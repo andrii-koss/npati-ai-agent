@@ -22,9 +22,32 @@ const MODEL_PRICING: Record<string, { promptPerM: number; completionPerM: number
   default: { promptPerM: 1.0, completionPerM: 3.0 },
 };
 
+/** The generic row `calculate` falls back to. It is a budget estimate, not any model's price. */
+const GENERIC_PRICING_KEY = "default";
+
+/** The row a model id resolves to, by the same substring rule `calculate` has always used. */
+function matchModelPricingKey(modelId: string): string {
+  return Object.keys(MODEL_PRICING).find((key) => modelId.toLowerCase().includes(key)) ?? GENERIC_PRICING_KEY;
+}
+
+/**
+ * C14: the **configured** price of a model, or `null` when the table has no entry for it.
+ *
+ * Deliberately different from `calculate`, which falls back to the generic row so budget accounting always
+ * has a number. A metric that reported the generic row as if it were this model's price would be a fabricated
+ * measurement, so the eval harness asks this function instead and reports `costUsd: null` with a reason when
+ * the answer is `null`. The `default` row is not a price for a model, so it never resolves here.
+ */
+export function configuredModelPricing(modelId: string): { promptPerM: number; completionPerM: number } | null {
+  const key = matchModelPricingKey(modelId);
+  if (key === GENERIC_PRICING_KEY) return null;
+  const pricing = MODEL_PRICING[key];
+  return pricing ? { promptPerM: pricing.promptPerM, completionPerM: pricing.completionPerM } : null;
+}
+
 export class CostTelemetry {
   static calculate(modelId: string, usage: TokenUsage): CostCalculationResult {
-    const key = Object.keys(MODEL_PRICING).find((k) => modelId.toLowerCase().includes(k)) || "default";
+    const key = matchModelPricingKey(modelId);
     const pricing = MODEL_PRICING[key] || MODEL_PRICING.default!;
 
     const promptCost = (usage.promptTokens / 1_000_000) * pricing.promptPerM;

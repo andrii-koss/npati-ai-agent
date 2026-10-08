@@ -801,6 +801,14 @@ export interface TranslationSchema {
     title: string;
     backAria: string;
     heroCopy: string;
+    /**
+     * C14 (owner decision 2): the model-profile fallback warning. `emptyHint` takes `{{count}}` — the number of
+     * profiles in the registry that no `code.model_profile.<id>` flag has enabled.
+     */
+    modelProfiles: {
+      title: string;
+      emptyHint: string;
+    };
     stats: {
       totalLabel: string;
       totalDesc: string;
@@ -2591,6 +2599,30 @@ export interface TranslationSchema {
         };
       };
     };
+  };
+  /**
+   * C14 (owner decision 3): the coding-agent metrics panel. The keys name the six metrics the owner asked for,
+   * and the placeholders are substituted by the panel (`{{count}}`, `{{limit}}`). Declaring them here is what
+   * forces every locale to carry them — a missing key is a compile error, not a silent English fallback.
+   */
+  codeMetrics: {
+    title: string;
+    subtitle: string;
+    loading: string;
+    empty: string;
+    /** The word the panel puts in front of a metric's reason when nothing could be measured. */
+    unavailable: string;
+    successRate: string;
+    avgTurns: string;
+    failedEditRate: string;
+    approvalsShare: string;
+    toolErrorRate: string;
+    costPerRun: string;
+    sampleRuns: string;
+    sampleSize: string;
+    sampleWindow: string;
+    sampleTruncated: string;
+    estimated: string;
   };
 }
 

@@ -140,6 +140,75 @@ export const DEFAULT_CODE_MODEL_PROFILES: readonly CodeModelProfile[] = Object.f
   }),
 ]);
 
+/**
+ * C6/C14: the flag key that enables one registry profile: `code.model_profile.<id>`.
+ *
+ * The prefix lives here, next to the registry it filters. `feature-flags.ts` owns the pattern and the
+ * allowlist that decide which keys may be *set* (`CODE_MODEL_PROFILE_PATTERN` / `CODE_FLAG_KEY_PATTERN`), and
+ * a test asserts every key this function builds is accepted there — so the two definitions cannot drift, and a
+ * profile id that cannot be expressed as a flag is caught instead of silently being un-gateable.
+ */
+export const CODE_MODEL_PROFILE_FLAG_PREFIX = "code.model_profile.";
+
+export function codeModelProfileFlagKey(profileId: string): string {
+  return `${CODE_MODEL_PROFILE_FLAG_PREFIX}${profileId}`;
+}
+
+/**
+ * The minimum of the flag service this module reads. `FeatureFlagService` satisfies it structurally, so the
+ * profile module keeps depending on nothing but its own vocabulary.
+ */
+export interface CodeModelProfileFlagReader {
+  isEnabled(
+    ctx: { workspaceId: string; userId: string; permissions: readonly string[] },
+    flagKey: string,
+    options?: { companyId?: string; userId?: string },
+  ): Promise<boolean>;
+}
+
+export interface ResolveEnabledModelProfileIdsInput {
+  /** Absent means "this deployment has no flag reader", which enables nothing (see below). */
+  flags?: CodeModelProfileFlagReader | null;
+  ctx: { workspaceId: string; userId: string; permissions: readonly string[] };
+  companyId?: string;
+  userId?: string;
+  profiles?: readonly CodeModelProfile[];
+}
+
+/**
+ * C6/C14: the profile ids a deployment has **enabled for one run**, from the `code.model_profile.<id>` flags.
+ *
+ * Fail closed in both directions:
+ *  - without a flag reader **no** profile is enabled, so the run falls back to the conservative profile. It
+ *    never means "all profiles": a deployment that cannot say which profiles it allows must not get native
+ *    tool calling and parallel writes for every model;
+ *  - a flag read that throws counts as disabled, so a flag-store outage narrows behaviour instead of widening
+ *    it.
+ *
+ * The conservative default is deliberately **not** flag-gated: it is the fallback for a registry with no match,
+ * so it never appears here (disabling it would leave an unknown model with no profile at all).
+ */
+export async function resolveEnabledModelProfileIds(
+  input: ResolveEnabledModelProfileIdsInput,
+): Promise<readonly string[]> {
+  const profiles = input.profiles ?? DEFAULT_CODE_MODEL_PROFILES;
+  const flags = input.flags;
+  if (!flags) return [];
+  const options = {
+    ...(input.companyId ? { companyId: input.companyId } : {}),
+    ...(input.userId ? { userId: input.userId } : {}),
+  };
+  const enabled: string[] = [];
+  for (const profile of profiles) {
+    try {
+      if (await flags.isEnabled(input.ctx, codeModelProfileFlagKey(profile.id), options)) enabled.push(profile.id);
+    } catch {
+      // A flag that cannot be read is not an enabled profile.
+    }
+  }
+  return enabled;
+}
+
 function conservativeContextWindow(profiles: readonly CodeModelProfile[]): number {
   const windows = profiles
     .map((profile) => profile.contextWindow)
@@ -397,6 +466,44 @@ export function resolveEffectiveToolCallingMode(
   return context.sawNativeToolCalls === true ? "native" : "text";
 }
 
+/**
+ * C14: why a run is on the conservative profile although its model could have been driven with a configured
+ * one. Two values, because the two situations need different operator action — and **only** these two, so the
+ * vocabulary cannot grow into a free-text field that says nothing:
+ *
+ *  - `profile_flag_disabled` — the deployment enabled **no** profile (`code.model_profile.<id>` is off, or the
+ *    flag store could not be read). Nothing is misconfigured about the model; the rollout simply has not been
+ *    switched on. This is the fail-closed behaviour working as designed, and it must be *visible* rather than
+ *    silent: a run that quietly loses native tool calling and parallel writes is a degradation nobody sees.
+ *  - `no_matching_profile` — profiles *are* enabled, but none of them matches this model (or the registry is
+ *    empty/invalid). The operator has to decide whether this model needs a profile of its own.
+ *
+ * `null` (no reason) is the normal case: the model matched a profile. Deliberately not a third enum member —
+ * "no degradation" is the absence of a reason, not a reason.
+ */
+export type CodeModelProfileFallbackReason = "profile_flag_disabled" | "no_matching_profile";
+
+/** The closed vocabulary above, exported as data so a UI/validation layer does not re-type it. */
+export const CODE_MODEL_PROFILE_FALLBACK_REASONS: readonly CodeModelProfileFallbackReason[] = [
+  "profile_flag_disabled",
+  "no_matching_profile",
+];
+
+/**
+ * C14: the fallback reason of one resolution, or `null` when the model matched a profile.
+ *
+ * `enabledProfileIds` is passed as resolved: `undefined` means "no filter was applied" (the whole registry was
+ * searched, so a miss is a genuine no-match), while an **empty list** means "this deployment enabled nothing"
+ * — a different situation with a different fix. The distinction is the whole point of two values.
+ */
+export function modelProfileFallbackReasonFor(
+  result: Pick<ResolvedCodeModelProfile, "matchedBy">,
+  enabledProfileIds?: readonly string[] | null,
+): CodeModelProfileFallbackReason | null {
+  if (result.matchedBy !== "default") return null;
+  return enabledProfileIds && enabledProfileIds.length === 0 ? "profile_flag_disabled" : "no_matching_profile";
+}
+
 /** Stable key for Activity/telemetry: which profile drove a turn, and why. */
 export function modelProfileTrace(result: ResolvedCodeModelProfile): {
   profileId: string;
@@ -409,5 +516,37 @@ export function modelProfileTrace(result: ResolvedCodeModelProfile): {
     matchedBy: result.matchedBy,
     toolCallingMode: result.profile.toolCallingMode,
     maxParallelToolCalls: result.profile.maxParallelToolCalls,
+  };
+}
+
+/**
+ * C14: the C6 trace **plus** why the conservative profile was used and which ids were allowed.
+ *
+ * Deliberately a second function rather than two new keys on `modelProfileTrace`: the four keys of that trace are
+ * a pinned contract ("exposes a stable trace for Activity", `tests/coding-agent-c6-model-profiles.test.ts`), and a
+ * consumer that switches on the trace's exact shape must not break because a diagnostic field was added. This one
+ * is additive by construction — it spreads the C6 trace and appends.
+ *
+ * The reason earns its place: "the run used `conservative-default`" reads identically whether the rollout is
+ * simply not switched on, the model has no profile, or the registry is broken, and those need different actions.
+ * Profile ids are configuration names, never model output, so both extra fields are metadata in the sense the
+ * Activity rules require.
+ */
+export interface CodeModelProfileFallbackTrace extends ReturnType<typeof modelProfileTrace> {
+  /** `null` when the model matched a profile; otherwise why it fell back to the conservative one. */
+  fallbackReason: CodeModelProfileFallbackReason | null;
+  /** The registry ids the run was allowed to match; `null` when no filter was applied at all. */
+  enabledProfileIds: readonly string[] | null;
+}
+
+export function modelProfileFallbackTrace(
+  result: ResolvedCodeModelProfile,
+  options: { enabledProfileIds?: readonly string[] | null } = {},
+): CodeModelProfileFallbackTrace {
+  const enabledProfileIds = options.enabledProfileIds ?? null;
+  return {
+    ...modelProfileTrace(result),
+    fallbackReason: modelProfileFallbackReasonFor(result, enabledProfileIds),
+    enabledProfileIds,
   };
 }

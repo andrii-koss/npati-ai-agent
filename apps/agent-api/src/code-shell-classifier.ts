@@ -70,10 +70,31 @@ export interface DepsHint {
   fromUrl: boolean;
 }
 
+/**
+ * C14: one hard-deny rule, named. The table below is exported so the attack catalogue guard can prove that
+ * **every** rule id is either exercised by a red-team suite or carries a written exemption — a rule nobody
+ * tests is a rule nobody would notice losing.
+ */
+export interface HardDenyRule {
+  id: string;
+  pattern: RegExp;
+  reason: string;
+}
+
 export interface ShellClassifierOptions {
   allowlist?: string[];
   protectedBranches?: string[];
   workspaceRoot?: string;
+  /**
+   * C14: the hard-deny rule set to evaluate. Defaults to the frozen `HARD_DENY_RULES` and **no production
+   * caller passes it**. It exists so a denial can be attributed to a named rule as evidence rather than as a
+   * promise: the mutation-sensitivity suite substitutes the set, removes exactly one rule, and shows that the
+   * specific denial disappears — if it did not, the control would be decorative.
+   *
+   * It is deliberately not an off-switch: an empty list is refused instead of silently disabling every
+   * hard deny, and the default is always the full frozen table.
+   */
+  hardDenyRules?: readonly HardDenyRule[];
 }
 
 export interface ShellLimits {
@@ -91,12 +112,23 @@ const READ_ONLY_EXECUTABLES = new Set([
 const INSTALL_EXECUTABLES = new Set(["npm", "pnpm", "yarn", "pip", "pip3", "poetry", "uv", "go", "cargo", "composer", "bundle", "apt", "apt-get", "apk"]);
 const NETWORK_EXECUTABLES = new Set(["curl", "wget", "nc", "netcat", "ssh", "scp", "rsync", "ftp", "telnet"]);
 
-const HARD_DENY_RULES: Array<{ id: string; pattern: RegExp; reason: string }> = [
+/**
+ * C14: the hard-deny table. Frozen and exported: it is the list the attack catalogue guard enumerates, and a
+ * rule that a red-team suite does not exercise must be exempted *by name* in the catalogue instead of
+ * quietly existing.
+ */
+export const HARD_DENY_RULES: readonly HardDenyRule[] = Object.freeze([
   { id: "rm_root", pattern: /(?:^|[\s;&|("'`=])rm\s+(?:-[A-Za-z]*\s+)*(?:-[A-Za-z]*r[A-Za-z]*f[A-Za-z]*|-[A-Za-z]*f[A-Za-z]*r[A-Za-z]*|--recursive\s+--force|--force\s+--recursive)\s+(?:\/|\/\*|~|~\/\*|\$HOME|\/etc|\/usr|\/var|\/bin|\/sbin|\/lib)(?:\s|$|\*|[)"'`;&|])/,
     reason: "recursive forced delete of the filesystem root or a system directory" },
   { id: "mkfs", pattern: /(?:^|[\s;&|("'`=])mkfs(?:\.\w+)?\s/, reason: "filesystem formatting is never allowed" },
   { id: "dd_device", pattern: /(?:^|[\s;&|("'`=])dd\s+[^;&|]*of=\/dev\//, reason: "raw write to a block device" },
-  { id: "fork_bomb", pattern: /:\s*\(\s*\)\s*\{.*\|.*&.*\}\s*;?\s*:/, reason: "fork bomb" },
+  /**
+   * C14: `[\s\S]` rather than `.` between the function body's parts. A shell accepts a newline wherever it
+   * accepts a space, so `:(){\n:|:&\n};:` is the same fork bomb as the one-liner — with `.` the rule missed
+   * it and the command fell back to `approval`, i.e. a human could have approved a fork bomb. Found by
+   * `tests/coding-agent-c14-redteam-fork-bomb.test.ts`, which pins both spellings.
+   */
+  { id: "fork_bomb", pattern: /:\s*\(\s*\)\s*\{[\s\S]*\|[\s\S]*&[\s\S]*\}\s*;?\s*:/, reason: "fork bomb" },
   { id: "chmod_root", pattern: /(?:^|[\s;&|("'`=])chmod\s+(?:-[A-Za-z]+\s+)*777\s+(?:\/|\/\*)\s*(?:$|[;&|])/, reason: "world-writable root" },
   { id: "docker_socket", pattern: /\/var\/run\/docker\.sock/, reason: "the host docker socket is never reachable from the sandbox" },
   { id: "sandbox_network", pattern: /(?:^|[\s;&|("'`=])(?:iptables|ip6tables|nft|ip\s+route|systemctl|mount|umount|insmod|modprobe)\s/, reason: "changing sandbox or host network/system configuration" },
@@ -107,7 +139,7 @@ const HARD_DENY_RULES: Array<{ id: string; pattern: RegExp; reason: string }> = 
   // whitespace, and the process-substitution form are covered.
   { id: "download_pipe_shell", pattern: /(?:curl|wget)\b[^;&|]*\|\s*(?:sudo\s+)?(?:sh|bash|zsh|dash)\b/, reason: "piping a download into a shell" },
   { id: "download_process_substitution", pattern: /(?:sh|bash|zsh|dash)\s+(?:-c\s+)?<\(\s*(?:curl|wget)\b/, reason: "running a downloaded script through process substitution" },
-];
+]);
 
 /** Registry configuration files: writing to them re-points every future install. */
 const REGISTRY_CONFIG_FILES = /(?:\.npmrc|\.yarnrc(?:\.yml)?|\.yarnrc|pip\.conf|\.pypirc)\b/;
@@ -563,8 +595,14 @@ export function classifyShellCommand(command: string, options: ShellClassifierOp
   }
 
   // 1. Hard-deny rules run against the raw command and against every segment: a rule that only
-  //    matches inside a subshell, heredoc or a later segment must still fire.
-  for (const rule of HARD_DENY_RULES) {
+  //    matches inside a subshell, heredoc or a later segment must still fire. The rule set is
+  //    `HARD_DENY_RULES` unless a caller substituted it (C14 mutation evidence); an empty set is refused
+  //    rather than treated as "no hard denies", so the seam can never be used as an off-switch.
+  const hardDenyRules = options.hardDenyRules ?? HARD_DENY_RULES;
+  if (!hardDenyRules.length) {
+    throw new Error("classifyShellCommand: the hard-deny rule set must not be empty; hard denies cannot be switched off");
+  }
+  for (const rule of hardDenyRules) {
     const haystacks = [command, ...parsed.segments.map((segment) => segment.raw)];
     if (haystacks.some((value) => rule.pattern.test(value))) {
       if (rule.id === "protected_branch_force_push") {

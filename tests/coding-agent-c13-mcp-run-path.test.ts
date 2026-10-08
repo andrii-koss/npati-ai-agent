@@ -41,9 +41,18 @@ import type { ResolverPort } from "../apps/agent-api/src/ssrf-policy";
 import {
   REPLAY_BUNDLE_FORMAT_VERSION,
   ReplayBundleRecorder,
+  bundleHash,
   readReplayBundle,
+  replayArgumentsHash,
+  replayInputHash,
+  type ReplayBundleReadResult,
 } from "../apps/agent-api/src/code-replay-bundle";
-import { replayRecorded } from "../apps/agent-api/src/code-replay-engine";
+import {
+  CODE_REPLAY_CODES,
+  replayRecorded,
+  type RecordedReplayResult,
+  type ReplayDivergence,
+} from "../apps/agent-api/src/code-replay-engine";
 
 /**
  * C13 (owner requirement: **fresh-process MCP acceptance**) — discovery must happen on the run path.
@@ -481,6 +490,19 @@ async function discoverThenAllowByOwnerPolicy(harness: ReturnType<typeof createH
     },
     { ctx: OWNER_CTX, tenant: COMPANY_A, toolId: TOOL_ID, risk: "low", approvalRequired: false, requestId: "req-1" },
   );
+}
+
+/**
+ * The `409 replay_diverged` answer for a replay that really diverged. The engine **returns** divergences rather
+ * than throwing them (`assertReplayClean` is what a route uses to convert them), so a diverged replay is read
+ * from the result — and a replay that says it is fine is a failure of this helper, not a silent pass.
+ */
+async function replayDivergence(run: () => Promise<RecordedReplayResult>): Promise<{ first: ReplayDivergence; count: number }> {
+  const result = await run();
+  expect(result.ok).toBe(false);
+  expect(result.status).toBe("diverged");
+  expect(result.divergences.length).toBeGreaterThan(0);
+  return { first: result.divergences[0]!, count: result.divergences.length };
 }
 
 describe("[security-gate] C13 MCP run path — a fresh runtime discovers before the first model call", () => {
@@ -1036,5 +1058,118 @@ describe("[security-gate] C13 MCP run path — negative controls (the tool must 
     });
     expect(refused.ok).toBe(false);
     expect(refused.ok === false ? refused.error.code : "").toBe("review_code_read_only");
+  });
+});
+
+describe("security-gate: C14 — a bundle the real runner recorded replays (one arguments hash per call)", () => {
+  /** The same tool call the harness's model asks for, as the provider really spells it. */
+  const ARGUMENT_BYTES = JSON.stringify({ path: "a.txt" });
+  /** Different argument **bytes** for the same call: a substitution, and a call nobody made. */
+  const SUBSTITUTED_BYTES = JSON.stringify({ path: "b.txt" });
+
+  it("replays the recorded run without an `arguments_hash` divergence, and refuses substituted argument bytes", async () => {
+    /**
+     * The bundle below is written by the **real** `ReplayBundleRecorder` through the real
+     * `CodingAgentRunner` run path (`createHarness`): the runner really receives the MCP tool call, really
+     * executes it through the Integration, and records the model step and the tool step the way `app.ts` wires
+     * it. Nothing here is hand-built — which is the whole point, because a hand-built fixture can spell the same
+     * argument value on both sides while the runner cannot.
+     *
+     * Before the fix the model step hashed the provider's argument **text**
+     * (`bundleHash(call.function.arguments)`) and the tool step hashed the parsed **object**
+     * (`bundleHash(outcome.call.arguments)`), so this very recording diverged at `arguments_hash` and no bundle
+     * written by a real run could be replayed at all. Both sides now derive the hash from the one canonical
+     * argument value (`replayArgumentsHash`), and the assertions below are what makes that a measurement rather
+     * than a claim: the model step really holds the argument text, and the old derivation really produces a
+     * different value from the one that was stored.
+     */
+    const harness = createHarness({
+      answers: [
+        { body: toolsListBody([{ name: TOOL_NAME, inputSchema: READ_FILE_SCHEMA }]) },
+        { body: toolsListBody([{ name: TOOL_NAME, inputSchema: READ_FILE_SCHEMA }]) },
+        { body: toolCallBody("file contents") },
+      ],
+    });
+    await discoverThenAllowByOwnerPolicy(harness, "run-arguments-hash-warmup");
+    harness.setScript([
+      { content: "reading", toolCalls: [nativeCall(TOOL_ID, { path: "a.txt" }, "mcp-call-hash")] },
+      { content: "done" },
+    ]);
+    await harness.run({ companyId: COMPANY_A.companyId, runId: "run-arguments-hash" });
+
+    const recording = await readReplayBundle({
+      store: harness.workspaceStore, companyId: COMPANY_A.companyId, runId: "run-arguments-hash",
+    });
+    expect(recording.kind).toBe("bundle");
+    expect(recording.steps.map((step) => step.kind)).toEqual(["model_step", "tool_call", "model_step"]);
+
+    // The model step really holds the provider's own text beside its hash, and the tool step — written by a
+    // different part of the loop, from the parsed and admitted object — carries the **same** hash for the call.
+    const recordedModelStep = recording.steps[0] as { response: { toolCalls: Array<Record<string, unknown>> } };
+    const recordedCall = recordedModelStep.response.toolCalls[0]!;
+    expect(recordedCall.arguments).toBe(ARGUMENT_BYTES);
+    expect(recordedCall.argumentsHash).toBe(replayArgumentsHash(ARGUMENT_BYTES));
+    const recordedToolStep = recording.steps[1] as Record<string, unknown>;
+    expect(recordedToolStep.tool).toBe(TOOL_ID);
+    expect(recordedToolStep.argumentsHash).toBe(recordedCall.argumentsHash);
+
+    // Negative control for *this* assertion: the derivation the runner used before the fix — `bundleHash` of the
+    // raw JSON text, which canonicalises a **string** (a quoted string literal) — is a different value from the
+    // one that was recorded. A runner-written bundle therefore really did carry two hashes for one call and
+    // diverged at `arguments_hash`; the equality above is a measurement, not a tautology.
+    expect(bundleHash(ARGUMENT_BYTES)).not.toBe(recordedCall.argumentsHash);
+
+    // (1) The evidence: the recorded run replays deterministically — no `arguments_hash` divergence, no
+    // divergence of any kind, and no provider dial or tool execution inside the replay.
+    const replayed = await replayRecorded({
+      recording,
+      toolVersions: () => 1,
+      bundleVersion: REPLAY_BUNDLE_FORMAT_VERSION,
+      recordedTerminalStatus: recording.terminalStatus ?? null,
+    });
+    expect(replayed.divergences).toEqual([]);
+    expect(replayed.ok).toBe(true);
+    expect(replayed.status).toBe("replayed");
+    expect(replayed.providerCalls).toBe(0);
+    expect(replayed.toolExecutions).toBe(0);
+    expect(replayed.comparison.toolCalls).toMatchObject({ matched: 1, expected: 1 });
+
+    // (2) The wall is still up. The **stored** hash of the call in the model step is replaced with the hash of
+    // different argument bytes, and the bundle hash is recomputed, so the integrity check passes by construction
+    // and the comparison is the only thing that can catch it — which is the check the fix had to repair, not
+    // weaken. (`arguments` itself is deliberately left alone: the deterministic engine compares the **recorded
+    // hashes** of the two steps, and the bytes-versus-hash check belongs to the cassette, which has to hand a
+    // `ChatResult` to a consumer; `coding-agent-c14-replay-cassette-engine.test.ts` proves it there.)
+    const substituted = JSON.parse(JSON.stringify(recording)) as ReplayBundleReadResult;
+    // Step order is preserved by the JSON round-trip, so index 0 is the model step in `steps` and in
+    // `replayInput` alike — and the recording is mutated in **both**, because the reader publishes the same
+    // ordered payloads under both names and a tamper that touched only one would be a fixture bug.
+    for (const list of [substituted.steps, substituted.replayInput]) {
+      const step = list[0] as { response: { toolCalls: Array<Record<string, unknown>> } };
+      step.response.toolCalls[0]!.argumentsHash = replayArgumentsHash(SUBSTITUTED_BYTES);
+    }
+    substituted.replayInputHash = replayInputHash(substituted.steps);
+    expect(substituted.integrityFailure).toBe(false);
+    // The substitution is a real one: the hash the model step now carries is not the one the tool step recorded.
+    const substitutedHash = ((substituted.replayInput[0] as { response: { toolCalls: Array<Record<string, unknown>> } })
+      .response.toolCalls[0]!).argumentsHash;
+    expect(substitutedHash).not.toBe(recordedToolStep.argumentsHash);
+
+    const { first: divergence, count: divergenceCount } = await replayDivergence(() => replayRecorded({
+      recording: substituted,
+      toolVersions: () => 1,
+      bundleVersion: REPLAY_BUNDLE_FORMAT_VERSION,
+      recordedTerminalStatus: substituted.terminalStatus ?? null,
+    }));
+    expect(divergence.reason).toBe("arguments_hash");
+    expect(divergence.toolCallId).toBe("mcp-call-hash");
+    // The engine reports the **tool step's** hash as `actual` and the pending call's (the model step's) as
+    // `expected`, so this reads: "the call the model made does not hash to the one that was executed".
+    expect(divergence.actual).toBe(recordedToolStep.argumentsHash);
+    expect(divergence.expected).toBe(replayArgumentsHash(SUBSTITUTED_BYTES));
+    expect(divergence.actual).not.toBe(divergence.expected);
+    // The substituted hash names no call that was ever recorded, so the recorded call is still pending — the
+    // second divergence is the same substitution seen from the other side, not a second mutation.
+    expect(divergenceCount).toBe(2);
   });
 });

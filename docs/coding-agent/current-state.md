@@ -38,8 +38,153 @@ both builds exit 0.
   `CAPABILITY_MATRIX.push(...)`. To be addressed in C13 together with owner decision 8 (static count vs runtime MCP count
   vs combined Inspector view).
 
+### C14 — the 15 baseline failures are quarantined, not hidden (owner decision 1)
+`known-failures.json` declares the 15 pre-existing failures with the exact test id (`file` + full vitest title),
+a reason, an owner, `added_at` and an **`expires_at`**; every id is a verbatim `FAIL` line of the escalated
+full-suite run (`Test Files 10 failed | 342 passed | 2 skipped (354)`, `Tests 15 failed | 3940 passed |
+6 skipped (3961)`). `scripts/check-known-failures.mjs` (wired as `npm run test:known-failures`, the platform
+job's **only** test step) still runs the whole suite — the same `vitest run` as `npm test`, no file filter, no
+`--exclude`, no `continue-on-error` — and is GREEN **only** while every actual failure is a documented,
+unexpired entry. Four conditions are RED: an **undocumented** failure, a quarantined test that **went green**
+(the entry must be deleted, or the quarantine would swallow that test's *next* failure), an entry past its
+`expires_at` (unpaid debt, reported separately from a regression — still RED), and a **run that did not execute
+every suite file on disk**. Verified against the escalated JSON report itself: all 15 curated ids are present
+verbatim, and the two extra failures of that moment (this step's own in-flight edits to `ci.yml` and
+`code-model-profiles.ts`) were reported as new failures rather than absorbed.
+
+### C14 — the model-profile fallback is fail-closed and **visible** (owner decision 2)
+`enabledProfileIds == []` still means "no profile", never automatic pattern matching: the conservative profile
+remains the answer, and C14 does not widen it. What was added is visibility — `modelProfileFallbackReason`
+(`profile_flag_disabled` when the deployment enabled nothing, `no_matching_profile` when profiles are enabled
+but none matches, and **absent** when a profile matched) is written into the existing `run_activity` payload of
+every event recorded after the profile was resolved, published through the per-run holder, and recorded in the
+ExecutionSnapshot payload as an **optional** source (`modelProfileFallbackReason`), so a deployment that does
+not wire it keeps the payload's previous key set and the snapshot schema version does not move. The model-profile
+port itself was already connected in `app.ts` (`DEFAULT_CODE_MODEL_PROFILES` + per-run
+`code.model_profile.<id>` resolution); the Inspector's `/capabilities/inspect` now also answers an additive
+`modelProfiles` section (registry ids, enabled ids, whether that list is empty, the fallback reason for an empty
+one), and `CapabilityInspectorPage` shows a warning banner from it in all seven i18n dictionaries.
+
+### C14 — the provider cassette, and the `argumentsHash` blocker it exposed
+The cassette is an **adaptation of `CodeRunEnginePort.chat`** (`code-replay-cassette.ts`: one dependency, the
+recording; no transport, no tool runtime, `providerDials`/`toolExecutions` structurally zero) plus a file-backed
+`ReplayBundlePersistPort` (`code-replay-cassette-store.ts`) that is the *same* serialized bundle without a
+database. Recording a real run only became replayable after a **blocker** was fixed: the runner wrote the model
+step's `argumentsHash` from the provider's JSON **text** (`bundleHash(call.function?.arguments ?? "")`) and the
+tool step's from the parsed **object** (`bundleHash(outcome.call.arguments ?? {})`), and
+`code-replay-engine.ts:516` compares the two — so **every** replay of a runner-recorded bundle that executed a
+tool diverged at `arguments_hash` (409). Both sides now derive it from the one canonical argument **value**,
+through a single conversion in the module that owns the format (`replayArgumentsHash` /
+`canonicalReplayArguments`, `code-replay-bundle.ts`); a helper that returned the canonical *text* instead was
+caught by the new test's negative control, because `bundleHash` would then hash a string literal. The evidence is
+a bundle the **real** runner recorded and `replayRecorded` accepts cleanly, with a substitution control that
+still diverges (`tests/coding-agent-c13-mcp-run-path.test.ts`, describe "C14 — a bundle the real runner recorded").
+`REPLAY_BUNDLE_FORMAT_VERSION` stays **3** (the persisted shape did not move, the C10 literal `sha256:579374f1…`
+is unaffected), and bundles written before the fix are **not** retro-fitted: they were already unreplayable, they
+stay readable evidence, and a cassette without the argument bytes still refuses
+(`replay_cassette_arguments_unavailable`). Full argument and reproduction command:
+`docs/coding-agent/c14-provider-cassette-and-arguments-hash.md`.
+
+### C14 — documentation set and the final comparative report (owner decision 5, PLAN.md:1000)
+Six documents now describe the steady state instead of only the history, so a reader does not have to
+reconstruct the architecture from per-step entries: `docs/coding-agent/architecture.md` (components, run
+lifecycle, the seven trust boundaries, why Activity and AuditLog are different),
+`docs/coding-agent/permission-modes.md` (the four modes, the mode × risk matrix, what is never automated, the
+three approval scopes, protected branches, and the four mechanisms that keep a mode out of reach of file
+content or tool output), `docs/coding-agent/security.md` (threat surface → defence → non-vacuity, sandbox
+containment, egress/SSRF, SecretLease, "content is data", RBAC, the fail-closed AuditLog, the 23-row attack
+catalogue and the quarantine), `docs/coding-agent/model-profiles.md` (registry, resolution order,
+`enabledProfileIds` as a **filter**, `conservative-default` as fail-closed, the two fallback reasons and where
+they are visible), `docs/coding-agent/adding-a-model-and-a-tool.md` (two ordered checklists with the exact
+guard each step must satisfy) and `docs/coding-agent/c14-final-report.md` (per-profile table, corpus
+measurements, the three headline numbers with their evidence, and the honest limits). They link to
+`00-audit.md`, `PLAN.md` and this file rather than repeating them, and they state one code/doc divergence
+instead of editing code: the `PolicyEngine` header comment lists an eight-phase order that omits
+`capability_groups`, `trust` and `network_enforcement` (see `architecture.md` §4).
+
 ## Current step
-- **C13 COMPLETE — hooks, slash commands, skills, MCP.** Final escalated evidence: `typecheck` exit 0,
+- **C14 COMPLETE — evals, metrics and hardening.** Final escalated evidence: `typecheck` 0, **`typecheck:tests` 0**,
+  **`lint` 0**, `verify-capability-matrix.mjs` 0 (4/4), `upgrade-gate.mjs` 0 (GREEN), **`security-gate` exit 0 —
+  `passed=2002 failed=0`, 144 suites, `present=144 missing=0`**, attack catalogue `rows=23 issues=0`, `eval:smoke` 0,
+  **`test:web` 0 — 9 files / 76 tests**, both builds 0, **`npm test` unchanged at `10 files / 15 tests`**, and
+  **`test:known-failures` GREEN** (`actual=15 quarantined=15 undeclared=0 stale=0 expired=0`).
+  - **The three owner-required numbers.** (1) **33 hermetic eval tasks, 7/7 types, 4 programming languages** (+JSON),
+    was 17 JS/TS-only: `bug_fix` 12 · `feature` 6 · `refactor` 3 · `tests` 4 · `multi_file` 2 · `build_repair` 4 ·
+    `dependency_migration` 2. Hermeticity is proven from the data (exactly 5 file tools, exactly 3 simulated
+    commands, no `http(s)://`, live only behind `NPATI_CODE_EVAL_LIVE=1` + injected `liveModel`). **The fixture test
+    runner is a REGEX SIMULATOR and is named as one**; **the Python/Go tasks carry no command at all** (only
+    `file_contains`/`diff_stats`) rather than pretending the simulator reads them. (2) **Edit success = 100 %
+    (33/33 tasks, 42/42 edit-class calls)** — ≥95 % met, nothing pulls it down; **the qualifier is part of the
+    number**: this is a *scripted, recorded* corpus, so it proves the harness applies and verifies the intended
+    change, **not** that a model writes good code; production `failed_edit_rate` exists but its live value is
+    `not measured`. (3) **0 successful red-team attacks / 0 sandbox escapes** — catalogue 23 rows (22 `covered`,
+    1 `measured-limitation` RT-12 Unicode path dedup), **12** hard-deny rules accounted by name (row or one of
+    **11** exemptions whose `probe` really fires), **5 mutation controls** (each neutralises a control *in memory*,
+    asserts the attack **then succeeds** or the test fails as "decorative control", restores it), 7 suites / 34 tests.
+    **What it does not prove is stated in the doc:** no live model attacked the build, and **no container was ever
+    started** (no Docker), so "0 escapes" means "no test caused an escape".
+  - **A real vulnerability was found and fixed**: `fork_bomb`'s hard-deny pattern used `.`, which does not cross
+    `\n`, so a **multi-line fork bomb was `approval` — a human could have approved it**. Fixed to `[\s\S]*`, with 8
+    forms plus end-to-end through the real shell runtime and PolicyEngine (`approved: true`, `full_auto`) →
+    `command_hard_denied`, sandbox port called **0** times. New classes: fork bomb, command-output injection,
+    disk/memory exhaustion, zip-slip, Unicode/NUL/long-path, plus two genuinely new channels (MCP `description`,
+    shell session env). The attack-catalogue guard has three levels and is proven to reject fabricated rows.
+  - **A real defect in the replay path was found and fixed**: the runner hashed a model step's arguments as a JSON
+    **string** while the tool-call step hashed the parsed **value**, and `code-replay-engine` compares them — so **no
+    bundle recorded by the real runner could ever replay**. One normalisation (`replayArgumentsHash` /
+    `canonicalReplayArguments`) now serves the writer and both readers, with the argument **value** as authority (the
+    MCP path after approval has no raw provider bytes). The new test replays a bundle recorded by the **real** runner;
+    the negative control proves the old material diverges, and it caught the first fix attempt, which reproduced the
+    same defect as a canonical *text*. Old bundles are not retro-fitted, and that is **proven**: they were already
+    unreplayable before the fix. `REPLAY_BUNDLE_FORMAT_VERSION` stays **3**, C10 literal `sha256:579374f1…` intact.
+  - **Eval scoring** adds `turns`, `diffStats{files,linesAdded,linesRemoved}` and a `diff_stats` verification type;
+    **cost is computed from a real price table or honestly `null` + `costUnavailable`** (`no_price_for_model` /
+    `token_split_unavailable`) — `0` means exactly zero tokens, never "unknown".
+  - **Provider cassette**: one file-backed `ReplayBundlePersistPort` plus **one** adapter of
+    `CodeRunEnginePort.chat`. It proves **reproducibility of the provider/tool sequence, never model quality** — that
+    sentence lives in the module header, a named constant, the closed `CassetteReproducibility` surface, the gate-list
+    comment and a test; there is **no** cassette score field. Deterministic runs are structurally zero-dial and
+    zero-tool-execution (the class has no transport/provider/tool-runtime), and a live-port negative control really
+    dials and executes, so the zeros are measured.
+  - **Metrics**: six metrics (`success_rate`, `avg_turns`, `failed_edit_rate`, `approvals_share`, `tool_error_rate`,
+    `cost_per_run`) aggregated from **existing** run/Activity rows only — no second source of truth, no new table,
+    column, migration or Activity `kind`. Each carries `source` + `sampleSize`; absent data returns **`null` + reason,
+    never `0`**; an unreadable source degrades only the metrics that read it. Versioned route
+    `GET /companies/:companyId/code/metrics` through the existing RBAC vocabulary, plus a read-only UI panel with i18n
+    in all 7 dictionaries. New tenant-scoped read method `listCodeRunStates` (no system scope).
+  - **SLO calibration**: R1 numbers were **not** copied over. Three are **confirmed by measurement**
+    (`maxStepsPerRun`=40 is exactly 4× the measured max, `minPopulationSamples`=5, cost multiplier 3 is
+    discriminating — 1/33 = 3.0 % flagged while the largest legitimate task is 3.61× median); **ten R1 SLO targets are
+    `not_measured`** with mechanism + source of a real measurement, in a **closed element shape** so a number cannot
+    hide there. Percentiles use one shared `nearest_rank` rule (no interpolation). **Anomaly detection** is a pure
+    unit with env thresholds, `anomalous: **null**` (never `false`) when no rule could run, reading the existing
+    `CodingAgentRunSummary` and step-3 tool-error counter — no route, no Activity kind, no AuditLog. Four real
+    mutations each caught and reverted.
+  - **CI and quarantine**: `ci.yml` finally runs on `push`/`pull_request` (it was `workflow_dispatch` only, so nothing
+    blocked anything) plus `typecheck:tests`, `lint` and an eval-smoke job. **`known-failures.json`** documents the 15
+    pre-existing failures with exact ids, reason, owner, `added_at`, `expires_at`; the gate runs the **full** `npm test`
+    and is GREEN **only** when `actual ⊆ quarantine`. It is **bidirectional** (undeclared failure → RED; an entry that
+    went green → RED, remove it; expired → RED; a run that did not cover the repository → RED; untrustworthy manifest →
+    RED). No `--exclude`, no `--testNamePattern`, no `continue-on-error`. **It caught a fresh regression of our own in
+    the session it was written**: the metrics suite's port adapter dropped `startedAfter`, and the gate named it
+    `NEW FAILURE` (`undeclared=1`) instead of letting it blend into the baseline.
+  - **Documentation**: `architecture.md`, `permission-modes.md`, `security.md`, `model-profiles.md`,
+    `adding-a-model-and-a-tool.md`, `c14-final-report.md` (plus `security-gate-report.md`, `attack-catalogue.json`,
+    `c14-eval-corpus-and-profiles.md`, `c14-provider-cassette-and-arguments-hash.md`). Every number carries a source.
+    The comparative report gives a **per-profile table** where model **conformance is measured** and model **quality
+    is `not_run`** (needs `NPATI_CODE_EVAL_LIVE=1` + injected `liveModel`), because `runEvalSuite` does not read a
+    profile at all — a replay score presented as a model score would be a fabricated number.
+  - **Honest limits carried forward**: CI has **never actually run on GitHub** (pinned by tests, verified statically
+    and by locally equivalent commands); **C4b Docker E2E was never executed**; **no Docker**, so sandbox ceilings are
+    proven on the argument line and by provider validation, not via OOM; migrations **070–085 have never run on a live
+    PostgreSQL**; **Browser E2E is required in G1 and is not done**; quality evals are `not_run`; **Production
+    ready = NO**.
+  - **Two documentation↔code divergences found and deliberately NOT fixed** (recorded so they are not lost):
+    (a) `code-policy-engine.ts:40-43` and the wiring comment at `app.ts:1464-1469` list **8** policy phases and
+    **omit** `capability_groups`, `trust` and `network_enforcement`, all three of which are `PolicyPhase` members and
+    really execute — a comment that lies about the order of phases, the exact kind of document a later session would
+    trust; (b) `security-gate-report.md` says 138 suites while the fixed list is now 144.
+- Earlier: **C13 COMPLETE — hooks, slash commands, skills, MCP.** Final escalated evidence: `typecheck` exit 0,
   **`typecheck:tests` exit 0**, `verify-capability-matrix.mjs` exit 0 (**4/4**, now against the **real** MCP overlay
   provider: `static=385 overlay=3 combined=388`, `hashRecomputes=true`), `upgrade-gate.mjs` exit 0 (`GREEN`),
   **`security-gate` exit 0 — `passed=1824 failed=0`, 125 suites, `present=125 missing=0`**, `test:web` exit 0
@@ -471,7 +616,18 @@ each of the five is asserted non-empty for an ordinary run.
    `ensureSystemPromptVersion(...)`, so the snapshot now says **with which prompt** the run executed (the
    registry de-duplicates by content hash, so an identical prompt reuses the same version — tested).
 2. `modelProfileVersion` — **CLOSED**: same mechanism via `ensureModelProfilesVersion(...)` /
-   `resolveModelProfile(...)`, so the snapshot says **with which profile** the run executed.
+   `resolveModelProfile(...)`, so the snapshot says **with which profile** the run executed. **C14 correction:**
+   until C14 that sentence was only half true. The port (`ports.modelProfiles`) was declared and read by the
+   runner but the composition never supplied it, so `enabledProfileIds` never reached `resolveModelProfile` and
+   the recorded profile was always derived from the whole built-in registry: the snapshot named the profile
+   that was *used*, while `code.model_profile.<id>` — the documented handle on that choice — could not exclude
+   or enable a single profile in a real deployment. C14 connects it in `app.ts` (the existing
+   `DEFAULT_CODE_MODEL_PROFILES` plus a per-run resolution of the existing flag service), and
+   `tests/coding-agent-c14-model-profile-flags.test.ts` pins both directions: a disabled flag excludes its
+   profile (an unknown model then resolves to the conservative default), a flag store that cannot be read
+   enables nothing, and the provider of the model id is now part of the match so a provider-only profile is
+   reachable. The recorded profile is therefore the deployment's profile, not an accident of the built-in
+   registry.
 
 Every snapshot source named by the spec is now populated: `toolManifestVersion`, `policyVersion` components
 (via `policyComposition`), `modelProfileVersion`, `modelSelection`, `systemPrompt`, `runnerVersion`,
@@ -761,7 +917,11 @@ pass generation parameters to `engine.chat` — recording a value that does not 
   `maxParallelToolCalls: 1`, the **smallest** known `contextWindow`, no temperature, **no** invented
   `preferredEditTool`, `knownLimitations: ["unknown_model"]`). Invalid profiles are skipped with a warning
   rather than half-applied; a bare `*` pattern is rejected; `code.model_profile.<id>` is a **boolean** flag, so
-  profile content comes from configuration and the flag only enables a profile by id.
+  profile content comes from configuration and the flag only enables a profile by id. C14 made that last
+  sentence true of the **composed application**: `app.ts` now passes the registry and the per-run flag
+  resolution into the runner, because before it the flag was settable, allowlisted and read by nothing — every
+  run resolved against the whole built-in registry. An unknown model still falls back to the conservative
+  profile, and a flag store that cannot be read enables nothing rather than everything.
 - **Intent router** extended **inside the existing mechanism** (`defaultHybridRouter`): seven code intents
   (`CREATE_CODE`, `EDIT_CODE`, `DEBUG_CODE`, `EXPLAIN_CODE`, `REVIEW_CODE`, `REFACTOR_CODE`, `TEST_CODE`) map
   onto existing `ProjectIntent`s; `DEPLOY_PROJECT`, `CONNECT_REPOSITORY` and data-model intents stay with the
@@ -1682,8 +1842,9 @@ pass generation parameters to `engine.chat` — recording a value that does not 
 3. **Shell approvals**: the static per-command approval requirement was removed from `code.shell.*`
    (`requiresConfirmation: false`, `risk: high`; `code.fs.delete` is the only remaining approval-gated
    capability). Every `code.shell.exec` now passes through the **centralized server-side PolicyEngine**
-   with a fixed phase order — feature flag → RBAC → capability → hard deny → session mode → project rules
-   → risk classification → approval. `safe` commands may run automatically according to the session mode,
+   with a fixed phase order — feature flag → RBAC → capability → capability groups → trust → hard deny
+   → session mode → project rules → network enforcement → approval → risk classification. `safe` commands
+   may run automatically according to the session mode,
    `approval`-class always needs approval, `hard_deny` is always denied, and **a direct API/tool call
    cannot bypass the engine**: without an injected engine the runtime refuses with
    `policy_engine_unavailable` (503) instead of running anything.

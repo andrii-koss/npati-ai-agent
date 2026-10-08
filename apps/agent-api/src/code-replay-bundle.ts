@@ -47,6 +47,49 @@ export const REPLAY_BUNDLE_FORMAT_VERSION = 3;
  * stored bundles that are still perfectly readable — the opposite of what the version exists to protect. The
  * one thing that *did* change is the hash of a bundle that carries the field, and that is visible where it
  * matters: on the bundles that carry the new input.
+ *
+ * Version 3 is likewise **unchanged** by C14's provider cassette, and for the same reason. A recorded model step
+ * may now carry the model's own argument **bytes** beside the argument **hash** it always carried
+ * (`response.toolCalls[].arguments`, see `ReplayModelStepInput`). That field is optional and is written only
+ * when the engine really returned argument text, which every engine does for a tool call, so it is present on
+ * new bundles and absent on old ones. A bundle without it serialises to exactly the step it always did and
+ * therefore derives the pre-C14 hash byte for byte — the pin is the C10 literal in
+ * `tests/coding-agent-c10-rewind-fork.test.ts` (`sha256:579374f1…`), and
+ * `tests/coding-agent-c14-replay-cassette-engine.test.ts` asserts that literal against the same fixture.
+ *
+ * Why record the bytes at all, when the hash was enough for verification: a **hash cannot reconstruct a tool
+ * call**. The cassette (`code-replay-cassette.ts`) has to hand a consumer a `ChatResult`, whose
+ * `toolCalls[].function.arguments` is a string by type; serving `""` there would hand a real run a different
+ * tool call than the one that was recorded, silently. The bytes are also the **source** of the hash, through the
+ * one canonical conversion below (`replayArgumentsHash`); a recording that carries none is refused by the
+ * cassette (`replay_cassette_arguments_unavailable`) rather than completed with an invented call. The bytes are
+ * replay **input** (they are inside the step, so they are inside `replayInputHash`) because a replay that fed
+ * different arguments would reproduce a conversation the run never had — the same rule the C13 command
+ * expansions follow. A secret in them is refused by the existing whole-recording scan, never stripped.
+ *
+ * Version 3 is **unchanged** by the C14 arguments-hash fix as well, and that is the same argued decision rather
+ * than an omission (rule 13). What changed is the *material* `response.toolCalls[].argumentsHash` is derived
+ * from, not the persisted shape: the recorder now derives it through `replayArgumentsHash` — the one canonical
+ * conversion of the argument **value**, which is what the tool step has always hashed — instead of hashing the
+ * provider's JSON **text**. The stored members are byte-for-byte the members that were stored before, so a
+ * version-3 bundle keeps verifying against its own stored `replayInputHash` (`replayInputHash` itself is
+ * untouched: it is a hash of the steps, and the steps' *shape* did not move), and the pre-C14 literal
+ * `sha256:579374f1…` that `tests/coding-agent-c10-rewind-fork.test.ts` pins is unaffected because that fixture
+ * supplies its own `argumentsHash` and carries no argument bytes. A bump would therefore invalidate stored
+ * bundles that are still perfectly readable — the opposite of what the version exists to protect. The only
+ * visible effect is the one the fix is for: `arguments_hash` now agrees between the model step and the tool step
+ * of a runner-recorded bundle.
+ *
+ * **The bundles written before this fix.** Their model step holds a hash of the argument *text* while their tool
+ * step holds a hash of the argument *value*, so `code-replay-engine.ts` diverged at `arguments_hash` on **every**
+ * replay of a runner-recorded bundle that executed a tool — the deterministic replay of a real run did not work
+ * at all. Nothing regresses by correcting the writer: those bundles were already unreplayable, and they stay
+ * readable evidence (their step payloads and their `replayInputHash` are untouched, and the reader recomputes the
+ * same hash). They are **not** retro-fitted: there is no second derivation, no lenient "old bundles compare
+ * differently" branch, and no migration that rewrites a stored recording. A cassette still refuses a recording
+ * that predates the argument bytes (`replay_cassette_arguments_unavailable`), so nothing is silently re-derived
+ * for them either. `tests/coding-agent-c13-mcp-run-path.test.ts` measures both halves: a bundle the **real**
+ * runner recorded replays clean, and the older mismatched pair still diverges.
  */
 
 /** Raised instead of persisting a bundle whose recording contains a credential. */
@@ -86,6 +129,68 @@ export function canonicalizeJson(value: unknown): string {
 
 export function bundleHash(value: unknown): string {
   return `sha256:${createHash("sha256").update(canonicalizeJson(value), "utf8").digest("hex")}`;
+}
+
+/**
+ * **The canonical tool-call arguments** — the *one* material every `argumentsHash` is derived from.
+ *
+ * Why this function has to exist at all, and why it is a conversion rather than a second hash. A recorded run
+ * holds a tool call's arguments in two places that are written by two different parts of the loop: the model step
+ * keeps the provider's own JSON **text** (`ChatToolCall.function.arguments` is a string by wire contract) and the
+ * tool step keeps the **parsed object** the adapter produced and the policy/approval gate then admitted. Hashing
+ * each of those with `bundleHash` directly gave two different values for one call — `bundleHash('{"path":"a"}')`
+ * is not `bundleHash({ path: "a" })` — and `code-replay-engine.ts` compares the two, so a bundle written by the
+ * real runner diverged at `arguments_hash` on every replay. The recorder, not the comparison, was wrong: the
+ * authoritative material is the argument value, and `canonicalizeJson` (key order, `undefined`, dates) is how
+ * this module already decides when two argument values are the same value. This function therefore states the
+ * conversion **once**, and every writer and every reader of an `argumentsHash` goes through it.
+ *
+ * The rules, and why each one cannot invent a call:
+ *
+ *  - an object is canonicalised as it stands (recursively, by `canonicalizeJson`), so `{a:1,b:2}` and `{b:2,a:1}`
+ *    are the same call — they are, and the tool received the same value;
+ *  - JSON text is parsed and then canonicalised, because a provider's text and the adapter's object *are* the
+ *    same argument value: `{"path":"a.txt"}` and `{ path: "a.txt" }` are two spellings of one call, and treating
+ *    them as two would make a replay depend on a provider's whitespace;
+ *  - text that does not parse is hashed **as text**. It is not an argument value this project can read, and the
+ *    alternative — hashing it as `{}` — would make two different unreadable fragments hash identically. The
+ *    adapter refuses such a call before execution (`invalid_tool_arguments`), so this branch is reachable only
+ *    from a hand-written fixture or a foreign recorder; hashing what was actually stored is the honest answer;
+ *  - `""`, `null` and `undefined` are the empty argument object, once, so a call that carried no arguments has
+ *    exactly one hash whether it was recorded as absent, as `null`, or as empty text;
+ *  - an array, a number, a boolean: canonicalised as it stands, never coerced into `{}` — the adapter refuses
+ *    them, and a hash that flattened them would erase the difference between a refused call and a valid empty one.
+ *
+ * Nothing here is a trust decision: the value that is hashed is data, and executing it still passes the whole
+ * policy/approval path.
+ *
+ * The return value is the **argument value**, never its serialisation: `bundleHash` canonicalises whatever it is
+ * given, so handing it the canonical *text* would hash a JSON string literal (a quoted string) instead of the
+ * value — a second, differently-spelled material, which is exactly the class of defect this function removes.
+ */
+export function canonicalReplayArguments(value: unknown): unknown {
+  if (value === null || value === undefined) return {};
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (!text) return {};
+    try {
+      return JSON.parse(text);
+    } catch {
+      // Not an argument value this project can read (the adapter refuses such a call before execution), so the
+      // stored text is hashed as text rather than flattened into `{}` — which would erase the difference
+      // between two unreadable fragments.
+      return text;
+    }
+  }
+  return value;
+}
+
+/**
+ * The recorded `argumentsHash` of a tool call — the single derivation used by the recorder (model step and tool
+ * step, both of which hand it a different *shape* of the same value) and by every reader that has to verify one.
+ */
+export function replayArgumentsHash(value: unknown): string {
+  return bundleHash(canonicalReplayArguments(value));
 }
 
 /**
@@ -137,7 +242,22 @@ export interface ReplayModelStepInput {
     model?: string | null;
     provider?: string | null;
     usage?: { totalTokens?: number; promptTokens?: number; completionTokens?: number } | null;
-    toolCalls: Array<{ id: string; name: string; argumentsHash: string }>;
+    toolCalls: Array<{
+      id: string;
+      name: string;
+      argumentsHash: string;
+      /**
+       * C14 (provider cassette): the model's raw argument text, exactly as the provider returned it — the value
+       * `argumentsHash` is derived from. Optional and additive, so a bundle recorded before this field existed
+       * keeps its exact pre-C14 bytes and hash (and the format version stays 3, see the module header).
+       *
+       * It is recorded because a **hash cannot reconstruct a call**: the cassette must answer a consumer's
+       * `ChatResult` with a string, and inventing one would silently change the tool call. The cassette
+       * therefore serves these bytes, verifies them against `argumentsHash` before it does, and refuses with
+       * `replay_cassette_arguments_unavailable` when a recording predates the field.
+       */
+      arguments?: string;
+    }>;
   };
 }
 

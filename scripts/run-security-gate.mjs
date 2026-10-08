@@ -17,6 +17,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { ATTACK_CATALOGUE_PATH, findMissingCatalogueEntries, loadAttackCatalogue, validateAttackCatalogue } from "./attack-catalogue-check.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -672,6 +673,112 @@ export const SECURITY_GATE_TESTS = [
   // cancellation are structured refusals that execute nothing — without ever requiring the separate owner/admin
   // risk downgrade, which keeps working beside it.
   "tests/coding-agent-c13-mcp-approval-flow.test.ts",
+  // C14 (evals, metrics and hardening). The eval corpus already lives in the gate above
+  // (`tests/coding-agent-c6-eval.test.ts`, 17 hermetic tasks); these two suites cover what C14 itself changed.
+  //
+  // C14: the CI workflow is an artifact with a contract. Pins that `.github/workflows/ci.yml` actually runs on
+  // `push`/`pull_request` (with identical behaviour-path filters) plus a weekly schedule and manual dispatch
+  // — before C14 it was `workflow_dispatch` only, so nothing ran on a change and "CI blocks regressions" was
+  // not true; that `typecheck:tests` and the new `lint` are steps; that the eval smoke is a job of its own
+  // with a report artifact and blocks the release; and that **no** step anywhere in the file can fail softly
+  // (`continue-on-error`). It also pins the lint guard itself in both directions: it fires on a real
+  // violation (a new file with an unrecorded cast, an unlisted `console.log`, an unrecorded `.only`/`.skip`)
+  // and produces no false positive on the repository it guards, with its own detector self-test asserted
+  // rather than trusted.
+  "tests/coding-agent-c14-ci-and-lint-gates.test.ts",
+  // C14: `code.model_profile.<id>` really decides which profiles a run may match. Pins the silent no-op this
+  // step closed: the runner's `modelProfiles` port was declared and read but never supplied by the
+  // composition, so `enabledProfileIds` never reached `resolveModelProfile` and the ExecutionSnapshot's
+  // "which profile ran" could not reflect the deployment. Behaviour is asserted on three layers — a real
+  // `FeatureFlagService` over the in-memory store (a disabled flag excludes its profile, and the same model
+  // then resolves to the conservative default; a throwing flag store enables nothing; the flag key of every
+  // registry profile passes the feature-flag allowlist), the runner recording the profile a per-run resolver
+  // enabled (with the run's own ctx/company/session, and the conservative default when the port is absent or
+  // the resolver throws), and a source guard that `app.ts` still passes the **existing** registry plus the
+  // flag-driven resolver — no second registry, and the provider of the model id is part of the match now.
+  "tests/coding-agent-c14-model-profile-flags.test.ts",
+  // C14 (owner decision 1): the known-failures quarantine. The 15 pre-existing failures stay *run* — the suite
+  // pins the four RED conditions of `scripts/check-known-failures.mjs` on synthetic data, each with its own
+  // negative control (the same fixture with the single difference reverted is GREEN), and then pins the real
+  // `known-failures.json` against the literal list of the 15 baseline failures **in both directions**, so a
+  // deleted entry (a failure that would then read as a regression) and an added one (something hidden) both fail.
+  // The verdict cannot be satisfied by a partial run either: a report that did not execute every suite file on
+  // disk is refused, which is the check `--exclude` would otherwise have made unnecessary.
+  "tests/coding-agent-c14-known-failures.test.ts",
+  // C14 (owner decision 2): the conservative model profile stays fail-closed, and its degradation is made
+  // **visible** instead of silent. Pins the two-valued reason (`profile_flag_disabled` when no profile is
+  // enabled, `no_matching_profile` when profiles are enabled but none matches, and no reason at all when one
+  // does) on the pure resolver, on a real runner run (the environment trace *and* every Activity event written
+  // after the profile, through the real metadata-only and secret guards), and on the ExecutionSnapshot payload
+  // (additive: the key is absent when the deployment does not wire the source). Source guards then pin that
+  // `app.ts` wires exactly that snapshot source and exposes the Inspector section, and that the warning the
+  // Inspector shows exists in all seven i18n dictionaries rather than in one.
+  "tests/coding-agent-c14-model-profile-fallback.test.ts",
+  // C14 (red-team hardening, PLAN.md G1 items 2 and 3). The catalogue below is an artifact with a contract:
+  // every row names a suite, an exact test title and a written non-vacuity argument, and the gate refuses a
+  // row whose suite file, suite registration, title or negative control does not resolve — so a fabricated
+  // entry cannot pass. The classes C14 adds are the ones nothing covered: a fork bomb (the rule existed and
+  // no test touched it), hostile text arriving through **command output**, disk/memory ceilings, zip-slip with
+  // Unicode/NUL/long-path spellings, and two channels the existing suites do not reach (an MCP tool
+  // *description*, and the shell session environment). The last two suites are the point of the step: the
+  // catalogue guard itself, and a mutation-sensitivity suite that neutralises five named guards in memory and
+  // asserts the matching attack then really succeeds.
+  "tests/coding-agent-c14-redteam-fork-bomb.test.ts",
+  "tests/coding-agent-c14-redteam-command-output-injection.test.ts",
+  "tests/coding-agent-c14-redteam-resource-exhaustion.test.ts",
+  "tests/coding-agent-c14-redteam-path-and-zip-slip.test.ts",
+  "tests/coding-agent-c14-redteam-new-channels.test.ts",
+  // C14: the catalogue guard. Pins that the catalogue cannot contain a fabricated row (a missing suite file, a
+  // suite outside this list, a title nobody wrote, a missing negative control, a stale rule exemption), that
+  // every hard-deny rule of the classifier is either exercised by a row or exempted with a probe command that
+  // really fires, and that the report check catches a catalogued title which did not run.
+  "tests/coding-agent-c14-attack-catalogue.test.ts",
+  // C14 (owner decision 1, second half): the eval **scores** and the **comparative report per profile**.
+  // The corpus itself is the suite above (`tests/coding-agent-c6-eval.test.ts`, now 33 hermetic tasks across
+  // seven task kinds and four programming languages plus JSON configuration); this suite pins the arithmetic
+  // under those numbers and the honesty of the profile table. It asserts `diffStats`/`turns`/`costUsd` in both
+  // directions — a real change set versus a false declaration, a computed price versus an unknown model, where
+  // the answer is `null` **with a reason** and never `0` (a generic price row would be a fabricated number) —
+  // and that turns are derived by a stated rule from the executed prefix only. It then re-derives the profile
+  // conformance matrix from the real `resolveModelProfile`/`modelProfileFallbackTrace` for every subject and
+  // deployment state, pins one row per profile (a profile that matched nothing is shown as such), and fails if
+  // any numeric quality field appears: a per-profile pass rate needs a live model, so every row is `not_run`
+  // and the report says so in its own text. A source guard finally proves the recorded harness reads no model
+  // profile at all, which is why "task X passed on profile Y" would be a label rather than a measurement.
+  "tests/coding-agent-c14-eval-metrics-and-profiles.test.ts",
+  // C14 (owner decision 3): the **aggregated** metrics — success rate, average turns, failed edit rate,
+  // approvals share, tool error rate and cost per run — computed from the run states and Activity rows that
+  // already exist. Each metric is pinned in both directions (a real number, and `null` **with a reason** once its
+  // source is removed, never `0`), together with the tenant boundary the store read enforces, the arithmetic
+  // against the real in-memory store, and the fact that the route serves exactly the report the aggregator
+  // produced under the existing `workspace:read` permission. The presentation half is pinned by `npm run test:web`.
+  "tests/coding-agent-c14-metrics-aggregation.test.ts",
+  // C14 (PLAN.md G1 item 3): mutation sensitivity of this gate. Five guards are neutralised **in memory** — the
+  // `fork_bomb` hard-deny rule, the PolicyEngine's classifier wiring, the ZIP decompression budget, the
+  // untrusted-data output budget and the sensitive-file read policy — and each attack is asserted to succeed
+  // once its guard is neutralised and to be refused again afterwards with the real guard restored. A
+  // neutralisation that changes nothing fails as "the control is decorative", which is what stops this gate
+  // from being a green suite that would stay green if a protection were deleted.
+  "tests/coding-agent-c14-gate-mutation-sensitivity.test.ts",
+  // C14 (owner decision 2, the provider cassette). Two suites, and the split is the point: one is the
+  // **file-backed** `ReplayBundlePersistPort` — a cassette a fresh process can read without a database, proved
+  // equivalent to the database-shaped store over the same recording (same steps, same `replayInputHash`, same
+  // tenant scoping), corrupt/wrong-container/hostile-id/refused-write cases included; the other is the
+  // **provider seam** — one adaptation of `CodeRunEnginePort.chat` that serves the recorded answers in order and
+  // the recorded settled tool results instead of executing anything, with the zeros **measured** (a stubbed
+  // global `fetch`, a tool runtime that would count, and a negative control that really dials and really
+  // executes), a byte-identical `replayInputHash` on the walk, and loud refusals for a request that does not
+  // match the recording, for missing argument bytes, and for a tampered cassette (the integrity hash plus two
+  // independent second walls). It proves reproducibility of the provider/tool sequence, never model quality.
+  "tests/coding-agent-c14-replay-cassette-store.test.ts",
+  "tests/coding-agent-c14-replay-cassette-engine.test.ts",
+  // C14 (post-step cleanup): the two descriptions that had drifted on their own. The phase order named by the
+  // engine's header comment and by the wiring comment in `app.ts` (both listed eight of the eleven
+  // `PolicyPhase` members and omitted three that really run), and the suite count in
+  // `docs/coding-agent/security-gate-report.md` (138 against a fixed list of 144). The guard reads the union
+  // type, the `evaluateInternal` body, both comments and the document itself, holds no copy of either fact, and
+  // proves both halves non-vacuous on in-memory copies rather than on the files.
+  "tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts",
 ];
 
 /**
@@ -756,18 +863,41 @@ function runStep(title, scriptRelativePath, args = []) {
   return true;
 }
 
-/** Prints every failed test with its message, so a red CI run is actionable without a second run. */
-export function formatFailedTests(report) {
-  const lines = [];
+/**
+ * The failing tests of a vitest JSON report, as `{ file, title, messages }`.
+ *
+ * There is exactly **one** traversal of `assertionResults` in this repository: `formatFailedTests` below and
+ * the C14 known-failures quarantine (`scripts/check-known-failures.mjs`) both read this. Two independent
+ * parsers would be two definitions of "which tests failed", and a quarantine compared against a differently
+ * parsed list is worse than no quarantine — a test could be red in one reading and green in the other.
+ *
+ * `file` is repository-relative and the title is the full `ancestorTitles > title` chain, which is the same
+ * string a `known-failures.json` entry names.
+ */
+export function failedTests(report) {
+  const failures = [];
   for (const file of report?.testResults ?? []) {
     for (const assertion of file?.assertionResults ?? []) {
       if (assertion?.status !== "failed") continue;
-      const name = [...(assertion.ancestorTitles ?? []), assertion.title].filter(Boolean).join(" > ");
-      lines.push(`[security-gate] FAILED TEST: ${path.relative(ROOT, String(file.name ?? ""))} > ${name}`);
-      for (const message of assertion.failureMessages ?? []) {
-        for (const messageLine of String(message).split("\n").slice(0, 12)) {
-          lines.push(`[security-gate]     ${messageLine.trim()}`);
-        }
+      const title = [...(assertion.ancestorTitles ?? []), assertion.title].filter(Boolean).join(" > ");
+      failures.push({
+        file: path.relative(ROOT, String(file.name ?? "")).replace(/\\/g, "/"),
+        title,
+        messages: (assertion.failureMessages ?? []).map((message) => String(message)),
+      });
+    }
+  }
+  return failures;
+}
+
+/** Prints every failed test with its message, so a red CI run is actionable without a second run. */
+export function formatFailedTests(report) {
+  const lines = [];
+  for (const failure of failedTests(report)) {
+    lines.push(`[security-gate] FAILED TEST: ${failure.file} > ${failure.title}`);
+    for (const message of failure.messages) {
+      for (const messageLine of message.split("\n").slice(0, 12)) {
+        lines.push(`[security-gate]     ${messageLine.trim()}`);
       }
     }
   }
@@ -794,6 +924,30 @@ function main() {
     process.stdout.write(`[security-gate] FAILED: ${missingFiles.length} configured suite file(s) do not exist:\n`);
     for (const suite of missingFiles) process.stdout.write(`[security-gate]   missing file: ${suite}\n`);
     ok = false;
+  }
+
+  /**
+   * The attack catalogue (C14). Checked **before** vitest for the same reason the suite list is: a row whose
+   * suite file is gone, whose suite is no longer part of this gate, whose test title nobody wrote or whose
+   * negative-control argument is missing must be reported as a catalogue defect instead of as a passing run.
+   * The report-side half of the check runs below, against the vitest JSON report.
+   */
+  const catalogueState = loadAttackCatalogue(ROOT);
+  let attackCatalogue = null;
+  if (catalogueState.error) {
+    process.stdout.write(`[security-gate] FAILED: attack catalogue ${catalogueState.error}\n`);
+    ok = false;
+  } else {
+    attackCatalogue = catalogueState.catalogue;
+    const catalogueVerdict = validateAttackCatalogue({ root: ROOT, catalogue: attackCatalogue, suites: SECURITY_GATE_TESTS });
+    const catalogueRows = Array.isArray(attackCatalogue?.classes) ? attackCatalogue.classes.length : 0;
+    process.stdout.write(
+      `\n[security-gate] attack catalogue (${ATTACK_CATALOGUE_PATH}): rows=${catalogueRows} issues=${catalogueVerdict.issues.length}\n`,
+    );
+    for (const issue of catalogueVerdict.issues) {
+      process.stdout.write(`[security-gate]   catalogue ${issue.code} [${issue.id}]: ${issue.detail}\n`);
+    }
+    if (!catalogueVerdict.ok) ok = false;
   }
   try {
     process.stdout.write(`\n[security-gate] vitest run (${SECURITY_GATE_TESTS.length} suites)\n`);
@@ -828,6 +982,24 @@ function main() {
           for (const suite of missing) process.stdout.write(`[security-gate]   missing: ${suite}\n`);
         }
         if (!verdict.ok || missing.length) ok = false;
+        /**
+         * The attack catalogue against the report: every catalogued attack test must have really run, matched
+         * by suite **and** exact title. A catalogue row whose test was renamed, moved or skipped is reported
+         * with its catalogue id, so the catalogue cannot describe tests that no longer exist.
+         */
+        if (attackCatalogue) {
+          const catalogueMissing = findMissingCatalogueEntries(report, attackCatalogue);
+          process.stdout.write(
+            `[security-gate] attack catalogue report check: rows=${Array.isArray(attackCatalogue.classes) ? attackCatalogue.classes.length : 0} missing=${catalogueMissing.length}\n`,
+          );
+          if (catalogueMissing.length) {
+            process.stdout.write(`[security-gate] FAILED: ${catalogueMissing.length} catalogued attack test(s) did not run:\n`);
+            for (const entry of catalogueMissing) {
+              process.stdout.write(`[security-gate]   catalogue ${entry.id}: ${entry.suite} > ${entry.title}\n`);
+            }
+            ok = false;
+          }
+        }
         const empty = findEmptySuites(report);
         if (empty.length) {
           process.stdout.write(`[security-gate] FAILED: ${empty.length} suite(s) reported no tests at all (a file that failed to load looks like this):\n`);

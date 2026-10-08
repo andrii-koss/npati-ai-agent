@@ -50,6 +50,18 @@ interface InspectorReport {
   counts: CapabilityInspectorCounts;
   activeSlice: InspectorSlice;
   items: CapabilityItem[];
+  /**
+   * C14: the model-profile rollout state the server reports. Optional because an older API without this section
+   * is still a valid report — the banner below simply does not render, rather than guessing a state.
+   */
+  modelProfiles?: {
+    registryProfileIds: string[];
+    enabledProfileIds: string[];
+    enabledProfileIdsIsEmpty: boolean;
+    flagSourceAvailable: boolean;
+    fallbackReason: "profile_flag_disabled" | null;
+    note: string;
+  };
 }
 interface IntegrationChannel {
   id: string;
@@ -383,6 +395,22 @@ export function CapabilityInspectorPage() {
           </p>
         </div>
       </header>
+
+      {/*
+        C14 (owner decision 2): the model-profile rollout state. The conservative profile stays the fail-closed
+        answer — this banner is what keeps that answer from being *silent*: without it, an operator who never
+        enabled a `code.model_profile.<id>` flag sees only that runs work, not that they lost native tool
+        calling and parallel writes. It reports the deployment's own state (which ids are eligible), so the
+        warning disappears exactly when the rollout starts.
+      */}
+      {report?.modelProfiles?.enabledProfileIdsIsEmpty && (
+        <div className="workspace-notice" role="status">
+          <strong>{t("capabilityInspector.modelProfiles.title")}</strong>{" "}
+          {t("capabilityInspector.modelProfiles.emptyHint", {
+            count: report.modelProfiles.registryProfileIds.length,
+          })}
+        </div>
+      )}
 
       <section className="overview-grid inspector-stats-grid">
         <div>

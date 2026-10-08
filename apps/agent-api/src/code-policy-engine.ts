@@ -37,9 +37,16 @@ import {
  * self-contained (structural dependency ports, no service imports) so that it can be injected into
  * any execution path and so that a path without an engine can only fail closed.
  *
- * Phase order is fixed and short-circuits on the first refusal:
- *   1 feature_flag -> 2 rbac -> 3 capability -> 4 hard_deny -> 5 session_mode ->
- *   6 project_rules -> 7 risk_classification -> 8 approval
+ * Phase order is fixed and short-circuits on the first refusal. The numbered order below is the order in
+ * which `evaluateInternal` can reach each phase, and its phase names are exactly the members of
+ * `PolicyPhase`; `tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts` reads the type and the
+ * method body from this file and fails when this description and the code disagree:
+ *   1 feature_flag -> 2 rbac -> 3 capability -> 4 capability_groups -> 5 trust -> 6 hard_deny ->
+ *   7 session_mode -> 8 project_rules -> 9 network_enforcement -> 10 approval -> 11 risk_classification
+ *
+ * The `approval` label is reached before `risk_classification` because the dependency and the migration
+ * approval decisions run before the mode x risk matrix; the matrix is the only place that refuses under
+ * `risk_classification`, and its own approval or allow verdict is the last thing this method returns.
  */
 
 export type PolicyDecision = "allow" | "deny" | "require_approval";

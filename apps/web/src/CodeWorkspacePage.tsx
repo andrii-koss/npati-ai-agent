@@ -3,6 +3,10 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import { useTranslation } from "./i18n";
 import { CodeSnapshotPanel } from "./CodeSnapshotPanel";
+// C14 (owner decision 3): the aggregated metrics of the company this project belongs to. It is a read-only
+// panel and it fetches its own report, so the page keeps holding one session-scoped state and the metrics stay
+// company-scoped (they are not a property of one session).
+import { CodeMetricsPanel } from "./code-workspace/CodeMetricsPanel";
 import { listProjectFiles, readProjectFile } from "./project-files-client";
 
 /**
@@ -653,6 +657,8 @@ export function CodeWorkspacePage() {
           <iframe src={previewUrl} title={isUk ? "Live preview" : "Live preview"} sandbox="allow-scripts allow-forms allow-same-origin" />
         </div>
       )}
+
+      <CodeMetricsPanel companyId={companyId} />
 
       <section className="bottom-tabs">
         <div className="bottom-tabs-nav" role="tablist">

@@ -16,18 +16,36 @@ import {
   canonicalDepsExecutors,
 } from "../apps/agent-api/src/code-tool-executors";
 import type { FeatureFlagService } from "../apps/agent-api/src/feature-flags";
+import { configuredModelPricing } from "../apps/agent-api/src/cost-telemetry";
 import { VERIFICATION_REPAIR_EXHAUSTED } from "../apps/agent-api/src/code-verification-loop";
 import {
   CODE_EVAL_SCHEMA_VERSION,
+  EVAL_LANGUAGES,
+  EVAL_TASK_KINDS,
   evalReportIsGreen,
   loadEvalFixture,
   loadEvalTasks,
   resolveEvalMode,
   runEvalSuite,
   type EvalFixture,
+  type EvalReport,
   type EvalStep,
   type EvalTask,
 } from "../apps/agent-api/src/code-eval-harness";
+import {
+  SLO_CALIBRATION_SCHEMA_VERSION,
+  buildSloCalibration,
+  notMeasuredSloTargets,
+} from "../apps/agent-api/src/code-slo-calibration";
+import {
+  DEFAULT_CODE_ANOMALY_THRESHOLDS,
+  anomalyPopulationFrom,
+  codeRunAnomalyFactsFromSummary,
+  evaluateCodeRunAnomaly,
+  resolveCodeAnomalyThresholds,
+} from "../apps/agent-api/src/code-anomaly-detection";
+import { DEFAULT_CODE_AGENT_LIMITS } from "../apps/agent-api/src/code-agent-config";
+import { DEFAULT_CODE_RUN_BUDGET } from "../apps/agent-api/src/code-run-quota";
 
 /**
  * C6/C9 security-gate suite: the eval harness must be deterministic in CI (no network, no Docker, no live
@@ -47,6 +65,14 @@ import {
  * `expect(<fn>(a, b)).toBe(n)` assertions against the source file, honours `.skip`/`.todo` and `.only` the way
  * a real runner does, and is therefore exactly the behaviour the test-integrity guard exists to catch: a
  * suite whose failing case no longer runs reports green.
+ *
+ * C14 added two more hermetic simulators, because build repair and dependency migration cannot be verified by
+ * reading a string: `npm run build` parses the repository's JSON configuration with the **real** `JSON.parse`
+ * (a build that cannot read its own config fails), and `npm run deps:check` scans `import`/`require`
+ * specifiers and compares them with the manifest **in both directions** (an import nobody declared cannot
+ * install; a declaration nobody imports is paid for and unused). All three are named as simulators on purpose:
+ * they spawn nothing, resolve no package and know no language. Every simulator is restricted to JavaScript/
+ * TypeScript-shaped text, which is why the Python and Go corpus tasks carry no command at all.
  */
 
 const owner: AuthContext = { workspaceId: "ws-eval", userId: "user-eval", permissions: ["workspace:read", "workspace:write", "business:manage", "admin:all"] };
@@ -161,6 +187,81 @@ function runFixtureTests(state: Record<string, string>): { exitCode: number; out
   return { exitCode: green ? 0 : 1, output: `fixture runner: files=${testFiles.length} executed=${executed} failed=${failed}` };
 }
 
+/**
+ * The fixture's stand-in build: it reads the project's JSON configuration with the **real** `JSON.parse`, which
+ * is what lets a build-repair task be verified by a command instead of by a string match. It compiles nothing
+ * and is named a simulator for that reason; a repository with no build configuration at all fails, exactly as
+ * a build with nothing to read would.
+ */
+function runFixtureBuild(state: Record<string, string>): { exitCode: number; output: string } {
+  const configs = ["package.json", "tsconfig.json"].filter((path) => state[path] !== undefined);
+  if (!configs.length) return { exitCode: 1, output: "fixture build: the repository has no build configuration" };
+  for (const path of configs) {
+    try {
+      JSON.parse(state[path]!);
+    } catch (error) {
+      return { exitCode: 1, output: `fixture build: ${path} is not readable JSON: ${error instanceof Error ? error.message : String(error)}` };
+    }
+  }
+  return { exitCode: 0, output: `fixture build: parsed ${configs.join(", ")}` };
+}
+
+/** Node builtins a bare specifier may name without being a declared dependency (the fixture's own convention). */
+const FIXTURE_NODE_BUILTINS = new Set([
+  "assert", "buffer", "child_process", "crypto", "events", "fs", "http", "https", "net", "os", "path", "stream", "url", "util", "zlib",
+]);
+
+/**
+ * The fixture's stand-in dependency check, in **both** directions: every bare specifier a source file imports
+ * must be declared, and every declared dependency must be imported by some source file. That is the whole
+ * content of a dependency migration — moving off a package means the import goes AND the declaration goes — so
+ * it is what the migration tasks are verified against, and neither half can be satisfied alone.
+ *
+ * It is a simulator and says so: it scans `import`/`require` specifiers with a regular expression and reads the
+ * manifest with `JSON.parse`. It resolves no package, knows no version and touches no registry.
+ */
+function runFixtureDepsCheck(state: Record<string, string>): { exitCode: number; output: string } {
+  const manifest = state["package.json"];
+  if (manifest === undefined) return { exitCode: 1, output: "fixture deps: the repository has no package.json" };
+  let parsed: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+  try {
+    parsed = JSON.parse(manifest) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+  } catch (error) {
+    return { exitCode: 1, output: `fixture deps: package.json is not readable JSON: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  const declared = new Set([...Object.keys(parsed.dependencies ?? {}), ...Object.keys(parsed.devDependencies ?? {})]);
+  const imported = new Set<string>();
+  for (const [path, content] of Object.entries(state)) {
+    if (!/\.(?:js|mjs|cjs|ts)$/.test(path)) continue;
+    for (const match of content.matchAll(/\bimport\s+(?:[\s\S]*?\sfrom\s+)?["']([^"']+)["']/g)) imported.add(match[1]!);
+    for (const match of content.matchAll(/\brequire\(\s*["']([^"']+)["']\s*\)/g)) imported.add(match[1]!);
+  }
+  const isBare = (specifier: string): boolean =>
+    !specifier.startsWith(".") && !specifier.startsWith("/") && !specifier.startsWith("node:") && !FIXTURE_NODE_BUILTINS.has(specifier);
+  const undeclared = [...imported].filter(isBare).filter((specifier) => !declared.has(specifier)).sort();
+  const unused = [...declared].filter((name) => !imported.has(name)).sort();
+  const output = `fixture deps: undeclared=${undeclared.join(",") || "-"} unused=${unused.join(",") || "-"}`;
+  return { exitCode: undeclared.length || unused.length ? 1 : 0, output };
+}
+
+/**
+ * The fixture's whole command vocabulary. An unknown command is a **failure**, not a pass: a task naming a
+ * command nothing simulates would otherwise be verified by a runner that does not exist. The corpus suite
+ * asserts the fixture names only these three.
+ */
+function runFixtureCommand(state: Record<string, string>, command: string): { exitCode: number; output: string } {
+  switch (command) {
+    case "npm test":
+      return runFixtureTests(state);
+    case "npm run build":
+      return runFixtureBuild(state);
+    case "npm run deps:check":
+      return runFixtureDepsCheck(state);
+    default:
+      return { exitCode: 1, output: `fixture runner: no simulator for '${command}'` };
+  }
+}
+
 // ---------------------------------------------------------------------------------------------------------
 // The harness
 // ---------------------------------------------------------------------------------------------------------
@@ -247,7 +348,7 @@ function inMemoryWorkspace(files: Record<string, string>) {
   return { state, read, write };
 }
 
-async function evalHarness(task: EvalTask) {
+async function evalHarness(task: EvalTask, options: { model?: string } = {}) {
   const { state, read, write } = inMemoryWorkspace(task.files);
   const workspace = new InMemoryWorkspaceStore();
   await workspace.initialize();
@@ -283,21 +384,35 @@ async function evalHarness(task: EvalTask) {
       ...canonicalDepsExecutors({}),
     },
   });
-  let tokens = 41; // deterministic per-step usage so the metric is asserted, not just present
+  // Deterministic per-step usage, reported as a split that adds up: `costUsd` is only computable when the
+  // prompt/completion split is known, so the harness supplies one instead of a bare total (the un-split case is
+  // a negative control in the C14 suite).
+  let usageIndex = 0;
   return {
     state,
     company,
-    invokeTool: async ({ tool, args, toolCallId }: { tool: string; args?: unknown; toolCallId: string; step: number }) => {
+    invokeTool: async ({ tool, args, toolCallId, turn }: { tool: string; args?: unknown; toolCallId: string; step: number; turn: number }) => {
       // One turn per task: read-before-write (C3) is scoped to a turn, exactly like the real runner, which
       // reads a file and then edits it inside the same turn.
-      const result = await runtime.invoke(owner, { companyId: company.id, projectId: "p-eval", sessionId: "s-eval", tool, args, toolCallId, turnId: "turn-eval" });
+      const result = await runtime.invoke(owner, { companyId: company.id, projectId: "p-eval", sessionId: "s-eval", tool, args, toolCallId, turnId: `turn-${turn}` });
       return result.ok ? { ok: true as const } : { ok: false as const, error: { code: result.error.code } };
     },
-    runCommand: async (command: string) => (command === "npm test" ? runFixtureTests(state) : { exitCode: 0 }),
+    runCommand: async (command: string) => runFixtureCommand(state, command),
     files: () => state,
-    usage: () => ({ tokens: tokens++ }),
+    usage: () => {
+      usageIndex += 1;
+      const completionTokens = 10;
+      const promptTokens = 30 + usageIndex;
+      return { tokens: promptTokens + completionTokens, promptTokens, completionTokens };
+    },
+    // The price comes from the project's own price configuration, so the eval cost and the production telemetry
+    // cost are computed from one table. A model the table does not price yields `null`, never a made-up number.
+    price: () => configuredModelPricing(options.model ?? PRICED_EVAL_MODEL),
   };
 }
+
+/** A model the project's price table really prices, so the cost metric is a computation rather than a claim. */
+const PRICED_EVAL_MODEL = "anthropic/claude-3-5-sonnet";
 
 /** Runs one task through the real runtime and throws with the harness's reason when it is not green. */
 async function runOne(task: EvalTask) {
@@ -311,12 +426,12 @@ function fixtureTask(id: string): EvalTask {
   return task;
 }
 
-describe("security-gate: C6/C9 eval harness runs the seventeen deterministic tasks", () => {
-  it("passes all seventeen fixture tasks through the real tool runtime", async () => {
+describe("security-gate: C6/C9/C14 eval harness runs the thirty-three deterministic tasks", () => {
+  it("passes all thirty-three fixture tasks through the real tool runtime", async () => {
     const tasks = loadFixture();
     // Exact count and exact ids: the corpus is a contract, so a task that silently disappears (or a renamed
     // id) fails here instead of shrinking the evidence.
-    expect(tasks).toHaveLength(17);
+    expect(tasks).toHaveLength(33);
     expect(tasks.map((task) => task.id)).toEqual([
       "fix-bug-arithmetic",
       "add-function-multiply",
@@ -335,6 +450,22 @@ describe("security-gate: C6/C9 eval harness runs the seventeen deterministic tas
       "added-test-not-flagged",
       "self-review-finds-secret",
       "self-review-flags-unrelated-change",
+      "python-fix-bug-average",
+      "python-feature-clamp",
+      "python-refactor-extract-helper",
+      "python-tests-add-case",
+      "python-multi-file-package",
+      "go-fix-bug-off-by-one",
+      "go-feature-multiply",
+      "go-tests-add-case",
+      "typescript-feature-optional-param",
+      "typescript-refactor-extract-type",
+      "typescript-multi-file-rename-export",
+      "build-repair-broken-manifest",
+      "build-repair-tsconfig-trailing-comma",
+      "dep-migration-replace-left-pad",
+      "dep-migration-drop-dead-dependency",
+      "javascript-feature-parse-args",
     ]);
     const fixture = loadFixtureFile();
     expect(fixture.schemaVersion).toBe(CODE_EVAL_SCHEMA_VERSION);
@@ -348,35 +479,306 @@ describe("security-gate: C6/C9 eval harness runs the seventeen deterministic tas
       // Throwing keeps the failure reason visible in every runner (including the CI harness shim).
       if (!result.ok) throw new Error(`eval task ${result.id} failed: ${result.reason ?? "unknown"}`);
     }
+    const results = perTask.map((single) => single.tasks[0]!);
     const combined = {
       schemaVersion: CODE_EVAL_SCHEMA_VERSION,
       mode: "recorded" as const,
-      tasks: perTask.map((single) => single.tasks[0]!),
+      tasks: results,
       totals: {
-        tasks: perTask.length,
-        passed: perTask.length,
+        tasks: results.length,
+        passed: results.length,
         failed: 0,
-        steps: perTask.reduce((sum, single) => sum + single.totals.steps, 0),
-        checks: perTask.reduce((sum, single) => sum + single.totals.checks, 0),
-        tokens: perTask.reduce((sum, single) => sum + single.totals.tokens, 0),
-        durationMs: perTask.reduce((sum, single) => sum + single.totals.durationMs, 0),
+        steps: results.reduce((sum, result) => sum + result.steps, 0),
+        turns: results.reduce((sum, result) => sum + result.turns, 0),
+        checks: results.reduce((sum, result) => sum + result.checks, 0),
+        tokens: results.reduce((sum, result) => sum + result.tokens, 0),
+        durationMs: results.reduce((sum, result) => sum + result.durationMs, 0),
+        diffStats: {
+          files: results.reduce((sum, result) => sum + result.diffStats.files, 0),
+          linesAdded: results.reduce((sum, result) => sum + result.diffStats.linesAdded, 0),
+          linesRemoved: results.reduce((sum, result) => sum + result.diffStats.linesRemoved, 0),
+        },
+        costUsd: Number(results.reduce((sum, result) => sum + (result.costUsd ?? 0), 0).toFixed(6)),
+        costUnavailableTasks: results.filter((result) => result.costUsd === null).length,
       },
     };
     expect(evalReportIsGreen(combined)).toBe(true);
-    expect(combined.totals.steps).toBeGreaterThanOrEqual(17 * 2);
-    // Exact: fourteen `check` steps (2 + 4 + 2 + 2 + 2 + 2) and no more, so a task that stops recording its
-    // own failures cannot hide behind the aggregate.
-    expect(combined.totals.checks).toBe(14);
+    expect(combined.totals.steps).toBeGreaterThanOrEqual(results.length * 2);
+    // Exact: twenty-two `check` steps (fourteen C9 plus eight C14) and no more, so a task that stops recording
+    // its own failures cannot hide behind the aggregate.
+    expect(combined.totals.checks).toBe(22);
     expect(combined.totals.tokens).toBeGreaterThan(0);
+    // C14 scoring: every task really changed something, the change set is counted, the transcript has turns and
+    // the cost is a computed number from a priced model (not a placeholder and not `null`).
+    expect(results.filter((result) => result.diffStats.files < 1)).toEqual([]);
+    expect(combined.totals.diffStats.linesAdded).toBeGreaterThan(0);
+    expect(combined.totals.diffStats.linesRemoved).toBeGreaterThan(0);
+    expect(combined.totals.turns).toBeGreaterThanOrEqual(results.length);
+    expect(combined.totals.costUnavailableTasks).toBe(0);
+    expect(combined.totals.costUsd).toBeGreaterThan(0);
+    // The aggregate the C14 documentation quotes, pinned so the table cannot drift away from the run. `steps`
+    // counts every transcript step, `turns` only the model turns (80 tool calls are grouped into fewer turns),
+    // and `costUsd` is the price table applied to the tokens — `durationMs` is deliberately not pinned, since
+    // wall-clock time is not a property of the corpus.
+    expect({
+      steps: combined.totals.steps,
+      turns: combined.totals.turns,
+      checks: combined.totals.checks,
+      tokens: combined.totals.tokens,
+      diffStats: combined.totals.diffStats,
+      costUsd: combined.totals.costUsd,
+    }).toEqual({
+      steps: 135,
+      turns: 49,
+      checks: 22,
+      tokens: 3357,
+      diffStats: { files: 42, linesAdded: 80, linesRemoved: 43 },
+      costUsd: 0.019671,
+    });
   });
 
-  it("fails a task whose transcript does not actually fix anything (negative control)", async () => {
-    const task = loadFixture()[0]!;
+  /**
+   * C14 (owner decision 4): the SLO calibration of **this** run.
+   *
+   * The numbers below are not a copy of R1's starting table: they are read off the thirty-three task results the
+   * test above already produced through the real tool path, and they are the only measurements of the corpus
+   * that exist. Three kinds of claim are kept apart on purpose, because collapsing them is exactly what the
+   * owner's instruction forbids:
+   *
+   *  - **measured** — turns, tokens, cost and the change set, per task and per task kind, pinned with the
+   *    nearest-rank statistic the calibration module names in every answer;
+   *  - **not_measured** — the R1 targets this corpus has no source for (sandbox start, queue wait, tool error
+   *    rate, recovery, provider fallback, run latency, approvals share, quota use, production cost median). The
+   *    suite asserts they are refused *and* asserts the mechanism that makes them unmeasurable here, so the
+   *    refusal rests on a fact about the corpus rather than on a preference;
+   *  - **proposed** — the thresholds the measurement does support, asserted equal to the shipped configuration
+   *    so a default cannot silently drift away from the calibration it claims to come from.
+   */
+  it("calibrates the SLO thresholds from this run, and refuses the R1 targets the corpus cannot measure", async () => {
+    const tasks = loadFixture();
+    const perTask = [];
+    for (const task of tasks) perTask.push(await runEvalSuite([task], await evalHarness(task)));
+    const results = perTask.map((single) => single.tasks[0]!);
+    const combined: EvalReport = {
+      schemaVersion: CODE_EVAL_SCHEMA_VERSION,
+      mode: "recorded",
+      tasks: results,
+      totals: {
+        tasks: results.length,
+        passed: results.filter((result) => result.ok).length,
+        failed: results.filter((result) => !result.ok).length,
+        steps: results.reduce((sum, result) => sum + result.steps, 0),
+        turns: results.reduce((sum, result) => sum + result.turns, 0),
+        checks: results.reduce((sum, result) => sum + result.checks, 0),
+        tokens: results.reduce((sum, result) => sum + result.tokens, 0),
+        durationMs: results.reduce((sum, result) => sum + result.durationMs, 0),
+        diffStats: {
+          files: results.reduce((sum, result) => sum + result.diffStats.files, 0),
+          linesAdded: results.reduce((sum, result) => sum + result.diffStats.linesAdded, 0),
+          linesRemoved: results.reduce((sum, result) => sum + result.diffStats.linesRemoved, 0),
+        },
+        costUsd: Number(results.reduce((sum, result) => sum + (result.costUsd ?? 0), 0).toFixed(6)),
+        costUnavailableTasks: results.filter((result) => result.costUsd === null).length,
+      },
+    };
+
+    const calibration = buildSloCalibration({ report: combined, tasks });
+    expect(calibration.schemaVersion).toBe(SLO_CALIBRATION_SCHEMA_VERSION);
+    expect(calibration.percentileMethod).toBe("nearest_rank");
+    // The calibration reads the same aggregate the test above pins — one run, one set of numbers.
+    expect(calibration.corpus).toEqual({
+      tasks: 33,
+      passed: 33,
+      failed: 0,
+      steps: 135,
+      turns: 49,
+      checks: 22,
+      tokens: 3357,
+      toolCalls: 80,
+      costUsd: 0.019671,
+      costUnavailableTasks: 0,
+      diffStats: { files: 42, linesAdded: 80, linesRemoved: 43 },
+    });
+    expect(calibration.unjoinedResults).toBe(0);
+    expect(calibration.byTaskType.every((group) => group.sampleSize > 0)).toBe(true);
+
+    const measured = (quantity: string) => {
+      const found = calibration.overall.find((entry) => entry.quantity === quantity);
+      if (!found) throw new Error(`no measured distribution for ${quantity}`);
+      return found;
+    };
+    // The real distributions, measured over all thirty-three tasks. `sum` is included so a shifted median
+    // cannot pass while the total stays wrong.
+    expect({
+      steps: [measured("steps").median, measured("steps").p95, measured("steps").max, measured("steps").sum],
+      turns: [measured("turns").median, measured("turns").p95, measured("turns").max, measured("turns").sum],
+      toolCalls: [measured("tool_calls").median, measured("tool_calls").p95, measured("tool_calls").max],
+      checks: [measured("checks").median, measured("checks").p95, measured("checks").max, measured("checks").sum],
+      tokens: [measured("tokens").median, measured("tokens").p95, measured("tokens").max, measured("tokens").sum],
+      cost: [measured("cost_usd").median, measured("cost_usd").p95, measured("cost_usd").max, measured("cost_usd").sum],
+      changeSet: [
+        measured("diff_files").median,
+        measured("diff_files").p95,
+        measured("diff_files").max,
+        measured("diff_files").sum,
+        measured("diff_lines_added").sum,
+        measured("diff_lines_removed").sum,
+      ],
+    }).toEqual({
+      steps: [3, 9, 10, 135],
+      turns: [1, 3, 4, 49],
+      toolCalls: [2, 5, 7],
+      checks: [0, 2, 4, 22],
+      tokens: [83, 215, 308, 3357],
+      // The median task costs 0.000489 USD and the 95th percentile 0.001245; the largest task in the corpus is
+      // 0.001764, which is 3.61x the median — the fact the R1 cost alert is checked against below.
+      cost: [0.000489, 0.001245, 0.001764, 0.019671],
+      changeSet: [1, 3, 4, 42, 80, 43],
+    });
+    // Every measured quantity is over the whole corpus, and the wall clock is measured but refused as an SLO.
+    for (const entry of calibration.overall) {
+      expect(entry.sampleSize).toBe(33);
+      expect(entry.unavailable).toBeUndefined();
+    }
+    expect(measured("duration_ms").usableForSlo).toBe(false);
+    expect(measured("duration_ms").note).toContain("wall clock");
+
+    // By task kind: the two-task groups are where a p95 stops being a percentile (rank = ceil(0.95 * 2) = 2, the
+    // maximum), which is the measured reason the population floor exists at all.
+    const kindOf = (taskType: string) => {
+      const group = calibration.byTaskType.find((entry) => entry.taskType === taskType);
+      if (!group) throw new Error(`no group for ${taskType}`);
+      const pick = (quantity: string) => group.distributions.find((entry) => entry.quantity === quantity)!;
+      return group;
+    };
+    const bugFix = kindOf("bug_fix");
+    expect(bugFix.sampleSize).toBe(12);
+    expect([bugFix.distributions[1]!.median, bugFix.distributions[1]!.p95, bugFix.distributions[1]!.max]).toEqual([1, 4, 4]);
+    expect([bugFix.distributions[2]!.median, bugFix.distributions[2]!.p95]).toEqual([83, 170]);
+    const migration = kindOf("dependency_migration");
+    expect(migration.sampleSize).toBe(2);
+    expect([migration.distributions[0]!.median, migration.distributions[0]!.max]).toEqual([5, 10]);
+    expect([migration.distributions[2]!.median, migration.distributions[2]!.p95, migration.distributions[2]!.max]).toEqual([83, 308, 308]);
+
+    // -----------------------------------------------------------------------------------------------------
+    // proposed: derived from the measurements above, and equal to the shipped configuration
+    // -----------------------------------------------------------------------------------------------------
+    const proposalOf = (target: string) => {
+      const found = calibration.proposed.find((entry) => entry.target === target);
+      if (!found) throw new Error(`no proposal for ${target}`);
+      if (found.status !== "proposed") throw new Error(`proposal ${target} is ${found.status}: ${found.reason}`);
+      return found;
+    };
+    // 4x the largest measured transcript (10 steps) is exactly the shipped step limit.
+    const steps = proposalOf("code.agent.maxStepsPerRun");
+    expect(steps.value).toBe(40);
+    expect(steps.basis).toBe("measured");
+    expect(steps.appliedTo).toEqual({ quantity: "steps", statistic: "max", measured: 10, sampleSize: 33, headroomMultiplier: 4 });
+    expect(steps.value).toBe(DEFAULT_CODE_AGENT_LIMITS.maxStepsPerRun);
+    // R1's cost multiple is kept, with what it does to the measured population reported beside it: it flags the
+    // single largest task in the corpus (0.001764 > 3 x 0.000489 = 0.001467), which is a discriminating rule.
+    const cost = proposalOf("code.anomaly.costMedianMultiplier");
+    expect(cost.value).toBe(3);
+    expect(cost.basis).toBe("r1_reference");
+    expect(cost.appliedTo?.measured).toBe(0.000489);
+    expect(cost.measuredEffect).toEqual({ crossed: 1, sampleSize: 33, share: Number((1 / 33).toFixed(6)) });
+    expect(cost.value).toBe(DEFAULT_CODE_ANOMALY_THRESHOLDS.costMedianMultiplier);
+    // No R1 number exists for turns, so the measured p95 supplies it: one multiplier places the alert exactly on
+    // the 95th percentile, and the corpus's own largest run (4 turns) is the only one above it.
+    const turns = proposalOf("code.anomaly.turnP95Multiplier");
+    expect(turns.value).toBe(1);
+    expect(turns.basis).toBe("measured");
+    expect(turns.appliedTo?.measured).toBe(3);
+    expect(turns.measuredEffect).toEqual({ crossed: 1, sampleSize: 33, share: Number((1 / 33).toFixed(6)) });
+    expect(turns.value).toBe(DEFAULT_CODE_ANOMALY_THRESHOLDS.turnP95Multiplier);
+    // The population floor is derived from the smallest group the corpus really has (two tasks), not chosen.
+    const floor = proposalOf("code.anomaly.minPopulationSamples");
+    expect(floor.value).toBe(5);
+    expect(floor.appliedTo?.measured).toBe(2);
+    expect(floor.value).toBe(DEFAULT_CODE_ANOMALY_THRESHOLDS.minPopulationSamples);
+
+    // -----------------------------------------------------------------------------------------------------
+    // not_measured: the R1 targets with no corpus source, and the mechanism that makes them unmeasurable
+    // -----------------------------------------------------------------------------------------------------
+    expect(calibration.notMeasured.map((entry) => entry.code)).toEqual(notMeasuredSloTargets().map((entry) => entry.code));
+    expect(calibration.notMeasured).toHaveLength(10);
+    expect(calibration.notMeasured.find((entry) => entry.code === "slo.tool_error_rate")?.reason).toContain("expectError");
+    // The fact behind that refusal, measured: the corpus contains no failing-call sample at all — every tool call
+    // it makes succeeds, and not one step declares an expected error.
+    const toolCalls = results.reduce((sum, result) => sum + result.toolCalls, 0);
+    const declaredErrors = tasks.reduce((sum, task) => sum + task.script.filter((step) => step.kind === "tool" && step.expectError).length, 0);
+    expect(toolCalls).toBe(80);
+    expect(declaredErrors).toBe(0);
+    expect(results.every((result) => result.failures === 0)).toBe(true);
+    // …which is why the tool-error threshold, the run-minute budget and the two run budgets are all refused
+    // rather than dressed up with a corpus number three orders of magnitude below the shipped value.
+    for (const target of ["code.anomaly.toolErrorRate", "code.agent.maxRunMinutes", "code.runBudget.maxTokens", "code.runBudget.maxCostUsd", "code.agent.maxChangedFiles"]) {
+      const entry = calibration.proposed.find((candidate) => candidate.target === target)!;
+      expect(entry.status).toBe("not_measured");
+      expect(entry.value).toBeNull();
+    }
+    // R1's 5% is still the shipped threshold: unconfirmed here, not discarded.
+    expect(DEFAULT_CODE_ANOMALY_THRESHOLDS.toolErrorRate).toBe(0.05);
+    // The corpus is a floor, so the values it cannot justify are reported, not adopted: the costliest corpus task
+    // is three orders of magnitude below the shipped per-run budget, and the largest change set is 4 files
+    // against a 25-file scope warning. That divergence is the conclusion, and the shipped values stand.
+    expect(measured("cost_usd").max).toBeLessThan(DEFAULT_CODE_RUN_BUDGET.maxCostUsd / 100);
+    expect(measured("tokens").max).toBeLessThan(DEFAULT_CODE_RUN_BUDGET.maxTokens / 100);
+    expect(measured("diff_files").max).toBeLessThan(DEFAULT_CODE_AGENT_LIMITS.maxChangedFiles);
+
+    // -----------------------------------------------------------------------------------------------------
+    // The anomaly detector on the measured population: it fires on it, and it does not fire inside it
+    // -----------------------------------------------------------------------------------------------------
+    const population = anomalyPopulationFrom({
+      costUsd: results.map((result) => result.costUsd),
+      turns: results.map((result) => result.turns),
+      source: "the eval corpus run above",
+    });
+    expect(population.cost.sampleSize).toBe(33);
+    expect(population.cost.median).toBe(0.000489);
+    expect(population.turns.p95).toBe(3);
+    const thresholds = resolveCodeAnomalyThresholds({});
+    // The corpus's own p95 cost and p95 turns: inside every rule, and judged rather than skipped.
+    const inside = evaluateCodeRunAnomaly(
+      codeRunAnomalyFactsFromSummary("run-corpus-p95", { turns: 3, tokens: 215, toolCalls: 5, costUsd: 0.001245 }, 0),
+      population,
+      thresholds,
+    );
+    expect(inside.status).toBe("evaluated");
+    expect(inside.anomalous).toBe(false);
+    expect(inside.notEvaluated).toEqual([]);
+    // The corpus's largest task plus one turn: anomalous on both measured rules, and named.
+    const outside = evaluateCodeRunAnomaly(
+      codeRunAnomalyFactsFromSummary("run-corpus-max", { turns: 4, tokens: 308, toolCalls: 7, costUsd: 0.001764 }, 0),
+      population,
+      thresholds,
+    );
+    expect(outside.status).toBe("evaluated");
+    expect(outside.anomalous).toBe(true);
+    expect(outside.findings.map((finding) => finding.code)).toEqual(["cost_above_median_multiple", "turns_above_p95_multiple"]);
+    expect(outside.findings[0]!.threshold).toBe(0.001467);
+    expect(outside.findings[1]!.threshold).toBe(3);
+    // A rule that could not run is not a pass: with no population at all the same run is `unavailable`.
+    const unmeasurable = evaluateCodeRunAnomaly(
+      codeRunAnomalyFactsFromSummary("run-corpus-max", { turns: 4, tokens: 308, toolCalls: 0, costUsd: 0.001764 }, 0),
+      anomalyPopulationFrom({ costUsd: [], turns: [], source: "no runs" }),
+      thresholds,
+    );
+    expect(unmeasurable.status).toBe("unavailable");
+    expect(unmeasurable.anomalous).toBeNull();
+  });
+
+  it("fails a task whose transcript does not actually fix anything (negative control)", async () => {    const task = loadFixture()[0]!;
     const broken: EvalTask = { ...task, script: [{ kind: "message", text: "I think it is fine." }] };
     const report = await runEvalSuite([broken], await evalHarness(broken));
     expect(report.tasks[0]!.ok).toBe(false);
     expect(report.tasks[0]!.reason).toContain("verify_content_mismatch");
     expect(evalReportIsGreen(report)).toBe(false);
+    // The scores stay honest in the failing direction too: a run that changed nothing reports an empty change
+    // set and zero turns, not the corpus average.
+    expect(report.tasks[0]!.diffStats).toEqual({ files: 0, linesAdded: 0, linesRemoved: 0 });
+    expect(report.tasks[0]!.turns).toBe(1);
+    expect(report.tasks[0]!.toolCalls).toBe(0);
   });
 
   it("fails when a tool call in the script errors, and reports which tool failed", async () => {
@@ -436,7 +838,7 @@ describe("security-gate: C6/C9 eval harness runs the seventeen deterministic tas
     expect(() => loadEvalTasks([{ ...task, verify: [] }])).toThrow(/eval_fixture_invalid/);
   });
 
-  it("keeps every scripted step a legal tool call shape and uses only the fixture's check command", () => {
+  it("keeps every scripted step a legal tool call shape and uses only the fixture's three simulated commands", () => {
     const tasks = loadFixture();
     const names = new Set(CODE_TOOL_SCHEMAS.map((schema) => schema.name));
     const commands = new Set<string>();
@@ -452,9 +854,69 @@ describe("security-gate: C6/C9 eval harness runs the seventeen deterministic tas
         if (verification.type === "command_succeeds" || verification.type === "command_fails") commands.add(verification.command);
       }
     }
-    // One command, the stand-in for the fixture's test runner. A task inventing a second command would be
-    // checked by a runner no test wires up — which is the same as not being checked.
-    expect([...commands]).toEqual(["npm test"]);
+    // Three commands, and every one of them is a simulator wired up below (`runFixtureCommand`): the regex test
+    // runner, the JSON-parse build and the two-directional dependency check. The list is exact on purpose — a
+    // task inventing a fourth command would be checked by a runner no test wires up, which is the same as not
+    // being checked — and anything outside the list is answered with a failure, never with a silent pass.
+    expect([...commands].sort()).toEqual(["npm run build", "npm run deps:check", "npm test"]);
+  });
+});
+
+describe("security-gate: C14 eval corpus — coverage, hermeticity and the limits of the simulators", () => {
+  it("covers all seven task kinds and every declared language, with the metadata declared as data", () => {
+    const tasks = loadFixture();
+    expect(tasks.length).toBeGreaterThanOrEqual(30);
+    // Every task declares its kind and language (the loader keeps them optional so old fixtures stay valid;
+    // the shipped corpus may not use that escape hatch), and both values are from the closed vocabularies.
+    expect(tasks.filter((task) => task.taskType === undefined || task.language === undefined)).toEqual([]);
+    const kinds = new Set<string>(tasks.map((task) => task.taskType ?? ""));
+    const languages = new Set<string>(tasks.map((task) => task.language ?? ""));
+    for (const kind of EVAL_TASK_KINDS) expect(kinds.has(kind), `no task covers ${kind}`).toBe(true);
+    // Four programming languages plus JSON configuration. This is a statement about the fixture text: the
+    // simulators understand JavaScript/TypeScript expressions and nothing else (see the next test).
+    expect(["javascript", "typescript", "python", "go", "json"].filter((language) => !languages.has(language))).toEqual([]);
+    for (const language of languages) expect(EVAL_LANGUAGES).toContain(language);
+  });
+
+  it("proves hermeticity from the data: file tools only, three simulated commands, no endpoint", async () => {
+    const tasks = loadFixture();
+    const toolNames = new Set<string>();
+    for (const task of tasks) {
+      for (const step of task.script as EvalStep[]) if (step.kind === "tool") toolNames.add(step.tool);
+      // No fixture file names a network endpoint, so no task can smuggle in a fetch even by accident.
+      for (const [path, content] of Object.entries(task.files)) {
+        expect(/https?:\/\//.test(content), `${task.id}/${path} names a network endpoint`).toBe(false);
+      }
+    }
+    // Exactly the file tools: no shell, no process control, no dependency installation, no git, no MCP and no
+    // sub-agent. A task that needs one of those is not hermetic and cannot be added by accident — it has to
+    // change this list, which is the review point.
+    expect([...toolNames].sort()).toEqual([
+      "code.fs.apply_patch",
+      "code.fs.edit",
+      "code.fs.move",
+      "code.fs.read",
+      "code.fs.write",
+    ]);
+    // The commands are the simulators `runFixtureCommand` implements, and the simulator itself never spawns a
+    // process: it is the same function the tool path is measured with, so "no process" is structural here.
+    const simulated = runFixtureCommand({}, "docker run alpine");
+    expect(simulated.exitCode).toBe(1);
+    expect(simulated.output).toContain("no simulator");
+  });
+
+  it("gives the Python and Go tasks no command at all, because no simulator reads those languages", () => {
+    for (const task of loadFixture()) {
+      if (task.language !== "python" && task.language !== "go") continue;
+      for (const step of task.script as EvalStep[]) {
+        expect(step.kind === "check", `${task.id} runs a check the simulator cannot honour`).toBe(false);
+      }
+      for (const verification of verificationList(task)) {
+        // `file_contains`/`diff_stats` judge the change set, which is what a hermetic run can honestly claim
+        // about a language no simulator understands — it never claims the code was executed.
+        expect(["file_contains", "diff_stats"]).toContain(verification.type);
+      }
+    }
   });
 });
 
