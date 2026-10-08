@@ -490,11 +490,37 @@ export class CodeRbac {
       if (input.approvalClaim) return deny("agent_cannot_approve", "An agent cannot approve its own action");
       if (input.policyChange) return deny("agent_cannot_change_policy", "An agent cannot change mode, roles, flags or policy");
     }
-    // Service identities: never production, never above their granted role.
+    // Service identities: never production, never a policy change, never above their granted role.
     if (principal === "service") {
       if (input.approvalClaim) return deny("service_cannot_approve", "A service identity cannot approve an action");
+      /**
+       * The production/privileged refusal keeps its place **before** the policy-change one on purpose: on the
+       * C5b data-policy surface (`code.policy.manage`, a privileged permission) this is the documented answer,
+       * and `tests/coding-agent-c5b-policy-rbac.test.ts` pins it. Only a policy change that is *not* already
+       * refused as production work reaches the invariant below.
+       */
       if (input.production || this.registry.isPrivileged(input.permission)) {
         return deny("service_identity_cannot_operate_production", "A service identity cannot perform production operations");
+      }
+      /**
+       * G1 (D14) — the mirror of the agent invariant above, and it was missing.
+       *
+       * A service identity is not a user, so a policy change must be refused **by this gate**, not by
+       * whoever called it. The default automation allowlist contains `business:manage` (see
+       * `AUTOMATION_PERMISSION_INVENTORY`), so on
+       * `PUT …/code/protected-branches` (`business:manage` + `policyChange`) the earlier order of these
+       * checks let a real automation reach the permission test, pass it, and be journalled as
+       * `code.rbac.allow` — an allow entry for an administrative policy change the service never performed,
+       * refused only afterwards by the route's own throw.
+       *
+       * The code is the documented one for this surface: `code-membership.ts` and
+       * `code-membership-routes.ts` already answer a service principal with `agent_cannot_change_policy`
+       * ("An agent or service identity cannot change company membership or policy"), so reusing it keeps the
+       * HTTP contract and the existing refusal vocabulary byte-identical while the journal now tells the
+       * truth.
+       */
+      if (input.policyChange) {
+        return deny("agent_cannot_change_policy", "A service identity cannot change mode, roles, flags or policy");
       }
     }
     // C5a (D11): the permission the action requires is derived from the action, never taken from the

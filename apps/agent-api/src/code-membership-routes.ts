@@ -247,10 +247,12 @@ export async function registerCodeMembershipRoutes(instance: FastifyInstance, de
     action: string,
   ): Promise<CompanyScopedAuthContext> => {
     if (classifyPrincipal(context) !== "user") {
-      // Canonical refusal + journal entry from the shared gate: `policyChange` is what turns an agent
-      // principal into `agent_cannot_change_policy`, and it is the only place that decides it.
+      // Canonical refusal + journal entry from the shared gate: `policyChange` is what turns an agent **or
+      // service** principal into `agent_cannot_change_policy`, and it is the only place that decides it. The
+      // `throw` below is therefore unreachable by contract — it exists so the refusal stays explicit in the
+      // types. (G1/D14: it used to be reachable for a service identity, whose default allowlist contains
+      // `business:manage`: the gate allowed and journalled `code.rbac.allow` before this route refused.)
       await authorizeCodeAction(context, companyId, { permission, action, policyChange: true }, rbacDeps);
-      // Unreachable by contract; kept so the refusal stays explicit in the types.
       throw new CodeMembershipRouteError(
         "agent_cannot_change_policy",
         "An agent or service identity cannot change company membership or policy",

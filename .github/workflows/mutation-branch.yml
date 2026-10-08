@@ -1,0 +1,88 @@
+name: Mutation branch (decoy)
+
+# G1 item 3 (PLAN.md): the **decoy-branch** proof, as a recurring job.
+#
+# `tests/coding-agent-c14-gate-mutation-sensitivity.test.ts` neutralises five guards **in memory** and proves they
+# are load-bearing in their own seam; it never runs the gate, so it cannot answer "would `security-gate` fail if
+# this protection were deleted from the source?". `scripts/security-gate-mutation-branch.mjs` answers exactly
+# that: it mirrors the tree under review into an isolated `git worktree`, weakens ONE guard from
+# `docs/coding-agent/mutation-controls.json`, runs the **real** `scripts/run-security-gate.mjs` and requires the
+# test the matrix names to be among the failures — with a cosmetic mutation (a comment in the guarded file) as
+# the negative control, so "the gate is sensitive" cannot be confused with "the gate fails on any change".
+#
+# Why this file exists and is not a job in `ci.yml`:
+#   * it needs `git` (a worktree), a writable `.git` and **two full gate runs** (~150 suites each), so it is
+#     tens of minutes rather than the security gate's minutes;
+#   * it mutates a worktree, which the mandatory, hermetic `security-gate` job must never do;
+#   * it is therefore **not** a pull-request blocker — it is manual-dispatch only, and nothing in
+#     `release-gate.needs` refers to it. A finding here is news, not a gate on ordinary work.
+#
+# G1 — AUTOMATIC TRIGGERS DISABLED ON PURPOSE (owner decision, the same one as `.github/workflows/ci.yml`): the
+# weekly `schedule` was removed because the repository is private and has no paid Actions minutes — every job of
+# every automatic run failed in about 2 seconds without starting, so the weekly proof never ran. This workflow now
+# runs only through `workflow_dispatch`. No job and no step was removed, the removed trigger is kept verbatim in
+# the RE-ENABLE RECIPE below (one commit to restore), and the consequences are recorded as an **accepted risk** in
+# `docs/coding-agent/security-gate-report.md` §6: while it holds, the decoy-branch proof is executed only when a
+# human dispatches it or runs `npm run mutation:branch` locally.
+#
+# The run's honest failure modes are visible in the artifact: exit 1 means the proof FAILED (a decoy was not
+# caught, or the cosmetic control turned the gate red), exit 3 means INCONCLUSIVE (the gate could not measure —
+# never rounded up to "caught"). The verdict is uploaded even when the step fails, because a failed proof is
+# exactly the run whose evidence matters.
+on:
+  workflow_dispatch:
+
+# -------------------------------------------------------------------------------------------------------------------------------
+# RE-ENABLE RECIPE — the trigger that was removed (the former weekly window; ci.yml's gate ran at 04:00 the same
+# day, so this followed it).
+# --- BEGIN RE-ENABLE RECIPE (triggers) ---
+#   schedule:
+# --- END RE-ENABLE RECIPE (triggers) ---
+# --- BEGIN RE-ENABLE RECIPE (schedule) ---
+#   - cron: "0 5 * * 1"
+# --- END RE-ENABLE RECIPE (schedule) ---
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-branch-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  mutation-branch:
+    name: Decoy branch (a removed guard must turn the gate red)
+    runs-on: ubuntu-24.04
+    # Two full security-gate runs plus `npm ci`, with room for a slow runner; the script's own `--timeout`
+    # bounds a single gate run at 45 minutes.
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # A worktree checkout and the mirror diff both compare against a real HEAD; a shallow clone is
+          # avoided so the proof never depends on how deep the fetch happened to be.
+          fetch-depth: 0
+          submodules: recursive
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.22.2
+          cache: npm
+      - run: npm ci
+      - name: Prepare the report directory
+        run: mkdir -p artifacts
+      - name: Decoy-branch mutation proof (real security gate inside an isolated worktree)
+        run: npm run mutation:branch
+      # `if: always()` on purpose: when the proof fails, the artifact is the evidence that says which row failed
+      # and which test did (or did not) fail. `error` keeps the repo's contract that a run producing no evidence
+      # is a failed job — the same rule the eval and security-gate jobs use. The gate transcripts are uploaded
+      # beside the verdict: the verdict names what failed, and the transcript is where the *reason* is
+      # (the first version truncated exactly those lines away, see docs/coding-agent/security-gate-report.md).
+      - name: Keep the mutation verdict and the gate transcripts as evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-gate-mutation-branch-report
+          path: |
+            artifacts/security-gate-mutation-branch.json
+            artifacts/security-gate-mutation-branch.*.log
+          if-no-files-found: error

@@ -1,56 +1,87 @@
 name: CI
 
-# C14: this workflow used to be `workflow_dispatch` only, so **nothing ran on a push or a pull request** and
-# the acceptance criterion "CI blocks regressions" was not true. It now runs on:
-#   - `push` and `pull_request`, path-filtered to the trees that can change behaviour (application and package
-#     source, tests, guard scripts, the Docker/compose definitions, the dependency and TS/vitest configuration
-#     and the workflows themselves) — a docs-only change does not need a 3-OS test matrix;
-#   - a weekly `schedule`, which **ignores** the path filter, so a week of docs-only pushes cannot leave the
-#     security gate unverified;
-#   - `workflow_dispatch`, kept for a manual run.
+# G1 — AUTOMATIC CI IS DISABLED ON PURPOSE (owner decision). This workflow has **no automatic trigger**: it runs
+# only through `workflow_dispatch` (Actions -> CI -> Run workflow). Nothing runs on a push, a pull request or a
+# schedule any more.
+#
+# WHY. The repository is private and its plan carries no Actions minutes for it. On the last automatic run
+# **every** job failed in about **2 seconds** — `Security gate (SG-1)`, `Node 22 / ubuntu-24.04`,
+# `Node 22 / windows-latest`, `Node 22 / macos-15-intel`, `Coding-agent eval smoke` and `Docker / Ubuntu` alike —
+# and `Release gate` was reported `Skipped` because it `needs` the others. A job that dies in two seconds never
+# started: `macos-*` and `windows-*` runners are simply not offered to a private repository without a paid plan,
+# and the Linux jobs went the same way for want of minutes. Those checks were therefore never evidence — they
+# were only a permanent red signal, and a permanently red signal is one nobody reads.
+#
+# WHAT WAS NOT DONE. No workflow file was deleted and **no job and no step was removed**: everything below is
+# intact and every command stays runnable by hand. The trigger contract that was removed — including the
+# behaviour-path filter that used to gate `push` and `pull_request` — is kept verbatim in the RE-ENABLE RECIPE
+# after the `on:` block, so turning CI back on is **one commit**: restore the triggers from the recipe and update
+# the pins in `tests/coding-agent-c14-ci-and-lint-gates.test.ts`.
+#
+# THIS IS AN ACCEPTED RISK, NOT A FIX. With no automatic trigger the mandatory security gate blocks no merge and
+# no release, `npm run test:known-failures` never runs on a push, and the only thing that executes the gate is the
+# owner's local escalated run — a compensating control that is **manual** and depends on discipline. It is
+# recorded with an owner and an expiry in `docs/coding-agent/security-gate-report.md` §6, and its effect on the G1
+# requirement "a separate mandatory CI job (not skipped, blocks merge/release)" is stated in
+# `docs/coding-agent/current-state.md` rather than left silent.
 #
 # Two invariants this file must keep (pinned by `tests/coding-agent-c14-ci-and-lint-gates.test.ts`):
 #   1. no step uses `continue-on-error`, so a failure in any step fails its job;
 #   2. the security-gate job keeps **no** path filter and no `if:` — its own fixed suite list is the contract,
-#      and it is the only job that runs on every trigger that reaches this file.
+#      and it is the job whose failure the project treats as non-negotiable.
 on:
   workflow_dispatch:
-  schedule:
-    # Monday 04:00 UTC, before the working week (the sandbox image rebuild runs at 03:00 the same day).
-    - cron: "0 4 * * 1"
-  push:
-    paths:
-      - "apps/**"
-      - "packages/**"
-      - "tests/**"
-      - "scripts/**"
-      - "docker/**"
-      - "services/**"
-      - "docker-compose*.yml"
-      - "package.json"
-      - "package-lock.json"
-      - "tsconfig*.json"
-      - "vitest*.ts"
-      - ".env.example"
-      - ".github/workflows/**"
-  pull_request:
-    # The same list as `push`, repeated rather than YAML-aliased: the two are pinned as identical by
-    # `tests/coding-agent-c14-ci-and-lint-gates.test.ts`, so they cannot drift, and the file stays plain YAML
-    # that any parser (and the reviewer) reads without anchor semantics.
-    paths:
-      - "apps/**"
-      - "packages/**"
-      - "tests/**"
-      - "scripts/**"
-      - "docker/**"
-      - "services/**"
-      - "docker-compose*.yml"
-      - "package.json"
-      - "package-lock.json"
-      - "tsconfig*.json"
-      - "vitest*.ts"
-      - ".env.example"
-      - ".github/workflows/**"
+
+# -------------------------------------------------------------------------------------------------------------------------------
+# RE-ENABLE RECIPE — the exact trigger contract that was removed, kept so re-enabling is one commit and not a
+# restoration from git history. To restore automated CI:
+#   1. put the three triggers of the `(triggers)` block below back into the `on:` block above;
+#   2. use the `(paths)` list verbatim for **both** `push:` and `pull_request:` — the two lists were pinned
+#      identical, which is why the list is written once here instead of twice, and the file stays plain YAML that
+#      any parser (and the reviewer) reads without anchor semantics;
+#   3. `schedule` deliberately **ignores** the path filter, so a week of docs-only pushes cannot leave the gate
+#      unverified; its cron is the `(schedule)` block below (the sandbox image rebuild runs at 03:00 the same day);
+#   4. keep the security-gate job unconditional (no path filter, no `if:`) — see invariant 2.
+# G1 (D21): `docs/**` is in the list because the gate-size guard reads the number of suites out of
+# `docs/coding-agent/security-gate-report.md`, so a documentation edit can make a gate suite red. The list also
+# names the security-critical surfaces (sandbox provider/runner, tool registry and runtime, policy engine, shell
+# classifier, the agent runner) explicitly beside the `apps/**` glob, so narrowing that glob later cannot silently
+# drop them.
+# --- BEGIN RE-ENABLE RECIPE (triggers) ---
+#   push:
+#   pull_request:
+#   schedule:
+# --- END RE-ENABLE RECIPE (triggers) ---
+# --- BEGIN RE-ENABLE RECIPE (paths) ---
+#   - "apps/**"
+#   - "packages/**"
+#   - "tests/**"
+#   - "scripts/**"
+#   - "docker/**"
+#   - "services/**"
+#   - "docker-compose*.yml"
+#   - "package.json"
+#   - "package-lock.json"
+#   - "tsconfig*.json"
+#   - "vitest*.ts"
+#   - ".env.example"
+#   - ".env.production.example"
+#   - ".github/workflows/**"
+#   - "apps/agent-api/src/sandbox-*.ts"
+#   - "apps/agent-api/src/sandbox-*.mjs"
+#   - "apps/agent-api/src/runner-readiness.ts"
+#   - "apps/agent-api/src/code-tool-runtime.ts"
+#   - "apps/agent-api/src/code-tool-registry.ts"
+#   - "apps/agent-api/src/code-tool-executors.ts"
+#   - "apps/agent-api/src/code-policy-engine.ts"
+#   - "apps/agent-api/src/code-shell-classifier.ts"
+#   - "apps/agent-api/src/coding-agent-runner.ts"
+#   - "apps/agent-api/src/approvals-repository.ts"
+#   - "docs/**"
+# --- END RE-ENABLE RECIPE (paths) ---
+# --- BEGIN RE-ENABLE RECIPE (schedule) ---
+#   - cron: "0 4 * * 1"
+# --- END RE-ENABLE RECIPE (schedule) ---
 
 permissions:
   contents: read
@@ -62,7 +93,9 @@ concurrency:
 jobs:
   security-gate:
     # C4a/SG-1: mandatory. Security-gate suites must never fail, be skipped or be weakened, so this job
-    # has no `continue-on-error` and no path filter — a failure blocks the workflow.
+    # has no `continue-on-error` and no path filter — a failure blocks the workflow. Since G1 the workflow runs
+    # on manual dispatch only, so "blocks the workflow" is true of a dispatched run and is **not** a merge or
+    # release gate today; see the header and `docs/coding-agent/security-gate-report.md` §6 item 11.
     name: Security gate (SG-1)
     runs-on: ubuntu-24.04
     steps:
@@ -75,6 +108,18 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run security-gate
+      # G1 (D20): before this step the gate's only report was a JSON file written into `mkdtempSync(...)` and
+      # deleted in the script's `finally`, so a red or green gate left **no** evidence behind. The script now
+      # also writes `artifacts/security-gate-report.json` (suite counts, catalogue counts, passed/failed/skipped
+      # and the verdict), and this step makes it mandatory: `if-no-files-found: error` means a run that produced
+      # no evidence fails, exactly like the eval job's report. No `if:` is used, because this job's own pinned
+      # invariant forbids conditional steps.
+      - name: Keep the gate verdict as evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-gate-report
+          path: artifacts/security-gate-report.json
+          if-no-files-found: error
 
   platform:
     name: Node 22 / ${{ matrix.os }}
@@ -124,6 +169,13 @@ jobs:
           name: known-failures-report
           path: artifacts/known-failures-report.json
           if-no-files-found: warn
+      # G1 (D5): the web suite (9 files / 76 tests: the web-source XSS invariant and the Code Workspace
+      # isolation) ran in **no** workflow at all. It is a separate step with a separate config on purpose:
+      # `vitest.config.ts` deliberately excludes `apps/web`, so folding these files into `npm test` would
+      # change the known-failures baseline (10 files / 15 tests) — the step is additive evidence, not a second
+      # verdict on the same run.
+      - name: Web suite (XSS source scan and Code Workspace isolation)
+        run: npm run test:web
       - run: npm run build
 
   # C14: the coding-agent eval smoke, as its own job so it is visible on its own and runs once (the platform
@@ -170,7 +222,10 @@ jobs:
     name: Release gate
     runs-on: ubuntu-24.04
     # C14: the eval job blocks the release as well. A gate that runs but blocks nothing is decoration.
-    needs: [platform, docker, evals]
+    # G1 (D6): so does `security-gate`. It was missing from this list, which meant a release could go out
+    # green while the mandatory security gate was red — the one job whose failure the project treats as
+    # non-negotiable blocked nothing.
+    needs: [platform, docker, evals, security-gate]
     steps:
       - uses: actions/checkout@v7
         with:

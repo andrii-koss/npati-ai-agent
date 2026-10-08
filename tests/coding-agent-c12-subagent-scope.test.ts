@@ -13,6 +13,11 @@ import {
   subagentDepthForRun,
 } from "../apps/agent-api/src/code-subagent-limits";
 import { resolveCodeAgentLimits } from "../apps/agent-api/src/code-agent-config";
+import {
+  conservativeHostedPolicy,
+  createProviderDataGuard,
+  type EffectiveDataPolicy,
+} from "../apps/agent-api/src/provider-data-guard";
 import { SubagentToolPolicyGuard } from "../apps/agent-api/src/subagent-tool-policy";
 import { NestedSubagentManager } from "../apps/agent-api/src/context-and-subagent-lifecycle";
 import { A2AQuotaManager } from "../apps/agent-api/src/a2a-protocol-extensions";
@@ -503,5 +508,78 @@ describe("security-gate: C12 parallelism is a hard ceiling", () => {
     expect(await peakFor(2)).toBe(2);
     // … and an absurd value is clamped to the ceiling instead of being honoured.
     expect(await peakFor(99)).toBe(CODE_SUBAGENT_MAX_PARALLELISM);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// G1 (D15): a sub-agent's provider call passes the ProviderDataGuard
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The structural claim this pins: `ProviderDataGuard` is wrapped around the engine once
+ * (`app.ts:930-933`) and **every** model call carries `policyContext`
+ * (`coding-agent-runner.ts:3870-3875`), so a child run cannot reach a provider on a path the parent does not
+ * use — there is exactly one engine, and the delegation adapter hands the child to the same
+ * `CodingAgentRunner`. No test drove a *child* run through that guard before this one, so the claim was
+ * unmeasured.
+ *
+ * The runner is the real one and the engine is the real guard over a recording provider, so the assertion is
+ * about the call that would have left the process: content the policy forbids never reaches the provider, and
+ * content it allows does.
+ */
+describe("security-gate: G1/D15 — a sub-agent's provider call passes the ProviderDataGuard", () => {
+  const childScope = { parentRunId: "run-parent", allowedTools: ["code.fs.read"] };
+
+  /** The guard exactly as `app.ts` builds it, over a provider that records every request it receives. */
+  function guardedEngine(policyValue: EffectiveDataPolicy) {
+    const providerCalls: Array<{ policyContext?: unknown }> = [];
+    const provider = {
+      async chat(request: { policyContext?: unknown }) {
+        providerCalls.push(request);
+        return { content: "done" };
+      },
+    };
+    const guard = createProviderDataGuard(provider as never, { resolvePolicy: () => policyValue });
+    return { engine: guard as unknown as CodingAgentRunnerPorts["engine"], providerCalls };
+  }
+
+  /** The same runner the delegation adapter starts a child with, over the given (guarded) engine. */
+  function childRunner(engine: CodingAgentRunnerPorts["engine"]): CodingAgentRunner {
+    const runner = runnerWithTools([descriptor("code.fs.read")]);
+    (runner as unknown as { ports: CodingAgentRunnerPorts }).ports.engine = engine;
+    return runner;
+  }
+
+  it("never reaches the provider for a child run the policy forbids, and reaches it when the policy allows", async () => {
+    // (1) The conservative hosted default allows `public` only; this session is `confidential`, so the child's
+    // first model call is refused inside the engine and nothing leaves the process.
+    const forbidden = guardedEngine(conservativeHostedPolicy({ model: "hosted/model-a" }));
+    const refused = await childRunner(forbidden.engine).run({
+      ctx, session: session(), prompt: "read src/index.ts", maxTurns: 1, subagentScope: childScope,
+    });
+    expect(forbidden.providerCalls).toEqual([]);
+    expect(refused).toMatchObject({ status: "failed" });
+    expect(`${refused.reason} ${refused.message}`).toContain("provider_data_classification_exceeded");
+
+    // (2) Negative control: the same runner, the same child scope, a policy that permits this content — the
+    // provider really is reached, so (1) is the policy and not a runner that never calls its engine.
+    const allowed = guardedEngine({
+      providerId: "hosted-provider",
+      kind: "hosted_third_party",
+      allowPrivateRepoCode: true,
+      maxDataClassification: "restricted",
+      allowPromptCaching: true,
+      trainingPolicy: "no_training",
+      externalRetention: "none",
+      requiredRedactions: [],
+      allowedContentTypes: ["text", "code", "diff", "logs", "terminal", "file_list", "web_content"],
+      policyVersion: 7,
+      stale: false,
+    });
+    const completed = await childRunner(allowed.engine).run({
+      ctx, session: session(), prompt: "read src/index.ts", maxTurns: 1, subagentScope: childScope,
+    });
+    expect(allowed.providerCalls.length).toBeGreaterThan(0);
+    expect(completed).toMatchObject({ status: "completed" });
   });
 });

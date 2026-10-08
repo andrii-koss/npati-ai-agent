@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { FastifyInstance } from "fastify";
 import type { AuthContext, CodeSession, CodeSessionMode } from "@npati/workspace";
 import {
   PolicyEngine,
@@ -33,6 +34,7 @@ import {
 import { CodeProjectTrustService } from "../apps/agent-api/src/code-project-trust";
 import { CodeShellRuntime } from "../apps/agent-api/src/code-shell-runtime";
 import { holdsProductionPermission } from "../apps/agent-api/src/code-step-up";
+import { registerCodeMembershipRoutes } from "../apps/agent-api/src/code-membership-routes";
 
 /**
  * C5a (D9/D6/D4/D7/D3/D10) — the gaps the C5a read-through and the test runs found, pinned shut.
@@ -767,5 +769,171 @@ describe("security-gate: C5a approval scope — a standing rule is consulted onl
     const shell = await harness.engine.evaluate(pushRequest(owner, "git push origin feature/topic"));
     expect(shell).toMatchObject({ decision: "allow", reasons: expect.arrayContaining(["approval:rule:project"]) });
     expect(queried).toEqual(["code.shell.exec:git:push"]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// G1 (D14): `PUT …/code/protected-branches` — the route was covered by no test at all
+// ---------------------------------------------------------------------------------------------
+
+interface RegisteredRoute {
+  method: string;
+  url: string;
+  handler: (request: never, reply: never) => Promise<unknown>;
+}
+
+/**
+ * A stand-in for the Fastify instance that only records registrations. The membership surface registers
+ * every route as `(url, handler)`, so the two-argument form is the one that matters; a route registered
+ * without a handler is a hard error instead of a test that silently calls nothing.
+ */
+function routeRecorder(routes: RegisteredRoute[]): FastifyInstance {
+  const record = (method: string) => (url: string, ...rest: unknown[]) => {
+    const handler = [...rest].reverse().find((candidate) => typeof candidate === "function") as RegisteredRoute["handler"] | undefined;
+    if (!handler) throw new Error(`${method} ${url} was registered without a handler`);
+    routes.push({ method, url, handler });
+    return undefined;
+  };
+  return { get: record("get"), post: record("post"), patch: record("patch"), put: record("put"), delete: record("delete") } as unknown as FastifyInstance;
+}
+
+interface ReplyState { status: number; body: unknown }
+
+function routeReply(): { reply: unknown; state: ReplyState } {
+  const state: ReplyState = { status: 200, body: undefined };
+  const reply = {
+    code(status: number) { state.status = status; return reply; },
+    status(status: number) { state.status = status; return reply; },
+    send(payload: unknown) { state.body = payload; return reply; },
+  };
+  return { reply, state };
+}
+
+/**
+ * The real route over the real gate (`authorizeCompanyAction` → `authorizeCodeAction`), with only the two
+ * services stubbed: the membership resolver (roles are its business, tested in its own suite) and the
+ * protected-branch policy service (which records what the route really asked it to do). The journal is a
+ * spy, because the RBAC gate refuses without one and its entries are part of the evidence here.
+ */
+function protectedBranchRouteHarness(getContext: () => AuthContext | null, roles: Record<string, string | null> = { "u-owner": "owner", "u-dev": "developer" }) {
+  const routes: RegisteredRoute[] = [];
+  const updates: Array<{ companyId: string; body: Record<string, unknown>; actor: string }> = [];
+  const resolveCalls: string[] = [];
+  const audit: Array<{ action: string; decision?: string; metadata?: Record<string, unknown> }> = [];
+  const service = {
+    async resolveRoleForUser(ctx: AuthContext) {
+      resolveCalls.push(String(ctx.userId ?? ""));
+      return roles[String(ctx.userId ?? "")] ?? null;
+    },
+  } as unknown as CodeMembershipService;
+  const protectedBranches = {
+    async getPolicy() { return { branches: ["main"], revision: 1 }; },
+    async updatePolicy(ctx: AuthContext, companyId: string, body: Record<string, unknown>) {
+      updates.push({ companyId, body, actor: String(ctx.userId ?? "") });
+      return { branches: body.branches ?? ["main"], revision: 2 };
+    },
+    effectiveGuard: "policy",
+  } as unknown as CodeProtectedBranchService;
+  return registerCodeMembershipRoutes(routeRecorder(routes), {
+    service,
+    protectedBranches,
+    getAuthContext: () => getContext(),
+    audit: { record: async (entry) => { audit.push(entry as (typeof audit)[number]); } },
+  }).then(() => {
+    const put = routes.find((route) => route.method === "put" && route.url.endsWith("/code/protected-branches"));
+    if (!put) throw new Error("the protected-branches PUT route was not registered");
+    return { put, updates, resolveCalls, audit };
+  });
+}
+
+describe("security-gate: C5a protected branches — the update route is a user-only policy change (G1/D14)", () => {
+  const policyMutation = { branches: ["main", "production"], expectedRevision: 1 };
+
+  it("lets an owner change the policy, forwards the raw body and journals the allow", async () => {
+    const harness = await protectedBranchRouteHarness(() => context("owner", "u-owner"));
+    const { reply, state } = routeReply();
+    await harness.put.handler({ params: { companyId: COMPANY }, body: policyMutation } as never, reply as never);
+
+    expect(state.status).toBe(200);
+    expect(state.body).toMatchObject({ apiVersion: "v1", policy: { revision: 2, branches: ["main", "production"] } });
+    // The administrative body is forwarded as-is: the policy service is the component that rejects an
+    // unexpected key (`branches`, `expectedRevision`, `challengeId` only), not the route.
+    expect(harness.updates).toEqual([{ companyId: COMPANY, body: policyMutation, actor: "u-owner" }]);
+    expect(harness.audit.map((entry) => entry.action)).toEqual(["code.rbac.allow"]);
+  });
+
+  it("refuses an agent and a service principal with agent_cannot_change_policy, before the role or the policy is touched", async () => {
+    const agent = context("owner", "agent:runner-1", ["workspace:read", "workspace:write", "business:manage", "admin:all", "owner"]);
+    const serviceIdentity: AuthContext = {
+      workspaceId: "ws-1",
+      companyId: COMPANY,
+      userId: "u-internal",
+      externalSubject: "service:automation:1",
+      permissions: ["workspace:read", "workspace:write", "business:manage", "admin:all", "owner"],
+      role: "owner",
+    } as unknown as AuthContext;
+
+    for (const principalContext of [agent, serviceIdentity]) {
+      const harness = await protectedBranchRouteHarness(() => principalContext);
+      const { reply, state } = routeReply();
+      await harness.put.handler({ params: { companyId: COMPANY }, body: policyMutation } as never, reply as never);
+
+      // `policyChange: true` is what produces this code rather than a generic permission miss, so the
+      // refusal names the reason: an agent may never change a policy, whatever permissions it was given.
+      expect(state.status).toBe(403);
+      expect(state.body).toMatchObject({ error: { code: "agent_cannot_change_policy", retryable: false } });
+      expect(harness.updates).toEqual([]);
+      // The role is never even resolved, so a membership row cannot become the thing that authorizes it.
+      expect(harness.resolveCalls).toEqual([]);
+      expect(harness.audit.map((entry) => entry.action)).toEqual(["code.rbac.deny"]);
+    }
+  });
+
+  it("refuses an unauthenticated caller, and a human member without the permission", async () => {
+    // The `Bearer`-less / unresolvable-token case: the context accessor answers `null` and the route refuses
+    // before anything else. `authorizeCompanyAction` is never reached.
+    const anonymous = await protectedBranchRouteHarness(() => null);
+    const anonymousReply = routeReply();
+    await anonymous.put.handler({ params: { companyId: COMPANY }, body: policyMutation } as never, anonymousReply.reply as never);
+    expect(anonymousReply.state.status).toBe(401);
+    expect(anonymousReply.state.body).toMatchObject({ error: { code: "unauthorized" } });
+    expect(anonymous.updates).toEqual([]);
+    expect(anonymous.audit).toEqual([]);
+
+    // A real developer: authenticated, a member of the company, and still not allowed to move a policy.
+    const developer = await protectedBranchRouteHarness(() => context("developer", "u-dev", ["workspace:read", "workspace:write"]));
+    const developerReply = routeReply();
+    await developer.put.handler({ params: { companyId: COMPANY }, body: policyMutation } as never, developerReply.reply as never);
+    expect(developerReply.state.status).toBe(403);
+    expect(developerReply.state.body).toMatchObject({ error: { code: "permission_denied" } });
+    expect(developer.updates).toEqual([]);
+    expect(developer.audit.map((entry) => entry.action)).toEqual(["code.rbac.deny"]);
+
+    // A human with no membership row at all has no role, and no role means no permission.
+    const stranger = await protectedBranchRouteHarness(() => context("owner", "u-stranger", ["admin:all"]));
+    const strangerReply = routeReply();
+    await stranger.put.handler({ params: { companyId: COMPANY }, body: policyMutation } as never, strangerReply.reply as never);
+    expect(strangerReply.state.status).toBe(403);
+    expect(strangerReply.state.body).toMatchObject({ error: { code: "permission_denied" } });
+    expect(stranger.updates).toEqual([]);
+  });
+
+  it("still serves the GET policy read to a member, so the route pair is not simply closed", async () => {
+    // The negative control for the refusals above: the same harness, the same gates, one route that a
+    // developer *may* use — so "everything is refused" is not what makes the PUT cases pass.
+    const routes: RegisteredRoute[] = [];
+    const developer = context("developer", "u-dev", ["workspace:read"]);
+    await registerCodeMembershipRoutes(routeRecorder(routes), {
+      service: { resolveRoleForUser: async () => "developer" } as unknown as CodeMembershipService,
+      protectedBranches: { getPolicy: async () => ({ branches: ["main"], revision: 1 }), updatePolicy: async () => ({}) } as unknown as CodeProtectedBranchService,
+      getAuthContext: () => developer,
+      audit: { record: async () => undefined },
+    });
+    const get = routes.find((route) => route.method === "get" && route.url.endsWith("/code/protected-branches"));
+    if (!get) throw new Error("the protected-branches GET route was not registered");
+    const { reply, state } = routeReply();
+    await get.handler({ params: { companyId: COMPANY } } as never, reply as never);
+    expect(state.status).toBe(200);
+    expect(state.body).toMatchObject({ policy: { revision: 1 }, defaults: [...DEFAULT_PROTECTED_BRANCHES] });
   });
 });

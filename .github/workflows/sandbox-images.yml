@@ -6,7 +6,16 @@ name: Sandbox images
 #
 # The catalog contract lives in docker/sandbox/images.json; the local guard (no Docker required) is
 # scripts/sandbox-image-verify.mjs and it is also wired into the main CI workflow.
-
+#
+# G1 — AUTOMATIC TRIGGERS DISABLED ON PURPOSE (owner decision, same one as `.github/workflows/ci.yml`): this
+# workflow runs only through `workflow_dispatch` now. Its weekly `schedule` and its path-filtered `push` were
+# removed because the repository is private and has no paid Actions minutes: every job failed in about 2 seconds
+# without starting, so the weekly rescan never ran and the push trigger only produced a red signal. No job and no
+# step was removed, and the removed triggers are kept verbatim in the RE-ENABLE RECIPE after the `on:` block, so
+# restoring them is one commit. This is an **accepted risk** recorded in
+# `docs/coding-agent/security-gate-report.md` §6: while it holds, the 14-day catalog age policy is enforced only
+# by the local guard (`npm run audit:sandbox-images`) and by the security gate on the owner's escalated run, not
+# by a scheduled rebuild.
 on:
   workflow_dispatch:
     inputs:
@@ -19,14 +28,22 @@ on:
         type: boolean
         required: false
         default: false
-  schedule:
-    # Weekly rebuild/rescan window (the catalog age policy is 14 days, so this keeps images fresh).
-    - cron: "0 3 * * 1"
-  push:
-    paths:
-      - "docker/sandbox/**"
-      - "scripts/sandbox-image-*.mjs"
-      - ".github/workflows/sandbox-images.yml"
+
+# -------------------------------------------------------------------------------------------------------------------------------
+# RE-ENABLE RECIPE — the exact trigger contract that was removed. Put the `(triggers)` block back into `on:`,
+# with the `(paths)` list under `push:` and the `(schedule)` cron under `schedule:`.
+# --- BEGIN RE-ENABLE RECIPE (triggers) ---
+#   schedule:
+#   push:
+# --- END RE-ENABLE RECIPE (triggers) ---
+# --- BEGIN RE-ENABLE RECIPE (paths) ---
+#   - "docker/sandbox/**"
+#   - "scripts/sandbox-image-*.mjs"
+#   - ".github/workflows/sandbox-images.yml"
+# --- END RE-ENABLE RECIPE (paths) ---
+# --- BEGIN RE-ENABLE RECIPE (schedule) ---
+#   - cron: "0 3 * * 1"
+# --- END RE-ENABLE RECIPE (schedule) ---
 
 permissions:
   contents: read
@@ -68,6 +85,9 @@ jobs:
   build:
     name: Build ${{ matrix.variant }}
     needs: [verify]
+    # Kept unchanged although `schedule` can no longer reach this file: the condition is part of the re-enable
+    # contract (a scheduled run must re-scan the published digests, never rebuild them, because a rebuild would
+    # mint new digests that no session is pinned to). With `workflow_dispatch` it is true, so a manual run builds.
     if: ${{ github.event_name != 'schedule' }}
     runs-on: ubuntu-24.04
     permissions:
@@ -119,7 +139,9 @@ jobs:
             docker/sandbox/sbom/*.spdx.json
           if-no-files-found: error
 
-  # Weekly: re-scan the digests that are already published; a new CRITICAL opens an issue and fails.
+  # Rescan: re-scan the digests that are already published; a new CRITICAL opens an issue and fails. It used to be
+  # the weekly job; with the schedule removed it is reachable through `workflow_dispatch` only, which is why the
+  # condition below still names both events (see the RE-ENABLE RECIPE above).
   rescan:
     name: Rescan published digests
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
