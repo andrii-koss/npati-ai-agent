@@ -64,7 +64,13 @@ describe("AES-256-GCM At Rest Encryption (CryptoVault)", () => {
       process.env.NODE_ENV = "production";
       delete process.env.NPATI_ENCRYPTION_KEY;
       delete process.env.ENCRYPTION_KEY;
-      expect(() => new CryptoVault()).toThrow("NPATI_ENCRYPTION_KEY_REQUIRED");
+      // G1 (production CrashLoop): the refusal belongs to the first cryptographic operation, not to construction.
+      // `defaultVault` is built at module load, so a throw from the constructor is a throw from `import` — which is
+      // how a production sandbox-runner that only *imports* the vault crash-looped. Loading is safe; using is still
+      // impossible, and the code is the same one. Asserted in both halves so the relocation cannot hide a weakening.
+      const unconfigured = new CryptoVault();
+      expect(() => unconfigured.encrypt("plaintext")).toThrow("NPATI_ENCRYPTION_KEY_REQUIRED");
+      expect(() => unconfigured.decrypt("v1$00$00$00$00")).toThrow("NPATI_ENCRYPTION_KEY_REQUIRED");
       expect(() => new CryptoVault("too-short")).toThrow("NPATI_ENCRYPTION_KEY_TOO_SHORT");
       process.env.NPATI_ENV = "production";
       expect(() => new CryptoVault("npati-local-development-encryption-key-change-before-production")).toThrow("NPATI_ENCRYPTION_KEY_UNSAFE_DEFAULT");

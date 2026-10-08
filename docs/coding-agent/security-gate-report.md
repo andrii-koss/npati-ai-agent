@@ -42,6 +42,7 @@
 | `tests/coding-agent-c14-mutation-branch-controls.test.ts` | **G1 п.3**: 150-й набір гейта — матриця резолвиться, guard невакуумний (13 фабрикацій), а «гейт не зміг виміряти» ніколи не читається як «мутацію спіймано» |
 | `scripts/lib/*.mjs` | **G1 п.5 (дефект A)**: бібліотечні половини шести скриптів гейта **без shebang** — `run-security-gate`, `attack-catalogue-check`, `scan-web-xss`, `lint-guard`, `check-known-failures`, `mutation-controls-check` (плюс `typosquat-dataset-generate`, який переїхав разом зі своїм CLI). Саме їх імпортують набори гейта; `scripts/*.mjs` лишилися тонкими executable-обгортками зі shebang, які ре-експортують бібліотеку і викликають `main()`. Причина: `#!/usr/bin/env node` у файлі, який бандлер віддає в `node:vm` без трансформації, — синтаксична помилка (`Invalid or unexpected token`), і набір, що його імпортує, рапортує «no tests at all» |
 | `tests/coding-agent-g1-clean-clone-prerequisites.test.ts` | **G1 п.5 (дефект B)**: 151-й набір гейта — фаза підготовки гейта (див. § 5.2): генерація `data/typosquat` у дерево, якому її назвали, відсутність побічних ефектів у цьому checkout, ідемпотентність, «застаріле лишається червоним», fail-closed без генератора |
+| `tests/coding-agent-g1-crypto-vault-production-key-timing.test.ts` | **G1 (production CrashLoop)**: 152-й набір гейта — перевірка продакшн-ключа перенесена з **імпорту** на **використання**. `defaultVault = new CryptoVault()` виконувався на рівні модуля, тож `NPATI_ENCRYPTION_KEY_REQUIRED` летів під час `import`, і sandbox-runner (який лише імпортує `@npati/workspace` через ланцюг `entrypoint → sandbox-runner-server → packages/workspace/src/index.ts → crypto-vault.ts`) падав у CrashLoop, жодного разу не зашифрувавши. Набір пінить обидві половини: модуль, барель і власні import-edge-и runner-а завантажуються при `NODE_ENV=production` без ключа, а `encrypt`/`decrypt` далі відмовляють тими самими трьома кодами; невакуумність доведена мутаціями **копій у памʼяті** (повернення throw у конструктор валить завантаження модуля; зняття guard-а з деривації змушує продакшн-сховище шифрувати development-ключем). Файли на диску не мутуються, `process.env` відновлюється у `finally` |
 | `scripts/typosquat-dataset-generate.mjs` + `scripts/lib/typosquat-dataset-generate.mjs` | **G1 п.5 (дефект B)**: генератор став root-aware (`--root` / `NPATI_TYPOSQUAT_ROOT`): гейт генерує набір **для того дерева, яке перевіряє**, а не для того, в якому лежить сам скрипт. Раніше `--root` не існував, тому фаза підготовки в тимчасовому дереві писала в реальний checkout |
 | 7 нових наборів у `tests/` | самі red-team тести (див. § 3–5) |
 | `docs/coding-agent/security-gate-report.md` | цей файл |
@@ -325,7 +326,7 @@ npm run mutation:branch -- --json          # той самий вердикт м
 
 Та сама матриця, але справжня: `[mutation-controls] rows=3 decoy=2 cosmetic=1 ok=true issues=0` (exit 0).
 Набір `tests/coding-agent-c14-mutation-branch-controls.test.ts` зареєстровано у фіксованому списку гейта, тож
-після кроку G1 п.5 (§ 5.2) → **151** наборів (було 150; до кроку G1 п.3 — 149).
+після кроку G1 п.5 (§ 5.2) → **152** наборів (було 151; до кроку G1 п.5 — 150; до кроку G1 п.3 — 149).
 
 **Чесні межі decoy-branch (і чому він не всередині гейта).**
 
@@ -415,9 +416,9 @@ npm run mutation:branch -- --json          # той самий вердикт м
 | `npm run lint` (`lint-guard` + `[web-xss]`) | **exit 0** (self-test 19/19, 994 файли, allowances 7/7, ratchet `as any` не зростав) |
 | `node --check scripts/run-security-gate.mjs` | **exit 0** |
 | `node --check scripts/attack-catalogue-check.mjs` | **exit 0** |
-| `node scripts/run-security-gate.mjs --list` | **151** рядків |
-| Фіксований список гейта | `suites=151 present=151 missing=0 duplicates=0` (було 131; 138 у зрізі C14; 145 після очищення C14; 146 після набору C15 «CLI / run-start»; 148 після двох наборів C15 «mounted folder»; 149 після набору C1a, див. § 7.4; 150 після guard-набору матриці мутацій, див. § 5.1; 151 після набору «clean clone → передумови гейта» кроком G1, див. § 5.2) |
-| Поточний розмір фіксованого списку гейта (єдине джерело істини — `SECURITY_GATE_TESTS` у `scripts/lib/run-security-gate.mjs`) | **151** наборів; саме це число guard-набір `tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts` читає з документа і порівнює зі списком. 150 було до реєстрації набору «clean clone → передумови гейта» кроком G1 (§ 5.2), 149 — до реєстрації guard-набору матриці мутацій кроком G1 (§ 5.1), 148 — до реєстрації набору C1a «dark launch / kill switch» кроком G1 (§ 7.4), 146 — до реєстрації двох наборів C15 «mounted folder» (див. § 7.2), 145 — до реєстрації набору C15 «CLI / run-start», 144 — до реєстрації цього guard-набору (тоді документ ще казав 138) |
+| `node scripts/run-security-gate.mjs --list` | **152** рядків |
+| Фіксований список гейта | `suites=152 present=152 missing=0 duplicates=0` (було 131; 138 у зрізі C14; 145 після очищення C14; 146 після набору C15 «CLI / run-start»; 148 після двох наборів C15 «mounted folder»; 149 після набору C1a, див. § 7.4; 150 після guard-набору матриці мутацій, див. § 5.1; 151 після набору «clean clone → передумови гейта» кроком G1, див. § 5.2; 152 після набору «production CrashLoop: ключ перевіряється на використанні, не на імпорті» кроком G1) |
+| Поточний розмір фіксованого списку гейта (єдине джерело істини — `SECURITY_GATE_TESTS` у `scripts/lib/run-security-gate.mjs`) | **152** наборів; саме це число guard-набір `tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts` читає з документа і порівнює зі списком. 151 було до реєстрації набору «production CrashLoop: ключ перевіряється на використанні, не на імпорті» кроком G1, 150 — до реєстрації набору «clean clone → передумови гейта» кроком G1 (§ 5.2), 149 — до реєстрації guard-набору матриці мутацій кроком G1 (§ 5.1), 148 — до реєстрації набору C1a «dark launch / kill switch» кроком G1 (§ 7.4), 146 — до реєстрації двох наборів C15 «mounted folder» (див. § 7.2), 145 — до реєстрації набору C15 «CLI / run-start», 144 — до реєстрації цього guard-набору (тоді документ ще казав 138) |
 | Харнес (кожен набір окремо) | `fork-bomb 5/5` · `command-output-injection 2/2` · `resource-exhaustion 5/5` · `path-and-zip-slip 7/7` · `new-channels 4/4` (2 describe) · `attack-catalogue 5/5` · `gate-mutation-sensitivity 6/6` — **разом 34 тести, failed=0** |
 | Статична перевірка каталогу | `rows=24 ok=true issues=0` |
 | Фабрикації (5 видів) | усі `ok=false` зі своїми кодами (див. § 3) |
@@ -435,11 +436,13 @@ node --experimental-transform-types --no-warnings ./artifacts/c5b-policy-probe/r
   після реєстрації двох наборів C15 «mounted folder» (§ 7.3) — **148**, після реєстрації набору C1a
   «dark launch / kill switch» кроком G1 (§ 7.4) — **149**, після реєстрації guard-набору матриці мутацій
   кроком G1 (§ 5.1) — **150**, після реєстрації набору «clean clone → передумови гейта» кроком G1 (§ 5.2) —
-  **151**. Усі згадки в цьому
+  **151**, після реєстрації набору «production CrashLoop: ключ перевіряється на використанні, не на імпорті»
+  кроком G1 — **152**. Усі згадки в цьому
   файлі зведені до фактичного числа, яке
-  читає guard-набір (`--list` = 151 рядків, `present=151 missing=0`); історія зростання лишена
+  читає guard-набір (`--list` = 152 рядків, `present=152 missing=0`); історія зростання лишена
   явно історичною: 131 до C14 → 138 у зрізі C14 → 145 після очищення C14 → 146 у C15 (CLI) → 148 у C15
-  (mounted folder) → 149 у G1 (C1a) → 150 у G1 (матриця мутацій) → 151 у G1 (передумови чистого клону).
+  (mounted folder) → 149 у G1 (C1a) → 150 у G1 (матриця мутацій) → 151 у G1 (передумови чистого клону) →
+  152 у G1 (production CrashLoop: перевірка ключа на використанні).
 * **Опис фаз політики.** Два коментарі (`apps/agent-api/src/code-policy-engine.ts` — заголовок двигуна, і
   `apps/agent-api/src/app.ts` — місце wiring) перелічували 8 фаз і пропускали `capability_groups`,
   `trust` і `network_enforcement`. Реальний порядок виконання в `evaluateInternal` — 11 фаз:

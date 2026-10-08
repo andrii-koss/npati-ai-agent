@@ -67,6 +67,10 @@
     // every other suite in this list follows. It generates datasets into temporary trees, so the type gate is
     // what keeps its path handling honest.
     "tests/coding-agent-g1-clean-clone-prerequisites.test.ts",
+    // G1 (production CrashLoop): the production-key timing suite, added here together with the suite itself — the
+    // same rule every other suite in this list follows. It transpiles and evaluates a copy of `crypto-vault.ts`
+    // in memory, so the type gate is what keeps that in-memory evaluation honest.
+    "tests/coding-agent-g1-crypto-vault-production-key-timing.test.ts",
     "tests/control-plane-ui-and-revisions.test.ts",
     "tests/full-capability-regression.test.ts",
     "tests/invariants-and-anti-patterns.test.ts",

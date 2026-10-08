@@ -870,6 +870,17 @@ export const SECURITY_GATE_TESTS = [
   // (generation does not repair staleness, it only removes "missing"). The temp-tree half proves the
   // preparation step is a real function of the tree it is given, not of this checkout.
   "tests/coding-agent-g1-clean-clone-prerequisites.test.ts",
+  // G1 (production CrashLoop): the sandbox runner exited before it served anything because
+  // `NPATI_ENCRYPTION_KEY_REQUIRED` was raised by `new CryptoVault()` — a **module-level** construction in
+  // `packages/workspace/src/crypto-vault.ts`, reached from `sandbox-runner-server.ts` through the
+  // `@npati/workspace` barrel. The runner never encrypts anything: it merely imports the module. The suite pins
+  // the corrected contract from both sides — the module, the barrel and the runner's own import edges all
+  // evaluate under `NODE_ENV=production` with no key, while `encrypt`/`decrypt` still refuse with the same three
+  // codes (`NPATI_ENCRYPTION_KEY_REQUIRED`, `_UNSAFE_DEFAULT`, `_TOO_SHORT`) — and proves the two halves are
+  // non-vacuous by mutating **copies** in memory: returning the refusal to the constructor makes module
+  // evaluation throw, and removing the derivation guard makes a production vault encrypt with the development
+  // key. The files on disk are never mutated, and every `process.env` change is restored in `finally`.
+  "tests/coding-agent-g1-crypto-vault-production-key-timing.test.ts",
 ];
 
 /**
