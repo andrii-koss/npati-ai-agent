@@ -326,7 +326,41 @@ npm run mutation:branch -- --json          # той самий вердикт м
 
 Та сама матриця, але справжня: `[mutation-controls] rows=3 decoy=2 cosmetic=1 ok=true issues=0` (exit 0).
 Набір `tests/coding-agent-c14-mutation-branch-controls.test.ts` зареєстровано у фіксованому списку гейта, тож
-після кроку G1 п.5 (§ 5.2) → **152** наборів (було 151; до кроку G1 п.5 — 150; до кроку G1 п.3 — 149).
+після кроку G1 п.5 (§ 5.2) набір став 152-м (було 151; до кроку G1 п.5 — 150; до кроку G1 п.3 — 149). Число
+**не** виділено жирним навмисно: guard-набір розміру (`tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts`)
+трактує будь-яке жирне число після стрілки як **поточне** твердження, а тут це історія.
+
+> **R1-C (крок секції C, пункти 11–13).** Число в цьому документі оновлено **явно**: було 152, стало 153 (щоб
+> guard-набір `tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts`, який читає число **з документа**,
+> не лишався червоним). До списку додано один набір — `tests/coding-agent-r1c-data-lifecycle.test.ts`
+> (герметичний, без Postgres: він перевіряє крок retention у reaper, межі словника `retention_class`,
+> fail-closed erasure і те, що diff в export іде через той самий сканер секретів). Раніше документ заявляв **138**
+> при реальних 152 — ця розбіжність була відома тому ж guard-набору; тепер усі місця, де поточне число названо
+> жирним, знову збігаються зі списком. Друга половина R1-C (вимірювання retention і негативний контроль для
+> Website Builder на **живій** базі) лежить у `tests/coding-agent-r1c-data-lifecycle-postgres.test.ts`, який
+> свідомо **не** додано ні в `SECURITY_GATE_TESTS` (той герметичний, і гейт валить прогін на `skipped`), ні в
+> `SECURITY_GATE_DB_TESTS` / `UPGRADE_GATE_DB_TESTS` — він запускається вручну з `DATABASE_URL` і
+> `NPATI_SECURITY_GATE_DB=1`, доки власник не вирішить інакше.
+>
+> **Виміряно (не заявлено).** `vitest` у цій пісочниці не стартує взагалі (`esbuild` піднімає сервіс-процес →
+> `spawn EPERM`), тому обидва нові набори прогнано локальним харнесом `artifacts/c5b-policy-probe/run.mjs`:
+> герметичний — `suites=6 tests=27 passed=27 failed=0` (exit 0), а DB-набір — **проти реального PostgreSQL 17.11
+> на `127.0.0.1:55432`** (`DATABASE_URL=postgres://postgres:postgres@127.0.0.1:55432/postgres`,
+> `NPATI_SECURITY_GATE_DB=1`) — `suites=1 tests=6 passed=6 failed=0` (exit 0), три прогони поспіль стабільно.
+> Саме цей прогін (а не міркування) знайшов два справжні дефекти: колізію параметрів у guard-і спільної таблиці
+> (`operator does not exist: text = integer` — guard перевикористав `$2`, ціле вікно `ephemeral`) і те, що
+> проєктне стирання лишало рядки `code_sessions`, тобто проєкт усе ще відповідав списком сесій. Обидва
+> виправлено; у документі це єдине місце, де «перевірено» означає «прогнано», а не «має працювати».
+>
+> **R1-A (крок секції A, пункти 1–5: ліміти і квоти).** Число в цьому документі оновлено **явно**: було 153,
+> стало 155 (той самий guard-набір читає його з документа). До `SECURITY_GATE_TESTS` додано два герметичні
+> набори — `tests/coding-agent-r1a-limits-and-quotas.test.ts` (періодичний ліміт запусків на користувача й на
+> Company, R1-дефолти черги 5/50, єдині двері адмісії, добові бюджети через наявний `A2AQuotaManager` зі
+> сповіщеннями на 80 %/100 %, read-only роут стану черги, і структурний доказ, що Company-ран/субагент не
+> дістають код-ран-шлях) і `tests/coding-agent-r1a-sandbox-quotas.test.ts` (ресурсні стелі sandbox як
+> конфігурація, сумарна квота на Company, admission control за CPU/RAM хоста і доказ, що він торкається **лише**
+> створення sandbox). Повний звіт кроку, разом із явним переліком змінених дефолтів, механізмом host admission і
+> доказами невакуумності кожного нового guard-а, — `docs/coding-agent/r1a-limits-and-quotas-report.md`.
 
 **Чесні межі decoy-branch (і чому він не всередині гейта).**
 
@@ -416,9 +450,9 @@ npm run mutation:branch -- --json          # той самий вердикт м
 | `npm run lint` (`lint-guard` + `[web-xss]`) | **exit 0** (self-test 19/19, 994 файли, allowances 7/7, ratchet `as any` не зростав) |
 | `node --check scripts/run-security-gate.mjs` | **exit 0** |
 | `node --check scripts/attack-catalogue-check.mjs` | **exit 0** |
-| `node scripts/run-security-gate.mjs --list` | **152** рядків |
-| Фіксований список гейта | `suites=152 present=152 missing=0 duplicates=0` (було 131; 138 у зрізі C14; 145 після очищення C14; 146 після набору C15 «CLI / run-start»; 148 після двох наборів C15 «mounted folder»; 149 після набору C1a, див. § 7.4; 150 після guard-набору матриці мутацій, див. § 5.1; 151 після набору «clean clone → передумови гейта» кроком G1, див. § 5.2; 152 після набору «production CrashLoop: ключ перевіряється на використанні, не на імпорті» кроком G1) |
-| Поточний розмір фіксованого списку гейта (єдине джерело істини — `SECURITY_GATE_TESTS` у `scripts/lib/run-security-gate.mjs`) | **152** наборів; саме це число guard-набір `tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts` читає з документа і порівнює зі списком. 151 було до реєстрації набору «production CrashLoop: ключ перевіряється на використанні, не на імпорті» кроком G1, 150 — до реєстрації набору «clean clone → передумови гейта» кроком G1 (§ 5.2), 149 — до реєстрації guard-набору матриці мутацій кроком G1 (§ 5.1), 148 — до реєстрації набору C1a «dark launch / kill switch» кроком G1 (§ 7.4), 146 — до реєстрації двох наборів C15 «mounted folder» (див. § 7.2), 145 — до реєстрації набору C15 «CLI / run-start», 144 — до реєстрації цього guard-набору (тоді документ ще казав 138) |
+| `node scripts/run-security-gate.mjs --list` | **155** рядків |
+| Фіксований список гейта | `suites=155 present=155 missing=0 duplicates=0` (було 131; 138 у зрізі C14; 145 після очищення C14; 146 після набору C15 «CLI / run-start»; 148 після двох наборів C15 «mounted folder»; 149 після набору C1a, див. § 7.4; 150 після guard-набору матриці мутацій, див. § 5.1; 151 після набору «clean clone → передумови гейта» кроком G1, див. § 5.2; 152 після набору «production CrashLoop: ключ перевіряється на використанні, не на імпорті» кроком G1; 153 після набору R1-C «data lifecycle: retention, erasure, export diff»; 155 після двох наборів R1-A «ліміти і квоти» — `coding-agent-r1a-limits-and-quotas` і `coding-agent-r1a-sandbox-quotas`, див. § R1-A) |
+| Поточний розмір фіксованого списку гейта (єдине джерело істини — `SECURITY_GATE_TESTS` у `scripts/lib/run-security-gate.mjs`) | **155** наборів; саме це число guard-набір `tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts` читає з документа і порівнює зі списком. 153 було до реєстрації двох наборів R1-A «ліміти і квоти» (§ R1-A), 152 було до реєстрації набору R1-C «data lifecycle: retention, erasure, export diff», 151 — до реєстрації набору «production CrashLoop: ключ перевіряється на використанні, не на імпорті» кроком G1, 150 — до реєстрації набору «clean clone → передумови гейта» кроком G1 (§ 5.2), 149 — до реєстрації guard-набору матриці мутацій кроком G1 (§ 5.1), 148 — до реєстрації набору C1a «dark launch / kill switch» кроком G1 (§ 7.4), 146 — до реєстрації двох наборів C15 «mounted folder» (див. § 7.2), 145 — до реєстрації набору C15 «CLI / run-start», 144 — до реєстрації цього guard-набору (тоді документ ще казав 138) |
 | Харнес (кожен набір окремо) | `fork-bomb 5/5` · `command-output-injection 2/2` · `resource-exhaustion 5/5` · `path-and-zip-slip 7/7` · `new-channels 4/4` (2 describe) · `attack-catalogue 5/5` · `gate-mutation-sensitivity 6/6` — **разом 34 тести, failed=0** |
 | Статична перевірка каталогу | `rows=24 ok=true issues=0` |
 | Фабрикації (5 видів) | усі `ok=false` зі своїми кодами (див. § 3) |

@@ -361,8 +361,14 @@ export interface CodeRunQuotaPort {
      * somehow slipped through.
      */
     currentDepth?: number,
+    /**
+     * R1 (section A, item 2): who is spending. The per-session budget is unaffected; the two **daily** scopes
+     * (per user, per Company) are keyed by these ids. Optional, so a deployment that supplies a port without
+     * them keeps exactly the pre-R1 behaviour instead of refusing every call for a missing parameter.
+     */
+    scope?: { userId?: string; companyId?: string },
   ): { allowed: boolean; error?: string; remainingTokens?: number; remainingCostUsd?: number };
-  recordUsage(sessionId: string, tokens: number, costUsd: number): void;
+  recordUsage(sessionId: string, tokens: number, costUsd: number, scope?: { userId?: string; companyId?: string }): void;
 }
 
 /**
@@ -3716,7 +3722,7 @@ export class CodingAgentRunner {
          * children draw on one allowance (a delegated coding run is a run of the same session) and a depth past
          * the canonical limit cannot obtain an allowance even if a delegation somehow slipped through.
          */
-        const verdict = this.ports.quota.checkQuota(sessionId, this.estimatedTokensPerCall, this.estimatedCostPerCallUsd, delegationDepth);
+        const verdict = this.ports.quota.checkQuota(sessionId, this.estimatedTokensPerCall, this.estimatedCostPerCallUsd, delegationDepth, { userId: ctx.userId, companyId });
         if (!verdict.allowed) {
           await release("budget_exhausted");
           summary.remaining = verdict.error ?? "Budget exhausted.";
@@ -3893,7 +3899,7 @@ export class CodingAgentRunner {
       summary.costUsd += costUsd;
       if (this.ports.quota && (tokens > 0 || costUsd > 0)) {
         try {
-          this.ports.quota.recordUsage(sessionId, tokens, costUsd);
+          this.ports.quota.recordUsage(sessionId, tokens, costUsd, { userId: ctx.userId, companyId });
         } catch {
           // Usage accounting must not abort a run; the budget pre-flight remains the gate.
         }

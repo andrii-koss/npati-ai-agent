@@ -15,6 +15,13 @@ import { RunnerMountGate, type MountedFolderAllowlistPort } from "./mounted-fold
 import { mountedFolderRoots } from "./project-mount-policy";
 import { authenticateRunnerRequest, createRunnerReadiness } from "./runner-readiness";
 import { CosignImageSignatureVerifier } from "./sandbox-image-signature";
+import {
+  HostAdmissionController,
+  SandboxCompanyQuota,
+  resolveSandboxCompanyQuota,
+  resolveSandboxResourceLimits,
+  sandboxMemoryArg,
+} from "./sandbox-resource-quota";
 
 /**
  * C1b: the runner is where containers are actually created, so image admission is enforced here.
@@ -132,13 +139,30 @@ const runnerReadiness = createRunnerReadiness({
   ttlMs: Number(process.env.NPATI_SANDBOX_RUNNER_READINESS_TTL_MS) || undefined,
 });
 
+/**
+ * R1 (section A, item 4): the deployment's sandbox resource settings, resolved **once** here so the container
+ * flags, the aggregate Company quota and the boot log all describe the same numbers.
+ */
+const sandboxResourceLimits = resolveSandboxResourceLimits(process.env);
+const sandboxCompanyQuota = new SandboxCompanyQuota(resolveSandboxCompanyQuota(process.env), sandboxResourceLimits);
+const hostAdmission = new HostAdmissionController();
+console.info("[sandbox-quota] " + JSON.stringify({
+  resourceLimits: sandboxResourceLimits,
+  companyQuota: sandboxCompanyQuota.config,
+  hostAdmission: hostAdmission.limits,
+}));
+
 const provider = new DockerSandboxProvider({
   image: process.env.NPATI_SANDBOX_IMAGE ?? "npati/project-sandbox:local",
   proxyImage: process.env.NPATI_SANDBOX_EGRESS_IMAGE ?? "npati/sandbox-egress:local",
-  cpu: process.env.NPATI_SANDBOX_CPU ?? "1",
-  memory: process.env.NPATI_SANDBOX_MEMORY ?? "1536m",
-  diskBytes: Number(process.env.NPATI_SANDBOX_DISK_BYTES) || 1536 * 1024 * 1024,
-  pids: Number(process.env.NPATI_SANDBOX_PIDS) || 128,
+  // R1 (section A, item 4): the R1 start values, and they are now *settings* rather than an undocumented
+  // override — the former 1 vCPU / 1536m / 1536 MiB / 128 pids defaults are recorded in
+  // `docs/coding-agent/security-gate-report.md` § R1-A. `NPATI_SANDBOX_MEMORY_MB` wins over the Docker-string
+  // form so one number can drive both the flag and the aggregate Company quota.
+  cpu: process.env.NPATI_SANDBOX_CPU ?? String(sandboxResourceLimits.cpu),
+  memory: process.env.NPATI_SANDBOX_MEMORY ?? sandboxMemoryArg(sandboxResourceLimits.memoryMb),
+  diskBytes: Number(process.env.NPATI_SANDBOX_DISK_BYTES) || sandboxResourceLimits.diskBytes,
+  pids: Number(process.env.NPATI_SANDBOX_PIDS) || sandboxResourceLimits.pids,
   maxFiles: Number(process.env.NPATI_SANDBOX_SYNC_MAX_FILES) || 500,
   maxBytes: Number(process.env.NPATI_SANDBOX_SYNC_MAX_BYTES) || 20_000_000,
   // C4b: the effective allowlist comes from the canonical allowlist module — the approved install
@@ -147,7 +171,7 @@ const provider = new DockerSandboxProvider({
   allowedHosts: sandboxAllowedHostsWithProjectApi(
     process.env.NPATI_SANDBOX_ALLOWED_HOSTS ?? toProxyAllowedHosts(resolveEgressAllowlist({ env: process.env })),
     process.env.NPATI_PROJECT_API_PUBLIC_URL),
-}, imageAdmission, egressEnforcement, runnerMountGate);
+}, imageAdmission, egressEnforcement, runnerMountGate, sandboxCompanyQuota, hostAdmission);
 const runnerPreflight = async (): Promise<void> => {
   const socketPresent = await stat("/var/run/docker.sock").then((value) => value.isSocket()).catch(() => false);
   const check = async (args: string[]) => dockerExec("docker", args, { timeout: 10_000, maxBuffer: 64_000 }).then(({ stdout }) => ({ ok: true, output: stdout.trim() })).catch((error: NodeJS.ErrnoException & { stderr?: string }) => ({ ok: false, code: dockerFailure(args.slice(0, 2).join("."), error.stderr ?? error.message ?? "", false, error.code).code, output: "" }));

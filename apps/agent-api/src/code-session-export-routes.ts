@@ -172,6 +172,46 @@ function fenced(value: string, language = ""): string {
   return `${fence}${language}\n${value}\n${fence}`;
 }
 
+/**
+ * R1-C (item 13): the **diffs** of a tool result, extracted from the settled result the model was already
+ * given. The item asks for "sessions **and diff**" in the export, and the diff is recorded: `code.fs.edit`,
+ * `code.fs.write`, `code.fs.apply_patch`, `code.fs.diff`, `code.git.diff` all return it in their settled
+ * result (`packages/shared/src/code-capabilities.ts`), which is the same value the replay bundle stores.
+ *
+ * Three properties, and they are the reason this is a parse of an existing value rather than a new read:
+ *
+ *  1. **No new data is surfaced.** The input string is the outcome of `boundedResult`, i.e. the exact
+ *     truncated settled result already printed below. Nothing is re-read from the workspace, so an export
+ *     cannot show a file the run never saw.
+ *  2. **The same refusal applies.** The extracted text is appended to the material that
+ *     `scanTextForSecrets(markdown)` scans, and every scanned line also carries the original JSON line, so a
+ *     credential cannot hide in the pretty-printed form. A finding is still `export_secret_detected` (422) with
+ *     kinds only — never a redaction, never a value.
+ *  3. **It is bounded like everything else here.** Each diff is bounded by the same `EXPORT_MAX_RESULT_CHARS`,
+ *     with the same explicit truncation marker, so one large diff cannot turn an export into an unbounded
+ *     download.
+ *
+ * A result that does not parse, or carries no `diff`, contributes nothing — this is a presentation of an
+ * existing value, not a claim that the run produced a diff.
+ */
+export function extractDiffsFromSettledResult(settledResult: string | null): string[] {
+  if (!settledResult) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(settledResult);
+  } catch {
+    return [];
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return [];
+  const record = parsed as Record<string, unknown>;
+  if (record.ok !== true) return [];
+  const result = record.result;
+  if (!result || typeof result !== "object" || Array.isArray(result)) return [];
+  const value = (result as Record<string, unknown>).diff;
+  if (typeof value !== "string" || !value.trim()) return [];
+  return [value.length <= EXPORT_MAX_RESULT_CHARS ? value : `${value.slice(0, EXPORT_MAX_RESULT_CHARS)}…`];
+}
+
 interface ExportTurn {
   turnIndex: number;
   assistant?: { content: string; finishReason: unknown; model: unknown; provider: unknown; toolCalls: Array<{ id: unknown; name: unknown }> };
@@ -236,8 +276,7 @@ function groupExportTurns(steps: ReplayBundleStepPayload[]): ExportTurn[] {
 }
 
 /** Metadata-only fallback for a run recorded before C6b: turn boundaries and tool outcomes, no assistant text. */
-function fromRunStateTurns(turns: CodeRunTurnRecord[]): ExportTurn[] {
-  return turns
+function fromRunStateTurns(turns: CodeRunTurnRecord[]): ExportTurn[] {  return turns
     .slice()
     .sort((a, b) => a.turnIndex - b.turnIndex)
     .map((turn) => ({
@@ -358,6 +397,15 @@ export function renderCodeSessionMarkdown(input: {
         lines.push("");
         lines.push(fenced(call.resultText, "json"));
         lines.push("");
+        // R1-C: the diff the result already carries, rendered so it can be read as a patch rather than as a
+        // JSON string. It is the same material the JSON block above prints, so nothing new leaves the server —
+        // and the same secret scan covers it.
+        for (const diff of extractDiffsFromSettledResult(call.resultText)) {
+          lines.push(`#### \`${call.tool}\` diff`);
+          lines.push("");
+          lines.push(fenced(diff, "diff"));
+          lines.push("");
+        }
       }
     }
   }

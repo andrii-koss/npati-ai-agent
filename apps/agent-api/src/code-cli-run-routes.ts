@@ -117,10 +117,16 @@ const ROUTE_ERROR_STATUS: Record<string, number> = {
   // codes by the queue itself; both are "come back later", which is what the CLI prints and what `retryable` says.
   queue_timeout: 429,
   queue_cancelled: 409,
+  /**
+   * R1 (section A, item 1): the **periodic** limit's refusal is "come back later" exactly like the queue's, so it
+   * maps onto the same 429 — but under its own code, because the answer to "when" is the window's estimate rather
+   * than the queue timeout, and a client that conflates the two would retry into the same refusal.
+   */
+  rate_limited: 429,
   code_run_start_failed: 500,
 };
 
-const ERROR_RETRYABLE = new Set(["queue_timeout", "queue_cancelled"]);
+const ERROR_RETRYABLE = new Set(["queue_timeout", "queue_cancelled", "rate_limited"]);
 
 interface CompanyParams { companyId: string }
 

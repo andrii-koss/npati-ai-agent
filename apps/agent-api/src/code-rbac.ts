@@ -401,6 +401,11 @@ export const CODE_ACTION_PERMISSIONS: Readonly<Record<string, string>> = Object.
   "code.active_context.write": "workspace:write",
   "code.project.archive": "business:manage",
   "code.project.delete": "business:manage",
+  // R1-C (item 13): erasing a session's or a project's code data is the right to be forgotten, and it is
+  // destructive in the same way deleting the project is — the rows are gone and no approval can bring them
+  // back. It therefore carries the same administrative permission, and it is a **separate action name** so a
+  // caller can never authorise the erasure with the delete route's label (or the reverse).
+  "code.session.data_erase": "business:manage",
   // C9: goals and plans. Reading goals, the current plan and the todo list are read surfaces. Creating a goal,
   // moving it, verifying an acceptance criterion and deciding a plan revision are workspace writes — they
   // change session state, not the workspace. None of them can complete a goal on its own: the store refuses

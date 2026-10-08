@@ -27,7 +27,13 @@ export type ReaperStep =
   | "stale_locks"
   | "disk_pressure"
   /** C9: questions past their TTL, which release the run they were holding as `ask_user_timeout`. */
-  | "expire_user_questions";
+  | "expire_user_questions"
+  /**
+   * R1-C (item 11): the retention step. `toolResultRetentionDays` and `transcriptRetentionDays` were declared
+   * by C1 and read by nobody, so nothing ever expired: this is the step that executes them, over the rows'
+   * own `retention_class` rather than over a second set of numbers invented here.
+   */
+  | "data_retention";
 
 export interface ReaperCleanedCounts {
   secretLeases: number;
@@ -41,6 +47,14 @@ export interface ReaperCleanedCounts {
   tempDirs: number;
   staleLocks: number;
   expiredUserQuestions: number;
+  /** R1-C: code rows past the retention window their own `retention_class` names. */
+  expiredDataRows: number;
+  /**
+   * R1-C: rows retention **matched but deliberately kept** because the database forbids deleting them
+   * (append-only evidence). Reported next to `expiredDataRows` so a pass cannot look like a clean sweep of
+   * evidence it never touched.
+   */
+  retainedDataRows: number;
 }
 
 export interface ReaperSkip {
@@ -138,6 +152,26 @@ export interface DiskUsage {
 }
 
 /**
+ * R1-C (items 11–12): what a retention pass reports. A distinct `retained` list — not a single total — because
+ * the interesting fact is *which* family was kept and *why*: an append-only evidence table must never be
+ * counted as purged, and a reason is what tells an operator whether a zero means "nothing to do" or
+ * "forbidden to do".
+ */
+export interface DataRetentionPortResult {
+  expired: number;
+  purged: number;
+  /** Rows the sweep matched but is forbidden to delete, with the reasons (codes, never row content). */
+  retained: number;
+  retainedReasons: string[];
+}
+
+export interface DataRetentionPortPreview {
+  expired: number;
+  retained: number;
+  retainedReasons: string[];
+}
+
+/**
  * Ports the reaper drives. Every one is optional: an absent port becomes a `skipped` entry with a reason,
  * which is how a missing capability stays visible instead of looking like "nothing to clean".
  */
@@ -189,6 +223,23 @@ export interface CodeReaperPorts {
   orphanSandboxes?: {
     listOrphans(input: { activeSandboxIds: string[] }): Promise<OrphanSandbox[]>;
     destroyOrphan(sandbox: OrphanSandbox): Promise<void>;
+  };
+  /**
+   * R1-C (item 11): data retention. The port has a **real** preview — the rows the rule matches can be counted
+   * without deleting them — so a dry run reports exactly what a real pass would expire instead of claiming the
+   * step is unavailable.
+   *
+   * Two things this port deliberately does **not** carry:
+   *
+   *  - any number. The windows come from the existing `CodeAgentLimits` (`toolResultRetentionDays`,
+   *    `transcriptRetentionDays`) and the row's own `retention_class`; a second set of limits here is exactly
+   *    the defect this step exists to close.
+   *  - any row content. The port returns counts, and the reasons it returns are codes
+   *    (`append_only_evidence`), never a table's rows.
+   */
+  dataRetention?: {
+    preview(input: { now: number }): Promise<DataRetentionPortPreview>;
+    apply(input: { now: number }): Promise<DataRetentionPortResult>;
   };
   /** Which sandboxes belong to a live session; supplied by the caller's store, never guessed. */
   activeSandboxes?: { listActiveSandboxIds(): Promise<string[]> };
@@ -242,6 +293,8 @@ function emptyCounts(): ReaperCleanedCounts {
     tempDirs: 0,
     staleLocks: 0,
     expiredUserQuestions: 0,
+    expiredDataRows: 0,
+    retainedDataRows: 0,
   };
 }
 
@@ -547,6 +600,46 @@ export class CodeReaper {
           return;
         }
         cleaned.expiredUserQuestions = await this.options.userQuestions!.expireCodeUserQuestions({ now });
+      });
+    }
+
+    // 13. R1-C (item 11): data retention. `toolResultRetentionDays`/`transcriptRetentionDays` were configured
+    //     and read by nobody, so a run's tool results, turn boundaries, checkpoints, plans, goals, todos,
+    //     ledgers and questions were kept forever. The step executes the configuration that already existed:
+    //     the windows are derived from those two limits (never restated here), the class comes from the row,
+    //     and `until_deleted` is never expired by a clock.
+    //
+    //     What it deliberately does NOT do: touch `audit_log`/`audit_anchors` (their own 365-day retention is
+    //     a separate contract), touch a `projects` row of another type (the shared table is only ever joined
+    //     through `code_project`), or claim a purge it did not perform. A family the database forbids deleting
+    //     is reported as `retained` with its reason, so "0 purged" and "0 expired" stay distinguishable.
+    if (!this.options.dataRetention) skipped.push({ step: "data_retention", reason: "port_unavailable" });
+    else if (dryRun) {
+      await step("data_retention", async () => {
+        const preview = await this.options.dataRetention!.preview({ now: this.now() });
+        cleaned.expiredDataRows = preview.expired;
+        cleaned.retainedDataRows = preview.retained;
+        if (preview.retained > 0) {
+          // Counts and reasons only: which family was kept and why, never a row.
+          this.options.logger?.warn(
+            { step: "data_retention", retained: preview.retained, reasons: preview.retainedReasons },
+            "code_reaper_retention_dry_run_retained",
+          );
+        }
+      });
+    } else {
+      await step("data_retention", async () => {
+        // A real pass performs **one** transaction: `apply` returns both what it purged and what it matched but
+        // was forbidden to purge, so the step never has to run the sweep twice to report a number.
+        const applied = await this.options.dataRetention!.apply({ now: this.now() });
+        cleaned.expiredDataRows = applied.purged;
+        cleaned.retainedDataRows = applied.retained;
+        if (applied.retained > 0) {
+          this.options.logger?.warn(
+            { step: "data_retention", retained: applied.retained, reasons: applied.retainedReasons },
+            "code_reaper_retention_retained",
+          );
+        }
       });
     }
 

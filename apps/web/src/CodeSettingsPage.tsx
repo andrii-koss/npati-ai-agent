@@ -7,6 +7,8 @@ import { chooseAvailableCompanyId, readCachedCompanies } from "./active-company"
 import { CodeFlagsPanel } from "./CodeFlagsPanel";
 import { CodeSandboxImagesPanel } from "./CodeSandboxImagesPanel";
 import { CodeDataPolicyPanel } from "./CodeDataPolicyPanel";
+// R1 (section A, item 3): the read-only queue/limits panel. It fetches `…/code/runs/queue` and renders it.
+import { CodeQueuePanel } from "./CodeQueuePanel";
 
 // --- Types -------------------------------------------------------------------
 
@@ -841,6 +843,9 @@ export function CodeSettingsPage() {
               notify={(type, message) => setFeedback({ type, message })}
             />
           )}
+
+          {/* R1 (section A, item 3): the queue's state is visible instead of being inferable only from a refusal. */}
+          {companyId && <CodeQueuePanel companyId={companyId} isUk={isUk} />}
 
           <details className="code-limits">
             <summary>{isUk ? "Ліміти (конфігурація)" : "Limits (configuration)"}</summary>

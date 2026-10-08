@@ -159,6 +159,19 @@ import { SandboxImagePolicy, sandboxImagePolicyConfig } from "./sandbox-image-po
 // C10 (ТЗ items 5, 6, 8): the run queue that bounds concurrency fairly, the registry that keeps a long run alive
 // after its tab closes, the reconnect/polling surface over it, and the Markdown session export.
 import { CodeRunQueue, resolveCodeRunQueueLimits, CodeRunRefusedError } from "./code-run-queue";
+/**
+ * R1 (section A, item 1): the **periodic** run limit is a separate limiter with its own configuration and its
+ * own window. `route-guard-tiers.ts` stays exactly what it was — the Company/Chat HTTP limiter — and is not
+ * imported here at all.
+ */
+import { CodeRunRateLimitedError, CodeRunRateLimiter, resolveCodeRunRateLimits } from "./code-run-rate-limit";
+/**
+ * R1 (section A, items 1 and 5): the single admission door. Every code-run entry point in this file goes
+ * through `codeRunAdmission`; `tests/coding-agent-r1a-limits-and-quotas.test.ts` fails if a **direct** queue
+ * acquisition ever reappears here.
+ */
+import { createCodeRunAdmission } from "./code-run-admission";
+import { registerCodeQueueStatusRoutes } from "./code-queue-status-routes";
 import { CodeBackgroundRunRegistry } from "./code-background-run-registry";
 import { registerCodeBackgroundRunRoutes } from "./code-background-run-routes";
 import { registerCodeSessionExportRoutes } from "./code-session-export-routes";
@@ -180,6 +193,10 @@ import { buildPullRequestDescription } from "./code-pr-description";
 import { CodeShellRuntime, type CodeShellSandboxPort } from "./code-shell-runtime";
 import { CodeProcessManager, type CodeProcessSandboxPort } from "./code-process-manager";
 import { CodeReaper, asStaleApprovalReaper } from "./code-reaper";
+// R1-C (items 11–13): retention really executed, and the right to be forgotten.
+import { CodeDataRetention } from "./code-data-retention";
+import { CodeDataErasureService } from "./code-data-erasure";
+import { registerCodeDataErasureRoutes } from "./code-data-erasure-routes";
 import { SecretLeaseProvider } from "./code-secret-lease";
 import { isAgentPrincipal, isReviewSafeTool, matrixModeFor, PolicyEngine } from "./code-policy-engine";
 import type { GitWriteIntent } from "./code-git-write-policy";
@@ -2183,6 +2200,23 @@ export function buildApp(config: AppConfig = {}) {
   let mcpApprovalPauseRelease:
     | ((input: { companyId: string; runId: string; approvalId: string; reason: McpApprovalReleaseReason; answeredBy?: string }) => Promise<unknown>)
     | null = null;
+  /**
+   * R1-C (item 11): the missing reader of two configuration values that had none.
+   *
+   * `toolResultRetentionDays` (30) and `transcriptRetentionDays` (90) were declared by C1, documented in
+   * `.env.example` and asserted by a test — and read by **nothing**. The consequence was that no code data
+   * ever expired. This object is their reader: it derives the four retention windows from those two limits and
+   * hands them to the store, which compares each row's own `retention_class` against them. No number is
+   * invented here, and the store's optional port means an in-memory deployment reports `port_unavailable`
+   * rather than a false clean sweep.
+   */
+  const codeDataRetention = new CodeDataRetention({
+    ...(workspaceStore.codeDataLifecycle ? { lifecycle: workspaceStore.codeDataLifecycle } : {}),
+    limits: {
+      toolResultRetentionDays: config.codeAgentLimits?.toolResultRetentionDays ?? DEFAULT_CODE_AGENT_LIMITS.toolResultRetentionDays,
+      transcriptRetentionDays: config.codeAgentLimits?.transcriptRetentionDays ?? DEFAULT_CODE_AGENT_LIMITS.transcriptRetentionDays,
+    },
+  });
   const codeReaper = new CodeReaper({
     intervalMs: config.codeAgentLimits?.reaperIntervalMs ?? DEFAULT_CODE_AGENT_LIMITS.reaperIntervalMs,
     toolCallNoProgressMs: config.codeAgentLimits?.toolCallNoProgressMs ?? DEFAULT_CODE_AGENT_LIMITS.toolCallNoProgressMs,
@@ -2250,6 +2284,19 @@ export function buildApp(config: AppConfig = {}) {
         const stats = await statfs(process.cwd());
         return { freeBytes: Number(stats.bavail) * Number(stats.bsize), freeInodes: Number(stats.ffree) };
       },
+    },
+    /**
+     * R1-C (item 11): retention, executed. The windows are derived from the limits this deployment already
+     * configured (`NPATI_CODE_TOOL_RESULT_RETENTION_DAYS` / `NPATI_CODE_TRANSCRIPT_RETENTION_DAYS`) and applied
+     * to each row's own `retention_class`; the port is `port_unavailable` when the store cannot delete code
+     * data (the in-memory backend), which is how a missing capability stays visible instead of looking clean.
+     *
+     * `audit_log`/`audit_anchors` are **not** reachable from this port: their 365-day retention is a separate
+     * contract (`audit-config.ts`) and this step must not be a second, uncoordinated writer of that journal.
+     */
+    dataRetention: {
+      preview: (input) => codeDataRetention.preview(input),
+      apply: (input) => codeDataRetention.apply(input),
     },
     activity: { record: (event) => { app.log.info(event, "code_reaper"); } },
     logger: { warn: (payload, message) => { app.log.warn(payload, message ?? "code_reaper_warning"); }, info: () => undefined },
@@ -5006,8 +5053,49 @@ ${localized.next}`;
      * `A2AQuotaManager` — the same instance the A2A control-plane routes configure — so there is one accounting
      * system, and it is keyed by session: a delegated run belongs to its parent's session, so parent and
      * children draw on one shared `sessionBudget` and a child cannot spend past what the parent has left.
+     *
+     * R1 (section A, item 2) adds the **daily** allowances (per user, per Company) to the same adapter, and this
+     * is where a threshold crossing becomes a **notification**: an Activity event persisted through the existing
+     * `codeActivitySink`, plus the structured log line that existed before. Activity is the surface the Coding
+     * Agent already shows runs and decisions in, so the 80 % warning and the 100 % stop are visible to the user
+     * who hit them rather than scrolling out of a container log. The messaging channels are deliberately not
+     * reused: their per-connection switch vocabulary (`automation` / `background_run` / `approval`) is a settings
+     * schema of its own, and quietly reusing one of those kinds would send a budget notice under another switch's
+     * name.
      */
-    quota: new CodeRunSharedQuota(globalQuotaManager),
+    quota: new CodeRunSharedQuota(globalQuotaManager, {
+      onThreshold: (event) => {
+        app.log.warn(
+          {
+            scope: event.scope,
+            level: event.level,
+            usedTokens: event.usedTokens,
+            maxTokens: event.maxTokens,
+            usedCostUsd: event.usedCostUsd,
+            maxCostUsd: event.maxCostUsd,
+            companyId: event.companyId ?? null,
+          },
+          "code_run_budget_threshold",
+        );
+        // Without a tenant there is nothing to scope the record to, and the sink would refuse it. The log line
+        // above is then the only notice, which is honest: the caller did not say whose budget it was.
+        if (!event.companyId) return;
+        void activitySinkForKind<Record<string, unknown>>(codeActivitySink, "run_activity")
+          .record({
+            companyId: event.companyId,
+            ...(event.userId ? { userId: event.userId } : {}),
+            event_type: "budget_threshold",
+            scope: event.scope,
+            level: event.level,
+            budgetKey: event.budgetKey,
+            usedTokens: event.usedTokens,
+            maxTokens: event.maxTokens,
+            usedCostUsd: event.usedCostUsd,
+            maxCostUsd: event.maxCostUsd,
+          })
+          .catch(() => undefined);
+      },
+    }),
     /**
      * C10: the session→run link. `code_sessions.run_id` had a reader (`lastRun`, `usage`) and an update path but
      * **no writer**, so both answers were permanently `null` and a resume had no way to find "the run of this
@@ -5964,6 +6052,16 @@ ${localized.next}`;
   const codeRunQueueLimits = resolveCodeRunQueueLimits(process.env);
   const codeRunQueue = new CodeRunQueue(codeRunQueueLimits);
   /**
+   * R1 (section A, item 1): the **periodic** limit — how many runs one user and one Company may **start** per
+   * window — and the one admission function both entry points below use. The limiter is a separate object from
+   * `route-guard-tiers.ts` on purpose: that one is the Company/Chat HTTP limiter and must keep meaning what it
+   * meant, while this one bounds sandbox-holding, budget-spending work. Configuration is
+   * `NPATI_CODE_RUN_RATE_LIMIT_PER_USER_PER_PERIOD` / `…_PER_COMPANY_PER_PERIOD` / `…_PERIOD_MS`, clamped.
+   */
+  const codeRunRateLimits = resolveCodeRunRateLimits(process.env);
+  const codeRunRateLimiter = new CodeRunRateLimiter(codeRunRateLimits);
+  const codeRunAdmission = createCodeRunAdmission(codeRunQueue, codeRunRateLimiter);
+  /**
    * C10 (ТЗ item 5): the background-run registry. A run registered here owns its **own** abort signal, so closing
    * the tab no longer kills it, and its events are buffered with a monotonic sequence so a reconnecting client can
    * be given the tail it missed instead of a gap.
@@ -6031,7 +6129,12 @@ ${localized.next}`;
       return session && session.status !== "archived" ? session : null;
     },
     createSession: async (ctx, companyId, projectId) => codeService.createSession(ctx, companyId, projectId, { mode: "edit" }),
-    admit: async (ctx, companyId, sessionId) => codeRunQueue.acquire({
+    /**
+     * R1 (section A, item 5): the CLI/IDE entry point takes its slot from the **same** admission function the
+     * chat path uses, so the periodic limit, the two concurrency caps and the fair queue apply to it by
+     * construction rather than by a second implementation that has to be kept in step.
+     */
+    admit: async (ctx, companyId, sessionId) => codeRunAdmission.admit({
       workspaceId: ctx.workspaceId,
       userId: ctx.userId,
       companyId,
@@ -6110,6 +6213,19 @@ ${localized.next}`;
     logger: app.log,
   });
   /**
+   * R1 (section A, item 3): the queue is **visible**. `CodeRunQueue.state()` existed with no caller, so "the run
+   * did not start" and "the deployment is at capacity" were indistinguishable from outside. The route is
+   * read-only, needs only `workspace:read`, and stays reachable while the feature flags are off — a status page
+   * that requires the feature it reports on is useless exactly when it is needed. The answer is projected down
+   * to the caller's own Company (`buildCodeQueueStatusView`), so exposing the state cannot leak another tenant's
+   * session ids.
+   */
+  registerCodeQueueStatusRoutes(app, {
+    auth: authProvider,
+    queue: codeRunQueue,
+    rateLimits: codeRunRateLimiter,
+  });
+  /**
    * C10 (ТЗ item 8): exporting a session to Markdown. The route reads the same transcript reader the Workspace
    * uses, applies the same turn/result bounds and refuses the whole document when either secret scanner finds a
    * credential — so the export cannot become a wider read path than the API it reuses.
@@ -6140,6 +6256,67 @@ ${localized.next}`;
         return null;
       }
     },
+    logger: app.log,
+  });
+  /**
+   * R1-C (item 13): the right to be forgotten.
+   *
+   * Export existed; erasure did not — `grep deleteCodeSession|purgeCodeSession|deleteSessionData|eraseSession`
+   * returned zero matches, so a user could take their data out and had no way to have it removed. This is the
+   * surface that closes it: one route family, two scopes (session, project), the existing RBAC gate with a
+   * named action (`code.session.data_erase` → `business:manage`), and the journal written **before** anything
+   * is deleted — an audit outage refuses the erasure instead of performing it unrecorded.
+   *
+   * The answer is the store's own measurement (`outstanding`, `preserved`, `verified`), so "nothing left" is
+   * reported with evidence. The on-disk workspace is removed by the mechanism that already owns it — and only
+   * for a whole-project erasure: erasing one session must never delete the project's shared directory, which
+   * is why `removeWorkspace` is omitted for a session target rather than wired to the same call.
+   */
+  const codeErasureContexts = new WeakMap<object, AuthContext>();
+  app.addHook("preHandler", async (request) => {
+    const path = request.url.split("?")[0] ?? "";
+    if (!/\/code\/(?:sessions|projects)\/[^/]+\/data$/.test(path)) return;
+    codeErasureContexts.set(request, await authProvider.authenticate(request));
+  });
+  const codeDataErasure = new CodeDataErasureService({
+    store: {
+      ...(workspaceStore.codeDataLifecycle ? { lifecycle: workspaceStore.codeDataLifecycle } : {}),
+      // Both resolvers are required members of the port: without them the service could not scope the
+      // project-scoped families honestly nor refuse a foreign project before the journal records anything.
+      //
+      // Each lookup is wrapped, and that is the idempotency contract rather than defensive style: a repeat
+      // erasure asks for a session that no longer exists, and `CodeService.getSession` answers with an error.
+      // Letting it escape would turn "erase twice" into a 500 — the opposite of what a repeatable erasure has
+      // to be — so an unknown/foreign id resolves to `null`, which the service reports as `already_erased`.
+      resolveSession: async ({ ctx, companyId, sessionId }) => {
+        try {
+          const session = await codeService.getSession(ctx, companyId, sessionId);
+          return { projectId: session.projectId };
+        } catch {
+          return null;
+        }
+      },
+      resolveProject: async ({ ctx, companyId, projectId }) => {
+        try {
+          const project = await projectService.get(ctx, companyId, projectId);
+          return { type: project.type };
+        } catch {
+          return null;
+        }
+      },
+    },
+    ...(codePrivilegedAudit ? { audit: codePrivilegedAudit } : {}),
+    // Wired through the same preHandler-backed context every other surface uses, so the workspace removal is
+    // authorised by the caller's own context rather than by a second authentication path.
+    removeWorkspace: async ({ ctx, companyId, projectId }) => {
+      return projectWorkspace.removeProjectWorkspace(ctx, companyId, projectId);
+    },
+    logger: app.log,
+  });
+  registerCodeDataErasureRoutes(app, {
+    erasure: codeDataErasure,
+    authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input),
+    getAuthContext: (request) => codeErasureContexts.get(request as object) ?? null,
     logger: app.log,
   });
   /**
@@ -7315,7 +7492,13 @@ ${localized.next}`;
         request.raw.once("close", abandonWait);
         let lease: Awaited<ReturnType<CodeRunQueue["acquire"]>>;
         try {
-          lease = await codeRunQueue.acquire(
+          /**
+           * R1 (section A, item 1): the periodic limit and the queue are entered through the **one** admission
+           * function, so the Workspace stream cannot start a run that the CLI would have been refused. Its
+           * refusal (`CodeRunRateLimitedError`, a `CodeRunRefusedError`) is handled below with the window's own
+           * retry-after.
+           */
+          lease = await codeRunAdmission.admit(
             {
               workspaceId: auth.workspaceId,
               userId: auth.userId,
@@ -7448,8 +7631,8 @@ ${localized.next}`;
              */
             const lease = reserved
               ? reserved.lease
-              : codeRunQueue.canAdmit({ userId: auth.userId, companyId: activeCompanyId! })
-                ? await codeRunQueue.acquire({
+              : codeRunAdmission.canAdmit({ userId: auth.userId, companyId: activeCompanyId! })
+                ? await codeRunAdmission.admit({
                   workspaceId: auth.workspaceId, userId: auth.userId, companyId: activeCompanyId!, sessionId: codeSession.id,
                 })
                 : (() => { throw new CodeRunRefusedError("queue_timeout", "The code run queue is full for this user or Company; the run was not started."); })();
@@ -7769,6 +7952,28 @@ ${localized.next}`;
     } catch (error) {
       if (error instanceof AuthenticationError) {
         return reply.code(error.status).send({ error: { code: error.code, message: error.message } });
+      }
+      /**
+       * R1 (section A, item 1): the **periodic** refusal is reported before the queue's own, because it is a
+       * subclass of the queue's error and it can say something the queue cannot — *when* the allowance returns.
+       * The `retry-after` is the window's own estimate rather than the queue timeout, which is the honest
+       * answer to "how long until I may start another run".
+       */
+      if (error instanceof CodeRunRateLimitedError) {
+        request.log.warn({ code: error.code, scope: error.scope }, "code_run_rate_limited");
+        return reply
+          .header("retry-after", String(Math.max(1, Math.ceil(error.retryAfterMs / 1000))))
+          .code(429)
+          .send({
+            error: {
+              code: "CODE_RUN_RATE_LIMITED",
+              message: error.message,
+              scope: error.scope,
+              limit: error.limit,
+              used: error.used,
+              retryable: true,
+            },
+          });
       }
       /**
        * C10 (ТЗ item 6): the queue refused this run before anything was written. 429 with `retry-after` is the
