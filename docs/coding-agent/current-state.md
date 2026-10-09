@@ -2,6 +2,10 @@
 
 Update this file after every completed step.
 
+2026-10-09: [Self-hosted активація, права власника та запуск із Settings/Workspace/Chat](2026-10-09-self-hosted-code-activation.md).
+Для self-hosted флаги тепер увімкнені за замовчуванням; hosted rollout не змінено. Історичні записи нижче
+описують попередні етапи. Чотири quarantine-записи company-runtime видалено після успішного повторного прогону.
+
 ## Sign-off policy (from C13 onward, owner decision)
 **Every step sign-off MUST run `npm test` in addition to `typecheck` / `security-gate` / `test:web` / both builds.**
 No new failures are allowed; failures caused by Coding Agent changes must be fixed. This closes a real gap: until C13

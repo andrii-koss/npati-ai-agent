@@ -1,7 +1,7 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ["src/server.ts", "src/worker.ts", "src/sandbox-runner-server.ts"],
+  entry: ["src/server.ts", "src/worker.ts", "src/sandbox-runner-server.ts", "src/shared-project-runtime-server.ts"],
   format: ["esm"],
   platform: "node",
   target: "node22",

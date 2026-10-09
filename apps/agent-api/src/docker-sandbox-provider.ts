@@ -13,6 +13,7 @@ import { dockerFailure, safeDockerStderr } from "./sandbox-runner-diagnostics";
 import { safeProjectPath } from "./project-workspace";
 import { classifyTerminalCommand, normalizeTerminalCommand } from "./terminal-command-policy";
 import { DEFAULT_SANDBOX_RESOURCE_LIMITS, sandboxMemoryArg, type HostAdmissionController, type SandboxCompanyQuota } from "./sandbox-resource-quota";
+import { gitShellHardeningEnv, resolveDepsPolicyLimits } from "./code-deps-policy";
 
 interface RunnerLimits {
   cpu: string; memory: string; diskBytes: number; pids: number; image: string; proxyImage: string; maxFiles: number; maxBytes: number; allowedHosts: string;
@@ -494,7 +495,7 @@ fi
     const names = await this.inspect(scope, id);
     const normalized = normalizeTerminalCommand({ command, cwd: options.cwd });
     classifyTerminalCommand({ command: normalized.command, cwd: normalized.cwd });
-    const environment = sandboxProcessEnvironment(options.environment);
+    const environment = [...sandboxProcessEnvironment(options.environment), ...Object.entries(gitShellHardeningEnv(resolveDepsPolicyLimits()))];
     this.touch(id);
     const processId = randomUUID(), marker = `/tmp/npati-process-${processId}`;
     const command64 = Buffer.from(command).toString("base64");

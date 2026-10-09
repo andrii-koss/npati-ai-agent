@@ -26,6 +26,10 @@ through the central NPATI backend. For ordinary self-hosting, keep `NPATI_DEPLOY
 `NPATI_DEPLOYMENT_TYPE=npati_hosted` and set the hosted registration token to the same
 server-only value configured in the central NPATI backend.
 
+The shared runtime in this default Compose is intended for OSS/self-hosted
+installations. Hosted deployments (`NPATI_DEPLOYMENT_TYPE=npati_hosted`) should
+use the retained `docker-compose.dokploy-isolated.yml` execution scheme.
+
 Set `OMNIROUTE_MANAGEMENT_PASSWORD` to a unique, strong password before first deployment.
 The Compose file supplies it as OmniRoute's `INITIAL_PASSWORD`, and Agent API uses the
 same value for provider management. On an existing installation, `INITIAL_PASSWORD` does
@@ -76,45 +80,34 @@ The Agent's PostgreSQL schema migrations are idempotent and run automatically wh
 initializes its workspace store. No separate migration command is required for a new Agent
 deployment.
 
-### Website Builder sandbox runner on this VPS
+### Website Builder shared runtime on this VPS
 
-In the Dokploy Compose Environment editor set `COMPOSE_PROFILES=local-sandbox`,
+In the Dokploy Compose Environment editor set
 `NPATI_SANDBOX_RUNNER_MODE=local`, `NPATI_SANDBOX_RUNNER_URL=http://sandbox-runner:7865`,
 a unique `NPATI_SANDBOX_RUNNER_SECRET` of at least 32 characters, and a stable
 `NPATI_PREVIEW_SECRET`. The API, company worker, and runner receive the same
 runner secret from Compose. Do not attach a public domain to `sandbox-runner`.
 
-The `local-sandbox` profile builds `npati/project-sandbox:local` and
-`npati/sandbox-egress:local` automatically before starting the runner. The image
-jobs exit successfully; the runner healthcheck verifies access to the host
-Docker daemon and both images. After redeploy, the runner startup log must show
-`socketPresent:true` and `present:true` for both images.
+The default self-hosted Compose now builds one `npati-project-runtime` container.
+All managed projects use separate workspaces, UIDs, processes and assigned ports
+inside it. There is no Docker socket or per-project Docker sandbox/proxy pair.
+The allowlisted network proxy runs inside the runtime.
 
-Sandbox creation also checks host load. The runner applies the Compose settings
-`NPATI_HOST_ADMISSION_MAX_CPU_PERCENT` (default 80),
-`NPATI_HOST_ADMISSION_MIN_FREE_MEMORY_PERCENT` (default 15), and
-`NPATI_HOST_ADMISSION_SAMPLE_TTL_MS` (default 5000). A `host_overloaded` response
-includes the measured value and threshold; ordinary chat does not use this gate.
-If available memory remains below the threshold, release unused workloads or add
-capacity before testing build and Live Preview. Changing these settings requires
-recreating the runner container. Its `[sandbox-quota]` startup log shows the
-effective thresholds. Setting a value in Dokploy now passes it into the runner;
-previously the Compose files omitted these variables and the runner used defaults.
+The host must support Landlock ABI 6 or newer (normally Linux 6.12+), IPv4/IPv6
+iptables, and the configured container capabilities. Startup refuses to run
+without the isolation boundary. Configure total runtime resources with
+`NPATI_PROJECT_RUNTIME_CPU` (default 4) and `NPATI_PROJECT_RUNTIME_MEMORY`
+(default `4g`); these resources are shared between projects.
 
-If the currently running deployment predates this Compose change, build the
-images once on the same VPS and Docker daemon used by Dokploy, from the checked
-out repository, then redeploy the Compose service:
+For an older host or deployments requiring independent Docker isolation/quotas,
+choose `docker-compose.dokploy-isolated.yml` instead. Its runner uses the Docker
+socket and prepares the sandbox/egress images before accepting work. The isolated
+configuration retains the `NPATI_HOST_ADMISSION_*` settings.
 
-```bash
-docker build -f apps/agent-api/Dockerfile.project-sandbox -t npati/project-sandbox:local apps/agent-api
-docker build -f apps/agent-api/Dockerfile.sandbox-egress -t npati/sandbox-egress:local apps/agent-api
-docker image inspect npati/project-sandbox:local npati/sandbox-egress:local
-```
+Read [shared runtime deployment and migration](website-builder/SHARED_PROJECT_RUNTIME.md)
+before switching an existing installation. The runtime's `projects` and state
+volumes are persistent; old per-project containers are not automatically deleted.
 
-To inspect the running deployment without printing the runner secret, run
-`scripts/ops/inspect-sandbox-runner.sh` with the runner, API, and worker container
-names (and optionally a sandbox ID). Use `docker ps --format '{{.Names}}'` to find
-those names.
 ### Redis host setting
 
 Redis requires `vm.overcommit_memory=1` on the **Linux host** for reliable background

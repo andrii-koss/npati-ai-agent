@@ -33,6 +33,7 @@ export interface CodeSessionRunPort {
     ctx: AuthContext;
     session: CodeSession;
     prompt: string;
+    model?: string;
     signal: AbortSignal;
     cancelRequested: () => boolean | Promise<boolean>;
     readOnlyIntent?: boolean;
@@ -105,6 +106,7 @@ export interface CodeSessionRunOutcome {
 export interface CodeSessionRunExecutorOptions {
   runner: CodeSessionRunPort;
   control: CodeRunControlPort;
+  resolveModel?: (ctx: AuthContext) => Promise<string | undefined>;
   logger?: { warn(payload: unknown, message?: string): void };
 }
 
@@ -147,10 +149,12 @@ export class CodeSessionRunExecutor {
 
     let result: unknown;
     try {
+      const model = await this.options.resolveModel?.(input.ctx);
       result = await runner.run({
         ctx: input.ctx,
         session: input.session,
         prompt: input.prompt,
+        ...(model ? { model } : {}),
         signal: sink ? sink.signal : controller.signal,
         cancelRequested: input.cancelRequested,
         ...(input.readOnlyIntent ? { readOnlyIntent: true } : {}),

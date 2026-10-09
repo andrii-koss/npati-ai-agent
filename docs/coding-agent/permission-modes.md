@@ -195,8 +195,9 @@ A mode is consulted in phase 5; the sub-flag is consulted in phase 1 and a missi
 | `READ_TOOLS` and `PLAN_SAFE_TOOLS` | `code.read` |
 | Everything else | `code.write` |
 
-All sub-flags are off by default (`feature-flags.ts:19-60`), and the master flag is
-`coding_agent.enabled` (`:17`). A key that does not match `CODE_FLAG_KEY_PATTERN` can never be enabled
+Self-hosted installations enable all supported sub-flags and the master `coding_agent.enabled` by default.
+Hosted deployments retain the off-by-default rollout. Explicit disabled rows and the master kill switch take
+precedence over installation defaults. A key that does not match `CODE_FLAG_KEY_PATTERN` can never be enabled
 (`feature-flags.ts:71-74`).
 
 ---

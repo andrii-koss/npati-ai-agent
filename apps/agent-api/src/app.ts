@@ -1056,12 +1056,21 @@ export function buildApp(config: AppConfig = {}) {
   const npatiJwtSecret = config.npatiJwtSecret ?? process.env.NPATI_JWT_SECRET ?? process.env.JWT_SECRET;
   const authClient = config.authClient ?? (npatiBackendUrl ? createNpatiAuthClient(npatiBackendUrl) : undefined);
   const apiKeysRepo = new ApiKeysRepository(config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
+  const installationAuthStore = new InstallationAuthStore(config.dataDirectory);
+  const selfHosted = config.deploymentType === "self_hosted";
   const authProvider = config.authProvider ?? new NpatiBackendAuthProvider({
     jwtSecret: npatiJwtSecret,
     authClient,
     workspaceStore,
     allowDevFallback: config.strictAuth ? false : (process.env.NODE_ENV === "test"),
     apiKeysRepository: apiKeysRepo,
+    ...(selfHosted ? { isInstallationOwner: async (userId: string) => {
+      const state = await installationAuthStore.load();
+      if (state.ownerUserId) return state.ownerUserId === userId;
+      if (!state.installationToken || !authClient?.createInstallationSession) return false;
+      const verified = await authClient.createInstallationSession(state.installationToken);
+      return (await installationAuthStore.bindOwner(verified.user.id)) === userId;
+    } } : {}),
   });
   const aiPreferences = new AIPreferencesStore(workspaceStore, config.dataDirectory);
   const activeContextResolver = new ActiveContextResolver(workspaceStore);
@@ -1236,7 +1245,7 @@ export function buildApp(config: AppConfig = {}) {
     retentionMs: Number(process.env.NPATI_SANDBOX_RETENTION_MS) || undefined,
   }, projectApiGatewayService ? (ctx, companyId, projectId) => projectApiGatewayService.getSandboxEnvironment(ctx, companyId, projectId) : undefined);
   const backupTimer = backupService && (process.env.NPATI_DATA_BACKUP_DISABLED !== "true")
-    ? setInterval(() => { void backupService.runScheduled(); }, Math.max(60_000, (Number(process.env.NPATI_DATA_BACKUP_TICK_SECONDS) || 300) * 1000))
+    ? setInterval(() => { void backupService.runScheduled().catch((error) => { app.log.error({ err: error }, "data_backup_tick_failed"); }); }, Math.max(60_000, (Number(process.env.NPATI_DATA_BACKUP_TICK_SECONDS) || 300) * 1000))
     : undefined;
   backupTimer?.unref();
   const sandboxIdleTimer = projectSandbox ? setInterval(() => { void projectSandbox?.stopInactive(); }, 60_000) : undefined;
@@ -1369,8 +1378,8 @@ export function buildApp(config: AppConfig = {}) {
   );
   const projectImportService = new ProjectImportService(workspaceStore, projectService, projectWorkspace, projectSandbox, projectPreviewService, projectGitService, browserCredentials);
   // C1: code projects and code sessions. No tools and no agent loop here; the runner is C6.
-  // C1a: the Coding Agent is dark by default; every code mutation (and later every tool) passes here.
-  const featureFlagService = new FeatureFlagService(workspaceStore, auditLogService, {}, async (ctx, companyId) => {
+  // Self-hosted defaults are ready to use; hosted deployments retain dark launch and rollout gates.
+  const featureFlagService = new FeatureFlagService(workspaceStore, auditLogService, { enabledByDefault: selfHosted, allowPreGateRollout: selfHosted }, async (ctx, companyId) => {
     // Best-effort kill-switch cleanup: stop the company's project sandboxes. Full teardown and
     // SecretLease revocation are C4/C6 work; failures here must not block the kill switch.
     let stopped = 0;
@@ -4816,7 +4825,7 @@ ${localized.next}`;
   });
   registerInstallationAuthRoutes(app, {
     authClient,
-    store: new InstallationAuthStore(config.dataDirectory),
+    store: installationAuthStore,
     publicDomain: config.agentPublicDomain,
     version: config.agentVersion,
     deploymentType: config.deploymentType,
@@ -5531,6 +5540,16 @@ ${localized.next}`;
   const codeSessionRunExecutor = new CodeSessionRunExecutor({
     runner: codingAgentRunner,
     control: codeRunCancellation,
+    resolveModel: async (ctx) => {
+      const preferences = await aiPreferences.get(ctx);
+      const modelId = preferences.routing.defaultModelId;
+      if (!modelId) return undefined;
+      const model = preferences.addedModels.find((item) => item.id === modelId);
+      if (model ? !isChatCapableModel(model) : isNonChatSpecialtyModel({ id: modelId })) {
+        throw new Error("The default AI model cannot run coding tasks. Choose a chat model in AI Settings.");
+      }
+      return modelId;
+    },
     logger: { warn: (payload, message) => { app.log.warn(payload as Record<string, unknown>, message ?? "code_session_run_warning"); } },
   });
   /**

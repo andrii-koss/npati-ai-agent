@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import { confirmModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
-import { chooseAvailableCompanyId, readCachedCompanies } from "./active-company";
+import { chooseAvailableCompanyId, readCachedCompanies, writeActiveCompanyId } from "./active-company";
 import { CodeFlagsPanel } from "./CodeFlagsPanel";
 import { CodeSandboxImagesPanel } from "./CodeSandboxImagesPanel";
 import { CodeDataPolicyPanel } from "./CodeDataPolicyPanel";
@@ -289,6 +289,7 @@ function ToolchainCell({ toolchain, isUk }: { toolchain: Toolchain | null | unde
 // --- Page --------------------------------------------------------------------
 
 export function CodeSettingsPage() {
+  const navigate = useNavigate();
   const { language } = useTranslation();
   const isUk = language === "uk";
 
@@ -322,6 +323,22 @@ export function CodeSettingsPage() {
   const readOnlyTitle = isUk ? "Coding Agent вимкнено (History read-only)" : "Coding Agent is disabled (History read-only)";
 
   const reload = useCallback(() => setReloadToken((token) => token + 1), []);
+
+  const openSession = useCallback(async (session: Pick<CodeSession, "id" | "projectId" | "status">, chat = false) => {
+    setBusyId(session.id);
+    try {
+      if (session.status !== "archived") {
+        const result = await apiFetch<{ persisted: boolean }>(`/companies/${encodeURIComponent(companyId)}/code/active-context`, {
+          method: "PUT", body: JSON.stringify({ contextType: "project", projectId: session.projectId, sessionId: session.id }),
+        });
+        if (!result.persisted) throw new Error(isUk ? "Не вдалося зберегти активну сесію." : "Could not save the active session.");
+      }
+      writeActiveCompanyId(companyId);
+      navigate(chat ? "/chat" : `/settings/code/${encodeURIComponent(companyId)}/${encodeURIComponent(session.projectId)}?session=${encodeURIComponent(session.id)}`);
+    } catch (cause) {
+      setFeedback({ type: "error", message: codeErrorMessage(cause, isUk) });
+    } finally { setBusyId(null); }
+  }, [companyId, isUk, navigate]);
 
   useEffect(() => {
     if (!feedback) return;
@@ -520,7 +537,8 @@ export function CodeSettingsPage() {
       message: isUk ? `Сесію ${session.id.slice(0, 8)} створено (${sessionModeLabel(session.mode, isUk)}).` : `Session ${session.id.slice(0, 8)} created (${sessionModeLabel(session.mode, isUk)}).`,
     });
     reload();
-  }, [companyId, isUk, reload]);
+    await openSession(session);
+  }, [companyId, isUk, reload, openSession]);
 
   const archiveSession = useCallback(async (session: CodeSession) => {
     if (!companyId) return;
@@ -753,8 +771,8 @@ export function CodeSettingsPage() {
               <h2>{isUk ? "Сесії Coding Agent" : "Coding Agent sessions"}</h2>
               <p className="ds-muted">
                 {isUk
-                  ? "Сесія фіксує режим дозволів, профіль моделі та класифікацію даних для майбутнього циклу агента."
-                  : "A session records the permission mode, model profile and data classification for the future agent loop."}
+                  ? "Відкрийте сесію, щоб працювати з агентом, або продовжуйте її в чаті."
+                  : "Open a session to work with the agent or continue it in chat."}
               </p>
             </div>
             <button
@@ -799,6 +817,8 @@ export function CodeSettingsPage() {
                       <td><span className="data-studio-badge">{classificationLabel(session.dataClassification, isUk)}</span></td>
                       <td className="ds-muted">{formatDate(session.createdAt, isUk)}</td>
                       <td className="automation-actions-cell">
+                        <button type="button" className="automation-action-btn" disabled={busyId === session.id} onClick={() => void openSession(session)}>{isUk ? "Відкрити Workspace" : "Open Workspace"}</button>
+                        <button type="button" className="automation-action-btn" disabled={busyId === session.id || readOnly || session.status === "archived"} onClick={() => void openSession(session, true)}>{isUk ? "У чаті" : "Open in chat"}</button>
                         {session.status !== "archived" && (
                           <button
                             type="button"
@@ -1305,8 +1325,8 @@ function CreateSessionDrawer({ isUk, projects, initialProjectId, onClose, onSubm
             </select>
             <small>
               {isUk
-                ? "plan — лише планування; ask — відповіді без змін; auto_edit — правки з підтвердженням; full_auto_sandbox — ширша автономія під політикою проєкту."
-                : "plan — planning only; ask — answers without changes; auto_edit — changes with approval; full_auto_sandbox — wider autonomy under the project policy."}
+                ? "plan — читання і планування; ask — правки після підтвердження; auto_edit — автоматичні правки, ризикові дії після підтвердження; full_auto_sandbox — автономна робота в sandbox."
+                : "plan — read and plan; ask — approve edits; auto_edit — automatic edits with approval for risky actions; full_auto_sandbox — autonomous sandbox work."}
             </small>
           </label>
           <label className="browser-form-field">
@@ -1325,8 +1345,8 @@ function CreateSessionDrawer({ isUk, projects, initialProjectId, onClose, onSubm
         <div className="browser-form-footer">
           <div className="browser-form-footer-hint">
             {isUk
-              ? "Сесія не запускає агента — цикл агента з'явиться в C6, а інструменти в C2–C4."
-              : "A session does not start the agent — the loop arrives in C6 and the tools in C2–C4."}
+              ? "Після створення відкриється Workspace. Введіть завдання, щоб запустити агента."
+              : "The workspace opens after creation. Enter a task to start the agent."}
           </div>
           <button type="submit" className="button-primary automations-action-primary browser-submit-btn" disabled={!projectId || working}>
             {working ? (isUk ? "Створення…" : "Creating…") : isUk ? "Створити сесію" : "Create session"}

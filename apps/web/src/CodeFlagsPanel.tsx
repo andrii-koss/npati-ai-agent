@@ -5,7 +5,7 @@ import { confirmModal } from "./ConfirmDialog";
 /**
  * C1a: Coding Agent feature-flag panel.
  *
- * The agent is dark by default; this panel is the only place where flags can be changed, and every
+ * Self-hosted installations enable the agent by default; hosted deployments retain dark launch. Every
  * mutation goes through the server (which enforces the owner/admin role, the security gate for stage
  * promotion and the audit journal). The UI never caches a decision: it re-reads the server state
  * after every change so a rolled-back or refused change is visible immediately.
@@ -49,6 +49,8 @@ export const CODE_SUB_FLAGS: readonly string[] = [
   // C13: slash commands (stored prompt templates) and lazily loaded Skills. Added here as well as on the
   // server because `CODE_FLAG_KEY_PATTERN` is an allowlist and this panel's list is what an operator sees.
   "code.commands", "code.skills",
+  "code.repo_map", "code.session_resume", "code.rewind", "code.session_fork", "code.export",
+  "code.model_profile.hosted-native-tools", "code.model_profile.hosted-native-tools-small-context", "code.model_profile.local-text-tools",
 ];
 
 const STAGE_LABELS: Record<FlagStage, string> = { off: "off", internal: "internal", allowlist: "allowlist", percent: "percent", ga: "ga" };
@@ -128,7 +130,7 @@ export function CodeFlagsPanel({ companyId, isUk, notify, onMasterEnabledChange,
   const [loading, setLoading] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [scope, setScope] = useState<FlagScope>("company");
+  const [scope, setScope] = useState<FlagScope>("global");
   const [history, setHistory] = useState<FlagHistoryEntry[]>([]);
   const [historyKey, setHistoryKey] = useState<string>("coding_agent.enabled");
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -225,8 +227,8 @@ export function CodeFlagsPanel({ companyId, isUk, notify, onMasterEnabledChange,
         <h2>{isUk ? "Feature flags (експериментально)" : "Feature flags (experimental)"}</h2>
         <p className="ds-muted">
           {isUk
-            ? "Coding Agent вимкнений за замовчуванням. Флаги змінюються без деплою; усі зміни пишуться в AuditLog."
-            : "The Coding Agent is off by default. Flags change without a deploy, and every change is written to the AuditLog."}
+            ? "У self-hosted інсталяції Coding Agent ввімкнений відразу. Тут можна змінити доступність функцій."
+            : "Coding Agent is enabled automatically on self-hosted installations. Manage feature availability here."}
         </p>
       </div>
 

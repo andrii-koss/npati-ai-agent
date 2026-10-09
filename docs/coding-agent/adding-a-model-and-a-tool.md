@@ -77,8 +77,8 @@ Enabling is a **filter**, never an assignment: `enabledProfileIds` decides which
 
 1. The key is `code.model_profile.<id>`; it must match `CODE_MODEL_PROFILE_PATTERN`
    (`feature-flags.ts:65`) and `CODE_FLAG_KEY_PATTERN` (`:71`).
-2. Turning the flags on is a rollout decision. All flags are off by default
-   (`feature-flags.ts:19-60`), so **until somebody enables `code.model_profile.<id>`, every model gets
+2. Self-hosted installations enable coding flags and model profiles by default after installation.
+   Hosted deployments retain dark-launch defaults. There, **until somebody enables `code.model_profile.<id>`, every model gets
    `conservative-default`** — `toolCallingMode: "auto"`, one tool call at a time, the registry's minimum
    context window, with `fallbackReason: "profile_flag_disabled"` recorded in Activity
    (`code-model-profiles.ts:181-189`, `:499-505`).

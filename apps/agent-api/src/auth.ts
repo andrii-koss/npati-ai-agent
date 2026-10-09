@@ -36,6 +36,7 @@ export class LocalDevAuthProvider implements AuthProvider {
 }
 
 export interface NpatiBackendAuthProviderOptions {
+  isInstallationOwner?: (userId: string) => Promise<boolean>;
   jwtSecret?: string;
   authClient?: NpatiAuthClient;
   workspaceStore?: WorkspaceStore;
@@ -90,6 +91,7 @@ export interface NpatiJwtPayload {
 }
 
 export class NpatiBackendAuthProvider implements AuthProvider {
+  private readonly isInstallationOwner?: (userId: string) => Promise<boolean>;
   private readonly jwtSecret?: string;
   private readonly authClient?: NpatiAuthClient;
   private readonly workspaceStore?: WorkspaceStore;
@@ -107,6 +109,7 @@ export class NpatiBackendAuthProvider implements AuthProvider {
   private readonly workspaceInitRetryMs: number;
 
   constructor(options: NpatiBackendAuthProviderOptions = {}) {
+    this.isInstallationOwner = options.isInstallationOwner;
     this.jwtSecret = options.jwtSecret || process.env.NPATI_JWT_SECRET || process.env.JWT_SECRET;
     this.authClient = options.authClient;
     this.workspaceStore = options.workspaceStore;
@@ -341,12 +344,16 @@ export class NpatiBackendAuthProvider implements AuthProvider {
         permissions.push("admin:all", "audit:read");
       }
 
+      const installationOwner = await this.isInstallationOwner?.(userId) ?? false;
+      if (installationOwner) permissions.push("owner", "admin:all", "audit:read", "tools:read", "tools:execute", "code.policy.manage", "code.trust.manage", "code.rbac.manage");
+
       const workspaceId = userId === "dev-user" ? "dev-workspace" : `workspace:${userId}`;
       const authContext: AuthContext = {
         userId,
         externalSubject: `npati:${userId}`,
         workspaceId,
         permissions,
+        ...(installationOwner ? { role: "owner" } : {}),
       };
 
       await this.ensureWorkspaceInitialized(authContext);

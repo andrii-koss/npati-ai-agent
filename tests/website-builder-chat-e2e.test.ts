@@ -7,6 +7,7 @@ import { buildApp } from "../apps/agent-api/src/app";
 import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
 import type { AuthProvider } from "../apps/agent-api/src/auth";
 import type { AIEngine, OmniRouteMarketplace } from "@npati/omniroute-adapter";
+import { WEBSITE_FILE_TOOLS, PROJECT_PREVIEW_TOOLS } from "../apps/agent-api/src/project-agent-capabilities";
 
 const createPrompt = "\u0421\u0442\u0432\u043e\u0440\u0438 \u0441\u0443\u0447\u0430\u0441\u043d\u0438\u0439 \u0441\u0430\u0439\u0442 \u0434\u043b\u044f \u0445\u043e\u0441\u0442\u0438\u043d\u0433-\u043a\u043e\u043c\u043f\u0430\u043d\u0456\u0457. \u0412\u0438\u043a\u043e\u0440\u0438\u0441\u0442\u0430\u0439 Next.js. \u0421\u0442\u043e\u0440\u0456\u043d\u043a\u0438: Home, Hosting, Domains, Pricing, Contact. \u0417\u0440\u043e\u0431\u0438 \u0430\u0434\u0430\u043f\u0442\u0438\u0432\u043d\u0438\u0439 \u0434\u0438\u0437\u0430\u0439\u043d \u0456 \u0437\u0430\u043f\u0443\u0441\u0442\u0438 Live Preview.";
 const editPrompt = "\u0417\u0440\u043e\u0431\u0438 header \u0442\u0435\u043c\u043d\u0456\u0448\u0438\u043c.";
@@ -32,9 +33,10 @@ describe("Website Builder through ordinary streamed Chat", () => {
     const company = await store.createCompany(auth, { name: "Hosting Company" }, "hosting-company");
     const agent = await store.createCompanyAgent(auth, company.id, {
       name: "Builder", role: "frontend developer",
-      tools: ["project.files.read", "project.files.write", "project.terminal.exec", "project.preview.start"], isActive: true,
+      tools: [...WEBSITE_FILE_TOOLS, ...PROJECT_PREVIEW_TOOLS], isActive: true,
     }, "builder-agent");
-    await store.setCompanyMainAgent(auth, company.id, agent.id, company.revision);
+    // Reproduce a fresh Company with a builder but no Main Agent selected.
+    expect((await store.getCompany(auth, company.id)).mainAgentId).toBeUndefined();
     const aiEngine = {
       chat: async () => ({ content: "Website task completed.", model: "test-model", usage: { promptTokens: 5, completionTokens: 5, totalTokens: 10 } }),
       async *stream() { yield "Website task completed."; },
@@ -54,6 +56,9 @@ describe("Website Builder through ordinary streamed Chat", () => {
     expect(first.statusCode).toBe(200);
     const created = streamResult(first.body);
     expect(created.projectAction?.action).toBe("create");
+    const assignedMain = (await store.getCompany(auth, company.id)).mainAgentId;
+    expect(assignedMain).toBeTruthy();
+    expect((await store.getCompanyAgent(auth, company.id, assignedMain!)).isActive).toBe(true);
     const projectId = created.projectCard?.projectId as string;
     expect(projectId).toBeTruthy();
     expect(created.activeContext).toMatchObject({ contextType: "project", companyId: company.id, projectId });

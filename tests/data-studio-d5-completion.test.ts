@@ -64,6 +64,7 @@ class CaptureSandbox implements SandboxProvider {
     _command: string,
     options: SandboxCommandOptions,
   ): Promise<SandboxCommandResult> {
+    sandboxProcessEnvironment(options.environment);
     this.processEnvironment = options.environment;
     return { status: "running", exitCode: null, stdout: "", stderr: "", durationMs: 0, step: "process", tool: "project.terminal.process", retryable: false, processId: "55555555-5555-4555-8555-555555555555" };
   }

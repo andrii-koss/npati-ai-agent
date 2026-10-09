@@ -15,48 +15,12 @@
     "from the JSON report. `evidence` records where the id came from, so a reader can re-check it instead of",
     "trusting it: every id below is a verbatim `FAIL` line of an escalated full-suite run",
     "(`D:\\npati\\c14b-test.txt`, `Test Files 10 failed | 342 passed | 2 skipped (354)`, `Tests 15 failed |",
-    "3940 passed | 6 skipped (3961)`), which is the run whose 15 failures this list documents."
+    "3940 passed | 6 skipped (3961)`), which is the original run. On 2026-10-09 all four company-runtime cases passed and were removed."
   ],
   "version": 1,
-  "updated_at": "2026-10-07",
+  "updated_at": "2026-10-09",
   "default_owner": "repo-maintainer",
   "entries": [
-    {
-      "file": "tests/company-runtime.test.ts",
-      "title": "Company delegation runtime > uses A2A planning, OmniRoute Pipeline, Auto fallback, tool enforcement and idempotency",
-      "reason": "Pre-existing Company delegation runtime defect, unrelated to the Coding Agent: `Error: Test timed out in 10000ms.` — the A2A planning run never settles.",
-      "owner": "repo-maintainer",
-      "added_at": "2026-10-07",
-      "expires_at": "2026-11-06",
-      "evidence": "full-suite run FAIL line verbatim (title confirmed, line 2177 of D:\\npati\\c14b-test.txt) + `Error: Test timed out in 10000ms.`"
-    },
-    {
-      "file": "tests/company-runtime.test.ts",
-      "title": "Company delegation runtime > uses OmniRoute Fusion for parallel workers and blocks forbidden tools in backend audit",
-      "reason": "Pre-existing Company delegation runtime defect: `AssertionError: expected { …(24) } to match object { status: 'completed', …(1) }` — the Fusion run does not reach a completed state.",
-      "owner": "repo-maintainer",
-      "added_at": "2026-10-07",
-      "expires_at": "2026-11-06",
-      "evidence": "full-suite run FAIL line verbatim (line 2191) + the assertion message above"
-    },
-    {
-      "file": "tests/company-runtime.test.ts",
-      "title": "Company delegation runtime > cancels an active A2A planning request and does not execute a duplicate run",
-      "reason": "Pre-existing Company delegation runtime defect: `Error: Test timed out in 10000ms.` — the cancelled A2A planning request does not settle.",
-      "owner": "repo-maintainer",
-      "added_at": "2026-10-07",
-      "expires_at": "2026-11-06",
-      "evidence": "full-suite run FAIL line verbatim (line 2215) + `Error: Test timed out in 10000ms.`"
-    },
-    {
-      "file": "tests/company-runtime.test.ts",
-      "title": "Company delegation runtime > persists provider failures and enforces the overall run timeout",
-      "reason": "Pre-existing Company delegation runtime defect: `AssertionError: expected 200 to be 502` — a failing provider is answered with a completed run instead of an error status. This is the last remaining behavioural (non-count) failure recorded in `docs/coding-agent/current-state.md`.",
-      "owner": "repo-maintainer",
-      "added_at": "2026-10-07",
-      "expires_at": "2026-11-06",
-      "evidence": "full-suite run FAIL line verbatim (line 2229) + `AssertionError: expected 200 to be 502 // Object.is equality`"
-    },
     {
       "file": "tests/company-orchestration.test.ts",
       "title": "PHASE 5: Company Main Agent + Specialist Agent Orchestration > successfully orchestrates Main -> Specialist delegation with tool execution",

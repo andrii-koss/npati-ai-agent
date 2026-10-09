@@ -6,6 +6,7 @@ import type { ProjectFileLeaseManager } from "./project-file-lock";
 import { WEBSITE_FILE_TOOLS, PROJECT_PREVIEW_TOOLS, canBuildWebsite, canBuildMobileApp } from "./project-agent-capabilities";
 import { DataStudioError } from "./data-studio/identifier";
 import type { AuthContext, Company, CompanyAgent, CompanyAgentRunDetails, Project, WorkspaceStore } from "@npati/workspace";
+import { WorkspaceNotFoundError } from "@npati/workspace";
 import type { ProjectService } from "./project-service";
 import type { ProjectWorkspace } from "./project-workspace";
 import type { ProjectSandboxService } from "./project-sandbox-service";
@@ -400,6 +401,15 @@ export class ProjectOrchestrator {
       : isMobileApp
         ? await this.ensureMobileAppAgent(ctx, params.companyId)
         : await this.ensureWebsiteAgent(ctx, params.companyId);
+    // A Company created from neutral chat may have no Main Agent yet. The
+    // qualified builder must be assigned before the runtime creates its run.
+    const taskCompany = await this.workspaceStore.getCompany(ctx, params.companyId);
+    if (!taskCompany.mainAgentId) {
+      await this.workspaceStore.setCompanyMainAgent(ctx, params.companyId, selectedAgent.id, taskCompany.revision);
+    } else {
+      const mainAgent = await this.workspaceStore.getCompanyAgent(ctx, params.companyId, taskCompany.mainAgentId);
+      if (!mainAgent.isActive) throw new ProjectOrchestrationError("MAIN_AGENT_INACTIVE", "Activate the company's Main Agent before running this project.", 409);
+    }
     // 1. Resolve or Create Project
     let project: Project;
     let isCreate = false;
@@ -775,6 +785,14 @@ export class ProjectOrchestrator {
             break;
           }
         } catch (buildErr) {
+          // Deletion/archive during a build must not spawn a repair run for stale context.
+          try {
+            const current = await this.projectService.get(ctx, params.companyId, project.id);
+            if (current.status === "archived") throw new ProjectOrchestrationError("PROJECT_ARCHIVED", "Проєкт архівовано під час build. Запуск зупинено.", 409);
+          } catch (lookupError) {
+            if (lookupError instanceof WorkspaceNotFoundError) throw new ProjectOrchestrationError("PROJECT_REMOVED", "Проєкт видалено під час build. Запуск зупинено.", 404);
+            throw lookupError;
+          }
           const errMessage = buildErr instanceof Error ? buildErr.message : String(buildErr);
           buildErrorSummary = errMessage;
           if (buildErr instanceof PreviewError && buildErr.code === "sandbox_unavailable") {
