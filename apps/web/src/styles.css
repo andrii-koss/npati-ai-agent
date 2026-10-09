@@ -14949,6 +14949,8 @@ body:has(.npati-dialog-backdrop) .sidebar {
   line-height: 1.5;
   color: #52525b;
   word-break: break-word;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .npati-dialog-form {

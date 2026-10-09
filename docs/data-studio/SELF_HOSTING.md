@@ -203,7 +203,8 @@ Core, not in the project database).
   RESTRICT`, so this is enforced by the database as well). Transfer or delete the databases first.
 - Deleting a DataBackend is refused while active Projects are attached unless the confirmed request
   includes `detachProjects: true`. Settings → Data Studio explains that attached projects lose access,
-  requires the exact database name, and sends this option together with `immediate: true` for “Delete now”. Detaching projects and scheduling deletion
+  shows the full stored database name and asks the user to type `DELETE`, then sends the exact stored
+  name as `confirmName` together with `detachProjects: true` and `immediate: true` for “Delete now”. Detaching projects and scheduling deletion
   happen in one tenant-scoped transaction; the projects themselves are preserved. Afterwards the backend is
   marked `deleting`, its runtime roles are suspended, and databases, roles, keys and secrets are
   purged after the snapshot retention window (`remove_after`). Use `immediate: true` in the API to
