@@ -16,7 +16,7 @@ function lockGraph(lock) {
   return result;
 }
 async function json(file) { return JSON.parse(await fs.readFile(file, 'utf8')); }
-async function prepareWorkspace(workspace, toolchain, mode) {
+async function prepareWorkspace(workspace, toolchain, mode, copyModules = (source, target) => fs.cp(source, target, { recursive: true, verbatimSymlinks: true })) {
   const manifest = await json(path.join(workspace, 'package.json'));
   // Preserve npm lifecycle, workspace, override, peer and engine semantics.
   if (['workspaces', 'overrides', 'resolutions', 'peerDependencies', 'bundledDependencies', 'bundleDependencies', 'engines', 'os', 'cpu', 'packageManager', 'config'].some(key => manifest[key]) ||
@@ -32,7 +32,7 @@ async function prepareWorkspace(workspace, toolchain, mode) {
   if (mode === 'ci' && !existingLock || existingLock && !same(lockGraph(existingLock), lockGraph(preparedLock))) return null;
   // Every project gets owned, writable copies. Never link writable shared modules.
   await fs.rm(path.join(workspace, 'node_modules'), { recursive: true, force: true });
-  await fs.cp(path.join(source, 'node_modules'), path.join(workspace, 'node_modules'), { recursive: true, verbatimSymlinks: true });
+  await copyModules(path.join(source, 'node_modules'), path.join(workspace, 'node_modules'));
   if (!existingLock) {
     preparedLock.name = manifest.name; preparedLock.version = manifest.version;
     preparedLock.packages[''].name = manifest.name; preparedLock.packages[''].version = manifest.version;
@@ -44,7 +44,11 @@ module.exports = { prepareWorkspace, dependencySet, lockGraph };
 if (require.main === module) (async () => {
   const mode = process.argv[2]; if (!['install', 'ci'].includes(mode)) throw Error('Unsupported dependency preparation command');
   let profile = null;
-  try { profile = await prepareWorkspace(process.cwd(), '/opt/npati-project-toolchain', mode); }
+  try { profile = await prepareWorkspace(process.cwd(), '/opt/npati-project-toolchain', mode, (source, target) => {
+    const copied = spawnSync('cp', ['-R', '--preserve=mode,timestamps', '--no-preserve=ownership', '--reflink=auto', source, target], { encoding: 'utf8' });
+    if (copied.error) throw copied.error;
+    if (copied.status !== 0) throw Error(`Prepared dependency copy failed: ${copied.stderr.slice(0, 500)}`);
+  }); }
   catch (error) {
     // A failed copy must fail explicitly; do not conceal permission/isolation errors.
     if (!['ENOENT', 'ENOTDIR'].includes(error.code)) throw error;

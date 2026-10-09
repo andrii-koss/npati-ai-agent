@@ -54,6 +54,8 @@ describe("Website Builder through ordinary streamed Chat", () => {
     apps.push(app);
     const first = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: createPrompt, contextType: "project", companyId: company.id, projectId: "7b54458a-f557-4d4b-b7ab-a6d4b9b05fb4" } });
     expect(first.statusCode).toBe(200);
+    const stages = first.body.split(/\r?\n\r?\n/).filter(block => block.includes('event: progress')).map(block => JSON.parse(block.split(/\r?\n/).find(line => line.startsWith('data:'))!.slice(5))).filter(event => event.type === 'project_progress');
+    expect(stages.map(event => event.stage)).toEqual(expect.arrayContaining(['project', 'files', 'agent']));
     const created = streamResult(first.body);
     expect(created.projectAction?.action).toBe("create");
     const assignedMain = (await store.getCompany(auth, company.id)).mainAgentId;

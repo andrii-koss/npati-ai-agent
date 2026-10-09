@@ -5,7 +5,7 @@ import { defaultHybridRouter } from "@npati/shared";
 import { FormEvent, Fragment, KeyboardEvent as ReactKeyboardEvent, ReactNode, SyntheticEvent, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { createPortal } from "react-dom";
-import { ChatMessageContent, stripInternalChatActions } from "./ChatMessageContent";
+import { ChatMessageContent, projectChatText, stripInternalChatActions } from "./ChatMessageContent";
 import { UserPromptMessage } from "./UserPromptMessage";
 import { readActiveCompanyId, writeActiveCompanyId } from "./active-company";
 import { AutoResizeChatTextarea } from "./AutoResizeChatTextarea";
@@ -1667,6 +1667,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     }
 
     const optimisticContent = message;
+    const projectProgressIntent = defaultHybridRouter.classifyProject({ message: requestMessage, activeCompanyId: companyId ?? readActiveCompanyId() });
     const mutationContext = companyId ? "company" : business ? "business" : "none";
     const pendingMutation = detectChatMutationOperation(requestMessage, mutationContext);
     const mutationTargets = pendingMutation
@@ -1677,6 +1678,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     const optimisticMessage: Message = { id: optimisticId, role: "user", content: optimisticContent, createdAt: new Date().toISOString(), attachments: sentAttachments };
     setMessages((current) => [...current, optimisticMessage]);
     resetProgress();
+    if (projectProgressIntent.intent !== "CHAT") enqueueProgress({ type: "project_progress", stage: "project", status: "active", title: /[\u0400-\u04ff]/u.test(requestMessage) ? "Підготовка запиту" : "Preparing request", timestamp: new Date().toISOString() });
     for (const mutationTarget of mutationTargets) enqueueProgress({ type: "action_started", ...mutationTarget, timestamp: new Date().toISOString() });
     setSending(true); setStreamingResponse(false); setNotice(""); setInput(""); setAttachments([]); setReplyMeta(null);
     window.requestAnimationFrame(() => {
@@ -1917,7 +1919,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
                   aria-label={message.role === "user" ? "Your message" : "NPATI Agent message"}
                 >
                   <PendingMessageAttachments value={message.attachments ?? []} />
-                  {message.role === "user" ? <UserPromptMessage content={message.content} onEdit={(prompt) => { setInput(prompt); window.requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".onboarding-live-composer textarea")?.focus()); }} /> : <ChatMessageContent content={message.content} />}
+                  {message.role === "user" ? <UserPromptMessage content={message.content} onEdit={(prompt) => { setInput(prompt); window.requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".onboarding-live-composer textarea")?.focus()); }} /> : <ChatMessageContent content={projectChatText(message.content, message.projectCard)} />}
                   {message.projectCard && <ProjectChatCard card={message.projectCard} />}
                   {message.role === "assistant" && !sending && (
                     <AssistantMessageToolbar

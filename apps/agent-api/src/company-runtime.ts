@@ -267,13 +267,13 @@ export class CompanyDelegationRuntime {
     return this.store.createCompanyAgentRun(ctx, companyId, { task: input.task, requestedMode: input.mode ?? "auto", projectId: input.projectId }, key);
   }
 
-  async execute(ctx: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode; noMemory?: boolean; memoryScope?: MemoryScope; preferredAgentId?: string; projectId?: string; suppressTools?: boolean; callBudget?: { remaining: number }; allowedProjectPaths?: string[]; allowedProjectId?: string }, key: string, signal?: AbortSignal): Promise<CompanyAgentRunDetails> {
+  async execute(ctx: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode; noMemory?: boolean; memoryScope?: MemoryScope; preferredAgentId?: string; projectId?: string; suppressTools?: boolean; callBudget?: { remaining: number }; allowedProjectPaths?: string[]; allowedProjectId?: string; onTool?: (tool: string, path?: string) => void }, key: string, signal?: AbortSignal): Promise<CompanyAgentRunDetails> {
     const created = await this.create(ctx, companyId, input, key);
     if (!created.created) return this.store.getCompanyAgentRun(ctx, companyId, created.run.id);
-    return this.process(ctx, companyId, created.run.id, { noMemory: input.noMemory === true, memoryScope: input.memoryScope, preferredAgentId: input.preferredAgentId, suppressTools: input.suppressTools, callBudget: input.callBudget, allowedProjectPaths: input.allowedProjectPaths, allowedProjectId: input.allowedProjectId, signal });
+    return this.process(ctx, companyId, created.run.id, { noMemory: input.noMemory === true, memoryScope: input.memoryScope, preferredAgentId: input.preferredAgentId, suppressTools: input.suppressTools, callBudget: input.callBudget, allowedProjectPaths: input.allowedProjectPaths, allowedProjectId: input.allowedProjectId, onTool: input.onTool, signal });
   }
 
-  async process(ctx: AuthContext, companyId: string, runId: string, options: { noMemory?: boolean; memoryScope?: MemoryScope; preferredAgentId?: string; approvalId?: string; suppressTools?: boolean; callBudget?: { remaining: number }; allowedProjectPaths?: string[]; allowedProjectId?: string; signal?: AbortSignal } = {}): Promise<CompanyAgentRunDetails> {
+  async process(ctx: AuthContext, companyId: string, runId: string, options: { noMemory?: boolean; memoryScope?: MemoryScope; preferredAgentId?: string; approvalId?: string; suppressTools?: boolean; callBudget?: { remaining: number }; allowedProjectPaths?: string[]; allowedProjectId?: string; onTool?: (tool: string, path?: string) => void; signal?: AbortSignal } = {}): Promise<CompanyAgentRunDetails> {
     const existing = await this.store.getCompanyAgentRun(ctx, companyId, runId);
     if (options.approvalId && existing.run.status !== "awaiting_approval") throw new CompanyRuntimeError("APPROVAL_INVALID", "Run is not awaiting approval", 409);
     const pendingState = options.approvalId ? await this.store.getCompanyRunPendingPlan(ctx, companyId, runId) as { plan: Plan; nextToolIndex: number; evidence: string } | null : null;
@@ -541,7 +541,7 @@ export class CompanyDelegationRuntime {
         }
         return { ...request, input: SecurityPolicyEngine.protectObject(request.input, guardrailPolicy) };
       });
-      const rawEvidence = options.suppressTools ? "" : await this.tools(ctx, company, created.run.id, normalizedToolRequests, byId, signal, knowledge, options.noMemory === true, options.approvalId, options.allowedProjectPaths, options.allowedProjectId ?? existing.run.projectId, existing.run.projectId, async (nextToolIndex, evidence) => { await this.store.setCompanyRunPendingPlan(ctx, companyId, created.run.id, { plan, nextToolIndex, evidence }); }, pendingState?.evidence, pendingState?.nextToolIndex ?? 0, existing.run.requestedMode);
+      const rawEvidence = options.suppressTools ? "" : await this.tools(ctx, company, created.run.id, normalizedToolRequests, byId, signal, knowledge, options.noMemory === true, options.approvalId, options.allowedProjectPaths, options.allowedProjectId ?? existing.run.projectId, existing.run.projectId, async (nextToolIndex, evidence) => { await this.store.setCompanyRunPendingPlan(ctx, companyId, created.run.id, { plan, nextToolIndex, evidence }); }, pendingState?.evidence, pendingState?.nextToolIndex ?? 0, existing.run.requestedMode, options.onTool);
       const evidence = rawEvidence ? protect(rawEvidence) : rawEvidence;
       const knowledgeContext = [
         knowledge.memories.length ? "Relevant Company Memory:\n" + knowledge.memories.map(item => item.content).join("\n") : "",
@@ -578,7 +578,7 @@ export class CompanyDelegationRuntime {
         result = await this.ai.chat({
           model: this.strictInferenceRouting ? inferenceModels[0] : comboModel(main.modelId), fallbackModel: this.strictInferenceRouting ? undefined : comboModel(main.fallbackModelId), signal, timeoutMs: this.timeoutMs, admission: { tenantId: ctx.workspaceId, tier: ctx.permissions.includes("admin:all") ? "enterprise" : "pro" }, idempotencyKey: `${created.run.id}:grounded-final`,
           messages: [
-            { role: "system", content: protect(instruction(company, main, true, !options.noMemory, linked) + "\n\nYou are the final grounding verifier. Use the authoritative Company Knowledge below as the source of truth. Preserve exact relevant values. Remove unsupported claims. Never omit the direct answer requested by the user." + chatLanguageInstruction(input.task)) },
+            { role: "system", content: protect(instruction(company, main, true, !options.noMemory, linked) + "\n\nYou are the final grounding verifier. Use the authoritative Company Knowledge below as the source of truth. Preserve exact relevant values. Remove unsupported claims. Never omit the direct answer requested by the user." + chatLanguageInstruction(input.task) + (existing.run.projectId ? "\nSummarize only verified tool results in at most 120 words. Do not output source code or proposed edits. This response cannot save files; Build and Preview are handled by the project pipeline." : "")) },
             { role: "user", content: protect([protectedTask, knowledgeContext, `Delegated draft to verify:\n${result.content}`, "Return only the corrected, knowledge-grounded final answer."].join("\n\n")) },
           ],
         });
@@ -723,7 +723,7 @@ export class CompanyDelegationRuntime {
     return { costUsd, totalTokens: usage.totalTokens };
   }
 
-  private async tools(ctx: AuthContext, company: Company, runId: string, plans: ToolPlan[], agents: Map<string, CompanyAgent>, signal: AbortSignal, knowledge: { chunks: Array<{ content: string }>; memories: Array<{ content: string }> }, noMemory = false, approvalId?: string, allowedProjectPaths?: string[], allowedProjectId?: string, runProjectId?: string, onApprovalPending?: (nextToolIndex: number, evidence: string) => Promise<void>, previousEvidence?: string, startIndex = 0, runType = "company_run") {
+  private async tools(ctx: AuthContext, company: Company, runId: string, plans: ToolPlan[], agents: Map<string, CompanyAgent>, signal: AbortSignal, knowledge: { chunks: Array<{ content: string }>; memories: Array<{ content: string }> }, noMemory = false, approvalId?: string, allowedProjectPaths?: string[], allowedProjectId?: string, runProjectId?: string, onApprovalPending?: (nextToolIndex: number, evidence: string) => Promise<void>, previousEvidence?: string, startIndex = 0, runType = "company_run", onTool?: (tool: string, path?: string) => void) {
     const evidence: string[] = previousEvidence ? [previousEvidence] : [];
     let sequenceNumber = 1;
     for (const [offset, plan] of plans.slice(startIndex, 10).entries()) {
@@ -1020,6 +1020,7 @@ export class CompanyDelegationRuntime {
           adapterInput.__npatiApprovalId = approvalId;
         }
         if (tool === "email.send" || tool === "communications.email_send" || tool.startsWith("browser.")) adapterInput.__npatiTaskRunId = runId;
+        onTool?.(tool, tool.startsWith("project.files.") && typeof adapterInput.path === "string" ? adapterInput.path : undefined);
         const result = tool === "knowledge" ? knowledge : await this.toolRuntime.execute(ctx, company, tool, adapterInput, signal);
         const latencyMs = Math.round(performance.now() - toolStart);
         await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId,

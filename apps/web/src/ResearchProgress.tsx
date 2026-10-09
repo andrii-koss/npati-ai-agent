@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
+import type { ProjectProgressEvent } from "@npati/shared";
 
 export type ChatProgressEvent = {
   type:
     | "search_started" | "search_results_received" | "source_discovered"
     | "page_fetch_started" | "page_fetch_completed" | "page_fetch_failed"
-    | "action_started" | "action_completed"
+    | "action_started" | "action_completed" | "project_progress"
     | "research_completed" | "final_generation_started" | "final_generation_completed" | "final_generation_failed";
   timestamp: string;
   query?: string;
@@ -15,6 +16,9 @@ export type ChatProgressEvent = {
   error?: string;
   sourceCount?: number;
   pageCount?: number;
+  stage?: ProjectProgressEvent["stage"];
+  status?: ProjectProgressEvent["status"];
+  framework?: string;
 };
 
 type PageState = {
@@ -209,6 +213,20 @@ export function ResearchProgressPanel({
     [visible, presentationEvent],
   );
   const fullyPresented = (completed || failed) && visibleCount >= events.length && !presentingEvent;
+  const projectSteps = new Map<string, ChatProgressEvent>();
+  for (const event of visible) if (event.type === "project_progress" && event.stage) {
+    for (const [key, step] of projectSteps) if (step.status === "active") projectSteps.set(key, { ...step, status: "completed" });
+    projectSteps.set(event.stage, event);
+  }
+  if (failed) for (const [key, step] of projectSteps) if (step.status === "active") projectSteps.set(key, { ...step, status: "failed" });
+  const iconPaths: Record<string, string> = {
+    project: "M3 7h7l2 2h9v12H3z", files: "M6 3h8l4 4v14H6z M14 3v5h4",
+    database: "M4 6c0-4 16-4 16 0v12c0 4-16 4-16 0z M4 6c0 4 16 4 16 0 M4 12c0 4 16 4 16 0",
+    agent: "M5 7h14v13H5z M12 3v4 M8 12h1 M15 12h1 M8 16h8",
+    dependencies: "M3 7l9-4 9 4v10l-9 4-9-4z M3 7l9 4 9-4 M12 11v10",
+    build: "M5 4l-3 8 3 8 M19 4l3 8-3 8 M14 6l-4 12",
+    preview: "M3 4h18v13H3z M8 21h8 M12 17v4", ready: "M4 12l5 5L20 6",
+  };
   const [collapsed, setCollapsed] = useState(false);
   const [autoCollapsed, setAutoCollapsed] = useState(false);
 
@@ -228,6 +246,11 @@ export function ResearchProgressPanel({
   }
 
   return <article className="assistant research-progress" aria-live="polite">
+    {projectSteps.size > 0 && <div className="research-page-list project-progress-list">{[...projectSteps.values()].map(step => <div className={`research-page-row ${step.status}`} key={step.stage}>
+      <span className="research-progress-state">{step.status === "completed" ? "✓" : step.status === "failed" ? "!" : "●"}</span>
+      <svg className="research-progress-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d={iconPaths[step.stage ?? "project"]} /></svg>
+      <span className={step.status === "active" ? "research-active-text" : undefined}><strong>{step.title}</strong>{step.framework && <small>{step.framework}</small>}</span>
+    </div>)}</div>}
     {autoCollapsed && <button className="research-history-toggle expanded" type="button" title="Hide analysis history" aria-label="Hide analysis history" onClick={() => setCollapsed(true)}>✓</button>}
 
     {!model.searchComplete && model.query && <div className="research-search-row active">

@@ -43,10 +43,12 @@ describe("Website data creation regressions", () => {
   });
   it("typechecks generated account, forms, store and SDK together", async () => {
     const root = path.resolve(".data/virtual-website-typecheck");
-    const files = createWebsiteDataFiles("https://api.example.test/v1/projects/p1", "npati_pk_dev_public", "p1", true);
+    const files = { ...new NextJsAdapter().scaffoldProject(createDefaultWebsiteDocument("Shop", "nextjs")), ...createWebsiteDataFiles("https://api.example.test/v1/projects/p1", "npati_pk_dev_public", "p1", true) };
+    // Next types are checked by the real container build; this virtual program covers the generated client assets.
+    delete files["app/layout.tsx"];
     files["npati-client.ts"] = await loadProjectClientSdkSource();
     const virtual = new Map(Object.entries(files).map(([name, content]) => [path.join(root, name), content]));
-    const options: ts.CompilerOptions = { noEmit: true, strict: true, skipLibCheck: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler, jsx: ts.JsxEmit.ReactJSX, types: ["react", "node"] };
+    const options: ts.CompilerOptions = { noEmit: true, resolveJsonModule: true, strict: true, skipLibCheck: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler, jsx: ts.JsxEmit.ReactJSX, types: ["react", "node"] };
     const host = ts.createCompilerHost(options);
     const readFile = host.readFile.bind(host), fileExists = host.fileExists.bind(host), getSourceFile = host.getSourceFile.bind(host);
     host.readFile = file => virtual.get(path.normalize(file)) ?? readFile(file);
@@ -55,7 +57,7 @@ describe("Website data creation regressions", () => {
     host.directoryExists = directory => path.normalize(directory).startsWith(root) || directoryExists(directory);
     host.realpath = file => virtual.has(path.normalize(file)) ? path.normalize(file) : ts.sys.realpath?.(file) ?? file;
     host.getSourceFile = (file, languageVersion, onError, shouldCreateNew) => virtual.has(path.normalize(file)) ? ts.createSourceFile(file, virtual.get(path.normalize(file))!, languageVersion, true) : getSourceFile(file, languageVersion, onError, shouldCreateNew);
-    const diagnostics = ts.getPreEmitDiagnostics(ts.createProgram([...virtual.keys()], options, host));
+    const diagnostics = ts.getPreEmitDiagnostics(ts.createProgram([...virtual.keys()].filter(file => /\.tsx?$/.test(file)), options, host));
     expect(diagnostics.map(diagnostic => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"))).toEqual([]);
   }, 30000);
   it("prepares schema/auth/API before frontend and is idempotent on retry", async () => {
@@ -89,8 +91,13 @@ describe("Website data creation regressions", () => {
       expect(files.get("components/BlockRenderer.tsx")).not.toContain('alert("Thank you! Message sent.")');
       expect(files.get("components/BlockRenderer.tsx")).toContain('case "forms"');
       expect(files.get("app/page.tsx")).toContain("ProjectStore");
+      expect(files.get("app/page.tsx")).toContain("BlockRenderer");
+      expect(files.get("app/layout.tsx")).not.toContain('<nav style={{padding:16}}');
+      expect(JSON.parse(files.get("website.config.json")!).pages[0].blocks.find((block:any)=>block.type === "hero").props.primaryCtaUrl).toBe("#catalog");
       expect(environment.providerConfig.websiteBootstrap.status).toBe("ready");
+      files.set("app/page.tsx", 'export default function CustomHome() { return <h1>My custom storefront</h1>; }');
       await bootstrapWebsiteData(ctx, project, prompt, services);
+      expect(files.get("app/page.tsx")).toContain("My custom storefront");
       expect(services.agentData.applyTemplate).toHaveBeenCalledTimes(1);
       expect(files.get("components/BlockRenderer.tsx")!.match(/import \{ ProjectForm \}/g)).toHaveLength(1);
     } finally { vi.unstubAllEnvs(); }

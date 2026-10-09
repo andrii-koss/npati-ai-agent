@@ -1,7 +1,7 @@
 FROM node:24-alpine AS project-web-toolchain
 RUN apk add --no-cache python3 git build-base
 COPY apps/agent-api/project-runtime-profiles.json apps/agent-api/build-project-runtime-profiles.cjs /tmp/npati-toolchain/
-RUN node /tmp/npati-toolchain/build-project-runtime-profiles.cjs
+RUN --mount=type=cache,id=npati-project-web-npm,target=/root/.npm node /tmp/npati-toolchain/build-project-runtime-profiles.cjs
 
 FROM node:24-alpine AS build
 WORKDIR /app
@@ -45,7 +45,7 @@ USER node
 CMD ["node", "dist/server.js"]
 
 # OSS shared project runtime: no Docker CLI/socket, one container for all projects.
-FROM runtime-base AS project-runtime
+FROM node:24-alpine AS project-runtime-tools
 USER root
 ENV NPATI_SANDBOX_RUNNER_MODE=local
 RUN apk add --no-cache python3 py3-pip git openssh-client ripgrep build-base linux-headers bash coreutils findutils util-linux procps jq unzip curl iptables
@@ -59,3 +59,13 @@ COPY apps/agent-api/project-runtime-entrypoint.sh /opt/npati-runtime/entrypoint.
 RUN mkdir -p /projects /runtime-state && chmod 711 /projects && chmod 700 /runtime-state
 EXPOSE 7865
 CMD ["sh", "/opt/npati-runtime/entrypoint.sh"]
+
+# Keep the large prepared toolchain independent of API source rebuilds.
+FROM project-runtime-tools AS project-runtime
+ARG NPATI_BUILD_COMMIT=unknown
+ARG NPATI_BUILD_TIME=unknown
+ENV NODE_ENV=production NPATI_BUILD_COMMIT=${NPATI_BUILD_COMMIT} NPATI_BUILD_TIME=${NPATI_BUILD_TIME}
+WORKDIR /app
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/apps/agent-api/node_modules ./node_modules
+COPY --from=build /app/apps/agent-api/dist ./dist

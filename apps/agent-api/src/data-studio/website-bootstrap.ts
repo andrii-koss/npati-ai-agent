@@ -1,3 +1,4 @@
+import { prepareCommerceDocument } from "../commerce-presentation";
 import type { AuthContext, Project } from "@npati/workspace";
 import { TEMPLATE_CATALOG } from "@npati/shared";
 import type { DataBackendService } from "./service";
@@ -77,8 +78,13 @@ export async function bootstrapWebsiteData(ctx: AuthContext, project: Project, p
     await workspace.createFile(ctx, companyId, project.id, filePath, content);
   }
   if (commerce) {
+    const config = await workspace.readFile(ctx, companyId, project.id, "website.config.json");
+    const document = JSON.parse(config.content);
+    const storefront = prepareCommerceDocument(document);
+    if (storefront !== document) await workspace.writeFile(ctx, companyId, project.id, "website.config.json", JSON.stringify(storefront, null, 2)+"\n", config.revision);
     const existing = await workspace.readFile(ctx, companyId, project.id, "app/page.tsx");
-    if (!existing.content.includes("ProjectStore")) await workspace.writeFile(ctx, companyId, project.id, "app/page.tsx", files["app/page.tsx"]!, existing.revision);
+    // Only adapt our generated homepage, never overwrite a custom agent/user page.
+    if ((existing.content.includes("BlockRenderer") && existing.content.includes("websiteConfig") && !existing.content.includes("ProjectStore")) || /^import \{ ProjectStore \}[^]*return <ProjectStore \/>/.test(existing.content)) await workspace.writeFile(ctx, companyId, project.id, "app/page.tsx", files["app/page.tsx"]!, existing.revision);
     const products = await migrations.listOwnerRows(ctx, backend, "dev", "products", { limit: 1 });
     if (!products.length && /тест|test|demo|демо/iu.test(prompt)) {
       const product = await migrations.createOwnerRow(ctx, backend, "dev", "products", { title: "Тестовий товар", slug: "test-product", description: "Демонстраційний товар магазину", price: 199, is_active: true });
@@ -94,7 +100,7 @@ export async function bootstrapWebsiteData(ctx: AuthContext, project: Project, p
     await workspace.writeFile(ctx, companyId, project.id, "components/BlockRenderer.tsx", content, renderer.revision);
   }
   const layout = await workspace.readFile(ctx, companyId, project.id, "app/layout.tsx");
-  if (!layout.content.includes('href="/auth"')) await workspace.writeFile(ctx, companyId, project.id, "app/layout.tsx", layout.content.replace("<body>{children}</body>", '<body><nav style={{padding:16}}><a href="/auth">Вхід / Реєстрація</a></nav>{children}</body>'), layout.revision);
+  if (!commerce && !layout.content.includes('href="/auth"')) await workspace.writeFile(ctx, companyId, project.id, "app/layout.tsx", layout.content.replace("<body>{children}</body>", '<body><nav style={{padding:16}}><a href="/auth">Вхід / Реєстрація</a></nav>{children}</body>'), layout.revision);
   schema = await provider.introspectSchema(backend, "dev");
   await repository.setExpectedSchema(ctx, companyId, backend.id, "dev", schema, provider.schemaFingerprint(schema));
   const completed = await repository.environment(ctx, companyId, backend.id, "dev");

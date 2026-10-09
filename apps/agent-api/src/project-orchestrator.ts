@@ -15,7 +15,7 @@ import type { CompanyDelegationRuntime } from "./company-runtime";
 import type { DataBackendService } from "./data-studio/service";
 import type { ProjectRedirectRepository } from "./data-studio/redirect-repository";
 import {
-  type ProjectCardData, type ProjectActionData, type ProjectIntentDecision, extractFramework,
+  type ProjectCardData, type ProjectProgressEvent, type ProjectActionData, type ProjectIntentDecision, extractFramework,
   createDefaultWebsiteDocument, getWebsiteAdapter, createMobileAppScaffold, defaultAppScheme, slugifyProjectName,
   isDataCapabilityPermitted, DATA_CAPABILITY_GROUPS,
 } from "@npati/shared";
@@ -376,6 +376,7 @@ export class ProjectOrchestrator {
       intentDecision: ProjectIntentDecision;
       prompt: string;
       idempotencyKey?: string;
+      onProgress?: (event: ProjectProgressEvent) => void;
     }
   ): Promise<{
     project: Project;
@@ -393,6 +394,13 @@ export class ProjectOrchestrator {
     };
   }> {
     const isRepositoryAction = params.intentDecision.intent === "COMMIT_PROJECT" || params.intentDecision.intent === "CONNECT_REPOSITORY";
+    const ukrainian = /[\u0400-\u04ff]/u.test(params.prompt);
+    const labels = ukrainian
+      ? { project: "Підготовка проєкту", files: "Створення файлів", database: "Підготовка бази даних і авторизації", agent: "Агент аналізує та редагує файли", dependencies: "Встановлення залежностей", build: "Перевірка production build", preview: "Запуск і перевірка Live Preview", ready: "Проєкт готовий" }
+      : { project: "Preparing project", files: "Creating project files", database: "Preparing database and authentication", agent: "Agent inspecting and editing files", dependencies: "Installing dependencies", build: "Checking production build", preview: "Starting and checking Live Preview", ready: "Project ready" };
+    const report = (stage: ProjectProgressEvent["stage"], status: ProjectProgressEvent["status"] = "active", framework?: string) =>
+      params.onProgress?.({ type: "project_progress", stage, status, title: labels[stage], framework });
+    report("project");
     const isMobileApp = params.intentDecision.targetDetails?.projectType === "mobile_app";
     const isDataTask = params.intentDecision.intent === "ADD_DATA_MODEL" || params.intentDecision.intent === "EDIT_DATA_MODEL";
     const selectedAgent = isDataTask ? await this.ensureDataAgent(ctx, params.companyId) : isRepositoryAction
@@ -468,9 +476,11 @@ export class ProjectOrchestrator {
 
       if (isMobileApp) {
         const scheme = project.appScheme || defaultAppScheme(project.name);
+        report("files", "active", framework);
         await this.scaffoldMobileAppProject(ctx, params.companyId, project.id, project.name, scheme);
         await this.registerMobileRedirects(ctx, params.companyId, project.id, scheme);
       } else if (framework === "Next.js" || framework === "HTML/CSS") {
+        report("files", "active", framework);
         await this.scaffoldWebsiteProject(ctx, params.companyId, project.id, project.name, framework === "Next.js" ? "nextjs" : "static", params.prompt);
       }
 
@@ -482,6 +492,7 @@ export class ProjectOrchestrator {
         projectType,
       });
       if (!isMobileApp && framework === "Next.js" && this.prepareWebsiteData) {
+        report("database", "active", framework);
         try {
           await this.prepareWebsiteData(ctx, project, params.prompt);
           project = await this.projectService.get(ctx, params.companyId, project.id);
@@ -670,6 +681,7 @@ export class ProjectOrchestrator {
     }
 
     let runDetails: CompanyAgentRunDetails;
+    report("agent", "active", project.framework ?? undefined);
     let usedMultiAgent = false;
     try {
       const multiAgent = new ProjectMultiAgentService(
@@ -686,7 +698,7 @@ export class ProjectOrchestrator {
         this.qaService,
       );
       const multiResult = project.framework !== "HTML/CSS" && ["CREATE_PROJECT", "CREATE_WEBSITE", "EDIT_PROJECT", "EDIT_WEBSITE", "IMPROVE_PROJECT"].includes(params.intentDecision.intent)
-        ? await multiAgent.execute(ctx, params.companyId, project.id, params.prompt, sharedContext, idempotencyKey, params.intentDecision.intent === "IMPROVE_PROJECT", true)
+        ? await multiAgent.execute(ctx, params.companyId, project.id, params.prompt, sharedContext, idempotencyKey, params.intentDecision.intent === "IMPROVE_PROJECT", true, (stage) => report(stage, "active", project.framework ?? undefined))
         : undefined;
       usedMultiAgent = Boolean(multiResult);
       runDetails = multiResult ?? await this.companyRuntime.execute(
@@ -697,6 +709,8 @@ export class ProjectOrchestrator {
           mode: "single",
           preferredAgentId: selectedAgent.id,
           projectId: project.id,
+          onTool: (tool, filePath) => params.onProgress?.({ type: "project_progress", stage: "agent", status: "active", framework: project.framework ?? undefined,
+            title: filePath ? `${tool.endsWith("read") ? (ukrainian ? "Читання" : "Reading") : (ukrainian ? "Робота з файлом" : "Working on file")}: ${filePath}` : labels.agent }),
         },
         idempotencyKey
       );
@@ -775,9 +789,12 @@ export class ProjectOrchestrator {
 
       while (repairAttempts < maxAttempts && !buildPassed) {
         repairAttempts++;
+        let activeStage: "dependencies" | "build" | "preview" = "dependencies";
         try {
           // Verify the production build before starting the development preview.
-          if (typeof this.previewService.buildProject === "function") await this.previewService.buildProject(ctx, params.companyId, project.id);
+          if (typeof this.previewService.buildProject === "function") await this.previewService.buildProject(ctx, params.companyId, project.id, (stage) => { activeStage = stage; report(stage, "active", project.framework ?? undefined); });
+          activeStage = "preview";
+          report("preview", "active", project.framework ?? undefined);
           const preview = await this.previewService.startPreview(ctx, params.companyId, project.id);
           if (preview.previewUrl) {
             buildPassed = true;
@@ -785,6 +802,7 @@ export class ProjectOrchestrator {
             break;
           }
         } catch (buildErr) {
+          report(activeStage, "failed", project.framework ?? undefined);
           // Deletion/archive during a build must not spawn a repair run for stale context.
           try {
             const current = await this.projectService.get(ctx, params.companyId, project.id);
@@ -801,6 +819,7 @@ export class ProjectOrchestrator {
           }
 
           if (repairAttempts < maxAttempts) {
+            report("agent", "active", project.framework ?? undefined);
             // Repair step: invoke agent with structured error context
             const repairTask = [
               `[BUILD REPAIR ATTEMPT ${repairAttempts}/${maxAttempts}]`,
@@ -907,6 +926,7 @@ export class ProjectOrchestrator {
       runId: runDetails.run.id,
     };
 
+    const hasInternalCalls = /DSML|<\|[^>]*invoke|<tool_call/i.test(runDetails.run.result ?? "");
     let responseMessage = runDetails.run.status === "awaiting_approval"
       ? `Project "${project.name}" is waiting for command approval. [Open approval](/company?company=${encodeURIComponent(params.companyId)}&runId=${encodeURIComponent(runDetails.run.id)})`
       : runDetails.run.status === "failed"
@@ -915,9 +935,9 @@ export class ProjectOrchestrator {
         : `Не вдалося ${isCreate ? "створити сайт" : "оновити проєкт"} "${project.name}".`
       : project.framework === "HTML/CSS" && isCreate
         ? `${runDetails.run.result?.includes("AI-персоналізацію не завершено") ? runDetails.run.result + " " : `Створено HTML/CSS сайт "${project.name}". `}Натисніть Preview, щоб побачити сторінку в чаті.`
-        : runDetails.run.result || (isCreate
-        ? `Створено новий проєкт "${project.name}" на базі ${project.framework || "Next.js"}.`
-        : `Оновлено проєкт "${project.name}".`);
+        : hasInternalCalls && !isCreate
+          ? `Перегляд показує збережену версію проєкту "${project.name}". ${lastBuildStatus === "success" ? "Build завершено успішно." : ""}`
+        : `${isCreate ? "Створено" : "Оновлено"} проєкт «${project.name}».${lastBuildStatus === "success" ? " Build успішний." : ""}${previewUrl ? " Live Preview готовий." : ""}`;
 
     if (runDetails.run.status === "failed" && runFailedDueToModel) {
       responseMessage += `\n\n⚠️ Model routing failed: ${runErrorMessage.slice(0, 300)}`;
@@ -928,6 +948,8 @@ export class ProjectOrchestrator {
       responseMessage += `\n\n⚠️ Build or preview failed: ${failure.slice(0, 300)}`;
     }
 
+    if (runDetails.run.status === "awaiting_approval") params.onProgress?.({ type: "project_progress", stage: "agent", status: "active", title: ukrainian ? "Очікування вашого погодження" : "Waiting for your approval", framework: project.framework ?? undefined });
+    else report("ready", lastBuildStatus === "failed" || runDetails.run.status === "failed" ? "failed" : "completed", project.framework ?? undefined);
     return {
       project,
       runDetails,

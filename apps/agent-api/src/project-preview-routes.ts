@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AuthContext, WorkspaceStore } from "@npati/workspace";
+import { WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
 import { AuthenticationError, type AuthProvider } from "./auth";
 import { PreviewError, type ProjectPreviewService } from "./project-preview-service";
 import type { ProjectWorkspace } from "./project-workspace";
@@ -86,6 +87,11 @@ export function registerProjectPreviewRoutes(
       if (!ctx) return;
       const { companyId, projectId } = request.params;
       const ttl = Number(request.query.ttlMs) || 15 * 60 * 1000;
+      try { await previewService.assertProjectAccess(ctx, companyId, projectId); }
+      catch (error) {
+        const status = error instanceof WorkspaceAccessError ? 403 : error instanceof WorkspaceNotFoundError ? 404 : 500;
+        return reply.code(status).send({ error: { code: "preview_token_denied", message: "Preview token is unavailable for this project." } });
+      }
       const session = previewService.getSession(projectId);
       const sandboxId = session?.sandboxId || "default";
       const token = previewService.generateToken({

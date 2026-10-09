@@ -7849,6 +7849,7 @@ ${localized.next}`;
             if (targetCompanyId) {
               const executed = await projectOrchestrator.executeWebsiteTask(auth, {
                 companyId: targetCompanyId,
+                onProgress: (event) => send("progress", { ...event, timestamp: new Date().toISOString() }),
                 projectId: projectIntent.intent === "CREATE_PROJECT" || projectIntent.intent === "CREATE_WEBSITE" ? undefined : activeProjectId ?? undefined,
                 intentDecision: projectIntent,
                 prompt: message,

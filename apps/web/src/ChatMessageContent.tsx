@@ -2,6 +2,14 @@ import React, { Fragment, useEffect, useMemo, useRef, useState, type ReactNode }
 import { getStoredAuthToken } from "./AuthContext";
 import { AttachmentFileIcon } from "./ChatAttachments";
 import { cardLinkHtml, escapeInlineText } from "./chat-markdown-inline";
+import type { ProjectCardData } from "@npati/shared";
+
+export function projectChatText(content: string, card?: ProjectCardData): string {
+  if (card?.kind !== "code_project" && card?.status === "previewing" && (card.buildStatus ?? card.lastBuildStatus) === "success" && content.length > 300) {
+    return `Проєкт «${card.name}» готовий. Build успішний, Live Preview працює.`;
+  }
+  return content;
+}
 
 const inlineMarkdown = /(\[([^\]]+)\]\((https?:\/\/[^\s)]+|\/[^\s)]*)\)|\*\*([^*]+)\*\*|(https?:\/\/[^\s<>()]+))/g;
 const markdownLink = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
@@ -16,6 +24,7 @@ const failedFavicons = new Set<string>();
 const internalActionFences = ["business-action", "business-profile", "goal-action", "goal-profile", "company-action", "workspace-action"];
 
 export function stripInternalChatActions(content: string, streaming = false): string {
+  content = content.replace(/<[^>]*DSML[^>]*calls[^>]*>[\s\S]*?(?:<[^>]*\/[^>]*DSML[^>]*calls[^>]*>|$)/gi, "");
   let visible = "";
   let cursor = 0;
   while (cursor < content.length) {

@@ -244,6 +244,7 @@ export class ProjectMultiAgentService {
     idempotencyKey: string,
     improveOnly = false,
     requireWebsiteTools = false,
+    onStage?: (stage: "dependencies" | "build" | "preview") => void,
   ): Promise<CompanyAgentRunDetails | undefined> {
     const company = await this.store.getCompany(ctx, companyId);
     const agents = await this.store.listCompanyAgents(ctx, companyId);
@@ -340,7 +341,8 @@ export class ProjectMultiAgentService {
           let openIssues: string[] = [];
           for (let iteration = 0; iteration < 2; iteration++) {
             try {
-              if (typeof this.preview.buildProject === "function") await this.preview.buildProject(ctx, companyId, projectId);
+              if (typeof this.preview.buildProject === "function") await this.preview.buildProject(ctx, companyId, projectId, onStage);
+              onStage?.("preview");
               await this.preview.startPreview(ctx, companyId, projectId);
             } catch (error) {
               openIssues = ["Preview/build failed: " + clean(error instanceof Error ? error.message : "Unknown error", 300)];
@@ -479,7 +481,8 @@ export class ProjectMultiAgentService {
 
             // Build verification
             try {
-              if (typeof this.preview.buildProject === "function") await this.preview.buildProject(ctx, companyId, projectId);
+              if (typeof this.preview.buildProject === "function") await this.preview.buildProject(ctx, companyId, projectId, onStage);
+              onStage?.("preview");
               await this.preview.startPreview(ctx, companyId, projectId);
               await this.store.appendCompanyAgentRunEvent(ctx, companyId, parent.id, {
                 eventKey: "project-build:" + task.id,

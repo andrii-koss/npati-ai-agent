@@ -39,7 +39,7 @@ export const defaultTerminalLimits: TerminalLimits = {
 const uuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 const scopeOf = (ctx: AuthContext, project: Project): SandboxScope => ({ workspaceId: ctx.workspaceId, userId: ctx.userId, companyId: project.companyId, projectId: project.id });
 const stepOf = (decision: TerminalCommandDecision) => decision.timeoutClass === "install_build" ? "install_build" : "command";
-const artifact = (filePath: string) => filePath.split("/").some((part) => ["node_modules", "dist", "build", ".next", ".cache", "vendor", "__pycache__", ".venv"].includes(part));
+const artifact = (filePath: string) => filePath.split("/").some((part) => ["node_modules", "dist", "build", ".next", ".nuxt", ".output", ".astro", ".cache", ".turbo", "vendor", "__pycache__", ".venv"].includes(part));
 
 /** The only Project API variables a sandbox may receive (D5). */
 export const PROJECT_API_SANDBOX_VARIABLES = SANDBOX_PROCESS_ENVIRONMENT_ALLOWLIST;
@@ -465,6 +465,22 @@ export class ProjectSandboxService {
     if (request.action === "logs") return { processId: request.processId, output: redactTerminalText(await this.provider.getLogs(scope, project.sandboxId, request.processId)).slice(0, this.limits.outputLimitBytes) };
     throw new SandboxProviderError("invalid_process_action", "Invalid process action", 400, "process", tool);
   }
+  supportsPreviewProxy(): boolean {
+    return typeof this.provider.proxyPreview === "function";
+  }
+
+  async stopRecordedPreview(ctx: AuthContext, companyId: string, projectId: string, command: string) {
+    const project = await this.project(ctx, companyId, projectId);
+    if (!project.sandboxId) return;
+    const history = await this.events.list(ctx, companyId, projectId);
+    const approvedSummary = "Approved command (" + createHash("sha256").update(command).digest("hex").slice(0, 12) + ")";
+    const previous = history.find(event => event.processId && event.sandboxId === project.sandboxId && (event.commandSummary === command || event.commandSummary === approvedSummary) && event.status === "running");
+    if (!previous?.processId) return;
+    const latest = history.find(event => event.processId === previous.processId);
+    if (latest?.status === "stopped") return;
+    await this.process(ctx, companyId, { projectId, processId: previous.processId, action: "stop", agentId: "system" });
+  }
+
   async proxyPreview(scope: SandboxScope, sandboxId: string, options: import("./sandbox-provider").PreviewProxyRequest) {
     if (!this.provider.proxyPreview) throw new Error("Sandbox runner does not support preview proxy");
     return this.provider.proxyPreview(scope, sandboxId, options);

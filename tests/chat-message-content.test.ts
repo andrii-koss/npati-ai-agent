@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ChatMessageContent, collectSourceTitles, isSourceCitationLine, stripInternalChatActions, toTrackedChatUrl } from "../apps/web/src/ChatMessageContent";
+import { ChatMessageContent, projectChatText, collectSourceTitles, isSourceCitationLine, stripInternalChatActions, toTrackedChatUrl } from "../apps/web/src/ChatMessageContent";
 
 describe("chat source links", () => {
   it("uses the real source-list title for a generic inline citation", () => {
@@ -41,6 +41,11 @@ describe("business result cards", () => {
   });
 });
 describe("streamed chat actions", () => {
+  it("hides provider DSML calls without hiding ordinary answer text", () => {
+    const call = '<｜｜DSML｜｜ calls>\n<｜｜DSML｜｜ invoke name="project.files.read">app/page.tsx</｜｜DSML｜｜ invoke>\n</｜｜DSML｜｜ calls>';
+    expect(stripInternalChatActions('Before\n' + call + '\nAfter')).toBe('Before\n\nAfter');
+    expect(stripInternalChatActions('Before\n' + call.slice(0, call.indexOf('</｜｜DSML')), true)).toBe('Before\n');
+  });
   it("never exposes a partial business deletion directive", () => {
     const prefix = "I deleted the test business idea.\n\n";
     const response = prefix + '```business-action\n{"action":"delete","businessName":"Test"}\n```';
@@ -56,3 +61,5 @@ describe("streamed chat actions", () => {
     expect(stripInternalChatActions("Use `code`")).toBe("Use `code`");
   });
 });
+
+describe("successful project chat summary",()=>{it("summarizes old implementation essays but preserves failure and approval details",()=>{const content="technical details ".repeat(100);const card={id:"p",name:"Shop",companyId:"c",status:"previewing",buildStatus:"success"};expect(projectChatText(content,card).length).toBeLessThan(120);expect(projectChatText(content,{...card,status:"failed"})).toBe(content);expect(projectChatText(content,{...card,status:"awaiting_approval"})).toBe(content);});});
