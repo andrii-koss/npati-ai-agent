@@ -184,19 +184,21 @@ export class DataBackendService {
     const removeAfter = new Date(Date.now() + (options.immediate ? 0 : retentionDays * 24 * 60 * 60 * 1000));
     await this.repository.beginRemoval(ctx, companyId, id, { detachProjects: options.detachProjects, removeAfter });
     for (const environment of ["dev", "prod"] as const) {
+      if (options.immediate) {
+        // Retry even an unavailable/partially provisioned environment: database and role
+        // removal are idempotent, and failed cleanup must remain visible for another attempt.
+        await provisioner.deprovisionDatabase(backend, environment);
+        await this.repository.setEnvironment(ctx, companyId, id, environment, { status: "unavailable" });
+        continue;
+      }
       const env = await this.repository.environment(ctx, companyId, id, environment).catch(() => null);
       if (env && (env.status === "ready" || env.status === "archived")) {
         await provisioner.snapshot(backend, environment).catch(() => undefined);
-        if (options.immediate) {
-          await provisioner.deprovisionDatabase(backend, environment);
-          await this.repository.setEnvironment(ctx, companyId, id, environment, { status: "unavailable" });
-        } else {
-          await provisioner.suspendRuntime(backend, environment).catch(() => undefined);
-        }
+        await provisioner.suspendRuntime(backend, environment).catch(() => undefined);
       }
     }
     if (options.immediate) {
-      await this.repository.deleteSecrets(id).catch(() => undefined);
+      await this.repository.deleteSecrets(id);
       await this.repository.remove(ctx, companyId, id);
       return { id, deleted: true, deferred: false };
     }
