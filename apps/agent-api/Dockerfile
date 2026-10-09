@@ -1,10 +1,16 @@
+FROM node:24-alpine AS project-web-toolchain
+RUN apk add --no-cache python3 git build-base
+COPY apps/agent-api/project-runtime-profiles.json apps/agent-api/build-project-runtime-profiles.cjs /tmp/npati-toolchain/
+RUN node /tmp/npati-toolchain/build-project-runtime-profiles.cjs
+
 FROM node:24-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
-COPY apps/agent-api ./apps/agent-api
+COPY apps/agent-api/package.json ./apps/agent-api/package.json
 COPY packages ./packages
 RUN apk add --no-cache python3 make g++
 RUN npm ci
+COPY apps/agent-api ./apps/agent-api
 RUN npm run build --workspace @npati/agent-api
 RUN npm prune --omit=dev
 
@@ -23,7 +29,8 @@ COPY --from=build /app/packages/project-client/src/index.ts /opt/npati-project-s
 
 FROM runtime-base AS sandbox-runner
 USER root
-RUN apk add --no-cache docker-cli
+ENV DOCKER_CONFIG=/tmp/npati-docker
+RUN apk add --no-cache docker-cli docker-cli-buildx
 COPY apps/agent-api/Dockerfile.project-sandbox apps/agent-api/Dockerfile.sandbox-egress /opt/npati-sandbox-images/
 COPY apps/agent-api/src/sandbox-egress-proxy.mjs /opt/npati-sandbox-images/src/
 COPY apps/agent-api/sandbox-runner-entrypoint.sh /opt/npati-sandbox-images/entrypoint.sh
@@ -36,3 +43,19 @@ RUN mkdir -p /app/data /app/project-snapshots && chown node:node /app/data /app/
 EXPOSE 3001
 USER node
 CMD ["node", "dist/server.js"]
+
+# OSS shared project runtime: no Docker CLI/socket, one container for all projects.
+FROM runtime-base AS project-runtime
+USER root
+ENV NPATI_SANDBOX_RUNNER_MODE=local
+RUN apk add --no-cache python3 py3-pip git openssh-client ripgrep build-base linux-headers bash coreutils findutils util-linux procps jq unzip curl iptables
+RUN npm install -g --prefix /opt/npati-package-managers --no-audit --no-fund pnpm@10 yarn@1.22.22
+COPY --from=project-web-toolchain /opt/npati-project-toolchain /opt/npati-project-toolchain
+COPY apps/agent-api/prepare-project-dependencies.cjs /opt/npati-runtime/prepare-project-dependencies.cjs
+COPY apps/agent-api/project-runtime-guard.c /tmp/project-runtime-guard.c
+RUN cc -O2 -Wall -Wextra -Werror /tmp/project-runtime-guard.c -o /usr/local/bin/npati-project-exec && rm /tmp/project-runtime-guard.c
+COPY apps/agent-api/src/sandbox-egress-proxy.mjs /opt/npati-runtime/sandbox-egress-proxy.mjs
+COPY apps/agent-api/project-runtime-entrypoint.sh /opt/npati-runtime/entrypoint.sh
+RUN mkdir -p /projects /runtime-state && chmod 711 /projects && chmod 700 /runtime-state
+EXPOSE 7865
+CMD ["sh", "/opt/npati-runtime/entrypoint.sh"]

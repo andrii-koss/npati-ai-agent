@@ -240,13 +240,13 @@ export function createProjectClient(options: ProjectClientOptions): ProjectClien
   };
 
   const notifyListeners = (event: AuthChangeEvent, session: ProjectSession | null) => {
-    for (const listener of listeners) {
+    listeners.forEach((listener) => {
       try {
         listener(event, session);
       } catch {
         // Ignore subscriber errors
       }
-    }
+    });
   };
 
   const request = async <R = unknown>(

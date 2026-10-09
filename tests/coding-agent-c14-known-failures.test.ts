@@ -48,10 +48,6 @@ const BASELINE_FAILURES: ReadonlyArray<readonly [string, string]> = [
   ["tests/chat-entity-mutations.test.ts", "business and goal mutations through production chat > creates five separate ideas with one goal and memory per chat turn"],
   ["tests/company-orchestration.test.ts", "PHASE 5: Company Main Agent + Specialist Agent Orchestration > successfully orchestrates Main -> Specialist delegation with tool execution"],
   ["tests/company-orchestration.test.ts", "PHASE 5: Company Main Agent + Specialist Agent Orchestration > cancels active run across all delegated agents"],
-  ["tests/company-runtime.test.ts", "Company delegation runtime > uses A2A planning, OmniRoute Pipeline, Auto fallback, tool enforcement and idempotency"],
-  ["tests/company-runtime.test.ts", "Company delegation runtime > uses OmniRoute Fusion for parallel workers and blocks forbidden tools in backend audit"],
-  ["tests/company-runtime.test.ts", "Company delegation runtime > cancels an active A2A planning request and does not execute a duplicate run"],
-  ["tests/company-runtime.test.ts", "Company delegation runtime > persists provider failures and enforces the overall run timeout"],
   ["tests/data-studio-d5-completion.test.ts", "D5 completion — sandbox process environment > starts the Live Preview dev server with the Project API variables and without secrets"],
   ["tests/long-ai-company-chat.test.ts", "long AI Company creation through production chat > creates the company, all named agents, responsibilities, hierarchy, and no unsolicited memory, then remains idempotent"],
   ["tests/long-ai-company-chat.test.ts", "long AI Company creation through production chat > recovers from repeated memory-only model responses using the semantic company plan"],
@@ -185,7 +181,7 @@ describe("[C14] [security-gate] the quarantine verdict is exactly `actual ⊆ do
 describe("[C14] [security-gate] known-failures.json is the recorded baseline, not a growing permission", () => {
   const loaded = loadKnownFailures(KNOWN_FAILURES_PATH);
 
-  it("parses, and equals the 15 baseline failures in both directions", () => {
+  it("parses, and equals the remaining baseline failures in both directions", () => {
     expect(loaded.errors).toEqual([]);
     expect(loaded.ok).toBe(true);
     const entries = loaded.manifest?.entries ?? [];
@@ -197,14 +193,13 @@ describe("[C14] [security-gate] known-failures.json is the recorded baseline, no
     expect(declared).toEqual(baselineKeys);
     expect(new Set(declared).size).toBe(declared.length);
 
-    // Per-file counts are the shape of the recorded baseline (company-runtime contributes four).
+    // Company-runtime's four previous failures passed on 2026-10-09 and are no longer quarantined.
     const perFile = new Map<string, number>();
     for (const item of entries) perFile.set(item.file, (perFile.get(item.file) ?? 0) + 1);
     expect(Object.fromEntries([...perFile].sort())).toEqual({
       "tests/advanced-memory-production.test.ts": 1,
       "tests/chat-entity-mutations.test.ts": 1,
       "tests/company-orchestration.test.ts": 2,
-      "tests/company-runtime.test.ts": 4,
       "tests/data-studio-d5-completion.test.ts": 1,
       "tests/long-ai-company-chat.test.ts": 2,
       "tests/manual-product-e2e-web.test.ts": 1,

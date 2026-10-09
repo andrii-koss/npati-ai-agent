@@ -8,6 +8,7 @@ import { ProjectTerminalEventsRepository } from "./project-terminal-events";
 import { logTerminalPolicy } from "./terminal-policy-log";
 import { gitShellHardeningEnv, resolveDepsPolicyLimits } from "./code-deps-policy";
 import type { ProjectService } from "./project-service";
+import { scanTextForSecrets } from "./code-secret-scanner";
 
 export interface TerminalSecretReference { id: string; field: string; }
 export interface TerminalRequest {
@@ -298,8 +299,15 @@ export class ProjectSandboxService {
       total += Buffer.byteLength(file.content, "utf8");
       const fileName = file.path.split("/").pop() || "";
       const isLockfile = /^(?:package(?:-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|composer\.(?:json|lock)|requirements\.txt|Pipfile(?:\.lock)?)$/i.test(fileName);
-      if (!isLockfile && (secrets.some((secret) => secret.length > 0 && file.content.includes(secret)) || redactTerminalText(file.content) !== file.content)) throw new SandboxProviderError("secret_content", "Sandbox produced protected file content", 403, "download");
       const original = originals.get(file.path);
+      // Terminal redaction also matches TypeScript declarations such as `password: string`.
+      // Scan source credentials instead, and avoid revalidating unchanged canonical files.
+      const changed = !original || original.content !== file.content;
+      const quotedCredential = /(?<![-A-Za-z0-9_])[A-Za-z0-9_]*(?:api[_-]?key|password|secret|token)(?![sS]\b)[A-Za-z0-9_]*["']?\s*[:=]\s*["'][^"']{8,}["']/i;
+      if (secrets.some((secret) => secret.length > 0 && file.content.includes(secret)) ||
+        (changed && !isLockfile && (!scanTextForSecrets(file.content).clean || quotedCredential.test(file.content)))) {
+        throw new SandboxProviderError("secret_content", "Sandbox produced protected file content", 403, "download");
+      }
       if (!original) await this.workspace.createFile(ctx, project.companyId, project.id, file.path, file.content);
       else if (original.content !== file.content) await this.workspace.writeFile(ctx, project.companyId, project.id, file.path, file.content, original.revision!);
     }
@@ -330,7 +338,9 @@ export class ProjectSandboxService {
      * secret values were captured for redaction (these values are not secrets) and after the
      * forbidden-variable filter, and it can only add git-scoped variables.
      */
-    Object.assign(environment, gitShellHardeningEnv(resolveDepsPolicyLimits()));
+    // Background processes accept only public Project API variables on the wire.
+    // Their trusted Git hardening is supplied inside the runner after this validation.
+    if (!startProcess) Object.assign(environment, gitShellHardeningEnv(resolveDepsPolicyLimits()));
 
     const timeoutMs = decision.timeoutClass === "install_build" ? this.limits.installBuildTimeoutMs : this.limits.commandTimeoutMs;
     let sandboxId = project.sandboxId ?? "";

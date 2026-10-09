@@ -8,6 +8,7 @@ import { CodeSnapshotPanel } from "./CodeSnapshotPanel";
 // company-scoped (they are not a property of one session).
 import { CodeMetricsPanel } from "./code-workspace/CodeMetricsPanel";
 import { listProjectFiles, readProjectFile } from "./project-files-client";
+import { writeActiveCompanyId } from "./active-company";
 
 /**
  * Code Workspace (C7).
@@ -211,6 +212,10 @@ export function CodeWorkspacePage() {
   const [usageError, setUsageError] = useState<string | null>(null);
 
   const [mode, setMode] = useState<SessionMode>("plan");
+  const [task, setTask] = useState("");
+  const [taskBusy, setTaskBusy] = useState(false);
+  const [taskError, setTaskError] = useState<string | null>(null);
+  const [contextReady, setContextReady] = useState(false);
   const [modeBusy, setModeBusy] = useState(false);
   const [modeError, setModeError] = useState<string | null>(null);
 
@@ -227,6 +232,41 @@ export function CodeWorkspacePage() {
   const [denyOpen, setDenyOpen] = useState<Record<string, boolean>>({});
 
   const tree = useMemo(() => flattenFiles(files), [files]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setContextReady(false);
+    if (!sessionId) return;
+    void apiGet<{ mode: SessionMode; status: string }>(`${codeBase}/sessions/${encodeURIComponent(sessionId)}`)
+      .then(async (session) => {
+        if (cancelled) return;
+        setMode(session.mode);
+        if (session.status === "archived") return;
+        const stored = await apiSend<{ persisted: boolean }>("PUT", `${codeBase}/active-context`, { contextType: "project", projectId, sessionId });
+        if (!cancelled) {
+          if (!stored.persisted) throw new Error("The active code session could not be saved");
+          writeActiveCompanyId(companyId);
+          setContextReady(true);
+          setTaskError(null);
+        }
+      }).catch((cause) => { if (!cancelled) setTaskError(cause instanceof Error ? cause.message : String(cause)); });
+    return () => { cancelled = true; };
+  }, [codeBase, companyId, projectId, sessionId]);
+
+  const startTask = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!contextReady || !task.trim() || taskBusy) return;
+    setTaskBusy(true);
+    setTaskError(null);
+    try {
+      const started = await apiSend<{ run: { runId: string } }>("POST", `${codeBase}/runs`, { projectId, sessionId, prompt: task.trim() });
+      const next = new URLSearchParams(searchParams);
+      next.set("run", started.run.runId);
+      setSearchParams(next);
+      setTask("");
+    } catch (cause) { setTaskError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setTaskBusy(false); }
+  };
 
   const loadFiles = useCallback(async () => {
     try {
@@ -317,6 +357,14 @@ export function CodeWorkspacePage() {
     void loadChanges();
     void loadUsage();
   }, [loadStream, loadChanges, loadUsage]);
+
+  useEffect(() => {
+    if (!runId) return;
+    const timer = window.setInterval(() => {
+      void loadStream(); void loadChanges(); void loadUsage(); void loadApprovals(); void loadFiles();
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [runId, loadStream, loadChanges, loadUsage, loadApprovals, loadFiles]);
 
   const openFile = useCallback(
     async (path: string) => {
@@ -448,6 +496,16 @@ export function CodeWorkspacePage() {
             : "No session selected. Open the workspace from the session list (Settings → Code) or add ?session=<id> to the URL."}
         </div>
       )}
+
+      <form className="code-workspace-controls" onSubmit={startTask}>
+        <label className="browser-form-field">
+          <span>{isUk ? "Завдання для Coding Agent" : "Task for Coding Agent"}</span>
+          <textarea value={task} onChange={(event) => setTask(event.target.value)} disabled={!contextReady || taskBusy} rows={3} placeholder={isUk ? "Поясни код, виправ помилку або додай тест…" : "Explain code, fix a bug or add a test…"} />
+        </label>
+        <button type="submit" className="button-primary" disabled={!contextReady || !task.trim() || taskBusy}>{taskBusy ? (isUk ? "Запуск…" : "Starting…") : (isUk ? "Запустити агента" : "Run agent")}</button>
+        {contextReady && <Link className="button-secondary" to="/chat">{isUk ? "Продовжити в чаті" : "Continue in chat"}</Link>}
+        {taskError && <p role="alert" className="ds-hint-error">{taskError}</p>}
+      </form>
 
       <div className="mobile-view-switch" role="tablist" aria-label={isUk ? "Панелі" : "Panels"}>
         {(["all", "files", "stream", "file", "bottom"] as MobileView[]).map((view) => (

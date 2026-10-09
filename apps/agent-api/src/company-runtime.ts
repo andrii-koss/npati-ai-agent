@@ -566,7 +566,7 @@ export class CompanyDelegationRuntime {
       let result = await this.ai.chat({
         model: execution.model, signal, timeoutMs: this.timeoutMs, admission: { tenantId: ctx.workspaceId, tier: ctx.permissions.includes("admin:all") ? "enterprise" : "pro" }, idempotencyKey: `${created.run.id}:final`,
         messages: [
-          { role: "system", content: protect(instruction(company, main, true, !options.noMemory, linked) + chatLanguageInstruction(input.task)) },
+          { role: "system", content: protect(instruction(company, main, true, !options.noMemory, linked) + chatLanguageInstruction(input.task) + (existing.run.projectId ? "\nThis final response cannot execute tools or save files. Summarize only verified tool results in at most 120 words. Do not output source code, patches, proposed edits or claim that unexecuted changes were saved. Build and Preview are handled by the project pipeline after this response." : "")) },
           { role: "user", content: protect([protectedTask, knowledgeContext, evidence && `Verified tool evidence:\n${evidence}`].filter(Boolean).join("\n\n")) },
         ],
       });

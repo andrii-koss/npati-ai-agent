@@ -71,6 +71,7 @@ export function registerInstallationAuthRoutes(app: FastifyInstance, options: {
         await store.authorize(exchange.installationToken, exchange.expiresAt);
       }
       const session = await authClient!.createInstallationSession!(exchange.installationToken);
+      if (options.deploymentType !== "npati_hosted") await store.bindOwner(session.user.id);
       const localSession = await store.createBrowserSession(exchange.installationToken, exchange.expiresAt);
       const secure = request.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
       reply.header("set-cookie", `${COOKIE}=${localSession}; HttpOnly; SameSite=Strict; Path=/api/auth/installation; Max-Age=7776000${secure}`);

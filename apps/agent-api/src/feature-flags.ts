@@ -94,10 +94,12 @@ export interface FlagResolution {
   scopeId: string;
   stage: FeatureFlagStage;
   /** Why the flag resolved this way: `no_row` means nothing was configured (dark launch). */
-  source: "user" | "company" | "global" | "no_row";
+  source: "user" | "company" | "global" | "no_row" | "self_hosted_default";
 }
 
 export interface FeatureFlagServiceConfig {
+  /** Explicit rows, including kill switches, always override self-hosted defaults. */
+  enabledByDefault?: boolean;
   /** Cache TTL for flag resolution; clamped to 1..30 s so a kill switch is felt quickly. */
   cacheTtlMs?: number;
   /** G1/R1 have not passed yet: stages above `internal` need an explicit operator override. */
@@ -113,6 +115,7 @@ const MAX_CACHE_TTL_MS = 30_000;
  * small and synchronous in its decisions: `isEnabled` never performs the privileged action itself.
  */
 export class FeatureFlagService {
+  private readonly enabledByDefault: boolean;
   private readonly cache = new Map<string, { resolution: FlagResolution; expiresAt: number }>();
   private readonly cacheTtlMs: number;
   private readonly allowPreGateRollout: boolean;
@@ -125,6 +128,7 @@ export class FeatureFlagService {
     /** Best-effort sandbox cleanup used by the kill switch (full cleanup and lease revocation: C4/C6). */
     private readonly stopSandboxes?: (ctx: AuthContext, companyId: string) => Promise<number>,
   ) {
+    this.enabledByDefault = config.enabledByDefault ?? false;
     const requested = config.cacheTtlMs ?? Number.parseInt(process.env.NPATI_CODE_FLAG_CACHE_TTL_MS ?? "", 10);
     const ttl = Number.isFinite(requested) && requested > 0 ? requested : 15_000;
     this.cacheTtlMs = Math.min(Math.max(ttl, 1_000), MAX_CACHE_TTL_MS);
@@ -216,12 +220,12 @@ export class FeatureFlagService {
           enabled: applicable.every(({ flag }) => this.stageAllows(ctx, flag, options)),
           scope: winner.flag.scope, scopeId: winner.flag.scopeId, stage: winner.flag.stage, source: winner.source,
         }
-        : { key: flagKey, enabled: false, scope: "global", scopeId: "", stage: "off", source: "no_row" };
+        : this.defaultResolution(flagKey);
     } else {
       const master = await this.resolve(ctx, CODE_AGENT_MASTER_FLAG, options);
       resolution = own
         ? { ...own, enabled: own.enabled && master.enabled }
-        : { key: flagKey, enabled: false, scope: "global", scopeId: "", stage: "off", source: "no_row" };
+        : { ...this.defaultResolution(flagKey), enabled: this.enabledByDefault && master.enabled };
     }
     this.cache.set(key, { resolution, expiresAt: Date.now() + this.cacheTtlMs });
     return resolution;
@@ -230,6 +234,10 @@ export class FeatureFlagService {
   async isEnabled(ctx: AuthContext, flagKey: string, options: FlagEvaluationContext = {}): Promise<boolean> {
     if (!isValidCodeFlagKey(flagKey)) return false;
     return (await this.resolve(ctx, flagKey, options)).enabled;
+  }
+
+  private defaultResolution(flagKey: string): FlagResolution {
+    return { key: flagKey, enabled: this.enabledByDefault, scope: "global", scopeId: "", stage: this.enabledByDefault ? "ga" : "off", source: this.enabledByDefault ? "self_hosted_default" : "no_row" };
   }
 
   /** Deny-by-default gate used by every code entry point (routes and services alike). */
@@ -242,7 +250,9 @@ export class FeatureFlagService {
   /** Dark-launch summary for the UI/API: the master flag plus every configured code flag. */
   async describe(ctx: AuthContext, options: FlagEvaluationContext = {}): Promise<{ master: FlagResolution; flags: FlagResolution[]; darkLaunch: boolean }> {
     const configured = (await this.store.listFeatureFlags(ctx)).filter((flag) => flag.flagKey.startsWith("code") || flag.flagKey === CODE_AGENT_MASTER_FLAG);
-    const keys = new Set<string>([CODE_AGENT_MASTER_FLAG, ...CODE_AGENT_SUB_FLAGS, ...configured.map((flag) => flag.flagKey)]);
+    const keys = new Set<string>([CODE_AGENT_MASTER_FLAG, ...CODE_AGENT_SUB_FLAGS,
+      "code.model_profile.hosted-native-tools", "code.model_profile.hosted-native-tools-small-context", "code.model_profile.local-text-tools",
+      ...configured.map((flag) => flag.flagKey)]);
     const flags: FlagResolution[] = [];
     for (const key of keys) {
       if (key === CODE_AGENT_MASTER_FLAG) continue;

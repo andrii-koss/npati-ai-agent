@@ -1,0 +1,24 @@
+{
+  "next": {
+    "dependencies": { "next": "^14.2.14", "react": "^18.3.1", "react-dom": "^18.3.1" },
+    "devDependencies": { "@types/node": "^20", "@types/react": "^18", "@types/react-dom": "^18", "typescript": "^5" }
+  },
+  "vite-react": {
+    "dependencies": { "react": "^18.3.1", "react-dom": "^18.3.1" },
+    "devDependencies": { "@vitejs/plugin-react": "^4.3.1", "vite": "^5.4.2", "typescript": "^5" }
+  },
+  "vite-vue": {
+    "dependencies": { "vue": "^3.5.13" },
+    "devDependencies": { "@vitejs/plugin-vue": "^5.2.1", "vite": "^5.4.2", "typescript": "^5" }
+  },
+  "nuxt": { "dependencies": { "nuxt": "3.17.5", "vue": "^3.5.13", "vue-router": "^4.5.0" } },
+  "astro": { "dependencies": { "astro": "5.7.13" } },
+  "expo-web": {
+    "dependencies": {
+      "expo": "~51.0.39", "@expo/metro-runtime": "~3.2.3", "expo-constants": "~16.0.2",
+      "expo-linking": "~6.3.1", "expo-secure-store": "~13.0.2", "expo-status-bar": "~1.12.1",
+      "react": "18.2.0", "react-dom": "18.2.0", "react-native": "0.74.5", "react-native-web": "~0.19.10"
+    },
+    "devDependencies": { "@types/react": "~18.2.79", "typescript": "~5.3.3" }
+  }
+}

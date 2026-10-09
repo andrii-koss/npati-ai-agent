@@ -303,6 +303,17 @@ describe("Step 4 — Project Preview & Changes", () => {
   });
 
   describe("3. Dev server lifecycle, start, stop, and status", () => {
+    it("uses the runtime-assigned port instead of a framework default", async () => {
+      const { preview, workspace, company, project, provider } = await fixture();
+      await workspace.createFile(owner, company.id, project.id, "index.html", "<h1>Shared runtime</h1>");
+      vi.spyOn(provider, "exposePort").mockResolvedValue({ port: 3002, internalHost: "127.0.0.1" });
+      const result = await preview.startPreview(owner, company.id, project.id);
+      expect(result.port).toBe(3002);
+      expect(result.command).toContain("-l 3002");
+      expect(provider.calls).toContain("process:npx -y serve -s . -l 3002");
+      expect((await preview.getPreviewStatus(owner, company.id, project.id)).port).toBe(3002);
+    });
+
     it("starts dev server, updates status to previewing, and exposes port", async () => {
       const { preview, workspace, company, project } = await fixture();
       await workspace.createFile(owner, company.id, project.id, "index.html", "<h1>Hello World</h1>");

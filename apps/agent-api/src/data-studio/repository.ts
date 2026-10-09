@@ -308,7 +308,12 @@ export class DataBackendRepository {
   }): Promise<void> {
     await this.pool.query(
       "INSERT INTO data_backend_snapshots(id,backend_id,environment,file_path,kind,reason,size_bytes,created_by,expires_at) " +
-      "VALUES($1,$2,$3,$4,$5,$6,$7,$8,now()+$9::integer * interval '1 day')",
+      "VALUES($1,$2,$3,$4,$5,$6,$7,$8,now()+$9::integer * interval '1 day') " +
+      // The provisioner already records the dump; enrich that same snapshot with backup metadata.
+      "ON CONFLICT(id) DO UPDATE SET kind=EXCLUDED.kind,reason=EXCLUDED.reason,size_bytes=EXCLUDED.size_bytes," +
+      "created_by=EXCLUDED.created_by,expires_at=EXCLUDED.expires_at " +
+      "WHERE data_backend_snapshots.backend_id=EXCLUDED.backend_id " +
+      "AND data_backend_snapshots.environment=EXCLUDED.environment AND data_backend_snapshots.file_path=EXCLUDED.file_path",
       [snapshot.id, backendId, environment, snapshot.path, snapshot.kind, snapshot.reason ?? null,
         snapshot.sizeBytes ?? null, snapshot.createdBy ?? null, Math.max(1, snapshot.retentionDays ?? 30)],
     );

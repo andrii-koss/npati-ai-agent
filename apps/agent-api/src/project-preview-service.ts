@@ -5,6 +5,7 @@ import type { ProjectService } from "./project-service";
 import type { ProjectWorkspace } from "./project-workspace";
 import type { ProjectSandboxService } from "./project-sandbox-service";
 import { SandboxProviderError } from "./sandbox-provider";
+import { projectRuntimeCommandPort } from "./shared-project-runtime-provider";
 
 export interface DetectedStack {
   packageManager: "npm" | "pnpm" | "yarn" | "bun";
@@ -278,8 +279,8 @@ export class ProjectPreviewService {
     const files = await this.workspace.listFiles(ctx, companyId, projectId);
     const detected = await detectProjectStack(files, async (p) => (await this.workspace.readFile(ctx, companyId, projectId, p)).content);
 
-    const devCommand = options.command?.trim() || detected.command;
-    const devPort = options.port && Number.isInteger(options.port) ? options.port : extractPortFromCommand(devCommand, detected.port);
+    let devCommand = options.command?.trim() || detected.command;
+    let devPort = options.port && Number.isInteger(options.port) ? options.port : extractPortFromCommand(devCommand, detected.port);
 
     // Stop existing session process if running
     const existing = this.sessions.get(projectId);
@@ -294,7 +295,11 @@ export class ProjectPreviewService {
     }
 
     // Expose port on sandbox runner
-    await this.sandbox.exposePort(ctx, companyId, projectId, devPort);
+    const exposed = await this.sandbox.exposePort(ctx, companyId, projectId, devPort);
+    if (exposed && exposed.port !== devPort) {
+      devPort = exposed.port;
+      devCommand = projectRuntimeCommandPort(devCommand, devPort);
+    }
     const updatedProject = await this.projects.get(ctx, companyId, projectId);
     const sandboxId = updatedProject.sandboxId;
     if (!sandboxId) throw new PreviewError("sandbox_failed", "Failed to obtain sandbox ID", 500);

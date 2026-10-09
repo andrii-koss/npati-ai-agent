@@ -403,6 +403,32 @@ describe("Capability-aware inference candidate selection", () => {
 });
 
 describe("Project model failure stage", () => {
+  it("stops without a repair run when the project is deleted during build", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "npati-deleted-build-"));
+    try {
+      const store = new InMemoryWorkspaceStore(); await store.initialize();
+      const auth: AuthContext = { workspaceId: "deleted-ws", userId: "deleted-user", permissions: ["workspace:read", "workspace:write", "business:manage"] };
+      const company = await store.createCompany(auth, { name: "Hosting" }, "deleted-company");
+      const agent = await store.createCompanyAgent(auth, company.id, { name: "Developer", role: "frontend developer", tools: ["project.files.read", "project.files.write"], isActive: true }, "deleted-agent");
+      await store.setCompanyMainAgent(auth, company.id, agent.id, company.revision);
+      const projects = new ProjectService(store), workspace = new LocalProjectWorkspace(projects, { root });
+      let executions = 0;
+      const runtime = { execute: async (_ctx: AuthContext, companyId: string, input: { task: string; projectId: string }, key: string) => {
+        executions++;
+        const { run } = await store.createCompanyAgentRun(auth, companyId, { task: input.task, requestedMode: "single", projectId: input.projectId }, key);
+        await store.updateCompanyAgentRun(auth, companyId, run.id, { status: "completed", result: "done" });
+        return store.getCompanyAgentRun(auth, companyId, run.id);
+      } };
+      const preview = { buildProject: async (_ctx: AuthContext, companyId: string, projectId: string) => {
+        await projects.delete(auth, companyId, projectId);
+        throw new Error("Build interrupted");
+      }, getPreviewStatus: async () => ({ previewUrl: null }) };
+      const orchestrator = new ProjectOrchestrator(store, projects, workspace, undefined, preview as any, runtime as any);
+      await expect(orchestrator.executeWebsiteTask(auth, { companyId: company.id, intentDecision: classifyProjectIntent({ message: testPrompt }), prompt: testPrompt, idempotencyKey: "deleted-build" })).rejects.toMatchObject({ code: "PROJECT_REMOVED", status: 404 });
+      expect(executions).toBe(1);
+      expect(await store.listProjects(auth, company.id)).toHaveLength(0);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
   it("reports model_routing_failed without labelling the build as failed", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "npati-model-stage-"));
     try {

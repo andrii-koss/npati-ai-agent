@@ -4,6 +4,7 @@ import path from "node:path";
 
 interface PersistedInstallationAuth {
   installationId: string;
+  ownerUserId?: string;
   installationToken?: string;
   installationTokenExpiresAt?: string;
   browserSessionHash?: string;
@@ -90,6 +91,19 @@ export class InstallationAuthStore {
     });
   }
 
+  /** Identity comes from the verified central installation session, never a browser body. */
+  async bindOwner(userId: string): Promise<string> {
+    if (!userId) throw new Error("Installation session has no owner identity");
+    return this.mutate(async () => {
+      const state = await this.load();
+      if (state.ownerUserId) return state.ownerUserId;
+      const next = { ...state, ownerUserId: userId };
+      await this.persist(next);
+      this.state = next;
+      return userId;
+    });
+  }
+
   async getBrowserSession(value?: string): Promise<{ installationToken: string; installationTokenExpiresAt: string } | null> {
     if (!value) return null;
     const state = await this.load();
@@ -123,7 +137,7 @@ export class InstallationAuthStore {
   async clearAuthorization() {
     return this.mutate(async () => {
       const state = await this.load();
-      const next = { installationId: state.installationId, browserSessions: {} };
+      const next = { installationId: state.installationId, ownerUserId: state.ownerUserId, browserSessions: {} };
       await this.persist(next);
       this.state = next;
     });

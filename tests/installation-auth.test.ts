@@ -136,7 +136,7 @@ describe("central installation authorization", () => {
   });
 
   it("polls idempotently, creates a browser session, and restores it", async () => {
-    const { app, client } = await fixture();
+    const { app, client, store } = await fixture();
     await app.inject({ method: "POST", url: "/api/auth/installation/start" });
     const pending = await app.inject({
       method: "POST", url: "/api/auth/installation/poll", headers: { "x-forwarded-proto": "https" }, payload: { deviceCode: "d".repeat(43) },
@@ -149,6 +149,7 @@ describe("central installation authorization", () => {
     });
     expect(authorized.statusCode).toBe(200);
     expect(authorized.json().data.accessToken).toBe("central-access");
+    expect((await store.load()).ownerUserId).toBe("owner-1");
     const setCookie = String(authorized.headers["set-cookie"]);
     expect(setCookie).toContain("HttpOnly");
     expect(setCookie).toContain("Secure");
