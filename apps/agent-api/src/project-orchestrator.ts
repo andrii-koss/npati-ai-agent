@@ -4,6 +4,7 @@ import type { ProjectBrowserQaService } from "./project-browser-qa-service";
 import { ProjectMultiAgentService, type ProjectMultiAgentOptions } from "./project-multi-agent";
 import type { ProjectFileLeaseManager } from "./project-file-lock";
 import { WEBSITE_FILE_TOOLS, PROJECT_PREVIEW_TOOLS, canBuildWebsite, canBuildMobileApp } from "./project-agent-capabilities";
+import { DataStudioError } from "./data-studio/identifier";
 import type { AuthContext, Company, CompanyAgent, CompanyAgentRunDetails, Project, WorkspaceStore } from "@npati/workspace";
 import type { ProjectService } from "./project-service";
 import type { ProjectWorkspace } from "./project-workspace";
@@ -15,6 +16,7 @@ import type { ProjectRedirectRepository } from "./data-studio/redirect-repositor
 import {
   type ProjectCardData, type ProjectActionData, type ProjectIntentDecision, extractFramework,
   createDefaultWebsiteDocument, getWebsiteAdapter, createMobileAppScaffold, defaultAppScheme, slugifyProjectName,
+  isDataCapabilityPermitted, DATA_CAPABILITY_GROUPS,
 } from "@npati/shared";
 
 export class ProjectOrchestrationError extends Error {
@@ -104,6 +106,7 @@ export class ProjectOrchestrator {
      * multi-agent service reports the final verification as `unavailable` rather than as a pass.
      */
     private readonly codeVerification?: ProjectMultiAgentOptions["verification"],
+    private readonly prepareWebsiteData?: (ctx: AuthContext, project: Project, prompt: string) => Promise<void>,
   ) {}
 
   /**
@@ -162,13 +165,27 @@ export class ProjectOrchestrator {
       description: "Builds and repairs websites requested in chat.",
       systemInstruction: "Inspect the project files, implement the requested website, and verify the result.",
       modelId: main?.modelId,
-      tools: [...WEBSITE_FILE_TOOLS, ...PROJECT_PREVIEW_TOOLS],
+      tools: [...WEBSITE_FILE_TOOLS, ...PROJECT_PREVIEW_TOOLS, ...DATA_CAPABILITY_GROUPS["data.read"], ...DATA_CAPABILITY_GROUPS["data.schema"], ...DATA_CAPABILITY_GROUPS["data.write"], ...DATA_CAPABILITY_GROUPS["auth.admin"]],
       isActive: true,
     }, "website-builder-agent-v1");
     if (!canBuildWebsite(agent) || !agent.isActive) {
       throw new ProjectOrchestrationError("NO_QUALIFIED_AGENT", "No active agent has the required website project tools.", 400);
     }
     return agent;
+  }
+
+  private async ensureDataAgent(ctx: AuthContext, companyId: string): Promise<CompanyAgent> {
+    const required = ["project.data.schema.inspect", "project.data.schema.apply"];
+    const agents = await this.workspaceStore.listCompanyAgents(ctx, companyId);
+    const existing = agents.find(agent => agent.isActive && required.every(tool => isDataCapabilityPermitted(agent.tools, tool)));
+    if (existing) return existing;
+    const company = await this.workspaceStore.getCompany(ctx, companyId);
+    const main = company.mainAgentId ? await this.workspaceStore.getCompanyAgent(ctx, companyId, company.mainAgentId) : undefined;
+    return this.workspaceStore.createCompanyAgent(ctx, companyId, {
+      name: "Data Builder", role: "Database developer", isActive: true, modelId: main?.modelId,
+      systemInstruction: "Inspect the active project's schema before proposing structured schema changes. Use add_field for new columns; do not reapply a template to add a field. Work only in dev and respect migration approvals.",
+      tools: [...DATA_CAPABILITY_GROUPS["data.read"], ...DATA_CAPABILITY_GROUPS["data.schema"], ...DATA_CAPABILITY_GROUPS["data.write"], ...DATA_CAPABILITY_GROUPS["auth.admin"]],
+    }, "data-builder-agent-v1");
   }
 
   /** Mobile projects (D6) get an Expo-focused agent with the same file and preview tools. */
@@ -373,7 +390,8 @@ export class ProjectOrchestrator {
   }> {
     const isRepositoryAction = params.intentDecision.intent === "COMMIT_PROJECT" || params.intentDecision.intent === "CONNECT_REPOSITORY";
     const isMobileApp = params.intentDecision.targetDetails?.projectType === "mobile_app";
-    const selectedAgent = isRepositoryAction
+    const isDataTask = params.intentDecision.intent === "ADD_DATA_MODEL" || params.intentDecision.intent === "EDIT_DATA_MODEL";
+    const selectedAgent = isDataTask ? await this.ensureDataAgent(ctx, params.companyId) : isRepositoryAction
       ? await this.selectProjectAgent(ctx, params.companyId, [])
         ?? await this.workspaceStore.getCompanyAgent(ctx, params.companyId, (await this.workspaceStore.getCompany(ctx, params.companyId)).mainAgentId!)
       : isMobileApp
@@ -391,6 +409,14 @@ export class ProjectOrchestrator {
       if (project.status === "archived") {
         throw new ProjectOrchestrationError("PROJECT_ARCHIVED", `Project ${params.projectId} is archived`, 400);
       }
+      if (project.type === "website" && project.framework === "Next.js" && project.status === "failed" && !project.lastBuildStatus && this.prepareWebsiteData && !isRepositoryAction && !isDataTask) {
+        try { await this.prepareWebsiteData(ctx, project, project.description || params.prompt); }
+        catch (error) {
+          if (error instanceof DataStudioError) throw new ProjectOrchestrationError(error.code || "DATA_BOOTSTRAP_FAILED", error.message, error.status);
+          throw error;
+        }
+        project = await this.projectService.get(ctx, params.companyId, project.id);
+      }
     } else {
       isCreate = true;
       const name = extractCleanProjectName(
@@ -398,7 +424,7 @@ export class ProjectOrchestrator {
         params.intentDecision.targetDetails?.entityName,
       );
       const projectType = isMobileApp ? "mobile_app" : "website";
-      let framework = params.intentDecision.targetDetails?.framework || extractFramework(params.prompt) || "HTML/CSS";
+      let framework = params.intentDecision.targetDetails?.framework || extractFramework(params.prompt) || (/магазин|store|shop|commerce/iu.test(params.prompt) ? "Next.js" : "HTML/CSS");
       let dataBackendId: string | undefined;
       if (isMobileApp) {
         const selection = await this.resolveMobileDataBackend(ctx, params.companyId, {
@@ -442,6 +468,16 @@ export class ProjectOrchestrator {
         purpose: params.prompt,
         projectType,
       });
+      if (!isMobileApp && framework === "Next.js" && this.prepareWebsiteData) {
+        try {
+          await this.prepareWebsiteData(ctx, project, params.prompt);
+          project = await this.projectService.get(ctx, params.companyId, project.id);
+        } catch (error) {
+          await this.workspaceStore.updateProjectPreview(ctx, params.companyId, project.id, { status: "failed", lastBuildStatus: null });
+          if (error instanceof DataStudioError) throw new ProjectOrchestrationError(error.code || "DATA_BOOTSTRAP_FAILED", error.message, error.status);
+          throw error;
+        }
+      }
     }
 
     // 2. Prepare Prompt with Targeted Edits Rule & Shared Context
@@ -453,6 +489,8 @@ export class ProjectOrchestrator {
       "1. Always search and read relevant files BEFORE editing. Do not blindly overwrite entire files or recreate the whole project.",
       "2. Make surgical, minimal modifications to fulfill the user request precisely.",
       "3. Keep all working pages, styles, assets, and configurations functional.",
+      isDataTask ? "Use project.data.schema.inspect first. Add fields with project.data.schema.apply and kind add_field. Do not recreate existing collections or apply a template merely to add a column." : "",
+      project.dataBackendId ? "The attached DataBackend, SDK, auth page and form bindings are already prepared. Preserve their wiring. Inspect lib/project-client.ts and use its projectClient for all database and auth calls. Never simulate form success with alert or local-only storage." : "",
       project.framework === "HTML/CSS" ? "4. This is a static HTML/CSS website. Edit its .html files directly and do not introduce Next.js or a package manager unless the user asks for it." : "",
       project.framework === "Next.js" ? "4. The Next.js project structure, package.json, and layout are ALREADY scaffolded in the workspace. Do not run create-next-app or re-scaffold; inspect and edit the existing files directly." : "",
       project.type === "mobile_app" ? "4. This is an Expo (React Native) app. The template, screens and ./npati-client SDK are ALREADY in the workspace. Use PROJECT_PUBLISHABLE_KEY from ./src/config only; never add PROJECT_SECRET_KEY, DATABASE_URL or any database credentials to the app." : "",
@@ -691,10 +729,10 @@ export class ProjectOrchestrator {
     let buildErrorSummary = "";
     let repairAttempts = 0;
 
-    const needsBuild = isCreate
+    const needsBuild = !isDataTask && (isCreate
       || params.intentDecision.intent === "BUILD_PROJECT"
       || params.intentDecision.intent.startsWith("EDIT_")
-      || params.intentDecision.intent === "DEBUG_PROJECT";
+      || params.intentDecision.intent === "DEBUG_PROJECT");
 
     const runErrorMessage = runDetails.run.errorMessage || "";
     const runFailedDueToModel = isModelError(runErrorMessage) || /model_routing_failed|model_unavailable/i.test(runDetails.run.errorCode ?? "");

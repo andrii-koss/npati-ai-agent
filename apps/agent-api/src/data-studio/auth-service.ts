@@ -1152,6 +1152,8 @@ export class ProjectAuthService {
     customStrategies: Record<string, GdprStrategy> = {},
   ): Promise<GdprAffectedData> {
     const backend = await this.getBackend(ctx, companyId, projectId);
+    const settings = await this.repository.environment(ctx, companyId, backend.id, environment);
+    customStrategies = { ...(settings.providerConfig.gdprStrategies as Record<string, GdprStrategy> ?? {}), ...customStrategies };
     const pool = await this.getPool(backend, environment, "migrator");
 
     const userRes = await pool.query("SELECT id FROM _npati_auth_users WHERE id = $1", [userId]);
@@ -1208,11 +1210,14 @@ export class ProjectAuthService {
     const pool = await this.getPool(backend, environment, "migrator");
     const refs = await this.findUserReferenceCollections(pool);
 
+    const env = await this.repository.environment(ctx, companyId, backend.id, environment);
+    const strategies = { ...(env.providerConfig.gdprStrategies as Record<string, GdprStrategy> ?? {}), ...options.strategies };
+
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
       for (const ref of refs) {
-        const strat = options.strategies?.[ref.collection] ?? (
+        const strat = strategies[ref.collection] ?? (
           ["orders", "order_items", "payments", "invoices"].includes(ref.collection) ? "anonymize" : "delete"
         );
 
@@ -1226,10 +1231,21 @@ export class ProjectAuthService {
           case "detach":
             await client.query(`UPDATE ${tbl} SET ${col} = NULL WHERE ${col} = $1`, [userId]);
             break;
-          case "anonymize":
-            // Scrub user reference or overwrite with anonymized text if it's text
-            await client.query(`UPDATE ${tbl} SET ${col} = NULL WHERE ${col} = $1`, [userId]);
+          case "anonymize": {
+            const columns = await client.query<{ column_name: string; data_type: string }>(
+              "SELECT column_name, data_type FROM information_schema.columns WHERE table_schema='public' AND table_name=$1",
+              [ref.collection],
+            );
+            const personalFields = new Set(["email", "phone", "name", "first_name", "last_name", "recipient_name", "city", "street", "postal_code", "address", "shipping_address"]);
+            const assignments = [`${col} = NULL`];
+            for (const field of columns.rows) {
+              if (!personalFields.has(field.column_name) || field.column_name === ref.field) continue;
+              if (["text", "character varying", "character"].includes(field.data_type)) assignments.push(`${quoteIdentifier(field.column_name)} = '[deleted]'`);
+              else if (["json", "jsonb"].includes(field.data_type)) assignments.push(`${quoteIdentifier(field.column_name)} = '{}'`);
+            }
+            await client.query(`UPDATE ${tbl} SET ${assignments.join(", ")} WHERE ${col} = $1`, [userId]);
             break;
+          }
           case "retain":
             // Keep rows as-is (audit requirement)
             break;

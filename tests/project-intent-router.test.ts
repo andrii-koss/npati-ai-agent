@@ -15,6 +15,7 @@ import { ProjectService } from "../apps/agent-api/src/project-service";
 import { LocalProjectWorkspace } from "../apps/agent-api/src/project-workspace";
 import { ActiveContextResolver } from "../apps/agent-api/src/active-context-resolver";
 import { ProjectOrchestrator } from "../apps/agent-api/src/project-orchestrator";
+import { DataStudioError } from "../apps/agent-api/src/data-studio/identifier";
 import { ProjectGitService } from "../apps/agent-api/src/project-git-service";
 import type { CompanyDelegationRuntime } from "../apps/agent-api/src/company-runtime";
 import { PreviewError, type ProjectPreviewService } from "../apps/agent-api/src/project-preview-service";
@@ -303,6 +304,26 @@ describe("Step 5 - Project Orchestrator: Agent Selection, Targeted Edits & Repai
       mockPreviewService,
       mockCompanyRuntime
     );
+  });
+
+  it("stops before AI on a database bootstrap failure and retries the same project", async () => {
+    let company = await store.createCompany(authUserA, { name: "Shop bootstrap" }, "bootstrap-company");
+    const main = await store.createCompanyAgent(authUserA, company.id, { name: "Coordinator", role: "manager", tools: [], isActive: true }, "bootstrap-main");
+    company = await store.setCompanyMainAgent(authUserA, company.id, main.id, company.revision);
+    let attempts = 0;
+    const hooked = new ProjectOrchestrator(store, projectService, projectWorkspace, undefined, gitPreviewService, gitCompanyRuntime,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      async () => { if (++attempts === 1) throw new DataStudioError(503, "website_bootstrap", "Configure Project API URL", false, "PROJECT_API_URL_REQUIRED"); });
+    const message = "Створи тестовий сайт інтернет магазин на Next.js, запусти build і Live Preview.";
+    await expect(hooked.executeWebsiteTask(authUserA, { companyId: company.id, prompt: message, intentDecision: classifyProjectIntent({message}), idempotencyKey: "shop-first" })).rejects.toMatchObject({code:"PROJECT_API_URL_REQUIRED",status:503});
+    const projects = await projectService.list(authUserA, company.id);
+    expect(projects).toHaveLength(1);
+    expect(projects[0]!.status).toBe("failed");
+    expect(await store.listProjectRuns(authUserA, company.id, projects[0]!.id)).toHaveLength(0);
+    const result = await hooked.executeWebsiteTask(authUserA, {companyId:company.id,projectId:projects[0]!.id,prompt:"Збери проєкт",intentDecision:classifyProjectIntent({message:"Збери проєкт",activeProjectId:projects[0]!.id}),idempotencyKey:"shop-retry"});
+    expect(attempts).toBe(2);
+    expect(result.project.id).toBe(projects[0]!.id);
+    expect(result.projectCard.buildStatus).toBe("success");
   });
 
   it("connects a repository and records a project commit in Activity", async () => {

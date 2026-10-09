@@ -379,7 +379,7 @@ export class CompanyDelegationRuntime {
       const page = await this.store.listCompanyAgentsPage(ctx, companyId, MAX_CANDIDATES);
       const candidates = page.items.filter((agent) => agent.isActive);
       if (!candidates.some((agent) => agent.id === main.id)) candidates.unshift(main);
-      const projectChoices = candidates.some((agent) => agent.tools.some((tool) => (toolName(tool).startsWith("project.files.") || toolName(tool).startsWith("project.terminal.") || toolName(tool).startsWith("project.preview."))))
+      const projectChoices = candidates.some((agent) => agent.tools.some((tool) => (toolName(tool).startsWith("project.files.") || toolName(tool).startsWith("project.terminal.") || toolName(tool).startsWith("project.preview.") || toolName(tool).startsWith("project.data.") || toolName(tool).startsWith("project.auth."))))
         ? (await this.store.listProjects(ctx, companyId)).slice(0, 50).map((project) => ({ id: project.id, name: project.name, type: project.type })) : [];
       const planningMemory = !options.noMemory && mainTools.includes("knowledge") && this.knowledgeRetriever ? await this.knowledgeRetriever(ctx, companyId, input.task, options.memoryScope).catch(() => ({ chunks: [], memories: [] })) : { chunks: [], memories: [] };
       const actionPlanningContext = planningMemory.memories.filter(memory => memory.source === "action_sensitive").map(memory => memory.content).join("\n");
@@ -1009,7 +1009,7 @@ export class CompanyDelegationRuntime {
               : company.name || "company information";
         }
         if (tool.startsWith("project.files.")) { adapterInput.__npatiAgentId = agent.id; adapterInput.__npatiTaskRunId = runId; if (tool === "project.files.delete") adapterInput.__npatiApprovalGranted = true; }
-        if (tool.startsWith("project.terminal.") || tool.startsWith("project.preview.") || tool.startsWith("project.git.") || tool.startsWith("project.deploy.") || tool.startsWith("project.data.")) { adapterInput.__npatiAgentId = agent.id; adapterInput.__npatiTaskRunId = runId; adapterInput.__npatiApprovalGranted = tool === "project.deploy.publish" || tool === "project.data.schema.apply" || tool === "project.data.templates.apply" || tool === "project.data.rows.delete" ? Boolean(approvedForCurrent || plan.input._approvalToken) : (!terminalNeedsApproval || Boolean(approvedForCurrent || plan.input._approvalToken)); }
+        if (tool.startsWith("project.terminal.") || tool.startsWith("project.preview.") || tool.startsWith("project.git.") || tool.startsWith("project.deploy.") || tool.startsWith("project.data.") || tool.startsWith("project.auth.") || tool === "project.api.inspect") { adapterInput.__npatiAgentId = agent.id; adapterInput.__npatiTaskRunId = runId; adapterInput.__npatiApprovalGranted = tool === "project.deploy.publish" || tool === "project.data.schema.apply" || tool === "project.data.templates.apply" || tool === "project.data.rows.delete" || tool === "project.auth.configure" ? Boolean(approvedForCurrent || plan.input._approvalToken) : (!terminalNeedsApproval || Boolean(approvedForCurrent || plan.input._approvalToken)); }
         /**
          * C11 (owner decision 5): the approval **record id** travels to the git boundary, which is what
          * verifies it (status, single use, expiry, payload hash). `__npatiApprovalGranted` above is a

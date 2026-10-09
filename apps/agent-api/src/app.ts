@@ -55,6 +55,7 @@ import { ProjectRedirectRepository } from "./data-studio/redirect-repository";
 import { registerProjectAuthRoutes } from "./data-studio/auth-routes";
 import { ProjectApiGatewayService } from "./data-studio/gateway-service";
 import { registerProjectApiGatewayRoutes } from "./data-studio/gateway-routes";
+import { bootstrapWebsiteData, isCommerceWebsite } from "./data-studio/website-bootstrap";
 import { AgentDataStudioService } from "./data-studio/agent-data-service";
 import { MountedWorkspaceProvider } from "./mounted-workspace-provider";
 import { ProjectWorkspaceBaseResolver, type MountedFolderFlagPort } from "./workspace-base-resolver";
@@ -1163,18 +1164,13 @@ export function buildApp(config: AppConfig = {}) {
     // D7: deleting a Project only detaches it; the DataBackend keeps serving other Projects.
     await dataBackendService?.detachProjectArtifacts(context, project.companyId, project.id).catch(() => undefined);
   }, async (context, companyId, projectId) => {
-    // Data Studio: wire a newly created Project to its database automatically so the owner never
-    // has to attach a DataBackend by hand. The company's newest ready backend is reused; the first
-    // Project of a company creates one on demand. Any failure leaves the Project detached.
+    // Independent sites get independent data. Explicit attachments (including mobile apps)
+    // are handled by ProjectService and never call this hook.
     if (!dataBackendService) return undefined;
     try {
-      const backends = await dataBackendService.list(context, companyId);
-      let backendId = (backends.find((backend) => backend.status === "ready") ?? backends[0])?.id;
-      if (!backendId) {
-        const company = await workspaceStore.getCompany(context, companyId);
-        const created = await dataBackendService.create(context, companyId, { name: `${company.name} data`.slice(0, 200) });
-        backendId = created.id;
-      }
+      const project = await workspaceStore.getProject(context, companyId, projectId);
+      const created = await dataBackendService.create(context, companyId, { name: `${project.name} data`.slice(0, 200) });
+      const backendId = created.id;
       await dataBackendService.attach(context, companyId, projectId, backendId);
       return backendId;
     } catch (error) {
@@ -3209,6 +3205,13 @@ export function buildApp(config: AppConfig = {}) {
             }),
         }
       : undefined,
+    async (ctx, project, prompt) => {
+      if (!dataBackendService || !dataBackendRepository || !dataProvider || !projectMigrationEngine || !agentDataStudioService || !projectAuthService || !projectApiGatewayService || !dataStudioService) {
+        if (isCommerceWebsite(prompt)) throw new ProjectOrchestrationError("DATA_STUDIO_UNAVAILABLE", "Project database service is unavailable. Configure Data Studio and postgres-projects before creating the store.", 503);
+        return;
+      }
+      await bootstrapWebsiteData(ctx, project, prompt, { backends: dataBackendService, repository: dataBackendRepository, provider: dataProvider, migrations: projectMigrationEngine, agentData: agentDataStudioService, auth: projectAuthService, gateway: projectApiGatewayService, studio: dataStudioService, workspace: projectWorkspace });
+    },
   );
   const companyRunQueue = config.redisUrl ? new CompanyRunQueueProducer(config.redisUrl) : undefined;
   const emailAutomationHooks = {

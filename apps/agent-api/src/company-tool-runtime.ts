@@ -527,7 +527,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
       }
     }
     const projectId = text(input.projectId, "Project ID", 100);
-    const approved = input.__npatiApprovalGranted === true || input.confirmed === true;
+    const approved = input.__npatiApprovalGranted === true;
     const runId = typeof input.__npatiTaskRunId === "string" ? input.__npatiTaskRunId : undefined;
 
     switch (tool) {

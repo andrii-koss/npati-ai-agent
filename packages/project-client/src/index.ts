@@ -531,11 +531,20 @@ export function createProjectClient(options: ProjectClientOptions): ProjectClien
   return {
     auth: authClient,
     from,
-    fetchRaw: (endpoint, init) => {
+    fetchRaw: async (endpoint, init = {}) => {
       const fullUrl = endpoint.startsWith("http://") || endpoint.startsWith("https://")
         ? endpoint
         : `${baseUrl}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
-      return fetchFn(fullUrl, init);
+      const headers = new Headers(init.headers);
+      const internal = !/^https?:\/\//i.test(endpoint) || fullUrl.startsWith(baseUrl + "/");
+      if (internal) {
+        const session = await loadSession();
+        const key = options.secretKey || options.publishableKey;
+        if (key) headers.set("X-Project-Key", key);
+        if (session?.accessToken) headers.set("Authorization", `Bearer ${session.accessToken}`);
+        if (typeof init.body === "string" && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+      }
+      return fetchFn(fullUrl, { ...init, headers });
     },
   };
 }

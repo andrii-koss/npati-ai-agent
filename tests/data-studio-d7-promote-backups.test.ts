@@ -131,6 +131,7 @@ function fakeRepository(state: FakeState) {
     async listAppliedMigrations(_backendId: string, environment: DataEnvironmentName) {
       return state.migrations[environment].map((row) => ({ version: row.version, operation: row.operation }));
     },
+    async getAccessPolicies() { return []; },
     async attach() { return null; },
     async deleteSecrets() { state.secrets.clear(); },
     async deleteSnapshots() { const rows = state.snapshots; state.snapshots = []; return rows; },

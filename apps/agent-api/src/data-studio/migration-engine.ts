@@ -6,6 +6,8 @@ import type { DataProvider, SchemaChange, SchemaOperation, SchemaSnapshot } from
 import type { DatabaseProvisioner } from "./provisioner";
 import type { DataBackend, DataEnvironmentName, ProjectSnapshot } from "./types";
 import type { AuthContext } from "@npati/workspace";
+import type { ProjectAccessPolicy } from "@npati/shared";
+import { RlsPolicyCompiler } from "./rls-compiler";
 
 export interface MigrationRequest {
   backend: DataBackend;
@@ -13,6 +15,8 @@ export interface MigrationRequest {
   operation: SchemaOperation;
   authorId: string;
   runId?: string;
+  /** Internal handoff from Promote; ownership is verified against Core. */
+  lockToken?: string;
 }
 export interface MigrationPreview {
   operation: string;
@@ -80,8 +84,8 @@ export class ProjectMigrationEngine {
     if (stored.status !== "ready") throw new DataStudioError(409, "migration", "Backend is not ready", false, "BACKEND_NOT_READY");
     const env = await this.repository.environment(ctx, backend.companyId, backend.id, environment);
     if (env.status !== "ready" || env.syncStatus !== "synced") throw new DataStudioError(409, "migration", "Environment requires reconciliation", false, "DRIFT_BLOCKED");
-    const token = randomUUID();
-    if (!await this.repository.acquireLock(backend.id, environment, token, 120_000)) {
+    const token = request.lockToken ?? randomUUID();
+    if (!(request.lockToken ? await this.repository.ownsLock(backend.id, environment, token) : await this.repository.acquireLock(backend.id, environment, token, 120_000))) {
       throw new DataStudioError(409, "migration_lock", "Migration already in progress", true, "MIGRATION_BUSY");
     }
     const pool = await this.pool(backend, environment);
@@ -139,7 +143,86 @@ export class ProjectMigrationEngine {
       return { ...change, current, diff: { operation: request.operation, beforeFingerprint: actual, sql: change.upSql }, id, version, checksum, fingerprint, snapshot };
     } finally {
       await pool.end();
-      await this.repository.releaseLock(backend.id, environment, token);
+      if (!request.lockToken) await this.repository.releaseLock(backend.id, environment, token);
+    }
+  }
+
+  /** All template DDL, history and runtime policies share one PostgreSQL transaction. */
+  async applyBatch(ctx: AuthContext, request: Omit<MigrationRequest, "operation"> & { operations: SchemaOperation[]; policies?: ProjectAccessPolicy[] }): Promise<MigrationResult[]> {
+    const { backend, environment, operations } = request;
+    if (!operations.length || operations.length > 50) throw new DataStudioError(400, "migration", "Invalid migration batch size", false, "INVALID_OPERATION");
+    if (backend.workspaceId !== ctx.workspaceId || backend.createdBy !== ctx.userId) throw new DataStudioError(403, "migration", "Backend is outside tenant", false, "TENANT_DENIED");
+    const stored = await this.repository.get(ctx, backend.companyId, backend.id);
+    const env = await this.repository.environment(ctx, backend.companyId, backend.id, environment);
+    if (stored.status !== "ready" || env.status !== "ready" || env.syncStatus !== "synced") throw new DataStudioError(409, "migration", "Environment is not ready or requires reconciliation", false, "DRIFT_BLOCKED");
+    const changes = operations.map(operation => this.compileManagedChange(operation));
+    for (const policy of request.policies ?? []) RlsPolicyCompiler.validate(policy);
+    const token = request.lockToken ?? randomUUID();
+    if (!(request.lockToken ? await this.repository.ownsLock(backend.id, environment, token) : await this.repository.acquireLock(backend.id, environment, token, 120_000))) throw new DataStudioError(409, "migration_lock", "Migration already in progress", true, "MIGRATION_BUSY");
+    let pool: Pool | undefined;
+    try {
+      pool = await this.pool(backend, environment);
+      await this.ensureHistory(pool);
+      const current = await this.provider.introspectSchema(backend, environment);
+      const actual = this.provider.schemaFingerprint(current);
+      if (env.schemaFingerprint && env.schemaFingerprint !== actual) {
+        await this.repository.setEnvironment(ctx, backend.companyId, backend.id, environment, { syncStatus: "drift_detected" });
+        throw new DataStudioError(409, "drift", "Project schema changed outside NPATI", false, "SCHEMA_DRIFT");
+      }
+      const usage = await this.provisioner.getUsage(backend, environment);
+      const pending = { tables: [...current.tables] };
+      operations.forEach((operation, index) => {
+        this.provider.assertLimits(changes[index]!.operation, pending, usage.bytes, operation.collection);
+        if (operation.kind === "create_collection") pending.tables.push({ name: operation.collection, columns: [], constraints: [], indexes: [], policies: [], rlsEnabled: true, rlsForced: true });
+      });
+      const snapshot = changes.some(change => change.destructive || change.requiresSnapshot) ? await this.provisioner.snapshot(backend, environment) : undefined;
+      const client = await pool.connect();
+      const records: Array<{ id: string; version: number; checksum: string; change: SchemaChange; operation: SchemaOperation }> = [];
+      try {
+        await client.query("BEGIN");
+        const lock = await client.query<{ locked: boolean }>("SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS locked", [backend.id + ":" + environment]);
+        if (!lock.rows[0]?.locked) throw new DataStudioError(409, "migration_lock", "Database migration lock busy", true, "MIGRATION_BUSY");
+        const next = await client.query<{ version: string }>("SELECT coalesce(max(version),0)::text AS version FROM _npati_migrations");
+        let version = Number(next.rows[0]!.version);
+        for (let index = 0; index < operations.length; index++) {
+          const operation = operations[index]!;
+          const change = changes[index]!;
+          const id = randomUUID();
+          const checksum = createHash("sha256").update(JSON.stringify(operation) + "\n" + change.upSql + "\n" + (change.downSql ?? "")).digest("hex");
+          await client.query(change.upSql);
+          await client.query("INSERT INTO _npati_migrations(id,version,operation,reversible,destructive,requires_snapshot,up_sql,down_sql,author_id,run_id,checksum,status,snapshot_ref) VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11,'applied',$12)", [id, ++version, JSON.stringify(operation), change.reversible, change.destructive, change.requiresSnapshot, change.upSql, change.downSql ?? null, request.authorId, request.runId ?? null, checksum, snapshot?.id ?? null]);
+          records.push({ id, version, checksum, change, operation });
+        }
+        const grouped = new Map<string, ProjectAccessPolicy[]>();
+        for (const policy of request.policies ?? []) grouped.set(policy.collection, [...(grouped.get(policy.collection) ?? []), policy]);
+        if (grouped.size) {
+          const runtime = await this.provisioner.getConnection(backend, environment, "runtime");
+          for (const [collection, policies] of grouped) {
+            for (const sql of RlsPolicyCompiler.compile(collection, policies).sql) await client.query(sql);
+            await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ${quoteIdentifier(collection)} TO ${quoteIdentifier(runtime.user)}`);
+          }
+        }
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally { client.release(); }
+      try {
+        for (const record of records) await this.repository.pool.query("INSERT INTO data_backend_migrations(id,backend_id,environment,version,operation,reversible,destructive,requires_snapshot,up_sql,down_sql,author_id,run_id,checksum,status,snapshot_ref,applied_at) VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13,'applied',$14,now())", [record.id, backend.id, environment, record.version, JSON.stringify(record.operation), record.change.reversible, record.change.destructive, record.change.requiresSnapshot, record.change.upSql, record.change.downSql ?? null, request.authorId, request.runId ?? null, record.checksum, snapshot?.id ?? null]);
+        const grouped = new Map<string, ProjectAccessPolicy[]>();
+        for (const policy of request.policies ?? []) grouped.set(policy.collection, [...(grouped.get(policy.collection) ?? []), policy]);
+        for (const [collection, policies] of grouped) await this.repository.setCollectionAccessPolicies(ctx, backend.companyId, backend.id, environment, collection, policies);
+        const updated = await this.provider.introspectSchema(backend, environment);
+        const fingerprint = this.provider.schemaFingerprint(updated);
+        await this.repository.setExpectedSchema(ctx, backend.companyId, backend.id, environment, updated, fingerprint);
+        return records.map(record => ({ ...record.change, id: record.id, version: record.version, checksum: record.checksum, fingerprint, snapshot, current, diff: { operation: record.operation, beforeFingerprint: actual, sql: record.change.upSql } }));
+      } catch (error) {
+        await this.repository.setEnvironment(ctx, backend.companyId, backend.id, environment, { syncStatus: "reconciliation_required" }).catch(() => undefined);
+        throw error;
+      }
+    } finally {
+      await pool?.end();
+      if (!request.lockToken) await this.repository.releaseLock(backend.id, environment, token);
     }
   }
 

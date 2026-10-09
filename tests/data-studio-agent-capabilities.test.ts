@@ -162,6 +162,15 @@ describe("Data Studio Agent Capabilities & Templates (D3)", () => {
       async rollback(ctx, backend, env, migrationId) {
         return { success: true };
       },
+      async applyBatch(ctx, request) {
+        const before = structuredClone(currentSchema.tables);
+        try {
+          return await Promise.all(request.operations.map(operation => this.apply!(ctx, { ...request, operation })));
+        } catch (error) {
+          currentSchema.tables = before;
+          throw error;
+        }
+      },
       async listOwnerRows(ctx, backend, env, collection, input) {
         const rows = rowsDatabase[collection] || [];
         return rows;
