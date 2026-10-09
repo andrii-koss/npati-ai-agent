@@ -1,5 +1,16 @@
 ﻿import { SandboxProviderError } from "./sandbox-provider";
 import { redactTerminalText } from "./terminal-command-policy";
+import { SandboxQuotaError } from "./sandbox-resource-quota";
+
+/** Preserve admission refusals across the runner API instead of masking them as Docker failures. */
+export function runnerFailure(error: unknown, operation: string): SandboxProviderError {
+  if (error instanceof SandboxProviderError) return error;
+  if (error instanceof SandboxQuotaError) return new SandboxProviderError(error.code, error.message, error.status, operation, "project.terminal.exec", error.retryable);
+  const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+  if (code === "EACCES" || code === "EPERM") return new SandboxProviderError("sandbox_workspace_permission_denied", "Sandbox workspace is not writable", 503);
+  if (code === "ENOSPC") return new SandboxProviderError("sandbox_storage_full", "Sandbox storage is full", 503);
+  return new SandboxProviderError("runner_failure", `Sandbox runner ${operation} failed`, 503);
+}
 
 export function safeDockerStderr(value: string): string {
   return redactTerminalText(value).slice(0, 1600)

@@ -1,11 +1,26 @@
 ﻿import { describe, expect, it, vi } from "vitest";
-import { dockerFailure, safeDockerStderr } from "../apps/agent-api/src/sandbox-runner-diagnostics";
+import { dockerFailure, safeDockerStderr, runnerFailure } from "../apps/agent-api/src/sandbox-runner-diagnostics";
+import { HostAdmissionController } from "../apps/agent-api/src/sandbox-resource-quota";
 import { RemoteSandboxProvider, SandboxProviderError } from "../apps/agent-api/src/sandbox-provider";
 
 const secret = "a".repeat(40);
 const scope = { workspaceId: "workspace", userId: "user", companyId: "company", projectId: "project" };
 
 describe("sandbox runner diagnostics", () => {
+  it("preserves the memory-pressure refusal and retryability through the remote runner", async () => {
+    const admission = new HostAdmissionController({ sample: () => ({ cpuUsageRatio: 0.1, freeMemoryRatio: 0.129 }) });
+    let refusal: unknown;
+    try { admission.assertAdmitted(); } catch (error) { refusal = error; }
+    expect(refusal).toBeInstanceOf(Error);
+    const error = runnerFailure(refusal, "createSandbox");
+    expect(error).toMatchObject({ code: "host_overloaded", status: 429, retryable: true });
+    expect(error.message).toContain("12.9%");
+    const transport = vi.fn(async () => new Response(JSON.stringify({ error: { code: error.code, message: error.message, retryable: error.retryable } }), { status: error.status }));
+    const provider = new RemoteSandboxProvider("http://sandbox-runner:7865", secret, transport as typeof fetch, "local");
+    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try { await expect(provider.createSandbox(scope)).rejects.toMatchObject({ code: "host_overloaded", status: 429, retryable: true, message: error.message }); }
+    finally { spy.mockRestore(); }
+  });
   it.each([
     ["permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock", "docker_socket_permission_denied", "Docker socket permission denied"],
     ["Cannot connect to the Docker daemon at unix:///var/run/docker.sock", "docker_daemon_unavailable", "Docker daemon unavailable"],

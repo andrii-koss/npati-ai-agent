@@ -4,7 +4,7 @@ import { stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { DockerSandboxProvider, sandboxAllowedHostsWithProjectApi } from "./docker-sandbox-provider";
-import { dockerFailure } from "./sandbox-runner-diagnostics";
+import { dockerFailure, runnerFailure } from "./sandbox-runner-diagnostics";
 import { SandboxProviderError, type SandboxCreateOptions, type SandboxScope } from "./sandbox-provider";
 import { InMemoryWorkspaceStore, PostgresWorkspaceStore } from "@npati/workspace";
 import { resolveRunnerStore } from "./sandbox-runner-store";
@@ -21,6 +21,7 @@ import {
   SandboxCompanyQuota,
   resolveSandboxCompanyQuota,
   resolveSandboxResourceLimits,
+  resolveHostAdmissionLimits,
   sandboxMemoryArg,
 } from "./sandbox-resource-quota";
 
@@ -152,7 +153,7 @@ const runnerReadiness = createRunnerReadiness({
  */
 const sandboxResourceLimits = resolveSandboxResourceLimits(process.env);
 const sandboxCompanyQuota = new SandboxCompanyQuota(resolveSandboxCompanyQuota(process.env), sandboxResourceLimits);
-const hostAdmission = new HostAdmissionController();
+const hostAdmission = new HostAdmissionController({ limits: resolveHostAdmissionLimits(process.env) });
 console.info("[sandbox-quota] " + JSON.stringify({
   resourceLimits: sandboxResourceLimits,
   companyQuota: sandboxCompanyQuota.config,
@@ -248,8 +249,7 @@ app.post<{ Body: string }>("/v1/sandbox", async (request, reply) => {
     if (!(error instanceof SandboxProviderError) && error instanceof Error) {
       console.error(`[sandbox-runner] underlying error during ${operation}:`, error.stack || error.message);
     }
-    const systemCode = error && typeof error === "object" && "code" in error ? String(error.code) : "";
-    const known = error instanceof SandboxProviderError ? error : systemCode === "EACCES" || systemCode === "EPERM" ? new SandboxProviderError("sandbox_workspace_permission_denied", "Sandbox workspace is not writable", 503) : systemCode === "ENOSPC" ? new SandboxProviderError("sandbox_storage_full", "Sandbox storage is full", 503) : new SandboxProviderError("runner_failure", `Sandbox runner ${operation} failed`, 503);
+    const known = runnerFailure(error, operation);
     const d = known.diagnostics;
     const resources = resourceNames(d?.sandboxId ?? sandboxId);
     console.error("[sandbox-runner] " + JSON.stringify({ operation, projectId: scope?.projectId ?? null, sandboxId: d?.sandboxId ?? (sandboxId || null), image: d?.image ?? null, container: d?.container ?? resources.container, network: d?.network ?? resources.network, status: "error", httpStatus: known.status, errorCode: known.code, errorMessage: known.message, dockerAction: d?.dockerAction ?? null, dockerStderr: d?.dockerStderr ?? null }));

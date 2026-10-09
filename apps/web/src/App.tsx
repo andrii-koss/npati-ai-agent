@@ -673,6 +673,7 @@ function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose?: () =
     navigate("/b/new", { state: { newBusiness: Date.now() } });
   }
   function openNewChat() {
+    try { sessionStorage.removeItem("npati_active_project"); } catch {}
     onClose?.();
     setChatOpen(true);
     cachedChatOpen = true;

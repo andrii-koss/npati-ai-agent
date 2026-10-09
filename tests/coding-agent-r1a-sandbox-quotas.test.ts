@@ -331,7 +331,7 @@ describe("security-gate: R1 A.4/A.5 — the provider applies the quotas, and onl
     }
     // The one production caller is the sandbox runner, where containers are actually created.
     const runner = read(path.join("apps", "agent-api", "src", "sandbox-runner-server.ts"));
-    expect(runner).toContain("new HostAdmissionController()");
+    expect(runner).toContain("new HostAdmissionController({ limits: resolveHostAdmissionLimits(process.env) })");
     expect(runner).toContain("runnerMountGate, sandboxCompanyQuota, hostAdmission);");
   });
 
