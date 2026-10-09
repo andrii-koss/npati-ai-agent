@@ -483,6 +483,52 @@ describe("Clean Project Naming for Website Builder", () => {
   });
 });
 
+describe("Settings default model changes", () => {
+  it("changes existing agent and pipeline routes without updating agent revisions", async () => {
+    const store = new InMemoryWorkspaceStore();
+    await store.initialize();
+    const auth: AuthContext = {workspaceId:"default-model-ws",userId:"owner",permissions:["workspace:read","workspace:write","business:manage","tools:execute"]};
+    let company = await store.createCompany(auth,{name:"Model switch"},"model-switch-company");
+    const oldModel="ollama-cloud/gemma4:31b", newModel="openai/gpt-5.6-luna";
+    const main=await store.createCompanyAgent(auth,company.id,{name:"Coordinator",role:"manager",modelId:oldModel,tools:[],isActive:true},"model-switch-main");
+    const worker=await store.createCompanyAgent(auth,company.id,{name:"Website Builder",role:"frontend developer",modelId:oldModel,tools:[],isActive:true},"model-switch-worker");
+    company=await store.setCompanyMainAgent(auth,company.id,main.id,company.revision);
+    const preferences=new AIPreferencesStore(store);
+    for (const id of [oldModel,newModel]) await preferences.add(auth,{id,name:id,providerId:id.split("/")[0],capabilities:["chat"],added:true} as AIModelSummary);
+    await preferences.setDefault(auth,oldModel);
+    const registry=new Map<string,any>();
+    const executed: string[]=[];
+    let expected=oldModel;
+    const resolve=(name:string):string[]=>{
+      const combo=registry.get(name);
+      return combo ? combo.models.flatMap((model:any)=>typeof model === "string" ? [model] : resolve(model.comboName)) : [name];
+    };
+    const ai={
+      ensureA2AEnabled:async()=>{},
+      ensureCombo:async(input:any)=>{if(!registry.has(input.name))registry.set(input.name,structuredClone(input));return {name:input.name};},
+      a2aSend:async(request:any)=>{expect(request.model).toBe(expected);return {taskId:"plan",content:JSON.stringify({mode:"single",agentIds:[worker.id],toolRequests:[]})};},
+      chat:async(request:any)=>{executed.push(request.model);expect(resolve(request.model)).toEqual([expected,expected]);return {content:"Completed"};},
+    } as unknown as AIEngine;
+    const runtime=new CompanyDelegationRuntime(store,ai,5000,undefined,undefined,undefined,undefined,undefined,undefined,undefined,undefined,
+      async ctx=>{const prefs=await preferences.get(ctx);return prefs.addedModels.filter(model=>model.id===prefs.routing.defaultModelId);},true);
+    const first=await runtime.execute(auth,company.id,{task:"Create a site",mode:"single",preferredAgentId:worker.id},"switch-first");
+    expect(first.run.status).toBe("completed");
+    expected=newModel;
+    await preferences.setDefault(auth,newModel);
+    const second=await runtime.execute(auth,company.id,{task:"Create a site",mode:"single",preferredAgentId:worker.id},"switch-second");
+    expect(second.run.status).toBe("completed");
+    expect(second.steps.every(step=>step.modelId===newModel)).toBe(true);
+    expect((await store.getCompanyAgent(auth,company.id,worker.id)).revision).toBe(worker.revision);
+    expect(executed[1]).not.toBe(executed[0]);
+    const third=await runtime.execute(auth,company.id,{task:"Create a site",mode:"single",preferredAgentId:worker.id},"switch-third");
+    expect(third.run.status).toBe("completed");
+    expect(executed[2]).toBe(executed[1]);
+  });
+  it("classifies empty provider responses as model failures", () => {
+    expect(isModelError(new Error("NPATI AI chat failed with HTTP 502: [ollama-cloud/gemma4:31b] Provider returned empty content (reset after 3s)"))).toBe(true);
+  });
+});
+
 describe("DeepSeek 401 uncredentialed provider failover", () => {
   it("automatically fails over from uncredentialed DeepSeek to 'auto' without throwing model_routing_failed", async () => {
     const store = new InMemoryWorkspaceStore();

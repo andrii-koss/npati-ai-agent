@@ -555,7 +555,7 @@ export class CompanyDelegationRuntime {
           agentId: id, stepOrder: plan.mode === "fusion" && id !== main.id ? 0 : index,
           lane: plan.mode === "fusion" && id !== main.id ? index : 0,
           role: id === main.id ? "manager" as const : reviewer?.id === id ? "reviewer" as const : "worker" as const,
-          status: "delegated" as const, modelId: agent.modelId ?? "auto"
+          status: "delegated" as const, modelId: this.strictInferenceRouting ? inferenceModels[0]! : agent.modelId ?? "auto"
         };
       }));
       await this.store.updateCompanyAgentRun(ctx, companyId, created.run.id,
@@ -1074,16 +1074,19 @@ export class CompanyDelegationRuntime {
         ? [...new Set([agent.modelId, agent.fallbackModelId, ...inferenceModels].filter((model): model is string => Boolean(model && inferenceModels.includes(model))))]
         : undefined;
       const primary = agentModels?.[0] ?? comboModel(agent.modelId), fallback = agentModels?.[1] ?? comboModel(agent.fallbackModelId);
-      const name = `npati/a/${digest(`${company.workspaceId}:${company.id}:${agent.id}:${agent.revision}`)}`;
       const allowed = agent.tools.map(toolName).map((item) => item.replace(/[^a-z0-9.]/gi, ""));
       const comboCandidateModels = agentModels?.length ? [...agentModels] : [...new Set([primary, fallback])];
       if (!this.strictInferenceRouting) {
         if (!comboCandidateModels.includes("auto")) comboCandidateModels.push("auto");
         if (!comboCandidateModels.includes("auto/smart")) comboCandidateModels.push("auto/smart");
       }
+      // OmniRoute keeps an existing combo unchanged. Include its effective routing
+      // and prompt in the identity so a Settings change cannot reuse an old provider.
+      const systemMessage = instruction(company, agent, agent.id === main.id, includeMemory, linked);
+      const name = `npati/a/${digest(JSON.stringify({ workspace: company.workspaceId, company: company.id, agent: agent.id, revision: agent.revision, models: comboCandidateModels, systemMessage, tools: allowed, timeoutMs: this.timeoutMs }))}`;
       await this.ai.ensureCombo({
         name, strategy: "priority", models: comboCandidateModels,
-        description: `NPATI Company agent ${agent.name}`, system_message: instruction(company, agent, agent.id === main.id, includeMemory, linked),
+        description: `NPATI Company agent ${agent.name}`, system_message: systemMessage,
         tool_filter_regex: allowed.length ? `^(?:${allowed.join("|")})$` : "a^",
         config: { maxRetries: 2, retryDelayMs: 500, failoverBeforeRetry: true, timeoutMs: this.timeoutMs }
       }, signal);
@@ -1092,7 +1095,7 @@ export class CompanyDelegationRuntime {
     const workers = selected.filter((agent) => agent.id !== main.id && agent.id !== reviewer?.id);
     if (mode === "single" && !workers.length && (!reviewer || reviewer.id === main.id))
       return { model: names.get(main.id)!, mode: "single" as const };
-    const signature = digest(json({ company: company.id, mode, agents: unique.map((agent) => [agent.id, agent.revision]), reviewer: reviewer?.id }));
+    const signature = digest(json({ company: company.id, mode, agents: unique.map((agent) => [agent.id, names.get(agent.id)]), reviewer: reviewer?.id, judgeModel: this.strictInferenceRouting ? inferenceModels?.[0] : comboModel(main.modelId) }));
     if (mode === "fusion" && workers.length >= 2) {
       const fusion = `npati/f/${signature}`;
       await this.ai.ensureCombo({

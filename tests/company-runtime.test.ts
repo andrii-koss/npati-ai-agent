@@ -1,5 +1,6 @@
 import { buildApp } from "../apps/agent-api/src/app";
 import { CompanyDelegationRuntime } from "../apps/agent-api/src/company-runtime";
+import { AIPreferencesStore } from "../apps/agent-api/src/ai-preferences";
 import type { AuthProvider } from "../apps/agent-api/src/auth";
 import type { AIEngine, OmniRouteComboInput } from "@npati/omniroute-adapter";
 import type { AuthContext } from "@npati/workspace";
@@ -33,6 +34,9 @@ async function setup(ai: AIEngine, active: { value: AuthContext }, companyRunTim
   const app = buildApp({ workspaceStore: store, authProvider: auth, aiEngine: ai, marketplace, companyRunTimeoutMs });
   apps.push(app);
   const company = await app.inject({ method: "POST", url: "/companies", headers: { "idempotency-key": "company-runtime-001" }, payload: { name: "Runtime Co" } });
+  const preferences = new AIPreferencesStore(store);
+  await preferences.add(active.value, { id: "openai/gpt-4o", name: "GPT-4o", providerId: "openai", capabilities: ["chat"], added: true });
+  await preferences.setDefault(active.value, "openai/gpt-4o");
   return { app, companyId: company.json().id as string };
 }
 async function addAgent(app: ReturnType<typeof buildApp>, companyId: string, key: string, input: Record<string, unknown>) {
@@ -109,7 +113,7 @@ describe("Company delegation runtime", () => {
       expect.objectContaining({ operation: "navigate", url: "https://example.com" }), expect.any(AbortSignal));
   });
 
-  it("uses A2A planning, OmniRoute Pipeline, Auto fallback, tool enforcement and idempotency", async () => {
+  it("uses A2A planning, OmniRoute Pipeline, the Settings default, tool enforcement and idempotency", async () => {
     const combos: OmniRouteComboInput[] = [];
     const chat = vi.fn(async () => ({
       content: "Reviewed final answer",
@@ -150,7 +154,8 @@ describe("Company delegation runtime", () => {
     expect(executeTool).toHaveBeenCalledWith("web.search", { query: "NPATI evidence" });
     expect(executeTool).toHaveBeenCalledTimes(1);
     expect(combos.some((combo) => combo.strategy === "pipeline")).toBe(true);
-    expect(combos.filter((combo) => combo.strategy === "priority").every((combo) => combo.models.includes("auto/smart"))).toBe(true);
+    expect(combos.filter((combo) => combo.strategy === "priority").every((combo) =>
+      JSON.stringify(combo.models) === JSON.stringify(["openai/gpt-4o"]))).toBe(true);
     expect(combos.filter((combo) => combo.strategy === "priority").every((combo) =>
       combo.config?.maxRetries === 2 && combo.config?.failoverBeforeRetry === true)).toBe(true);
     expect(chat).toHaveBeenCalledWith(expect.objectContaining({ model: expect.stringMatching(/^npati\/p\//) }));

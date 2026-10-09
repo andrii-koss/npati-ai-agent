@@ -14,6 +14,7 @@ import { resolveEgressAllowlist, toProxyAllowedHosts } from "./egress-allowlist"
 import { RunnerMountGate, type MountedFolderAllowlistPort } from "./mounted-folder-gate";
 import { mountedFolderRoots } from "./project-mount-policy";
 import { authenticateRunnerRequest, createRunnerReadiness } from "./runner-readiness";
+import { createReadinessNetwork, READINESS_EGRESS_SCOPE } from "./sandbox-readiness-network";
 import { CosignImageSignatureVerifier } from "./sandbox-image-signature";
 import {
   HostAdmissionController,
@@ -129,9 +130,15 @@ const egressEnforcement = resolveEgressEnforcement(process.env, {
 });
 
 /** C4b: readiness facts served to the API (see `runner-readiness.ts`). */
+const readinessEnforcement = resolveEgressEnforcement(process.env, {
+  probe: dockerEgressProbe({docker:dockerCommand,sandboxImage:process.env.NPATI_SANDBOX_IMAGE ?? "npati/project-sandbox:local"}),
+  log:(event,details)=>console.warn(`[sandbox-runner] ${event} ${JSON.stringify(details)}`),
+});
+readinessEnforcement.scope = READINESS_EGRESS_SCOPE;
 const runnerReadiness = createRunnerReadiness({
   docker: dockerCommand,
-  enforcement: egressEnforcement,
+  enforcement: readinessEnforcement,
+  prepareEgress: createReadinessNetwork({docker:dockerCommand,image:process.env.NPATI_SANDBOX_EGRESS_IMAGE ?? "npati/sandbox-egress:local",allowedHosts:sandboxAllowedHostsWithProjectApi(process.env.NPATI_SANDBOX_ALLOWED_HOSTS ?? toProxyAllowedHosts(resolveEgressAllowlist({env:process.env})),process.env.NPATI_PROJECT_API_PUBLIC_URL)}),
   images: {
     sandbox: process.env.NPATI_SANDBOX_IMAGE ?? "npati/project-sandbox:local",
     egressProxy: process.env.NPATI_SANDBOX_EGRESS_IMAGE ?? "npati/sandbox-egress:local",

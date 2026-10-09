@@ -162,6 +162,16 @@ describe("security-gate: C4b egress — readiness probe", () => {
     expect(await enforcement.isEnforced()).toBe(true);
     await expect(enforcement.assertEnforced()).resolves.toMatchObject({ enforced: true });
   });
+  it("does not reuse another sandbox's cached enforcement result", async () => {
+    const probe=healthyProbe();
+    const enforcement=new EgressEnforcement({probe});
+    enforcement.scope={proxy:"first-proxy",network:"first-network"};
+    expect((await enforcement.verify()).enforced).toBe(true);
+    probe.proxyHealth.mockResolvedValueOnce({ok:false,detail:"missing second proxy"});
+    enforcement.scope={proxy:"second-proxy",network:"second-network"};
+    expect(await enforcement.verify()).toMatchObject({enforced:false,reason:"proxy_unhealthy"});
+    expect(probe.proxyHealth).toHaveBeenLastCalledWith({proxy:"second-proxy",network:"second-network"});
+  });
 
   it("fails closed with a structured reason for every unmet condition", async () => {
     const cases: Array<[string, () => Record<string, unknown>]> = [
