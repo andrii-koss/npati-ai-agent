@@ -163,11 +163,45 @@ async function fixture() {
 }
 
 describe("Step 4 — Project Preview & Changes", () => {
+  it("waits for HTTP readiness before publishing the preview", async () => {
+    const { preview, sandbox, workspace, company, project } = await fixture();
+    await workspace.createFile(owner, company.id, project.id, "index.html", "Ready");
+    vi.spyOn(sandbox, "supportsPreviewProxy").mockReturnValue(true);
+    const probe = vi.spyOn(sandbox, "proxyPreview")
+      .mockRejectedValueOnce(new Error("Connection refused"))
+      .mockResolvedValueOnce({ status: 200, headers: {}, body: "" });
+    await expect(preview.startPreview(owner, company.id, project.id)).resolves.toMatchObject({ status: "running" });
+    expect(probe).toHaveBeenCalledTimes(2);
+    expect(probe.mock.calls[0][0].projectId).toBe(project.id);
+  });
+
+  it("stops a failed preview process without publishing a ready session", async () => {
+    const { preview, sandbox, workspace, provider, company, project } = await fixture();
+    await workspace.createFile(owner, company.id, project.id, "index.html", "Ready");
+    vi.spyOn(sandbox, "supportsPreviewProxy").mockReturnValue(true);
+    vi.spyOn(sandbox, "proxyPreview").mockResolvedValue({ status: 502, headers: {}, body: "" });
+    provider.processFailOnCheck = true;
+    await expect(preview.startPreview(owner, company.id, project.id)).rejects.toMatchObject({ code: "preview_start_failed" });
+    expect(provider.calls).toContain("stopProcess");
+    expect((await preview.getPreviewStatus(owner, company.id, project.id)).isRunning).toBe(false);
+  });
+
   it("classifies a missing sandbox image as an infrastructure failure", async () => {
     const { preview, workspace, provider, company, project } = await fixture();
     await workspace.createFile(owner, company.id, project.id, "package.json", JSON.stringify({ scripts: { build: "next build" }, dependencies: { next: "15.0.0" } }));
     vi.spyOn(provider, "createSandbox").mockRejectedValueOnce(new SandboxProviderError("sandbox_image_not_found", "Sandbox image not found", 503));
     await expect(preview.buildProject(owner, company.id, project.id)).rejects.toMatchObject({ code: "sandbox_unavailable", message: "Sandbox image not found", status: 503 });
+  });
+  it("stops the recorded preview listener after API session state is lost", async () => {
+    const { preview, sandbox, workspace, provider, projects, store, company, project } = await fixture();
+    await workspace.createFile(owner, company.id, project.id, "index.html", "Preview");
+    await preview.startPreview(owner, company.id, project.id);
+    const restored = new ProjectPreviewService(projects, store, workspace, sandbox, "test-preview-secret-key-32chars!");
+    const count = provider.calls.length;
+    await restored.startPreview(owner, company.id, project.id);
+    const calls = provider.calls.slice(count);
+    expect(calls.indexOf("stopProcess")).toBeGreaterThanOrEqual(0);
+    expect(calls.indexOf("stopProcess")).toBeLessThan(calls.findIndex(call => call.startsWith("process:")));
   });
   describe("1. Framework & dev command & port detection", () => {
     it("detects Next.js with npm", async () => {
@@ -439,6 +473,15 @@ describe("Step 4 — Project Preview & Changes", () => {
   });
 
   describe("6. Fastify Preview Routes & Reverse Proxy", () => {
+    it("does not mint a preview token for another user's project", async () => {
+      const { preview, workspace, company, project } = await fixture();
+      const app = Fastify();
+      registerProjectPreviewRoutes(app, preview, workspace, { authenticate: async () => otherUser });
+      const response = await app.inject({ method: "GET", url: `/companies/${company.id}/projects/${project.id}/preview/token` });
+      expect([403, 404]).toContain(response.statusCode);
+      expect(response.json().token).toBeUndefined();
+      await app.close();
+    });
     it("serves preview status and blocks invalid tokens", async () => {
       const { preview, workspace, company, project } = await fixture();
       const app = Fastify();
@@ -477,7 +520,7 @@ describe("Step 4 — Project Preview & Changes", () => {
       const started = await preview.startPreview(owner, company.id, project.id);
       const proxy = vi.spyOn(sandbox, "proxyPreview").mockResolvedValue({
         status: 200, headers: { "content-type": "text/html" },
-        body: Buffer.from('<script src="/_next/static/app.js"></script>').toString("base64"),
+        body: Buffer.from('<head></head><a href="/auth">Account</a><script src="/_next/static/app.js"></script><img src="//images.example/product.png">').toString("base64"),
       });
       const app = Fastify();
       registerProjectPreviewRoutes(app, preview, workspace, new LocalDevAuthProvider(owner));
@@ -487,6 +530,9 @@ describe("Step 4 — Project Preview & Changes", () => {
       });
       expect(res.statusCode).toBe(200);
       expect(res.body).toContain(`/api/companies/${company.id}/projects/${project.id}/preview/proxy/_next/static/app.js?token=`);
+      expect(res.body).toContain('<a href="/auth">Account</a>');
+      expect(res.body).toContain('<img src="//images.example/product.png">');
+      expect(res.body).toContain('document.addEventListener("click"');
       expect(proxy).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: owner.workspaceId, companyId: company.id }), expect.any(String), expect.objectContaining({ port: started.port, path: "/", method: "GET" }));
     });
 

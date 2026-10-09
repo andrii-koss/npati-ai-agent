@@ -1,3 +1,4 @@
+import { previewBrowserBridge } from "./preview-browser-bridge";
 import { createHmac, randomBytes } from "node:crypto";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AuthContext, Project, ProjectStatus, WorkspaceStore } from "@npati/workspace";
@@ -189,7 +190,7 @@ export class ProjectPreviewService {
     this.secret = secret || process.env.NPATI_PREVIEW_SECRET || randomBytes(32).toString("hex");
   }
 
-  async buildProject(ctx: AuthContext, companyId: string, projectId: string): Promise<void> {
+  async buildProject(ctx: AuthContext, companyId: string, projectId: string, onStage?: (stage: "dependencies" | "build") => void): Promise<void> {
     if (!this.sandbox) throw new PreviewError("sandbox_unavailable", "Sandbox runner is not configured", 503);
     const files = await this.workspace.listFiles(ctx, companyId, projectId);
     const stack = await detectProjectStack(files, async (filePath) => (await this.workspace.readFile(ctx, companyId, projectId, filePath)).content);
@@ -201,7 +202,9 @@ export class ProjectPreviewService {
       : stack.packageManager === "pnpm" && paths.has("pnpm-lock.yaml") ? "pnpm install --frozen-lockfile"
       : `${stack.packageManager} install`;
     try {
+      onStage?.("dependencies");
       await this.sandbox.execute(ctx, companyId, { projectId, command: install, agentId: "system", approved: true });
+      onStage?.("build");
       await this.sandbox.execute(ctx, companyId, { projectId, command: `${stack.packageManager} run build`, agentId: "system", approved: true });
     } catch (error) {
       if (error instanceof SandboxProviderError && sandboxInfrastructureErrors.has(error.code)) {
@@ -304,6 +307,9 @@ export class ProjectPreviewService {
     const sandboxId = updatedProject.sandboxId;
     if (!sandboxId) throw new PreviewError("sandbox_failed", "Failed to obtain sandbox ID", 500);
 
+    // API session state is transient, but the runner may still own the old listener.
+    if (!existing) await this.sandbox.stopRecordedPreview(ctx, companyId, projectId, devCommand);
+
     // Start process in sandbox
     const result = await this.sandbox.process(ctx, companyId, {
       projectId,
@@ -315,6 +321,31 @@ export class ProjectPreviewService {
 
     const processId = result.processId;
     if (!processId) throw new PreviewError("process_failed", "Failed to start preview dev server process", 500);
+
+    // Starting a process does not mean its HTTP server (or first compilation) is ready.
+    if (this.sandbox.supportsPreviewProxy()) {
+      const deadline = Date.now() + 90_000;
+      let ready = false;
+      try {
+        while (Date.now() < deadline) {
+          const response = await this.sandbox.proxyPreview({
+            workspaceId: ctx.workspaceId, userId: ctx.userId, companyId, projectId,
+          }, sandboxId, { port: devPort, path: "/", method: "GET", headers: {} }).catch(() => null);
+          if (response && response.status < 500) { ready = true; break; }
+          const state = await this.sandbox.process(ctx, companyId, {
+            projectId, action: "status", processId, agentId: options.agentId || "system",
+          });
+          if (!("status" in state) || state.status !== "running") break;
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+        if (!ready) throw new PreviewError("preview_start_failed", "Preview server did not become HTTP-ready", 503);
+      } catch (error) {
+        await this.sandbox.process(ctx, companyId, {
+          projectId, action: "stop", processId, agentId: options.agentId || "system",
+        }).catch(() => undefined);
+        throw error;
+      }
+    }
 
     // Generate signed preview token
     const { token } = this.generateToken({
@@ -495,6 +526,10 @@ export class ProjectPreviewService {
     return this.sessions.get(projectId);
   }
 
+  async assertProjectAccess(ctx: AuthContext, companyId: string, projectId: string): Promise<void> {
+    await this.projects.get(ctx, companyId, projectId);
+  }
+
   setSession(projectId: string, session: ActivePreviewSession): void {
     this.sessions.set(projectId, session);
   }
@@ -559,9 +594,14 @@ export class ProjectPreviewService {
       }
       let body = Buffer.from(result.body, "base64");
       if (String(result.headers["content-type"] ?? "").includes("text/html")) {
-        const html = body.toString("utf8").replace(/(src|href|action|poster)=(["'])(\/[^"']*)\2/gi, (_match, attr: string, quote: string, target: string) =>
-          `${attr}=${quote}${routed(target)}${quote}`);
-        body = Buffer.from(html);
+        const html = body.toString("utf8").replace(/(src|href|action|poster)=(["'])(\/[^"']*)\2/gi, (match, attr: string, quote: string, target: string, offset: number, source: string) => {
+          // React must hydrate the original anchor props. The browser bridge routes clicks instead.
+          const tag = source.slice(source.lastIndexOf("<", offset), offset);
+          if (target.startsWith("//") || attr.toLowerCase() === "href" && /^<a\s/i.test(tag)) return match;
+          return `${attr}=${quote}${routed(target)}${quote}`;
+        });
+        const bridge = previewBrowserBridge(prefix, token);
+        body = Buffer.from(html.includes("<head>") ? html.replace("<head>", "<head>"+bridge) : bridge+html);
       }
       return reply.send(body);
     } catch (error) {

@@ -18,11 +18,13 @@ const specs = [
   }, marker: 'prepared-vite-react-runtime' },
   { name: 'vite-vue', command: 'npm run dev', scripts: { build: 'vite build', dev: 'vite --host 0.0.0.0' }, files: {
     'index.html': '<html><body><div id="app">prepared-vite-vue-runtime</div><script type="module" src="/main.js"></script></body></html>',
-    'main.js': "import{createApp}from'vue';createApp({template:'<h1>prepared-vite-vue-runtime</h1>'}).mount('#app');"
+    'main.js': "import{createApp}from'vue';import App from './App.vue';createApp(App).mount('#app');",
+    'App.vue': '<template><h1>prepared-vite-vue-runtime</h1></template>',
+    'vite.config.mjs': "import{defineConfig}from'vite';import vue from'@vitejs/plugin-vue';export default defineConfig({plugins:[vue()]});"
   }, marker: 'prepared-vite-vue-runtime' },
   { name: 'nuxt', command: 'npm run dev', scripts: { build: 'nuxt build', dev: 'nuxt dev --host 0.0.0.0' }, files: {
-    'app.vue': '<template><h1>prepared-nuxt-runtime</h1></template>',
-    'nuxt.config.ts': 'export default defineNuxtConfig({devtools:{enabled:false},telemetry:false});'
+    'app/app.vue': '<template><h1>prepared-nuxt-runtime</h1></template>',
+    'nuxt.config.ts': 'export default defineNuxtConfig({devtools:{enabled:false},telemetry:false,experimental:{viteEnvironmentApi:true}});'
   }, marker: 'prepared-nuxt-runtime' },
   { name: 'astro', command: 'npm run dev', scripts: { build: 'astro build', dev: 'astro dev --host 0.0.0.0' }, files: {
     'src/pages/index.astro': '<html><body><h1>prepared-astro-runtime</h1></body></html>'

@@ -459,6 +459,34 @@ describe("Project model failure stage", () => {
 });
 
 describe("Explicit Next.js framework", () => {
+  it.each(['I will inspect files. <｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="project.files.read">app/page.tsx</｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>', "A very long implementation report. ".repeat(300)])("streams actual build stages and summarizes the result %#", async (modelResult) => {
+    const root = await mkdtemp(path.join(tmpdir(), "npati-progress-"));
+    try {
+      const store = new InMemoryWorkspaceStore(); await store.initialize();
+      const auth: AuthContext = { workspaceId: "progress-ws", userId: "owner", permissions: ["workspace:read", "workspace:write", "business:manage"] };
+      const company = await store.createCompany(auth, { name: "Progress" }, "progress-company");
+      const agent = await store.createCompanyAgent(auth, company.id, { name: "Builder", role: "frontend developer", tools: ["project.files.read", "project.files.write"], isActive: true }, "progress-builder");
+      await store.setCompanyMainAgent(auth, company.id, agent.id, company.revision);
+      const projects = new ProjectService(store), workspace = new LocalProjectWorkspace(projects, { root });
+      const runtime = { execute: async (_ctx: AuthContext, companyId: string, input: { task: string; projectId: string }, key: string) => {
+        const { run } = await store.createCompanyAgentRun(auth, companyId, { task: input.task, requestedMode: "single", projectId: input.projectId }, key);
+        await store.updateCompanyAgentRun(auth, companyId, run.id, { status: "completed", result: modelResult });
+        return store.getCompanyAgentRun(auth, companyId, run.id);
+      } };
+      const preview = {
+        buildProject: async (_ctx: AuthContext, _company: string, _project: string, onStage: (stage: "dependencies" | "build") => void) => { onStage("dependencies"); onStage("build"); },
+        startPreview: async () => ({ previewUrl: "/preview" }), getPreviewStatus: async () => ({ previewUrl: "/preview" }),
+      };
+      const stages: Array<{ stage: string; status: string }> = [];
+      const orchestrator = new ProjectOrchestrator(store, projects, workspace, undefined, preview as any, runtime as any);
+      const result = await orchestrator.executeWebsiteTask(auth, { companyId: company.id, intentDecision: classifyProjectIntent({ message: testPrompt }), prompt: testPrompt, idempotencyKey: "progress-project", onProgress: event => stages.push(event) });
+      expect(stages.map(event => event.stage)).toEqual(["project", "files", "agent", "dependencies", "build", "preview", "ready"]);
+      expect(stages.at(-1)?.status).toBe("completed");
+      expect(result.responseMessage).not.toMatch(/DSML|I will inspect|implementation report/);
+      expect(result.responseMessage.length).toBeLessThan(220);
+      expect(result.responseMessage).toContain(result.project.name);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
   it("rejects a generated Vite manifest instead of silently switching frameworks", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "npati-next-guard-"));
     try {

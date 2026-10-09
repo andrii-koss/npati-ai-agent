@@ -33,6 +33,20 @@ Expo keeps the existing Expo Web export/static-preview workflow. Native device/s
 
 ## Deployment and migration
 
+### Prepared web dependencies
+
+The runtime image contains Node/npm/pnpm/yarn, Python/Git and six prepared dependency profiles: Next.js, Vite/React, Vite/Vue, Nuxt, Astro and Expo Web. Profiles are installed when the image is built, in a separate cached Docker stage, and stored read-only under `/opt/npati-project-toolchain`. Versions/ranges are declared in `apps/agent-api/project-runtime-profiles.json`; its Next/Vite/Expo profiles match the existing generated manifests.
+
+For Nuxt 4 development in this single-port runtime, set `experimental: { viteEnvironmentApi: true }` in `nuxt.config.ts`. The framework diagnostic uses this setting. The default separate SSR/HMR server requests another random port and is intentionally blocked by project isolation; a production `nuxt build` output can also be served with `node .output/server/index.mjs` on the assigned `PORT`. Installing the prepared dependencies does not rewrite an existing project's Nuxt configuration.
+
+For a root `npm install` or `npm ci`, the existing provider invokes `prepare-project-dependencies.cjs` through the same project UID/Landlock boundary. Exact dependency sets and compatible lock graphs can use project-owned copies of prepared modules. No writable symlinks or shared project directories are introduced. A different explicit lockfile, dependency version, workspaces/overrides, or root install lifecycle keeps the normal npm execution path. `npm ci` without a lockfile still fails normally. Commands with other managers, arguments or subdirectory cwd also retain their normal execution.
+
+Builds still run against the project's actual source. Generated Nuxt/Astro/cache artifacts are excluded from canonical source synchronization. The final project model response is limited by instruction to verified results within 120 words; it cannot write files or execute additional tools.
+
+Preview startup now probes the project's HTTP endpoint before publishing a ready session. It waits for server startup and the first compilation, retries temporary connection/5xx failures for up to 90 seconds, and stops a failed process instead of returning a premature ready card. A non-5xx response also permits API projects whose root is intentionally 404 or authentication-protected.
+
+The image is larger and its first build downloads all six sets. New project requests reuse that image; they never build Docker images. This does not guarantee a fixed end-to-end latency or that every possible npm dependency combination hits a prepared profile.
+
 Local launch uses the same Compose command as before, with the default sandbox override. Build/recreate `agent-api`, `company-worker`, and `sandbox-runner`; persistent canonical project data is retained. Existing projects whose old sandbox ID cannot be found in the shared runtime receive a new logical sandbox on their next execution, with files synchronized from the canonical workspace.
 
 Existing legacy `npati-sb-*`, `npati-proxy-*`, and `npati-readiness-egress` containers are not automatically deleted. They are not used for newly created shared workspaces. Clean them up deliberately after confirming no isolated runner uses them. Do not remove application/data volumes.
@@ -48,11 +62,14 @@ After a runtime restart, recorded process IDs are marked stopped and persisted P
 `scripts/verify-shared-project-runtime.cjs` creates random diagnostic projects and removes only those projects. It checks concurrent servers, port and context ownership, isolated environments/logs, cross-project reads/writes, symlink traversal, direct network/DNS bypass, and scoped stopping. Run through Node inside the API container:
 
 ```powershell
-Get-Content -Raw scripts/verify-shared-project-runtime.cjs | docker exec -i npati-agent-api node
+docker cp scripts/verify-shared-project-runtime.cjs npati-agent-api:/app/verify-shared-project-runtime.cjs
+docker exec npati-agent-api node /app/verify-shared-project-runtime.cjs
 ```
 
 `scripts/verify-shared-runtime-frameworks.cjs` checks actual installs/builds and concurrent Preview for Next.js, Vite/React, Expo Web, and Node.js. Copy it and its helper above to the API container's `/tmp`, then execute with Node. It uses diagnostic workspaces, not user projects.
 
 Local execution on 2026-10-09 passed all four actual builds, concurrent HTTP 200 previews on ports 3001–3004, and Node tests. The filesystem/network/context isolation diagnostic also passed. Diagnostic workspaces were removed after the checks; the running stack remained at 12 containers. The legacy readiness egress container, identified by its `npati.readiness=egress` label and having no data mounts, was removed during this local migration.
 
-Focused unit/integration tests cover port rewriting and the existing Preview, project files, terminal policy, environment validation, approval scopes, and Coding Agent security paths. No claim is made that every repository test passes or that a new model-driven chat run was performed.
+Focused unit/integration tests cover port rewriting and the existing Preview, project files, terminal policy, environment validation, approval scopes, and Coding Agent security paths. This is not a claim that every repository test passes.
+
+`scripts/verify-prepared-project-runtime.cjs` checks all six prepared profiles with actual builds and concurrent HTTP previews. Copy it, `scripts/verify-shared-project-runtime.cjs`, and `apps/agent-api/project-runtime-profiles.json` into `/app` in the API container, then execute with Node. `scripts/verify-chat-website.cjs` sends the actual Ukrainian shop request through authenticated chat using the installation owner's configured model, verifies the production-build event, and requests the resulting Next.js Preview through the web proxy. It creates a persistent test project and never prints credentials or signed preview URLs.

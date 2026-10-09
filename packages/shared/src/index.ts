@@ -107,6 +107,15 @@ export interface RunContextSnapshot extends ActiveContext {
  */
 export const PROJECT_CARD_DATA_VERSION = 2;
 
+export type ProjectProgressEvent = {
+  type: "project_progress";
+  stage: "project" | "files" | "database" | "agent" | "dependencies" | "build" | "preview" | "ready";
+  status: "active" | "completed" | "failed";
+  title: string;
+  framework?: string;
+  projectId?: string;
+};
+
 export interface ProjectCardData {
   id: string;
   projectId?: string;

@@ -56,6 +56,8 @@ export function mutationProgressTargets(message: string, context: ChatMutationCo
 }
 
 export function detectChatMutationOperation(message: string, context: ChatMutationContext): ChatMutationOperation | null {
+  // Project operations report actual pipeline stages, not company-setting links.
+  if (/(?:Next\.js|Live Preview|\b(?:website|mobile app)\b|сайт|застосунок)/iu.test(message) && !/(?:налаштуван|settings)/iu.test(message)) return null;
   if (!explicitMutationProgressTargets(message).length && context === "none") return null;
   if (/(?:видал|приб|удал|\bdelete\b|\bremove\b|supprim|l[oö]sch|elimin|usuń|exclu|verwijder|\bsil\b|删除|削除|삭제|احذف|إزالة|हटाएँ|हटाओ)/iu.test(message)) return "delete";
   if (/(?:створ|дод|созда|добав|\bcreate\b|\badd\b|cr[eé]|ajout|erstell|hinzuf|crear|a[ñn]ad|agreg|creare|aggiung|utw[oó]rz|stw[oó]rz|dodaj|cri(?:ar|e)|adicion|\bmaak\b|voeg|oluştur|\bekle\b|创建|添加|作成|追加|만들|생성|추가|أنشئ|إنشاء|أضف|बनाएँ|बनाओ|जोड़ें)/iu.test(message)) return "create";

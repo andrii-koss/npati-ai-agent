@@ -6,6 +6,10 @@ const paths = (message: string, context: "none" | "business" | "company" = "none
   mutationProgressTargets(message, context).map((target) => new URL(target.url).pathname);
 
 describe("chat mutation progress", () => {
+  it("does not label project creation as company settings", () => {
+    expect(detectChatMutationOperation("Створи тестовий сайт інтернет магазин на Next.js, запусти build і Live Preview", "company")).toBeNull();
+    expect(detectChatMutationOperation("Create a website", "none")).toBeNull();
+  });
   it("shows every affected settings page in the order stated by the user", () => {
     const message = "Створи бізнес-ідею, ціль і компанію з 5 агентами";
     expect(detectChatMutationOperation(message, "none")).toBe("create");

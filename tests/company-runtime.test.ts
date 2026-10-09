@@ -55,7 +55,8 @@ describe("Project delegation JSON recovery", () => {
     const builder = await store.createCompanyAgent(ctx, company.id, { name: "Builder", role: "developer", tools: ["project.files.list"] }, "project-json-builder");
     company = await store.setCompanyMainAgent(ctx, company.id, main.id, company.revision);
     let calls = 0;
-    const ai = engine({ a2aSend: async () => ({
+    const finalChat = vi.fn(async () => ({ content: "Verified result", model: "auto" }));
+    const ai = engine({ chat: finalChat, a2aSend: async () => ({
       taskId: `plan-${++calls}`,
       content: calls === 1 ? '{"mode":"single","agentIds":[' :
         JSON.stringify({ mode: "single", agentIds: [builder.id], toolRequests: [] }),
@@ -68,6 +69,7 @@ describe("Project delegation JSON recovery", () => {
     expect(result.run.status).toBe("completed");
     expect(result.run.selectedAgentIds).toContain(builder.id);
     expect(calls).toBe(2);
+    expect(JSON.stringify(finalChat.mock.calls)).toContain("Summarize only verified tool results in at most 120 words");
   });
 
   it("reads the delegation object when the model includes another JSON object first", async () => {
