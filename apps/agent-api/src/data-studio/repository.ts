@@ -226,7 +226,7 @@ export class DataBackendRepository {
     finally { client.release(); }
   }
 
-  async beginRemoval(ctx: AuthContext, companyId: string, id: string): Promise<void> {
+  async beginRemoval(ctx: AuthContext, companyId: string, id: string, options: { detachProjects?: boolean; removeAfter?: Date } = {}): Promise<void> {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
@@ -235,12 +235,18 @@ export class DataBackendRepository {
         [id, ctx.workspaceId, companyId, ctx.userId],
       );
       if (!backend.rowCount) throw new DataStudioError(404, "delete_backend", "Data backend not found", false, "BACKEND_NOT_FOUND");
+      if (options.detachProjects) {
+        await client.query(
+          "UPDATE projects SET data_backend_id=NULL,revision=revision+1,updated_at=now() WHERE workspace_id=$1 AND company_id=$2 AND data_backend_id=$3",
+          [ctx.workspaceId, companyId, id],
+        );
+      }
       const attached = await client.query<{ count: string }>(
         "SELECT count(*)::text AS count FROM projects WHERE workspace_id=$1 AND company_id=$2 AND data_backend_id=$3 AND status<>'archived'",
         [ctx.workspaceId, companyId, id],
       );
       if (Number(attached.rows[0]!.count)) throw new DataStudioError(409, "delete_backend", "Active projects still use this backend", false, "BACKEND_IN_USE");
-      await client.query("UPDATE data_backends SET status='deleting',updated_at=now() WHERE id=$1", [id]);
+      await client.query("UPDATE data_backends SET status='deleting',remove_after=COALESCE(remove_after,$2),updated_at=now() WHERE id=$1", [id, options.removeAfter ?? null]);
       await client.query("COMMIT");
     } catch (error) { await client.query("ROLLBACK"); throw error; }
     finally { client.release(); }

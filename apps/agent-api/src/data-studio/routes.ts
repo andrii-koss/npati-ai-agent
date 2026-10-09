@@ -76,13 +76,13 @@ export function registerDataBackendRoutes(
     catch (error) { return fail(reply, error); }
   });
 
-  app.delete<{ Params: { companyId: string; backendId: string }; Body: { confirmName: string; immediate?: boolean } }>(
+  app.delete<{ Params: { companyId: string; backendId: string }; Body: { confirmName: string; immediate?: boolean; detachProjects?: boolean } }>(
     "/companies/:companyId/data-backends/:backendId",
-    { schema: { body: { type: "object", additionalProperties: false, required: ["confirmName"], properties: { confirmName: { type: "string" }, immediate: { type: "boolean" } } } } },
+    { schema: { body: { type: "object", additionalProperties: false, required: ["confirmName"], properties: { confirmName: { type: "string" }, immediate: { type: "boolean" }, detachProjects: { type: "boolean" } } } } },
     async (request, reply) => {
       try {
         const { ctx, service } = await authorize(request, "business:manage");
-        return await service.remove(ctx, request.params.companyId, request.params.backendId, request.body.confirmName, { immediate: request.body.immediate });
+        return await service.remove(ctx, request.params.companyId, request.params.backendId, request.body.confirmName, { immediate: request.body.immediate, detachProjects: request.body.detachProjects });
       }
       catch (error) { return fail(reply, error); }
     },

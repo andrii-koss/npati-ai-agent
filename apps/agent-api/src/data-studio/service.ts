@@ -168,16 +168,21 @@ export class DataBackendService {
   }
 
   /**
-   * D7 two-phase removal. The backend is detached from every project first; its databases, roles,
+   * D7 two-phase removal. Active projects block removal unless explicitly detached; databases, roles,
    * keys and secrets are then purged only after the configured snapshot retention window, so a
    * mistaken removal is still recoverable. `immediate` skips the wait (used by tooling and tests).
    */
-  async remove(ctx: AuthContext, companyId: string, id: string, confirmation: string, options: { immediate?: boolean } = {}) {
+  async remove(ctx: AuthContext, companyId: string, id: string, confirmation: string, options: { immediate?: boolean; detachProjects?: boolean } = {}) {
     await this.store.getCompany(ctx, companyId);
     const backend = await this.repository.get(ctx, companyId, id);
     if (confirmation !== backend.name) throw new DataStudioError(400, "delete_backend", "Confirmation name does not match", false, "CONFIRMATION_REQUIRED");
+    const retentionDays = Math.max(1, Number(process.env.NPATI_PROJECTS_SNAPSHOT_RETENTION_DAYS) || 30);
+    if (backend.status === "deleting" && backend.removeAfter && !options.immediate) {
+      return { id, deleted: false, deferred: true, removeAfter: backend.removeAfter, retentionDays };
+    }
     const provisioner = this.available();
-    await this.repository.beginRemoval(ctx, companyId, id);
+    const removeAfter = new Date(Date.now() + (options.immediate ? 0 : retentionDays * 24 * 60 * 60 * 1000));
+    await this.repository.beginRemoval(ctx, companyId, id, { detachProjects: options.detachProjects, removeAfter });
     for (const environment of ["dev", "prod"] as const) {
       const env = await this.repository.environment(ctx, companyId, id, environment).catch(() => null);
       if (env && (env.status === "ready" || env.status === "archived")) {
@@ -195,8 +200,6 @@ export class DataBackendService {
       await this.repository.remove(ctx, companyId, id);
       return { id, deleted: true, deferred: false };
     }
-    const retentionDays = Math.max(1, Number(process.env.NPATI_PROJECTS_SNAPSHOT_RETENTION_DAYS) || 30);
-    const removeAfter = new Date(Date.now() + retentionDays * 24 * 60 * 60 * 1000);
     await this.repository.setRemovalDeadline(ctx, companyId, id, removeAfter);
     return { id, deleted: false, deferred: true, removeAfter: removeAfter.toISOString(), retentionDays };
   }
