@@ -12,6 +12,7 @@ import { RlsPolicyCompiler } from "../apps/agent-api/src/data-studio/rls-compile
 import { loadProjectClientSdkSource } from "../apps/agent-api/src/data-studio/project-sdk-file";
 import { ProjectApiGatewayService } from "../apps/agent-api/src/data-studio/gateway-service";
 import { createProjectClient } from "../packages/project-client/src/index";
+import { extractCleanProjectName } from "../apps/agent-api/src/project-orchestrator";
 
 const prompt = "Створи тестовий сайт інтернет магазин на Next.js, запусти build і Live Preview.";
 const ctx = { workspaceId: "ws", userId: "user", permissions: ["business:manage"] };
@@ -19,6 +20,11 @@ const backend = { id: "backend", companyId: "company", workspaceId: "ws", create
 const provider = new PostgresDataProvider();
 
 describe("Website data creation regressions", () => {
+  it("uses the site topic as its name instead of the creation and build instructions", () => {
+    expect(extractCleanProjectName(prompt)).toBe("Інтернет магазин");
+    expect(extractCleanProjectName("Create a test website for online store on Next.js, run build and Live Preview.")).toBe("Online store");
+    expect(extractCleanProjectName(prompt,"My Shop")).toBe("My Shop");
+  });
   it.each([prompt, "Створи інтернет магазин на Next.js", "Створи інтернет-магазин на Next.js"])("creates a Next store for %s", message => {
     expect(classifyProjectIntent({ message, activeProjectId: "old" })).toMatchObject({ intent: "CREATE_WEBSITE", targetDetails: { framework: "Next.js", projectType: "website" } });
   });

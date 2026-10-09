@@ -50,14 +50,17 @@ export function extractCleanProjectName(prompt: string, explicitName?: string): 
   let cleaned = (prompt || "").trim();
 
   const commandPatterns = [
-    /^(?:створи(?: мені)?|зроби(?: мені)?|розроби(?: мені)?|побудуй|запусти|згенеруй|відкрий)\s+(?:новий\s+)?(?:сучасний\s+)?(?:адаптивний\s+)?(?:веб-?сайт|сайт|проєкт|проект|лендінг|додаток)(?:\s+(?:для|під|про|компанії))?/iu,
+    /^(?:створи(?: мені)?|зроби(?: мені)?|розроби(?: мені)?|побудуй|запусти|згенеруй|відкрий)\s+(?:(?:новий|сучасний|адаптивний|тестовий|демо)\s+)*(?:веб-?сайт|сайт|проєкт|проект|лендінг|додаток)(?:\s+(?:для|під|про|компанії))?/iu,
     /^(?:створи(?:ти)?|зроби(?:ти)?)\s+(?:новий\s+)?(?:веб-?сайт|сайт|проєкт|проект)/iu,
-    /^(?:please\s+)?(?:create|build|make|generate|launch|develop)(?:\s+me)?(?:\s+a)?(?:\s+new)?(?:\s+modern)?(?:\s+responsive)?\s+(?:website|site|project|landing(?:\s+page)?|web\s*app)(?:\s+(?:for|about))?/iu,
+    /^(?:please\s+)?(?:create|build|make|generate|launch|develop)(?:\s+me)?(?:\s+a)?\s+(?:(?:new|modern|responsive|test|demo)\s+)*(?:website|site|project|landing(?:\s+page)?|web\s*app)(?:\s+(?:for|about))?/iu,
   ];
 
   for (const pattern of commandPatterns) {
     cleaned = cleaned.replace(pattern, "").trim();
   }
+  // Framework and execution instructions belong in the description, not the display name.
+  cleaned = cleaned.replace(/\s+(?:на|on|using|with)\s+(?:next\.?js|react|vite|expo|html(?:\/css)?)(?:\b|(?=\s|[,.;]))[\s\S]*$/iu, "").trim();
+  cleaned = cleaned.replace(/[,;]\s*(?:запусти|збери|покажи|run|build|start|launch)(?:\s|$)[\s\S]*$/iu, "").trim();
 
   cleaned = cleaned.replace(/^[,:;—–\-.\s]+/, "").trim();
 

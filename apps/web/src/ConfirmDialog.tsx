@@ -95,7 +95,7 @@ export function promptModal(
       placeholder: opts.placeholder || "",
       confirmText: opts.confirmText || "Save",
       cancelText: opts.cancelText || "Cancel",
-      isDanger: false,
+      isDanger: opts.isDanger || false,
       resolve,
     });
   });

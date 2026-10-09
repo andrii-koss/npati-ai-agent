@@ -474,11 +474,13 @@ export function DataStudioSettingsPage() {
     if (!confirmed) return;
     const typed = await promptModal({
       title: isUk ? "Підтвердіть видалення" : "Confirm deletion",
-      message: isUk ? `Введіть назву бази «${backend.name}», щоб підтвердити.` : `Type the database name “${backend.name}” to confirm.`,
-      placeholder: backend.name,
+      message: isUk ? `База даних:\n${backend.name}\n\nВведіть DELETE, щоб підтвердити видалення.` : `Database:\n${backend.name}\n\nType DELETE to confirm deletion.`,
+      placeholder: "DELETE",
+      confirmText: isUk ? "Видалити зараз" : "Delete now",
+      isDanger: true,
     });
-    if (typed !== backend.name) {
-      if (typed !== null) notify(isUk ? "Назва не збігається — скасовано" : "Name does not match — cancelled", "error");
+    if (typed?.trim() !== "DELETE") {
+      if (typed !== null) notify(isUk ? "Для підтвердження введіть DELETE" : "Type DELETE to confirm", "error");
       return;
     }
     setBackendBusy(true);

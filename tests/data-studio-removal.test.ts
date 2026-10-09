@@ -89,14 +89,15 @@ describe("Data Studio database removal", () => {
     expect(query).not.toHaveBeenCalled();
     expect(repository.setRemovalDeadline).not.toHaveBeenCalled();
   });
-  it("deletes an already pending database immediately through the Settings API", async () => {
+  it.each(["Store DB", "Створи тестовий сайт інтернет магазин на Next.j... data"])("deletes an already pending database named %s immediately through the Settings API", async name => {
     const {service,backend,repository,provisioner} = harness();
+    backend.name=name;
     backend.status="deleting";
     backend.removeAfter="2026-11-09T00:00:00.000Z";
     const app=Fastify();
     registerDataBackendRoutes(app,{authenticate:async()=>owner},service);
     try {
-      const response=await app.inject({method:"DELETE",url:"/companies/company-a/data-backends/backend-a",payload:{confirmName:"Store DB",detachProjects:true,immediate:true}});
+      const response=await app.inject({method:"DELETE",url:"/companies/company-a/data-backends/backend-a",payload:{confirmName:backend.name,detachProjects:true,immediate:true}});
       expect(response.statusCode).toBe(200);
       expect(response.json()).toEqual({id:"backend-a",deleted:true,deferred:false});
       expect(provisioner.deprovisionDatabase.mock.calls.map(([,env])=>env)).toEqual(["dev","prod"]);
