@@ -201,10 +201,14 @@ Core, not in the project database).
 - A company that still owns DataBackends cannot be deleted: the API answers
   `Company cannot be deleted while it owns N DataBackend(s)` (the foreign key is `ON DELETE
   RESTRICT`, so this is enforced by the database as well). Transfer or delete the databases first.
-- Deleting a DataBackend is refused while active Projects are attached. Afterwards the backend is
+- Deleting a DataBackend is refused while active Projects are attached unless the confirmed request
+  includes `detachProjects: true`. Settings → Data Studio explains that attached projects lose access,
+  requires the exact database name, and sends this option. Detaching projects and scheduling deletion
+  happen in one tenant-scoped transaction; the projects themselves are preserved. Afterwards the backend is
   marked `deleting`, its runtime roles are suspended, and databases, roles, keys and secrets are
   purged after the snapshot retention window (`remove_after`). Use `immediate: true` in the API to
-  purge right away (for example in disposable test environments).
+  purge right away (for example in disposable test environments). Settings displays “Pending deletion”
+  and the removal deadline while retention is active. Repeating the request does not extend that deadline.
 - Activating an archived backend only re-enables the runtime role; the data is untouched.
 
 ## 8. Upgrades and troubleshooting

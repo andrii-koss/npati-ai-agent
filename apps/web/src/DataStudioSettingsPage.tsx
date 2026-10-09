@@ -31,6 +31,7 @@ interface BackendSummary {
   status: string;
   createdAt?: string;
   updatedAt?: string;
+  removeAfter?: string | null;
   /** Tagged on load: the database list merges every company of the workspace. */
   companyId: string;
   companyName: string;
@@ -462,11 +463,12 @@ export function DataStudioSettingsPage() {
   }, [isUk, notify, refresh]);
 
   const deleteDatabase = useCallback(async (backend: BackendSummary) => {
+    if (backend.status === "deleting") return;
     const confirmed = await confirmModal({
       title: isUk ? "Видалити базу" : "Delete database",
       message: isUk
-        ? `Базу «${backend.name}» буде видалено. Проєкти втратят доступ до даних, а сама база зникне після вікна збереження бекапів.`
-        : `“${backend.name}” will be deleted. Projects lose their data and the database is removed after the backup retention window.`,
+        ? `Базу «${backend.name}» буде видалено. Усі приєднані проєкти буде відв’язано від цієї бази: вони втратять доступ до її даних. Самі проєкти залишаться. Фізичне видалення бази відбудеться після періоду збереження бекапів.`
+        : `“${backend.name}” will be deleted. All attached projects will be disconnected from this database and lose access to its data. The projects will remain. The database is physically removed after the backup retention window.`,
       confirmText: isUk ? "Продовжити" : "Continue",
       isDanger: true,
     });
@@ -482,11 +484,14 @@ export function DataStudioSettingsPage() {
     }
     setBackendBusy(true);
     try {
-      await apiFetch(`/companies/${encodeURIComponent(backend.companyId)}/data-backends/${encodeURIComponent(backend.id)}`, {
+      const result = await apiFetch<{ deleted: boolean; deferred: boolean; removeAfter?: string }>(`/companies/${encodeURIComponent(backend.companyId)}/data-backends/${encodeURIComponent(backend.id)}`, {
         method: "DELETE",
-        body: JSON.stringify({ confirmName: backend.name }),
+        body: JSON.stringify({ confirmName: backend.name, detachProjects: true }),
       });
-      notify(isUk ? "Базу позначено на видалення" : "Database marked for deletion");
+      const deadline = result.removeAfter ? new Date(result.removeAfter).toLocaleString(isUk ? "uk-UA" : "en-US") : "";
+      notify(result.deferred
+        ? (isUk ? `Базу відв’язано від проєктів. Очікує фізичного видалення${deadline ? ` після ${deadline}` : ""}.` : `Database disconnected from projects. Pending physical deletion${deadline ? ` after ${deadline}` : ""}.`)
+        : (isUk ? "Базу видалено" : "Database deleted"));
       if (detailId === backend.id) setDetailId(null);
       refresh();
     } catch (cause) {
@@ -802,14 +807,14 @@ export function DataStudioSettingsPage() {
               <button type="button" className="button-secondary" onClick={() => void renameDatabase(detail)} disabled={backendBusy}>
                 {isUk ? "Перейменувати" : "Rename"}
               </button>
-              <button type="button" className="button-secondary" onClick={() => void toggleArchive(detail)} disabled={backendBusy}>
+              <button type="button" className="button-secondary" onClick={() => void toggleArchive(detail)} disabled={backendBusy || detail.status === "deleting"}>
                 {detail.status === "ready" ? (isUk ? "Архівувати" : "Archive") : (isUk ? "Активувати" : "Activate")}
               </button>
               <button type="button" className="button-secondary" onClick={() => setTransferOpen(true)} disabled={backendBusy}>
                 {isUk ? "Перенести в іншу компанію" : "Move to another company"}
               </button>
-              <button type="button" className="button-secondary" onClick={() => void deleteDatabase(detail)} disabled={backendBusy}>
-                {isUk ? "Видалити" : "Delete"}
+              <button type="button" className="button-secondary" onClick={() => void deleteDatabase(detail)} disabled={backendBusy || detail.status === "deleting"}>
+                {detail.status === "deleting" ? (isUk ? "Очікує видалення" : "Pending deletion") : (isUk ? "Видалити" : "Delete")}
               </button>
             </div>
           </div>
@@ -1247,7 +1252,7 @@ export function DataStudioSettingsPage() {
                       <span className="data-studio-badge" title={isUk ? "Компанія-власник бази" : "Owning company"}>{backend.companyName}</span>
                     </td>
                     <td>{backend.provider === "external_postgres" ? (isUk ? "Зовнішня" : "External") : "NPATI Postgres"}</td>
-                    <td><span className={`status-pill ${statusPillClass(backend.status)}`}>{backend.status}</span></td>
+                    <td><span className={`status-pill ${statusPillClass(backend.status)}`}>{backend.status === "deleting" ? (isUk ? "Очікує видалення" : "Pending deletion") : backend.status}</span>{backend.status === "deleting" && backend.removeAfter && <small className="ds-muted">{isUk ? " Після " : " After "}{new Date(backend.removeAfter).toLocaleString(isUk ? "uk-UA" : "en-US")}</small>}</td>
                     <td>
                       {list.length === 0 && <span className="ds-muted">—</span>}
                       {list.map((env) => (
@@ -1263,11 +1268,11 @@ export function DataStudioSettingsPage() {
                         <button type="button" className="automation-action-btn run-btn" onClick={() => setDetailId(backend.id)}>
                           {isUk ? "Відкрити" : "Open"}
                         </button>
-                        <button type="button" className="automation-action-btn" disabled={backendBusy} onClick={() => void toggleArchive(backend)}>
+                        <button type="button" className="automation-action-btn" disabled={backendBusy || backend.status === "deleting"} onClick={() => void toggleArchive(backend)}>
                           {backend.status === "ready" ? (isUk ? "Архівувати" : "Archive") : (isUk ? "Активувати" : "Activate")}
                         </button>
-                        <button type="button" className="automation-action-btn danger" disabled={backendBusy} onClick={() => void deleteDatabase(backend)}>
-                          {isUk ? "Видалити" : "Delete"}
+                        <button type="button" className="automation-action-btn danger" disabled={backendBusy || backend.status === "deleting"} onClick={() => void deleteDatabase(backend)}>
+                          {backend.status === "deleting" ? (isUk ? "Очікує видалення" : "Pending deletion") : (isUk ? "Видалити" : "Delete")}
                         </button>
                       </div>
                     </td>
