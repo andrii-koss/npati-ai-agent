@@ -80,13 +80,14 @@ export interface RunnerReadinessReport {
 export interface RunnerReadinessOptions {
   /** Docker command runner (the same helper the runner already uses). */
   docker: (args: string[], timeoutMs?: number) => Promise<{ ok: boolean; output: string }>;
-  /** The single enforcement probe; reused here instead of writing a second one. */
+  /** Enforcement probe scoped to readiness infrastructure, independent of Project run scopes. */
   enforcement: EgressEnforcement;
   /** Images a run needs; both must be present locally. */
   images?: { sandbox?: string; egressProxy?: string };
   /** Short cache so the endpoint stays cheap; the enforcement probe has its own TTL. */
   ttlMs?: number;
   now?: () => number;
+  prepareEgress?: () => Promise<void>;
 }
 
 export interface RunnerReadiness {
@@ -120,8 +121,11 @@ export function createRunnerReadiness(options: RunnerReadinessOptions): RunnerRe
 
     // One probe, decomposed: the enforcement report already proves proxy health, direct-egress blocking
     // and DNS blocking, and it fails closed when the probe is missing or the feature is disabled.
-    const report: EgressEnforcementReport = await options.enforcement.verify(force).catch(() => ({
-      enforced: false, reason: "probe_unavailable" as const, details: {}, checkedAt: now(), fromCache: false,
+    const report: EgressEnforcementReport = await (async () => {
+      if (dockerReady && requiredImagesReady) await options.prepareEgress?.();
+      return options.enforcement.verify(force);
+    })().catch((error: unknown) => ({
+      enforced: false, reason: "probe_unavailable" as const, details: { detail: error instanceof Error ? error.message : "Readiness setup failed" }, checkedAt: now(), fromCache: false,
     }));
     const checks = report.checks;
     const egressProxyReady = checks?.proxy?.ok === true;
@@ -145,6 +149,7 @@ export function createRunnerReadiness(options: RunnerReadinessOptions): RunnerRe
         images: imageChecks,
         enforcementReason: report.reason ?? null,
         enforcementChecks: checks ?? null,
+        enforcementDetails: report.details,
         enforcementCheckedAt: report.checkedAt,
         fromCache: false,
       },

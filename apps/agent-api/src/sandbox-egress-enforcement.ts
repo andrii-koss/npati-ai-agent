@@ -82,6 +82,7 @@ export class EgressEnforcement {
   private readonly now: () => number;
   private readonly log: (event: string, details: Record<string, unknown>) => void;
   private cached?: EgressEnforcementReport;
+  private cachedScope?: string;
 
   constructor(options: EgressEnforcementOptions = {}) {
     this.probe = options.probe;
@@ -96,11 +97,14 @@ export class EgressEnforcement {
 
   /** Re-proves enforcement when the cache expired; never throws. */
   async verify(force = false): Promise<EgressEnforcementReport> {
-    if (!force && this.cached && this.cached.checkedAt + this.ttlMs > this.now()) {
+    const scope = { ...this.scope };
+    const scopeKey = JSON.stringify(scope);
+    if (!force && this.cached && this.cachedScope === scopeKey && this.cached.checkedAt + this.ttlMs > this.now()) {
       return { ...this.cached, fromCache: true };
     }
-    const report = await this.probeOnce();
+    const report = await this.probeOnce(scope);
     this.cached = report;
+    this.cachedScope = scopeKey;
     if (!report.enforced) this.log("egress_enforcement_failed", { reason: report.reason, ...report.details });
     return report;
   }
@@ -116,7 +120,7 @@ export class EgressEnforcement {
     return report;
   }
 
-  private async probeOnce(): Promise<EgressEnforcementReport> {
+  private async probeOnce(scope: {proxy:string;network:string}): Promise<EgressEnforcementReport> {
     const checkedAt = this.now();
     const checks: EgressEnforcementChecks = {
       proxy: { ok: false },
@@ -128,13 +132,13 @@ export class EgressEnforcement {
     if (!this.enabled) return fail("disabled_by_configuration");
     if (!this.probe) return fail("probe_not_configured");
     try {
-      const health = await this.probe.proxyHealth({ proxy: this.proxyName, network: this.network });
+      const health = await this.probe.proxyHealth(scope);
       checks.proxy = { ok: health.ok, detail: health.detail };
       if (!health.ok) return fail("proxy_unhealthy", { detail: health.detail ?? null });
-      const direct = await this.probe.directEgressBlocked({ network: this.network });
+      const direct = await this.probe.directEgressBlocked({ network: scope.network });
       checks.direct = { blocked: direct.blocked, detail: direct.detail };
       if (!direct.blocked) return fail("direct_egress_open", { detail: direct.detail ?? null });
-      const dns = await this.probe.dnsBypassBlocked({ network: this.network });
+      const dns = await this.probe.dnsBypassBlocked({ network: scope.network });
       checks.dns = { blocked: dns.blocked, detail: dns.detail };
       if (!dns.blocked) return fail("dns_bypass_open", { detail: dns.detail ?? null });
       return { enforced: true, details: { direct: direct.detail ?? "blocked", dns: dns.detail ?? "blocked" }, checkedAt, fromCache: false, checks };
@@ -145,8 +149,6 @@ export class EgressEnforcement {
 
   /** Set by the caller (provider/runner) for the run currently being created. */
   scope: { proxy: string; network: string } = { proxy: "npati-egress", network: "npati-sandbox-control" };
-  private get proxyName(): string { return this.scope.proxy; }
-  private get network(): string { return this.scope.network; }
 }
 
 export interface DockerEgressProbeOptions {
@@ -176,7 +178,7 @@ export function dockerEgressProbe(options: DockerEgressProbeOptions): EgressProb
   return {
     async proxyHealth({ proxy }) {
       const result = await options.docker(["exec", proxy, "node", "-e",
-        "const http=require('http');const r=http.get('http://127.0.0.1:8080/_npati/health',(res)=>{let b='';res.on('data',(c)=>b+=c);res.on('end',()=>{console.log(res.statusCode+' '+b);process.exit(res.statusCode===200?0:3);});});r.on('error',(e)=>{console.log('ERR:'+e.code);process.exit(3);});",
+        "const http=require('http');let attempts=0;function probe(){const r=http.get('http://127.0.0.1:8080/_npati/health',(res)=>{let b='';res.on('data',(c)=>b+=c);res.on('end',()=>{console.log(res.statusCode+' '+b);process.exit(res.statusCode===200?0:3);});});r.setTimeout(1000,()=>r.destroy());r.on('error',(e)=>{if(++attempts<10)setTimeout(probe,200);else{console.log('ERR:'+e.code);process.exit(3);}});}probe();",
       ], 15_000);
       const healthy = result.ok && /"ok"\s*:\s*true/.test(result.output);
       return { ok: healthy, detail: result.output.slice(-400) };
