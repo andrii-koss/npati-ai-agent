@@ -7,6 +7,7 @@ import type { DataProvider, SchemaOperation, SchemaSnapshot } from "./data-provi
 import type { DatabaseProvisioner } from "./provisioner";
 import type { ProjectMigrationEngine } from "./migration-engine";
 import type { DataBackend, DataBackendPromotion, DataEnvironmentName, ProjectSnapshot, SnapshotKind } from "./types";
+import { RlsPolicyCompiler } from "./rls-compiler";
 
 const PROMOTE_LOCK_TTL_MS = 120_000;
 const MANAGED_PREFIX = "_npati_";
@@ -315,6 +316,7 @@ export class PromoteService {
           operation: row.operation,
           authorId: options.agentId || ctx.userId,
           runId: options.runId,
+          lockToken: token,
         });
         appliedOperations += 1;
       }
@@ -323,6 +325,29 @@ export class PromoteService {
         const limit = Number(process.env.NPATI_PROMOTE_DATA_MAX_ROWS) || DEFAULT_MAX_DATA_ROWS;
         for (const entry of preview.dataPreview) copiedRows += await this.copyRows(backend, target, entry.collection, limit);
       }
+
+      const policies = await this.repository.getAccessPolicies(ctx, companyId, backend.id, "dev");
+      if (policies.length) {
+        const connection = await this.provisioner.getConnection(backend, target, "migrator");
+        const runtime = await this.provisioner.getConnection(backend, target, "runtime");
+        const pool = new Pool({ ...connection, max: 1, connectionTimeoutMillis: 3000 });
+        const client = await pool.connect();
+        const grouped = new Map<string, typeof policies>();
+        for (const policy of policies) grouped.set(policy.collection, [...(grouped.get(policy.collection) ?? []), policy]);
+        try {
+          await client.query("BEGIN");
+          for (const [collection, rules] of grouped) {
+            for (const sql of RlsPolicyCompiler.compile(collection, rules).sql) await client.query(sql);
+            await client.query(`GRANT SELECT,INSERT,UPDATE,DELETE ON ${quoteIdentifier(collection)} TO ${quoteIdentifier(runtime.user)}`);
+          }
+          await client.query("COMMIT");
+          for (const [collection, rules] of grouped) await this.repository.setCollectionAccessPolicies(ctx, companyId, backend.id, target, collection, rules);
+        } catch (error) { await client.query("ROLLBACK"); throw error; }
+        finally { client.release(); await pool.end(); }
+      }
+      const dev = await this.repository.environment(ctx, companyId, backend.id, "dev");
+      const prod = await this.repository.environment(ctx, companyId, backend.id, target);
+      await this.repository.setEnvironment(ctx, companyId, backend.id, target, { providerConfig: { ...prod.providerConfig, ...(dev.providerConfig.commerce === true ? { commerce: true } : {}), ...(dev.providerConfig.gdprStrategies ? { gdprStrategies: dev.providerConfig.gdprStrategies } : {}) } });
 
       const schema = await this.provider.introspectSchema(backend, target);
       const fingerprint = this.provider.schemaFingerprint(schema);

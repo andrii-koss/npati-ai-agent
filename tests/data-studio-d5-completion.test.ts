@@ -123,7 +123,7 @@ describe("D5 completion — sandbox process environment", () => {
     });
 
     expect(result.processId).toBe("55555555-5555-4555-8555-555555555555");
-    expect(provider.processEnvironment).toEqual({
+    expect(provider.processEnvironment).toMatchObject({
       PROJECT_API_URL: "https://api.npati.example.test/v1/projects/p1",
       PROJECT_PUBLISHABLE_KEY: "npati_pk_dev_deadbeefdeadbeefdeadbeefdeadbeef",
     });

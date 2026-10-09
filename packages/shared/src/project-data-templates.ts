@@ -19,6 +19,7 @@ export interface TemplateAccessPolicy {
   ownerField?: string;
   role?: string;
   description?: string;
+  actions?: Array<"select" | "insert" | "update" | "delete" | "all">;
 }
 import type { GdprStrategy } from "./project-auth-types";
 
@@ -153,7 +154,7 @@ export const TEMPLATE_CATALOG: DataSchemaTemplate[] = [
         name: "orders",
         isPrivate: true,
         fields: [
-          { name: "owner_id", type: "uuid", required: true },
+          { name: "owner_id", type: "uuid" },
           { name: "order_number", type: "string", required: true },
           { name: "status", type: "string", default: "pending" },
           { name: "total_amount", type: "decimal", required: true },
@@ -177,7 +178,7 @@ export const TEMPLATE_CATALOG: DataSchemaTemplate[] = [
         name: "addresses",
         isPrivate: true,
         fields: [
-          { name: "owner_id", type: "uuid", required: true },
+          { name: "owner_id", type: "uuid" },
           { name: "recipient_name", type: "string", required: true },
           { name: "phone", type: "string", required: true },
           { name: "city", type: "string", required: true },
@@ -196,9 +197,9 @@ export const TEMPLATE_CATALOG: DataSchemaTemplate[] = [
       { collection: "order_items", target: "products", name: "product", cardinality: "many-to-one" },
     ],
     accessPolicies: [
-      { collection: "categories", rule: "public" },
-      { collection: "products", rule: "public" },
-      { collection: "product_variants", rule: "public" },
+      { collection: "categories", rule: "public", actions: ["select"] },
+      { collection: "products", rule: "public", actions: ["select"] },
+      { collection: "product_variants", rule: "public", actions: ["select"] },
       { collection: "carts", rule: "owner", ownerField: "owner_id" },
       { collection: "cart_items", rule: "owner", ownerField: "owner_id" },
       { collection: "orders", rule: "owner", ownerField: "owner_id" },

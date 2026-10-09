@@ -102,6 +102,7 @@ export function validateOperation(operation: SchemaOperation): void {
     case "create_relation":
       validateIdentifier(operation.target);
       validateIdentifier(operation.name);
+      if (operation.field) validateIdentifier(operation.field);
       break;
     case "drop_relation":
       validateIdentifier(operation.name);

@@ -353,12 +353,15 @@ export class AgentDataStudioService {
 
     // 2. Create relations
     for (const rel of template.relations) {
+      const source = template.collections.find(collection => collection.name === (rel.cardinality === "one-to-many" ? rel.target : rel.collection));
+      const field = source?.fields.find(field => field.name === `${rel.name}_id` || field.name === rel.name)?.name;
       operations.push({
         kind: "create_relation",
         collection: rel.collection,
         target: rel.target,
         name: rel.name,
         cardinality: rel.cardinality,
+        ...(field && rel.cardinality !== "many-to-many" ? { field } : {}),
       });
     }
 
@@ -403,29 +406,14 @@ export class AgentDataStudioService {
       };
     }
 
-    // Execute operations atomically in a transaction
-    const appliedMigrations = [];
-    try {
-      for (const op of operations) {
-        const mig = await this.migrations.apply(ctx, {
-          backend,
-          environment: "dev",
-          operation: op,
-          authorId: options.agentId || ctx.userId,
-          runId: options.runId,
-        });
-        appliedMigrations.push(mig);
-      }
-      if (!this.authService) throw new DataStudioError(503, "template", "Project Auth service is required to apply template policies", true, "AUTH_UNAVAILABLE");
-      await this.authService.applyAccessPolicies(ctx, companyId, projectId, "dev", template.accessPolicies);
-    } catch (error) {
-      // Rollback applied migrations in reverse order if any operation fails
-      for (let i = appliedMigrations.length - 1; i >= 0; i--) {
-        const mig = appliedMigrations[i]!;
-        await this.migrations.rollback(ctx, backend, "dev", mig.id).catch(() => {});
-      }
-      throw error;
-    }
+    const appliedMigrations = await this.migrations.applyBatch(ctx, {
+      backend, environment: "dev", operations, policies: template.accessPolicies,
+      authorId: options.agentId || ctx.userId, runId: options.runId,
+    });
+    const currentEnv = await this.repository.environment(ctx, companyId, backend.id, "dev");
+    await this.repository.setEnvironment(ctx, companyId, backend.id, "dev", {
+      providerConfig: { ...currentEnv.providerConfig, gdprStrategies: { ...(currentEnv.providerConfig?.gdprStrategies as Record<string, string> ?? {}), ...template.gdprStrategies } },
+    });
 
     // Update PROJECT.md
     const updatedSchema = await this.provider.introspectSchema(backend, "dev");

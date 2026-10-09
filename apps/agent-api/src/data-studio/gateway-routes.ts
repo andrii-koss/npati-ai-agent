@@ -297,6 +297,14 @@ export function registerProjectApiGatewayRoutes(
   // Collection CRUD Endpoints
   // =========================================================================
 
+  app.post<{ Params: ProjectRouteParams; Body: Record<string, unknown> }>(`${base}/forms/:collection/submit`, PUBLIC_WRITE_ROUTE, (request, reply) =>
+    runWithGateway(request, reply, auth => gateway!.submitForm(auth, request.params.collection!, request.body)),
+  );
+
+  app.post<{ Params: ProjectRouteParams; Body: { cartId: string } }>(`${base}/commerce/checkout`, PUBLIC_WRITE_ROUTE, (request, reply) =>
+    runWithGateway(request, reply, auth => gateway!.checkout(auth, request.body?.cartId)),
+  );
+
   app.get<{
     Params: ProjectRouteParams;
     Querystring: {

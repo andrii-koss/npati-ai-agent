@@ -91,6 +91,8 @@ const DEPLOY_REGEX = /(?:задеплой(?:ти)?|опублікуй(?: сай�
 
 const EDIT_DATA_MODEL_REGEX = /(?:зміни|онови|видали|поправ|відредагуй|edit|update|modify|alter|drop|delete)(?:\s+[\p{L}\d_-]+){0,3}\s+(?:таблиц|колекці|модел|поля?|поле|зв['ʼ]?язок|стовпець|колонк[ауи]|table|collection|model|field|relation|column)/iu;
 const ADD_DATA_MODEL_REGEX = /(?:додай|створи|налаштуй|зроби|add|create|setup|generate)(?:\s+[\p{L}\d_-]+){0,4}\s+(?:таблиц|колекці|модел|баз[уі]|схем|інтернет-магазин|магазин|блог|crm|saas|ecommerce|blog|store|table|collection|model|database|schema)/iu;
+const ADD_FIELD_REGEX = /(?:додай|додати|створи|add|create)\s+(?:нов[\p{L}]*\s+)?(?:поле|поля|стовпець|стовпці|колонк[ауи]|field|column)/iu;
+const CREATE_STORE_REGEX = /(?:створи|створити|зроби|розроби|create|build|make)(?:\s+[\p{L}\d_-]+){0,4}\s+(?:інтернет[ -]?магазин|online\s+(?:store|shop)|e-?commerce\s+(?:store|site)|магазин|store|shop)/iu;
 
 function extractEntityName(message: string): string | undefined {
   const match = message.match(/(?:for|для|назва|called|named|під назвою)\s+["'«]?([^"'»\n.,!?]+)["'»]?/i)
@@ -199,9 +201,10 @@ export function classifyProjectIntent(rawInput: ProjectIntentInput | string): Pr
     });
   }
 
-  // Creation takes precedence when the same request also asks for preview
-  if (CREATE_PROJECT_REGEX.test(text) && PREVIEW_REGEX.test(text)) {
-    const isWebsite = /сайт|веб-?сайт|лендінг|website|web\s*site|landing/i.test(text);
+  // A new site/app must win over ancillary build, preview and data requests.
+  if (CREATE_PROJECT_REGEX.test(text) && (/створи|створити|зроби|розроби|згенеруй|create|generate|make|build\s+(?:a|an)\s/iu.test(text) || !PREVIEW_REGEX.test(text) && !BUILD_REGEX.test(text) && !TEST_REGEX.test(text)) || CREATE_STORE_REGEX.test(text) && !/таблиц|колекці|схем|table|collection|schema/iu.test(text)) {
+    const isMobileApp = isMobileAppRequest(text);
+    const isWebsite = !isMobileApp && /сайт|веб-?сайт|лендінг|магазин|website|web\s*site|landing|store|shop/iu.test(text);
     return buildDecision({
       intent: isWebsite ? "CREATE_WEBSITE" : "CREATE_PROJECT",
       confidence: 0.92,
@@ -209,8 +212,9 @@ export function classifyProjectIntent(rawInput: ProjectIntentInput | string): Pr
       needsClarification: false,
       targetDetails: {
         topic: text,
-        framework: extractFramework(text),
+        framework: isMobileApp ? "Expo" : extractFramework(text),
         entityName: extractEntityName(text),
+        projectType: isMobileApp ? "mobile_app" : "website",
       },
     });
   }
@@ -265,7 +269,7 @@ export function classifyProjectIntent(rawInput: ProjectIntentInput | string): Pr
   }
 
   // 10.1. Data Model Intents (D3)
-  if (EDIT_DATA_MODEL_REGEX.test(text)) {
+  if (EDIT_DATA_MODEL_REGEX.test(text) || ADD_FIELD_REGEX.test(text)) {
     return buildDecision({
       intent: "EDIT_DATA_MODEL",
       confidence: 0.92,

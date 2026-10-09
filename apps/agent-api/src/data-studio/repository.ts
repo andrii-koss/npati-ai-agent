@@ -277,6 +277,11 @@ export class DataBackendRepository {
     await this.pool.query("DELETE FROM data_backend_migration_locks WHERE backend_id=$1 AND environment=$2 AND owner_token=$3", [id, environment, token]);
   }
 
+  async ownsLock(id: string, environment: DataEnvironmentName, token: string): Promise<boolean> {
+    const result = await this.pool.query("SELECT 1 FROM data_backend_migration_locks WHERE backend_id=$1 AND environment=$2 AND owner_token=$3 AND expires_at>now()", [id, environment, token]);
+    return Boolean(result.rowCount);
+  }
+
   // =========================================================================
   // D7: backups, promotions, lifecycle
   // =========================================================================

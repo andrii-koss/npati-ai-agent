@@ -13,7 +13,7 @@ export type SchemaOperation =
   | { kind: "add_field"; collection: string; field: FieldDefinition }
   | { kind: "alter_field"; collection: string; field: FieldDefinition }
   | { kind: "drop_field"; collection: string; field: string }
-  | { kind: "create_relation"; collection: string; target: string; name: string; cardinality: "many-to-one" | "one-to-many" | "many-to-many" }
+  | { kind: "create_relation"; collection: string; target: string; name: string; field?: string; cardinality: "many-to-one" | "one-to-many" | "many-to-many" }
   | { kind: "drop_relation"; collection: string; name: string; cardinality: "many-to-one" | "one-to-many" | "many-to-many" }
   | { kind: "create_index"; collection: string; fields: string[]; unique?: boolean };
 export interface SchemaChange {
@@ -102,6 +102,7 @@ export class PostgresDataProvider implements DataProvider {
     if (field.default !== undefined && field.default !== null) {
       if (typeof field.default === "number" && Number.isFinite(field.default) && ["integer", "decimal"].includes(field.type)) sql += " DEFAULT " + String(field.default);
       else if (typeof field.default === "boolean" && field.type === "boolean") sql += " DEFAULT " + (field.default ? "true" : "false");
+      else if (typeof field.default === "string" && ["string", "text", "enum"].includes(field.type) && field.default.length <= 1000 && !field.default.includes("\0")) sql += " DEFAULT '" + field.default.replace(/'/g, "''") + "'";
       else throw new DataStudioError(400, "field", "Unsupported field default", false, "INVALID_DEFAULT");
     }
     if (field.type === "enum") sql += " CHECK (" + name + " IN (" + field.options!.map((value) => "'" + value + "'").join(",") + "))";
@@ -116,7 +117,15 @@ export class PostgresDataProvider implements DataProvider {
       case "add_field": return this.addField(operation.collection, operation.field);
       case "alter_field": return this.alterField(operation.collection, operation.field);
       case "drop_field": return this.dropField(operation.collection, operation.field);
-      case "create_relation": return this.createRelation(operation.collection, operation.target, operation.name, operation.cardinality);
+      case "create_relation": {
+        if (operation.field && operation.cardinality !== "many-to-many") {
+          const many = operation.cardinality === "one-to-many" ? operation.target : operation.collection;
+          const one = operation.cardinality === "one-to-many" ? operation.collection : operation.target;
+          const constraint = quoteIdentifier(validateIdentifier(`fk_${many}_${operation.name}`.slice(0, 63)));
+          return { operation: "create_relation", upSql: `ALTER TABLE ${quoteIdentifier(many)} ADD CONSTRAINT ${constraint} FOREIGN KEY (${quoteIdentifier(operation.field)}) REFERENCES ${quoteIdentifier(one)}(id);`, downSql: `ALTER TABLE ${quoteIdentifier(many)} DROP CONSTRAINT ${constraint};`, reversible: true, destructive: false, requiresSnapshot: false };
+        }
+        return this.createRelation(operation.collection, operation.target, operation.name, operation.cardinality);
+      }
       case "drop_relation": return this.dropRelation(operation.collection, operation.name, operation.cardinality);
       case "create_index": return this.createIndex(operation.collection, operation.fields, operation.unique);
       default: throw new DataStudioError(400, "schema_operation", "Unsupported schema operation", false, "INVALID_OPERATION");

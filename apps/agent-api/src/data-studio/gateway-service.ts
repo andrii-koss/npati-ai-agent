@@ -398,6 +398,37 @@ export class ProjectApiGatewayService {
     if ((options.include?.length ?? 0) > MAX_RELATION_INCLUDES) throw new DataStudioError(400, "gateway", `At most ${MAX_RELATION_INCLUDES} relations may be included`, false, "INVALID_QUERY");
   }
 
+  private async assertCommerceMutation(auth: GatewayAuthResult, collection: string): Promise<void> {
+    if (!["orders", "order_items"].includes(collection)) return;
+    const ctx = { workspaceId: auth.project.workspaceId, userId: auth.project.createdBy, permissions: ["business:manage"] };
+    const env = await this.repository.environment(ctx, auth.project.companyId, auth.backend.id, auth.environment);
+    if (env.providerConfig.commerce === true && auth.keyType !== "secret") throw new DataStudioError(403, "checkout", "Orders must be created through checkout; clients cannot change prices or order status", false, "CHECKOUT_REQUIRED");
+  }
+
+  async checkout(auth: GatewayAuthResult, cartId: string) {
+    if (!auth.userId) throw new DataStudioError(401, "checkout", "Sign in before checkout", false, "AUTH_REQUIRED");
+    if (typeof cartId !== "string" || !/^[0-9a-f-]{36}$/i.test(cartId)) throw new DataStudioError(400, "checkout", "Invalid cart ID", false, "INVALID_CART");
+    const ctx = { workspaceId: auth.project.workspaceId, userId: auth.project.createdBy, permissions: ["business:manage"] };
+    const env = await this.repository.environment(ctx, auth.project.companyId, auth.backend.id, auth.environment);
+    if (env.providerConfig.commerce !== true) throw new DataStudioError(404, "checkout", "Store checkout is unavailable", false, "CHECKOUT_UNAVAILABLE");
+    await this.authorizeCollection(auth, "orders", "insert");
+    await this.authorizeCollection(auth, "order_items", "insert");
+    await this.quotas?.assertWritesAllowed(auth.backend, auth.environment);
+    return this.executeRuntime(auth, async client => {
+      const cart = await client.query("SELECT id FROM carts WHERE id=$1 AND owner_id=$2 AND status='active' FOR UPDATE", [cartId, auth.userId]);
+      if (!cart.rowCount) throw new DataStudioError(409, "checkout", "Cart not found or already checked out", false, "INVALID_CART");
+      const items = await client.query<{ id: string; quantity: string }>("SELECT id,quantity::text AS quantity FROM cart_items WHERE cart_id=$1 AND owner_id=$2 FOR UPDATE", [cartId, auth.userId]);
+      if (!items.rows.length || items.rows.length > 100 || items.rows.some(item => !Number.isSafeInteger(Number(item.quantity)) || Number(item.quantity) < 1 || Number(item.quantity) > 100)) throw new DataStudioError(400, "checkout", "Cart quantities are invalid or cart is empty", false, "INVALID_CART_ITEMS");
+      const available = await client.query("SELECT ci.id FROM cart_items ci JOIN product_variants v ON v.id=ci.variant_id JOIN products p ON p.id=v.product_id WHERE ci.cart_id=$1 AND ci.owner_id=$2 AND p.is_active=true AND v.price>=0 AND v.inventory_count>=ci.quantity", [cartId, auth.userId]);
+      if (available.rowCount !== items.rows.length) throw new DataStudioError(409, "checkout", "A product is unavailable", false, "PRODUCT_UNAVAILABLE");
+      const orderNumber = "NP-" + randomUUID();
+      const order = await client.query<Record<string, unknown>>("INSERT INTO orders(owner_id,order_number,status,total_amount,currency) SELECT $2,$3,'pending',sum(v.price*ci.quantity),'UAH' FROM cart_items ci JOIN product_variants v ON v.id=ci.variant_id WHERE ci.cart_id=$1 AND ci.owner_id=$2 RETURNING *", [cartId, auth.userId, orderNumber]);
+      await client.query("INSERT INTO order_items(order_id,product_id,variant_id,quantity,unit_price,owner_id) SELECT $3,v.product_id,v.id,ci.quantity,v.price,$2 FROM cart_items ci JOIN product_variants v ON v.id=ci.variant_id WHERE ci.cart_id=$1 AND ci.owner_id=$2", [cartId, auth.userId, order.rows[0]!.id]);
+      await client.query("UPDATE carts SET status='ordered' WHERE id=$1 AND owner_id=$2", [cartId, auth.userId]);
+      return { order: order.rows[0] };
+    });
+  }
+
   async listRows(auth: GatewayAuthResult, collection: string, options: GatewayListOptions = {}) {
     await this.authorizeCollection(auth, collection, "select");
     this.assertQueryBounds(options);
@@ -524,7 +555,27 @@ export class ProjectApiGatewayService {
     });
   }
 
+  /** Append-only forms do not need SELECT permission or expose submitted records. */
+  async submitForm(auth: GatewayAuthResult, collection: string, values: Record<string, unknown>) {
+    if (collection !== "contact_messages" && collection !== "form_submissions") {
+      throw new DataStudioError(400, "gateway", "Unsupported form collection", false, "INVALID_FORM_COLLECTION");
+    }
+    await this.authorizeCollection(auth, collection, "insert");
+    await this.quotas?.assertWritesAllowed(auth.backend, auth.environment);
+    const allowed = collection === "contact_messages" ? ["name", "email", "message"] : ["form_name", "payload"];
+    if (!values || typeof values !== "object" || Array.isArray(values) || allowed.some(key => values[key] === undefined) || Object.keys(values).some(key => !allowed.includes(key))) {
+      throw new DataStudioError(400, "gateway", "Invalid form fields", false, "INVALID_FORM_FIELDS");
+    }
+    return this.executeRuntime(auth, async client => {
+      await this.validateColumns(client, collection, allowed);
+      // RETURNING requires a SELECT policy, which would disclose other submissions.
+      await client.query(`INSERT INTO ${quoteIdentifier(collection)} (${allowed.map(quoteIdentifier).join(", ")}) VALUES (${allowed.map((_, index) => `$${index + 1}`).join(", ")})`, allowed.map(key => values[key]));
+      return { success: true };
+    });
+  }
+
   async createRow(auth: GatewayAuthResult, collection: string, values: Record<string, unknown>) {
+    await this.assertCommerceMutation(auth, collection);
     await this.authorizeCollection(auth, collection, "insert");
     await this.quotas?.assertWritesAllowed(auth.backend, auth.environment);
 
@@ -557,6 +608,7 @@ export class ProjectApiGatewayService {
   }
 
   async updateRow(auth: GatewayAuthResult, collection: string, id: string, values: Record<string, unknown>) {
+    await this.assertCommerceMutation(auth, collection);
     await this.authorizeCollection(auth, collection, "update");
     await this.quotas?.assertWritesAllowed(auth.backend, auth.environment);
 
@@ -587,6 +639,7 @@ export class ProjectApiGatewayService {
   }
 
   async deleteRow(auth: GatewayAuthResult, collection: string, id: string) {
+    await this.assertCommerceMutation(auth, collection);
     await this.authorizeCollection(auth, collection, "delete");
     const sql = `DELETE FROM ${quoteIdentifier(collection)} WHERE id = $1`;
 
