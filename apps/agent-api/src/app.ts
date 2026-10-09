@@ -7101,9 +7101,9 @@ ${localized.next}`;
         projectId: chatBody.projectId ?? null,
       };
 
-      const resolved = await activeContextResolver.resolve(auth, requestedContext);
       const prompt = chatBody.message?.trim();
-      const activeProjId = requestedContext.projectId ?? (resolved.context as any).projectId ?? null;
+      const resolved = await activeContextResolver.resolveChat(auth, requestedContext, prompt ?? "");
+      const activeProjId = resolved.project?.id ?? null;
       const activeCompId = requestedContext.companyId ?? resolved.company?.id ?? resolved.project?.companyId ?? null;
 
       const intentDecision = defaultHybridRouter.classifyProject({
@@ -7463,9 +7463,9 @@ ${localized.next}`;
         projectId: request.body.projectId ?? null,
       };
 
-      const resolved = await activeContextResolver.resolve(auth, requestedContext);
+      const resolved = await activeContextResolver.resolveChat(auth, requestedContext, message);
 
-      const activeProjectId = request.body.projectId ?? resolved.project?.id ?? null;
+      const activeProjectId = resolved.project?.id ?? null;
       const activeCompanyId = request.body.companyId ?? resolved.company?.id ?? resolved.project?.companyId ?? null;
       const projectIntent = defaultHybridRouter.classifyProject({
         message,

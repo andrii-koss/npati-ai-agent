@@ -90,6 +90,17 @@ jobs exit successfully; the runner healthcheck verifies access to the host
 Docker daemon and both images. After redeploy, the runner startup log must show
 `socketPresent:true` and `present:true` for both images.
 
+Sandbox creation also checks host load. The runner applies the Compose settings
+`NPATI_HOST_ADMISSION_MAX_CPU_PERCENT` (default 80),
+`NPATI_HOST_ADMISSION_MIN_FREE_MEMORY_PERCENT` (default 15), and
+`NPATI_HOST_ADMISSION_SAMPLE_TTL_MS` (default 5000). A `host_overloaded` response
+includes the measured value and threshold; ordinary chat does not use this gate.
+If available memory remains below the threshold, release unused workloads or add
+capacity before testing build and Live Preview. Changing these settings requires
+recreating the runner container. Its `[sandbox-quota]` startup log shows the
+effective thresholds. Setting a value in Dokploy now passes it into the runner;
+previously the Compose files omitted these variables and the runner used defaults.
+
 If the currently running deployment predates this Compose change, build the
 images once on the same VPS and Docker daemon used by Dokploy, from the checked
 out repository, then redeploy the Compose service:

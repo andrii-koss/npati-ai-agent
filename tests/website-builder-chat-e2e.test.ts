@@ -50,7 +50,7 @@ describe("Website Builder through ordinary streamed Chat", () => {
     const authProvider: AuthProvider = { authenticate: async () => auth };
     const app = buildApp({ workspaceStore: store, authProvider, aiEngine, marketplace, projectWorkspaceRoot: root });
     apps.push(app);
-    const first = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: createPrompt, contextType: "company", companyId: company.id } });
+    const first = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: createPrompt, contextType: "project", companyId: company.id, projectId: "7b54458a-f557-4d4b-b7ab-a6d4b9b05fb4" } });
     expect(first.statusCode).toBe(200);
     const created = streamResult(first.body);
     expect(created.projectAction?.action).toBe("create");
@@ -87,6 +87,15 @@ describe("Website Builder through ordinary streamed Chat", () => {
     expect(edited.projectAction?.projectId).toBe(projectId);
     expect(await store.listProjects(auth, company.id)).toHaveLength(1);
     expect((await store.listProjectRuns(auth, company.id, projectId)).length).toBeGreaterThan(runsBefore.length);
+    // Older clients may send the previous Project when explicitly asking for a new site.
+    const another = await app.inject({ method: "POST", url: "/chat", payload: {
+      message: createPrompt,
+      contextType: "project", companyId: company.id, projectId: "deleted-project",
+    } });
+    expect(another.statusCode, another.body).toBe(200);
+    expect(another.json().projectAction?.action).toBe("create");
+    expect(another.json().activeContext.projectId).not.toBe(projectId);
+    expect(await store.listProjects(auth, company.id)).toHaveLength(2);
   });
 });
 

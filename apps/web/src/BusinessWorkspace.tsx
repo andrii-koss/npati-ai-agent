@@ -1,6 +1,7 @@
 import { getStoredAuthToken } from "./AuthContext";
 import { useTranslation } from "./i18n";
 import type { AgentReply, ProjectCardData } from "@npati/shared";
+import { defaultHybridRouter } from "@npati/shared";
 import { FormEvent, Fragment, KeyboardEvent as ReactKeyboardEvent, ReactNode, SyntheticEvent, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { createPortal } from "react-dom";
@@ -1721,13 +1722,14 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
 
     const activeCompanyForRequest = companyId ?? readActiveCompanyId();
     let activeProjectId: string | undefined;
-    const isNewProjectRequest = /\b(?:створи|створіть|create|build|generate|make|new)\b[^.\n]{0,30}\b(?:сайт|website|проєкт|проект|project|app)\b/iu.test(requestMessage);
+    const projectIntent = defaultHybridRouter.classifyProject({ message: requestMessage, activeCompanyId: activeCompanyForRequest });
+    const isNewProjectRequest = projectIntent.intent === "CREATE_WEBSITE" || projectIntent.intent === "CREATE_PROJECT";
     if (!isNewProjectRequest) {
       try {
         const stored = sessionStorage.getItem("npati_active_project");
         if (stored) {
-          const active = JSON.parse(stored) as { companyId?: string; projectId?: string };
-          if (active.companyId === activeCompanyForRequest) activeProjectId = active.projectId;
+          const active = JSON.parse(stored) as { companyId?: string; projectId?: string; conversationId?: string };
+          if (selected && active.conversationId === selected && active.companyId === activeCompanyForRequest) activeProjectId = active.projectId;
         }
       } catch {}
     }
@@ -1778,7 +1780,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       }
       if (result.activeContext?.projectId) {
         try {
-          sessionStorage.setItem("npati_active_project", JSON.stringify({ companyId: result.activeContext.companyId, projectId: result.activeContext.projectId }));
+          sessionStorage.setItem("npati_active_project", JSON.stringify({ companyId: result.activeContext.companyId, projectId: result.activeContext.projectId, conversationId: result.conversationId ?? selected }));
           if (!readActiveCompanyId() && result.activeContext.companyId) writeActiveCompanyId(result.activeContext.companyId);
         } catch {}
       }

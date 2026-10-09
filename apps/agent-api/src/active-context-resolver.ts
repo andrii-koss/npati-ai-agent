@@ -4,6 +4,7 @@ import {
   type RunContextSnapshot,
   validateActiveContext,
   ContextValidationError,
+  defaultHybridRouter,
 } from "@npati/shared";
 import {
   type AuthContext,
@@ -24,6 +25,16 @@ export interface ResolvedActiveContext {
 
 export class ActiveContextResolver {
   constructor(private readonly store: WorkspaceStore) {}
+
+  /** A new Project request must not validate or reuse the previous chat's Project. */
+  async resolveChat(auth: AuthContext, requested: Parameters<ActiveContextResolver["resolve"]>[1], message: string): Promise<ResolvedActiveContext> {
+    const validated = validateActiveContext(requested ?? {});
+    const intent = defaultHybridRouter.classifyProject({ message, activeCompanyId: validated.companyId, activeProjectId: validated.projectId });
+    if (validated.projectId && (intent.intent === "CREATE_WEBSITE" || intent.intent === "CREATE_PROJECT")) {
+      return this.resolve(auth, { contextType: "company", companyId: validated.companyId });
+    }
+    return this.resolve(auth, requested);
+  }
 
   async resolve(
     auth: AuthContext,
