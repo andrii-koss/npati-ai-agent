@@ -203,12 +203,14 @@ Core, not in the project database).
   RESTRICT`, so this is enforced by the database as well). Transfer or delete the databases first.
 - Deleting a DataBackend is refused while active Projects are attached unless the confirmed request
   includes `detachProjects: true`. Settings → Data Studio explains that attached projects lose access,
-  requires the exact database name, and sends this option. Detaching projects and scheduling deletion
+  requires the exact database name, and sends this option together with `immediate: true` for “Delete now”. Detaching projects and scheduling deletion
   happen in one tenant-scoped transaction; the projects themselves are preserved. Afterwards the backend is
   marked `deleting`, its runtime roles are suspended, and databases, roles, keys and secrets are
   purged after the snapshot retention window (`remove_after`). Use `immediate: true` in the API to
-  purge right away (for example in disposable test environments). Settings displays “Pending deletion”
-  and the removal deadline while retention is active. Repeating the request does not extend that deadline.
+  purge right away. Settings uses immediate deletion, including for backends already marked “Pending deletion”.
+  The row disappears after physical cleanup of both environments and removal of Core metadata succeeds.
+  A failed cleanup leaves the row available for retry. API requests without `immediate: true` still use
+  the retention window; repeating a deferred request does not extend that deadline.
 - Activating an archived backend only re-enables the runtime role; the data is untouched.
 
 ## 8. Upgrades and troubleshooting

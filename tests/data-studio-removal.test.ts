@@ -27,8 +27,12 @@ function harness(failAfterDetach = false) {
   repository.get = async () => backend;
   repository.environment = async () => ({status:"unavailable"}) as any;
   repository.setRemovalDeadline = vi.fn(async (_ctx, _company, _id, deadline) => {backend.removeAfter = deadline.toISOString();});
-  const service = new DataBackendService({getCompany:async()=>({id:"company-a"})} as any,repository,{} as any);
-  return {repository,service,query,release,backend};
+  repository.setEnvironment = vi.fn(async () => {});
+  repository.deleteSecrets = vi.fn(async () => {});
+  repository.remove = vi.fn(async () => {backend.status="deleted";});
+  const provisioner = {deprovisionDatabase:vi.fn(async (_backend: unknown, _environment: string) => {})};
+  const service = new DataBackendService({getCompany:async()=>({id:"company-a"})} as any,repository,provisioner as any);
+  return {repository,service,query,release,backend,provisioner};
 }
 
 describe("Data Studio database removal", () => {
@@ -84,5 +88,32 @@ describe("Data Studio database removal", () => {
     expect(await service.remove(owner,"company-a","backend-a","Store DB",{detachProjects:true})).toMatchObject({deferred:true,removeAfter:backend.removeAfter});
     expect(query).not.toHaveBeenCalled();
     expect(repository.setRemovalDeadline).not.toHaveBeenCalled();
+  });
+  it("deletes an already pending database immediately through the Settings API", async () => {
+    const {service,backend,repository,provisioner} = harness();
+    backend.status="deleting";
+    backend.removeAfter="2026-11-09T00:00:00.000Z";
+    const app=Fastify();
+    registerDataBackendRoutes(app,{authenticate:async()=>owner},service);
+    try {
+      const response=await app.inject({method:"DELETE",url:"/companies/company-a/data-backends/backend-a",payload:{confirmName:"Store DB",detachProjects:true,immediate:true}});
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({id:"backend-a",deleted:true,deferred:false});
+      expect(provisioner.deprovisionDatabase.mock.calls.map(([,env])=>env)).toEqual(["dev","prod"]);
+      expect(repository.deleteSecrets).toHaveBeenCalledWith("backend-a");
+      expect(repository.remove).toHaveBeenCalledWith(owner,"company-a","backend-a");
+      expect(repository.setRemovalDeadline).not.toHaveBeenCalled();
+    } finally {await app.close();}
+  });
+  it("keeps metadata and credentials on a failed physical deletion and allows retry", async () => {
+    const {service,backend,repository,provisioner} = harness();
+    provisioner.deprovisionDatabase.mockImplementationOnce(async()=>{}).mockImplementationOnce(async()=>{throw new Error("prod database is busy");});
+    await expect(service.remove(owner,"company-a","backend-a","Store DB",{immediate:true,detachProjects:true})).rejects.toThrow("prod database is busy");
+    expect(backend.status).toBe("deleting");
+    expect(repository.deleteSecrets).not.toHaveBeenCalled();
+    expect(repository.remove).not.toHaveBeenCalled();
+    await expect(service.remove(owner,"company-a","backend-a","Store DB",{immediate:true,detachProjects:true})).resolves.toMatchObject({deleted:true,deferred:false});
+    expect(provisioner.deprovisionDatabase.mock.calls.map(([,env])=>env)).toEqual(["dev","prod","dev","prod"]);
+    expect(repository.remove).toHaveBeenCalledTimes(1);
   });
 });
