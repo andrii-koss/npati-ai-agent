@@ -303,7 +303,7 @@ refactor(<scope>): split <file> into <N> modules (step <N>)
 | # | Файл | Рядків | Стан |
 |---|---|---:|---|
 | 1 | `apps/web/src/styles.css` | 21 754 | [x] |
-| 2 | `apps/agent-api/src/app.ts` | 8 449 → **7 393** | [~] 2a, 2b-1…2b-3, 2c-1, 2c-2 ✓ |
+| 2 | `apps/agent-api/src/app.ts` | 8 449 → **5 628** | [~] 2a, 2b-1…2b-3, 2c-1…2c-4 ✓ |
 | 3 | `packages/shared/src/code-capabilities.ts` | 4 079 | [ ] |
 | 4 | `packages/shared/src/capability-catalog.ts` | 7 283 | [ ] |
 | 5 | `packages/shared/src/capability-matrix.ts` | 4 861 | [ ] |
@@ -443,8 +443,12 @@ sha256(concat(01..28)) == sha256(оригінал)
 - [~] **2c. Реєстрація маршрутів** — один домен на коміт, шаблон `registerXRoutes(app, deps)`, як у наявних `*-routes.ts`. Виконано:
   - [x] **2c-1 (коміт `bb39b7f`).** `health-routes.ts` (82 рядки): `/health/live`, `/health`, `/skills`. `app.ts` 7792 → 7750.
   - [x] **2c-2 (коміт `6b93dc7`).** `platform-routes.ts` (564 рядки): **22 реєстратори** (code data-erasure/goals/instructions/trust/mounted-folder/approval/ask-user, network, deploy, QA, company runtime, content library, MCP policy, email, api keys, scoped memory, memory documents, guardrail, reliability, browser automation/credentials, multimodal, A2A) плюс їхня власна проводка (контексти, `messagingRoutes`, хук email-шлюзу). `app.ts` 7750 → **7393**.
-  - [ ] **2c-3.** Друга щільна група — 24 реєстратори в 4234–4278 (auth, AI, workspace, project-*, data-backend/studio, code, sandbox images).
-  - [ ] **2c-4.** Решта code-* реєстраторів (4927–6030 у старій нумерації) — з їхньою проводкою (`codeRbacForRun`, `codeRunStateLog`, `codingAgentRunner`, …).
+  - [x] **2c-3 (коміт `15f375c`).** `platform-base-routes.ts` (134 рядки): 19 реєстраторів (auth, installation auth, session stream, AI, runtime compat, workspace, project routes, data-backend, data-studio, project auth, gateway, files, terminal, preview, git, import, code, sandbox images, code tools) + хук teardown, що належить їм. `app.ts` 7393 → 7364.
+  - [x] **2c-4 (коміт `cbd821b`).** `code-route-wiring.ts`: **1745 рядків** — 11 сервісів проводки code-поверхні (rbac, run state, session inbox, cancellation, run executor, queue limits/admission, background runs, data erasure, erasure contexts, run environment) і 16 реєстраторів із їхніми per-route хуками. `app.ts` 7364 → **5628** (−1736 за один коміт — найбільший крок).
+    *Три нові пастки, пройдені тут:* (1) **компоненти, які читаються ДО регіону** в замиканнях (`codeRunEnvironment` на рядку 2164) — їх не видно в аналізі «використано після регіону», тому вони теж мусять повертатися з модуля; (2) **три пізні рефи** (`codingAgentRunnerRef`, `codeSubagentOperationsRef`, `subagentChildRunnerWithAck`) перейменовано на `*Value` і повернено; (3) **мій парсер імпортів читав лише однорядкові** — через це 36 імпортів реєстраторів не потрапили в модуль; парсер мусить бути багаторядковим.
+  - [ ] **2c-5 (обов'язково).** ⚠️ **`code-route-wiring.ts` — 1921 рядок, тобто новий великий файл.** Розбити за родинами маршрутів (session/run, stream, durability, replay, metrics/snapshot, export/queue, background/CLI runs, agent control, intent, inbox) — по одному модулю на коміт. Поки це не зроблено, мета «жодного файлу > 800» не досягнута, і guard-скрипт (Додаток B) зафлагує цей файл.
+  - [ ] **2c-6.** Ранні code-реєстратори (`registerCodeProductionRoutes` L995, `registerCodeSessionModeRoutes` L1234, `registerCodeMembershipRoutes` L1251, `registerCodeDataPolicyRoutes` L1390) — вони розкидані серед проводки code-* сервісів.
+  - [ ] **2c-7.** `/capabilities` і `/capability-inspector` (наступні після health) та чат-ендпоінти `/chat*` (~1300 рядків).
 
 > **Рецепт виносу групи маршрутів (перевірено на 2c-2, 357 рядків за один коміт):**
 > 1. **Межі — за шаблоном, не за номерами** (`findIndex` на `register<Domain>Routes(app`): попередній крок додає імпорт і зсуває все на ±1.
@@ -1144,3 +1148,5 @@ Rollback:   git revert <sha>
 | 2b-4 | `apps/agent-api/src/app.ts` | 7 792 | 7 792 — **спробувано й відкочено**: тест `c15-mount-sandbox` пінить 5 літералів у `app.ts` | — (відкат) | 2026-10-10 |
 | 2c-1 | `apps/agent-api/src/app.ts` | 7 792 | 7 750 (health/skills → `health-routes.ts`) | `bb39b7f` | 2026-10-10 |
 | 2c-2 | `apps/agent-api/src/app.ts` | 7 750 | 7 393 (22 реєстратори → `platform-routes.ts`) | `6b93dc7` | 2026-10-10 |
+| 2c-3 | `apps/agent-api/src/app.ts` | 7 393 | 7 364 (19 реєстраторів → `platform-base-routes.ts`) | `15f375c` | 2026-10-10 |
+| 2c-4 | `apps/agent-api/src/app.ts` | 7 364 | **5 628** (code-проводка + 16 реєстраторів → `code-route-wiring.ts`) | `cbd821b` | 2026-10-10 |
