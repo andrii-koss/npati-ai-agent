@@ -457,7 +457,9 @@ sha256(concat(01..28)) == sha256(оригінал)
     - [x] **2c-7a (коміт `9754178`).** `/capabilities`, `/capabilities/inspect` + `CapabilityInspectorService` (121 рядок) → `capability-routes.ts` (149). `app.ts` 5628 → **5519**.
     - [x] **2c-7b (коміт `65a407f`).** `/router/evaluate`, два `/attachments/:attachmentId`, `/businesses/:businessId/research-jobs/:jobId` (69 рядків) → `misc-routes.ts` (98). `app.ts` 5519 → 5461.
     - [x] **2c-7c-a (коміт `7a36e05`).** Ендпоінт `/chat`-стріму — **666 рядків**, найбільший залишковий блок → `chat-stream-routes.ts` (745). `app.ts` 5461 → **4821**.
-    - [ ] **2c-7c-b.** Решта чат-маршрутів: `/chat/streams/:streamId/cancel` (10), блок на 47 і блок на 378 рядків, і сам чат-замикач (`contextBuilder` + оркестрація, ~1300 рядків).
+    - [x] **2c-7c-b (коміт `080bc41`).** Решта чат-маршрутів (скасування стріму + нейтральний/компанійний/бізнесовий ендпоінти, 436 рядків) → `chat-routes.ts` (487). `app.ts` 4821 → **4401**.
+    - [ ] **2c-7c-c.** Чат-замикач (`contextBuilder` + оркестрація, ~1300 рядків) — останній великий блок `app.ts`.
+    - 💡 **Прийом 2c-7c-b:** коли тип залежності не можна назвати, його беруть **з наявного символу**: тип чат-відповіді — `Parameters<typeof applyChatTelemetryHeaders>[1] & { message: string; companyAction?: … }`, а `getAIContext` повертає `AgentAIContext` із `@npati/agent`. Це точніше за ручний опис структури й не потребує `any`.
     - ⚠️ **Пастки 2c-7c-a:** (1) `app.ts` отримує виходи частин через **однорядкову деструктуризацію** `const { a, b, ... } = codeRoutes;` — мій парсер «оголошених раніше» імен її не бачив, тому 4 залежності не потрапили в модуль; тепер деструктуризація парситься загальним regex-ом; (2) `function* boundedResponseChunks` (генератор) теж не потрапляв під шаблон оголошень; (3) вставка поля в інтерфейс «за `IndexOf("}")`» влучила всередину generic-типу `Map<string,{…}>` — вставляти треба за рядком, що дорівнює `}`.
     - ⚠️ **2c-7c-a довела правило гейтингу:** лінт-гвард знову вимагав перезаморозки (2 `as any` переїхали), і цього разу базлайн оновлено **до** коміту й додано в той самий коміт.
     - ⚠️ **Процесний урок:** коміт гейтиться **і лінтом, і typecheck**. У 2c-7a лінт-гвард упав (3 `as any` переїхали разом з кодом, а базлайн вказував на `app.ts`), а коміт пройшов, бо перевірявся лише typecheck. Виправлено тим самим комітом через `--amend` після `node scripts/lint-guard.mjs --update-baseline` (`app.ts` 8 → 5, `capability-routes.ts` 0 → 3). Далі: перевіряти `$LASTEXITCODE` лінта **до** коміту.
@@ -1167,3 +1169,4 @@ Rollback:   git revert <sha>
 | 2c-7a | `apps/agent-api/src/app.ts` | 5 628 | 5 519 (`/capabilities*` → `capability-routes.ts`) | `9754178` | 2026-10-10 |
 | 2c-7b | `apps/agent-api/src/app.ts` | 5 519 | 5 461 (router/attachments/research → `misc-routes.ts`) | `65a407f` | 2026-10-10 |
 | 2c-7c-a | `apps/agent-api/src/app.ts` | 5 461 | **4 821** (ендпоінт `/chat`-стріму → `chat-stream-routes.ts`) | `7a36e05` | 2026-10-10 |
+| 2c-7c-b | `apps/agent-api/src/app.ts` | 4 821 | **4 401** (решта чат-ендпоінтів → `chat-routes.ts`) | `080bc41` | 2026-10-10 |
