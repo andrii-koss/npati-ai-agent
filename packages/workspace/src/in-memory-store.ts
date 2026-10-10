@@ -22,6 +22,7 @@ import { InMemoryDataPolicyStore } from "./in-memory-data-policy-store";
 import { providerPolicyKey as ruleProviderPolicyKey, assertValidProviderPolicy as ruleAssertValidProviderPolicy, assertValidPathRule as ruleAssertValidPathRule } from "./in-memory-data-policy-rules";
 import { InMemoryCodeRunStore } from "./in-memory-code-run-store";
 import { InMemoryCompanyMembershipStore } from "./in-memory-company-membership-store";
+import { InMemoryPlatformStore } from "./in-memory-platform-store";
 // C9: goals, plan revisions and session todos — shared rule implementation for both backends.
 import { InMemoryCodeGoalStore } from "./code-goal-store";
 import {
@@ -52,8 +53,8 @@ import type {
 import { auditEntryHash, verifyAuditEntries } from "./audit-chain";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from './pagination';
+import { now } from "./in-memory-clock";
 
-const now = () => new Date().toISOString();
 type StoredUserSetting = import('./types').UserSetting;
 export class InMemoryWorkspaceStore implements WorkspaceStore {
   readonly codeProcesses = new MemoryCodeProcessStore(async (scope) => [...this.codeRunStates.values()]
@@ -80,6 +81,13 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   private readonly featureFlagHistory: FeatureFlagHistoryEntry[] = [];
   private readonly codeToolManifests = new Map<number, CodeToolManifest>();
   private readonly sandboxImages = new Map<string, SandboxImage>();
+  // step 3h: the code-run state lives in its own class, handed the maps it reads
+  private readonly platformOps = new InMemoryPlatformStore(
+    this.featureFlags,
+    this.featureFlagHistory,
+    this.codeToolManifests,
+    this.sandboxImages,
+  );
   private readonly codeApprovalRules = new Map<string, CodeApprovalRule>();
   // C5b: ProviderDataPolicy. Keys are tenant-scoped, and the empty-tenant marker keeps a platform default
   // (`companyId === null`) from ever colliding with a real company id, mirroring the SQL `COALESCE` index.
@@ -676,59 +684,23 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
    * (revision conflict -> WorkspaceAccessError, one row per scope + scopeId + flagKey).
    */
   async setFeatureFlag(context: AuthContext, input: FeatureFlagInput): Promise<FeatureFlag> {
-    const scopeId = input.scope === "global" ? "" : (input.scopeId ?? "");
-    if (input.scope !== "global" && !scopeId) throw new WorkspaceAccessError("scopeId is required for company and user scoped flags");
-    const mapKey = `${context.workspaceId}|${input.scope}:${scopeId}:${input.flagKey}`;
-    const previous = this.featureFlags.get(mapKey) ?? null;
-    if (input.expectedRevision !== undefined && previous && previous.revision !== input.expectedRevision) {
-      throw new WorkspaceAccessError("Feature flag changed by another request. Reload and try again.");
-    }
-    const next: FeatureFlag = {
-      id: previous?.id ?? randomUUID(),
-      workspaceId: context.workspaceId,
-      scope: input.scope,
-      scopeId,
-      flagKey: input.flagKey,
-      stage: input.stage ?? previous?.stage ?? "off",
-      enabled: input.enabled ?? previous?.enabled ?? false,
-      rolloutPercent: input.rolloutPercent ?? previous?.rolloutPercent ?? 0,
-      allowlist: input.allowlist ?? previous?.allowlist ?? [],
-      revision: previous ? previous.revision + 1 : 1,
-      updatedBy: context.userId,
-      updatedAt: now(),
-    };
-    this.featureFlags.set(mapKey, next);
-    this.featureFlagHistory.push({
-      id: randomUUID(), workspaceId: context.workspaceId, flagKey: input.flagKey, scope: input.scope, scopeId,
-      previousValue: previous ? { ...previous } : null, nextValue: { ...next }, actor: context.userId, createdAt: now(),
-    });
-    return structuredClone(next);
+    return this.platformOps.setFeatureFlag(context, input);
   }
 
   async listFeatureFlags(context: AuthContext): Promise<FeatureFlag[]> {
-    return structuredClone([...this.featureFlags.entries()]
-      .filter(([mapKey]) => mapKey.startsWith(`${context.workspaceId}|`))
-      .map(([, flag]) => flag)
-      .sort((a, b) => a.flagKey.localeCompare(b.flagKey) || a.scope.localeCompare(b.scope) || a.scopeId.localeCompare(b.scopeId)));
+    return this.platformOps.listFeatureFlags(context);
   }
 
   async listFeatureFlagHistory(context: AuthContext, flagKey?: string, limit = 100): Promise<FeatureFlagHistoryEntry[]> {
-    return structuredClone(this.featureFlagHistory
-      .filter((entry) => entry.workspaceId === context.workspaceId && (!flagKey || entry.flagKey === flagKey))
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-      .slice(0, Math.max(1, Math.min(limit, 500))));
+    return this.platformOps.listFeatureFlagHistory(context, flagKey, limit);
   }
 
   async publishCodeToolManifest(context: AuthContext, manifest: { version: number; tools: CodeToolManifest["tools"]; checksum: string }): Promise<CodeToolManifest> {
-    const record: CodeToolManifest = { version: manifest.version, tools: manifest.tools, checksum: manifest.checksum, createdAt: now() };
-    this.codeToolManifests.set(manifest.version, record);
-    return structuredClone(record);
+    return this.platformOps.publishCodeToolManifest(context, manifest);
   }
 
   async latestCodeToolManifest(): Promise<CodeToolManifest | null> {
-    const versions = [...this.codeToolManifests.keys()].sort((a, b) => b - a);
-    const latest = versions.length ? this.codeToolManifests.get(versions[0]!) : undefined;
-    return latest ? structuredClone(latest) : null;
+    return this.platformOps.latestCodeToolManifest();
   }
 
   // --- C5: scoped approval rules ------------------------------------------------------------
@@ -793,48 +765,23 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   // --- C1b: sandbox image supply chain ------------------------------------------------------
 
   async listSandboxImages(context: AuthContext): Promise<SandboxImage[]> {
-    return structuredClone([...this.sandboxImages.values()]
-      .filter((image) => image.workspaceId === context.workspaceId)
-      .sort((a, b) => (a.variant === b.variant ? b.createdAt.localeCompare(a.createdAt) : a.variant.localeCompare(b.variant))));
+    return this.platformOps.listSandboxImages(context);
   }
 
   async getSandboxImage(context: AuthContext, reference: string): Promise<SandboxImage | null> {
-    const image = this.sandboxImages.get(`${context.workspaceId}|${reference}`);
-    return image ? structuredClone(image) : null;
+    return this.platformOps.getSandboxImage(context, reference);
   }
 
   async upsertSandboxImage(context: AuthContext, input: SandboxImageInput): Promise<SandboxImage> {
-    const key = `${context.workspaceId}|${input.reference}`;
-    const existing = this.sandboxImages.get(key);
-    const record: SandboxImage = {
-      id: existing?.id ?? randomUUID(), workspaceId: context.workspaceId, variant: input.variant,
-      reference: input.reference, digest: input.digest, status: input.status ?? existing?.status ?? "unverified",
-      signature: input.signature ?? null, signatureIssuer: input.signatureIssuer ?? null, sbomPath: input.sbomPath ?? null,
-      scanTool: input.scanTool ?? null, scanAt: input.scanAt ?? null,
-      scanCritical: input.scanCritical ?? 0, scanHigh: input.scanHigh ?? 0,
-      waiverOwner: input.waiverOwner ?? null, waiverExpiresAt: input.waiverExpiresAt ?? null, waiverReason: input.waiverReason ?? null,
-      previousReference: input.previousReference ?? existing?.previousReference ?? null,
-      revokedAt: existing?.revokedAt ?? null, revokedBy: existing?.revokedBy ?? null, revokeReason: existing?.revokeReason ?? null,
-      createdBy: existing?.createdBy ?? context.userId, createdAt: existing?.createdAt ?? now(), updatedAt: now(),
-    };
-    this.sandboxImages.set(key, record);
-    return structuredClone(record);
+    return this.platformOps.upsertSandboxImage(context, input);
   }
 
   async revokeSandboxImage(context: AuthContext, reference: string, input: { actor: string; reason: string }): Promise<SandboxImage> {
-    const key = `${context.workspaceId}|${reference}`;
-    const existing = this.sandboxImages.get(key);
-    if (!existing) throw new WorkspaceNotFoundError("Sandbox image not found");
-    const record: SandboxImage = { ...existing, status: "revoked", revokedAt: now(), revokedBy: input.actor, revokeReason: input.reason, updatedAt: now() };
-    this.sandboxImages.set(key, record);
-    return structuredClone(record);
+    return this.platformOps.revokeSandboxImage(context, reference, input);
   }
 
   async latestVerifiedSandboxImage(context: AuthContext, variant: SandboxImageVariant): Promise<SandboxImage | null> {
-    const candidates = [...this.sandboxImages.values()]
-      .filter((image) => image.workspaceId === context.workspaceId && image.variant === variant && image.status === "verified")
-      .sort((a, b) => (b.scanAt ?? b.createdAt).localeCompare(a.scanAt ?? a.createdAt));
-    return candidates.length ? structuredClone(candidates[0]!) : null;
+    return this.platformOps.latestVerifiedSandboxImage(context, variant);
   }
 
   async updateCodeSession(context: AuthContext, companyId: string, sessionId: string, patch: { status?: CodeSessionStatus; summary?: string; runId?: string | null; modelProfile?: string; dataClassification?: DataClassification; retentionClass?: RetentionClass; toolManifestVersion?: number | null; mode?: CodeSessionMode; expectedRevision?: number }): Promise<CodeSession> {    const session = await this.getCodeSession(context, companyId, sessionId);
