@@ -28,36 +28,21 @@ import { chatLanguageInstruction, companyChatCopy, detectCompanyChatLanguage, re
 import { compositeCreationCopy, compositeMemoryCopy } from "./composite-chat-i18n";
 import { companyDeleteCompletedAll, companyDeleteConfirmAll, isCompanyDeleteConfirmed } from "./company-delete-i18n";
 import { pendingCompanyDelete } from "./pending-company-delete";
-import { registerAIRoutes } from "./ai-routes";
 import { AuthenticationError, NpatiBackendAuthProvider, type AuthProvider } from "./auth";
-import { registerAuthRoutes } from "./auth-routes";
-import { registerInstallationAuthRoutes } from "./installation-auth-routes";
 import { createNpatiAuthClient, type NpatiAuthClient } from "@npati/hub-connector";
-import { registerWorkspaceRoutes } from "./workspace-routes";
-import { registerProjectRoutes } from "./project-routes";
 import { ProjectService } from "./project-service";
-import { registerDataBackendRoutes } from "./data-studio/routes";
 import { DataStudioUiService } from "./data-studio/studio-service";
-import { registerDataStudioRoutes } from "./data-studio/studio-routes";
-import { registerProjectAuthRoutes } from "./data-studio/auth-routes";
 import { ProjectApiGatewayService } from "./data-studio/gateway-service";
-import { registerProjectApiGatewayRoutes } from "./data-studio/gateway-routes";
 import { bootstrapWebsiteData, isCommerceWebsite } from "./data-studio/website-bootstrap";
 import { AgentDataStudioService } from "./data-studio/agent-data-service";
 import { MountedWorkspaceProvider } from "./mounted-workspace-provider";
 import { ProjectWorkspaceBaseResolver, type MountedFolderFlagPort } from "./workspace-base-resolver";
-import { registerProjectFileRoutes } from "./project-file-routes";
 import { RemoteSandboxProvider, projectRuntimeMode } from "./sandbox-provider";
 import { ProjectSandboxService } from "./project-sandbox-service";
 import { ProjectTerminalEventsRepository } from "./project-terminal-events";
-import { registerProjectTerminalRoutes } from "./project-terminal-routes";
-import { registerProjectPreviewRoutes } from "./project-preview-routes";
 import { ProjectGitService, type HostGitCredentialPort } from "./project-git-service";
-import { registerProjectGitRoutes } from "./project-git-routes";
 import { ProjectImportService } from "./project-import-service";
-import { registerProjectImportRoutes } from "./project-import-routes";
 import { CodeService } from "./code-service";
-import { registerCodeRoutes } from "./code-routes";
 import { NetworkActivityRecorder } from "./network-activity";
 import { PolicyDecisionRecorder } from "./policy-decision-activity";
 import { activitySinkForKind, createCodeRunActivitySink } from "./code-run-activity-sink";
@@ -158,7 +143,6 @@ import { registerCodeBackgroundRunRoutes } from "./code-background-run-routes";
 import { registerCodeSessionExportRoutes } from "./code-session-export-routes";
 import { connectionWantsNotification } from "./code-background-run-notifications";
 import { CosignImageSignatureVerifier } from "./sandbox-image-signature";
-import { registerSandboxImageRoutes } from "./sandbox-image-routes";
 import { CodeToolRuntime, CodeToolError, createProjectWorkspaceReadPort, createProjectWorkspaceWritePort, currentManifestVersion } from "./code-tool-runtime";
 import { buildInstallPlan, registryFromConfig, runInstallPlan } from "./code-deps-policy";
 import { runDependencyAudit, shouldBlockCommit } from "./code-deps-audit";
@@ -194,7 +178,6 @@ import { registerCodeCliRunRoutes } from "./code-cli-run-routes";
 import { CodeTurnTracker, codeCheckpointPortFromGit, approvalsBackedPort, resolveTurnTrackingOptions } from "./code-workspace-checkpoint";
 import { collectAsyncOperationChanges } from "./code-async-collect-changes";
 import { resolveApprovalPolicy } from "./code-edit-approval";
-import { registerCodeToolRoutes } from "./code-tool-routes";
 import { CodeApprovalScopeService, resolveApprovalTimeoutMs } from "./code-approval-scope";
 import { ReadTracker, resolveReadTrackerOptions } from "./code-read-tracker";
 import { FeatureFlagService } from "./feature-flags";
@@ -257,14 +240,12 @@ import { InMemoryObjectStorage, type ObjectStorage } from "./object-storage";
 import { InMemoryFileMetadataRepository, PostgresFileMetadataRepository, type FileMetadataRepository } from "./file-metadata";
 import { InMemoryStorageProtection, RedisStorageProtection, StorageRateLimitError, type StorageProtection } from "./storage-protection";
 import { StorageReconciler, type StorageReconcilerOptions } from "./storage-reconciler";
-import { registerRuntimeCompatRoutes } from "./runtime-compat-routes";
 import { PerRequestNoMemoryGate, type NoMemoryEvaluationResult } from "./ephemeral-no-memory-and-rtk";
 import {SecurityPolicyEngine,SecurityPolicyViolation} from "./security-guardrails";
 import { assertOutboundAllowed, createOutboundGuard, setOutboundGuard } from "./outbound-exfiltration-guard";
 import {GuardrailPolicyRepository} from "./guardrail-policy-repository";
 import {WasmExecSandbox} from "./wasm-exec-sandbox";
 import { InMemoryActiveSessionRegistry, RedisActiveSessionRegistry, type ActiveSessionLease, type ActiveSessionRegistry } from "./distributed-session-registry";
-import { registerSessionStreamRoutes } from "./session-stream-routes";
 import { ContextCompactor } from "./context-compactor";
 import { AutomaticMemoryExtractor } from "./automatic-memory-extractor";
 import { MemoryDocumentService, memoryDocumentPrompt } from "./memory-documents";
@@ -281,6 +262,7 @@ import { createCoreServices } from "./core-services";
 import { createDataBackendServices } from "./data-backend-services";
 import { registerHealthRoutes } from "./health-routes";
 import { registerPlatformRoutes } from "./platform-routes";
+import { registerPlatformBaseRoutes } from "./platform-base-routes";
 
 // Re-exported so existing importers keep working: tests/chat-language-routing.test.ts
 export { isSpreadsheetEditRequest, mapColumnDirectiveFromProposal };
@@ -4203,54 +4185,43 @@ ${localized.next}`;
     if(error instanceof SecurityPolicyViolation)return reply.code(error.status).send({error:{code:error.code,reasonCode:error.reasonCode,message:error.message}});
     return reply.send(error);
   });
-  registerAuthRoutes(app, {
+  // Platform base routes (step 2c-3): auth, AI, workspace, project and data-backend.
+  registerPlatformBaseRoutes(app, {
+    config,
+    log: app.log,
+    activeSessionRegistry,
+    agentDataStudioService,
+    aiEngine,
+    aiPreferences,
     authClient,
-    workspaceStore,
     authProvider,
-    allowLegacyPasswordAuth: config.allowLegacyPasswordAuth ?? false,
-    localJwtSigningSecret: npatiJwtSecret,
-  });
-  registerInstallationAuthRoutes(app, {
-    authClient,
-    store: installationAuthStore,
-    publicDomain: config.agentPublicDomain,
-    version: config.agentVersion,
-    deploymentType: config.deploymentType,
-    hostedRegistrationToken: config.hostedRegistrationToken,
-  });
-  registerSessionStreamRoutes(app, authProvider, activeSessionRegistry);
-  registerAIRoutes(app, marketplace, aiPreferences, authProvider, aiEngine);
-  registerRuntimeCompatRoutes(app, aiEngine, authProvider);
-  registerWorkspaceRoutes(app, workspaceStore, authProvider, aiPreferences, {
-    beforeDeleteBusiness: async (context,businessId) => { await chatFiles?.deleteBusiness(context,businessId); },
+    backupService,
     beforeDeleteCompany,
-    beforeDeleteConversation: async (context,_businessId,conversationId) => { await chatFiles?.deleteChat(context,conversationId); },
-  });
-  registerProjectRoutes(app, projectService, authProvider, projectWorkspace);
-  registerDataBackendRoutes(app, authProvider, dataBackendService, { promote: promoteService, backups: backupService, quotas: quotaService });
-  registerDataStudioRoutes(app, authProvider, dataStudioService, agentDataStudioService);
-  registerProjectAuthRoutes(app, authProvider, projectAuthService);
-  registerProjectApiGatewayRoutes(app, projectApiGatewayService, projectAuthService);
-  app.addHook("onClose", async () => {
-    await projectApiGatewayService?.close();
-    await projectAuthService?.close();
-    await dataProvider?.close();
-    await databaseProvisioner?.close();
-    await dataBackendRepository?.close();
-  });
-  registerProjectFileRoutes(app, projectWorkspace, authProvider);
-  registerProjectTerminalRoutes(app, authProvider, projectTerminalEvents, projectSandbox);
-  registerProjectPreviewRoutes(app, projectPreviewService, projectWorkspace, authProvider, workspaceStore);
-  registerProjectGitRoutes(app, projectGitService, authProvider);
-  registerProjectImportRoutes(app, projectImportService, authProvider);
-  registerCodeRoutes(app, authProvider, codeService, featureFlagService);
-  // C1b: the sandbox image admission port (list/allow/revoke/scan/verify for operators).
-  registerSandboxImageRoutes(app, authProvider, sandboxImagePolicy, workspaceStore);
-  // C2: manual invocation harness for the read-only code.* tools (the runner calls the runtime directly).
-  registerCodeToolRoutes(app, {
-    auth: authProvider,
-    runtime: codeToolRuntime,
-    assertCompany: async (ctx, companyId) => { await workspaceStore.getCompany(ctx, companyId); },
+    chatFiles,
+    codeService,
+    codeToolRuntime,
+    dataBackendRepository,
+    dataBackendService,
+    dataProvider,
+    dataStudioService,
+    databaseProvisioner,
+    featureFlagService,
+    installationAuthStore,
+    marketplace,
+    npatiJwtSecret,
+    projectApiGatewayService,
+    projectAuthService,
+    projectGitService,
+    projectImportService,
+    projectPreviewService,
+    projectSandbox,
+    projectService,
+    projectTerminalEvents,
+    projectWorkspace,
+    promoteService,
+    quotaService,
+    sandboxImagePolicy,
+    workspaceStore,
   });
   // C6: the coding agent loop. Wired to the GUARDED engine (`aiEngine`), never to `baseAiEngine`: that is
   // what makes `policyContext` and the provider-data policy apply to every model call the loop makes.
