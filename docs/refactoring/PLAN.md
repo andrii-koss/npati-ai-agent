@@ -303,7 +303,7 @@ refactor(<scope>): split <file> into <N> modules (step <N>)
 | # | Файл | Рядків | Стан |
 |---|---|---:|---|
 | 1 | `apps/web/src/styles.css` | 21 754 | [x] |
-| 2 | `apps/agent-api/src/app.ts` | 8 449 → **7 792** | [~] 2a, 2b-1…2b-3 ✓ |
+| 2 | `apps/agent-api/src/app.ts` | 8 449 → **7 393** | [~] 2a, 2b-1…2b-3, 2c-1, 2c-2 ✓ |
 | 3 | `packages/shared/src/code-capabilities.ts` | 4 079 | [ ] |
 | 4 | `packages/shared/src/capability-catalog.ts` | 7 283 | [ ] |
 | 5 | `packages/shared/src/capability-matrix.ts` | 4 861 | [ ] |
@@ -440,7 +440,20 @@ sha256(concat(01..28)) == sha256(оригінал)
 > **Урок 2b-4 (процесний, найдорожчий у раунді).** Перед виносом будь-якого кластера — **грепати ВЕСЬ тестовий файл на `app.ts`**, а не діапазон рядків навколо відомого твердження. Я перевірив `c15-mount-sandbox.test.ts:437–441` і пропустив `:431` — цього вистачило, щоб зламати security-гейт. Робоче правило: `Select-String -Pattern 'src/app\.ts' -Context 0,10` по всьому тесту, і лише потім різати.
 >
 > **Стратегічний висновок (змінює порядок робіт).** Мікро-фабрики далі не окупуються: те, що лишилось у `app.ts`, — це переважно **реєстрація маршрутів (~1900 рядків)**, **чат-замикання (~1300)** і **чат-ендпоінти (~1300)**, а не проводка сервісів. Їх не винести частинами, поки немає одного об'єкта залежностей. Тому **2c перед 2b-5**.
-- [ ] **2c (наступний крок).** Зібрати **один об'єкт залежностей** `const services = { config, log: app.log, ...core, ...audit, ...dataBackend }` і виносити **реєстрацію маршрутів** (зараз ~1900 рядків усередині `buildApp`) у `routes/register-*.ts(app, services)` — по одному домену на коміт. Фабрики 2b-1…2b-3 уже зробили це дешевим: майже всі потрібні значення лежать у деструктурованих `const`, тож реєстратор просто читає переданий об'єкт.
+- [~] **2c. Реєстрація маршрутів** — один домен на коміт, шаблон `registerXRoutes(app, deps)`, як у наявних `*-routes.ts`. Виконано:
+  - [x] **2c-1 (коміт `bb39b7f`).** `health-routes.ts` (82 рядки): `/health/live`, `/health`, `/skills`. `app.ts` 7792 → 7750.
+  - [x] **2c-2 (коміт `6b93dc7`).** `platform-routes.ts` (564 рядки): **22 реєстратори** (code data-erasure/goals/instructions/trust/mounted-folder/approval/ask-user, network, deploy, QA, company runtime, content library, MCP policy, email, api keys, scoped memory, memory documents, guardrail, reliability, browser automation/credentials, multimodal, A2A) плюс їхня власна проводка (контексти, `messagingRoutes`, хук email-шлюзу). `app.ts` 7750 → **7393**.
+  - [ ] **2c-3.** Друга щільна група — 24 реєстратори в 4234–4278 (auth, AI, workspace, project-*, data-backend/studio, code, sandbox images).
+  - [ ] **2c-4.** Решта code-* реєстраторів (4927–6030 у старій нумерації) — з їхньою проводкою (`codeRbacForRun`, `codeRunStateLog`, `codingAgentRunner`, …).
+
+> **Рецепт виносу групи маршрутів (перевірено на 2c-2, 357 рядків за один коміт):**
+> 1. **Межі — за шаблоном, не за номерами** (`findIndex` на `register<Domain>Routes(app`): попередній крок додає імпорт і зсуває все на ±1.
+> 2. **Набір залежностей** = імена, оголошені **до** регіону (`const`/`let`/`function`/модульні `const`) ∪ **імена, деструктуровані з фабрик** (їх не видно серед `const`!) ∪ параметр `buildApp` `config`. Мінус те, що регіон оголошує сам.
+> 3. **Типи залежностей** виводяться з оголошень: `ReturnType<typeof createXServices>["field"]` для виходів фабрик, ім'я класу для `new X(...)`, явна анотація для `const X: T = …`. Для `async function X(...)` типового виведення немає — сигнатуру треба виписати руками.
+> 4. **Логер** оголошувати як `FastifyBaseLogger`, а не власним інтерфейсом: частина реєстраторів приймає pino-подібний `warn(message, meta)`, і саморобний інтерфейс не проходить перевірку.
+> 5. `AppConfig` імпортувати як `import type { AppConfig } from "./app"` — типовий імпорт стирається, тож циклу виконання немає.
+> 6. **⚠️ Пізно зв'язані порти.** Якщо `let X` оголошено до регіону, а **присвоюється всередині** (тут: `codeUserQuestionReaperPort`, `mcpApprovalPauseRelease`), перенести присвоєння не можна: `buildApp` читає ці змінні після виклику. Рішення — оголосити їх у модулі як `const`, **повернути** з `registerXRoutes`, а в `app.ts` присвоїти одразу після виклику. Урок 2b-4 у новій формі: спершу шукати `^  let …` і перевіряти, чи не присвоюються вони в регіоні.
+> 7. Після виносу — пройтись по імпортах: у 2c-2 **30 імпортів** стали мертвими.
 - [ ] **2d.** Чат: `chat-orchestrator.ts` + `chat-routes.ts` (найбільший сліс, ~2400 рядків; робити останнім, коли всі його залежності вже в фабриках).
 - [ ] **2e.** Довести `app.ts` до ≤ 250 рядків.
 
@@ -1129,3 +1142,5 @@ Rollback:   git revert <sha>
 | 2b-2 | `apps/agent-api/src/app.ts` | 7 922 | 7 834 (ядро → `core-services.ts`) | `fbf2ecc` | 2026-10-10 |
 | 2b-3 | `apps/agent-api/src/app.ts` | 7 834 | 7 792 (data-backend → `data-backend-services.ts`) | `80f0e20` | 2026-10-10 |
 | 2b-4 | `apps/agent-api/src/app.ts` | 7 792 | 7 792 — **спробувано й відкочено**: тест `c15-mount-sandbox` пінить 5 літералів у `app.ts` | — (відкат) | 2026-10-10 |
+| 2c-1 | `apps/agent-api/src/app.ts` | 7 792 | 7 750 (health/skills → `health-routes.ts`) | `bb39b7f` | 2026-10-10 |
+| 2c-2 | `apps/agent-api/src/app.ts` | 7 750 | 7 393 (22 реєстратори → `platform-routes.ts`) | `6b93dc7` | 2026-10-10 |
