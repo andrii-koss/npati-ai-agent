@@ -5,7 +5,7 @@
       "as-any": 4
     },
     "apps/agent-api/src/app.ts": {
-      "as-any": 5
+      "as-any": 4
     },
     "apps/agent-api/src/approvals-routes.ts": {
       "as-any": 1
@@ -93,6 +93,9 @@
     },
     "apps/agent-api/src/messaging-integrations-routes.ts": {
       "as-any": 4
+    },
+    "apps/agent-api/src/misc-routes.ts": {
+      "as-any": 1
     },
     "apps/agent-api/src/multimodal-routes.ts": {
       "as-any": 7
