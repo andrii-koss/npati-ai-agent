@@ -224,6 +224,8 @@ import { registerMiscRoutes } from "./misc-routes";
 import { registerChatStreamRoutes } from "./chat-stream-routes";
 import { registerChatRoutes } from "./chat-routes";
 import { createChatOrchestration } from "./chat-orchestration";
+import { createCodePolicyWiring } from "./code-policy-wiring";
+import { createAutomationExecutor } from "./automation-executor-wiring";
 
 // Re-exported so existing importers keep working: tests/chat-language-routing.test.ts
 export { isSpreadsheetEditRequest, mapColumnDirectiveFromProposal };
@@ -1023,99 +1025,21 @@ export function buildApp(config: AppConfig = {}) {
    */
   const readRuntimeMcpManifest = (tenant: { workspaceId: string; companyId: string }) =>
     readMcpRuntimeManifest(mcpRuntimeCapabilities, tenant);
-  const policyEngine = new PolicyEngine({
-    flags: featureFlagService,
-    /**
-     * C13 (owner decision 5): the capability lookup is `static → runtime → unknown ⇒ deny`, in one function.
-     *
-     * `lookupCapability` is asked with the request's tenant (the engine passes the scope), so:
-     *   - a static code tool resolves exactly as before — the static registry is consulted **first**, so a
-     *     runtime provider capability can never shadow one, and the pre-C13 path is byte-identical;
-     *   - a runtime MCP tool resolves from that tenant's overlay, carrying `requiresConfirmation` from its own
-     *     fail-closed `approvalRequired`, which is the field the approval phase already reads;
-     *   - anything else stays `undefined`, so the engine answers `unknown_tool` (404). A discovered MCP tool is
-     *     never written into `CODE_TOOL_SCHEMAS`, `CAPABILITY_CATALOG` or `CAPABILITY_MATRIX`.
-     */
-    capabilities: {
-      get: (id, scope) => {
-        const tenant = scope?.companyId
-          ? { workspaceId: scope.workspaceId ?? AUDIT_SYSTEM_WORKSPACE, companyId: scope.companyId }
-          : null;
-        return lookupCapability(
-          {
-            staticCapabilities: {
-              get: (toolId) => {
-                const schema = CODE_TOOL_SCHEMAS.find((tool) => tool.name === toolId);
-                return schema ? { id: schema.name, status: schema.status, version: schema.version } : undefined;
-              },
-            },
-            runtimeOverlay: tenant
-              ? mcpRuntimeCapabilities.overlayFor(tenant)
-              : mcpRuntimeCapabilities.overlayFor({ workspaceId: AUDIT_SYSTEM_WORKSPACE, companyId: "" }),
-          },
-          id,
-        ).capability;
-      },
-    },
-    classifier: (command) => classifyShellCommand(command),
-    approvals: approvalsRepo
-      ? {
-          // Thin adapter to the existing approval system; the policy engine never re-implements it.
-          requestApproval: async (ctx, companyId, input) => approvalsRepo!.requestApproval(ctx, companyId, input as never),
-          consumeApproved: async (ctx, companyId, id, params) => approvalsRepo!.consumeApproved(ctx, companyId, id, params as never),
-        }
-      : undefined,
-    // C5: scoped approval rules. Consulted only in the approval phase, which runs after hard deny, the
-    // session-mode check, project rules and the network gate — so a rule can never bypass any of them.
-    approvalRules: {
-      findRule: async (ctx, query) => codeApprovalScope.findRule(ctx, query),
-    },
-    // C5: read-only lookup so a rejection can carry the reviewer's (redacted) comment back to the model.
-    getApproval: approvalsRepo
-      ? async (ctx, companyId, id) => {
-          const approval = await approvalsRepo!.get(ctx, companyId, id).catch(() => null);
-          return approval ? { status: approval.status, notes: approval.decisionNotes ?? null, comment: approval.decisionNotes ?? null } : null;
-        }
-      : undefined,
-    sessionMode: async (ctx, companyId, sessionId) => {
-      const session = await workspaceStore.getCodeSession(ctx, companyId, sessionId).catch(() => null);
-      return session?.mode ?? null;
-    },
-    // C5: every decision (allow, deny, require_approval) is recorded as a structured Activity event
-    // answering who/what/mode/rule/outcome. Recording is observability only: the engine calls it after
-    // the verdict and ignores failures, so it can never change, delay or weaken a decision.
-    decisionRecorder: async (request, result) => {
-      await policyDecisionActivity.record({
-        companyId: request.companyId,
-        projectId: request.projectId,
-        sessionId: request.sessionId,
-        runId: request.runId,
-        snapshotId: request.snapshotId,
-        tool: request.tool,
-        action: request.tool,
-        mode: matrixModeFor(request.sessionMode),
-        phase: result.phase,
-        decision: result.decision,
-        code: result.code,
-        ruleRef: request.ruleRef ?? null,
-        actor: request.ctx.userId ?? request.agentId ?? "unknown",
-        actorKind: isAgentPrincipal(request.ctx) ? "agent" : "user",
-        agentId: request.agentId,
-        approvedBy: result.decision === "allow" && request.approved === true ? request.ctx.userId : undefined,
-        approvalId: result.approvalId ?? request.approvalId,
-      });
-    },
-    // C4b: a verified runner readiness report is the only proof of enforcement. The flag is advisory and
-    // can only disable; a missing runner, a failed request or a non-ready report all fail closed.
-    networkEnforcement: () => runnerReadiness
-      ? runnerReadiness.isReadySync()
-      : egressEnforcement.lastReport()?.enforced === true,
-    // C5a (D9): the company protected-branch policy. The engine consults it in the hard-deny phase, so a
-    // `git push` into a protected branch is `protected_branch_write_denied` (and a force push
-    // `force_push_denied`) for every principal — owner, `admin:all`, a session rule and `approved: true`
-    // included — while a push into an unprotected branch keeps its `approval` class.
-    protectedBranches: codeProtectedBranches,
-    logger: app.log,
+  // The code policy engine (step 2c-6c).
+  const { policyEngine } = createCodePolicyWiring({
+    config,
+    log: app.log,
+    systemWorkspaceId: AUDIT_SYSTEM_WORKSPACE,
+    agent,
+    approvalsRepo,
+    codeApprovalScope,
+    codeProtectedBranches,
+    egressEnforcement,
+    featureFlagService,
+    mcpRuntimeCapabilities,
+    policyDecisionActivity,
+    runnerReadiness,
+    workspaceStore,
   });
   /**
    * C5: project trust. Repository content can never mark a project trusted — only an owner/admin can,
@@ -2108,92 +2032,16 @@ export function buildApp(config: AppConfig = {}) {
   const emailMessagingAdapter = new EmailMessagingAdapter(emailInboxRepo, () => emailInboxWorker.triggerTick());
   const messagingGateway = new MessagingGateway().register(new TelegramMessagingAdapter()).register(whatsappMessagingAdapter).register(discordMessagingAdapter).register(slackMessagingAdapter).register(emailMessagingAdapter);
   const messagingScopeRouter = new MessagingScopeRouter(workspaceStore, messagingIntegrationsRepo);
-  const executeAutomation = async (automation: import("./automations-repository").CompanyAutomation, executionKey: string) => {
-    /**
-     * C5a (owner decision): the unattended run executes as a **service identity** whose permissions are the
-     * reviewed inventory in `code-service-identity.ts`, instead of the owner with a fixed wide permission
-     * set. The owner id stays in the context because NPATI resolves companies by `user_id`
-     * (`assertCompany`), while `externalSubject` carries `service:automation:<id>` — so the principal is a
-     * service wherever it matters: it can never approve anything and can never reach production.
-     */
-    const automationIdentity = serviceIdentityForAutomation({
-      companyId: automation.companyId,
-      automationId: automation.id,
-      workspaceId: automation.workspaceId,
-      ownerUserId: automation.userId,
-      allowedPermissions: automationAllowedPermissions.allowed,
-    });
-    const automationContext: AuthContext = automationIdentity.auth;
-    const configuredTargets = browserCredentials
-      ? (await browserCredentials.listTargets(automationContext, automation.companyId)).filter((target) => target.automationId === automation.id)
-      : [];
-    if (browserCredentials && configuredTargets.length) {
-      const claimed = await browserCredentials.claimTargets(automationContext, automation.companyId, automation.id, 10);
-      if (!claimed.length) return { result: "No pending browser campaign sites. Up to 10 sites are processed per scheduled run." };
-      const results: string[] = [];
-      for (const target of claimed) {
-        try {
-          if (!target.emailAccountId) throw new Error("A Company email account must be selected for this site");
-          const emailAccount = await emailInboxRepo.getAccount(automationContext, automation.companyId, target.emailAccountId);
-          if (!emailAccount) throw new Error("The selected Company email account is no longer available");
-          const credentialId = await browserCredentials.ensureTargetCredential(automationContext, automation.companyId, target, emailAccount.emailAddress);
-          const targetTask = [
-            automation.prompt,
-            `Process exactly one approved browser campaign site: ${target.siteName}.`,
-            `Registration URL: ${target.registrationUrl}`,
-            target.publishUrl ? `Article publishing URL: ${target.publishUrl}` : "",
-            `Allowed domain: ${target.allowedDomain}`,
-            `Company email: ${emailAccount.emailAddress}`,
-            target.articleTitle ? `Article title: ${target.articleTitle}` : "",
-            target.articleBody ? `Article body:\n${target.articleBody}` : "",
-            `Use browser.browser_clicktype with operation \"task\", url \"${target.registrationUrl}\", allowedDomains [\"${target.allowedDomain}\"], campaignTargetId \"${target.id}\", emailHint \"${target.allowedDomain}\", and credentialRefs [{\"id\":\"${credentialId}\",\"alias\":\"account\"}].`,
-            "Register if necessary, complete email verification when requested, publish the article when a publishing URL is present, and return the final public URL. Never claim success without browser evidence.",
-          ].filter(Boolean).join("\n\n");
-          const details = await companyRuntime.execute(
-            automationContext,
-            automation.companyId,
-            { task: targetTask, mode: automation.agentId ? "single" : "auto" },
-            `${executionKey}:target:${target.id}:attempt:${target.attempts}`,
-          );
-          const refreshed = await browserCredentials.getTarget(automationContext, automation.companyId, target.id);
-          if (details.run.status !== "completed") {
-            await browserCredentials.recordTargetResult(automationContext, automation.companyId, target.id, {
-              status: "failed", runId: details.run.id, errorMessage: details.run.errorMessage || `Company run ended with ${details.run.status}`,
-            });
-            results.push(`${target.siteName}: failed`);
-          } else if (!refreshed || refreshed.status === "processing") {
-            await browserCredentials.recordTargetResult(automationContext, automation.companyId, target.id, {
-              status: "failed", runId: details.run.id, errorMessage: "Agent finished without a verified browser result",
-            });
-            results.push(`${target.siteName}: failed (no verified browser result)`);
-          } else {
-            results.push(`${target.siteName}: ${refreshed.status}${refreshed.resultUrl ? ` — ${refreshed.resultUrl}` : ""}`);
-          }
-        } catch (error) {
-          await browserCredentials.recordTargetResult(automationContext, automation.companyId, target.id, {
-            status: "failed", errorMessage: error instanceof Error ? error.message : String(error),
-          });
-          results.push(`${target.siteName}: failed — ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
-      return { result: `Browser campaign processed ${claimed.length} site(s):\n${results.join("\n")}` };
-    }
-    const task = [
-      automation.prompt,
-      automation.agentId ? `Assigned automation agent: ${automation.agentId}.` : "",
-      "This is an unattended scheduled Company automation. Use the linked Business profile, Company Knowledge, and approved browser credential references. Report concrete completed actions and resulting public URLs; never report success without verified browser evidence.",
-    ].filter(Boolean).join("\n\n");
-    const details = await companyRuntime.execute(
-      automationContext,
-      automation.companyId,
-      { task, mode: automation.agentId ? "single" : "auto" },
-      executionKey,
-    );
-    if (details.run.status !== "completed") {
-      throw new Error(details.run.errorMessage || `Company automation run ended with status ${details.run.status}`);
-    }
-    return { result: details.run.result || `Company run ${details.run.id} completed.` };
-  };
+  // The automation executor (step 2c-6c).
+  const { executeAutomation } = createAutomationExecutor({
+    config,
+    log: app.log,
+    agent,
+    automationAllowedPermissions,
+    browserCredentials,
+    companyRuntime,
+    emailInboxRepo,
+  });
   /**
    * C10 (ТЗ item 5): the shared delivery path for every messaging notification NPATI sends on a background result.
    * `notifyAutomation` below was the only caller of this shape; making it a named function is what lets a
