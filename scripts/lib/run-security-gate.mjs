@@ -189,6 +189,7 @@ export const SECURITY_GATE_TESTS = [
   "tests/coding-agent-async-subagents-detached.test.ts",
   "tests/coding-agent-async-controls.test.ts",
   "tests/coding-agent-async-collect-barrier.test.ts",
+  "tests/coding-agent-async-workspace.test.ts",
   "tests/coding-agent-c6a-reconciler.test.ts",
   // C6a security: database migrations. Pins that a production, external or unidentified target is a hard
   // deny that no mode, role, standing rule or `approved: true` claim can lift; that a development

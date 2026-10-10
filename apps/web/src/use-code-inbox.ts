@@ -74,7 +74,8 @@ export function useCodeInbox(conversationId: string | null, streaming: boolean) 
     void refresh();
     refreshRef.current = { sessionId: session.sessionId, refresh };
     // Bounded UI snapshot refresh covers queued runs after the original chat SSE closes and other hosts.
-    // It does not consume input, start a run or poll from the model. A unified event tail belongs to Step 8.
+    // It does not consume input, start a run or poll from the model. Step 8's workspace observes this same inbox
+    // alongside durable operations; the existing Activity stream remains the event history.
     const timer = window.setInterval(() => { if (observationActive.current && document.visibilityState !== "hidden") void refresh(); }, 3000);
     window.addEventListener("focus", refresh); window.addEventListener("online", refresh);
     return () => { controller.abort(); refreshRef.current = null; window.clearInterval(timer); window.removeEventListener("focus", refresh); window.removeEventListener("online", refresh); };

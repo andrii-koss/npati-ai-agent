@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import { useTranslation } from "./i18n";
 import { CodeSnapshotPanel } from "./CodeSnapshotPanel";
+import { AsyncWorkspacePanel } from "./code-workspace/AsyncWorkspacePanel";
 // C14 (owner decision 3): the aggregated metrics of the company this project belongs to. It is a read-only
 // panel and it fetches its own report, so the page keeps holding one session-scoped state and the metrics stay
 // company-scoped (they are not a property of one session).
@@ -183,6 +184,14 @@ function eventFacts(event: RunEvent): Array<[string, string]> {
 
 export function CodeWorkspacePage() {
   const { companyId = "", projectId = "" } = useParams();
+  const [searchParams] = useSearchParams();
+  // Scope changes dispose the old view; late file/activity replies cannot reach the new scope.
+  // A new run in the same session keeps inbox/control retry identity and browser continuity.
+  return <CodeWorkspaceContent key={JSON.stringify([companyId, projectId, searchParams.get("session") ?? ""])} />;
+}
+
+function CodeWorkspaceContent() {
+  const { companyId = "", projectId = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const { language } = useTranslation();
   const isUk = language === "uk";
@@ -216,6 +225,9 @@ export function CodeWorkspacePage() {
   const [taskBusy, setTaskBusy] = useState(false);
   const [taskError, setTaskError] = useState<string | null>(null);
   const [contextReady, setContextReady] = useState(false);
+  const [asyncInboxEnabled, setAsyncInboxEnabled] = useState<boolean | null>(null);
+  const asyncBinding = JSON.stringify([companyId, projectId, sessionId]);
+  useEffect(() => { setAsyncInboxEnabled(null); }, [asyncBinding]);
   const [modeBusy, setModeBusy] = useState(false);
   const [modeError, setModeError] = useState<string | null>(null);
 
@@ -255,7 +267,7 @@ export function CodeWorkspacePage() {
 
   const startTask = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!contextReady || !task.trim() || taskBusy) return;
+    if (!contextReady || asyncInboxEnabled !== false || !task.trim() || taskBusy) return;
     setTaskBusy(true);
     setTaskError(null);
     try {
@@ -497,15 +509,16 @@ export function CodeWorkspacePage() {
         </div>
       )}
 
-      <form className="code-workspace-controls" onSubmit={startTask}>
+      {contextReady && sessionId && <AsyncWorkspacePanel key={asyncBinding} scope={{ companyId, projectId, sessionId }} runId={runId} isUk={isUk} onAvailability={setAsyncInboxEnabled} onRun={nextRun => selectSession(sessionId, nextRun)} />}
+      {asyncInboxEnabled !== true && <form className="code-workspace-controls" onSubmit={startTask}>
         <label className="browser-form-field">
           <span>{isUk ? "Завдання для Coding Agent" : "Task for Coding Agent"}</span>
-          <textarea value={task} onChange={(event) => setTask(event.target.value)} disabled={!contextReady || taskBusy} rows={3} placeholder={isUk ? "Поясни код, виправ помилку або додай тест…" : "Explain code, fix a bug or add a test…"} />
+          <textarea value={task} onChange={(event) => setTask(event.target.value)} disabled={!contextReady || asyncInboxEnabled !== false || taskBusy} rows={3} placeholder={isUk ? "Поясни код, виправ помилку або додай тест…" : "Explain code, fix a bug or add a test…"} />
         </label>
-        <button type="submit" className="button-primary" disabled={!contextReady || !task.trim() || taskBusy}>{taskBusy ? (isUk ? "Запуск…" : "Starting…") : (isUk ? "Запустити агента" : "Run agent")}</button>
+        <button type="submit" className="button-primary" disabled={!contextReady || asyncInboxEnabled !== false || !task.trim() || taskBusy}>{taskBusy ? (isUk ? "Запуск…" : "Starting…") : (isUk ? "Запустити агента" : "Run agent")}</button>
         {contextReady && <Link className="button-secondary" to="/chat">{isUk ? "Продовжити в чаті" : "Continue in chat"}</Link>}
         {taskError && <p role="alert" className="ds-hint-error">{taskError}</p>}
-      </form>
+      </form>}
 
       <div className="mobile-view-switch" role="tablist" aria-label={isUk ? "Панелі" : "Panels"}>
         {(["all", "files", "stream", "file", "bottom"] as MobileView[]).map((view) => (
@@ -770,7 +783,7 @@ export function CodeWorkspacePage() {
             <p className="ds-muted">
               {isUk
                 ? "Вивід команд відображається в стрімі агента як результат tool call; окремий термінал — у Website Builder."
-                : "Command output appears in the agent stream as a tool-call result; a standalone terminal lives in Website Builder."}
+                : "Use Process output in the async work panel for the current process output. Tool-call results also appear in the agent stream."}
             </p>
           )}
 

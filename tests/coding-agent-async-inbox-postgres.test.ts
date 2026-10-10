@@ -6,6 +6,7 @@ import { CodeRunStateLog } from "../apps/agent-api/src/code-run-state";
 import { CodeAsyncProcessService } from "../apps/agent-api/src/code-async-process";
 import { CodeSessionInboxService } from "../apps/agent-api/src/code-session-inbox";
 import { CodeProcessCompletionService } from "../apps/agent-api/src/code-process-completions";
+import { CodeAsyncWorkspaceService } from "../apps/agent-api/src/code-async-workspace";
 import { runMigration088 } from "../packages/workspace/src/migration-088";
 import { runMigration089 } from "../packages/workspace/src/migration-089";
 import { runWithCleanup } from "./support/run-with-cleanup";
@@ -174,6 +175,19 @@ describe.skipIf(!databaseUrl || process.env.NPATI_SECURITY_GATE_DB !== "1")("asy
       await collector.admitted(sibling, collected.notice, { runId: "sibling", owner: "sibling", turnIndex: 1, text: collected.text, source: "inbox" });
       expect((await collector.barrier(ctx, sibling, "sibling")).ready).toBe(true);
       expect((await other.codeProcesses.transact(siblingScope, { kind: "read" })).operations.find(op => op.child?.runId === "control-child")?.completion?.admission?.runId).toBe("sibling");
+      // Step 8: a newly connected UI service sees the existing cross-pool child and its collector state.
+      // Observation must not consume another notice, mutate the journal or reveal producer content.
+      const workspaceView = new CodeAsyncWorkspaceService({ store: restarted.codeProcesses,
+        flags: { assertEnabled: async () => true, isEnabled: async () => true },
+        session: (ctx, companyId, sessionId) => restarted.getCodeSession(ctx, companyId, sessionId) });
+      const beforeView = await other.codeProcesses.transact(siblingScope, { kind: "read" });
+      const restoredView = await workspaceView.read(ctx, siblingScope);
+      expect(restoredView.operations.find(op => op.childRunId === "control-child")).toMatchObject({
+        operationId: controlOperationId, childSessionId: child.id, state: "completed", collected: true, delivered: true,
+      });
+      expect(JSON.stringify(restoredView)).not.toContain("Inspect constraints");
+      expect(await other.codeProcesses.transact(siblingScope, { kind: "read" })).toEqual(beforeView);
+      await expect(workspaceView.read({ ...ctx, userId: "foreign-user" }, siblingScope)).rejects.toBeDefined();
       const erased = await other.codeDataLifecycle!.eraseCodeData({ companyId: company.id, target: { kind: "session", sessionId: session.id } });
       expect(erased.verified).toBe(true);
       expect((await other.codeProcesses.transact(siblingScope, { kind: "read" })).operations[0]!.operationId).toBe(siblingOp.operationId);

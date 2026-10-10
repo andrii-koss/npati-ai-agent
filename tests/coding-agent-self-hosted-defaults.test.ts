@@ -16,7 +16,7 @@ describe("self-hosted coding defaults and installation ownership", () => {
     const store = new InMemoryWorkspaceStore();
     const flags = new FeatureFlagService(store, undefined, { enabledByDefault: true });
     for (const key of ["coding_agent.enabled", ...CODE_AGENT_SUB_FLAGS, "code.model_profile.hosted-native-tools"]) {
-      expect(await flags.isEnabled(owner, key, { companyId: "company-a" })).toBe(!["code.async_inbox", "code.async_processes", "code.async_subagents", "code.async_agent_control", "code.async_collect_barrier"].includes(key));
+      expect(await flags.isEnabled(owner, key, { companyId: "company-a" })).toBe(!["code.async_inbox", "code.async_processes", "code.async_subagents", "code.async_agent_control", "code.async_collect_barrier", "code.async_workspace"].includes(key));
     }
     const described = await flags.describe(owner, { companyId: "company-a" });
     expect(described.master).toMatchObject({ enabled: true, scope: "global", source: "self_hosted_default" });
