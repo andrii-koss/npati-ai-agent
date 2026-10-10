@@ -309,6 +309,7 @@ import { defaultCoreBackendHealthCheck, withHealthTimeout } from "./backend-heal
 import { createAuditServices } from "./audit-services";
 import { createCoreServices } from "./core-services";
 import { createDataBackendServices } from "./data-backend-services";
+import { registerHealthRoutes } from "./health-routes";
 
 // Re-exported so existing importers keep working: tests/chat-language-routing.test.ts
 export { isSpreadsheetEditRequest, mapColumnDirectiveFromProposal };
@@ -6438,59 +6439,16 @@ ${localized.next}`;
     automationScheduler.start();
   });
 
-  // Container liveness must not depend on optional or remote services. Fastify
-  // exposes this route only after the onReady initialization above completes.
-  app.get("/health/live", async () => ({
-    status: "ok" as const,
-    timestamp: new Date().toISOString(),
-    build: buildInfo,
-  }));
-
-  app.get("/health", async (): Promise<HealthResponse> => {
-    const [omniroute, hubHealth, databaseStatus, crawlerStatus, storageStatus, redisHealth, coreBackendHealth] = await Promise.all([
-      aiEngine.healthCheck(),
-      hub.healthCheck(),
-      workspaceStore.health(),
-      researchBundle?.crawler?.healthCheck() ?? Promise.resolve("not_configured" as const),
-      objectStorage?.health() ?? Promise.resolve("not_configured" as const),
-      redisHealthCheck(),
-      coreBackendHealthCheck(),
-    ]);
-    const requiredStatuses: ServiceStatus[] = [
-      omniroute.status,
-      databaseStatus,
-      crawlerStatus,
-      storageStatus,
-      redisHealth.status,
-      coreBackendHealth.status,
-    ];
-    const degraded = requiredStatuses.some((status) => status === "degraded" || status === "unavailable");
-    return {
-      status: degraded ? "degraded" : "ok",
-      timestamp: new Date().toISOString(),
-      services: {
-        agent: "ok",
-        database: databaseStatus,
-        omniroute: omniroute.status,
-        redis: redisHealth.status,
-        crawler: crawlerStatus,
-        hub: hubHealth.status,
-        storage: storageStatus,
-        coreBackend: coreBackendHealth.status,
-      },
-      details: {
-        omniroute,
-        redis: redisHealth,
-        crawler: { status: crawlerStatus },
-        database: { status: databaseStatus },
-        hub: hubHealth,
-        storage: { status: storageStatus },
-        coreBackend: coreBackendHealth,
-      },
-    };
+  // System routes (step 2c-1): liveness, readiness and the skills catalogue.
+  registerHealthRoutes(app, {
+    aiEngine,
+    hub,
+    store: workspaceStore,
+    researchBundle,
+    objectStorage,
+    redisHealthCheck,
+    coreBackendHealthCheck,
   });
-
-  app.get("/skills", async () => defaultSkillRegistry.list());
 
   app.get<{ Querystring: { type?: string; domain?: string; callable?: string } }>("/capabilities", async (request) => {
     const callable = request.query.callable !== undefined ? request.query.callable === "true" : undefined;
