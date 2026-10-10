@@ -9,7 +9,7 @@ export interface DurableCodeProcess {
   operationId: string; executionKey: string; processId: string; companyId: string; projectId: string; sessionId: string;
   runId: string; owner: string; generation: number; payloadHash: string; agentId: string;
   sandboxId: string | null; startedRevision: number; state: DurableProcessState; exitCode: number | null;
-  workspaceSnapshot?: { sandboxId: string; mounted: boolean; files: Array<{ path: string; revision: string; hash: string }> };
+  workspaceSnapshot?: { version?: 2; sandboxId: string; mounted: boolean; files: Array<{ path: string; revision: string; hash: string }> };
   cancelRequested: boolean; promoted: boolean; createdAt: string; startedAt: string | null; settledAt: string | null;
   output: { text: string; earliest: number; next: number; lossy: boolean };
   events: Array<{ seq: number; type: string }>; seq: number;

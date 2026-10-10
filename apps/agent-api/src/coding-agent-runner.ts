@@ -155,6 +155,7 @@ export type CodingAgentStopReason =
    * `completed`, because a caller that read it as success would move on to work the child is still doing.
    */
   | "active_subagent_unsettled"
+  | "async_collect_unsettled"
   | "refused";
 
 /**
@@ -780,6 +781,12 @@ export interface CodingAgentRunnerPorts {
   /** Optional asynchronous input port, sharing the existing run and C6a lease. */
   inbox?: import("./code-session-inbox").CodeSessionInboxService;
   completions?: import("./code-process-completions").CodeProcessCompletionService;
+  /** Step 7: uses the existing collector before C9. Absent means disabled. */
+  asyncCollect?: {
+    enabled(ctx: AuthContext, companyId: string): Promise<boolean>;
+    timeoutMs?: number;
+    changes(ctx: AuthContext, session: CodeSession, operations: readonly import("@npati/workspace").DurableCodeProcess[]): Promise<Array<{ path: string; tool: string; status?: string; diff?: string }>>;
+  };
   flags: {
     assertEnabled(ctx: AuthContext, flagKey: string, options?: { companyId?: string; userId?: string }): Promise<unknown>;
   };
@@ -2144,7 +2151,7 @@ export class CodingAgentRunner {
         const stateStatus = status === "cancelled"
           ? "cancelled"
           : status === "failed" ? "failed" : status === "interrupted" ? "interrupted" : "completed";
-        if (status === "interrupted" && (input.detachedChildInbox || unsettledChildren)) {
+        if (status === "interrupted" && (input.detachedChildInbox || unsettledChildren || reason === "async_collect_unsettled")) {
           await writeState(() => this.ports.runState!.markInterrupted?.({ companyId, runId: stateRunId!, reason })
             ?? this.ports.runState!.markFinished({ companyId, runId: stateRunId!, status: "interrupted", reason }));
           await writeState(() => this.ports.runState!.releaseLease?.({ companyId, runId: stateRunId!, owner: stateOwner }) ?? Promise.resolve());
@@ -2388,9 +2395,10 @@ export class CodingAgentRunner {
      * asks exactly this function "did the review-driven fix change anything?", and a cached value would answer
      * with the state from before the fix.
      */
+    let collectedChanges: Array<{ path: string; tool: string; status?: string; diff?: string }> = [];
     const runChanges = (): Array<{ path: string; tool: string; status?: string; diff?: string }> => {
-      if (!this.ports.toolRuntime.turnSummary) return [];
-      const merged = new Map<string, { path: string; tool: string; status?: string; diff?: string }>();
+      const merged = new Map(collectedChanges.map((change) => [change.path, change]));
+      if (!this.ports.toolRuntime.turnSummary) return [...merged.values()];
       for (const index of toolSteps) {
         try {
           const summaryForTurn = this.ports.toolRuntime.turnSummary(sessionId, stepTurnKey(index));
@@ -2418,7 +2426,14 @@ export class CodingAgentRunner {
       const paths = new Set<string>();
       let linesAdded = 0;
       let linesRemoved = 0;
-      if (!this.ports.toolRuntime.turnSummary) return { files: 0, linesAdded, linesRemoved };
+      for (const change of collectedChanges) {
+        paths.add(change.path);
+        for (const line of (change.diff ?? "").split("\n")) {
+          if (line.startsWith("+") && !line.startsWith("+++")) linesAdded++;
+          if (line.startsWith("-") && !line.startsWith("---")) linesRemoved++;
+        }
+      }
+      if (!this.ports.toolRuntime.turnSummary) return { files: paths.size, linesAdded, linesRemoved };
       for (const index of toolSteps) {
         try {
           const summaryForTurn = this.ports.toolRuntime.turnSummary(sessionId, stepTurnKey(index));
@@ -4215,6 +4230,47 @@ export class CodingAgentRunner {
          */
         // Final proposal cutoff is atomic with inbox admission. Before this cutoff steering
         // continues this task; after it the API explicitly receipts next-turn. C9 is unchanged.
+        let useCollectBarrier = false;
+        try { useCollectBarrier = !input.subagentScope && !!this.ports.asyncCollect && await this.ports.asyncCollect.enabled(ctx, companyId); }
+        catch { return stop("interrupted", "async_collect_unsettled", "The collect barrier flag could not be resolved. Verification has not run."); }
+        if (useCollectBarrier && this.ports.asyncCollect) {
+          if (!inboxOpened || !stateRunId || !this.ports.completions) {
+            return stop("interrupted", "async_collect_unsettled", "The collect barrier requires a durable inbox and completion collector.");
+          }
+          // Join producers before sealing the inbox or reading the C9 change set. Poll durable state
+          // under the existing heartbeat; waiting spends neither model turns nor a second quota.
+          const deadline = Date.now() + Math.max(0, Math.min(this.ports.asyncCollect.timeoutMs ?? 30_000,
+            this.limits.maxRunMinutes * 60_000 - (this.now() - startedAt)));
+          let collectedInput = false;
+          try {
+            for (;;) {
+              if (await cancelled()) {
+                await release("cancelled");
+                return stop("cancelled", "cancelled", "The run was cancelled during result collection.");
+              }
+              if (!await this.ports.asyncCollect.enabled(ctx, companyId)) throw new Error("collect_barrier_disabled");
+              if (this.ports.runState && !(await this.ports.runState.renewLease({ companyId, runId: stateRunId, owner: stateOwner })).held) {
+                throw new Error("collect_barrier_lease_lost");
+              }
+              await this.ports.completions.barrier(ctx, session, stateRunId, stateOwner);
+              await this.ports.inbox!.transact(session, { kind: "collect-completions", runId: stateRunId, owner: stateOwner });
+              collectedInput = await admitInbox() || collectedInput;
+              const barrier = await this.ports.completions.barrier(ctx, session, stateRunId, stateOwner);
+              if (barrier.ready) {
+                collectedChanges = await this.ports.asyncCollect.changes(ctx, session, barrier.operations);
+                this.applyTurnSummary(summary, runChanges(), runChangeTotals());
+                break;
+              }
+              if (barrier.blocked || Date.now() >= deadline) throw new Error("collect_barrier_pending");
+              await new Promise<void>((resolve) => setTimeout(resolve, 250));
+            }
+          } catch {
+            // Keep the workspace fence and the same C10 run identity. An uncertain result is never
+            // verification success, and a paused child is never silently resumed or cancelled here.
+            return stop("interrupted", "async_collect_unsettled", "Result collection is incomplete. Verification and self-review have not run; the same run can be continued.");
+          }
+          if (collectedInput) continue;
+        }
         if (inboxOpened && stateRunId) {
           try {
             if (await admitInbox()) continue;

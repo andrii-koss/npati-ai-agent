@@ -54,7 +54,7 @@ export class CodeProcessCompletionService {
      * Step 5: the recovery of detached delegations, run on the same schedule as the process outbox.
      *
      * A child operation is reconciled by the **child's own** run state — terminal means "settle it from that
-     * state", a live lease means "leave it alone", `interrupted` means "re-enter the same run id" — so this hook is
+     * state", a live lease means "leave it alone", `interrupted` stays fenced for explicit Continue — so this hook is
      * only a trigger. Without it a delegation whose process died would sit active forever, which would keep the
      * parent's cleanup fence up and never produce the completion the parent is waiting for.
      */
@@ -94,7 +94,7 @@ export class CodeProcessCompletionService {
       catch { this.options.warn("completion_subagent_recovery_pending"); }
       const scope = { companyId: session.companyId, projectId: session.projectId, sessionId: session.id };
       const before = await this.options.processes.list(ctx, scope);
-      for (const op of before.filter(activeCodeProcess)) {
+      for (const op of before.filter((op) => op.kind !== "subagent" && activeCodeProcess(op))) {
         // Reattach observation after restart through the SAME process manager, never start a producer.
         try { await this.options.processes.wait(ctx, { ...scope, processId: op.processId, waitTimeoutMs: 1 }); }
         catch { this.options.warn("completion_process_reconciliation_pending"); }
@@ -124,6 +124,29 @@ export class CodeProcessCompletionService {
     })();
     this.flushing.set(key, task);
     try { await task; } finally { if (this.flushing.get(key) === task) this.flushing.delete(key); }
+  }
+  /** Step 7: observe the existing outbox; never dispatch or resume a producer here. */
+  async barrier(ctx: AuthContext, session: CodeSession, runId: string, owner?: string) {
+    if (this.closed || !await this.options.enabled(ctx, session.companyId)) throw new Error("completion_collection_disabled");
+    const scope = { companyId: session.companyId, projectId: session.projectId, sessionId: session.id };
+    if (owner) {
+      // C10's replacement lease observes the SAME process through Step 3's existing adoption path.
+      for (const op of (await this.options.processes.list(ctx, scope)).filter(op => op.runId === runId
+        && op.kind !== "subagent" && activeCodeProcess(op) && op.owner !== owner)) {
+        await this.options.processes.wait(ctx, { ...scope, processId: op.processId, leaseOwner: owner, waitTimeoutMs: 1 });
+      }
+    }
+    await this.recover(ctx, session);
+    const operations = (await this.options.processes.list(ctx, {
+      companyId: session.companyId, projectId: session.projectId, sessionId: session.id,
+    })).filter((op) => op.runId === runId && (activeCodeProcess(op) || op.kind === "subagent"
+      || !!op.completion || !!op.startedAt || !!op.workspaceSnapshot));
+    const active = operations.filter(activeCodeProcess);
+    // An explicit interruption or ambiguous dispatch requires an operator/Continue decision, not a replay.
+    const blocked = active.some((op) => ["interrupted", "unknown_outcome"].includes(op.state));
+    const uncollected = operations.filter((op) => !activeCodeProcess(op)
+      && (!op.completion || !op.completion.admission || op.completion.admission.runId !== runId));
+    return { ready: !active.length && !uncollected.length, blocked, operations };
   }
   async collect(ctx: AuthContext, session: CodeSession, message: CodeInboxMessage, runId: string) {
     const notice = message.completion; if (!notice) return null;

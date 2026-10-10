@@ -78,6 +78,7 @@ export type CodeInboxCommand =
   | { kind: "open"; runId: string; owner: string; initialMessageId?: string }
   | { kind: "drain"; runId: string; owner: string; turnIndex: number }
   | { kind: "resume-inputs"; runId: string; owner: string }
+  | { kind: "collect-completions"; runId: string; owner: string }
   | { kind: "seal"; runId: string; owner: string }
   | { kind: "close"; runId: string; owner: string };
 export interface CodeInboxResult {
@@ -258,6 +259,15 @@ export function applyCodeInbox(
   } else if (command.kind === "resume-inputs") {
     if (live(command.runId)?.owner !== command.owner || (state.runId && state.runId !== command.runId)) throw new CodeInboxError("inbox_lease_lost");
     for (const message of pending("next-turn").filter((m) => m.mode === "steer")) { message.target = "next-step"; event("input.updated", message.id); }
+  } else if (command.kind === "collect-completions") {
+    // Step 7: a completion delivered while its parent was paused (or before C10 changed owner)
+    // still belongs to that same run. Only its current lease can move it across the cutoff.
+    fence(command.runId, command.owner);
+    if (state.phase !== "running") throw new CodeInboxError("inbox_task_sealed");
+    for (const message of pending("next-turn").filter(m => m.completion?.parentRunId === command.runId)) {
+      message.target = "next-step";
+      event("input.updated", message.id);
+    }
   } else if (command.kind === "drain") {
     fence(command.runId, command.owner);
     if (state.phase !== "running") throw new CodeInboxError("inbox_task_sealed");

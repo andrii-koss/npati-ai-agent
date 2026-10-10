@@ -70,6 +70,7 @@ export const CODE_AGENT_SUB_FLAGS = [
    */
   "code.async_subagents",
   "code.async_agent_control",
+  "code.async_collect_barrier",
 ] as const;
 
 export type CodeAgentSubFlag = typeof CODE_AGENT_SUB_FLAGS[number];
@@ -81,7 +82,7 @@ export const CODE_MODEL_PROFILE_PATTERN = /^code\.model_profile\.[a-z0-9._-]{1,6
  * the key carries the bare hex prefix (8..64 chars) because a flag key cannot contain a colon.
  */
 export const CODE_SANDBOX_IMAGE_PATTERN = /^code\.sandbox_image\.[a-f0-9]{8,64}$/;
-export const CODE_FLAG_KEY_PATTERN = /^(coding_agent\.enabled|code\.(read|write|shell|git|subagents|background_runs|mounted_folder|hooks|mcp|full_auto_sandbox|repo_map|session_resume|rewind|session_fork|export|commands|skills|async_inbox|async_processes|async_subagents|async_agent_control))$|^code\.model_profile\.[a-z0-9._-]{1,64}$|^code\.sandbox_image\.[a-f0-9]{8,64}$/;
+export const CODE_FLAG_KEY_PATTERN = /^(coding_agent\.enabled|code\.(read|write|shell|git|subagents|background_runs|mounted_folder|hooks|mcp|full_auto_sandbox|repo_map|session_resume|rewind|session_fork|export|commands|skills|async_inbox|async_processes|async_subagents|async_agent_control|async_collect_barrier))$|^code\.model_profile\.[a-z0-9._-]{1,64}$|^code\.sandbox_image\.[a-f0-9]{8,64}$/;
 
 export function isValidCodeFlagKey(flagKey: string): boolean {
   return typeof flagKey === "string" && CODE_FLAG_KEY_PATTERN.test(flagKey);
@@ -250,7 +251,7 @@ export class FeatureFlagService {
   }
 
   private defaultResolution(flagKey: string): FlagResolution {
-    const enabled = this.enabledByDefault && !["code.async_inbox", "code.async_processes", "code.async_subagents", "code.async_agent_control"].includes(flagKey);
+    const enabled = this.enabledByDefault && !["code.async_inbox", "code.async_processes", "code.async_subagents", "code.async_agent_control", "code.async_collect_barrier"].includes(flagKey);
     return { key: flagKey, enabled, scope: "global", scopeId: "", stage: enabled ? "ga" : "off", source: enabled ? "self_hosted_default" : "no_row" };
   }
 

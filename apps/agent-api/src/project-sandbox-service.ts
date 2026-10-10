@@ -12,7 +12,7 @@ import { scanTextForSecrets } from "./code-secret-scanner";
 import type { DurableCodeProcess } from "@npati/workspace";
 
 export interface TerminalSecretReference { id: string; field: string; }
-export interface ProcessWorkspaceSnapshot { sandboxId: string; mounted: boolean; files: Array<{ path: string; revision: string; hash: string }> }
+export interface ProcessWorkspaceSnapshot { version?: 2; sandboxId: string; mounted: boolean; files: Array<{ path: string; revision: string; hash: string }> }
 export interface TerminalRequest {
   projectId: string; sandboxId?: string; command?: string; executable?: string; args?: string[]; cwd?: string; processId?: string;
   action?: "start" | "status" | "logs" | "stop";
@@ -41,7 +41,8 @@ export const defaultTerminalLimits: TerminalLimits = {
 const uuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 const scopeOf = (ctx: AuthContext, project: Project): SandboxScope => ({ workspaceId: ctx.workspaceId, userId: ctx.userId, companyId: project.companyId, projectId: project.id });
 const stepOf = (decision: TerminalCommandDecision) => decision.timeoutClass === "install_build" ? "install_build" : "command";
-const artifact = (filePath: string) => filePath.split("/").some((part) => ["node_modules", "dist", "build", ".next", ".nuxt", ".output", ".astro", ".cache", ".turbo", "vendor", "__pycache__", ".venv"].includes(part));
+export const isSandboxWorkspaceArtifact = (filePath: string) => filePath.split("/").some((part) => ["node_modules", "dist", "build", ".next", ".nuxt", ".output", ".astro", ".cache", ".turbo", "vendor", "__pycache__", ".venv"].includes(part));
+const artifact = isSandboxWorkspaceArtifact;
 
 /** The only Project API variables a sandbox may receive (D5). */
 export const PROJECT_API_SANDBOX_VARIABLES = SANDBOX_PROCESS_ENVIRONMENT_ALLOWLIST;
@@ -463,10 +464,26 @@ export class ProjectSandboxService {
     return (await this.evaluateAutoApprovalTerminal(ctx, companyId, runProjectId, request, tool)).allowed;
   }
   execute(ctx: AuthContext, companyId: string, request: TerminalRequest) { return this.run(ctx, companyId, request, "project.terminal.exec"); }
-  async startTrackedProcess(ctx: AuthContext, companyId: string, request: TerminalRequest, beforeStart: (snapshot: ProcessWorkspaceSnapshot) => Promise<void>) {
+  async startTrackedProcess(ctx: AuthContext, companyId: string, request: TerminalRequest, beforeStart: (snapshot: ProcessWorkspaceSnapshot) => Promise<void>, captureMountedBaseline = false) {
     if (!await this.supportsTrackedProcesses(ctx, companyId, request.projectId)) throw new SandboxProviderError("process_promotion_unavailable", "Provider has no durable process identity capability", 503);
     if (!request.processId || !uuid(request.processId) || Object.keys(request.environmentReferences ?? {}).length) throw new SandboxProviderError("process_promotion_unavailable", "Tracked processes cannot inherit foreground secrets", 403);
-    return this.run(ctx, companyId, request, "project.terminal.process", true, beforeStart);
+    return this.run(ctx, companyId, request, "project.terminal.process", true, async (snapshot) => {
+      if (snapshot.mounted && captureMountedBaseline) {
+        // Step 7 snapshot v2: mounted files are read in place, never uploaded. Only hashes/revisions persist.
+        const entries = (await this.workspace.listFiles(ctx, companyId, request.projectId)).filter(file => !artifact(file.path));
+        if (entries.length > this.limits.syncMaxFiles) throw new SandboxProviderError("workspace_sync_limit", "Project exceeds snapshot limits", 413);
+        let bytes = 0;
+        snapshot.files = [];
+        snapshot.version = 2;
+        for (const entry of entries) {
+          const file = await this.workspace.readFile(ctx, companyId, request.projectId, entry.path);
+          bytes += file.size;
+          if (bytes > this.limits.syncMaxBytes) throw new SandboxProviderError("workspace_sync_limit", "Project exceeds snapshot limits", 413);
+          snapshot.files.push({ path: entry.path, revision: file.revision, hash: createHash("sha256").update(file.content).digest("hex") });
+        }
+      }
+      await beforeStart(snapshot);
+    });
   }
   async trackedOutput(ctx: AuthContext, companyId: string, request: TerminalRequest, offset: number) {
     await this.agent(ctx, companyId, request.agentId, "project.terminal.process");

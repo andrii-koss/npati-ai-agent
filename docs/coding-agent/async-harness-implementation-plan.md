@@ -93,7 +93,12 @@ fences are implemented. Hermetic and PostgreSQL acceptance evidence:
 
 ### Step 7 — Collect barrier before the existing verification/self-review
 
-Not started.
+Status: **implemented and verified** on 2026-10-10. The root joins required durable operations,
+admits their results, incorporates trusted file changes, and only then enters the existing C9
+verification/self-review. Timeout/unknown/interrupted results remain resumable and fenced;
+same-run C10 continuation collects notices delivered during a pause or before worker takeover.
+The separate `code.async_collect_barrier` flag is off by default. Acceptance and recovery limits:
+[async-collect-barrier-step-7.md](async-collect-barrier-step-7.md).
 
 ### Step 8 — One UI, recovery drills and rollout
 

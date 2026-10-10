@@ -190,6 +190,16 @@ export class CodeTurnTracker {
     };
   }
 
+  /** Step 7: trusted write evidence of a dedicated child session across Continue turns. */
+  sessionChanges(sessionId: string): CodeWriteChange[] {
+    const merged = new Map<string, CodeWriteChange>();
+    for (const [key, entry] of this.turns) {
+      if (!key.startsWith(`${sessionId}:`) || !this.prune(entry)) continue;
+      for (const change of entry.changes) merged.set(change.path, { ...change });
+    }
+    return [...merged.values()];
+  }
+
   clear(sessionId?: string, turnId?: string): void {
     if (sessionId === undefined) { this.turns.clear(); return; }
     if (turnId === undefined) {

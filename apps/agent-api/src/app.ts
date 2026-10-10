@@ -217,6 +217,7 @@ import { CodeSessionRunExecutor } from "./code-session-run-executor";
 // C15 (owner decisions 2 and 3): the run-start surface the CLI and, later, an IDE extension call.
 import { registerCodeCliRunRoutes } from "./code-cli-run-routes";
 import { CodeTurnTracker, codeCheckpointPortFromGit, approvalsBackedPort, resolveTurnTrackingOptions } from "./code-workspace-checkpoint";
+import { collectAsyncOperationChanges } from "./code-async-collect-changes";
 import { resolveApprovalPolicy } from "./code-edit-approval";
 import { registerCodeToolRoutes } from "./code-tool-routes";
 import { CodeApprovalScopeService, resolveApprovalTimeoutMs } from "./code-approval-scope";
@@ -2206,7 +2207,8 @@ export function buildApp(config: AppConfig = {}) {
     run: (companyId, runId) => workspaceStore.getCodeRunState(companyId, runId),
     port: {
       supported: (ctx, companyId, projectId) => projectSandbox.supportsTrackedProcesses(ctx, companyId, projectId),
-      start: (ctx, input, op, beforeStart) => projectSandbox.startTrackedProcess(ctx, input.companyId, { ...input, agentId: op.agentId, processId: op.processId }, beforeStart),
+      start: async (ctx, input, op, beforeStart) => projectSandbox.startTrackedProcess(ctx, input.companyId, { ...input, agentId: op.agentId, processId: op.processId }, beforeStart,
+        await featureFlagService.isEnabled(ctx, "code.async_collect_barrier", { companyId: input.companyId })),
       status: async (ctx, op) => await projectSandbox.process(ctx, op.companyId, { projectId: op.projectId, sandboxId: op.sandboxId ?? undefined, agentId: op.agentId, processId: op.processId, action: "status" }) as { status: string; exitCode: number | null },
       stop: async (ctx, op) => await projectSandbox.process(ctx, op.companyId, { projectId: op.projectId, sandboxId: op.sandboxId ?? undefined, agentId: op.agentId, processId: op.processId, action: "stop" }) as { status: string; exitCode: number | null },
       output: (ctx, op, offset) => projectSandbox.trackedOutput(ctx, op.companyId, { projectId: op.projectId, sandboxId: op.sandboxId ?? undefined, agentId: op.agentId, processId: op.processId }, offset),
@@ -5101,8 +5103,8 @@ ${localized.next}`;
     /**
      * Step 5: the detached delegations of this session, reconciled by the **child's own** run state. Every parent
      * run that has an unfinished child is asked about separately, because the child's run state — not the parent's —
-     * is the oracle: a terminal child is settled from it, a live one is left to its owner, and an `interrupted` one
-     * is re-entered under the same deterministic run id.
+     * is the oracle: a terminal child is settled from it, a live one is left to its owner, and an interrupted one
+     * remains fenced for explicit Continue.
      */
     subagents: async (ctx, session) => {
       const operations = codeSubagentOperationsRef?.();
@@ -5125,6 +5127,24 @@ ${localized.next}`;
   }
   const codingAgentRunner = new CodingAgentRunner({
     completions: codeProcessCompletions,
+    asyncCollect: {
+      enabled: (ctx, companyId) => featureFlagService.isEnabled(ctx, "code.async_collect_barrier", { companyId }),
+      changes: (ctx, session, operations) => collectAsyncOperationChanges({
+        session, operations,
+        childChanges: (sessionId) => codeTurnTracker.sessionChanges(sessionId),
+        childFileCount: async (runId) => {
+          const state = await codeRunStateLog.loadRunState(session.companyId, runId);
+          const estimate = state?.details.estimate as { filesChanged?: unknown } | undefined;
+          return typeof estimate?.filesChanged === "number" && Number.isSafeInteger(estimate.filesChanged) && estimate.filesChanged >= 0 ? estimate.filesChanged : null;
+        },
+        listFiles: () => projectWorkspace.listFiles(ctx, session.companyId, session.projectId),
+        readFile: (file) => projectWorkspace.readFile(ctx, session.companyId, session.projectId, file).catch((error) => {
+          if ((error as { status?: number }).status === 404) return null;
+          throw error;
+        }),
+        diff: (file) => projectGitService.diff(ctx, session.companyId, session.projectId, { file }),
+      }),
+    },
     /**
      * Step 5: the parent's fence against a detached child. It reads the same durable delegation record the
      * sandbox-cleanup guard reads, through the service the detached path reserved in — so "a required child is
