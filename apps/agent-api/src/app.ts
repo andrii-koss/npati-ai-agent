@@ -1,3 +1,4 @@
+import { createEmailAutomationWiring } from "./email-automation-wiring";
 import { createCodeSandboxWiring } from "./code-sandbox-wiring";
 import { createCodePortsWiring } from "./code-ports-wiring";
 import { createCodeToolRuntimeWiring } from "./code-tool-runtime-wiring";
@@ -1376,111 +1377,36 @@ export function buildApp(config: AppConfig = {}) {
       const selected = prefs.addedModels.find((model) => model.id === prefs.routing.defaultModelId);
       return selected && isChatCapableModel(selected) ? [selected] : [];
     }, true);
-  const projectOrchestrator = new ProjectOrchestrator(
-    workspaceStore,
+  // The project orchestrator and email automation hooks (step 2c-6g).
+  const automationWiring = createEmailAutomationWiring({
+    config,
+    log: app.log,
+    getAutomationsRepo: () => automationsRepo,
+    agent,
+    agentDataStudioService,
+    codeVerifyRunnerPort,
+    companyRuntime,
+    dataBackendRepository,
+    dataBackendService,
+    dataProvider,
+    dataStudioService,
+    emailAgentTools,
+    emailAttachmentStorage,
+    projectApiGatewayService,
+    projectAuthService,
+    projectBrowserQaService,
+    projectDeployService,
+    projectFileLeaseManager,
+    projectGitService,
+    projectMigrationEngine,
+    projectPreviewService,
+    projectRedirectRepository,
+    projectSandbox,
     projectService,
     projectWorkspace,
-    projectSandbox,
-    projectPreviewService,
-    companyRuntime,
-    projectGitService,
-    projectDeployService,
-    projectBrowserQaService,
-    dataBackendService,
-    projectRedirectRepository,
-    // C12: the **one** lease manager of the deployment. `CompanyToolRuntime` above already holds this exact
-    // instance, so a path locked by the project task graph and the same path locked by a `project.files.*` tool
-    // are one lock instead of two managers that cannot see each other.
-    projectFileLeaseManager,
-    /**
-     * C12: the mandatory verification after the merges, over the **same** `codeVerifyRunnerPort` the
-     * `code.verify.run` tool uses. There is no second verification path: the final check replays the project's
-     * configured `lint`/`typecheck`/`test`/`build` commands exactly as the tool does, and a deployment with no
-     * sandbox reports `unavailable` rather than a pass.
-     */
-    codeVerifyRunnerPort
-      ? {
-          run: async ({ ctx, companyId, projectId, tools, changedOnly, timeoutMs }) =>
-            codeVerifyRunnerPort.run({
-              ctx, companyId, projectId, tools: [...tools], changedOnly, timeoutMs,
-            }),
-        }
-      : undefined,
-    async (ctx, project, prompt) => {
-      if (!dataBackendService || !dataBackendRepository || !dataProvider || !projectMigrationEngine || !agentDataStudioService || !projectAuthService || !projectApiGatewayService || !dataStudioService) {
-        if (isCommerceWebsite(prompt)) throw new ProjectOrchestrationError("DATA_STUDIO_UNAVAILABLE", "Project database service is unavailable. Configure Data Studio and postgres-projects before creating the store.", 503);
-        return;
-      }
-      await bootstrapWebsiteData(ctx, project, prompt, { backends: dataBackendService, repository: dataBackendRepository, provider: dataProvider, migrations: projectMigrationEngine, agentData: agentDataStudioService, auth: projectAuthService, gateway: projectApiGatewayService, studio: dataStudioService, workspace: projectWorkspace });
-    },
-  );
-  const companyRunQueue = config.redisUrl ? new CompanyRunQueueProducer(config.redisUrl) : undefined;
-  const emailAutomationHooks = {
-    createTask: async ({ ctx, companyId, thread, inboundMessage, assignedAgentId }: {
-      ctx: AuthContext; companyId: string; thread: import("./email-inbox-types").CompanyEmailThread;
-      inboundMessage: import("./email-inbox-types").CompanyEmailMessage; assignedAgentId?: string | null;
-    }) => {
-      const created = await workspaceStore.createCompanyAgentRun(ctx, companyId, {
-        task: `Handle inbound email "${thread.subject}" from ${thread.customerEmail}. Thread: ${thread.id}. Message: ${inboundMessage.id}.${assignedAgentId ? ` Assigned agent: ${assignedAgentId}.` : ""}`,
-        requestedMode: assignedAgentId ? "single" as const : "auto" as const,
-      }, `email-task:${inboundMessage.id}`);
-      if (created.created && companyRunQueue) {
-        await companyRunQueue.enqueue({ context: ctx, companyId, runId: created.run.id });
-      }
-      return created.run.id;
-    },
-    continueTask: async ({ ctx, companyId, thread, inboundMessage, awaitingRunId }: {
-      ctx: AuthContext; companyId: string; thread: import("./email-inbox-types").CompanyEmailThread;
-      inboundMessage: import("./email-inbox-types").CompanyEmailMessage; awaitingRunId: string;
-    }) => {
-      const verification = emailAgentTools.extractVerification(inboundMessage.bodyText);
-      const created = await workspaceStore.createCompanyAgentRun(ctx, companyId, {
-        task: [
-          `Continue Agent Task ${awaitingRunId} after receiving its awaited email reply.`,
-          typeof thread.metadata.awaitingBrowserJobId === "string"
-            ? `Resume Browser Job ${thread.metadata.awaitingBrowserJobId} with profile ${String(thread.metadata.awaitingBrowserProfileId || "default")} using browser.resume.${typeof thread.metadata.awaitingBrowserCampaignTargetId === "string" ? ` Include campaignTargetId ${thread.metadata.awaitingBrowserCampaignTargetId} in the browser input.` : ""}`
-            : "",
-          `Thread: ${thread.id}. Sender: ${inboundMessage.fromAddress}. Subject: ${inboundMessage.subject}.`,
-          verification.verificationCode ? `Verification code: ${verification.verificationCode}.` : "",
-          verification.token ? `Verification token: ${verification.token}.` : "",
-          verification.verificationLinks.length ? `Verification links: ${verification.verificationLinks.join(", ")}.` : "",
-          `Email body:\n${inboundMessage.bodyText}`,
-        ].filter(Boolean).join("\n"),
-        requestedMode: "auto" as const,
-      }, `email-continuation:${inboundMessage.id}:${awaitingRunId}`);
-      if (created.created && companyRunQueue) {
-        await companyRunQueue.enqueue({ context: ctx, companyId, runId: created.run.id });
-      }
-      return created.run.id;
-    },
-    startWorkflow: async ({ ctx, companyId, thread, inboundMessage, workflowId }: {
-      ctx: AuthContext; companyId: string; thread: import("./email-inbox-types").CompanyEmailThread;
-      inboundMessage: import("./email-inbox-types").CompanyEmailMessage; workflowId: string;
-    }) => {
-      const workflow = await automationsRepo.get(ctx, companyId, workflowId);
-      if (workflow.status !== "active") throw new Error(`Email workflow ${workflowId} is not active`);
-      const created = await workspaceStore.createCompanyAgentRun(ctx, companyId, {
-        task: [
-          workflow.prompt,
-          "\nEmail trigger context:",
-          `Thread: ${thread.id}. Sender: ${inboundMessage.fromAddress}. Subject: ${inboundMessage.subject}.`,
-          `Message:\n${inboundMessage.bodyText}`,
-          workflow.agentId ? `Assigned workflow agent: ${workflow.agentId}.` : "",
-        ].filter(Boolean).join("\n"),
-        requestedMode: workflow.agentId ? "single" as const : "auto" as const,
-      }, `email-workflow:${workflow.id}:${inboundMessage.id}`);
-      if (created.created && companyRunQueue) {
-        await companyRunQueue.enqueue({ context: ctx, companyId, runId: created.run.id });
-      }
-      return created.run.id;
-    },
-    persistAttachments: emailAttachmentStorage
-      ? async ({ ctx, companyId, thread, attachments }: {
-          ctx: AuthContext; companyId: string; thread: import("./email-inbox-types").CompanyEmailThread;
-          attachments: import("./email-inbox-types").EmailAttachment[];
-        }) => emailAttachmentStorage.persist(ctx, companyId, thread.id, attachments)
-      : undefined,
-  };
+    workspaceStore,
+  });
+  const { projectOrchestrator, companyRunQueue, emailAutomationHooks } = automationWiring;
   const emailInboxWorker = new EmailInboxWorker(emailInboxRepo, aiEngine, auditRepo, emailAutomationHooks, undefined, emailAttachmentStorage);
   const knowledgeQueue = knowledgeRepo && config.redisUrl ? new CompanyKnowledgeQueue(config.redisUrl) : undefined;
   const automationsRepo = new CompanyAutomationsRepository(config.databaseUrl);
