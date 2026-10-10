@@ -83,7 +83,7 @@ describe("security-gate: C12 migration 084 is additive and indexed", () => {
   });
 
   it("is registered by the postgres store, which is what makes it run at all", () => {
-    const store = readFileSync("packages/workspace/src/postgres-store.ts", "utf8");
+    const store = ["postgres-store.ts", "postgres-store-schema.ts"].map((file) => readFileSync(`packages/workspace/src/${file}`, "utf8")).join("\n");
     expect(store).toMatch(/await import\("\.\/migration-084"\)/);
     expect(store).toMatch(/INSERT INTO schema_migrations\(version\) VALUES \('084_code_activity_parents'\)/);
     expect(store).toMatch(/SELECT 1 FROM schema_migrations WHERE version='084_code_activity_parents'/);
@@ -99,7 +99,7 @@ describe("security-gate: C12 migration 084 is additive and indexed", () => {
   });
 
   it("carries the three columns in the store's own select list, aliased the way the record reads them", () => {
-    const store = readFileSync("packages/workspace/src/postgres-store.ts", "utf8");
+    const store = ["postgres-store.ts", "postgres-store-schema.ts"].map((file) => readFileSync(`packages/workspace/src/${file}`, "utf8")).join("\n");
     expect(store).toMatch(/parent_run_id AS "parentRunId", parent_tool_call_id AS "parentToolCallId", parent_event_id AS "parentEventId"/);
     // And the row mapper reads exactly those aliases, so a missing column cannot silently become `undefined`.
     expect(store).toMatch(/parentRunId: row\.parentRunId/);
