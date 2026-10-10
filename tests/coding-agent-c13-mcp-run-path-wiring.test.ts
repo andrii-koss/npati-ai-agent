@@ -4,6 +4,7 @@ import type { AIEngine, OmniRouteMarketplace } from "@npati/omniroute-adapter";
 import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
 import type { AuthProvider } from "../apps/agent-api/src/auth";
 import { buildApp } from "../apps/agent-api/src/app";
+import { readApiSource, readApiSources } from "./lib/api-source";
 
 /**
  * C13 (owner requirement: **fresh-process MCP acceptance**) — the wiring that makes the run path discover.
@@ -23,7 +24,9 @@ import { buildApp } from "../apps/agent-api/src/app";
  * so each guard asserts its anchor exists and only then asserts the ordering.
  */
 
-const appSource = readFileSync(new URL("../apps/agent-api/src/app.ts", import.meta.url), "utf8");
+const appSource = readApiSources();
+/** app.ts alone: some guards are about what the entry point itself no longer does. */
+const appOnly = readApiSource("app.ts");
 const runnerSource = readFileSync(new URL("../apps/agent-api/src/coding-agent-runner.ts", import.meta.url), "utf8");
 const runPathSource = readFileSync(new URL("../apps/agent-api/src/mcp-run-path.ts", import.meta.url), "utf8");
 
@@ -53,8 +56,8 @@ function realApp() {
 
 describe("security-gate: C13 MCP run path wiring — one discovery system, reachable by a run", () => {
   it("hands the runner the same discovery object the Inspector route uses", () => {
-    // The run path is constructed once — a second construction would be a second discovery system.
-    const constructions = [...appSource.matchAll(/createMcpRuntimeRunPath\(/g)];
+    // The run path is constructed once — a second construction would be a second discovery system. (The call site is matched through its assignment so that the module's own declaration is not counted.)
+    const constructions = [...appOnly.matchAll(/createMcpRuntimeRunPath\(/g)];
     expect(constructions).toHaveLength(1);
 
     // The runner receives it as its runtime provider port …
@@ -65,7 +68,7 @@ describe("security-gate: C13 MCP run path wiring — one discovery system, reach
     expect(/const discoverRuntimeMcpCapabilities = \(ctx: AuthContext, companyId: string\) =>\s*\n\s*mcpRunPath\.discover\(ctx, companyId\)/.test(appSource)).toBe(true);
     // The route's own discovery call is gone: `discoverMcpRuntimeCapabilities(...)` is no longer invoked in
     // `app.ts` (the import was removed with it), so the two entry points cannot drift apart.
-    expect(/discoverMcpRuntimeCapabilities\(/.test(appSource)).toBe(false);
+    expect(/discoverMcpRuntimeCapabilities\(/.test(appOnly)).toBe(false);
     // …while the Inspector surface itself is untouched and still offers the combined view.
     expect(appSource).toContain('request.query.includeRuntime === "true"');
     expect(appSource).toContain("buildCombinedCapabilityView(mcpRuntimeCapabilities.overlayFor(tenant), capabilityInspector)");
