@@ -229,6 +229,7 @@ import { registerChatRoutes } from "./chat-routes";
 import { createChatOrchestration } from "./chat-orchestration";
 import { createCodePolicyWiring } from "./code-policy-wiring";
 import { createAutomationExecutor } from "./automation-executor-wiring";
+import { createRedisHealthWiring } from "./redis-health-wiring";
 
 // Re-exported so existing importers keep working: tests/chat-language-routing.test.ts
 export { isSpreadsheetEditRequest, mapColumnDirectiveFromProposal };
@@ -295,41 +296,13 @@ export interface AppConfig {
 
 export function buildApp(config: AppConfig = {}) {
   const app = Fastify({ logger: process.env.NODE_ENV !== "test" ? {redact:{paths:["req.headers.authorization","req.headers.x-npati-api-key","req.body.password","req.body.apiKey","req.body.token","req.body.imapConfig.password","req.body.smtpConfig.password","req.body.imapConfig.accessToken","req.body.smtpConfig.accessToken","req.body.imapConfig.refreshToken","req.body.smtpConfig.refreshToken","req.body.imapConfig.clientSecret","req.body.smtpConfig.clientSecret"],censor:"[REDACTED]"}} : false, bodyLimit: 30 * 1024 * 1024 });
-  const activeChatStreams=new Map<string,{controller:AbortController;workspaceId:string;userId:string}>();
-  const activeSessionRegistry = config.activeSessionRegistry ?? (config.redisUrl ? new RedisActiveSessionRegistry(config.redisUrl) : new InMemoryActiveSessionRegistry());
-  let redisHealthClient: ReturnType<typeof createClient> | undefined;
-  let redisHealthConnecting: Promise<ReturnType<typeof createClient>> | undefined;
-  const getRedisHealthClient = async () => {
-    if (redisHealthClient?.isReady) return redisHealthClient;
-    if (!config.redisUrl) throw new Error("Redis URL is not configured");
-    if (!redisHealthConnecting) redisHealthConnecting = (async () => {
-      const client = createClient({ url: config.redisUrl, socket: { connectTimeout: 2_500 } });
-      client.on("error", () => undefined);
-      redisHealthClient = client;
-      await client.connect();
-      return client;
-    })().finally(() => { redisHealthConnecting = undefined; });
-    return redisHealthConnecting;
-  };
-  const defaultRedisHealthCheck = async (): Promise<ServiceHealth> => {
-    if (!config.redisUrl) return { status: "not_configured", detail: "Redis URL is not configured" };
-    try {
-      const client = await withHealthTimeout(getRedisHealthClient(), 4_000);
-      const pong = await withHealthTimeout(client.ping(), 2_000);
-      return pong === "PONG"
-        ? { status: "ok", detail: "Redis PING succeeded" }
-        : { status: "degraded", detail: `Unexpected Redis response: ${pong}` };
-    } catch (error) {
-      if (redisHealthClient?.isOpen) redisHealthClient.destroy();
-      redisHealthClient = undefined;
-      return { status: "unavailable", detail: error instanceof Error ? error.message : "Redis PING failed" };
-    }
-  };
-  const redisHealthCheck = config.redisHealthCheck ?? defaultRedisHealthCheck;
-  app.addHook("onClose", async () => {
-    await activeSessionRegistry.close();
-    if (redisHealthClient?.isOpen) await redisHealthClient.quit().catch(() => redisHealthClient?.destroy());
+  // The redis health client and check (step 2c-6h).
+  const redisHealthWiring = createRedisHealthWiring({
+    config,
+    log: app.log,
+    app,
   });
+  const { activeChatStreams, activeSessionRegistry, redisHealthCheck } = redisHealthWiring;
   const baseAiEngine = config.aiEngine ?? new OmniRouteEngine({
     baseUrl: config.omnirouteBaseUrl,
     apiKey: config.omnirouteApiKey,
