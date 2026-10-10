@@ -459,7 +459,14 @@ sha256(concat(01..28)) == sha256(оригінал)
     - [x] **2c-6c (коміт `e60c7e4`).** `codeToolRuntime` — 279 рядків, найбільший залишковий блок → `code-tool-runtime-wiring.ts` (358) за фабрикою. `app.ts` 2832 → **2588**. Знову **0 функційних залежностей** (29 const). Типи межі — через наявні символи: `CodeShellRuntimePort`, `CodeApprovalPort`, `Parameters<typeof runSandboxPostWriteHook>[0]`, `ReturnType<typeof createCodeToolWiring>[...]`. Для пісочничного порту знадобився **точний структурний тип об'єкта** (а не тип слота), бо рантайм читає `result.stdout` напряму.
     - [x] **2c-6d (коміт `9d82137`).** `policyEngine` (94) → `code-policy-wiring.ts` (134) і `executeAutomation` (86) → `automation-executor-wiring.ts` (113). `app.ts` 2588 → **2436**.
     - ⚠️⚠️ **Найдорожча помилка за весь рефакторинг (у 2c-6d, виправлена до коміту):** ім'я нового модуля `code-policy-engine.ts` **зіткнулося з наявним модулем** (1172 рядки, експортує `PolicyEngine`, `isAgentPrincipal`, `isReviewSafeTool`, `matrixModeFor`) і перезаписало його. Врятував `git checkout` — файл відновлено, дерево чисте, нічого не закомічено. **Правило: генератор мусить відмовлятися писати файл, який уже існує** (`existsSync` → throw). Друга помилка того ж кроку: межа регіону «перше закриття» різала **всередині** стрілкових констант — тепер кінець визначається контекстом (закриття на 2 пробілах, **після якого починається новий top-level оператор**).
-    - [ ] **2c-6e.** Решта: `codeReaper` (86), `executeCompositeBusinessCompanyCreation` (101) та інші середні блоки `app.ts`.
+    - [x] **2c-6e (коміт `d7f1b60`).** Суміжний кластер 313 рядків із **9 оголошеннями** (`codeReaper`, `codeProcessSessions`, `fnv1a`, `codeShellRuntimePort`, `codeVerifyRunnerPort`, `CODE_DEPS_MANIFESTS`, `readWorkspaceText`, `codeInstructionsLoader`, `codeHooksService`) → `code-ports-wiring.ts` (383) за фабрикою; назовні повертаються 7 із них. `app.ts` 2436 → **2145**.
+      ⚠️ Три виправлення генератора, знайдені тут: (1) **зберігати аліаси імпортів** (`defaultResolver as ssrfDefaultResolver`); (2) **не переносити ініціалізатор оголошення в поле інтерфейсу** (`projectSandbox: ProjectSandboxService | undefined = config.projectSandbox` → без `= …`); (3) `config` треба **і оголосити в інтерфейсі, і деструктурувати**.
+    - [ ] **2c-6f — готовий рецепт для кластера 715–983 (269 рядків, 17 оголошень).** Спроба зроблена й **відкочена**; потрібні рівно чотири речі, усі вже відомі:
+      1. `hostGitCredentialLease` — `let`, оголошений **до** регіону й **присвоюваний усередині**: у модулі оголосити `let` (не `const`), **включити в об'єкт, що повертається**, і **виключити з деструктуризації та з аргументів виклику**; батько присвоює `X = sandboxWiring.X`.
+      2. Модульні константи `sandboxRunnerUrl` / `sandboxRunnerSecret` — додати в набір «оголошених» (рядки `^(?:export )?const`) і дати тип `string | undefined`.
+      3. Регіон звертається до `app.` (не лише `app.log`) — передати `app: FastifyInstance` як залежність.
+      4. Прибрати ініціалізатори з полів інтерфейсу (див. 2c-6e, пункт 2).
+      Після цього `app.ts` має впасти до ~1880.
   - [~] **2c-7. Інлайн-маршрути `/capabilities*` і `/chat*`** (10 означень у `app.ts`, ~1300 рядків).
     - [x] **2c-7a (коміт `9754178`).** `/capabilities`, `/capabilities/inspect` + `CapabilityInspectorService` (121 рядок) → `capability-routes.ts` (149). `app.ts` 5628 → **5519**.
     - [x] **2c-7b (коміт `65a407f`).** `/router/evaluate`, два `/attachments/:attachmentId`, `/businesses/:businessId/research-jobs/:jobId` (69 рядків) → `misc-routes.ts` (98). `app.ts` 5519 → 5461.
@@ -1185,5 +1192,6 @@ Rollback:   git revert <sha>
 | 2c-6a | `apps/agent-api/src/app.ts` | 3 107 | 2 832 (code-tool проводка → `code-tool-wiring.ts`) | `2dcb2c6` | 2026-10-10 |
 | 2c-6c | `apps/agent-api/src/app.ts` | 2 832 | 2 588 (`codeToolRuntime` → `code-tool-runtime-wiring.ts`) | `e60c7e4` | 2026-10-10 |
 | 2c-6d | `apps/agent-api/src/app.ts` | 2 588 | **2 436** (`policyEngine` + `executeAutomation`) | `9d82137` | 2026-10-10 |
+| 2c-6e | `apps/agent-api/src/app.ts` | 2 436 | **2 145** (9 оголошень code-портів → `code-ports-wiring.ts`) | `d7f1b60` | 2026-10-10 |
 | 2c-7c-c-1 | `apps/agent-api/src/app.ts` | 4 401 | **3 106** (чат-ядро 1330 рядків → `chat-orchestration.ts`) | `f65fe4d` | 2026-10-10 |
 | 2c-7c-c-2 | `apps/agent-api/src/chat-orchestration.ts` | 1 436 | 897 (хелпери 572 → `chat-actions.ts`) | `2facf6c` | 2026-10-10 |
