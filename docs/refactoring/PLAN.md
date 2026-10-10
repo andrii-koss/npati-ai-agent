@@ -303,7 +303,7 @@ refactor(<scope>): split <file> into <N> modules (step <N>)
 | # | Файл | Рядків | Стан |
 |---|---|---:|---|
 | 1 | `apps/web/src/styles.css` | 21 754 | [x] |
-| 2 | `apps/agent-api/src/app.ts` | 8 449 → **5 628** | [~] 2a, 2b-1…2b-3, 2c-1…2c-4 ✓ |
+| 2 | `apps/agent-api/src/app.ts` | 8 449 → **1 821** | [~] 2a, 2b-1…2b-3, 2c-1…2c-5b, 2c-6a…2c-6g, 2c-7a…2c-7c-c-3 ✓ |
 | 3 | `packages/shared/src/code-capabilities.ts` | 4 079 | [ ] |
 | 4 | `packages/shared/src/capability-catalog.ts` | 7 283 | [ ] |
 | 5 | `packages/shared/src/capability-matrix.ts` | 4 861 | [ ] |
