@@ -302,7 +302,7 @@ refactor(<scope>): split <file> into <N> modules (step <N>)
 | # | Файл | Рядків | Стан |
 |---|---|---:|---|
 | 1 | `apps/web/src/styles.css` | 21 754 | [x] |
-| 2 | `apps/agent-api/src/app.ts` | 8 449 → **7 954** | [~] 2a ✓ |
+| 2 | `apps/agent-api/src/app.ts` | 8 449 → **7 834** | [~] 2a, 2b-1, 2b-2 ✓ |
 | 3 | `packages/shared/src/code-capabilities.ts` | 4 079 | [ ] |
 | 4 | `packages/shared/src/capability-catalog.ts` | 7 283 | [ ] |
 | 5 | `packages/shared/src/capability-matrix.ts` | 4 861 | [ ] |
@@ -422,7 +422,19 @@ sha256(concat(01..28)) == sha256(оригінал)
   - `app.ts`: **8449 → 7954**; прибрано 8 імпортів, що стали мертвими; `isSpreadsheetEditRequest` і `mapColumnDirectiveFromProposal` ре-експортовано (їх імпортує `tests/chat-language-routing.test.ts`).
   - ⚠️ **Відхилення від тексту плану:** модулі створено **пласко** (`chat-intent-helpers.ts`), а не в підтеках `chat/`, `bootstrap/` — бо в `apps/agent-api/src/` уже є така конвенція (`chat-task-plan.ts`, `chat-tool-orchestrator.ts`, `chat-file-service.ts`, `chat-inference-candidates.ts`) і лише одна підтека `data-studio/`. Триматися наявної конвенції важливіше за букву плану.
 - **⚠️ Чому «об'єкт залежностей» (колишній 2a) не можна зробити наступним кроком.** Усі ~70 викликів `register*Routes(app, …)` живуть **усередині** `buildApp` і посилаються на локальні `const` (сервіси, репозиторії, порти). Винести виклик із функції = передати ці залежності явно. Отже маршрути **не можуть** поїхати раніше, ніж з'явиться фабрика залежностей. Перетворення ~600 локальних `const` на один об'єкт одним комітом — це дифф на тисячі рядків і найвищий ризик у плані, тому його розбито:
-- [ ] **2b.** Витягувати **сервісну проводку за доменами** у фабрики: `createXServices(inputs) → outputs`. Почати з найбільш самодостатнього домену (аудит/спостережуваність), далі data-backend, потім project-* і code-*. Кожна фабрика = окремий коміт; `buildApp` лише викликає фабрики й передає їхні результати далі.
+- [~] **2b. Сервісна проводка за доменами** — `createXServices(inputs) → outputs`, один домен на коміт; `buildApp` лише викликає фабрики й передає результати далі. Виконано:
+  - [x] **2b-1 (коміт `6f027a5`).** `audit-services.ts` (87 рядків): журнал аудиту, його конфіг, порт C5a для рішень про погодження і **два фонових таймери C1c** (перевірка ланцюга + щоденний якір). `app.ts` 7954 → 7922.
+  - [x] **2b-2 (коміт `fbf2ecc`).** `core-services.ts` (199 рядків): web-research і маркетплейс, стор документів, об'єктне сховище і файли, auth-провайдер, налаштування, active-context resolver, рушії пам'яті, scoped memory, guardrail-репозиторій. `app.ts` 7922 → **7834**.
+  - [ ] **2b-3.** Домен data-backend/provisioners (провізіонери, quota/promote/backup, data-studio) — ⚠️ містить ланіве посилання `projectRedirectRepository` → `projectService`, який створюється **пізніше**; передавати це як ланівий аксесор, а не як значення.
+  - [ ] **2b-4.** Домен project-* (projectService, git, import, preview, sandbox, deploy, QA, terminal).
+  - [ ] **2b-5.** Домен code-* (найбільший сліс; робити останнім із проводки).
+
+> **Урок 2b (три пастки, які вже коштували часу):**
+> 1. **Кластери з `let`-станом не можна деструктурувати.** `engineDataPolicyResolver`, `outboundPolicySnapshot`, `refreshOutboundPolicySnapshot` оголошені через `let` і **присвоюються пізніше** в `buildApp`; деструктуризація робить їх `const` і ламає присвоєння (TS2588). Такі кластери лишаються в `app.ts`, а їхні **результати** (тут — `baseAiEngine` і `aiEngine`) передаються у фабрику як входи.
+> 2. **Default-імпорти переносяться як `import X from "…"`, а не `import { X } from "…"`** — інакше TS2595 (`path` з `node:path`). Генератор імпортів мусить розрізняти обидві форми.
+> 3. **`git checkout` переписує файл у CRLF** (бо `core.autocrlf=true`), навіть якщо до цього він був LF. Після будь-якого відкату — нормалізувати до LF перед комітом, інакше в коміт поїде весь файл.
+>
+> **G2 підтверджено на практиці:** 3 касти `as any` переїхали в `core-services.ts` → `npm run lint` упав. Лікування — `node scripts/lint-guard.mjs --update-baseline`; дельта реєстру (`app.ts` 12 → 9, `core-services.ts` 0 → 3) пішла в той самий коміт як рев'ювана зміна.
 - [ ] **2c.** Коли залежності домену вже зібрані у фабриці — виносити відповідні `register*Routes(app, deps)` у `routes/register-*.ts` (реєстратори лише **читають** переданий об'єкт, тому це найдешевший шов після 2b).
 - [ ] **2d.** Чат: `chat-orchestrator.ts` + `chat-routes.ts` (найбільший сліс, ~2400 рядків; робити останнім, коли всі його залежності вже в фабриках).
 - [ ] **2e.** Довести `app.ts` до ≤ 250 рядків.
@@ -1108,3 +1120,5 @@ Rollback:   git revert <sha>
 |---|---|---:|---:|---|---|
 | 1 | `apps/web/src/styles.css` | 21 754 | 39 рядків entry + 28 модулів (макс. 800) | `a253b28`, `76ab098` | 2026-10-10 |
 | 2a | `apps/agent-api/src/app.ts` | 8 449 | 7 954 (винесено 6 модулів, 507 рядків) | `2b4868c` | 2026-10-10 |
+| 2b-1 | `apps/agent-api/src/app.ts` | 7 954 | 7 922 (аудит → `audit-services.ts`) | `6f027a5` | 2026-10-10 |
+| 2b-2 | `apps/agent-api/src/app.ts` | 7 922 | 7 834 (ядро → `core-services.ts`) | `fbf2ecc` | 2026-10-10 |
