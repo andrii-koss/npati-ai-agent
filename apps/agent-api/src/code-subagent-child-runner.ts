@@ -70,7 +70,22 @@ export interface CodeSubagentChildRunnerDeps {
     readOnlyIntent?: boolean;
     maxTurns: number;
     turnId?: string;
+    /**
+     * Step 5: the child run's lease identity and the durable facts its own run row must carry. Both travel to the
+     * runner unchanged, so a detached child is a run of the same log as every other run — with a parent recorded
+     * on it and a lease that the settlement of its operation can be fenced on.
+     */
+    runStateOwner?: string;
+    runDetails?: Record<string, unknown>;
   }): Promise<CodeSubagentRunAgentResult>;
+  /**
+   * Step 5: the child's metadata-only outcome, reported **after** the run returns or throws.
+   *
+   * This is the detached path's settlement hook: the delegated run is produced by the existing runner, and this
+   * adapter is the only place that sees the run's own summary before it becomes a tool result. It is optional, so
+   * the blocking path (which reports the outcome in its tool result) is unchanged and a test need not supply it.
+   */
+  onSettled?(request: CodeSubagentChildRunRequest, outcome: CodeSubagentChildOutcome): void;
 }
 
 /** A single-line, bounded string from an unknown value, or `null`. Mirrors the digest's own rule. */
@@ -148,26 +163,48 @@ export function createCodeSubagentChildRunner(deps: CodeSubagentChildRunnerDeps)
     async run(request: CodeSubagentChildRunRequest): Promise<CodeSubagentChildOutcome> {
       const session = await deps.loadSession({ ctx: request.ctx, companyId: request.companyId, sessionId: request.sessionId });
       if (!session) {
-        return {
+        const missing: CodeSubagentChildOutcome = {
           runId: request.runId,
           status: "failed",
           errorCode: "subagent_session_missing",
           errorMessage: `Session ${request.sessionId} is not available to this caller`,
         };
+        deps.onSettled?.(request, missing);
+        return missing;
       }
-      const result = await deps.runAgent({
-        ctx: request.ctx,
-        session,
-        prompt: buildCodeSubagentPrompt(request),
-        runId: request.runId,
-        parentRunId: request.parentRunId,
-        allowedTools: request.allowedTools,
-        maxTurns: request.maxTurns,
-        ...(request.model ? { model: request.model } : {}),
-        ...(request.readOnly ? { readOnlyIntent: true } : {}),
-      });
+      let result: CodeSubagentRunAgentResult;
+      try {
+        result = await deps.runAgent({
+          ctx: request.ctx,
+          session,
+          prompt: buildCodeSubagentPrompt(request),
+          runId: request.runId,
+          parentRunId: request.parentRunId,
+          allowedTools: request.allowedTools,
+          maxTurns: request.maxTurns,
+          ...(request.model ? { model: request.model } : {}),
+          ...(request.readOnly ? { readOnlyIntent: true } : {}),
+          ...(request.runStateOwner ? { runStateOwner: request.runStateOwner } : {}),
+          ...(request.runDetails ? { runDetails: request.runDetails } : {}),
+        });
+      } catch (error) {
+        /**
+         * Step 5: a child run that throws is still a settled delegation. The detached path would otherwise leave
+         * the durable operation active forever, which keeps the parent's cleanup fence up and never produces the
+         * completion the parent is waiting for. The outcome is metadata-only: a code, never the error's own text
+         * beyond a bounded line.
+         */
+        const thrown: CodeSubagentChildOutcome = {
+          runId: request.runId,
+          status: "failed",
+          errorCode: typeof (error as { code?: unknown }).code === "string" ? String((error as { code: string }).code) : "subagent_run_failed",
+          errorMessage: line(error instanceof Error ? error.message : null, 300) ?? "The sub-agent run failed",
+        };
+        deps.onSettled?.(request, thrown);
+        return thrown;
+      }
       const completed = result.status === "completed";
-      return {
+      const outcome: CodeSubagentChildOutcome = {
         runId: request.runId,
         status: completed ? "completed" : "failed",
         ...(completed ? {} : { errorCode: result.code ?? result.reason ?? "subagent_run_failed" }),
@@ -177,6 +214,8 @@ export function createCodeSubagentChildRunner(deps: CodeSubagentChildRunnerDeps)
         toolCalls: result.summary.toolCalls ?? 0,
         turns: result.summary.turns ?? 0,
       };
+      deps.onSettled?.(request, outcome);
+      return outcome;
     },
   };
 }

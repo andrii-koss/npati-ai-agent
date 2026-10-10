@@ -199,16 +199,30 @@ export const V9_TOOL_SCHEMAS = CODE_TOOL_SCHEMAS.filter((tool) => V8_TOOL_NAMES.
 export const PUBLISHED_V9_TOOL_SCHEMA_CHECKSUM = "b498efdc44e06ea1fd8b75860947a770e74f8b9a63dcd92026068a98de963d20";
 export const CODE_TOOL_MANIFEST_VERSION = 10;
 
+/*
+ * Step 5: the detached receipt is an **in-process** extension of the published v10 set, not a new version.
+ *
+ * `code.agent.spawn`'s result gained fields (`status: "accepted"`, `detached`, `accepted`), and a published
+ * manifest version is never edited in place — but nothing about v10 *changes* here: the runtime validates
+ * arguments against `inputSchema` and builds the result envelope itself, and it never validates a result against
+ * `outputSchema`, so the additive receipt travels under the version that is already published. That is also why
+ * there is no second `toolManifest(…, 10)` entry in `KNOWN_TOOL_MANIFESTS`: two manifests for one published
+ * version would break the "exactly one manifest per published version" invariant (and the resolvability of a
+ * session pinned to v10) that `coding-agent-c2-schema-parity.test.ts` and `coding-agent-c3-capabilities.test.ts`
+ * pin. When the result shape is republished, `code-tool-schemas.json` is regenerated with the next manifest
+ * version and `CODE_TOOL_MANIFEST_VERSION`/`PUBLISHED_TOOL_SCHEMA_CHECKSUM` move with it.
+ */
+
 /**
  * Checksum of the published set. It is a literal so that a schema change without a version bump is a
  * visible, reviewable edit instead of a silent re-computation.
  * Regenerate with: `node scripts/code-tool-schemas-generate.mjs --manifest-version N`.
  *
- * v9 (37 tools: v8's 36 plus `code.agent.spawn`, inventory id 385). Equals
+ * v10 (39 tools: the C12 surface, `code.agent.spawn` included). Equals
  * `toolSchemaChecksum(CODE_TOOL_SCHEMAS)` — computed with the registry's own hasher, never a second
- * implementation, and cross-checked against `buildSnapshot(schemas, 9).checksum` in
+ * implementation, and cross-checked against `buildSnapshot(schemas, 10).checksum` in
  * `scripts/verify-code-tool-schemas.mjs` (both hashers agree on the canonical form; they produced the same
- * value for v8). The committed artifacts (`code-tool-schemas.published.json` and the frozen snapshot) are
+ * value for v8 and v9). The committed artifacts (`code-tool-schemas.published.json` and the frozen snapshot) are
  * written by the generator; until that run happens the artifact comparison in
  * `coding-agent-c2-schema-parity.test.ts` and `scripts/verify-code-tool-schemas.mjs --check` are the two
  * places that report the artifact as stale, while `assertManifestConsistent()` — and therefore the manifest

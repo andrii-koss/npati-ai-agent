@@ -50,6 +50,9 @@ export const CODE_SUB_FLAGS: readonly string[] = [
   // server because `CODE_FLAG_KEY_PATTERN` is an allowlist and this panel's list is what an operator sees.
   "code.commands", "code.skills",
   "code.async_inbox", "code.async_processes",
+  // Step 5: detached async sub-agents. Listed here as well as on the server because `CODE_FLAG_KEY_PATTERN` is
+  // an allowlist and this list is what an operator can see and set.
+  "code.async_subagents",
   "code.repo_map", "code.session_resume", "code.rewind", "code.session_fork", "code.export",
   "code.model_profile.hosted-native-tools", "code.model_profile.hosted-native-tools-small-context", "code.model_profile.local-text-tools",
 ];

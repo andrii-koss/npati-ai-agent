@@ -144,6 +144,14 @@ export type CodeToolErrorCode =
   | "subagent_handoff_content_rejected"
   | "subagent_handoff_refused_credential"
   /**
+   * Step 5: detached delegations. `subagent_write_scope_conflict` is the one new refusal the detached path adds —
+   * "another child of this run is already writing there" — and it is its own code because the model can act on it
+   * (narrow the scope or wait), which `subagent_path_outside_scope` would not tell it.
+   */
+  | "subagent_write_scope_conflict"
+  | "subagent_detached_disabled"
+  | "subagent_reserve_failed"
+  /**
    * C13 (owner decision 1): a `PreToolUse` project hook refused this call. The code exists so a refusal that
    * came from the repository's own hook is distinguishable from one the server made — and so the model
    * learns *why* without being told that a hook can do anything else. A hook can only ever produce this
@@ -197,6 +205,7 @@ const CANONICAL_ERROR_CODES: ReadonlySet<string> = new Set<string>([
   "subagent_tool_not_published", "subagent_tool_not_delegable", "subagent_parent_scope_unresolved",
   "subagent_parallelism_exceeded", "subagent_capability_scope_empty",
   "subagent_handoff_content_rejected", "subagent_handoff_refused_credential",
+  "subagent_write_scope_conflict", "subagent_detached_disabled", "subagent_reserve_failed",
 ]);
 
 /** Recognises a canonical `CodeToolError` (different class, same contract) by shape. */

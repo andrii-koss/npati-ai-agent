@@ -246,6 +246,26 @@
       "negativeControlTitle": "negative control: the obfuscation rules ignore a readable command, a literal eval, a decoded file and a PATH read",
       "hardDenyRuleIds": ["decode_pipe_shell", "eval_dynamic", "shell_alias_definition", "path_manipulation"],
       "status": "covered"
+    },
+    {
+      "id": "ASY-01",
+      "class": "gate_integrity.catalogue_contract",
+      "suite": "tests/coding-agent-async-inbox-pause-fence.test.ts",
+      "title": "lets a new run take the session after the loop paused, and hands it the paused run's pending input",
+      "negativeControl": "The suite pairs the new permission with the fence it must not weaken: two live drivers of one session, neither of which yielded, are still asserted to conflict (`session_run_held`), and after the winner settles its task the loser is shown to stay fenced until the task is released. A pause from a worker that lost the lease is refused, and a pause naming a run that does not hold the task writes no marker — so the marker cannot be forged or inherited.",
+      "negativeControlSuite": "tests/coding-agent-async-inbox-pause-fence.test.ts",
+      "negativeControlTitle": "still fences two live drivers of one session, so the fence was not weakened",
+      "status": "covered"
+    },
+    {
+      "id": "ASY-02",
+      "class": "resource_exhaustion.process_limit",
+      "suite": "tests/coding-agent-async-subagents-detached.test.ts",
+      "title": "returns an accepted receipt with the child id while the child is still running",
+      "negativeControl": "The suite keeps every detached permission paired with the thing it must not become: a retried tool call is asserted to adopt the delegation it already made rather than start a second child, a child whose run already ended is settled without running anything while only a child that provably never started is re-entered, an active child is shown to withhold the parent's sandbox release (`cleanup-acquired` is false), and two writing children with overlapping scopes are refused while a read-only sibling sharing a scope is accepted and a sibling path prefix like `src/a` against `src/ab` is not treated as a conflict.",
+      "negativeControlSuite": "tests/coding-agent-async-subagents-detached.test.ts",
+      "negativeControlTitle": "refuses a second writing child whose scope overlaps, and allows a disjoint one",
+      "status": "covered"
     }
   ],
   "hardDenyRuleExemptions": [

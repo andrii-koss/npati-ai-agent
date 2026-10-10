@@ -21,9 +21,23 @@ export interface CodeInboxMessage {
 }
 export interface CodeInboxEvent {
   seq: number;
-  type: "input.accepted" | "input.claimed" | "input.admitted" | "input.discarded" | "input.updated" | "task.opened" | "task.sealed" | "task.closed" | "task.dispatch_failed";
+  type: "input.accepted" | "input.claimed" | "input.admitted" | "input.discarded" | "input.updated" | "task.opened" | "task.sealed" | "task.closed" | "task.paused" | "task.dispatch_failed";
   messageId: string | null;
   runId: string | null;
+}
+/**
+ * N1: the run that **yielded** the session without reaching a terminal state.
+ *
+ * A pause (C9 question, C11 approval) and a C10 resume both leave the run's C6a lease `live` while nothing is
+ * driving the loop — a pause stops the heartbeat, a resume takes the lease and hands the continuation prompt
+ * back to its caller. The inbox used to read that live lease as "the session is occupied", so a continuation
+ * that mints a **new** run id was refused with `session_run_held` until the lease expired. This marker is the
+ * proof that the old run released the session on purpose, which is a fact no lease can express.
+ */
+export interface CodeInboxYield {
+  runId: string;
+  owner: string;
+  at: string;
 }
 export interface CodeInboxState {
   revision: number;
@@ -33,6 +47,8 @@ export interface CodeInboxState {
   events: CodeInboxEvent[];
   lastError: string | null;
   completionWakeTimes?: string[];
+  /** Additive to the persisted JSON: an absent value means "no run has yielded", which is the pre-N1 behaviour. */
+  yielded?: CodeInboxYield | null;
 }
 export interface CodeInboxScope {
   companyId: string;
@@ -50,6 +66,13 @@ export type CodeInboxCommand =
   | { kind: "discard"; id: string; expectedRevision: number }
   | { kind: "take-task"; authorId?: string }
   | { kind: "release-task"; runId: string }
+  /**
+   * N1: the run is not driving the session any more, although it has not reached a terminal state. Written by
+   * the pause path (the loop stopped on a human decision) and by a resume (which takes the lease and hands the
+   * continuation prompt back to its caller). It records **which** run yielded, so only that run's own claim can
+   * be released and a live driver that never yielded still fences the session.
+   */
+  | { kind: "pause"; runId: string; owner: string }
   | { kind: "dispatch-error" }
   | { kind: "open"; runId: string; owner: string; initialMessageId?: string }
   | { kind: "drain"; runId: string; owner: string; turnIndex: number }
@@ -74,7 +97,7 @@ export class CodeInboxError extends Error {
   constructor(readonly code: string, readonly httpStatus = 409) { super(code); }
 }
 export function emptyCodeInbox(): CodeInboxState {
-  return { revision: 0, runId: null, phase: "idle", messages: [], events: [], lastError: null };
+  return { revision: 0, runId: null, phase: "idle", messages: [], events: [], lastError: null, yielded: null };
 }
 
 /** Same transition rules in both backends. No asynchronous gap inside a transition. */
@@ -180,14 +203,46 @@ export function applyCodeInbox(
   } else if (command.kind === "release-task") {
     if (state.runId === command.runId && leases.some((l) => l.runId === command.runId && l.terminal) && !live(command.runId)) {
       state.phase = "idle";
+      state.yielded = null;
       event("task.closed");
+    }
+  } else if (command.kind === "pause") {
+    /**
+     * N1: the run holds its task but is not driving it. The phase deliberately stays `running` because the task is
+     * still this run's — its admitted messages must remain recoverable by a resume of the **same** run id — and
+     * only `open` reads the marker, to let a continuation proceed.
+     *
+     * The fence is the **identity on the run's lease**, not its liveness, and that is the whole point of the
+     * command: the runner marks the run `waiting_for_user` and a release marks it `interrupted` *before* this
+     * write, and neither state is `running` — so a `live` test would refuse exactly the transition this command
+     * exists for, and N1's marker would never be recorded. `state.runId === command.runId` keeps the marker on the
+     * task's own run, `lease.owner === command.owner` keeps it to the worker that owns that run (a stranger is
+     * still refused, so the marker cannot be forged), and a run that already reached a terminal state is refused
+     * because it is not yielding anything. A marker can only ever *permit* a takeover (`open`), never deny one, so
+     * this widening does not weaken the `session_run_held` fence that `open` applies to a live driver.
+     */
+    if (state.runId === command.runId) {
+      const lease = leases.find((entry) => entry.runId === command.runId);
+      if (!lease || lease.owner !== command.owner || lease.terminal) throw new CodeInboxError("inbox_lease_lost");
+      if (state.yielded?.runId !== command.runId) {
+        state.yielded = { runId: command.runId, owner: command.owner, at: now.toISOString() };
+        event("task.paused");
+      }
     }
   } else if (command.kind === "open") {
     if (live(command.runId)?.owner !== command.owner) throw new CodeInboxError("inbox_lease_lost");
     if (["reserved", "sealed", "settled"].includes(state.phase) && state.runId !== command.runId) throw new CodeInboxError("session_run_held");
-    if (state.phase !== "idle" && state.runId !== command.runId && live(state.runId)) throw new CodeInboxError("session_run_held");
+    /**
+     * N1: the fence refuses a second driver of one session — a run that is live and has **not** yielded. A run
+     * that yielded (the pause path, a resume that only rebuilt the continuation prompt) is not driving anything,
+     * so the continuation the user just asked for may take the session. The check stays in front of the ordinary
+     * case: two live runs of one session, neither of which yielded, still conflict exactly as before.
+     */
+    const priorRunYielded = state.yielded?.runId === state.runId && state.runId !== command.runId;
+    if (state.phase !== "idle" && state.runId !== command.runId && live(state.runId) && !priorRunYielded) throw new CodeInboxError("session_run_held");
     state.runId = command.runId;
     state.phase = "running";
+    state.yielded = null;
     state.lastError = null;
     event("task.opened");
     if (command.initialMessageId) {

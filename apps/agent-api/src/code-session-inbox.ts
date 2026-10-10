@@ -85,6 +85,19 @@ export class CodeSessionInboxService {
   async isEnabled(ctx: AuthContext, companyId: string) {
     return !!this.options.store && await this.options.flags.isEnabled(ctx, "code.async_inbox", { companyId });
   }
+  /**
+   * N1: records that a run holds the session's task without driving it — the pause path and a C10 resume both do
+   * this. Resolves `false` when the durable inbox is off, so a caller can report "not recorded" instead of
+   * assuming the marker exists. Never throws for a task that belongs to another run: the transition itself is
+   * the fence.
+   */
+  async yieldTask(input: { ctx: AuthContext; companyId: string; sessionId: string; runId: string; owner: string }): Promise<boolean> {
+    if (!await this.isEnabled(input.ctx, input.companyId)) return false;
+    const session = await this.options.loadSession(input.ctx, input.companyId, input.sessionId).catch(() => null);
+    if (!session) return false;
+    await this.transact(session, { kind: "pause", runId: input.runId, owner: input.owner });
+    return true;
+  }
   async recoverTerminalTask(session: CodeSession) {
     if (this.options.ownsLocalRun?.(session.id)) return;
     const snapshot = await this.transact(session, { kind: "read" });

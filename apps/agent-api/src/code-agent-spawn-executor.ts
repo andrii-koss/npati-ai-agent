@@ -1,4 +1,4 @@
-import { CodeToolError, type CodeToolExecutionContext } from "./code-tool-runtime";
+import { CodeToolError, type CodeToolErrorCode, type CodeToolExecutionContext } from "./code-tool-runtime";
 import { normalizeWorkspacePath } from "./code-tools-path";
 import { SubagentToolPolicyGuard } from "./subagent-tool-policy";
 import {
@@ -95,6 +95,19 @@ export interface CodeSubagentChildRunRequest {
   snapshotId?: string | null;
   /** Advisory tool-calling mode the type resolved (native/text), for the child's provider layer. */
   toolCallingMode: string;
+  /**
+   * Step 5: facts the **child's own durable run row** must carry — `parentRunId`, the parent's tool call, the
+   * agent type and whether the child was detached. The runner writes them with the row it creates, so
+   * "which run delegated this one, under which tool call" is a property of the run rather than a convention of
+   * the process that started it. Absent for a blocking delegation, whose run row needs no join key.
+   */
+  runDetails?: Record<string, unknown>;
+  /**
+   * Step 5: the child run's own lease identity. A detached child is settled by a background task, and its durable
+   * settlement is fenced on the child run's lease — so the identity has to be stable per child run rather than per
+   * process, or a second lifetime of the same delegation could never settle its own operation.
+   */
+  runStateOwner?: string;
 }
 
 /** What the child runner reports back. Deliberately small: the digest is built from named fields only. */
@@ -118,6 +131,35 @@ export interface CodeSubagentChildRunner {
   run(request: CodeSubagentChildRunRequest): Promise<CodeSubagentChildOutcome>;
 }
 
+/**
+ * Step 5: how a delegation becomes a **detached** one.
+ *
+ * The port is deliberately this narrow. The executor still does all of C12's work — the type, the intersection,
+ * the paths, the depth and the fan-out — and then hands the already-resolved request to this port, which reserves
+ * the durable operation and starts the child **without awaiting it**. Nothing about the detached path re-does a
+ * decision the blocking path made; it only changes who waits.
+ */
+export interface CodeSubagentDetachedPort {
+  /** True when `code.async_subagents` is on for this company. Off means the blocking path, unchanged. */
+  isEnabled(input: { ctx: CodeToolExecutionContext["ctx"]; companyId: string }): Promise<boolean>;
+  start(input: {
+    ctx: CodeToolExecutionContext["ctx"];
+    companyId: string;
+    projectId: string;
+    sessionId: string;
+    parentRunId: string;
+    parentOwner: string;
+    toolCallId: string;
+    childRunId: string;
+    snapshotId?: string | null;
+    /** The resolved delegation, exactly as the blocking path would have run it. */
+    resolution: ResolvedCodeSubagentType;
+    task: string;
+    paths: readonly string[];
+    allowedTools: readonly string[];
+  }): Promise<{ status: "accepted"; childRunId: string; operationId: string; duplicate: boolean } | { status: "refused"; code: string; message: string }>;
+}
+
 export interface CodeAgentSpawnExecutorOptions {
   /**
    * The child runner. Absent means the tool fails closed with `tool_not_configured` rather than appearing to
@@ -128,6 +170,11 @@ export interface CodeAgentSpawnExecutorOptions {
    * that does not exist yet.
    */
   childRunner?: () => CodeSubagentChildRunner | undefined;
+  /**
+   * Step 5: the detached path. Absent, or `isEnabled` false, means every delegation keeps the C12 behaviour —
+   * the tool call blocks until the child settles. This is the rollback: one wiring change, no code path edit.
+   */
+  detached?: CodeSubagentDetachedPort;
   /**
    * The deployment's canonical tool universe — `CodeToolRuntime.listTools()`, i.e. the **published** registry.
    * It is the only thing a parent's `*` grant may expand to; without it the wildcard grants nothing and the
@@ -225,7 +272,11 @@ export function codeSubagentRunId(parentRunId: string, toolCallId: string): stri
 
 export interface CodeSubagentSpawnOutcome {
   agentType: CodeSubagentType;
-  status: "completed" | "failed";
+  /**
+   * `accepted` exists only on the detached path: it says the delegation was recorded and the child started, and
+   * that its result will arrive later through the completion outbox rather than in this result.
+   */
+  status: "accepted" | "completed" | "failed";
   runId: string | null;
   errorCode: string | null;
   capabilityProfile: string;
@@ -237,6 +288,10 @@ export interface CodeSubagentSpawnOutcome {
   resolution: ResolvedCodeSubagentType;
   allowedTools: string[];
   deniedTools: Array<{ tool: string; reason: string }>;
+  /** Step 5: true when this result is a receipt and not the child's outcome. */
+  detached?: boolean;
+  /** Step 5: the durable handles of the delegation, for the receipt and its retry. */
+  accepted?: { childRunId: string; operationId: string; duplicate: boolean };
 }
 
 /**
@@ -263,6 +318,26 @@ export class CodeSubagentInFlightTracker {
 }
 
 /**
+ * The refusal vocabulary of the detached port, mapped onto the runtime's own `CodeToolErrorCode` union.
+ *
+ * The port answers with the code the **reserve** refused with (a store code such as `process_lease_lost` or
+ * `sandbox_cleanup_in_progress`), and those store codes are not tool codes — so a code this runtime does not
+ * publish is reported as `subagent_reserve_failed`, which says exactly what happened, instead of inventing a
+ * vocabulary the model cannot act on. The published ones keep their own meaning.
+ */
+function detachedRefusalCode(code: string): CodeToolErrorCode {
+  switch (code) {
+    case "subagent_detached_disabled":
+    case "subagent_tool_not_delegable":
+    case "subagent_reserve_failed":
+    case "tool_not_configured":
+      return code;
+    default:
+      return "subagent_reserve_failed";
+  }
+}
+
+/**
  * The delegation core, independent of the tool envelope so a test can drive it directly. Throws
  * `CodeToolError` for the refusals; a **child** failure is not a refusal and comes back as `status: "failed"`.
  */
@@ -273,6 +348,8 @@ export async function spawnCodeSubagent(
     projectId: string;
     sessionId: string;
     parentRunId: string;
+    /** Step 5: the run-lease owner of the parent, so the durable delegation record names the run that owns it. */
+    parentOwner: string;
     toolCallId: string;
     snapshotId?: string | null;
     args: Record<string, unknown>;
@@ -421,6 +498,61 @@ export async function spawnCodeSubagent(
   };
 
   const now = options.now ?? (() => new Date());
+
+  /**
+   * Step 5: the flag-gated fork. Everything above this line — the refusals, the intersection, the depth, the
+   * fan-out and the deterministic run id — is shared by both paths, so the two cannot disagree about what a
+   * delegation is allowed to do; only the waiting differs.
+   *
+   * A **refused** detached start is reported through the same channel a refused guard is (`CodeToolError`), never
+   * as a successful receipt: the parent must be told that its delegation did not happen, not handed a child id for
+   * a child nobody will run.
+   */
+  if (options.detached && await options.detached.isEnabled({ ctx: input.ctx, companyId: input.companyId })) {
+    const accepted = await options.detached.start({
+      ctx: input.ctx,
+      companyId: input.companyId,
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      parentRunId: input.parentRunId,
+      parentOwner: input.parentOwner,
+      toolCallId: input.toolCallId,
+      childRunId: runId,
+      snapshotId: input.snapshotId ?? null,
+      resolution,
+      task,
+      paths,
+      allowedTools,
+    });
+    if (accepted.status === "refused") {
+      throw new CodeToolError(detachedRefusalCode(accepted.code), accepted.message, 409, "policy", accepted.code === "subagent_reserve_failed", tool);
+    }
+    /**
+     * The **accepted receipt**. It is the whole point of the detached path: the parent learns that the delegation
+     * exists, which child it is and how to recognise its completion — and nothing waits for the child's run.
+     * `handoff` is empty by construction and `detached: true` says why, so a reader cannot mistake "no findings
+     * yet" for "the child found nothing".
+     */
+    const receipt: CodeSubagentSpawnOutcome = {
+      agentType: resolution.type,
+      status: "accepted",
+      runId: accepted.childRunId,
+      errorCode: null,
+      capabilityProfile: resolution.capabilityProfile,
+      limits: { maxTurns: resolution.maxTurns, maxParallelism: resolution.maxParallelism },
+      tools: allowedTools,
+      handoff: emptyCodeSubagentHandoffDigest(),
+      truncated: false,
+      resolution,
+      allowedTools,
+      deniedTools: evaluation.deniedTools,
+      detached: true,
+      accepted: { childRunId: accepted.childRunId, operationId: accepted.operationId, duplicate: accepted.duplicate },
+    };
+    await recordDelegationActivity(options, input, receipt, now());
+    return receipt;
+  }
+
   tracker.enter(input.parentRunId);
   let outcome: CodeSubagentChildOutcome;
   try {
@@ -568,6 +700,7 @@ export function createCodeAgentSpawnExecutor(
         projectId: input.projectId,
         sessionId: input.sessionId,
         parentRunId: input.runId,
+        parentOwner: input.leaseOwner ?? "unknown",
         toolCallId: input.toolCallId,
         snapshotId: input.snapshotId ?? null,
         args: input.args,
@@ -585,6 +718,10 @@ export function createCodeAgentSpawnExecutor(
       tools: outcome.tools,
       handoff: outcome.handoff,
       truncated: outcome.truncated,
+      // Step 5: the two facts that turn a result into an accepted receipt. A reader that sees `detached` knows the
+      // child is still running and that its digest arrives later through the completion outbox.
+      ...(outcome.detached ? { detached: true } : {}),
+      ...(outcome.accepted ? { accepted: outcome.accepted } : {}),
     };
   };
 }

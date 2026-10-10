@@ -190,6 +190,10 @@ import { allCanonicalExecutors, runSandboxPostWriteHook, type CodeVerifyRunnerPo
 // C12: the delegation adapter. It is the only thing that turns a `code.agent.spawn` call into a child run, and
 // it does so through the **same** `CodingAgentRunner` instance the rest of the application uses.
 import { createCodeSubagentChildRunner } from "./code-subagent-child-runner";
+import {
+  CodeSubagentOperationService,
+  type CodeSubagentDetachedRunner,
+} from "./code-subagent-operations";
 import { ensureSessionBranch } from "./code-tool-git-executors";
 import { gitWriteIntentForTool, sessionBranchName } from "./code-git-workflow";
 import { CodeWorkspaceRevisionGuard } from "./code-workspace-revision";
@@ -2898,6 +2902,18 @@ export function buildApp(config: AppConfig = {}) {
    */
   let codeToolRuntimeRef: CodeToolRuntime | undefined;
   let codingAgentRunnerRef: CodingAgentRunner | undefined;
+  /**
+   * Step 5: the detached delegation service, late-bound like the two refs above and for the same reason — the
+   * child runner it drives is the `CodingAgentRunner` built hundreds of lines below, and the completion service it
+   * reports through is built after that. A getter, so no caller can capture a service that does not exist yet.
+   */
+  let codeSubagentOperationsRef: (() => CodeSubagentOperationService) | undefined;
+  /**
+   * Step 5: the delegation adapter the tool runtime reaches — the same one C12 built inline. It is a named accessor
+   * so the operations service can drive it and so the detached path and the blocking path are provably the same
+   * runner: there is one `createCodeSubagentChildRunner` call in this file, and both paths read it.
+   */
+  let subagentChildRunnerWithAck: CodeSubagentDetachedRunner | undefined;
   const codeToolRuntime = new CodeToolRuntime({
     flags: featureFlagService,
     store: workspaceStore,
@@ -3035,24 +3051,43 @@ export function buildApp(config: AppConfig = {}) {
        *    is one more event in the one Activity stream — with its `snapshot_id` and its parent run.
        */
       subagentCanonicalTools: () => codeToolRuntimeRef?.listTools().map((entry) => entry.name) ?? CODE_TOOL_SCHEMAS.map((entry) => entry.name),
-      subagentChildRunner: () => codingAgentRunnerRef
-        ? createCodeSubagentChildRunner({
-            loadSession: async ({ ctx, companyId, sessionId }) => codeService.getSession(ctx, companyId, sessionId),
-            runAgent: async ({ ctx, session, prompt, model, runId, parentRunId, allowedTools, readOnlyIntent, maxTurns }) =>
-              codingAgentRunnerRef!.run({
-                ctx,
-                session,
-                prompt,
-                runId,
-                maxTurns,
-                subagentScope: { parentRunId, allowedTools: [...allowedTools] },
-                ...(model ? { model } : {}),
-                // A read-only type (explore/plan/review) travels as the session's own read-only intent, so the
-                // runner offers only the review-safe tools and the runtime refuses anything else on the server.
-                ...(readOnlyIntent ? { readOnlyIntent: true } : {}),
-              }),
-          })
-        : undefined,
+      subagentChildRunner: () => subagentChildRunnerWithAck,
+      /**
+       * Step 5: the detached delegation port. Off by default: `isEnabled` reads `code.async_subagents`, so a
+       * deployment that has not enabled it keeps the C12 blocking behaviour with no code path change. The port is
+       * a thin adapter over `CodeSubagentOperationService` — the executor keeps every validation and policy
+       * decision, the service only reserves durably and starts the child in the background.
+       */
+      subagentDetached: {
+        isEnabled: async ({ ctx, companyId }) => await featureFlagService.isEnabled(ctx, "code.async_subagents", { companyId })
+          && !!trackedProcesses && !!workspaceStore.codeProcesses,
+        start: async (request) => {
+          if (!trackedProcesses || !workspaceStore.codeProcesses) {
+            return { status: "refused" as const, code: "tool_not_configured", message: "Detached sub-agents need the durable process store" };
+          }
+          return codeSubagentOperationsRef!().startDetached({
+            ctx: request.ctx,
+            companyId: request.companyId,
+            projectId: request.projectId,
+            sessionId: request.sessionId,
+            parentRunId: request.parentRunId,
+            parentOwner: request.parentOwner,
+            toolCallId: request.toolCallId,
+            childRunId: request.childRunId,
+            snapshotId: request.snapshotId ?? null,
+            agentType: request.resolution.type,
+            capabilityProfile: request.resolution.capabilityProfile,
+            task: request.task,
+            paths: [...request.paths],
+            model: request.resolution.model,
+            maxTurns: request.resolution.maxTurns,
+            readOnly: request.resolution.readOnly,
+            summaryOnly: request.resolution.summaryOnly,
+            allowedTools: [...request.allowedTools],
+            toolCallingMode: request.resolution.toolCallingMode,
+          });
+        },
+      },
       subagentActivity: codeActivitySink,
     }),
     checkpoints: codeCheckpointPort,
@@ -5060,6 +5095,23 @@ ${localized.next}`;
     store: workspaceStore.codeProcesses, processes: trackedProcesses, inbox: codeSessionInbox,
     loadSession: (ctx, companyId, sessionId) => codeService.getSession(ctx, companyId, sessionId),
     enabled: async (ctx, companyId) => await featureFlagService.isEnabled(ctx, "code.async_processes", { companyId }) && await codeSessionInbox.isEnabled(ctx, companyId),
+    /**
+     * Step 5: the detached delegations of this session, reconciled by the **child's own** run state. Every parent
+     * run that has an unfinished child is asked about separately, because the child's run state — not the parent's —
+     * is the oracle: a terminal child is settled from it, a live one is left to its owner, and an `interrupted` one
+     * is re-entered under the same deterministic run id.
+     */
+    subagents: async (ctx, session) => {
+      const operations = codeSubagentOperationsRef?.();
+      if (!operations) return;
+      const parents = await operations.listChildren({
+        companyId: session.companyId, projectId: session.projectId, sessionId: session.id,
+        dataClassification: session.dataClassification, retentionClass: session.retentionClass,
+      });
+      for (const parentRunId of [...new Set(parents.map((child) => child.runId))]) {
+        await operations.recover({ ctx, companyId: session.companyId, sessionId: session.id, parentRunId });
+      }
+    },
     progress: (scope, notice) => codeBackgroundRuns.operationProgress(scope, { kind: "operation.settled", notice }),
     warn: (code) => app.log.warn({ code }, "code_completion_delivery_warning"),
   }) : undefined;
@@ -5070,6 +5122,21 @@ ${localized.next}`;
   }
   const codingAgentRunner = new CodingAgentRunner({
     completions: codeProcessCompletions,
+    /**
+     * Step 5: the parent's fence against a detached child. It reads the same durable delegation record the
+     * sandbox-cleanup guard reads, through the service the detached path reserved in — so "a required child is
+     * still running" withholds this run's sandbox release instead of letting the parent's terminal path destroy a
+     * workspace the child is still writing into. Absent (no process store) the runner behaves exactly as before,
+     * and the service is late-bound because the runner is built before it.
+     */
+    ...(workspaceStore.codeProcesses ? {
+      activeChildren: {
+        isUnsettled: async (input: { ctx: AuthContext; companyId: string; projectId: string; sessionId: string; runId: string }) =>
+          await codeSubagentOperationsRef?.()?.hasRequiredChild({
+            ctx: input.ctx, companyId: input.companyId, sessionId: input.sessionId, parentRunId: input.runId,
+          }) ?? false,
+      },
+    } : {}),
     asyncProcessesEnabled: async (ctx, companyId, projectId) => !!trackedProcesses &&
       await featureFlagService.isEnabled(ctx, "code.async_processes", { companyId }) &&
       await featureFlagService.isEnabled(ctx, "code.background_runs", { companyId }) &&
@@ -5381,6 +5448,83 @@ ${localized.next}`;
   });
   // C12: the delegation can now reach the runner. Same instance, no second loop.
   codingAgentRunnerRef = codingAgentRunner;
+  /**
+   * Step 5: the delegation service is built **here**, once. It owns no loop, no queue and no channel of its own —
+   * the child is run by `codingAgentRunner`, the delegation is one operation in `workspaceStore.codeProcesses`, and
+   * the completion travels through `codeProcessCompletions` and the session inbox — and it is built at this line
+   * because this is the first point at which every one of those exists.
+   */
+  if (workspaceStore.codeProcesses && codeProcessCompletions) {
+    /**
+     * The one child-runner adapter. `runAgent` is the **same** `CodingAgentRunner` instance every other run uses,
+     * reached through the late ref because the tool runtime that dispatches `code.agent.spawn` was built above it.
+     * The detached path adds two facts to the child's own durable run row (its parent and its lease identity); the
+     * blocking path passes neither, so it behaves exactly as C12 left it.
+     */
+    subagentChildRunnerWithAck = {
+      ...createCodeSubagentChildRunner({
+        loadSession: async ({ ctx, companyId, sessionId }) => codeService.getSession(ctx, companyId, sessionId),
+        runAgent: async ({ ctx, session, prompt, model, runId, parentRunId, allowedTools, readOnlyIntent, maxTurns, runStateOwner, runDetails }) =>
+          codingAgentRunnerRef!.run({
+            ctx,
+            session,
+            prompt,
+            runId,
+            maxTurns,
+            subagentScope: { parentRunId, allowedTools: [...allowedTools] },
+            ...(model ? { model } : {}),
+            // A read-only type (explore/plan/review) travels as the session's own read-only intent, so the runner
+            // offers only the review-safe tools and the runtime refuses anything else on the server.
+            ...(readOnlyIntent ? { readOnlyIntent: true } : {}),
+            ...(runStateOwner ? { runStateOwner } : {}),
+            ...(runDetails ? { runDetails } : {}),
+          }),
+        /**
+         * The detached path's settlement: the adapter is the only place that sees the child run's own summary, and
+         * the service turns it into the durable operation's terminal state — which is what releases the parent's
+         * cleanup fence and produces the completion the parent collects.
+         */
+        onSettled: (request, outcome) => {
+          void codeSubagentOperationsRef?.()?.settleChild(request, request.runId, outcome)
+            .catch(() => app.log.warn("code_subagent_settle_failed"));
+        },
+      }),
+      /**
+       * The acknowledgement. It writes one Activity event so a detached child is observably started under its
+       * parent; it is best effort by design and never a gate, because the accepted receipt the parent already holds
+       * rests on the durable reserve, not on this.
+       */
+      ack: (request) => {
+        void codeActivitySink.record(
+          {
+            kind: "run_activity", companyId: request.companyId, projectId: request.projectId, sessionId: request.sessionId,
+            runId: request.runId, parentRunId: request.parentRunId, parentToolCallId: request.toolCallId,
+          },
+          { action: "subagent_started", agentType: request.agentType, readOnly: request.readOnly, maxTurns: request.maxTurns },
+        ).catch(() => undefined);
+      },
+    };
+    const operations = new CodeSubagentOperationService({
+      store: workspaceStore.codeProcesses,
+      runState: codeRunStateLog,
+      childRunner: () => subagentChildRunnerWithAck,
+      loadSession: async ({ ctx, companyId, sessionId }) => codeService.getSession(ctx, companyId, sessionId),
+      enabled: async ({ ctx, companyId }) => await featureFlagService.isEnabled(ctx, "code.async_subagents", { companyId })
+        && !!trackedProcesses,
+      spawnTool: "code.agent.spawn",
+      /**
+       * The completion is delivered through the **existing** Step-4 path: waking the session inbox runs its
+       * completion recovery and then its wake task, the same sequence the process outbox already relies on. There is
+       * no second delivery channel, and a deployment whose inbox is off simply recovers on the outbox's own timer.
+       */
+      onSettled: (event) => {
+        void codeSessionInbox.wake(event.ctx, event.companyId, event.sessionId)
+          .catch(() => app.log.warn("code_subagent_completion_wake_failed"));
+      },
+      logger: { warn: (code) => app.log.warn({ code }, "code_subagent_operation_warning") },
+    });
+    codeSubagentOperationsRef = () => operations;
+  }
   // C6a: reconcile runs whose process died. A run that still claims to be running with an expired lease is
   // moved to `interrupted`; read-only calls with an unknown result may be replayed, mutating calls are reported
   // as a doubt and never replayed. This is what turns a crash into a recoverable state instead of a mystery.
@@ -5884,6 +6028,17 @@ ${localized.next}`;
   });
   const codeSessionResumeService = new CodeSessionResumeService({
     flags: featureFlagService,
+    /**
+     * N1: a resume takes the run's lease and returns the continuation prompt to its caller; it does not drive
+     * the loop. Recording that the resumed run yielded the session is what keeps the inbox fence from refusing
+     * the continuation it just prepared. `yieldTask` is the same transition the pause path uses, so there is one
+     * spelling of "this run is not driving".
+     */
+    inbox: {
+      yieldTask: async ({ ctx, companyId, sessionId, runId, owner }) => {
+        await codeSessionInbox.yieldTask({ ctx, companyId, sessionId, runId, owner });
+      },
+    },
     sessions: { get: async (ctx, companyId, sessionId) => codeService.getSession(ctx, companyId, sessionId) },
     runState: codeRunStateLog,
     store: {

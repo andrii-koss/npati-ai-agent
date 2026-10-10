@@ -290,6 +290,19 @@ export interface CodeSessionResumeDeps {
       unknownOutcomeToolCalls?: number;
     }): Promise<void>;
   };
+  /**
+   * N1: the inbox task of the resumed session, when the durable inbox is wired.
+   *
+   * A resume takes the run's C6a lease and **hands the continuation prompt back** to its caller; it does not
+   * drive the loop. Leaving the inbox saying "this run is driving" therefore closed the session against the very
+   * continuation the resume had just prepared, until the 60 s lease expired. The port lets the resume record the
+   * same yield a pause records, so the next run id may take the session immediately. Optional: a deployment
+   * without the inbox keeps the old behaviour, and the marker is only ever a permission to proceed, never a
+   * grant.
+   */
+  inbox?: {
+    yieldTask(input: { ctx: AuthContext; companyId: string; sessionId: string; runId: string; owner: string }): Promise<void>;
+  };
   /** This replica's lease identity. A resume from another replica is a different owner, by design. */
   owner?: string;
   promptChars?: number;
@@ -410,6 +423,17 @@ export class CodeSessionResumeService {
     const boundary = await this.deps.runState.loadTurnBoundary(companyId, runId);
     const lost = this.lostProcesses(boundary);
     const forfeited = await this.forfeitProcesses({ ctx, companyId, projectId: session.projectId, sessionId });
+    /**
+     * N1: the lease is taken, so the session must not also be fenced against the continuation this resume is
+     * about to hand back. Recorded **after** the lease and the refusal checks (a resume that was refused changed
+     * nothing), and best effort: the marker only permits a new run id to take the session, so failing to write it
+     * degrades to the pre-N1 wait for the lease to expire rather than to an unsafe admission.
+     */
+    try {
+      await this.deps.inbox?.yieldTask({ ctx, companyId, sessionId, runId, owner });
+    } catch {
+      // Best effort: without the marker a continuation waits for the lease to expire, exactly as before N1.
+    }
     await this.recordRecovery({ companyId, sessionId, projectId: session.projectId, runId, boundary, lost });
 
     const checkpoint = await this.resolveCheckpoint(companyId, runId, boundary);
