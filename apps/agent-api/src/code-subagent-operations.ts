@@ -1,5 +1,5 @@
 import type { AuthContext, CodeProcessStore, CodeRunStateRecord, CodeSession, DurableCodeProcess } from "@npati/workspace";
-import { activeCodeProcess } from "@npati/workspace";
+import { activeCodeProcess, WorkspaceNotFoundError } from "@npati/workspace";
 import { CodeToolError } from "./code-tool-runtime";
 import type { CodeSubagentRunSummaryLike } from "./code-subagent-child-runner";
 import type {
@@ -8,6 +8,15 @@ import type {
   CodeSubagentChildRunner,
 } from "./code-agent-spawn-executor";
 import type { CodeRunStateLog } from "./code-run-state";
+import { randomUUID } from "node:crypto";
+import type { CodeSessionInboxService } from "./code-session-inbox";
+
+export class CodeAgentControlError extends Error {
+  constructor(readonly code: string, readonly httpStatus = 409) { super(code); }
+}
+export interface CodeAgentControlTarget {
+  ctx: AuthContext; companyId: string; sessionId: string; parentRunId: string; childRunId: string;
+}
 
 /**
  * Step 5 — **detached** async sub-agents, on top of C12.
@@ -37,8 +46,8 @@ import type { CodeRunStateLog } from "./code-run-state";
  *     already says it ran.
  *  3. **An unknown outcome is never replayed blindly.** Recovery reads the **child's own durable run state**
  *     first: a terminal run is settled from that state without running anything, a live lease is left alone (its
- *     owner settles it), and only a child that provably never started — or whose run is `interrupted`, which C6a
- *     defines as "not running, continuable" — is (re-)entered, under the same deterministic run id.
+ *     owner settles it), and only a reservation that never dispatched is launched automatically.
+ *     Interrupted children require explicit C10 continuation under the same run id.
  */
 
 /** One live delegation's write claim, for one parent run. */
@@ -117,6 +126,7 @@ export interface CodeSubagentDetachedSpawnInput extends CodeSubagentDelegationRe
   toolCallId: string;
   childRunId: string;
   snapshotId?: string | null;
+  maxParallelism?: number;
 }
 
 export type CodeSubagentDetachedStart =
@@ -133,12 +143,16 @@ export interface CodeSubagentDetachedRunner extends CodeSubagentChildRunner {
 
 export interface CodeSubagentOperationServiceOptions {
   store: CodeProcessStore;
-  runState: Pick<CodeRunStateLog, "loadRunState" | "startRun">;
+  runState: Pick<CodeRunStateLog, "loadRunState" | "startRun" | "markInterrupted" | "markFinished">;
   /** The same adapter the blocking path uses. A child starts through the one runner there is. */
   childRunner: () => CodeSubagentDetachedRunner | undefined;
   loadSession(input: { ctx: AuthContext; companyId: string; sessionId: string }): Promise<CodeSession | null>;
   /** The detached path is only reachable while its own flag is on. */
   enabled(input: { ctx: AuthContext; companyId: string }): Promise<boolean>;
+  controlsEnabled?(input: { ctx: AuthContext; companyId: string }): Promise<boolean>;
+  inbox?: CodeSessionInboxService;
+  ensureChildSession?(input: { ctx: AuthContext; parent: CodeSession; childRunId: string }): Promise<CodeSession>;
+  resumeChild?(input: { ctx: AuthContext; companyId: string; sessionId: string; runId: string; owner: string }): Promise<{ prompt: string; turnIndex: number; unknownCalls: number }>;
   /**
    * `code.agent.spawn` cannot be delegated, so the allow-list a child receives must not contain it; C12's
    * executor already removes it. Passed in so the check lives where the delegation record is read.
@@ -259,7 +273,7 @@ export function summarizeCodeSubagentRun(result: { summary: CodeSubagentRunSumma
 }
 
 export class CodeSubagentOperationService {
-  private readonly running = new Map<string, { controller: AbortController; parentRunId: string; operationId: string }>();
+  private readonly running = new Map<string, { controller: AbortController; parentRunId: string; operationId: string; companyId: string; sessionId: string; timer?: ReturnType<typeof setInterval> }>();
   private readonly writeScopes: CodeSubagentWriteScopeRegistry;
   private closed = false;
 
@@ -299,7 +313,7 @@ export class CodeSubagentOperationService {
      * one — the answer is only `true` when an active child record (or a live delegation of this process) was
      * actually found.
      */
-    const session = await this.options.loadSession({ ctx: input.ctx, companyId: input.companyId, sessionId: input.sessionId }).catch(() => null);
+    const session = await this.options.loadSession({ ctx: input.ctx, companyId: input.companyId, sessionId: input.sessionId });
     if (!session) return false;
     const children = await this.listChildren(this.scopeFor(session), input.parentRunId);
     return children.some((op) => activeCodeProcess(op));
@@ -317,6 +331,7 @@ export class CodeSubagentOperationService {
    * recording afterwards would leave a child nobody can join to a tool call.
    */
   async startDetached(input: CodeSubagentDetachedSpawnInput): Promise<CodeSubagentDetachedStart> {
+    if (this.closed) return { status: "refused", code: "subagent_detached_disabled", message: "The child operation service is shutting down" };
     if (!await this.options.enabled({ ctx: input.ctx, companyId: input.companyId })) {
       return { status: "refused", code: "subagent_detached_disabled", message: "Detached sub-agents are not enabled for this company" };
     }
@@ -324,37 +339,23 @@ export class CodeSubagentOperationService {
     if (!runner) {
       return { status: "refused", code: "tool_not_configured", message: "code.agent.spawn has no sub-agent runner configured" };
     }
-    if (input.allowedTools.includes(this.options.spawnTool)) {
+    if (input.allowedTools.some((tool) => tool.startsWith("code.agent."))) {
       return {
         status: "refused", code: "subagent_tool_not_delegable",
         message: `${this.options.spawnTool} cannot be delegated: depth 1 means a sub-agent works, it does not delegate`,
       };
     }
     const operationId = codeSubagentOperationId(input.parentRunId, input.toolCallId);
-    /**
-     * Write-scope disjointness is decided **before** anything is reserved: a refused delegation must leave no
-     * durable record, otherwise a scope conflict would permanently claim a slot and a child run id.
-     *
-     * Only a **writing** delegation is fenced. A read cannot conflict with a write or with another read, so the
-     * plan's "default read-only, or disjoint approved write scopes" is satisfied by fencing writers against each
-     * other — while two read-only children may share a scope, and a read-only child is never refused because a
-     * sibling happens to be writing nearby. The registry records writing claims only, so the two halves agree.
-     */
-    if (!input.readOnly) {
-      const conflict = this.writeScopes.conflict(input.parentRunId, input.paths, operationId);
-      if (conflict) {
-        throw new CodeToolError(
-          "subagent_write_scope_conflict",
-          `Another sub-agent of this run is already writing inside ${this.writeScopes.scope(input.parentRunId).slice(0, 5).join(", ")}; this delegation asked for ${input.paths.join(", ")}`,
-          409, "policy", true, this.options.spawnTool,
-        );
-      }
-    }
-
+    // Parallelism and write conflicts are checked atomically by reserve-child, across hosts.
     const session = await this.options.loadSession({ ctx: input.ctx, companyId: input.companyId, sessionId: input.sessionId });
     if (!session) {
       return { status: "refused", code: "subagent_session_missing", message: `Session ${input.sessionId} is not available to this caller` };
     }
+    if (session.companyId !== input.companyId || session.projectId !== input.projectId || session.id !== input.sessionId) {
+      return { status: "refused", code: "subagent_session_missing", message: "The delegation does not match the requested session" };
+    }
+    const parentState = await this.options.runState.loadRunState(input.companyId, input.parentRunId);
+    if (parentState?.details?.parentRunId) return { status: "refused", code: "subagent_depth_exceeded", message: "A child run cannot delegate another child" };
     const scope = this.scopeFor(session);
     const delegation: CodeSubagentDelegationRecord = {
       agentType: input.agentType,
@@ -378,6 +379,7 @@ export class CodeSubagentOperationService {
       const reservation = await this.options.store.transact(scope, {
         kind: "reserve-child", operationId, childRunId: input.childRunId, toolCallId: input.toolCallId,
         agentType: input.agentType, runId: input.parentRunId, owner: input.parentOwner, delegation: { ...delegation },
+        maxParallelism: input.maxParallelism,
       });
       /**
        * "Did **this** call create the delegation?" is the question that decides whether a child is started, and the
@@ -391,9 +393,16 @@ export class CodeSubagentOperationService {
       return { status: "refused", code, message: `The delegation could not be recorded durably (${code})` };
     }
 
-    const stored = await this.readOperation(scope, input.childRunId);
     if (created) {
-      this.launch(input.ctx, scope, delegation, input.childRunId, input.parentRunId, input.parentOwner, input.toolCallId, input.snapshotId ?? null, runner);
+      if (this.options.ensureChildSession) {
+        const childSession = await this.options.ensureChildSession({ ctx: input.ctx, parent: session, childRunId: input.childRunId });
+        if (childSession.parentSessionId !== session.id || childSession.companyId !== session.companyId || childSession.projectId !== session.projectId) throw new CodeAgentControlError("subagent_session_missing", 404);
+        await this.options.store.transact(scope, { kind: "bind-child-session", childRunId: input.childRunId, childSessionId: childSession.id });
+      }
+      const claim = await this.options.store.transact(scope, {
+        kind: "update-child", childRunId: input.childRunId, owner: input.parentOwner, state: "running",
+      });
+      if (claim.claimed) this.launch(input.ctx, scope, delegation, input.childRunId, input.parentRunId, input.parentOwner, input.toolCallId, input.snapshotId ?? null, runner, claim.operations.find((op) => op.child?.runId === input.childRunId)?.child?.sessionId);
     }
     if (!input.readOnly && input.paths.length) {
       this.writeScopes.claim(input.parentRunId, { operationId, childRunId: input.childRunId, paths: [...input.paths] });
@@ -411,13 +420,13 @@ export class CodeSubagentOperationService {
    * request the child ran under — a server fact, passed straight through — never from caller input.
    */
   async settleChild(
-    request: { ctx: AuthContext; companyId: string; projectId: string; sessionId: string },
+    request: { ctx: AuthContext; companyId: string; projectId: string; sessionId: string; parentSessionId?: string; runStateOwner?: string },
     childRunId: string,
     outcome: CodeSubagentChildOutcome,
   ): Promise<void> {
-    const session = await this.options.loadSession({ ctx: request.ctx, companyId: request.companyId, sessionId: request.sessionId });
+    const session = await this.options.loadSession({ ctx: request.ctx, companyId: request.companyId, sessionId: request.parentSessionId ?? request.sessionId });
     if (!session) return;
-    await this.settle(request.ctx, this.scopeFor(session), childRunId, outcome);
+    await this.settle(request.ctx, this.scopeFor(session), childRunId, outcome, request.runStateOwner);
   }
 
   /** Starts (or restarts) one child under its deterministic run id. Never awaited by the parent's tool call. */
@@ -431,15 +440,19 @@ export class CodeSubagentOperationService {
     toolCallId: string,
     snapshotId: string | null,
     runner: CodeSubagentDetachedRunner,
+    childSessionId?: string,
+    continuation?: CodeSubagentChildRunRequest["continuation"],
   ): void {
     const controller = new AbortController();
     const operationId = codeSubagentOperationId(parentRunId, toolCallId);
-    this.running.set(childRunId, { controller, parentRunId, operationId });
+    this.running.set(childRunId, { controller, parentRunId, operationId, companyId: scope.companyId, sessionId: scope.sessionId });
     const request: CodeSubagentChildRunRequest = {
       ctx,
       companyId: scope.companyId,
       projectId: scope.projectId,
-      sessionId: scope.sessionId,
+      sessionId: childSessionId ?? scope.sessionId,
+      ...(childSessionId ? { parentSessionId: scope.sessionId } : {}),
+      ...(continuation ? { continuation } : {}),
       parentRunId,
       toolCallId,
       runId: childRunId,
@@ -455,7 +468,8 @@ export class CodeSubagentOperationService {
       snapshotId,
       toolCallingMode: delegation.toolCallingMode,
       /** The child run's own lease identity, derived from its run id so the same delegation is always one owner. */
-      runStateOwner: codeSubagentRunOwner(childRunId),
+      runStateOwner: continuation?.owner ?? codeSubagentRunOwner(childRunId),
+      signal: controller.signal,
       /**
        * The durable parent link of this child run. It is written with the run row by the runner, in the same
        * `startRun` that creates the child: "which run delegated this one, and under which tool call" is then a
@@ -493,17 +507,20 @@ export class CodeSubagentOperationService {
       errorMessage: error instanceof Error ? error.message.slice(0, 300) : "The sub-agent run failed",
     }));
     void (async () => {
-      /**
-       * `accepted` → `running`, written from the **parent's** side: the child's run row may not exist yet, and the
-       * parent's lease is the one that certainly does. It is the transition that turns the durable record into "a
-       * producer is working on this", and it is this write — not the launch — that is visible to a later reader
-       * deciding whether a retry should adopt the existing child or start one.
-       */
-      await this.options.store.transact(scope, {
-        kind: "update-child", childRunId, owner: parentOwner, state: "running",
-      }).catch(() => this.options.logger?.warn("subagent_start_not_recorded"));
-      const outcome = await childOutcome;
-      await this.settle(ctx, scope, childRunId, outcome).catch(() => this.options.logger?.warn("subagent_detached_settle_failed"));
+      // Poll durable cancel intent while THIS service owns a live child. This only delivers a signal;
+      // execution ownership and state stay in the existing runner/run log.
+      const timer = setInterval(() => {
+        void this.readOperation(scope, childRunId).then((op) => {
+          if (op?.cancelRequested) controller.abort(Object.assign(new Error("Sub-agent interrupted"), { code: "subagent_interrupt" }));
+        }).catch(() => controller.abort(new Error("Child control state unavailable")));
+      }, 100);
+      timer.unref?.();
+      const live = this.running.get(childRunId); if (live) live.timer = timer;
+      // The durable dispatch claim was committed before launch; only settlement remains asynchronous.
+      try {
+        const outcome = await childOutcome;
+        await this.settle(ctx, scope, childRunId, outcome, request.runStateOwner).catch(() => this.options.logger?.warn("subagent_detached_settle_failed"));
+      } finally { clearInterval(timer); }
     })();
   }
 
@@ -523,6 +540,7 @@ export class CodeSubagentOperationService {
     scope: CodeProcessScopeLike,
     childRunId: string,
     outcome: CodeSubagentChildOutcome,
+    owner?: string,
   ): Promise<void> {
     const operation = await this.readOperation(scope, childRunId);
     if (!operation) return;
@@ -530,8 +548,8 @@ export class CodeSubagentOperationService {
     const completed = outcome.status === "completed";
     try {
       await this.options.store.transact(scope, {
-        kind: "update-child", childRunId, owner: codeSubagentRunOwner(childRunId),
-        state: completed ? "completed" : "failed",
+        kind: "update-child", childRunId, owner: owner ?? operation.child?.owner ?? codeSubagentRunOwner(childRunId),
+        state: outcome.status === "interrupted" ? "interrupted" : completed ? "completed" : "failed",
         errorCode: completed ? null : outcome.errorCode ?? "subagent_run_failed",
         outcome: {
           answer: outcome.answer ?? null,
@@ -552,7 +570,7 @@ export class CodeSubagentOperationService {
     }
     this.running.delete(childRunId);
     this.writeScopes.release(operation.runId, operation.operationId);
-    this.options.onSettled?.({
+    if (outcome.status !== "interrupted") this.options.onSettled?.({
       ctx, companyId: scope.companyId, projectId: scope.projectId, sessionId: scope.sessionId,
       parentRunId: operation.runId, childRunId,
     });
@@ -576,12 +594,12 @@ export class CodeSubagentOperationService {
    * to share an id can never be mistaken for a delegation.
    */
   private async readOperation(scope: CodeProcessScopeLike, childRunId: string): Promise<DurableCodeProcess | null> {
-    const listed = await this.options.store.transact(scope, { kind: "read" }).catch(() => null);
+    const listed = await this.options.store.transact(scope, { kind: "read" });
     return listed?.operations.find((op) => op.kind === "subagent" && op.child?.runId === childRunId && op.sessionId === scope.sessionId) ?? null;
   }
   /** The children of one session, newest first, as recovery and the cleanup fence read them. */
   async listChildren(scope: CodeProcessScopeLike, parentRunId?: string | null): Promise<DurableCodeProcess[]> {
-    const listed = await this.options.store.transact(scope, { kind: "read" }).catch(() => null);
+    const listed = await this.options.store.transact(scope, { kind: "read" });
     return (listed?.operations ?? []).filter((op) => op.kind === "subagent" && op.sessionId === scope.sessionId
       && (!parentRunId || op.runId === parentRunId));
   }
@@ -595,9 +613,8 @@ export class CodeSubagentOperationService {
    *    the operation is settled **from that state**, with no model call and no tool call. (A delegated run cannot
    *    ask a question — the question tool is not in a child's scope — so `waiting_for_user` is not a live pause.)
    *  - `running` with a live lease — some worker owns it; left completely alone.
-   *  - `interrupted`, expired lease, or no run row at all — C6a's own definition of "not running, continuable":
-   *    the run is re-entered through the same deterministic run id, which is idempotent in the store, so a retry
-   *    cannot create a second child.
+   *  - An accepted reservation without a run row is claimed atomically before launch.
+   *  - A dispatched child with missing, interrupted or expired run state stays fenced for explicit C10 recovery.
    */
   async recover(input: { ctx: AuthContext; companyId: string; sessionId: string; parentRunId?: string | null }): Promise<{ recovered: number; settled: number; skipped: number }> {
     if (this.closed) return { recovered: 0, settled: 0, skipped: 0 };
@@ -623,17 +640,130 @@ export class CodeSubagentOperationService {
       }
       const runner = this.options.childRunner?.();
       if (!runner) { skipped += 1; continue; }
+      // Only a reservation that has never crossed the durable dispatch boundary can be launched.
+      // An expired/interrupted child needs C10 continuation, never a fresh run of its original prompt.
+      if (state || operation.state !== "accepted") { skipped += 1; continue; }
+      if (operation.cancelRequested) {
+        await this.settle(input.ctx, scope, child.runId, { status: "failed", errorCode: "subagent_cancelled" });
+        settled += 1;
+        continue;
+      }
+      if (!child.sessionId && this.options.ensureChildSession) {
+        const childSession = await this.options.ensureChildSession({ ctx: input.ctx, parent: session, childRunId: child.runId });
+        await this.options.store.transact(scope, { kind: "bind-child-session", childRunId: child.runId, childSessionId: childSession.id });
+        child.sessionId = childSession.id;
+      }
+      const claim = await this.options.store.transact(scope, {
+        kind: "update-child", childRunId: child.runId, owner: operation.owner, state: "running",
+      });
+      if (!claim.claimed) { skipped += 1; continue; }
       const delegation = readDelegation(operation);
       recovered += 1;
-      this.launch(input.ctx, scope, delegation, child.runId, operation.runId, operation.owner, child.toolCallId, null, runner);
+      this.launch(input.ctx, scope, delegation, child.runId, operation.runId, operation.owner, child.toolCallId, null, runner, child.sessionId);
     }
     return { recovered, settled, skipped };
+  }
+
+  /** Step 6 foundation: durable cancel intent, then cooperative interruption of the SAME live child.
+   * A remote owner is reported as pending; this method never claims it stopped or releases its fence.
+   */
+  private async target(input: CodeAgentControlTarget, drain = false) {
+    if (this.closed) throw new CodeAgentControlError("subagent_control_unavailable", 503);
+    if (!drain && (!await this.options.enabled(input) || !await this.options.controlsEnabled?.(input))) throw new CodeToolError("subagent_detached_disabled", "Async agent controls are disabled", 409, "policy", false, this.options.spawnTool);
+    const session = await this.options.loadSession(input).catch((error) => {
+      if (error instanceof WorkspaceNotFoundError) throw new CodeAgentControlError("subagent_session_missing", 404);
+      throw error;
+    });
+    if (!session || session.companyId !== input.companyId || session.id !== input.sessionId) throw new CodeAgentControlError("subagent_session_missing", 404);
+    const scope = this.scopeFor(session);
+    const op = await this.readOperation(scope, input.childRunId);
+    if (!op || op.runId !== input.parentRunId) throw new CodeAgentControlError("subagent_child_not_found", 404);
+    return { session, scope, op };
+  }
+
+  async interrupt(input: CodeAgentControlTarget): Promise<"requested" | "settled" | "pending_remote"> {
+    // After rollback, existing delegated work may still be drained. Never launch work here.
+    const { scope, op } = await this.target(input, true);
+    if (!activeCodeProcess(op)) return "settled";
+    await this.options.store.transact(scope, { kind: "cancel", operationId: op.operationId });
+    const live = this.running.get(input.childRunId);
+    if (!live || live.companyId !== input.companyId || live.sessionId !== input.sessionId || live.parentRunId !== input.parentRunId) return "pending_remote";
+    live.controller.abort(Object.assign(new Error("Sub-agent interrupted"), { code: "subagent_interrupt" }));
+    return "requested";
+  }
+
+  async sendMessage(input: CodeAgentControlTarget & { requestId: string; text: string }) {
+    const { op } = await this.target(input);
+    if (!op.child?.sessionId || !this.options.inbox) throw new CodeAgentControlError("subagent_control_unavailable", 503);
+    if (!activeCodeProcess(op) || op.child.stopRequested) throw new CodeAgentControlError("subagent_not_continuable");
+    const result = await this.options.inbox.submit(input.ctx, input.companyId, op.child.sessionId, {
+      requestId: input.requestId, text: input.text, mode: "steer",
+    });
+    const message = result.messages[0];
+    return { schemaVersion: 1, childRunId: input.childRunId, childSessionId: op.child.sessionId,
+      status: "accepted", messageId: message?.id, target: message?.target, revision: result.state.revision };
+  }
+
+  async continueChild(input: CodeAgentControlTarget & { requestId: string }) {
+    const { scope, op } = await this.target(input);
+    if (!input.requestId || input.requestId.length > 200) throw new CodeAgentControlError("invalid_arguments", 400);
+    if (op.child?.continueRequestId === input.requestId || op.child?.continueRequestIds?.includes(input.requestId)) return { schemaVersion: 1, status: "accepted", childRunId: input.childRunId, duplicate: true };
+    if (!activeCodeProcess(op) || op.child?.stopRequested) throw new CodeAgentControlError("subagent_not_continuable");
+    if (!op.child?.sessionId || !this.options.resumeChild) throw new CodeAgentControlError("subagent_control_unavailable", 503);
+    if (this.running.has(input.childRunId)) throw new CodeAgentControlError("subagent_control_busy");
+    const state = await this.options.runState.loadRunState(input.companyId, input.childRunId);
+    if (!state || state.sessionId !== op.child.sessionId || !["interrupted", "running"].includes(state.status)) throw new CodeAgentControlError("subagent_not_continuable");
+    if (state.status === "running" && state.leaseExpiresAt && state.leaseExpiresAt.getTime() > (this.options.now?.() ?? Date.now())) throw new CodeAgentControlError("subagent_control_busy");
+    const runner = this.options.childRunner();
+    if (!runner) throw new CodeAgentControlError("subagent_control_unavailable", 503);
+    const owner = `subagent-resume-${randomUUID()}`;
+    const continuation = await this.options.resumeChild({ ctx: input.ctx, companyId: input.companyId, sessionId: op.child.sessionId, runId: input.childRunId, owner });
+    if (continuation.unknownCalls) throw new CodeAgentControlError("subagent_unknown_outcome");
+    const claimed = await this.options.store.transact(scope, { kind: "continue-child", childRunId: input.childRunId, requestId: input.requestId, owner }).catch(async (error) => {
+      await this.options.runState.markInterrupted({ companyId: input.companyId, runId: input.childRunId, reason: "subagent_continue_refused", owner });
+      throw error;
+    });
+    if (claimed.claimed && this.options.inbox) {
+      const session = await this.options.loadSession({ ctx: input.ctx, companyId: input.companyId, sessionId: op.child.sessionId });
+      if (!session || session.parentSessionId !== input.sessionId) throw new CodeAgentControlError("subagent_session_missing", 404);
+      await this.options.inbox.transact(session, { kind: "resume-inputs", runId: input.childRunId, owner });
+    }
+    if (claimed.claimed) this.launch(input.ctx, scope, readDelegation(op), input.childRunId, op.runId, op.owner, op.child.toolCallId, null, runner,
+      op.child.sessionId, { prompt: continuation.prompt, owner, turnIndex: continuation.turnIndex });
+    return { schemaVersion: 1, status: "accepted", childRunId: input.childRunId, duplicate: !claimed.claimed };
+  }
+
+  /** Parent terminal fence: wait, or explicitly cancel and settle before allowing cleanup. */
+  async settleChildren(input: Omit<CodeAgentControlTarget, "childRunId"> & { cancel: boolean; timeoutMs?: number }): Promise<boolean> {
+    const session = await this.options.loadSession(input); if (!session) return false;
+    const scope = this.scopeFor(session);
+    const deadline = Date.now() + (input.timeoutMs ?? 30_000);
+    do {
+      const children = (await this.listChildren(scope, input.parentRunId)).filter(activeCodeProcess);
+      if (!children.length) return true;
+      if (input.cancel) for (const child of children) {
+        if (!child.child) continue;
+        await this.options.store.transact(scope, { kind: "cancel", operationId: child.operationId, terminal: true });
+        const state = await this.options.runState.loadRunState(input.companyId, child.child.runId);
+        const live = this.running.get(child.child.runId);
+        if (live) live.controller.abort(new Error("Parent run stopped"));
+        else if (!state || state.status !== "running" || !state.leaseExpiresAt || state.leaseExpiresAt.getTime() <= Date.now()) {
+          // A dispatched missing/expired run can have a tool still alive; do not infer settlement.
+          if (child.state === "accepted" || state?.status === "interrupted" || (state && ["completed", "failed", "cancelled"].includes(state.status))) {
+            if (state?.status === "interrupted") await this.options.runState.markFinished({ companyId: input.companyId, runId: child.child.runId, status: "cancelled", reason: "parent_cancelled" });
+            await this.settle(input.ctx, scope, child.child.runId, { status: "failed", errorCode: "parent_cancelled" });
+          }
+        } else await this.options.store.transact(scope, { kind: "cancel", operationId: child.operationId });
+      }
+      if (Date.now() >= deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } while (true);
   }
 
   /** Stops every in-flight child of this process. Called on shutdown, beside the existing registries. */
   async close(): Promise<void> {
     this.closed = true;
-    for (const entry of this.running.values()) entry.controller.abort(new Error("Server shutting down"));
+    for (const entry of this.running.values()) { if (entry.timer) clearInterval(entry.timer); entry.controller.abort(new Error("Server shutting down")); }
     this.running.clear();
   }
 }

@@ -774,8 +774,8 @@ describe("security-gate: C11 the manifest the git tools were published in", () =
   it("publishes the git tools in v8 and leaves the v7 checksum frozen", () => {
     // C12 published `code.agent.spawn` in v9, so the current version moved on. What this suite pins is unchanged:
     // the git tools are the v8 publication, v8's checksum is frozen, and v7 still resolves without them.
-    expect(CODE_TOOL_MANIFEST_VERSION).toBe(10);
-    expect(CODE_TOOL_SCHEMAS).toHaveLength(39);
+    expect(CODE_TOOL_MANIFEST_VERSION).toBe(11);
+    expect(CODE_TOOL_SCHEMAS).toHaveLength(43);
     expect(toolSchemaChecksum(CODE_TOOL_SCHEMAS.filter((tool) => GIT_TOOL_NAMES.includes(tool.name))))
       .not.toBe(PUBLISHED_V7_TOOL_SCHEMA_CHECKSUM);
     // Every git tool is published, active and version 1, with both schemas — the registry's own invariants.

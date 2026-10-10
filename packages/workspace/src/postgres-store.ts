@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { codeChildSessionId } from "./code-child-session-id";
 import { PostgresCodeInboxStore } from "./code-session-inbox-postgres";
 import { PostgresCodeProcessStore } from "./code-process-store-postgres";
 import { assertNoSecrets } from "@npati/memory";
@@ -147,10 +148,10 @@ const RETENTION_AGE_COLUMN: Readonly<Record<string, string>> = Object.freeze({
  * question points at a session, a turn at a run that belongs to a code session), so there is nothing to guard.
  */
 const RETENTION_EXTRA_PREDICATE: Readonly<Record<string, string>> = Object.freeze({
-  code_process_projects: CODE_PROJECT_GUARD_FOR("t") + " AND t.state->>'cleanupToken' IS NULL AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(t.state->'operations') op WHERE (op->>'state' IN ('accepted','preparing','dispatching','running','unknown_outcome') OR (op->'completion' IS NOT NULL AND op->'completion'->'admission' IS NULL)))",
+  code_process_projects: CODE_PROJECT_GUARD_FOR("t") + " AND t.state->>'cleanupToken' IS NULL AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(t.state->'operations') op WHERE (op->>'state' IN ('accepted','preparing','dispatching','running','interrupted','unknown_outcome') OR (op->'completion' IS NOT NULL AND op->'completion'->'admission' IS NULL)))",
   code_session_inboxes: CODE_PROJECT_GUARD_FOR("t") + " AND NOT EXISTS (SELECT 1 FROM code_run_states r WHERE r.company_id=t.company_id AND r.session_id=t.session_id AND r.status IN ('running','waiting_for_user')) AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(t.state->'messages') m WHERE m->>'status' IN ('pending','claimed'))",
   project_checkpoints: CODE_PROJECT_GUARD_FOR("t"),
-  code_run_states: CODE_PROJECT_GUARD_FOR("t") + " AND NOT EXISTS (SELECT 1 FROM code_process_projects p, jsonb_array_elements(p.state->'operations') op WHERE p.company_id=t.company_id AND op->>'runId'=t.run_id AND (op->>'state' IN ('accepted','preparing','dispatching','running','unknown_outcome') OR (op->'completion' IS NOT NULL AND op->'completion'->'admission' IS NULL)))",
+  code_run_states: CODE_PROJECT_GUARD_FOR("t") + " AND NOT EXISTS (SELECT 1 FROM code_process_projects p, jsonb_array_elements(p.state->'operations') op WHERE p.company_id=t.company_id AND (op->>'runId'=t.run_id OR op->'child'->>'runId'=t.run_id) AND (op->>'state' IN ('accepted','preparing','dispatching','running','interrupted','unknown_outcome') OR (op->'completion' IS NOT NULL AND op->'completion'->'admission' IS NULL)))",
   code_session_plans: CODE_PROJECT_GUARD_FOR("t"),
   code_goals: CODE_PROJECT_GUARD_FOR("t"),
   code_session_todos: CODE_PROJECT_GUARD_FOR("t"),
@@ -2533,15 +2534,18 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     if (!isClassificationAtLeast(requested, project.dataClassification)) {
       throw new WorkspaceAccessError("Session data classification cannot be lower than the project classification");
     }
+    const id = input.childKey && input.parentSessionId
+      ? codeChildSessionId(context, companyId, projectId, input.parentSessionId, input.childKey) : randomUUID();
     const session = await this.pool.query<CodeSession>(`INSERT INTO code_sessions
       (id, workspace_id, company_id, project_id, user_id, agent_id, mode, model_profile, status, parent_session_id,
        summary, data_classification, retention_class)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,'active',$9,$10,$11,$12)
+      ON CONFLICT (id) DO NOTHING
       RETURNING ${codeSessionColumns}`,
-      [randomUUID(), context.workspaceId, companyId, projectId, context.userId, input.agentId ?? null,
+      [id, context.workspaceId, companyId, projectId, context.userId, input.agentId ?? null,
         input.mode ?? "edit", input.modelProfile ?? null, input.parentSessionId ?? null, input.summary ?? null,
         requested, input.retentionClass ?? project.retentionClass]);
-    return session.rows[0]!;
+    return session.rows[0] ?? this.getCodeSession(context, companyId, id);
   }
 
   async getCodeSession(context: AuthContext, companyId: string, sessionId: string): Promise<CodeSession> {
@@ -4904,8 +4908,8 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       // Serialize against process admission before deleting either session or project content.
       const processRows = await client.query("SELECT project_id,state FROM code_process_projects WHERE company_id=$1 AND ($2::text IS NULL OR project_id=$2) FOR UPDATE", [input.companyId, projectId ?? null]);
       for (const row of processRows.rows) {
-        const targeted = row.state.operations.filter((op: { sessionId: string }) => projectScoped || op.sessionId === key);
-        if (row.state.cleanupToken || targeted.some((op: { state: string }) => ["accepted","preparing","dispatching","running","unknown_outcome"].includes(op.state))) throw new CodeRunStateStoreError("process_cleanup_blocked", "Settle tracked producers before erasing their workspace");
+        const targeted = row.state.operations.filter((op: { sessionId: string; child?: { sessionId?: string } }) => projectScoped || op.sessionId === key || op.child?.sessionId === key);
+        if (row.state.cleanupToken || targeted.some((op: { state: string }) => ["accepted","preparing","dispatching","running","interrupted","unknown_outcome"].includes(op.state))) throw new CodeRunStateStoreError("process_cleanup_blocked", "Settle tracked producers before erasing their workspace");
       }
       for (const family of CODE_RETENTION_FAMILIES) {
         if (family.table === "code_process_projects" && !projectScoped) {

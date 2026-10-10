@@ -197,21 +197,11 @@ export const V8_TOOL_SCHEMAS: readonly CodeToolSchema[] = CODE_TOOL_SCHEMAS.filt
 /** Manifest version of the currently published schema set. Bump together with the checksum. */
 export const V9_TOOL_SCHEMAS = CODE_TOOL_SCHEMAS.filter((tool) => V8_TOOL_NAMES.includes(tool.name) || tool.name === "code.agent.spawn");
 export const PUBLISHED_V9_TOOL_SCHEMA_CHECKSUM = "b498efdc44e06ea1fd8b75860947a770e74f8b9a63dcd92026068a98de963d20";
-export const CODE_TOOL_MANIFEST_VERSION = 10;
+export const V10_TOOL_SCHEMAS = CODE_TOOL_SCHEMAS.filter((tool) => !["code.agent.spawn_async","code.agent.continue","code.agent.send_message","code.agent.interrupt"].includes(tool.name));
+export const PUBLISHED_V10_TOOL_SCHEMA_CHECKSUM = "880e0aa6ec32a5ee666864bd9174192e486f559205b8657ea3365c47c7885050";
+export const CODE_TOOL_MANIFEST_VERSION = 11;
 
-/*
- * Step 5: the detached receipt is an **in-process** extension of the published v10 set, not a new version.
- *
- * `code.agent.spawn`'s result gained fields (`status: "accepted"`, `detached`, `accepted`), and a published
- * manifest version is never edited in place — but nothing about v10 *changes* here: the runtime validates
- * arguments against `inputSchema` and builds the result envelope itself, and it never validates a result against
- * `outputSchema`, so the additive receipt travels under the version that is already published. That is also why
- * there is no second `toolManifest(…, 10)` entry in `KNOWN_TOOL_MANIFESTS`: two manifests for one published
- * version would break the "exactly one manifest per published version" invariant (and the resolvability of a
- * session pinned to v10) that `coding-agent-c2-schema-parity.test.ts` and `coding-agent-c3-capabilities.test.ts`
- * pin. When the result shape is republished, `code-tool-schemas.json` is regenerated with the next manifest
- * version and `CODE_TOOL_MANIFEST_VERSION`/`PUBLISHED_TOOL_SCHEMA_CHECKSUM` move with it.
- */
+/* Step 6 publishes additive controls and spawn_async in v11; spawn@1 and manifests v1?v10 stay frozen. */
 
 /**
  * Checksum of the published set. It is a literal so that a schema change without a version bump is a
@@ -228,7 +218,7 @@ export const CODE_TOOL_MANIFEST_VERSION = 10;
  * places that report the artifact as stale, while `assertManifestConsistent()` — and therefore the manifest
  * the application publishes — is already satisfied.
  */
-export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "880e0aa6ec32a5ee666864bd9174192e486f559205b8657ea3365c47c7885050";
+export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "a1c20d6e1be84667c158b84f65e4afba78918b6794582752c7339218f826be6b";
 
 /**
  * Checksum of the v8 published set (36 tools: everything through the eleven `code.git.*` tools). Frozen for
@@ -398,6 +388,7 @@ export const KNOWN_TOOL_MANIFESTS: readonly CodeToolManifest[] = [
   toolManifest(V7_TOOL_SCHEMAS, 7),
   toolManifest(V8_TOOL_SCHEMAS, 8),
   toolManifest(V9_TOOL_SCHEMAS, 9),
+  toolManifest(V10_TOOL_SCHEMAS, 10),
   toolManifest(CODE_TOOL_SCHEMAS, CODE_TOOL_MANIFEST_VERSION),
 ];
 

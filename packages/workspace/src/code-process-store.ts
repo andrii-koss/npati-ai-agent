@@ -1,6 +1,6 @@
 import type { DataClassification, RetentionClass } from "./types";
 
-export type DurableProcessState = "accepted" | "preparing" | "dispatching" | "running" | "completed" | "failed" | "stopped" | "timed_out" | "lost" | "unknown_outcome";
+export type DurableProcessState = "accepted" | "preparing" | "dispatching" | "running" | "interrupted" | "completed" | "failed" | "stopped" | "timed_out" | "lost" | "unknown_outcome";
 export interface CodeProcessScope {
   companyId: string; projectId: string; sessionId: string;
   dataClassification: DataClassification; retentionClass: RetentionClass;
@@ -25,7 +25,7 @@ export interface DurableCodeProcess {
    */
   kind?: "process" | "subagent";
   /** For `kind: "subagent"`: the durable child run and the parent tool call that is its join key. */
-  child?: { runId: string; toolCallId: string; agentType: string };
+  child?: { runId: string; toolCallId: string; agentType: string; sessionId?: string; owner?: string; continueRequestId?: string; continueRequestIds?: string[]; stopRequested?: boolean };
   /**
    * For `kind: "subagent"`: the delegation this operation *is* — the resolved type, the task, the approved scope
    * and the capability intersection. Recovery re-enters a child from this record, so it has to survive a restart;
@@ -57,7 +57,7 @@ export type CodeProcessCommand =
   | { kind: "reserve"; operationId: string; processId: string; executionKey: string; payloadHash: string; runId: string; owner: string; agentId: string; startedRevision: number }
   | { kind: "claim" | "adopt"; operationId: string; owner: string }
   | { kind: "update"; operationId: string; owner: string; generation: number; state?: DurableProcessState; sandboxId?: string; workspaceSnapshot?: DurableCodeProcess["workspaceSnapshot"]; exitCode?: number | null; output?: string; outputOffset?: number; lossy?: boolean; promoted?: boolean }
-  | { kind: "cancel"; operationId: string }
+  | { kind: "cancel"; operationId: string; terminal?: boolean }
   | { kind: "completion-delivered"; operationId: string; eventId: string; generation: number }
   | { kind: "completion-admit"; operationId: string; eventId: string; generation: number; runId: string; owner: string; turnIndex: number; source: "wait" | "inbox"; canonicalResult: string }
   | { kind: "cleanup-acquire"; token: string; purpose?: "prepare" }
@@ -78,8 +78,10 @@ export type CodeProcessCommand =
    * transition is the parent's and is fenced by the **parent run's** live lease.
    */
   | { kind: "reserve-child"; operationId: string; childRunId: string; toolCallId: string; agentType: string; runId: string; owner: string;
-      delegation?: Record<string, unknown> }
-  | { kind: "update-child"; childRunId: string; owner: string; state?: "running" | "completed" | "failed"; errorCode?: string | null;
+      delegation?: Record<string, unknown>; maxParallelism?: number }
+  | { kind: "bind-child-session"; childRunId: string; childSessionId: string }
+  | { kind: "continue-child"; childRunId: string; owner: string; requestId: string }
+  | { kind: "update-child"; childRunId: string; owner: string; state?: "running" | "interrupted" | "completed" | "failed"; errorCode?: string | null;
       outcome?: { answer?: string | null; filesChanged?: readonly unknown[]; toolCalls?: unknown; turns?: unknown } };
 export interface CodeProcessStoreResult {
   operations: DurableCodeProcess[];
@@ -98,7 +100,7 @@ export interface CodeProcessStore {
 export class CodeProcessStoreError extends Error {
   constructor(readonly code: string, readonly httpStatus = 409) { super(code); }
 }
-export const activeCodeProcess = (op: DurableCodeProcess) => ["accepted", "preparing", "dispatching", "running", "unknown_outcome"].includes(op.state);
+export const activeCodeProcess = (op: DurableCodeProcess) => ["accepted", "preparing", "dispatching", "running", "interrupted", "unknown_outcome"].includes(op.state);
 
 /**
  * The JSON a settled `subagent` operation stores in its free-text slot.
@@ -214,6 +216,24 @@ export function applyCodeProcess(state: CodeProcessProjectState, scope: CodeProc
       }
     } else {
       if (next.cleanupToken) throw new CodeProcessStoreError("sandbox_cleanup_in_progress");
+      const siblings = next.operations.filter((op) => op.kind === "subagent" && op.runId === command.runId
+        && op.sessionId === scope.sessionId && activeCodeProcess(op));
+      const limit = Math.max(1, Math.min(4, Math.floor(command.maxParallelism ?? 4)));
+      if (!Number.isFinite(limit) || siblings.length >= limit) throw new CodeProcessStoreError("subagent_parallelism_exceeded", 429);
+      if (command.delegation?.readOnly === false) {
+        const paths = command.delegation.paths;
+        if (!Array.isArray(paths) || !paths.length || paths.some((path) => typeof path !== "string" || !path)) {
+          throw new CodeProcessStoreError("subagent_write_scope_conflict");
+        }
+        for (const sibling of siblings) {
+          if (sibling.delegation?.readOnly !== false) continue;
+          const other = sibling.delegation.paths;
+          if (!Array.isArray(other) || !other.length || other.some((left) => typeof left !== "string"
+            || paths.some((right) => left === right || left.startsWith(`${right}/`) || String(right).startsWith(`${left}/`)))) {
+            throw new CodeProcessStoreError("subagent_write_scope_conflict");
+          }
+        }
+      }
       if (next.operations.filter((op) => op.sessionId === scope.sessionId && activeCodeProcess(op)).length >= 10 || next.operations.length >= 1000) {
         throw new CodeProcessStoreError("process_limit", 429);
       }
@@ -228,6 +248,23 @@ export function applyCodeProcess(state: CodeProcessProjectState, scope: CodeProc
       };
       next.operations.push(op); journal(op, "subagent.accepted");
       reserved = true;
+    }
+  } else if (command.kind === "bind-child-session" || command.kind === "continue-child") {
+    const op = next.operations.find((candidate) => candidate.kind === "subagent" && candidate.child?.runId === command.childRunId && candidate.sessionId === scope.sessionId);
+    if (!op?.child) throw new CodeProcessStoreError("process_not_found", 404);
+    if (command.kind === "bind-child-session") {
+      if (op.child.sessionId && op.child.sessionId !== command.childSessionId) throw new CodeProcessStoreError("subagent_child_conflict");
+      if (op.state !== "accepted" && !op.child.sessionId) throw new CodeProcessStoreError("subagent_child_conflict");
+      op.child.sessionId = command.childSessionId;
+    } else {
+      if (op.child.continueRequestId === command.requestId || op.child.continueRequestIds?.includes(command.requestId)) return { state: next, result: { operations: [structuredClone(op)], claimed: false, cleanupAcquired: false, reserved: false } };
+      const lease = leases.find((l) => l.runId === command.childRunId && l.sessionId === (op.child?.sessionId ?? scope.sessionId) && l.live && l.owner === command.owner);
+      if (!lease || op.completion || op.child.stopRequested || !["interrupted", "running", "unknown_outcome"].includes(op.state)) throw new CodeProcessStoreError("process_lease_lost");
+      const previousRequests = op.child.continueRequestIds ?? (op.child.continueRequestId ? [op.child.continueRequestId] : []);
+      if (previousRequests.length >= 256) throw new CodeProcessStoreError("process_operation_limit");
+      op.child.owner = command.owner; op.child.continueRequestId = command.requestId;
+      op.child.continueRequestIds = [...previousRequests, command.requestId];
+      op.cancelRequested = false; op.state = "running"; claimed = true; journal(op, "subagent.continued");
     }
   } else if (command.kind === "update-child") {
     /**
@@ -252,16 +289,19 @@ export function applyCodeProcess(state: CodeProcessProjectState, scope: CodeProc
     if (command.state === "running") {
       const startLease = leases.find((entry) => entry.runId === op.runId && entry.sessionId === scope.sessionId && entry.live && entry.owner === command.owner);
       if (!startLease) throw new CodeProcessStoreError("process_lease_lost");
+      if (op.cancelRequested) throw new CodeProcessStoreError("process_cancel_requested");
       if (op.state === "accepted") {
         op.state = "running"; op.startedAt = now.toISOString(); op.cancelRequested = false; journal(op, "subagent.started");
+        claimed = true;
       }
     } else if (command.state) {
-      const childLease = leases.find((entry) => entry.runId === command.childRunId && entry.sessionId === scope.sessionId);
+      if (op.child?.owner && op.child.owner !== command.owner) throw new CodeProcessStoreError("process_lease_lost");
+      const childLease = leases.find((entry) => entry.runId === command.childRunId && entry.sessionId === (op.child?.sessionId ?? scope.sessionId));
       if (childLease?.live && childLease.owner !== command.owner) throw new CodeProcessStoreError("process_lease_lost");
       if (activeCodeProcess(op)) {
         op.state = command.state;
-        op.exitCode = command.state === "completed" ? 0 : 1;
-        op.settledAt = now.toISOString();
+        op.exitCode = command.state === "interrupted" ? null : command.state === "completed" ? 0 : 1;
+        op.settledAt = command.state === "interrupted" ? null : now.toISOString();
         /**
          * The child's **outcome** goes into the operation's free-text slot. For a sub-agent that slot is metadata
          * by construction: the answer the handoff digest builder parses (findings, paths, symbols, counts) plus the
@@ -278,8 +318,9 @@ export function applyCodeProcess(state: CodeProcessProjectState, scope: CodeProc
     }
   } else if (command.kind === "cancel") {
     const op = owned(command.operationId);
+    if (command.terminal && op.child && !op.child.stopRequested) { op.child.stopRequested = true; journal(op, "subagent.stop_requested"); }
     if (activeCodeProcess(op) && !op.cancelRequested) { op.cancelRequested = true; journal(op, "process.cancel_requested"); }
-    if (op.state === "accepted") { op.state = "stopped"; op.settledAt = now.toISOString(); journal(op, "process.settled"); }
+    if (op.state === "accepted" && op.kind !== "subagent") { op.state = "stopped"; op.settledAt = now.toISOString(); journal(op, "process.settled"); }
   } else if (command.kind === "idle-check") {
     cleanupAcquired = !next.cleanupToken && !next.operations.some(activeCodeProcess);
   } else if (command.kind === "cleanup-acquire") {
@@ -314,7 +355,7 @@ export function applyCodeProcess(state: CodeProcessProjectState, scope: CodeProc
     return command.kind === "update" && command.operationId === op.operationId;
   };
   for (const op of next.operations) {
-    if (settledNow(op) && !activeCodeProcess(op) && !op.completion && (op.startedAt || op.workspaceSnapshot)) {
+    if (settledNow(op) && !activeCodeProcess(op) && !op.completion && (op.kind === "subagent" || op.startedAt || op.workspaceSnapshot)) {
       journal(op, "operation.settled");
       const eventId = `${op.operationId}:${op.generation}:${op.seq}`;
       const isChild = op.kind === "subagent" && !!op.child;

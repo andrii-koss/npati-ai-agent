@@ -33,6 +33,7 @@ import {
  * mirror drifts — a changed field without a version bump is never acceptable (rule 13).
  */
 const TOOL_NAMES = [
+  "code.agent.spawn_async", "code.agent.continue", "code.agent.send_message", "code.agent.interrupt",
   "code.shell.exec_async", "code.shell.process.wait",
   "code.fs.list",
   "code.fs.read",
@@ -164,6 +165,7 @@ const APPROVAL_REQUIRED_TOOLS = new Set([
 
 /** C3/C4 risk contract: reads are low, mutations medium, deletion and command launch high. */
 const EXPECTED_RISK: Record<string, "low" | "medium" | "high"> = {
+  "code.agent.spawn_async": "medium", "code.agent.continue": "medium", "code.agent.send_message": "medium", "code.agent.interrupt": "medium",
   "code.shell.exec_async": "high", "code.shell.process.wait": "low",
   "code.fs.list": "low",
   "code.fs.read": "low",
@@ -382,6 +384,12 @@ describe("security-gate: C2 tool schema parity", () => {
     }
     expect(v8.tools.map((tool) => tool.name), "v9's code.agent.spawn must not leak into v8").not.toContain("code.agent.spawn");
     const v9 = KNOWN_TOOL_MANIFESTS.find((manifest) => manifest.version === 9)!;
+    const v10 = KNOWN_TOOL_MANIFESTS.find((manifest) => manifest.version === 10)!;
+    expect(v10.tools).toHaveLength(39);
+    expect(v10.checksum).toBe("880e0aa6ec32a5ee666864bd9174192e486f559205b8657ea3365c47c7885050");
+    for (const name of ["code.agent.spawn_async", "code.agent.continue", "code.agent.send_message", "code.agent.interrupt"]) {
+      expect(v10.tools.map((tool) => tool.name)).not.toContain(name);
+    }
     expect(v9.tools.map((tool) => tool.name).sort()).toEqual([...V8_TOOL_NAMES, "code.agent.spawn"].sort());
     expect(v9.checksum).toBe(PUBLISHED_V9_TOOL_SCHEMA_CHECKSUM);
     expect(toolSchemaChecksum(V9_TOOL_SCHEMAS)).toBe(PUBLISHED_V9_TOOL_SCHEMA_CHECKSUM);

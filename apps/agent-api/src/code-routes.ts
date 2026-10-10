@@ -159,6 +159,7 @@ export function registerCodeRoutes(app: FastifyInstance, auth: AuthProvider, ser
     async (request, reply) => {
       try {
         const { ctx, service } = await authorizeWrite(request, request.params.companyId, "code.write");
+        if ("childKey" in (request.body ?? {})) throw new CodeError("invalid_arguments", "Internal child identity is not a public session argument", 400);
         const session = await service.createSession(ctx, request.params.companyId, request.params.projectId, request.body as never);
         return reply.code(201).send(session);
       } catch (error) { return fail(reply, error); }

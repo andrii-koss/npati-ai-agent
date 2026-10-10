@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { codeChildSessionId } from "./code-child-session-id";
 import { MemoryCodeInboxStore } from "./code-session-inbox-memory";
 import { MemoryCodeProcessStore } from "./code-process-store-memory";
 import { assertNoSecrets } from "@npati/memory";
@@ -489,9 +490,12 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     if (!isClassificationAtLeast(requested, project.dataClassification)) {
       throw new WorkspaceAccessError("Session data classification cannot be lower than the project classification");
     }
+    const id = input.childKey && input.parentSessionId
+      ? codeChildSessionId(context, companyId, projectId, input.parentSessionId, input.childKey) : randomUUID();
+    if (this.codeSessions.has(id)) return this.getCodeSession(context, companyId, id);
     const timestamp = now();
     const session: CodeSession = {
-      id: randomUUID(), workspaceId: context.workspaceId, companyId, projectId, userId: context.userId,
+      id, workspaceId: context.workspaceId, companyId, projectId, userId: context.userId,
       agentId: input.agentId ?? null, mode: input.mode ?? "edit", modelProfile: input.modelProfile ?? null,
       status: "active", parentSessionId: input.parentSessionId ?? null, runId: null,
       summary: input.summary ?? null, dataClassification: requested,

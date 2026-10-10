@@ -81,11 +81,15 @@ Acceptance:
 - parent Stop and sandbox lifetime;
 - restart recovery without duplicate child spawn.
 
-Report: `async-subagents-step-5.md` (to be created when the step is done).
+Status: **partial** after code review on 2026-10-10. Acceptance gaps and corrections:
+[async-subagents-step-5.md](async-subagents-step-5.md).
 
 ### Step 6 — Continue / send_message / interrupt
 
-Not started. Do not implement while working on Step 5.
+Status: **implemented and verified** on 2026-10-10. Versioned tool/API controls, durable child
+session/inbox routing, C10 continuation, cooperative interrupt, rollback drain and parent Stop
+fences are implemented. Hermetic and PostgreSQL acceptance evidence:
+[async-controls-step-6.md](async-controls-step-6.md). UI integration remains Step 8.
 
 ### Step 7 — Collect barrier before the existing verification/self-review
 

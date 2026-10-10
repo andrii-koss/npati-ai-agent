@@ -127,9 +127,9 @@ describe("security-gate: C9 planning tools", () => {
       // eleven `code.git.*` tools and to v9 when C12 published `code.agent.spawn`. The v6 assertions below are
       // about the frozen set v6 always was: 24 tools, and `code.ask_user` is not one of them. v7 stays frozen at
       // 25 and v8 at 36; neither may gain a later tool.
-      expect(CODE_TOOL_MANIFEST_VERSION).toBe(10);
+      expect(CODE_TOOL_MANIFEST_VERSION).toBe(11);
       expect(PUBLISHED_TOOL_SCHEMA_CHECKSUM).toBe(toolSchemaChecksum(CODE_TOOL_SCHEMAS));
-      expect(CODE_TOOL_SCHEMAS).toHaveLength(39);
+      expect(CODE_TOOL_SCHEMAS).toHaveLength(43);
 
       const v5 = resolveManifestForSession(5);
       const v6 = resolveManifestForSession(6);
@@ -158,7 +158,7 @@ describe("security-gate: C9 planning tools", () => {
       expect(v8.tools.map((tool) => tool.name), "code.agent.spawn must not leak into v8").not.toContain("code.agent.spawn");
       expect(v8.tools.map((tool) => tool.name)).toContain("code.git.push");
       const current = resolveManifestForSession(CODE_TOOL_MANIFEST_VERSION);
-      expect(current.tools).toHaveLength(39);
+      expect(current.tools).toHaveLength(43);
       expect(current.tools.map((tool) => tool.name)).toContain("code.ask_user");
       expect(current.tools.map((tool) => tool.name)).toContain("code.git.push");
       expect(current.tools.map((tool) => tool.name)).toContain("code.agent.spawn");

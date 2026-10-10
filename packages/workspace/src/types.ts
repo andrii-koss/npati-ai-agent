@@ -697,6 +697,8 @@ export interface ProjectMountedFolderInput {
 }
 
 export interface CodeSessionInput {
+  /** Internal deterministic child-session identity; never accepted by public session routes. */
+  childKey?: string;
   mode?: CodeSessionMode;
   agentId?: string;
   modelProfile?: string;

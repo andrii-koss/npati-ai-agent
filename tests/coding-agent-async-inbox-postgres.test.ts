@@ -15,6 +15,7 @@ describe.skipIf(!databaseUrl || process.env.NPATI_SECURITY_GATE_DB !== "1")("asy
     const url = new URL(databaseUrl!); url.pathname = `/${name}`;
     const store = new PostgresWorkspaceStore(url.toString());
     const other = new PostgresWorkspaceStore(url.toString());
+    const restarted = new PostgresWorkspaceStore(url.toString());
     const pool = new Pool({ connectionString: url.toString() });
     let storeClosed = false;
     await runWithCleanup(async () => {
@@ -107,12 +108,50 @@ describe.skipIf(!databaseUrl || process.env.NPATI_SECURITY_GATE_DB !== "1")("asy
       await other.codeProcesses.transact(siblingScope, siblingOp);
       await expect(other.codeDataLifecycle!.eraseCodeData({ companyId: company.id, target: { kind: "project", projectId: project.project.id } })).rejects.toMatchObject({ code: "process_cleanup_blocked" });
       await other.codeProcesses.transact(siblingScope, { kind: "cancel", operationId: siblingOp.operationId });
+      // Step 6: the child session and control state survive a fresh pool, with a distinct child lease.
+      await restarted.initialize(ctx);
+      const childInput = { mode: "edit" as const, parentSessionId: sibling.id, childKey: "control-child" };
+      const [child, sameChild] = await Promise.all([
+        other.createCodeSession(ctx, company.id, project.project.id, childInput),
+        restarted.createCodeSession(ctx, company.id, project.project.id, childInput),
+      ]);
+      expect(child.id).toBe(sameChild.id);
+      expect(child.id).not.toBe(sibling.id);
+      const childScope = { ...scope, sessionId: child.id };
+      const controlOperationId = randomUUID();
+      await other.codeProcesses.transact(siblingScope, { kind: "reserve-child", operationId: controlOperationId,
+        childRunId: "control-child", toolCallId: "control-call", agentType: "explore", runId: "sibling", owner: "sibling" });
+      await other.codeProcesses.transact(siblingScope, { kind: "bind-child-session", childRunId: "control-child", childSessionId: child.id });
+      await other.codeProcesses.transact(siblingScope, { kind: "update-child", childRunId: "control-child", state: "running", owner: "sibling" });
+      const childLog = new CodeRunStateLog({ store: other });
+      await childLog.startRun({ ctx, ...childScope, runId: "control-child", owner: "child-worker" });
+      await other.codeInbox.transact(childScope, { kind: "open", runId: "control-child", owner: "child-worker" });
+      await restarted.codeProcesses.transact(siblingScope, { kind: "cancel", operationId: controlOperationId });
+      await childLog.markInterrupted({ companyId: company.id, runId: "control-child", reason: "subagent_interrupt", owner: "child-worker" });
+      await other.codeProcesses.transact(siblingScope, { kind: "update-child", childRunId: "control-child", owner: "child-worker", state: "interrupted" });
+      await expect(restarted.codeDataLifecycle!.eraseCodeData({ companyId: company.id, target: { kind: "session", sessionId: child.id } })).rejects.toMatchObject({ code: "process_cleanup_blocked" });
+      await pool.query("UPDATE code_process_projects SET updated_at='2020-01-01',retention_class='short' WHERE company_id=$1", [company.id]);
+      await pool.query("UPDATE code_run_states SET started_at='2020-01-01',retention_class='short' WHERE company_id=$1 AND run_id='control-child'", [company.id]);
+      await restarted.codeDataLifecycle!.planCodeDataRetention({ companyId: company.id, windows: resolveCodeRetentionWindows({ toolResultRetentionDays: 1, transcriptRetentionDays: 1 }), now: new Date(), dryRun: false });
+      expect((await childLog.loadRunState(company.id, "control-child"))?.status).toBe("interrupted");
+      expect((await restarted.codeProcesses.transact(siblingScope, { kind: "read" })).operations.find(op => op.child?.runId === "control-child")?.state).toBe("interrupted");
+      await restarted.codeInbox.transact(childScope, { kind: "submit", id: "paused-message", requestId: "paused-request", authorId: ctx.userId, text: "Inspect constraints", mode: "steer" });
+      const resumedLog = new CodeRunStateLog({ store: restarted });
+      expect((await resumedLog.resumeRun({ companyId: company.id, runId: "control-child", owner: "resumed-child" })).held).toBe(true);
+      expect((await restarted.codeProcesses.transact(siblingScope, { kind: "continue-child", childRunId: "control-child", owner: "resumed-child", requestId: "continue-control" })).claimed).toBe(true);
+      expect((await other.codeProcesses.transact(siblingScope, { kind: "continue-child", childRunId: "control-child", owner: "resumed-child", requestId: "continue-control" })).claimed).toBe(false);
+      await restarted.codeInbox.transact(childScope, { kind: "resume-inputs", runId: "control-child", owner: "resumed-child" });
+      await restarted.codeInbox.transact(childScope, { kind: "open", runId: "control-child", owner: "resumed-child" });
+      expect((await restarted.codeInbox.transact(childScope, { kind: "drain", runId: "control-child", owner: "resumed-child", turnIndex: 2 })).messages[0]?.text).toBe("Inspect constraints");
+      await resumedLog.markFinished({ companyId: company.id, runId: "control-child", status: "completed" });
+      await expect(other.codeProcesses.transact(siblingScope, { kind: "update-child", childRunId: "control-child", owner: "child-worker", state: "failed" })).rejects.toMatchObject({ code: "process_lease_lost" });
+      await restarted.codeProcesses.transact(siblingScope, { kind: "update-child", childRunId: "control-child", owner: "resumed-child", state: "completed" });
       const erased = await other.codeDataLifecycle!.eraseCodeData({ companyId: company.id, target: { kind: "session", sessionId: session.id } });
       expect(erased.verified).toBe(true);
       expect((await other.codeProcesses.transact(siblingScope, { kind: "read" })).operations[0]!.operationId).toBe(siblingOp.operationId);
       expect((await other.codeProcesses.transact(scope, { kind: "read" })).operations).toEqual([]);
     }, async () => {
-      const resources = await Promise.allSettled([storeClosed ? Promise.resolve() : store.close(), other.close(), pool.end()]);
+      const resources = await Promise.allSettled([storeClosed ? Promise.resolve() : store.close(), other.close(), restarted.close(), pool.end()]);
       const failures = resources.filter((r): r is PromiseRejectedResult => r.status === "rejected").map((r) => r.reason);
       try { await admin.query(`DROP DATABASE IF EXISTS "${name}"`); } catch (error) { failures.push(error); }
       try { await admin.end(); } catch (error) { failures.push(error); }

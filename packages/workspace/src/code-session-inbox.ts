@@ -9,6 +9,7 @@ export interface CodeInboxMessage {
   requestId: string;
   /** Immutable submit identity; edits change content, never the accepted request. */
   requestFingerprint?: string;
+  mode?: "queue" | "steer";
   authorId: string;
   text: string;
   target: "next-turn" | "next-step";
@@ -76,6 +77,7 @@ export type CodeInboxCommand =
   | { kind: "dispatch-error" }
   | { kind: "open"; runId: string; owner: string; initialMessageId?: string }
   | { kind: "drain"; runId: string; owner: string; turnIndex: number }
+  | { kind: "resume-inputs"; runId: string; owner: string }
   | { kind: "seal"; runId: string; owner: string }
   | { kind: "close"; runId: string; owner: string };
 export interface CodeInboxResult {
@@ -155,7 +157,7 @@ export function applyCodeInbox(
       if (pending("next-turn").length + pending("next-step").length >= 100 || state.messages.length >= 1_000
         || state.messages.reduce((size, m) => size + m.text.length, command.text.length) > 2_000_000) throw new CodeInboxError("inbox_full", 429);
       const target = command.mode === "steer" && state.phase === "running" && live(state.runId) ? "next-step" : "next-turn";
-      const message: CodeInboxMessage = { id: command.id, requestId: command.requestId, requestFingerprint, authorId: command.authorId,
+      const message: CodeInboxMessage = { id: command.id, requestId: command.requestId, requestFingerprint, authorId: command.authorId, mode: command.mode,
         text: command.text, target, status: "pending", runId: null, turnIndex: null, revision: 1, createdAt: now.toISOString() };
       state.messages.push(message);
       event("input.accepted", message.id, target === "next-step" ? state.runId : null);
@@ -253,6 +255,9 @@ export function applyCodeInbox(
     }
     // Inputs admitted before a crash are recoverable independently of a terminal replay bundle.
     delivered.push(...state.messages.filter((m) => m.runId === command.runId && m.status === "admitted" && m.turnIndex !== 0 && m.id !== command.initialMessageId));
+  } else if (command.kind === "resume-inputs") {
+    if (live(command.runId)?.owner !== command.owner || (state.runId && state.runId !== command.runId)) throw new CodeInboxError("inbox_lease_lost");
+    for (const message of pending("next-turn").filter((m) => m.mode === "steer")) { message.target = "next-step"; event("input.updated", message.id); }
   } else if (command.kind === "drain") {
     fence(command.runId, command.owner);
     if (state.phase !== "running") throw new CodeInboxError("inbox_task_sealed");

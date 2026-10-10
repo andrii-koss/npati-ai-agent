@@ -315,15 +315,15 @@ describe("C13 static manifest / schema parity", () => {
   it("matches the published manifest v9 and its 37 code tools, schema by schema", () => {
     const result = checkStaticManifestParity(readManifest());
     expect(result.ok).toBe(true);
-    expect(result.facts.manifestVersion).toBe(10);
-    expect(result.facts.manifestTools).toBe(39);
-    expect(result.facts.catalogCodeTools).toBe(39);
+    expect(result.facts.manifestVersion).toBe(11);
+    expect(result.facts.manifestTools).toBe(43);
+    expect(result.facts.catalogCodeTools).toBe(43);
     expect(result.issues.length).toBe(0);
   });
 
   it("fails on a manifest version bump that the pinned constant does not know about", () => {
     const manifest = readManifest();
-    manifest.manifestVersion = 11;
+    manifest.manifestVersion = 12;
     const result = checkStaticManifestParity(manifest);
     expect(result.ok).toBe(false);
     expect(codes(result)).toContain("manifest_version_divergence");
@@ -359,11 +359,11 @@ describe("C13 static manifest / schema parity", () => {
       const result = checkStaticManifestParity(readManifest());
       expect(result.ok).toBe(false);
       expect(codes(result)).toContain("catalog_code_tool_missing_from_manifest");
-      expect(result.facts.catalogCodeTools).toBe(40);
+      expect(result.facts.catalogCodeTools).toBe(44);
     } finally {
       CAPABILITY_CATALOG.pop();
     }
     expect(checkStaticManifestParity(readManifest()).ok).toBe(true);
-    expect(checkStaticManifestParity(readManifest()).facts.catalogCodeTools).toBe(39);
+    expect(checkStaticManifestParity(readManifest()).facts.catalogCodeTools).toBe(43);
   });
 });
