@@ -232,6 +232,9 @@ import { createAutomationExecutor } from "./automation-executor-wiring";
 import { createRedisHealthWiring } from "./redis-health-wiring";
 import { createEnrichedPolicyEngineWiring } from "./enriched-policy-engine-wiring";
 import { createShellSandboxPortWiring } from "./shell-sandbox-port-wiring";
+import { createProcessSandboxPortWiring } from "./process-sandbox-port-wiring";
+import { createCodeSessionWiring } from "./code-session-wiring";
+import { createMessagingNotificationsWiring } from "./messaging-notifications-wiring";
 
 // Re-exported so existing importers keep working: tests/chat-language-routing.test.ts
 export { isSpreadsheetEditRequest, mapColumnDirectiveFromProposal };
@@ -837,7 +840,12 @@ export function buildApp(config: AppConfig = {}) {
    * same mechanism as the session-mode and production routes — no second auth path). The services
    * themselves are constructed above, together with the policy engine that consults them.
    */
-  const codeMembershipContexts = new WeakMap<object, AuthContext>();
+  // The code session modes and membership contexts (step 2c-6h).
+  const codeSessionWiring = createCodeSessionWiring({
+    config,
+    log: app.log,
+  });
+  const { codeMembershipContexts } = codeSessionWiring;
   app.addHook("preHandler", async (request) => {
     if (!/\/code\/(?:members(?:\/|$)|protected-branches(?:\/|$))/.test(request.url.split("?")[0] ?? "")) return;
     codeMembershipContexts.set(request, await authProvider.authenticate(request));
@@ -1055,44 +1063,13 @@ export function buildApp(config: AppConfig = {}) {
     projectSandbox,
   });
   const { shellSandboxPort } = shellSandboxPortWiring;
-  const processSandboxPort: CodeProcessSandboxPort | undefined = projectSandbox ? {
-    logsAreSnapshots: true,
-    start: async (input) => {
-      const result = await projectSandbox!.process(input.context, input.companyId, {
-        projectId: input.projectId, command: input.command, action: "start", agentId: "system",
-        ...(input.cwd ? { cwd: input.cwd } : {}),
-        ...(input.runId ? { runId: input.runId } : {}),
-        ...(input.approved ? { approved: true } : {}),
-      }) as { processId?: string; pid?: number; startedAt?: string | number };
-      const parsed = typeof result?.startedAt === "number" ? result.startedAt : result?.startedAt ? Date.parse(result.startedAt) : Date.now();
-      return { processId: String(result?.processId ?? ""), pid: result?.pid, startedAt: Number.isFinite(parsed) ? parsed : Date.now() };
-    },
-    logs: async (input) => {
-      const result = await projectSandbox!.process(input.context, input.companyId, {
-        projectId: input.projectId, processId: input.processId, action: "logs", agentId: "system",
-      }) as { output?: string; stdout?: string; eof?: boolean };
-      return { output: String(result?.output ?? result?.stdout ?? ""), eof: result?.eof };
-    },
-    status: async (input) => {
-      const result = await projectSandbox!.process(input.context, input.companyId, {
-        projectId: input.projectId, processId: input.processId, action: "status", agentId: "system",
-      }) as { status?: string; exitCode?: number | null };
-      const state = result.status;
-      if (state !== "running" && state !== "completed" && state !== "failed" && state !== "stopped" && state !== "timed_out" && state !== "lost") {
-        throw new Error("process_status_unknown");
-      }
-      return { state, exitCode: result.exitCode ?? null };
-    },
-    stop: async (input) => {
-      const started = Date.now();
-      const result = await projectSandbox!.process(input.context, input.companyId, {
-        projectId: input.projectId, processId: input.processId, action: "stop", agentId: "system",
-      }) as { status?: string; exitCode?: number | null };
-      const state = result.status;
-      if (state !== "stopped" && state !== "completed" && state !== "failed" && state !== "timed_out") throw new Error("process_stop_unconfirmed");
-      return { state, exitCode: result.exitCode ?? null, durationMs: Date.now() - started };
-    },
-  } : undefined;
+  // The process sandbox port (step 2c-6h).
+  const processSandboxPortWiring = createProcessSandboxPortWiring({
+    config,
+    log: app.log,
+    projectSandbox,
+  });
+  const { processSandboxPort } = processSandboxPortWiring;
   const trackedProcesses = projectSandbox && workspaceStore.codeProcesses ? new CodeAsyncProcessService({
     store: workspaceStore.codeProcesses, flags: featureFlagService,
     session: (ctx, companyId, sessionId) => workspaceStore.getCodeSession(ctx, companyId, sessionId),
@@ -1384,36 +1361,14 @@ export function buildApp(config: AppConfig = {}) {
    * background-run notices off. `notifications.backgroundResults` existed in the schema, in the migration defaults
    * and in the UI in eight locales while **no server code read it** — this is the reader.
    */
-  const notifyMessagingConnections = async (input: {
-    workspaceId: string;
-    userId: string;
-    companyId: string;
-    agentId?: string | null;
-    kind: "automation" | "background_run" | "approval";
-    title: string;
-    detail: string;
-  }) => {
-    const connections = await messagingIntegrationsRepo.listConnectedForCompany(
-      input.workspaceId, input.userId, input.companyId, input.agentId ?? undefined,
-    );
-    const wanted = (connection: (typeof connections)[number]): boolean =>
-      connectionWantsNotification(input.kind, connection.settings);
-    await Promise.allSettled(connections.filter(wanted).map(async (connection) => {
-      const notificationTarget = connection.channel === "whatsapp"
-        ? (connection.settings.access.allowedUserIds[0] || connection.externalChatId)
-        : connection.externalChatId;
-      if (!notificationTarget) return;
-      try {
-        await messagingGateway.adapter(connection.channel).sendText(
-          messagingIntegrationsRepo.resolveToken(connection), notificationTarget,
-          `${input.title}\n\n${input.detail}`, connection.externalThreadId || undefined,
-        );
-        await messagingIntegrationsRepo.record(connection.id, "outbound");
-      } catch (error) {
-        await messagingIntegrationsRepo.record(connection.id, "outbound", error instanceof Error ? error.message : String(error));
-      }
-    }));
-  };
+  // The messaging connection notifier (step 2c-6h).
+  const messagingNotificationsWiring = createMessagingNotificationsWiring({
+    config,
+    log: app.log,
+    messagingGateway,
+    messagingIntegrationsRepo,
+  });
+  const { notifyMessagingConnections } = messagingNotificationsWiring;
   const notifyAutomation = async (automation: import("./automations-repository").CompanyAutomation, status: "completed" | "failed", detail: string) => {
     await notifyMessagingConnections({
       workspaceId: automation.workspaceId,
