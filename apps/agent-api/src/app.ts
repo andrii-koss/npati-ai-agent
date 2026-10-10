@@ -4,8 +4,6 @@ import { CodeSessionInboxService } from "./code-session-inbox";
 import { registerCodeSessionInboxRoutes } from "./code-session-inbox-routes";
 import cors from "@fastify/cors";
 import { ContextBuilder, NpatiAgent } from "@npati/agent";
-import { createHubClient } from "@npati/hub-connector";
-import { InMemoryProvider } from "@npati/memory";
 import { OmniRouteEngine, OmniRouteMarketplace, type AIEngine, type ChatRequest, type ChatContentPart, type ChatToolCall, type ChatToolDefinition, isChatCapableModel, isNonChatSpecialtyModel } from "@npati/omniroute-adapter";
 import { createWebResearch, type ResearchOutcome, type ResearchProgressEvent, type ResearchProgressListener, type WebResearchService, extractTargetUrlOrDomain } from "@npati/web-research";
 import type { AgentReply, HealthResponse, ServiceHealth, ServiceStatus } from "@npati/shared";
@@ -16,7 +14,6 @@ import { WorkspaceAccessError, WorkspaceNotFoundError, DEFAULT_DATA_CLASSIFICATI
 import { ContextValidationError, validateActiveContext, defaultCapabilityRegistry, defaultHybridRouter, CapabilityInspectorService, buildCombinedCapabilityView, defaultEffectiveCapabilityResolver, CODE_READ_FLAG, CODE_WRITE_FLAG, codeIntentIsReadOnly, PROJECT_CARD_DATA_VERSION, type ProjectCardData } from "@npati/shared";
 import Fastify from "fastify";
 import path from "node:path";
-import { ActiveContextResolver } from "./active-context-resolver";
 import { SpreadsheetModifier } from "./spreadsheet-modifier";
 import { BusinessActionHandler } from "./business-action-handler";
 import { CompanyChatActions } from "./company-chat-actions";
@@ -31,12 +28,10 @@ import { chatLanguageInstruction, companyChatCopy, detectCompanyChatLanguage, re
 import { compositeCreationCopy, compositeMemoryCopy } from "./composite-chat-i18n";
 import { companyDeleteCompletedAll, companyDeleteConfirmAll, isCompanyDeleteConfirmed } from "./company-delete-i18n";
 import { pendingCompanyDelete } from "./pending-company-delete";
-import { AIPreferencesStore } from "./ai-preferences";
 import { registerAIRoutes } from "./ai-routes";
 import { AuthenticationError, NpatiBackendAuthProvider, type AuthProvider } from "./auth";
 import { registerAuthRoutes } from "./auth-routes";
 import { registerInstallationAuthRoutes } from "./installation-auth-routes";
-import { InstallationAuthStore } from "./installation-auth";
 import { createNpatiAuthClient, type NpatiAuthClient } from "@npati/hub-connector";
 import { registerWorkspaceRoutes } from "./workspace-routes";
 import { registerProjectRoutes } from "./project-routes";
@@ -240,8 +235,6 @@ import { CompanyDelegationRuntime, companyRunTelemetryHeaders } from "./company-
 import { registerCompanyRuntimeRoutes } from "./company-runtime-routes";
 import { CompanyKnowledgeProcessor,CompanyKnowledgeRepository } from "./company-knowledge";
 import { CompanyKnowledgeQueue } from "./company-knowledge-queue";
-import { ProductionQdrantClient } from "./qdrant-client";
-import { ProductionMemoryEngineRegistry, QdrantMemoryEngineAdapter, SqliteFts5MemoryEngine } from "./knowledge-memory-engine";
 import { registerCompanyKnowledgeRoutes } from "./company-knowledge-routes";
 import { registerReliabilityAndOperationsRoutes, globalAdmissionQueue } from "./reliability-and-operations-routes";
 import { createProductionResilientAIEngine } from "./production-resilient-ai-engine";
@@ -299,14 +292,12 @@ import { registerScopedMemoryRoutes } from "./scoped-memory-routes";
 import { CompanyToolRuntime } from "./company-tool-runtime";
 import { CompanyRunQueueProducer } from "./company-run-queue";
 import { InMemoryObjectStorage, type ObjectStorage } from "./object-storage";
-import { ChatFileService } from "./chat-file-service";
 import { InMemoryFileMetadataRepository, PostgresFileMetadataRepository, type FileMetadataRepository } from "./file-metadata";
 import { InMemoryStorageProtection, RedisStorageProtection, StorageRateLimitError, type StorageProtection } from "./storage-protection";
 import { StorageReconciler, type StorageReconcilerOptions } from "./storage-reconciler";
 import { registerRuntimeCompatRoutes } from "./runtime-compat-routes";
 import { PerRequestNoMemoryGate, type NoMemoryEvaluationResult } from "./ephemeral-no-memory-and-rtk";
 import {SecurityPolicyEngine,SecurityPolicyViolation} from "./security-guardrails";
-import {webResearchUrlValidator} from "./ssrf-url-validator";
 import { assertOutboundAllowed, createOutboundGuard, setOutboundGuard } from "./outbound-exfiltration-guard";
 import {GuardrailPolicyRepository} from "./guardrail-policy-repository";
 import {registerGuardrailPolicyRoutes} from "./guardrail-policy-routes";
@@ -327,6 +318,7 @@ import { attachResearchSources, publicChatError, publicCompanyRunMessage } from 
 import { addColumnDirectiveFromMarkdown, explicitlyRequestsWebResearch, isSpreadsheetEditRequest, mapColumnDirectiveFromProposal, spreadsheetEditedMessage } from "./chat-text-directives";
 import { defaultCoreBackendHealthCheck, withHealthTimeout } from "./backend-health-probe";
 import { createAuditServices } from "./audit-services";
+import { createCoreServices } from "./core-services";
 
 // Re-exported so existing importers keep working: tests/chat-language-routing.test.ts
 export { isSpreadsheetEditRequest, mapColumnDirectiveFromProposal };
@@ -487,116 +479,36 @@ export function buildApp(config: AppConfig = {}) {
         }
       : undefined,
   });
-  const researchBundle = baseAiEngine instanceof OmniRouteEngine
-    // C4b: web fetch/crawl must obey the same SSRF policy as every other outbound request, so the
-    // hardened shared validator is injected instead of the package's lighter default.
-    // C5b: the exfiltration guard is injected alongside it, so a search query, a fetched URL or a crawl
-    // request carrying private repository content is inspected before it leaves NPATI.
-    ? createWebResearch(baseAiEngine, config.crawlerBaseUrl, process.env, {
-      validator: webResearchUrlValidator(),
-      outboundGuard: { assertOutboundAllowed: (input) => {
-        assertOutboundAllowed({
-          channel: input.channel,
-          parts: input.parts,
-          ...(input.context
-            ? { context: {
-              ...(input.context.companyId ? { companyId: input.context.companyId } : {}),
-              ...(input.context.projectId ? { projectId: input.context.projectId } : {}),
-              ...(input.context.sessionId ? { sessionId: input.context.sessionId } : {}),
-            } }
-            : {}),
-        });
-      } },
-    })
-    : undefined;
-  const webResearch = config.webResearch ?? researchBundle?.service;
-  const marketplace = config.marketplace ?? new OmniRouteMarketplace({
-    baseUrl: config.omnirouteBaseUrl,
-    apiKey: config.omnirouteApiKey,
-    managementPassword: config.omnirouteManagementPassword,
-  });
-  const attachmentDirectory = config.dataDirectory ? path.join(config.dataDirectory, "chat-attachments") : undefined;
-  const hub = createHubClient({ baseUrl: config.hubBaseUrl, apiKey: config.hubApiKey });
-  const agent = new NpatiAgent({ aiEngine, hub, memory: new InMemoryProvider() });
-  // G1 (item 2): annotated with the interface, so the store's optional `close?.()` (the pool it owns) is
-  // reachable from the shutdown hook below. The concrete implementations add nothing the composition uses.
-  const workspaceStore: WorkspaceStore = config.workspaceStore ?? (config.databaseUrl ? new PostgresWorkspaceStore(config.databaseUrl) : new InMemoryWorkspaceStore());
-  const memoryDocuments = new MemoryDocumentService(workspaceStore);
-  const objectStorage = config.objectStorage ?? (process.env.NODE_ENV === "test" ? new InMemoryObjectStorage() : undefined);
-  const fileRepository = config.fileMetadataRepository ?? (config.databaseUrl ? new PostgresFileMetadataRepository(config.databaseUrl) : new InMemoryFileMetadataRepository());
-  const storageProtection = config.storageProtection ?? (config.redisUrl ? new RedisStorageProtection(config.redisUrl) : new InMemoryStorageProtection());
-  const chatFiles = objectStorage ? new ChatFileService(objectStorage,fileRepository,workspaceStore,attachmentDirectory,storageProtection) : undefined;
-  const persistBusinessLogo = async (context: AuthContext, businessId: string, attachment: { name: string; mimeType: string; data: Buffer; kind?: string }) => {
-    if (!chatFiles) throw new Error("Persistent object storage is not configured");
-    const mimeType = attachment.mimeType.toLowerCase().split(";")[0]!.trim();
-    if (attachment.kind !== "image" || !["image/png", "image/jpeg", "image/webp"].includes(mimeType)) {
-      throw new Error("Logo must be a PNG, JPEG, or WebP image");
-    }
-    if (!attachment.data.length || attachment.data.length > 5 * 1024 * 1024) {
-      throw new Error("Logo must be between 1 byte and 5 MB");
-    }
-    const logo = await chatFiles.persistBusinessAsset(context, businessId, {
-      kind: "image",
-      name: attachment.name.replace(/[^\p{L}\p{N}._ -]/gu, "_").slice(0, 255),
-      mimeType,
-      data: attachment.data,
-    });
-    const business = await workspaceStore.updateBusiness(context, businessId, { logoFileId: logo.id });
-    const linkedCompanies = (await workspaceStore.listCompanies(context, 100)).items.filter((company) => company.businessId === business.id);
-    for (const company of linkedCompanies) {
-      const knowledge = company.knowledge.filter((item) => {
-        if (!item || typeof item !== "object") return true;
-        const value = item as Record<string, unknown>;
-        return value.source !== "linked_business" || value.name !== "Company logo";
-      });
-      knowledge.push({ attachmentId: logo.id, kind: "image", name: "Company logo", source: "linked_business" });
-      await workspaceStore.updateCompany(context, company.id, { knowledge }, company.revision);
-    }
-    return business;
-  };
-  const storageReconciler = config.databaseUrl && objectStorage ? new StorageReconciler(objectStorage,fileRepository,storageProtection,{...config.storageReconcilerOptions,onResult:(summary)=>app.log.info(summary,"Storage reconciliation completed"),onError:(error)=>app.log.error(error,"Storage reconciliation failed")}) : undefined;
-  const npatiBackendUrl = config.npatiBackendUrl ?? process.env.NPATI_BACKEND_URL;
-  let coreBackendHealthCache: { value: ServiceHealth; expiresAt: number } | undefined;
-  let coreBackendHealthPending: Promise<ServiceHealth> | undefined;
-  const coreBackendHealthCheck = config.coreBackendHealthCheck ?? (async () => {
-    if (coreBackendHealthCache && coreBackendHealthCache.expiresAt > Date.now()) return coreBackendHealthCache.value;
-    if (!coreBackendHealthPending) coreBackendHealthPending = defaultCoreBackendHealthCheck(npatiBackendUrl)
-      .then((value) => {
-        coreBackendHealthCache = { value, expiresAt: Date.now() + 15_000 };
-        return value;
-      })
-      .finally(() => { coreBackendHealthPending = undefined; });
-    return coreBackendHealthPending;
-  });
-  const npatiJwtSecret = config.npatiJwtSecret ?? process.env.NPATI_JWT_SECRET ?? process.env.JWT_SECRET;
-  const authClient = config.authClient ?? (npatiBackendUrl ? createNpatiAuthClient(npatiBackendUrl) : undefined);
-  const apiKeysRepo = new ApiKeysRepository(config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
-  const installationAuthStore = new InstallationAuthStore(config.dataDirectory);
-  const selfHosted = config.deploymentType === "self_hosted";
-  const authProvider = config.authProvider ?? new NpatiBackendAuthProvider({
-    jwtSecret: npatiJwtSecret,
-    authClient,
+  // Core platform domain (step 2b): research, storage, files, auth, memory and guardrail repositories.
+  const {
+    researchBundle,
+    webResearch,
+    marketplace,
+    attachmentDirectory,
+    hub,
+    agent,
     workspaceStore,
-    allowDevFallback: config.strictAuth ? false : (process.env.NODE_ENV === "test"),
-    apiKeysRepository: apiKeysRepo,
-    ...(selfHosted ? { isInstallationOwner: async (userId: string) => {
-      const state = await installationAuthStore.load();
-      if (state.ownerUserId) return state.ownerUserId === userId;
-      if (!state.installationToken || !authClient?.createInstallationSession) return false;
-      const verified = await authClient.createInstallationSession(state.installationToken);
-      return (await installationAuthStore.bindOwner(verified.user.id)) === userId;
-    } } : {}),
-  });
-  const aiPreferences = new AIPreferencesStore(workspaceStore, config.dataDirectory);
-  const activeContextResolver = new ActiveContextResolver(workspaceStore);
-  const knowledgeRepo = config.databaseUrl && objectStorage ? new CompanyKnowledgeRepository(config.databaseUrl) : undefined;
-  const qdrant = process.env.QDRANT_URL ? new ProductionQdrantClient(process.env.QDRANT_URL, "npati_company_knowledge", process.env.QDRANT_INT8_ENABLED !== "false") : undefined;
-  const memoryEngines = new ProductionMemoryEngineRegistry([
-    ...(qdrant ? [new QdrantMemoryEngineAdapter(qdrant)] : []),
-    ...(process.env.FTS5_DB_PATH ? [new SqliteFts5MemoryEngine(process.env.FTS5_DB_PATH)] : []),
-  ]);
-  const scopedMemory = new ScopedMemoryEngine(config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
-  const guardrailPolicies = new GuardrailPolicyRepository(config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
+    memoryDocuments,
+    objectStorage,
+    fileRepository,
+    storageProtection,
+    chatFiles,
+    persistBusinessLogo,
+    storageReconciler,
+    coreBackendHealthCheck,
+    npatiJwtSecret,
+    authClient,
+    apiKeysRepo,
+    installationAuthStore,
+    selfHosted,
+    authProvider,
+    aiPreferences,
+    activeContextResolver,
+    knowledgeRepo,
+    memoryEngines,
+    scopedMemory,
+    guardrailPolicies,
+  } = createCoreServices({ config, log: app.log, baseAiEngine, aiEngine });
   // Audit and observability domain (step 2b): the journal, its config and its two background timers.
   const {
     auditRepo,
