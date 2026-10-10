@@ -3,10 +3,11 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { SharedProjectRuntimeProvider } from "./shared-project-runtime-provider";
 import { authenticateRunnerRequest } from "./runner-readiness";
-import { SandboxProviderError, type SandboxScope, type SandboxCreateOptions, type SandboxCommandOptions, type SandboxFile, type PreviewProxyRequest } from "./sandbox-provider";
+import { assertProjectRuntimeProvider, SandboxProviderError, type SandboxScope, type SandboxCreateOptions, type SandboxCommandOptions, type SandboxFile, type PreviewProxyRequest } from "./sandbox-provider";
 import { runnerFailure } from "./sandbox-runner-diagnostics";
 
 const secret = process.env.NPATI_SANDBOX_RUNNER_SECRET ?? "";
+assertProjectRuntimeProvider("shared");
 if (secret.length < 32 || process.env.NPATI_SANDBOX_RUNNER_MODE !== "local") throw new Error("Shared runtime requires local self-hosted mode and a 32-character runner secret");
 const provider = new SharedProjectRuntimeProvider();
 const seen = new Map<string, number>();
@@ -43,7 +44,7 @@ app.post<{ Body: string }>("/v1/sandbox", async (request, reply) => {
     let result: unknown;
     switch (operation) {
       case "createSandbox": result = await provider.createSandbox(scope, p.options as SandboxCreateOptions); break;
-      case "processCapabilities": result = { durableIdentity: false, terminalStatus: false }; break;
+      case "processCapabilities": result = await provider.processCapabilities(); break;
       case "getStatus": result = await provider.getStatus(scope, id); break;
       case "startSandbox": result = await provider.startSandbox(scope, id); break;
       case "stopSandbox": result = await provider.stopSandbox(scope, id); break;
@@ -55,6 +56,7 @@ app.post<{ Body: string }>("/v1/sandbox", async (request, reply) => {
       case "stopProcess": result = await provider.stopProcess(scope, id, String(p.processId ?? "")); break;
       case "getProcessStatus": result = await provider.getProcessStatus(scope, id, String(p.processId ?? "")); break;
       case "getLogs": result = await provider.getLogs(scope, id, p.processId as string | undefined); break;
+      case "getProcessOutput": result = await provider.getProcessOutput(scope, id, String(p.processId ?? "")); break;
       case "exposePort": result = await provider.exposePort(scope, id, Number(p.port)); break;
       case "proxyPreview": result = await provider.proxyPreview(scope, id, p.options as PreviewProxyRequest); break;
       default: throw new SandboxProviderError("invalid_operation", "Operation is unavailable in shared runtime", 400);

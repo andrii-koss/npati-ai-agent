@@ -1,5 +1,20 @@
 import { createHmac, randomUUID } from "node:crypto";
 
+/** Frozen decision: docs/website-builder/SHARED_PROJECT_RUNTIME.md. Transport locality
+ * and execution architecture are separate; shared must never fall back to Docker. */
+export type ProjectRuntimeMode = "shared" | "isolated";
+export function projectRuntimeMode(env: Record<string, string | undefined> = process.env): ProjectRuntimeMode {
+  const configured = env.NPATI_PROJECT_RUNTIME_MODE;
+  if (configured && configured !== "shared" && configured !== "isolated") throw new Error("Invalid NPATI_PROJECT_RUNTIME_MODE");
+  const mode: ProjectRuntimeMode = configured === "shared" || configured === "isolated" ? configured
+    : env.NPATI_DEPLOYMENT_TYPE === "self_hosted" || env.NPATI_SANDBOX_RUNNER_MODE === "local" ? "shared" : "isolated";
+  if (mode === "shared" && env.NPATI_DEPLOYMENT_TYPE === "npati_hosted") throw new Error("Hosted deployments require isolated project execution");
+  return mode;
+}
+export function assertProjectRuntimeProvider(kind: ProjectRuntimeMode, env: Record<string, string | undefined> = process.env): void {
+  if (projectRuntimeMode(env) !== kind) throw new SandboxProviderError("runtime_architecture_violation", `Configured ${projectRuntimeMode(env)} runtime cannot use ${kind} provider`, 503, "provider_selection");
+}
+
 export type SandboxState = "created" | "running" | "stopped" | "failed" | "destroyed";
 export interface SandboxScope { workspaceId: string; userId: string; companyId: string; projectId: string; }
 export interface SandboxStatus { id: string; state: SandboxState; createdAt: string; lastActivityAt: string; }
@@ -72,6 +87,7 @@ export function sandboxProcessEnvironment(environment: Record<string, string> | 
   return entries;
 }
 export interface SandboxProvider {
+  readonly executionMode?: ProjectRuntimeMode;
   processCapabilities?(scope: SandboxScope): Promise<{ durableIdentity: boolean; terminalStatus: boolean }>;
   proxyPreview?(scope: SandboxScope, sandboxId: string, options: PreviewProxyRequest): Promise<PreviewProxyResponse>;
   inspectBrowser?(scope: SandboxScope, sandboxId: string, options: SandboxBrowserQaOptions): Promise<SandboxBrowserQaResult>;
@@ -97,9 +113,10 @@ export class SandboxProviderError extends Error {
   constructor(public readonly code: string, message: string, public readonly status = 503, public readonly step = "sandbox", public readonly tool = "project.terminal.exec", public readonly retryable = false, public readonly currentRevision?: string) { super(message); }
 }
 export class RemoteSandboxProvider implements SandboxProvider {
+  get executionMode(): ProjectRuntimeMode { return this.runtimeMode ?? projectRuntimeMode(); }
   processCapabilities(scope: SandboxScope) { return this.request<{ durableIdentity: boolean; terminalStatus: boolean }>("processCapabilities", { scope }); }
   private readonly endpoint: URL;
-  constructor(url: string, private readonly secret: string, private readonly transport: typeof fetch = fetch, private readonly mode: "local" | "remote" = (process.env.NPATI_SANDBOX_RUNNER_MODE === "local" ? "local" : "remote")) {
+  constructor(url: string, private readonly secret: string, private readonly transport: typeof fetch = fetch, private readonly mode: "local" | "remote" = (process.env.NPATI_SANDBOX_RUNNER_MODE === "local" ? "local" : "remote"), private readonly runtimeMode?: ProjectRuntimeMode) {
     if (process.env.NPATI_SANDBOX_RUNNER_MODE && !["local", "remote"].includes(process.env.NPATI_SANDBOX_RUNNER_MODE)) throw new Error("Invalid sandbox runner mode");
     this.endpoint = new URL(url);
     const loopback = ["127.0.0.1", "localhost"].includes(this.endpoint.hostname);
@@ -109,7 +126,31 @@ export class RemoteSandboxProvider implements SandboxProvider {
     if (process.env.NODE_ENV === "production" && loopback) throw new Error("Production sandbox runner must be on a separate host");
     if (!secret || secret.length < 32) throw new Error("Sandbox runner secret must be at least 32 characters");
   }
+  private async assertBackend(): Promise<void> {
+    const expected = this.runtimeMode ?? (process.env.NPATI_PROJECT_RUNTIME_MODE || process.env.NPATI_DEPLOYMENT_TYPE || process.env.NPATI_SANDBOX_RUNNER_MODE === "local" ? projectRuntimeMode() : undefined);
+    if (expected) {
+      try {
+        // Authenticated readiness proves which implementation is behind the runner URL.
+        // Check every admission; an API reconnect must not silently reach a replaced isolated runner.
+        const body = JSON.stringify({});
+        const timestamp = String(Date.now()), nonce = randomUUID();
+        const signature = createHmac("sha256", this.secret).update(`${timestamp}.${nonce}.${body}`).digest("hex");
+        const response = await this.transport(new URL("/v1/readiness", this.endpoint), {
+          method: "POST", headers: { "content-type": "application/json", "x-npati-timestamp": timestamp, "x-npati-nonce": nonce, "x-npati-signature": signature },
+          body, signal: AbortSignal.timeout(5000),
+        });
+        const report = await response.json() as { overall_ready?: boolean; details?: { runtimeMode?: string } };
+        if (!response.ok || report.overall_ready !== true || report.details?.runtimeMode !== expected) {
+          throw new SandboxProviderError("runtime_architecture_violation", `Configured ${expected} runtime requires its matching ready provider; provider fallback is prohibited`, 503, "provider_selection");
+        }
+      } catch (error) {
+        if (error instanceof SandboxProviderError) throw error;
+        throw new SandboxProviderError("runner_unavailable", `Configured ${expected} runtime readiness could not be established; provider fallback is prohibited`, 503, "provider_selection", "project.terminal.exec", true);
+      }
+    }
+  }
   private async request<T>(operation: string, payload: Record<string, unknown>, timeoutMs = 30_000): Promise<T> {
+    await this.assertBackend();
     const body = JSON.stringify({ operation, payload });
     const runnerEndpoint = new URL("/v1/sandbox", this.endpoint).origin + "/v1/sandbox";
     const requestScope = payload.scope as SandboxScope | undefined;

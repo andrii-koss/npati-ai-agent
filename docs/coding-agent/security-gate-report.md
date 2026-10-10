@@ -450,9 +450,9 @@ npm run mutation:branch -- --json          # той самий вердикт м
 | `npm run lint` (`lint-guard` + `[web-xss]`) | **exit 0** (self-test 19/19, 994 файли, allowances 7/7, ratchet `as any` не зростав) |
 | `node --check scripts/run-security-gate.mjs` | **exit 0** |
 | `node --check scripts/attack-catalogue-check.mjs` | **exit 0** |
-| `node scripts/run-security-gate.mjs --list` | **163** рядків |
-| Фіксований список гейта | `suites=163 present=163 missing=0 duplicates=0` (було 131; 138 у зрізі C14; 145 після очищення C14; 146 після набору C15 «CLI / run-start»; 148 після двох наборів C15 «mounted folder»; 149 після набору C1a, див. § 7.4; 150 після guard-набору матриці мутацій, див. § 5.1; 151 після набору «clean clone → передумови гейта» кроком G1, див. § 5.2; 152 після набору «production CrashLoop: ключ перевіряється на використанні, не на імпорті» кроком G1; 153 після набору R1-C «data lifecycle: retention, erasure, export diff»; 155 після двох наборів R1-A «ліміти і квоти» — `coding-agent-r1a-limits-and-quotas` і `coding-agent-r1a-sandbox-quotas`, див. § R1-A; 158 → 160 після двох наборів async-track Step 5/N1 `coding-agent-async-subagents-detached` і `coding-agent-async-inbox-pause-fence`) |
-| Поточний розмір фіксованого списку гейта (єдине джерело істини — `SECURITY_GATE_TESTS` у `scripts/lib/run-security-gate.mjs`) | **163** наборів; саме це число guard-набір `tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts` читає з документа і порівнює зі списком. 158 → 160 після двох наборів async-track Step 5/N1, 153 було до реєстрації двох наборів R1-A «ліміти і квоти» (§ R1-A), 152 було до реєстрації набору R1-C «data lifecycle: retention, erasure, export diff», 151 — до реєстрації набору «production CrashLoop: ключ перевіряється на використанні, не на імпорті» кроком G1, 150 — до реєстрації набору «clean clone → передумови гейта» кроком G1 (§ 5.2), 149 — до реєстрації guard-набору матриці мутацій кроком G1 (§ 5.1), 148 — до реєстрації набору C1a «dark launch / kill switch» кроком G1 (§ 7.4), 146 — до реєстрації двох наборів C15 «mounted folder» (див. § 7.2), 145 — до реєстрації набору C15 «CLI / run-start», 144 — до реєстрації цього guard-набору (тоді документ ще казав 138) |
+| `node scripts/run-security-gate.mjs --list` | **165** рядків |
+| Фіксований список гейта | `suites=165 present=165 missing=0 duplicates=0` (було 131; 138 у зрізі C14; 145 після очищення C14; 146 після набору C15 «CLI / run-start»; 148 після двох наборів C15 «mounted folder»; 149 після набору C1a, див. § 7.4; 150 після guard-набору матриці мутацій, див. § 5.1; 151 після набору «clean clone → передумови гейта» кроком G1, див. § 5.2; 152 після набору «production CrashLoop: ключ перевіряється на використанні, не на імпорті» кроком G1; 153 після набору R1-C «data lifecycle: retention, erasure, export diff»; 155 після двох наборів R1-A «ліміти і квоти» — `coding-agent-r1a-limits-and-quotas` і `coding-agent-r1a-sandbox-quotas`, див. § R1-A; 158 → 160 після двох наборів async-track Step 5/N1 `coding-agent-async-subagents-detached` і `coding-agent-async-inbox-pause-fence`) |
+| Поточний розмір фіксованого списку гейта (єдине джерело істини — `SECURITY_GATE_TESTS` у `scripts/lib/run-security-gate.mjs`) | **165** наборів; саме це число guard-набір `tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts` читає з документа і порівнює зі списком. 158 → 160 після двох наборів async-track Step 5/N1, 153 було до реєстрації двох наборів R1-A «ліміти і квоти» (§ R1-A), 152 було до реєстрації набору R1-C «data lifecycle: retention, erasure, export diff», 151 — до реєстрації набору «production CrashLoop: ключ перевіряється на використанні, не на імпорті» кроком G1, 150 — до реєстрації набору «clean clone → передумови гейта» кроком G1 (§ 5.2), 149 — до реєстрації guard-набору матриці мутацій кроком G1 (§ 5.1), 148 — до реєстрації набору C1a «dark launch / kill switch» кроком G1 (§ 7.4), 146 — до реєстрації двох наборів C15 «mounted folder» (див. § 7.2), 145 — до реєстрації набору C15 «CLI / run-start», 144 — до реєстрації цього guard-набору (тоді документ ще казав 138) |
 | Харнес (кожен набір окремо) | `fork-bomb 5/5` · `command-output-injection 2/2` · `resource-exhaustion 5/5` · `path-and-zip-slip 7/7` · `new-channels 4/4` (2 describe) · `attack-catalogue 5/5` · `gate-mutation-sensitivity 6/6` — **разом 34 тести, failed=0** |
 | Статична перевірка каталогу | `rows=24 ok=true issues=0` |
 | Фабрикації (5 видів) | усі `ok=false` зі своїми кодами (див. § 3) |
@@ -1578,3 +1578,24 @@ Manifest v11 remains 43 tools with checksum `a1c20d6e1be84667c158b84f65e4afba789
 catalogue remains 391 entries. The disposable PostgreSQL container was removed after verification.
 No application deployment or rollout flag enablement was performed. Promotion beyond `internal`
 remains subject to signed G1/R1, as required by the implementation plan.
+
+### Chat website integration and shared-runtime regression fix (2026-10-10)
+
+[Runtime regression report](shared-runtime-regression-fix.md) records the audited provider selection,
+fail-closed runtime invariant, durable shared processes and retained workspace lifecycle.
+[Chat integration](chat-website-integration.md) connects browser chat to `code_project`, canonical
+build verification, right-hand Preview and subsequent edits in the same session.
+
+Current hermetic gate: **165 suites / 2405 passed / failed=0 / skipped=0**. PostgreSQL gate:
+**3 suites / 5 passed / failed=0 / skipped=0**. Workspace/test typechecks and lint/XSS passed.
+The actual shared-runner chat drill passed source edits, two detached child runners, a canonical
+background command, Next.js production build/HTTP Preview and resumption after a fresh API instance.
+The model is scripted; external-provider behavior is not claimed. The separate real isolated Docker
+producer passed **1 test** and removed its owned container.
+
+The final deployed local stack uses one shared runtime. Five simultaneous scopes/Previews, reconnect,
+actual API restart, background process replay and selective deletion retain **13 total containers**
+at every phase, with no per-project sandbox/proxy containers. Earlier live chat phases retained 15;
+the two-container difference is documented diagnostic cleanup. Global async rollout defaults remain
+unchanged. Full repository tests were not rerun; the unrelated business-chat baseline failure remains
+documented separately.

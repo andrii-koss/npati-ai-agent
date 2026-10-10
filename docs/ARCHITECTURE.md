@@ -3,6 +3,32 @@
 NPATI Agent is split into application, domain, and infrastructure boundaries so a
 self-hosted installation does not need private NPATI infrastructure secrets.
 
+## FROZEN ARCHITECTURAL DECISION — Shared Local Runtime
+
+```text
+NPATI
+├── web
+├── api
+├── worker
+├── postgres
+├── redis
+├── ...
+└── shared-project-runtime   ← ONE container
+    ├── /projects/site
+    ├── /projects/blog
+    ├── /projects/crm
+    └── /projects/mobile
+```
+
+LOCAL/SELF-HOSTED runs all Projects in one shared runtime. Coding Agent, async subagents,
+background jobs, Preview and website editing reuse scoped project directories and processes.
+Creating Projects must never increase the Docker container count. Shared mode has no per-project
+workload or egress proxy containers and no fallback to the isolated provider.
+
+HOSTED/ISOLATED may retain per-project Docker isolation under an explicitly isolated profile.
+This decision may change only at the owner's explicit request. See the authoritative
+[runtime contract and enforcement](website-builder/SHARED_PROJECT_RUNTIME.md).
+
 ## Runtime flow
 
 ```text

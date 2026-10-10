@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { PreviewProxyRequest, PreviewProxyResponse, SandboxBrowserQaOptions, SandboxBrowserQaResult, SandboxCommandResult, SandboxCommandOptions, SandboxCreateOptions, SandboxFile, SandboxMount, SandboxProvider, SandboxScope, SandboxStatus } from "./sandbox-provider";
 import type { SandboxMountGate } from "./mounted-folder-gate";
-import { SandboxProviderError, sandboxProcessEnvironment } from "./sandbox-provider";
+import { assertProjectRuntimeProvider, SandboxProviderError, sandboxProcessEnvironment } from "./sandbox-provider";
 import { dockerFailure, safeDockerStderr } from "./sandbox-runner-diagnostics";
 import { safeProjectPath } from "./project-workspace";
 import { classifyTerminalCommand, normalizeTerminalCommand } from "./terminal-command-policy";
@@ -163,6 +163,7 @@ export function buildSandboxCreateArgs(input: {
 }
 
 export class DockerSandboxProvider implements SandboxProvider {  private readonly limits: RunnerLimits;
+  readonly executionMode = "isolated" as const;
   private readonly activity = new Map<string, number>();
   private touch(id: string) { this.activity.set(id, Date.now()); }
   constructor(limits: Partial<RunnerLimits> = {}, /** C1b admission policy; absent means every image is refused. */ private readonly imagePolicy?: SandboxImageAdmission,
@@ -197,6 +198,7 @@ export class DockerSandboxProvider implements SandboxProvider {  private readonl
     if (!allowlistEntries.every(validAllowlistEntry)) throw new Error("Invalid sandbox allowlist");
     if (!/^(?:0\.[1-9][0-9]*|[1-9][0-9]*(?:\.[0-9]+)?)$/.test(this.limits.cpu) || !/^[1-9][0-9]*(?:[kmg])?$/i.test(this.limits.memory) || !Number.isSafeInteger(this.limits.diskBytes) || this.limits.diskBytes < 16_000_000 || !Number.isSafeInteger(this.limits.pids) || this.limits.pids < 16) throw new Error("Invalid sandbox resource limits"); }
   private async docker(argsList: string[], timeoutMs = 30_000, stdin?: string | Buffer, outputLimit?: number) {
+    assertProjectRuntimeProvider("isolated");
     const action = [argsList[0], argsList[0] === "network" ? argsList[1] : undefined].filter(Boolean).join(".");
     let result: Awaited<ReturnType<typeof args>>;
     try { result = await args("docker", argsList, timeoutMs, stdin, outputLimit); }
@@ -228,6 +230,8 @@ export class DockerSandboxProvider implements SandboxProvider {  private readonl
     return { id, state: value === "running" ? "running" : value === "created" ? "created" : value === "exited" ? "stopped" : "failed", createdAt: createdAt ?? new Date().toISOString(), lastActivityAt: new Date(Number.isFinite(storedAt) ? storedAt : Date.now()).toISOString() };
   }
   async createSandbox(scope: SandboxScope, options: SandboxCreateOptions = {}): Promise<SandboxStatus> {
+    // Frozen local runtime decision: refuse before quotas, probes or any Docker command.
+    assertProjectRuntimeProvider("isolated");
     /**
      * R1 (section A, item 4): the two **deployment** limits, checked before anything else and before any Docker
      * call. Order matters for the diagnosis: "the host is overloaded" and "this Company is at its quota" are

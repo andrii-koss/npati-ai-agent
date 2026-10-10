@@ -1,0 +1,107 @@
+import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
+import type { AIEngine, OmniRouteMarketplace } from "@npati/omniroute-adapter";
+import { buildApp } from "../apps/agent-api/src/app";
+import { CodeSessionRunExecutor, type CodeSessionRunInput } from "../apps/agent-api/src/code-session-run-executor";
+import { finishCodeChatWebsite, hasCodeChatPreview } from "../apps/agent-api/src/code-chat-website";
+import { resolveChatCodeIntent } from "../apps/agent-api/src/code-intent-routing";
+import { getLatestChatProjectCard, saveChatProjectCard } from "../apps/agent-api/src/project-chat-cards";
+
+const ctx: AuthContext = { workspaceId: "chat-website-ws", userId: "chat-owner", permissions: ["admin:all", "workspace:read", "workspace:write", "business:manage", "tools:execute"] };
+async function fixture(framework = "Next.js") {
+  const store = new InMemoryWorkspaceStore(); await store.initialize();
+  const company = await store.createCompany(ctx, { name: "Chat sites" }, "chat-sites-company");
+  const { project } = await store.createProject(ctx, company.id, { name: "Shop", type: "code_project" }, "chat-shop");
+  await store.updateProjectPreview(ctx, company.id, project.id, { framework });
+  const session = await store.createCodeSession(ctx, company.id, project.id, { mode: "auto" });
+  const input: CodeSessionRunInput = { ctx, session, prompt: "Change the button", cancelRequested: () => false };
+  const ports = { getProject: async () => store.getProject(ctx, company.id, project.id),
+    startPreview: vi.fn(async () => ({ status: "running", previewUrl: "/preview/shop" })), markFailed: vi.fn(async () => undefined) };
+  return { store, company, project, session, input, ports };
+}
+const verified = { status: "completed", summary: { verification: { status: "passed", requestedTools: ["build"] } } };
+
+describe("Coding Agent website chat", () => {
+  it("keeps natural-language edits and legacy websites in a validated session, preserving read-only reviews", () => {
+    for (const projectKind of ["website", "code_project"] as const) {
+      const input = { codingEnabled: true, companyId: "c", projectId: "p", projectKind, sessionBound: true };
+      expect(resolveChatCodeIntent({ ...input, message: "Зроби кнопку зеленою" })).toEqual({ mode: "run", intent: "EDIT_CODE", readOnly: false });
+      expect(resolveChatCodeIntent({ ...input, message: "зроби ревю коду" })).toMatchObject({ mode: "run", readOnly: true });
+      expect(resolveChatCodeIntent({ ...input, message: "Зроби кнопку зеленою", codingEnabled: false })).toEqual({ mode: "chat" });
+    }
+  });
+  it("starts Preview only after the canonical production build passed", async () => {
+    const { input, ports } = await fixture();
+    expect(hasCodeChatPreview(await finishCodeChatWebsite(input, verified, ports))).toBe(true);
+    expect(ports.startPreview).toHaveBeenCalledOnce();
+  });
+  it.each(["failed", "waiting_for_user", "interrupted", "cancelled"])("never launches Preview for %s", async status => {
+    const { input, ports } = await fixture(); const run = { status };
+    expect(await finishCodeChatWebsite(input, run, ports)).toBe(run);
+    expect(ports.startPreview).not.toHaveBeenCalled();
+  });
+  it("rejects an unverified build even if the model claims completion", async () => {
+    const { input, ports } = await fixture();
+    expect(await finishCodeChatWebsite(input, { status: "completed", message: "Build passed!" }, ports)).toMatchObject({ status: "failed", reason: "website_build_not_verified" });
+    expect(ports.startPreview).not.toHaveBeenCalled(); expect(ports.markFailed).toHaveBeenCalledOnce();
+  });
+  it("does not start a process for read-only requests or plan sessions", async () => {
+    const { input, ports } = await fixture();
+    await finishCodeChatWebsite({ ...input, readOnlyIntent: true }, verified, ports);
+    await finishCodeChatWebsite({ ...input, session: { ...input.session, mode: "plan" } }, verified, ports);
+    expect(ports.startPreview).not.toHaveBeenCalled();
+  });
+  it("does not fabricate a package-manager build for static HTML", async () => {
+    const { input, ports } = await fixture("HTML/CSS");
+    expect(hasCodeChatPreview(await finishCodeChatWebsite(input, { status: "completed" }, ports))).toBe(true);
+  });
+  it("reports Preview failures before the executor publishes a completed terminal state", async () => {
+    const { input, ports } = await fixture(); ports.startPreview.mockRejectedValueOnce(new Error("Preview did not become ready"));
+    const terminal = vi.fn();
+    const executor = new CodeSessionRunExecutor({ control: { clearSession() {}, registerController() {}, unregisterController() {} },
+      runner: { run: async () => verified }, afterRun: (input, result) => finishCodeChatWebsite(input, result, ports) });
+    const outcome = await executor.execute({ ...input, sink: { signal: new AbortController().signal, emitResult() {}, emitTerminal: terminal } });
+    expect(outcome.terminalStatus).toBe("failed"); expect(terminal).toHaveBeenCalledWith("failed", "Preview did not become ready");
+    expect(ports.markFailed).toHaveBeenCalledOnce();
+  });
+  it("restores the latest project from its conversation and denies another workspace", async () => {
+    const { store, project, company, session } = await fixture();
+    const conversation = await store.createNeutralConversation(ctx, "Shop edits");
+    const msg = await store.appendNeutralMessage(ctx, conversation.id, "assistant", "Created");
+    await saveChatProjectCard(store, ctx, conversation.id, msg.id, { id: session.id, projectId: project.id, sessionId: session.id, companyId: company.id, name: project.name, status: "completed", kind: "code_project" });
+    expect(await getLatestChatProjectCard(store, ctx, conversation.id)).toMatchObject({ projectId: project.id, sessionId: session.id });
+    await expect(getLatestChatProjectCard(store, { ...ctx, workspaceId: "another-ws" }, conversation.id)).rejects.toThrow();
+  });
+  it("production stream creates code_project and reuses its session without falling back to the company builder", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "npati-chat-website-"));
+    const store = new InMemoryWorkspaceStore(); await store.initialize();
+    const company = await store.createCompany(ctx, { name: "Website company" }, "stream-website-company");
+    const engine: AIEngine = { chat: async () => ({ content: "Updated the website." }), async *stream() { yield "Updated the website."; },
+      listModels: async () => [], getModel: async () => undefined, executeTool: async () => undefined,
+      searchMemory: async () => [], saveMemory: async () => undefined, getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }) };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ dataDirectory: directory, projectWorkspaceRoot: path.join(directory, "projects"), workspaceStore: store,
+      authProvider: { authenticate: async () => ctx }, aiEngine: engine, marketplace, deploymentType: "self_hosted" });
+    const finalResult = (body: string) => {
+      const events = body.split("\n\n").filter(event => event.includes("event: result")).map(event => JSON.parse(event.split("\n").find(line => line.startsWith("data: "))!.slice(6)));
+      return events.at(-1);
+    };
+    try {
+      const first = await app.inject({ method: "POST", url: "/chat/stream", payload: { companyId: company.id, contextType: "company", message: "Створи тестовий сайт на HTML/CSS" } });
+      expect(first.statusCode, first.body).toBe(200);
+      const created = finalResult(first.body);
+      expect(created, first.body).toMatchObject({ routed: "code_runner", projectCard: { kind: "code_project", framework: "HTML/CSS" } });
+      const second = await app.inject({ method: "POST", url: "/chat/stream", payload: { conversationId: created.conversationId, contextType: "none", message: "Зроби кнопку зеленою" } });
+      const edited = finalResult(second.body);
+      expect(edited, second.body).toMatchObject({ routed: "code_runner", projectCard: { projectId: created.projectCard.projectId, sessionId: created.projectCard.sessionId } });
+      expect(await store.listProjects(ctx, company.id)).toHaveLength(1);
+      // In-memory app wiring has no privileged audit port. Routing must not bypass that refusal.
+      expect(created.run).toMatchObject({ status: "failed", reason: "refused" });
+      expect(created.run.message).toContain("audit_unavailable");
+      expect(created.projectCard.previewUrl).toBeUndefined();
+    } finally { await app.close(); await rm(directory, { recursive: true, force: true }); }
+  });
+});

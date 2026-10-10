@@ -74,11 +74,17 @@ function toRecord(row: PolicyRow): McpToolPolicyRecord | null {
  */
 export class McpToolPolicyStore implements McpToolPolicyRepositoryPort {
   private pool?: Pool;
+  private readonly ownsPool: boolean;
   private readonly memory = new Map<string, McpToolPolicyRecord>();
 
   constructor(databaseUrl?: string, pool?: Pool) {
+    this.ownsPool = !pool && !!databaseUrl?.trim();
     if (pool) this.pool = pool;
     else if (databaseUrl && databaseUrl.trim().length > 0) this.pool = new Pool({ connectionString: databaseUrl, max: 5 });
+  }
+
+  async close(): Promise<void> {
+    if (this.ownsPool) await this.pool?.end();
   }
 
   private memoryKey(ctx: AuthContext, companyId: string, connectionId: string, toolName: string): string {

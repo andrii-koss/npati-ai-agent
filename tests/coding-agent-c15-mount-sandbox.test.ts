@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -132,15 +132,20 @@ describe("security-gate: C15 sandbox mount — the argument line", () => {
   it("refuses to create a container with a mount when the runner has no gate at all", async () => {
     const admission = ADMISSION;
     const provider = new DockerSandboxProvider({}, admission);
+    const create = vi.spyOn(provider as unknown as { createSandboxInternal: () => Promise<never> }, "createSandboxInternal")
+      .mockRejectedValue(new Error("test_container_boundary"));
     // The refusal happens after image admission and before any docker command, so this is the provider's own
     // decision rather than a failure of the environment.
     const refused = await rejection(provider.createSandbox(scope, { mount: { source: "/host/repo", target: "/workspace", readOnly: false } }));
     expect(refused).toContain("mounted_folder_gate_unavailable");
+    expect(create).not.toHaveBeenCalled();
 
-    // Negative control: the same provider with no mount needs no gate, and reaches Docker (which is absent here,
-    // so the failure is the environment's, not a mount refusal).
+    // Negative control reaches the container boundary without calling real Docker.
+    // This is a hermetic gate test even when Docker is installed on the developer's machine.
     const withoutMount = await rejection(provider.createSandbox(scope, {}));
     expect(withoutMount.includes("mounted_folder")).toBe(false);
+    expect(withoutMount).toContain("test_container_boundary");
+    expect(create).toHaveBeenCalledOnce();
   });
 
   it("a gate refusal stops the container before it exists", async () => {

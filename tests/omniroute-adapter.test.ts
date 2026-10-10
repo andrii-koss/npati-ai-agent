@@ -2,6 +2,39 @@ import { OmniRouteEngine } from "@npati/omniroute-adapter";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe.each(["chat-completions", "responses"] as const)("Coding Agent tool names over %s", format => {
+  it("sends valid aliases, rewrites history/choice and restores canonical names before execution", async () => {
+    const engine = new OmniRouteEngine({ baseUrl: "http://omniroute:20128" });
+    await seedModels(engine, [{ id: "test/model", type: "chat", supported_endpoints: [format === "responses" ? "/v1/responses" : "/v1/chat/completions"] }]);
+    const request = { model: "test/model", tools: ["code.fs.read", "code_fs_read", `code.${"long".repeat(30)}`].map(name => ({ type: "function" as const, function: { name, description: "Read source", parameters: { type: "object" } } })),
+      toolChoice: { type: "function" as const, function: { name: "code.fs.read" } },
+      messages: [{ role: "assistant" as const, content: null, tool_calls: [{ id: "previous", type: "function" as const, function: { name: "code.fs.read", arguments: "{}" } }] },
+        { role: "tool" as const, name: "code.fs.read", tool_call_id: "previous", content: "source" }] };
+    const original = JSON.stringify(request);
+    const aliases: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init.body));
+      const names = body.tools.map((tool: any) => format === "responses" ? tool.name : tool.function.name);
+      for (const name of names) expect(name).toMatch(/^[a-zA-Z0-9_-]{1,64}$/);
+      expect(new Set(names).size).toBe(3); expect(names[1]).toBe("code_fs_read");
+      aliases.push(names[0]);
+      if (format === "responses") {
+        expect(body.tool_choice).toEqual({ type: "function", name: names[0] });
+        expect(body.input[0]).toMatchObject({ type: "function_call", name: names[0], call_id: "previous" });
+      } else {
+        expect(body.tool_choice.function.name).toBe(names[0]);
+        expect(body.messages[0].tool_calls[0].function.name).toBe(names[0]);
+        expect(body.messages[1].name).toBe(names[0]);
+      }
+      return new Response(JSON.stringify(format === "responses"
+        ? { output: [{ type: "function_call", call_id: "next", name: names[0], arguments: "{}" }] }
+        : { choices: [{ message: { tool_calls: [{ id: "next", type: "function", function: { name: names[0], arguments: "{}" } }] } }] }), { status: 200 });
+    }));
+    for (let turn = 0; turn < 2; turn++) expect((await engine.chat(request)).toolCalls?.[0]).toMatchObject({ id: "next", function: { name: "code.fs.read", arguments: "{}" } });
+    expect(aliases[0]).toBe(aliases[1]); expect(JSON.stringify(request)).toBe(original);
+  });
+});
 async function seedModels(engine: OmniRouteEngine, models: Array<{ id: string; type?: string; supported_endpoints?: string[] }>) {
   const providerFetch = globalThis.fetch;
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: models }), { status: 200 })));

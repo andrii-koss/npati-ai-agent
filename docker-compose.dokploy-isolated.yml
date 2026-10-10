@@ -31,6 +31,7 @@ services:
       NODE_ENV: production
       NPATI_ENV: production
       NPATI_AGENT_API_PORT: 3001
+      NPATI_PROJECT_RUNTIME_MODE: isolated
       NPATI_SANDBOX_RUNNER_MODE: ${NPATI_SANDBOX_RUNNER_MODE:-local}
       NPATI_SANDBOX_RUNNER_URL: ${NPATI_SANDBOX_RUNNER_URL:-http://sandbox-runner:7865}
       NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:-}
@@ -179,6 +180,7 @@ services:
       target: sandbox-runner
     restart: unless-stopped
     environment:
+      NPATI_PROJECT_RUNTIME_MODE: isolated
       NPATI_SANDBOX_RUNNER_MODE: local
       NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:-}
       NPATI_SANDBOX_IMAGE: npati/project-sandbox:local

@@ -1,5 +1,9 @@
 # Coding Agent — architecture and component boundaries (C14)
 
+The [frozen shared local runtime decision](../website-builder/SHARED_PROJECT_RUNTIME.md#frozen-architectural-decision--shared-local-runtime)
+applies to every code execution path, including async processes/subagents and Preview. Local/self-hosted uses
+one shared container and scoped project processes. Only explicitly isolated deployments use per-project Docker.
+
 This document is the steady-state map of the Coding Agent: which component owns which decision, where the
 trust boundaries run, and how to find the code that enforces each claim. It is **navigation, not history**:
 the historical record lives in the documents below, and this file deliberately does not repeat them.

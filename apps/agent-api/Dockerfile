@@ -38,7 +38,9 @@ EXPOSE 7865
 CMD ["sh", "/opt/npati-sandbox-images/entrypoint.sh"]
 
 FROM runtime-base AS runtime
-RUN apk add --no-cache postgresql-client
+# Session branch admission/checkpoints execute Git in the API/worker workspace,
+# before project commands are dispatched to the shared runtime.
+RUN apk add --no-cache postgresql-client git && git --version
 RUN mkdir -p /app/data /app/project-snapshots && chown node:node /app/data /app/project-snapshots
 EXPOSE 3001
 USER node

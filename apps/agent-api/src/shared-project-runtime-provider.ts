@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import { chown, chmod, mkdir, readFile, writeFile, rename, rm, open } from "node:fs/promises";
@@ -12,7 +12,7 @@ import { normalizeTerminalCommand, classifyTerminalCommand } from "./terminal-co
 import { safeProjectPath } from "./project-workspace";
 import { gitShellHardeningEnv, resolveDepsPolicyLimits } from "./code-deps-policy";
 
-type ProcessRecord = { id: string; pid?: number; status: SandboxCommandResult["status"]; exitCode: number | null };
+type ProcessRecord = { id: string; pid?: number; status: SandboxCommandResult["status"]; exitCode: number | null; commandHash?: string };
 type Entry = SandboxStatus & { scope: SandboxScope; uid: number; port: number; processes: Record<string, ProcessRecord> };
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const scopeKey = (scope: SandboxScope) => JSON.stringify([scope.workspaceId, scope.userId, scope.companyId, scope.projectId]);
@@ -37,11 +37,15 @@ export function projectRuntimeWorkspaceCommand(command: string, directory: strin
 /** One supervisor, many logical sandboxes. It implements the existing contract,
  * so canonical file revisions, project context, approvals and audit stay in API. */
 export class SharedProjectRuntimeProvider implements SandboxProvider {
+  readonly executionMode = "shared" as const;
+  async processCapabilities() { return { durableIdentity: true, terminalStatus: true }; }
   private entries: Entry[] = [];
   private ready: Promise<void>;
   private saving: Promise<void> = Promise.resolve();
   private children = new Map<string, ChildProcess>();
   private jobs = new Map<string, Set<ChildProcess>>();
+  private outputs = new Map<string, { output: string; earliestOffset: number; nextOffset: number }>();
+  private outputSaves = new Map<string, Promise<void>>();
   constructor(private readonly root = "/projects", private readonly state = "/runtime-state", private readonly launcher = "/usr/local/bin/npati-project-exec") {
     this.ready = this.initialize();
   }
@@ -114,7 +118,13 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
   async destroySandbox(scope: SandboxScope, id: string) {
     const entry = await this.entry(scope, id);
     await this.stopSandbox(scope, id);
-    for (const processId of Object.keys(entry.processes)) await rm(path.join(this.state, `${processId}.log`), { force: true });
+    for (const processId of Object.keys(entry.processes)) {
+      await this.outputSaves.get(processId)?.catch(() => undefined);
+      await rm(path.join(this.state, `${processId}.log`), { force: true });
+      await rm(path.join(this.state, `${processId}.output.json`), { force: true });
+      this.outputs.delete(processId);
+      this.outputSaves.delete(processId);
+    }
     await rm(this.directory(entry), { recursive: true, force: true });
     this.entries = this.entries.filter(item => item !== entry); await this.persist();
   }
@@ -205,19 +215,58 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
   async startProcess(scope: SandboxScope, id: string, command: string, options: SandboxCommandOptions): Promise<SandboxCommandResult> {
     const entry = await this.entry(scope, id), normalized = this.command(command, options.cwd);
     sandboxProcessEnvironment(options.environment);
-    const processId = randomUUID();
+    const processId = options.processId ?? randomUUID();
+    if (!UUID.test(processId)) throw new SandboxProviderError("invalid_process", "Invalid process identity", 400);
+    const commandHash = createHash("sha256").update(JSON.stringify([normalized.command, normalized.cwd, options.environment ?? {}, options.timeoutMs])).digest("hex");
+    const existing = entry.processes[processId];
+    if (existing) {
+      if (existing.status === "stopped" && !existing.commandHash) return this.processResult(existing);
+      if (existing.commandHash !== commandHash) throw new SandboxProviderError("process_identity_conflict", "Process identity belongs to a different command", 409);
+      return this.processResult(existing);
+    }
+    if (this.entries.some(item => item !== entry && item.processes[processId])) throw new SandboxProviderError("process_identity_conflict", "Process identity belongs to another project", 409);
+    const record: ProcessRecord = { id: processId, status: "running", exitCode: null, commandHash };
+    entry.processes[processId] = record;
+    // Reserve the caller's durable identity before launching. A replay never respawns the job.
+    await this.persist();
     const log = await open(path.join(this.state, `${processId}.log`), "wx", 0o600);
     const child = this.launch(entry, "sh", ["-s"], normalized.cwd, options.environment, true);
-    const record: ProcessRecord = { id: processId, pid: child.pid, status: "running", exitCode: null };
+    record.pid = child.pid;
     entry.processes[processId] = record; this.children.set(processId, child);
     let written = 0;
-    const append = (chunk: Buffer) => { const available = Math.max(0, 2_000_000 - written); written += chunk.length; if (available) void log.write(chunk.subarray(0, available)).catch(() => undefined); };
+    if (options.processId) this.outputs.set(processId, { output: "", earliestOffset: 0, nextOffset: 0 });
+    const append = (text: string) => {
+      const chunk = Buffer.from(text);
+      const snapshot = this.outputs.get(processId);
+      if (snapshot) {
+        snapshot.nextOffset += text.length; snapshot.output = (snapshot.output + text).slice(-Math.min(Math.max(options.outputLimitBytes, 1024), 2_000_000));
+        snapshot.earliestOffset = snapshot.nextOffset - snapshot.output.length;
+      }
+      const available = Math.max(0, 2_000_000 - written); written += chunk.length;
+      if (available) void log.write(chunk.subarray(0, available)).catch(() => undefined);
+    };
+    child.stdout!.setEncoding("utf8"); child.stderr!.setEncoding("utf8");
     child.stdout!.on("data", append); child.stderr!.on("data", append);
     child.on("error", () => { record.status = "failed"; record.exitCode = 126; });
-    child.on("close", code => { if (record.status === "running") record.status = code === 0 ? "completed" : "failed"; record.exitCode = code; this.children.delete(processId); void log.close().catch(() => undefined); void this.persist().catch(() => undefined); });
+    const timer = options.processId ? setTimeout(() => {
+      if (record.status === "running") {
+        record.status = "timed_out";
+        if (child.pid) try { process.kill(-child.pid, "SIGKILL"); } catch { /* exited */ }
+      }
+    }, Math.min(Math.max(options.timeoutMs, 1000), 600_000)) : undefined;
+    child.on("close", async code => {
+      clearTimeout(timer);
+      // Persist output before publishing a completed terminal identity.
+      let outputFailed = false;
+      await this.saveOutput(processId).catch(() => { outputFailed = true; });
+      if (outputFailed) { record.status = "failed"; code = 126; }
+      if (record.status === "running") record.status = code === 0 ? "completed" : "failed";
+      record.exitCode = code; this.children.delete(processId);
+      await log.close().catch(() => undefined); await this.persist().catch(() => undefined);
+    });
     child.stdin!.on("error", () => undefined);
     // Preview servers are long-lived; command timeouts apply to foreground jobs.
-    child.stdin!.end(projectRuntimeWorkspaceCommand(projectRuntimeCommandPort(normalized.command, entry.port), this.directory(entry)));
+    child.stdin!.end(projectRuntimeWorkspaceCommand(options.processId ? normalized.command : projectRuntimeCommandPort(normalized.command, entry.port), this.directory(entry)));
     await this.persist();
     return this.processResult(record);
   }
@@ -225,15 +274,45 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
   private process(entry: Entry, id: string) { const record = entry.processes[id]; if (!record) throw new SandboxProviderError("process_not_found", "Process does not belong to selected Project", 404); return record; }
   async getProcessStatus(scope: SandboxScope, id: string, processId: string) { return this.processResult(this.process(await this.entry(scope, id), processId)); }
   async stopProcess(scope: SandboxScope, id: string, processId: string) {
-    const entry = await this.entry(scope, id), record = this.process(entry, processId), child = this.children.get(processId);
+    const entry = await this.entry(scope, id);
+    if (!UUID.test(processId)) throw new SandboxProviderError("invalid_process", "Invalid process identity", 400);
+    if (!entry.processes[processId]) {
+      if (this.entries.some(item => item !== entry && item.processes[processId])) throw new SandboxProviderError("process_not_found", "Process does not belong to selected Project", 404);
+      // Cancellation may arrive before dispatch. The same ID must never launch afterward.
+      entry.processes[processId] = { id: processId, status: "stopped", exitCode: null };
+    }
+    const record = this.process(entry, processId), child = this.children.get(processId);
     // Never signal persisted PIDs after supervisor restart (PID reuse).
     if (child?.pid && record.status === "running") { try { process.kill(-child.pid, "SIGKILL"); } catch { /* already stopped */ } }
-    record.status = "stopped"; await this.persist(); return this.processResult(record);
+    if (record.status === "running") record.status = "stopped";
+    await this.persist(); return this.processResult(record);
   }
   async getLogs(scope: SandboxScope, id: string, processId?: string) {
     const entry = await this.entry(scope, id);
     if (!processId) return "";
     this.process(entry, processId);
     return readFile(path.join(this.state, `${processId}.log`), "utf8");
+  }
+  private async saveOutput(processId: string) {
+    const snapshot = this.outputs.get(processId);
+    if (!snapshot) return;
+    const file = path.join(this.state, `${processId}.output.json`), temporary = `${file}.${randomUUID()}.tmp`;
+    const captured = { ...snapshot };
+    const save = (this.outputSaves.get(processId) ?? Promise.resolve()).then(async () => {
+      await writeFile(temporary, JSON.stringify(captured), { mode: 0o600 });
+      await rename(temporary, file);
+    });
+    this.outputSaves.set(processId, save);
+    await save; return captured;
+  }
+  async getProcessOutput(scope: SandboxScope, id: string, processId: string) {
+    const record = this.process(await this.entry(scope, id), processId);
+    if (record.status === "stopped" && !record.commandHash) return { output: "", earliestOffset: 0, nextOffset: 0 };
+    const captured = await this.saveOutput(processId);
+    if (captured) return captured;
+    try { return JSON.parse(await readFile(path.join(this.state, `${processId}.output.json`), "utf8")) as { output: string; earliestOffset: number; nextOffset: number }; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    const output = await this.getLogs(scope, id, processId);
+    return { output, earliestOffset: 0, nextOffset: output.length };
   }
 }

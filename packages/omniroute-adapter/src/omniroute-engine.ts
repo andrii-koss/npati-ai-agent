@@ -1,5 +1,6 @@
 import type { ServiceHealth } from "@npati/shared";
 import { isChatCapableModel } from "./normalization";
+import { providerToolNames } from "./provider-tool-names";
 import type { A2AMessageRequest, A2AMessageResult, AIEngine, AudioTranscriptionInput, AudioTranscriptionResult, ChatContentPart, ChatMessage, ChatToolCall, EmbeddingInput, EmbeddingResult, ModerationInput, ModerationResult, RerankInput, RerankResult, ChatRequest, ChatResult, MCPToolCallRequest, ModelInfo, OmniRouteComboInput, OmniRouteConfig, OmniRouteResilienceSnapshot, SpeechAudioFormat, SpeechSynthesisInput, SpeechSynthesisResult, WebFetchInput, WebPageResult, WebSearchInput, WebSearchResponse } from "./types";
 
 function requestSignal(signal: AbortSignal | undefined, timeoutMs: number) {
@@ -198,26 +199,28 @@ export class OmniRouteEngine implements AIEngine {
   }
   async chat(request: ChatRequest): Promise<ChatResult> {
     if (!this.baseUrl) throw new Error("OmniRoute is not configured");
+    const wire = await providerToolNames(request);
     const candidateModels = await this.chatCandidates(request.model, request.fallbackModel);
     let lastError = "OmniRoute chat failed";
     const startedAt = Date.now();
     for (const [index, model] of candidateModels.entries()) {
       const useResponses = requiresResponsesApi(this.chatModelMetadata.get(model));
       const path = useResponses ? "/api/v1/responses" : "/api/v1/chat/completions";
-      const responseTools = request.tools?.map((tool) => ({ type: "function", ...tool.function }));
+      const responseTools = wire.tools?.map((tool) => ({ type: "function", ...tool.function }));
+      const responseChoice = typeof wire.toolChoice === "object" ? { type: "function", name: wire.toolChoice.function.name } : wire.toolChoice ?? "auto";
       const body = useResponses
         ? {
             model,
-            input: request.messages.flatMap<any>((message) => responseInputMessage(message)),
+            input: wire.messages.flatMap<any>((message) => responseInputMessage(message)),
             stream: false,
             ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
-            ...(responseTools?.length ? { tools: responseTools, tool_choice: request.toolChoice ?? "auto", parallel_tool_calls: false } : {}),
+            ...(responseTools?.length ? { tools: responseTools, tool_choice: responseChoice, parallel_tool_calls: false } : {}),
           }
         : {
             model,
-            messages: request.messages,
+            messages: wire.messages,
             ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
-            ...(request.tools?.length ? { tools: request.tools, tool_choice: request.toolChoice ?? "auto", parallel_tool_calls: false } : {}),
+            ...(wire.tools?.length ? { tools: wire.tools, tool_choice: wire.toolChoice ?? "auto", parallel_tool_calls: false } : {}),
           };
       const response = await fetch(`${this.baseUrl}${path}`, {
         method: "POST",
@@ -250,7 +253,7 @@ export class OmniRouteEngine implements AIEngine {
         output_text?: string;
         output?: Array<Record<string, any>>;
       };
-      const toolCalls = useResponses ? responseToolCalls(payload) : payload.choices?.[0]?.message?.tool_calls ?? [];
+      const toolCalls = wire.decode(useResponses ? responseToolCalls(payload) : payload.choices?.[0]?.message?.tool_calls ?? []);
       return {
         content: useResponses ? responsesText(payload) : payload.choices?.[0]?.message?.content ?? "",
         ...(toolCalls.length ? { toolCalls } : {}),

@@ -87,6 +87,8 @@ export interface StepUpChallenge {
 /** The audit port shared by the C5a privileged modules; `app.ts` adapts it onto `AuditLogService`. */
 export interface CodePrivilegedAuditPort {
   record(input: {
+    /** Authenticated workspace of the decision, never a model-supplied scope. */
+    workspaceId?: string;
     action: string;
     actor: string;
     companyId: string;

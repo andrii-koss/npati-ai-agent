@@ -270,7 +270,7 @@ export class ProjectOrchestrator {
     ctx: AuthContext,
     companyId: string,
     projectId: string,
-    details: { name: string; description?: string; framework?: string; purpose?: string; projectType?: "website" | "mobile_app" }
+    details: { name: string; description?: string; framework?: string; purpose?: string; projectType?: "website" | "mobile_app" | "code_project" }
   ): Promise<string> {
     const isMobileApp = details.projectType === "mobile_app";
     const content = isMobileApp
@@ -310,7 +310,9 @@ export class ProjectOrchestrator {
           "- Language: TypeScript / JavaScript",
           "",
           "## Engineering Mandate & Guidelines",
-          "- **Single Source of Truth**: website.config.json defines all pages, blocks, components, styles, and content. When modifying or creating sections, keep website.config.json synchronized so the visual editor and live preview stay in sync.",
+          details.projectType === "code_project"
+            ? "- Source files are the source of truth. Edit this website in the Coding Agent workspace; preserve the attached database/auth SDK and existing routes."
+            : "- **Single Source of Truth**: website.config.json defines all pages, blocks, components, styles, and content. When modifying or creating sections, keep website.config.json synchronized so the visual editor and live preview stay in sync.",
           "- **Targeted Edits Rule**: Always search and inspect relevant files before modifying. Make surgical, targeted edits.",
           "- **No Blind Rewrites**: Do NOT recreate the entire project or overwrite unchanged components.",
           "- **Preserve Stability**: Ensure configuration, routing, and functional components remain intact across iterations.",
@@ -327,6 +329,16 @@ export class ProjectOrchestrator {
       await this.projectWorkspace.createFile(ctx, companyId, projectId, "PROJECT.md", content);
     }
     return content;
+  }
+
+  async prepareCodingWebsite(ctx: AuthContext, project: Project, prompt: string, framework: string): Promise<Project> {
+    await this.scaffoldWebsiteProject(ctx, project.companyId, project.id, project.name, framework === "Next.js" ? "nextjs" : "static", prompt);
+    await this.projectService.updatePreview(ctx, project.companyId, project.id, { framework });
+    await this.initSharedProjectContext(ctx, project.companyId, project.id, { name: project.name, description: prompt, framework, projectType: "code_project" });
+    if (framework === "Next.js" && this.prepareWebsiteData) {
+      await this.prepareWebsiteData(ctx, await this.projectService.get(ctx, project.companyId, project.id), prompt);
+    }
+    return this.projectService.get(ctx, project.companyId, project.id);
   }
 
   private async scaffoldWebsiteProject(ctx: AuthContext, companyId: string, projectId: string, projectName: string, framework: "nextjs" | "static", prompt?: string) {

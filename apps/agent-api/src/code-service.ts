@@ -141,7 +141,7 @@ export class CodeService {
    * (private repositories go through the Company vault credential), then the toolchain is detected
    * from the resulting workspace.
    */
-  async createProject(ctx: AuthContext, companyId: string, input: CreateCodeProjectInput): Promise<Project> {
+  async createProject(ctx: AuthContext, companyId: string, input: CreateCodeProjectInput, idempotencyKey?: string): Promise<Project> {
     this.assertWrite(ctx);
     await this.assertWriteEnabled(ctx, companyId, "code.write");
     const name = typeof input?.name === "string" ? input.name.trim() : "";
@@ -156,7 +156,7 @@ export class CodeService {
     const created = await this.projects.create(ctx, companyId, {
       name, type: "code_project", description: input.description?.trim() || undefined,
       dataClassification, retentionClass, defaultBranch: input.branch?.trim() || undefined,
-    }, `code-${ctx.userId}-${name}-${repositoryUrl || "empty"}`);
+    }, idempotencyKey ?? `code-${ctx.userId}-${name}-${repositoryUrl || "empty"}`);
 
     await this.auditCodeAction(ctx, companyId, "code.project.create", "code_project", created.project.id, created.project.id,
       { name, type: "code_project", repositoryUrl: repositoryUrl || null, branch: input.branch?.trim() || null, dataClassification, retentionClass },

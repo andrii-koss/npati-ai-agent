@@ -5,6 +5,16 @@ const settingKey = (conversationId: string) => `chat-project-cards:${conversatio
 
 type StoredCards = Record<string, ProjectCardData>;
 
+/** The authenticated conversation, rather than another tab's global selection, owns its project. */
+export async function getLatestChatProjectCard(store: WorkspaceStore, context: AuthContext, conversationId: string, businessId?: string): Promise<ProjectCardData | null> {
+  const { messages } = await store.getNeutralConversation(context, conversationId).catch(error => {
+    if (!businessId) throw error;
+    return store.getConversation(context, businessId, conversationId);
+  });
+  const decorated = await getChatMessagesWithProjectCards(store, context, conversationId, messages);
+  return [...decorated].reverse().find(message => message.projectCard)?.projectCard ?? null;
+}
+
 function readCards(value: unknown): StoredCards {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as StoredCards;

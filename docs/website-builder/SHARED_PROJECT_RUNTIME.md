@@ -1,5 +1,34 @@
 # Shared project runtime for OSS / self-hosting
 
+## FROZEN ARCHITECTURAL DECISION — Shared Local Runtime
+
+```text
+NPATI
+├── web
+├── api
+├── worker
+├── postgres
+├── redis
+├── ...
+└── shared-project-runtime   ← ONE container
+    ├── /projects/site
+    ├── /projects/blog
+    ├── /projects/crm
+    └── /projects/mobile
+```
+
+LOCAL/SELF-HOSTED uses one shared runtime for all Projects. Projects, Coding Agent sessions,
+async subagents, background jobs and Preview create scoped directories and processes, never
+per-project workload or proxy containers. Deleting a Project must never destroy the shared runtime.
+HOSTED/ISOLATED retains per-project Docker isolation through an explicitly isolated profile.
+Future implementation must not change this decision unless the owner explicitly requests an architecture change.
+
+`NPATI_PROJECT_RUNTIME_MODE=shared|isolated` selects the execution architecture;
+`NPATI_SANDBOX_RUNNER_MODE=local|remote` selects transport locality. These are separate settings.
+The default local update script uses `docker-compose.sandbox-runner.yml`. API shared execution
+checks authenticated runner readiness for `details.runtimeMode=shared`; the Docker provider
+refuses shared mode before any Docker work. An unavailable shared runtime fails closed.
+
 The default local `docker-compose.sandbox-runner.yml` and self-hosted `docker-compose.dokploy.yml` now run one `npati-project-runtime` container. Its Compose service/DNS alias remains `sandbox-runner`, preserving the authenticated runner URL and existing `RemoteSandboxProvider` contract. There is no Docker socket, Docker CLI, per-project sandbox container, per-project proxy container, or readiness Docker container in this execution path.
 
 ## Existing paths retained
@@ -51,7 +80,7 @@ Local launch uses the same Compose command as before, with the default sandbox o
 
 Existing legacy `npati-sb-*`, `npati-proxy-*`, and `npati-readiness-egress` containers are not automatically deleted. They are not used for newly created shared workspaces. Clean them up deliberately after confirming no isolated runner uses them. Do not remove application/data volumes.
 
-The previous Docker provider and server are retained for remote/isolated deployments. Local isolated configuration is `docker-compose.sandbox-isolated.yml`; Dokploy isolated configuration is `docker-compose.dokploy-isolated.yml`. Choose one runtime scheme for a deployment. Shared mode refuses arbitrary host-folder mounts; such projects retain the isolated runner path, not an unchecked shared bind mount.
+The previous Docker provider and server are retained for remote/isolated deployments. Explicit isolated configuration is `docker-compose.sandbox-isolated.yml`; Dokploy isolated configuration is `docker-compose.dokploy-isolated.yml`. Choose one runtime scheme for a deployment. Shared mode refuses arbitrary host-folder mounts. Using mounted folders requires an explicitly isolated deployment; a project never switches providers automatically.
 
 For `NPATI_DEPLOYMENT_TYPE=npati_hosted`, retain the isolated configuration; the shared runtime default is the OSS/self-hosted deployment scheme.
 
