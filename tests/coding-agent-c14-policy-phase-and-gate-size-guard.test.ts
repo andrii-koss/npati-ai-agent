@@ -39,7 +39,7 @@ import { SECURITY_GATE_TESTS } from "../scripts/lib/run-security-gate.mjs";
 const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const GUARD_PATH = "tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts";
 const ENGINE_PATH = "apps/agent-api/src/code-policy-engine.ts";
-const WIRING_PATH = "apps/agent-api/src/app.ts";
+const WIRING_PATH = "apps/agent-api/src/code-sandbox-wiring.ts";
 /**
  * G1 (item 5): the gate's implementation — and therefore its fixed list — is the library
  * `scripts/lib/run-security-gate.mjs`; `scripts/run-security-gate.mjs` is the thin executable wrapper that owns
