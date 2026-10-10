@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { InMemoryWorkspaceStore, type AuthContext, type CodeSession } from "@npati/workspace";
+import { readApiSources } from "./lib/api-source";
 import {
   CONSERVATIVE_CODE_MODEL_PROFILE_ID,
   CODE_MODEL_PROFILE_FALLBACK_REASONS,
@@ -301,7 +302,7 @@ describe("[C14] [security-gate] the reason reaches the ExecutionSnapshot payload
   });
 
   it("wires the same source in the composition, and the Inspector section beside it", () => {
-    const appSource = readFileSync(path.join(workspaceRoot, "apps", "agent-api", "src", "app.ts"), "utf8");
+    const appSource = readApiSources();
     // The snapshot source of a real deployment, spelled the same way the test above spells it.
     expect(appSource).toContain("modelProfileFallbackReason: async () => codeRunEnvironment.modelProfileTrace()?.fallbackReason ?? null");
     // The Inspector section (owner decision 2): which ids are allowed, whether the list is empty, and the reason
