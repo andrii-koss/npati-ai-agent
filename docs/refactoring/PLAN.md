@@ -89,6 +89,14 @@
 - [ ] **P6.** Скрипти в `package.json`: `"size:check"`, `"size:report"`.
 - [ ] **P7.** Винести з репо `artifacts/minio-local-rootfs.tar` (**168 MB**) і додати в `.gitignore`.
 
+### Стан середовища на 2026-10-10 (важливо для виконання)
+
+- **`pwsh` у цій сесії не має прав на запис у робочий простір**, хоч політика сесії — `workspace-write`: створення теки, створення файлу й перезапис наявного файлу падають з відмовою. Файлові інструменти (`write`/`edit`) працюють нормально.
+  Діагностика за скілом `diagnose-windows-sandbox-acl` полагодила права на `apps`, `apps/web`, `apps/web/src` і `apps/web/src/styles` (**4 зміни, усі перевірені**, бекапи й команди відкату — у `C:\Users\hostk\npati-acl-diagnosis\`), але **запис для `pwsh` усе одно лишається закритим**.
+  **Наслідок:** кожен крок, який пише файли через `pwsh` (а всі кроки такі — потрібне масове переміщення коду), потребує **одноразового розширеного доступу з підтвердженням користувача**. Альтернатива — перевести сесію в режим повного доступу.
+- **`core.autocrlf = true`:** канонічний вміст у git — LF, робоча копія — CRLF. **Хеші рахувати тільки по канонічному (LF) вмісту**, інакше отримаєш хибну розбіжність (перевірено на кроці 1).
+- **PowerShell і stderr:** `2>&1` разом з `$ErrorActionPreference = "Stop"` перетворює будь-яке попередження сторонньої програми (напр. `vite` про `node:crypto`) на помилку, яка обриває скрипт. Для збірок використовувати `$ErrorActionPreference = "Continue"` + `$PSNativeCommandUseErrorActionPreference = $false` і перевіряти `$LASTEXITCODE`.
+
 ---
 
 ## 4. Перехресні guard-и: що ламається від переміщення коду
@@ -255,7 +263,7 @@ refactor(<scope>): split <file> into <N> modules (step <N>)
 | Фаза | Зміст | Кроки | Файлів |
 |---|---|---|---:|---:|
 | 0 | Інфраструктура: чисте дерево, guard, baseline | P1–P7 | — |
-| 1 | Найбільші файли з низьким зв'язуванням | 1–8 | 8 |
+| 1 | Найбільші файли з низьким зв'язуванням | 1–8 | 8 (**1 ✓**) |
 | 2 | Шар `workspace` (найризикованіший, робиться разом) | 9–12 | 4 |
 | 3 | `agent-api`: репозиторії, сервіси, роутери ≥ 1000 | 13–22 | 10 |
 | 4 | `apps/web` + `i18n` ≥ 1000 | 23–36 | 14 |
@@ -291,7 +299,7 @@ refactor(<scope>): split <file> into <N> modules (step <N>)
 
 | # | Файл | Рядків | Стан |
 |---|---|---:|---|
-| 1 | `apps/web/src/styles.css` | 21 754 | [ ] |
+| 1 | `apps/web/src/styles.css` | 21 754 | [x] |
 | 2 | `apps/agent-api/src/app.ts` | 8 441 | [ ] |
 | 3 | `packages/shared/src/code-capabilities.ts` | 4 079 | [ ] |
 | 4 | `packages/shared/src/capability-catalog.ts` | 7 283 | [ ] |
@@ -302,64 +310,70 @@ refactor(<scope>): split <file> into <N> modules (step <N>)
 
 > Крок 3 (`code-capabilities`) стоїть перед 4–5, бо його матриці (`CODE_*_MATRIX`, `CODE_*_CAPABILITIES`) імпортуються і каталогом, і матрицею: спочатку стабілізуємо листовий модуль, потім агрегатори.
 
-### [ ] Крок 1 — `apps/web/src/styles.css` (21 754 → 33 файли ≤ 800)
+### [x] Крок 1 — `apps/web/src/styles.css` (21 754 → 28 модулів ≤ 800) ✅ виконано
 
 **Чому перший.** Найбільший файл проєкту (426 KB) і найбезпечніший: чистий CSS без логіки.
 
 **Факти.** CSS-змінні живуть у `@npati/branding/theme.css`; `styles.css` імпортується **рівно один раз** — `apps/web/src/main.tsx` рядок 10. Отже схема підключення безпечна, якщо зберегти порядок.
 
-**Шов.** 32 **суміжні** діапазони, кожен ≤ 800 рядків, межі — на наявних коментарях-секціях.
+**⚠️ УРОК, ЗДОБУТИЙ НА ЦЬОМУ КРОЦІ (обов'язковий для всіх CSS-кроків).**
+Початковий план різав файл по **рядках коментарів-секцій**. Це дало побайтово точну суму модулів, але **зламало збірку**: `postcss-import: 02-*.css: Unclosed block` — межа впала всередину CSS-правила, а кожен модуль мусить бути валідним CSS **сам по собі** (postcss парсить його окремо, до інлайну).
+**Правильне правило:** різати лише там, де закрито блок верхнього рівня — тобто після рядка, у якого `Trim() -eq '}'` і глибина вкладеності дорівнює 0. Глибину рахувати з урахуванням коментарів і рядкових літералів.
+
+**ЯК ЗРОБЛЕНО.** 28 **суміжних** модулів ≤ 800 рядків, межі — на закриваючих `}` верхнього рівня (2710 безпечних точок розрізу в оригіналі). Файл замінено на 39-рядковий entry з `@import` у вихідному порядку; `main.tsx` **не змінювався**.
 
 | Модуль (`apps/web/src/styles/`) | Рядки вихідного | Рядків |
 |---|---|---:|
-| `01-base.css` | 1–732 | 732 |
-| `02-toasts.css` | 733–1532 | 800 |
-| `03-buttons-primary.css` | 1533–2200 | 668 |
-| `04-buttons-secondary.css` | 2201–3000 | 800 |
-| `05-live-chat-notice.css` | 3001–3614 | 614 |
-| `06-skills-catalog.css` | 3615–4326 | 712 |
-| `07-overlays-tables.css` | 4327–5003 | 677 |
-| `08-dropdowns-compact.css` | 5004–5748 | 745 |
-| `09-chat-bubbles.css` | 5749–6548 | 800 |
-| `10-chat-misc.css` | 6549–6770 | 222 |
-| `11-company-config.css` | 6771–7570 | 800 |
-| `12-company-organization.css` | 7571–8334 | 764 |
-| `13-knowledge-card.css` | 8335–8991 | 657 |
-| `14-capability-inspector-activity.css` | 8992–9735 | 744 |
-| `15-dispatch-card.css` | 9736–10462 | 727 |
-| `16-delegation-tools.css` | 10463–11090 | 628 |
-| `17-memory-engine.css` | 11091–11879 | 789 |
-| `18-automations.css` | 11880–12535 | 656 |
-| `19-automation-status.css` | 12536–13152 | 617 |
-| `20-goals.css` | 13153–13411 | 259 |
-| `21-documents.css` | 13412–14056 | 645 |
-| `22-feedback-toast.css` | 14057–14822 | 766 |
-| `23-dialog-system.css` | 14823–15510 | 688 |
-| `24-status-badges.css` | 15511–16295 | 785 |
-| `25-email-thread-history.css` | 16296–17033 | 738 |
-| `26-integrations-messaging.css` | 17034–17714 | 681 |
-| `27-activity-badges.css` | 17715–18165 | 451 |
-| `28-project-browser-qa.css` | 18166–18936 | 771 |
-| `29-website-builder.css` | 18937–19679 | 743 |
-| `30-code-workspace.css` | 19680–20460 | 781 |
-| `31-data-studio.css` | 20461–21117 | 657 |
-| `32-data-studio-settings.css` | 21118–21754 | 637 |
+| `01-base-and-shell.css` | 1–799 | 799 |
+| `02-toasts-and-buttons.css` | 800–1592 | 793 |
+| `03-buttons.css` | 1593–2390 | 798 |
+| `04-buttons-and-notice-modal.css` | 2391–3185 | 795 |
+| `05-notice-modal-and-skills.css` | 3186–3981 | 796 |
+| `06-skills-catalog.css` | 3982–4777 | 796 |
+| `07-skills-and-dropdowns.css` | 4778–5574 | 797 |
+| `08-chat-bubbles.css` | 5575–6238 | 664 |
+| `09-chat-and-company-config.css` | 6239–7032 | 794 |
+| `10-company-config.css` | 7033–7832 | 800 |
+| `11-company-cards.css` | 7833–8628 | 796 |
+| `12-auth-and-capability-inspector.css` | 8629–9425 | 797 |
+| `13-activity-and-dispatch.css` | 9426–10225 | 800 |
+| `14-activity-trace-detail.css` | 10226–11025 | 800 |
+| `15-memory-engine.css` | 11026–11821 | 796 |
+| `16-content-and-automations.css` | 11822–12619 | 798 |
+| `17-automations-and-goals.css` | 12620–13410 | 791 |
+| `18-documents.css` | 13411–14210 | 800 |
+| `19-chat-rendering.css` | 14211–15007 | 797 |
+| `20-dialogs-and-language.css` | 15008–15799 | 792 |
+| `21-email-inbox.css` | 15800–16596 | 797 |
+| `22-email-analytics-and-project.css` | 16597–17387 | 791 |
+| `23-project-runs-and-deployments.css` | 17388–18173 | 786 |
+| `24-website-builder-panels.css` | 18174–18967 | 794 |
+| `25-website-builder-canvas-inspector.css` | 18968–19763 | 796 |
+| `26-data-studio.css` | 19764–20557 | 794 |
+| `27-data-studio-auth-and-backups.css` | 20558–21347 | 790 |
+| `28-data-studio-settings-and-code.css` | 21348–21754 | 407 |
 
-**Ціль.** `styles.css` → 33-рядковий entry, що лише `@import`-ить модулі в порядку 01→32. `main.tsx` **не змінюється**.
+**РЕЗУЛЬТАТ (виконано 2026-10-10).** `styles.css`: **21 754 → 39 рядків**; 28 модулів (максимум 800). `main.tsx` не змінювався.
 
-**Верифікація (обов'язкова):**
-```powershell
-git show HEAD:apps/web/src/styles.css > $env:TEMP\before.css
-Get-ChildItem apps/web/src/styles/*.css | Sort-Object Name | ForEach-Object { Get-Content $_ } > $env:TEMP\after.css
-# порівняти before/after (ідентичні, крім порожніх рядків на межах)
-npm run build --workspace @npati/web
+**Доказ еквівалентності — не «на око».** Канонічний вміст у git має **LF** (`core.autocrlf=true` дає CRLF у робочій копії, тому хеш рахувати тільки по канонічному вмісту — інакше отримаєш хибну розбіжність):
+
 ```
-Візуальний смоук: `/`, `/chat`, `/settings/capabilities`, `/settings/company`, `/projects`, `/settings/data-studio`.
+sha256(concat(01..28)) == sha256(оригінал)
+                       == 0346fe2a0a3131fa8997b9f1b09d1ef1e1452d73a18023301b7f750ff840296b
+```
 
-**Guard-и:** немає (CSS не входить ні в XSS-allowlist, ні в lint-baseline).
-**Ризики.** Порушення порядку → «зникають» стилі; не розривати `@media`-блоки навпіл.
-**Під-кроки:** 1a — модулі 01–08; 1b — 09–16; 1c — 17–24; 1d — 25–32 + тонкий entry + перевірка.
-**Effort:** M.
+**Що прогнано:**
+1. `npm run build --workspace @npati/web` → **exit 0**, `✓ built in 8.20s`, CSS 360 KB.
+2. `npm run lint` (lint-guard + scan-web-xss) → **exit 0**, 7/7 allowlist-записів збіглись.
+3. Кожен модуль окремо: дужки збалансовані (28/28) — тобто кожен валідний CSS.
+4. Порядок каскаду в артефакті: `.home-shell` (модуль 01) на позиції **10 314**, `.code-workspace-controls` (модуль 28) — **358 939** → порядок збережено.
+5. 28 `@import` ↔ 28 файлів на диску: відсутніх і зайвих немає.
+6. Ім'я та розмір зібраного файлу (`index-BRNWCKqJ.css`) не змінились після перейменування модулів — артефакт ідентичний.
+
+**Єдина неперевірена ланка:** візуальний смоук сторінок (`/`, `/chat`, `/settings/capabilities`, `/settings/company`, `/projects`, `/settings/data-studio`) не робився — потрібен браузер. Вміст CSS побайтово ідентичний, тому ризик мінімальний.
+
+**Rollback:** `git checkout -- apps/web/src/styles.css` + видалити теку `apps/web/src/styles/`.
+**Effort:** M (фактично одна механічна операція + одне виправлення меж).
 
 ---
 
@@ -1084,4 +1098,4 @@ Rollback:   git revert <sha>
 
 | Крок | Файл | Було | Стало | Коміт | Дата |
 |---|---|---:|---:|---|---|
-| — | — | — | — | — | — |
+| 1 | `apps/web/src/styles.css` | 21 754 | 39 рядків entry + 28 модулів (макс. 800) | не закомічено | 2026-10-10 |
