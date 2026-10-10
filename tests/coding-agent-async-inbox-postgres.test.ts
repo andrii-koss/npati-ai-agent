@@ -3,6 +3,9 @@ import { Pool } from "pg";
 import { describe, expect, it } from "vitest";
 import { PostgresWorkspaceStore, resolveCodeRetentionWindows, type AuthContext } from "@npati/workspace";
 import { CodeRunStateLog } from "../apps/agent-api/src/code-run-state";
+import { CodeAsyncProcessService } from "../apps/agent-api/src/code-async-process";
+import { CodeSessionInboxService } from "../apps/agent-api/src/code-session-inbox";
+import { CodeProcessCompletionService } from "../apps/agent-api/src/code-process-completions";
 import { runMigration088 } from "../packages/workspace/src/migration-088";
 import { runMigration089 } from "../packages/workspace/src/migration-089";
 import { runWithCleanup } from "./support/run-with-cleanup";
@@ -18,6 +21,9 @@ describe.skipIf(!databaseUrl || process.env.NPATI_SECURITY_GATE_DB !== "1")("asy
     const restarted = new PostgresWorkspaceStore(url.toString());
     const pool = new Pool({ connectionString: url.toString() });
     let storeClosed = false;
+    let collector: CodeProcessCompletionService | undefined;
+    let observer: CodeAsyncProcessService | undefined;
+    let rootInbox: CodeSessionInboxService | undefined;
     await runWithCleanup(async () => {
       await admin.query(`CREATE DATABASE "${name}"`);
       const ctx: AuthContext = { userId: "inbox-user", workspaceId: "inbox-workspace", permissions: ["admin:all", "workspace:read", "workspace:write", "business:manage"] };
@@ -48,7 +54,9 @@ describe.skipIf(!databaseUrl || process.env.NPATI_SECURITY_GATE_DB !== "1")("asy
       await expect(store.codeProcesses.transact(scope, { kind: "update", operationId: process.operationId, owner: "a", generation: 1, state: "dispatching", sandboxId: "sandbox" }))
         .rejects.toMatchObject({ code: "process_lease_lost" });
       await pool.query("UPDATE code_run_states SET status='running' WHERE company_id=$1 AND run_id='a'", [scope.companyId]);
-      await store.codeProcesses.transact(scope, { kind: "update", operationId: process.operationId, owner: "a", generation: 1, state: "dispatching", sandboxId: "sandbox" });
+      await store.codeProcesses.transact(scope, { kind: "update", operationId: process.operationId, owner: "a", generation: 1, state: "dispatching", sandboxId: "sandbox",
+        workspaceSnapshot: { version: 2, sandboxId: "sandbox", mounted: true, files: [{ path: "src/a.ts", hash: "baseline-hash", revision: "1" }] } });
+      expect((await other.codeProcesses.transact(scope, { kind: "read" })).operations[0]!.workspaceSnapshot).toMatchObject({ version: 2, mounted: true, files: [{ hash: "baseline-hash" }] });
       expect((await other.codeProcesses.transact(scope, { kind: "cleanup-acquire", token: "cleanup" })).cleanupAcquired).toBe(false);
       await pool.query("UPDATE code_run_states SET lease_owner='replacement' WHERE company_id=$1 AND run_id='a'", [scope.companyId]);
       const adoptedProcess = await other.codeProcesses.transact(scope, { kind: "adopt", operationId: process.operationId, owner: "replacement" });
@@ -146,11 +154,32 @@ describe.skipIf(!databaseUrl || process.env.NPATI_SECURITY_GATE_DB !== "1")("asy
       await resumedLog.markFinished({ companyId: company.id, runId: "control-child", status: "completed" });
       await expect(other.codeProcesses.transact(siblingScope, { kind: "update-child", childRunId: "control-child", owner: "child-worker", state: "failed" })).rejects.toMatchObject({ code: "process_lease_lost" });
       await restarted.codeProcesses.transact(siblingScope, { kind: "update-child", childRunId: "control-child", owner: "resumed-child", state: "completed" });
+      // Step 7: a fresh collector joins durable PG operations, withholds readiness until result admission,
+      // and ignores the cancelled reservation that never dispatched a producer.
+      rootInbox = new CodeSessionInboxService({ store: restarted.codeInbox, flags: { assertEnabled: async () => true, isEnabled: async () => true },
+        loadSession: (ctx, companyId, sessionId) => restarted.getCodeSession(ctx, companyId, sessionId),
+        loadRunState: (companyId, runId) => restarted.getCodeRunState(companyId, runId), audit: async () => {} });
+      const unexpected = async (): Promise<never> => { throw new Error("Child must not enter the shell process manager"); };
+      observer = new CodeAsyncProcessService({ store: restarted.codeProcesses, flags: { assertEnabled: async () => true },
+        session: (ctx, companyId, sessionId) => restarted.getCodeSession(ctx, companyId, sessionId), run: (companyId, runId) => restarted.getCodeRunState(companyId, runId),
+        port: { supported: async () => true, start: unexpected, status: unexpected, output: unexpected, stop: unexpected, sync: unexpected } });
+      collector = new CodeProcessCompletionService({ store: restarted.codeProcesses, processes: observer, inbox: rootInbox,
+        loadSession: (ctx, companyId, sessionId) => restarted.getCodeSession(ctx, companyId, sessionId), enabled: async () => true, progress: () => {}, warn: () => {} });
+      expect((await collector.barrier(ctx, sibling, "sibling")).ready).toBe(false);
+      expect((await rootInbox.transact(sibling, { kind: "read" })).state.messages[0]?.target).toBe("next-turn");
+      await rootInbox.transact(sibling, { kind: "open", runId: "sibling", owner: "sibling" });
+      await other.codeInbox.transact(siblingScope, { kind: "collect-completions", runId: "sibling", owner: "sibling" });
+      const notices = (await rootInbox.transact(sibling, { kind: "drain", runId: "sibling", owner: "sibling", turnIndex: 1 })).messages;
+      const collected = (await collector.collect(ctx, sibling, notices[0]!, "sibling"))!;
+      await collector.admitted(sibling, collected.notice, { runId: "sibling", owner: "sibling", turnIndex: 1, text: collected.text, source: "inbox" });
+      expect((await collector.barrier(ctx, sibling, "sibling")).ready).toBe(true);
+      expect((await other.codeProcesses.transact(siblingScope, { kind: "read" })).operations.find(op => op.child?.runId === "control-child")?.completion?.admission?.runId).toBe("sibling");
       const erased = await other.codeDataLifecycle!.eraseCodeData({ companyId: company.id, target: { kind: "session", sessionId: session.id } });
       expect(erased.verified).toBe(true);
       expect((await other.codeProcesses.transact(siblingScope, { kind: "read" })).operations[0]!.operationId).toBe(siblingOp.operationId);
       expect((await other.codeProcesses.transact(scope, { kind: "read" })).operations).toEqual([]);
     }, async () => {
+      await collector?.close(); await observer?.close(); await rootInbox?.close(() => {});
       const resources = await Promise.allSettled([storeClosed ? Promise.resolve() : store.close(), other.close(), restarted.close(), pool.end()]);
       const failures = resources.filter((r): r is PromiseRejectedResult => r.status === "rejected").map((r) => r.reason);
       try { await admin.query(`DROP DATABASE IF EXISTS "${name}"`); } catch (error) { failures.push(error); }
