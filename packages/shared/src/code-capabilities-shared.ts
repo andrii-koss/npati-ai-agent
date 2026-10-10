@@ -33,3 +33,5 @@ export const FILE_ENTRY = {
     mtimeMs: { type: ["number", "null"] },
   },
 };
+export const WRITE_PERMISSION = ["workspace:write"];
+export const SHELL_PERMISSION = ["workspace:write"];

@@ -1,0 +1,189 @@
+/* The shell code capabilities, split out of code-capabilities.ts in step 3d of
+ * docs/refactoring/PLAN.md. Declarations are moved verbatim; code-capabilities.ts imports and
+ * re-exports them, so every existing import path keeps working.
+ */
+import type { CapabilityDefinition } from "./capabilities";
+import { READ_PERMISSION, SHELL_PERMISSION } from "./code-capabilities-shared";
+import type { CapabilityMatrixEntry } from "./capability-matrix";
+import { CODE_TOOL_SCHEMA_MIRROR } from "./code-tool-schema-mirror";
+
+
+export const CODE_SHELL_CAPABILITIES: CapabilityDefinition[] = [
+  {
+    id: "code.shell.exec",
+    inventoryIds: [362],
+    type: "tool",
+    domain: "code",
+    name: "Run sandbox command",
+    description: "Run one non-interactive command inside the admitted sandbox and return the exit code, stdout, stderr and duration. Dangerous commands require an approval, secrets are leased per call, and output is redacted and truncated.",
+    useWhen: [
+      "The agent must run a build, a test suite, a formatter or an inspection command that the sandbox image provides.",
+      "A verification step needs the project's own tooling rather than a fixed tool call.",
+    ],
+    doNotUseWhen: [
+      "The command is interactive or long-running: use code.shell.process.start.",
+      "The command needs production credentials or network access outside the allowlist: it will be refused.",
+      "A read/search tool answers the question (code.fs.grep, code.fs.read): running a shell command for that is wasteful and riskier.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "high",
+    // Approval is decided by the server-side PolicyEngine from the command's risk class, not by the
+    // capability contract: a safe command inside an allowed session mode runs without an extra prompt,
+    // while an approval-class or hard-denied command is still gated (and hard-denied outright).
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: SHELL_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.exec"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.exec"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.shell.process.start",
+    inventoryIds: [363],
+    type: "tool",
+    domain: "code",
+    name: "Start sandbox process",
+    description: "Start a long-running process (a dev server, a watcher) inside the sandbox and return its process id. The process belongs to the sandbox and is stopped when the sandbox is cleaned up.",
+    useWhen: [
+      "A development server or watcher must keep running while the agent does something else.",
+      "A preview needs a background process rather than a blocking command.",
+    ],
+    doNotUseWhen: [
+      "A short command is enough: use code.shell.exec so the output is returned directly.",
+      "The process would need production credentials or unapproved network access.",
+      "The process is interactive: interactive commands are not supported.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "high",
+    // See code.shell.exec: the PolicyEngine, not the capability contract, decides approvals.
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: SHELL_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.process.start"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.process.start"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.shell.process.list",
+    inventoryIds: [364],
+    type: "tool",
+    domain: "code",
+    name: "List sandbox processes",
+    description: "List the processes this sandbox started, with their status and exit code. Read-only: it starts nothing and reveals no environment values.",
+    useWhen: [
+      "The agent wants to know whether a previously started process is still running.",
+      "Before starting a server, to check whether one is already running.",
+    ],
+    doNotUseWhen: [
+      "The agent needs the process output: use code.shell.process.logs.",
+      "The path or process id is not known to this session.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "low",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: READ_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.process.list"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.process.list"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.shell.process.logs",
+    inventoryIds: [365],
+    type: "tool",
+    domain: "code",
+    name: "Read sandbox process logs",
+    description: "Read the buffered output of a sandbox process by offset so a long log can be paged. Secrets are redacted before the output is returned.",
+    useWhen: [
+      "A background process must be inspected (a failing dev server, a watcher error).",
+      "The agent needs the tail of a long log: page it with offset/limit instead of reading everything.",
+    ],
+    doNotUseWhen: [
+      "The process id belongs to another project or sandbox: ownership is enforced and the call is refused.",
+      "The agent needs the exit code only: code.shell.process.list already reports it.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "low",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: READ_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.process.logs"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.process.logs"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.shell.process.stop",
+    inventoryIds: [366],
+    type: "tool",
+    domain: "code",
+    name: "Stop sandbox process",
+    description: "Stop a process started through code.shell.process.start. Stopping a process the sandbox does not own is refused.",
+    useWhen: [
+      "A dev server or watcher is no longer needed and the sandbox should not keep running it.",
+      "A process must be restarted after a configuration change.",
+    ],
+    doNotUseWhen: [
+      "The process was started outside this project's sandbox.",
+      "The intent is to stop the sandbox itself: that is sandbox lifecycle, not a tool call.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "medium",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: SHELL_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.process.stop"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.process.stop"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.verify.run",
+    inventoryIds: [367],
+    type: "tool",
+    domain: "code",
+    name: "Verify changes",
+    description: "Run the project's configured verification commands (lint, typecheck, test, build) in the sandbox and return structured findings per tool with a pass/fail summary.",
+    useWhen: [
+      "After changing code, to prove the change does not break the project.",
+      "Before proposing a change as finished, so the model sees real results instead of assuming.",
+    ],
+    doNotUseWhen: [
+      "The project has no configured command for the requested tool: the result reports it as unavailable rather than inventing a command.",
+      "A single ad-hoc command is needed: use code.shell.exec.",
+      "The verification needs network access outside the egress allowlist.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "medium",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: SHELL_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.verify.run"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.verify.run"]!.outputSchema,
+    version: 1,
+  },
+];
+
+/**
+ * C4a: dependency tools. `code.deps.inspect` only reads manifests and lockfiles (so it is gated by
+ * `code.read`), the audit needs sandbox execution and the allowlisted registries (`code.shell`), and
+ * `code.deps.add` mutates the dependency graph, so it is high risk and must be approved through the
+ * existing approval system — an install is never a silent side effect.
+ */
+export const CODE_SHELL_MATRIX: CapabilityMatrixEntry[] = CODE_SHELL_CAPABILITIES.map((capability) => ({
+  id: capability.inventoryIds[0]!,
+  capabilityId: capability.id,
+  name: capability.name,
+  type: "tool",
+  domain: "code",
+  agentCallable: true,
+  risk: capability.risk,
+  testType: "integration",
+  testFiles: ["tests/coding-agent-c4-capabilities.test.ts", "tests/coding-agent-c3-schema-executor-parity.test.ts"],
+  status: "VERIFIED_EXISTING",
+}));
+
