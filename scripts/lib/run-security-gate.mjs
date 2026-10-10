@@ -172,6 +172,21 @@ export const SECURITY_GATE_TESTS = [
   // and that a dry run and a repeated pass change nothing.
   "tests/coding-agent-c6a-run-state.test.ts",
   "tests/coding-agent-async-inbox.test.ts",
+  // N1 (Step 5, phase A): the session fence against a continuation after a pause or a resume. A paused run
+  // (C9 `code.ask_user`, C11 approval) and a C10 resume both hold a `live` C6a lease while nothing is driving
+  // the loop, so the inbox fence refused the continuation the user had just asked for until the lease expired.
+  // The suite drives the **real** runner through the **real** inbox with `code.async_inbox` on, proves that a
+  // new run id may take the session and receives the paused run's pending input, and keeps the ordinary case
+  // pinned: two live drivers of one session, neither of which yielded, still conflict.
+  "tests/coding-agent-async-inbox-pause-fence.test.ts",
+  // Step 5: detached async sub-agents. The suite pins every property the detached path adds over C12's blocking
+  // delegation: the accepted receipt returns **before** the child settles, the durable join key
+  // `(parentRunId, toolCallId) → childRunId` makes a retry the same delegation instead of a second child, the
+  // child's completion travels through the Step-4 outbox and collector, an active child withholds the parent's
+  // sandbox release, two writing children with overlapping scopes are refused while read-only siblings are not,
+  // and recovery settles a child whose run already ended without running anything while re-entering only a child
+  // that provably never started.
+  "tests/coding-agent-async-subagents-detached.test.ts",
   "tests/coding-agent-c6a-reconciler.test.ts",
   // C6a security: database migrations. Pins that a production, external or unidentified target is a hard
   // deny that no mode, role, standing rule or `approved: true` claim can lift; that a development

@@ -19,6 +19,7 @@ import {
   type CodeAgentSpawnExecutorOptions,
   type CodeSubagentActivityRecorder,
   type CodeSubagentChildRunner,
+  type CodeSubagentDetachedPort,
 } from "./code-agent-spawn-executor";
 
 /**
@@ -980,6 +981,12 @@ export function allCanonicalExecutors(
 export interface CanonicalSubagentExecutorOptions {
   /** Late-bound because the composition builds the executors before the runner exists. */
   subagentChildRunner?: () => CodeSubagentChildRunner | undefined;
+  /**
+   * Step 5: the detached delegation port. Absent, or its `isEnabled` false, means `code.agent.spawn` keeps the C12
+   * blocking behaviour; present and enabled, the same executor returns an accepted receipt instead of the child's
+   * outcome. The port carries no policy of its own — every validation, scope and limit stays in the executor.
+   */
+  subagentDetached?: CodeSubagentDetachedPort;
   /** The published registry (`CodeToolRuntime.listTools()`), i.e. the canonical tool universe. */
   subagentCanonicalTools?: () => readonly string[];
   /** The C6b Activity sink, so the delegation is recorded as a nested event with its snapshot. */
@@ -994,6 +1001,7 @@ export function canonicalSubagentExecutors(
   return {
     "code.agent.spawn": createCodeAgentSpawnExecutor({
       ...(options.subagentChildRunner ? { childRunner: options.subagentChildRunner } : {}),
+      ...(options.subagentDetached ? { detached: options.subagentDetached } : {}),
       ...(options.subagentCanonicalTools ? { canonicalTools: options.subagentCanonicalTools } : {}),
       ...(options.subagentActivity ? { activity: options.subagentActivity } : {}),
       ...(options.subagentModelProfiles ? { modelProfiles: options.subagentModelProfiles } : {}),

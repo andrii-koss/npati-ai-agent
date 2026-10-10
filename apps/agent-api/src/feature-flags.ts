@@ -59,6 +59,16 @@ export const CODE_AGENT_SUB_FLAGS = [
   "code.skills",
   "code.async_inbox",
   "code.async_processes",
+  /**
+   * Step 5: **detached** async sub-agents. `code.subagents` above enables delegation at all (the blocking
+   * `code.agent.spawn`); this key enables the variant where the parent receives an accepted receipt and the
+   * child's run id **without awaiting the child**, and collects the result later through the Step-4 completion
+   * outbox. Its own flag because the blast radius is different: a detached child outlives the tool call, so it
+   * can still be running when the parent's run settles. Like the other async keys it is excluded from the
+   * self-hosted default in `defaultResolution`, so turning the master flag on in a self-hosted install does not
+   * silently switch delegation from blocking to detached.
+   */
+  "code.async_subagents",
 ] as const;
 
 export type CodeAgentSubFlag = typeof CODE_AGENT_SUB_FLAGS[number];
@@ -70,7 +80,7 @@ export const CODE_MODEL_PROFILE_PATTERN = /^code\.model_profile\.[a-z0-9._-]{1,6
  * the key carries the bare hex prefix (8..64 chars) because a flag key cannot contain a colon.
  */
 export const CODE_SANDBOX_IMAGE_PATTERN = /^code\.sandbox_image\.[a-f0-9]{8,64}$/;
-export const CODE_FLAG_KEY_PATTERN = /^(coding_agent\.enabled|code\.(read|write|shell|git|subagents|background_runs|mounted_folder|hooks|mcp|full_auto_sandbox|repo_map|session_resume|rewind|session_fork|export|commands|skills|async_inbox|async_processes))$|^code\.model_profile\.[a-z0-9._-]{1,64}$|^code\.sandbox_image\.[a-f0-9]{8,64}$/;
+export const CODE_FLAG_KEY_PATTERN = /^(coding_agent\.enabled|code\.(read|write|shell|git|subagents|background_runs|mounted_folder|hooks|mcp|full_auto_sandbox|repo_map|session_resume|rewind|session_fork|export|commands|skills|async_inbox|async_processes|async_subagents))$|^code\.model_profile\.[a-z0-9._-]{1,64}$|^code\.sandbox_image\.[a-f0-9]{8,64}$/;
 
 export function isValidCodeFlagKey(flagKey: string): boolean {
   return typeof flagKey === "string" && CODE_FLAG_KEY_PATTERN.test(flagKey);
@@ -239,7 +249,7 @@ export class FeatureFlagService {
   }
 
   private defaultResolution(flagKey: string): FlagResolution {
-    const enabled = this.enabledByDefault && !["code.async_inbox", "code.async_processes"].includes(flagKey);
+    const enabled = this.enabledByDefault && !["code.async_inbox", "code.async_processes", "code.async_subagents"].includes(flagKey);
     return { key: flagKey, enabled, scope: "global", scopeId: "", stage: enabled ? "ga" : "off", source: enabled ? "self_hosted_default" : "no_row" };
   }
 

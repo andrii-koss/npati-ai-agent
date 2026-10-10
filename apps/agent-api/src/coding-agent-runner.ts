@@ -149,6 +149,12 @@ export type CodingAgentStopReason =
   | "self_review_unavailable"
   /** C9: the run asked the user a question and stopped on purpose. Not a failure and not a completion. */
   | "waiting_for_user"
+  /**
+   * Step 5: the run ended while a delegated child it started was still required, so the session's sandbox was
+   * **not** released and the child's completion is still on its way to the inbox. Its own reason rather than
+   * `completed`, because a caller that read it as success would move on to work the child is still doing.
+   */
+  | "active_subagent_unsettled"
   | "refused";
 
 /**
@@ -1017,6 +1023,25 @@ export interface CodingAgentRunnerPorts {
   /** Releases the sandbox after a cancelled or finished run (existing provider/cleanup path). */
   sandbox?: {
     release(input: { ctx: AuthContext; companyId: string; projectId: string; sessionId?: string; reason: string }): Promise<void>;
+  };
+  /**
+   * Step 5: the parent's terminal fence against a detached child.
+   *
+   * A detached sub-agent outlives the tool call that started it, so "this run is over" no longer implies "this
+   * session's sandbox is idle". The port answers whether a **delegated child of this run is still required** —
+   * running, with a completion that has not been collected — and when it says yes the run settles as
+   * `failed/active_subagent_unsettled` instead of releasing the sandbox the child is still writing into.
+   *
+   * Optional, and absent means the pre-Step-5 behaviour: a deployment without detached delegations (the flag off,
+   * which is the default) never reaches this port.
+   */
+  activeChildren?: {
+    /**
+     * Asked on the terminal path, before the sandbox is released. The caller supplies the run's own identity, so
+     * the answer is scoped to this company, this session and this run and needs no ambient state. `true` means the
+     * sandbox is withheld and the run settles as `failed/active_subagent_unsettled`.
+     */
+    isUnsettled(input: { ctx: AuthContext; companyId: string; projectId: string; sessionId: string; runId: string }): Promise<boolean>;
   };
   /**
    * Deployment-level admission gate, read **before** the first model call. The C6a reaper raises
@@ -1946,6 +1971,12 @@ export class CodingAgentRunner {
     let heartbeatTimer: NodeJS.Timeout | null = null;
     /** Set by the heartbeat when a renewal is refused: another process owns the run. */
     let leaseLost = false;
+    /**
+     * Step 5: set when the sandbox was **withheld** because a delegated child of this run had not settled. The
+     * run's own outcome is then reported as a failure — `active_subagent_unsettled` — because a parent that ended
+     * while a child it started is still working has not finished the work it accepted.
+     */
+    let unsettledChildren = false;
     const stopHeartbeat = (): void => {
       if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
     };
@@ -1988,10 +2019,21 @@ export class CodingAgentRunner {
        */
       this.ports.environment?.setRunSummary(null);
       const finishedAt = this.now();
+      /**
+       * Step 5: a withheld sandbox is a real outcome, not a detail. A run that "completed" while a child it started
+       * is still required would make the caller's next step run against a session whose work is half done, so the
+       * status is reported as a failure with its own reason. The child keeps its own run, its own lease and its own
+       * completion; nothing here cancels it.
+       */
+      const reportedStatus: CodingAgentRunStatus = unsettledChildren && status !== "waiting_for_user" ? "failed" : status;      const reportedReason: CodingAgentStopReason = unsettledChildren && status !== "waiting_for_user"
+        ? "active_subagent_unsettled"
+        : reason;
       return {
-        status,
-        reason,
-        message,
+        status: reportedStatus,
+        reason: reportedReason,
+        message: unsettledChildren && status !== "waiting_for_user"
+          ? `The run ended while a delegated sub-agent was still required; its completion has not been collected (${message})`
+          : message,
         summary,
         snapshotId,
         startedAt,
@@ -2173,6 +2215,22 @@ export class CodingAgentRunner {
         }));
       }
       stopHeartbeat();
+      /**
+       * N1: the paused run is **not driving** the session any more, although it keeps its inbox task (its
+       * admitted messages must still be recoverable by a resume of this same run id). Recording that fact here
+       * is what lets a continuation that mints a new run id take the session instead of being refused by the
+       * lease fence while this run's C6a lease is still `live`. Best effort, like every other settlement write:
+       * a failure leaves the pre-N1 behaviour (a continuation waits for the lease to expire) rather than
+       * corrupting the task.
+       */
+      if (inboxOpened && stateRunId) {
+        try {
+          await this.ports.inbox!.transact(session, { kind: "pause", runId: stateRunId, owner: stateOwner });
+          inboxOpened = false;
+        } catch {
+          this.ports.logger?.warn("inbox_pause_not_recorded");
+        }
+      }
       await release("waiting_for_user");
       await this.ports.runEvents?.append({
         eventKey: `code-run-waiting-for-user:${turnId}`,
@@ -2244,6 +2302,24 @@ export class CodingAgentRunner {
 
     const release = async (reason: string): Promise<void> => {
       if (!this.ports.sandbox) return;
+      try {
+        /**
+         * Step 5: the sandbox is **not** released while a delegated child of this run is still required. The
+         * child is not this run's process, so the process cleanup fence cannot see it, and destroying the sandbox
+         * under a child that is still writing would fail the child for a reason nobody chose. The run is settled
+         * by the caller as `active_subagent_unsettled`, which is the honest answer: the parent is over, its
+         * delegation is not, and the child's completion is still on its way to the inbox.
+         */
+        if (stateRunId && this.ports.activeChildren
+          && await this.ports.activeChildren.isUnsettled({ ctx, companyId, projectId, sessionId, runId: stateRunId })) {
+          unsettledChildren = true;
+          return;
+        }
+      } catch {
+        // An unreadable fence must not release the sandbox either: the safe direction is to keep it.
+        unsettledChildren = true;
+        return;
+      }
       try {
         await this.ports.sandbox.release({ ctx, companyId, projectId, sessionId, reason });
       } catch {

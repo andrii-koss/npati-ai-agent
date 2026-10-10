@@ -14,10 +14,35 @@ export interface DurableCodeProcess {
   output: { text: string; earliest: number; next: number; lossy: boolean };
   events: Array<{ seq: number; type: string }>; seq: number;
   completion?: CodeProcessCompletion;
+  /**
+   * Step 5 (detached async sub-agents): what this operation is.
+   *
+   * Absent means `"process"`, so every row written before this field existed keeps its meaning and no reader has
+   * to migrate. `"subagent"` is a **child run of the coding agent** attached to the parent run: it uses the same
+   * project transaction, the same active-operation accounting (an in-flight child blocks the sandbox cleanup the
+   * parent's processes block), the same completion outbox and the same collector — which is exactly why it is an
+   * additive field here rather than a second store, a second outbox or a second queue.
+   */
+  kind?: "process" | "subagent";
+  /** For `kind: "subagent"`: the durable child run and the parent tool call that is its join key. */
+  child?: { runId: string; toolCallId: string; agentType: string };
+  /**
+   * For `kind: "subagent"`: the delegation this operation *is* — the resolved type, the task, the approved scope
+   * and the capability intersection. Recovery re-enters a child from this record, so it has to survive a restart;
+   * it is one object on the operation rather than a table of its own because a delegation has no life without the
+   * operation that owns its slot, its join key and its completion notice.
+   */
+  delegation?: Record<string, unknown>;
 }
 export interface CodeCompletionNotice {
   eventId: string; operationId: string; processId: string; generation: number;
-  parentRunId: string; parentOwner: string; type: "process"; status: DurableProcessState; resultRef: string;
+  parentRunId: string; parentOwner: string; type: "process" | "subagent"; status: DurableProcessState; resultRef: string;
+  /**
+   * For `type: "subagent"`: the child's own run id and the parent tool call that started it. They are part of the
+   * notice so the parent can join a completion to the delegation **from the notice alone**, without reading the
+   * operation back.
+   */
+  childRunId?: string; childToolCallId?: string;
 }
 export interface CodeProcessCompletion {
   notice: CodeCompletionNotice;
@@ -37,8 +62,36 @@ export type CodeProcessCommand =
   | { kind: "completion-admit"; operationId: string; eventId: string; generation: number; runId: string; owner: string; turnIndex: number; source: "wait" | "inbox"; canonicalResult: string }
   | { kind: "cleanup-acquire"; token: string; purpose?: "prepare" }
   | { kind: "idle-check" }
-  | { kind: "cleanup-release"; token: string };
-export interface CodeProcessStoreResult { operations: DurableCodeProcess[]; claimed: boolean; cleanupAcquired: boolean }
+  | { kind: "cleanup-release"; token: string }
+  /**
+   * Step 5: the durable record of a **detached** sub-agent delegation, and its settlement.
+   *
+   * `reserve-child` is the write that makes the delegation recoverable: it records the join key
+   * `(parentRunId, toolCallId) → childRunId` in the same project transaction that already owns process
+   * accounting, so a restart can find the delegation without a second table. It is idempotent by the join key,
+   * which is what makes a retried `code.agent.spawn` the *same* delegation instead of a second child.
+   *
+   * `update-child` settles it from the child's own run id — the child runner does not know its operation id —
+   * and the terminal transition is fenced by the **child run's** own lease identity: while a different owner holds
+   * a live lease on the child run, the settlement is refused; a child whose run has ended, or whose run row does
+   * not exist at all, is settled from the durable record (see the branch below). The `accepted` → `running`
+   * transition is the parent's and is fenced by the **parent run's** live lease.
+   */
+  | { kind: "reserve-child"; operationId: string; childRunId: string; toolCallId: string; agentType: string; runId: string; owner: string;
+      delegation?: Record<string, unknown> }
+  | { kind: "update-child"; childRunId: string; owner: string; state?: "running" | "completed" | "failed"; errorCode?: string | null;
+      outcome?: { answer?: string | null; filesChanged?: readonly unknown[]; toolCalls?: unknown; turns?: unknown } };
+export interface CodeProcessStoreResult {
+  operations: DurableCodeProcess[];
+  claimed: boolean;
+  cleanupAcquired: boolean;
+  /**
+   * Step 5: true when this transaction **created** the operation it was asked to reserve, false when it already
+   * existed. The caller must not start a second child for a reservation it did not make, and "the row now exists"
+   * cannot answer that: the earlier reservation may still be in its `accepted` state, before any producer ran.
+   */
+  reserved: boolean;
+}
 export interface CodeProcessStore {
   transact(scope: CodeProcessScope, command: CodeProcessCommand): Promise<CodeProcessStoreResult>;
 }
@@ -47,10 +100,33 @@ export class CodeProcessStoreError extends Error {
 }
 export const activeCodeProcess = (op: DurableCodeProcess) => ["accepted", "preparing", "dispatching", "running", "unknown_outcome"].includes(op.state);
 
+/**
+ * The JSON a settled `subagent` operation stores in its free-text slot.
+ *
+ * `code-process-completions.ts` reads exactly this shape back (`parseStoredCodeSubagentChildOutcome`) and never
+ * parses anything else, so writer and reader are one contract. The bound is the same 64 000 characters the
+ * completion admission enforces, applied here so an oversized child answer cannot be stored at all; the digest
+ * builder refuses content and credentials on top of it, so this is a size bound and not the security bound.
+ */
+function serializeChildOutcome(
+  outcome: { answer?: string | null; filesChanged?: readonly unknown[]; toolCalls?: unknown; turns?: unknown } | undefined,
+  errorCode: string | null | undefined,
+): string {
+  const payload = {
+    ...(typeof outcome?.answer === "string" && outcome.answer.length <= 64_000 ? { answer: outcome.answer } : {}),
+    ...(outcome?.filesChanged ? { filesChanged: outcome.filesChanged.filter((entry) => typeof entry === "string").slice(0, 200) } : {}),
+    toolCalls: typeof outcome?.toolCalls === "number" && Number.isFinite(outcome.toolCalls) ? Math.trunc(outcome.toolCalls) : 0,
+    turns: typeof outcome?.turns === "number" && Number.isFinite(outcome.turns) ? Math.trunc(outcome.turns) : 0,
+    ...(errorCode ? { errorCode: String(errorCode).slice(0, 120) } : {}),
+  };
+  const serialized = JSON.stringify(payload);
+  return serialized.length <= 64_000 ? serialized : JSON.stringify({ ...payload, answer: undefined });
+}
+
 /** Shared synchronous transitions. The backend serializes the project and locks current C6a run rows. */
 export function applyCodeProcess(state: CodeProcessProjectState, scope: CodeProcessScope, command: CodeProcessCommand, leases: ProcessRunLease[], now: Date) {
   const next = structuredClone(state);
-  let claimed = false, cleanupAcquired = false;
+  let claimed = false, cleanupAcquired = false, reserved = false;
   const journal = (op: DurableCodeProcess, type: string) => {
     op.seq++; op.events.push({ seq: op.seq, type });
     if (op.events.length > 4096) op.events.splice(0, op.events.length - 4096);
@@ -123,6 +199,83 @@ export function applyCodeProcess(state: CodeProcessProjectState, scope: CodeProc
     }
     if (command.lossy) op.output.lossy = true;
     if (command.promoted && !op.promoted) { op.promoted = true; journal(op, "process.promoted"); }
+  } else if (command.kind === "reserve-child") {
+    /**
+     * Step 5: the delegation record. Idempotent by the join key `(parentRunId, toolCallId)` — expressed as the
+     * deterministic child run id — so a retried tool call re-reads the delegation it already created instead of
+     * starting a second child. The parent's run lease must be live: a detached child started by a run nobody owns
+     * would be work with no owner and no terminal path.
+     */
+    live(command.runId, command.owner);
+    const existing = next.operations.find((op) => op.kind === "subagent" && op.child?.runId === command.childRunId);
+    if (existing) {
+      if (existing.runId !== command.runId || existing.sessionId !== scope.sessionId || existing.child?.toolCallId !== command.toolCallId) {
+        throw new CodeProcessStoreError("subagent_child_conflict");
+      }
+    } else {
+      if (next.cleanupToken) throw new CodeProcessStoreError("sandbox_cleanup_in_progress");
+      if (next.operations.filter((op) => op.sessionId === scope.sessionId && activeCodeProcess(op)).length >= 10 || next.operations.length >= 1000) {
+        throw new CodeProcessStoreError("process_limit", 429);
+      }
+      const op: DurableCodeProcess = {
+        ...scope, operationId: command.operationId, processId: `subagent:${command.childRunId}`, executionKey: `subagent:${scope.companyId}:${scope.projectId}:${scope.sessionId}:${command.runId}:${command.toolCallId}`,
+        runId: command.runId, owner: command.owner, generation: 1, payloadHash: command.toolCallId, agentId: command.agentType,
+        sandboxId: null, startedRevision: 0, state: "accepted", exitCode: null,
+        cancelRequested: false, promoted: false, createdAt: now.toISOString(), startedAt: null, settledAt: null,
+        output: { text: "", earliest: 0, next: 0, lossy: false }, events: [], seq: 0,
+        kind: "subagent", child: { runId: command.childRunId, toolCallId: command.toolCallId, agentType: command.agentType },
+        ...(command.delegation ? { delegation: command.delegation } : {}),
+      };
+      next.operations.push(op); journal(op, "subagent.accepted");
+      reserved = true;
+    }
+  } else if (command.kind === "update-child") {
+    /**
+     * The child's own runner does not know its operation id, so the settlement is keyed by the child run id.
+     *
+     * Two different leases fence two different transitions, and that is deliberate. In both, `command.owner` is
+     * **the owner that transition has to hold**, which is why one command carries two identities depending on the
+     * state it moves to:
+     *
+     *  - **`accepted` → `running`** belongs to the **parent**: the operation was created by the parent's tool call,
+     *    and the child's run row may not exist yet at the moment the delegation is recorded. So `command.owner` is
+     *    the parent run's owner, checked against the parent run's lease — the one that certainly exists.
+     *  - **terminal** belongs to the **child run**: `command.owner` is the identity the child run was started
+     *    under (its own `runStateOwner`, derived from the child run id by the delegation). A child run whose lease
+     *    is **live** under any other owner is still being driven by somebody else, so the settlement is refused;
+     *    a child with no run row at all, or one whose run has already ended, is settled from the durable operation
+     *    — which is the honest reading of "the child produced no run of its own" and of "its run is over", and is
+     *    exactly what a recovery after a crash has to be able to write.
+     */
+    const op = next.operations.find((candidate) => candidate.kind === "subagent" && candidate.child?.runId === command.childRunId && candidate.sessionId === scope.sessionId);
+    if (!op) throw new CodeProcessStoreError("process_not_found", 404);
+    if (command.state === "running") {
+      const startLease = leases.find((entry) => entry.runId === op.runId && entry.sessionId === scope.sessionId && entry.live && entry.owner === command.owner);
+      if (!startLease) throw new CodeProcessStoreError("process_lease_lost");
+      if (op.state === "accepted") {
+        op.state = "running"; op.startedAt = now.toISOString(); op.cancelRequested = false; journal(op, "subagent.started");
+      }
+    } else if (command.state) {
+      const childLease = leases.find((entry) => entry.runId === command.childRunId && entry.sessionId === scope.sessionId);
+      if (childLease?.live && childLease.owner !== command.owner) throw new CodeProcessStoreError("process_lease_lost");
+      if (activeCodeProcess(op)) {
+        op.state = command.state;
+        op.exitCode = command.state === "completed" ? 0 : 1;
+        op.settledAt = now.toISOString();
+        /**
+         * The child's **outcome** goes into the operation's free-text slot. For a sub-agent that slot is metadata
+         * by construction: the answer the handoff digest builder parses (findings, paths, symbols, counts) plus the
+         * failure code — never a transcript, a file body or tool output, which the child runner never produces for
+         * a delegation in the first place. The collector rebuilds the parent's digest from it through the same
+         * builder the blocking path uses, so the two paths cannot disagree about what a handoff may contain.
+         */
+        op.output.text = serializeChildOutcome(command.outcome, command.errorCode);
+        op.output.next = op.output.text.length;
+        op.output.earliest = 0;
+        op.output.lossy = false;
+        journal(op, "subagent.settled");
+      }
+    }
   } else if (command.kind === "cancel") {
     const op = owned(command.operationId);
     if (activeCodeProcess(op) && !op.cancelRequested) { op.cancelRequested = true; journal(op, "process.cancel_requested"); }
@@ -150,18 +303,46 @@ export function applyCodeProcess(state: CodeProcessProjectState, scope: CodeProc
       }
     }
   }
-  // The classified terminal snapshot and its outbox intent commit in the SAME project transaction.
+  // The classified terminal snapshot and its outbox intent commit in the SAME project transaction. A sub-agent
+  // delegation settles through the same block, so it uses the same outbox, the same delivery flag and the same
+  // inbox identity as a process completion; only the notice's `type` and, for a child, its run ids differ.
+  const settledNow = (op: DurableCodeProcess): boolean => {
+    if (op.kind === "subagent") {
+      return command.kind === "update-child" && command.state !== undefined && command.state !== "running"
+        && command.childRunId === op.child?.runId;
+    }
+    return command.kind === "update" && command.operationId === op.operationId;
+  };
   for (const op of next.operations) {
-    if (command.kind === "update" && command.operationId === op.operationId && !activeCodeProcess(op) && !op.completion && (op.startedAt || op.workspaceSnapshot)) {
+    if (settledNow(op) && !activeCodeProcess(op) && !op.completion && (op.startedAt || op.workspaceSnapshot)) {
       journal(op, "operation.settled");
       const eventId = `${op.operationId}:${op.generation}:${op.seq}`;
-      op.completion = { notice: { eventId, operationId: op.operationId, processId: op.processId, generation: op.generation,
-        parentRunId: op.runId, parentOwner: op.owner, type: "process", status: op.state, resultRef: `code-process:${eventId}` },
-        result: { state: op.state, exitCode: op.exitCode, output: op.output.text, earliestOffset: op.output.earliest, nextOffset: op.output.next, lossy: op.output.lossy }, deliveredAt: null };
+      const isChild = op.kind === "subagent" && !!op.child;
+      op.completion = {
+        notice: {
+          eventId, operationId: op.operationId, processId: op.processId, generation: op.generation,
+          parentRunId: op.runId, parentOwner: op.owner, type: isChild ? "subagent" : "process", status: op.state,
+          resultRef: `code-process:${eventId}`,
+          ...(op.child ? { childRunId: op.child.runId, childToolCallId: op.child.toolCallId } : {}),
+        },
+        result: {
+          state: op.state, exitCode: op.exitCode,
+          /**
+           * The free-text slot carries the child's settled outcome as JSON (`serializeChildOutcome`), which is
+           * metadata by construction: the answer the digest builder parses, the changed paths, the counts and the
+           * failure code. Copying it into the completion is what lets the parent's collector rebuild the handoff
+           * from the completion record alone; leaving it empty made every settled child read as "produced nothing".
+           * A process keeps its own stream output and cursors.
+           */
+          output: op.output.text,
+          earliestOffset: op.output.earliest, nextOffset: op.output.next, lossy: op.output.lossy,
+        },
+        deliveredAt: null,
+      };
     }
   }
   const operations = next.operations.filter((op) => op.sessionId === scope.sessionId
     && (command.kind !== "read" || (!command.operationId || op.operationId === command.operationId) && (!command.processId || op.processId === command.processId)));
   if (command.kind === "read" && (command.operationId || command.processId) && !operations.length) throw new CodeProcessStoreError("process_not_found", 404);
-  return { state: next, result: structuredClone({ operations, claimed, cleanupAcquired }) };
+  return { state: next, result: structuredClone({ operations, claimed, cleanupAcquired, reserved }) };
 }
