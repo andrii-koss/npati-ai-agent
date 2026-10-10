@@ -167,6 +167,7 @@
 | Файл | Тест | Що мусить залишитись у файлі |
 |---|---|---|
 | `apps/agent-api/src/project-git-service.ts` | `tests/coding-agent-c15-mount-sandbox.test.ts:437–441` | **НЕ** містити `path.join(this.workspaceRoot`; **містити** `await this.bases.resolve(ctx, companyId, projectId)` і `"MOUNTED_FOLDER_READ_ONLY"` → метод `resolveProjectWorkspace` (L318–372) лишається на місці |
+| `apps/agent-api/src/app.ts` | `tests/coding-agent-c15-mount-sandbox.test.ts:425–440` | рівно **одне** входження `path.join(config.dataDirectory ?? ".data", "project-workspaces")`; `new ProjectWorkspaceBaseResolver({`; `new MountedWorkspaceProvider(projectService`; regex `projectGitService = new ProjectGitService(… projectWorkspaceBases,`; `workspaceStore.getProjectMountedFolder(ctx, companyId, projectId)`; `mountedFolderFlags = featureFlagService` → **увесь блок «одного канонічного workspace» лишається в `app.ts`** (перевірено відкатом 2b-4) |
 | `apps/agent-api/src/code-tool-executors.ts` | `tests/coding-agent-c12-subagent-workflow.test.ts:781–783` | `...canonicalSubagentExecutors(options)` і `"code.agent.spawn": createCodeAgentSpawnExecutor(` → обидві агрегатні мапи (`allCanonicalExecutors` L960–982, `canonicalExecutors` L1175–1263) лишаються |
 | `apps/agent-api/src/company-runtime.ts` | `tests/advanced-memory-production.test.ts:22–27` | **порядок у тому самому файлі:** `indexOf("const actionPlanningContext") < indexOf("const planningRequest")`; плюс рядки `"Mandatory action-sensitive rules"` і `plan.toolRequests.map(request=>request.tool)` — усе це всередині `process` (L276–615) |
 | `apps/agent-api/src/company-runtime.ts` | `tests/coding-agent-r1a-limits-and-quotas.test.ts:323–329`, `tests/coding-agent-r1a-sandbox-quotas.test.ts:323–331` | **не** містити `code-run-admission`, `CodeRunQueue`, `codeRunQueue`, `host_admission`, `HostAdmissionController`, `sandbox-resource-quota` (перевірка **per-file** — новий модуль може порушити її непомітно) |
@@ -302,7 +303,7 @@ refactor(<scope>): split <file> into <N> modules (step <N>)
 | # | Файл | Рядків | Стан |
 |---|---|---:|---|
 | 1 | `apps/web/src/styles.css` | 21 754 | [x] |
-| 2 | `apps/agent-api/src/app.ts` | 8 449 → **7 834** | [~] 2a, 2b-1, 2b-2 ✓ |
+| 2 | `apps/agent-api/src/app.ts` | 8 449 → **7 792** | [~] 2a, 2b-1…2b-3 ✓ |
 | 3 | `packages/shared/src/code-capabilities.ts` | 4 079 | [ ] |
 | 4 | `packages/shared/src/capability-catalog.ts` | 7 283 | [ ] |
 | 5 | `packages/shared/src/capability-matrix.ts` | 4 861 | [ ] |
@@ -425,17 +426,21 @@ sha256(concat(01..28)) == sha256(оригінал)
 - [~] **2b. Сервісна проводка за доменами** — `createXServices(inputs) → outputs`, один домен на коміт; `buildApp` лише викликає фабрики й передає результати далі. Виконано:
   - [x] **2b-1 (коміт `6f027a5`).** `audit-services.ts` (87 рядків): журнал аудиту, його конфіг, порт C5a для рішень про погодження і **два фонових таймери C1c** (перевірка ланцюга + щоденний якір). `app.ts` 7954 → 7922.
   - [x] **2b-2 (коміт `fbf2ecc`).** `core-services.ts` (199 рядків): web-research і маркетплейс, стор документів, об'єктне сховище і файли, auth-провайдер, налаштування, active-context resolver, рушії пам'яті, scoped memory, guardrail-репозиторій. `app.ts` 7922 → **7834**.
-  - [ ] **2b-3.** Домен data-backend/provisioners (провізіонери, quota/promote/backup, data-studio) — ⚠️ містить ланіве посилання `projectRedirectRepository` → `projectService`, який створюється **пізніше**; передавати це як ланівий аксесор, а не як значення.
-  - [ ] **2b-4.** Домен project-* (projectService, git, import, preview, sandbox, deploy, QA, terminal).
-  - [ ] **2b-5.** Домен code-* (найбільший сліс; робити останнім із проводки).
+  - [x] **2b-3 (коміт `80f0e20`).** `data-backend-services.ts` (111 рядків): провізіонери shared/external Postgres, data provider, `DataBackendService`, migration engine, quota/promote/backup, `projectAuthService`, redirect-репозиторій і таймер бекапів. `app.ts` 7834 → **7792**. Ланіве посилання на `projectService` вирішено входом `getProject` — рівно як планувалось.
+  - [x] ~~**2b-4.**~~ **спробувано й відкочено: домен project-\* не виноситься.** `tests/coding-agent-c15-mount-sandbox.test.ts:425–440` **пінить у тексті `app.ts` п'ять літералів**: рівно одне входження `path.join(config.dataDirectory ?? ".data", "project-workspaces")`; `new ProjectWorkspaceBaseResolver({`; `new MountedWorkspaceProvider(projectService`; regex `projectGitService = new ProjectGitService(… projectWorkspaceBases,`; `workspaceStore.getProjectMountedFolder(ctx, companyId, projectId)` і `mountedFolderFlags = featureFlagService`. А `projectApiGatewayService` та `agentDataStudioService` **споживають** `projectWorkspace`, що залежить від `projectService` — тож передати блок у фабрику можна лише як входи, і чистий виграш ≈ 0 рядків. **Домен лишається в `app.ts`.**
+  - [ ] **2b-5.** Домен code-* (найбільший сліс проводки) — **не наступним кроком**, див. висновок нижче.
 
 > **Урок 2b (три пастки, які вже коштували часу):**
 > 1. **Кластери з `let`-станом не можна деструктурувати.** `engineDataPolicyResolver`, `outboundPolicySnapshot`, `refreshOutboundPolicySnapshot` оголошені через `let` і **присвоюються пізніше** в `buildApp`; деструктуризація робить їх `const` і ламає присвоєння (TS2588). Такі кластери лишаються в `app.ts`, а їхні **результати** (тут — `baseAiEngine` і `aiEngine`) передаються у фабрику як входи.
 > 2. **Default-імпорти переносяться як `import X from "…"`, а не `import { X } from "…"`** — інакше TS2595 (`path` з `node:path`). Генератор імпортів мусить розрізняти обидві форми.
 > 3. **`git checkout` переписує файл у CRLF** (бо `core.autocrlf=true`), навіть якщо до цього він був LF. Після будь-якого відкату — нормалізувати до LF перед комітом, інакше в коміт поїде весь файл.
 >
-> **G2 підтверджено на практиці:** 3 касти `as any` переїхали в `core-services.ts` → `npm run lint` упав. Лікування — `node scripts/lint-guard.mjs --update-baseline`; дельта реєстру (`app.ts` 12 → 9, `core-services.ts` 0 → 3) пішла в той самий коміт як рев'ювана зміна.
-- [ ] **2c.** Коли залежності домену вже зібрані у фабриці — виносити відповідні `register*Routes(app, deps)` у `routes/register-*.ts` (реєстратори лише **читають** переданий об'єкт, тому це найдешевший шов після 2b).
+> **G2 підтверджено на практиці:** 3 касти `as any` переїхали в `core-services.ts` → `npm run lint` упав. Лікування — `node scripts/lint-guard.mjs --update-baseline`; дельта реєстру (`app.ts` 12 → 9, `core-services.ts` 0 → 3) пішла в той самий коміт як рев'ювана зміна. Повторилося на 2b-2 і 2b-3 (по одному касту в кожному новому модулі) — це вже рутина, а не сюрприз.
+>
+> **Урок 2b-4 (процесний, найдорожчий у раунді).** Перед виносом будь-якого кластера — **грепати ВЕСЬ тестовий файл на `app.ts`**, а не діапазон рядків навколо відомого твердження. Я перевірив `c15-mount-sandbox.test.ts:437–441` і пропустив `:431` — цього вистачило, щоб зламати security-гейт. Робоче правило: `Select-String -Pattern 'src/app\.ts' -Context 0,10` по всьому тесту, і лише потім різати.
+>
+> **Стратегічний висновок (змінює порядок робіт).** Мікро-фабрики далі не окупуються: те, що лишилось у `app.ts`, — це переважно **реєстрація маршрутів (~1900 рядків)**, **чат-замикання (~1300)** і **чат-ендпоінти (~1300)**, а не проводка сервісів. Їх не винести частинами, поки немає одного об'єкта залежностей. Тому **2c перед 2b-5**.
+- [ ] **2c (наступний крок).** Зібрати **один об'єкт залежностей** `const services = { config, log: app.log, ...core, ...audit, ...dataBackend }` і виносити **реєстрацію маршрутів** (зараз ~1900 рядків усередині `buildApp`) у `routes/register-*.ts(app, services)` — по одному домену на коміт. Фабрики 2b-1…2b-3 уже зробили це дешевим: майже всі потрібні значення лежать у деструктурованих `const`, тож реєстратор просто читає переданий об'єкт.
 - [ ] **2d.** Чат: `chat-orchestrator.ts` + `chat-routes.ts` (найбільший сліс, ~2400 рядків; робити останнім, коли всі його залежності вже в фабриках).
 - [ ] **2e.** Довести `app.ts` до ≤ 250 рядків.
 
@@ -1122,3 +1127,5 @@ Rollback:   git revert <sha>
 | 2a | `apps/agent-api/src/app.ts` | 8 449 | 7 954 (винесено 6 модулів, 507 рядків) | `2b4868c` | 2026-10-10 |
 | 2b-1 | `apps/agent-api/src/app.ts` | 7 954 | 7 922 (аудит → `audit-services.ts`) | `6f027a5` | 2026-10-10 |
 | 2b-2 | `apps/agent-api/src/app.ts` | 7 922 | 7 834 (ядро → `core-services.ts`) | `fbf2ecc` | 2026-10-10 |
+| 2b-3 | `apps/agent-api/src/app.ts` | 7 834 | 7 792 (data-backend → `data-backend-services.ts`) | `80f0e20` | 2026-10-10 |
+| 2b-4 | `apps/agent-api/src/app.ts` | 7 792 | 7 792 — **спробувано й відкочено**: тест `c15-mount-sandbox` пінить 5 літералів у `app.ts` | — (відкат) | 2026-10-10 |
