@@ -22,6 +22,8 @@
     "allowJs": true
   },
   "include": [
+    "tests/coding-agent-async-controls.test.ts",
+    "tests/coding-agent-async-subagents-detached.test.ts",
     "tests/coding-agent-async-process.test.ts",
     "tests/coding-agent-async-completions.test.ts",
     "tests/coding-agent-async-process-docker.test.ts",

@@ -8,6 +8,7 @@ import { CodeSubagentOperationService, CodeSubagentWriteScopeRegistry, codeSubag
 import { spawnCodeSubagent, CodeSubagentInFlightTracker, codeSubagentRunId, type CodeSubagentChildOutcome, type CodeSubagentChildRunRequest } from "../apps/agent-api/src/code-agent-spawn-executor";
 import { resolveCodeSubagentType } from "../apps/agent-api/src/code-subagent-types";
 import type { FeatureFlagService } from "../apps/agent-api/src/feature-flags";
+import { createCodeSubagentChildRunner } from "../apps/agent-api/src/code-subagent-child-runner";
 
 /**
  * Step 5 security-gate: **detached** async sub-agents.
@@ -42,7 +43,7 @@ function trackedProcesses(store: InMemoryWorkspaceStore, log: CodeRunStateLog) {
 }
 
 /** Everything a detached delegation needs, wired exactly as the composition wires it, minus the loop. */
-function setup(options: { enabled?: boolean; childRun?: (request: CodeSubagentChildRunRequest) => Promise<CodeSubagentChildOutcome> } = {}) {
+function setup(options: { enabled?: boolean; controlsEnabled?: boolean; childRun?: (request: CodeSubagentChildRunRequest) => Promise<CodeSubagentChildOutcome> } = {}) {
   const store = new InMemoryWorkspaceStore();
   const log = new CodeRunStateLog({ store });
   const inbox = new CodeSessionInboxService({ store: store.codeInbox, flags: { assertEnabled: async () => true, isEnabled: async () => true },
@@ -60,7 +61,8 @@ function setup(options: { enabled?: boolean; childRun?: (request: CodeSubagentCh
   const childRunner = { run: childRun };
   const enabled = options.enabled ?? true;
   const operations = new CodeSubagentOperationService({ store: store.codeProcesses!, runState: log,
-    childRunner: () => childRunner, loadSession: async () => session, enabled: async () => enabled, spawnTool: "code.agent.spawn" });
+    childRunner: () => childRunner, loadSession: async () => session, enabled: async () => enabled,
+    controlsEnabled: async () => options.controlsEnabled ?? false, spawnTool: "code.agent.spawn" });
   cleanups.push(() => operations.close());
 
   const start = (overrides: Partial<Parameters<CodeSubagentOperationService["startDetached"]>[0]> = {}) => operations.startDetached({
@@ -235,8 +237,8 @@ describe("security-gate: Step 5 detached subagents — write-scope disjointness"
     await h.beginParent();
     await h.start({ toolCallId: "write-1", childRunId: codeSubagentRunId(PARENT, "write-1"), readOnly: false, paths: ["src/a"] });
     // Overlapping (a path inside the claimed directory) is refused before anything is reserved.
-    await expect(h.start({ toolCallId: "write-2", childRunId: codeSubagentRunId(PARENT, "write-2"), readOnly: false, paths: ["src/a/deep"] }))
-      .rejects.toMatchObject({ code: "subagent_write_scope_conflict" });
+    expect(await h.start({ toolCallId: "write-2", childRunId: codeSubagentRunId(PARENT, "write-2"), readOnly: false, paths: ["src/a/deep"] }))
+      .toMatchObject({ status: "refused", code: "subagent_write_scope_conflict" });
     expect((await h.processes.list(ctx, { companyId: "c", projectId: "p", sessionId: "s" })).filter((op) => op.kind === "subagent")).toHaveLength(1);
     // Disjoint is admitted.
     expect(await h.start({ toolCallId: "write-3", childRunId: codeSubagentRunId(PARENT, "write-3"), readOnly: false, paths: ["src/b"] }))
@@ -265,24 +267,50 @@ describe("security-gate: Step 5 detached subagents — write-scope disjointness"
 });
 
 describe("security-gate: Step 5 detached subagents — recovery never replays blindly", () => {
-  it("re-enters a child that never started, under the same deterministic run id", async () => {
+  it("claims an undispatched reservation only once when two recovering services compete", async () => {
+    const h = setup({ childRun: async () => new Promise(() => {}) });
+    await h.beginParent();
+    await h.store.codeProcesses!.transact(sessionScope(), {
+      kind: "reserve-child", operationId: codeSubagentOperationId(PARENT, TOOL_CALL), childRunId: CHILD,
+      toolCallId: TOOL_CALL, agentType: "explore", runId: PARENT, owner: "worker",
+      delegation: { agentType: "explore", task: "original task", readOnly: true, allowedTools: ["code.fs.read"], maxTurns: 8 },
+    });
+    const other = setup2(h);
+    const results = await Promise.all([h.operations.recover({ ctx, companyId: "c", sessionId: "s" }),
+      other.recover({ ctx, companyId: "c", sessionId: "s" })]);
+    expect(results.reduce((sum, result) => sum + result.recovered, 0)).toBe(1);
+    expect(h.childRun).toHaveBeenCalledOnce();
+    expect(h.childRun.mock.calls[0]![0].task).toBe("original task");
+  });
+
+  it("leaves an interrupted child for explicit C10 continuation without replaying the prompt", async () => {
+    const h = setup({ childRun: async () => new Promise(() => {}) });
+    await h.beginParent();
+    await h.start();
+    await startChildRun(h.log);
+    await h.log.markInterrupted({ companyId: "c", runId: CHILD, reason: "host_restart" });
+    const other = setup2(h);
+    expect(await other.recover({ ctx, companyId: "c", sessionId: "s" })).toMatchObject({ recovered: 0, skipped: 1 });
+    expect(h.childRun).toHaveBeenCalledOnce();
+    expect(activeCodeProcess(await h.childOperation())).toBe(true);
+  });
+  it("does not replay a dispatched child with no run row and an unknown outcome", async () => {
     const h = setup({ childRun: async () => { await new Promise(() => {}); return { runId: CHILD, status: "completed" }; } });
     await h.beginParent();
-    // A reservation with no run row at all: the crash landed between the reserve and the start.
+    // Dispatch crossed the durable running boundary, but no child run row proves its outcome.
     const accepted = await h.start();
     expect(accepted).toMatchObject({ status: "accepted" });
     // The process that launched it is gone; only the durable record remains.
     await h.operations.close();
     const recovered = setup2(h);
     const outcome = await recovered.recover({ ctx, companyId: "c", sessionId: "s", parentRunId: PARENT });
-    expect(outcome).toMatchObject({ recovered: 1, settled: 0 });
-    // One call from the original launch, one from the recovery — and both under the **same** deterministic id, so
-    // the run-state log's idempotency-by-run-id makes them one delegation rather than two.
-    expect(recovered.childRun).toHaveBeenCalledTimes(2);
+    expect(outcome).toMatchObject({ recovered: 0, settled: 0, skipped: 1 });
+    // Recovery must keep the original dispatch fenced and never start its task again.
+    expect(recovered.childRun).toHaveBeenCalledTimes(1);
     for (const call of recovered.childRun.mock.calls) {
       expect((call[0] as CodeSubagentChildRunRequest).runId).toBe(CHILD);
     }
-    expect((recovered.childRun.mock.calls[1]![0] as CodeSubagentChildRunRequest).task).toBe("look at src/a.ts");
+    expect(activeCodeProcess(await h.childOperation())).toBe(true);
   });
 
   it("settles a child whose run already ended, without running anything", async () => {
@@ -321,6 +349,80 @@ describe("security-gate: Step 5 detached subagents — recovery never replays bl
     const outcome = await h.operations.recover({ ctx, companyId: "c", sessionId: "s", parentRunId: PARENT });
     expect(outcome).toMatchObject({ recovered: 0, settled: 0, skipped: 1 });
     expect(h.childRun).toHaveBeenCalledOnce();
+  });
+});
+
+function sessionScope() {
+  return { companyId: session.companyId, projectId: session.projectId, sessionId: session.id,
+    dataClassification: session.dataClassification, retentionClass: session.retentionClass };
+}
+
+describe("security-gate: detached admission is atomic across service instances", () => {
+  it("enforces the parallel ceiling across simultaneous admissions", async () => {
+    const h = setup({ childRun: async () => new Promise(() => {}) });
+    await h.beginParent();
+    const receipts = await Promise.all(["one", "two"].map((id) => h.start({
+      childRunId: codeSubagentRunId(PARENT, id), toolCallId: id, maxParallelism: 1,
+    })));
+    expect(receipts.filter((r) => r.status === "accepted")).toHaveLength(1);
+    expect(receipts.find((r) => r.status === "refused")).toMatchObject({ code: "subagent_parallelism_exceeded" });
+    expect(h.childRun).toHaveBeenCalledOnce();
+  });
+
+  it("rejects overlapping writers in the store even when live registries are independent", async () => {
+    const h = setup({ childRun: async () => new Promise(() => {}) });
+    await h.beginParent();
+    const other = setup2(h);
+    await h.start({ readOnly: false, paths: ["src/a"] });
+    const receipt = await other.operations.startDetached({ ctx, companyId: "c", projectId: "p", sessionId: "s",
+      parentRunId: PARENT, parentOwner: "worker", childRunId: "other-child", toolCallId: "other-call",
+      agentType: "explore", capabilityProfile: "explore", task: "edit", paths: ["src/a/file.ts"],
+      model: null, maxTurns: 8, readOnly: false, summaryOnly: true, allowedTools: ["code.fs.read"], toolCallingMode: "text" });
+    expect(receipt).toMatchObject({ status: "refused", code: "subagent_write_scope_conflict" });
+    expect(h.childRun).toHaveBeenCalledOnce();
+  });
+});
+
+describe("security-gate: Step 6 interrupt foundation", () => {
+  it("allows existing child interruption to drain after control flag rollback", async () => {
+    const h = setup({ childRun: async () => new Promise(() => {}) });
+    await h.beginParent(); await h.start();
+    expect(await h.operations.interrupt({ ctx, companyId: "c", sessionId: "s", parentRunId: PARENT, childRunId: CHILD })).toBe("requested");
+    expect((await h.childOperation()).cancelRequested).toBe(true);
+  });
+
+  it("passes the same abort signal through the child adapter and retains cleanup until settlement", async () => {
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    const runAgent = vi.fn(async (input: { signal?: AbortSignal }) => {
+      await gate;
+      expect(input.signal?.aborted).toBe(true);
+      return { status: "cancelled", reason: "cancelled", message: "cancelled", summary: {} };
+    });
+    const adapter = createCodeSubagentChildRunner({ loadSession: async () => session, runAgent });
+    const h = setup({ controlsEnabled: true, childRun: (request) => adapter.run(request) });
+    await h.beginParent(); await h.start();
+    await vi.waitFor(() => expect(runAgent).toHaveBeenCalledOnce());
+    const target = { ctx, companyId: "c", sessionId: "s", parentRunId: PARENT, childRunId: CHILD };
+    expect(await h.operations.interrupt(target)).toBe("requested");
+    expect(await h.operations.interrupt(target)).toBe("requested");
+    expect(runAgent.mock.calls[0]![0].signal?.aborted).toBe(true);
+    expect((await h.childOperation()).cancelRequested).toBe(true);
+    expect(await h.operations.hasRequiredChild(target)).toBe(true);
+    expect((await h.store.codeProcesses!.transact(sessionScope(), { kind: "cleanup-acquire", token: "early" })).cleanupAcquired).toBe(false);
+    finish();
+    await vi.waitFor(async () => expect((await h.childOperation()).state).toBe("failed"));
+    expect(await h.operations.interrupt(target)).toBe("settled");
+    expect((await h.childOperation()).completion?.notice.type).toBe("subagent");
+    expect(h.childRun).toHaveBeenCalledOnce();
+  });
+
+  it("refuses another parent's child without writing cancel intent", async () => {
+    const h = setup({ controlsEnabled: true, childRun: async () => new Promise(() => {}) });
+    await h.beginParent(); await h.start();
+    await expect(h.operations.interrupt({ ctx, companyId: "c", sessionId: "s", parentRunId: "foreign-parent", childRunId: CHILD }))
+      .rejects.toThrow("subagent_child_not_found");
+    expect((await h.childOperation()).cancelRequested).toBe(false);
   });
 });
 

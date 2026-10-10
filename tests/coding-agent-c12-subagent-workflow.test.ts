@@ -170,8 +170,8 @@ describe("security-gate: C12 code.agent.spawn is published as a first-class tool
     expect(schema, "code.agent.spawn must be published").toBeTruthy();
     expect(schema!.version).toBe(1);
     expect(schema!.status).toBe("active");
-    expect(CODE_TOOL_MANIFEST_VERSION).toBe(10);
-    expect(CODE_TOOL_SCHEMAS).toHaveLength(39);
+    expect(CODE_TOOL_MANIFEST_VERSION).toBe(11);
+    expect(CODE_TOOL_SCHEMAS).toHaveLength(43);
     expect(PUBLISHED_TOOL_SCHEMA_CHECKSUM).toBe(toolSchemaChecksum(CODE_TOOL_SCHEMAS));
 
     const current = KNOWN_TOOL_MANIFESTS.find((manifest) => manifest.version === CODE_TOOL_MANIFEST_VERSION)!;

@@ -108,12 +108,16 @@ export interface CodeSubagentChildRunRequest {
    * process, or a second lifetime of the same delegation could never settle its own operation.
    */
   runStateOwner?: string;
+  /** The detached operation's controller, passed through to the existing runner. */
+  signal?: AbortSignal;
+  parentSessionId?: string;
+  continuation?: { prompt: string; owner: string; turnIndex: number };
 }
 
 /** What the child runner reports back. Deliberately small: the digest is built from named fields only. */
 export interface CodeSubagentChildOutcome {
   runId?: string | null;
-  status: "completed" | "failed";
+  status: "completed" | "failed" | "interrupted";
   /** The child's own refusal code, carried through so the parent sees why it failed. */
   errorCode?: string | null;
   /** Bounded, content-free explanation of `errorCode`. */
@@ -330,6 +334,8 @@ function detachedRefusalCode(code: string): CodeToolErrorCode {
     case "subagent_detached_disabled":
     case "subagent_tool_not_delegable":
     case "subagent_reserve_failed":
+    case "subagent_parallelism_exceeded":
+    case "subagent_write_scope_conflict":
     case "tool_not_configured":
       return code;
     default:
@@ -417,7 +423,7 @@ export async function spawnCodeSubagent(
   // Naming the delegation tool is an escalation attempt and is refused. A **wildcard** that happens to expand
   // to it is a different matter: `*` means "the tools you may use", and the delegation tool is not one of them,
   // so the expansion drops it and the recorded scope is self-consistent with depth 1.
-  if (rawRequested.some((name) => name.toLowerCase() === tool)) {
+  if (rawRequested.some((name) => name.toLowerCase().startsWith("code.agent."))) {
     throw new CodeToolError(
       "subagent_tool_not_delegable",
       `${tool} cannot be delegated: depth 1 means a sub-agent works, it does not delegate`,
@@ -436,7 +442,7 @@ export async function spawnCodeSubagent(
   // wildcard expansion put it there. The removal is belt-and-braces on top of the structural refusal in
   // `resolveCodeRunCapabilityScope`, and it is what makes the recorded scope self-consistent.
   const delegationRecord = (resolvedRequest.tools.length ? resolvedRequest.tools : [...resolution.baseTools])
-    .filter((name) => name !== tool);
+    .filter((name) => !name.startsWith("code.agent."));
 
   const guard = options.guard ?? new SubagentToolPolicyGuard();
   const evaluation = guard.evaluateSubagentTools({

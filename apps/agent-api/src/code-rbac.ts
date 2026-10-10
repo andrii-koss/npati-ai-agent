@@ -309,6 +309,10 @@ export const CODE_ACTION_PERMISSIONS: Readonly<Record<string, string>> = Object.
   "code.session.create": "workspace:write",
   "code.session.inbox.read": "workspace:read",
   "code.session.inbox.write": "workspace:write",
+  "code.agent.continue": "workspace:write",
+  "code.agent.send_message": "workspace:write",
+  "code.agent.interrupt": "workspace:write",
+  "code.agent.spawn_async": "workspace:write",
   // Mutating workspace surfaces.
   "code.fs.edit": "workspace:write",
   "code.fs.write": "workspace:write",

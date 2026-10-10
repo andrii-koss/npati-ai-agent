@@ -1,4 +1,6 @@
 import { CodeToolError as CanonicalToolError } from "./code-tools-path";
+import { canonicalCodeAgentControlExecutors } from "./code-agent-controls";
+import type { CodeSubagentOperationService } from "./code-subagent-operations";
 import {
   codeToolLimits, grepFiles, listFiles, readFileLines, symbolsOutline, treeOverview,
   type CodeDirEntry, type CodeReadPort as FsReadPort, type CodeSearchRequest, type CodeSearchResponse,
@@ -979,6 +981,7 @@ export function allCanonicalExecutors(
  * the `runCtags` defect class, and claiming to have delegated when nothing ran would be worse.
  */
 export interface CanonicalSubagentExecutorOptions {
+  subagentControls?: () => CodeSubagentOperationService | undefined;
   /** Late-bound because the composition builds the executors before the runner exists. */
   subagentChildRunner?: () => CodeSubagentChildRunner | undefined;
   /**
@@ -999,14 +1002,23 @@ export function canonicalSubagentExecutors(
   options: CanonicalSubagentExecutorOptions = {},
 ): Record<string, (input: CodeToolExecutionContext) => Promise<unknown>> {
   return {
+    ...canonicalCodeAgentControlExecutors(options.subagentControls),
     "code.agent.spawn": createCodeAgentSpawnExecutor({
       ...(options.subagentChildRunner ? { childRunner: options.subagentChildRunner } : {}),
-      ...(options.subagentDetached ? { detached: options.subagentDetached } : {}),
       ...(options.subagentCanonicalTools ? { canonicalTools: options.subagentCanonicalTools } : {}),
       ...(options.subagentActivity ? { activity: options.subagentActivity } : {}),
       ...(options.subagentModelProfiles ? { modelProfiles: options.subagentModelProfiles } : {}),
       ...(options.subagentEnv ? { env: options.subagentEnv } : {}),
     }),
+    "code.agent.spawn_async": async (input) => {
+      if (!options.subagentDetached || !await options.subagentDetached.isEnabled({ ctx: input.ctx, companyId: input.companyId })) {
+        throw new CodeToolError("subagent_detached_disabled", "Detached sub-agents are disabled", 409, "policy", false, input.tool.name);
+      }
+      return createCodeAgentSpawnExecutor({ childRunner: options.subagentChildRunner,
+        detached: { ...options.subagentDetached, isEnabled: async () => true },
+        canonicalTools: options.subagentCanonicalTools, activity: options.subagentActivity,
+        modelProfiles: options.subagentModelProfiles, env: options.subagentEnv })(input);
+    },
   };
 }
 

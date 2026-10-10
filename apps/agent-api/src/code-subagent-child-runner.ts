@@ -77,6 +77,11 @@ export interface CodeSubagentChildRunnerDeps {
      */
     runStateOwner?: string;
     runDetails?: Record<string, unknown>;
+    signal?: AbortSignal;
+    quotaSessionId?: string;
+    detachedChildInbox?: boolean;
+    subagentWritePaths?: readonly string[];
+    initialTurnIndex?: number;
   }): Promise<CodeSubagentRunAgentResult>;
   /**
    * Step 5: the child's metadata-only outcome, reported **after** the run returns or throws.
@@ -177,7 +182,7 @@ export function createCodeSubagentChildRunner(deps: CodeSubagentChildRunnerDeps)
         result = await deps.runAgent({
           ctx: request.ctx,
           session,
-          prompt: buildCodeSubagentPrompt(request),
+          prompt: request.continuation?.prompt ?? buildCodeSubagentPrompt(request),
           runId: request.runId,
           parentRunId: request.parentRunId,
           allowedTools: request.allowedTools,
@@ -186,6 +191,10 @@ export function createCodeSubagentChildRunner(deps: CodeSubagentChildRunnerDeps)
           ...(request.readOnly ? { readOnlyIntent: true } : {}),
           ...(request.runStateOwner ? { runStateOwner: request.runStateOwner } : {}),
           ...(request.runDetails ? { runDetails: request.runDetails } : {}),
+          ...(request.signal ? { signal: request.signal } : {}),
+          ...(request.parentSessionId ? { quotaSessionId: request.parentSessionId, detachedChildInbox: true } : {}),
+          ...(request.parentSessionId && !request.readOnly ? { subagentWritePaths: request.paths } : {}),
+          ...(request.continuation ? { initialTurnIndex: request.continuation.turnIndex } : {}),
         });
       } catch (error) {
         /**
@@ -206,7 +215,7 @@ export function createCodeSubagentChildRunner(deps: CodeSubagentChildRunnerDeps)
       const completed = result.status === "completed";
       const outcome: CodeSubagentChildOutcome = {
         runId: request.runId,
-        status: completed ? "completed" : "failed",
+        status: result.status === "interrupted" ? "interrupted" : completed ? "completed" : "failed",
         ...(completed ? {} : { errorCode: result.code ?? result.reason ?? "subagent_run_failed" }),
         ...(completed ? {} : { errorMessage: line(result.message, 300) ?? "The sub-agent run did not complete" }),
         answer: JSON.stringify(buildCodeSubagentAnswer(result)),

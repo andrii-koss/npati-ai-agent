@@ -23,6 +23,7 @@ import {
 import type { CodeWorkspaceRevisionGuard, CodeWorkspaceRevisionSnapshot } from "./code-workspace-revision";
 import { isGitWriteTool } from "./code-git-write-policy";
 import { CODE_AGENT_SPAWN_TOOL } from "./code-subagent-limits";
+import { parsePatch } from "./code-tools-patch";
 import {
   CodeTurnTracker, extractWriteChanges, resolveTurnTrackingOptions, revisionConflictDetails, simpleUnifiedDiff,
   type CodeApprovalPort, type CodeCheckpointPort, type CodeWriteChange,
@@ -151,6 +152,12 @@ export type CodeToolErrorCode =
   | "subagent_write_scope_conflict"
   | "subagent_detached_disabled"
   | "subagent_reserve_failed"
+  | "subagent_control_unavailable"
+  | "subagent_not_continuable"
+  | "subagent_control_busy"
+  | "subagent_unknown_outcome"
+  | "subagent_session_missing"
+  | "subagent_child_not_found"
   /**
    * C13 (owner decision 1): a `PreToolUse` project hook refused this call. The code exists so a refusal that
    * came from the repository's own hook is distinguishable from one the server made — and so the model
@@ -201,6 +208,7 @@ const CANONICAL_ERROR_CODES: ReadonlySet<string> = new Set<string>([
    * raise them (the child runner knows the child's own refusal), and a shaped error from a port must reach the
    * model with its own code instead of the useless `tool_failed` — the same reason the git codes are listed.
    */
+  "subagent_control_unavailable", "subagent_not_continuable", "subagent_control_busy", "subagent_unknown_outcome", "subagent_session_missing", "subagent_child_not_found",
   "subagent_type_unknown", "subagent_summary_required", "subagent_path_outside_scope",
   "subagent_tool_not_published", "subagent_tool_not_delegable", "subagent_parent_scope_unresolved",
   "subagent_parallelism_exceeded", "subagent_capability_scope_empty",
@@ -549,6 +557,8 @@ export function codeSubFlagForTool(tool: string, write: boolean): string {
    * starts another run that draws on the same shared budget and may write, so an operator who enables file
    * edits must not thereby enable spawning children.
    */
+  if (tool === "code.agent.spawn_async") return "code.async_subagents";
+  if (["code.agent.continue", "code.agent.send_message", "code.agent.interrupt"].includes(tool)) return "code.async_agent_control";
   if (tool === CODE_AGENT_SPAWN_TOOL) return "code.subagents";
   return write ? "code.write" : "code.read";
 }
@@ -833,6 +843,7 @@ export class CodeToolRuntime {
      * runner not offering the tool is only the courtesy.
      */
     parentRunId?: string;
+    subagentWritePaths?: readonly string[];
     /**
      * C12: the capability scope the delegation recorded for this run (an intersection: the parent's effective
      * set, the child type's profile and the delegation record). A tool outside it is refused on the server.
@@ -903,7 +914,7 @@ export class CodeToolRuntime {
        * parent is a child, and a child may never grow the delegation tree, whatever the model asks for, whatever
        * the schema advertises and whatever the configuration says.
        */
-      if (input.parentRunId !== undefined && tool.name === CODE_AGENT_SPAWN_TOOL) {
+      if (input.parentRunId !== undefined && tool.name.startsWith("code.agent.")) {
         throw new CodeToolError(
           "subagent_depth_exceeded",
           `Run ${input.parentRunId} is itself a sub-agent run, so ${tool.name} cannot run: a coding sub-agent works, it does not delegate (depth 1)`,
@@ -936,6 +947,18 @@ export class CodeToolRuntime {
 
       // (5) Arguments.
       const args = validateArguments(tool.inputSchema, input.args);
+      if (input.subagentWritePaths) {
+        const scopedFileTools = ["code.fs.edit", "code.fs.write", "code.fs.move", "code.fs.delete", "code.fs.apply_patch"];
+        const unsafe = this.isWriteTool(tool.name) || /^(code\.shell\.(exec|exec_async|process\.start)|code\.verify\.run|code\.deps\.(add|install|update|remove)|code\.git\.(branch|stage|commit|restore|push|pr))/.test(tool.name);
+        if (unsafe) {
+          const paths = tool.name === "code.fs.apply_patch" ? parsePatch(args.patch).files.map((file) => file.path)
+            : [args.path, args.from, args.to].filter((value): value is string => typeof value === "string");
+          if (!scopedFileTools.includes(tool.name) || !paths.length || paths.some((path) => {
+            const normalized = this.guardPath(path);
+            return !input.subagentWritePaths!.some((scope) => normalized === scope || normalized.startsWith(`${scope}/`));
+          })) throw new CodeToolError("subagent_path_outside_scope", "The writing child must stay inside its recorded file scope", 403, "policy", false, tool.name);
+        }
+      }
       if (tool.name === "code.fs.undo_last_turn" && args.confirm !== true) {
         throw new CodeToolError("invalid_arguments", "code.fs.undo_last_turn requires confirm: true", 400, "validate_arguments", false, tool.name);
       }

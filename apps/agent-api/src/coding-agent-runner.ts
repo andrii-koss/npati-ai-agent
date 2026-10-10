@@ -403,6 +403,7 @@ export interface CodeRunStatePort {
   }): Promise<{ runId: string }>;
   renewLease(input: { companyId: string; runId: string; owner: string }): Promise<{ held: boolean }>;
   releaseLease?(input: { companyId: string; runId: string; owner: string }): Promise<unknown>;
+  markInterrupted?(input: { companyId: string; runId: string; reason: string }): Promise<unknown>;
   /** Records a turn boundary. Called after every turn, never only at the end. */
   appendTurn(input: {
     companyId: string;
@@ -1036,6 +1037,7 @@ export interface CodingAgentRunnerPorts {
    * which is the default) never reaches this port.
    */
   activeChildren?: {
+    settle?(input: { ctx: AuthContext; companyId: string; projectId: string; sessionId: string; runId: string; cancel: boolean }): Promise<boolean>;
     /**
      * Asked on the terminal path, before the sandbox is released. The caller supplies the run's own identity, so
      * the answer is scoped to this company, this session and this run and needs no ambient state. `true` means the
@@ -1069,6 +1071,8 @@ export interface CodingAgentRunnerPorts {
    * in this file, and an unknown model falls back to the conservative profile.
    */
   asyncProcessesEnabled?: (ctx: AuthContext, companyId: string, projectId: string) => Promise<boolean>;
+  asyncSubagentsEnabled?: (ctx: AuthContext, companyId: string) => Promise<boolean>;
+  asyncAgentControlsEnabled?: (ctx: AuthContext, companyId: string) => Promise<boolean>;
   modelProfiles?: {
     profiles?: readonly CodeModelProfile[];
     overrides?: readonly CodeModelProfile[];
@@ -1132,6 +1136,11 @@ export interface CodingAgentRunInput {
   cancelRequested?: () => boolean | Promise<boolean>;
   /** C6a: lease identity of this process; defaults to a per-run id derived from the pid and a random suffix. */
   runStateOwner?: string;
+  runDetails?: Record<string, unknown>;
+  quotaSessionId?: string;
+  detachedChildInbox?: boolean;
+  subagentWritePaths?: readonly string[];
+  initialTurnIndex?: number;
   /** Extra system-prompt lines from the caller (profiles, project context). Never from file contents. */
   extraSystemPromptLines?: readonly string[];
   /**
@@ -1729,6 +1738,8 @@ export class CodingAgentRunner {
       capabilityScope?: CodeRunCapabilityScope;
       runtimeTools?: readonly CodeRunRuntimeToolDescriptor[];
       asyncProcessesEnabled?: boolean;
+      asyncSubagentsEnabled?: boolean;
+      asyncAgentControlsEnabled?: boolean;
     } = {},
   ): CodeRunToolDescriptor[] {
     const scope = options.capabilityScope;
@@ -1749,8 +1760,10 @@ export class CodingAgentRunner {
       }));
     let available = [...staticTools, ...runtimeTools];
     if (!options.asyncProcessesEnabled) available = available.filter((tool) => !["code.shell.exec_async", "code.shell.process.wait"].includes(tool.name));
+    if (!options.asyncSubagentsEnabled) available = available.filter((tool) => tool.name !== "code.agent.spawn_async");
+    if (!options.asyncAgentControlsEnabled) available = available.filter((tool) => !["code.agent.continue", "code.agent.send_message", "code.agent.interrupt"].includes(tool.name));
     // A delegation tool is only ever offered to a run that may delegate, and only while the depth limit allows.
-    if (!mayDelegate) available = available.filter((tool) => tool.name !== CODE_AGENT_SPAWN_TOOL);
+    if (!mayDelegate) available = available.filter((tool) => !tool.name.startsWith("code.agent."));
     if (scope?.tools) {
       const allowed = new Set(scope.tools.map((tool) => tool.toLowerCase()));
       available = available.filter((tool) => allowed.has(tool.name.toLowerCase()));
@@ -1973,7 +1986,7 @@ export class CodingAgentRunner {
     let leaseLost = false;
     /**
      * Step 5: set when the sandbox was **withheld** because a delegated child of this run had not settled. The
-     * run's own outcome is then reported as a failure — `active_subagent_unsettled` — because a parent that ended
+     * run's own outcome is then interrupted — `active_subagent_unsettled` — because a parent that ended
      * while a child it started is still working has not finished the work it accepted.
      */
     let unsettledChildren = false;
@@ -2022,10 +2035,11 @@ export class CodingAgentRunner {
       /**
        * Step 5: a withheld sandbox is a real outcome, not a detail. A run that "completed" while a child it started
        * is still required would make the caller's next step run against a session whose work is half done, so the
-       * status is reported as a failure with its own reason. The child keeps its own run, its own lease and its own
+       * status remains interrupted with its own reason. The child keeps its own run, its own lease and its own
        * completion; nothing here cancels it.
        */
-      const reportedStatus: CodingAgentRunStatus = unsettledChildren && status !== "waiting_for_user" ? "failed" : status;      const reportedReason: CodingAgentStopReason = unsettledChildren && status !== "waiting_for_user"
+      const reportedStatus: CodingAgentRunStatus = unsettledChildren && status !== "waiting_for_user" ? "interrupted" : status;
+      const reportedReason: CodingAgentStopReason = unsettledChildren && status !== "waiting_for_user"
         ? "active_subagent_unsettled"
         : reason;
       return {
@@ -2089,6 +2103,7 @@ export class CodingAgentRunner {
       reason: CodingAgentStopReason,
       message: string,
     ): Promise<CodingAgentRunResult> => {
+      if (unsettledChildren) { status = "interrupted"; reason = "active_subagent_unsettled"; }
       if (inboxOpened && stateRunId) {
         try {
           if (this.ports.runState && !(await this.ports.runState.renewLease({ companyId, runId: stateRunId, owner: stateOwner })).held) {
@@ -2129,7 +2144,11 @@ export class CodingAgentRunner {
         const stateStatus = status === "cancelled"
           ? "cancelled"
           : status === "failed" ? "failed" : status === "interrupted" ? "interrupted" : "completed";
-        await writeState(() => this.ports.runState!.markFinished({
+        if (status === "interrupted" && (input.detachedChildInbox || unsettledChildren)) {
+          await writeState(() => this.ports.runState!.markInterrupted?.({ companyId, runId: stateRunId!, reason })
+            ?? this.ports.runState!.markFinished({ companyId, runId: stateRunId!, status: "interrupted", reason }));
+          await writeState(() => this.ports.runState!.releaseLease?.({ companyId, runId: stateRunId!, owner: stateOwner }) ?? Promise.resolve());
+        } else await writeState(() => this.ports.runState!.markFinished({
           companyId, runId: stateRunId!, status: stateStatus, reason,
           // Persisted as an estimate, never as metering: `costUsd` is the loop's own number and the provider may
           // have reported no usage at all, so a reader must be able to tell the two apart.
@@ -2301,8 +2320,11 @@ export class CodingAgentRunner {
     };
 
     const release = async (reason: string): Promise<void> => {
-      if (!this.ports.sandbox) return;
       try {
+        if (stateRunId && this.ports.activeChildren?.settle
+          && !await this.ports.activeChildren.settle({ ctx, companyId, projectId, sessionId, runId: stateRunId, cancel: reason !== "completed" })) {
+          unsettledChildren = true; return;
+        }
         /**
          * Step 5: the sandbox is **not** released while a delegated child of this run is still required. The
          * child is not this run's process, so the process cleanup fence cannot see it, and destroying the sandbox
@@ -2320,6 +2342,7 @@ export class CodingAgentRunner {
         unsettledChildren = true;
         return;
       }
+      if (!this.ports.sandbox) return;
       try {
         await this.ports.sandbox.release({ ctx, companyId, projectId, sessionId, reason });
       } catch {
@@ -3191,7 +3214,7 @@ export class CodingAgentRunner {
     // (5) C6a: durable run state + lease. A run whose state cannot be recorded is refused rather than run
     // "invisibly": without the row there is no turn boundary, and a crash would leave a mutating tool call
     // with no record that it ever started. This is the only state write that is allowed to fail the run.
-    const useInbox = !input.subagentScope && !!this.ports.inbox && await this.ports.inbox.isEnabled(ctx, companyId);
+    const useInbox = (!input.subagentScope || input.detachedChildInbox === true) && !!this.ports.inbox && await this.ports.inbox.isEnabled(ctx, companyId);
     if (this.ports.runState) {
       try {
         const startedState = await this.ports.runState.startRun({
@@ -3200,6 +3223,7 @@ export class CodingAgentRunner {
           projectId,
           sessionId,
           owner: stateOwner,
+          ...(input.runDetails ? { details: input.runDetails } : {}),
           ...(input.runId ? { runId: input.runId } : {}),
           /**
            * C10: the run's **original request**, written by the same statement that creates the run. Until this
@@ -3304,6 +3328,7 @@ export class CodingAgentRunner {
      * any tool outside the recorded scope, before the sub-flag, the arguments, the approval and the executor.
      */
     const capabilityScopeFields = {
+      ...(input.subagentWritePaths ? { subagentWritePaths: input.subagentWritePaths } : {}),
       ...(capabilityScope.tools ? { capabilityScope: capabilityScope.tools } : {}),
       ...(capabilityScope.parentRunId ? { parentRunId: capabilityScope.parentRunId } : {}),
     };
@@ -3412,6 +3437,8 @@ export class CodingAgentRunner {
      */
     const toolOptions = {
       asyncProcessesEnabled: !!this.ports.asyncProcessesEnabled && await this.ports.asyncProcessesEnabled(ctx, companyId, projectId),
+      asyncSubagentsEnabled: !!this.ports.asyncSubagentsEnabled && await this.ports.asyncSubagentsEnabled(ctx, companyId),
+      asyncAgentControlsEnabled: !!this.ports.asyncAgentControlsEnabled && await this.ports.asyncAgentControlsEnabled(ctx, companyId),
       readOnlyIntent: input.readOnlyIntent === true,
       capabilityScope,
       runtimeTools: runtimeToolDescriptors,
@@ -3651,6 +3678,7 @@ export class CodingAgentRunner {
         const opened = await this.ports.inbox!.transact(session, { kind: "open", runId: stateRunId, owner: stateOwner,
           ...(input.initialInboxMessageId ? { initialMessageId: input.initialInboxMessageId } : {}) });
         inboxOpened = true;
+        if (input.detachedChildInbox) await this.ports.inbox!.transact(session, { kind: "resume-inputs", runId: stateRunId, owner: stateOwner });
         recoveredInbox = opened.messages.filter((m) => m.id !== input.initialInboxMessageId || m.completion);
       } catch {
         return stop("failed", "refused", "The session inbox could not acquire this run's lease.");
@@ -3665,7 +3693,7 @@ export class CodingAgentRunner {
     const argumentCorrections = new Map<string, number>();
     let loopReminded = false;
     let errorReminded = false;
-    let steps = 0;
+    let steps = Math.max(0, input.initialTurnIndex ?? 0);
     const appendInboxMessage = async (message: import("@npati/workspace").CodeInboxMessage): Promise<boolean> => {
       if (message.completion && stateRunId && this.ports.completions) {
         const collected = await this.ports.completions.collect(ctx, session, message, stateRunId);
@@ -3848,6 +3876,9 @@ export class CodingAgentRunner {
         );
       }
       if (await cancelled()) {
+        if (input.detachedChildInbox && (input.signal?.reason as { code?: string } | undefined)?.code === "subagent_interrupt") {
+          return stop("interrupted", "interrupted", "The child was interrupted at a safe boundary and can be continued.");
+        }
         await release("cancelled");
         await this.ports.runEvents?.append({ eventKey: `code-run-cancelled:${turnId}`, eventType: "cancelled", runStatus: "cancelled", message: "Coding Agent run cancelled by the user" });
         return stop("cancelled", "cancelled", "The run was cancelled. Any running processes were stopped and the sandbox was released.");
@@ -3879,7 +3910,7 @@ export class CodingAgentRunner {
          * children draw on one allowance (a delegated coding run is a run of the same session) and a depth past
          * the canonical limit cannot obtain an allowance even if a delegation somehow slipped through.
          */
-        const verdict = this.ports.quota.checkQuota(sessionId, this.estimatedTokensPerCall, this.estimatedCostPerCallUsd, delegationDepth, { userId: ctx.userId, companyId });
+        const verdict = this.ports.quota.checkQuota(input.quotaSessionId ?? sessionId, this.estimatedTokensPerCall, this.estimatedCostPerCallUsd, delegationDepth, { userId: ctx.userId, companyId });
         if (!verdict.allowed) {
           await release("budget_exhausted");
           summary.remaining = verdict.error ?? "Budget exhausted.";
@@ -4040,6 +4071,13 @@ export class CodingAgentRunner {
       } catch (error) {
         // Provider errors are handled by the engine's own routing/fallback; reaching here means the whole
         // chain failed. The runner never invents retries.
+        if (input.detachedChildInbox && (input.signal?.reason as { code?: string } | undefined)?.code === "subagent_interrupt") {
+          return stop("interrupted", "interrupted", "The child was interrupted during its model request and can be continued.");
+        }
+        if (input.detachedChildInbox && input.signal?.aborted) {
+          await release("cancelled");
+          return stop("cancelled", "cancelled", "The delegated run was cancelled.");
+        }
         const failure = error as { code?: string; message?: string };
         await release("provider_error");
         await this.ports.runEvents?.append({ eventKey: `code-run-failed:${turnId}`, eventType: "failed", runStatus: "failed", message: "Coding Agent run failed" });
@@ -4056,7 +4094,7 @@ export class CodingAgentRunner {
       summary.costUsd += costUsd;
       if (this.ports.quota && (tokens > 0 || costUsd > 0)) {
         try {
-          this.ports.quota.recordUsage(sessionId, tokens, costUsd, { userId: ctx.userId, companyId });
+          this.ports.quota.recordUsage(input.quotaSessionId ?? sessionId, tokens, costUsd, { userId: ctx.userId, companyId });
         } catch {
           // Usage accounting must not abort a run; the budget pre-flight remains the gate.
         }

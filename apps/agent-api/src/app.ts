@@ -129,6 +129,7 @@ import { registerCodeSessionControlRoutes } from "./code-session-control-routes"
 // C10: durable session operations — resume, rewind, fork — and the reconciler's recovery notice.
 import { registerCodeSessionDurabilityRoutes } from "./code-session-durability-routes";
 import { CodeSessionResumeService } from "./code-session-resume";
+import { registerCodeAgentControlRoutes } from "./code-agent-controls";
 import { CodeSessionRewindService } from "./code-session-rewind";
 import { CodeSessionForkService } from "./code-session-fork";
 import { collectCodeSessionUsage } from "./code-session-usage";
@@ -3081,6 +3082,7 @@ export function buildApp(config: AppConfig = {}) {
             paths: [...request.paths],
             model: request.resolution.model,
             maxTurns: request.resolution.maxTurns,
+            maxParallelism: request.resolution.maxParallelism,
             readOnly: request.resolution.readOnly,
             summaryOnly: request.resolution.summaryOnly,
             allowedTools: [...request.allowedTools],
@@ -3088,6 +3090,7 @@ export function buildApp(config: AppConfig = {}) {
           });
         },
       },
+      subagentControls: () => codeSubagentOperationsRef?.(),
       subagentActivity: codeActivitySink,
     }),
     checkpoints: codeCheckpointPort,
@@ -5131,6 +5134,7 @@ ${localized.next}`;
      */
     ...(workspaceStore.codeProcesses ? {
       activeChildren: {
+        settle: async (input) => await codeSubagentOperationsRef?.()?.settleChildren({ ...input, parentRunId: input.runId }) ?? true,
         isUnsettled: async (input: { ctx: AuthContext; companyId: string; projectId: string; sessionId: string; runId: string }) =>
           await codeSubagentOperationsRef?.()?.hasRequiredChild({
             ctx: input.ctx, companyId: input.companyId, sessionId: input.sessionId, parentRunId: input.runId,
@@ -5141,6 +5145,8 @@ ${localized.next}`;
       await featureFlagService.isEnabled(ctx, "code.async_processes", { companyId }) &&
       await featureFlagService.isEnabled(ctx, "code.background_runs", { companyId }) &&
       await projectSandbox!.supportsTrackedProcesses(ctx, companyId, projectId),
+    asyncSubagentsEnabled: async (ctx, companyId) => !!trackedProcesses && await featureFlagService.isEnabled(ctx, "code.async_subagents", { companyId }) && await codeSessionInbox.isEnabled(ctx, companyId),
+    asyncAgentControlsEnabled: async (ctx, companyId) => !!trackedProcesses && await featureFlagService.isEnabled(ctx, "code.async_agent_control", { companyId }) && await codeSessionInbox.isEnabled(ctx, companyId),
     inbox: codeSessionInbox,
     flags: featureFlagService,
     rbac: { authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input) },
@@ -5464,7 +5470,7 @@ ${localized.next}`;
     subagentChildRunnerWithAck = {
       ...createCodeSubagentChildRunner({
         loadSession: async ({ ctx, companyId, sessionId }) => codeService.getSession(ctx, companyId, sessionId),
-        runAgent: async ({ ctx, session, prompt, model, runId, parentRunId, allowedTools, readOnlyIntent, maxTurns, runStateOwner, runDetails }) =>
+        runAgent: async ({ ctx, session, prompt, model, runId, parentRunId, allowedTools, readOnlyIntent, maxTurns, runStateOwner, runDetails, signal, quotaSessionId, detachedChildInbox, initialTurnIndex, subagentWritePaths }) =>
           codingAgentRunnerRef!.run({
             ctx,
             session,
@@ -5478,6 +5484,11 @@ ${localized.next}`;
             ...(readOnlyIntent ? { readOnlyIntent: true } : {}),
             ...(runStateOwner ? { runStateOwner } : {}),
             ...(runDetails ? { runDetails } : {}),
+            ...(signal ? { signal } : {}),
+            ...(quotaSessionId ? { quotaSessionId } : {}),
+            ...(detachedChildInbox ? { detachedChildInbox } : {}),
+            ...(initialTurnIndex !== undefined ? { initialTurnIndex } : {}),
+            ...(subagentWritePaths ? { subagentWritePaths } : {}),
           }),
         /**
          * The detached path's settlement: the adapter is the only place that sees the child run's own summary, and
@@ -5510,7 +5521,21 @@ ${localized.next}`;
       childRunner: () => subagentChildRunnerWithAck,
       loadSession: async ({ ctx, companyId, sessionId }) => codeService.getSession(ctx, companyId, sessionId),
       enabled: async ({ ctx, companyId }) => await featureFlagService.isEnabled(ctx, "code.async_subagents", { companyId })
-        && !!trackedProcesses,
+        && !!trackedProcesses && await featureFlagService.isEnabled(ctx, "code.subagents", { companyId })
+        && await featureFlagService.isEnabled(ctx, "code.async_processes", { companyId }) && await codeSessionInbox.isEnabled(ctx, companyId),
+      controlsEnabled: async ({ ctx, companyId }) => await featureFlagService.isEnabled(ctx, "code.async_agent_control", { companyId }),
+      inbox: codeSessionInbox,
+      ensureChildSession: async ({ ctx, parent, childRunId }) => codeService.createSession(ctx, parent.companyId, parent.projectId, {
+        childKey: childRunId, parentSessionId: parent.id, mode: parent.mode,
+        dataClassification: parent.dataClassification, retentionClass: parent.retentionClass,
+      }),
+      resumeChild: async ({ ctx, companyId, sessionId, runId, owner }) => {
+        const boundary = await codeRunStateLog.loadTurnBoundary(companyId, runId);
+        if (!boundary) throw Object.assign(new Error("subagent_run_missing"), { code: "subagent_control_unavailable", httpStatus: 409 });
+        if (boundary.unknownOutcomeToolCalls.length) return { prompt: "", turnIndex: boundary.lastFinishedTurn, unknownCalls: boundary.unknownOutcomeToolCalls.length };
+        const resumed = await codeSessionResumeService.resume({ ctx, companyId, sessionId, runId, owner });
+        return { prompt: resumed.resumePrompt, turnIndex: Math.max(boundary.lastFinishedTurn, boundary.incompleteTurn?.turnIndex ?? 0), unknownCalls: resumed.unknownOutcomeToolCalls.length };
+      },
       spawnTool: "code.agent.spawn",
       /**
        * The completion is delivered through the **existing** Step-4 path: waking the session inbox runs its
@@ -5524,6 +5549,9 @@ ${localized.next}`;
       logger: { warn: (code) => app.log.warn({ code }, "code_subagent_operation_warning") },
     });
     codeSubagentOperationsRef = () => operations;
+    app.addHook("onClose", async () => { await operations.close(); });
+    registerCodeAgentControlRoutes(app, { service: () => operations, auth: authProvider,
+      authorize: (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input) });
   }
   // C6a: reconcile runs whose process died. A run that still claims to be running with an expired lease is
   // moved to `interrupted`; read-only calls with an unknown result may be replayed, mutating calls are reported

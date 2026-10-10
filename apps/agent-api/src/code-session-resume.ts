@@ -113,6 +113,8 @@ const PROCESS_TOOLS: ReadonlyArray<string> = [
 ];
 
 export interface CodeSessionResumeRequest {
+  /** Internal controller's unique lease identity; public resume routes never copy this argument. */
+  owner?: string;
   ctx: AuthContext;
   companyId: string;
   sessionId: string;
@@ -398,7 +400,7 @@ export class CodeSessionResumeService {
       );
     }
 
-    const owner = this.deps.owner ?? `resume-${process.pid}`;
+    const owner = request.owner ?? this.deps.owner ?? `resume-${process.pid}`;
     const alreadyResumed = state.status === "running"
       && state.leaseExpiresAt !== null
       && state.leaseExpiresAt.getTime() >= (this.deps.now?.() ?? Date.now());

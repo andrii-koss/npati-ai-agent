@@ -36,8 +36,8 @@ import { CapabilityInspectorService, type InspectorReport } from "./capability-i
  * this value through `push(...)` during C9/C11/C12, which is exactly the change the old gate could not see.
  */
 export const STATIC_CATALOG_BASELINE = {
-  total: 387,
-  agentCallable: 123,
+  total: 391,
+  agentCallable: 127,
   runtimeOnly: 264,
 } as const;
 
@@ -46,7 +46,7 @@ export const STATIC_CATALOG_BASELINE = {
  * tool registry publishes). Pinned here on purpose: a manifest bump is a reviewable event, and
  * `scripts/code-tool-schemas-generate.mjs --manifest-version N` is where it comes from.
  */
-export const TOOL_SCHEMA_MANIFEST_VERSION = 10;
+export const TOOL_SCHEMA_MANIFEST_VERSION = 11;
 
 export interface CapabilityAuditIssue {
   /** Stable machine-readable code; the negative control asserts on these, never on prose. */
