@@ -336,7 +336,7 @@ describe("[C14] [security-gate] the runner really reads ports.modelProfiles", ()
 // ---------------------------------------------------------------------------------------------------------
 
 describe("[C14] [security-gate] the model-profile port is wired in the composition", () => {
-  const appSource = readFileSync(path.join(workspaceRoot, "apps", "agent-api", "src", "app.ts"), "utf8");
+  const appSource = ["app.ts", "code-route-wiring.ts"].map((file) => readFileSync(path.join(workspaceRoot, "apps", "agent-api", "src", file), "utf8")).join("\n");
   const start = appSource.indexOf("new CodingAgentRunner({");
   const end = appSource.indexOf("\n  });", start);
   const runnerBlock = start >= 0 && end > start ? appSource.slice(start, end) : "";
@@ -355,7 +355,7 @@ describe("[C14] [security-gate] the model-profile port is wired in the compositi
   });
 
   it("records the provider next to the model, and derives it once for both uses", () => {
-    const runnerSource = readFileSync(path.join(workspaceRoot, "apps", "agent-api", "src", "coding-agent-runner.ts"), "utf8");
+    const runnerSource = ["coding-agent-runner.ts", "coding-agent-runner-contracts.ts"].map((file) => readFileSync(path.join(workspaceRoot, "apps", "agent-api", "src", file), "utf8")).join("\n");
     expect(runnerSource).toContain("provider: modelProviderHint,");
     // The same hint feeds the snapshot's `modelSelection.provider`; a second computation would be a second
     // answer to "which provider is this run about".

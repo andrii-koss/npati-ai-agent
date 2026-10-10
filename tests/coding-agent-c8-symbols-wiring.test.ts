@@ -75,7 +75,7 @@ describe("[C8] [security-gate] symbols.outline runner behaviour", () => {
 });
 
 describe("[C8] [security-gate] symbols.outline is wired in app.ts", () => {
-  const source = readFileSync(path.join(workspaceRoot, "apps", "agent-api", "src", "app.ts"), "utf8");
+  const source = ["app.ts", "code-tool-runtime-wiring.ts"].map((file) => readFileSync(path.join(workspaceRoot, "apps", "agent-api", "src", file), "utf8")).join("\n");
 
   it("passes the ctags runner into the canonical executors", () => {
     const executorsAt = source.indexOf("allCanonicalExecutors({");
