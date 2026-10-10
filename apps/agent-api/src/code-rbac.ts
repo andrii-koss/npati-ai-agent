@@ -307,6 +307,8 @@ export const CODE_ACTION_PERMISSIONS: Readonly<Record<string, string>> = Object.
   // C6: creating a session is what makes a run possible at all; it was audited by `code-service.ts` but
   // missing from this map, so any RBAC gate on it was denied by default.
   "code.session.create": "workspace:write",
+  "code.session.inbox.read": "workspace:read",
+  "code.session.inbox.write": "workspace:write",
   // Mutating workspace surfaces.
   "code.fs.edit": "workspace:write",
   "code.fs.write": "workspace:write",

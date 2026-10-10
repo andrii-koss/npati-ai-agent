@@ -12,11 +12,11 @@ import { CodeSessionRunExecutor } from "../apps/agent-api/src/code-session-run-e
 const owner = { userId: "owner-1", workspaceId: "workspace:owner-1", permissions: ["owner", "admin:all", "workspace:write", "business:manage"] };
 
 describe("self-hosted coding defaults and installation ownership", () => {
-  it("enables every supported coding feature globally without setup rows", async () => {
+  it("enables stable coding features globally while experimental async inbox remains opt-in", async () => {
     const store = new InMemoryWorkspaceStore();
     const flags = new FeatureFlagService(store, undefined, { enabledByDefault: true });
     for (const key of ["coding_agent.enabled", ...CODE_AGENT_SUB_FLAGS, "code.model_profile.hosted-native-tools"]) {
-      expect(await flags.isEnabled(owner, key, { companyId: "company-a" })).toBe(true);
+      expect(await flags.isEnabled(owner, key, { companyId: "company-a" })).toBe(!["code.async_inbox", "code.async_processes"].includes(key));
     }
     const described = await flags.describe(owner, { companyId: "company-a" });
     expect(described.master).toMatchObject({ enabled: true, scope: "global", source: "self_hosted_default" });

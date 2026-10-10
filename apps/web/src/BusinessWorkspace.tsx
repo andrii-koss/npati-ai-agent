@@ -14,6 +14,9 @@ import { SPEECH_VOICES } from "./speech-voices";
 import { persistedModeLabel } from "./code-workspace/actions";
 import { ResearchProgressPanel, type ChatProgressEvent } from "./ResearchProgress";
 import { cancelChatStream, streamChat } from "./chat-stream";
+import { CodePendingMessages } from "./CodePendingMessages";
+import { InboxSubmission, requestCodeInbox, type InboxMessage } from "./code-inbox-client";
+import { useCodeInbox } from "./use-code-inbox";
 import { confirmModal, alertModal } from "./ConfirmDialog";
 import { detectChatMutationOperation, mutationProgressTargets } from "./chat-mutation-progress";
 
@@ -1294,6 +1297,15 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   }, []);
 
   const [sending, setSending] = useState(false); const [thinkingStep, setThinkingStep] = useState(0);
+  const codeInbox = useCodeInbox(selected, sending);
+  const [inboxSubmitting, setInboxSubmitting] = useState(false);
+  const [inboxNotice, setInboxNotice] = useState("");
+  useEffect(() => { setInboxNotice(""); }, [selected, codeInbox.session?.sessionId]);
+  const inboxSubmission = useRef(new InboxSubmission());
+  const inboxMutationBusy = useRef(false);
+  const draftVersion = useRef(0);
+  const selectedChatRef = useRef(selected); selectedChatRef.current = selected;
+  const chatSubmissionBusy = useRef(false);
   const [streamingResponse,setStreamingResponse]=useState(false);
   const [notice, setNotice] = useState(""); const [replyMeta, setReplyMeta] = useState<AgentReply | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(() => Boolean(initialConversationId));
@@ -1619,8 +1631,56 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     progressCompleteRef.current = false;
     flushDeltasRef.current = null;
   }
+  async function submitInbox(mode: "queue" | "steer") {
+    const session = codeInbox.session;
+    const text = input.trim();
+    if (!session || !text || inboxMutationBusy.current) return;
+    if (attachments.length || noMemory || ttsEnabled) { setInboxNotice(t("codeInbox.textOnly")); return; }
+    const version = draftVersion.current, generation = codeInbox.generation.current;
+    inboxMutationBusy.current = true; setInboxSubmitting(true);
+    try {
+      await inboxSubmission.current.send(session, text, mode, { version, generation,
+        currentVersion: () => draftVersion.current, currentGeneration: () => codeInbox.generation.current,
+        apply: (next) => codeInbox.applySnapshot(next, session.sessionId),
+        clear: () => { draftVersion.current++; setInput(""); },
+      });
+      if (generation !== codeInbox.generation.current) return;
+      // The server may turn a late steer into next-turn. The pending panel uses the receipt target.
+      setInboxNotice("");
+    } catch (reason) {
+      if (generation === codeInbox.generation.current) setInboxNotice(reason instanceof Error ? reason.message : t("common.error"));
+      // Leave the draft and retry identity intact, including an ambiguous transport failure.
+    } finally {
+      inboxMutationBusy.current = false; setInboxSubmitting(false);
+    }
+  }
+  async function changeInboxMessage(message: InboxMessage, text?: string) {
+    const session = codeInbox.session;
+    if (!session || inboxMutationBusy.current) return false;
+    const generation = codeInbox.generation.current;
+    inboxMutationBusy.current = true; setInboxSubmitting(true);
+    try {
+      const next = await requestCodeInbox(session, text === undefined ? "DELETE" : "PUT",
+        { expectedRevision: message.revision, ...(text !== undefined ? { text } : {}) }, message.id);
+      if (generation !== codeInbox.generation.current) return false;
+      codeInbox.applySnapshot(next, session.sessionId); setInboxNotice(""); return true;
+    } catch (reason) {
+      if (generation !== codeInbox.generation.current) return false;
+      setInboxNotice(reason instanceof Error ? reason.message : t("common.error"));
+      // A claim/edit conflict must refresh authoritative state rather than repeat a stale mutation.
+      try { codeInbox.applySnapshot(await requestCodeInbox(session), session.sessionId); } catch { /* Retain the error and draft. */ }
+      return false;
+    } finally { inboxMutationBusy.current = false; setInboxSubmitting(false); }
+  }
   async function submit(event: FormEvent) {
-    event.preventDefault(); const message = input.trim(); if ((!message && attachments.length === 0) || sending) return;
+    event.preventDefault();
+    if (codeInbox.active) { await submitInbox("queue"); return; }
+    const message = input.trim(); if ((!message && attachments.length === 0) || sending || chatSubmissionBusy.current) return;
+    chatSubmissionBusy.current = true;
+    const submittedDraftVersion = draftVersion.current;
+    const restoreDraft = (savedAttachments: ChatAttachmentInput[]) => {
+      if (draftVersion.current === submittedDraftVersion && selectedChatRef.current === conversationAtSubmit) { setInput(message); setAttachments(savedAttachments); }
+    };
     const requestMessage = expandDeleteConfirmationReply(message, messages);
     const conversationAtSubmit = selected;
     // An earlier history request must not replace the optimistic turn after it starts.
@@ -1680,7 +1740,9 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     resetProgress();
     if (projectProgressIntent.intent !== "CHAT") enqueueProgress({ type: "project_progress", stage: "project", status: "active", title: /[\u0400-\u04ff]/u.test(requestMessage) ? "Підготовка запиту" : "Preparing request", timestamp: new Date().toISOString() });
     for (const mutationTarget of mutationTargets) enqueueProgress({ type: "action_started", ...mutationTarget, timestamp: new Date().toISOString() });
-    setSending(true); setStreamingResponse(false); setNotice(""); setInput(""); setAttachments([]); setReplyMeta(null);
+    setSending(true); setStreamingResponse(false); setNotice("");
+    if (draftVersion.current === submittedDraftVersion) { setInput(""); setAttachments([]); }
+    setReplyMeta(null);
     window.requestAnimationFrame(() => {
       activeTurnRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       setTimeout(() => activeTurnRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
@@ -1747,6 +1809,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         streamId,
       }, enqueueProgress, {
         signal: controller.signal,
+        onCodeSession: (session) => { if (streamControllerRef.current?.controller === controller && selectedChatRef.current === conversationAtSubmit) codeInbox.accept(session, conversationAtSubmit); },
+        onCodeInbox: (sessionId) => { if (streamControllerRef.current?.controller === controller) codeInbox.refresh(sessionId); },
         onDelta: (delta) => {
           if (!progressCompleteRef.current && progressEventsRef.current.length > 0) {
             deltaBuffer.push(delta);
@@ -1794,6 +1858,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           : [...current, { id: assistantId, role: "assistant", content: cleanedMessage, projectCard: result.projectCard, createdAt: new Date().toISOString() }];
       });
       if (!privateRequest && result.conversationId) {
+        if (selectedChatRef.current === conversationAtSubmit) codeInbox.bindConversation(result.conversationId);
         setSelected(result.conversationId);
         window.history.replaceState(
           { ...window.history.state, usr: business ? { businessId: business.id } : { neutralChat: true } },
@@ -1840,7 +1905,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       window.dispatchEvent(new CustomEvent("npati:company-changed", { detail: { action: "refresh" } }));
       if (privateRequest) {
         setMessages((current) => current.filter((item) => item.id !== optimisticId));
-        setInput(message); setAttachments(sentAttachments);
+        restoreDraft(sentAttachments);
       } else try {
         const loaded = await loadConversations(selected ?? undefined);
         const latestUser = [...loaded].reverse().find((item) => item.role === "user");
@@ -1848,18 +1913,18 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           && (!message || latestUser!.content.includes(message))
           && sentAttachments.every((item) => latestUser!.content.includes(encodeURIComponent(item.name)));
         if (!persisted) {
-          setInput(message);
-          setAttachments(sentAttachments);
+          restoreDraft(sentAttachments);
         }
         window.dispatchEvent(new Event("npati:conversations-changed"));
       } catch {
         setMessages((current) => current.filter((item) => item.id !== optimisticId));
-        setInput(message); setAttachments(sentAttachments);
+        restoreDraft(sentAttachments);
       }
     } finally {
       flushDeltas();
       if (streamControllerRef.current?.controller === controller) streamControllerRef.current = null;
       setSending(false);
+      chatSubmissionBusy.current = false;
       setStreamingResponse(false);
     }
   }
@@ -1953,6 +2018,10 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         </div>
         {replyMeta?.memoryCandidate && <div className="memory-candidate"><div><strong>Remember this?</strong><p>{replyMeta.memoryCandidate.title}: {replyMeta.memoryCandidate.content}</p></div><button onClick={() => void remember()}>Remember</button><button onClick={() => setReplyMeta({ ...replyMeta, memoryCandidate: undefined })}>Not now</button></div>}
         <form className="onboarding-live-composer" onSubmit={(event) => void submit(event)}>
+          {codeInbox.session && <>
+            <CodePendingMessages key={codeInbox.session.sessionId} receiptTarget={codeInbox.receiptTarget} snapshot={codeInbox.snapshot} error={codeInbox.error || inboxNotice} busy={inboxSubmitting} t={t} onChange={changeInboxMessage} />
+            <Link to={`/settings/code/${encodeURIComponent(codeInbox.session.companyId)}/${encodeURIComponent(codeInbox.session.projectId)}`}>{t("codeInbox.workspace")}</Link>
+          </>}
           {contextSwitcher}
           {noMemory && (
             <span className="composer-private-badge" title="Private request active: memory, chat history, and attachments are not saved">
@@ -1968,9 +2037,9 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           )}
           <ChatAttachments
             value={attachments}
-            onChange={setAttachments}
+            onChange={(next) => { draftVersion.current++; setAttachments(next); }}
             onError={setNotice}
-            disabled={sending}
+            disabled={sending || codeInbox.active}
             privateRequestEnabled={chatMode === "private"}
             onPrivateRequestChange={(enabled) => handleModeChange(enabled ? "private" : "none")}
             ttsEnabled={chatMode === "tts"}
@@ -1981,8 +2050,12 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
             onGenerateSpeech={generateSpeechForInput}
             isGeneratingSpeech={isGeneratingSpeech}
           />
-          <AutoResizeChatTextarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={sendOnEnter} placeholder={business ? t("chat.businessPlaceholder") : t("chat.placeholder")} />
-          <div>
+          <AutoResizeChatTextarea value={input} onChange={(event) => { draftVersion.current++; setInput(event.target.value); }} onKeyDown={sendOnEnter} placeholder={business ? t("chat.businessPlaceholder") : t("chat.placeholder")} />
+          <div className={codeInbox.active ? "composer-inbox-actions" : undefined}>
+            {codeInbox.active && <>
+              <button type="submit" disabled={inboxSubmitting || !input.trim()}>{t("codeInbox.queue")}</button>
+              <button type="button" disabled={inboxSubmitting || !input.trim()} onClick={() => void submitInbox("steer")}>{t("codeInbox.steer")}</button>
+            </>}
             {sending ? (
               <button
                 type="button"
@@ -1998,7 +2071,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
                   <rect x="5" y="5" width="14" height="14" rx="2.5" />
                 </svg>
               </button>
-            ) : (
+            ) : !codeInbox.active ? (
               <button
                 type="submit"
                 className="chat-send-btn"
@@ -2011,7 +2084,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
                   <polyline points="14 6 20 12 14 18" />
                 </svg>
               </button>
-            )}
+            ) : null}
           </div>
         </form>
       </div>

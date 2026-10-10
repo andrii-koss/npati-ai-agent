@@ -37,6 +37,8 @@ export interface CodeSessionRunPort {
     signal: AbortSignal;
     cancelRequested: () => boolean | Promise<boolean>;
     readOnlyIntent?: boolean;
+    runId?: string;
+    initialInboxMessageId?: string;
   }): Promise<unknown>;
 }
 
@@ -68,6 +70,8 @@ export interface CodeSessionRunInput {
   ctx: AuthContext;
   session: CodeSession;
   prompt: string;
+  runId?: string;
+  initialInboxMessageId?: string;
   /** `codeIntentIsReadOnly(intent)` of the resolved intent — never a model argument and never a guess. */
   readOnlyIntent?: boolean;
   /**
@@ -154,6 +158,8 @@ export class CodeSessionRunExecutor {
         ctx: input.ctx,
         session: input.session,
         prompt: input.prompt,
+        ...(input.runId ? { runId: input.runId } : {}),
+        ...(input.initialInboxMessageId ? { initialInboxMessageId: input.initialInboxMessageId } : {}),
         ...(model ? { model } : {}),
         signal: sink ? sink.signal : controller.signal,
         cancelRequested: input.cancelRequested,

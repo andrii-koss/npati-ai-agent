@@ -9,13 +9,15 @@ import { logTerminalPolicy } from "./terminal-policy-log";
 import { gitShellHardeningEnv, resolveDepsPolicyLimits } from "./code-deps-policy";
 import type { ProjectService } from "./project-service";
 import { scanTextForSecrets } from "./code-secret-scanner";
+import type { DurableCodeProcess } from "@npati/workspace";
 
 export interface TerminalSecretReference { id: string; field: string; }
+export interface ProcessWorkspaceSnapshot { sandboxId: string; mounted: boolean; files: Array<{ path: string; revision: string; hash: string }> }
 export interface TerminalRequest {
   projectId: string; sandboxId?: string; command?: string; executable?: string; args?: string[]; cwd?: string; processId?: string;
   action?: "start" | "status" | "logs" | "stop";
   environmentReferences?: Record<string, TerminalSecretReference>;
-  approved?: boolean; runId?: string; agentId: string;
+  approved?: boolean; runId?: string; agentId: string; timeoutMs?: number;
 }
 export interface TerminalLimits {
   commandTimeoutMs: number;
@@ -50,6 +52,13 @@ export function isForbiddenSandboxVariable(name: string): boolean {
 }
 
 export class ProjectSandboxService {
+  private processCleanupGuard?: { acquire(ctx: AuthContext, project: Project): Promise<(() => Promise<void>) | null>; prepare?(ctx: AuthContext, project: Project): Promise<(() => Promise<void>) | null> };
+  setProcessCleanupGuard(guard: NonNullable<ProjectSandboxService["processCleanupGuard"]>) { this.processCleanupGuard = guard; }
+  async supportsTrackedProcesses(ctx: AuthContext, companyId: string, projectId: string) {
+    const project = await this.project(ctx, companyId, projectId);
+    try { const capabilities = await this.provider.processCapabilities?.(scopeOf(ctx, project)); return capabilities?.durableIdentity === true && capabilities.terminalStatus === true; }
+    catch { return false; }
+  }
   private readonly limits: TerminalLimits;
   private readonly lastUse = new Map<string, { ctx: AuthContext; project: Project; at: number }>();
   constructor(
@@ -132,7 +141,9 @@ export class ProjectSandboxService {
         if (status.state !== "running") { this.lastUse.delete(projectId); continue; }
         const remoteAt = Date.parse(status.lastActivityAt);
         if (Number.isFinite(remoteAt) && now - remoteAt < this.limits.inactivityMs) { item.at = remoteAt; continue; }
-        await this.provider.stopSandbox(scope, item.project.sandboxId);
+        const release = this.processCleanupGuard ? await this.processCleanupGuard.acquire(item.ctx, item.project) : async () => {};
+        if (!release) continue;
+        try { await this.provider.stopSandbox(scope, item.project.sandboxId); } finally { await release(); }
         // Kept, not removed: the retention pass needs to know this sandbox exists and when it went quiet.
         item.at = now;
       } catch (error) {
@@ -180,8 +191,7 @@ export class ProjectSandboxService {
       try {
         const isRunning = await this.sandboxRuns(item).catch(() => null);
         if (isRunning === true) continue;
-        await this.destroy(item.ctx, item.project);
-        destroyed += 1;
+        if (await this.destroy(item.ctx, item.project)) destroyed += 1;
       } catch (error) {
         if (error instanceof SandboxProviderError && error.status === 404) this.lastUse.delete(candidate.projectId);
       }
@@ -312,7 +322,8 @@ export class ProjectSandboxService {
       else if (original.content !== file.content) await this.workspace.writeFile(ctx, project.companyId, project.id, file.path, file.content, original.revision!);
     }
   }
-  private async run(ctx: AuthContext, companyId: string, request: TerminalRequest, tool: "project.terminal.exec" | "project.terminal.process", startProcess = false) {
+  private async run(ctx: AuthContext, companyId: string, request: TerminalRequest, tool: "project.terminal.exec" | "project.terminal.process", startProcess = false,
+    beforeStart?: (snapshot: ProcessWorkspaceSnapshot) => Promise<void>) {
     await this.agent(ctx, companyId, request.agentId, tool);
     const project = await this.project(ctx, companyId, request.projectId);
     if (request.sandboxId && request.sandboxId !== project.sandboxId) throw new SandboxProviderError("sandbox_mismatch", "Sandbox does not belong to this Project", 403, "authorization", tool);
@@ -342,16 +353,20 @@ export class ProjectSandboxService {
     // Their trusted Git hardening is supplied inside the runner after this validation.
     if (!startProcess) Object.assign(environment, gitShellHardeningEnv(resolveDepsPolicyLimits()));
 
-    const timeoutMs = decision.timeoutClass === "install_build" ? this.limits.installBuildTimeoutMs : this.limits.commandTimeoutMs;
+    const ceiling = decision.timeoutClass === "install_build" ? this.limits.installBuildTimeoutMs : this.limits.commandTimeoutMs;
+    const timeoutMs = beforeStart ? Math.max(1000, Math.min(request.timeoutMs ?? ceiling, this.limits.installBuildTimeoutMs)) : ceiling;
     let sandboxId = project.sandboxId ?? "";
+    const release = !beforeStart && this.processCleanupGuard ? await (this.processCleanupGuard.prepare ?? this.processCleanupGuard.acquire)(ctx, project) : async () => {};
+    if (!release) throw new SandboxProviderError("process_workspace_busy", "A tracked producer still owns the sandbox workspace", 409);
     try {
       const ready = await this.ensure(ctx, project);
       sandboxId = ready.sandboxId;
       if (request.sandboxId && request.sandboxId !== sandboxId) throw new SandboxProviderError("sandbox_mismatch", "Sandbox does not belong to this Project", 403, "authorization", tool);
       logTerminalPolicy({ rawCommand: normalized.rawCommand, normalizedCommand: command, sandboxId, projectId: project.id, decision: "allow", reason: request.approved && decision.requiresApproval ? "human_approved" : "sandbox_execution", policyRule: decision.policyRule, toolName: tool, executionContext: "project_sandbox", runId: request.runId ?? "direct", agentId: request.agentId, runType: "project_tool", cwd: normalized.cwd, rawArgs: normalized.args, commandPolicyRule: decision.policyRule });
       const originals = await this.upload(ctx, ready.project, ready.scope, sandboxId, ready.mount);
+      if (beforeStart) await beforeStart({ sandboxId, mounted: !!ready.mount, files: [...originals.values()].map((file) => ({ path: file.path, revision: file.revision!, hash: createHash("sha256").update(file.content).digest("hex") })) });
       const raw = startProcess
-        ? await this.provider.startProcess(ready.scope, sandboxId, command, { timeoutMs, outputLimitBytes: this.limits.outputLimitBytes, environment, cwd: normalized.cwd })
+        ? await this.provider.startProcess(ready.scope, sandboxId, command, { timeoutMs, outputLimitBytes: this.limits.outputLimitBytes, environment, cwd: normalized.cwd, ...(beforeStart ? { processId: request.processId } : {}) })
         : await this.provider.executeCommand(ready.scope, sandboxId, command, { timeoutMs, outputLimitBytes: this.limits.outputLimitBytes, environment, cwd: normalized.cwd });
       const output = redactTerminalText(raw.stdout + (raw.stderr ? "\n" + raw.stderr : ""), secrets).slice(0, this.limits.outputLimitBytes);
       /**
@@ -378,7 +393,7 @@ export class ProjectSandboxService {
       if (error instanceof SandboxProviderError) throw error;
       if (error instanceof ProjectFileError) throw new SandboxProviderError(error.code, error.message, error.status, "workspace_sync", tool, false, error.currentRevision);
       throw new SandboxProviderError("sandbox_execution_failed", "Sandbox execution failed", 503, "sandbox", tool, true);
-    }
+    } finally { await release(); }
   }
   async cloneRepository(
     ctx: AuthContext,
@@ -448,6 +463,46 @@ export class ProjectSandboxService {
     return (await this.evaluateAutoApprovalTerminal(ctx, companyId, runProjectId, request, tool)).allowed;
   }
   execute(ctx: AuthContext, companyId: string, request: TerminalRequest) { return this.run(ctx, companyId, request, "project.terminal.exec"); }
+  async startTrackedProcess(ctx: AuthContext, companyId: string, request: TerminalRequest, beforeStart: (snapshot: ProcessWorkspaceSnapshot) => Promise<void>) {
+    if (!await this.supportsTrackedProcesses(ctx, companyId, request.projectId)) throw new SandboxProviderError("process_promotion_unavailable", "Provider has no durable process identity capability", 503);
+    if (!request.processId || !uuid(request.processId) || Object.keys(request.environmentReferences ?? {}).length) throw new SandboxProviderError("process_promotion_unavailable", "Tracked processes cannot inherit foreground secrets", 403);
+    return this.run(ctx, companyId, request, "project.terminal.process", true, beforeStart);
+  }
+  async trackedOutput(ctx: AuthContext, companyId: string, request: TerminalRequest, offset: number) {
+    await this.agent(ctx, companyId, request.agentId, "project.terminal.process");
+    const project = await this.project(ctx, companyId, request.projectId);
+    if (!project.sandboxId || project.sandboxId !== request.sandboxId || !request.processId || !uuid(request.processId)) throw new SandboxProviderError("sandbox_mismatch", "Process sandbox is no longer attached", 404);
+    if (!this.provider.getProcessOutput) throw new SandboxProviderError("process_output_unavailable", "Provider cannot collect bounded process output", 503);
+    const snapshot = await this.provider.getProcessOutput(scopeOf(ctx, project), project.sandboxId, request.processId);
+    // Keep provider UTF-16 cursors stable even where redaction changes the length of a line.
+    const text = snapshot.output.split("\n").map((line) => {
+      const redacted = redactTerminalText(line);
+      return redacted === line ? line : "*".repeat(line.length);
+    }).join("\n");
+    const start = Math.max(offset, snapshot.earliestOffset);
+    if (offset > snapshot.nextOffset) throw new SandboxProviderError("process_output_reset", "Process output changed its offsets", 409);
+    return { output: text.slice(start - snapshot.earliestOffset), offset: start, lossy: offset < snapshot.earliestOffset };
+  }
+  async syncTrackedProcess(ctx: AuthContext, op: DurableCodeProcess & { workspaceSnapshot?: ProcessWorkspaceSnapshot }) {
+    const snapshot = op.workspaceSnapshot;
+    if (!snapshot || snapshot.mounted) return;
+    const project = await this.project(ctx, op.companyId, op.projectId);
+    if (project.sandboxId !== snapshot.sandboxId) throw new SandboxProviderError("sandbox_mismatch", "Tracked workspace changed sandbox", 409);
+    const files = await this.provider.downloadFiles(scopeOf(ctx, project), snapshot.sandboxId);
+    if (files.length > this.limits.syncMaxFiles || files.reduce((n, f) => n + Buffer.byteLength(f.content, "utf8"), 0) > this.limits.syncMaxBytes) throw new SandboxProviderError("workspace_sync_limit", "Tracked process exceeded workspace limits", 413);
+    for (const file of files) {
+      if (artifact(file.path)) continue;
+      safeProjectPath(file.path);
+      const original = snapshot.files.find((f) => f.path === file.path);
+      if (original?.hash === createHash("sha256").update(file.content).digest("hex")) continue;
+      if (!scanTextForSecrets(file.content).clean) throw new SandboxProviderError("secret_content", "Process produced protected content", 403);
+      // A repeated sync may see the exact result already committed by this operation.
+      const existing = await this.workspace.readFile(ctx, op.companyId, op.projectId, file.path).catch((error) => { if ((error as { status?: number }).status === 404) return null; throw error; });
+      if (existing?.content === file.content) continue;
+      if (original) await this.workspace.writeFile(ctx, op.companyId, op.projectId, file.path, file.content, original.revision);
+      else await this.workspace.createFile(ctx, op.companyId, op.projectId, file.path, file.content);
+    }
+  }
   async process(ctx: AuthContext, companyId: string, request: TerminalRequest) {
     const tool = "project.terminal.process" as const;
     if (request.action === "start") return this.run(ctx, companyId, request, tool, true);
@@ -504,10 +559,15 @@ export class ProjectSandboxService {
     return [recorded, runner, ...processLogs].filter(Boolean).join("\n").slice(0, this.limits.outputLimitBytes);
   }
   async destroy(ctx: AuthContext, project: Project) {
-    if (!project.sandboxId) return;
+    if (!project.sandboxId) return false;
+    const release = this.processCleanupGuard ? await this.processCleanupGuard.acquire(ctx, project) : async () => {};
+    if (!release) return false;
+    try {
     try { await this.provider.destroySandbox(scopeOf(ctx, project), project.sandboxId); }
     catch (error) { if (!(error instanceof SandboxProviderError && error.status === 404)) throw error; }
     this.lastUse.delete(project.id);
     await this.store.setProjectSandbox(ctx, project.companyId, project.id, null, project.sandboxId);
+    return true;
+    } finally { await release(); }
   }
 }

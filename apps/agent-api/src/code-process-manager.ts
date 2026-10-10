@@ -15,12 +15,20 @@ import type { SecretLeaseProvider } from "./code-secret-lease";
  */
 
 export interface CodeProcessSandboxPort {
+  /** Existing providers return cumulative log snapshots; legacy injected ports may return deltas. */
+  logsAreSnapshots?: boolean;
   start(input: {
     context: AuthContext; companyId: string; projectId: string; agentId: string; command: string;
     cwd?: string; runId?: string; approved?: boolean; leaseId?: string;
   }): Promise<{ processId: string; pid?: number; startedAt?: number }>;
-  logs(input: { context: AuthContext; companyId: string; projectId: string; processId: string }): Promise<{ output: string; eof?: boolean }>;
-  stop(input: { context: AuthContext; companyId: string; projectId: string; processId: string }): Promise<{ exitCode: number; durationMs: number }>;
+  logs(input: { context: AuthContext; companyId: string; projectId: string; processId: string; agentId?: string }): Promise<{ output: string; eof?: boolean }>;
+  status?(input: { context: AuthContext; companyId: string; projectId: string; processId: string; agentId?: string }): Promise<CodeProcessOutcome>;
+  stop(input: { context: AuthContext; companyId: string; projectId: string; processId: string; agentId?: string }): Promise<{ exitCode: number | null; durationMs: number; state?: CodeProcessOutcome["state"] }>;
+}
+
+export interface CodeProcessOutcome {
+  state: "running" | "completed" | "failed" | "stopped" | "timed_out" | "lost";
+  exitCode: number | null;
 }
 
 export interface CodeProcessRecord {
@@ -28,12 +36,13 @@ export interface CodeProcessRecord {
   sessionId: string;
   companyId: string;
   projectId: string;
+  agentId?: string;
   commandDigest: string;
   pid?: number;
-  state: "running" | "stopped" | "failed";
+  state: CodeProcessOutcome["state"];
   startedAt: number;
   stoppedAt?: number;
-  exitCode?: number;
+  exitCode?: number | null;
   leaseId?: string;
   cursor: number;
 }
@@ -45,6 +54,7 @@ export interface CodeProcessManagerOptions {
   leases?: SecretLeaseProvider;
   /** Ring buffer size per process; older lines are dropped. */
   logLines?: number;
+  outputChars?: number;
   /** Idle TTL after which a process record is dropped from memory. */
   ttlMs?: number;
   maxProcessesPerSession?: number;
@@ -69,9 +79,16 @@ export class ProcessManagerError extends Error {
 }
 
 export class CodeProcessManager {
+  tracked?: import("./code-async-process").CodeAsyncProcessService;
   private readonly processes = new Map<string, CodeProcessRecord>();
   private readonly buffers = new Map<string, string[]>();
+  private readonly bufferStarts = new Map<string, number>();
+  private readonly providerOffsets = new Map<string, number>();
+  private readonly outputBuffers = new Map<string, { text: string; earliest: number; next: number }>();
+  private readonly refreshingLogs = new Map<string, Promise<void>>();
+  private readonly starting = new Map<string, number>();
   private readonly logLines: number;
+  private readonly outputChars: number;
   private readonly ttlMs: number;
   private readonly maxProcessesPerSession: number;
   private readonly now: () => number;
@@ -79,6 +96,7 @@ export class CodeProcessManager {
   constructor(private readonly options: CodeProcessManagerOptions = {}) {
     const positive = (value: number | undefined, fallback: number) => (Number.isFinite(value) && Number(value) > 0 ? Number(value) : fallback);
     this.logLines = positive(options.logLines, 2_000);
+    this.outputChars = positive(options.outputChars, 64_000);
     this.ttlMs = positive(options.ttlMs, 12 * 60 * 60 * 1000);
     this.maxProcessesPerSession = positive(options.maxProcessesPerSession, 10);
     this.now = options.now ?? (() => Date.now());
@@ -90,9 +108,6 @@ export class CodeProcessManager {
     if (this.options.flags) await this.options.flags.assertEnabled(context, CODE_AGENT_MASTER_FLAG, { companyId: input.companyId });
     else throw new ProcessManagerError("feature_disabled", "Coding agent flags are not configured", 403);
     if (this.options.flags) await this.options.flags.assertEnabled(context, "code.background_runs", { companyId: input.companyId });
-    if (this.runningForSession(input.sessionId).length >= this.maxProcessesPerSession) {
-      throw new ProcessManagerError("process_limit", "Too many background processes for this session", 429, true);
-    }
     if (input.leaseId) {
       if (!this.options.leases) throw new ProcessManagerError("secret_lease_unavailable", "Secret leases are not configured", 503, true);
       if (input.approved !== true) throw new ProcessManagerError("approval_required", "A background process that uses a secret requires its own approval", 403);
@@ -100,19 +115,36 @@ export class CodeProcessManager {
       // A lease issued for a foreground call must never be reused by a background process.
       this.options.leases.assertNotInherited(input.leaseId, input.leaseId);
     }
-    const started = await this.options.sandbox.start({
-      context, companyId: input.companyId, projectId: input.projectId, agentId: input.agentId ?? "code-process-manager",
-      command: input.command, cwd: input.cwd, runId: input.runId, approved: input.approved === true, leaseId: input.leaseId,
-    });
-    const record: CodeProcessRecord = {
-      processId: started.processId, sessionId: input.sessionId, companyId: input.companyId, projectId: input.projectId,
-      commandDigest: digest(input.command), pid: started.pid, state: "running",
-      startedAt: started.startedAt ?? this.now(), leaseId: input.leaseId, cursor: 0,
-    };
-    this.processes.set(record.processId, record);
-    this.buffers.set(record.processId, []);
-    await this.audit(context, input, "process.start", "allowed", { processId: record.processId, leaseId: input.leaseId ?? null });
-    return { ...record };
+    // Reserve synchronously before the provider await: concurrent starts cannot oversubscribe capacity.
+    const reserved = this.starting.get(input.sessionId) ?? 0;
+    if (this.runningForSession(input.sessionId).length + reserved >= this.maxProcessesPerSession) {
+      throw new ProcessManagerError("process_limit", "Too many background processes for this session", 429, true);
+    }
+    this.starting.set(input.sessionId, reserved + 1);
+    try {
+      const started = await this.options.sandbox.start({
+        context, companyId: input.companyId, projectId: input.projectId, agentId: input.agentId ?? "system",
+        command: input.command, cwd: input.cwd, runId: input.runId, approved: input.approved === true, leaseId: input.leaseId,
+      });
+      if (!started.processId?.trim() || this.processes.has(started.processId)) {
+        throw new ProcessManagerError("process_start_unknown_outcome", "Provider did not publish a unique process handle; reconcile before retrying", 502);
+      }
+      const record: CodeProcessRecord = {
+        processId: started.processId, sessionId: input.sessionId, companyId: input.companyId, projectId: input.projectId,
+        agentId: input.agentId ?? "system",
+        commandDigest: digest(input.command), pid: started.pid, state: "running",
+        startedAt: started.startedAt ?? this.now(), leaseId: input.leaseId, cursor: 0,
+      };
+      this.processes.set(record.processId, record);
+      this.buffers.set(record.processId, []);
+      this.outputBuffers.set(record.processId, { text: "", earliest: 0, next: 0 });
+      await this.audit(context, input, "process.start", "allowed", { processId: record.processId, leaseId: input.leaseId ?? null });
+      return { ...record };
+    } finally {
+      const remaining = (this.starting.get(input.sessionId) ?? 1) - 1;
+      if (remaining) this.starting.set(input.sessionId, remaining);
+      else this.starting.delete(input.sessionId);
+    }
   }
 
   /** Lists the processes of one session only; records of other sessions are never returned. */
@@ -133,36 +165,118 @@ export class CodeProcessManager {
   /** Appends sandbox output to the ring buffer and returns new lines from `offset`. */
   appendOutput(processId: string, output: string): void {
     const buffer = this.buffers.get(processId);
-    if (!buffer) return;
+    if (!buffer || !output) return;
+    const chars = this.outputBuffers.get(processId)!;
+    chars.text = (chars.text + output).slice(-this.outputChars);
+    chars.next += output.length;
+    chars.earliest = chars.next - chars.text.length;
     for (const line of output.split("\n")) buffer.push(line);
-    if (buffer.length > this.logLines) buffer.splice(0, buffer.length - this.logLines);
+    if (buffer.length > this.logLines) {
+      const dropped = buffer.length - this.logLines;
+      buffer.splice(0, dropped);
+      this.bufferStarts.set(processId, (this.bufferStarts.get(processId) ?? 0) + dropped);
+    }
+  }
+
+  /** Absolute character cursors (UTF-16), independent of UI/model readers and ring-buffer eviction. */
+  readOutput(sessionId: string, processId: string, offset = 0, limit = this.outputChars) {
+    this.owned(sessionId, processId);
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1) {
+      throw new ProcessManagerError("invalid_output_cursor", "Output offset and limit must be nonnegative integers", 400);
+    }
+    const buffer = this.outputBuffers.get(processId)!;
+    if (offset > buffer.next) throw new ProcessManagerError("invalid_output_cursor", "Output cursor is ahead of this process", 400);
+    const start = Math.max(offset, buffer.earliest);
+    const output = buffer.text.slice(start - buffer.earliest, start - buffer.earliest + Math.min(limit, this.outputChars));
+    return { output, earliestOffset: buffer.earliest, nextOffset: start + output.length, total: buffer.next, truncated: offset < buffer.earliest };
+  }
+
+  /** A lifecycle exit is separate from cancellation; a missing exit code never becomes success. */
+  async status(context: AuthContext, sessionId: string, processId: string): Promise<CodeProcessRecord> {
+    const process = this.owned(sessionId, processId);
+    if (process.state !== "running") return { ...process };
+    if (!this.options.sandbox?.status) throw new ProcessManagerError("process_status_unavailable", "Provider has no terminal status capability", 503);
+    const result = await this.options.sandbox.status({ context, companyId: process.companyId, projectId: process.projectId, processId, agentId: process.agentId });
+    if (process.state === "running" && result.state !== "running") {
+      if (["completed", "failed", "timed_out"].includes(result.state) && !Number.isInteger(result.exitCode)) {
+        throw new ProcessManagerError("process_outcome_unknown", "Provider has no terminal exit code", 502);
+      }
+      if (result.state === "completed" && result.exitCode !== 0) throw new ProcessManagerError("process_outcome_unknown", "Provider completion disagrees with exit code", 502);
+      process.state = result.state;
+      process.exitCode = result.exitCode;
+      process.stoppedAt = this.now();
+    }
+    return { ...process };
+  }
+
+  /** Bounded observation of the SAME handle. Timeout never stops or starts a process. */
+  async wait(context: AuthContext, sessionId: string, processId: string, waitTimeoutMs: number): Promise<{ process: CodeProcessRecord; timedOut: boolean }> {
+    const held = this.owned(sessionId, processId);
+    if (!Number.isSafeInteger(waitTimeoutMs) || waitTimeoutMs < 0 || waitTimeoutMs > 300_000) throw new ProcessManagerError("invalid_wait_timeout", "Wait timeout must be between 0 and 300000 ms", 400);
+    if (!this.options.sandbox?.status) throw new ProcessManagerError("process_status_unavailable", "Provider has no terminal status capability", 503);
+    let closed = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let tick: ReturnType<typeof setTimeout> | undefined;
+    let wakeTick: (() => void) | undefined;
+    const timeout = new Promise<{ process: CodeProcessRecord; timedOut: boolean }>((resolve) => {
+      timer = setTimeout(() => resolve({ process: { ...held }, timedOut: held.state === "running" }), waitTimeoutMs);
+    });
+    const observe = async () => {
+      while (!closed) {
+        const process = await this.status(context, sessionId, processId);
+        if (process.state !== "running") return { process, timedOut: false };
+        if (!closed) await new Promise<void>((resolve) => { wakeTick = resolve; tick = setTimeout(resolve, 100); });
+      }
+      return { process: { ...held }, timedOut: held.state === "running" };
+    };
+    try { return await Promise.race([observe(), timeout]); }
+    finally { closed = true; clearTimeout(timer); clearTimeout(tick); wakeTick?.(); }
   }
 
   async logs(sessionId: string, processId: string, options: { offset?: number; limit?: number } = {}): Promise<{ lines: string[]; nextOffset: number; eof: boolean; total: number }> {
     const process = this.owned(sessionId, processId);
     const buffer = this.buffers.get(processId) ?? [];
-    const offset = Math.max(0, Math.min(options.offset ?? 0, buffer.length));
+    const earliest = this.bufferStarts.get(processId) ?? 0;
+    const absolute = Math.max(earliest, Math.min(options.offset ?? 0, earliest + buffer.length));
+    const offset = absolute - earliest;
     const limit = Math.max(1, Math.min(options.limit ?? 200, this.logLines));
     const lines = buffer.slice(offset, offset + limit);
-    return { lines, nextOffset: offset + lines.length, eof: offset + lines.length >= buffer.length, total: buffer.length };
+    return { lines, nextOffset: absolute + lines.length, eof: offset + lines.length >= buffer.length, total: earliest + buffer.length };
   }
 
   /** Refreshes the buffer from the sandbox and returns the newly available lines. */
   async fetchLogs(context: AuthContext, sessionId: string, processId: string, options: { limit?: number } = {}): Promise<{ lines: string[]; nextOffset: number; eof: boolean; total: number }> {
     const process = this.owned(sessionId, processId);
     if (!this.options.sandbox) throw new ProcessManagerError("sandbox_unavailable", "Sandbox process execution is unavailable", 503, true);
-    const fetched = await this.options.sandbox.logs({ context, companyId: process.companyId, projectId: process.projectId, processId });
-    this.appendOutput(processId, fetched.output ?? "");
+    let refresh = this.refreshingLogs.get(processId);
+    if (!refresh) {
+      refresh = (async () => {
+        const fetched = await this.options.sandbox!.logs({ context, companyId: process.companyId, projectId: process.projectId, processId, agentId: process.agentId });
+        const output = fetched.output ?? "";
+        const previous = this.options.sandbox!.logsAreSnapshots ? this.providerOffsets.get(processId) ?? 0 : 0;
+        if (output.length < previous) throw new ProcessManagerError("process_output_reset", "Provider output was truncated or replaced", 409);
+        this.appendOutput(processId, output.slice(previous));
+        if (this.options.sandbox!.logsAreSnapshots) this.providerOffsets.set(processId, output.length);
+      })();
+      this.refreshingLogs.set(processId, refresh);
+    }
+    try { await refresh; } finally { if (this.refreshingLogs.get(processId) === refresh) this.refreshingLogs.delete(processId); }
     return this.logs(sessionId, processId, options);
   }
 
   async stop(context: AuthContext, sessionId: string, processId: string): Promise<CodeProcessRecord> {
     const process = this.owned(sessionId, processId);
+    if (process.state !== "running") return { ...process };
     if (!this.options.sandbox) throw new ProcessManagerError("sandbox_unavailable", "Sandbox process execution is unavailable", 503, true);
-    const result = await this.options.sandbox.stop({ context, companyId: process.companyId, projectId: process.projectId, processId });
-    process.state = result.exitCode === 0 ? "stopped" : "failed";
-    process.exitCode = result.exitCode;
-    process.stoppedAt = this.now();
+    const result = await this.options.sandbox.stop({ context, companyId: process.companyId, projectId: process.projectId, processId, agentId: process.agentId });
+    if (process.state === "running") {
+      if (result.state === "running" || result.state === "completed" && result.exitCode !== 0) {
+        throw new ProcessManagerError("process_stop_unconfirmed", "Provider did not confirm cancellation or a terminal outcome", 502);
+      }
+      process.state = result.state ?? "stopped";
+      process.exitCode = result.exitCode;
+      process.stoppedAt = this.now();
+    }
     await this.audit(context, { companyId: process.companyId, projectId: process.projectId, sessionId }, "process.stop", "allowed", { processId, exitCode: result.exitCode });
     return { ...process };
   }
@@ -177,9 +291,7 @@ export class CodeProcessManager {
         await this.stop(context, sessionId, process.processId);
         stopped += 1;
       } catch {
-        // Best effort: a sandbox that already died still clears the local record.
-        process.state = "failed";
-        process.stoppedAt = this.now();
+        // Failed cancellation is not proof of settlement; retain ownership for reconciliation.
       }
     }
     return stopped;
@@ -195,6 +307,9 @@ export class CodeProcessManager {
       if (process.stoppedAt && now - process.stoppedAt < this.ttlMs) continue;
       this.processes.delete(processId);
       this.buffers.delete(processId);
+      this.bufferStarts.delete(processId);
+      this.providerOffsets.delete(processId);
+      this.outputBuffers.delete(processId);
       dropped += 1;
     }
     return dropped;

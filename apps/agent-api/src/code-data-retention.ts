@@ -36,6 +36,8 @@ import type { DataRetentionPortPreview, DataRetentionPortResult } from "./code-r
 
 /** The names the retention SQL is allowed to reach. Exported so a suite can pin the closed set. */
 export const RETENTION_FAMILY_TABLES: readonly string[] = [
+  "code_process_projects",
+  "code_session_inboxes",
   "code_run_turns",
   "project_checkpoints",
   "code_run_states",

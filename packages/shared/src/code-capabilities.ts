@@ -64,6 +64,329 @@ const FILE_ENTRY = {
  * Keep in lockstep: the parity test compares this object with the registry entry by entry.
  */
 export const CODE_TOOL_SCHEMA_MIRROR: Record<string, { inputSchema: Record<string, unknown>; outputSchema: Record<string, unknown> }> = {
+"code.shell.exec_async": {
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "command"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "command": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4000,
+        "description": "The command line to run in the sandbox. Interactive commands and commands needing production credentials are refused."
+      },
+      "cwd": {
+        "type": "string",
+        "description": "Workspace-relative working directory; defaults to the workspace root."
+      },
+      "env": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "description": "Non-secret environment variables. Secrets must be requested through secretRefs instead."
+      },
+      "timeoutMs": {
+        "type": "integer",
+        "minimum": 1000,
+        "maximum": 600000,
+        "default": 120000
+      },
+      "secretRefs": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 10,
+        "description": "Names of company vault secrets to lease for exactly this call. The lease is revoked when the call ends and is never inherited."
+      },
+      "approved": {
+        "type": "boolean",
+        "default": false,
+        "description": "Set by the runtime after the approval system granted this exact command; never set it from model output."
+      },
+      "background": {
+        "type": "boolean",
+        "default": false
+      },
+      "waitTimeoutMs": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 300000,
+        "default": 1000
+      }
+    }
+  },
+  "outputSchema": {
+    "type": "object",
+    "required": [
+      "kind",
+      "tool",
+      "toolVersion",
+      "schemaVersion",
+      "trust",
+      "note",
+      "data"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "kind": {
+        "const": "code_tool_result"
+      },
+      "tool": {
+        "const": "code.shell.exec_async"
+      },
+      "toolVersion": {
+        "type": "integer"
+      },
+      "schemaVersion": {
+        "type": "integer"
+      },
+      "trust": {
+        "const": "untrusted_data"
+      },
+      "note": {
+        "type": "string"
+      },
+      "truncated": {
+        "type": "boolean"
+      },
+      "truncation": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "data": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "version",
+          "operationId",
+          "processId",
+          "generation",
+          "state",
+          "exitCode",
+          "output",
+          "earliestOffset",
+          "nextOffset",
+          "truncated",
+          "lossy"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "foreground-result",
+              "running-process-receipt"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "const": 1
+          },
+          "operationId": {
+            "type": "string"
+          },
+          "processId": {
+            "type": "string"
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "preparing",
+              "dispatching",
+              "running",
+              "completed",
+              "failed",
+              "stopped",
+              "timed_out",
+              "lost",
+              "unknown_outcome"
+            ]
+          },
+          "exitCode": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "output": {
+            "type": "string",
+            "maxLength": 64000
+          },
+          "earliestOffset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "nextOffset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "lossy": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+},
+"code.shell.process.wait": {
+  "inputSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "processId"
+    ],
+    "properties": {
+      "processId": {
+        "type": "string",
+        "minLength": 1
+      },
+      "offset": {
+        "type": "integer",
+        "minimum": 0,
+        "default": 0
+      },
+      "waitTimeoutMs": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 300000,
+        "default": 1000
+      }
+    }
+  },
+  "outputSchema": {
+    "type": "object",
+    "required": [
+      "kind",
+      "tool",
+      "toolVersion",
+      "schemaVersion",
+      "trust",
+      "note",
+      "data"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "kind": {
+        "const": "code_tool_result"
+      },
+      "tool": {
+        "const": "code.shell.process.wait"
+      },
+      "toolVersion": {
+        "type": "integer"
+      },
+      "schemaVersion": {
+        "type": "integer"
+      },
+      "trust": {
+        "const": "untrusted_data"
+      },
+      "note": {
+        "type": "string"
+      },
+      "truncated": {
+        "type": "boolean"
+      },
+      "truncation": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "data": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "version",
+          "operationId",
+          "processId",
+          "generation",
+          "state",
+          "exitCode",
+          "output",
+          "earliestOffset",
+          "nextOffset",
+          "truncated",
+          "lossy"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "foreground-result",
+              "running-process-receipt"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "const": 1
+          },
+          "operationId": {
+            "type": "string"
+          },
+          "processId": {
+            "type": "string"
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "preparing",
+              "dispatching",
+              "running",
+              "completed",
+              "failed",
+              "stopped",
+              "timed_out",
+              "lost",
+              "unknown_outcome"
+            ]
+          },
+          "exitCode": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "output": {
+            "type": "string",
+            "maxLength": 64000
+          },
+          "earliestOffset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "nextOffset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "lossy": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+},
   "code.fs.list": {
     inputSchema: {
       type: "object",
@@ -2257,7 +2580,16 @@ export const CODE_SUBAGENT_CAPABILITIES: CapabilityDefinition[] = [
 ];
 
 /** Every `code.*` capability (reads, mutating file tools, sandbox execution, dependencies, planning). */
+export const CODE_ASYNC_PROCESS_CAPABILITIES: CapabilityDefinition[] = [
+  {"id":"code.shell.exec_async","inventoryIds":[386],"type":"tool","domain":"code","name":"Run tracked command","description":"Execute one tracked sandbox process. Wait up to waitTimeoutMs, then return the same handle for explicit collection. Foreground secret leases cannot be promoted.","useWhen":["Continue the run while a sandbox command is still running."],"doNotUseWhen":["The backend does not support durable process identity.","The command requires foreground secret leases."],"agentCallable":true,"userVisible":true,"risk":"high","requiresConfirmation":false,"requiredConnections":[],"requiredPermissions":["workspace:write"],"version":1, inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.exec_async"]!.inputSchema, outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.exec_async"]!.outputSchema },
+{"id":"code.shell.process.wait","inventoryIds":[387],"type":"tool","domain":"code","name":"Collect tracked process","description":"Collect bounded output and real terminal state of a tracked process. waitTimeoutMs=0 polls; a timeout preserves the same process handle.","useWhen":["Collect the real outcome of a previously started process."],"doNotUseWhen":["The backend does not support durable process identity.","The command requires foreground secret leases."],"agentCallable":true,"userVisible":true,"risk":"low","requiresConfirmation":false,"requiredConnections":[],"requiredPermissions":["workspace:read"],"version":1, inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.process.wait"]!.inputSchema, outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.process.wait"]!.outputSchema }
+];
+export const CODE_ASYNC_PROCESS_MATRIX: CapabilityMatrixEntry[] = CODE_ASYNC_PROCESS_CAPABILITIES.map((capability) => ({
+  id: capability.inventoryIds[0]!, capabilityId: capability.id, name: capability.name, type: "tool", domain: "code", agentCallable: true,
+  risk: capability.risk, testType: "integration", testFiles: ["tests/coding-agent-async-process.test.ts", "tests/coding-agent-c2-schema-parity.test.ts"], status: "VERIFIED_EXISTING",
+}));
 export const CODE_CAPABILITIES: CapabilityDefinition[] = [
+  ...CODE_ASYNC_PROCESS_CAPABILITIES,
   ...CODE_READ_CAPABILITIES,
   ...CODE_WRITE_CAPABILITIES,
   ...CODE_SHELL_CAPABILITIES,
@@ -2393,6 +2725,7 @@ export const CODE_TOOL_FLAG_KEYS: Record<string, string> = Object.fromEntries(
  * verification commands, so it belongs with the change tools it verifies.
  */
 export const CODE_TOOL_FLAG_OVERRIDES: Record<string, string> = Object.fromEntries([
+  ...CODE_ASYNC_PROCESS_CAPABILITIES.map((capability) => [capability.id, "code.shell"] as const),
   ...CODE_SHELL_CAPABILITIES
     .filter((capability) => capability.id.startsWith("code.shell."))
     .map((capability) => [capability.id, "code.shell"] as const),

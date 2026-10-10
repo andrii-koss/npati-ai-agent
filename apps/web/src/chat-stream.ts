@@ -1,9 +1,12 @@
 import type { ChatProgressEvent } from "./ResearchProgress";
 import type { ChatAttachmentInput } from "./ChatAttachments";
+import type { CodeChatSession } from "./code-inbox-client";
 
 type StreamEnvelope<T> =
   | { event: "progress"; data: ChatProgressEvent }
   | { event: "delta"; data: { delta: string } }
+  | { event: "code_session"; data: CodeChatSession }
+  | { event: "code_inbox"; data: { sessionId: string; revision: number } }
   | { event: "result"; data: T }
   | { event: "error"; data: { error?: { code?: string; message?: string } } };
 
@@ -32,7 +35,9 @@ export async function streamChat<T>(
     streamId?:string;
   },
   onProgress: (event: ChatProgressEvent) => void,
-  options: { onDelta?: (delta:string)=>void; signal?:AbortSignal } = {},
+  options: { onDelta?: (delta:string)=>void; signal?:AbortSignal;
+    onCodeSession?: (session: CodeChatSession) => void;
+    onCodeInbox?: (sessionId: string, revision: number) => void } = {},
 ): Promise<T> {
   const token = localStorage.getItem("npati_agent_access_token");
   const headers: Record<string, string> = {
@@ -71,6 +76,8 @@ export async function streamChat<T>(
       if (!envelope) continue;
       if (envelope.event === "progress") onProgress(envelope.data);
       if (envelope.event === "delta") options.onDelta?.(envelope.data.delta);
+      if (envelope.event === "code_session") options.onCodeSession?.(envelope.data);
+      if (envelope.event === "code_inbox") options.onCodeInbox?.(envelope.data.sessionId, envelope.data.revision);
       if (envelope.event === "result") result = envelope.data;
       if (envelope.event === "error") {
         const error = new Error(envelope.data.error?.message ?? "The agent stream failed.");
@@ -84,6 +91,8 @@ export async function streamChat<T>(
     const envelope=parseBlock<T>(buffer);
     if(envelope?.event==="progress")onProgress(envelope.data);
     if(envelope?.event==="delta")options.onDelta?.(envelope.data.delta);
+    if(envelope?.event==="code_session")options.onCodeSession?.(envelope.data);
+    if(envelope?.event==="code_inbox")options.onCodeInbox?.(envelope.data.sessionId,envelope.data.revision);
     if(envelope?.event==="result")result=envelope.data;
     if(envelope?.event==="error")throw new Error(envelope.data.error?.message??"The agent stream failed.");
   }

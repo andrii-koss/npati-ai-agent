@@ -1,6 +1,6 @@
 {
-  "manifestVersion": 9,
-  "checksum": "b498efdc44e06ea1fd8b75860947a770e74f8b9a63dcd92026068a98de963d20",
+  "manifestVersion": 10,
+  "checksum": "880e0aa6ec32a5ee666864bd9174192e486f559205b8657ea3365c47c7885050",
   "tools": [
     {
       "key": "code.agent.spawn@1",
@@ -220,6 +220,13 @@
       "checksum": "0f8a03d1f31732fc9e4a72c34af44be01376121e8706bd0f10db308208c7ce17"
     },
     {
+      "key": "code.shell.exec_async@1",
+      "name": "code.shell.exec_async",
+      "version": 1,
+      "status": "active",
+      "checksum": "ed663b54016f81c9a132ccb635c423025f8743b7bb90a423eb2cb4eae771cc89"
+    },
+    {
       "key": "code.shell.process.list@1",
       "name": "code.shell.process.list",
       "version": 1,
@@ -246,6 +253,13 @@
       "version": 1,
       "status": "active",
       "checksum": "4344685b2676fcfadf1cd14bbc71eaee33cb418d1eebcc2533deab26b589f7ac"
+    },
+    {
+      "key": "code.shell.process.wait@1",
+      "name": "code.shell.process.wait",
+      "version": 1,
+      "status": "active",
+      "checksum": "445b5713f8cd00bb6453f29f208d7ffc017a5916fd81303e067d9e18d296ac4a"
     },
     {
       "key": "code.symbols.outline@1",

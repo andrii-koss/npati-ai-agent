@@ -21741,6 +21741,13 @@ body:has(.project-chat-preview-layer) .chat-workspace-content .onboarding-live-c
 .code-workspace .code-workspace-usage { font-size: 12px; }
 .code-workspace .code-workspace-sessions { display: flex; gap: 8px; margin-top: 12px; }
 .code-workspace .project-preview-frame iframe { width: 100%; min-height: 420px; border: 1px solid #eef2f6; border-radius: 10px; }
+.onboarding-live-composer .code-pending-messages { display: block; max-height: 240px; overflow: auto; padding: 8px 12px; border: 1px solid #bcc7d4; border-radius: 8px; font-size: 12px; }
+.code-pending-messages .code-pending-row { display: block; border-top: 1px solid #bcc7d4; padding: 6px 0; }
+.code-pending-messages .code-pending-row p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; }
+.code-pending-messages .code-pending-row textarea { width: 100%; min-height: 64px; }
+.code-pending-messages .code-pending-row button { margin-right: 8px; }
+.onboarding-live-composer .composer-inbox-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.onboarding-live-composer .code-pending-row textarea { padding: 6px; font-size: 13px; overflow-y: auto; border: 1px solid #bcc7d4; border-radius: 6px; }
 @media (max-width: 900px) {
   .code-workspace .mobile-view-switch { display: flex; }
   .code-workspace .code-workspace-controls { flex-direction: column; align-items: stretch; }

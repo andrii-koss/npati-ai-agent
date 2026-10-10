@@ -201,7 +201,7 @@ export class DockerSandboxProvider implements SandboxProvider {  private readonl
     let result: Awaited<ReturnType<typeof args>>;
     try { result = await args("docker", argsList, timeoutMs, stdin, outputLimit); }
     catch (error) { throw dockerFailure(action, error instanceof Error ? error.message : "Docker CLI failed to start", false, (error as NodeJS.ErrnoException)?.code); }
-    if (result.code !== 0 || result.timedOut) throw dockerFailure(action, text(result.stderr), result.timedOut);
+    if (result.code !== 0 || result.timedOut) throw dockerFailure(action, text(result.stderr) || text(result.stdout), result.timedOut);
     return result;
   }
   private names(id: string) {
@@ -491,14 +491,23 @@ fi
     if (processId) { if (!uuid(processId)) throw new SandboxProviderError("invalid_process", "Invalid process ID", 400); const result = await this.docker(["exec", names.sandbox, "cat", "--", `/tmp/npati-process-${processId}.log`]); return text(result.stdout); }
     const result = await this.docker(["logs", "--tail", "100", names.sandbox]); return text(result.stdout) + text(result.stderr);
   }
+  async processCapabilities(_scope: SandboxScope) { return { durableIdentity: true, terminalStatus: true }; }
+  async getProcessOutput(scope: SandboxScope, id: string, processId: string) {
+    const names = await this.inspect(scope, id);
+    if (!uuid(processId)) throw new SandboxProviderError("invalid_process", "Invalid process ID", 400);
+    const script = `const fs=require('fs');let tail='',total=0;const s=fs.createReadStream(process.argv[1],{encoding:'utf8'});s.on('data',c=>{total+=c.length;tail=(tail+c).slice(-64000)});s.on('end',()=>process.stdout.write(JSON.stringify({output:tail,earliestOffset:total-tail.length,nextOffset:total})));s.on('error',()=>process.exit(44));`;
+    const result = await args("docker", ["exec", names.sandbox, "node", "-e", script, `/tmp/npati-process-${processId}.log`], 30000, undefined, 512000);
+    if (result.code !== 0 || result.timedOut) throw new SandboxProviderError("process_output_unavailable", "Process output is unavailable", 503);
+    return JSON.parse(result.stdout.toString("utf8")) as { output: string; earliestOffset: number; nextOffset: number };
+  }
   async startProcess(scope: SandboxScope, id: string, command: string, options: SandboxCommandOptions): Promise<SandboxCommandResult> {
     const names = await this.inspect(scope, id);
     const normalized = normalizeTerminalCommand({ command, cwd: options.cwd });
     classifyTerminalCommand({ command: normalized.command, cwd: normalized.cwd });
     const environment = [...sandboxProcessEnvironment(options.environment), ...Object.entries(gitShellHardeningEnv(resolveDepsPolicyLimits()))];
     this.touch(id);
-    const processId = randomUUID(), marker = `/tmp/npati-process-${processId}`;
-    const command64 = Buffer.from(command).toString("base64");
+    const processId = options.processId ?? randomUUID(), marker = `/tmp/npati-process-${processId}`;
+    if (!uuid(processId)) throw new SandboxProviderError("invalid_process", "Invalid process ID", 400);
     const ensureDepsScript = `if [ -f package.json ] && [ ! -d node_modules ]; then
   if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile;
   elif [ -f yarn.lock ]; then yarn install;
@@ -507,24 +516,60 @@ fi
   fi
 fi
 `;
-    const ensureDeps64 = Buffer.from(ensureDepsScript).toString("base64");
+    const command64 = Buffer.from("set -e\n" + ensureDepsScript + "\n" + command).toString("base64");
     const environmentScript = environment.map(([key, value]) => `export ${key}="$(printf %s ${Buffer.from(value).toString("base64")} | base64 -d)"`).join("\n");
-    const script = `${environmentScript ? environmentScript + "\n" : ""}setsid sh -c 'printf %s ${ensureDeps64} | base64 -d | sh -s > ${marker}.log 2>&1 && printf %s ${command64} | base64 -d | timeout -s TERM -k 2 ${Math.max(1, Math.ceil(options.timeoutMs / 1000))} sh -s >> ${marker}.log 2>&1; echo $? > ${marker}.exit' </dev/null >/dev/null 2>&1 & echo $! > ${marker}.pid`;
+    const script = `set -e
+${this.processLock(marker)}
+if [ -f ${marker}.cancel ] || [ -f ${marker}.claim ]; then exit 0; fi
+touch ${marker}.claim ${marker}.log
+${environmentScript}
+setsid sh -c 'echo $$ > ${marker}.pid; foreground=""; if timeout --help 2>&1 | grep -q -- "--foreground"; then foreground="--foreground"; fi; printf %s ${command64} | base64 -d | timeout $foreground -s TERM -k 2 ${Math.max(1, Math.ceil(options.timeoutMs / 1000))} sh -s >> ${marker}.log 2>&1; echo $? > ${marker}.exit' 9>&- </dev/null >/dev/null 2>&1 &
+i=0; until [ -s ${marker}.pid ]; do i=$((i+1)); [ "$i" -lt 100 ] || exit 75; sleep 0.01; done`;
     await this.docker(["exec", "-i", "--workdir", normalized.cwd === "." ? "/workspace" : `/workspace/${normalized.cwd}`, names.sandbox, "sh", "-s"], 15_000, script);
-    return { status: "running", exitCode: null, stdout: "", stderr: "", durationMs: 0, step: "process", tool: "project.terminal.process", retryable: false, processId };
+    return this.getProcessStatus(scope, id, processId);
+  }
+  private processLock(marker: string) {
+    return `exec 9>${marker}.lock; i=0
+until flock -n 9; do i=$((i+1)); [ "$i" -lt 100 ] || exit 75; sleep 0.05; done`;
+  }
+  private groupAliveScript() {
+    // Zombies cannot write; kill(0) alone would keep their sandbox pinned forever.
+    return `const fs=require("fs");const pid=fs.readFileSync(process.argv[1],"utf8").trim();if(!/^[1-9][0-9]*$/.test(pid))process.exit(76);let alive=false;for(const entry of fs.readdirSync("/proc")){if(!/^[0-9]+$/.test(entry))continue;try{const stat=fs.readFileSync("/proc/"+entry+"/stat","utf8");const parts=stat.slice(stat.lastIndexOf(")")+2).split(" ");if(parts[2]===pid&&!["Z","X"].includes(parts[0]))alive=true}catch{}}process.stdout.write(alive?"alive":"dead")`;
   }
   async getProcessStatus(scope: SandboxScope, id: string, processId: string): Promise<SandboxCommandResult> {
     const names = await this.inspect(scope, id);
     if (!uuid(processId)) throw new SandboxProviderError("invalid_process", "Invalid process ID", 400);
-    const result = await args("docker", ["exec", names.sandbox, "cat", "--", `/tmp/npati-process-${processId}.exit`]);
-    if (result.code !== 0 && /^(?:error response from daemon|cannot connect to the docker daemon|permission denied while trying to connect|docker: error)/i.test(text(result.stderr).trim())) throw dockerFailure("exec", text(result.stderr), result.timedOut);
-    const done = result.code === 0, exitCode = done ? Number(text(result.stdout).trim()) : null;
-    return { status: done ? exitCode === 0 ? "completed" : exitCode === 124 ? "timed_out" : "failed" : "running", exitCode, stdout: "", stderr: "", durationMs: 0, step: done ? "finished" : "running", tool: "project.terminal.process", retryable: false, processId };
+    const marker = `/tmp/npati-process-${processId}`;
+    const result = await this.docker(["exec", names.sandbox, "sh", "-c", `${this.processLock(marker)}
+if [ -f ${marker}.pid ] && [ "$(node -e '${this.groupAliveScript()}' ${marker}.pid)" = alive ]; then echo running
+elif [ -f ${marker}.exit ]; then cat ${marker}.exit
+elif [ -f ${marker}.cancel ]; then echo stopped
+elif [ -f ${marker}.claim ]; then echo unknown
+else echo missing; fi`]);
+    const value = text(result.stdout).trim();
+    if (value === "missing") throw new SandboxProviderError("process_not_found", "Process handle is missing", 404);
+    if (value === "unknown" || !/^(running|stopped|[0-9]+)$/.test(value)) throw new SandboxProviderError("process_outcome_unknown", "Producer outcome is unconfirmed", 409);
+    const exitCode = /^\d+$/.test(value) ? Number(value) : null;
+    const status = value === "running" ? "running" : value === "stopped" ? "stopped" : exitCode === 0 ? "completed" : exitCode === 124 ? "timed_out" : "failed";
+    return { status, exitCode, stdout: "", stderr: "", durationMs: 0, step: status, tool: "project.terminal.process", retryable: false, processId };
   }
   async stopProcess(scope: SandboxScope, id: string, processId: string): Promise<SandboxCommandResult> {
     const names = await this.inspect(scope, id);
     if (!uuid(processId)) throw new SandboxProviderError("invalid_process", "Invalid process ID", 400);
-    await this.docker(["exec", names.sandbox, "sh", "-c", `pid="$(cat /tmp/npati-process-${processId}.pid)"; /bin/kill -TERM -- "-$pid" 2>/dev/null || true; echo 143 > /tmp/npati-process-${processId}.exit`]);
-    return { status: "stopped", exitCode: null, stdout: "", stderr: "", durationMs: 0, step: "stopped", tool: "project.terminal.process", retryable: false, processId };
+    const marker = `/tmp/npati-process-${processId}`;
+    await this.docker(["exec", names.sandbox, "sh", "-c", `${this.processLock(marker)}
+touch ${marker}.cancel ${marker}.log
+if [ ! -f ${marker}.exit ] && [ -f ${marker}.pid ]; then
+ pid="$(cat ${marker}.pid)"; case "$pid" in ''|*[!0-9]*) exit 76;; esac
+ /bin/kill -TERM "-$pid" 2>/dev/null || true
+ sleep 0.1; /bin/kill -KILL "-$pid" 2>/dev/null || true
+fi`]);
+    // Never fabricate an exit code. A surviving group remains running and pins cleanup.
+    let result = await this.getProcessStatus(scope, id, processId);
+    for (let attempt = 0; result.status === "running" && attempt < 5; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      result = await this.getProcessStatus(scope, id, processId);
+    }
+    return result;
   }
 }

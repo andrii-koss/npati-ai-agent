@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { MemoryCodeInboxStore } from "./code-session-inbox-memory";
+import { MemoryCodeProcessStore } from "./code-process-store-memory";
 import { assertNoSecrets } from "@npati/memory";
 import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionStatus, ProjectCodeSettings, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification, FeatureFlag, FeatureFlagInput, FeatureFlagHistoryEntry, CodeToolManifest, SandboxImage, SandboxImageInput, SandboxImageVariant, CodeSessionMode, ProjectCodeTrust, ProjectCodeTrustInput, ProjectMountedFolder, ProjectMountedFolderInput, CodeApprovalRule, CodeApprovalRuleInput, CodeApprovalRuleScope,
   CompanyMember, CompanyInvite, CompanyInviteInput, AcceptCompanyInviteInput, UpdateCompanyMemberRoleInput, RemoveCompanyMemberInput,
@@ -49,6 +51,15 @@ import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from './
 const now = () => new Date().toISOString();
 type StoredUserSetting = import('./types').UserSetting;
 export class InMemoryWorkspaceStore implements WorkspaceStore {
+  readonly codeProcesses = new MemoryCodeProcessStore(async (scope) => [...this.codeRunStates.values()]
+    .filter((run) => run.companyId === scope.companyId && run.projectId === scope.projectId)
+    .map((run) => ({ runId: run.runId, sessionId: run.sessionId, owner: run.leaseOwner,
+      live: run.status === "running" && !!run.leaseExpiresAt && run.leaseExpiresAt.getTime() > Date.now(), terminal: ["completed", "failed", "cancelled"].includes(run.status) })));
+  readonly codeInbox = new MemoryCodeInboxStore(async (scope) => [...this.codeRunStates.values()]
+    .filter((run) => run.companyId === scope.companyId && run.sessionId === scope.sessionId)
+    .map((run) => ({ runId: run.runId, owner: run.leaseOwner,
+      live: run.status === "running" && !!run.leaseExpiresAt && run.leaseExpiresAt.getTime() > Date.now(),
+      terminal: ["completed", "failed", "cancelled"].includes(run.status) })));
   private readonly identities = new Map<string, { displayName: string; workspaceName: string; role: string }>();
   private readonly businesses = new Map<string, Business>();
   private readonly companies = new Map<string, Company>();

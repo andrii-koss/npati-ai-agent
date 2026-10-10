@@ -57,6 +57,8 @@ export const CODE_AGENT_SUB_FLAGS = [
    */
   "code.commands",
   "code.skills",
+  "code.async_inbox",
+  "code.async_processes",
 ] as const;
 
 export type CodeAgentSubFlag = typeof CODE_AGENT_SUB_FLAGS[number];
@@ -68,7 +70,7 @@ export const CODE_MODEL_PROFILE_PATTERN = /^code\.model_profile\.[a-z0-9._-]{1,6
  * the key carries the bare hex prefix (8..64 chars) because a flag key cannot contain a colon.
  */
 export const CODE_SANDBOX_IMAGE_PATTERN = /^code\.sandbox_image\.[a-f0-9]{8,64}$/;
-export const CODE_FLAG_KEY_PATTERN = /^(coding_agent\.enabled|code\.(read|write|shell|git|subagents|background_runs|mounted_folder|hooks|mcp|full_auto_sandbox|repo_map|session_resume|rewind|session_fork|export|commands|skills))$|^code\.model_profile\.[a-z0-9._-]{1,64}$|^code\.sandbox_image\.[a-f0-9]{8,64}$/;
+export const CODE_FLAG_KEY_PATTERN = /^(coding_agent\.enabled|code\.(read|write|shell|git|subagents|background_runs|mounted_folder|hooks|mcp|full_auto_sandbox|repo_map|session_resume|rewind|session_fork|export|commands|skills|async_inbox|async_processes))$|^code\.model_profile\.[a-z0-9._-]{1,64}$|^code\.sandbox_image\.[a-f0-9]{8,64}$/;
 
 export function isValidCodeFlagKey(flagKey: string): boolean {
   return typeof flagKey === "string" && CODE_FLAG_KEY_PATTERN.test(flagKey);
@@ -225,7 +227,7 @@ export class FeatureFlagService {
       const master = await this.resolve(ctx, CODE_AGENT_MASTER_FLAG, options);
       resolution = own
         ? { ...own, enabled: own.enabled && master.enabled }
-        : { ...this.defaultResolution(flagKey), enabled: this.enabledByDefault && master.enabled };
+        : { ...this.defaultResolution(flagKey), enabled: this.defaultResolution(flagKey).enabled && master.enabled };
     }
     this.cache.set(key, { resolution, expiresAt: Date.now() + this.cacheTtlMs });
     return resolution;
@@ -237,7 +239,8 @@ export class FeatureFlagService {
   }
 
   private defaultResolution(flagKey: string): FlagResolution {
-    return { key: flagKey, enabled: this.enabledByDefault, scope: "global", scopeId: "", stage: this.enabledByDefault ? "ga" : "off", source: this.enabledByDefault ? "self_hosted_default" : "no_row" };
+    const enabled = this.enabledByDefault && !["code.async_inbox", "code.async_processes"].includes(flagKey);
+    return { key: flagKey, enabled, scope: "global", scopeId: "", stage: enabled ? "ga" : "off", source: enabled ? "self_hosted_default" : "no_row" };
   }
 
   /** Deny-by-default gate used by every code entry point (routes and services alike). */

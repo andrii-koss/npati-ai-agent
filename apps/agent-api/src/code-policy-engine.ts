@@ -379,7 +379,7 @@ export function matrixModeFor(mode: string | null | undefined): MatrixMode {
 const READ_TOOLS = new Set([
   "code.fs.read", "code.fs.list", "code.fs.grep", "code.fs.tree",
   "code.symbols.outline", "code.project.info", "code.fs.diff",
-  "code.shell.process.list", "code.shell.process.logs",
+  "code.shell.process.list", "code.shell.process.logs", "code.shell.process.wait",
 ]);
 
 /**
@@ -408,7 +408,7 @@ export const PLAN_SAFE_TOOLS = new Set(["code.plan.propose", "code.plan.update",
  */
 export const REVIEW_SAFE_GIT_TOOLS = new Set(["code.git.status", "code.git.diff", "code.git.log", "code.git.pr.comment"]);
 
-const SHELL_TOOLS = new Set(["code.shell.exec", "code.shell.process.start", "code.shell.process.stop"]);
+const SHELL_TOOLS = new Set(["code.shell.exec_async", "code.shell.exec", "code.shell.process.start", "code.shell.process.stop"]);
 const WRITE_TOOLS = new Set([
   "code.fs.edit", "code.fs.apply_patch", "code.fs.write", "code.fs.move",
   "code.fs.delete", "code.fs.undo_last_turn", "code.verify.run",

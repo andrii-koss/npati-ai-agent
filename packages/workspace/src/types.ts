@@ -10,6 +10,7 @@ import type {
   SetCodeGoalCriterionStatusInput,
   UpdateCodeGoalInput,
 } from "./code-goal-types";
+import type { CodeInboxStore } from "./code-session-inbox";
 import type {
   AnswerCodeUserQuestionInput,
   CodeUserQuestionRecord,
@@ -250,6 +251,8 @@ export interface CodeDataFamily {
  * table holds user content is how a retention job deletes the wrong thing.
  */
 export const CODE_RETENTION_FAMILIES: readonly CodeDataFamily[] = [
+  { table: "code_process_projects", scope: "project", timestampColumn: "updated_at", appendOnly: false },
+  { table: "code_session_inboxes", scope: "session", timestampColumn: "updated_at", appendOnly: false },
   { table: "code_run_turns", scope: "run", timestampColumn: "started_at", appendOnly: false },
   { table: "project_checkpoints", scope: "project", timestampColumn: "created_at", appendOnly: false },
   { table: "code_run_states", scope: "session", timestampColumn: "started_at", appendOnly: false },
@@ -1641,6 +1644,9 @@ export class ProviderDataPolicyStoreError extends WorkspaceAccessError {
 }
 
 export interface WorkspaceStore {
+  /** Optional additive inbox port; absent deployments refuse asynchronous input. */
+  codeInbox?: CodeInboxStore;
+  codeProcesses?: import("./code-process-store").CodeProcessStore;
   initialize(context?: AuthContext): Promise<void>;
   /**
    * G1 (item 2): releases the resources the store owns — for the PostgreSQL implementation the connection

@@ -13,10 +13,17 @@ case "$project_image" in
     if ! docker image inspect "$project_image" >/dev/null 2>&1; then
       docker build --file "${image_dir}/Dockerfile.project-sandbox" --tag "$project_image" "$image_dir"
     fi
-    pinned_image=$(docker image inspect --format '{{index .RepoDigests 0}}' "$project_image")
+    pinned_image=$(docker image inspect --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}' "$project_image")
     case "$pinned_image" in
       *@sha256:*) export NPATI_SANDBOX_IMAGE="$pinned_image" ;;
-      *) echo "Built sandbox has no repository digest; image admission requires a pinned image" >&2; exit 1 ;;
+      *)
+        if [ "${NPATI_ENVIRONMENT:-}" = development ] && [ "${NPATI_SANDBOX_ALLOW_UNVERIFIED_IMAGES:-}" = true ]; then
+          echo "[sandbox-runner-image] using explicitly permitted local development image"
+        else
+          echo "Built sandbox has no repository digest; image admission requires a pinned image" >&2
+          exit 1
+        fi
+        ;;
     esac
     ;;
 esac

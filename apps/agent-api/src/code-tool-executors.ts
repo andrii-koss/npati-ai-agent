@@ -499,6 +499,16 @@ export function canonicalWriteExecutors(options: CanonicalWriteExecutorOptions =
  * `tool_not_configured` (503) instead of executing anything on the API host.
  */
 export interface CodeShellRuntimePort {
+  execAsync?(input: {
+    ctx: CodeToolExecutionContext["ctx"]; companyId: string; projectId: string; sessionId: string;
+    runId: string; leaseOwner: string; toolCallId: string; agentId?: string;
+    command: string; cwd?: string; env?: Record<string, string>; timeoutMs: number;
+    waitTimeoutMs: number; background: boolean; secretRefs?: string[]; approved: boolean;
+  }): Promise<import("./code-async-process").AsyncProcessReceipt>;
+  waitProcess?(input: {
+    ctx: CodeToolExecutionContext["ctx"]; companyId: string; projectId: string; sessionId: string;
+    processId: string; waitTimeoutMs: number; offset: number; leaseOwner?: string;
+  }): Promise<import("./code-async-process").AsyncProcessReceipt>;
   exec(input: {
     ctx: CodeToolExecutionContext["ctx"];
     companyId: string;
@@ -517,6 +527,7 @@ export interface CodeShellRuntimePort {
     companyId: string;
     projectId: string;
     sessionId?: string;
+    agentId?: string;
     command: string;
     cwd?: string;
     env?: Record<string, string>;
@@ -526,11 +537,13 @@ export interface CodeShellRuntimePort {
     ctx: CodeToolExecutionContext["ctx"];
     companyId: string;
     projectId: string;
+    sessionId?: string;
   }): Promise<{ processes: Array<{ processId: string; command: string; status: "running" | "stopped" | "failed"; startedAt?: string | null; exitCode?: number | null }> }>;
   processLogs?(input: {
     ctx: CodeToolExecutionContext["ctx"];
     companyId: string;
     projectId: string;
+    sessionId?: string;
     processId: string;
     offset: number;
     limit: number;
@@ -539,6 +552,7 @@ export interface CodeShellRuntimePort {
     ctx: CodeToolExecutionContext["ctx"];
     companyId: string;
     projectId: string;
+    sessionId?: string;
     processId: string;
   }): Promise<{ processId: string; stopped: boolean }>;
 }
@@ -607,6 +621,28 @@ export function canonicalShellExecutors(options: CanonicalShellExecutorOptions =
   };
 
   return {
+    "code.shell.exec_async": async (input) => {
+      const runtime = shell();
+      if (!runtime.execAsync) toolNotConfigured(input.tool.name, "tracked execution");
+      try {
+        return await runtime.execAsync({ ctx: input.ctx, companyId: input.companyId, projectId: input.projectId,
+          sessionId: input.sessionId ?? "", runId: input.runId ?? "", leaseOwner: input.leaseOwner ?? "", toolCallId: input.toolCallId ?? "", agentId: input.agentId,
+          command: stringArg(input.args, ["command"]) ?? "", cwd: stringArg(input.args, ["cwd"]) ?? undefined, env: envArg(input.args.env),
+          timeoutMs: typeof input.args.timeoutMs === "number" ? input.args.timeoutMs : input.limits.commandTimeoutMs,
+          waitTimeoutMs: typeof input.args.waitTimeoutMs === "number" ? input.args.waitTimeoutMs : 1000,
+          background: input.args.background === true, secretRefs: stringListArg(input.args.secretRefs), approved: input.approved === true });
+      } catch (error) { rethrowCanonical(error); }
+    },
+    "code.shell.process.wait": async (input) => {
+      const runtime = shell();
+      if (!runtime.waitProcess) toolNotConfigured(input.tool.name, "tracked process collection");
+      try {
+        return await runtime.waitProcess({ ctx: input.ctx, companyId: input.companyId, projectId: input.projectId,
+          sessionId: input.sessionId ?? "", processId: stringArg(input.args, ["processId"]) ?? "", leaseOwner: input.leaseOwner,
+          waitTimeoutMs: typeof input.args.waitTimeoutMs === "number" ? input.args.waitTimeoutMs : 1000,
+          offset: typeof input.args.offset === "number" ? input.args.offset : 0 });
+      } catch (error) { rethrowCanonical(error); }
+    },
     "code.shell.exec": async (input) => {
       const command = stringArg(input.args, ["command", "cmd", "commandLine"]);
       if (!command) throw new CodeToolError("invalid_arguments", "code.shell.exec requires a command", 400, "validate_arguments", false, input.tool.name);
@@ -647,6 +683,7 @@ export function canonicalShellExecutors(options: CanonicalShellExecutorOptions =
           companyId: input.companyId,
           projectId: input.projectId,
           sessionId: input.sessionId,
+          agentId: input.agentId,
           command,
           cwd: stringArg(input.args, ["cwd", "workingDirectory"]) ?? undefined,
           env: envArg(input.args.env),
@@ -659,7 +696,7 @@ export function canonicalShellExecutors(options: CanonicalShellExecutorOptions =
       const runtime = shell();
       if (!runtime.listProcesses) toolNotConfigured(input.tool.name, "process management");
       try {
-        return await runtime.listProcesses({ ctx: input.ctx, companyId: input.companyId, projectId: input.projectId });
+        return await runtime.listProcesses({ ctx: input.ctx, companyId: input.companyId, projectId: input.projectId, sessionId: input.sessionId });
       } catch (error) { rethrowCanonical(error); }
     },
 
@@ -674,6 +711,7 @@ export function canonicalShellExecutors(options: CanonicalShellExecutorOptions =
           companyId: input.companyId,
           projectId: input.projectId,
           processId,
+          sessionId: input.sessionId,
           offset: typeof input.args.offset === "number" ? input.args.offset : 0,
           limit: typeof input.args.limit === "number" ? input.args.limit : 200,
         });
@@ -686,7 +724,7 @@ export function canonicalShellExecutors(options: CanonicalShellExecutorOptions =
       const runtime = shell();
       if (!runtime.stopProcess) toolNotConfigured(input.tool.name, "process management");
       try {
-        return await runtime.stopProcess({ ctx: input.ctx, companyId: input.companyId, projectId: input.projectId, processId });
+        return await runtime.stopProcess({ ctx: input.ctx, companyId: input.companyId, projectId: input.projectId, sessionId: input.sessionId, processId });
       } catch (error) { rethrowCanonical(error); }
     },
 

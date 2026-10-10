@@ -22,6 +22,11 @@
     "allowJs": true
   },
   "include": [
+    "tests/coding-agent-async-process.test.ts",
+    "tests/coding-agent-async-completions.test.ts",
+    "tests/coding-agent-async-process-docker.test.ts",
+    "tests/coding-agent-async-inbox.test.ts",
+    "tests/coding-agent-async-inbox-postgres.test.ts",
     "tests/coding-agent-c6-eval.test.ts",
     "tests/coding-agent-c13-capability-catalog-audit.test.ts",
     "tests/coding-agent-c14-attack-catalogue.test.ts",
