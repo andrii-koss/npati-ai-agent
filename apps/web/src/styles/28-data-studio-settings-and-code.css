@@ -1,0 +1,407 @@
+
+.ds-sql {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  background: #0f172a;
+  border-radius: 8px;
+  color: #e2e8f0;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 640px) {
+  .data-studio-drawer {
+    width: 100%;
+  }
+
+  .ds-toolbar .button-primary,
+  .ds-toolbar .button-secondary,
+  .ds-status-row .button-secondary {
+    margin-left: 0;
+  }
+}
+
+/* Data Studio settings page: the same segmented control also sits in the pane header. */
+.ds-segmented.inline {
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+.ds-segmented.inline button {
+  flex: 0 0 auto;
+  padding: 6px 14px;
+  white-space: nowrap;
+}
+
+/* DataBackend management moved from the Company page into the Data Studio settings section. */
+.data-studio-pane .data-backend-section {
+  margin: 20px;
+}
+
+/* Data Studio settings page (/settings/data-studio), built on the Automations page layout. */
+.ds-name-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--npati-text, #111111);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+
+.ds-name-link:hover {
+  color: var(--npati-red);
+  text-decoration: underline;
+}
+
+.ds-muted {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.ds-section-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 28px 0 14px;
+}
+
+.ds-section-title h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.ds-detail-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  background: #ffffff;
+  border: 1px solid var(--npati-gray-100);
+  border-radius: 16px;
+  box-shadow: 0 4px 16px -2px rgba(17, 17, 17, 0.05);
+}
+
+.ds-detail-toolbar > label,
+.ds-detail-toolbar .ds-toolbar-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+
+.ds-detail-toolbar > label > span,
+.ds-detail-toolbar .ds-toolbar-field > span {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.ds-detail-toolbar select,
+.ds-detail-toolbar input {
+  min-width: 200px;
+}
+
+.ds-attach-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+}
+
+.data-studio-attachments .ds-attach-row + .ds-attach-row {
+  border-top: 1px solid var(--npati-gray-100);
+}
+
+/* Settings → Code (C1 foundation): detail rows, repository cell, toolchain chips and limits block. */
+.code-repository {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.code-repository .ds-muted {
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.code-toolchain {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.code-detail-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--npati-gray-100);
+  font-size: 13px;
+}
+
+.code-detail-row:last-child {
+  border-bottom: none;
+}
+
+.code-detail-row > span:first-child {
+  color: #64748b;
+}
+
+.code-detail-row code {
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.code-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.code-limits {
+  margin: 20px 0 0;
+  padding: 14px 16px;
+  background: #ffffff;
+  border: 1px solid var(--npati-gray-100);
+  border-radius: 16px;
+  box-shadow: 0 4px 16px -2px rgba(17, 17, 17, 0.05);
+}
+
+.code-limits summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--npati-black);
+}
+
+.code-limits ul {
+  margin: 10px 0 0;
+  padding-left: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.code-limits li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.code-limits code {
+  color: #475569;
+}
+
+@media (max-width: 640px) {
+  .code-detail-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+}
+
+/* C1a: Coding Agent feature-flag panel (same palette as the rest of the Code section). */
+.code-flags {
+  gap: 14px;
+}
+
+.code-flags-scope {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 4px 0 2px;
+}
+
+.code-flags-warning {
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--npati-gray-100);
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.code-flags-master {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  background: #ffffff;
+  border: 1px solid var(--npati-gray-100);
+  border-radius: 16px;
+  box-shadow: 0 4px 16px -2px rgba(17, 17, 17, 0.05);
+}
+
+.code-flags-master-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 240px;
+}
+
+.code-flags-master-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.code-flags-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.code-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--npati-black);
+  cursor: pointer;
+}
+
+.code-switch input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--npati-red);
+  cursor: pointer;
+}
+
+.code-switch input:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+@media (max-width: 640px) {
+  .code-flags-master {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .code-flags-master-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+/* --- C1b: sandbox images panel --------------------------------------------------------- */
+
+.code-images {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--npati-gray-100);
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.04);
+}
+
+.code-images-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.code-images-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.code-images-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.code-images-admission {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--npati-gray-100);
+}
+
+.code-images-admission-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+@media (max-width: 640px) {
+  .code-images {
+    padding: 12px;
+  }
+
+  .code-images-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .code-images-admission-row {
+    width: 100%;
+  }
+}
+
+/* --- C7 Code Workspace (additive; every rule is scoped to .code-workspace) --- */
+.code-workspace .mobile-view-switch { display: none; gap: 6px; margin: 8px 0 12px; flex-wrap: wrap; }
+.code-workspace .mobile-view-button { border: 1px solid #eef2f6; background: transparent; color: inherit; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-size: 12px; }
+.code-workspace .mobile-view-button.active { border-color: currentColor; }
+.code-workspace .code-file-tree { list-style: none; margin: 0; padding: 0; max-height: 60vh; overflow: auto; }
+.code-workspace .code-file-tree-item { display: block; width: 100%; text-align: left; background: transparent; border: 0; color: inherit; padding: 4px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; overflow-wrap: anywhere; }
+.code-workspace .code-file-tree-item.active { background: rgba(110, 168, 254, 0.12); }
+.code-workspace .code-stream { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.code-workspace .code-stream-toggle { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: transparent; border: 0; color: inherit; cursor: pointer; padding: 6px 4px; }
+.code-workspace .code-stream-kind { font-size: 13px; overflow-wrap: anywhere; }
+.code-workspace .code-stream-body { border-left: 2px solid #eef2f6; margin-left: 6px; padding-left: 10px; }
+.code-workspace .code-approvals { margin-top: 16px; }
+.code-workspace .code-approval-card { border: 1px solid #eef2f6; border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+.code-workspace .code-approval-body { max-height: 240px; overflow: auto; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.code-workspace .code-approval-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.code-workspace .code-approval-deny { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.code-workspace .code-approval-deny textarea { min-height: 64px; width: 100%; }
+.code-workspace .code-changes-list { list-style: none; margin: 0; padding: 0; }
+.code-workspace .code-change-header { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; overflow-wrap: anywhere; }
+.code-workspace .code-diff { max-height: 320px; overflow: auto; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.code-workspace .code-workspace-controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+.code-workspace .code-workspace-usage { font-size: 12px; }
+.code-workspace .code-workspace-sessions { display: flex; gap: 8px; margin-top: 12px; }
+.code-workspace .project-preview-frame iframe { width: 100%; min-height: 420px; border: 1px solid #eef2f6; border-radius: 10px; }
+.onboarding-live-composer .code-pending-messages { display: block; max-height: 240px; overflow: auto; padding: 8px 12px; border: 1px solid #bcc7d4; border-radius: 8px; font-size: 12px; }
+.code-pending-messages .code-pending-row { display: block; border-top: 1px solid #bcc7d4; padding: 6px 0; }
+.code-pending-messages .code-pending-row p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; }
+.code-pending-messages .code-pending-row textarea { width: 100%; min-height: 64px; }
+.code-pending-messages .code-pending-row button { margin-right: 8px; }
+.onboarding-live-composer .composer-inbox-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.onboarding-live-composer .code-pending-row textarea { padding: 6px; font-size: 13px; overflow-y: auto; border: 1px solid #bcc7d4; border-radius: 6px; }
+@media (max-width: 900px) {
+  .code-workspace .mobile-view-switch { display: flex; }
+  .code-workspace .code-workspace-controls { flex-direction: column; align-items: stretch; }
+}
