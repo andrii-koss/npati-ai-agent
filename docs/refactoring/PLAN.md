@@ -458,7 +458,12 @@ sha256(concat(01..28)) == sha256(оригінал)
     - [x] **2c-7b (коміт `65a407f`).** `/router/evaluate`, два `/attachments/:attachmentId`, `/businesses/:businessId/research-jobs/:jobId` (69 рядків) → `misc-routes.ts` (98). `app.ts` 5519 → 5461.
     - [x] **2c-7c-a (коміт `7a36e05`).** Ендпоінт `/chat`-стріму — **666 рядків**, найбільший залишковий блок → `chat-stream-routes.ts` (745). `app.ts` 5461 → **4821**.
     - [x] **2c-7c-b (коміт `080bc41`).** Решта чат-маршрутів (скасування стріму + нейтральний/компанійний/бізнесовий ендпоінти, 436 рядків) → `chat-routes.ts` (487). `app.ts` 4821 → **4401**.
-    - [ ] **2c-7c-c.** Чат-замикач (`contextBuilder` + оркестрація, ~1300 рядків) — останній великий блок `app.ts`.
+    - [x] **2c-7c-c-1 (коміт `f65fe4d`).** Чат-ядро — 1330 рядків (`contextBuilder`, виконавці чат-дій, шляхи завершення business/company і дві turn-функції `runBusinessMessage`/`runNeutralMessage`) → `chat-orchestration.ts` за фабрикою `createChatOrchestration(deps)`. `app.ts` 4401 → **3106**.
+      💡 **Ключове рішення:** виносити хелпери **разом** із функціями, що їх викликають. 14 перехресних викликів стали внутрішніми модуля, і на межі лишилось 4 типи замість 17.
+    - [x] **2c-7c-c-2 (коміт `2facf6c`).** 572 рядки хелперів → `chat-actions.ts` (683) за фабрикою `createChatActions(deps)`; `chat-orchestration.ts` 1436 → **897**.
+      💡 **Прийом, що прибрав ручні сигнатури:** фабрика експортує **власний тип** — `export type ChatActions = ReturnType<typeof createChatActions>` (у цій ревізії — просто `ReturnType<typeof …>` на місці), тож батько деструктурує хелпери з точними виведеними типами, і жодного інтерфейсу писати не треба.
+    - [ ] **2c-7c-c-3.** `chat-orchestration.ts` — 897 рядків, потрібен ще один зріз (ті самі дві turn-функції; тип межі брати через `ReturnType<typeof createChatTurn>`).
+    - [ ] **2c-6.** Ранні code-реєстратори — маленькі (4–10 рядків кожен, залежностей 3–5, без функційних): `registerCodeProductionRoutes` (935), `registerCodeSessionModeRoutes` (1174), `registerCodeMembershipRoutes` (1191), `registerCodeDataPolicyRoutes` (1330).
     - 💡 **Прийом 2c-7c-b:** коли тип залежності не можна назвати, його беруть **з наявного символу**: тип чат-відповіді — `Parameters<typeof applyChatTelemetryHeaders>[1] & { message: string; companyAction?: … }`, а `getAIContext` повертає `AgentAIContext` із `@npati/agent`. Це точніше за ручний опис структури й не потребує `any`.
     - ⚠️ **Пастки 2c-7c-a:** (1) `app.ts` отримує виходи частин через **однорядкову деструктуризацію** `const { a, b, ... } = codeRoutes;` — мій парсер «оголошених раніше» імен її не бачив, тому 4 залежності не потрапили в модуль; тепер деструктуризація парситься загальним regex-ом; (2) `function* boundedResponseChunks` (генератор) теж не потрапляв під шаблон оголошень; (3) вставка поля в інтерфейс «за `IndexOf("}")`» влучила всередину generic-типу `Map<string,{…}>` — вставляти треба за рядком, що дорівнює `}`.
     - ⚠️ **2c-7c-a довела правило гейтингу:** лінт-гвард знову вимагав перезаморозки (2 `as any` переїхали), і цього разу базлайн оновлено **до** коміту й додано в той самий коміт.
@@ -1170,3 +1175,5 @@ Rollback:   git revert <sha>
 | 2c-7b | `apps/agent-api/src/app.ts` | 5 519 | 5 461 (router/attachments/research → `misc-routes.ts`) | `65a407f` | 2026-10-10 |
 | 2c-7c-a | `apps/agent-api/src/app.ts` | 5 461 | **4 821** (ендпоінт `/chat`-стріму → `chat-stream-routes.ts`) | `7a36e05` | 2026-10-10 |
 | 2c-7c-b | `apps/agent-api/src/app.ts` | 4 821 | **4 401** (решта чат-ендпоінтів → `chat-routes.ts`) | `080bc41` | 2026-10-10 |
+| 2c-7c-c-1 | `apps/agent-api/src/app.ts` | 4 401 | **3 106** (чат-ядро 1330 рядків → `chat-orchestration.ts`) | `f65fe4d` | 2026-10-10 |
+| 2c-7c-c-2 | `apps/agent-api/src/chat-orchestration.ts` | 1 436 | 897 (хелпери 572 → `chat-actions.ts`) | `2facf6c` | 2026-10-10 |
