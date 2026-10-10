@@ -230,6 +230,8 @@ import { createChatOrchestration } from "./chat-orchestration";
 import { createCodePolicyWiring } from "./code-policy-wiring";
 import { createAutomationExecutor } from "./automation-executor-wiring";
 import { createRedisHealthWiring } from "./redis-health-wiring";
+import { createEnrichedPolicyEngineWiring } from "./enriched-policy-engine-wiring";
+import { createShellSandboxPortWiring } from "./shell-sandbox-port-wiring";
 
 // Re-exported so existing importers keep working: tests/chat-language-routing.test.ts
 export { isSpreadsheetEditRequest, mapColumnDirectiveFromProposal };
@@ -1004,28 +1006,17 @@ export function buildApp(config: AppConfig = {}) {
    * repository-instruction review and the policy-change marker. Enrichment only *adds* restrictions —
    * the engine still decides, and an unresolvable agent or project leaves the field absent.
    */
-  const enrichedPolicyEngine: PolicyEngine = Object.assign(Object.create(Object.getPrototypeOf(policyEngine)) as PolicyEngine, {
-    evaluate: async (request: Parameters<PolicyEngine["evaluate"]>[0]) => {
-      const enriched = { ...request } as typeof request;
-      if (enriched.agentId) {
-        const agent = await workspaceStore.getCompanyAgent(request.ctx, request.companyId, enriched.agentId).catch(() => null);
-        const groups = codeGroupsForAgent((agent as { tools?: string[] } | null)?.tools);
-        if (groups.length) {
-          enriched.capabilityGroups = {
-            agentCapabilityGroups: groups,
-            userPermissions: request.ctx.permissions ?? [],
-            projectRules: null,
-          };
-        }
-      }
-      if (enriched.requiresProjectTrust === true && enriched.projectTrusted === undefined && request.projectId) {
-        enriched.projectTrusted = await codeProjectTrust
-          .isTrusted(request.ctx, request.companyId, request.projectId)
-          .catch(() => false);
-      }
-      return policyEngine.evaluate(enriched);
-    },
+  // The enriched policy engine (step 2c-6h).
+  const enrichedPolicyEngineWiring = createEnrichedPolicyEngineWiring({
+    config,
+    log: app.log,
+    policyEngine,
+    agent,
+    codeGroupsForAgent,
+    codeProjectTrust,
+    workspaceStore,
   });
+  const { enrichedPolicyEngine } = enrichedPolicyEngineWiring;
   /**
    * C13 (owner requirement: fresh-process MCP acceptance): **the** run-path entry point of runtime MCP
    * discovery, and the vendor of the discovery the Capability Inspector route asks for.
@@ -1056,30 +1047,14 @@ export function buildApp(config: AppConfig = {}) {
   });
   const discoverRuntimeMcpCapabilities = (ctx: AuthContext, companyId: string) =>
     mcpRunPath.discover(ctx, companyId);
-  const shellSandboxPort: CodeShellSandboxPort | undefined = projectSandbox ? {
-    execute: async (input) => {
-      const started = Date.now();
-      const result = await projectSandbox!.execute(input.context, input.companyId, {
-        projectId: input.projectId,
-        command: input.command,
-        // Code sessions are authorized by the canonical code runtime, not Company-agent IDs.
-        // The sandbox's system path still checks the authenticated user's write permission.
-        agentId: "system",
-        ...(input.cwd ? { cwd: input.cwd } : {}),
-        ...(input.approved ? { approved: true } : {}),
-        ...(input.environmentReferences ? { environmentReferences: input.environmentReferences } : {}),
-      }) as { stdout?: string; stderr?: string; output?: string; exitCode?: number; durationMs?: number; status?: string; sandboxId?: string; riskLevel?: string };
-      return {
-        exitCode: typeof result?.exitCode === "number" ? result.exitCode : 1,
-        stdout: result?.stdout ?? result?.output ?? "",
-        stderr: result?.stderr ?? "",
-        durationMs: typeof result?.durationMs === "number" ? result.durationMs : Date.now() - started,
-        status: result?.status,
-        sandboxId: result?.sandboxId,
-        riskLevel: result?.riskLevel,
-      };
-    },
-  } : undefined;
+  // The shell sandbox port (step 2c-6h).
+  const shellSandboxPortWiring = createShellSandboxPortWiring({
+    config,
+    log: app.log,
+    agent,
+    projectSandbox,
+  });
+  const { shellSandboxPort } = shellSandboxPortWiring;
   const processSandboxPort: CodeProcessSandboxPort | undefined = projectSandbox ? {
     logsAreSnapshots: true,
     start: async (input) => {
