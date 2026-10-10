@@ -453,7 +453,11 @@ sha256(concat(01..28)) == sha256(оригінал)
     - ⚠️ **Головний урок 2c-5: різати модуль можна лише З КІНЦЯ.** Спроба розбити його на 4 суміжні частини спереду провалилася двічі: модуль переплітає створення й **ліниве** використання в обидва боки. `registerCodeSessionInboxRoutes` (рядок 325) посилається на `codeRunCancellation` (створюється на 1024) і `codeBackgroundRuns` (1606) — усередині колбеків, що виконуються пізніше, тож у вихідному файлі це коректно, а при розрізі вперед стає прямим посиланням на неіснуючу змінну. Різ із кінця безпечний: усе, що потрібне хвосту, оголошено раніше.
     - ⚠️ **Дзеркальний випадок — імена, які хвіст створює, а батько читає РАНІШЕ** (тут: `codeRunQueueLimits`, `codeRunAdmission`, `codeBackgroundRuns`, `codeErasureContexts`, `codeDataErasure`, `codeSessionResumeService` — їх читає цикл довантаження, зареєстрований до виклику). Їх не можна ні залишити в батька, ні деструктурувати: батько оголошує `let X!: T;` (definite assignment) на початку, частина повертає значення, батько присвоює його після виклику. `let X: T;` без `!` не компілюється — TS бачить читання до присвоєння.
   - [ ] **2c-6.** Ранні code-реєстратори (`registerCodeProductionRoutes` L995, `registerCodeSessionModeRoutes` L1234, `registerCodeMembershipRoutes` L1251, `registerCodeDataPolicyRoutes` L1390) — вони розкидані серед проводки code-* сервісів.
-  - [ ] **2c-7.** `/capabilities` і `/capability-inspector` (наступні після health) та чат-ендпоінти `/chat*` (~1300 рядків).
+  - [~] **2c-7. Інлайн-маршрути `/capabilities*` і `/chat*`** (10 означень у `app.ts`, ~1300 рядків).
+    - [x] **2c-7a (коміт `9754178`).** `/capabilities`, `/capabilities/inspect` + `CapabilityInspectorService` (121 рядок) → `capability-routes.ts` (149). `app.ts` 5628 → **5519**.
+    - [ ] **2c-7b.** `/router/evaluate`, `/attachments/*` (2 маршрути), `/businesses/*/research-jobs/*`, `/chat/streams/:streamId/cancel` (4331→ далі, ~120 рядків).
+    - [ ] **2c-7c.** Три великі чат-блоки (48, 379 і 670 рядків) — найбільший залишок.
+    - ⚠️ **Процесний урок:** коміт гейтиться **і лінтом, і typecheck**. У 2c-7a лінт-гвард упав (3 `as any` переїхали разом з кодом, а базлайн вказував на `app.ts`), а коміт пройшов, бо перевірявся лише typecheck. Виправлено тим самим комітом через `--amend` після `node scripts/lint-guard.mjs --update-baseline` (`app.ts` 8 → 5, `capability-routes.ts` 0 → 3). Далі: перевіряти `$LASTEXITCODE` лінта **до** коміту.
 
 > **Рецепт виносу групи маршрутів (перевірено на 2c-2, 357 рядків за один коміт):**
 > 1. **Межі — за шаблоном, не за номерами** (`findIndex` на `register<Domain>Routes(app`): попередній крок додає імпорт і зсуває все на ±1.
@@ -1157,3 +1161,4 @@ Rollback:   git revert <sha>
 | 2c-4 | `apps/agent-api/src/app.ts` | 7 364 | **5 628** (code-проводка + 16 реєстраторів → `code-route-wiring.ts`) | `cbd821b` | 2026-10-10 |
 | 2c-5a | `apps/agent-api/src/code-route-wiring.ts` | 1 921 | 1 312 (хвіст 634 рядки → `code-route-runs.ts`) | `d40d0c3` | 2026-10-10 |
 | 2c-5b | `apps/agent-api/src/code-route-wiring.ts` | 1 312 | **759** (середина 568 рядків → `code-route-lifecycle.ts`) | `377c9ed` | 2026-10-10 |
+| 2c-7a | `apps/agent-api/src/app.ts` | 5 628 | 5 519 (`/capabilities*` → `capability-routes.ts`) | `9754178` | 2026-10-10 |
