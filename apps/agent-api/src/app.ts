@@ -100,7 +100,6 @@ import { CodeStepUp, resolveStepUpConfig, type CodePrivilegedAuditPort } from ".
 import { CodeProductionOperations, NullProductionExecutor, registerCodeProductionRoutes } from "./code-prod-operations";
 import { resolveAutomationAllowedPermissions, serviceIdentityForAutomation } from "./code-service-identity";
 import { CodeRbac } from "./code-rbac";
-import type { ApprovalDecisionAuditPort } from "./approvals-repository";
 import { groupForCapability } from "./code-capability-groups";
 import { resolveAllowlistForPhase, resolveEgressAllowlist, toProxyAllowedHosts } from "./egress-allowlist";
 import { resolveEgressEnforcement } from "./sandbox-egress-enforcement";
@@ -285,9 +284,6 @@ import { DiscordMessagingAdapter } from "./discord-messaging";
 import { SlackMessagingAdapter } from "./slack-messaging";
 import { registerMessagingIntegrationRoutes } from "./messaging-integrations-routes";
 import { MessagingScopeRouter } from "./messaging-scope-router";
-import { AuditRepository } from "./audit-repository";
-import { AuditLogService } from "./audit-log";
-import { resolveAuditConfig } from "./audit-config";
 import { registerAuditRoutes } from "./audit-routes";
 import { EmailInboxRepository } from "./email-inbox-repository";
 import { EmailChatActions } from "./email-chat-actions";
@@ -330,6 +326,7 @@ import { ChatAttachmentInput, prepareChatAttachments, safeAttachmentName } from 
 import { attachResearchSources, publicChatError, publicCompanyRunMessage } from "./chat-public-errors";
 import { addColumnDirectiveFromMarkdown, explicitlyRequestsWebResearch, isSpreadsheetEditRequest, mapColumnDirectiveFromProposal, spreadsheetEditedMessage } from "./chat-text-directives";
 import { defaultCoreBackendHealthCheck, withHealthTimeout } from "./backend-health-probe";
+import { createAuditServices } from "./audit-services";
 
 // Re-exported so existing importers keep working: tests/chat-language-routing.test.ts
 export { isSpreadsheetEditRequest, mapColumnDirectiveFromProposal };
@@ -600,35 +597,20 @@ export function buildApp(config: AppConfig = {}) {
   ]);
   const scopedMemory = new ScopedMemoryEngine(config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
   const guardrailPolicies = new GuardrailPolicyRepository(config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
-  const auditRepo = config.databaseUrl ? new AuditRepository(config.databaseUrl) : undefined;
-  // C1c: tamper-evident journal for privileged decisions (append-only, hash-chained, anchored daily).
-  const auditConfig = resolveAuditConfig(process.env, config.dataDirectory);
-  const auditLogService = config.databaseUrl ? new AuditLogService(workspaceStore, auditConfig) : undefined;
-  /**
-   * C5a: approval decisions are journalled **before** they are applied, closing the C5 audit finding that
-   * decisions never reached `company_audit_logs`. When the journal is absent the port is absent too and the
-   * repository keeps its previous behaviour (the port is what makes the journal mandatory in production).
-   */
-  const approvalDecisionAudit: ApprovalDecisionAuditPort | undefined = auditLogService
-    ? {
-        record: async (input) => {
-          await auditLogService.record(
-            { workspaceId: AUDIT_SYSTEM_WORKSPACE, userId: input.actor, permissions: [] } as AuthContext,
-            {
-              companyId: input.companyId,
-              actor: input.actor,
-              actorRole: "owner",
-              action: input.action,
-              resourceType: input.resourceType,
-              resourceId: input.resourceId,
-              decision: input.decision === "allow" ? "approved" : "rejected",
-              ...(input.payloadHash ? { payload: { payload_hash: input.payloadHash } } : {}),
-              metadata: input.metadata ?? {},
-            },
-          );
-        },
-      }
-    : undefined;
+  // Audit and observability domain (step 2b): the journal, its config and its two background timers.
+  const {
+    auditRepo,
+    auditLogService,
+    approvalDecisionAudit,
+    verifyTimer: auditVerifyTimer,
+    anchorTimer: auditAnchorTimer,
+  } = createAuditServices({
+    databaseUrl: config.databaseUrl,
+    dataDirectory: config.dataDirectory,
+    store: workspaceStore,
+    systemWorkspaceId: AUDIT_SYSTEM_WORKSPACE,
+    log: app.log,
+  });
   const approvalsRepo = config.databaseUrl ? new CompanyApprovalsRepository(config.databaseUrl, approvalDecisionAudit) : undefined;
   const emailInboxRepo = new EmailInboxRepository(config.databaseUrl);
   const emailAgentTools = new EmailAgentTools(emailInboxRepo);
@@ -804,20 +786,6 @@ export function buildApp(config: AppConfig = {}) {
     })();
   }, 60_000) : undefined;
   sandboxRetentionTimer?.unref();
-  // C1c: background chain verification and the daily anchor. Both are read-only unless a break is
-  // detected; a failed verification logs a critical alert and (by configuration) blocks new
-  // privileged audit writes for that company until an operator investigates.
-  const auditVerifyTimer = auditLogService ? setInterval(() => {
-    void auditLogService.verifyAll(AUDIT_SYSTEM_WORKSPACE)
-      .then((failures) => { for (const failure of failures) app.log.error({ failure }, "audit_chain_verification_failed"); })
-      .catch((error) => app.log.warn({ err: error }, "audit_chain_verification_error"));
-  }, auditConfig.verifyIntervalMs) : undefined;
-  auditVerifyTimer?.unref();
-  const auditAnchorTimer = auditLogService ? setInterval(() => {
-    void auditLogService.writeDailyAnchors(AUDIT_SYSTEM_WORKSPACE)
-      .catch((error) => app.log.warn({ err: error }, "audit_anchor_write_failed"));
-  }, auditConfig.anchorIntervalMs) : undefined;
-  auditAnchorTimer?.unref();
   const projectPreviewService = new ProjectPreviewService(projectService, workspaceStore, projectWorkspace, projectSandbox, process.env.NPATI_PREVIEW_SECRET);
   /**
    * C11 (owner decisions 2, 7, 8 and 10): the git workflow wiring.
