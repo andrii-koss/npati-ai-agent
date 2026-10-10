@@ -43,6 +43,7 @@ app.post<{ Body: string }>("/v1/sandbox", async (request, reply) => {
     let result: unknown;
     switch (operation) {
       case "createSandbox": result = await provider.createSandbox(scope, p.options as SandboxCreateOptions); break;
+      case "processCapabilities": result = { durableIdentity: false, terminalStatus: false }; break;
       case "getStatus": result = await provider.getStatus(scope, id); break;
       case "startSandbox": result = await provider.startSandbox(scope, id); break;
       case "stopSandbox": result = await provider.stopSandbox(scope, id); break;

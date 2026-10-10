@@ -233,3 +233,46 @@ describe("security-gate: C10 sandbox lifecycle — release is real, not a no-op 
     expect(removed).toBe(true);
   });
 });
+
+
+describe("security-gate: tracked producer pins the existing sandbox lifecycle", () => {
+  it("keeps the sandbox pointer and does not stop or count a pinned sandbox as destroyed", async () => {
+    const f = await fixture();
+    try {
+      const live = await f.store.setProjectSandbox(owner, f.company.id, f.project.id, f.provider.id, null);
+      f.provider.state = "running";
+      f.provider.lastActivityAt = new Date(Date.now() - 60_000).toISOString();
+      await f.sandbox.trackForRetention(owner, live);
+      f.sandbox.setProcessCleanupGuard({ acquire: async () => null });
+      await f.sandbox.stopInactive(Date.now());
+      expect(f.provider.calls).not.toContain("stop");
+      expect(await f.sandbox.destroy(owner, live)).toBe(false);
+      f.provider.state = "stopped";
+      expect(await f.sandbox.sweepRetention(Date.now() + 60_000)).toEqual({ destroyed: 0, candidates: 1 });
+      expect(f.provider.calls).not.toContain("destroy");
+      expect((await f.store.getProject(owner, f.company.id, f.project.id)).sandboxId).toBe(f.provider.id);
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  });
+
+  it("releases the durable cleanup fence after provider failure so cleanup can retry", async () => {
+    const f = await fixture();
+    try {
+      const live = await f.store.setProjectSandbox(owner, f.company.id, f.project.id, f.provider.id, null);
+      let held = false; let releases = 0;
+      f.sandbox.setProcessCleanupGuard({ acquire: async () => {
+        if (held) return null;
+        held = true;
+        return async () => { held = false; releases++; };
+      } });
+      const destroy = f.provider.destroySandbox.bind(f.provider);
+      f.provider.destroySandbox = async () => { throw new Error("provider temporarily unavailable"); };
+      await expect(f.sandbox.destroy(owner, live)).rejects.toThrow("provider temporarily unavailable");
+      expect(held).toBe(false);
+      expect((await f.store.getProject(owner, f.company.id, f.project.id)).sandboxId).toBe(f.provider.id);
+      f.provider.destroySandbox = destroy;
+      expect(await f.sandbox.destroy(owner, live)).toBe(true);
+      expect(releases).toBe(2);
+      expect((await f.store.getProject(owner, f.company.id, f.project.id)).sandboxId ?? null).toBeNull();
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  });
+});

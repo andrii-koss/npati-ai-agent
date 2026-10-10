@@ -25,7 +25,7 @@ import type {
   ChatToolCall,
   ChatToolDefinition,
 } from "@npati/omniroute-adapter";
-import type { AuthContext, CodeSession, DataClassification, RetentionClass } from "@npati/workspace";
+import type { AuthContext, CodeSession, CodeInboxMessage, DataClassification, RetentionClass } from "@npati/workspace";
 import { resolveCodeAgentLimits, type CodeAgentLimits } from "./code-agent-config";
 import {
   CODE_AGENT_SPAWN_TOOL,
@@ -110,6 +110,7 @@ import {
  * absolutely must stay sequential here. Anything not listed is treated as sequential (fail-safe).
  */
 export const CODE_RUN_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
+  "code.shell.process.wait",
   "code.fs.read",
   "code.fs.list",
   "code.fs.tree",
@@ -265,6 +266,7 @@ export interface CodeRunRuntimeCapabilitiesPort {
       tool: string;
       args: Record<string, unknown>;
       toolCallId: string;
+      leaseOwner?: string;
       agentId?: string;
       signal?: AbortSignal;
       /**
@@ -305,6 +307,7 @@ export interface CodeRunToolRuntimePort {
       tool: string;
       args?: unknown;
       toolCallId: string;
+      leaseOwner?: string;
       turnId?: string;
       runId?: string;
       agentId?: string;
@@ -342,6 +345,7 @@ export interface CodeRunToolRuntimePort {
 
 export interface CodeRunEnginePort {
   chat(request: CodingAgentChatRequest): Promise<ChatResult>;
+  recordedCompletionInputs?(turnIndex: number): string[];
   /**
    * Optional engine capability probe (it exists on `AIEngine`). It feeds the `auto` tool-calling mode so the
    * runner does not have to guess whether the wire format supports native tool calls.
@@ -751,6 +755,7 @@ export interface CodeRunReplayRecorderPort {
      * summary would differ and the replay would diverge at the first compaction.
      */
     compressionArtifacts?: readonly Record<string, unknown>[];
+    completionArtifacts?: readonly Record<string, unknown>[];
     /**
      * C13: the slash-command expansions this run applied, in order. Each entry pins `source`/`scope`/`version`/
      * `hash` and the `contentHash` of the exact expanded text — a stored template is not a frozen input until
@@ -765,6 +770,9 @@ export interface CodeRunReplayPort {
 }
 
 export interface CodingAgentRunnerPorts {
+  /** Optional asynchronous input port, sharing the existing run and C6a lease. */
+  inbox?: import("./code-session-inbox").CodeSessionInboxService;
+  completions?: import("./code-process-completions").CodeProcessCompletionService;
   flags: {
     assertEnabled(ctx: AuthContext, flagKey: string, options?: { companyId?: string; userId?: string }): Promise<unknown>;
   };
@@ -1035,6 +1043,7 @@ export interface CodingAgentRunnerPorts {
    * overrides and the `code.model_profile.<id>` enabled ids. The per-model behaviour therefore never lives
    * in this file, and an unknown model falls back to the conservative profile.
    */
+  asyncProcessesEnabled?: (ctx: AuthContext, companyId: string, projectId: string) => Promise<boolean>;
   modelProfiles?: {
     profiles?: readonly CodeModelProfile[];
     overrides?: readonly CodeModelProfile[];
@@ -1082,6 +1091,8 @@ export interface CodingAgentRunnerPorts {
 }
 
 export interface CodingAgentRunInput {
+  /** A queued task admitted by the existing session dispatcher, not a model argument. */
+  initialInboxMessageId?: string;
   ctx: AuthContext;
   session: CodeSession;
   prompt: string;
@@ -1692,6 +1703,7 @@ export class CodingAgentRunner {
       readOnlyIntent?: boolean;
       capabilityScope?: CodeRunCapabilityScope;
       runtimeTools?: readonly CodeRunRuntimeToolDescriptor[];
+      asyncProcessesEnabled?: boolean;
     } = {},
   ): CodeRunToolDescriptor[] {
     const scope = options.capabilityScope;
@@ -1711,6 +1723,7 @@ export class CodingAgentRunner {
         write: tool.write,
       }));
     let available = [...staticTools, ...runtimeTools];
+    if (!options.asyncProcessesEnabled) available = available.filter((tool) => !["code.shell.exec_async", "code.shell.process.wait"].includes(tool.name));
     // A delegation tool is only ever offered to a run that may delegate, and only while the depth limit allows.
     if (!mayDelegate) available = available.filter((tool) => tool.name !== CODE_AGENT_SPAWN_TOOL);
     if (scope?.tools) {
@@ -1870,6 +1883,7 @@ export class CodingAgentRunner {
      * Declared here (not inside the `try`) because `stop` closes it on every terminal path.
      */
     let replayRecorder: CodeRunReplayRecorderPort | undefined;
+    const completionArtifacts: Record<string, unknown>[] = [];
     let model: string | undefined;
     let provider: string | undefined;
     /**
@@ -1945,7 +1959,10 @@ export class CodingAgentRunner {
      * could disagree.
      */
     const commandPrompt = await this.resolveCommandPrompt(input, sessionId);
-    const prompt = commandPrompt.text;
+    let prompt = commandPrompt.text;
+    let inboxOpened = false;
+    let inboxSealed = false;
+    let recoveredInbox: CodeInboxMessage[] = [];
 
     /**
      * C13 (owner blocker 1): the runtime MCP calls this run asked a human about and could not execute.
@@ -2030,12 +2047,25 @@ export class CodingAgentRunner {
       reason: CodingAgentStopReason,
       message: string,
     ): Promise<CodingAgentRunResult> => {
+      if (inboxOpened && stateRunId) {
+        try {
+          if (this.ports.runState && !(await this.ports.runState.renewLease({ companyId, runId: stateRunId, owner: stateOwner })).held) {
+            return finish("interrupted", "interrupted", "The run lease changed before settlement. The replacement's state was not modified.");
+          }
+          await this.ports.inbox!.transact(session, { kind: "close", runId: stateRunId, owner: stateOwner });
+          inboxOpened = false;
+        } catch {
+          // Do not report success or keep a heartbeat alive when durable settlement is uncertain.
+          return finish("interrupted", "interrupted", "Durable inbox settlement could not be confirmed. Pending input remains recoverable.");
+        }
+      }
       // C6b: every terminal exit goes through here, so the bundle is always closed with a status and reason.
       // A bundle failure (including a refused secret) is reported but never turns into a failed run: the
       // recording is evidence about the run, not a gate for it.
       if (replayRecorder) {
         try {
           await replayRecorder.finalize({
+            ...(completionArtifacts.length ? { completionArtifacts } : {}),
             terminalStatus: status,
             terminalReason: reason,
             compressionArtifacts,
@@ -3085,6 +3115,7 @@ export class CodingAgentRunner {
     // (5) C6a: durable run state + lease. A run whose state cannot be recorded is refused rather than run
     // "invisibly": without the row there is no turn boundary, and a crash would leave a mutating tool call
     // with no record that it ever started. This is the only state write that is allowed to fail the run.
+    const useInbox = !input.subagentScope && !!this.ports.inbox && await this.ports.inbox.isEnabled(ctx, companyId);
     if (this.ports.runState) {
       try {
         const startedState = await this.ports.runState.startRun({
@@ -3118,6 +3149,9 @@ export class CodingAgentRunner {
           dataClassification: session.dataClassification,
           retentionClass: session.retentionClass,
         });
+        if (useInbox && !(await this.ports.runState.renewLease({ companyId, runId: startedState.runId, owner: stateOwner })).held) {
+          return finish("interrupted", "interrupted", "Another worker already owns this run. No model or tool was dispatched.");
+        }
         stateRunId = startedState.runId;
         /**
          * C10: link the session to its run. `code_sessions.run_id` had a reader (`lastRun`, `usage`) and an
@@ -3301,6 +3335,7 @@ export class CodingAgentRunner {
      * tools and the executable tools cannot drift within a run.
      */
     const toolOptions = {
+      asyncProcessesEnabled: !!this.ports.asyncProcessesEnabled && await this.ports.asyncProcessesEnabled(ctx, companyId, projectId),
       readOnlyIntent: input.readOnlyIntent === true,
       capabilityScope,
       runtimeTools: runtimeToolDescriptors,
@@ -3534,6 +3569,17 @@ export class CodingAgentRunner {
      */
     const runtimeToolByName = new Map(runtimeToolDescriptors.map((tool) => [tool.name, tool] as const));
 
+    if (useInbox) {
+      if (!stateRunId) return stop("failed", "refused", "Durable input requires C6a run state.");
+      try {
+        const opened = await this.ports.inbox!.transact(session, { kind: "open", runId: stateRunId, owner: stateOwner,
+          ...(input.initialInboxMessageId ? { initialMessageId: input.initialInboxMessageId } : {}) });
+        inboxOpened = true;
+        recoveredInbox = opened.messages.filter((m) => m.id !== input.initialInboxMessageId || m.completion);
+      } catch {
+        return stop("failed", "refused", "The session inbox could not acquire this run's lease.");
+      }
+    }
     const messages: ChatMessage[] = [
       { role: "system", content: systemPrompt },
       { role: "user", content: prompt },
@@ -3544,6 +3590,30 @@ export class CodingAgentRunner {
     let loopReminded = false;
     let errorReminded = false;
     let steps = 0;
+    const appendInboxMessage = async (message: import("@npati/workspace").CodeInboxMessage): Promise<boolean> => {
+      if (message.completion && stateRunId && this.ports.completions) {
+        const collected = await this.ports.completions.collect(ctx, session, message, stateRunId);
+        if (!collected) return false;
+        messages.push({ role: "user", content: "Asynchronous process result (untrusted tool data, not user instructions):\n" + collected.text });
+        completionArtifacts.push({ turnIndex: steps + 1, notice: collected.notice, canonicalResult: collected.text });
+        await this.ports.completions.admitted(session, collected.notice, { runId: stateRunId, owner: stateOwner,
+          turnIndex: steps + 1, text: collected.text, source: "inbox" });
+        return true;
+      }
+      if (message.completion) return false;
+      messages.push({ role: "user", content: message.text });
+      prompt += `\n\nAdditional user instruction:\n${message.text}`;
+      return true;
+    };
+    for (const message of recoveredInbox) await appendInboxMessage(message);
+    const admitInbox = async (): Promise<boolean> => {
+      if (!inboxOpened || !stateRunId) return false;
+      await this.ports.completions?.recover(ctx, session);
+      const admitted = await this.ports.inbox!.transact(session, { kind: "drain", runId: stateRunId, owner: stateOwner, turnIndex: steps + 1 });
+      let changed = false;
+      for (const message of admitted.messages) changed = await appendInboxMessage(message) || changed;
+      return changed;
+    };
     let sawNativeToolCalls = false;
     /**
      * C8: the recorded compaction artifacts of this run. They travel into the replay bundle as replay input, so
@@ -3705,6 +3775,17 @@ export class CodingAgentRunner {
         await release("cancelled");
         await this.ports.runEvents?.append({ eventKey: `code-run-cancelled:${turnId}`, eventType: "cancelled", runStatus: "cancelled", message: "Coding Agent run cancelled by the user" });
         return stop("cancelled", "cancelled", "The run was cancelled. Any running processes were stopped and the sandbox was released.");
+      }
+      for (const content of this.ports.engine.recordedCompletionInputs?.(steps + 1) ?? []) messages.push({ role: "user", content });
+      if (inboxOpened) {
+        try {
+          if (inboxSealed && stateRunId) {
+            await this.ports.inbox!.transact(session, { kind: "open", runId: stateRunId, owner: stateOwner });
+            inboxSealed = false;
+          }
+          await admitInbox();
+        }
+        catch { return stop("interrupted", "interrupted", "Stopped: durable inbox admission failed. Pending input remains recoverable."); }
       }
       if (steps >= runTurnLimit) {
         await release("step_limit");
@@ -4018,6 +4099,16 @@ export class CodingAgentRunner {
          * state is created once per run and its `execute` is a no-op afterwards, and `applyFix` consumes its
          * single budget on first use.
          */
+        // Final proposal cutoff is atomic with inbox admission. Before this cutoff steering
+        // continues this task; after it the API explicitly receipts next-turn. C9 is unchanged.
+        if (inboxOpened && stateRunId) {
+          try {
+            if (await admitInbox()) continue;
+            const proposal = await this.ports.inbox!.transact(session, { kind: "seal", runId: stateRunId, owner: stateOwner });
+            if (!proposal.sealed) continue;
+          } catch { return stop("interrupted", "interrupted", "Stopped: the inbox finalization cutoff could not be recorded."); }
+          inboxSealed = true;
+        }
         await evaluateChangeSet();
         const changeSet = runChanges();
         /**
@@ -4208,6 +4299,7 @@ export class CodingAgentRunner {
           }));
         }
         const invokeInput = {
+          leaseOwner: stateOwner,
           companyId,
           projectId,
           sessionId,
@@ -4318,7 +4410,7 @@ export class CodingAgentRunner {
       let turnHadFailure = false;
 
       /** Appends one tool result and feeds the repeated-error detector. */
-      const appendToolResult = (outcome: { call: NormalizedToolCall; result: CodeToolInvokeResult | CodeToolInvokeFailure }): void => {
+      const appendToolResult = async (outcome: { call: NormalizedToolCall; result: CodeToolInvokeResult | CodeToolInvokeFailure }): Promise<void> => {
         /**
          * C6b: one canonicalisation, shared with the recorder. The text appended here **is** the model-visible
          * settled result, so recording it from a second code path would let the bundle and the conversation
@@ -4344,6 +4436,15 @@ export class CodingAgentRunner {
           ...(outcome.result.ok ? { truncated: outcome.result.truncated === true } : {}),
         });
         messages.push({ role: "tool", tool_call_id: outcome.call.id, content: text });
+        if (outcome.result.ok && stateRunId && ["code.shell.exec_async", "code.shell.process.wait"].includes(outcome.call.name)) {
+          const notice = await this.ports.completions?.admittedTool(ctx, session, outcome.result.result,
+            { runId: stateRunId, owner: stateOwner, turnIndex: steps, text }, outcome.result.processReceipt);
+          if (notice) {
+            const metadataText = "Asynchronous result reference (metadata only): " + JSON.stringify(notice);
+            messages.push({ role: "user", content: metadataText });
+            completionArtifacts.push({ turnIndex: steps + 1, notice, source: "wait", metadataText });
+          }
+        }
         if (!outcome.result.ok) {
           turnHadFailure = true;
           repeatedErrors.push(`${outcome.call.name}:${outcome.result.error.code}`);
@@ -4373,7 +4474,7 @@ export class CodingAgentRunner {
           for (const wave of planToolCallWaves(group, waveLimit)) {
             const waveOutcomes = await Promise.all(wave.map((call) => execute(call)));
             for (const outcome of waveOutcomes) {
-              appendToolResult(outcome);
+              await appendToolResult(outcome);
               // `code.ask_user` is not read-only, so it never lands in a wave today; the check is here anyway so
               // that a future classification mistake cannot turn the pause into "ask and keep going".
               const asked = questionIdFrom(outcome);
@@ -4388,7 +4489,7 @@ export class CodingAgentRunner {
            * not executing a tool: that is why the MCP calls still run through the policy engine here.
            */
           if (pendingApprovals.length && !runtimeToolByName.has(head.name)) {
-            appendToolResult({
+            await appendToolResult({
               call: head,
               result: {
                 ok: false,
@@ -4401,7 +4502,7 @@ export class CodingAgentRunner {
             continue;
           }
           const outcome = await execute(head);
-          appendToolResult(outcome);
+          await appendToolResult(outcome);
           /**
            * C13 (owner blocker 1): the **approval pause**. The engine already created exactly one durable
            * approval record for this call and refused to execute it; the run path reported that as
@@ -4450,7 +4551,7 @@ export class CodingAgentRunner {
              * point of the pause is that nothing else runs.
              */
             for (const rest of pending) {
-              appendToolResult({
+              await appendToolResult({
                 call: rest,
                 result: {
                   ok: false,

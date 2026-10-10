@@ -8,6 +8,8 @@ import type { PolicyEngine } from "./code-policy-engine";
 import type { AuditLogService } from "./audit-log";
 import { SecretLeaseProvider, redactLeaseValues, type SecretEnvironmentReference } from "./code-secret-lease";
 import { CredentialMasker } from "./security-guardrails";
+import type { CodeAsyncProcessService, AsyncProcessReceipt } from "./code-async-process";
+import type { CodeProcessManager } from "./code-process-manager";
 import { MIGRATION_CODES, assertNoProductionCredentialsVisible } from "./code-migration-safety";
 
 /**
@@ -66,6 +68,7 @@ export interface CodeShellSandboxPort {
 }
 
 export interface CodeShellExecInput {
+  leaseOwner?: string;
   companyId: string;
   projectId: string;
   sessionId: string;
@@ -126,6 +129,7 @@ export interface CodeShellSession {
 }
 
 export interface CodeShellRuntimeOptions {
+  processes?: CodeProcessManager;
   sandbox?: CodeShellSandboxPort;
   classifier?: ShellClassifier;
   flags?: FeatureFlagService;
@@ -245,6 +249,14 @@ export class CodeShellRuntime {
   }
 
   async exec(context: AuthContext, input: CodeShellExecInput): Promise<CodeShellExecResult> {
+    return this.execute(context, input) as Promise<CodeShellExecResult>;
+  }
+
+  async execAsync(context: AuthContext, input: CodeShellExecInput & { background?: boolean; waitTimeoutMs?: number }): Promise<AsyncProcessReceipt> {
+    return this.execute(context, input, { background: input.background, waitTimeoutMs: input.waitTimeoutMs }) as Promise<AsyncProcessReceipt>;
+  }
+
+  private async execute(context: AuthContext, input: CodeShellExecInput, tracked?: { background?: boolean; waitTimeoutMs?: number }): Promise<CodeShellExecResult | AsyncProcessReceipt> {
     if (!input.command || !input.command.trim()) throw new ShellRuntimeError("invalid_command", "A command is required", 400);
     if (input.command.length > 8_000) throw new ShellRuntimeError("invalid_command", "Command is too long", 400);
     if (!input.sessionId || !input.toolCallId) throw new ShellRuntimeError("invalid_command", "sessionId and toolCallId are required", 400);
@@ -354,6 +366,7 @@ export class CodeShellRuntime {
     // Secret delivery for exactly this call.
     const leases = this.options.leases;
     const leaseIds = (input.secretLeaseIds ?? []).filter(Boolean);
+    if (tracked && leaseIds.length) throw new ShellRuntimeError("process_secret_promotion_denied", "Foreground secret leases cannot be promoted", 403);
     const references: Record<string, SecretEnvironmentReference> = {};
     const leaseValues: string[] = [];
     if (leaseIds.length) {
@@ -368,6 +381,22 @@ export class CodeShellRuntime {
     const installLike = classification.timeoutClass === "install" || classification.timeoutClass === "install_build";
     const ceiling = installLike ? this.limits.installBuildTimeoutMs : this.limits.commandTimeoutMs;
     const timeoutMs = Math.max(1_000, Math.min(input.timeoutMs ?? ceiling, this.limits.installBuildTimeoutMs));
+
+    if (tracked) {
+      const processes: CodeAsyncProcessService | undefined = this.options.processes?.tracked;
+      if (!processes) throw new ShellRuntimeError("process_promotion_unavailable", "Tracked execution is unavailable", 503);
+      const waitTimeoutMs = tracked.background ? 0 : (tracked.waitTimeoutMs ?? 1000);
+      if (!Number.isSafeInteger(waitTimeoutMs) || waitTimeoutMs < 0 || waitTimeoutMs > 300000) throw new ShellRuntimeError("invalid_wait_timeout", "Invalid foreground wait", 400);
+      let op = await processes.start(context, { companyId: input.companyId, projectId: input.projectId, sessionId: input.sessionId,
+        runId: input.runId ?? "", leaseOwner: input.leaseOwner ?? "", toolCallId: input.toolCallId, agentId: input.agentId,
+        command, cwd, timeoutMs, approved: input.approved });
+      const result = await processes.wait(context, { companyId: input.companyId, projectId: input.projectId, sessionId: input.sessionId,
+        processId: op.processId, waitTimeoutMs, leaseOwner: input.leaseOwner });
+      if (result.kind === "running-process-receipt") op = await processes.promote(context, input, op);
+      session.env = environment; session.cwd = cwd; session.updatedAt = this.now(); session.turnCount += 1;
+      await this.audit(context, input, "shell.command.executed", "allowed", { operationId: op.operationId, processId: op.processId, state: result.state });
+      return result;
+    }
 
     let raw: Awaited<ReturnType<CodeShellSandboxPort["execute"]>>;
     try {

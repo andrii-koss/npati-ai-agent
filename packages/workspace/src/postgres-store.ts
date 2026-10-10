@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { PostgresCodeInboxStore } from "./code-session-inbox-postgres";
+import { PostgresCodeProcessStore } from "./code-process-store-postgres";
 import { assertNoSecrets } from "@npati/memory";
 import { Pool } from "pg";
 import migration001 from "./migration-001";
@@ -74,6 +76,8 @@ import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from
  * silently contributing zero to a sweep.
  */
 const RETENTION_FROM: Readonly<Record<string, string>> = Object.freeze({
+  code_process_projects: "code_process_projects t",
+  code_session_inboxes: "code_session_inboxes t",
   code_run_turns: "code_run_turns t",
   project_checkpoints: "project_checkpoints t",
   code_run_states: "code_run_states t",
@@ -123,6 +127,8 @@ const CODE_PROJECT_GUARD_FOR = (alias: string): string =>
 
 /** `table → the age column`, used for the bound. `code_session_heads` ages by `updated_at` (it is a cursor). */
 const RETENTION_AGE_COLUMN: Readonly<Record<string, string>> = Object.freeze({
+  code_process_projects: "t.updated_at",
+  code_session_inboxes: "t.updated_at",
   code_run_turns: "t.started_at",
   project_checkpoints: "t.created_at",
   code_run_states: "t.started_at",
@@ -141,8 +147,10 @@ const RETENTION_AGE_COLUMN: Readonly<Record<string, string>> = Object.freeze({
  * question points at a session, a turn at a run that belongs to a code session), so there is nothing to guard.
  */
 const RETENTION_EXTRA_PREDICATE: Readonly<Record<string, string>> = Object.freeze({
+  code_process_projects: CODE_PROJECT_GUARD_FOR("t") + " AND t.state->>'cleanupToken' IS NULL AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(t.state->'operations') op WHERE (op->>'state' IN ('accepted','preparing','dispatching','running','unknown_outcome') OR (op->'completion' IS NOT NULL AND op->'completion'->'admission' IS NULL)))",
+  code_session_inboxes: CODE_PROJECT_GUARD_FOR("t") + " AND NOT EXISTS (SELECT 1 FROM code_run_states r WHERE r.company_id=t.company_id AND r.session_id=t.session_id AND r.status IN ('running','waiting_for_user')) AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(t.state->'messages') m WHERE m->>'status' IN ('pending','claimed'))",
   project_checkpoints: CODE_PROJECT_GUARD_FOR("t"),
-  code_run_states: CODE_PROJECT_GUARD_FOR("t"),
+  code_run_states: CODE_PROJECT_GUARD_FOR("t") + " AND NOT EXISTS (SELECT 1 FROM code_process_projects p, jsonb_array_elements(p.state->'operations') op WHERE p.company_id=t.company_id AND op->>'runId'=t.run_id AND (op->>'state' IN ('accepted','preparing','dispatching','running','unknown_outcome') OR (op->'completion' IS NOT NULL AND op->'completion'->'admission' IS NULL)))",
   code_session_plans: CODE_PROJECT_GUARD_FOR("t"),
   code_goals: CODE_PROJECT_GUARD_FOR("t"),
   code_session_todos: CODE_PROJECT_GUARD_FOR("t"),
@@ -181,6 +189,8 @@ const RETENTION_WINDOW_EXPR =
 
 /** The families an erasure deletes, keyed by table. Keys are exactly `CODE_RETENTION_FAMILIES`. */
 const ERASE_FROM: Readonly<Record<string, string>> = Object.freeze({
+  code_process_projects: "code_process_projects",
+  code_session_inboxes: "code_session_inboxes",
   code_run_turns: "code_run_turns",
   project_checkpoints: "project_checkpoints",
   code_run_states: "code_run_states",
@@ -195,6 +205,8 @@ const ERASE_FROM: Readonly<Record<string, string>> = Object.freeze({
 
 /** `table → the scope predicate for a delete` with `$1` the Company id and `$2` the session id. */
 const ERASE_SCOPE_PREDICATE: Readonly<Record<string, string>> = Object.freeze({
+  code_process_projects: "company_id=$1 AND project_id=$2",
+  code_session_inboxes: "company_id=$1 AND session_id=$2",
   // A turn is reached through its run: the turn row carries no session column, and reaching it by
   // `company_id` alone would erase another session's turns in the same tenant.
   code_run_turns: "company_id=$1 AND run_id IN (SELECT run_id FROM code_run_states WHERE company_id=$1 AND session_id=$2)",
@@ -224,6 +236,8 @@ const ERASE_SCOPE_PREDICATE: Readonly<Record<string, string>> = Object.freeze({
  * `$1` is the Company id and `$2` the project id.
  */
 const ERASE_PROJECT_SCOPE_PREDICATE: Readonly<Record<string, string>> = Object.freeze({
+  code_process_projects: "company_id=$1 AND project_id=$2",
+  code_session_inboxes: "company_id=$1 AND project_id=$2",
   code_run_turns: "company_id=$1 AND run_id IN (SELECT run_id FROM code_run_states WHERE company_id=$1 AND project_id=$2)",
   project_checkpoints: CODE_PROJECT_CHECKPOINT_PREDICATE,
   code_run_states: "company_id=$1 AND project_id=$2",
@@ -506,6 +520,10 @@ import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from './
 type StoredUserSetting = import('./types').UserSetting;
 
 export class PostgresWorkspaceStore implements WorkspaceStore {
+  private codeProcessesInstance?: PostgresCodeProcessStore;
+  get codeProcesses(): PostgresCodeProcessStore { return this.codeProcessesInstance ??= new PostgresCodeProcessStore(this.pool); }
+  private codeInboxInstance?: PostgresCodeInboxStore;
+  get codeInbox(): PostgresCodeInboxStore { return this.codeInboxInstance ??= new PostgresCodeInboxStore(this.pool); }
   private readonly pool: Pool;
   constructor(databaseUrl: string) { this.pool = new Pool({ connectionString: databaseUrl, max: 10 }); }
 
@@ -1543,6 +1561,30 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         await client.query("COMMIT");
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
+    }
+    const inboxMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='088_code_session_inbox'");
+    if (!inboxMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { runMigration088 } = await import("./migration-088");
+        await runMigration088(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('088_code_session_inbox')");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
+    const processMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='089_code_process_projects'");
+    if (!processMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT pg_advisory_xact_lock(hashtext('089_code_process_projects'))");
+        const { runMigration089 } = await import("./migration-089");
+        await runMigration089(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('089_code_process_projects') ON CONFLICT DO NOTHING");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
     }
   }
 
@@ -4859,7 +4901,23 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
        */
       const scopeKey = projectScoped ? projectId : key;
       const predicateSet = projectScoped ? ERASE_PROJECT_SCOPE_PREDICATE : ERASE_SCOPE_PREDICATE;
+      // Serialize against process admission before deleting either session or project content.
+      const processRows = await client.query("SELECT project_id,state FROM code_process_projects WHERE company_id=$1 AND ($2::text IS NULL OR project_id=$2) FOR UPDATE", [input.companyId, projectId ?? null]);
+      for (const row of processRows.rows) {
+        const targeted = row.state.operations.filter((op: { sessionId: string }) => projectScoped || op.sessionId === key);
+        if (row.state.cleanupToken || targeted.some((op: { state: string }) => ["accepted","preparing","dispatching","running","unknown_outcome"].includes(op.state))) throw new CodeRunStateStoreError("process_cleanup_blocked", "Settle tracked producers before erasing their workspace");
+      }
       for (const family of CODE_RETENTION_FAMILIES) {
+        if (family.table === "code_process_projects" && !projectScoped) {
+          let purged = 0;
+          for (const row of processRows.rows) {
+            const kept = row.state.operations.filter((op: { sessionId: string }) => op.sessionId !== key);
+            purged += row.state.operations.length - kept.length;
+            await client.query("UPDATE code_process_projects SET state=$3 WHERE company_id=$1 AND project_id=$2", [input.companyId, row.project_id, { ...row.state, operations: kept }]);
+          }
+          families.push({ table: family.table, scope: family.scope, expired: purged, purged, retained: 0, remaining: 0 });
+          continue;
+        }
         const boundKey = family.scope === "project" && !projectScoped ? projectId : scopeKey;
         // A project-scoped family with no known project is not this erasure's business: skipping it is what
         // keeps a repeated session erasure from deleting every checkpoint of a project it cannot identify.

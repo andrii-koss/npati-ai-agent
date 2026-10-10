@@ -10,6 +10,8 @@ import {
   PUBLISHED_V6_TOOL_SCHEMA_CHECKSUM,
   PUBLISHED_V7_TOOL_SCHEMA_CHECKSUM,
   PUBLISHED_V8_TOOL_SCHEMA_CHECKSUM,
+  PUBLISHED_V9_TOOL_SCHEMA_CHECKSUM,
+  V9_TOOL_SCHEMAS,
   V5_TOOL_SCHEMAS,
   V6_TOOL_SCHEMAS,
   V7_TOOL_SCHEMAS,
@@ -31,6 +33,7 @@ import {
  * mirror drifts — a changed field without a version bump is never acceptable (rule 13).
  */
 const TOOL_NAMES = [
+  "code.shell.exec_async", "code.shell.process.wait",
   "code.fs.list",
   "code.fs.read",
   "code.fs.grep",
@@ -161,6 +164,7 @@ const APPROVAL_REQUIRED_TOOLS = new Set([
 
 /** C3/C4 risk contract: reads are low, mutations medium, deletion and command launch high. */
 const EXPECTED_RISK: Record<string, "low" | "medium" | "high"> = {
+  "code.shell.exec_async": "high", "code.shell.process.wait": "low",
   "code.fs.list": "low",
   "code.fs.read": "low",
   "code.fs.grep": "low",
@@ -377,6 +381,10 @@ describe("security-gate: C2 tool schema parity", () => {
       expect(v8.tools.map((tool) => tool.name), `v8 must hold ${gitTool}`).toContain(gitTool);
     }
     expect(v8.tools.map((tool) => tool.name), "v9's code.agent.spawn must not leak into v8").not.toContain("code.agent.spawn");
+    const v9 = KNOWN_TOOL_MANIFESTS.find((manifest) => manifest.version === 9)!;
+    expect(v9.tools.map((tool) => tool.name).sort()).toEqual([...V8_TOOL_NAMES, "code.agent.spawn"].sort());
+    expect(v9.checksum).toBe(PUBLISHED_V9_TOOL_SCHEMA_CHECKSUM);
+    expect(toolSchemaChecksum(V9_TOOL_SCHEMAS)).toBe(PUBLISHED_V9_TOOL_SCHEMA_CHECKSUM);
     // The five frozen sets are distinct, so a checksum copy-paste cannot make two of them look equal.
     expect(new Set([
       PUBLISHED_V5_TOOL_SCHEMA_CHECKSUM,

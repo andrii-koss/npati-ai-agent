@@ -321,14 +321,17 @@ export function replayInputHash(
   compressionArtifacts?: readonly Record<string, unknown>[],
   commandExpansions?: readonly Record<string, unknown>[],
   runtimeMcpManifests?: readonly Record<string, unknown>[],
+  completionArtifacts?: readonly Record<string, unknown>[],
 ): string {
   const artifacts = compressionArtifacts ?? [];
   const expansions = commandExpansions ?? [];
   const manifests = runtimeMcpManifests ?? [];
+  const completions = completionArtifacts ?? [];
   const input = replayInputSteps(steps);
-  if (artifacts.length === 0 && expansions.length === 0 && manifests.length === 0) return bundleHash({ steps: input });
+  if (artifacts.length === 0 && expansions.length === 0 && manifests.length === 0 && completions.length === 0) return bundleHash({ steps: input });
   return bundleHash({
     steps: input,
+    ...(completions.length ? { completionArtifacts: [...completions] } : {}),
     ...(artifacts.length > 0 ? { compressionArtifacts: [...artifacts] } : {}),
     ...(expansions.length > 0 ? { commandExpansions: [...expansions] } : {}),
     // C13 (owner decision 6): the runtime MCP manifest the run was admitted under. It is replay **input** for
@@ -500,6 +503,7 @@ export class ReplayBundleRecorder {
      * input so a replay replays the *model-visible* compacted context instead of recomputing a summary.
      */
     compressionArtifacts?: readonly Record<string, unknown>[];
+    completionArtifacts?: readonly Record<string, unknown>[];
     /**
      * C13: the slash-command expansions this run applied, in order. Each entry pins the command's provenance
      * (`source`/`scope`/`version`/`hash`) and the `contentHash` of the exact expanded text — never the text's
@@ -543,6 +547,7 @@ export class ReplayBundleRecorder {
       // summary changes the bundle's own hash, so tampering is detectable rather than merely unlikely.
       compressionArtifacts: [...(input.compressionArtifacts ?? [])],
       compressionArtifactCount: input.compressionArtifacts?.length ?? 0,
+      ...(input.completionArtifacts?.length ? { completionArtifacts: [...input.completionArtifacts] } : {}),
       // C13: recorded **only when the run applied one**, so a run that used no slash command has exactly the
       // header it had before this feature existed.
       ...(commandExpansions.length > 0
@@ -563,7 +568,7 @@ export class ReplayBundleRecorder {
       throw error;
     }
     const payloadHash = bundleHash(header);
-    const inputHash = replayInputHash(steps, compressionArtifacts, commandExpansions, runtimeMcpManifest ? [runtimeMcpManifest] : []);
+    const inputHash = replayInputHash(steps, compressionArtifacts, commandExpansions, runtimeMcpManifest ? [runtimeMcpManifest] : [], input.completionArtifacts);
     try {
       const record = await this.input.store.createReplayBundle({
         workspaceId: this.input.context.workspaceId,
@@ -679,6 +684,7 @@ export interface ReplayBundleReadResult {
    * which reads as "no compaction to reproduce" rather than as a licence to recompute a summary.
    */
   compressionArtifacts?: Record<string, unknown>[];
+  completionArtifacts?: Record<string, unknown>[];
   /**
    * C13: the recorded slash-command expansions, in order. **This is replay input, not a report**: a template is
    * versioned, so a replay must expand the recorded version (`version` + `hash`) and republish the recorded
@@ -706,6 +712,7 @@ async function assembleBundleRead(
   const rows = await store.listReplayBundleSteps(companyId, bundle.id);
   const steps = rows.map((row) => row.payload as ReplayBundleStepPayload);
   const replayInput = replayInputSteps(steps);
+  const completionArtifacts = Array.isArray(bundle.payload?.completionArtifacts) ? bundle.payload.completionArtifacts as Record<string, unknown>[] : [];
   const storedCount = Number(bundle.payload?.stepCount ?? steps.length);
   // C8: read straight from the persisted header. A version-1 bundle has no field here, and the honest reading
   // of that is "no recorded compaction", never "recompute one".
@@ -735,9 +742,10 @@ async function assembleBundleRead(
     replayInputHash: bundle.replayInputHash,
     // The same derivation the writer used, artifacts included: a summary that was swapped after the fact can
     // no longer pass, because it is now part of the value the stored hash covers.
-    integrityFailure: bundle.replayInputHash !== replayInputHash(steps, compressionArtifacts, commandExpansions, runtimeMcpManifest ? [runtimeMcpManifest] : []),
+    integrityFailure: bundle.replayInputHash !== replayInputHash(steps, compressionArtifacts, commandExpansions, runtimeMcpManifest ? [runtimeMcpManifest] : [], completionArtifacts),
     truncated: steps.length < storedCount,
     compressionArtifacts,
+    ...(completionArtifacts.length ? { completionArtifacts } : {}),
     commandExpansions,
     runtimeMcpManifest,
   };

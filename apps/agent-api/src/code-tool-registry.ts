@@ -195,7 +195,9 @@ const V8_TOOL_NAMES: readonly string[] = [
 export const V8_TOOL_SCHEMAS: readonly CodeToolSchema[] = CODE_TOOL_SCHEMAS.filter((tool) => V8_TOOL_NAMES.includes(tool.name));
 
 /** Manifest version of the currently published schema set. Bump together with the checksum. */
-export const CODE_TOOL_MANIFEST_VERSION = 9;
+export const V9_TOOL_SCHEMAS = CODE_TOOL_SCHEMAS.filter((tool) => V8_TOOL_NAMES.includes(tool.name) || tool.name === "code.agent.spawn");
+export const PUBLISHED_V9_TOOL_SCHEMA_CHECKSUM = "b498efdc44e06ea1fd8b75860947a770e74f8b9a63dcd92026068a98de963d20";
+export const CODE_TOOL_MANIFEST_VERSION = 10;
 
 /**
  * Checksum of the published set. It is a literal so that a schema change without a version bump is a
@@ -212,7 +214,7 @@ export const CODE_TOOL_MANIFEST_VERSION = 9;
  * places that report the artifact as stale, while `assertManifestConsistent()` — and therefore the manifest
  * the application publishes — is already satisfied.
  */
-export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "b498efdc44e06ea1fd8b75860947a770e74f8b9a63dcd92026068a98de963d20";
+export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "880e0aa6ec32a5ee666864bd9174192e486f559205b8657ea3365c47c7885050";
 
 /**
  * Checksum of the v8 published set (36 tools: everything through the eleven `code.git.*` tools). Frozen for
@@ -381,6 +383,7 @@ export const KNOWN_TOOL_MANIFESTS: readonly CodeToolManifest[] = [
   toolManifest(V6_TOOL_SCHEMAS, 6),
   toolManifest(V7_TOOL_SCHEMAS, 7),
   toolManifest(V8_TOOL_SCHEMAS, 8),
+  toolManifest(V9_TOOL_SCHEMAS, 9),
   toolManifest(CODE_TOOL_SCHEMAS, CODE_TOOL_MANIFEST_VERSION),
 ];
 

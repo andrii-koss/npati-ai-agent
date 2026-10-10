@@ -224,6 +224,7 @@ app.post<{ Body: string }>("/v1/sandbox", async (request, reply) => {
     sandboxId = id;
     let result: unknown;
     switch (operation) {
+      case "processCapabilities": result = await provider.processCapabilities?.(requestScope) ?? { durableIdentity: false, terminalStatus: false }; break;
       case "createSandbox": result = await provider.createSandbox(requestScope, p.options as SandboxCreateOptions | undefined); break;
       case "startSandbox": result = await provider.startSandbox(requestScope, id); break;
       case "stopSandbox": result = await provider.stopSandbox(requestScope, id); break;
@@ -236,6 +237,7 @@ app.post<{ Body: string }>("/v1/sandbox", async (request, reply) => {
       case "getStatus": result = await provider.getStatus(requestScope, id); break;
       case "startProcess": result = await provider.startProcess(requestScope, id, String(p.command ?? ""), p.options as any); break;
       case "stopProcess": result = await provider.stopProcess(requestScope, id, String(p.processId ?? "")); break;
+      case "getProcessOutput": if (!provider.getProcessOutput) throw new SandboxProviderError("process_output_unavailable", "Bounded process output is unavailable", 503); result = await provider.getProcessOutput(requestScope, id, String(p.processId ?? "")); break;
       case "getProcessStatus": result = await provider.getProcessStatus(requestScope, id, String(p.processId ?? "")); break;
       case "inspectBrowser": result = await provider.inspectBrowser(requestScope, id, p.options as any); break;
       case "proxyPreview": result = await provider.proxyPreview(requestScope, id, p.options as any); break;

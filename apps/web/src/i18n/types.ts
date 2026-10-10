@@ -2605,6 +2605,7 @@ export interface TranslationSchema {
    * and the placeholders are substituted by the panel (`{{count}}`, `{{limit}}`). Declaring them here is what
    * forces every locale to carry them — a missing key is a compile error, not a silent English fallback.
    */
+  codeInbox: { completion: string; workspace: string; accepted: string; title: string; queue: string; steer: string; textOnly: string; dispatchError: string; idle: string; reserved: string; running: string; sealed: string; settled: string; pending: string; claimed: string; };
   codeMetrics: {
     title: string;
     subtitle: string;

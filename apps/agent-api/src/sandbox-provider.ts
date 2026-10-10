@@ -25,7 +25,7 @@ export interface SandboxCommandResult {
   retryable: boolean;
   processId?: string;
 }
-export interface SandboxCommandOptions { timeoutMs: number; outputLimitBytes: number; environment?: Record<string, string>; cwd?: string; }
+export interface SandboxCommandOptions { timeoutMs: number; outputLimitBytes: number; environment?: Record<string, string>; cwd?: string; processId?: string; }
 /**
  * C15: a bind mount of one **mounted local project folder** into a container.
  *
@@ -72,6 +72,7 @@ export function sandboxProcessEnvironment(environment: Record<string, string> | 
   return entries;
 }
 export interface SandboxProvider {
+  processCapabilities?(scope: SandboxScope): Promise<{ durableIdentity: boolean; terminalStatus: boolean }>;
   proxyPreview?(scope: SandboxScope, sandboxId: string, options: PreviewProxyRequest): Promise<PreviewProxyResponse>;
   inspectBrowser?(scope: SandboxScope, sandboxId: string, options: SandboxBrowserQaOptions): Promise<SandboxBrowserQaResult>;
   createSandbox(scope: SandboxScope, options?: SandboxCreateOptions): Promise<SandboxStatus>;
@@ -87,6 +88,7 @@ export interface SandboxProvider {
   startProcess(scope: SandboxScope, sandboxId: string, command: string, options: SandboxCommandOptions): Promise<SandboxCommandResult>;
   stopProcess(scope: SandboxScope, sandboxId: string, processId: string): Promise<SandboxCommandResult>;
   getProcessStatus(scope: SandboxScope, sandboxId: string, processId: string): Promise<SandboxCommandResult>;
+  getProcessOutput?(scope: SandboxScope, sandboxId: string, processId: string): Promise<{ output: string; earliestOffset: number; nextOffset: number }>;
 }
 export interface PreviewProxyRequest { port: number; path: string; method: string; headers: Record<string, string>; body?: string; }
 export interface PreviewProxyResponse { status: number; headers: Record<string, string>; body: string; }
@@ -95,6 +97,7 @@ export class SandboxProviderError extends Error {
   constructor(public readonly code: string, message: string, public readonly status = 503, public readonly step = "sandbox", public readonly tool = "project.terminal.exec", public readonly retryable = false, public readonly currentRevision?: string) { super(message); }
 }
 export class RemoteSandboxProvider implements SandboxProvider {
+  processCapabilities(scope: SandboxScope) { return this.request<{ durableIdentity: boolean; terminalStatus: boolean }>("processCapabilities", { scope }); }
   private readonly endpoint: URL;
   constructor(url: string, private readonly secret: string, private readonly transport: typeof fetch = fetch, private readonly mode: "local" | "remote" = (process.env.NPATI_SANDBOX_RUNNER_MODE === "local" ? "local" : "remote")) {
     if (process.env.NPATI_SANDBOX_RUNNER_MODE && !["local", "remote"].includes(process.env.NPATI_SANDBOX_RUNNER_MODE)) throw new Error("Invalid sandbox runner mode");
@@ -159,6 +162,7 @@ export class RemoteSandboxProvider implements SandboxProvider {
   startProcess(scope: SandboxScope, sandboxId: string, command: string, options: SandboxCommandOptions) { return this.request<SandboxCommandResult>("startProcess", { scope, sandboxId, command, options }, options.timeoutMs + 15_000); }
   stopProcess(scope: SandboxScope, sandboxId: string, processId: string) { return this.request<SandboxCommandResult>("stopProcess", { scope, sandboxId, processId }); }
   getProcessStatus(scope: SandboxScope, sandboxId: string, processId: string) { return this.request<SandboxCommandResult>("getProcessStatus", { scope, sandboxId, processId }); }
+  getProcessOutput(scope: SandboxScope, sandboxId: string, processId: string) { return this.request<{ output: string; earliestOffset: number; nextOffset: number }>("getProcessOutput", { scope, sandboxId, processId }); }
   inspectBrowser(scope: SandboxScope, sandboxId: string, options: SandboxBrowserQaOptions) { return this.request<SandboxBrowserQaResult>("inspectBrowser", { scope, sandboxId, options }, Math.min(60_000, options.timeoutMs) + 15_000); }
   proxyPreview(scope: SandboxScope, sandboxId: string, options: PreviewProxyRequest) { return this.request<PreviewProxyResponse>("proxyPreview", { scope, sandboxId, options }, 30_000); }
 }

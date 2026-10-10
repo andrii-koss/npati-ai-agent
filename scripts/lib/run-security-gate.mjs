@@ -86,6 +86,8 @@ export const SECURITY_GATE_TESTS = [
   "tests/coding-agent-c3-schema-executor-parity.test.ts",
   "tests/coding-agent-c4-classifier.test.ts",
   "tests/coding-agent-c4-shell.test.ts",
+  "tests/coding-agent-async-process.test.ts",
+  "tests/coding-agent-async-completions.test.ts",
   "tests/coding-agent-c4-secret-lease.test.ts",
   "tests/coding-agent-c4-credentials-environment.test.ts",
   "tests/coding-agent-c4-policy-engine.test.ts",
@@ -169,6 +171,7 @@ export const SECURITY_GATE_TESTS = [
   // repeated (its result becomes `unknown_outcome` with a workspace diff against the last checkpoint),
   // and that a dry run and a repeated pass change nothing.
   "tests/coding-agent-c6a-run-state.test.ts",
+  "tests/coding-agent-async-inbox.test.ts",
   "tests/coding-agent-c6a-reconciler.test.ts",
   // C6a security: database migrations. Pins that a production, external or unidentified target is a hard
   // deny that no mode, role, standing rule or `approved: true` claim can lift; that a development
@@ -938,6 +941,7 @@ export const SECURITY_GATE_TESTS = [
  */
 export const SECURITY_GATE_DB_TESTS = [
   "tests/coding-agent-c1c-audit-postgres.test.ts",
+  "tests/coding-agent-async-inbox-postgres.test.ts",
 ];
 
 /**

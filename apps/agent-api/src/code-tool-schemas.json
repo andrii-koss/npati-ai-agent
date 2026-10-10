@@ -1830,5 +1830,336 @@
         }
       }
     }
+  },
+  {
+    "name": "code.shell.exec_async",
+    "version": 1,
+    "status": "active",
+    "description": "Execute one tracked sandbox process. Wait up to waitTimeoutMs, then return the same handle for explicit collection. Foreground secret leases cannot be promoted.",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "command"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "description": "The command line to run in the sandbox. Interactive commands and commands needing production credentials are refused."
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Workspace-relative working directory; defaults to the workspace root."
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Non-secret environment variables. Secrets must be requested through secretRefs instead."
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 600000,
+          "default": 120000
+        },
+        "secretRefs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10,
+          "description": "Names of company vault secrets to lease for exactly this call. The lease is revoked when the call ends and is never inherited."
+        },
+        "approved": {
+          "type": "boolean",
+          "default": false,
+          "description": "Set by the runtime after the approval system granted this exact command; never set it from model output."
+        },
+        "background": {
+          "type": "boolean",
+          "default": false
+        },
+        "waitTimeoutMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300000,
+          "default": 1000
+        }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": [
+        "kind",
+        "tool",
+        "toolVersion",
+        "schemaVersion",
+        "trust",
+        "note",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "code_tool_result"
+        },
+        "tool": {
+          "const": "code.shell.exec_async"
+        },
+        "toolVersion": {
+          "type": "integer"
+        },
+        "schemaVersion": {
+          "type": "integer"
+        },
+        "trust": {
+          "const": "untrusted_data"
+        },
+        "note": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "truncation": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "version",
+            "operationId",
+            "processId",
+            "generation",
+            "state",
+            "exitCode",
+            "output",
+            "earliestOffset",
+            "nextOffset",
+            "truncated",
+            "lossy"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "foreground-result",
+                "running-process-receipt"
+              ]
+            },
+            "version": {
+              "type": "integer",
+              "const": 1
+            },
+            "operationId": {
+              "type": "string"
+            },
+            "processId": {
+              "type": "string"
+            },
+            "generation": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "accepted",
+                "preparing",
+                "dispatching",
+                "running",
+                "completed",
+                "failed",
+                "stopped",
+                "timed_out",
+                "lost",
+                "unknown_outcome"
+              ]
+            },
+            "exitCode": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "output": {
+              "type": "string",
+              "maxLength": 64000
+            },
+            "earliestOffset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "nextOffset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "truncated": {
+              "type": "boolean"
+            },
+            "lossy": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "code.shell.process.wait",
+    "version": 1,
+    "status": "active",
+    "description": "Collect bounded output and real terminal state of a tracked process. waitTimeoutMs=0 polls; a timeout preserves the same process handle.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "processId"
+      ],
+      "properties": {
+        "processId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "waitTimeoutMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300000,
+          "default": 1000
+        }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": [
+        "kind",
+        "tool",
+        "toolVersion",
+        "schemaVersion",
+        "trust",
+        "note",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "code_tool_result"
+        },
+        "tool": {
+          "const": "code.shell.process.wait"
+        },
+        "toolVersion": {
+          "type": "integer"
+        },
+        "schemaVersion": {
+          "type": "integer"
+        },
+        "trust": {
+          "const": "untrusted_data"
+        },
+        "note": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "truncation": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "version",
+            "operationId",
+            "processId",
+            "generation",
+            "state",
+            "exitCode",
+            "output",
+            "earliestOffset",
+            "nextOffset",
+            "truncated",
+            "lossy"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "foreground-result",
+                "running-process-receipt"
+              ]
+            },
+            "version": {
+              "type": "integer",
+              "const": 1
+            },
+            "operationId": {
+              "type": "string"
+            },
+            "processId": {
+              "type": "string"
+            },
+            "generation": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "accepted",
+                "preparing",
+                "dispatching",
+                "running",
+                "completed",
+                "failed",
+                "stopped",
+                "timed_out",
+                "lost",
+                "unknown_outcome"
+              ]
+            },
+            "exitCode": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "output": {
+              "type": "string",
+              "maxLength": 64000
+            },
+            "earliestOffset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "nextOffset": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "truncated": {
+              "type": "boolean"
+            },
+            "lossy": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    }
   }
 ]

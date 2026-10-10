@@ -26,7 +26,7 @@ const WRITE_TOOLS = [
 
 /** C4: the sandbox execution tools this guard now covers as well (schema → executor parity). */
 const SHELL_TOOLS = [
-  "code.shell.exec", "code.shell.process.start", "code.shell.process.list",
+  "code.shell.exec_async", "code.shell.process.wait", "code.shell.exec", "code.shell.process.start", "code.shell.process.list",
   "code.shell.process.logs", "code.shell.process.stop", "code.verify.run",
 ] as const;
 
@@ -97,10 +97,12 @@ function sampleArgs(tool: string, schema: CodeToolSchema): Record<string, unknow
       return { ...args, turnOnly: true };
     case "code.fs.undo_last_turn":
       return { ...args, confirm: true };
+    case "code.shell.exec_async":
     case "code.shell.exec":
       return { ...args, command: "npm test" };
     case "code.shell.process.start":
       return { ...args, command: "npm run dev" };
+    case "code.shell.process.wait":
     case "code.shell.process.logs":
       return { ...args, processId: "proc-1" };
     case "code.shell.process.stop":
@@ -193,7 +195,10 @@ function harness(): Harness {
   // C4: sandbox execution ports. They are fakes so the parity guard can prove that schema-shaped
   // arguments reach the shell executors instead of being rejected as invalid_arguments; the real ports
   // live in `app.ts` and drive the admitted sandbox.
+  const receipt = { kind: "foreground-result" as const, version: 1 as const, operationId: "op", processId: "proc-1", generation: 1, state: "completed" as const, exitCode: 0, output: "ok", earliestOffset: 0, nextOffset: 2, truncated: false, lossy: false };
   const shellRuntime = {
+    async execAsync() { return receipt; },
+    async waitProcess() { return receipt; },
     async exec() { return { exitCode: 0, stdout: "ok", stderr: "", durationMs: 1, truncated: false, risk: "low" as const }; },
     async startProcess() { return { processId: "proc-1", startedAt: new Date(0).toISOString() }; },
     async listProcesses() { return { processes: [{ processId: "proc-1", command: "npm run dev", status: "running" as const, startedAt: null, exitCode: null }] }; },

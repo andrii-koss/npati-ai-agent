@@ -2,6 +2,47 @@
 
 Update this file after every completed step.
 
+2026-10-10: [Async Coding Agent — крок 4 завершено: completion → inbox](async-completions-step-4.md).
+Атомарний terminal result/outbox, scoped collection, admission після context append, wait suppression,
+recovery без respawn, replay completion artifacts та quota для нових idle tasks підключено до чинного runner.
+Security gate: 158 suites / 2301 passed, 0 failed/skipped; PostgreSQL gate: 4 passed; web: 90 passed.
+Typechecks, lint, schema/catalog audits, Docker builds та real Docker process acceptance passed.
+Docker Desktop: API/worker/web/isolated runner healthy; HTTP 3000/3001/7865 = 200,
+durable process capabilities та overall readiness підтверджено. Async flags лишаються off за замовчуванням.
+Повторне оновлення: scripts/update-local-async-docker.ps1. Крок 5 не розпочато.
+
+2026-10-10: [Async Coding Agent — крок 3 завершено: tracked processes](async-process-step-3.md).
+Durable intent/dedup/C6a fencing, same-handle foreground wait/background receipt, explicit collect/wait,
+Docker restart reconciliation, bounded output, scoped cancellation та sandbox cleanup pin підключено до чинного runtime.
+Manifest 10 additive: 39 code tools; versions 1–9 frozen. Каталог: 387 capabilities, 123 callable.
+`code.async_processes` off за замовчуванням, також на self-hosted; foreground secret leases не успадковуються.
+Кроки 1/2 повторно перевірено; immutable submit fingerprint та backend test typecheck виправлено.
+Security gate: 157 suites / 2289 passed, 0 failed/skipped. Реальні PostgreSQL і Docker acceptance passed.
+Full suite: 4431 passed / 12 baseline failures / 16 skipped, без нових FAIL headers.
+Typechecks, lint, schema/catalog audits та API build passed. Completion → inbox належить кроку 4.
+Повні результати перевірок та operational limits — у звіті вище.
+
+2026-10-10: [Async Coding Agent — етап 2/8: active chat queue/steer](async-inbox-step-2.md).
+Додано server Coding Session identity/revision hints у chat SSE, окремий inbox submit state,
+pending/claimed panel, queue/steer та revision-guarded edit/remove, snapshot reconnect і захист новішої чернетки.
+Opt-in `code.async_inbox` лишається off за замовчуванням; текстові inbox messages використовують чинні Step 1 endpoints.
+Worker/runner/policy/security semantics не змінені; Step 3 не розпочато.
+Passed: workspace/test typechecks, обидва builds, web 11 files / 89 tests, regressions 11 files / 134 tests,
+security gate 156 suites / 2259 tests. Full `npm test`: 4401 passed / 12 failed / 15 skipped,
+ті самі 10 known-red files та FAIL cases, що й serial Step 1 baseline, без нових failures.
+Межі: текстовий inbox; live hints + bounded snapshot refresh, без durable unified UI tail;
+reconnect pointer у sessionStorage; queued results у чинному Code Workspace; browser click-through не запускався.
+
+2026-10-10: [Async Coding Agent — етап 1/8: durable inbox](async-inbox-step-1.md).
+Додано opt-in `code.async_inbox` (off також на self-hosted), queue/steer API, PostgreSQL migration 088,
+atomic boundary admission і dispatch queued tasks через чинний runner/executor/C6a/admission.
+Уточнено план щодо durable worker ownership async child, тієї самої Coding Session/chat при next-turn
+та stable operationId/executionKey. Додано next-turn continuity acceptance test; Step 2 не розпочато.
+Security gate: 156 suites / 2258 tests; targeted regressions: 9 files / 168 tests. DB gate: 2 suites / 4 tests.
+Обидва builds і web tests passed.
+Full `npm test` лишається red: 12 failures у 10 files, 4400 passed; ті самі failures відтворені на чистому HEAD 4a21cde.
+UI, async processes/children, completion outbox і collect barrier — наступні етапи, ще не реалізовані.
+
 2026-10-09: [Self-hosted активація, права власника та запуск із Settings/Workspace/Chat](2026-10-09-self-hosted-code-activation.md).
 Для self-hosted флаги тепер увімкнені за замовчуванням; hosted rollout не змінено. Історичні записи нижче
 описують попередні етапи. Чотири quarantine-записи company-runtime видалено після успішного повторного прогону.

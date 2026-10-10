@@ -1,4 +1,7 @@
+import { CodeProcessCompletionService } from "./code-process-completions";
 import { buildInfo } from "./build-info";
+import { CodeSessionInboxService } from "./code-session-inbox";
+import { registerCodeSessionInboxRoutes } from "./code-session-inbox-routes";
 import cors from "@fastify/cors";
 import { ContextBuilder, NpatiAgent } from "@npati/agent";
 import { createHubClient } from "@npati/hub-connector";
@@ -192,7 +195,9 @@ import { gitWriteIntentForTool, sessionBranchName } from "./code-git-workflow";
 import { CodeWorkspaceRevisionGuard } from "./code-workspace-revision";
 import { buildPullRequestDescription } from "./code-pr-description";
 import { CodeShellRuntime, type CodeShellSandboxPort } from "./code-shell-runtime";
+import { CodeAsyncProcessService } from "./code-async-process";
 import { CodeProcessManager, type CodeProcessSandboxPort } from "./code-process-manager";
+import { createCodeProcessControls } from "./code-process-runtime";
 import { CodeReaper, asStaleApprovalReaper } from "./code-reaper";
 // R1-C (items 11–13): retention really executed, and the right to be forgotten.
 import { CodeDataRetention } from "./code-data-retention";
@@ -1387,7 +1392,7 @@ export function buildApp(config: AppConfig = {}) {
       const projects = await projectService.list(ctx, companyId, true);
       for (const project of projects) {
         if (!project.sandboxId || !projectSandbox) continue;
-        await projectSandbox.destroy(ctx, project).then(() => { stopped += 1; }).catch(() => undefined);
+        await projectSandbox.destroy(ctx, project).then((destroyed) => { if (destroyed) stopped += 1; }).catch(() => undefined);
       }
     } catch { /* ignore */ }
     return stopped;
@@ -2153,6 +2158,7 @@ export function buildApp(config: AppConfig = {}) {
     },
   } : undefined;
   const processSandboxPort: CodeProcessSandboxPort | undefined = projectSandbox ? {
+    logsAreSnapshots: true,
     start: async (input) => {
       const result = await projectSandbox!.process(input.context, input.companyId, {
         projectId: input.projectId, command: input.command, action: "start", agentId: input.agentId,
@@ -2165,24 +2171,56 @@ export function buildApp(config: AppConfig = {}) {
     },
     logs: async (input) => {
       const result = await projectSandbox!.process(input.context, input.companyId, {
-        projectId: input.projectId, processId: input.processId, action: "logs", agentId: "code-process-manager",
+        projectId: input.projectId, processId: input.processId, action: "logs", agentId: input.agentId ?? "system",
       }) as { output?: string; stdout?: string; eof?: boolean };
       return { output: String(result?.output ?? result?.stdout ?? ""), eof: result?.eof };
     },
+    status: async (input) => {
+      const result = await projectSandbox!.process(input.context, input.companyId, {
+        projectId: input.projectId, processId: input.processId, action: "status", agentId: input.agentId ?? "system",
+      }) as { status?: string; exitCode?: number | null };
+      const state = result.status;
+      if (state !== "running" && state !== "completed" && state !== "failed" && state !== "stopped" && state !== "timed_out" && state !== "lost") {
+        throw new Error("process_status_unknown");
+      }
+      return { state, exitCode: result.exitCode ?? null };
+    },
     stop: async (input) => {
       const started = Date.now();
-      await projectSandbox!.process(input.context, input.companyId, {
-        projectId: input.projectId, processId: input.processId, action: "stop", agentId: "code-process-manager",
-      });
-      return { exitCode: 0, durationMs: Date.now() - started };
+      const result = await projectSandbox!.process(input.context, input.companyId, {
+        projectId: input.projectId, processId: input.processId, action: "stop", agentId: input.agentId ?? "system",
+      }) as { status?: string; exitCode?: number | null };
+      const state = result.status;
+      if (state !== "stopped" && state !== "completed" && state !== "failed" && state !== "timed_out") throw new Error("process_stop_unconfirmed");
+      return { state, exitCode: result.exitCode ?? null, durationMs: Date.now() - started };
     },
   } : undefined;
-  const codeShellRuntime = new CodeShellRuntime({
-    sandbox: shellSandboxPort, flags: featureFlagService, audit: auditLogService,
-    leases: secretLeases, limits: config.codeAgentLimits, policy: enrichedPolicyEngine,
-  });
+  const trackedProcesses = projectSandbox && workspaceStore.codeProcesses ? new CodeAsyncProcessService({
+    store: workspaceStore.codeProcesses, flags: featureFlagService,
+    session: (ctx, companyId, sessionId) => workspaceStore.getCodeSession(ctx, companyId, sessionId),
+    run: (companyId, runId) => workspaceStore.getCodeRunState(companyId, runId),
+    port: {
+      supported: (ctx, companyId, projectId) => projectSandbox.supportsTrackedProcesses(ctx, companyId, projectId),
+      start: (ctx, input, op, beforeStart) => projectSandbox.startTrackedProcess(ctx, input.companyId, { ...input, agentId: op.agentId, processId: op.processId }, beforeStart),
+      status: async (ctx, op) => await projectSandbox.process(ctx, op.companyId, { projectId: op.projectId, sandboxId: op.sandboxId ?? undefined, agentId: op.agentId, processId: op.processId, action: "status" }) as { status: string; exitCode: number | null },
+      stop: async (ctx, op) => await projectSandbox.process(ctx, op.companyId, { projectId: op.projectId, sandboxId: op.sandboxId ?? undefined, agentId: op.agentId, processId: op.processId, action: "stop" }) as { status: string; exitCode: number | null },
+      output: (ctx, op, offset) => projectSandbox.trackedOutput(ctx, op.companyId, { projectId: op.projectId, sandboxId: op.sandboxId ?? undefined, agentId: op.agentId, processId: op.processId }, offset),
+      sync: (ctx, op) => projectSandbox.syncTrackedProcess(ctx, op),
+    },
+  }) : undefined;
+  if (trackedProcesses) {
+    projectSandbox!.setProcessCleanupGuard({ acquire: (_ctx, project) => trackedProcesses.cleanupGuard(project.companyId, project.id),
+      prepare: (ctx, project) => trackedProcesses.legacyPreparationGuard(ctx, project.companyId, project.id) });
+    app.addHook("onClose", async () => { await trackedProcesses.close(); });
+  }
   const codeProcessManager = new CodeProcessManager({
     sandbox: processSandboxPort, flags: featureFlagService, audit: auditLogService, leases: secretLeases,
+  });
+  codeProcessManager.tracked = trackedProcesses;
+  const codeShellRuntime = new CodeShellRuntime({
+    processes: codeProcessManager,
+    sandbox: shellSandboxPort, flags: featureFlagService, audit: auditLogService,
+    leases: secretLeases, limits: config.codeAgentLimits, policy: enrichedPolicyEngine,
   });
   /**
    * C6a: the reaper is an orchestrator over ports. Only the capabilities that exist today are wired; every
@@ -2318,6 +2356,14 @@ export function buildApp(config: AppConfig = {}) {
     return hash.toString(16).padStart(8, "0");
   };
   const codeShellRuntimePort = projectSandbox ? {
+    execAsync: async (input: Parameters<NonNullable<import("./code-tool-executors").CodeShellRuntimePort["execAsync"]>>[0]) => {
+      if (input.secretRefs?.length) throw new CodeToolError("process_secret_promotion_denied", "Foreground secrets cannot be promoted", 403, "execute", false);
+      return codeShellRuntime.execAsync(input.ctx, input);
+    },
+    waitProcess: async (input: Parameters<NonNullable<import("./code-tool-executors").CodeShellRuntimePort["waitProcess"]>>[0]) => {
+      if (!trackedProcesses) throw new CodeToolError("process_promotion_unavailable", "Tracked processes are unavailable", 503, "execute", false);
+      return trackedProcesses.wait(input.ctx, input);
+    },
     exec: async (input: {
       ctx: AuthContext; companyId: string; projectId: string; sessionId?: string; turnId?: string;
       command: string; cwd?: string;
@@ -2357,43 +2403,18 @@ export function buildApp(config: AppConfig = {}) {
       }
     },
     startProcess: async (input: {
-      ctx: AuthContext; companyId: string; projectId: string; sessionId?: string;
+      ctx: AuthContext; companyId: string; projectId: string; sessionId?: string; agentId?: string;
       command: string; cwd?: string; env?: Record<string, string>; approved: boolean;
     }) => {
       const sessionId = input.sessionId ?? `${input.companyId}:${input.projectId}`;
       const record = await codeProcessManager.start(input.ctx, {
         companyId: input.companyId, projectId: input.projectId, sessionId,
-        command: input.command, cwd: input.cwd, agentId: "code-tool-runtime", approved: input.approved,
+        command: input.command, cwd: input.cwd, agentId: input.agentId ?? "system", approved: input.approved,
       });
       codeProcessSessions.set(record.processId, { sessionId, companyId: input.companyId, projectId: input.projectId });
       return { processId: record.processId, startedAt: new Date(record.startedAt).toISOString() };
     },
-    listProcesses: async (input: { ctx: AuthContext; companyId: string; projectId: string }) => {
-      const processes: Array<{ processId: string; command: string; status: "running" | "stopped" | "failed"; startedAt?: string | null; exitCode?: number | null }> = [];
-      const seen = new Set<string>();
-      for (const [, meta] of codeProcessSessions) {
-        if (meta.companyId !== input.companyId || meta.projectId !== input.projectId || seen.has(meta.sessionId)) continue;
-        seen.add(meta.sessionId);
-        for (const record of codeProcessManager.list(meta.sessionId)) {
-          processes.push({
-            processId: record.processId, command: record.commandDigest, status: record.state,
-            startedAt: new Date(record.startedAt).toISOString(), exitCode: typeof record.exitCode === "number" ? record.exitCode : null,
-          });
-        }
-      }
-      return { processes };
-    },
-    processLogs: async (input: { ctx: AuthContext; companyId: string; projectId: string; processId: string; offset: number; limit: number }) => {
-      const sessionId = codeProcessSessions.get(input.processId)?.sessionId ?? `${input.companyId}:${input.projectId}`;
-      const result = await codeProcessManager.logs(sessionId, input.processId, { offset: input.offset, limit: input.limit });
-      return { lines: result.lines, nextOffset: result.nextOffset, eof: result.eof };
-    },
-    stopProcess: async (input: { ctx: AuthContext; companyId: string; projectId: string; processId: string }) => {
-      const sessionId = codeProcessSessions.get(input.processId)?.sessionId ?? `${input.companyId}:${input.projectId}`;
-      await codeProcessManager.stop(input.ctx, sessionId, input.processId);
-      codeProcessSessions.delete(input.processId);
-      return { processId: input.processId, stopped: true };
-    },
+    ...createCodeProcessControls(codeProcessManager, codeProcessSessions),
   } : undefined;
   /**
    * C4: verification runner. Commands come from the project toolchain detected in C1 — the runner never
@@ -5020,7 +5041,40 @@ ${localized.next}`;
       }
     },
   };
+  const codeSessionInbox = new CodeSessionInboxService({
+    logger: { warn: (code) => app.log.warn({ code }, "code_inbox_dispatch_error") },
+    store: workspaceStore.codeInbox,
+    ownsLocalRun: (sessionId) => codeRunCancellation.hasLiveRun(sessionId),
+    flags: featureFlagService,
+    loadSession: (ctx, companyId, sessionId) => codeService.getSession(ctx, companyId, sessionId),
+    loadRunState: (companyId, runId) => codeRunStateLog.loadRunState(companyId, runId),
+    audit: async (ctx, companyId, sessionId, kind) => {
+      if (!auditLogService) throw Object.assign(new Error("audit_unavailable"), { code: "audit_unavailable", status: 503 });
+      await auditLogService.record(ctx, { companyId, actor: ctx.userId, actorRole: "human",
+        action: `code.session.inbox.${kind}`, resourceType: "code_session", resourceId: sessionId, decision: "allowed" });
+    },
+  });
+  registerCodeSessionInboxRoutes(app, { service: codeSessionInbox, auth: authProvider,
+    authorize: (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input) });
+  const codeProcessCompletions = trackedProcesses && workspaceStore.codeProcesses ? new CodeProcessCompletionService({
+    store: workspaceStore.codeProcesses, processes: trackedProcesses, inbox: codeSessionInbox,
+    loadSession: (ctx, companyId, sessionId) => codeService.getSession(ctx, companyId, sessionId),
+    enabled: async (ctx, companyId) => await featureFlagService.isEnabled(ctx, "code.async_processes", { companyId }) && await codeSessionInbox.isEnabled(ctx, companyId),
+    progress: (scope, notice) => codeBackgroundRuns.operationProgress(scope, { kind: "operation.settled", notice }),
+    warn: (code) => app.log.warn({ code }, "code_completion_delivery_warning"),
+  }) : undefined;
+  if (codeProcessCompletions) {
+    trackedProcesses!.setSettlementObserver((ctx, op) => codeProcessCompletions.settled(ctx, op));
+    codeSessionInbox.setCompletionRecovery((ctx, session) => codeProcessCompletions.recover(ctx, session));
+    app.addHook("onClose", async () => { await codeProcessCompletions.close(); });
+  }
   const codingAgentRunner = new CodingAgentRunner({
+    completions: codeProcessCompletions,
+    asyncProcessesEnabled: async (ctx, companyId, projectId) => !!trackedProcesses &&
+      await featureFlagService.isEnabled(ctx, "code.async_processes", { companyId }) &&
+      await featureFlagService.isEnabled(ctx, "code.background_runs", { companyId }) &&
+      await projectSandbox!.supportsTrackedProcesses(ctx, companyId, projectId),
+    inbox: codeSessionInbox,
     flags: featureFlagService,
     rbac: { authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input) },
     toolRuntime: codeToolRuntime,
@@ -5378,6 +5432,12 @@ ${localized.next}`;
            */
           ...(codeIntentIsReadOnly(invocation.intent) ? { readOnlyIntent: true } : {}),
         });
+        if (invocation.session && await codeSessionInbox.isEnabled(invocation.ctx, invocation.session.companyId)) {
+          if (projectSandbox && await codeSessionInbox.mayCleanup(invocation.ctx, invocation.session as CodeSession, result)) await projectSandbox.destroy(invocation.ctx,
+            await projectService.get(invocation.ctx, invocation.session.companyId, invocation.session.projectId));
+          void codeSessionInbox.settled(invocation.ctx, invocation.session as CodeSession, result)
+            .catch((error) => app.log.warn({ err: error }, "code_inbox_wake_failed"));
+        }
         return { status: result.status, reason: result.reason, summary: result.summary };
       },
     },
@@ -5484,6 +5544,12 @@ ${localized.next}`;
             session: input.session,
             prompt: input.prompt,
           });
+          if (await codeSessionInbox.isEnabled(input.ctx, input.session.companyId)) {
+            if (projectSandbox && await codeSessionInbox.mayCleanup(input.ctx, input.session, result)) await projectSandbox.destroy(input.ctx,
+              await projectService.get(input.ctx, input.session.companyId, input.session.projectId));
+            void codeSessionInbox.settled(input.ctx, input.session, result)
+              .catch((error) => app.log.warn({ err: error }, "code_inbox_wake_failed"));
+          }
           return {
             runId: result.runId ?? `${input.sourceRunId}:live`,
             snapshotId: result.snapshotId ? result.snapshotId : null,
@@ -6091,6 +6157,50 @@ ${localized.next}`;
   const codeBackgroundRuns = new CodeBackgroundRunRegistry({
     logger: { warn: (payload, message) => { app.log.warn(payload as Record<string, unknown>, message ?? "code_background_run_warning"); } },
   });
+  codeSessionInbox.setWakeTask(async (ctx, session, signal) => {
+    // Admission and execution remain the existing C15 path; the inbox only reserves task identity.
+    for (;;) {
+      if (signal.aborted || !await codeSessionInbox.isEnabled(ctx, session.companyId)) return;
+      // Recheck session mode/status for every queued task, rather than retaining an old grant.
+      session = await codeService.getSession(ctx, session.companyId, session.id);
+      if (session.status !== "active") return;
+      await codeProcessCompletions?.recover(ctx, session);
+      const snapshot = await codeSessionInbox.transact(session, { kind: "read" });
+      if (snapshot.state.phase === "settled" && snapshot.state.runId) {
+        const state = await codeRunStateLog.loadRunState(session.companyId, snapshot.state.runId);
+        if (!state || !["completed", "failed", "cancelled"].includes(state.status)) return;
+        if (projectSandbox) await projectSandbox.destroy(ctx, await projectService.get(ctx, session.companyId, session.projectId));
+        await codeSessionInbox.transact(session, { kind: "release-task", runId: state.runId });
+        continue;
+      }
+      if (!["idle", "reserved"].includes(snapshot.state.phase) || !snapshot.state.messages.some((m) => m.status === "pending" || m.status === "claimed")) return;
+      await codeRbacForRun.authorize(ctx, session.companyId, { action: "code.run.start", permission: "workspace:write", sessionId: session.id });
+      const lease = await codeRunAdmission.admit({ workspaceId: ctx.workspaceId, userId: ctx.userId,
+        companyId: session.companyId, sessionId: session.id }, { signal, timeoutMs: codeRunQueueLimits.queueTimeoutMs });
+      try {
+        // A different user's queued task must not run using this caller's permissions.
+        const task = await codeSessionInbox.transact(session, { kind: "take-task", authorId: ctx.userId });
+        const message = task.messages[0];
+        if (!message?.runId || signal.aborted) return;
+        const sink = codeBackgroundRuns.start({ runId: message.runId, sessionId: session.id, companyId: session.companyId,
+          projectId: session.projectId, userId: ctx.userId });
+        const outcome = await codeSessionRunExecutor.execute({ ctx, session, prompt: message.text,
+          runId: message.runId, initialInboxMessageId: message.id,
+          sink: { signal: sink.signal, emitResult: (result) => sink.emit("result", { routed: "code_runner", runId: message.runId, run: result }),
+            emitTerminal: (status, reason) => sink.finish(status, reason) },
+          abort: (reason) => codeBackgroundRuns.abort(message.runId!, String(reason ?? "Stopped")),
+          cancelRequested: () => codeRunCancellation.isSessionCancelled(session.id) });
+        if (!await codeSessionInbox.mayCleanup(ctx, session, outcome.result)) return;
+        if (projectSandbox) {
+          const project = await projectService.get(ctx, session.companyId, session.projectId);
+          await projectSandbox.destroy(ctx, project);
+        }
+        await codeSessionInbox.transact(session, { kind: "release-task", runId: message.runId });
+        if (outcome.terminalStatus !== "completed") return;
+      } finally { lease.release(); }
+    }
+  });
+  app.addHook("onClose", async () => { await codeSessionInbox.close((sessionId) => { codeRunCancellation.abortLiveRuns(sessionId); }); });
   const codeBackgroundRunContexts = new WeakMap<object, AuthContext>();
   app.addHook("preHandler", async (request) => {
     const path = request.url.split("?")[0] ?? "";
@@ -6217,7 +6327,7 @@ ${localized.next}`;
       } finally {
         // The sandbox is released after the run on every path — success, failure and cancellation — exactly as the
         // chat entry point does. The project is re-read because the pre-run object's `sandboxId` is empty.
-        if (projectSandbox) {
+        if (projectSandbox && await codeSessionInbox.mayCleanup(ctx, session, outcome?.result)) {
           try {
             const current = await projectService.get(ctx, companyId, projectId);
             await projectSandbox.destroy(ctx, current);
@@ -6230,6 +6340,8 @@ ${localized.next}`;
           reason: outcome?.reason ?? null,
           needsApproval: outcome?.needsApproval ?? false,
         });
+        if (outcome) void codeSessionInbox.settled(ctx, session, outcome.result)
+          .catch((error) => app.log.warn({ err: error }, "code_inbox_wake_failed"));
       }
     },
     logger: app.log,
@@ -7571,7 +7683,7 @@ ${localized.next}`;
         // run's own `finally` below releases the slot either way.
         if(codeBackgroundRunId) request.log.info({ runId: codeBackgroundRunId }, "code_background_run_detached");
       });
-      const send = (event: "progress" | "delta" | "result" | "error", data: unknown) => {
+      const send = (event: "progress" | "delta" | "result" | "error" | "code_session" | "code_inbox", data: unknown) => {
         if (reply.raw.destroyed) return;
         sequence += 1;
         reply.raw.write(`id: ${sequence}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -7687,6 +7799,9 @@ ${localized.next}`;
             const isBackground = backgroundSink !== null;
             if (isBackground) codeBackgroundRunId = runKey;
             send("progress", { routed: "code_runner", intent: codeDecision.intent, projectId: effectiveProjectId, background: isBackground, runId: isBackground ? runKey : null });
+            const chatInboxEnabled = !memoryPolicy.noMemoryActive && await codeSessionInbox.isEnabled(auth, activeCompanyId!).catch(() => false);
+            if (chatInboxEnabled) send("code_session", { companyId: activeCompanyId, projectId: effectiveProjectId,
+              sessionId: codeSession.id, inboxEnabled: true });
             let runResult: unknown;
             /**
              * C15: the loop itself, the cancellation registration and the terminal-status normalisation live in
@@ -7699,6 +7814,9 @@ ${localized.next}`;
              * order: `result` with the runner's own result (the `result` carrying the project card is still sent
              * below it, once the card exists), then the background run's terminal state.
              */
+            const stopInboxObservation = chatInboxEnabled
+              ? codeSessionInbox.observe(activeCompanyId!, codeSession.id, (revision) => send("code_inbox", { sessionId: codeSession.id, revision }))
+              : () => {};
             const executed = await codeSessionRunExecutor.execute({
               ctx: auth,
               session: codeSession,
@@ -7715,8 +7833,14 @@ ${localized.next}`;
                 ? (reason?: unknown) => { codeBackgroundRuns.abort(runKey, reason instanceof Error ? reason.message : "Stopped by request"); }
                 : (reason?: unknown) => { streamController.abort(reason instanceof Error ? reason : new Error("Client disconnected")); },
               cancelRequested: () => codeRunCancellation.isSessionCancelled(codeSession.id),
-            });
+            }).finally(stopInboxObservation);
             runResult = executed.result;
+            if (chatInboxEnabled) {
+              try {
+                const { state } = await codeSessionInbox.transact(codeSession, { kind: "read" });
+                send("code_inbox", { sessionId: codeSession.id, revision: state.revision });
+              } catch { request.log.warn("code_inbox_chat_snapshot_unavailable"); }
+            }
             const runTerminalStatus = executed.terminalStatus;
             const runReason = executed.reason;
             const needsApproval = executed.needsApproval;
@@ -7749,7 +7873,7 @@ ${localized.next}`;
             // its `sandboxId` is the pre-run value and is normally empty (the run creates the sandbox), which
             // made this a no-op that leaked a live sandbox on every code run. Re-reading is what makes the
             // release real, and it is asserted in `tests/coding-agent-c10-sandbox-retention.test.ts`.
-            if (projectSandbox) {
+            if (projectSandbox && await codeSessionInbox.mayCleanup(auth, codeSession, runResult)) {
               try {
                 const current = await projectService.get(auth, activeCompanyId!, effectiveProjectId!);
                 await projectSandbox.destroy(auth, current);
@@ -7760,6 +7884,8 @@ ${localized.next}`;
               request.log.warn({ projectId: activeProjectId }, "code_run_sandbox_release_unavailable");
             }
             lease.release();
+            void codeSessionInbox.settled(auth, codeSession, runResult)
+              .catch((error) => request.log.warn({ err: error }, "code_inbox_wake_failed"));
             // C7: the chat answer carries a card for the code project/session, so the conversation offers
             // "Open Workspace" and "Changes" without the user hunting for the project. It is built from what the
             // run actually reported (never from a guess) and persisted through the existing chat-card store.

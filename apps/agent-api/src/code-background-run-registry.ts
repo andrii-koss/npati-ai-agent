@@ -167,6 +167,12 @@ export class CodeBackgroundRunRegistry {
   isLive(runId: string): boolean {
     return this.runs.get(runId)?.finished === false;
   }
+  /** Operation hints share the existing progress stream; they never finish the whole run. */
+  operationProgress(scope: { companyId: string; sessionId: string; userId: string }, data: unknown) {
+    for (const tracked of this.runs.values()) {
+      if (!tracked.finished && tracked.snapshot.companyId === scope.companyId && tracked.snapshot.sessionId === scope.sessionId && tracked.snapshot.userId === scope.userId) this.append(tracked, "progress", data);
+    }
+  }
 
   startSnapshot(runId: string): CodeBackgroundRunSnapshot | null {
     const tracked = this.runs.get(runId);

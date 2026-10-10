@@ -46,6 +46,7 @@ import { HOOK_CONTEXT_NOTE } from "./code-hooks";
  */
 
 export type CodeToolErrorCode =
+  | "process_secret_promotion_denied" | "process_promotion_unavailable" | "process_output_cursor_lost"
   | "feature_disabled"
   | "company_access_denied"
   | "unknown_tool"
@@ -255,6 +256,8 @@ export interface CodeToolInvokeResult {
   truncated: boolean;
   durationMs: number;
   cached?: boolean;
+  /** Server metadata survives output budgeting; only canonical process executors populate it. */
+  processReceipt?: { kind: string; processId: string };
 }
 
 export interface CodeToolInvokeFailure {
@@ -283,6 +286,7 @@ export interface CodeToolExecutionContext {
    * pause and the executor refuses it instead of pretending a question was asked.
    */
   runId?: string;
+  leaseOwner?: string;
   /**
    * C9: the model's tool-call id. It is the idempotency key of a question (`company, run, tool_call_id` is
    * unique), so a replayed call finds the question it already asked instead of asking the user twice.
@@ -503,7 +507,7 @@ export interface CodeToolRuntimeOptions {
   preToolPolicy?: {
     evaluate(input: {
       ctx: AuthContext; companyId: string; projectId: string; sessionId?: string; tool: string;
-      args: Record<string, unknown>; toolCallId: string; runId?: string; agentId?: string; approvalId?: string;
+      args: Record<string, unknown>; toolCallId: string; runId?: string; agentId?: string; leaseOwner?: string; approvalId?: string;
     }): Promise<{ decision: "allow" | "require_approval" | "deny"; code?: string }>;
   };
 }
@@ -799,7 +803,7 @@ export class CodeToolRuntime {
     /** C3: an approval obtained for this exact payload; consumed before the change is applied. */
     approvalId?: string;
     /** C3: existing run/agent identity, required by the approval system when consuming. */
-    runId?: string; agentId?: string;
+    runId?: string; agentId?: string; leaseOwner?: string;
     /**
      * C6b: the ExecutionSnapshot this call belongs to. Optional and never fabricated: a call outside a run
      * (or from a caller that predates C6b) leaves it unset, and both the Activity event and the audit entry
@@ -1127,7 +1131,7 @@ export class CodeToolRuntime {
           // C9: the run and the tool-call id travel to the executor because `code.ask_user` pauses the run and
           // is idempotent per tool call; both come from the invocation envelope, never from a model argument.
           ...(input.runId ? { runId: input.runId } : {}),
-          toolCallId: input.toolCallId,
+          toolCallId: input.toolCallId, leaseOwner: input.leaseOwner,
           tool, args, limits: this.limits, port,
           guards: { path: (value: unknown) => this.guardPath(value), sensitive: (value: string) => this.guardSensitive(value) },
           turnChanges: turnChanges.map((change) => ({ path: change.path, tool: change.tool, sha256: change.sha256, linesAdded: change.linesAdded, linesRemoved: change.linesRemoved })),
@@ -1217,6 +1221,10 @@ export class CodeToolRuntime {
         ok: true, tool: tool.name, toolVersion: tool.version, schemaVersion: tool.version,
         result: wrapped, truncated, durationMs: Date.now() - started,
       };
+      if (["code.shell.exec_async", "code.shell.process.wait"].includes(tool.name) && raw && typeof raw === "object") {
+        const receipt = raw as { kind?: unknown; processId?: unknown };
+        if (typeof receipt.kind === "string" && typeof receipt.processId === "string") result.processReceipt = { kind: receipt.kind, processId: receipt.processId };
+      }
       this.idempotency.set(cacheKey, { at: Date.now(), result });
       await this.recordActivity({ ...input, tool: tool.name, toolVersion: tool.version, durationMs: result.durationMs, bytes: serialized.length, truncated, ok: true });
       await this.recordAudit(ctx, { ...input, sessionId, tool: tool.name }, tool, "allowed", undefined, { checkpointId, turnId, changes: write ? this.turns.listChanges(sessionId, turnId).length : 0, ...(input.snapshotId ? { snapshotId: input.snapshotId } : {}) });
@@ -1577,7 +1585,7 @@ export class CodeToolRuntime {
    */
   private async preToolPolicyAllows(
     ctx: AuthContext,
-    input: { companyId: string; projectId: string; sessionId?: string; toolCallId: string; runId?: string; agentId?: string; approvalId?: string },
+    input: { companyId: string; projectId: string; sessionId?: string; toolCallId: string; runId?: string; agentId?: string; leaseOwner?: string; approvalId?: string },
     tool: string,
     args: Record<string, unknown>,
   ): Promise<boolean> {
