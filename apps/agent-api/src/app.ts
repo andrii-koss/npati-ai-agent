@@ -36,20 +36,9 @@ import { createNpatiAuthClient, type NpatiAuthClient } from "@npati/hub-connecto
 import { registerWorkspaceRoutes } from "./workspace-routes";
 import { registerProjectRoutes } from "./project-routes";
 import { ProjectService } from "./project-service";
-import { DataBackendRepository } from "./data-studio/repository";
-import { SharedPostgresProvisioner, ProvisionerRouter } from "./data-studio/provisioner";
-import { ExternalPostgresProvisioner } from "./data-studio/external-provisioner";
-import { QuotaService } from "./data-studio/quota-service";
-import { PromoteService } from "./data-studio/promote-service";
-import { BackupService } from "./data-studio/backup-service";
-import { DataBackendService } from "./data-studio/service";
-import { PostgresDataProvider } from "./data-studio/data-provider";
 import { registerDataBackendRoutes } from "./data-studio/routes";
-import { ProjectMigrationEngine } from "./data-studio/migration-engine";
 import { DataStudioUiService } from "./data-studio/studio-service";
 import { registerDataStudioRoutes } from "./data-studio/studio-routes";
-import { ProjectAuthService } from "./data-studio/auth-service";
-import { ProjectRedirectRepository } from "./data-studio/redirect-repository";
 import { registerProjectAuthRoutes } from "./data-studio/auth-routes";
 import { ProjectApiGatewayService } from "./data-studio/gateway-service";
 import { registerProjectApiGatewayRoutes } from "./data-studio/gateway-routes";
@@ -319,6 +308,7 @@ import { addColumnDirectiveFromMarkdown, explicitlyRequestsWebResearch, isSpread
 import { defaultCoreBackendHealthCheck, withHealthTimeout } from "./backend-health-probe";
 import { createAuditServices } from "./audit-services";
 import { createCoreServices } from "./core-services";
+import { createDataBackendServices } from "./data-backend-services";
 
 // Re-exported so existing importers keep working: tests/chat-language-routing.test.ts
 export { isSpreadsheetEditRequest, mapColumnDirectiveFromProposal };
@@ -532,53 +522,25 @@ export function buildApp(config: AppConfig = {}) {
     : undefined;
   const emailAttachmentStorage = objectStorage ? new EmailAttachmentStorage(objectStorage, fileRepository) : undefined;
   let projectSandbox: ProjectSandboxService | undefined = config.projectSandbox;
-  const dataBackendRepository = config.databaseUrl ? new DataBackendRepository(config.databaseUrl) : undefined;
-  const projectsAdminPassword = process.env.NPATI_PROJECTS_POSTGRES_ADMIN_PASSWORD;
-  const snapshotDirectory = process.env.NPATI_PROJECTS_SNAPSHOT_DIR || path.join(config.dataDirectory ?? ".data", "data-backend-snapshots");
-  const sharedPostgresProvisioner = dataBackendRepository && projectsAdminPassword
-    ? new SharedPostgresProvisioner({
-        host: process.env.NPATI_PROJECTS_POSTGRES_HOST || "postgres-projects",
-        port: Number(process.env.NPATI_PROJECTS_POSTGRES_PORT) || 5432,
-        adminUser: process.env.NPATI_PROJECTS_POSTGRES_ADMIN_USER || "npati_projects_admin",
-        adminPassword: projectsAdminPassword,
-        maintenanceDatabase: process.env.NPATI_PROJECTS_POSTGRES_ADMIN_DB || "postgres",
-        snapshotDirectory,
-      }, dataBackendRepository)
-    : undefined;
-  // D7: DataBackends may live on the shared cluster or on an external Postgres the owner provides.
-  const externalPostgresProvisioner = dataBackendRepository ? new ExternalPostgresProvisioner(dataBackendRepository, { snapshotDirectory }) : undefined;
-  const databaseProvisioner = dataBackendRepository && (sharedPostgresProvisioner || externalPostgresProvisioner)
-    ? new ProvisionerRouter(sharedPostgresProvisioner, externalPostgresProvisioner)
-    : undefined;
-  const dataProvider = databaseProvisioner ? new PostgresDataProvider({
-    maxCollections: Number(process.env.NPATI_DATA_MAX_COLLECTIONS) || 50,
-    maxFields: Number(process.env.NPATI_DATA_MAX_FIELDS) || 100,
-    maxRows: Number(process.env.NPATI_DATA_MAX_ROWS) || 100,
-    maxQueriesPerMinute: Number(process.env.NPATI_DATA_MAX_QUERIES_PER_MINUTE) || 600,
-    maxDatabaseBytes: Number(process.env.NPATI_DATA_MAX_DATABASE_BYTES) || 1_000_000_000,
-  }, databaseProvisioner) : undefined;
-  const dataBackendService = dataBackendRepository ? new DataBackendService(workspaceStore, dataBackendRepository, databaseProvisioner, dataProvider) : undefined;
-  const projectMigrationEngine = dataBackendRepository && databaseProvisioner && dataProvider
-    ? new ProjectMigrationEngine(databaseProvisioner, dataProvider, dataBackendRepository)
-    : undefined;
-  const quotaService = dataBackendRepository && databaseProvisioner
-    ? new QuotaService(dataBackendRepository, databaseProvisioner)
-    : undefined;
-  const promoteService = dataBackendRepository && databaseProvisioner && projectMigrationEngine && dataProvider
-    ? new PromoteService(dataBackendRepository, databaseProvisioner, projectMigrationEngine, dataProvider)
-    : undefined;
-  const backupService = dataBackendRepository && databaseProvisioner
-    ? new BackupService(dataBackendRepository, databaseProvisioner, dataProvider)
-    : undefined;
-  const projectRedirectRepository = new ProjectRedirectRepository({ get: (ctx, companyId, projectId) => projectService.get(ctx, companyId, projectId) }, config.databaseUrl ? (workspaceStore as any)?.pool : undefined);
-  const projectAuthService = dataBackendRepository && databaseProvisioner
-    ? new ProjectAuthService({
-        store: workspaceStore,
-        repository: dataBackendRepository,
-        provisioner: databaseProvisioner,
-        redirects: projectRedirectRepository,
-      })
-    : undefined;
+  // Data-backend domain (step 2b-3): provisioners, quotas, backups and project auth.
+  const {
+    dataBackendRepository,
+    databaseProvisioner,
+    dataProvider,
+    dataBackendService,
+    projectMigrationEngine,
+    quotaService,
+    promoteService,
+    backupService,
+    projectRedirectRepository,
+    projectAuthService,
+    backupTimer,
+  } = createDataBackendServices({
+    config,
+    store: workspaceStore,
+    log: app.log,
+    getProject: (ctx, companyId, projectId) => projectService.get(ctx, companyId, projectId),
+  });
   const projectService = new ProjectService(workspaceStore, async (context, project) => {
     if (project.sandboxId && !projectSandbox) throw new Error("Sandbox runner is required to remove this Project");
     await projectSandbox?.destroy(context, project);
@@ -661,10 +623,6 @@ export function buildApp(config: AppConfig = {}) {
     const project = await projectService.get(ctx, companyId, projectId);
     return project.dataBackendId ? projectApiGatewayService.getSandboxEnvironment(ctx, companyId, projectId) : {};
   } : undefined);
-  const backupTimer = backupService && (process.env.NPATI_DATA_BACKUP_DISABLED !== "true")
-    ? setInterval(() => { void backupService.runScheduled().catch((error) => { app.log.error({ err: error }, "data_backup_tick_failed"); }); }, Math.max(60_000, (Number(process.env.NPATI_DATA_BACKUP_TICK_SECONDS) || 300) * 1000))
-    : undefined;
-  backupTimer?.unref();
   const sandboxIdleTimer = projectSandbox ? setInterval(() => { void projectSandbox?.stopInactive(); }, 60_000) : undefined;
   sandboxIdleTimer?.unref();
   /**
