@@ -49,6 +49,24 @@ import type { AuthContext } from "@npati/workspace";
 const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (relative: string): string => readFileSync(path.join(workspaceRoot, relative), "utf8");
 
+/**
+ * R1a guards read the composition root **plus the modules that own the wiring under test**. Reading `app.ts`
+ * alone stopped covering the subject once plan step 2 moved that wiring into domain modules, and reading the
+ * whole composition is not an option either: the negative assertions below (no `hostAdmission`, no
+ * `SandboxCompanyQuota` on these paths) would then match the sandbox provider and fail for the wrong reason.
+ */
+const readComposition = (): string =>
+  [
+    "app.ts",
+    "code-route-runs.ts",
+    "chat-stream-routes.ts",
+    "code-queue-status-routes.ts",
+    "automation-executor-wiring.ts",
+    "code-route-wiring.ts",
+  ]
+    .map((file) => read(path.join("apps", "agent-api", "src", file)))
+    .join("\n");
+
 function authContext(overrides: Partial<AuthContext> = {}): AuthContext {
   return { userId: "user-1", workspaceId: "ws-1", permissions: ["workspace:read"], companyId: "company-1", ...overrides };
 }
@@ -287,7 +305,7 @@ describe("security-gate: R1 A.1/A.5 — one admission door for every entry point
   });
 
   it("keeps the admission door single: no code-run entry point calls queue.acquire itself", () => {
-    const app = read(path.join("apps", "agent-api", "src", "app.ts"));
+    const app = readComposition();
     /**
      * The structural half of "not bypassed". The queue was already correct; what R1 had to fix is that two
      * call sites each called `acquire` and would each have had to remember the new periodic limit. The
@@ -319,7 +337,7 @@ describe("security-gate: R1 A.1/A.5 — one admission door for every entry point
      * different gate (`AdmissionError`/`admissionGate`). Both claims are checked structurally here: the
      * admission door and the queue are imported by the composition root and by nothing else on those paths.
      */
-    const app = read(path.join("apps", "agent-api", "src", "app.ts"));
+    const app = readComposition();
     const companyRuntime = read(path.join("apps", "agent-api", "src", "company-runtime.ts"));
     const subagent = read(path.join("apps", "agent-api", "src", "code-subagent-child-runner.ts"));
     for (const source of [companyRuntime, subagent]) {

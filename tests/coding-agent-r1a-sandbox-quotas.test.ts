@@ -31,6 +31,24 @@ import { buildSandboxCreateArgs, DockerSandboxProvider } from "../apps/agent-api
 
 const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (relative: string): string => readFileSync(path.join(workspaceRoot, relative), "utf8");
+
+/**
+ * R1a guards read the composition root **plus the modules that own the wiring under test**. Reading `app.ts`
+ * alone stopped covering the subject once plan step 2 moved that wiring into domain modules, and reading the
+ * whole composition is not an option either: the negative assertions below (no `hostAdmission`, no
+ * `SandboxCompanyQuota` on these paths) would then match the sandbox provider and fail for the wrong reason.
+ */
+const readComposition = (): string =>
+  [
+    "app.ts",
+    "code-route-runs.ts",
+    "chat-stream-routes.ts",
+    "code-queue-status-routes.ts",
+    "automation-executor-wiring.ts",
+    "code-route-wiring.ts",
+  ]
+    .map((file) => read(path.join("apps", "agent-api", "src", file)))
+    .join("\n");
 const scope = { workspaceId: "ws-1", userId: "user-1", companyId: "company-1", projectId: "project-1" };
 
 /** Runs a refusing call and returns the error, so an assertion can name its structured `code`. */
@@ -315,7 +333,7 @@ describe("security-gate: R1 A.4/A.5 — the provider applies the quotas, and onl
      * modules on that path must therefore not know this module exists, and the composition root must still wire
      * the gate to the reaper alone.
      */
-    const app = read(path.join("apps", "agent-api", "src", "app.ts"));
+    const app = readComposition();
     expect(app).toContain("admissionGate: { isRefusingNewRuns: () => codeReaper.isRefusingNewRuns() },");
     expect(app).not.toContain("HostAdmissionController");
     expect(app).not.toContain("hostAdmission");
