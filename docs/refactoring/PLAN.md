@@ -1388,3 +1388,59 @@ Rollback:   git revert <sha>
 `known-failures.json`: **11 записів** = 10 тих, що справді падають, + 1 застарілий. Отже гейт `test:known-failures` червоний із двох причин: **15 незадекларованих падінь** ✗ (13 з групи A + 2 з групи B) і **1 застарілий запис** ✗. **Регресій коду немає** ✓.
 
 **Пропозиція власнику** (не застосована ✗, `--adopt` вимагає підпису): внести 15 записів із причиною, власником і терміном — або полагодити групу A в генераторі каталогу; і прибрати застарілий запис `data-studio-d5-completion`.
+
+---
+
+## STEP 1 — КАРТА ВІДПОВІДАЛЬНОСТЕЙ `PostgresWorkspaceStore` (за даними коду)
+
+Клас: 4 503 рядки, 232 методи, починається з рядка 76. Карта побудована **не за назвами**, а за **таблицями, які реально торкає SQL кожного методу** (`FROM`/`INTO`/`UPDATE`/`JOIN`), тож домени взяті з коду, а не вигадані.
+
+### Домени, які справді існують (методи, чий SQL торкається лише таблиць цього домену)
+
+| Домен | Рядків | Методів | Таблиці |
+|---|---|---|---|
+| **companies** | 355 | 27 | `company*` |
+| **agents/edges/runs** | 355 | 27 | `company_agent*`, `company_edge*`, `company_run*`, `company_tool_audit`, `company_member`, `company_invite` |
+| **code-runs** | 260 | 14 | `code_run*`, `code_activity*`, `code_context*`, `replay*` |
+| **projects** | 210 | 22 | `project*` |
+| **businesses** | 125 | 13 | `business*`, `onboarding*` |
+| **goals/memory** | 110 | 20 | `goal*`, `memory*`, `conversation*`, `message*` |
+| **audit** | 103 | 7 | `audit*` |
+| **sessions** | 97 | 5 | `code_session*` |
+
+### Спільні хелпери (викликаються з ≥ 8 методів) — **не** домен, а спільний модуль
+
+| Хелпер | Викликів | Рішення |
+|---|---|---|
+| `assertCompany` | **29** | спільний модуль як функція над `pool` |
+| `getBusiness` | 20 | те саме |
+| `getProject` | 18 | те саме |
+| `durability` | 15 | **інстанс** композиції → лишається на фасаді, передається в модулі за потреби |
+| `assertMember` | 12 | спільний модуль |
+| `goals` | 11 | **інстанс** → лишається на фасаді |
+| `ensureIdentity` | 8 | спільний модуль |
+
+### Row-мапери (кандидати в модульний рівень, ~116 рядків)
+
+`mapReplayBundleRow` (33) · `mapExecutionSnapshotRow` (19) · `mapCodeActivityEventRow` (19) · `mapCodeContextSummaryRow` (18) · `mapReplayBundleStepRow` (14) · `mapSnapshotConfigVersionRow` (13)
+
+### Цільова архітектура (виведена з коду)
+
+```
+PostgresWorkspaceStore        ← публічний фасад; тонкі делегації, без логіки домену
+  ├── postgres-row-mappers.ts      спільні мапери рядків (крок 1a)
+  ├── postgres-lookups.ts          assertCompany / getBusiness / getProject / assertMember / ensureIdentity
+  │                                як функції над pool — без циклів і без другої реалізації
+  ├── CompanyRepository            companies        (355)
+  ├── AgentGraphRepository         agents/edges/runs(355)
+  ├── CodeRunRepository            code-runs        (260)
+  ├── ProjectRepository            projects         (210)
+  ├── BusinessRepository           businesses       (125)
+  ├── GoalMemoryRepository         goals/memory     (110)
+  ├── AuditRepository              audit            (103)
+  └── SessionRepository            sessions         (97)
+```
+
+**Правила кроку (з директиви):** фасад лишається публічним API; `pool` інжектується; спільні мапери/хелпери **перевикористовуються**; SQL не дублюється; транзакції зберігають той самий клієнт; порядок, локи й конкурентність не змінюються; **один домен = один коміт** із typecheck + цільові тести + c-серія.
+
+**Порядок:** 1a мапери рядків → 1b спільні lookups → далі домени від найізольованішого: audit (103) → sessions (97) → businesses (125) → goals/memory (110) → projects (210) → code-runs (260) → companies (355) → agents/edges/runs (355).
