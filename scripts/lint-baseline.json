@@ -181,7 +181,7 @@
     "packages/omniroute-adapter/src/normalization.ts": {
       "as-any": 6
     },
-    "packages/shared/src/code-capabilities.ts": {
+    "packages/shared/src/code-capabilities-git.ts": {
       "as-any": 1
     },
     "packages/shared/src/website-renderer.ts": {

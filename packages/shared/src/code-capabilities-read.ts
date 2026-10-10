@@ -1,0 +1,188 @@
+/* The read-only code capabilities, split out of code-capabilities.ts in step 3d of
+ * docs/refactoring/PLAN.md. Declarations are moved verbatim; code-capabilities.ts imports and
+ * re-exports them, so every existing import path keeps working.
+ */
+import type { CapabilityDefinition } from "./capabilities";
+import { READ_PERMISSION } from "./code-capabilities-shared";
+import type { CapabilityMatrixEntry } from "./capability-matrix";
+import { CODE_TOOL_SCHEMA_MIRROR } from "./code-tool-schema-mirror";
+
+export const CODE_READ_CAPABILITIES: CapabilityDefinition[] = [
+  {
+    id: "code.fs.list",
+    inventoryIds: [349],
+    type: "tool",
+    domain: "code",
+    name: "List code files (glob)",
+    description: "List files in the active code project workspace, optionally filtered by a glob pattern, honouring .gitignore and sorted by modification time.",
+    useWhen: [
+      "The agent needs to discover which files exist in a code project before reading them.",
+      "The agent has a glob or extension hint and wants the matching paths.",
+    ],
+    doNotUseWhen: [
+      "The goal is to modify, create or delete files (the read-only C2 tool set cannot do that).",
+      "The agent needs file contents: use code.fs.read or code.fs.grep instead.",
+      "The path is outside the project workspace or resolves through a symlink out of it.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "low",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: READ_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.fs.list"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.fs.list"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.fs.read",
+    inventoryIds: [350],
+    type: "tool",
+    domain: "code",
+    name: "Read code file",
+    description: "Read a text file from the project workspace with line numbers, offset/limit paging and long-line truncation; binary and image files return metadata instead of content.",
+    useWhen: [
+      "The agent needs the exact content of a known file, or a specific line range of it.",
+      "The agent is preparing an edit and must see the current text first.",
+    ],
+    doNotUseWhen: [
+      "The agent wants to find where something is defined across many files: use code.fs.grep first.",
+      "The file is outside the workspace, is a symlink leaving the workspace, or is a secret/credential file.",
+      "The file is large and only a summary is needed (read a bounded range instead).",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "low",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: READ_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.fs.read"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.fs.read"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.fs.grep",
+    inventoryIds: [351],
+    type: "tool",
+    domain: "code",
+    name: "Search code contents",
+    description: "Search file contents inside the project workspace with a regular expression, optional glob/type filters and context lines, in files_with_matches, content or count mode.",
+    useWhen: [
+      "The agent needs to locate a symbol, string or pattern across the codebase.",
+      "The agent wants to count or list the files that mention something.",
+    ],
+    doNotUseWhen: [
+      "The agent needs the whole file rather than the matching lines: use code.fs.read.",
+      "The search would read secret files or paths outside the workspace.",
+      "A cheap path listing is enough: use code.fs.list.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "low",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: READ_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.fs.grep"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.fs.grep"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.fs.tree",
+    inventoryIds: [352],
+    type: "tool",
+    domain: "code",
+    name: "Project tree overview",
+    description: "Return a compact directory tree of the project workspace with bounded depth and entry count, skipping ignored and generated directories.",
+    useWhen: [
+      "The agent needs a quick orientation of the repository layout before planning work.",
+      "The agent wants to confirm where a module lives without listing every file.",
+    ],
+    doNotUseWhen: [
+      "The agent needs file contents or matches: use code.fs.read or code.fs.grep.",
+      "The agent needs metadata of many files: use code.fs.list.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "low",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: READ_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.fs.tree"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.fs.tree"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.symbols.outline",
+    inventoryIds: [353],
+    type: "tool",
+    domain: "code",
+    name: "File symbol outline",
+    description: "List the symbols (classes, functions, methods) of a source file using universal-ctags when it is present in the sandbox image, and otherwise report the structured reason symbols_unavailable instead of guessing.",
+    useWhen: [
+      "The agent needs the structure of a single file without reading all of it.",
+      "The agent is deciding which function to read or edit next.",
+    ],
+    doNotUseWhen: [
+      "ctags is unavailable in the sandbox image: the tool reports symbols_unavailable rather than parsing heuristically.",
+      "The agent needs cross-file references: use code.fs.grep.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "low",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: READ_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.symbols.outline"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.symbols.outline"]!.outputSchema,
+    version: 1,
+  },
+  {
+    id: "code.project.info",
+    inventoryIds: [354],
+    type: "tool",
+    domain: "code",
+    name: "Code project summary",
+    description: "Return the code project metadata and the detected toolchain (languages, package managers, verify commands) recorded in C1, without reading file contents.",
+    useWhen: [
+      "The agent needs to know which language, package manager and verification commands the project uses.",
+      "The agent is about to plan verification steps and needs the recorded commands.",
+    ],
+    doNotUseWhen: [
+      "The agent needs repository contents: use the read tools.",
+      "The agent needs another company's project: tenant isolation forbids it.",
+    ],
+    agentCallable: true,
+    userVisible: true,
+    risk: "low",
+    requiresConfirmation: false,
+    requiredConnections: [],
+    requiredPermissions: READ_PERMISSION,
+    inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.project.info"]!.inputSchema,
+    outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.project.info"]!.outputSchema,
+    version: 1,
+  },
+];
+
+export const CODE_READ_MATRIX: CapabilityMatrixEntry[] = CODE_READ_CAPABILITIES.map((capability) => ({
+  id: capability.inventoryIds[0]!,
+  capabilityId: capability.id,
+  name: capability.name,
+  type: "tool",
+  domain: "code",
+  agentCallable: true,
+  risk: capability.risk,
+  testType: "integration",
+  testFiles: ["tests/coding-agent-c2-schema-parity.test.ts", "tests/coding-agent-c2-tool-runtime.test.ts"],
+  status: "VERIFIED_EXISTING",
+}));
+
+/**
+ * C3: mutating Coding Agent tools.
+ *
+ * Every one of them is gated server-side by the `code.write` feature flag (on top of the master
+ * `coding_agent.enabled` flag), requires `workspace:write`, runs only in the admitted sandbox, and is
+ * checkpointed so a turn can be rolled back. `code.fs.delete` is the only `high` risk tool of the set
+ * and the only one that requires an explicit approval; `code.fs.diff` stays read-only (`low`).
+ *
+ * Inventory ids 355-361 continue the catalog (C2 ended at 354).
+ */
