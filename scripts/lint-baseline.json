@@ -34,7 +34,7 @@
     "apps/agent-api/src/code-sandbox-wiring.ts": {
       "as-any": 1
     },
-    "apps/agent-api/src/coding-agent-runner.ts": {
+    "apps/agent-api/src/coding-agent-runner-contracts.ts": {
       "as-any": 1
     },
     "apps/agent-api/src/company-knowledge-queue.ts": {
