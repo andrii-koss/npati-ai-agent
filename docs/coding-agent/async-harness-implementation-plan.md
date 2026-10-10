@@ -81,7 +81,8 @@ Acceptance:
 - parent Stop and sandbox lifetime;
 - restart recovery without duplicate child spawn.
 
-Status: **partial** after code review on 2026-10-10. Acceptance gaps and corrections:
+Status: **implemented and verified** after Steps 6–8 on 2026-10-10. Step 8 demonstrates the
+remaining two-concurrent-child/root-budget acceptance drill. Review history and corrections:
 [async-subagents-step-5.md](async-subagents-step-5.md).
 
 ### Step 6 — Continue / send_message / interrupt
@@ -102,5 +103,11 @@ The separate `code.async_collect_barrier` flag is off by default. Acceptance and
 
 ### Step 8 — One UI, recovery drills and rollout
 
-Not started. Rollout beyond `internal` additionally requires the security gate (G1) and
-rollout readiness (R1) to be signed.
+Status: **implementation and local recovery drills completed** on 2026-10-10. One Code Workspace
+observes the existing inbox, processes, child controls and collection state; browser reconnect,
+durable PostgreSQL recovery and concurrent shared-budget drills are covered. The separate
+`code.async_workspace` flag is off by default, including self-hosted. Staged rollout/rollback
+procedure and verification: [async-workspace-step-8.md](async-workspace-step-8.md).
+
+Rollout remains dark. Promotion beyond `internal` additionally requires the security gate (G1)
+and rollout readiness (R1) to be signed; local tests do not supply those signatures.

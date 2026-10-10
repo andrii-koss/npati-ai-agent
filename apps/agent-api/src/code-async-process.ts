@@ -172,6 +172,7 @@ export class CodeAsyncProcessService {
     if (!Number.isSafeInteger(input.waitTimeoutMs) || input.waitTimeoutMs < 0 || input.waitTimeoutMs > 300000) throw new CodeProcessStoreError("invalid_wait_timeout", 400);
     const scope = await this.scope(ctx, input);
     let op = (await this.options.store.transact(scope, { kind: "read", processId: input.processId })).operations[0]!;
+    if (op.kind === "subagent") throw new CodeProcessStoreError("process_not_found", 404);
     const run = await this.options.run(op.companyId, op.runId);
     if (run?.status === "running" && input.leaseOwner && run.leaseOwner === input.leaseOwner && op.owner !== input.leaseOwner) {
       op = (await this.options.store.transact(scope, { kind: "adopt", operationId: op.operationId, owner: input.leaseOwner })).operations.find((item) => item.operationId === op.operationId)!;
@@ -214,6 +215,7 @@ export class CodeAsyncProcessService {
   async cancel(ctx: AuthContext, input: { companyId: string; projectId: string; sessionId: string; processId: string }) {
     const scope = await this.scope(ctx, input);
     let op = (await this.options.store.transact(scope, { kind: "read", processId: input.processId })).operations[0]!;
+    if (op.kind === "subagent") throw new CodeProcessStoreError("process_not_found", 404);
     op = (await this.options.store.transact(scope, { kind: "cancel", operationId: op.operationId })).operations.find((item) => item.operationId === op.operationId)!;
     if (activeCodeProcess(op)) op = await this.cancelOwned(ctx, scope, op);
     return op;

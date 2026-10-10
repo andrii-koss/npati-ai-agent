@@ -1,6 +1,7 @@
 # Async Coding Agent — Step 5 review
 
-Date: 2026-10-10. Status: **partial; acceptance is not complete**.
+Date: 2026-10-10. Initial review status: **partial**. Follow-up status after Steps 6–8:
+**implemented and verified**; the final concurrent shared-budget drill is recorded below.
 
 Review of the current code against [the implementation plan](async-harness-implementation-plan.md),
 including Steps 1–4. Historical reports are evidence of their original runs, not fresh verification.
@@ -45,13 +46,14 @@ including Steps 1–4. Historical reports are evidence of their original runs, n
 - Manifest v11 adds `code.agent.spawn_async@1` with an accepted receipt. Canonical
   `code.agent.spawn@1` retains its blocking result; manifests v1–v10 remain frozen.
 
-The initial implementation gaps above are closed. Step 5 remains marked partial because its
-full fan-out acceptance drill with two real concurrent children exhausting one root budget has
-not been demonstrated. The shared quota manager itself is unchanged; these changes route child
-usage to it. Step 6 control acceptance and fresh verification are recorded in its linked report.
+The initial implementation gaps above were closed in Step 6. At that point Step 5 remained partial
+because two real concurrent children exhausting one root budget had not been demonstrated.
+Step 8 now supplies that drill through the existing child adapter, real runner and shared quota
+manager: two concurrent children charge the root's allowance and the next root call stops before
+another model request. No child budget is minted. See [Step 8](async-workspace-step-8.md).
 
-Keep async flags off until these items have code and behavioral proof. No deployment or flag
-enablement was performed during this review.
+Async flags remain off pending staged rollout gates. No deployment or flag enablement was
+performed during this review or the Step 8 follow-up.
 
 ## Initial review verification (before completing Step 6)
 

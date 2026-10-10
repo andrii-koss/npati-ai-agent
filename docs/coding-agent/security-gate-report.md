@@ -450,9 +450,9 @@ npm run mutation:branch -- --json          # той самий вердикт м
 | `npm run lint` (`lint-guard` + `[web-xss]`) | **exit 0** (self-test 19/19, 994 файли, allowances 7/7, ratchet `as any` не зростав) |
 | `node --check scripts/run-security-gate.mjs` | **exit 0** |
 | `node --check scripts/attack-catalogue-check.mjs` | **exit 0** |
-| `node scripts/run-security-gate.mjs --list` | **162** рядків |
-| Фіксований список гейта | `suites=162 present=162 missing=0 duplicates=0` (було 131; 138 у зрізі C14; 145 після очищення C14; 146 після набору C15 «CLI / run-start»; 148 після двох наборів C15 «mounted folder»; 149 після набору C1a, див. § 7.4; 150 після guard-набору матриці мутацій, див. § 5.1; 151 після набору «clean clone → передумови гейта» кроком G1, див. § 5.2; 152 після набору «production CrashLoop: ключ перевіряється на використанні, не на імпорті» кроком G1; 153 після набору R1-C «data lifecycle: retention, erasure, export diff»; 155 після двох наборів R1-A «ліміти і квоти» — `coding-agent-r1a-limits-and-quotas` і `coding-agent-r1a-sandbox-quotas`, див. § R1-A; 158 → 160 після двох наборів async-track Step 5/N1 `coding-agent-async-subagents-detached` і `coding-agent-async-inbox-pause-fence`) |
-| Поточний розмір фіксованого списку гейта (єдине джерело істини — `SECURITY_GATE_TESTS` у `scripts/lib/run-security-gate.mjs`) | **162** наборів; саме це число guard-набір `tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts` читає з документа і порівнює зі списком. 158 → 160 після двох наборів async-track Step 5/N1, 153 було до реєстрації двох наборів R1-A «ліміти і квоти» (§ R1-A), 152 було до реєстрації набору R1-C «data lifecycle: retention, erasure, export diff», 151 — до реєстрації набору «production CrashLoop: ключ перевіряється на використанні, не на імпорті» кроком G1, 150 — до реєстрації набору «clean clone → передумови гейта» кроком G1 (§ 5.2), 149 — до реєстрації guard-набору матриці мутацій кроком G1 (§ 5.1), 148 — до реєстрації набору C1a «dark launch / kill switch» кроком G1 (§ 7.4), 146 — до реєстрації двох наборів C15 «mounted folder» (див. § 7.2), 145 — до реєстрації набору C15 «CLI / run-start», 144 — до реєстрації цього guard-набору (тоді документ ще казав 138) |
+| `node scripts/run-security-gate.mjs --list` | **163** рядків |
+| Фіксований список гейта | `suites=163 present=163 missing=0 duplicates=0` (було 131; 138 у зрізі C14; 145 після очищення C14; 146 після набору C15 «CLI / run-start»; 148 після двох наборів C15 «mounted folder»; 149 після набору C1a, див. § 7.4; 150 після guard-набору матриці мутацій, див. § 5.1; 151 після набору «clean clone → передумови гейта» кроком G1, див. § 5.2; 152 після набору «production CrashLoop: ключ перевіряється на використанні, не на імпорті» кроком G1; 153 після набору R1-C «data lifecycle: retention, erasure, export diff»; 155 після двох наборів R1-A «ліміти і квоти» — `coding-agent-r1a-limits-and-quotas` і `coding-agent-r1a-sandbox-quotas`, див. § R1-A; 158 → 160 після двох наборів async-track Step 5/N1 `coding-agent-async-subagents-detached` і `coding-agent-async-inbox-pause-fence`) |
+| Поточний розмір фіксованого списку гейта (єдине джерело істини — `SECURITY_GATE_TESTS` у `scripts/lib/run-security-gate.mjs`) | **163** наборів; саме це число guard-набір `tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts` читає з документа і порівнює зі списком. 158 → 160 після двох наборів async-track Step 5/N1, 153 було до реєстрації двох наборів R1-A «ліміти і квоти» (§ R1-A), 152 було до реєстрації набору R1-C «data lifecycle: retention, erasure, export diff», 151 — до реєстрації набору «production CrashLoop: ключ перевіряється на використанні, не на імпорті» кроком G1, 150 — до реєстрації набору «clean clone → передумови гейта» кроком G1 (§ 5.2), 149 — до реєстрації guard-набору матриці мутацій кроком G1 (§ 5.1), 148 — до реєстрації набору C1a «dark launch / kill switch» кроком G1 (§ 7.4), 146 — до реєстрації двох наборів C15 «mounted folder» (див. § 7.2), 145 — до реєстрації набору C15 «CLI / run-start», 144 — до реєстрації цього guard-набору (тоді документ ще казав 138) |
 | Харнес (кожен набір окремо) | `fork-bomb 5/5` · `command-output-injection 2/2` · `resource-exhaustion 5/5` · `path-and-zip-slip 7/7` · `new-channels 4/4` (2 describe) · `attack-catalogue 5/5` · `gate-mutation-sensitivity 6/6` — **разом 34 тести, failed=0** |
 | Статична перевірка каталогу | `rows=24 ok=true issues=0` |
 | Фабрикації (5 видів) | усі `ok=false` зі своїми кодами (див. § 3) |
@@ -1557,3 +1557,24 @@ Final hermetic gate: **158 suites / 2301 passed / failed=0 / skipped=0**. Postgr
 [Collect barrier report](async-collect-barrier-step-7.md): required parent operations settle and their results enter the existing collector before C9 verification/self-review. Child write evidence and synchronized process changes feed the existing change set. Unknown/interrupted/timeout/missing-evidence states keep the workspace fenced and the same parent resumable; paused completions are selectively collected under the new worker lease. Mounted baseline snapshot v2 is additive. `code.async_collect_barrier` remains off by default, including self-hosted.
 
 Hermetic gate: **162 suites / 2370 passed / failed=0 / skipped=0**, including the new 23-test Step 7 suite. PostgreSQL gate: **2 suites / 4 passed / failed=0 / skipped=0**, with cross-pool snapshot v2 and completion collection/admission. Web: **11 suites / 90 passed**. Workspace/test typechecks, lint and tool/catalog audits passed. Manifest v11 remains 43 tools; catalogue remains 391 entries. No production rollout or local stack deployment was performed. Step 8 rollout drills and the separately recorded Step 5 acceptance gap remain open.
+
+### Async Step 8 follow-up — unified workspace and recovery drills (2026-10-10)
+
+[Step 8 report](async-workspace-step-8.md): the existing Code Workspace observes durable process/child
+operations and the same inbox, exposes Step 6 controls and canonical process output/Stop, and fences
+disconnected or obsolete observers. Its separate `code.async_workspace` flag stays off by default,
+including self-hosted. Shell controls cannot read or cancel child-operation handles.
+
+Hermetic gate: **163 suites / 2385 passed / failed=0 / skipped=0**, including 15 new Step 8 tests.
+PostgreSQL gate: **2 suites / 4 passed / failed=0 / skipped=0**, extended with the cross-pool workspace
+projection and read-only journal proof. Web: **12 suites / 102 passed**. The actual React panel in
+headless Edge passes **6 browser drills** for control retry, child messaging, inbox mutations, inert
+output, reload and reconnect against mocked existing HTTP contracts. The separate backend and PG
+tests cover their server behavior; this is not live provider or deployment acceptance.
+
+The two concurrent real child runners/root-quota drill closes the final recorded Step 5 acceptance
+gap. Workspace/test typechecks, lint/XSS, schema/catalog audits and whitespace checks pass.
+Manifest v11 remains 43 tools with checksum `a1c20d6e1be84667c158b84f65e4afba78918b6794582752c7339218f826be6b`;
+catalogue remains 391 entries. The disposable PostgreSQL container was removed after verification.
+No application deployment or rollout flag enablement was performed. Promotion beyond `internal`
+remains subject to signed G1/R1, as required by the implementation plan.

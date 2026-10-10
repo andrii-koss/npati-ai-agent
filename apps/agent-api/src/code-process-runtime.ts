@@ -30,6 +30,7 @@ export function createCodeProcessControls(manager: CodeProcessManager, registry:
           startedAt: new Date(current.startedAt).toISOString(), exitCode: current.exitCode ?? null });
       }
       if (manager.tracked && input.sessionId) for (const op of await manager.tracked.list(input.ctx, { ...input, sessionId })) {
+        if (op.kind === "subagent") continue;
         if (!op.startedAt) continue;
         const current = await manager.tracked.wait(input.ctx, { ...input, sessionId, processId: op.processId, waitTimeoutMs: 0 });
         const status = ["running", "dispatching", "unknown_outcome"].includes(current.state) ? "running" as const

@@ -130,6 +130,7 @@ import { registerCodeSessionControlRoutes } from "./code-session-control-routes"
 import { registerCodeSessionDurabilityRoutes } from "./code-session-durability-routes";
 import { CodeSessionResumeService } from "./code-session-resume";
 import { registerCodeAgentControlRoutes } from "./code-agent-controls";
+import { CodeAsyncWorkspaceService, registerCodeAsyncWorkspaceRoutes } from "./code-async-workspace";
 import { CodeSessionRewindService } from "./code-session-rewind";
 import { CodeSessionForkService } from "./code-session-fork";
 import { collectCodeSessionUsage } from "./code-session-usage";
@@ -5573,6 +5574,11 @@ ${localized.next}`;
     registerCodeAgentControlRoutes(app, { service: () => operations, auth: authProvider,
       authorize: (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input) });
   }
+  if (workspaceStore.codeProcesses) registerCodeAsyncWorkspaceRoutes(app, {
+    service: new CodeAsyncWorkspaceService({ store: workspaceStore.codeProcesses, flags: featureFlagService,
+      session: (ctx, companyId, sessionId) => codeService.getSession(ctx, companyId, sessionId) }),
+    auth: authProvider, authorize: (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input),
+  });
   // C6a: reconcile runs whose process died. A run that still claims to be running with an expired lease is
   // moved to `interrupted`; read-only calls with an unknown result may be replayed, mutating calls are reported
   // as a doubt and never replayed. This is what turns a crash into a recoverable state instead of a mystery.
