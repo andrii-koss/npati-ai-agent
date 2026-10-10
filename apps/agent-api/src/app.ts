@@ -63,7 +63,7 @@ import { AgentDataStudioService } from "./data-studio/agent-data-service";
 import { MountedWorkspaceProvider } from "./mounted-workspace-provider";
 import { ProjectWorkspaceBaseResolver, type MountedFolderFlagPort } from "./workspace-base-resolver";
 import { registerProjectFileRoutes } from "./project-file-routes";
-import { RemoteSandboxProvider } from "./sandbox-provider";
+import { RemoteSandboxProvider, projectRuntimeMode } from "./sandbox-provider";
 import { ProjectSandboxService } from "./project-sandbox-service";
 import { ProjectTerminalEventsRepository } from "./project-terminal-events";
 import { registerProjectTerminalRoutes } from "./project-terminal-routes";
@@ -234,7 +234,9 @@ import { ProjectPreviewService } from "./project-preview-service";
 import { ProjectFileLeaseManager } from "./project-file-lock";
 import { CodeRunSharedQuota } from "./code-run-quota";
 import { ProjectOrchestrator, ProjectOrchestrationError } from "./project-orchestrator";
-import { saveChatProjectCard } from "./project-chat-cards";
+import { saveChatProjectCard, getLatestChatProjectCard } from "./project-chat-cards";
+import { isCodeChatWebsite, hasCodeChatPreview, finishCodeChatWebsite } from "./code-chat-website";
+import { extractCleanProjectName } from "./project-orchestrator";
 import { CompanyDelegationRuntime, companyRunTelemetryHeaders } from "./company-runtime";
 import { registerCompanyRuntimeRoutes } from "./company-runtime-routes";
 import { CompanyKnowledgeProcessor,CompanyKnowledgeRepository } from "./company-knowledge";
@@ -1246,7 +1248,9 @@ export function buildApp(config: AppConfig = {}) {
   const projectTerminalEvents = new ProjectTerminalEventsRepository(projectService, config.databaseUrl ? (workspaceStore as any).pool : undefined);
   const sandboxRunnerUrl = process.env.NPATI_SANDBOX_RUNNER_URL;
   const sandboxRunnerSecret = process.env.NPATI_SANDBOX_RUNNER_SECRET;
-  if (!projectSandbox && sandboxRunnerUrl && sandboxRunnerSecret) projectSandbox = new ProjectSandboxService(projectService, workspaceStore, projectWorkspace, new RemoteSandboxProvider(sandboxRunnerUrl, sandboxRunnerSecret), projectTerminalEvents, browserCredentials, {
+  if (!projectSandbox && sandboxRunnerUrl && sandboxRunnerSecret) projectSandbox = new ProjectSandboxService(projectService, workspaceStore, projectWorkspace,
+    new RemoteSandboxProvider(sandboxRunnerUrl, sandboxRunnerSecret, fetch, undefined,
+      projectRuntimeMode({ ...process.env, ...(config.deploymentType ? { NPATI_DEPLOYMENT_TYPE: config.deploymentType } : {}) })), projectTerminalEvents, browserCredentials, {
     commandTimeoutMs: Number(process.env.NPATI_TERMINAL_TIMEOUT_MS) || undefined,
     installBuildTimeoutMs: Number(process.env.NPATI_TERMINAL_BUILD_TIMEOUT_MS) || undefined,
     outputLimitBytes: Number(process.env.NPATI_TERMINAL_OUTPUT_LIMIT_BYTES) || undefined,
@@ -1255,7 +1259,10 @@ export function buildApp(config: AppConfig = {}) {
     syncMaxBytes: Number(process.env.NPATI_SANDBOX_SYNC_MAX_BYTES) || undefined,
     // C10 (ТЗ item 7): the retention window the sweep destroys idle sandboxes after.
     retentionMs: Number(process.env.NPATI_SANDBOX_RETENTION_MS) || undefined,
-  }, projectApiGatewayService ? (ctx, companyId, projectId) => projectApiGatewayService.getSandboxEnvironment(ctx, companyId, projectId) : undefined);
+  }, projectApiGatewayService ? async (ctx, companyId, projectId) => {
+    const project = await projectService.get(ctx, companyId, projectId);
+    return project.dataBackendId ? projectApiGatewayService.getSandboxEnvironment(ctx, companyId, projectId) : {};
+  } : undefined);
   const backupTimer = backupService && (process.env.NPATI_DATA_BACKUP_DISABLED !== "true")
     ? setInterval(() => { void backupService.runScheduled().catch((error) => { app.log.error({ err: error }, "data_backup_tick_failed"); }); }, Math.max(60_000, (Number(process.env.NPATI_DATA_BACKUP_TICK_SECONDS) || 300) * 1000))
     : undefined;
@@ -1469,7 +1476,7 @@ export function buildApp(config: AppConfig = {}) {
       } catch (error) {
         app.log.warn({ err: error, projectId: request.projectId }, "code_sandbox_revision_unavailable");
       }
-      const terminalRequest = { projectId: request.projectId, command: request.command, agentId: "code-tool-runtime", ...(request.cwd ? { cwd: request.cwd } : {}) };
+      const terminalRequest = { projectId: request.projectId, command: request.command, agentId: "system", ...(request.cwd ? { cwd: request.cwd } : {}) };
       const result = await projectSandbox!.execute(ctx, companyId, terminalRequest);
       const shaped = result as { stdout?: string; output?: string; exitCode?: number };
       return { stdout: shaped?.stdout ?? shaped?.output ?? "", exitCode: shaped?.exitCode };
@@ -1633,7 +1640,7 @@ export function buildApp(config: AppConfig = {}) {
     ? {
         record: async (input) => {
           await auditLogService.record(
-            { workspaceId: AUDIT_SYSTEM_WORKSPACE, userId: input.actor, permissions: [] } as AuthContext,
+            { workspaceId: input.workspaceId ?? AUDIT_SYSTEM_WORKSPACE, userId: input.actor, permissions: [] } as AuthContext,
             {
               companyId: input.companyId,
               actor: input.actor,
@@ -1739,6 +1746,7 @@ export function buildApp(config: AppConfig = {}) {
    *     default for every discovered tool stays `high` + approval required until such a decision exists.
    */
   const mcpToolPolicyStore = new McpToolPolicyStore(config.databaseUrl);
+  app.addHook("onClose", async () => { await mcpToolPolicyStore.close(); });
   const mcpRuntimeCapabilities = new McpRuntimeCapabilityStore({ policies: mcpToolPolicyStore });
   const mcpRuntimeTransport = new McpRuntimeTransport({
     // The **run** phase allowlist is the one an MCP dial belongs to: it is the phase for outbound calls made
@@ -2148,7 +2156,9 @@ export function buildApp(config: AppConfig = {}) {
       const result = await projectSandbox!.execute(input.context, input.companyId, {
         projectId: input.projectId,
         command: input.command,
-        agentId: input.agentId,
+        // Code sessions are authorized by the canonical code runtime, not Company-agent IDs.
+        // The sandbox's system path still checks the authenticated user's write permission.
+        agentId: "system",
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(input.approved ? { approved: true } : {}),
         ...(input.environmentReferences ? { environmentReferences: input.environmentReferences } : {}),
@@ -2168,7 +2178,7 @@ export function buildApp(config: AppConfig = {}) {
     logsAreSnapshots: true,
     start: async (input) => {
       const result = await projectSandbox!.process(input.context, input.companyId, {
-        projectId: input.projectId, command: input.command, action: "start", agentId: input.agentId,
+        projectId: input.projectId, command: input.command, action: "start", agentId: "system",
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(input.runId ? { runId: input.runId } : {}),
         ...(input.approved ? { approved: true } : {}),
@@ -2178,13 +2188,13 @@ export function buildApp(config: AppConfig = {}) {
     },
     logs: async (input) => {
       const result = await projectSandbox!.process(input.context, input.companyId, {
-        projectId: input.projectId, processId: input.processId, action: "logs", agentId: input.agentId ?? "system",
+        projectId: input.projectId, processId: input.processId, action: "logs", agentId: "system",
       }) as { output?: string; stdout?: string; eof?: boolean };
       return { output: String(result?.output ?? result?.stdout ?? ""), eof: result?.eof };
     },
     status: async (input) => {
       const result = await projectSandbox!.process(input.context, input.companyId, {
-        projectId: input.projectId, processId: input.processId, action: "status", agentId: input.agentId ?? "system",
+        projectId: input.projectId, processId: input.processId, action: "status", agentId: "system",
       }) as { status?: string; exitCode?: number | null };
       const state = result.status;
       if (state !== "running" && state !== "completed" && state !== "failed" && state !== "stopped" && state !== "timed_out" && state !== "lost") {
@@ -2195,7 +2205,7 @@ export function buildApp(config: AppConfig = {}) {
     stop: async (input) => {
       const started = Date.now();
       const result = await projectSandbox!.process(input.context, input.companyId, {
-        projectId: input.projectId, processId: input.processId, action: "stop", agentId: input.agentId ?? "system",
+        projectId: input.projectId, processId: input.processId, action: "stop", agentId: "system",
       }) as { status?: string; exitCode?: number | null };
       const state = result.status;
       if (state !== "stopped" && state !== "completed" && state !== "failed" && state !== "timed_out") throw new Error("process_stop_unconfirmed");
@@ -2208,11 +2218,11 @@ export function buildApp(config: AppConfig = {}) {
     run: (companyId, runId) => workspaceStore.getCodeRunState(companyId, runId),
     port: {
       supported: (ctx, companyId, projectId) => projectSandbox.supportsTrackedProcesses(ctx, companyId, projectId),
-      start: async (ctx, input, op, beforeStart) => projectSandbox.startTrackedProcess(ctx, input.companyId, { ...input, agentId: op.agentId, processId: op.processId }, beforeStart,
+      start: async (ctx, input, op, beforeStart) => projectSandbox.startTrackedProcess(ctx, input.companyId, { ...input, agentId: "system", processId: op.processId }, beforeStart,
         await featureFlagService.isEnabled(ctx, "code.async_collect_barrier", { companyId: input.companyId })),
-      status: async (ctx, op) => await projectSandbox.process(ctx, op.companyId, { projectId: op.projectId, sandboxId: op.sandboxId ?? undefined, agentId: op.agentId, processId: op.processId, action: "status" }) as { status: string; exitCode: number | null },
-      stop: async (ctx, op) => await projectSandbox.process(ctx, op.companyId, { projectId: op.projectId, sandboxId: op.sandboxId ?? undefined, agentId: op.agentId, processId: op.processId, action: "stop" }) as { status: string; exitCode: number | null },
-      output: (ctx, op, offset) => projectSandbox.trackedOutput(ctx, op.companyId, { projectId: op.projectId, sandboxId: op.sandboxId ?? undefined, agentId: op.agentId, processId: op.processId }, offset),
+      status: async (ctx, op) => await projectSandbox.process(ctx, op.companyId, { projectId: op.projectId, sandboxId: op.sandboxId ?? undefined, agentId: "system", processId: op.processId, action: "status" }) as { status: string; exitCode: number | null },
+      stop: async (ctx, op) => await projectSandbox.process(ctx, op.companyId, { projectId: op.projectId, sandboxId: op.sandboxId ?? undefined, agentId: "system", processId: op.processId, action: "stop" }) as { status: string; exitCode: number | null },
+      output: (ctx, op, offset) => projectSandbox.trackedOutput(ctx, op.companyId, { projectId: op.projectId, sandboxId: op.sandboxId ?? undefined, agentId: "system", processId: op.processId }, offset),
       sync: (ctx, op) => projectSandbox.syncTrackedProcess(ctx, op),
     },
   }) : undefined;
@@ -2333,7 +2343,8 @@ export function buildApp(config: AppConfig = {}) {
       usage: async () => {
         const { statfs } = await import("node:fs/promises");
         const stats = await statfs(process.cwd());
-        return { freeBytes: Number(stats.bavail) * Number(stats.bsize), freeInodes: Number(stats.ffree) };
+        // NTFS reports no inode counters (files=ffree=0), rather than an exhausted filesystem.
+        return { freeBytes: Number(stats.bavail) * Number(stats.bsize), ...(stats.files > 0 ? { freeInodes: Number(stats.ffree) } : {}) };
       },
     },
     /**
@@ -2447,7 +2458,7 @@ export function buildApp(config: AppConfig = {}) {
           continue;
         }
         const result = await projectSandbox!.execute(input.ctx, input.companyId, {
-          projectId: input.projectId, command, agentId: "code-tool-runtime",
+          projectId: input.projectId, command, agentId: "system",
         }) as { stdout?: string; stderr?: string; output?: string; exitCode?: number };
         const output = `${result?.stdout ?? result?.output ?? ""}${result?.stderr ? `\n${result.stderr}` : ""}`.trim();
         const exitCode = typeof result?.exitCode === "number" ? result.exitCode : 1;
@@ -2929,7 +2940,7 @@ export function buildApp(config: AppConfig = {}) {
     executors: allCanonicalExecutors({
       projectLoader: async ({ ctx, companyId, projectId }) => {
         const project = await projectService.get(ctx, companyId, projectId);
-        return (project as { type?: string } | null)?.type === "code_project" ? project as never : null;
+        return project && (project.type === "code_project" || isCodeChatWebsite(project)) ? project as never : null;
       },
       // C4: shell/process/verify execution is injected; without these ports those tools fail closed.
       shellRuntime: codeShellRuntimePort,
@@ -5631,7 +5642,7 @@ ${localized.next}`;
           ...(codeIntentIsReadOnly(invocation.intent) ? { readOnlyIntent: true } : {}),
         });
         if (invocation.session && await codeSessionInbox.isEnabled(invocation.ctx, invocation.session.companyId)) {
-          if (projectSandbox && await codeSessionInbox.mayCleanup(invocation.ctx, invocation.session as CodeSession, result)) await projectSandbox.destroy(invocation.ctx,
+          if (projectSandbox && await codeSessionInbox.mayCleanup(invocation.ctx, invocation.session as CodeSession, result)) await projectSandbox.releaseAfterRun(invocation.ctx,
             await projectService.get(invocation.ctx, invocation.session.companyId, invocation.session.projectId));
           void codeSessionInbox.settled(invocation.ctx, invocation.session as CodeSession, result)
             .catch((error) => app.log.warn({ err: error }, "code_inbox_wake_failed"));
@@ -5743,7 +5754,7 @@ ${localized.next}`;
             prompt: input.prompt,
           });
           if (await codeSessionInbox.isEnabled(input.ctx, input.session.companyId)) {
-            if (projectSandbox && await codeSessionInbox.mayCleanup(input.ctx, input.session, result)) await projectSandbox.destroy(input.ctx,
+            if (projectSandbox && await codeSessionInbox.mayCleanup(input.ctx, input.session, result)) await projectSandbox.releaseAfterRun(input.ctx,
               await projectService.get(input.ctx, input.session.companyId, input.session.projectId));
             void codeSessionInbox.settled(input.ctx, input.session, result)
               .catch((error) => app.log.warn({ err: error }, "code_inbox_wake_failed"));
@@ -5804,6 +5815,19 @@ ${localized.next}`;
   const codeSessionRunExecutor = new CodeSessionRunExecutor({
     runner: codingAgentRunner,
     control: codeRunCancellation,
+    resolveVerificationTools: async (input) => {
+      const project = await projectService.get(input.ctx, input.session.companyId, input.session.projectId);
+      if (!isCodeChatWebsite(project) || input.readOnlyIntent || input.session.mode === "plan") return undefined;
+      return project.framework === "HTML/CSS" ? [] : ["build"];
+    },
+    afterRun: (input, result) => finishCodeChatWebsite(input, result, {
+      getProject: (ctx, companyId, projectId) => projectService.get(ctx, companyId, projectId),
+      startPreview: async (ctx, companyId, projectId, signal) => {
+        await featureFlagService.assertEnabled(ctx, "code.shell", { companyId });
+        return projectPreviewService.startPreview(ctx, companyId, projectId, { signal });
+      },
+      markFailed: (ctx, companyId, projectId) => projectService.updatePreview(ctx, companyId, projectId, { status: "failed", lastBuildStatus: "failed" }),
+    }),
     resolveModel: async (ctx) => {
       const preferences = await aiPreferences.get(ctx);
       const modelId = preferences.routing.defaultModelId;
@@ -5882,7 +5906,7 @@ ${localized.next}`;
       try {
         const project = await projectService.get(ctx, companyId, projectId);
         if (!project.sandboxId) return { released: true, reason: "no_sandbox" };
-        await projectSandbox.destroy(ctx, project);
+        await projectSandbox.releaseAfterRun(ctx, project);
         return { released: true };
       } catch (error) {
         return { released: false, reason: error instanceof Error ? error.message : "sandbox_release_failed" };
@@ -6374,11 +6398,16 @@ ${localized.next}`;
       session = await codeService.getSession(ctx, session.companyId, session.id);
       if (session.status !== "active") return;
       await codeProcessCompletions?.recover(ctx, session);
+      await codeSessionInbox.recoverTerminalTask(session);
       const snapshot = await codeSessionInbox.transact(session, { kind: "read" });
       if (snapshot.state.phase === "settled" && snapshot.state.runId) {
+        if (codeRunCancellation.hasLiveRun(session.id)) return;
         const state = await codeRunStateLog.loadRunState(session.companyId, snapshot.state.runId);
         if (!state || !["completed", "failed", "cancelled"].includes(state.status)) return;
-        if (projectSandbox) await projectSandbox.destroy(ctx, await projectService.get(ctx, session.companyId, session.projectId));
+        if (projectSandbox && projectPreviewService.getSession(session.projectId)?.status !== "running") {
+          const project = await projectService.get(ctx, session.companyId, session.projectId);
+          if (!(isCodeChatWebsite(project) && project.status === "previewing" && project.previewUrl)) await projectSandbox.releaseAfterRun(ctx, project);
+        }
         await codeSessionInbox.transact(session, { kind: "release-task", runId: state.runId });
         continue;
       }
@@ -6400,9 +6429,9 @@ ${localized.next}`;
           abort: (reason) => codeBackgroundRuns.abort(message.runId!, String(reason ?? "Stopped")),
           cancelRequested: () => codeRunCancellation.isSessionCancelled(session.id) });
         if (!await codeSessionInbox.mayCleanup(ctx, session, outcome.result)) return;
-        if (projectSandbox) {
+        if (projectSandbox && !hasCodeChatPreview(outcome.result) && projectPreviewService.getSession(session.projectId)?.status !== "running") {
           const project = await projectService.get(ctx, session.companyId, session.projectId);
-          await projectSandbox.destroy(ctx, project);
+          await projectSandbox.releaseAfterRun(ctx, project);
         }
         await codeSessionInbox.transact(session, { kind: "release-task", runId: message.runId });
         if (outcome.terminalStatus !== "completed") return;
@@ -6536,10 +6565,10 @@ ${localized.next}`;
       } finally {
         // The sandbox is released after the run on every path — success, failure and cancellation — exactly as the
         // chat entry point does. The project is re-read because the pre-run object's `sandboxId` is empty.
-        if (projectSandbox && await codeSessionInbox.mayCleanup(ctx, session, outcome?.result)) {
+        if (projectSandbox && !hasCodeChatPreview(outcome?.result) && projectPreviewService.getSession(projectId)?.status !== "running" && await codeSessionInbox.mayCleanup(ctx, session, outcome?.result)) {
           try {
             const current = await projectService.get(ctx, companyId, projectId);
-            await projectSandbox.destroy(ctx, current);
+            await projectSandbox.releaseAfterRun(ctx, current);
           } catch (error) {
             app.log.warn({ err: error, projectId }, "code_cli_run_sandbox_release_failed");
           }
@@ -7805,15 +7834,57 @@ ${localized.next}`;
 
       const resolved = await activeContextResolver.resolveChat(auth, requestedContext, message);
 
-      const activeProjectId = resolved.project?.id ?? null;
-      const activeCompanyId = request.body.companyId ?? resolved.company?.id ?? resolved.project?.companyId ?? null;
+      let activeProjectId = resolved.project?.id ?? null;
+      let activeCompanyId = request.body.companyId ?? resolved.company?.id ?? resolved.project?.companyId ?? null;
       const projectIntent = defaultHybridRouter.classifyProject({
         message,
         activeCompanyId,
         activeProjectId,
         hasWorkspace: Boolean(overview.currentBusiness || resolved.company || resolved.project),
       });
-      if (projectIntent.intent === "CHAT" && resolved.context.contextType === "business" && !resolved.business) {
+      const creatingChatWebsite = (projectIntent.intent === "CREATE_WEBSITE" || projectIntent.intent === "CREATE_PROJECT")
+        && projectIntent.targetDetails?.projectType !== "mobile_app";
+      // Resolve the conversation binding before admission. Never borrow another conversation's project.
+      const boundCard = !creatingChatWebsite && request.body.conversationId && !memoryPolicy.noMemoryActive
+        ? await getLatestChatProjectCard(workspaceStore, auth, request.body.conversationId, resolved.business?.id) : null;
+      if (boundCard && !request.body.projectId) {
+        activeCompanyId = boundCard.companyId;
+        activeProjectId = boundCard.projectId ?? boundCard.id;
+        await projectService.get(auth, activeCompanyId, activeProjectId);
+      }
+      if (creatingChatWebsite && !activeCompanyId) {
+        const companies = (await workspaceStore.listCompanies(auth)).items;
+        if (companies.length === 1) activeCompanyId = companies[0]!.id;
+      }
+      let preparedChatSession: CodeSession | null = null;
+      const chatCodingEnabled = activeCompanyId
+        ? await featureFlagService.isEnabled(auth, CODE_AGENT_MASTER_FLAG, { companyId: activeCompanyId, userId: auth.userId }) : false;
+      if (chatCodingEnabled && activeCompanyId) {
+        if (creatingChatWebsite && !projectIntent.needsClarification && !projectIntent.unsupportedIntentMessage) {
+          let project = await codeService.createProject(auth, activeCompanyId,
+            { name: extractCleanProjectName(message, projectIntent.targetDetails?.entityName), description: message },
+            `chat-website:${auth.userId}:${request.headers["idempotency-key"] ?? streamId ?? crypto.randomUUID()}`);
+          const framework = projectIntent.targetDetails?.framework === "HTML/CSS" ? "HTML/CSS" : "Next.js";
+          project = await projectOrchestrator.prepareCodingWebsite(auth, project, message, framework);
+          await codeService.detectAndPersist(auth, activeCompanyId, project.id);
+          activeProjectId = project.id;
+          preparedChatSession = await codeService.createSession(auth, activeCompanyId, project.id, { mode: "auto" });
+        } else if (activeProjectId) {
+          const project = await projectService.get(auth, activeCompanyId, activeProjectId);
+          if (isCodeChatWebsite(project) || project.type === "code_project") {
+            if (boundCard?.sessionId && (boundCard.projectId ?? boundCard.id) === project.id && boundCard.companyId === activeCompanyId) {
+              const session = await codeService.getSession(auth, activeCompanyId, boundCard.sessionId);
+              if (session.projectId === project.id && session.status !== "archived") preparedChatSession = session;
+            }
+            preparedChatSession ??= (await codeService.listSessions(auth, activeCompanyId, project.id, { limit: 1 }))[0] ?? null;
+            if (!preparedChatSession && isCodeChatWebsite(project)) {
+              await codeService.detectAndPersist(auth, activeCompanyId, project.id);
+              preparedChatSession = await codeService.createSession(auth, activeCompanyId, project.id, { mode: "auto" });
+            }
+          }
+        }
+      }
+      if (!preparedChatSession && projectIntent.intent === "CHAT" && resolved.context.contextType === "business" && !resolved.business) {
         return reply.code(409).send({ error: { code: "BUSINESS_REQUIRED", message: "Complete business setup before starting a streamed research chat." } });
       }
 
@@ -7930,6 +8001,7 @@ ${localized.next}`;
           companyId: activeCompanyId,
           projectId: codeProject ? effectiveProjectId : null,
           projectKind: codeProjectKind,
+          sessionBound: !!preparedChatSession,
         });
         if (codeDecision.mode === "clarify") {
           send("result", { routed: "clarify", intent: codeDecision.intent, message: codeDecision.message });
@@ -7944,13 +8016,14 @@ ${localized.next}`;
             : null;
           // The stored session is used only when it still belongs to the resolved project and is not archived;
           // otherwise the newest session of that project is used, exactly as before.
-          const codeSession = storedSession && storedSession.status !== "archived" && storedSession.projectId === effectiveProjectId
+          const codeSession = preparedChatSession ?? (storedSession && storedSession.status !== "archived" && storedSession.projectId === effectiveProjectId
             ? storedSession
-            : codeSessions[0] ?? null;
+            : codeSessions[0] ?? null);
           if (!codeSession) {
             send("result", { routed: "clarify", intent: codeDecision.intent, message: "Which project should I work in? Create or select a code session first." });
           } else {
             const runKey = `${codeSession.id}:${Date.now().toString(36)}`;
+            if (await codeSessionInbox.isEnabled(auth, codeSession.companyId)) await codeSessionInbox.recoverTerminalTask(codeSession);
             /**
              * C10 (ТЗ items 5–6): the two gates that turn "a code run" into "a code run that survives the tab".
              *
@@ -8029,7 +8102,9 @@ ${localized.next}`;
             const executed = await codeSessionRunExecutor.execute({
               ctx: auth,
               session: codeSession,
-              prompt: message,
+              prompt: isCodeChatWebsite(codeProject)
+                ? `${message}\n\nWork in this existing website workspace. Start with package.json, the main page and its styles; implement the requested visible website before exploring unrelated files. Read files before editing; preserve working pages and the attached database/auth SDK (lib/project-client.ts). Do not re-scaffold or run create-next-app. Use code.deps.install for dependency installation, not compound shell setup commands. Do not start a dev server yourself. Once the requested edits are made, finish your response: the system runs the production build and starts Live Preview.`
+                : message,
               // C11 (owner decision 10): `REVIEW_CODE` is a read-only intent, and this is the flag the runtime
               // refuses writes on. It is derived from the routing decision, never from the message.
               ...(codeIntentIsReadOnly(codeDecision.intent) ? { readOnlyIntent: true } : {}),
@@ -8082,10 +8157,10 @@ ${localized.next}`;
             // its `sandboxId` is the pre-run value and is normally empty (the run creates the sandbox), which
             // made this a no-op that leaked a live sandbox on every code run. Re-reading is what makes the
             // release real, and it is asserted in `tests/coding-agent-c10-sandbox-retention.test.ts`.
-            if (projectSandbox && await codeSessionInbox.mayCleanup(auth, codeSession, runResult)) {
+            if (projectSandbox && !hasCodeChatPreview(runResult) && projectPreviewService.getSession(effectiveProjectId!)?.status !== "running" && await codeSessionInbox.mayCleanup(auth, codeSession, runResult)) {
               try {
                 const current = await projectService.get(auth, activeCompanyId!, effectiveProjectId!);
-                await projectSandbox.destroy(auth, current);
+                await projectSandbox.releaseAfterRun(auth, current);
               } catch (error) {
                 request.log.warn({ err: error }, "code_run_sandbox_release_failed");
               }
@@ -8099,6 +8174,7 @@ ${localized.next}`;
             // "Open Workspace" and "Changes" without the user hunting for the project. It is built from what the
             // run actually reported (never from a guess) and persisted through the existing chat-card store.
             const finishedRun = runResult && typeof runResult === "object" ? (runResult as Partial<CodingAgentRunResult>) : null;
+            const finishedProject = await projectService.get(auth, activeCompanyId!, effectiveProjectId!);
             const runStatus = typeof finishedRun?.status === "string" ? finishedRun.status : "unknown";
             const changedFiles = Array.isArray(finishedRun?.summary?.filesChanged) ? finishedRun.summary.filesChanged.length : undefined;
             const codeCard: ProjectCardData = {
@@ -8109,6 +8185,9 @@ ${localized.next}`;
               status: runStatus,
               cardVersion: PROJECT_CARD_DATA_VERSION,
               kind: "code_project",
+              framework: finishedProject.framework ?? undefined,
+              previewUrl: hasCodeChatPreview(runResult) ? finishedProject.previewUrl ?? undefined : undefined,
+              lastBuildStatus: finishedProject.lastBuildStatus ?? undefined,
               sessionId: codeSession.id,
               codeMode: codeSession.mode,
               ...(typeof changedFiles === "number" ? { changesCount: changedFiles } : {}),
@@ -8139,6 +8218,8 @@ ${localized.next}`;
               intent: codeDecision.intent,
               run: runResult,
               projectCard: codeCard,
+              message: finishedRun?.message ?? `The code agent finished with status ${runStatus}.`,
+              activeContext: { contextType: "project", companyId: activeCompanyId, projectId: effectiveProjectId, businessId: null },
               ...(cardConversationId ? { conversationId: cardConversationId } : {}),
             });
           }
@@ -8147,9 +8228,11 @@ ${localized.next}`;
           return;
         }
       } catch (error) {
-        // A failure inside the coding-agent branch must never break the chat stream: log it and continue with
-        // the existing pipeline exactly as if the branch had not matched.
         request.log.warn({ err: error }, "code_intent_chat_branch_failed");
+        send("error", { error: { code: "code_chat_failed", message: error instanceof Error ? error.message : "Coding Agent failed" } });
+        clearInterval(heartbeat);
+        if (!reply.raw.writableEnded) reply.raw.end();
+        return;
       }
 
       const progress = (event: ResearchProgressEvent) => send("progress", { ...event, timestamp: new Date().toISOString() });

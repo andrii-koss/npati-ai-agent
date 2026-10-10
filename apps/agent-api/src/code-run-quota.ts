@@ -87,8 +87,12 @@ function positive(value: unknown, fallback: number): number {
 
 /** Reads the budget from the environment, clamping every value. */
 export function resolveCodeRunBudget(env: NodeJS.ProcessEnv = process.env): CodeRunBudgetLimits {
+  // Total tokens include the input context on every tool round trip. A website
+  // build needs more than the legacy 100k allowance; retain explicit operator caps.
+  const defaultTokens = env.NPATI_DEPLOYMENT_TYPE === "self_hosted" || env.NPATI_SANDBOX_RUNNER_MODE === "local"
+    ? 500_000 : DEFAULT_CODE_RUN_BUDGET.maxTokens;
   return {
-    maxTokens: Math.min(positive(env.NPATI_CODE_RUN_MAX_TOKENS, DEFAULT_CODE_RUN_BUDGET.maxTokens), CODE_RUN_BUDGET_MAX_TOKENS),
+    maxTokens: Math.min(positive(env.NPATI_CODE_RUN_MAX_TOKENS, defaultTokens), CODE_RUN_BUDGET_MAX_TOKENS),
     maxCostUsd: Math.min(positive(env.NPATI_CODE_RUN_MAX_COST_USD, DEFAULT_CODE_RUN_BUDGET.maxCostUsd), CODE_RUN_BUDGET_MAX_COST_USD),
     // The depth is the structural one: configuration cannot raise it past the canonical nesting limit.
     maxDepth: clampCodeSubagentRegistryDepth(env.NPATI_CODE_RUN_MAX_DEPTH ?? DEFAULT_CODE_RUN_BUDGET.maxDepth),

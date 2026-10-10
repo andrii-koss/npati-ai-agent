@@ -172,19 +172,25 @@ export function resolveChatCodeIntent(input: {
   companyId?: string | null;
   projectId?: string | null;
   projectKind?: CodeProjectKind | null;
+  /** A validated conversation/project binding keeps natural-language follow-ups in the same runner. */
+  sessionBound?: boolean;
 }): { mode: "chat" } | { mode: "clarify"; intent: CodeIntent; message: string } | { mode: "run"; intent: CodeIntent; readOnly: boolean } {
   // Flag off (or unreadable) → byte-for-byte the previous chat behaviour.
   if (!input.codingEnabled) return { mode: "chat" };
   if (!input.companyId) return { mode: "chat" };
   // A website/mobile project is handled by the existing project pipeline, never by the agent loop.
-  if (input.projectKind && input.projectKind !== "code_project") return { mode: "chat" };
+  if (input.projectKind && input.projectKind !== "code_project" && !input.sessionBound) return { mode: "chat" };
 
   const classification = classifyCodeIntent({
     message: input.message,
     activeProjectId: input.projectId ?? null,
     projectKind: input.projectId ? "code_project" : "unknown",
   });
-  if (classification.intent === "CHAT") return { mode: "chat" };
+  if (classification.intent === "CHAT") {
+    return input.sessionBound && input.projectId
+      ? { mode: "run", intent: "EDIT_CODE", readOnly: false }
+      : { mode: "chat" };
+  }
   // A code request with no project at all must ASK (plan requirement), not be answered as ordinary chat.
   if (classification.needsProjectSelection) {
     return { mode: "clarify", intent: classification.intent, message: classification.clarificationMessage ?? "Which project should I work in?" };

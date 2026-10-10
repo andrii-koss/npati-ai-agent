@@ -1,9 +1,9 @@
 import { getStoredAuthToken } from "./AuthContext";
 import { useTranslation } from "./i18n";
 import type { AgentReply, ProjectCardData } from "@npati/shared";
-import { defaultHybridRouter } from "@npati/shared";
+import { defaultHybridRouter } from "@npati/shared/hybrid-router";
 import { FormEvent, Fragment, KeyboardEvent as ReactKeyboardEvent, ReactNode, SyntheticEvent, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { createPortal } from "react-dom";
 import { ChatMessageContent, projectChatText, stripInternalChatActions } from "./ChatMessageContent";
 import { UserPromptMessage } from "./UserPromptMessage";
@@ -1084,16 +1084,13 @@ function AssistantMessageToolbar({
 }
 
 
-function ProjectChatCard({ card }: { card: ProjectCardData }) {
+export function ProjectChatCard({ card, onActivate }: { card: ProjectCardData; onActivate?: (card: ProjectCardData) => void }) {
   const navigate = useNavigate();
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState(card.previewUrl ?? "");
   const [previewHtml, setPreviewHtml] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
-  const builderUrl = card.companyId
-    ? `/settings/websites/${encodeURIComponent(card.companyId)}/${encodeURIComponent(card.projectId ?? card.id)}`
-    : `/projects/${encodeURIComponent(card.projectId ?? card.id)}`;
   // C7: a code project opens the Code Workspace instead of the Website Builder. `tab=changes` is the same
   // convention the builder link uses, so the Changes action lands on the tab the user asked for.
   const isCodeProject = card.kind === "code_project";
@@ -1103,6 +1100,15 @@ function ProjectChatCard({ card }: { card: ProjectCardData }) {
   const codeChangesUrl = codeWorkspaceUrl
     ? `${codeWorkspaceUrl}${codeWorkspaceUrl.includes("?") ? "&" : "?"}tab=changes`
     : null;
+
+  useEffect(() => {
+    if (!previewOpen) return;
+    const refresh = (event: Event) => {
+      if ((event as CustomEvent<{ projectId?: string }>).detail?.projectId === (card.projectId ?? card.id)) void openPreview();
+    };
+    window.addEventListener("npati-code-project-updated", refresh);
+    return () => window.removeEventListener("npati-code-project-updated", refresh);
+  }, [previewOpen, card.companyId, card.projectId, card.id]);
 
   useEffect(() => {
     if (!previewOpen) return;
@@ -1211,34 +1217,13 @@ function ProjectChatCard({ card }: { card: ProjectCardData }) {
           <span className={`status-pill status-${card.status}`}>{card.status}</span>
         </div>
         <div className="project-chat-card-meta">
-          <span>Build: <strong className={`build-${card.lastBuildStatus || (card.status === "failed" ? "not-run" : "ready")}`}>{card.lastBuildStatus || (card.status === "failed" ? "not run" : "ready")}</strong></span>
+          <span>Build: <strong className={`build-${card.lastBuildStatus || "not-run"}`}>{card.lastBuildStatus || "not run"}</strong></span>
           {card.previewUrl && <span className="preview-live-badge">● Live Preview Active</span>}
         </div>
         <div className="project-chat-card-actions">
-          {isCodeProject && codeWorkspaceUrl ? (
-            <>
-              <button type="button" className="button-primary" onClick={() => navigate(codeWorkspaceUrl)}>
-                Open Workspace →
-              </button>
-              <button type="button" className="button-secondary" onClick={() => navigate(codeChangesUrl!)}>
-                Changes{typeof card.changesCount === "number" ? ` (${card.changesCount})` : ""}
-              </button>
-            </>
-          ) : (
-            <button type="button" className="button-primary" onClick={() => navigate(builderUrl)}>
-              Open in Website Builder →
-            </button>
-          )}
-          {!isCodeProject && (
-            <button type="button" className="button-secondary" onClick={() => void openPreview()}>
-              Preview
-            </button>
-          )}
-          {!isCodeProject && (
-            <button type="button" className="button-secondary" onClick={() => navigate(`${builderUrl}?tab=changes`)}>
-              Changes
-            </button>
-          )}
+          <button type="button" className="button-primary" disabled={isCodeProject && !card.previewUrl && ["stopped", "failed", "cancelled", "waiting_for_user"].includes(card.status)} onClick={() => { onActivate?.(card); void openPreview(); }}>Preview</button>
+          <button type="button" className="button-secondary" onClick={() => onActivate?.(card)}>Edit in chat</button>
+          {isCodeProject && codeWorkspaceUrl && <button type="button" className="button-secondary" onClick={() => navigate(codeChangesUrl!)}>Changes{typeof card.changesCount === "number" ? ` (${card.changesCount})` : ""}</button>}
           {isCodeProject && card.codeMode && persistedModeLabel(card.codeMode, false) && (
             <span className="project-chat-card-meta-note">Mode: {persistedModeLabel(card.codeMode, false)}</span>
           )}
@@ -1283,6 +1268,22 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const { overview } = useWorkspace(); const business = neutralChat || companyId ? null : overview?.currentBusiness;
   const contextSwitcher = useContext(ChatContextSwitcherContext);
   const navigate = useNavigate();
+  const [chatSearch] = useSearchParams();
+  const [selectedProject, setSelectedProject] = useState<{ companyId: string; projectId: string; conversationId: string | null } | null>(() => {
+    const projectId = chatSearch.get("project"); const selectedCompany = chatSearch.get("company");
+    return projectId && selectedCompany ? { projectId, companyId: selectedCompany, conversationId: null } : null;
+  });
+  const [entryProjectCard, setEntryProjectCard] = useState<ProjectCardData | null>(null);
+  useEffect(() => {
+    if (!selectedProject || selectedProject.conversationId !== null) return;
+    const controller = new AbortController();
+    void api<{ id: string; name: string; status: string; framework?: string; previewUrl?: string; type: string }>(
+      `/companies/${encodeURIComponent(selectedProject.companyId)}/projects/${encodeURIComponent(selectedProject.projectId)}`, { signal: controller.signal }
+    ).then(project => {
+      if (!controller.signal.aborted) setEntryProjectCard({ id: project.id, projectId: project.id, companyId: selectedProject.companyId, name: project.name, status: project.status, framework: project.framework, previewUrl: project.previewUrl, kind: project.type === "code_project" ? "code_project" : "website_project" });
+    }).catch(error => { if (!controller.signal.aborted) setNotice(error instanceof Error ? error.message : "Project unavailable"); });
+    return () => controller.abort();
+  }, [selectedProject]);
   const [conversations, setConversations] = useState<Conversation[]>([]); const [selected, setSelected] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]); const [input, setInput] = useState(initialPrompt);
   const [attachments, setAttachments] = useState<ChatAttachmentInput[]>([]);
@@ -1298,6 +1299,11 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
 
   const [sending, setSending] = useState(false); const [thinkingStep, setThinkingStep] = useState(0);
   const codeInbox = useCodeInbox(selected, sending);
+  useEffect(() => {
+    if (codeInbox.session && codeInbox.snapshot?.phase === "settled") {
+      window.dispatchEvent(new CustomEvent("npati-code-project-updated", { detail: { projectId: codeInbox.session.projectId } }));
+    }
+  }, [codeInbox.session?.projectId, codeInbox.snapshot?.phase, codeInbox.snapshot?.runId]);
   const [inboxSubmitting, setInboxSubmitting] = useState(false);
   const [inboxNotice, setInboxNotice] = useState("");
   useEffect(() => { setInboxNotice(""); }, [selected, codeInbox.session?.sessionId]);
@@ -1674,7 +1680,9 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (codeInbox.active) { await submitInbox("queue"); return; }
+    const nextIntent = defaultHybridRouter.classifyProject({ message: input.trim(), activeCompanyId: companyId ?? readActiveCompanyId() });
+    const createsProject = nextIntent.intent === "CREATE_WEBSITE" || nextIntent.intent === "CREATE_PROJECT";
+    if (codeInbox.active && !createsProject) { await submitInbox("queue"); return; }
     const message = input.trim(); if ((!message && attachments.length === 0) || sending || chatSubmissionBusy.current) return;
     chatSubmissionBusy.current = true;
     const submittedDraftVersion = draftVersion.current;
@@ -1784,16 +1792,19 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     };
     flushDeltasRef.current = flushDeltas;
 
-    const activeCompanyForRequest = companyId ?? readActiveCompanyId();
+    const activeCompanyForRequest = (!createsProject && selectedProject?.conversationId === selected ? selectedProject.companyId : null) ?? companyId ?? readActiveCompanyId();
     let activeProjectId: string | undefined;
     const projectIntent = defaultHybridRouter.classifyProject({ message: requestMessage, activeCompanyId: activeCompanyForRequest });
     const isNewProjectRequest = projectIntent.intent === "CREATE_WEBSITE" || projectIntent.intent === "CREATE_PROJECT";
     if (!isNewProjectRequest) {
+      const latestCard = [...messages].reverse().find(item => item.projectCard)?.projectCard;
+      if (selectedProject?.conversationId === selected && selectedProject.companyId === activeCompanyForRequest) activeProjectId = selectedProject.projectId;
+      else if (latestCard?.companyId === activeCompanyForRequest) activeProjectId = latestCard.projectId ?? latestCard.id;
       try {
         const stored = sessionStorage.getItem("npati_active_project");
         if (stored) {
           const active = JSON.parse(stored) as { companyId?: string; projectId?: string; conversationId?: string };
-          if (selected && active.conversationId === selected && active.companyId === activeCompanyForRequest) activeProjectId = active.projectId;
+          if (!activeProjectId && selected && active.conversationId === selected && active.companyId === activeCompanyForRequest) activeProjectId = active.projectId;
         }
       } catch {}
     }
@@ -1845,6 +1856,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         window.dispatchEvent(new CustomEvent("npati:goals-changed", { detail: (result as any).goalAction }));
       }
       if (result.activeContext?.projectId) {
+        window.dispatchEvent(new CustomEvent("npati-code-project-updated", { detail: { projectId: result.activeContext.projectId } }));
         try {
           sessionStorage.setItem("npati_active_project", JSON.stringify({ companyId: result.activeContext.companyId, projectId: result.activeContext.projectId, conversationId: result.conversationId ?? selected }));
           if (!readActiveCompanyId() && result.activeContext.companyId) writeActiveCompanyId(result.activeContext.companyId);
@@ -1951,6 +1963,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       )}
       <div className="onboarding-live-chat standard-live-chat">
         <div className="message-stream" ref={messageStreamRef}>
+          {entryProjectCard && !selected && <ProjectChatCard card={entryProjectCard} onActivate={(card) => setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected })} />}
           {messages.length === 0 && !selected && !initialConversationId && !loadingHistory && (
             <div className="chat-welcome">
               <h2>{t("chat.emptyTitle")}</h2>
@@ -1985,7 +1998,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
                 >
                   <PendingMessageAttachments value={message.attachments ?? []} />
                   {message.role === "user" ? <UserPromptMessage content={message.content} onEdit={(prompt) => { setInput(prompt); window.requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".onboarding-live-composer textarea")?.focus()); }} /> : <ChatMessageContent content={projectChatText(message.content, message.projectCard)} />}
-                  {message.projectCard && <ProjectChatCard card={message.projectCard} />}
+                  {message.projectCard && <ProjectChatCard card={message.projectCard} onActivate={(card) => { setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected }); setNotice(`Editing ${card.name}. Describe your changes in chat.`); }} />}
                   {message.role === "assistant" && !sending && (
                     <AssistantMessageToolbar
                       content={message.content}
@@ -2018,9 +2031,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         </div>
         {replyMeta?.memoryCandidate && <div className="memory-candidate"><div><strong>Remember this?</strong><p>{replyMeta.memoryCandidate.title}: {replyMeta.memoryCandidate.content}</p></div><button onClick={() => void remember()}>Remember</button><button onClick={() => setReplyMeta({ ...replyMeta, memoryCandidate: undefined })}>Not now</button></div>}
         <form className="onboarding-live-composer" onSubmit={(event) => void submit(event)}>
-          {codeInbox.session && <>
+          {codeInbox.session && (codeInbox.active || codeInbox.error || inboxNotice) && <>
             <CodePendingMessages key={codeInbox.session.sessionId} receiptTarget={codeInbox.receiptTarget} snapshot={codeInbox.snapshot} error={codeInbox.error || inboxNotice} busy={inboxSubmitting} t={t} onChange={changeInboxMessage} />
-            <Link to={`/settings/code/${encodeURIComponent(codeInbox.session.companyId)}/${encodeURIComponent(codeInbox.session.projectId)}`}>{t("codeInbox.workspace")}</Link>
           </>}
           {contextSwitcher}
           {noMemory && (

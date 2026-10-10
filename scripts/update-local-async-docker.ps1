@@ -13,7 +13,7 @@ function Invoke-LocalDocker([string[]]$DockerArguments) {
 $taskRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $taskRoot
 try {
-    $compose = @('compose', '-p', 'npati-agent', '-f', 'docker-compose.yml', '-f', 'docker-compose.fresh-local.yml', '-f', 'docker-compose.sandbox-isolated.yml')
+    $compose = @('compose', '-p', 'npati-agent', '-f', 'docker-compose.yml', '-f', 'docker-compose.fresh-local.yml', '-f', 'docker-compose.sandbox-runner.yml')
     # Preserve the existing Desktop installation's locally prepared MinIO image when present.
     $localOverride = Join-Path $taskRoot 'artifacts/docker-compose.local-testing.yml'
     if (Test-Path -LiteralPath $localOverride) { $compose += @('-f', $localOverride) }
@@ -22,5 +22,8 @@ try {
         Invoke-LocalDocker ($compose + @('build', 'agent-api', 'company-worker', 'web', 'sandbox-runner'))
     }
     Invoke-LocalDocker ($compose + @('up', '-d', '--no-deps', '--wait', '--wait-timeout', '360', 'agent-api', 'company-worker', 'web', 'sandbox-runner'))
-    Write-Host 'Local async stack ready: web http://localhost:3000, API http://localhost:3001, isolated runner http://localhost:7865'
+    # Chat branch admission runs here, not in the project-runtime toolchain.
+    Invoke-LocalDocker ($compose + @('exec', '-T', 'agent-api', 'git', '--version'))
+    Invoke-LocalDocker ($compose + @('exec', '-T', 'company-worker', 'git', '--version'))
+    Write-Host 'Local async stack ready: web http://localhost:3000, API http://localhost:3001, one shared project runtime http://localhost:7865'
 } finally { Pop-Location }

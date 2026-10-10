@@ -1156,6 +1156,8 @@ export interface CodingAgentRunInput {
    * for this run, which is how a caller opts out without a new flag.
    */
   verificationTools?: readonly string[];
+  /** Server-selected build/preview tasks must verify even when source files did not change. */
+  forceVerification?: boolean;
   /**
    * C11 (owner decision 10): the session's resolved intent is read-only (`REVIEW_CODE`, `EXPLAIN_CODE`).
    * The value comes from `codeIntentIsReadOnly(intent)` in the chat entry point — never from a model
@@ -4286,7 +4288,7 @@ export class CodingAgentRunner {
          * is not silently skipped in that case: its verdict is computed and says `not_run`, which is what the
          * summary reports — "we did not review this" is visible, never dressed up as clean.
          */
-        if (verificationDisabled || changeSet.length === 0) {
+        if (verificationDisabled || (changeSet.length === 0 && !input.forceVerification)) {
           // The state exists so the verdict is explicit rather than an absent field: `not_run` with its reason
           // ("no changes to review", "disabled by configuration"). "We did not review this" is visible, never
           // dressed up as clean.

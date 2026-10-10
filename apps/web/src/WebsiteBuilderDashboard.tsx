@@ -24,7 +24,7 @@ export interface WebsiteProject {
   companyId: string;
   name: string;
   description?: string;
-  type: "website" | "web_app" | "landing_page" | "mobile_app";
+  type: "website" | "web_app" | "landing_page" | "mobile_app" | "code_project";
   status: string;
   framework?: string;
   repositoryBranch?: string;
@@ -131,15 +131,15 @@ const TEMPLATES: TemplateOption[] = [
     pagesCount: 1,
     blocks: ["Navbar", "Hero", "Footer"],
     defaultName: "My Custom Website",
-    defaultDesc: "Custom website built from scratch with NPATI Visual Block Builder.",
+    defaultDesc: "Custom website edited with NPATI Coding Agent in chat.",
   },
 ];
 
 const copy = {
   en: {
     eyebrow: "Website Studio",
-    title: "Website Builder",
-    subtitle: "Build, customize and launch high-performing Next.js websites using AI and visual block editing.",
+    title: "Websites",
+    subtitle: "Create and edit websites with Coding Agent in chat and view changes in Live Preview.",
     newWebsite: "Create Website",
     searchPlaceholder: "Search websites by name or purpose...",
     filterAll: "All Frameworks",
@@ -149,7 +149,7 @@ const copy = {
     emptyTitle: "No websites created yet",
     emptySubtitle: "Create your first website with our pre-built Next.js block templates or ask the AI agent in Chat.",
     createNow: "Create Your First Website",
-    openBuilder: "Open in Builder",
+    openBuilder: "Edit in chat",
     preview: "Live Preview",
     duplicate: "Duplicate",
     rename: "Rename",
@@ -160,7 +160,7 @@ const copy = {
     renamePrompt: "Enter new website name:",
     archivePrompt: "Archive this website? It will remain accessible under archived filter.",
     deletePrompt: "Permanently delete this website project and all its files? This action cannot be undone.",
-    drawerKicker: "VISUAL BLOCK BUILDER",
+    drawerKicker: "WEBSITE STARTER",
     drawerTitle: "Create New Website",
     drawerSubtitle: "Select a starter block template and customize your project details.",
     sectionTemplate: "1. Choose Starter Blocks & Template",
@@ -191,7 +191,7 @@ const copy = {
     typeWebApp: "Web Application",
     typeMobileApp: "Mobile app (Expo / React Native)",
     cancel: "Cancel",
-    createBtn: "Create Website & Open Builder →",
+    createBtn: "Create Website & Edit in chat →",
     creating: "Creating Project & Files...",
     pages: "pages",
     updated: "Updated",
@@ -201,8 +201,8 @@ const copy = {
   },
   uk: {
     eyebrow: "Студія сайтів",
-    title: "Website Builder",
-    subtitle: "Створюйте, редагуйте та публікуйте сайти на Next.js за допомогою штучного інтелекту та візуальних блоків.",
+    title: "Сайти",
+    subtitle: "Створюйте й редагуйте сайти через Coding Agent у чаті та переглядайте зміни в Live Preview.",
     newWebsite: "Створити сайт",
     searchPlaceholder: "Пошук сайтів за назвою чи описом...",
     filterAll: "Усі фреймворки",
@@ -212,7 +212,7 @@ const copy = {
     emptyTitle: "Сайтів ще не створено",
     emptySubtitle: "Створіть свій перший сайт із готових блоків Next.js або попросіть AI агента у Chat командою «Створи сайт».",
     createNow: "Створити перший сайт",
-    openBuilder: "Відкрити конструктор",
+    openBuilder: "Редагувати в чаті",
     preview: "Live Preview",
     duplicate: "Дублювати",
     rename: "Перейменувати",
@@ -223,7 +223,7 @@ const copy = {
     renamePrompt: "Введіть нову назву сайту:",
     archivePrompt: "Архівувати цей сайт? Його можна буде переглянути через фільтр архівних.",
     deletePrompt: "Назавжди видалити цей сайт і всі його файли? Цю дію неможливо скасувати.",
-    drawerKicker: "КОНСТРУКТОР БЛОКІВ",
+    drawerKicker: "СТАРТОВИЙ САЙТ",
     drawerTitle: "Створити новий сайт",
     drawerSubtitle: "Оберіть структуру блоків та вкажіть назву сайту.",
     sectionTemplate: "1. Оберіть структуру блоків та шаблон",
@@ -254,7 +254,7 @@ const copy = {
     typeWebApp: "Вебзастосунок",
     typeMobileApp: "Мобільний застосунок (Expo / React Native)",
     cancel: "Скасувати",
-    createBtn: "Створити сайт і відкрити конструктор →",
+    createBtn: "Створити сайт і редагувати в чаті →",
     creating: "Створення проєкту та файлів...",
     pages: "стор.",
     updated: "Оновлено",
@@ -367,7 +367,7 @@ export function WebsiteBuilderDashboard() {
       const res = await apiFetch<{ projects: WebsiteProject[] }>(
         `/companies/${encodeURIComponent(companyId)}/projects?includeArchived=true`
       );
-      setWebsites(res.projects || []);
+      setWebsites((res.projects || []).filter(site => site.type !== "code_project" || /^(Next\.js|HTML\/CSS|React|Vite)$/i.test(site.framework ?? "")));
       setError("");
     } catch (err: any) {
       setError(err.message || t.loadError);
@@ -768,7 +768,7 @@ export function WebsiteBuilderDashboard() {
           }}
         >
           {filteredWebsites.map((site) => {
-            const editorUrl = `/settings/websites/${encodeURIComponent(companyId)}/${encodeURIComponent(site.id)}`;
+            const editorUrl = `/chat?company=${encodeURIComponent(companyId)}&project=${encodeURIComponent(site.id)}`;
             const isNext = (site.framework || "").toLowerCase().includes("next");
             const isPreviewing = site.status === "previewing" || Boolean(site.previewUrl);
 

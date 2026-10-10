@@ -272,6 +272,9 @@ export class ProjectSandboxService {
       }
     }
     if (!sandboxId) {
+      // A sandbox is a scoped runtime identity, not necessarily a container.
+      // Frozen local decision: docs/website-builder/SHARED_PROJECT_RUNTIME.md.
+      // Shared provider creates/reuses a project directory; never fall back to Docker here.
       const created = await this.provider.createSandbox(scope, { runtime: project.runtime, ...(mount ? { mount } : {}) });
       try { project = await this.store.setProjectSandbox(ctx, project.companyId, project.id, created.id, project.sandboxId ?? null); }
       catch (error) { await this.provider.destroySandbox(scope, created.id).catch(() => undefined); throw error; }
@@ -574,6 +577,14 @@ export class ProjectSandboxService {
     const processIds = [...new Set(history.map((event) => event.processId).filter((id): id is string => Boolean(id)))].slice(-5);
     const processLogs = project.sandboxId ? await Promise.all(processIds.map(async (id) => redactTerminalText(await this.provider.getLogs(scopeOf(ctx, project), project.sandboxId!, id)).slice(0, 8_000)).map((item) => item.catch(() => ""))) : [];
     return [recorded, runner, ...processLogs].filter(Boolean).join("\n").slice(0, this.limits.outputLimitBytes);
+  }
+  /** Run completion releases the caller, not the shared Project's directory, cache or other processes.
+   * Full deletion, explicit teardown and retention continue through destroy(). */
+  async releaseAfterRun(ctx: AuthContext, project: Project) {
+    if (this.provider.executionMode !== "shared") return this.destroy(ctx, project);
+    const current = await this.projects.get(ctx, project.companyId, project.id);
+    this.touch(ctx, current);
+    return true;
   }
   async destroy(ctx: AuthContext, project: Project) {
     if (!project.sandboxId) return false;

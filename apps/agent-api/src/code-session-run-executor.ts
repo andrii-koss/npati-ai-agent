@@ -39,6 +39,8 @@ export interface CodeSessionRunPort {
     readOnlyIntent?: boolean;
     runId?: string;
     initialInboxMessageId?: string;
+    verificationTools?: readonly string[];
+    forceVerification?: boolean;
   }): Promise<unknown>;
 }
 
@@ -58,7 +60,7 @@ export interface CodeRunControlPort {
  */
 export interface CodeRunEventSink {
   signal: AbortSignal;
-  /** Records the run's own result. `result` is the unchanged value `CodingAgentRunner.run` returned. */
+  /** Records the result after any website build/preview finalization. */
   emitResult(result: unknown): void;
   /** Records how the run ended. Called once, after `emitResult`. */
   emitTerminal(status: CodeRunTerminalStatus, reason: string | null): void;
@@ -93,7 +95,7 @@ export interface CodeSessionRunInput {
 }
 
 export interface CodeSessionRunOutcome {
-  /** The runner's own result, unchanged. `unknown` because the runner's result type is the runner's business. */
+  /** The runner's result, including optional website Preview metadata. */
   result: unknown;
   /** The registry-normalised terminal status: a "stopped" run is `failed`, never a success. */
   terminalStatus: CodeRunTerminalStatus;
@@ -111,6 +113,8 @@ export interface CodeSessionRunExecutorOptions {
   runner: CodeSessionRunPort;
   control: CodeRunControlPort;
   resolveModel?: (ctx: AuthContext) => Promise<string | undefined>;
+  resolveVerificationTools?: (input: CodeSessionRunInput) => Promise<readonly string[] | undefined>;
+  afterRun?: (input: CodeSessionRunInput, result: unknown) => Promise<unknown>;
   logger?: { warn(payload: unknown, message?: string): void };
 }
 
@@ -154,6 +158,7 @@ export class CodeSessionRunExecutor {
     let result: unknown;
     try {
       const model = await this.options.resolveModel?.(input.ctx);
+      const verificationTools = await this.options.resolveVerificationTools?.(input);
       result = await runner.run({
         ctx: input.ctx,
         session: input.session,
@@ -161,10 +166,15 @@ export class CodeSessionRunExecutor {
         ...(input.runId ? { runId: input.runId } : {}),
         ...(input.initialInboxMessageId ? { initialInboxMessageId: input.initialInboxMessageId } : {}),
         ...(model ? { model } : {}),
+        ...(verificationTools ? { verificationTools } : {}),
+        ...(verificationTools?.includes("build") ? { forceVerification: true } : {}),
         signal: sink ? sink.signal : controller.signal,
         cancelRequested: input.cancelRequested,
         ...(input.readOnlyIntent ? { readOnlyIntent: true } : {}),
       });
+      if (this.options.afterRun && !controller.signal.aborted && !await input.cancelRequested()) {
+        result = await this.options.afterRun(input, result);
+      }
     } catch (error) {
       /**
        * A throw becomes a failed run rather than an exception the caller has to interpret, so one entry point
@@ -172,7 +182,10 @@ export class CodeSessionRunExecutor {
        * than printed, and a caller that needs it has it in the terminal state.
        */
       this.options.logger?.warn({ err: error, sessionId }, "code_session_run_failed");
-      result = { status: "failed", reason: error instanceof Error ? error.message : "run_failed" };
+      const reason = error instanceof Error ? error.message : "run_failed";
+      result = result && typeof result === "object"
+        ? { ...result, status: controller.signal.aborted ? "cancelled" : "failed", reason, message: reason }
+        : { status: "failed", reason };
     } finally {
       control.unregisterController(sessionId, controller);
     }

@@ -259,6 +259,12 @@ function createHarness(options: HarnessOptions = {}) {
 }
 
 describe("security-gate: C6 runner — tool execution and the model contract", () => {
+  it("runs the canonical build for an explicit website build task even without source changes", async () => {
+    const harness = createHarness({ script: [{ content: "Build the existing site." }] });
+    const result = await harness.run({ verificationTools: ["build"], forceVerification: true });
+    expect(harness.invocations.some(entry => entry.tool === "code.verify.run")).toBe(true);
+    expect(result.summary.verification).toMatchObject({ status: "passed", requestedTools: ["build"] });
+  });
   it("completes when the model stops calling tools and reports a summary", async () => {
     const harness = createHarness({
       script: [

@@ -265,7 +265,7 @@ export class ProjectPreviewService {
     ctx: AuthContext,
     companyId: string,
     projectId: string,
-    options: { command?: string; port?: number; agentId?: string } = {},
+    options: { command?: string; port?: number; agentId?: string; signal?: AbortSignal } = {},
   ): Promise<{
     status: string;
     previewUrl: string;
@@ -275,6 +275,7 @@ export class ProjectPreviewService {
     command: string;
   }> {
     if (!this.sandbox) throw new PreviewError("sandbox_unavailable", "Sandbox runner is not configured", 503);
+    options.signal?.throwIfAborted();
     const project = await this.projects.get(ctx, companyId, projectId);
     if (project.status === "archived") throw new PreviewError("project_archived", "Archived project cannot run preview", 409);
 
@@ -311,6 +312,7 @@ export class ProjectPreviewService {
     if (!existing) await this.sandbox.stopRecordedPreview(ctx, companyId, projectId, devCommand);
 
     // Start process in sandbox
+    options.signal?.throwIfAborted();
     const result = await this.sandbox.process(ctx, companyId, {
       projectId,
       action: "start",
@@ -328,6 +330,7 @@ export class ProjectPreviewService {
       let ready = false;
       try {
         while (Date.now() < deadline) {
+          options.signal?.throwIfAborted();
           const response = await this.sandbox.proxyPreview({
             workspaceId: ctx.workspaceId, userId: ctx.userId, companyId, projectId,
           }, sandboxId, { port: devPort, path: "/", method: "GET", headers: {} }).catch(() => null);
@@ -347,6 +350,10 @@ export class ProjectPreviewService {
       }
     }
 
+    if (options.signal?.aborted) {
+      await this.sandbox.process(ctx, companyId, { projectId, action: "stop", processId, agentId: options.agentId || "system" }).catch(() => undefined);
+      options.signal.throwIfAborted();
+    }
     // Generate signed preview token
     const { token } = this.generateToken({
       userId: ctx.userId,

@@ -233,6 +233,7 @@ export function createRoleRegistry(matrix: CodeRoleMatrix = DEFAULT_CODE_ROLE_MA
 
 export interface CodeAuthorizationAuditPort {
   record(input: {
+    workspaceId?: string;
     action: string;
     actor: string;
     companyId: string;
@@ -582,6 +583,7 @@ export class CodeRbac {
     }
     try {
       await this.deps.audit.record({
+        workspaceId: ctx.workspaceId,
         action,
         actor: String(ctx.userId ?? "unknown"),
         companyId,

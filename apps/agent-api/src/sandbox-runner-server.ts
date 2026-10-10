@@ -5,7 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { DockerSandboxProvider, sandboxAllowedHostsWithProjectApi } from "./docker-sandbox-provider";
 import { dockerFailure, runnerFailure } from "./sandbox-runner-diagnostics";
-import { SandboxProviderError, type SandboxCreateOptions, type SandboxScope } from "./sandbox-provider";
+import { assertProjectRuntimeProvider, SandboxProviderError, type SandboxCreateOptions, type SandboxScope } from "./sandbox-provider";
 import { InMemoryWorkspaceStore, PostgresWorkspaceStore } from "@npati/workspace";
 import { resolveRunnerStore } from "./sandbox-runner-store";
 import { SandboxImagePolicy, sandboxImagePolicyConfig, type SandboxImageAdmission } from "./sandbox-image-policy";
@@ -108,6 +108,7 @@ const runnerMountGate = new RunnerMountGate({
   runnerMode: process.env.NPATI_SANDBOX_RUNNER_MODE,
 });
 
+assertProjectRuntimeProvider("isolated");
 const secret = process.env.NPATI_SANDBOX_RUNNER_SECRET ?? "";
 if (secret.length < 32 || !["local", "remote"].includes(process.env.NPATI_SANDBOX_RUNNER_MODE ?? "remote")) throw new Error("Sandbox runner requires a valid mode and 32-character secret");
 if ((process.env.NPATI_SANDBOX_RUNNER_MODE ?? "remote") === "remote" && process.env.NPATI_SANDBOX_RUNNER_ISOLATED_HOST !== "true") throw new Error("Remote sandbox runner requires an isolated host");
@@ -207,7 +208,7 @@ app.post<{ Body: string }>("/v1/readiness", async (request, reply) => {
   const auth = authenticateRunnerRequest({ headers: request.headers, body: request.body ?? "", secret, seen });
   if (!auth.ok) return reply.code(auth.status).send({ error: { code: auth.code, message: auth.message } });
   const report = await runnerReadiness.collect();
-  return report;
+  return { ...report, details: { ...report.details, runtimeMode: "isolated" } };
 });
 app.post<{ Body: string }>("/v1/sandbox", async (request, reply) => {
   const auth = authenticateRunnerRequest({ headers: request.headers, body: request.body ?? "", secret, seen });

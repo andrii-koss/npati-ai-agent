@@ -190,6 +190,8 @@ export const SECURITY_GATE_TESTS = [
   "tests/coding-agent-async-controls.test.ts",
   "tests/coding-agent-async-collect-barrier.test.ts",
   "tests/coding-agent-async-workspace.test.ts",
+  "tests/coding-agent-chat-website.test.ts",
+  "tests/shared-runtime-regression.test.ts",
   "tests/coding-agent-c6a-reconciler.test.ts",
   // C6a security: database migrations. Pins that a production, external or unidentified target is a hard
   // deny that no mode, role, standing rule or `approved: true` claim can lift; that a development
@@ -958,6 +960,7 @@ export const SECURITY_GATE_TESTS = [
  *    move the known-failures baseline of 10 files / 15 tests).
  */
 export const SECURITY_GATE_DB_TESTS = [
+  "tests/coding-agent-chat-website-postgres.test.ts",
   "tests/coding-agent-c1c-audit-postgres.test.ts",
   "tests/coding-agent-async-inbox-postgres.test.ts",
 ];

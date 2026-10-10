@@ -1,7 +1,9 @@
 import crypto from "node:crypto";
-const createHash = crypto?.createHash;
-const createHmac = crypto?.createHmac;
-const randomUUID = crypto?.randomUUID || (() => globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2));
+// Read Node-only members when the server invokes them. The chat imports the shared
+// catalogue in Vite too; eager property reads crash its browser module loader.
+const createHash = (...args: Parameters<typeof crypto.createHash>) => crypto.createHash(...args);
+const createHmac = (...args: Parameters<typeof crypto.createHmac>) => crypto.createHmac(...args);
+const randomUUID = (...args: Parameters<typeof crypto.randomUUID>) => crypto.randomUUID(...args);
 
 import type { CapabilityRisk } from "./capabilities";
 
