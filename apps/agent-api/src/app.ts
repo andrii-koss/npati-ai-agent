@@ -13,7 +13,7 @@ import { createClient } from "redis";
 import { defaultSkillRegistry } from "@npati/skills";
 import { InMemoryWorkspaceStore, PostgresWorkspaceStore, type AuthContext, type Business, type OnboardingScenario, type WorkspaceStore } from "@npati/workspace";
 import { WorkspaceAccessError, WorkspaceNotFoundError, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS } from "@npati/workspace";
-import { ContextValidationError, validateActiveContext, type ActiveContext, type ContextType, defaultCapabilityRegistry, defaultHybridRouter, CapabilityInspectorService, buildCombinedCapabilityView, defaultEffectiveCapabilityResolver, CODE_READ_FLAG, CODE_WRITE_FLAG, codeIntentIsReadOnly, PROJECT_CARD_DATA_VERSION, type ProjectCardData } from "@npati/shared";
+import { ContextValidationError, validateActiveContext, defaultCapabilityRegistry, defaultHybridRouter, CapabilityInspectorService, buildCombinedCapabilityView, defaultEffectiveCapabilityResolver, CODE_READ_FLAG, CODE_WRITE_FLAG, codeIntentIsReadOnly, PROJECT_CARD_DATA_VERSION, type ProjectCardData } from "@npati/shared";
 import Fastify from "fastify";
 import path from "node:path";
 import { ActiveContextResolver } from "./active-context-resolver";
@@ -29,11 +29,11 @@ import { verifyPlannedCompany } from "./company-plan-verification";
 import { WorkspaceChatActions } from "./workspace-chat-actions";
 import { chatLanguageInstruction, companyChatCopy, detectCompanyChatLanguage, resolveConversationLanguage, type CompanyChatLanguage } from "./company-chat-i18n";
 import { compositeCreationCopy, compositeMemoryCopy } from "./composite-chat-i18n";
-import { companyDeleteCompletedAll, companyDeleteConfirmAll, isCompanyDeleteConfirmed, isCompanyDeleteIntent } from "./company-delete-i18n";
+import { companyDeleteCompletedAll, companyDeleteConfirmAll, isCompanyDeleteConfirmed } from "./company-delete-i18n";
 import { pendingCompanyDelete } from "./pending-company-delete";
 import { AIPreferencesStore } from "./ai-preferences";
 import { registerAIRoutes } from "./ai-routes";
-import { AuthenticationError, LocalDevAuthProvider, NpatiBackendAuthProvider, type AuthProvider } from "./auth";
+import { AuthenticationError, NpatiBackendAuthProvider, type AuthProvider } from "./auth";
 import { registerAuthRoutes } from "./auth-routes";
 import { registerInstallationAuthRoutes } from "./installation-auth-routes";
 import { InstallationAuthStore } from "./installation-auth";
@@ -245,10 +245,10 @@ import { ProductionQdrantClient } from "./qdrant-client";
 import { ProductionMemoryEngineRegistry, QdrantMemoryEngineAdapter, SqliteFts5MemoryEngine } from "./knowledge-memory-engine";
 import { registerCompanyKnowledgeRoutes } from "./company-knowledge-routes";
 import { registerReliabilityAndOperationsRoutes, globalAdmissionQueue } from "./reliability-and-operations-routes";
-import { createProductionResilientAIEngine, InferenceRouteFailure } from "./production-resilient-ai-engine";
+import { createProductionResilientAIEngine } from "./production-resilient-ai-engine";
 import { createProviderDataGuard } from "./provider-data-guard";
 import { createEnginePolicyResolver, OutboundPolicySnapshot, resolveOutboundPolicyFromSnapshot, type ProviderDataPolicyLookupPort } from "./provider-data-policy-resolver";
-import { AdmissionError, SelfHealingExhaustedError, type PriorityTier } from "./resilience-admission-queue";
+import { AdmissionError, type PriorityTier } from "./resilience-admission-queue";
 import { registerBrowserAutomationRoutes } from "./browser-automation-routes";
 import { BrowserCredentialsRepository } from "./browser-credentials-repository";
 import { registerBrowserCredentialsRoutes } from "./browser-credentials-routes";
@@ -316,14 +316,23 @@ import {GuardrailPolicyRepository} from "./guardrail-policy-repository";
 import {registerGuardrailPolicyRoutes} from "./guardrail-policy-routes";
 import {registerMcpPolicyRoutes} from "./mcp-policy-routes";
 import {WasmExecSandbox} from "./wasm-exec-sandbox";
-import {CostTelemetry} from "./cost-telemetry";
 import { InMemoryActiveSessionRegistry, RedisActiveSessionRegistry, type ActiveSessionLease, type ActiveSessionRegistry } from "./distributed-session-registry";
 import { registerSessionStreamRoutes } from "./session-stream-routes";
 import { ContextCompactor } from "./context-compactor";
 import { AutomaticMemoryExtractor } from "./automatic-memory-extractor";
 import { MemoryDocumentService, memoryDocumentPrompt } from "./memory-documents";
 import { registerMemoryDocumentRoutes } from "./memory-document-routes";
-import { extractDocumentText, inferMimeType } from "./document-extractor";
+import { extractDocumentText } from "./document-extractor";
+
+import { conversationTitle, inferOnboardingScenario, isCompositeBusinessCompanyCreation, isLikelyOnboardingAside, isShortAffirmativeReply, isSimpleGreeting, normalizeNewBusinessDirective, onboardingGoalQuestion, quickOnboardingReply, requestsBusinessGoal, requestsBusinessMemory, requestsCompositeCompanyDeletionIntent, requestsNewBusinessIdea, resolveContextualCompanyFollowUp } from "./chat-intent-helpers";
+import { applyChatTelemetryHeaders } from "./chat-telemetry";
+import { ChatAttachmentInput, prepareChatAttachments, safeAttachmentName } from "./chat-attachments";
+import { attachResearchSources, publicChatError, publicCompanyRunMessage } from "./chat-public-errors";
+import { addColumnDirectiveFromMarkdown, explicitlyRequestsWebResearch, isSpreadsheetEditRequest, mapColumnDirectiveFromProposal, spreadsheetEditedMessage } from "./chat-text-directives";
+import { defaultCoreBackendHealthCheck, withHealthTimeout } from "./backend-health-probe";
+
+// Re-exported so existing importers keep working: tests/chat-language-routing.test.ts
+export { isSpreadsheetEditRequest, mapColumnDirectiveFromProposal };
 
 function* boundedResponseChunks(value:string,maxCharacters=1_024){
   for(let offset=0;offset<value.length;){
@@ -334,105 +343,6 @@ function* boundedResponseChunks(value:string,maxCharacters=1_024){
   }
 }
 
-function isCompositeBusinessCompanyCreation(message: string): boolean {
-  // A phrase such as "delete everything you just created" contains a past-tense
-  // creation word. Destructive intent must always win over creation detection.
-  if (isCompanyDeleteIntent(message)) return false;
-  const create = /(?:створ|созда|create|cr[eé]e|erstelle|crea|utwórz|stwórz|crie|maak|oluştur|创建|作成|만들|أنشئ|बना)/iu.test(message);
-  const business = /(?:б[іи]знес[\s-]*(?:іде|иде)|business\s+idea|id[eé]e\s+d['’]?entreprise|gesch[aä]ftsidee|idea\s+de\s+negocio|idea\s+imprenditoriale|pomysł\s+na\s+biznes|ideia\s+de\s+neg[oó]cio|businessidee|iş\s+fikri|商业想法|ビジネスアイデア|비즈니스\s*아이디어|فكرة\s+عمل|व्यवसाय\s+विचार)/iu.test(message);
-  const goal = /(?:ціл|цел|\bgoal|objectif|ziel|objetivo|obiettivo|cel\b|meta\b|doel|hedef|目标|目標|목표|هدف|लक्ष्य)/iu.test(message);
-  const company = /(?:компан|compan|entreprise|unternehmen|empresa|azienda|firm|sp[oó]łk|bedrijf|şirket|公司|会社|회사|شركة|कंपनी)/iu.test(message);
-  return create && business && goal && company;
-}
-
-function requestsNewBusinessIdea(message: string): boolean {
-  return /(?:\u0441\u0442\u0432\u043e\u0440\p{L}*|\u0441\u043e\u0437\u0434\u0430\p{L}*|create|cr[e\u00e9]e|erstelle|crea|utw[o\u00f3]rz|stw[o\u00f3]rz)\s+(?:(?:\u0449\u0435|\u043e\u0434\u043d\u0443|\u043d\u043e\u0432\p{L}*|another|new|a|an|test\p{L}*|\u0442\u0435\u0441\u0442\p{L}*)\s+){0,5}(?:\u0431[\u0456\u0438]\u0437\u043d\u0435\u0441|business(?:\s+(?:idea|profile))?|id[e\u00e9]e\s+d['\u2019]entreprise|gesch[a\u00e4]ftsidee|idea\s+de\s+negocio|idea\s+imprenditoriale|pomys\u0142\s+na\s+biznes)/iu.test(message);
-}
-function normalizeNewBusinessDirective(text: string, requestMessage: string): string {
-  if (!requestsNewBusinessIdea(requestMessage)) return text;
-  return text.replace(/```business-action\s*([\s\S]*?)```/iu, (block, body: string) => {
-    try {
-      const directive = JSON.parse(body) as { action?: string; profile?: { name?: string } };
-      if (directive.action !== "update" || !directive.profile?.name?.trim()) return block;
-      return "```business-action\n" + JSON.stringify({ ...directive, action: "create" }) + "\n```";
-    } catch { return block; }
-  });
-}
-function requestsBusinessMemory(message: string): boolean {
-  return /(?:пам(?:'|’)?ят|памят|мемор|\bmemory\b|m[eé]moire|ged[aä]chtnis|memoria|pami[eę][ćc]|mem[oó]ria|geheugen|hafıza|记忆|メモリ|메모리|الذاكرة|मेमोरी|स्मृति)/iu.test(message);
-}
-
-function requestsBusinessGoal(message: string): boolean {
-  return /(?:\u0446\u0456\u043b|\u0446\u0435\u043b|\bgoals?\b|objectif|ziel|objetivo|obiettivo|\bcel\b|\bmeta\b|doel|hedef|\u76ee\u6807|\u76ee\u6a19|\ubaa9\ud45c|\u0647\u062f\u0641|\u0932\u0915\u094d\u0937\u094d\u092f)/iu.test(message)
-    && !/(?:\u0431\u0435\u0437|without|sans|ohne|sin|senza|bez|no)\s+(?:\u0446\u0456\u043b\p{L}*|\u0446\u0435\u043b\p{L}*|goals?)/iu.test(message);
-}
-function requestsCompositeCompanyDeletionIntent(message: string): boolean {
-  if (!isCompanyDeleteIntent(message)) return false;
-  const company = /(?:компан|compan|entreprise|unternehmen|empresa|azienda|firm|bedrijf|şirket|公司|会社|회사|شركة|कंपनी)/iu.test(message);
-  const business = /(?:б[іиу]знес(?:[\s-]*(?:іде|иде))?|\bbusiness(?:\s+idea)?\b|id[eé]e\s+d['’]?entreprise|geschäftsidee|idea\s+de\s+negocio|idea\s+imprenditoriale|pomysł\s+na\s+biznes|ideia\s+de\s+negócio|businessidee|iş\s+fikri|商业构想|ビジネスアイデア|비즈니스\s*아이디어|فكرة\s+العمل|व्यवसाय\s+विचार)/iu.test(message);
-  const linkedResource = /(?:ціл|цел|goals?|objectifs?|ziele?|objetivos?|obiettiv|metas?|doelen?|hedef|目标|目標|목표|هدف|लक्ष्य|пам(?:'|’)?ят|мемор|\bmemory\b|mémoire|gedächtnis|memoria|pamięć|memória|geheugen|hafıza|记忆|メモリ|메모리|الذاكرة|मेमोरी|everything|all\s+of\s+it|це\s+все|усе\s+це|все\s+це)/iu.test(message);
-  return company && business && linkedResource;
-}
-
-function requestsCompositeCompanyDeletion(message: string): boolean {
-  return isCompanyDeleteConfirmed(message) && requestsCompositeCompanyDeletionIntent(message);
-}
-
-function isShortAffirmativeReply(message: string): boolean {
-  return /^(?:так|так[,!.]?|гаразд|добре|підтверджую|да|да[,!.]?|подтверждаю|yes|yes[,!.]?|confirm|oui|ja|sí|si|sì|tak|sim|evet|是|是的|はい|예|نعم|हाँ)[.!]?$/iu.test(message.trim());
-}
-
-function resolveContextualCompanyFollowUp(message: string, previousAssistant: string): string {
-  const normalizedReply = message.trim().toLocaleLowerCase().replace(/[\s,.!]+/gu, "");
-  const contextualAffirmative = isShortAffirmativeReply(message) || ["\u0442\u0430\u043a", "yes", "confirm"].includes(normalizedReply);
-
-  const offeredAgentSetup = /(?:ролі[\s\S]{0,100}інструкці|инструкци[\s\S]{0,100}модел|roles?[\s\S]{0,100}instructions?[\s\S]{0,100}models?|rôles?[\s\S]{0,100}instructions?|rollen?[\s\S]{0,100}anweisungen?|roles?[\s\S]{0,100}instrucciones?|ruoli?[\s\S]{0,100}istruzioni?|role[\s\S]{0,100}instrukc|funções?[\s\S]{0,100}instruções?|rollen?[\s\S]{0,100}instructies?|roller[\s\S]{0,100}talimat|角色[\s\S]{0,50}指令|役割[\s\S]{0,50}指示|역할[\s\S]{0,50}지침|أدوار[\s\S]{0,80}تعليمات|भूमिकाएँ[\s\S]{0,80}निर्देश)/iu.test(previousAssistant);
-  const linkedCompanyCard = /\/settings\/company\?company=[0-9a-f-]{36}/iu.test(previousAssistant);
-  if ((!contextualAffirmative && !(linkedCompanyCard && message.trim().length <= 16)) || (!offeredAgentSetup && !linkedCompanyCard)) return message;
-  const language = detectCompanyChatLanguage(previousAssistant);
-  const commands: Record<ReturnType<typeof detectCompanyChatLanguage>, string> = {
-    en: "Configure detailed roles, system instructions, prompt guidelines, and recommended prompts for every agent in this company.",
-    uk: "Детально налаштуй ролі, системні інструкції, правила промптів і рекомендовані запити для всіх агентів цієї компанії.",
-    fr: "Configure en détail les rôles, les instructions système, les règles de prompt et les invites recommandées pour tous les agents de cette entreprise.",
-    de: "Konfiguriere detaillierte Rollen, Systemanweisungen, Prompt-Richtlinien und empfohlene Prompts für alle Agenten dieses Unternehmens.",
-    es: "Configura roles detallados, instrucciones del sistema, pautas de prompts y prompts recomendados para todos los agentes de esta empresa.",
-    it: "Configura ruoli dettagliati, istruzioni di sistema, linee guida dei prompt e prompt consigliati per tutti gli agenti di questa azienda.",
-    pl: "Skonfiguruj szczegółowe role, instrukcje systemowe, wytyczne promptów i zalecane prompty dla wszystkich agentów tej firmy.",
-    pt: "Configure funções detalhadas, instruções do sistema, diretrizes de prompts e prompts recomendados para todos os agentes desta empresa.",
-    nl: "Configureer gedetailleerde rollen, systeeminstructies, promptrichtlijnen en aanbevolen prompts voor alle agenten van dit bedrijf.",
-    tr: "Bu şirketteki tüm ajanlar için ayrıntılı roller, sistem talimatları, istem yönergeleri ve önerilen istemler yapılandır.",
-    ru: "Детально настрой роли, системные инструкции, правила промптов и рекомендуемые запросы для всех агентов этой компании.",
-    zh: "为该公司的所有智能体详细配置角色、系统指令、提示词指南和推荐提示词。",
-    ja: "この会社のすべてのエージェントに、詳細な役割、システム指示、プロンプトガイドライン、推奨プロンプトを設定してください。",
-    ko: "이 회사의 모든 에이전트에 대해 상세 역할, 시스템 지침, 프롬프트 가이드라인 및 추천 프롬프트를 설정하세요.",
-    ar: "اضبط الأدوار وتعليمات النظام وإرشادات المطالبات والمطالبات المقترحة بالتفصيل لجميع وكلاء هذه الشركة.",
-    hi: "इस कंपनी के सभी एजेंटों के लिए विस्तृत भूमिकाएँ, सिस्टम निर्देश, प्रॉम्प्ट दिशानिर्देश और सुझाए गए प्रॉम्प्ट सेट करें।",
-  };
-  return commands[language];
-}
-
-function applyChatTelemetryHeaders(reply: { header(name: string, value: string): unknown }, result: { model?: string; telemetry?: AgentReply["telemetry"] }) {
-  if (!result.telemetry) return;
-  const usage = result.telemetry.usage;
-  const costUsd = result.telemetry.costUsd ?? (usage ? CostTelemetry.calculate(result.model ?? "auto", usage).totalCostUsd : 0);
-  const headers = CostTelemetry.getRunTelemetryHeaders({
-    requestId: result.telemetry.requestId ?? crypto.randomUUID(),
-    modelId: result.model,
-    provider: result.telemetry.provider,
-    strategy: result.telemetry.routingStrategy,
-    totalTokens: usage?.totalTokens,
-    totalCostUsd: costUsd,
-    latencyMs: result.telemetry.latencyMs,
-    cacheHit: result.telemetry.cacheHit,
-    cachedTokens: usage?.cachedTokens,
-    cacheSavingsUsd: result.telemetry.cacheSavingsUsd,
-    failoverCount: result.telemetry.failoverCount,
-    costSource: result.telemetry.costSource ?? "estimated",
-  });
-  for (const [name, value] of Object.entries(headers)) reply.header(name, value);
-}
-
-/** Workspace used by background jobs (chain verifier, anchors) when no user context exists. */
 const AUDIT_SYSTEM_WORKSPACE = process.env.NPATI_WORKSPACE_ID ?? "dev-workspace";
 
 export interface AppConfig {
@@ -482,413 +392,7 @@ export interface AppConfig {
   projectSandbox?: ProjectSandboxService;
 }
 
-function inferOnboardingScenario(message: string): OnboardingScenario {
-  if (/\b(sell|selling|sale)\b|продат|продаю|продавати|продаж|sprzed/i.test(message)) return "seller";
-  if (/already have|existing business|my business|running business|маю бізнес|мій бізнес|вже є бізнес|існуюч/i.test(message)) return "existing";
-  return "starting";
-}
 
-function isSimpleGreeting(message: string) {
-  const normalized = message.toLocaleLowerCase().replace(/[^\p{L}]+/gu, " ").trim();
-  return /^(привіт|вітаю|добрий день|добрий вечір|доброго дня|доброго вечора|hello|hi|hey|greetings)$/.test(normalized);
-}
-
-function quickOnboardingReply(message: string) {
-  const normalized = message.toLocaleLowerCase().replace(/[’']/g, "'").replace(/\s+/g, " ").trim();
-  if (/(поясн(?:и|іть).*npati|як працює.*npati|how does.*npati.*work|explain how.*npati)/iu.test(normalized)) {
-    return /[іїєґ]/iu.test(normalized)
-      ? "NPATI Agent: це AI-асистент для роботи з бізнесом. Він відповідає на запитання, допомагає досліджувати ринок, формувати цілі й планувати наступні дії, використовуючи контекст вибраної Business Idea."
-      : "NPATI Agent is an AI assistant for business work. It answers questions, helps research markets, define goals, and plan next actions using the selected Business Idea as context.";
-  }
-  if (/(дослід.*попит|попит.*ринк|research market demand)/iu.test(normalized)) {
-    return /[іїєґ]/iu.test(normalized)
-      ? "Щоб перевірити попит, визначте цільового покупця, зберіть пошукові запити й відгуки конкурентів, поговоріть із 10-15 потенційними клієнтами та протестуйте просту пропозицію або передзамовлення. Реальні заявки важливіші за загальні позитивні відповіді."
-      : "To test demand, define the target buyer, review search behavior and competitor feedback, interview 10-15 potential customers, and test a simple offer or preorder. Real signups matter more than general positive comments.";
-  }
-  if (/(business ideas|бізнес.?іде|іде.*бізнес)/iu.test(normalized) && /(brainstorm|придум|згенер|допомож)/iu.test(normalized)) {
-    return /[іїєґ]/iu.test(normalized)
-      ? "Почніть із трьох речей: ваші сильні навички, проблема конкретної аудиторії та спосіб швидко перевірити готовність платити. Я можу запропонувати ідеї, якщо ви напишете країну, досвід і приблизний бюджет."
-      : "Start with three things: your strongest skills, a specific audience problem, and a quick way to test willingness to pay. I can suggest ideas if you share your country, experience, and approximate budget.";
-  }
-  return undefined;
-}
-
-function isLikelyOnboardingAside(message: string) {
-  const normalized = message.toLocaleLowerCase().trim();
-  return /\?$/.test(normalized) || /^(як|що|чому|навіщо|де|коли|хто|поясн(?:и|іть)|розкаж(?:и|іть)|можеш|how|what|why|where|when|who|explain|tell me|can you|could you)\b/iu.test(normalized);
-}
-
-function onboardingGoalQuestion(message: string) {
-  return /[іїєґ]/iu.test(message)
-    ? "Добре, контекст бізнесу збережено. Якої першої конкретної цілі ви хочете досягти? Наприклад: отримати перших 1 000 клієнтів."
-    : "Good, the business context is saved. What is the first concrete goal you want to achieve? For example: get your first 1,000 customers.";
-}
-
-function conversationTitle(message: string) {
-  const normalized = message
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/gi, "$1 $2")
-    .replace(/[\n\r\t]+/g, " ")
-    .replace(/\s+/g, " ")
-    .replace(/^[#*_\x60\s]+|[#*_\x60\s]+$/g, "")
-    .trim();
-  return Array.from(normalized).slice(0, 72).join("") || "New conversation";
-}
-
-type ChatAttachmentInput = {
-  kind: "image" | "audio" | "document" | "file";
-  clientId?: string;
-  name: string;
-  mimeType: string;
-  dataBase64: string;
-};
-
-const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
-const allowedAudioTypes = new Set(["audio/webm", "audio/ogg", "audio/mpeg", "audio/mp4", "audio/wav", "audio/x-wav", "audio/aac", "audio/flac"]);
-const allowedDocumentTypes = new Set([
-  "application/pdf",
-  "text/plain",
-  "text/csv",
-  "text/tab-separated-values",
-  "text/tsv",
-  "application/csv",
-  "application/json",
-  "text/markdown",
-  "text/x-markdown",
-  "application/xml",
-  "text/xml",
-  "text/html",
-  "text/css",
-  "text/javascript",
-  "application/javascript",
-  "application/typescript",
-  "text/yaml",
-  "application/x-yaml",
-  "text/x-yaml",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/x-msexcel",
-  "application/x-excel",
-  "application/vnd.ms-excel.sheet.macroEnabled.12",
-  "application/vnd.ms-excel.sheet.binary.macroEnabled.12",
-  "application/vnd.ms-powerpoint",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/zip",
-  "application/x-zip-compressed",
-  "application/x-zip",
-  "multipart/x-zip",
-  "application/gzip",
-  "application/x-gzip",
-  "application/x-tar",
-  "application/tar",
-  "application/x-compressed",
-  "application/octet-stream",
-]);
-const audioTypeAliases = new Map([
-  ["audio/x-m4a", "audio/mp4"],
-  ["audio/m4a", "audio/mp4"],
-  ["audio/x-mp4", "audio/mp4"],
-  ["audio/mp3", "audio/mpeg"],
-]);
-
-function safeAttachmentName(value: string) {
-  return value.replace(/[^\p{L}\p{N}._ -]/gu, "_").trim().slice(0, 120) || "attachment";
-}
-
-function decodeAttachment(input: ChatAttachmentInput) {
-  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(input.dataBase64)) throw new Error("Attachment data is not valid base64.");
-  const data = Buffer.from(input.dataBase64, "base64");
-  if (data.length === 0) throw new Error("The attached file is empty.");
-  let declaredMimeType = input.mimeType.toLowerCase().split(";", 1)[0]!.trim();
-  if (!declaredMimeType || declaredMimeType === "application/octet-stream") {
-    declaredMimeType = inferMimeType(input.name, declaredMimeType || "application/octet-stream");
-  }
-  const mimeType = input.kind === "audio" ? audioTypeAliases.get(declaredMimeType) ?? declaredMimeType : declaredMimeType;
-  const allowed = input.kind === "image" ? allowedImageTypes : input.kind === "audio" ? allowedAudioTypes : allowedDocumentTypes;
-  if (!allowed.has(mimeType)) {
-    const inferred = inferMimeType(input.name);
-    if (!allowed.has(inferred)) {
-      throw new Error("Unsupported " + input.kind + " format: " + input.mimeType);
-    }
-  }
-  const limit = input.kind === "image" ? 5 * 1024 * 1024 : input.kind === "audio" ? 15 * 1024 * 1024 : 20 * 1024 * 1024;
-  if (data.length > limit) throw new Error("The attached file is too large.");
-  if (input.kind === "image") {
-    const validSignature =
-      (mimeType === "image/jpeg" && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff)
-      || (mimeType === "image/png" && data.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])))
-      || (mimeType === "image/gif" && data.subarray(0, 3).toString("ascii") === "GIF")
-      || (mimeType === "image/webp" && data.subarray(0, 4).toString("ascii") === "RIFF" && data.subarray(8, 12).toString("ascii") === "WEBP");
-    if (!validSignature) throw new Error("The image content does not match its declared format.");
-  }
-  if (input.kind === "document" || input.kind === "file") {
-    const zip = data[0] === 0x50 && data[1] === 0x4b;
-    const ole = data.subarray(0,8).equals(Buffer.from([0xd0,0xcf,0x11,0xe0,0xa1,0xb1,0x1a,0xe1]));
-    const isPdf = data.subarray(0,5).toString("ascii") === "%PDF-";
-    const isGzip = data[0] === 0x1f && data[1] === 0x8b;
-    const isTar = data.length >= 512 && data.subarray(257, 262).toString("ascii") === "ustar";
-    const isText = !data.subarray(0, Math.min(4096, data.length)).includes(0);
-    const validDocument = isPdf || zip || ole || isGzip || isTar || isText;
-    if (!validDocument) throw new Error("The document content does not match its declared format.");
-  }
-  return { ...input, mimeType, name: safeAttachmentName(input.name), data };
-}
-
-function publicChatError(error: unknown, route?: string) {
-  const raw = error instanceof InferenceRouteFailure && error.cause instanceof Error
-    ? error.cause.message
-    : error instanceof Error ? error.message : String(error);
-  if (/Invalid file format/i.test(raw)) {
-    return "The audio container does not match the file extension. Convert or export the file as M4A/AAC, MP3, WAV, WEBM, OGG, or FLAC and try again.";
-  }
-  if (/Unsupported audio format/i.test(raw)) {
-    return "This audio format is not supported. Upload M4A, MP3, WAV, WEBM, OGG, AAC, or FLAC.";
-  }
-  if (/audio transcription|transcribe|transcription/i.test(raw)) {
-    return "The voice message could not be transcribed. Check the audio file and try again.";
-  }
-  if (error instanceof InferenceRouteFailure || error instanceof SelfHealingExhaustedError) {
-    const attempts = error instanceof InferenceRouteFailure
-      ? error.attempts
-      : error instanceof SelfHealingExhaustedError
-        ? error.attempts.filter((attempt) => !attempt.success).map((attempt) => ({
-            modelId: attempt.modelId,
-            httpStatus: Number(/\bHTTP\s+(\d{3})\b/i.exec(attempt.error ?? "")?.[1]) || undefined,
-          }))
-        : [];
-    const selected = attempts[0]?.modelId ?? route;
-    const routeLabel = selected && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,100}$/.test(selected)
-      ? `NPATI route "${selected}"`
-      : "The selected NPATI AI route";
-    const status = Number(/\bAPI\s*\[(\d{3})\]/i.exec(raw)?.[1]) || attempts[0]?.httpStatus || (Number(/\bHTTP\s+(\d{3})\b/i.exec(raw)?.[1]) || undefined);
-    const fallback = attempts.length > 1 ? attempts.at(-1) : undefined;
-    const fallbackLabel = fallback?.modelId && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,100}$/.test(fallback.modelId)
-      ? ` Fallback route "${fallback.modelId}" also failed${fallback.httpStatus ? ` (HTTP ${fallback.httpStatus})` : ""}.`
-      : "";
-    const reason = /no active credentials for provider/i.test(raw)
-      ? "No active provider credential is available. Reconnect this provider in AI Marketplace."
-      : status === 401 || status === 403
-      ? "The provider denied the request. Check its connection and permissions in AI Marketplace."
-      : status === 404
-        ? "The provider could not find this model. Check the model ID in AI Marketplace."
-        : status === 429
-          ? "The provider rate limit or quota was reached. Try again later or choose another model."
-          : status === 400
-            ? "The provider rejected the request. Check the model settings in AI Marketplace."
-            : selected?.startsWith("auto")
-              ? "Switch to another AI mode or choose a model in AI Marketplace."
-              : "Try again or choose another model in AI Marketplace.";
-    return `${routeLabel} failed${status ? ` (HTTP ${status})` : ""}.${fallbackLabel} ${reason}`;
-  }
-  return "NPATI Agent could not complete this message. Please try again.";
-}
-
-function publicCompanyRunMessage(result: string | null | undefined, errorMessage: string | null | undefined, requestMessage: string) {
-  if (result?.trim()) return result;
-  if (!errorMessage?.trim()) return "Company run completed.";
-  const language = detectCompanyChatLanguage(requestMessage);
-  if (language === "uk") return "Не вдалося виконати завдання компанії через тимчасову недоступність вибраної AI-моделі. Перевірте підключення вибраної моделі в AI Marketplace і спробуйте ще раз.";
-  if (language === "ru") return "Не удалось выполнить задачу компании из-за временной недоступности выбранной AI-модели. Проверьте подключение выбранной модели в AI Marketplace и попробуйте снова.";
-  return "The company task could not be completed because the selected AI model is temporarily unavailable. Check the selected model connection in AI Marketplace, then try again.";
-}
-
-function attachResearchSources(content: string, research?: { sources: Array<{ url: string; title?: string }> }) {
-  if (!research?.sources.length) return content;
-  const unique = [...new Map(research.sources.map((item) => [item.url, item])).values()];
-  const existingUrls = new Set((content.match(/https?:\/\/[^\s<>()]+/g) ?? []).map((url) => url.replace(/[.,;!?]+$/, "")));
-  const missing = unique.filter((item) => !existingUrls.has(item.url));
-  if (!missing.length) return content;
-  return content + "\n\nДжерела:\n" + missing.map((item) => {
-    const rawTitle = item.title?.replace(/[\[\]\r\n]+/g, " ").trim() || item.url;
-    return "- [" + rawTitle + "](" + item.url + ")";
-  }).join("\n");
-}
-
-export function isSpreadsheetEditRequest(message: string): boolean {
-  const edit = /(?:дод|заповн|змін|онов|редаг|встав|видал|приб|добав|заполн|измен|обнов|редакт|встав|удал|add|fill|edit|update|change|insert|append|remove|delete|modify|ajout|rempl|modif|supprim|hinzuf|bearbeit|änder|lösch|agreg|rellen|edit|elimin|aggiung|modific|rimuov|dodaj|wypeł|edyt|zmień|usuń|adicion|preench|editar|alter|exclu|voeg|bewerk|wijzig|verwijder|ekle|doldur|düzenle|değiştir|sil|添加|填写|编辑|更新|删除|追加|入力|編集|変更|削除|추가|입력|편집|수정|삭제|أضف|املأ|عدّل|حدّث|احذف|जोड़|भर|संपादित|बदल|हटा)/iu.test(message);
-  const spreadsheet = /(?:xlsx|xls|csv|excel|spreadsheet|workbook|worksheet|table|column|row|cell|sheet|стовп|колон|ряд|клітин|аркуш|таблиц|файл|feuille|tableau|colonne|ligne|zelle|spalte|tabelle|hoja|tabla|columna|fila|foglio|tabella|colonna|riga|arkusz|tabela|kolumn|wiersz|planilha|coluna|linha|werkblad|tabel|kolom|rij|sayfa|tablo|sütun|satır|电子表格|表格|列|行|单元格|スプレッドシート|表|列|行|セル|스프레드시트|표|열|행|셀|جدول|عمود|صف|خلية|स्प्रेडशीट|तालिका|कॉलम|पंक्ति|सेल)/iu.test(message);
-  return edit && spreadsheet;
-}
-
-function explicitlyRequestsWebResearch(message: string): boolean {
-  return Boolean(extractTargetUrlOrDomain(message))
-    || /(?:https?:\/\/|\bweb\b|\binternet\b|\bwebsite\b|\bonline\b|\bsearch\b|\bbrowse\b|\bcrawl\b|\bcompetitors?\b|\bcompetition\b|інтернет|веб|сайт|пошук|пошукай|конкурент|конкурентів|проскануй|интернет|сайт|поиск|найди\s+в\s+интернете|concurrents?|mitbewerber|wettbewerb|competidores?|concorrenti?|głównych\s+konkurentów|rakipler?|竞争对手|競合|경쟁사|المنافسين|प्रतिस्पर्धियों)/iu.test(message);
-}
-
-const spreadsheetEditedCopies: Record<ReturnType<typeof detectCompanyChatLanguage>, string> = {
-  en: "Done. I updated the uploaded spreadsheet and attached the edited file.",
-  uk: "Готово. Я оновив завантажену таблицю та прикріпив відредагований файл.",
-  fr: "Terminé. J’ai mis à jour la feuille de calcul importée et joint le fichier modifié.",
-  de: "Erledigt. Ich habe die hochgeladene Tabelle aktualisiert und die bearbeitete Datei angehängt.",
-  es: "Listo. Actualicé la hoja de cálculo cargada y adjunté el archivo editado.",
-  it: "Fatto. Ho aggiornato il foglio di calcolo caricato e allegato il file modificato.",
-  pl: "Gotowe. Zaktualizowałem przesłany arkusz i załączyłem edytowany plik.",
-  pt: "Pronto. Atualizei a planilha enviada e anexei o arquivo editado.",
-  nl: "Klaar. Ik heb het geüploade werkblad bijgewerkt en het bewerkte bestand bijgevoegd.",
-  tr: "Tamamlandı. Yüklenen tabloyu güncelledim ve düzenlenmiş dosyayı ekledim.",
-  ru: "Готово. Я обновил загруженную таблицу и прикрепил отредактированный файл.",
-  zh: "完成。我已更新上传的电子表格并附上编辑后的文件。",
-  ja: "完了しました。アップロードされたスプレッドシートを更新し、編集済みファイルを添付しました。",
-  ko: "완료했습니다. 업로드한 스프레드시트를 수정하고 편집된 파일을 첨부했습니다.",
-  ar: "تم. حدّثت جدول البيانات المرفوع وأرفقت الملف المعدّل.",
-  hi: "पूरा हुआ। मैंने अपलोड की गई स्प्रेडशीट अपडेट करके संपादित फ़ाइल संलग्न कर दी है।",
-};
-
-function spreadsheetEditedMessage(message: string): string {
-  return spreadsheetEditedCopies[detectCompanyChatLanguage(message)];
-}
-
-function addColumnDirectiveFromMarkdown(content: string, request: string) {
-  const quotedHeader = /[«“"']([^»”"']{1,80})[»”"']/u.exec(request)?.[1]?.trim();
-  const namedHeader = /(?:column|стовп(?:ець|ця)|колонк[ауи]|colonne|spalte|columna|colonna|kolumn[ęa]|coluna|kolom|sütun|列|열|عمود|कॉलम)\s+([\p{L}\p{N}_ -]{1,40})/iu.exec(request)?.[1]?.trim();
-  const header = quotedHeader || namedHeader;
-  if (!header) return undefined;
-  const rows = content.split(/\r?\n/).filter((line) => /^\s*\|.*\|\s*$/.test(line));
-  if (rows.length < 3) return undefined;
-  const cells = (line: string) => line.trim().replace(/^\||\|$/g, "").split("|").map((cell) => cell.trim());
-  const headers = cells(rows[0]!);
-  const column = headers.findIndex((value) => value.toLocaleLowerCase() === header.toLocaleLowerCase());
-  if (column < 0 || !/^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$/u.test(rows[1]!)) return undefined;
-  const values = rows.slice(2).map((row) => cells(row)[column] ?? "");
-  return { action: "add_column" as const, newColumn: { header, values } };
-}
-
-export function mapColumnDirectiveFromProposal(content: string, request: string) {
-  const header = /[«“"']([^»”"']{1,80})[»”"']/u.exec(request)?.[1]?.trim();
-  if (!header) return undefined;
-  const sourceColumn = /(?:based\s+on|from|на\s+основі|из\s+поля|à\s+partir|basierend|basado|in\s+base|na\s+podstawie|com\s+base|op\s+basis|temel|基于|基づ|기반|استناد|के\s+आधार)[^\n]{0,120}[«“"`]([^»”"`\n]{1,80})[»”"`]/iu.exec(content)?.[1]?.trim();
-  if (!sourceColumn) return undefined;
-  const valueMap: Array<{ match: string; value: string; mode: "contains" }> = [];
-  for (const line of content.split(/\r?\n/)) {
-    const labelled = /^\s*[-*]\s*([^:\n]{1,80}):\s*(.+)$/u.exec(line);
-    if (!labelled) continue;
-    const target = labelled[1]!.replace(/[*_]/g, "").trim();
-    for (const match of [...labelled[2]!.matchAll(/`([^`]{1,120})`/gu)]) {
-      valueMap.push({ match: match[1]!.trim(), value: target, mode: "contains" });
-    }
-  }
-  if (valueMap.length < 2) return undefined;
-  valueMap.sort((left, right) => right.match.length - left.match.length);
-  return { action: "map_column" as const, sourceColumn, newColumn: { header }, valueMap };
-}
-
-async function prepareChatAttachments(
-  aiEngine: AIEngine,
-  message: string,
-  attachments: ChatAttachmentInput[] = [],
-  progress?: (event: ResearchProgressEvent) => void,
-) {
-  if (attachments.length > 3) throw new Error("You can attach up to 3 files per message.");
-  const decoded = attachments.map(decodeAttachment);
-  if (decoded.reduce((total, item) => total + item.data.length, 0) > 20 * 1024 * 1024) {
-    throw new Error("Attachments in one message must be 20 MB or smaller in total.");
-  }
-  const images = decoded.filter((item) => item.kind === "image").map((item) => ({ mimeType: item.mimeType, dataBase64: item.data.toString("base64") }));
-  const audio = decoded.filter((item) => item.kind === "audio");
-  const documents = decoded.filter((item) => item.kind === "document" || item.kind === "file");
-  const transcripts: Array<{ name: string; text: string }> = [];
-  const cleanMessage = message.trim();
-  for (const image of decoded.filter((item) => item.kind === "image")) {
-    progress?.({
-      type: "page_fetch_started",
-      url: `file://${encodeURIComponent(image.name)}`,
-      domain: "file",
-      title: image.name,
-    });
-  }
-  for (const item of audio) {
-    if (item.name.startsWith("speech-") && cleanMessage) {
-      transcripts.push({ name: item.name, text: cleanMessage });
-      continue;
-    }
-    if (!aiEngine.transcribeAudio) throw new Error("The selected AI runtime does not support audio transcription.");
-    const result = await aiEngine.transcribeAudio({ data: item.data, mimeType: item.mimeType, filename: item.name });
-    transcripts.push({ name: item.name, text: result.text });
-  }
-
-  const extractedDocs: Array<{ name: string; text: string }> = [];
-  for (const doc of documents) {
-    progress?.({ type: "page_fetch_started", url: `file://${encodeURIComponent(doc.name)}`, domain: "file", title: doc.name });
-    try {
-      const text = await extractDocumentText(doc.data, doc.mimeType, doc.name);
-      extractedDocs.push({ name: doc.name, text });
-      progress?.({ type: "page_fetch_completed", url: `file://${encodeURIComponent(doc.name)}`, domain: "file", title: doc.name });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      extractedDocs.push({ name: doc.name, text: `[Error reading attached file ${doc.name}: ${msg}]` });
-      progress?.({ type: "page_fetch_failed", url: `file://${encodeURIComponent(doc.name)}`, domain: "file", title: doc.name, error: msg });
-    }
-  }
-
-  const relevantTranscripts = transcripts.filter((item) => !(item.name.startsWith("speech-") && cleanMessage));
-  const transcriptContext = relevantTranscripts.map((item) => "Voice message transcript (" + item.name + "):\n" + item.text).join("\n\n");
-  const docContext = extractedDocs.map((item) => "Attached file content (" + item.name + "):\n```\n" + item.text + "\n```").join("\n\n");
-
-  const basePrompt = cleanMessage
-    || (images.length ? "Analyze the attached image and explain what is useful for my business."
-      : extractedDocs.length ? "Analyze the attached file, table, or archive and answer my questions based on its content."
-      : "Respond to my voice message.");
-
-  const prompt = [basePrompt, transcriptContext, docContext].filter(Boolean).join("\n\n");
-  const display = [
-    cleanMessage,
-    ...decoded.filter((item) => item.kind === "image").map((item) => "📷 Image: " + item.name),
-    ...extractedDocs.map((item) => "📄 File: " + item.name),
-    ...transcripts.map((item) => "🎤 Voice message: " + item.name + (item.name.startsWith("speech-") && cleanMessage ? "" : "\nTranscript: " + item.text)),
-  ].filter(Boolean).join("\n\n");
-  return { prompt, display, images, decoded, transcripts, extractedDocs };
-}
-
-function publicServiceEndpoint(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  try {
-    const endpoint = new URL(value);
-    endpoint.username = "";
-    endpoint.password = "";
-    return endpoint.toString().replace(/\/$/, "");
-  } catch {
-    return undefined;
-  }
-}
-
-function coreBackendProbeUrl(baseUrl: string): string {
-  const base = baseUrl.replace(/\/+$/, "");
-  if (base.endsWith("/api/v1")) return `${base}/users/me`;
-  if (base.endsWith("/api")) return `${base}/v1/users/me`;
-  return `${base}/api/v1/users/me`;
-}
-
-async function defaultCoreBackendHealthCheck(baseUrl: string | undefined): Promise<ServiceHealth> {
-  const endpoint = publicServiceEndpoint(baseUrl);
-  if (!baseUrl) return { status: "not_configured", detail: "NPATI Core Backend URL is not configured" };
-  try {
-    const response = await fetch(coreBackendProbeUrl(baseUrl), {
-      headers: { accept: "application/json" },
-      signal: AbortSignal.timeout(4_000),
-    });
-    // Authentication endpoints normally answer 401 without a token. A 404 can
-    // mean that NPATI_BACKEND_URL points at a reachable host but not the Core API.
-    if (response.status === 404 || response.status === 429 || response.status >= 500) {
-      return { status: "degraded", detail: `Core API returned HTTP ${response.status}`, endpoint };
-    }
-    return { status: "ok", detail: `Core API reachable (HTTP ${response.status})`, endpoint };
-  } catch (error) {
-    return { status: "unavailable", detail: error instanceof Error ? error.message : "Core API request failed", endpoint };
-  }
-}
-
-async function withHealthTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_, reject) => { timer = setTimeout(() => reject(new Error("Health check timed out")), timeoutMs); }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
 
 export function buildApp(config: AppConfig = {}) {
   const app = Fastify({ logger: process.env.NODE_ENV !== "test" ? {redact:{paths:["req.headers.authorization","req.headers.x-npati-api-key","req.body.password","req.body.apiKey","req.body.token","req.body.imapConfig.password","req.body.smtpConfig.password","req.body.imapConfig.accessToken","req.body.smtpConfig.accessToken","req.body.imapConfig.refreshToken","req.body.smtpConfig.refreshToken","req.body.imapConfig.clientSecret","req.body.smtpConfig.clientSecret"],censor:"[REDACTED]"}} : false, bodyLimit: 30 * 1024 * 1024 });
@@ -8447,3 +7951,4 @@ ${localized.next}`;
 
   return app;
 }
+
