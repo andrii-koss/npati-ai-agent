@@ -4,6 +4,7 @@ import { buildApp } from "../apps/agent-api/src/app";
 import type { AuthProvider } from "../apps/agent-api/src/auth";
 import type { AIEngine, ChatRequest } from "@npati/omniroute-adapter";
 import { InMemoryWorkspaceStore } from "@npati/workspace";
+import { readApiSources } from "./lib/api-source";
 
 const apps: Array<ReturnType<typeof buildApp>> = [];
 afterEach(async () => Promise.all(apps.splice(0).map((app) => app.close())));
@@ -56,7 +57,7 @@ describe("production runtime capabilities #8-#15", () => {
     expect(attachments).toContain('aria-label="Speech voice"');
     expect(attachments).toContain('SPEECH_VOICES.map');
     expect(voices).toContain('{ id: "nova"');
-    const api = await readFile(new URL("../apps/agent-api/src/app.ts", import.meta.url), "utf8");
+    const api = readApiSources();
     expect(api).toContain('"/chat/stream"');
   });
 });

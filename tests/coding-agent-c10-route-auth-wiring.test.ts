@@ -4,6 +4,7 @@ import type { AIEngine, OmniRouteMarketplace } from "@npati/omniroute-adapter";
 import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
 import { createMockNpatiJwt, NpatiBackendAuthProvider, type AuthProvider, type WorkspaceInitFailure } from "../apps/agent-api/src/auth";
 import { buildApp } from "../apps/agent-api/src/app";
+import { readApiSources } from "./lib/api-source";
 
 /**
  * C10 security-gate suite: the **built** application actually authenticates the code surfaces it registers.
@@ -28,7 +29,7 @@ import { buildApp } from "../apps/agent-api/src/app";
  *     anyone writes a route test for it.
  */
 
-const appSource = readFileSync(new URL("../apps/agent-api/src/app.ts", import.meta.url), "utf8");
+const appSource = readApiSources();
 
 const context = (): AuthContext => ({
   workspaceId: "workspace-context",

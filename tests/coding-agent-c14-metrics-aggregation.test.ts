@@ -10,6 +10,7 @@ import {
 } from "../apps/agent-api/src/code-metrics";
 import { CODE_METRICS_ACTIONS, registerCodeMetricsRoutes, resolveMetricsQuery, type CodeMetricsRouteDeps } from "../apps/agent-api/src/code-metrics-routes";
 import { CodeRbac, DEFAULT_CODE_ROLE_MATRIX, createRoleRegistry, requiredPermissionForAction, type CodeAuthorizationAuditPort } from "../apps/agent-api/src/code-rbac";
+import { readApiSources } from "./lib/api-source";
 
 /**
  * C14 (owner decision 3) security-gate suite: the metrics aggregation and the route that serves it.
@@ -567,7 +568,7 @@ describe("[C14] [security-gate] the metrics route serves the aggregator's number
     expect(wrapper).toContain('export { main } from "./lib/run-security-gate.mjs"');
     const gate = readFileSync(new URL("../scripts/lib/run-security-gate.mjs", import.meta.url), "utf8");
     expect(gate).toContain("tests/coding-agent-c14-metrics-aggregation.test.ts");
-    const app = readFileSync(new URL("../apps/agent-api/src/app.ts", import.meta.url), "utf8");
+    const app = readApiSources();
     // A route module that is never registered is a surface nobody can reach: the composition is part of the
     // contract, and the context map must have a writer (the C10 wiring guard makes the same demand).
     expect(app).toContain("registerCodeMetricsRoutes(app, {");
