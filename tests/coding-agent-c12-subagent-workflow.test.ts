@@ -772,11 +772,15 @@ describe("security-gate: C12 the child runner adapter is the only way a child ru
     // "Shared" and "single engine" are properties of the composition, so they are asserted where they live: the
     // spawn executor is handed the runtime's own published tool list and the same `CodingAgentRunner` the rest of
     // the application uses, through the one interface the runner already reads for a delegated run.
-    const app = readFileSync("apps/agent-api/src/app.ts", "utf8");
+    const app = [
+      "apps/agent-api/src/app.ts",
+      "apps/agent-api/src/code-tool-runtime-wiring.ts",
+      "apps/agent-api/src/code-route-lifecycle.ts",
+    ].map((file) => readFileSync(file, "utf8")).join("\n");
     expect(app).toMatch(/subagentCanonicalTools: \(\) => codeToolRuntimeRef\?\.listTools\(\)/);
     expect(app).toMatch(/createCodeSubagentChildRunner\(\{/);
     expect(app).toMatch(/subagentScope: \{ parentRunId, allowedTools: \[\.\.\.allowedTools\] \}/);
-    expect(app).toMatch(/codingAgentRunnerRef = codingAgentRunner;/);
+    expect(app).toMatch(/codingAgentRunnerRef(?:Value)? = codingAgentRunner;/);
     // And the executor is part of the canonical executor map, not a parallel dispatch path.
     const executors = readFileSync("apps/agent-api/src/code-tool-executors.ts", "utf8");
     expect(executors).toMatch(/\.\.\.canonicalSubagentExecutors\(options\)/);

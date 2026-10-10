@@ -138,7 +138,7 @@ describe("security-gate: C12 one file-lock manager for the graph and the Company
     const read = (relative: string) => readFileSync(path.join(root, relative), "utf8");
 
     // `app.ts` builds the manager once and hands that instance to the Company tool runtime and the orchestrator.
-    const app = read("apps/agent-api/src/app.ts");
+    const app = read("apps/agent-api/src/app.ts") + read("apps/agent-api/src/email-automation-wiring.ts");
     expect(app).toMatch(/const projectFileLeaseManager = new ProjectFileLeaseManager\(\)/);
     expect(app).toMatch(/new ProjectOrchestrator\(/);
     /**
