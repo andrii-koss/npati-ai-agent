@@ -54,6 +54,7 @@ import { auditEntryHash, verifyAuditEntries } from "./audit-chain";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from "./onboarding";
 import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from './pagination';
 import { now } from "./in-memory-clock";
+import { createProject, listProjects, getProject, updateProject, getProjectCodeTrust, getProjectMountedFolder, getProjectMountedFolderForSystem, updateProjectRepository, updateProjectPreview, archiveProject, deleteProject, createProjectCheckpoint, getProjectCheckpoint, deleteProjectCheckpoint, createProjectDeployment, getProjectDeployment, updateProjectDeployment, createProjectQaReport, getProjectQaReport, getProjectDataPolicy, getProjectForSystem, type InMemoryProjectState } from "./in-memory-project-store";
 
 type StoredUserSetting = import('./types').UserSetting;
 export class InMemoryWorkspaceStore implements WorkspaceStore {
@@ -162,6 +163,20 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   private readonly codeUserQuestionState = new InMemoryCodeUserQuestionStore();
 
   private readonly codeSessionDurabilityState = new InMemoryCodeSessionDurabilityStore();
+
+  private projectState(): InMemoryProjectState {
+    return {
+      dataPolicyOps: this.dataPolicyOps,
+      projectCheckpoints: this.projectCheckpoints,
+      projectCodeTrust: this.projectCodeTrust,
+      projectCreateRequests: this.projectCreateRequests,
+      projectDeployments: this.projectDeployments,
+      projectMountedFolders: this.projectMountedFolders,
+      projectQaReports: this.projectQaReports,
+      projects: this.projects,
+      assertCompany: this.assertCompany.bind(this),
+    };
+  }
 
   async initialize(context?: AuthContext) {
     if (context) this.identities.set(`${context.workspaceId}:${context.userId}`, { displayName: "Dev User", workspaceName: "My Workspace", role: "owner" });
@@ -449,57 +464,20 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return { items, nextCursor: rows.length > limit && last ? encodeBusinessCursor({ createdAt: last.createdAt, id: last.id }) : null };
   }
 
-  async createProject(context: AuthContext, companyId: string, input: ProjectInput, idempotencyKey: string) {
-    this.assertCompany(context, companyId);
-    const requestKey = [context.workspaceId, context.userId, companyId, idempotencyKey].join(":");
-    const previous = this.projectCreateRequests.get(requestKey);
-    if (previous) return { project: await this.getProject(context, companyId, previous), created: false };
-    const timestamp = now();
-    const project: Project = {
-      id: randomUUID(), workspaceId: context.workspaceId, companyId, createdBy: context.userId,
-      name: input.name, description: input.description, type: input.type ?? "website", status: "ready",
-      dataBackendId: input.dataBackendId, appScheme: input.appScheme,
-      toolchain: input.toolchain ?? null, defaultBranch: input.defaultBranch ?? null,
-      dataClassification: input.dataClassification ?? DEFAULT_DATA_CLASSIFICATION,
-      retentionClass: input.retentionClass ?? DEFAULT_RETENTION_CLASS,
-      revision: 1, createdAt: timestamp, updatedAt: timestamp,
-    };
-    this.projects.set(project.id, project);
-    this.projectCreateRequests.set(requestKey, project.id);
-    return { project: structuredClone(project), created: true };
+    async createProject(context: AuthContext, companyId: string, input: ProjectInput, idempotencyKey: string) {
+    return createProject(this.projectState(), context, companyId, input, idempotencyKey);
   }
 
-  async listProjects(context: AuthContext, companyId: string, includeArchived = false) {
-    this.assertCompany(context, companyId);
-    return structuredClone([...this.projects.values()]
-      .filter((project) => project.workspaceId === context.workspaceId && project.companyId === companyId
-        && project.createdBy === context.userId && (includeArchived || project.status !== "archived"))
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id)));
+    async listProjects(context: AuthContext, companyId: string, includeArchived = false) {
+    return listProjects(this.projectState(), context, companyId, includeArchived);
   }
 
-  async getProject(context: AuthContext, companyId: string, projectId: string) {
-    this.assertCompany(context, companyId);
-    const project = this.projects.get(projectId);
-    if (!project || project.workspaceId !== context.workspaceId || project.companyId !== companyId
-      || project.createdBy !== context.userId) throw new WorkspaceNotFoundError("Project not found");
-    return structuredClone(project);
+    async getProject(context: AuthContext, companyId: string, projectId: string) {
+    return getProject(this.projectState(), context, companyId, projectId);
   }
 
-  async updateProject(context: AuthContext, companyId: string, projectId: string, input: { name?: string; expectedRevision: number; code?: ProjectCodeSettings }) {
-    const project = await this.getProject(context, companyId, projectId);
-    if (project.revision !== input.expectedRevision || project.status === "archived") throw new Error("Project changed by another request or is archived");
-    const code = input.code ?? {};
-    const next: Project = {
-      ...project,
-      name: input.name ?? project.name,
-      toolchain: code.toolchain ?? project.toolchain ?? null,
-      defaultBranch: code.defaultBranch ?? project.defaultBranch ?? null,
-      dataClassification: code.dataClassification ?? project.dataClassification,
-      retentionClass: code.retentionClass ?? project.retentionClass,
-      revision: project.revision + 1, updatedAt: now(),
-    };
-    this.projects.set(projectId, next);
-    return structuredClone(next);
+    async updateProject(context: AuthContext, companyId: string, projectId: string, input: { name?: string; expectedRevision: number; code?: ProjectCodeSettings }) {
+    return updateProject(this.projectState(), context, companyId, projectId, input);
   }
 
   async createCodeSession(context: AuthContext, companyId: string, projectId: string, input: CodeSessionInput): Promise<CodeSession> {
@@ -775,9 +753,8 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return structuredClone(next);
   }
 
-  async getProjectCodeTrust(context: AuthContext, companyId: string, projectId: string): Promise<ProjectCodeTrust | null> {
-    this.assertCompany(context, companyId);
-    return structuredClone(this.projectCodeTrust.get(`${companyId}:${projectId}`) ?? null);
+    async getProjectCodeTrust(context: AuthContext, companyId: string, projectId: string): Promise<ProjectCodeTrust | null> {
+    return getProjectCodeTrust(this.projectState(), context, companyId, projectId);
   }
 
   async setProjectCodeTrust(context: AuthContext, companyId: string, projectId: string, input: ProjectCodeTrustInput): Promise<ProjectCodeTrust> {
@@ -806,15 +783,12 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return structuredClone(next);
   }
 
-  async getProjectMountedFolder(context: AuthContext, companyId: string, projectId: string): Promise<ProjectMountedFolder | null> {
-    this.assertCompany(context, companyId);
-    const record = this.projectMountedFolders.get(`${companyId}:${projectId}`);
-    if (!record || record.workspaceId !== context.workspaceId) return null;
-    return structuredClone(record);
+    async getProjectMountedFolder(context: AuthContext, companyId: string, projectId: string): Promise<ProjectMountedFolder | null> {
+    return getProjectMountedFolder(this.projectState(), context, companyId, projectId);
   }
 
-  async getProjectMountedFolderForSystem(companyId: string, projectId: string): Promise<ProjectMountedFolder | null> {
-    return structuredClone(this.projectMountedFolders.get(`${companyId}:${projectId}`) ?? null);
+    async getProjectMountedFolderForSystem(companyId: string, projectId: string): Promise<ProjectMountedFolder | null> {
+    return getProjectMountedFolderForSystem(this.projectState(), companyId, projectId);
   }
 
   async setProjectMountedFolder(context: AuthContext, companyId: string, projectId: string, input: ProjectMountedFolderInput): Promise<ProjectMountedFolder> {
@@ -851,80 +825,22 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     this.projects.set(projectId, next);
     return structuredClone(next);
   }
-  async updateProjectRepository(context: AuthContext, companyId: string, projectId: string, input: { provider: string; url: string; branch: string }): Promise<Project> {
-    const project = await this.getProject(context, companyId, projectId);
-    if (project.status === "archived") throw new Error("Project is archived");
-    const next = { ...project, repositoryProvider: input.provider, repositoryUrl: input.url, repositoryBranch: input.branch, revision: project.revision + 1, updatedAt: now() };
-    this.projects.set(projectId, next);
-    return structuredClone(next);
+    async updateProjectRepository(context: AuthContext, companyId: string, projectId: string, input: { provider: string; url: string; branch: string }): Promise<Project> {
+    return updateProjectRepository(this.projectState(), context, companyId, projectId, input);
   }
-  async updateProjectPreview(context: AuthContext, companyId: string, projectId: string, patch: { status?: ProjectStatus; previewUrl?: string | null; previewPort?: number | null; framework?: string | null; runtime?: string | null; lastBuildStatus?: string | null; deploymentUrl?: string | null; deploymentStatus?: string | null; lastDeploymentStatus?: string | null; lastDeployedAt?: string | null }) {
-    const project = await this.getProject(context, companyId, projectId);
-    if (project.status === "archived") throw new Error("Project is archived");
-    const next: Project = {
-      ...project,
-      status: patch.status ?? project.status,
-      previewUrl: patch.previewUrl !== undefined ? (patch.previewUrl ?? undefined) : project.previewUrl,
-      previewPort: patch.previewPort !== undefined ? (patch.previewPort ?? undefined) : project.previewPort,
-      framework: patch.framework !== undefined ? (patch.framework ?? undefined) : project.framework,
-      runtime: patch.runtime !== undefined ? (patch.runtime ?? undefined) : project.runtime,
-      lastBuildStatus: patch.lastBuildStatus !== undefined ? (patch.lastBuildStatus ?? undefined) : project.lastBuildStatus,
-      deploymentUrl: patch.deploymentUrl !== undefined ? (patch.deploymentUrl ?? undefined) : project.deploymentUrl,
-      deploymentStatus: patch.deploymentStatus !== undefined ? (patch.deploymentStatus ?? undefined) : (patch.lastDeploymentStatus !== undefined ? (patch.lastDeploymentStatus ?? undefined) : project.deploymentStatus),
-      lastDeployedAt: patch.lastDeployedAt !== undefined ? (patch.lastDeployedAt ?? undefined) : (patch.deploymentUrl ? now() : project.lastDeployedAt),
-      revision: project.revision + 1,
-      updatedAt: now(),
-    };
-    this.projects.set(projectId, next);
-    return structuredClone(next);
+    async updateProjectPreview(context: AuthContext, companyId: string, projectId: string, patch: { status?: ProjectStatus; previewUrl?: string | null; previewPort?: number | null; framework?: string | null; runtime?: string | null; lastBuildStatus?: string | null; deploymentUrl?: string | null; deploymentStatus?: string | null; lastDeploymentStatus?: string | null; lastDeployedAt?: string | null }) {
+    return updateProjectPreview(this.projectState(), context, companyId, projectId, patch);
   }
-  async archiveProject(context: AuthContext, companyId: string, projectId: string, expectedRevision: number) {
-    const project = await this.getProject(context, companyId, projectId);
-    if (project.revision !== expectedRevision || project.status === "archived") throw new Error("Project changed by another request or is archived");
-    const next: Project = { ...project, status: "archived", revision: project.revision + 1, updatedAt: now() };
-    this.projects.set(projectId, next);
-    return structuredClone(next);
+    async archiveProject(context: AuthContext, companyId: string, projectId: string, expectedRevision: number) {
+    return archiveProject(this.projectState(), context, companyId, projectId, expectedRevision);
   }
 
-  async deleteProject(context: AuthContext, companyId: string, projectId: string) {
-    await this.getProject(context, companyId, projectId);
-    for (const [key, id] of this.projectCreateRequests) if (id === projectId) this.projectCreateRequests.delete(key);
-    for (const [id, chk] of this.projectCheckpoints) {
-      if (chk.projectId === projectId && chk.companyId === companyId && chk.workspaceId === context.workspaceId) {
-        this.projectCheckpoints.delete(id);
-      }
-    }
-    for (const [id, dep] of this.projectDeployments) {
-      if (dep.projectId === projectId && dep.companyId === companyId && dep.workspaceId === context.workspaceId) {
-        this.projectDeployments.delete(id);
-      }
-    }
-    for (const [id, rep] of this.projectQaReports) {
-      if (rep.projectId === projectId && rep.companyId === companyId && rep.workspaceId === context.workspaceId) {
-        this.projectQaReports.delete(id);
-      }
-    }
-    return this.projects.delete(projectId);
+    async deleteProject(context: AuthContext, companyId: string, projectId: string) {
+    return deleteProject(this.projectState(), context, companyId, projectId);
   }
 
-  async createProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, input: CreateCheckpointInput): Promise<ProjectCheckpoint> {
-    await this.getProject(context, companyId, projectId);
-    const checkpoint: ProjectCheckpoint = {
-      id: `chk_${randomUUID()}`,
-      workspaceId: context.workspaceId,
-      companyId,
-      projectId,
-      userId: context.userId,
-      name: input.name.trim(),
-      description: input.description,
-      commitHash: input.commitHash,
-      trigger: input.trigger,
-      runId: input.runId,
-      fileCount: input.fileCount ?? 0,
-      createdAt: now(),
-    };
-    this.projectCheckpoints.set(checkpoint.id, checkpoint);
-    return structuredClone(checkpoint);
+    async createProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, input: CreateCheckpointInput): Promise<ProjectCheckpoint> {
+    return createProjectCheckpoint(this.projectState(), context, companyId, projectId, input);
   }
 
   async listProjectCheckpoints(context: AuthContext, companyId: string, projectId: string, limit = 50): Promise<ProjectCheckpoint[]> {
@@ -936,47 +852,16 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       .slice(0, safeLimit));
   }
 
-  async getProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, checkpointId: string): Promise<ProjectCheckpoint> {
-    await this.getProject(context, companyId, projectId);
-    const checkpoint = this.projectCheckpoints.get(checkpointId);
-    if (!checkpoint || checkpoint.workspaceId !== context.workspaceId || checkpoint.companyId !== companyId || checkpoint.projectId !== projectId) {
-      throw new WorkspaceNotFoundError("Project checkpoint not found");
-    }
-    return structuredClone(checkpoint);
+    async getProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, checkpointId: string): Promise<ProjectCheckpoint> {
+    return getProjectCheckpoint(this.projectState(), context, companyId, projectId, checkpointId);
   }
 
-  async deleteProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, checkpointId: string): Promise<boolean> {
-    await this.getProject(context, companyId, projectId);
-    const checkpoint = this.projectCheckpoints.get(checkpointId);
-    if (!checkpoint || checkpoint.workspaceId !== context.workspaceId || checkpoint.companyId !== companyId || checkpoint.projectId !== projectId) {
-      return false;
-    }
-    return this.projectCheckpoints.delete(checkpointId);
+    async deleteProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, checkpointId: string): Promise<boolean> {
+    return deleteProjectCheckpoint(this.projectState(), context, companyId, projectId, checkpointId);
   }
 
-  async createProjectDeployment(context: AuthContext, companyId: string, projectId: string, input: CreateDeploymentInput): Promise<ProjectDeployment> {
-    await this.getProject(context, companyId, projectId);
-    const deployment: ProjectDeployment = {
-      id: `dep_${randomUUID()}`,
-      workspaceId: context.workspaceId,
-      companyId,
-      projectId,
-      userId: context.userId,
-      provider: input.provider,
-      environment: input.environment ?? "production",
-      branch: input.branch ?? "project/main",
-      commitHash: input.commitHash,
-      status: input.status ?? "queued",
-      targetUrl: input.targetUrl,
-      externalDeploymentId: input.externalDeploymentId,
-      preflightSummary: input.preflightSummary,
-      errorMessage: input.errorMessage,
-      runId: input.runId,
-      createdAt: now(),
-      updatedAt: now(),
-    };
-    this.projectDeployments.set(deployment.id, deployment);
-    return structuredClone(deployment);
+    async createProjectDeployment(context: AuthContext, companyId: string, projectId: string, input: CreateDeploymentInput): Promise<ProjectDeployment> {
+    return createProjectDeployment(this.projectState(), context, companyId, projectId, input);
   }
 
   async listProjectDeployments(context: AuthContext, companyId: string, projectId: string, limit = 50): Promise<ProjectDeployment[]> {
@@ -988,53 +873,16 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       .slice(0, safeLimit));
   }
 
-  async getProjectDeployment(context: AuthContext, companyId: string, projectId: string, deploymentId: string): Promise<ProjectDeployment | null> {
-    await this.getProject(context, companyId, projectId);
-    const deployment = this.projectDeployments.get(deploymentId);
-    if (!deployment || deployment.workspaceId !== context.workspaceId || deployment.companyId !== companyId || deployment.projectId !== projectId) {
-      return null;
-    }
-    return structuredClone(deployment);
+    async getProjectDeployment(context: AuthContext, companyId: string, projectId: string, deploymentId: string): Promise<ProjectDeployment | null> {
+    return getProjectDeployment(this.projectState(), context, companyId, projectId, deploymentId);
   }
 
-  async updateProjectDeployment(context: AuthContext, companyId: string, projectId: string, deploymentId: string, patch: Partial<ProjectDeployment>): Promise<ProjectDeployment> {
-    await this.getProject(context, companyId, projectId);
-    const current = this.projectDeployments.get(deploymentId);
-    if (!current || current.workspaceId !== context.workspaceId || current.companyId !== companyId || current.projectId !== projectId) {
-      throw new WorkspaceNotFoundError("Project deployment not found");
-    }
-    const updated: ProjectDeployment = {
-      ...current,
-      ...patch,
-      id: current.id,
-      workspaceId: current.workspaceId,
-      companyId: current.companyId,
-      projectId: current.projectId,
-      updatedAt: now(),
-    };
-    this.projectDeployments.set(deploymentId, updated);
-    return structuredClone(updated);
+    async updateProjectDeployment(context: AuthContext, companyId: string, projectId: string, deploymentId: string, patch: Partial<ProjectDeployment>): Promise<ProjectDeployment> {
+    return updateProjectDeployment(this.projectState(), context, companyId, projectId, deploymentId, patch);
   }
 
-  async createProjectQaReport(context: AuthContext, companyId: string, projectId: string, input: CreateProjectQaReportInput): Promise<ProjectQaReport> {
-    await this.getProject(context, companyId, projectId);
-    const report: ProjectQaReport = {
-      id: `qa_${randomUUID()}`,
-      workspaceId: context.workspaceId,
-      companyId,
-      projectId,
-      userId: context.userId,
-      status: input.status,
-      targetUrl: input.targetUrl,
-      summary: input.summary,
-      issues: structuredClone(input.issues),
-      metrics: structuredClone(input.metrics),
-      screenshots: structuredClone(input.screenshots ?? []),
-      runId: input.runId,
-      createdAt: now(),
-    };
-    this.projectQaReports.set(report.id, report);
-    return structuredClone(report);
+    async createProjectQaReport(context: AuthContext, companyId: string, projectId: string, input: CreateProjectQaReportInput): Promise<ProjectQaReport> {
+    return createProjectQaReport(this.projectState(), context, companyId, projectId, input);
   }
 
   async listProjectQaReports(context: AuthContext, companyId: string, projectId: string, limit = 50): Promise<ProjectQaReport[]> {
@@ -1046,13 +894,8 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       .slice(0, safeLimit));
   }
 
-  async getProjectQaReport(context: AuthContext, companyId: string, projectId: string, reportId: string): Promise<ProjectQaReport | null> {
-    await this.getProject(context, companyId, projectId);
-    const report = this.projectQaReports.get(reportId);
-    if (!report || report.workspaceId !== context.workspaceId || report.companyId !== companyId || report.projectId !== projectId) {
-      return null;
-    }
-    return structuredClone(report);
+    async getProjectQaReport(context: AuthContext, companyId: string, projectId: string, reportId: string): Promise<ProjectQaReport | null> {
+    return getProjectQaReport(this.projectState(), context, companyId, projectId, reportId);
   }
 
   async getLatestProjectQaReport(context: AuthContext, companyId: string, projectId: string): Promise<ProjectQaReport | null> {
@@ -1639,8 +1482,8 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return this.dataPolicyOps.listProviderDataPolicyVersions(companyId, providerId);
   }
 
-  async getProjectDataPolicy(companyId: string, projectId: string): Promise<ProjectDataPolicyRecord | null> {
-    return this.dataPolicyOps.getProjectDataPolicy(companyId, projectId);
+    async getProjectDataPolicy(companyId: string, projectId: string): Promise<ProjectDataPolicyRecord | null> {
+    return getProjectDataPolicy(this.projectState(), companyId, projectId);
   }
 
   async upsertProjectDataPolicy(input: UpsertProjectDataPolicyStoreInput): Promise<ProjectDataPolicyRecord> {
@@ -1772,10 +1615,8 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     };
   }
 
-  async getProjectForSystem(companyId: string, projectId: string): Promise<Project | null> {
-    const project = this.projects.get(projectId);
-    if (!project || project.companyId !== companyId) return null;
-    return structuredClone(project);
+    async getProjectForSystem(companyId: string, projectId: string): Promise<Project | null> {
+    return getProjectForSystem(this.projectState(), companyId, projectId);
   }
 
   async listCodeRunTurnsForScan(input: CodeRunTurnScanInput): Promise<CodeRunScanPage<CodeRunTurnRecord>> {
