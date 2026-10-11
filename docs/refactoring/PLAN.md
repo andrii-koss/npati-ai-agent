@@ -1468,3 +1468,8 @@ PostgresWorkspaceStore        ← публічний фасад; тонкі де
 **Тіла змінено двома механічними правками:** `this.pool` → аргумент `pool` ✓, `this.assertCompany(...)` → спільний `assertCompany(pool, ...)` із кроку 1b ✓ (саме для цього lookups і виносилися — домен не залежить від фасада ✓). SQL аудиту не дубльовано, транзакція `appendAuditEntry` (advisory-lock + COMMIT/ROLLBACK) збережена дослівно ✓.
 
 **Перевірено:** `tsc --noEmit` (воркспейс, усі воркспейси, тестовий проєкт) — **exit 0** ✓ · `npm run lint` — **exit 0** ✓ · **c-серія** — **рівно 3 наявні падіння каталогу, як на базі** ✓ (регресій немає).
+### Крок 1 — домен `goals and memory` ✓
+
+`postgres-store.ts` 4361 → **4312**; 20 методів (listGoals, createGoal, updateGoal, deleteGoal, listMemory, createMemory, updateMemory, deleteMemory, listConversations, createConversation, getConversation, updateConversation, deleteConversation, appendMessage, listNeutralConversations, createNeutralConversation, getNeutralConversation, updateNeutralConversation, deleteNeutralConversation, appendNeutralMessage) винесено в `postgres-goals-memory-repository.ts` (144 рядків) як функції над `pool` (таблиці: `goal*, memory*, conversation*, message*`). Фасад лишає тонкі делегації з тими самими сигнатурами, тож публічний API не змінився, а всі виклики поза доменом працюють через фасад без правок.
+
+**Перевірено:** `tsc --noEmit` (воркспейс, усі воркспейси, тестовий проєкт) — exit 0 · `npm run lint` — exit 0 · **c-серія** — рівно 3 наявні падіння каталогу, як на базі (регресій немає).

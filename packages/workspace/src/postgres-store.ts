@@ -82,6 +82,7 @@ import {
 } from "./postgres-row-mappers";
 import * as lookups from "./postgres-lookups";
 import * as audit from "./postgres-audit-repository";
+import * as goalsmemory from "./postgres-goals-memory-repository";
 
 export class PostgresWorkspaceStore implements WorkspaceStore {
   private codeProcessesInstance?: PostgresCodeProcessStore;
@@ -2596,8 +2597,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   async listGoals(context: AuthContext, businessId: string) {
-    await this.getBusiness(context, businessId);
-    return (await this.pool.query<Goal>(`SELECT ${goalColumns} FROM goals WHERE workspace_id=$1 AND business_id=$2 ORDER BY priority, updated_at DESC`, [context.workspaceId, businessId])).rows;
+    return goalsmemory.listGoals(this.pool, context, businessId);
   }
 
   async listUserGoals(context: AuthContext) {
@@ -2613,11 +2613,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   async createGoal(context: AuthContext, businessId: string, input: GoalInput) {
-    await this.getBusiness(context, businessId);
-    const values = [randomUUID(), context.workspaceId, businessId, context.userId, input.title.trim(), input.description ?? null, input.status ?? "active", input.targetValue ?? null, input.targetUnit ?? null, input.currentValue ?? null, input.targetDate ?? null, input.priority ?? 3];
-    const result = await this.pool.query<Goal>(`INSERT INTO goals(id,workspace_id,business_id,created_by_user_id,title,description,status,target_value,target_unit,current_value,target_date,priority)
-      VALUES (${values.map((_, index) => `$${index + 1}`).join(",")}) RETURNING ${goalColumns}`, values);
-    return result.rows[0]!;
+    return goalsmemory.createGoal(this.pool, context, businessId, input);
   }
 
   async linkGoal(context: AuthContext, businessId: string, goalId: string) {
@@ -2635,23 +2631,15 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   async updateGoal(context: AuthContext, businessId: string, goalId: string, input: Partial<GoalInput>) {
-    await this.getBusiness(context, businessId);
-    const values = [goalId, context.workspaceId, businessId, input.title, input.description, input.status, input.targetValue, input.targetUnit, input.currentValue, input.targetDate, input.priority];
-    const result = await this.pool.query<Goal>(`UPDATE goals SET title=COALESCE($4,title),description=COALESCE($5,description),status=COALESCE($6,status),target_value=COALESCE($7,target_value),target_unit=COALESCE($8,target_unit),current_value=COALESCE($9,current_value),target_date=COALESCE($10,target_date),priority=COALESCE($11,priority),updated_at=now()
-      WHERE id=$1 AND workspace_id=$2 AND business_id=$3 RETURNING ${goalColumns}`, values.map((value) => value === undefined ? null : value));
-    if (!result.rowCount) throw new WorkspaceAccessError("Goal is not available for this business");
-    return result.rows[0]!;
+    return goalsmemory.updateGoal(this.pool, context, businessId, goalId, input);
   }
 
   async deleteGoal(context: AuthContext, businessId: string, goalId: string) {
-    await this.getBusiness(context, businessId);
-    return Boolean((await this.pool.query("DELETE FROM goals WHERE id=$1 AND workspace_id=$2 AND business_id=$3 RETURNING id", [goalId, context.workspaceId, businessId])).rowCount);
+    return goalsmemory.deleteGoal(this.pool, context, businessId, goalId);
   }
 
   async listMemory(context: AuthContext, businessId: string, query = "", limit = 100) {
-    await this.getBusiness(context, businessId);
-    const needle = `%${query.trim()}%`;
-    return (await this.pool.query<MemoryItem>(`SELECT ${memoryColumns} FROM memory_items WHERE workspace_id=$1 AND business_id=$2 AND ($3='' OR type ILIKE $4 OR title ILIKE $4 OR content ILIKE $4) ORDER BY updated_at DESC LIMIT $5`, [context.workspaceId, businessId, query.trim(), needle, Math.min(limit, 100)])).rows;
+    return goalsmemory.listMemory(this.pool, context, businessId, query, limit);
   }
 
   async listUserMemories(context: AuthContext, query = "", limit = 100) {
@@ -2668,10 +2656,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   async createMemory(context: AuthContext, businessId: string, input: MemoryInput) {
-    await this.getBusiness(context, businessId); assertNoSecrets(input);
-    const values = [randomUUID(), context.workspaceId, businessId, context.userId, input.type, input.title.trim(), input.content.trim(), input.source ?? "user", input.confidence ?? null];
-    const result = await this.pool.query<MemoryItem>(`INSERT INTO memory_items(id,workspace_id,business_id,user_id,type,title,content,source,confidence) VALUES (${values.map((_, index) => `$${index + 1}`).join(",")}) RETURNING ${memoryColumns}`, values);
-    return result.rows[0]!;
+    return goalsmemory.createMemory(this.pool, context, businessId, input);
   }
 
   async linkMemory(context: AuthContext, businessId: string, memoryId: string) {
@@ -2689,93 +2674,59 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   async updateMemory(context: AuthContext, businessId: string, memoryId: string, input: Partial<MemoryInput>) {
-    await this.getBusiness(context, businessId); assertNoSecrets(input);
-    const values = [memoryId, context.workspaceId, businessId, input.type, input.title, input.content, input.source, input.confidence];
-    const result = await this.pool.query<MemoryItem>(`UPDATE memory_items SET type=COALESCE($4,type),title=COALESCE($5,title),content=COALESCE($6,content),source=COALESCE($7,source),confidence=COALESCE($8,confidence),updated_at=now() WHERE id=$1 AND workspace_id=$2 AND business_id=$3 RETURNING ${memoryColumns}`, values.map((value) => value === undefined ? null : value));
-    if (!result.rowCount) throw new WorkspaceAccessError("Memory is not available for this business");
-    return result.rows[0]!;
+    return goalsmemory.updateMemory(this.pool, context, businessId, memoryId, input);
   }
 
   async deleteMemory(context: AuthContext, businessId: string, memoryId: string) {
-    await this.getBusiness(context, businessId);
-    return Boolean((await this.pool.query("DELETE FROM memory_items WHERE id=$1 AND workspace_id=$2 AND business_id=$3 RETURNING id", [memoryId, context.workspaceId, businessId])).rowCount);
+    return goalsmemory.deleteMemory(this.pool, context, businessId, memoryId);
   }
 
   async listConversations(context: AuthContext, businessId: string) {
-    await this.getBusiness(context, businessId);
-    return (await this.pool.query<Conversation>(`SELECT ${conversationColumns} FROM conversations WHERE workspace_id=$1 AND business_id=$2 AND user_id=$3 ORDER BY updated_at DESC`, [context.workspaceId, businessId, context.userId])).rows;
+    return goalsmemory.listConversations(this.pool, context, businessId);
   }
 
   async createConversation(context: AuthContext, businessId: string, title: string) {
-    await this.getBusiness(context, businessId);
-    const result = await this.pool.query<Conversation>(`INSERT INTO conversations(id,workspace_id,business_id,user_id,title) VALUES ($1,$2,$3,$4,$5) RETURNING ${conversationColumns}`, [randomUUID(), context.workspaceId, businessId, context.userId, title.trim().slice(0, 120) || "New conversation"]);
-    return result.rows[0]!;
+    return goalsmemory.createConversation(this.pool, context, businessId, title);
   }
 
   async getConversation(context: AuthContext, businessId: string, conversationId: string) {
-    await this.getBusiness(context, businessId);
-    const result = await this.pool.query<Conversation>(`SELECT ${conversationColumns} FROM conversations WHERE id=$1 AND workspace_id=$2 AND business_id=$3 AND user_id=$4`, [conversationId, context.workspaceId, businessId, context.userId]);
-    if (!result.rowCount) throw new WorkspaceAccessError("Conversation is not available for this business");
-    const messages = (await this.pool.query<ConversationMessage>(`SELECT id, conversation_id AS "conversationId", role, content, created_at AS "createdAt" FROM messages WHERE conversation_id=$1 ORDER BY created_at`, [conversationId])).rows;
-    return { conversation: result.rows[0]!, messages };
+    return goalsmemory.getConversation(this.pool, context, businessId, conversationId);
   }
 
   async updateConversation(context: AuthContext, businessId: string, conversationId: string, title: string) {
-    await this.getConversation(context, businessId, conversationId);
-    const result = await this.pool.query<Conversation>(
-      `UPDATE conversations SET title=$1,updated_at=now() WHERE id=$2 RETURNING ${conversationColumns}`,
-      [title.trim().slice(0, 120) || "New conversation", conversationId],
-    );
-    return result.rows[0]!;
+    return goalsmemory.updateConversation(this.pool, context, businessId, conversationId, title);
   }
 
   async deleteConversation(context: AuthContext, businessId: string, conversationId: string) {
-    await this.getConversation(context, businessId, conversationId);
-    return Boolean((await this.pool.query("DELETE FROM conversations WHERE id=$1", [conversationId])).rowCount);
+    return goalsmemory.deleteConversation(this.pool, context, businessId, conversationId);
   }
 
   async appendMessage(context: AuthContext, businessId: string, conversationId: string, role: ConversationMessage["role"], content: string) {
-    await this.getConversation(context, businessId, conversationId);
-    const result = await this.pool.query<ConversationMessage>(`INSERT INTO messages(id,conversation_id,role,content) VALUES ($1,$2,$3,$4) RETURNING id,conversation_id AS "conversationId",role,content,created_at AS "createdAt"`, [randomUUID(), conversationId, role, content]);
-    await this.pool.query("UPDATE conversations SET updated_at=now() WHERE id=$1", [conversationId]);
-    return result.rows[0]!;
+    return goalsmemory.appendMessage(this.pool, context, businessId, conversationId, role, content);
   }
 
   async listNeutralConversations(context: AuthContext) {
-    await this.ensureIdentity(context);
-    return (await this.pool.query<Conversation>(`SELECT ${conversationColumns} FROM conversations WHERE workspace_id=$1 AND business_id IS NULL AND user_id=$2 ORDER BY updated_at DESC`, [context.workspaceId, context.userId])).rows;
+    return goalsmemory.listNeutralConversations(this.pool, context);
   }
 
   async createNeutralConversation(context: AuthContext, title: string) {
-    await this.ensureIdentity(context);
-    const result = await this.pool.query<Conversation>(`INSERT INTO conversations(id,workspace_id,business_id,user_id,title) VALUES ($1,$2,NULL,$3,$4) RETURNING ${conversationColumns}`, [randomUUID(), context.workspaceId, context.userId, title.trim().slice(0, 120) || "New conversation"]);
-    return result.rows[0]!;
+    return goalsmemory.createNeutralConversation(this.pool, context, title);
   }
 
   async getNeutralConversation(context: AuthContext, conversationId: string) {
-    await this.ensureIdentity(context);
-    const result = await this.pool.query<Conversation>(`SELECT ${conversationColumns} FROM conversations WHERE id=$1 AND workspace_id=$2 AND business_id IS NULL AND user_id=$3`, [conversationId, context.workspaceId, context.userId]);
-    if (!result.rowCount) throw new WorkspaceAccessError("Conversation is not available to this user");
-    const messages = (await this.pool.query<ConversationMessage>(`SELECT id, conversation_id AS "conversationId", role, content, created_at AS "createdAt" FROM messages WHERE conversation_id=$1 ORDER BY created_at`, [conversationId])).rows;
-    return { conversation: result.rows[0]!, messages };
+    return goalsmemory.getNeutralConversation(this.pool, context, conversationId);
   }
 
   async updateNeutralConversation(context: AuthContext, conversationId: string, title: string) {
-    await this.getNeutralConversation(context, conversationId);
-    const result = await this.pool.query<Conversation>(`UPDATE conversations SET title=$1,updated_at=now() WHERE id=$2 RETURNING ${conversationColumns}`, [title.trim().slice(0, 120) || "New conversation", conversationId]);
-    return result.rows[0]!;
+    return goalsmemory.updateNeutralConversation(this.pool, context, conversationId, title);
   }
 
   async deleteNeutralConversation(context: AuthContext, conversationId: string) {
-    await this.getNeutralConversation(context, conversationId);
-    return Boolean((await this.pool.query("DELETE FROM conversations WHERE id=$1", [conversationId])).rowCount);
+    return goalsmemory.deleteNeutralConversation(this.pool, context, conversationId);
   }
 
   async appendNeutralMessage(context: AuthContext, conversationId: string, role: ConversationMessage["role"], content: string) {
-    await this.getNeutralConversation(context, conversationId);
-    const result = await this.pool.query<ConversationMessage>(`INSERT INTO messages(id,conversation_id,role,content) VALUES ($1,$2,$3,$4) RETURNING id,conversation_id AS "conversationId",role,content,created_at AS "createdAt"`, [randomUUID(), conversationId, role, content]);
-    await this.pool.query("UPDATE conversations SET updated_at=now() WHERE id=$1", [conversationId]);
-    return result.rows[0]!;
+    return goalsmemory.appendNeutralMessage(this.pool, context, conversationId, role, content);
   }
 
   // --- C5a: company membership and invites ---------------------------------------------------
