@@ -33,84 +33,8 @@ import { log, commit, type ProjectGitHistoryHost } from "./project-git-history-s
 import { assertNoSymlinkPath, removePathForRevert, resolveRevertTarget, assertWorkspaceRevisionUnchanged, type ProjectGitGuardHost } from "./project-git-guard-service";
 import { resolveProjectWorkspace, assertSafeIndex, ensureRepository, requireWrite, runGit, stage, type ProjectGitWorkspaceHost } from "./project-git-workspace-service";
 import { getProjectPath, parseConflictFiles, connectRepository, restore, countWorkspaceFiles, isLargeChange, listCheckpoints, pathExistsInCommit, assertGitWriteBoundary, captureWorkspaceRevision, credentialEnvironment, getAgentWorktreePath, type ProjectGitCoreHost } from "./project-git-core-service";
-
-const execFileAsync = promisify(execFile);
-
-export class GitError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string,
-    public readonly status = 400,
-    /**
-     * C11 (owner decision 13): structured detail for a refusal a caller can act on — currently
-     * `repository_not_initialized`, whose `requiresInitialization` tells a requester that this write is a
-     * *different* act that needs its own approval. It travels to the tool layer unchanged (`rethrowGit` copies
-     * it into the structured tool error), so the model learns *why* instead of parsing a message.
-     *
-     * The union with `string` is not new: `GitConflictEscalationError` has carried its escalation text in
-     * `details` since the merge-conflict work, and a subclass property must stay assignable to this one.
-     */
-    public readonly details: Record<string, unknown> | string = {},
-  ) {
-    super(message);
-    this.name = "GitError";
-  }
-}
-
-export class GitConflictError extends GitError {
-  constructor(
-    public readonly conflictingFiles: string[],
-    public readonly details: string,
-  ) {
-    super(
-      "GIT_CONFLICT",
-      `Git merge conflict detected in ${conflictingFiles.length} file(s): ${conflictingFiles.join(", ")}`,
-      409,
-    );
-    this.name = "GitConflictError";
-  }
-}
-
-/**
- * C11 (owner decision 9): a merge that could not be finished automatically.
- *
- * The message is **factual**: it reports the number of merge attempts that were actually run and the budget
- * they were run against. It used to claim "exceeded maximum automatic attempts (2)" while the method made
- * exactly one attempt and had no resolver at all — a promise in a string. The counter below is the
- * mechanism that message now describes, and `escalation` carries the structured decision a caller can act
- * on (`code.ask_user` is the suggested tool).
- */
-export class GitConflictEscalationError extends GitError {
-  constructor(
-    public readonly conflictingFiles: string[],
-    public readonly details: string,
-    public readonly escalation?: {
-      attempts: number;
-      maxAttempts: number;
-      sourceBranch: string;
-      targetBranch: string;
-      suggestedTool: "code.ask_user";
-      question: string;
-    },
-  ) {
-    const attempts = escalation?.attempts ?? 0;
-    const maxAttempts = escalation?.maxAttempts ?? MAX_GIT_MERGE_ATTEMPTS;
-    super(
-      "GIT_CONFLICT_ESCALATED",
-      `Git merge conflict in ${conflictingFiles.length} file(s) after ${attempts} of at most ${maxAttempts} automatic `
-      + `attempt(s); escalating to user intervention for files: ${conflictingFiles.join(", ")}`,
-      409,
-    );
-    this.name = "GitConflictEscalationError";
-  }
-}
-
-export class GitApprovalRequiredError extends GitError {
-  constructor(message = "External Git write operation requires explicit human approval") {
-    super("GIT_APPROVAL_REQUIRED", message, 403);
-    this.name = "GitApprovalRequiredError";
-  }
-}
+import { GitError, GitConflictError, GitConflictEscalationError, GitApprovalRequiredError, validId, redactSecrets, execFileAsync } from "./project-git-shared";
+export { GitError, GitConflictError, GitConflictEscalationError, GitApprovalRequiredError, validId, redactSecrets, execFileAsync } from "./project-git-shared";
 
 export interface GitStatusResult {
   branch: string;
@@ -257,10 +181,6 @@ export const defaultCheckpointThresholds: CheckpointThresholds = {
   lineThreshold: 200,
 };
 
-function validId(value: string) {
-  return typeof value === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(value);
-}
-
 export function safeAgentSlug(slug: string): string {
   if (typeof slug !== "string" || !slug || slug.includes("/") || slug.includes("\\") || slug.includes("..")) {
     throw new GitError("INVALID_AGENT_SLUG", "Invalid agent slug for worktree", 400);
@@ -268,16 +188,6 @@ export function safeAgentSlug(slug: string): string {
   const clean = slug.toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50);
   if (!clean || clean === "." || clean === "..") throw new GitError("INVALID_AGENT_SLUG", "Invalid agent slug for worktree", 400);
   return clean;
-}
-
-function redactSecrets(text: string): string {
-  return text.replace(/https:\/\/[^@\s]+@/g, "https://***@")
-    .replace(/(?:ghp_|github_pat_)[a-zA-Z0-9_]+/g, "***TOKEN***")
-    // C11: the git credential is delivered as an `Authorization: Basic <base64>` extraheader. A failing
-    // git command can echo the config it was given (`-c`/`GIT_CONFIG_VALUE_n` appear in some messages), and
-    // the base64 blob would not match either pattern above, so the header is masked explicitly.
-    .replace(/Authorization:\s*(?:Basic|Bearer)\s+[A-Za-z0-9+/=_-]+/gi, "Authorization: ***")
-    .replace(/GIT_CONFIG_VALUE_\d+=\S*/g, "GIT_CONFIG_VALUE_***");
 }
 
 /** Exported for the security-gate suite: redaction of a credential-bearing git error is pinned directly. */
