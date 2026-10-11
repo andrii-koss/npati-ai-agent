@@ -12,7 +12,7 @@
     "build": "npm run catalog:generate && npm run build --workspace @npati/agent-api && npm run build --workspace @npati/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "typecheck:tests": "tsc --noEmit -p tsconfig.tests.json",
-    "lint": "node scripts/lint-guard.mjs && node scripts/scan-web-xss.mjs",
+    "lint": "node scripts/lint-guard.mjs && node scripts/scan-web-xss.mjs && node scripts/source-size-guard.mjs",
     "eval:smoke": "node node_modules/vitest/vitest.mjs run tests/coding-agent-c6-eval.test.ts --reporter=json --outputFile=artifacts/coding-agent-eval-smoke-report.json",
     "test": "vitest run",
     "test:known-failures": "node scripts/check-known-failures.mjs --artifact artifacts/known-failures-report.json",
