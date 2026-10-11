@@ -21,6 +21,7 @@ import {
 import { createAgentWorktree, commitAgentWorktree, mergeAgentWorktree, listAgentWorktrees, type ProjectGitWorktreeHost } from "./project-git-worktree-service";
 import { createPullRequest, commentOnPullRequest, type ProjectGitPullRequestHost } from "./project-git-pull-request-service";
 import { restoreCheckpoint, restorePaths, type ProjectGitCheckpointHost } from "./project-git-checkpoint-service";
+import { requireGitWriteApproval, resolveWriteIntent, type ProjectGitApprovalHost } from "./project-git-approval-service";
 
 const execFileAsync = promisify(execFile);
 
@@ -305,6 +306,13 @@ export class ProjectGitService {
     this.thresholds = {
       fileThreshold: thresholds?.fileThreshold ?? (Number(process.env.NPATI_CHECKPOINT_FILE_THRESHOLD) || defaultCheckpointThresholds.fileThreshold),
       lineThreshold: thresholds?.lineThreshold ?? (Number(process.env.NPATI_CHECKPOINT_LINE_THRESHOLD) || defaultCheckpointThresholds.lineThreshold),
+    };
+  }
+
+  private approvalHost(): ProjectGitApprovalHost {
+    return {
+      boundary: this.boundary,
+      currentBranch: this.currentBranch.bind(this),
     };
   }
 
@@ -1256,7 +1264,7 @@ export class ProjectGitService {
    * what `gitApprovalPayload` binds as `repositoryInitialized: false`, so the approval covers the act of
    * creating the repository — and only that act.
    */
-  private async resolveWriteIntent(
+    private async resolveWriteIntent(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
@@ -1267,34 +1275,7 @@ export class ProjectGitService {
     namedSourceBranch?: string,
     inspection?: GitRepositoryInspection,
   ): Promise<GitWriteIntent> {
-    const target = namedBranch || await this.currentBranch(ctx, companyId, projectId, inspection);
-    const branch = normalizeGitBranch(target);
-    if (!branch || !/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,99}$/.test(branch) || branch.includes("..") || branch.includes("@{")) {
-      throw new GitError("INVALID_BRANCH_NAME", "Invalid branch name", 400);
-    }
-    /**
-     * C11: the local branch is the target unless the caller named a different one. When it did, the source
-     * is normalised the same way and validated the same way — the two are separate fields of the intent
-     * because the approval hash covers both, and the refspec below is built from both.
-     */
-    const source = namedSourceBranch ? normalizeGitBranch(namedSourceBranch) : branch;
-    if (!source || !/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,99}$/.test(source) || source.includes("..") || source.includes("@{")) {
-      throw new GitError("INVALID_BRANCH_NAME", "Invalid branch name", 400);
-    }
-    return {
-      gitOperation: force ? "force_push" : "push",
-      sourceBranch: source,
-      targetBranch: branch,
-      remoteBranch: branch,
-      // The configured URL is credential-free by construction (`connectRepository` refuses a URL that
-      // carries a user or a password), so no secret can enter the approval payload through it.
-      remote: project.repositoryUrl ?? null,
-      force,
-      credentialId: credentialId ?? null,
-      // C11 (owner decision 13): the resolved fact, from the read-only inspection — never from an argument.
-      // `gitApprovalPayload` writes it into the payload only when it is `false`.
-      ...(inspection ? { repositoryInitialized: inspection.initialized } : {}),
-    };
+    return resolveWriteIntent(this.approvalHost(), ctx, companyId, projectId, project, namedBranch, force, credentialId, namedSourceBranch, inspection);
   }
 
   /**
@@ -1339,7 +1320,7 @@ export class ProjectGitService {
    * an approval at all (503, fail closed), and no approval *record* means the caller presented only the
    * `approved` flag — which is not proof (`GIT_APPROVAL_RECORD_REQUIRED`).
    */
-  private async requireGitWriteApproval(
+    private async requireGitWriteApproval(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
@@ -1347,48 +1328,7 @@ export class ProjectGitService {
     toolName: string,
     approval?: GitWriteApprovalRequest,
   ): Promise<void> {
-    const port = this.boundary?.approvals;
-    if (!port) {
-      throw new GitError(
-        "GIT_APPROVAL_UNAVAILABLE",
-        "Git write approval verification is not configured; the remote write is refused",
-        503,
-      );
-    }
-    if (!approval?.approvalId) {
-      throw new GitError(
-        "GIT_APPROVAL_RECORD_REQUIRED",
-        "A remote git write requires an approved Company run: the approval record is missing and the `approved` flag alone is not proof",
-        403,
-      );
-    }
-    /**
-     * C11 (owner decision 5, corrected): the tool id inside the payload is the one the **record** was created
-     * under, because that is the name the request side hashed and the name `consumeApproved` matches on. For
-     * a push the request side is `code.git.push` (the tool the runtime gated), not this service's historical
-     * `project.git.push`; rebuilding the payload under the wrong name produced a different hash and made every
-     * record unredeemable. A record without a name cannot get here (`GIT_APPROVAL_RECORD_REQUIRED` above), and
-     * the caller-supplied name is only a fallback so a hand-built caller keeps working.
-     */
-    const recordTool = approval?.toolName?.trim() || toolName;
-    const inputPayload = "payload" in binding
-      ? binding.payload
-      : gitApprovalPayload({ projectId, tool: recordTool, intent: binding });
-    try {
-      await port.consumeApproved(ctx, companyId, approval.approvalId, {
-        runId: approval.runId ?? "",
-        agentId: approval.agentId ?? "",
-        toolName: recordTool,
-        inputPayload,
-      });
-    } catch (error) {
-      const code = String((error as { code?: string }).code ?? "GIT_APPROVAL_INVALID");
-      throw new GitError(
-        code,
-        "The approval record does not authorise this git write (status, single use, expiry and payload hash are all verified)",
-        403,
-      );
-    }
+    return requireGitWriteApproval(this.approvalHost(), ctx, companyId, projectId, binding, toolName, approval);
   }
 
   /**
