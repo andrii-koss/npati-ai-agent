@@ -57,6 +57,18 @@ and the actual running MinIO instance. Changing API credentials requires
 recreating API and company-worker containers; changing MinIO root credentials
 requires recreating MinIO as well. Preserve the `minio-data` volume.
 
+When API fails to listen, its `API startup failed` log now includes the MinIO
+endpoint, resolved addresses, whether the API key matches the configured root
+username, and whether credentials contain leading/trailing whitespace. No key,
+password or credential hash is printed. This log is available even while the
+API container is restarting. A separate registered MinIO user is expected to
+have `accessKeyMatchesRootUser: false`; this field alone does not reject it.
+
+The combined image serves React assets and API routes on container port 3001.
+MinIO initialization is required before that server listens, so a rejected
+storage credential prevents both frontend and API from starting. Domain port
+13001 is not the container port and cannot fix a storage authentication failure.
+
 To test credentials from the **actual containers** without displaying their values,
 run this command on the Docker host from the repository directory:
 
