@@ -49,6 +49,10 @@ Open:
 Empty optional provider keys are acceptable for initial startup. Features that require an
 external provider remain unavailable until that provider is connected.
 
+Docker deployments serve the React frontend and `/api/*` from the same `agent-api`
+container. The local UI remains at `http://localhost:3000`; Dokploy domains target
+`agent-api` on container port `3001`.
+
 ## Architecture
 
 ```text

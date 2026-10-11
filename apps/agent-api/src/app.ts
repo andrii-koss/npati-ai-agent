@@ -4,6 +4,7 @@ import { createCodePortsWiring } from "./code-ports-wiring";
 import { createCodeToolRuntimeWiring } from "./code-tool-runtime-wiring";
 import { createCodeToolWiring } from "./code-tool-wiring";
 import cors from "@fastify/cors";
+import { registerWebFrontend, rewriteBrowserApiUrl } from "./web-frontend";
 import { ContextBuilder, NpatiAgent } from "@npati/agent";
 import { OmniRouteEngine, OmniRouteMarketplace, type AIEngine, type ChatRequest, type ChatContentPart, type ChatToolCall, type ChatToolDefinition, isChatCapableModel, isNonChatSpecialtyModel } from "@npati/omniroute-adapter";
 import { createWebResearch, type ResearchOutcome, type ResearchProgressEvent, type ResearchProgressListener, type WebResearchService, extractTargetUrlOrDomain } from "@npati/web-research";
@@ -227,6 +228,7 @@ function* boundedResponseChunks(value:string,maxCharacters=1_024){
 const AUDIT_SYSTEM_WORKSPACE = process.env.NPATI_WORKSPACE_ID ?? "dev-workspace";
 
 export interface AppConfig {
+  webDistDirectory?: string;
   webOrigin?: string;
   omnirouteBaseUrl?: string;
   omnirouteApiKey?: string;
@@ -274,7 +276,9 @@ export interface AppConfig {
 }
 
 export function buildApp(config: AppConfig = {}) {
-  const app = Fastify({ logger: process.env.NODE_ENV !== "test" ? {redact:{paths:["req.headers.authorization","req.headers.x-npati-api-key","req.body.password","req.body.apiKey","req.body.token","req.body.imapConfig.password","req.body.smtpConfig.password","req.body.imapConfig.accessToken","req.body.smtpConfig.accessToken","req.body.imapConfig.refreshToken","req.body.smtpConfig.refreshToken","req.body.imapConfig.clientSecret","req.body.smtpConfig.clientSecret"],censor:"[REDACTED]"}} : false, bodyLimit: 30 * 1024 * 1024 });
+  const app = Fastify({ rewriteUrl: rewriteBrowserApiUrl, logger: process.env.NODE_ENV !== "test" ? {redact:{paths:["req.headers.authorization","req.headers.x-npati-api-key","req.body.password","req.body.apiKey","req.body.token","req.body.imapConfig.password","req.body.smtpConfig.password","req.body.imapConfig.accessToken","req.body.smtpConfig.accessToken","req.body.imapConfig.refreshToken","req.body.smtpConfig.refreshToken","req.body.imapConfig.clientSecret","req.body.smtpConfig.clientSecret"],censor:"[REDACTED]"}} : false, bodyLimit: 30 * 1024 * 1024 });
+
+  if (config.webDistDirectory) registerWebFrontend(app, config.webDistDirectory);
 
   const redisHealthWiring = createRedisHealthWiring({
     config,

@@ -22,6 +22,7 @@
     "allowJs": true
   },
   "include": [
+    "tests/web-frontend.test.ts",
     "tests/coding-agent-chat-website.test.ts",
     "tests/shared-runtime-regression.test.ts",
     "tests/coding-agent-chat-website-postgres.test.ts",

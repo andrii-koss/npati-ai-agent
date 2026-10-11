@@ -709,50 +709,21 @@ export class CodingAgentRunner {
       return verificationTools.map((tool) => ({ tool, state: "passed" }));
     };
 
-    const runVerification = async (): Promise<void> => {
-      const attempt = verificationLoop.report().verificationRuns + 1;
-      let outcome: CodeToolInvokeResult | CodeToolInvokeFailure;
-      try {
-        outcome = await this.ports.toolRuntime.invoke(ctx, {
-          companyId,
-          projectId,
-          sessionId,
-          tool: "code.verify.run",
-          args: { tools: [...verificationTools], changedOnly: true },
-          toolCallId: `verify:${turnId}:${attempt}`,
-          turnId,
-          ...(input.runId ? { runId: input.runId } : {}),
-          ...(stateRunId ? { runId: stateRunId } : {}),
-          ...(input.readOnlyIntent === true ? { readOnlyIntent: true } : {}),
-          ...capabilityScopeFields,
-        });
-      } catch (error) {
-        const failure = error as { code?: string; message?: string };
-        outcome = {
-          ok: false,
-          error: {
-            code: (failure.code ?? "verify_error") as CodeToolInvokeFailure["error"]["code"],
-            status: 500,
-            message: failure.message ?? "Verification failed to run",
-            tool: "code.verify.run",
-            step: "execute",
-            retryable: false,
-          },
-        };
-      }
-      const checks = toCheckReports(outcome);
-      verificationLoop.record(checks);
-      await record({
-        kind: "tool_call",
-        companyId, projectId, sessionId,
-        runId: input.runId,
-        turn: steps,
-        tool: "code.verify.run",
-        toolCallId: `verify:${turnId}:${attempt}`,
-        ok: outcome.ok,
-        ...(outcome.ok ? {} : { errorCode: String(outcome.error.code) }),
-      });
-    };
+    const runVerification = (): Promise<void> => this.verifyOnce({
+      ctx,
+      input,
+      companyId,
+      projectId,
+      sessionId,
+      stateRunId,
+      steps,
+      turnId,
+      verificationTools,
+      capabilityScopeFields,
+      verificationLoop,
+      toCheckReports,
+      record,
+    });
 
     const writeVerificationSummary = (): void => {
       if (verificationDisabled) return;
@@ -2493,5 +2464,83 @@ export class CodingAgentRunner {
         message: failure.message ?? `The run was refused (${failure.code ?? "refused"}).`,
       };
     }
+  }
+
+  private async verifyOnce(args: {
+    ctx: AuthContext;
+    input: CodingAgentRunInput;
+    companyId: string;
+    projectId: string;
+    sessionId: string;
+    stateRunId: string | undefined;
+    steps: number;
+    turnId: string;
+    verificationTools: readonly string[];
+    capabilityScopeFields: {
+      subagentWritePaths?: CodingAgentRunInput["subagentWritePaths"];
+      capabilityScope?: readonly string[];
+      parentRunId?: string;
+    };
+    verificationLoop: VerificationLoop;
+    toCheckReports: (outcome: CodeToolInvokeResult | CodeToolInvokeFailure) => VerificationCheckReport[];
+    record: (event: CodeRunActivityEvent) => Promise<void>;
+  }): Promise<void> {
+    const {
+      ctx,
+      input,
+      companyId,
+      projectId,
+      sessionId,
+      stateRunId,
+      steps,
+      turnId,
+      verificationTools,
+      capabilityScopeFields,
+      verificationLoop,
+      toCheckReports,
+      record,
+    } = args;
+    const attempt = verificationLoop.report().verificationRuns + 1;
+    let outcome: CodeToolInvokeResult | CodeToolInvokeFailure;
+    try {
+      outcome = await this.ports.toolRuntime.invoke(ctx, {
+        companyId,
+        projectId,
+        sessionId,
+        tool: "code.verify.run",
+        args: { tools: [...verificationTools], changedOnly: true },
+        toolCallId: `verify:${turnId}:${attempt}`,
+        turnId,
+        ...(input.runId ? { runId: input.runId } : {}),
+        ...(stateRunId ? { runId: stateRunId } : {}),
+        ...(input.readOnlyIntent === true ? { readOnlyIntent: true } : {}),
+        ...capabilityScopeFields,
+      });
+    } catch (error) {
+      const failure = error as { code?: string; message?: string };
+      outcome = {
+        ok: false,
+        error: {
+          code: (failure.code ?? "verify_error") as CodeToolInvokeFailure["error"]["code"],
+          status: 500,
+          message: failure.message ?? "Verification failed to run",
+          tool: "code.verify.run",
+          step: "execute",
+          retryable: false,
+        },
+      };
+    }
+    const checks = toCheckReports(outcome);
+    verificationLoop.record(checks);
+    await record({
+      kind: "tool_call",
+      companyId, projectId, sessionId,
+      runId: input.runId,
+      turn: steps,
+      tool: "code.verify.run",
+      toolCallId: `verify:${turnId}:${attempt}`,
+      ok: outcome.ok,
+      ...(outcome.ok ? {} : { errorCode: String(outcome.error.code) }),
+    });
   }
 }
