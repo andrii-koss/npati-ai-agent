@@ -20,6 +20,7 @@ import {
 } from "./code-git-workflow";
 import { createAgentWorktree, commitAgentWorktree, mergeAgentWorktree, listAgentWorktrees, type ProjectGitWorktreeHost } from "./project-git-worktree-service";
 import { createPullRequest, commentOnPullRequest, type ProjectGitPullRequestHost } from "./project-git-pull-request-service";
+import { restoreCheckpoint, restorePaths, type ProjectGitCheckpointHost } from "./project-git-checkpoint-service";
 
 const execFileAsync = promisify(execFile);
 
@@ -304,6 +305,20 @@ export class ProjectGitService {
     this.thresholds = {
       fileThreshold: thresholds?.fileThreshold ?? (Number(process.env.NPATI_CHECKPOINT_FILE_THRESHOLD) || defaultCheckpointThresholds.fileThreshold),
       lineThreshold: thresholds?.lineThreshold ?? (Number(process.env.NPATI_CHECKPOINT_LINE_THRESHOLD) || defaultCheckpointThresholds.lineThreshold),
+    };
+  }
+
+  private checkpointHost(): ProjectGitCheckpointHost {
+    return {
+      requireWrite: this.requireWrite.bind(this),
+      ensureRepository: this.ensureRepository.bind(this),
+      getCheckpoint: this.getCheckpoint.bind(this),
+      createCheckpoint: this.createCheckpoint.bind(this),
+      runGit: this.runGit.bind(this),
+      assertNoSymlinkPath: this.assertNoSymlinkPath.bind(this),
+      resolveRevertTarget: this.resolveRevertTarget.bind(this),
+      pathExistsInCommit: this.pathExistsInCommit.bind(this),
+      removePathForRevert: this.removePathForRevert.bind(this),
     };
   }
 
@@ -871,36 +886,14 @@ export class ProjectGitService {
     return this.workspaceStore.getProjectCheckpoint(ctx, companyId, projectId, checkpointId);
   }
 
-  async restoreCheckpoint(
+    async restoreCheckpoint(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
     checkpointId: string,
     options?: { approved?: boolean },
   ): Promise<{ restoredCheckpoint: ProjectCheckpoint; backupCheckpoint: ProjectCheckpoint }> {
-    this.requireWrite(ctx);
-    const dir = await this.ensureRepository(ctx, companyId, projectId);
-    const target = await this.getCheckpoint(ctx, companyId, projectId, checkpointId);
-
-    if (!target.commitHash) {
-      throw new GitError("CHECKPOINT_NO_COMMIT", "Checkpoint does not have an associated commit hash", 400);
-    }
-
-    // MANDATORY SAFETY: Create automatic pre-restore checkpoint before rolling back!
-    const backupCheckpoint = await this.createCheckpoint(ctx, companyId, projectId, {
-      name: `Before restoring "${target.name}"`,
-      description: `Automatic safety checkpoint taken prior to rollback to checkpoint ${checkpointId} (${target.commitHash.slice(0, 7)})`,
-      trigger: "pre_restore",
-    });
-
-    // Hard reset to the checkpoint's commit
-    await this.runGit(dir, ["reset", "--hard", target.commitHash]);
-    await this.runGit(dir, ["clean", "-fd"]);
-
-    return {
-      restoredCheckpoint: target,
-      backupCheckpoint,
-    };
+    return restoreCheckpoint(this.checkpointHost(), ctx, companyId, projectId, checkpointId, options);
   }
 
   /**
@@ -928,58 +921,13 @@ export class ProjectGitService {
    *  - a mandatory pre-revert safety checkpoint is taken first, so the revert itself is reversible;
    *  - per-path outcomes are collected, so one path that cannot be reverted never marks the others as done.
    */
-  async restorePaths(
+    async restorePaths(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
     input: { files: string[]; checkpointId?: string; commitHash?: string },
   ): Promise<{ restored: string[]; removed: string[]; failed: Array<{ path: string; reason: string }>; targetCommit: string; safetyCheckpointId: string | null }> {
-    this.requireWrite(ctx);
-    const requested = Array.isArray(input?.files) ? input.files : [];
-    if (requested.length === 0) throw new GitError("FILES_REQUIRED", "List of files to restore is required", 400);
-    if (requested.length > 200) throw new GitError("TOO_MANY_FILES", "At most 200 paths can be restored at once", 400);
-
-    // Validate everything up front: a single bad path must refuse the whole call, not partially apply a revert.
-    const safeFiles = requested.map((file) => {
-      if (typeof file === "string" && file.trimStart().startsWith("~")) {
-        throw new GitError("INVALID_PATH", "Home-relative paths are not allowed", 400);
-      }
-      return safeProjectPath(file);
-    });
-    if (new Set(safeFiles).size !== safeFiles.length) throw new GitError("DUPLICATE_PATHS", "Duplicate paths in restore request", 400);
-
-    const dir = await this.ensureRepository(ctx, companyId, projectId);
-    await this.assertNoSymlinkPath(dir, safeFiles);
-
-    const targetCommit = await this.resolveRevertTarget(ctx, companyId, projectId, input);
-
-    // MANDATORY SAFETY: the same pre-restore checkpoint `restoreCheckpoint` takes, so a path revert is undoable.
-    const safety = await this.createCheckpoint(ctx, companyId, projectId, {
-      name: `Before restoring ${safeFiles.length} path(s)`,
-      description: `Automatic safety checkpoint taken prior to a path-scoped restore of: ${safeFiles.join(", ")}`,
-      trigger: "pre_restore",
-    });
-
-    const restored: string[] = [];
-    const removed: string[] = [];
-    const failed: Array<{ path: string; reason: string }> = [];
-    for (const file of safeFiles) {
-      try {
-        const existedInTarget = await this.pathExistsInCommit(dir, targetCommit, file);
-        if (existedInTarget) {
-          // Path-scoped checkout. `--` separates paths from revisions so a path can never be read as an option.
-          await this.runGit(dir, ["checkout", targetCommit, "--", file]);
-          restored.push(file);
-        } else {
-          await this.removePathForRevert(dir, file);
-          removed.push(file);
-        }
-      } catch (error) {
-        failed.push({ path: file, reason: error instanceof Error ? error.message : "restore_failed" });
-      }
-    }
-
-    return { restored, removed, failed, targetCommit, safetyCheckpointId: safety?.id ?? null };
+    return restorePaths(this.checkpointHost(), ctx, companyId, projectId, input);
   }
 
   /**
