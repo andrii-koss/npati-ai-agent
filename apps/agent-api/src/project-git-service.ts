@@ -29,6 +29,7 @@ import { push, type ProjectGitPushHost } from "./project-git-push-service";
 import { githubToken, acquireCredential, type ProjectGitCredentialHost } from "./project-git-credential-service";
 import { currentBranch, type ProjectGitBranchHost } from "./project-git-branch-service";
 import { cleanupAllWorktrees, type ProjectGitCleanupHost } from "./project-git-cleanup-service";
+import { log, commit, type ProjectGitHistoryHost } from "./project-git-history-service";
 
 const execFileAsync = promisify(execFile);
 
@@ -313,6 +314,17 @@ export class ProjectGitService {
     this.thresholds = {
       fileThreshold: thresholds?.fileThreshold ?? (Number(process.env.NPATI_CHECKPOINT_FILE_THRESHOLD) || defaultCheckpointThresholds.fileThreshold),
       lineThreshold: thresholds?.lineThreshold ?? (Number(process.env.NPATI_CHECKPOINT_LINE_THRESHOLD) || defaultCheckpointThresholds.lineThreshold),
+    };
+  }
+
+  private historyHost(): ProjectGitHistoryHost {
+    return {
+      runGit: this.runGit.bind(this),
+      requireWrite: this.requireWrite.bind(this),
+      ensureRepository: this.ensureRepository.bind(this),
+      assertSafeIndex: this.assertSafeIndex.bind(this),
+      status: this.status.bind(this),
+      stage: this.stage.bind(this),
     };
   }
 
@@ -652,29 +664,13 @@ export class ProjectGitService {
     return { diff: stdout.slice(0, 128_000) };
   }
 
-  async log(
+    async log(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
     limit = 20,
   ): Promise<GitLogEntry[]> {
-    const dir = await this.ensureRepository(ctx, companyId, projectId);
-    const safeLimit = Math.max(1, Math.min(limit, 100));
-    try {
-      const { stdout } = await this.runGit(dir, ["log", `-n`, String(safeLimit), `--pretty=format:%H|%an|%ad|%s`]);
-      const lines = stdout.split(/\r?\n/).filter(Boolean);
-      return lines.map((line) => {
-        const [hash = "", author = "", date = "", ...msgParts] = line.split("|");
-        return {
-          hash,
-          author,
-          date,
-          message: msgParts.join("|"),
-        };
-      });
-    } catch {
-      return [];
-    }
+    return log(this.historyHost(), ctx, companyId, projectId, limit);
   }
 
     async branch(
@@ -705,31 +701,13 @@ export class ProjectGitService {
     return { staged: st.staged };
   }
 
-  async commit(
+    async commit(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
     options: { message: string; files?: string[]; stageAll?: boolean },
   ): Promise<{ commitHash: string; message: string }> {
-    this.requireWrite(ctx);
-    const dir = await this.ensureRepository(ctx, companyId, projectId);
-    if (!options.message || !options.message.trim()) {
-      throw new GitError("COMMIT_MESSAGE_REQUIRED", "Commit message is required", 400);
-    }
-    if (options.stageAll || options.files) {
-      await this.stage(ctx, companyId, projectId, options.files);
-    }
-    let st = await this.status(ctx, companyId, projectId);
-    if (st.staged.length === 0) {
-      await this.stage(ctx, companyId, projectId);
-      st = await this.status(ctx, companyId, projectId);
-    }
-    await this.assertSafeIndex(dir);
-    await this.runGit(dir, st.staged.length === 0 ? ["commit", "--allow-empty", "-m", options.message.trim()] : ["commit", "-m", options.message.trim()]);
-
-    const { stdout } = await this.runGit(dir, ["rev-parse", "HEAD"]);
-    const commitHash = stdout.trim();
-    return { commitHash, message: options.message.trim() };
+    return commit(this.historyHost(), ctx, companyId, projectId, options);
   }
 
   async restore(
