@@ -2570,85 +2570,27 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   private async insertExecutionSnapshot(record: ExecutionSnapshotRecord): Promise<void> {
-    await this.pool.query(
-      `INSERT INTO execution_snapshots(id, workspace_id, company_id, project_id, session_id, run_id,
-         snapshot_version, payload, payload_hash, prev_snapshot_id, prev_payload_hash, "trigger", legacy,
-         created_at, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15)`,
-      [record.id, record.workspaceId, record.companyId, record.projectId, record.sessionId, record.runId,
-        record.snapshotVersion, JSON.stringify(record.payload), record.payloadHash, record.prevSnapshotId,
-        record.prevPayloadHash, record.trigger, record.legacy, record.createdAt, record.createdBy],
-    );
+    return support.insertExecutionSnapshot(this.pool, record);
   }
 
   async createExecutionSnapshot(input: CreateExecutionSnapshotInput): Promise<ExecutionSnapshotRecord> {
-    const id = input.id ?? randomUUID();
-    const attempted = await this.pool.query("SELECT 1 FROM execution_snapshots WHERE id=$1", [id]);
-
-    if (attempted.rowCount) throw new ExecutionSnapshotImmutableError(`create with existing id ${id}`);
-
-    const head = await this.pool.query<{ id: string; payload_hash: string; snapshot_version: number }>(
-      `SELECT id, payload_hash, snapshot_version FROM execution_snapshots
-        WHERE company_id=$1 AND session_id=$2 ORDER BY snapshot_version DESC LIMIT 1`,
-      [input.companyId, input.sessionId],
-    );
-    const previous = head.rows[0] ?? null;
-    const record: ExecutionSnapshotRecord = {
-      id,
-      workspaceId: input.workspaceId,
-      companyId: input.companyId,
-      projectId: input.projectId,
-      sessionId: input.sessionId,
-      runId: input.runId ?? null,
-      snapshotVersion: (previous?.snapshot_version ?? 0) + 1,
-      payload: input.payload,
-      payloadHash: snapshotPayloadHash(input.payload),
-      prevSnapshotId: previous?.id ?? null,
-      prevPayloadHash: previous?.payload_hash ?? null,
-      trigger: input.trigger,
-      legacy: input.legacy === true,
-      createdAt: input.now ?? new Date(),
-      createdBy: input.createdBy,
-    };
-    await this.insertExecutionSnapshot(record);
-    return record;
+    return support.createExecutionSnapshot(this.pool, input);
   }
 
   async getExecutionSnapshot(companyId: string, snapshotId: string): Promise<ExecutionSnapshotRecord | null> {
-    const result = await this.pool.query(
-      "SELECT * FROM execution_snapshots WHERE company_id=$1 AND id=$2", [companyId, snapshotId],
-    );
-    const row = result.rows[0];
-    return row ? support.mapExecutionSnapshotRow(row) : null;
+    return support.getExecutionSnapshot(this.pool, companyId, snapshotId);
   }
 
   async getLatestSnapshotForSession(companyId: string, sessionId: string): Promise<ExecutionSnapshotRecord | null> {
-    const result = await this.pool.query(
-      `SELECT * FROM execution_snapshots WHERE company_id=$1 AND session_id=$2
-        ORDER BY snapshot_version DESC LIMIT 1`, [companyId, sessionId],
-    );
-    const row = result.rows[0];
-    return row ? support.mapExecutionSnapshotRow(row) : null;
+    return support.getLatestSnapshotForSession(this.pool, companyId, sessionId);
   }
 
   async getSnapshotForRun(companyId: string, runId: string): Promise<ExecutionSnapshotRecord | null> {
-    const result = await this.pool.query(
-      `SELECT * FROM execution_snapshots WHERE company_id=$1 AND run_id=$2
-        ORDER BY snapshot_version DESC LIMIT 1`, [companyId, runId],
-    );
-    const row = result.rows[0];
-    return row ? support.mapExecutionSnapshotRow(row) : null;
+    return support.getSnapshotForRun(this.pool, companyId, runId);
   }
 
   async listExecutionSnapshots(input: ListExecutionSnapshotsInput): Promise<ExecutionSnapshotRecord[]> {
-    const limit = Math.min(Math.max(input.limit, 1), 500);
-    const result = await this.pool.query(
-      `SELECT * FROM execution_snapshots
-        WHERE company_id=$1 AND ($2::text IS NULL OR session_id=$2) AND ($3::text IS NULL OR project_id=$3)
-        ORDER BY created_at DESC LIMIT $4`,
-      [input.companyId, input.sessionId ?? null, input.projectId ?? null, limit],
-    );
-    return result.rows.map((row) => support.mapExecutionSnapshotRow(row));
+    return support.listExecutionSnapshots(this.pool, input);
   }
 
   diffExecutionSnapshots(a: ExecutionSnapshotRecord, b: ExecutionSnapshotRecord): ExecutionSnapshotDiff {
