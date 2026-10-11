@@ -24,6 +24,7 @@ import { restoreCheckpoint, restorePaths, type ProjectGitCheckpointHost } from "
 import { requireGitWriteApproval, resolveWriteIntent, type ProjectGitApprovalHost } from "./project-git-approval-service";
 import { ensureRepositoryInitialized, inspectRepository, status, branch, type ProjectGitRepositoryHost } from "./project-git-repository-service";
 import { diffAgentWorktree, removeAgentWorktree, type ProjectGitWorktreeExtraHost } from "./project-git-worktree-extra-service";
+import { createCheckpoint, getCheckpoint, type ProjectGitCheckpointWriteHost } from "./project-git-checkpoint-write-service";
 
 const execFileAsync = promisify(execFile);
 
@@ -308,6 +309,19 @@ export class ProjectGitService {
     this.thresholds = {
       fileThreshold: thresholds?.fileThreshold ?? (Number(process.env.NPATI_CHECKPOINT_FILE_THRESHOLD) || defaultCheckpointThresholds.fileThreshold),
       lineThreshold: thresholds?.lineThreshold ?? (Number(process.env.NPATI_CHECKPOINT_LINE_THRESHOLD) || defaultCheckpointThresholds.lineThreshold),
+    };
+  }
+
+  private checkpointWriteHost(): ProjectGitCheckpointWriteHost {
+    return {
+      workspaceStore: this.workspaceStore,
+      assertSafeIndex: this.assertSafeIndex.bind(this),
+      ensureRepository: this.ensureRepository.bind(this),
+      getProjectPath: this.getProjectPath.bind(this),
+      requireWrite: this.requireWrite.bind(this),
+      runGit: this.runGit.bind(this),
+      status: this.status.bind(this),
+      countWorkspaceFiles: this.countWorkspaceFiles.bind(this),
     };
   }
 
@@ -728,38 +742,13 @@ export class ProjectGitService {
     }
   }
 
-  async createCheckpoint(
+    async createCheckpoint(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
     input: { name: string; description?: string; trigger?: CheckpointTrigger; runId?: string },
   ): Promise<ProjectCheckpoint> {
-    this.requireWrite(ctx);
-    const dir = await this.ensureRepository(ctx, companyId, projectId);
-    const trigger = input.trigger ?? "manual";
-
-    // Commit any uncommitted changes to create a valid git snapshot
-    const st = await this.status(ctx, companyId, projectId);
-    if (!st.clean) {
-      await this.runGit(dir, ["add", "-A"]);
-      await this.assertSafeIndex(dir);
-      await this.runGit(dir, ["commit", "-m", `Checkpoint: ${input.name}`]);
-    }
-
-    const { stdout } = await this.runGit(dir, ["rev-parse", "HEAD"]);
-    const commitHash = stdout.trim();
-    const fileCount = await this.countWorkspaceFiles(dir);
-
-    const checkpoint = await this.workspaceStore.createProjectCheckpoint(ctx, companyId, projectId, {
-      name: input.name,
-      description: input.description,
-      commitHash,
-      trigger,
-      runId: input.runId,
-      fileCount,
-    });
-    await this.runGit(dir, ["update-ref", `refs/npati/checkpoints/${checkpoint.id}`, commitHash]);
-    return checkpoint;
+    return createCheckpoint(this.checkpointWriteHost(), ctx, companyId, projectId, input);
   }
 
   async listCheckpoints(
@@ -772,14 +761,13 @@ export class ProjectGitService {
     return this.workspaceStore.listProjectCheckpoints(ctx, companyId, projectId, limit);
   }
 
-  async getCheckpoint(
+    async getCheckpoint(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
     checkpointId: string,
   ): Promise<ProjectCheckpoint> {
-    await this.getProjectPath(ctx, companyId, projectId);
-    return this.workspaceStore.getProjectCheckpoint(ctx, companyId, projectId, checkpointId);
+    return getCheckpoint(this.checkpointWriteHost(), ctx, companyId, projectId, checkpointId);
   }
 
     async restoreCheckpoint(
