@@ -629,49 +629,20 @@ export class CodingAgentRunner {
       findings.slice(0, 5).map((finding) => `${finding.path}:${finding.kind}`).join(", ");
 
     const evaluateChangeSet = async (): Promise<void> => {
-      const changes = runChanges();
-      if (!changes.length) return;
-      testIntegrity = analyzeTestIntegrity(changes);
-      scopeGuard = evaluateScopeGuard({
-        changedPaths: changes.map((change) => change.path),
-        requestText: prompt,
-        maxChangedFiles: this.limits.maxChangedFiles,
+      const evaluated = await this.evaluateChangeSet({
+        input,
+        companyId,
+        projectId,
+        sessionId,
+        steps,
+        prompt,
+        summary,
+        runChanges,
+        record,
       });
-      summary.scope = {
-        changedFiles: scopeGuard.changedFiles,
-        limit: scopeGuard.limit,
-        exceeded: scopeGuard.exceeded,
-        severity: scopeGuard.severity,
-        unrelatedPaths: scopeGuard.unrelatedPaths,
-        relatednessUnknown: scopeGuard.relatednessUnknown,
-        warnings: scopeGuard.warnings.map((warning) => ({
-          code: warning.code,
-          message: warning.message,
-          severity: warning.severity,
-          paths: warning.paths,
-        })),
-      };
-      for (const warning of scopeGuard.warnings) {
-
-        await record({
-          kind: "turn",
-          companyId, projectId, sessionId,
-          runId: input.runId,
-          turn: steps,
-          ok: warning.severity !== "critical",
-          reason: warning.code,
-        });
-      }
-      if (testIntegrity.flagged) {
-        await record({
-          kind: "turn",
-          companyId, projectId, sessionId,
-          runId: input.runId,
-          turn: steps,
-          ok: false,
-          reason: "test_integrity_flagged",
-        });
-      }
+      if (!evaluated) return;
+      testIntegrity = evaluated.testIntegrity;
+      scopeGuard = evaluated.scopeGuard;
     };
 
     const toCheckReports = (outcome: CodeToolInvokeResult | CodeToolInvokeFailure): VerificationCheckReport[] => {
@@ -2542,5 +2513,63 @@ export class CodingAgentRunner {
       ok: outcome.ok,
       ...(outcome.ok ? {} : { errorCode: String(outcome.error.code) }),
     });
+  }
+
+  private async evaluateChangeSet(args: {
+    input: CodingAgentRunInput;
+    companyId: string;
+    projectId: string;
+    sessionId: string;
+    steps: number;
+    prompt: string;
+    summary: CodingAgentRunSummary;
+    runChanges: () => Array<{ path: string; tool: string; status?: string; diff?: string }>;
+    record: (event: CodeRunActivityEvent) => Promise<void>;
+  }): Promise<{ testIntegrity: TestIntegrityVerdict | null; scopeGuard: ScopeGuardResult | null } | null> {
+    const { input, companyId, projectId, sessionId, steps, prompt, summary, runChanges, record } = args;
+    const changes = runChanges();
+    if (!changes.length) return null;
+    const testIntegrity = analyzeTestIntegrity(changes);
+    const scopeGuard = evaluateScopeGuard({
+      changedPaths: changes.map((change) => change.path),
+      requestText: prompt,
+      maxChangedFiles: this.limits.maxChangedFiles,
+    });
+    summary.scope = {
+      changedFiles: scopeGuard.changedFiles,
+      limit: scopeGuard.limit,
+      exceeded: scopeGuard.exceeded,
+      severity: scopeGuard.severity,
+      unrelatedPaths: scopeGuard.unrelatedPaths,
+      relatednessUnknown: scopeGuard.relatednessUnknown,
+      warnings: scopeGuard.warnings.map((warning) => ({
+        code: warning.code,
+        message: warning.message,
+        severity: warning.severity,
+        paths: warning.paths,
+      })),
+    };
+    for (const warning of scopeGuard.warnings) {
+
+      await record({
+        kind: "turn",
+        companyId, projectId, sessionId,
+        runId: input.runId,
+        turn: steps,
+        ok: warning.severity !== "critical",
+        reason: warning.code,
+      });
+    }
+    if (testIntegrity.flagged) {
+      await record({
+        kind: "turn",
+        companyId, projectId, sessionId,
+        runId: input.runId,
+        turn: steps,
+        ok: false,
+        reason: "test_integrity_flagged",
+      });
+    }
+    return { testIntegrity, scopeGuard };
   }
 }
