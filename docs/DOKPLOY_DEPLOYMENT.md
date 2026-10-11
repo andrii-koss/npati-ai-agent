@@ -36,6 +36,18 @@ same value for provider management. On an existing installation, `INITIAL_PASSWO
 not replace a password already stored in OmniRoute's database. Change that password
 through OmniRoute's Security settings, and keep the Dokploy variable in sync.
 
+Agent API and company worker use `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY` when
+both are explicitly configured. Otherwise, leave both blank to use
+`MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD`. A separate API credential pair must
+belong to an existing MinIO user or service account with access to the NPATI
+buckets; setting the environment variables does not create that account.
+
+If startup reports `diagnosticCode: InvalidAccessKeyId`, the MinIO endpoint did
+not recognize the access key sent by API. Check the selected credential pair
+and the actual running MinIO instance. Changing API credentials requires
+recreating API and company-worker containers; changing MinIO root credentials
+requires recreating MinIO as well. Preserve the `minio-data` volume.
+
 ## 2. Configure the domain
 
 In the Compose service's **Domains** tab, add the public HTTPS domain with:
