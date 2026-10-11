@@ -104,7 +104,7 @@
       "expires_at": "2027-02-28"
     },
     "apps/agent-api/src/email-inbox-repository.ts": {
-      "lines": 2347,
+      "lines": 2046,
       "reason": "API module not yet decomposed; tracked as follow-up to the plan in docs/refactoring/PLAN.md",
       "owner": "refactor/large-files",
       "expires_at": "2027-02-28"

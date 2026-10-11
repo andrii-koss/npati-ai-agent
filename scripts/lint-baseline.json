@@ -82,7 +82,7 @@
     "apps/agent-api/src/email-connection-tester.ts": {
       "as-any": 1
     },
-    "apps/agent-api/src/email-inbox-repository.ts": {
+    "apps/agent-api/src/email-inbox-contacts-repositories.ts": {
       "as-any": 2
     },
     "apps/agent-api/src/email-routes.ts": {
