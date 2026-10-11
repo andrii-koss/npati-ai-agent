@@ -18,6 +18,7 @@ import {
   runMergeWithAutoResolve,
   type GitConflictResolverPort,
 } from "./code-git-workflow";
+import { createAgentWorktree, commitAgentWorktree, mergeAgentWorktree, listAgentWorktrees, type ProjectGitWorktreeHost } from "./project-git-worktree-service";
 
 const execFileAsync = promisify(execFile);
 
@@ -302,6 +303,18 @@ export class ProjectGitService {
     this.thresholds = {
       fileThreshold: thresholds?.fileThreshold ?? (Number(process.env.NPATI_CHECKPOINT_FILE_THRESHOLD) || defaultCheckpointThresholds.fileThreshold),
       lineThreshold: thresholds?.lineThreshold ?? (Number(process.env.NPATI_CHECKPOINT_LINE_THRESHOLD) || defaultCheckpointThresholds.lineThreshold),
+    };
+  }
+
+  private worktreeHost(): ProjectGitWorktreeHost {
+    return {
+      mergeLocks: this.mergeLocks,
+      runGit: this.runGit.bind(this),
+      requireWrite: this.requireWrite.bind(this),
+      ensureRepository: this.ensureRepository.bind(this),
+      branch: this.branch.bind(this),
+      getAgentWorktreePath: this.getAgentWorktreePath.bind(this),
+      safeAgentSlug: safeAgentSlug,
     };
   }
 
@@ -1650,78 +1663,22 @@ export class ProjectGitService {
     return resolved;
   }
 
-  async createAgentWorktree(
+    async createAgentWorktree(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
     options: { agentSlug: string; baseBranch?: string },
   ): Promise<{ worktreePath: string; branch: string; baseBranch: string }> {
-    this.requireWrite(ctx);
-    const dir = await this.ensureRepository(ctx, companyId, projectId);
-    const slug = safeAgentSlug(options.agentSlug);
-    const branch = `agent/${slug}`;
-    const baseBranch = options.baseBranch ?? "project/main";
-
-    // Ensure baseBranch exists (point to HEAD if not yet created)
-    const { branches } = await this.branch(ctx, companyId, projectId, { action: "list" });
-    if (!branches.includes(baseBranch)) {
-      await this.runGit(dir, ["branch", baseBranch, "HEAD"]).catch(() => undefined);
-    }
-
-    const wtDir = this.getAgentWorktreePath(dir, options.agentSlug);
-    await mkdir(path.dirname(wtDir), { recursive: true });
-
-    // Clean up if worktree already exists at this path
-    try {
-      await this.runGit(dir, ["worktree", "remove", "--force", wtDir]);
-    } catch {}
-    await rm(wtDir, { recursive: true, force: true }).catch(() => undefined);
-    await this.runGit(dir, ["worktree", "prune"]).catch(() => undefined);
-
-    // Create worktree on branch starting from baseBranch
-    await this.runGit(dir, ["worktree", "add", "-B", branch, wtDir, baseBranch]);
-
-    return {
-      worktreePath: wtDir,
-      branch,
-      baseBranch,
-    };
+    return createAgentWorktree(this.worktreeHost(), ctx, companyId, projectId, options);
   }
 
-  async commitAgentWorktree(
+    async commitAgentWorktree(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
     options: { agentSlug: string; message: string; stageAll?: boolean },
   ): Promise<{ commitHash: string; message: string }> {
-    this.requireWrite(ctx);
-    const dir = await this.ensureRepository(ctx, companyId, projectId);
-    const wtDir = this.getAgentWorktreePath(dir, options.agentSlug);
-    const message = options.message?.trim() || `Agent ${options.agentSlug} update`;
-
-    // Stage changes in worktree
-    await this.runGit(wtDir, ["add", "-A"]);
-
-    // Assert safe index in worktree
-    const { stdout: stagedOut } = await this.runGit(wtDir, ["diff", "--no-ext-diff", "--cached", "--name-only", "-z"]);
-    for (const file of stagedOut.split("\0").filter(Boolean)) {
-      try { safeProjectPath(file); }
-      catch { throw new GitError("PROTECTED_FILE", "Protected files cannot be committed in worktree", 403); }
-    }
-
-    // Check status
-    const { stdout: statusOut } = await this.runGit(wtDir, ["status", "--porcelain=v1"]);
-    if (statusOut.trim().length > 0) {
-      await this.runGit(wtDir, ["commit", "-m", message]);
-    } else {
-      await this.runGit(wtDir, ["commit", "--allow-empty", "-m", message]);
-    }
-
-    const { stdout: hashOut } = await this.runGit(wtDir, ["rev-parse", "HEAD"]);
-    return {
-      commitHash: hashOut.trim(),
-      message,
-    };
+    return commitAgentWorktree(this.worktreeHost(), ctx, companyId, projectId, options);
   }
 
   async diffAgentWorktree(
@@ -1759,7 +1716,7 @@ export class ProjectGitService {
    * decision), attempt 2 really runs and can really succeed. `code.ask_user` is the suggested next step,
    * because the agent that called this owns the run that has to wait.
    */
-  async mergeAgentWorktree(
+    async mergeAgentWorktree(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
@@ -1773,90 +1730,7 @@ export class ProjectGitService {
       maxAttempts?: number;
     },
   ): Promise<{ merged: boolean; commitHash: string; targetBranch: string; sourceBranch: string; attempts: number }> {
-    this.requireWrite(ctx);
-    const lockKey = `${companyId}:${projectId}`;
-    const prev = this.mergeLocks.get(lockKey) ?? Promise.resolve();
-    let release!: () => void;
-    const current = new Promise<void>((resolve) => { release = resolve; });
-    this.mergeLocks.set(lockKey, prev.then(() => current));
-    await prev;
-
-    try {
-      const dir = await this.ensureRepository(ctx, companyId, projectId);
-      const slug = safeAgentSlug(options.agentSlug);
-      const sourceBranch = `agent/${slug}`;
-      const targetBranch = options.targetBranch ?? "project/main";
-      const commitMsg = options.message?.trim() || `Merge ${sourceBranch} into ${targetBranch}`;
-
-      // Ensure targetBranch exists
-      const { branches } = await this.branch(ctx, companyId, projectId, { action: "list" });
-      if (!branches.includes(targetBranch)) {
-        await this.runGit(dir, ["branch", targetBranch, "HEAD"]).catch(() => undefined);
-      }
-
-      // Switch to targetBranch in main repo
-      await this.runGit(dir, ["checkout", targetBranch]);
-
-      const outcome = await runMergeWithAutoResolve({
-        sourceBranch,
-        targetBranch,
-        ...(options.maxAttempts !== undefined ? { maxAttempts: options.maxAttempts } : {}),
-        resolver: options.conflictResolver ?? null,
-        merge: async (strategy) => {
-          const args = ["merge", "--no-ff", "-m", commitMsg];
-          if (strategy !== "none") args.push(`-X${strategy}`);
-          args.push(sourceBranch);
-          await this.runGit(dir, args);
-        },
-        readConflicts: async () => {
-          const { stdout } = await this.runGit(dir, ["diff", "--name-only", "--diff-filter=U"]);
-          return stdout.split(/\r?\n/).filter(Boolean);
-        },
-        abort: async () => {
-          await this.runGit(dir, ["merge", "--abort"]);
-        },
-      }).catch((error: unknown) => {
-        /**
-         * The workflow module reports the escalation as its own structured error; this service's callers
-         * (`project-git-routes.ts`, `project-multi-agent.ts`, the worktree suite) catch
-         * `GitConflictEscalationError`, and the escalation payload travels with it so a caller can act on the
-         * attempt count and the suggested next tool instead of re-deriving them from a message.
-         */
-        if (error instanceof CodeGitWorkflowError && error.code === GIT_CONFLICT_ESCALATED) {
-          const escalation = (error.details as { escalation?: {
-            attempts: number; maxAttempts: number; conflictingFiles: string[]; sourceBranch: string;
-            targetBranch: string; suggestedTool: "code.ask_user"; question: string;
-          } }).escalation;
-          const built = escalation ?? buildConflictEscalation({
-            attempts: 1, conflictingFiles: [], sourceBranch, targetBranch,
-          });
-          throw new GitConflictEscalationError(
-            built.conflictingFiles,
-            `Merge conflict detected between ${sourceBranch} and ${targetBranch} in: ${built.conflictingFiles.join(", ")}`,
-            {
-              attempts: built.attempts,
-              maxAttempts: built.maxAttempts,
-              sourceBranch,
-              targetBranch,
-              suggestedTool: built.suggestedTool,
-              question: built.question,
-            },
-          );
-        }
-        throw error;
-      });
-
-      const { stdout: headOut } = await this.runGit(dir, ["rev-parse", "HEAD"]);
-      return {
-        merged: true,
-        commitHash: headOut.trim(),
-        targetBranch,
-        sourceBranch,
-        attempts: outcome.attempts,
-      };
-    } finally {
-      release();
-    }
+    return mergeAgentWorktree(this.worktreeHost(), ctx, companyId, projectId, options);
   }
 
   async removeAgentWorktree(
@@ -1917,39 +1791,11 @@ export class ProjectGitService {
     return { cleanedCount };
   }
 
-  async listAgentWorktrees(
+    async listAgentWorktrees(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
   ): Promise<Array<{ worktreePath: string; branch: string; head: string }>> {
-    const dir = await this.ensureRepository(ctx, companyId, projectId);
-    const { stdout } = await this.runGit(dir, ["worktree", "list", "--porcelain"]);
-    const lines = stdout.split(/\r?\n/);
-    const wtBase = path.resolve(path.join(dir, ".worktrees"));
-
-    const worktrees: Array<{ worktreePath: string; branch: string; head: string }> = [];
-    let curPath = "";
-    let curHead = "";
-    let curBranch = "";
-
-    for (const line of lines) {
-      if (line.startsWith("worktree ")) {
-        if (curPath && curPath.startsWith(wtBase + path.sep)) {
-          worktrees.push({ worktreePath: curPath, branch: curBranch, head: curHead });
-        }
-        curPath = path.resolve(line.slice(9).trim());
-        curHead = "";
-        curBranch = "";
-      } else if (line.startsWith("HEAD ")) {
-        curHead = line.slice(5).trim();
-      } else if (line.startsWith("branch ")) {
-        curBranch = line.slice(7).trim().replace(/^refs\/heads\//, "");
-      }
-    }
-    if (curPath && curPath.startsWith(wtBase + path.sep)) {
-      worktrees.push({ worktreePath: curPath, branch: curBranch, head: curHead });
-    }
-
-    return worktrees;
+    return listAgentWorktrees(this.worktreeHost(), ctx, companyId, projectId);
   }
 }
