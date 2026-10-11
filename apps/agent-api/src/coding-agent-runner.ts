@@ -443,52 +443,26 @@ export class CodingAgentRunner {
 
       waitingFor: "question" | "approval" = "question",
     ): Promise<CodingAgentRunResult> => {
-      if (stateRunId && this.ports.runState) {
-        if (this.ports.runState.markWaitingForUser) {
-          await writeState(() => this.ports.runState!.markWaitingForUser!({
-            companyId, runId: stateRunId!, questionId: question.questionId, toolCallId: question.toolCallId,
-          }));
-        } else {
-
-          this.ports.logger?.warn("run_state_pause_unsupported", {
-            runId: stateRunId, questionId: question.questionId,
-          });
-        }
-        await writeState(() => this.ports.runState!.appendTurn({
-          companyId, runId: stateRunId!, turnIndex: steps, status: "finished", outcome: "ok",
-          checkpointId: turnCheckpointId(),
-        }));
-      }
-      stopHeartbeat();
-
-      if (inboxOpened && stateRunId) {
-        try {
-          await this.ports.inbox!.transact(session, { kind: "pause", runId: stateRunId, owner: stateOwner });
-          inboxOpened = false;
-        } catch {
-          this.ports.logger?.warn("inbox_pause_not_recorded");
-        }
-      }
-      await release("waiting_for_user");
-      await this.ports.runEvents?.append({
-        eventKey: `code-run-waiting-for-user:${turnId}`,
-        eventType: "waiting_for_user",
-        runStatus: "waiting_for_user",
-        message: waitingFor === "approval"
-          ? "Coding Agent run is waiting for an approval decision"
-          : "Coding Agent run is waiting for the user to answer a question",
+      const paused = await this.pauseForUserOnce({
+        ctx,
+        session,
+        companyId,
+        steps,
+        turnId,
+        stateRunId,
+        stateOwner,
+        inboxOpened,
+        summary,
+        question,
+        waitingFor,
+        writeState,
+        stopHeartbeat,
+        turnCheckpointId,
+        release,
+        finish,
       });
-      summary.turns = steps;
-      summary.remaining = waitingFor === "approval"
-        ? "The run is waiting for an approval decision."
-        : "The run is waiting for the user to answer a question.";
-      return finish(
-        "waiting_for_user",
-        "waiting_for_user",
-        waitingFor === "approval"
-          ? `Waiting for an approval decision on tool call ${question.toolCallId}.`
-          : `Waiting for the user to answer question ${question.questionId}.`,
-      );
+      inboxOpened = paused.inboxOpened;
+      return paused.result;
     };
 
     const approvalPauseFrom = (
@@ -2571,5 +2545,97 @@ export class CodingAgentRunner {
       });
     }
     return { testIntegrity, scopeGuard };
+  }
+
+  private async pauseForUserOnce(args: {
+    ctx: AuthContext;
+    session: CodeSession;
+    companyId: string;
+    steps: number;
+    turnId: string;
+    stateRunId: string | undefined;
+    stateOwner: string;
+    inboxOpened: boolean;
+    summary: CodingAgentRunSummary;
+    question: { questionId: string; toolCallId: string };
+    waitingFor: "question" | "approval";
+    writeState: (operation: () => Promise<unknown>) => Promise<void>;
+    stopHeartbeat: () => void;
+    turnCheckpointId: () => string | null;
+    release: (reason: string) => Promise<void>;
+    finish: (
+      status: CodingAgentRunStatus,
+      reason: CodingAgentStopReason,
+      message: string,
+      code?: string,
+    ) => CodingAgentRunResult;
+  }): Promise<{ result: CodingAgentRunResult; inboxOpened: boolean }> {
+    const {
+      ctx,
+      session,
+      companyId,
+      steps,
+      turnId,
+      stateRunId,
+      stateOwner,
+      summary,
+      question,
+      waitingFor,
+      writeState,
+      stopHeartbeat,
+      turnCheckpointId,
+      release,
+      finish,
+    } = args;
+    let inboxOpened = args.inboxOpened;
+    if (stateRunId && this.ports.runState) {
+      if (this.ports.runState.markWaitingForUser) {
+        await writeState(() => this.ports.runState!.markWaitingForUser!({
+          companyId, runId: stateRunId!, questionId: question.questionId, toolCallId: question.toolCallId,
+        }));
+      } else {
+
+        this.ports.logger?.warn("run_state_pause_unsupported", {
+          runId: stateRunId, questionId: question.questionId,
+        });
+      }
+      await writeState(() => this.ports.runState!.appendTurn({
+        companyId, runId: stateRunId!, turnIndex: steps, status: "finished", outcome: "ok",
+        checkpointId: turnCheckpointId(),
+      }));
+    }
+    stopHeartbeat();
+
+    if (inboxOpened && stateRunId) {
+      try {
+        await this.ports.inbox!.transact(session, { kind: "pause", runId: stateRunId, owner: stateOwner });
+        inboxOpened = false;
+      } catch {
+        this.ports.logger?.warn("inbox_pause_not_recorded");
+      }
+    }
+    await release("waiting_for_user");
+    await this.ports.runEvents?.append({
+      eventKey: `code-run-waiting-for-user:${turnId}`,
+      eventType: "waiting_for_user",
+      runStatus: "waiting_for_user",
+      message: waitingFor === "approval"
+        ? "Coding Agent run is waiting for an approval decision"
+        : "Coding Agent run is waiting for the user to answer a question",
+    });
+    summary.turns = steps;
+    summary.remaining = waitingFor === "approval"
+      ? "The run is waiting for an approval decision."
+      : "The run is waiting for the user to answer a question.";
+    return {
+      result: finish(
+        "waiting_for_user",
+        "waiting_for_user",
+        waitingFor === "approval"
+          ? `Waiting for an approval decision on tool call ${question.toolCallId}.`
+          : `Waiting for the user to answer question ${question.questionId}.`,
+      ),
+      inboxOpened,
+    };
   }
 }
