@@ -22,6 +22,7 @@
     "allowJs": true
   },
   "include": [
+    "tests/coding-agent-c1b-images.test.ts",
     "tests/minio-startup-diagnostics.test.ts",
     "tests/web-frontend.test.ts",
     "tests/coding-agent-chat-website.test.ts",

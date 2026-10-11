@@ -9,7 +9,7 @@ fs.writeFileSync(path.join(dir,'empty.env'),'');
 const source=fs.readFileSync('docker-compose.dokploy-isolated.yml','utf8');
 const env={...process.env};
 for(const match of source.matchAll(/\$\{([A-Z0-9_]+):\?/g))env[match[1]]='validation-only-987654321abcdef987654321abcdef';
-Object.assign(env,{MINIO_ROOT_USER:'validation-admin',MINIO_ROOT_PASSWORD:randomBytes(32).toString('hex'),MINIO_ACCESS_KEY:'',MINIO_SECRET_KEY:'',NPATI_BACKEND_URL:'https://backend.example.invalid',NPATI_WEB_ORIGIN:'http://localhost:13001',NPATI_AGENT_PUBLIC_DOMAIN:'localhost',NPATI_DEPLOYMENT_TYPE:'self_hosted',NPATI_BUILD_COMMIT:spawnSync('git',['rev-parse','--short','HEAD'],{encoding:'utf8'}).stdout.trim(),NPATI_BUILD_TIME:new Date().toISOString(),NPATI_ENCRYPTION_KEY:randomBytes(32).toString('hex')});
+Object.assign(env,{MINIO_ROOT_USER:'validation-admin',MINIO_ROOT_PASSWORD:randomBytes(32).toString('hex'),MINIO_ACCESS_KEY:'',MINIO_SECRET_KEY:'',NPATI_BACKEND_URL:process.env.NPATI_BACKEND_URL||'https://www.npati.com',NPATI_WEB_ORIGIN:'http://127.0.0.1:13001',NPATI_AGENT_PUBLIC_DOMAIN:'http://127.0.0.1:13001',NPATI_DEPLOYMENT_TYPE:'self_hosted',NPATI_BUILD_COMMIT:spawnSync('git',['rev-parse','--short','HEAD'],{encoding:'utf8'}).stdout.trim(),NPATI_BUILD_TIME:new Date().toISOString(),NPATI_ENCRYPTION_KEY:randomBytes(32).toString('hex')});
 // Do not rotate credentials in an existing validation project's persistent databases.
 for(const args of [['ps','-aq','--filter','label=com.docker.compose.project=npati-validation-20261011'],['volume','ls','-q','--filter','label=com.docker.compose.project=npati-validation-20261011']]){
  const existing=spawnSync('docker',args,{encoding:'utf8'});

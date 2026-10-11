@@ -2,10 +2,36 @@ import { describe, expect, it, vi } from "vitest";
 import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
 import { SandboxImagePolicy, SandboxImageError, type AuditRecorder } from "../apps/agent-api/src/sandbox-image-policy";
 import { CosignImageSignatureVerifier, NullImageSignatureVerifier, type ImageSignatureVerifier } from "../apps/agent-api/src/sandbox-image-signature";
-import { SandboxImageCatalogError, loadSandboxImageCatalog, parseCatalog, validateCatalog } from "../apps/agent-api/src/sandbox-image-catalog";
+import { SandboxImageCatalogError, loadSandboxImageCatalog, parseCatalog } from "../apps/agent-api/src/sandbox-image-catalog";
 import { buildSandboxCreateArgs } from "../apps/agent-api/src/docker-sandbox-provider";
 
 const digest = (char: string) => char.repeat(64);
+describe("digest references in private registries", () => {
+  const reference = `localhost:15000/npati/project-sandbox@sha256:${digest("a")}`;
+  it("admits a pinned private-registry image only under the explicit development exception", async () => {
+    const { policy } = await harness({ environment: "development", allowUnverifiedImages: true });
+    expect(await policy.admit(member, { companyId: COMPANY, reference })).toMatchObject({ reference, dev: true });
+    const production = await harness({ environment: "production", allowUnverifiedImages: true });
+    await expect(production.policy.admit(member, { companyId: COMPANY, reference })).rejects.toMatchObject({ code: "image_not_allowed" });
+  });
+  it("passes the full registry hostname and port to signature verification", async () => {
+    const exec = vi.fn(async (_file: string, _args: string[], _options: { timeout: number; maxBuffer: number }) => ({ stdout: JSON.stringify([{ optional: { Subject: "ci@npati.dev" } }]), stderr: "" }));
+    const verifier = new CosignImageSignatureVerifier({ exec });
+    expect(await verifier.verify(reference, { identity: "ci@npati.dev", issuer: "https://token.actions.githubusercontent.com" })).toMatchObject({ ok: true });
+    expect(exec.mock.calls[0]?.[1]).toContain(reference);
+  });
+});
+
+it("loads the publisher's nested catalogue without changing its trust status or scan evidence", () => {
+  const reference = `ghcr.io/npati/sandbox-node@sha256:${digest("a")}`;
+  const catalog = parseCatalog(JSON.stringify({ schemaVersion: 1, images: [{
+    variant: "node", reference, status: "unverified", sbomPath: "node.spdx.json",
+    scan: { at: "2026-10-11T00:00:00Z", tool: "trivy", critical: 2, high: 3 },
+    signature: { identity: "ci@npati.dev", issuer: "https://token.actions.githubusercontent.com" },
+    waiver: { owner: "owner", expiresAt: "2026-10-12T00:00:00Z", reason: "reviewed" },
+  }] }));
+  expect(catalog.images[0]).toMatchObject({ reference, status: "unverified", scanAt: "2026-10-11T00:00:00Z", scanTool: "trivy", scanCritical: 2, scanHigh: 3, signature: "ci@npati.dev", signatureIssuer: "https://token.actions.githubusercontent.com", waiverOwner: "owner", waiverExpiresAt: "2026-10-12T00:00:00Z" });
+});
 const NODE_IMAGE = `ghcr.io/npati/project-sandbox-node@sha256:${digest("a")}`;
 const NEW_NODE_IMAGE = `ghcr.io/npati/project-sandbox-node@sha256:${digest("b")}`;
 const REVOKED_IMAGE = `ghcr.io/npati/project-sandbox-python@sha256:${digest("c")}`;
@@ -181,11 +207,11 @@ describe("security-gate: C1b image administration and audit", () => {
   });
 
   it("audits every allow, revoke and waiver before applying it", async () => {
-    const record = vi.fn(async () => undefined);
+    const record = vi.fn<AuditRecorder["record"]>(async () => undefined);
     const { policy } = await harness({ audit: { record } });
     await policy.allow(admin, { ...verified, companyId: COMPANY });
     await policy.revoke(admin, COMPANY, NODE_IMAGE, "compromised base image");
-    expect(record.mock.calls.map((call) => (call[1] as { action: string }).action)).toEqual(["sandbox_image.allow", "sandbox_image.revoke"]);
+    expect(record.mock.calls.map((call) => call[1].action)).toEqual(["sandbox_image.allow", "sandbox_image.revoke"]);
     expect(record.mock.calls[0]![1]).toMatchObject({ companyId: COMPANY, actorRole: "admin", decision: "allowed", resourceType: "sandbox_image" });
   });
 
@@ -243,12 +269,18 @@ describe("security-gate: C1b image catalogue and container hardening", () => {
         { variant: "node", reference: NODE_IMAGE, status: "verified", sbomPath: "", scanAt: "2026-02-09T00:00:00.000Z" },
         { variant: "node", reference: NEW_NODE_IMAGE, status: "trusted", sbomPath: "s3://x", scanAt: "2026-02-09T00:00:00.000Z" },
         { variant: "node", reference: `ghcr.io/npati/z@sha256:${digest("d")}`, status: "verified", sbomPath: "s3://x", scanAt: "not-a-date" },
-        { variant: "cobol" as never, reference: `ghcr.io/npati/w@sha256:${digest("f")}`, status: "verified", sbomPath: "s3://x", scanAt: "2026-02-09T00:00:00.000Z" },
+        { variant: "cobol", reference: `ghcr.io/npati/w@sha256:${digest("f")}`, status: "verified", sbomPath: "s3://x", scanAt: "2026-02-09T00:00:00.000Z" },
         { variant: "node", reference: `ghcr.io/npati/y@sha256:${digest("e")}`, status: "verified", sbomPath: "s3://x", scanAt: "2026-02-09T00:00:00.000Z" },
         { variant: "node", reference: `ghcr.io/npati/y@sha256:${digest("e")}`, status: "verified", sbomPath: "s3://x", scanAt: "2026-02-09T00:00:00.000Z" },
       ],
     };
-    const problems = validateCatalog(catalog);
+    // Invalid external data enters through JSON parsing, not a typed catalogue.
+    let problems: SandboxImageCatalogError["problems"] = [];
+    try { parseCatalog(JSON.stringify(catalog)); }
+    catch (error) {
+      if (!(error instanceof SandboxImageCatalogError)) throw error;
+      problems = error.problems;
+    }
     expect(problems.map((problem) => problem.reason)).toEqual(expect.arrayContaining(["reference_must_be_digest_pinned", "sbom_path_is_required", "unknown_status", "scan_timestamp_is_required", "unknown_variant", "duplicate_reference"]));
     expect(() => parseCatalog(JSON.stringify(catalog))).toThrow(SandboxImageCatalogError);
     expect(() => parseCatalog("{not json")).toThrow(SandboxImageCatalogError);

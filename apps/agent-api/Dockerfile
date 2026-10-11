@@ -37,8 +37,9 @@ COPY --from=build /app/packages/project-client/src/index.ts /opt/npati-project-s
 
 FROM runtime-base AS sandbox-runner
 USER root
-ENV DOCKER_CONFIG=/tmp/npati-docker
-RUN apk add --no-cache docker-cli docker-cli-buildx
+ENV DOCKER_CONFIG=/tmp/npati-docker NPATI_SANDBOX_IMAGE_CATALOG=/opt/npati-sandbox-images/catalog.json
+RUN apk add --no-cache docker-cli docker-cli-buildx cosign
+COPY docker/sandbox/images.json /opt/npati-sandbox-images/catalog.json
 COPY apps/agent-api/Dockerfile.project-sandbox apps/agent-api/Dockerfile.sandbox-egress /opt/npati-sandbox-images/
 COPY apps/agent-api/src/sandbox-egress-proxy.mjs /opt/npati-sandbox-images/src/
 COPY apps/agent-api/sandbox-runner-entrypoint.sh /opt/npati-sandbox-images/entrypoint.sh

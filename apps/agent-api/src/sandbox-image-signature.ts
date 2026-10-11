@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { SANDBOX_IMAGE_REFERENCE_PATTERN } from "@npati/workspace";
 
 /**
  * C1b: image signature verification.
@@ -57,7 +58,7 @@ export class CosignImageSignatureVerifier implements ImageSignatureVerifier {
 
   async verify(reference: string, expectedSigner: { identity: string; issuer: string }): Promise<ImageSignatureVerification> {
     if (!expectedSigner.identity || !expectedSigner.issuer) return { ok: false, reason: "signature_identity_not_configured" };
-    if (!/^[a-z0-9][a-z0-9._/-]*(?::[0-9]+)?@sha256:[0-9a-f]{64}$/.test(reference)) return { ok: false, reason: "image_not_pinned" };
+    if (!SANDBOX_IMAGE_REFERENCE_PATTERN.test(reference)) return { ok: false, reason: "image_not_pinned" };
     const args = [
       "verify",
       "--certificate-identity", expectedSigner.identity,
