@@ -1632,135 +1632,31 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   async listCompanies(context: AuthContext, requestedLimit = 20, cursor?: string) {
-    await this.assertMember(context);
-    const limit = companyPageLimit(requestedLimit), after = decodeBusinessCursor(cursor);
-    const result = await this.pool.query<Company>(`SELECT ${companyColumns} FROM companies
-      WHERE workspace_id=$1 AND user_id=$2 AND ($3::text IS NULL OR id=$3)
-        AND ($4::timestamptz IS NULL OR (created_at,id) > ($4::timestamptz,$5::text))
-      ORDER BY created_at,id LIMIT $6`, [context.workspaceId, context.userId, context.companyId ?? null, after?.createdAt ?? null, after?.id ?? "", limit + 1]);
-    const items = result.rows.slice(0, limit), last = items.at(-1);
-    return { items, nextCursor: result.rows.length > limit && last ? encodeBusinessCursor({ createdAt: last.createdAt, id: last.id }) : null };
+    return company.listCompanies(this.pool, context, requestedLimit, cursor);
   }
 
-  async getCompany(context: AuthContext, companyId: string) { return this.assertCompany(context, companyId); }
+  async getCompany(context: AuthContext, companyId: string) {
+    return company.getCompany(this.pool, context, companyId);
+  }
 
   async createCompany(context: AuthContext, input: CompanyInput, idempotencyKey: string) {
-    if (context.companyId) throw new WorkspaceAccessError("Company-scoped API keys cannot create companies");
-    await this.assertMember(context);
-    const name = input.name?.trim();
-    if (!name) throw new Error("Company name is required");
-    if (input.businessId) await this.getBusiness(context, input.businessId);
-    const values = [randomUUID(), context.workspaceId, context.userId, input.businessId ?? null, name, input.website ?? null,
-      input.industry ?? null, input.description ?? null, input.productsServices ?? null, JSON.stringify(input.languages ?? []),
-      input.brandTone ?? null, input.companyInstructions ?? null, JSON.stringify(input.knowledge ?? []),
-      JSON.stringify(input.memory ?? {}), input.status ?? "active", idempotencyKey];
-    const result = await this.pool.query<Company>(`INSERT INTO companies(
-      id,workspace_id,user_id,business_id,name,website,industry,description,products_services,languages,
-      brand_tone,company_instructions,knowledge,memory,status,create_request_key)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13::jsonb,$14::jsonb,$15,$16)
-      ON CONFLICT (workspace_id,user_id,create_request_key) WHERE create_request_key IS NOT NULL DO NOTHING
-      RETURNING ${companyColumns}`, values);
-    const company = result.rows[0] ?? (await this.pool.query<Company>(`SELECT ${companyColumns} FROM companies
-      WHERE workspace_id=$1 AND user_id=$2 AND create_request_key=$3`, [context.workspaceId, context.userId, idempotencyKey])).rows[0];
-    if (!company) throw new Error("Could not create company");
-    return company;
+    return company.createCompany(this.pool, context, input, idempotencyKey);
   }
 
   async convertBusinessToCompany(context: AuthContext, businessId: string, input: BusinessToCompanyInput, idempotencyKey: string): Promise<{ company: Company; created: boolean }> {
-    const business = await this.getBusiness(context, businessId);
-    const existing = (await this.pool.query<Company>(`SELECT ${companyColumns} FROM companies
-      WHERE workspace_id=$1 AND user_id=$2 AND create_request_key=$3`, [context.workspaceId, context.userId, idempotencyKey])).rows[0];
-    if (existing) {
-      return { company: existing, created: false };
-    }
-
-    const memory: Record<string, unknown> = {};
-    if (input.includeConfirmedMemory) {
-      const memories = await this.listMemory(context, businessId);
-      memory["confirmed_business_facts"] = memories.map((m) => m.content);
-    }
-    if (input.includeGoals) {
-      const goals = await this.listGoals(context, businessId);
-      memory["transferred_goals"] = goals.map((g) => ({ title: g.title, description: g.description, status: g.status }));
-    }
-
-    const instructionParts: string[] = [];
-    if (input.includeInstructions) {
-      if (business.description) instructionParts.push(`Business Description: ${business.description}`);
-      if (business.businessModel) instructionParts.push(`Business Model: ${business.businessModel}`);
-    }
-    if (input.includeResearchSummary) {
-      if (business.audienceSummary) instructionParts.push(`Target Audience: ${business.audienceSummary}`);
-      if (business.market) instructionParts.push(`Market & Niche: ${business.market} / ${business.niche ?? ""}`);
-    }
-
-    const companyInput: CompanyInput = {
-      name: input.companyName?.trim() || business.name,
-      businessId: business.id,
-      website: business.website,
-      industry: business.industry,
-      description: business.description,
-      productsServices: business.productsServicesSummary,
-      knowledge: business.logoFileId ? [{ attachmentId: business.logoFileId, kind: "image", name: "Company logo", source: "linked_business" }] : [],
-      companyInstructions: instructionParts.length > 0 ? instructionParts.join("\n\n") : undefined,
-      memory,
-      languages: ["Ukrainian", "English"],
-      status: "active",
-    };
-
-    const company = await this.createCompany(context, companyInput, idempotencyKey);
-
-    const mainAgent = await this.createCompanyAgent(context, company.id, {
-      name: "Main Agent",
-      role: "Coordinator",
-      description: `Primary executive agent for ${company.name}`,
-      tools: ["web.search", "files", "knowledge"],
-      isActive: true,
-    }, `${idempotencyKey}:main-agent`);
-
-    await this.setCompanyMainAgent(context, company.id, mainAgent.id, company.revision);
-    const updatedCompany = await this.getCompany(context, company.id);
-
-    return { company: updatedCompany, created: true };
+    return company.convertBusinessToCompany(this.pool, context, businessId, input, idempotencyKey);
   }
 
   async updateCompany(context: AuthContext, companyId: string, input: Partial<CompanyInput>, expectedRevision: number) {
-    await this.assertCompany(context, companyId);
-    if (input.businessId) await this.getBusiness(context, input.businessId);
-    if (input.name !== undefined && !input.name.trim()) throw new Error("Company name is required");
-    const patch = JSON.stringify(input);
-    const result = await this.pool.query<Company>(`UPDATE companies SET
-      business_id=CASE WHEN $4::jsonb ? 'businessId' THEN NULLIF($4::jsonb->>'businessId','') ELSE business_id END,
-      name=CASE WHEN $4::jsonb ? 'name' THEN trim($4::jsonb->>'name') ELSE name END,
-      website=CASE WHEN $4::jsonb ? 'website' THEN NULLIF($4::jsonb->>'website','') ELSE website END,
-      industry=CASE WHEN $4::jsonb ? 'industry' THEN NULLIF($4::jsonb->>'industry','') ELSE industry END,
-      description=CASE WHEN $4::jsonb ? 'description' THEN NULLIF($4::jsonb->>'description','') ELSE description END,
-      products_services=CASE WHEN $4::jsonb ? 'productsServices' THEN NULLIF($4::jsonb->>'productsServices','') ELSE products_services END,
-      languages=CASE WHEN $4::jsonb ? 'languages' THEN $4::jsonb->'languages' ELSE languages END,
-      brand_tone=CASE WHEN $4::jsonb ? 'brandTone' THEN NULLIF($4::jsonb->>'brandTone','') ELSE brand_tone END,
-      company_instructions=CASE WHEN $4::jsonb ? 'companyInstructions' THEN NULLIF($4::jsonb->>'companyInstructions','') ELSE company_instructions END,
-      memory=CASE WHEN $4::jsonb ? 'memory' THEN $4::jsonb->'memory' ELSE memory END,
-      status=CASE WHEN $4::jsonb ? 'status' THEN $4::jsonb->>'status' ELSE status END,
-      revision=revision+1,updated_at=now()
-      WHERE id=$1 AND workspace_id=$2 AND user_id=$3 AND revision=$5 RETURNING ${companyColumns}`,
-      [companyId, context.workspaceId, context.userId, patch, expectedRevision]);
-    if (!result.rowCount) throw new Error("Company was changed by another request. Reload and try again.");
-    return result.rows[0]!;
+    return company.updateCompany(this.pool, context, companyId, input, expectedRevision);
   }
 
   async deleteCompany(context: AuthContext, companyId: string) {
-    await this.assertCompany(context, companyId);
-    return Boolean((await this.pool.query("DELETE FROM companies WHERE id=$1 AND workspace_id=$2 AND user_id=$3 RETURNING id", [companyId, context.workspaceId, context.userId])).rowCount);
+    return company.deleteCompany(this.pool, context, companyId);
   }
 
   async setCompanyMainAgent(context: AuthContext, companyId: string, agentId: string | null, expectedRevision: number) {
-    await this.assertCompany(context, companyId);
-    if (agentId) await this.getCompanyAgent(context, companyId, agentId);
-    const result = await this.pool.query<Company>(`UPDATE companies SET main_agent_id=$4,revision=revision+1,updated_at=now()
-      WHERE id=$1 AND workspace_id=$2 AND user_id=$3 AND revision=$5 RETURNING ${companyColumns}`,
-      [companyId, context.workspaceId, context.userId, agentId, expectedRevision]);
-    if (!result.rowCount) throw new Error("Company was changed by another request. Reload and try again.");
-    return result.rows[0]!;
+    return company.setCompanyMainAgent(this.pool, context, companyId, agentId, expectedRevision);
   }
 
   async listCompanyAgents(context: AuthContext, companyId: string) {
@@ -2035,26 +1931,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   async deleteCompanyAgent(context: AuthContext, companyId: string, agentId: string, expectedRevision: number) {
-    await this.assertCompany(context, companyId);
-    const client = await this.pool.connect();
-    try {
-      await client.query("BEGIN");
-      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [companyId]);
-      const current = await client.query<{ revision: number }>(`SELECT revision FROM company_agents
-        WHERE id=$1 AND workspace_id=$2 AND company_id=$3 FOR UPDATE`, [agentId, context.workspaceId, companyId]);
-      if (!current.rowCount) { await client.query("COMMIT"); return false; }
-      if (current.rows[0]!.revision !== expectedRevision) throw new Error("Agent was changed by another request. Reload and try again.");
-      await client.query(`DELETE FROM company_agent_edges
-        WHERE workspace_id=$1 AND company_id=$2 AND (parent_agent_id=$3 OR child_agent_id=$3)`, [context.workspaceId, companyId, agentId]);
-      await client.query(`UPDATE companies SET main_agent_id=NULL,revision=revision+1,updated_at=now()
-        WHERE id=$1 AND workspace_id=$2 AND user_id=$3 AND main_agent_id=$4`, [companyId, context.workspaceId, context.userId, agentId]);
-      await client.query("DELETE FROM company_agents WHERE id=$1 AND workspace_id=$2 AND company_id=$3", [agentId, context.workspaceId, companyId]);
-      await client.query("COMMIT");
-      return true;
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally { client.release(); }
+    return company.deleteCompanyAgent(this.pool, context, companyId, agentId, expectedRevision);
   }
 
   async listCompanyAgentEdges(context: AuthContext, companyId: string, agentIds?: string[]) {
