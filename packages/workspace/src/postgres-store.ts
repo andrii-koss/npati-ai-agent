@@ -1,3 +1,6 @@
+import * as support from "./postgres-store-support";
+import * as company from "./postgres-company-repositories";
+import * as project from "./postgres-project-repositories";
 import { randomUUID } from "node:crypto";
 import { codeChildSessionId } from "./code-child-session-id";
 import { PostgresCodeInboxStore } from "./code-session-inbox-postgres";
@@ -72,20 +75,6 @@ import migration017 from './migration-017';
 import migration030 from './migration-030';
 import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from './pagination';
 import { RETENTION_FROM, CODE_PROJECT_CHECKPOINT_PREDICATE, CODE_PROJECT_GUARD_FOR, RETENTION_AGE_COLUMN, RETENTION_EXTRA_PREDICATE, SQL_FRAGMENT_SHAPE, assertSqlFragment, RETENTION_WINDOW_EXPR, ERASE_FROM, ERASE_SCOPE_PREDICATE, ERASE_PROJECT_SCOPE_PREDICATE, ERASE_CLEAR_SESSION_REFERENCE, PROJECT_SCOPED_ERASE_TABLES, APPEND_ONLY_COUNTABLE, APPEND_ONLY_AGE_COLUMN, businessColumns, goalColumns, memoryColumns, conversationColumns, onboardingColumns, companyColumns, projectColumns, codeSessionColumns, projectCodeTrustColumns, projectMountedFolderColumns, auditEntryColumns, codeActivityEventColumns, codeContextSummaryColumns, replayBundleColumns, replayBundleStepColumns, auditAnchorColumns, featureFlagColumns, sandboxImageColumns, codeApprovalRuleColumns, projectCheckpointColumns, projectDeploymentColumns, projectQaReportColumns, companyAgentColumns, companyEdgeColumns, companyRunColumns, companyRunStepColumns, companyToolAuditColumns, companyRunEventColumns, companyMemberColumns, companyInviteColumns, lastActiveOwnerPredicate, providerDataPolicyColumns, providerDataPolicyVersionColumns, projectDataPolicyColumns, hostedProviderConsentColumns, codeRunStateColumns, codeRunTurnColumns, StoredUserSetting } from "./postgres-store-schema";
-import {
-  mapCodeActivityEventRow,
-  mapCodeContextSummaryRow,
-  mapExecutionSnapshotRow,
-  mapReplayBundleRow,
-  mapReplayBundleStepRow,
-  mapSnapshotConfigVersionRow,
-} from "./postgres-row-mappers";
-import * as lookups from "./postgres-lookups";
-import * as audit from "./postgres-audit-repository";
-import * as goalsmemory from "./postgres-goals-memory-repository";
-import * as projects from "./postgres-projects-repository";
-import * as coderuns from "./postgres-code-runs-repository";
-import * as agentgraph from "./postgres-agent-graph-repository";
 
 export class PostgresWorkspaceStore implements WorkspaceStore {
   private codeProcessesInstance?: PostgresCodeProcessStore;
@@ -1443,11 +1432,11 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
    * Failures propagate: privileged actions must fail closed when the audit cannot be written.
    */
   async appendAuditEntry(context: AuthContext, companyId: string, input: AuditEntryInput): Promise<AuditEntry> {
-    return audit.appendAuditEntry(this.pool, context, companyId, input);
+    return company.appendAuditEntry(this.pool, context, companyId, input);
   }
 
   async listAuditEntries(context: AuthContext, companyId: string, filters: { actor?: string; requestId?: string; correlationId?: string; action?: string; limit?: number; fromSequence?: number } = {}): Promise<AuditEntry[]> {
-    return audit.listAuditEntries(this.pool, context, companyId, filters);
+    return company.listAuditEntries(this.pool, context, companyId, filters);
   }
 
   /**
@@ -1513,11 +1502,11 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   async verifyAuditChain(context: AuthContext, companyId: string, range: { fromSequence?: number; toSequence?: number } = {}): Promise<AuditChainVerification> {
-    return audit.verifyAuditChain(this.pool, context, companyId, range);
+    return company.verifyAuditChain(this.pool, context, companyId, range);
   }
 
   async auditChainState(context: AuthContext, companyId: string): Promise<AuditChainState> {
-    return audit.auditChainState(this.pool, context, companyId);
+    return company.auditChainState(this.pool, context, companyId);
   }
 
   async recordAuditAnchor(context: AuthContext, companyId: string, anchor: { day: string; sequence: number; entryCount: number; headHash: string; anchorPath?: string | null; signature?: string | null }): Promise<AuditAnchor> {
@@ -1532,7 +1521,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   async listAuditAnchors(context: AuthContext, companyId: string, limit = 90): Promise<AuditAnchor[]> {
-    return audit.listAuditAnchors(this.pool, context, companyId, limit);
+    return company.listAuditAnchors(this.pool, context, companyId, limit);
   }
 
   async latestAuditAnchor(context: AuthContext, companyId: string): Promise<AuditAnchor | null> {
@@ -1541,12 +1530,12 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   async auditCompanies(context: AuthContext): Promise<string[]> {
-    return audit.auditCompanies(this.pool, context);
+    return company.auditCompanies(this.pool, context);
   }
 
   /** Background verifier path: no user context, workspace-scoped, hashes and counts only. */
   async systemAuditChains(workspaceId: string) {
-    return audit.systemAuditChains(this.pool, workspaceId);
+    return company.systemAuditChains(this.pool, workspaceId);
   }
 
   async systemRecordAuditAnchor(workspaceId: string, companyId: string, anchor: { day: string; sequence: number; entryCount: number; headHash: string; anchorPath?: string | null; signature?: string | null }): Promise<AuditAnchor> {
@@ -1595,15 +1584,15 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   private async ensureIdentity(context: AuthContext) {
-    await lookups.ensureIdentity(this.pool, context);
+    await support.ensureIdentity(this.pool, context);
   }
 
   private async assertMember(context: AuthContext) {
-    return lookups.assertMember(this.pool, context);
+    return support.assertMember(this.pool, context);
   }
 
   async getBusiness(context: AuthContext, businessId: string) {
-    return lookups.getBusiness(this.pool, context, businessId);
+    return support.getBusiness(this.pool, context, businessId);
   }
 
   async getUserBusiness(context: AuthContext, businessId: string) {
@@ -1718,7 +1707,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
 
 
   private async assertCompany(context: AuthContext, companyId: string) {
-    return lookups.assertCompany(this.pool, context, companyId);
+    return support.assertCompany(this.pool, context, companyId);
   }
 
   async listCompanies(context: AuthContext, requestedLimit = 20, cursor?: string) {
@@ -1855,32 +1844,32 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   async listCompanyAgents(context: AuthContext, companyId: string) {
-    return agentgraph.listCompanyAgents(this.pool, context, companyId);
+    return company.listCompanyAgents(this.pool, context, companyId);
   }
 
   async listCompanyAgentsPage(context: AuthContext, companyId: string, requestedLimit = 50, cursor?: string) {
-    return agentgraph.listCompanyAgentsPage(this.pool, context, companyId, requestedLimit, cursor);
+    return company.listCompanyAgentsPage(this.pool, context, companyId, requestedLimit, cursor);
   }
 
 
   async createProject(context: AuthContext, companyId: string, input: ProjectInput, idempotencyKey: string) {
-    return projects.createProject(this.pool, context, companyId, input, idempotencyKey);
+    return project.createProject(this.pool, context, companyId, input, idempotencyKey);
   }
 
   async listProjects(context: AuthContext, companyId: string, includeArchived = false) {
-    return projects.listProjects(this.pool, context, companyId, includeArchived);
+    return project.listProjects(this.pool, context, companyId, includeArchived);
   }
 
   async getProject(context: AuthContext, companyId: string, projectId: string) {
-    return lookups.getProject(this.pool, context, companyId, projectId);
+    return support.getProject(this.pool, context, companyId, projectId);
   }
 
   async updateProject(context: AuthContext, companyId: string, projectId: string, input: { name?: string; expectedRevision: number; code?: ProjectCodeSettings }) {
-    return projects.updateProject(this.pool, context, companyId, projectId, input);
+    return project.updateProject(this.pool, context, companyId, projectId, input);
   }
 
   async setProjectSandbox(context: AuthContext, companyId: string, projectId: string, sandboxId: string | null, expectedSandboxId: string | null) {
-    return projects.setProjectSandbox(this.pool, context, companyId, projectId, sandboxId, expectedSandboxId);
+    return project.setProjectSandbox(this.pool, context, companyId, projectId, sandboxId, expectedSandboxId);
   }
   async updateProjectRepository(context: AuthContext, companyId: string, projectId: string, input: { provider: string; url: string; branch: string }): Promise<Project> {
     await this.getProject(context, companyId, projectId);
@@ -1912,11 +1901,11 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return result.rows[0];
   }
   async archiveProject(context: AuthContext, companyId: string, projectId: string, expectedRevision: number) {
-    return projects.archiveProject(this.pool, context, companyId, projectId, expectedRevision);
+    return project.archiveProject(this.pool, context, companyId, projectId, expectedRevision);
   }
 
   async deleteProject(context: AuthContext, companyId: string, projectId: string) {
-    return projects.deleteProject(this.pool, context, companyId, projectId);
+    return project.deleteProject(this.pool, context, companyId, projectId);
   }
 
   // --- C1: code sessions -------------------------------------------------------------------
@@ -1999,7 +1988,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   // --- C5: project trust ---------------------------------------------------------------------
 
   async getProjectCodeTrust(context: AuthContext, companyId: string, projectId: string): Promise<ProjectCodeTrust | null> {
-    return projects.getProjectCodeTrust(this.pool, context, companyId, projectId);
+    return project.getProjectCodeTrust(this.pool, context, companyId, projectId);
   }
 
   /**
@@ -2034,7 +2023,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   // --- C15: the mounted local folder allowlist ------------------------------------------------
 
   async getProjectMountedFolder(context: AuthContext, companyId: string, projectId: string): Promise<ProjectMountedFolder | null> {
-    return projects.getProjectMountedFolder(this.pool, context, companyId, projectId);
+    return project.getProjectMountedFolder(this.pool, context, companyId, projectId);
   }
 
   /**
@@ -2043,7 +2032,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
    * fail-closed answer — a runner that cannot read the allowlist mounts nothing.
    */
   async getProjectMountedFolderForSystem(companyId: string, projectId: string): Promise<ProjectMountedFolder | null> {
-    return projects.getProjectMountedFolderForSystem(this.pool, companyId, projectId);
+    return project.getProjectMountedFolderForSystem(this.pool, companyId, projectId);
   }
 
   /**
@@ -2083,51 +2072,51 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
 
   /** Rejects an agent id that does not belong to the company (tenant isolation for sessions). */
   private async assertProjectAgent(context: AuthContext, companyId: string, agentId?: string) {
-    return agentgraph.assertProjectAgent(this.pool, context, companyId, agentId);
+    return company.assertProjectAgent(this.pool, context, companyId, agentId);
   }
 
   async createProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, input: CreateCheckpointInput): Promise<ProjectCheckpoint> {
-    return projects.createProjectCheckpoint(this.pool, context, companyId, projectId, input);
+    return project.createProjectCheckpoint(this.pool, context, companyId, projectId, input);
   }
 
   async listProjectCheckpoints(context: AuthContext, companyId: string, projectId: string, limit = 50): Promise<ProjectCheckpoint[]> {
-    return projects.listProjectCheckpoints(this.pool, context, companyId, projectId, limit);
+    return project.listProjectCheckpoints(this.pool, context, companyId, projectId, limit);
   }
 
   async getProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, checkpointId: string): Promise<ProjectCheckpoint> {
-    return projects.getProjectCheckpoint(this.pool, context, companyId, projectId, checkpointId);
+    return project.getProjectCheckpoint(this.pool, context, companyId, projectId, checkpointId);
   }
 
   async deleteProjectCheckpoint(context: AuthContext, companyId: string, projectId: string, checkpointId: string): Promise<boolean> {
-    return projects.deleteProjectCheckpoint(this.pool, context, companyId, projectId, checkpointId);
+    return project.deleteProjectCheckpoint(this.pool, context, companyId, projectId, checkpointId);
   }
 
   async createProjectDeployment(context: AuthContext, companyId: string, projectId: string, input: CreateDeploymentInput): Promise<ProjectDeployment> {
-    return projects.createProjectDeployment(this.pool, context, companyId, projectId, input);
+    return project.createProjectDeployment(this.pool, context, companyId, projectId, input);
   }
 
   async listProjectDeployments(context: AuthContext, companyId: string, projectId: string, limit = 50): Promise<ProjectDeployment[]> {
-    return projects.listProjectDeployments(this.pool, context, companyId, projectId, limit);
+    return project.listProjectDeployments(this.pool, context, companyId, projectId, limit);
   }
 
   async getProjectDeployment(context: AuthContext, companyId: string, projectId: string, deploymentId: string): Promise<ProjectDeployment | null> {
-    return projects.getProjectDeployment(this.pool, context, companyId, projectId, deploymentId);
+    return project.getProjectDeployment(this.pool, context, companyId, projectId, deploymentId);
   }
 
   async updateProjectDeployment(context: AuthContext, companyId: string, projectId: string, deploymentId: string, patch: Partial<ProjectDeployment>): Promise<ProjectDeployment> {
-    return projects.updateProjectDeployment(this.pool, context, companyId, projectId, deploymentId, patch);
+    return project.updateProjectDeployment(this.pool, context, companyId, projectId, deploymentId, patch);
   }
 
   async createProjectQaReport(context: AuthContext, companyId: string, projectId: string, input: CreateProjectQaReportInput): Promise<ProjectQaReport> {
-    return projects.createProjectQaReport(this.pool, context, companyId, projectId, input);
+    return project.createProjectQaReport(this.pool, context, companyId, projectId, input);
   }
 
   async listProjectQaReports(context: AuthContext, companyId: string, projectId: string, limit = 50): Promise<ProjectQaReport[]> {
-    return projects.listProjectQaReports(this.pool, context, companyId, projectId, limit);
+    return project.listProjectQaReports(this.pool, context, companyId, projectId, limit);
   }
 
   async getProjectQaReport(context: AuthContext, companyId: string, projectId: string, reportId: string): Promise<ProjectQaReport | null> {
-    return projects.getProjectQaReport(this.pool, context, companyId, projectId, reportId);
+    return project.getProjectQaReport(this.pool, context, companyId, projectId, reportId);
   }
 
   async getLatestProjectQaReport(context: AuthContext, companyId: string, projectId: string): Promise<ProjectQaReport | null> {
@@ -2136,16 +2125,16 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   async getCompanyAgent(context: AuthContext, companyId: string, agentId: string) {
-    return agentgraph.getCompanyAgent(this.pool, context, companyId, agentId);
+    return company.getCompanyAgent(this.pool, context, companyId, agentId);
   }
 
   async createCompanyAgent(context: AuthContext, companyId: string, input: CompanyAgentInput, idempotencyKey: string) {
-    return agentgraph.createCompanyAgent(this.pool, context, companyId, input, idempotencyKey);
+    return company.createCompanyAgent(this.pool, context, companyId, input, idempotencyKey);
   }
 
 
   async updateCompanyAgent(context: AuthContext, companyId: string, agentId: string, input: Partial<CompanyAgentInput>, expectedRevision: number) {
-    return agentgraph.updateCompanyAgent(this.pool, context, companyId, agentId, input, expectedRevision);
+    return company.updateCompanyAgent(this.pool, context, companyId, agentId, input, expectedRevision);
   }
 
   async deleteCompanyAgent(context: AuthContext, companyId: string, agentId: string, expectedRevision: number) {
@@ -2172,7 +2161,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   async listCompanyAgentEdges(context: AuthContext, companyId: string, agentIds?: string[]) {
-    return agentgraph.listCompanyAgentEdges(this.pool, context, companyId, agentIds);
+    return company.listCompanyAgentEdges(this.pool, context, companyId, agentIds);
   }
 
 
@@ -2208,11 +2197,11 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   async createCompanyAgentRun(context: AuthContext, companyId: string, input: { task: string; requestedMode: "auto" | "single" | "pipeline" | "fusion"; projectId?: string }, idempotencyKey: string) {
-    return agentgraph.createCompanyAgentRun(this.pool, context, companyId, input, idempotencyKey);
+    return company.createCompanyAgentRun(this.pool, context, companyId, input, idempotencyKey);
   }
 
   async listCompanyAgentRuns(context: AuthContext, companyId: string, limit = 50, filter?: { projectId?: string }) {
-    return agentgraph.listCompanyAgentRuns(this.pool, context, companyId, limit, filter);
+    return company.listCompanyAgentRuns(this.pool, context, companyId, limit, filter);
   }
 
   async listProjectRuns(context: AuthContext, companyId: string, projectId: string, limit = 50) {
@@ -2220,50 +2209,50 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   async getCompanyAgentRun(context: AuthContext, companyId: string, runId: string) {
-    return agentgraph.getCompanyAgentRun(this.pool, context, companyId, runId);
+    return company.getCompanyAgentRun(this.pool, context, companyId, runId);
   }
 
   async getCompanyRunPendingPlan(context: AuthContext, companyId: string, runId: string): Promise<unknown | null> {
-    return agentgraph.getCompanyRunPendingPlan(this.pool, context, companyId, runId);
+    return company.getCompanyRunPendingPlan(this.pool, context, companyId, runId);
   }
   async setCompanyRunPendingPlan(context: AuthContext, companyId: string, runId: string, plan: unknown | null): Promise<void> {
-    return agentgraph.setCompanyRunPendingPlan(this.pool, context, companyId, runId, plan);
+    return company.setCompanyRunPendingPlan(this.pool, context, companyId, runId, plan);
   }
   async updateCompanyAgentRun(context: AuthContext, companyId: string, runId: string, patch: Partial<CompanyAgentRun>) {
-    return agentgraph.updateCompanyAgentRun(this.pool, context, companyId, runId, patch);
+    return company.updateCompanyAgentRun(this.pool, context, companyId, runId, patch);
   }
 
   async replaceCompanyAgentRunSteps(context: AuthContext, companyId: string, runId: string, steps: Array<Pick<CompanyAgentRunStep, "agentId" | "stepOrder" | "lane" | "role" | "status" | "modelId">>) {
-    return agentgraph.replaceCompanyAgentRunSteps(this.pool, context, companyId, runId, steps);
+    return company.replaceCompanyAgentRunSteps(this.pool, context, companyId, runId, steps);
   }
 
   async appendCompanyAgentToolAudit(context: AuthContext, companyId: string, runId: string, entry: Pick<CompanyAgentToolAudit, "agentId" | "toolName" | "decision" | "status" | "inputSummary" | "errorMessage"> & Partial<Pick<CompanyAgentToolAudit, "latencyMs" | "cost" | "tokens" | "reasonCode" | "sequenceNumber">>) {
-    return agentgraph.appendCompanyAgentToolAudit(this.pool, context, companyId, runId, entry);
+    return company.appendCompanyAgentToolAudit(this.pool, context, companyId, runId, entry);
   }
 
   async appendCompanyAgentRunEvent(context: AuthContext, companyId: string, runId: string, entry: Pick<CompanyAgentRunEvent, "eventKey" | "eventType" | "runStatus" | "message"> & Partial<Pick<CompanyAgentRunEvent, "workerId" | "attemptCount" | "details">>) {
-    return agentgraph.appendCompanyAgentRunEvent(this.pool, context, companyId, runId, entry);
+    return company.appendCompanyAgentRunEvent(this.pool, context, companyId, runId, entry);
   }
 
 
   async claimCompanyAgentRun(context: AuthContext, companyId: string, runId: string, workerId: string, leaseMs: number) {
-    return agentgraph.claimCompanyAgentRun(this.pool, context, companyId, runId, workerId, leaseMs);
+    return company.claimCompanyAgentRun(this.pool, context, companyId, runId, workerId, leaseMs);
   }
 
   async heartbeatCompanyAgentRun(context: AuthContext, companyId: string, runId: string, workerId: string, leaseMs: number) {
-    return agentgraph.heartbeatCompanyAgentRun(this.pool, context, companyId, runId, workerId, leaseMs);
+    return company.heartbeatCompanyAgentRun(this.pool, context, companyId, runId, workerId, leaseMs);
   }
 
   async requeueCompanyAgentRun(context: AuthContext, companyId: string, runId: string, workerId: string, delayMs: number) {
-    return agentgraph.requeueCompanyAgentRun(this.pool, context, companyId, runId, workerId, delayMs);
+    return company.requeueCompanyAgentRun(this.pool, context, companyId, runId, workerId, delayMs);
   }
 
   async listRecoverableCompanyAgentRuns(limit = 200) {
-    return agentgraph.listRecoverableCompanyAgentRuns(this.pool, limit);
+    return company.listRecoverableCompanyAgentRuns(this.pool, limit);
   }
 
   async listGoals(context: AuthContext, businessId: string) {
-    return goalsmemory.listGoals(this.pool, context, businessId);
+    return company.listGoals(this.pool, context, businessId);
   }
 
   async listUserGoals(context: AuthContext) {
@@ -2279,7 +2268,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   async createGoal(context: AuthContext, businessId: string, input: GoalInput) {
-    return goalsmemory.createGoal(this.pool, context, businessId, input);
+    return company.createGoal(this.pool, context, businessId, input);
   }
 
   async linkGoal(context: AuthContext, businessId: string, goalId: string) {
@@ -2297,15 +2286,15 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   async updateGoal(context: AuthContext, businessId: string, goalId: string, input: Partial<GoalInput>) {
-    return goalsmemory.updateGoal(this.pool, context, businessId, goalId, input);
+    return company.updateGoal(this.pool, context, businessId, goalId, input);
   }
 
   async deleteGoal(context: AuthContext, businessId: string, goalId: string) {
-    return goalsmemory.deleteGoal(this.pool, context, businessId, goalId);
+    return company.deleteGoal(this.pool, context, businessId, goalId);
   }
 
   async listMemory(context: AuthContext, businessId: string, query = "", limit = 100) {
-    return goalsmemory.listMemory(this.pool, context, businessId, query, limit);
+    return company.listMemory(this.pool, context, businessId, query, limit);
   }
 
   async listUserMemories(context: AuthContext, query = "", limit = 100) {
@@ -2322,7 +2311,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   async createMemory(context: AuthContext, businessId: string, input: MemoryInput) {
-    return goalsmemory.createMemory(this.pool, context, businessId, input);
+    return company.createMemory(this.pool, context, businessId, input);
   }
 
   async linkMemory(context: AuthContext, businessId: string, memoryId: string) {
@@ -2340,59 +2329,59 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   async updateMemory(context: AuthContext, businessId: string, memoryId: string, input: Partial<MemoryInput>) {
-    return goalsmemory.updateMemory(this.pool, context, businessId, memoryId, input);
+    return company.updateMemory(this.pool, context, businessId, memoryId, input);
   }
 
   async deleteMemory(context: AuthContext, businessId: string, memoryId: string) {
-    return goalsmemory.deleteMemory(this.pool, context, businessId, memoryId);
+    return company.deleteMemory(this.pool, context, businessId, memoryId);
   }
 
   async listConversations(context: AuthContext, businessId: string) {
-    return goalsmemory.listConversations(this.pool, context, businessId);
+    return company.listConversations(this.pool, context, businessId);
   }
 
   async createConversation(context: AuthContext, businessId: string, title: string) {
-    return goalsmemory.createConversation(this.pool, context, businessId, title);
+    return company.createConversation(this.pool, context, businessId, title);
   }
 
   async getConversation(context: AuthContext, businessId: string, conversationId: string) {
-    return goalsmemory.getConversation(this.pool, context, businessId, conversationId);
+    return company.getConversation(this.pool, context, businessId, conversationId);
   }
 
   async updateConversation(context: AuthContext, businessId: string, conversationId: string, title: string) {
-    return goalsmemory.updateConversation(this.pool, context, businessId, conversationId, title);
+    return company.updateConversation(this.pool, context, businessId, conversationId, title);
   }
 
   async deleteConversation(context: AuthContext, businessId: string, conversationId: string) {
-    return goalsmemory.deleteConversation(this.pool, context, businessId, conversationId);
+    return company.deleteConversation(this.pool, context, businessId, conversationId);
   }
 
   async appendMessage(context: AuthContext, businessId: string, conversationId: string, role: ConversationMessage["role"], content: string) {
-    return goalsmemory.appendMessage(this.pool, context, businessId, conversationId, role, content);
+    return company.appendMessage(this.pool, context, businessId, conversationId, role, content);
   }
 
   async listNeutralConversations(context: AuthContext) {
-    return goalsmemory.listNeutralConversations(this.pool, context);
+    return company.listNeutralConversations(this.pool, context);
   }
 
   async createNeutralConversation(context: AuthContext, title: string) {
-    return goalsmemory.createNeutralConversation(this.pool, context, title);
+    return company.createNeutralConversation(this.pool, context, title);
   }
 
   async getNeutralConversation(context: AuthContext, conversationId: string) {
-    return goalsmemory.getNeutralConversation(this.pool, context, conversationId);
+    return company.getNeutralConversation(this.pool, context, conversationId);
   }
 
   async updateNeutralConversation(context: AuthContext, conversationId: string, title: string) {
-    return goalsmemory.updateNeutralConversation(this.pool, context, conversationId, title);
+    return company.updateNeutralConversation(this.pool, context, conversationId, title);
   }
 
   async deleteNeutralConversation(context: AuthContext, conversationId: string) {
-    return goalsmemory.deleteNeutralConversation(this.pool, context, conversationId);
+    return company.deleteNeutralConversation(this.pool, context, conversationId);
   }
 
   async appendNeutralMessage(context: AuthContext, conversationId: string, role: ConversationMessage["role"], content: string) {
-    return goalsmemory.appendNeutralMessage(this.pool, context, conversationId, role, content);
+    return company.appendNeutralMessage(this.pool, context, conversationId, role, content);
   }
 
   // --- C5a: company membership and invites ---------------------------------------------------
@@ -2401,11 +2390,11 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
 
   /** No row is `null`: there is no "owner by default" fallback anywhere in the membership path. */
   async getCompanyMembership(companyId: string, userId: string): Promise<CompanyMember | null> {
-    return agentgraph.getCompanyMembership(this.pool, companyId, userId);
+    return company.getCompanyMembership(this.pool, companyId, userId);
   }
 
   async listCompanyMembers(companyId: string): Promise<CompanyMember[]> {
-    return agentgraph.listCompanyMembers(this.pool, companyId);
+    return company.listCompanyMembers(this.pool, companyId);
   }
 
   /**
@@ -2414,11 +2403,11 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
    * only *usable* owner be demoted or removed and leave the company without an administrator.
    */
   async countCompanyOwners(companyId: string): Promise<number> {
-    return agentgraph.countCompanyOwners(this.pool, companyId);
+    return company.countCompanyOwners(this.pool, companyId);
   }
 
   async createCompanyInvite(input: CompanyInviteInput): Promise<CompanyInvite> {
-    return agentgraph.createCompanyInvite(this.pool, input);
+    return company.createCompanyInvite(this.pool, input);
   }
 
   /**
@@ -2426,7 +2415,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
    * tell "not a valid token" apart from "valid but expired / already used".
    */
   async findCompanyInviteByTokenHash(tokenHash: string): Promise<CompanyInvite | null> {
-    return agentgraph.findCompanyInviteByTokenHash(this.pool, tokenHash);
+    return company.findCompanyInviteByTokenHash(this.pool, tokenHash);
   }
 
   /**
@@ -2497,7 +2486,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
    * be raced.
    */
   async updateCompanyMemberRole(input: UpdateCompanyMemberRoleInput): Promise<CompanyMember> {
-    return agentgraph.updateCompanyMemberRole(this.pool, input);
+    return company.updateCompanyMemberRole(this.pool, input);
   }
 
   /**
@@ -2506,7 +2495,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
    * `membership_not_found` (404) by `CodeMembershipService` before the store is called.
    */
   async removeCompanyMember(input: RemoveCompanyMemberInput): Promise<void> {
-    return agentgraph.removeCompanyMember(this.pool, input);
+    return company.removeCompanyMember(this.pool, input);
   }
 
   private async hydrateOnboarding(context: AuthContext, row: Omit<BusinessOnboardingSession, "business" | "totalFields" | "currentField">): Promise<BusinessOnboardingSession> {
@@ -2938,7 +2927,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
    * duplicated start can never rewind a run or steal its own lease.
    */
   async createCodeRunState(input: CreateCodeRunStateInput): Promise<CodeRunStateRecord> {
-    return coderuns.createCodeRunState(this.pool, input);
+    return project.createCodeRunState(this.pool, input);
   }
 
   /**
@@ -2947,7 +2936,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
    * every stale run) never pull prompt content into memory.
    */
   async getCodeRunRequest(companyId: string, runId: string): Promise<CodeRunRequestRecord | null> {
-    return coderuns.getCodeRunRequest(this.pool, companyId, runId);
+    return project.getCodeRunRequest(this.pool, companyId, runId);
   }
 
   /**
@@ -2961,11 +2950,11 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
    *   written per-mode rather than as an early return.
    */
   async applyCodeRunStateEvent(input: ApplyCodeRunStateEventInput): Promise<CodeRunStateRecord> {
-    return coderuns.applyCodeRunStateEvent(this.pool, input);
+    return project.applyCodeRunStateEvent(this.pool, input);
   }
 
   async getCodeRunState(companyId: string, runId: string): Promise<CodeRunStateRecord | null> {
-    return coderuns.getCodeRunState(this.pool, companyId, runId);
+    return project.getCodeRunState(this.pool, companyId, runId);
   }
 
   /**
@@ -2973,7 +2962,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
    * expired (or was never taken), which is exactly the set a crashed process leaves behind.
    */
   async listStaleCodeRunStates(input: { now: Date; limit: number }): Promise<CodeRunStateRecord[]> {
-    return coderuns.listStaleCodeRunStates(this.pool, input);
+    return project.listStaleCodeRunStates(this.pool, input);
   }
 
   /**
@@ -2991,7 +2980,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
    *      and the `details` bag the terminal state already carries; nothing here is a second record of a run.
    */
   async listCodeRunStates(input: ListCodeRunStatesInput): Promise<CodeRunStateRecord[]> {
-    return coderuns.listCodeRunStates(this.pool, input);
+    return project.listCodeRunStates(this.pool, input);
   }
 
   /**
@@ -3034,11 +3023,11 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   async getCodeRunTurn(companyId: string, runId: string, turnIndex: number): Promise<CodeRunTurnRecord | null> {
-    return coderuns.getCodeRunTurn(this.pool, companyId, runId, turnIndex);
+    return project.getCodeRunTurn(this.pool, companyId, runId, turnIndex);
   }
 
   async listCodeRunTurns(companyId: string, runId: string): Promise<CodeRunTurnRecord[]> {
-    return coderuns.listCodeRunTurns(this.pool, companyId, runId);
+    return project.listCodeRunTurns(this.pool, companyId, runId);
   }
 
   /**
@@ -3047,7 +3036,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
    * dropped before returning.
    */
   async listCodeRunStatesForScan(input: CodeRunStateScanInput): Promise<CodeRunScanPage<CodeRunStateRecord>> {
-    return coderuns.listCodeRunStatesForScan(this.pool, input);
+    return project.listCodeRunStatesForScan(this.pool, input);
   }
 
   /**
@@ -3089,12 +3078,12 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
    * or foreign id.
    */
   async getProjectForSystem(companyId: string, projectId: string): Promise<Project | null> {
-    return projects.getProjectForSystem(this.pool, companyId, projectId);
+    return project.getProjectForSystem(this.pool, companyId, projectId);
   }
 
   /** Keyset scan over the open turns, used by the reaper to find tool calls with no progress. */
   async listCodeRunTurnsForScan(input: CodeRunTurnScanInput): Promise<CodeRunScanPage<CodeRunTurnRecord>> {
-    return coderuns.listCodeRunTurnsForScan(this.pool, input);
+    return project.listCodeRunTurnsForScan(this.pool, input);
   }
 
   // --- C6b: immutable execution snapshots and versioned configuration -------------------------------
@@ -3149,7 +3138,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       "SELECT * FROM execution_snapshots WHERE company_id=$1 AND id=$2", [companyId, snapshotId],
     );
     const row = result.rows[0];
-    return row ? mapExecutionSnapshotRow(row) : null;
+    return row ? support.mapExecutionSnapshotRow(row) : null;
   }
 
   async getLatestSnapshotForSession(companyId: string, sessionId: string): Promise<ExecutionSnapshotRecord | null> {
@@ -3158,7 +3147,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         ORDER BY snapshot_version DESC LIMIT 1`, [companyId, sessionId],
     );
     const row = result.rows[0];
-    return row ? mapExecutionSnapshotRow(row) : null;
+    return row ? support.mapExecutionSnapshotRow(row) : null;
   }
 
   async getSnapshotForRun(companyId: string, runId: string): Promise<ExecutionSnapshotRecord | null> {
@@ -3167,7 +3156,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         ORDER BY snapshot_version DESC LIMIT 1`, [companyId, runId],
     );
     const row = result.rows[0];
-    return row ? mapExecutionSnapshotRow(row) : null;
+    return row ? support.mapExecutionSnapshotRow(row) : null;
   }
 
   async listExecutionSnapshots(input: ListExecutionSnapshotsInput): Promise<ExecutionSnapshotRecord[]> {
@@ -3178,7 +3167,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         ORDER BY created_at DESC LIMIT $4`,
       [input.companyId, input.sessionId ?? null, input.projectId ?? null, limit],
     );
-    return result.rows.map((row) => mapExecutionSnapshotRow(row));
+    return result.rows.map((row) => support.mapExecutionSnapshotRow(row));
   }
 
   diffExecutionSnapshots(a: ExecutionSnapshotRecord, b: ExecutionSnapshotRecord): ExecutionSnapshotDiff {
@@ -3227,7 +3216,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       [companyId, kind, version],
     );
     const row = result.rows[0];
-    return row ? mapSnapshotConfigVersionRow(row) : null;
+    return row ? support.mapSnapshotConfigVersionRow(row) : null;
   }
 
   async findSnapshotConfigVersionByHash(
@@ -3238,7 +3227,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       [companyId, kind, contentHash],
     );
     const row = result.rows[0];
-    return row ? mapSnapshotConfigVersionRow(row) : null;
+    return row ? support.mapSnapshotConfigVersionRow(row) : null;
   }
 
   async listSnapshotConfigVersions(companyId: string, kind: SnapshotConfigKind): Promise<SnapshotConfigVersionRecord[]> {
@@ -3246,7 +3235,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       "SELECT * FROM code_snapshot_config_versions WHERE company_id=$1 AND kind=$2 ORDER BY version DESC",
       [companyId, kind],
     );
-    return result.rows.map((row) => mapSnapshotConfigVersionRow(row));
+    return result.rows.map((row) => support.mapSnapshotConfigVersionRow(row));
   }
 
   /**
@@ -3254,11 +3243,11 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
    * service layer rejects content-like payload keys before calling this (`code-run-activity-sink.ts`).
    */
   async createCodeActivityEvent(input: CreateCodeActivityEventInput): Promise<CodeActivityEventRecord> {
-    return coderuns.createCodeActivityEvent(this.pool, input);
+    return project.createCodeActivityEvent(this.pool, input);
   }
 
   async listCodeActivityEvents(input: ListCodeActivityEventsInput): Promise<CodeActivityEventRecord[]> {
-    return coderuns.listCodeActivityEvents(this.pool, input);
+    return project.listCodeActivityEvents(this.pool, input);
   }
 
   /**
@@ -3268,11 +3257,11 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
    * `short` retention, because a summary is derived and outliving its transcript buys nothing.
    */
   async createCodeContextSummary(input: CreateCodeContextSummaryInput): Promise<CodeContextSummaryRecord> {
-    return coderuns.createCodeContextSummary(this.pool, input);
+    return project.createCodeContextSummary(this.pool, input);
   }
 
   async listCodeContextSummaries(input: ListCodeContextSummariesInput): Promise<CodeContextSummaryRecord[]> {
-    return coderuns.listCodeContextSummaries(this.pool, input);
+    return project.listCodeContextSummaries(this.pool, input);
   }
 
   /**
@@ -3311,7 +3300,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         if (existing) return existing;
         throw new WorkspaceAccessError("Replay bundle conflict");
       }
-      const bundle = mapReplayBundleRow(inserted.rows[0]!);
+      const bundle = support.mapReplayBundleRow(inserted.rows[0]!);
       let seq = 0;
       for (const step of input.steps) {
         seq += 1;
@@ -3342,7 +3331,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       [companyId, runId, bundleVersion ?? null],
     );
     const row = result.rows[0];
-    return row ? mapReplayBundleRow(row) : null;
+    return row ? support.mapReplayBundleRow(row) : null;
   }
 
   /**
@@ -3355,7 +3344,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       [companyId, bundleId],
     );
     const row = result.rows[0];
-    return row ? mapReplayBundleRow(row) : null;
+    return row ? support.mapReplayBundleRow(row) : null;
   }
 
   async listReplayBundles(input: ListReplayBundlesInput): Promise<ReplayBundleRecord[]> {    const limit = Math.max(1, Math.min(input.limit ?? 100, 500));
@@ -3368,7 +3357,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         ORDER BY created_at DESC, id DESC LIMIT $5`,
       [input.companyId, input.runId ?? null, input.sessionId ?? null, input.executionSnapshotId ?? null, limit],
     );
-    return result.rows.map((row) => mapReplayBundleRow(row));
+    return result.rows.map((row) => support.mapReplayBundleRow(row));
   }
 
   async listReplayBundleSteps(companyId: string, bundleId: string): Promise<ReplayBundleStepRecord[]> {
@@ -3377,7 +3366,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         WHERE company_id=$1 AND bundle_id=$2 ORDER BY seq ASC`,
       [companyId, bundleId],
     );
-    return result.rows.map((row) => mapReplayBundleStepRow(row));
+    return result.rows.map((row) => support.mapReplayBundleStepRow(row));
   }
 
   // --- R1-C (items 11–13): retention and erasure ------------------------------------------------------
