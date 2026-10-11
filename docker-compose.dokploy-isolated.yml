@@ -158,9 +158,6 @@ services:
     networks: [npati-agent, npati-sandbox-control]
 
   sandbox-runner:
-    # Temporarily disabled for production deployment diagnostics.
-    # Enable explicitly with: docker compose --profile project-runtime ... up -d --build
-    profiles: [project-runtime]
     build:
       context: .
       dockerfile: apps/agent-api/Dockerfile
