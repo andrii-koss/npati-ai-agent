@@ -1,10 +1,4 @@
-/* The chat action helpers of app.ts - context building, the chat-action executors and the
- * business/company completion paths - extracted from chat-orchestration.ts in step 2c-7c-c-2
- * of docs/refactoring/PLAN.md.
- *
- * Moved verbatim inside a factory that returns every helper and exports its own type, so callers
- * get exact types without a hand-written interface.
- */
+
 import type { FastifyBaseLogger } from "fastify";
 import type { AppConfig } from "./app";
 import { createAuditServices } from "./audit-services";
@@ -153,9 +147,7 @@ export function createChatActions(deps: ChatActionDeps) {
     return {status:"completed" as const,persistedCount};
   }
   async function beforeDeleteCompany(context: AuthContext, companyId: string) {
-    // Data Studio keeps DataBackends with ON DELETE RESTRICT, so a company that still owns project
-    // databases cannot be deleted. Refuse with an actionable message instead of a raw foreign-key
-    // error: the owner transfers or deletes those DataBackends first (Data Studio → Databases).
+
     if (dataBackendService) {
       const backends = await dataBackendService.list(context, companyId).catch(() => []);
       if (backends.length) {

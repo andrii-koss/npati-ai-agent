@@ -1,9 +1,4 @@
-/* The chat endpoints other than the stream, extracted from app.ts
- * (step 2c-7c-b of docs/refactoring/PLAN.md).
- *
- * Moved verbatim; the only edits are the closure locals that became deps
- * (app.log -> log) and the module imports for the code that moved with it.
- */
+
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { AppConfig } from "./app";
 import { AuthenticationError } from "./auth";
@@ -57,7 +52,6 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
     return {cancelled:true};
   });
 
-  // Context Compaction API (#72)
   app.post<{
     Body: {
       messages?: Array<{ role: string; content: string }>;
@@ -77,7 +71,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
             messages = conv.messages.map((m: any) => ({ role: m.role, content: m.content }));
           }
         } catch {
-          // not neutral conversation
+
         }
       }
       if (!messages || !Array.isArray(messages)) {
@@ -167,7 +161,6 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
 
       const chatBody = request.body as Record<string, any>;
 
-      // Resolve Active Context safely and fail-closed
       const requestedContext = {
         contextType: chatBody.contextType ?? (chatBody.projectId ? "project" : chatBody.companyId ? "company" : "business"),
         businessId: chatBody.businessSetup
@@ -189,7 +182,6 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
         hasWorkspace: Boolean(overview.currentBusiness || resolved.company || resolved.project),
       });
 
-      // 1. Unsupported website intents (Git, Deploy)
       if (intentDecision.unsupportedIntentMessage) {
         return {
           message: intentDecision.unsupportedIntentMessage,
@@ -198,7 +190,6 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
         };
       }
 
-      // 2. Needs clarification (e.g. edit without active project)
       if (intentDecision.needsClarification && intentDecision.clarificationPrompt) {
         return {
           message: intentDecision.clarificationPrompt,
@@ -207,7 +198,6 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
         };
       }
 
-      // 3. Executable website builder tasks (Create, Edit, Build, Preview, Test, Debug)
       if (intentDecision.isExecutableInStep5 && intentDecision.intent !== "CHAT") {
         if (!prompt && !chatBody.attachments?.length) {
           return reply.code(400).send({ error: { code: "MESSAGE_REQUIRED", message: "Enter a message or attach a photo or voice message." } });
@@ -283,7 +273,6 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
         };
       }
 
-      // 1. NEUTRAL CONTEXT ('none')
       if (resolved.context.contextType === "none") {
         const prompt = request.body.message?.trim();
         if (!prompt && !request.body.attachments?.length) {
@@ -294,7 +283,6 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
         return { ...result, activeContext: resolved.context };
       }
 
-      // 2. COMPANY CONTEXT ('company')
       if (resolved.context.contextType === "company") {
         const prompt = request.body.message?.trim();
         if (!prompt && !request.body.attachments?.length) {
@@ -346,7 +334,6 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
         };
       }
 
-      // 3. BUSINESS CONTEXT ('business')
       if (!resolved.business) {
         if (memoryPolicy.noMemoryActive) {
           return reply.code(409).send({ error: { code: "NO_MEMORY_ONBOARDING_UNSUPPORTED", message: "Finish business setup before using a private no-memory request." } });

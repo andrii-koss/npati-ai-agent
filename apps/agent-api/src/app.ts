@@ -46,8 +46,7 @@ import { CodeService } from "./code-service";
 import { NetworkActivityRecorder } from "./network-activity";
 import { PolicyDecisionRecorder } from "./policy-decision-activity";
 import { activitySinkForKind, createCodeRunActivitySink } from "./code-run-activity-sink";
-// C13: the project lifecycle hooks. The service is built on the existing lifecycle manager and the existing
-// sandbox/webhook transports; nothing here creates a second event bus or a second egress path.
+
 import { CodeHookError, createCodeHooksService, createCodeHookPolicyPreflight } from "./code-hooks";
 import { globalLifecycleHookManager } from "./automations-routes";
 import { deliverWebhook } from "./webhook-destination-policy";
@@ -75,40 +74,21 @@ import { resolveEgressEnforcement } from "./sandbox-egress-enforcement";
 import { RunnerReadinessClient, resolveRunnerReadinessTtl } from "./sandbox-runner-readiness-client";
 import { assertManifestConsistent, currentToolManifest, CODE_TOOL_SCHEMAS } from "./code-tool-registry";
 import { CodingAgentRunner, buildRunnerVersion, createCodeRunEnvironmentHolder, createCodeRunPolicyComposition, type CodeRunPolicyCompositionSources, type CodingAgentRunResult } from "./coding-agent-runner";
-// C6b: replay. Deterministic replay verifies the recorded bundle without any live port; live replay starts a
-// new run and is labelled best-effort.
-// C6b: the read-only "why did the agent act this way" surface (snapshot for a run, snapshot diff, Activity
-// events of a run, replay metadata). Reads only, so it cannot widen what an agent may do.
+
 import { buildCompanyMemoryBlock, buildProjectContextBlock } from "./code-context-memory";import { registerCodeRunStreamRoutes } from "./code-run-stream-routes";
-// C10: durable session operations — resume, rewind, fork — and the reconciler's recovery notice.
-// C14 (owner decision 3): the aggregated metrics of a tenant, computed from the run states and Activity rows the
-// two readers below already return — no new table, no second record of what a run did.
+
 import { createCodeInstructionsLoader } from "./code-instructions-loader";
-// C9: goals, plan revisions and the session todo list. The tools update session metadata only; the routes are
-// the read/decision surface the workspace renders.
+
 import { proposePlan, updateSessionTodos } from "./code-plan-tool";
-// C9: `code.ask_user`. The tool service persists the question (the runner owns the run state and the pause); the
-// routes are the surface a person answers on, and the reaper port releases a run whose question timed out.
+
 import { createCodeAskUserService } from "./code-ask-user-service";
 import { createCodeUserQuestionReaperPort } from "./code-ask-user-reaper";
 import { isRepositoryInstructionsTrusted } from "./code-project-trust";
-// C15: the mounted-folder allowlist — its service (flag, owner/admin, path validation, audit before apply) and
-// the route that exposes it.
+
 import { createCodeCommandRegistry } from "./code-command-registry";
 import { createCodeSkillsService } from "./code-skills-instructions";
 import { SandboxImagePolicy, sandboxImagePolicyConfig } from "./sandbox-image-policy";
-// C10 (ТЗ items 5, 6, 8): the run queue that bounds concurrency fairly, the registry that keeps a long run alive
-// after its tab closes, the reconnect/polling surface over it, and the Markdown session export.
-/**
- * R1 (section A, item 1): the **periodic** run limit is a separate limiter with its own configuration and its
- * own window. `route-guard-tiers.ts` stays exactly what it was — the Company/Chat HTTP limiter — and is not
- * imported here at all.
- */
-/**
- * R1 (section A, items 1 and 5): the single admission door. Every code-run entry point in this file goes
- * through `codeRunAdmission`; `tests/coding-agent-r1a-limits-and-quotas.test.ts` fails if a **direct** queue
- * acquisition ever reappears here.
- */
+
 import { connectionWantsNotification } from "./code-background-run-notifications";
 import { CosignImageSignatureVerifier } from "./sandbox-image-signature";
 import { CodeToolRuntime, CodeToolError, createProjectWorkspaceReadPort, createProjectWorkspaceWritePort, currentManifestVersion } from "./code-tool-runtime";
@@ -116,8 +96,7 @@ import { buildInstallPlan, registryFromConfig, runInstallPlan } from "./code-dep
 import { runDependencyAudit, shouldBlockCommit } from "./code-deps-audit";
 import { classifyDependencySource, findTyposquatTarget, isRegistryAllowed, resolveDepsGuardPolicy, sourceRequiresApproval } from "./code-deps-guard";
 import { allCanonicalExecutors, runSandboxPostWriteHook, type CodeVerifyRunnerPort } from "./code-tool-executors";
-// C12: the delegation adapter. It is the only thing that turns a `code.agent.spawn` call into a child run, and
-// it does so through the **same** `CodingAgentRunner` instance the rest of the application uses.
+
 import { createCodeSubagentChildRunner } from "./code-subagent-child-runner";
 import {
   CodeSubagentOperationService,
@@ -131,14 +110,14 @@ import { CodeAsyncProcessService } from "./code-async-process";
 import { CodeProcessManager, type CodeProcessSandboxPort } from "./code-process-manager";
 import { createCodeProcessControls } from "./code-process-runtime";
 import { CodeReaper, asStaleApprovalReaper } from "./code-reaper";
-// R1-C (items 11–13): retention really executed, and the right to be forgotten.
+
 import { CodeDataRetention } from "./code-data-retention";
 import { SecretLeaseProvider } from "./code-secret-lease";
 import { isAgentPrincipal, isReviewSafeTool, matrixModeFor, PolicyEngine } from "./code-policy-engine";
 import type { GitWriteIntent } from "./code-git-write-policy";
 import { classifyShellCommand } from "./code-shell-classifier";
 import { detectVerifyTool, parseVerifyOutput } from "./code-verify-parser";
-// C15 (owner decisions 2 and 3): the run-start surface the CLI and, later, an IDE extension call.
+
 import { CodeTurnTracker, codeCheckpointPortFromGit, approvalsBackedPort, resolveTurnTrackingOptions } from "./code-workspace-checkpoint";
 import { resolveApprovalPolicy } from "./code-edit-approval";
 import { CodeApprovalScopeService, resolveApprovalTimeoutMs } from "./code-approval-scope";
@@ -166,9 +145,7 @@ import { AutomationScheduler, computeNextCronDate } from "./automation-scheduler
 import { ContentLibraryStore } from "./content-library-store";
 import { CompanyApprovalsRepository } from "./approvals-repository";
 import { IntegrationsRepository } from "./integrations-repository";
-// C13 (owner decision 5–8): the runtime MCP capability surface. `lookupCapability` is the one place the
-// `static → runtime → unknown` order lives; the store/overlay and the SSRF-safe transport are the only
-// runtime provider mechanism in the process (no second client, no second catalog).
+
 import { lookupCapability } from "./mcp-runtime-capabilities";
 import { McpRuntimeCapabilityStore } from "./mcp-runtime-capabilities";
 import { McpToolPolicyStore } from "./mcp-tool-policy-repository";
@@ -236,7 +213,6 @@ import { createProcessSandboxPortWiring } from "./process-sandbox-port-wiring";
 import { createCodeSessionWiring } from "./code-session-wiring";
 import { createMessagingNotificationsWiring } from "./messaging-notifications-wiring";
 
-// Re-exported so existing importers keep working: tests/chat-language-routing.test.ts
 export { isSpreadsheetEditRequest, mapColumnDirectiveFromProposal };
 
 function* boundedResponseChunks(value:string,maxCharacters=1_024){
@@ -262,7 +238,7 @@ export interface AppConfig {
   omnirouteVisionModel?: string;
   dataDirectory?: string;
   projectWorkspaceRoot?: string;
-  /** C1: Coding Agent limits (configuration, not literals). */
+
   codeAgentLimits?: Partial<CodeAgentLimits>;
   hubBaseUrl?: string;
   hubApiKey?: string;
@@ -297,11 +273,9 @@ export interface AppConfig {
   projectSandbox?: ProjectSandboxService;
 }
 
-
-
 export function buildApp(config: AppConfig = {}) {
   const app = Fastify({ logger: process.env.NODE_ENV !== "test" ? {redact:{paths:["req.headers.authorization","req.headers.x-npati-api-key","req.body.password","req.body.apiKey","req.body.token","req.body.imapConfig.password","req.body.smtpConfig.password","req.body.imapConfig.accessToken","req.body.smtpConfig.accessToken","req.body.imapConfig.refreshToken","req.body.smtpConfig.refreshToken","req.body.imapConfig.clientSecret","req.body.smtpConfig.clientSecret"],censor:"[REDACTED]"}} : false, bodyLimit: 30 * 1024 * 1024 });
-  // The redis health client and check (step 2c-6h).
+
   const redisHealthWiring = createRedisHealthWiring({
     config,
     log: app.log,
@@ -315,27 +289,15 @@ export function buildApp(config: AppConfig = {}) {
     ttsModel: config.omnirouteTtsModel,
     embeddingModel: config.omnirouteEmbeddingModel, rerankModel: config.omnirouteRerankModel,
   });
-  // C5b: ProviderDataGuard sits between the engine and every caller that sends content to a model. It is
-  // only active when the operator opts in (`NPATI_CODE_PROVIDER_DATA_ENFORCEMENT=true`) because the first
-  // caller able to supply a policy context is the Coding Agent runner (C6); once enabled it is fail-closed.
-  //
-  // The resolver reads the configured policy from the same store the policy API writes to (`workspaceStore`),
-  // so what the UI shows and what actually reaches a provider cannot diverge. `workspaceStore` is declared
-  // further down with the policy service; the closure runs per request, long after startup, so the reference
-  // is safely initialised by then.
+
   let engineDataPolicyResolver: ReturnType<typeof createEnginePolicyResolver> | undefined;
-  /**
-   * C5b: the outbound guard's policy snapshot. Initialised below next to the policy service (it needs the
-   * same store), and referenced lazily from the guard closure that is registered at the same place.
-   * `refreshOutboundPolicySnapshot` lets the policy routes invalidate the snapshot right after a change.
-   */
+
   let outboundPolicySnapshot: OutboundPolicySnapshot | undefined;
   let refreshOutboundPolicySnapshot: (() => void) | undefined;
   const resolveEngineDataPolicy = (input: { model?: string; providerId?: string; policyContext?: { companyId: string } }) => {
     const resolver = engineDataPolicyResolver;
     if (!resolver) {
-      // Fail closed: until the policy service exists nothing may be sent, and the guard turns this into
-      // `provider_policy_unavailable` (503) instead of inventing a permissive default.
+
       throw new Error("provider data policy resolver is not wired yet");
     }
     return resolver(input);
@@ -347,9 +309,7 @@ export function buildApp(config: AppConfig = {}) {
   const aiEngine = createProductionResilientAIEngine(guardedAiEngine, {
     queue: globalAdmissionQueue,
     defaultTier: "pro",
-    // Routing eligibility is decided by the same resolver as the guard's per-request decision, so a model
-    // the UI reports as eligible is exactly the model routing is allowed to try. A stale policy (review
-    // older than 180 days) is never eligible, which forces a policy review instead of silent sending.
+
     isModelEligible: providerDataGuardInstance
       ? async (model: string) => {
           try {
@@ -367,7 +327,7 @@ export function buildApp(config: AppConfig = {}) {
         }
       : undefined,
   });
-  // Core platform domain (step 2b): research, storage, files, auth, memory and guardrail repositories.
+
   const {
     researchBundle,
     webResearch,
@@ -397,7 +357,7 @@ export function buildApp(config: AppConfig = {}) {
     scopedMemory,
     guardrailPolicies,
   } = createCoreServices({ config, log: app.log, baseAiEngine, aiEngine });
-  // Audit and observability domain (step 2b): the journal, its config and its two background timers.
+
   const {
     auditRepo,
     auditLogService,
@@ -420,7 +380,7 @@ export function buildApp(config: AppConfig = {}) {
     : undefined;
   const emailAttachmentStorage = objectStorage ? new EmailAttachmentStorage(objectStorage, fileRepository) : undefined;
   let projectSandbox: ProjectSandboxService | undefined = config.projectSandbox;
-  // Data-backend domain (step 2b-3): provisioners, quotas, backups and project auth.
+
   const {
     dataBackendRepository,
     databaseProvisioner,
@@ -442,11 +402,10 @@ export function buildApp(config: AppConfig = {}) {
   const projectService = new ProjectService(workspaceStore, async (context, project) => {
     if (project.sandboxId && !projectSandbox) throw new Error("Sandbox runner is required to remove this Project");
     await projectSandbox?.destroy(context, project);
-    // D7: deleting a Project only detaches it; the DataBackend keeps serving other Projects.
+
     await dataBackendService?.detachProjectArtifacts(context, project.companyId, project.id).catch(() => undefined);
   }, async (context, companyId, projectId) => {
-    // Independent sites get independent data. Explicit attachments (including mobile apps)
-    // are handled by ProjectService and never call this hook.
+
     if (!dataBackendService) return undefined;
     try {
       const project = await workspaceStore.getProject(context, companyId, projectId);
@@ -459,25 +418,9 @@ export function buildApp(config: AppConfig = {}) {
       return undefined;
     }
   });
-  /**
-   * C15: the **one** resolver of a project's canonical workspace, and the one `WorkspaceProvider` that serves it.
-   *
-   * The owner decision for this step is that a mounted local folder becomes a real `WorkspaceProvider` rather
-   * than a bypass: the provider below is the ordinary one, its base comes from this resolver, and the allowlist
-   * read and the feature flag are wired into it. `ProjectGitService` receives the *same* resolver object further
-   * down, so git, the file tools and the sandbox all act on the one directory this object names — there is no
-   * second join of a workspace root anywhere in this file.
-   *
-   * `protectedRoots` carries the data directory (and the workspace root is added by the validator itself),
-   * because a mount that contains either would expose it one level down.
-   */
+
   const projectWorkspaceRoot = config.projectWorkspaceRoot ?? path.join(config.dataDirectory ?? ".data", "project-workspaces");
-  /**
-   * The flag reader is bound late, like the other late-bound ports in this file: the feature-flag service is
-   * built further down (it depends on the audit log), and the resolver must not hold a second flag reader.
-   * While it is unset the resolver answers "disabled", so an unwired build mounts nothing instead of mounting
-   * without a gate — the fail-closed direction for a handle that does not exist yet.
-   */
+
   let mountedFolderFlags: MountedFolderFlagPort | null = null;
   const projectWorkspaceBases = new ProjectWorkspaceBaseResolver({
     root: projectWorkspaceRoot,
@@ -494,7 +437,7 @@ export function buildApp(config: AppConfig = {}) {
     protectedRoots: config.dataDirectory ? [path.resolve(config.dataDirectory)] : [],
   });
   const projectWorkspace = new MountedWorkspaceProvider(projectService, { root: projectWorkspaceRoot, bases: projectWorkspaceBases, maxFileBytes: Number(process.env.NPATI_PROJECT_MAX_FILE_BYTES) || undefined, maxFiles: Number(process.env.NPATI_PROJECT_MAX_FILES) || undefined });
-  // The gateway vendors the Project API client into the Project workspace, so it needs the workspace handle.
+
   const projectApiGatewayService = dataBackendRepository && databaseProvisioner
     ? new ProjectApiGatewayService(workspaceStore, dataBackendRepository, databaseProvisioner, projectAuthService, dataProvider, undefined, projectWorkspace, quotaService)
     : undefined;
@@ -515,7 +458,7 @@ export function buildApp(config: AppConfig = {}) {
     inactivityMs: Number(process.env.NPATI_SANDBOX_IDLE_MS) || undefined,
     syncMaxFiles: Number(process.env.NPATI_SANDBOX_SYNC_MAX_FILES) || undefined,
     syncMaxBytes: Number(process.env.NPATI_SANDBOX_SYNC_MAX_BYTES) || undefined,
-    // C10 (ТЗ item 7): the retention window the sweep destroys idle sandboxes after.
+
     retentionMs: Number(process.env.NPATI_SANDBOX_RETENTION_MS) || undefined,
   }, projectApiGatewayService ? async (ctx, companyId, projectId) => {
     const project = await projectService.get(ctx, companyId, projectId);
@@ -523,23 +466,13 @@ export function buildApp(config: AppConfig = {}) {
   } : undefined);
   const sandboxIdleTimer = projectSandbox ? setInterval(() => { void projectSandbox?.stopInactive(); }, 60_000) : undefined;
   sandboxIdleTimer?.unref();
-  /**
-   * C10 (ТЗ item 7): the retention pass. It runs on the established idle cadence rather than a timer of its own —
-   * `sweepRetention` re-checks the idle age itself, so the cadence only decides how quickly a long-idle sandbox is
-   * noticed, never whether a live one is destroyed.
-   *
-   * Before sweeping it re-registers the projects that own code sessions, because the idle map is in-process: a
-   * sandbox that exists on disk but is not in the map would never be stopped and never be destroyed, which is the
-   * exact leak this policy exists to close. The store read is the existing tenant-enumerating one the reaper and
-   * reconciler already use for cross-company scans — a system scope, so no user's permissions are borrowed.
-   */
+
   const sandboxRetentionTimer = projectSandbox ? setInterval(() => {
     void (async () => {
       try {
         const refs = await workspaceStore.listCodeProjectRefs({ companyId: null, limit: 500 });
         for (const ref of refs.items) {
-          // System-scope read on purpose: the sweep runs as the deployment, which owns no project, so the
-          // tenant-scoped `getProject` would refuse every one of them.
+
           const project = await workspaceStore.getProjectForSystem(ref.companyId, ref.projectId).catch(() => null);
           if (project) await projectSandbox!.trackForRetention({ workspaceId: project.workspaceId, userId: project.createdBy, permissions: [] }, project);
         }
@@ -555,65 +488,34 @@ export function buildApp(config: AppConfig = {}) {
   }, 60_000) : undefined;
   sandboxRetentionTimer?.unref();
   const projectPreviewService = new ProjectPreviewService(projectService, workspaceStore, projectWorkspace, projectSandbox, process.env.NPATI_PREVIEW_SECRET);
-  /**
-   * C11 (owner decisions 2, 7, 8 and 10): the git workflow wiring.
-   *
-   * Four ports, and each one exists because the thing it does must have exactly one implementation:
-   *
-   *  - `codeWorkspaceRevisions` reads the **canonical** revision from the existing `ProjectWorkspace.info`
-   *    (the content digest of the workspace's file set). The tool runtime captures it when it authorises a
-   *    call and the git executors re-check it before a commit or a push, so "which bytes did this operation
-   *    act on" is provable and a moved revision is `workspace_revision_mismatch` (owner decision 7);
-   *  - `assertProtectedBranch` is `CodeProtectedBranchService.assertGitWriteAllowed` — the **same** decision
-   *    phase 4b and the git boundary make. A git tool therefore cannot reach a branch decision that the other
-   *    two checks would not have made;
-   *  - `sessionBranch` is `sessionBranchName(sessionId)` (`npati/<session-short-id>`), so a commit or a push
-   *    asserts it is on the branch the session was told to work on (owner decision 8);
-   *  - `describeRun` reuses the run's own `CodingAgentRunSummary` for a pull-request body (owner decision 11).
-   *    It reads the live summary the runner publishes, and a call outside a run answers `null` — the tool then
-   *    says `descriptionSource: "unavailable"` rather than inventing a description.
-   *
-   * The guard is built **here**, above the git-policy boundary, because owner decision 13 gives the boundary
-   * a third port: the revision must be read before the write's own initialization and re-checked after it. It
-   * is one guard instance for the tool runtime and the boundary, so there is one answer to "what revision is
-   * this workspace on".
-   */
+
   const codeWorkspaceRevisions = new CodeWorkspaceRevisionGuard({
     read: async ({ ctx, companyId, projectId }) => {
       const info = await projectWorkspace.info(ctx, companyId, projectId);
       return { currentRevision: info.currentRevision, currentBranch: info.currentBranch ?? null };
     },
   });
-  /**
-   * C11: the git-policy boundary of `ProjectGitService`. The policy and credential ports are assigned further
-   * down — the protected-branch service and the secret-lease provider are built after this line — and are read
-   * **lazily** here, exactly like the other late-bound ports in this file. The closure resolves them at
-   * call time (a git write happens long after startup); while a port is unset the write is refused, so the
-   * lazy indirection cannot turn a missing check into a skipped one. The revision guard above is passed
-   * directly: it is a read-only port whose instance exists already.
-   */
+
   let codeGitPolicyBoundary: { assertGitWriteAllowed: (ctx: AuthContext, companyId: string, input: GitWriteIntent) => Promise<unknown> } | null = null;
   let hostGitCredentialLease: HostGitCredentialPort | null = null;
   const projectGitService = new ProjectGitService(
     workspaceStore,
     projectService,
-    // C15: the **same** resolver the workspace provider reads, not a second join of the same root. This is what
-    // makes "one canonical workspace" true for git as well: a mounted project's repository is the user's own.
+
     projectWorkspaceBases,
     undefined,
     async (ctx, companyId, credentialId) => { const fields = await browserCredentials?.resolve(ctx, companyId, credentialId); const token = fields?.token; if (!token) throw new Error("GitHub token is unavailable in the Company vault"); return token; },
     undefined,
     {
-      // The second protected-branch check, performed immediately before the write (owner decision 3).
+
       assertGitWriteAllowed: (ctx, companyId, input) => {
         const boundary = codeGitPolicyBoundary;
         if (!boundary) throw new Error("The protected-branch policy is unavailable; the git write is refused");
         return boundary.assertGitWriteAllowed(ctx, companyId, input);
       },
-      // C11 (owner decision 7 + 13): the canonical revision, read before the approval and re-checked after the
-      // write's own initialization (`workspace_revision_mismatch`, no push).
+
       workspaceRevisions: codeWorkspaceRevisions,
-      // The real approval record, consumed with the payload hash of the exact write (owner decision 5).
+
       ...(approvalsRepo
         ? {
             approvals: {
@@ -622,7 +524,7 @@ export function buildApp(config: AppConfig = {}) {
             },
           }
         : {}),
-      // One credential lease per git operation (owner decision 6).
+
       credentials: {
         acquire: async (input) => {
           const leases = hostGitCredentialLease;
@@ -636,11 +538,9 @@ export function buildApp(config: AppConfig = {}) {
     },
   );
   const projectImportService = new ProjectImportService(workspaceStore, projectService, projectWorkspace, projectSandbox, projectPreviewService, projectGitService, browserCredentials);
-  // C1: code projects and code sessions. No tools and no agent loop here; the runner is C6.
-  // Self-hosted defaults are ready to use; hosted deployments retain dark launch and rollout gates.
+
   const featureFlagService = new FeatureFlagService(workspaceStore, auditLogService, { enabledByDefault: selfHosted, allowPreGateRollout: selfHosted }, async (ctx, companyId) => {
-    // Best-effort kill-switch cleanup: stop the company's project sandboxes. Full teardown and
-    // SecretLease revocation are C4/C6 work; failures here must not block the kill switch.
+
     let stopped = 0;
     try {
       const projects = await projectService.list(ctx, companyId, true);
@@ -648,14 +548,12 @@ export function buildApp(config: AppConfig = {}) {
         if (!project.sandboxId || !projectSandbox) continue;
         await projectSandbox.destroy(ctx, project).then((destroyed) => { if (destroyed) stopped += 1; }).catch(() => undefined);
       }
-    } catch { /* ignore */ }
+    } catch {  }
     return stopped;
   });
-  // C15: the late-bound flag reader of the workspace resolver is bound to the one feature-flag service, so a
-  // `code.mounted_folder` kill switch is felt by the next resolution (the service caches for at most 30 s).
+
   mountedFolderFlags = featureFlagService;
-  // C1b: sandbox image admission control. Created here so the routes and the runner-facing services
-  // share one policy; without a configured signer identity it denies every image (see the policy).
+
   const sandboxImageConfig = sandboxImagePolicyConfig(process.env, config.dataDirectory);
   const sandboxImagePolicy = new SandboxImagePolicy(workspaceStore, {
     ...sandboxImageConfig,
@@ -664,15 +562,9 @@ export function buildApp(config: AppConfig = {}) {
     audit: auditLogService,
   });
   const codeService = new CodeService(workspaceStore, projectService, projectWorkspace, projectImportService, config.codeAgentLimits, auditLogService, featureFlagService);
-  // C2: runtime for the read-only code.* tools. Reads go through the existing project workspace; text
-  // search requires the sandbox, so without it the tool refuses with `sandbox_unavailable` instead of
-  // touching the host. Activity is logged here; the run-event stream and ExecutionSnapshot links arrive
-  // with the runner in C6 (the run event enum is lifecycle-only by design).
+
   const codeReadTracker = new ReadTracker(resolveReadTrackerOptions());
-  // C3: the write runtime reuses the existing Website Builder checkpoint mechanism (`ProjectGitService`
-  // already commits the dirty worktree and tags `refs/npati/checkpoints/<id>`) and the existing approval
-  // system (`CompanyApprovalsRepository` verifies the payload hash on consumption). Nothing is stored in
-  // a new format, and the per-turn log stays in-process until C6a decides persistence.
+
   const codeTurnTracker = new CodeTurnTracker(resolveTurnTrackingOptions());
   const codeCheckpointPort = codeCheckpointPortFromGit({
     createCheckpoint: (ctx, companyId, projectId, input) => projectGitService.createCheckpoint(ctx, companyId, projectId, input),
@@ -690,9 +582,7 @@ export function buildApp(config: AppConfig = {}) {
     moveFile: (ctx, companyId, projectId, from, to, expectedRevision) => projectWorkspace.moveFile(ctx, companyId, projectId, from, to, expectedRevision),
     deleteFile: (ctx, companyId, projectId, filePath) => projectWorkspace.deleteFile(ctx, companyId, projectId, filePath),
   });
-  // Single sandbox execution adapter for the code toolset: text search and the post-write hooks both use
-  // it, so the terminal policy sees one consistent caller identity.
-  // The code sandbox wiring (step 2c-6f).
+
   const sandboxWiring = createCodeSandboxWiring({
     config,
     log: app.log,
@@ -710,52 +600,25 @@ export function buildApp(config: AppConfig = {}) {
   });
   hostGitCredentialLease = sandboxWiring.hostGitCredentialLease;
   const { codeSandboxExecPort, secretLeases, runnerReadiness, egressEnforcement, runnerReadinessTimer, codeActivitySink, networkActivity, egressAllowlist, codeApprovalScope, policyDecisionActivity, codePrivilegedAudit, automationAllowedPermissions, codeMembership, codeProtectedBranches } = sandboxWiring;
-  /**
-   * C11 (owner decision 3): the git-policy boundary of `ProjectGitService` reads the same service the
-   * engine's hard-deny phase reads. `assertGitWriteAllowed` is a **separate** call, made immediately before
-   * the git side effect, because a direct service call (a route, a script, a future tool) never reaches the
-   * engine — that is the path this assignment closes.
-   */
+
   codeGitPolicyBoundary = {
     assertGitWriteAllowed: (ctx: AuthContext, companyId: string, input: GitWriteIntent) =>
       codeProtectedBranches.assertGitWriteAllowed(ctx, companyId, input),
   };
-  /**
-   * C13 (owner decision 5–8): the **runtime** MCP capability surface, constructed here because the policy
-   * engine's capability port (below) consults it on every tool call.
-   *
-   * Three things are one instance each, deliberately:
-   *   - `mcpRuntimeCapabilities` is the only runtime provider overlay in the process. A discovered MCP tool is
-   *     published **into it** and never into `CODE_TOOL_SCHEMAS`/`CAPABILITY_CATALOG`/`CAPABILITY_MATRIX`, so
-   *     the static manifest stays versioned and immutable while the Inspector still shows both sources.
-   *   - `mcpRuntimeTransport` is the existing SSRF-safe client, not a second HTTP stack. The allowlist is read
-   *     lazily (the C4b allowlist is learned at runtime), and a request to a host that is not on it is refused
-   *     by the SSRF policy before a socket exists.
-   *   - `mcpToolPolicyStore` is migration 085's table: the durable record of an owner/admin risk decision. The
-   *     default for every discovered tool stays `high` + approval required until such a decision exists.
-   */
+
   const mcpToolPolicyStore = new McpToolPolicyStore(config.databaseUrl);
   app.addHook("onClose", async () => { await mcpToolPolicyStore.close(); });
   const mcpRuntimeCapabilities = new McpRuntimeCapabilityStore({ policies: mcpToolPolicyStore });
   const mcpRuntimeTransport = new McpRuntimeTransport({
-    // The **run** phase allowlist is the one an MCP dial belongs to: it is the phase for outbound calls made
-    // while work is in flight, and it is read lazily because the C4b allowlist is learned at runtime.
+
     allowlist: () => resolveAllowlistForPhase("run", egressAllowlist),
   });
-  /**
-   * The configured integrations the transport may dial. Late-bound because `IntegrationsRepository` is
-   * constructed further down (the same late-binding idiom the spawn executor uses): `null` means "not wired",
-   * and discovery then reports `mcp_integration_source_unavailable` rather than dialling anything.
-   */
+
   let mcpIntegrationSourceForRuntime: McpIntegrationSource | null = null;
-  /**
-   * The runtime MCP manifest, in the metadata-only shape the ExecutionSnapshot and the replay bundle pin.
-   * One definition, three readers (the snapshot source, the replay recorder's context and the replay route's
-   * "current manifest" side), so a pinned manifest and a compared manifest cannot be computed differently.
-   */
+
   const readRuntimeMcpManifest = (tenant: { workspaceId: string; companyId: string }) =>
     readMcpRuntimeManifest(mcpRuntimeCapabilities, tenant);
-  // The code policy engine (step 2c-6c).
+
   const { policyEngine } = createCodePolicyWiring({
     config,
     log: app.log,
@@ -771,10 +634,7 @@ export function buildApp(config: AppConfig = {}) {
     runnerReadiness,
     workspaceStore,
   });
-  /**
-   * C5: project trust. Repository content can never mark a project trusted — only an owner/admin can,
-   * and the change is audited before it is applied (fail closed, same journal as the other C5 writes).
-   */
+
   const codeProjectTrust = new CodeProjectTrustService({
     store: workspaceStore,
     audit: auditLogService
@@ -785,7 +645,7 @@ export function buildApp(config: AppConfig = {}) {
               {
                 companyId: input.companyId, actor: input.actor, actorRole: "owner", action: input.action,
                 resourceType: "code_project_trust", resourceId: input.resourceId,
-                // C5a (D7): a refused trust change is journalled as a denied decision, not as an allow.
+
                 decision: input.decision === "deny" ? "denied" : "allowed",
                 payload: { action: input.action, target: input.resourceId },
                 metadata: input.metadata ?? {},
@@ -795,7 +655,7 @@ export function buildApp(config: AppConfig = {}) {
         }
       : undefined,
   });
-  /** C5: session modes are a policy surface, so every change goes through the audited service. */
+
   const codeSessionModes = new CodeSessionModeService({
     store: workspaceStore,
     audit: auditLogService
@@ -806,7 +666,7 @@ export function buildApp(config: AppConfig = {}) {
               {
                 companyId: input.companyId, actor: input.actor, actorRole: "owner", action: input.action,
                 resourceType: "code_session", resourceId: input.resourceId,
-                // C5a (D7): a refused mode change is journalled as a denied decision.
+
                 decision: input.decision === "deny" ? "denied" : "allowed",
                 payload: { action: input.action, target: input.resourceId },
                 metadata: input.metadata ?? {},
@@ -818,29 +678,19 @@ export function buildApp(config: AppConfig = {}) {
     suggestionSink: async (suggestion) => { app.log.info(suggestion, "code_session_mode_suggestion"); },
     logger: app.log,
   });
-  /**
-   * The session-mode routes take a synchronous context accessor while authentication is async, so the
-   * context is resolved once in a path-scoped preHandler and read back synchronously. Scoped to the
-   * mode endpoints on purpose: no other route authenticates twice or changes behaviour.
-   */
+
   const codeSessionModeContexts = new WeakMap<object, AuthContext>();
   app.addHook("preHandler", async (request) => {
     if (!/\/code\/sessions\/[^/]+\/mode(\/suggest)?$/.test(request.url.split("?")[0] ?? "")) return;
     codeSessionModeContexts.set(request, await authProvider.authenticate(request));
   });
   registerCodeSessionModeRoutes(app, {
-    // `SessionModeRouteDeps` requires the store for the route-level reads; the service holds its own.
+
     store: workspaceStore,
     service: codeSessionModes,
     getAuthContext: (request) => codeSessionModeContexts.get(request as object) ?? null,
   });
-  /**
-   * The membership and protected-branch routes take a synchronous context accessor while authentication is
-   * async, so the context is resolved once in a path-scoped preHandler and read back synchronously (the
-   * same mechanism as the session-mode and production routes — no second auth path). The services
-   * themselves are constructed above, together with the policy engine that consults them.
-   */
-  // The code session modes and membership contexts (step 2c-6h).
+
   const codeSessionWiring = createCodeSessionWiring({
     config,
     log: app.log,
@@ -855,22 +705,12 @@ export function buildApp(config: AppConfig = {}) {
     protectedBranches: codeProtectedBranches,
     getAuthContext: (request) => codeMembershipContexts.get(request as object) ?? null,
     ...(codePrivilegedAudit ? { audit: codePrivilegedAudit } : {}),
-    // An invite token names its company: a token posted to another company's path is refused before use.
+
     findInviteCompanyId: async (tokenHash) =>
       (await workspaceStore.findCompanyInviteByTokenHash(tokenHash))?.companyId ?? null,
     logger: app.log,
   });
-  /**
-   * C5b: provider data policy administration.
-   *
-   * The store-level service owns validation, the audited "journal before write" order and the version
-   * bump; `ProviderDataPolicyAdminService` on top of it owns *who may change what* (company-role anchored
-   * RBAC through the C5a gate), the Activity event, and the eligibility read model the UI needs. Both are
-   * built here so the routes and any later caller share one instance and therefore one policy view.
-   *
-   * Without the audit journal the reads answer but every change refuses (`audit_unavailable`, 503) — the
-   * policy that decides what may leave NPATI is not something that gets edited unattributed.
-   */
+
   const codeDataPolicyAudit = codePrivilegedAudit
     ? {
         record: async (input: {
@@ -884,7 +724,7 @@ export function buildApp(config: AppConfig = {}) {
           await codePrivilegedAudit.record({
             action: input.action,
             actor: input.actor,
-            // A platform default has no company; the journal needs a scope, so it is named explicitly.
+
             companyId: input.companyId ?? AUDIT_SYSTEM_WORKSPACE,
             resourceType: input.resourceType,
             resourceId: input.resourceId,
@@ -897,11 +737,7 @@ export function buildApp(config: AppConfig = {}) {
     store: workspaceStore,
     ...(codeDataPolicyAudit ? { audit: codeDataPolicyAudit } : {}),
   });
-  /**
-   * C5b: a policy change must take effect immediately, not after the snapshot's next tick, so the mutating
-   * methods of the policy service invalidate the outbound snapshot. The wrapper lives here (not in the policy
-   * module) because the snapshot is created below; the closure resolves it lazily at request time.
-   */
+
   const invalidationWrappedDataPolicyService = new Proxy(codeDataPolicyStoreService, {
     get(target, property, receiver) {
       const value = Reflect.get(target, property, receiver);
@@ -916,15 +752,9 @@ export function buildApp(config: AppConfig = {}) {
       };
     },
   });
-  // C5b: wire the provider data guard's resolver to the same store the policy API reads and writes, so a
-  // configured policy actually decides what may leave NPATI (and what routing considers eligible).
+
   engineDataPolicyResolver = createEnginePolicyResolver(workspaceStore as unknown as ProviderDataPolicyLookupPort);
-  /**
-   * C5b: the outbound guard resolves its policy from a **snapshot** of the same store, so there is exactly
-   * one policy source. The resolver is synchronous by contract (call sites decide synchronously), so the
-   * snapshot is refreshed in the background: at startup, on an interval, and by `refreshOutboundPolicySnapshot()`
-   * which the policy routes call after a change.
-   */
+
   outboundPolicySnapshot = new OutboundPolicySnapshot(workspaceStore as unknown as ProviderDataPolicyLookupPort);
   const refreshOutboundSnapshot = () => {
     void outboundPolicySnapshot?.refresh().catch((error) => {
@@ -955,7 +785,7 @@ export function buildApp(config: AppConfig = {}) {
         : null;
       if (!resolution) return null;
       if (resolution.kind === "policy") return resolution.resolved.policy;
-      // Explicit refusal: the caller sees *why* nothing could be evaluated instead of a silent null.
+
       return { code: resolution.code, reason: resolution.reason };
     },
     resolveProjectClassification: (_channel, context) => context?.dataClassification,
@@ -968,12 +798,7 @@ export function buildApp(config: AppConfig = {}) {
     store: workspaceStore,
     policies: invalidationWrappedDataPolicyService,
     resolveRole: (context, companyId) => codeMembership.resolveRoleForUser(context, companyId),
-    /**
-     * C5b: the project record carries its own (C1) classification, which the project drawer edits, while
-     * the policy row decides what may reach a provider. The two are combined by taking the **strictest**
-     * one, so neither can lower the protection the other set; a project that cannot be read counts as
-     * `confidential` rather than as "no constraint" (see `provider-data-policy-service.ts`).
-     */
+
     projectClassification: {
       readProjectClassification: async (context, companyId, projectId) => {
         const project = await workspaceStore.getProject(context, companyId, projectId);
@@ -993,13 +818,7 @@ export function buildApp(config: AppConfig = {}) {
     service: codeDataPolicy,
     getAuthContext: (request) => codeDataPolicyContexts.get(request as object) ?? null,
   });
-  /**
-   * C5: the effective capability groups of an agent are derived from the code tools it was granted
-   * (`CompanyAgent.tools`), which is the only capability grant that exists in the data model today.
-   * When no agent record is resolvable the field stays absent, so the phase simply has no data (it is
-   * an extra narrowing layer — RBAC, feature flags and the capability registry always apply).
-   * TODO(C5a): store the granted capability groups on the agent record instead of deriving them.
-   */
+
   const codeGroupsForAgent = (tools: readonly string[] | undefined): string[] => {
     const groups = new Set<string>();
     for (const tool of tools ?? []) {
@@ -1008,13 +827,7 @@ export function buildApp(config: AppConfig = {}) {
     }
     return [...groups];
   };
-  /**
-   * C5: enriches a tool-call policy request with the facts the caller cannot know: the agent's
-   * capability groups, whether the project is trusted, and (when the caller supplies them) the
-   * repository-instruction review and the policy-change marker. Enrichment only *adds* restrictions —
-   * the engine still decides, and an unresolvable agent or project leaves the field absent.
-   */
-  // The enriched policy engine (step 2c-6h).
+
   const enrichedPolicyEngineWiring = createEnrichedPolicyEngineWiring({
     config,
     log: app.log,
@@ -1025,37 +838,22 @@ export function buildApp(config: AppConfig = {}) {
     workspaceStore,
   });
   const { enrichedPolicyEngine } = enrichedPolicyEngineWiring;
-  /**
-   * C13 (owner requirement: fresh-process MCP acceptance): **the** run-path entry point of runtime MCP
-   * discovery, and the vendor of the discovery the Capability Inspector route asks for.
-   *
-   * It is one object with one `discover` implementation, so there is no second discovery system and no way for
-   * the Inspector and a run to disagree about what a tenant's MCP server offers. Crucially the dependency runs
-   * the other way from what it used to: the **run** discovers for itself (`prepareForRun`, which the runner
-   * calls before the first model call and before the ExecutionSnapshot that pins the runtime manifest), and the
-   * Inspector route simply calls the same function. No run depends on the Inspector having been opened, and
-   * nothing here reads a route, a cache or a warm-up hook.
-   *
-   * It is constructed here — after the enriched engine, before the runner — because both are needed: the engine
-   * is the port that decides whether a runtime MCP call may happen, and the runner is the consumer that must be
-   * offered the tools the discovery published.
-   */
+
   const mcpRunPath = createMcpRuntimeRunPath({
     store: mcpRuntimeCapabilities,
     transport: mcpRuntimeTransport,
     source: () => mcpIntegrationSourceForRuntime,
-    // `code.mcp` is read before anything is dialled: a disabled sub-flag means no discovery pass at all.
+
     flags: featureFlagService,
-    // The same engine the rest of the tool path consults, so `code.mcp`, the mode, the permission, the
-    // capability lookup and the fail-closed approval requirement are enforced for a runtime MCP call too.
+
     policy: enrichedPolicyEngine,
-    // Metadata-only Activity (counts, codes, the manifest hash): the sink itself rejects endpoints and tokens.
+
     activity: activitySinkForKind(codeActivitySink, "run_activity"),
     logger: { warn: (message, meta) => app.log.warn(meta ?? {}, message) },
   });
   const discoverRuntimeMcpCapabilities = (ctx: AuthContext, companyId: string) =>
     mcpRunPath.discover(ctx, companyId);
-  // The shell sandbox port (step 2c-6h).
+
   const shellSandboxPortWiring = createShellSandboxPortWiring({
     config,
     log: app.log,
@@ -1063,7 +861,7 @@ export function buildApp(config: AppConfig = {}) {
     projectSandbox,
   });
   const { shellSandboxPort } = shellSandboxPortWiring;
-  // The process sandbox port (step 2c-6h).
+
   const processSandboxPortWiring = createProcessSandboxPortWiring({
     config,
     log: app.log,
@@ -1098,37 +896,13 @@ export function buildApp(config: AppConfig = {}) {
     sandbox: shellSandboxPort, flags: featureFlagService, audit: auditLogService,
     leases: secretLeases, limits: config.codeAgentLimits, policy: enrichedPolicyEngine,
   });
-  /**
-   * C6a: the reaper is an orchestrator over ports. Only the capabilities that exist today are wired; every
-   * other step is reported as `skipped` with a reason, so a missing scan API stays visible in the metrics
-   * instead of looking like "nothing to clean". Note that `SecretLeaseProvider.startReaper()` was never
-   * started before this step, so expired leases were previously never revoked in a running server.
-   */
-  /**
-   * C9: the question-expiry port the reaper drives. It is assigned once the run-state log exists — releasing a
-   * timed-out question's run means writing run state — and the closures below **throw** while it is unset, so a
-   * reaper pass that somehow ran too early reports a visible error instead of a false "nothing to expire".
-   * `codeReaper.run()` is only reached near the end of this composition, well after the assignment.
-   */
+
   let codeUserQuestionReaperPort: ReturnType<typeof createCodeUserQuestionReaperPort> | null = null;
-  /**
-   * C13 (owner blocker 1): the release of a run paused on a **runtime MCP approval**. Late bound for the same
-   * reason as the question port above — it needs the run-state log, which is constructed further down — and a
-   * `null` holder means the release is reported as unsupported rather than silently skipped.
-   */
+
   let mcpApprovalPauseRelease:
     | ((input: { companyId: string; runId: string; approvalId: string; reason: McpApprovalReleaseReason; answeredBy?: string }) => Promise<unknown>)
     | null = null;
-  /**
-   * R1-C (item 11): the missing reader of two configuration values that had none.
-   *
-   * `toolResultRetentionDays` (30) and `transcriptRetentionDays` (90) were declared by C1, documented in
-   * `.env.example` and asserted by a test — and read by **nothing**. The consequence was that no code data
-   * ever expired. This object is their reader: it derives the four retention windows from those two limits and
-   * hands them to the store, which compares each row's own `retention_class` against them. No number is
-   * invented here, and the store's optional port means an in-memory deployment reports `port_unavailable`
-   * rather than a false clean sweep.
-   */
+
   const codeDataRetention = new CodeDataRetention({
     ...(workspaceStore.codeDataLifecycle ? { lifecycle: workspaceStore.codeDataLifecycle } : {}),
     limits: {
@@ -1136,7 +910,7 @@ export function buildApp(config: AppConfig = {}) {
       transcriptRetentionDays: config.codeAgentLimits?.transcriptRetentionDays ?? DEFAULT_CODE_AGENT_LIMITS.transcriptRetentionDays,
     },
   });
-  // The code execution ports (step 2c-6e).
+
   const ports = createCodePortsWiring({
     config,
     log: app.log,
@@ -1157,30 +931,9 @@ export function buildApp(config: AppConfig = {}) {
     trackedProcesses,
   });
   const { codeReaper, codeShellRuntimePort, codeVerifyRunnerPort, CODE_DEPS_MANIFESTS, readWorkspaceText, codeInstructionsLoader, codeHooksService } = ports;
-  /**
-   * C13 (owner decisions 3 and 4): slash commands and lazily loaded Skills.
-   *
-   * Both are wired on machinery that already exists — no second template engine, no second settings system, no
-   * second file reader:
-   *
-   *   - **Reading.** The command files go through `codeInstructionsLoader.collectCommands`, i.e. the *same* C8
-   *     loader and therefore the same `readWorkspaceText` path guard, and the loader asks the project trust
-   *     record **before** its first read. An untrusted repository is never read, which the suite proves with a
-   *     spy that stayed at zero calls.
-   *   - **Classification.** A command template and a Skill body both pass the existing C5 classifier
-   *     (`classifyRepositoryInstruction`) and the existing C4a scanner (`scanTextForSecrets`) — the same two
-   *     functions `NPATI.md` and the stored webhook prompt already pass.
-   *   - **Provider policy.** A Skill body passes the existing C5b `ProviderDataGuard`
-   *     (`guardProviderBoundText`), exactly as the C8 compaction summary does. A body the guard would have to
-   *     redact is **refused**, never sanitised, because a redacted body would carry a `REDACTED:` placeholder
-   *     into the prompt and into the recorded model-visible state.
-   *   - **Skills.** The metadata and the body both come from the one `defaultSkillRegistry` the `/skills` route
-   *     and `/settings/skills` already serve. `list()` (which strips `canHandle`/`run`) supplies the metadata,
-   *     and nothing calls `run()` until a Skill is really selected — that is the lazy-load boundary, and it is
-   *     observable as a spy on the body reader.
-   */
+
   const codeCommandIds = ["review", "explain", "test", "fix"] as const;
-  // The code-tool wiring (step 2c-6).
+
   const codeToolWiring = createCodeToolWiring({
     config,
     log: app.log,
@@ -1195,31 +948,14 @@ export function buildApp(config: AppConfig = {}) {
     readWorkspaceText,
   });
   const { codeCommandRegistry, codeSkillsService, codeDepsPort, describeCodeRunForPullRequest } = codeToolWiring;
-  /**
-   * C12: the two late-bound ports the delegation executor needs.
-   *
-   * They are placeholders rather than values because the composition has a genuine ordering constraint: the
-   * tool executors (and therefore the runtime) are built **before** the runner, and the runner is built over the
-   * runtime. A value would have to be `undefined` forever; a getter lets the delegation see them once they
-   * exist, which is the same late-binding idiom `createCodeRunEnvironmentHolder` already uses for the
-   * per-run facts. Neither holder is a second engine: they are the **same** `CodeToolRuntime` and the **same**
-   * `CodingAgentRunner` instances the rest of the application uses.
-   */
+
   let codeToolRuntimeRef: CodeToolRuntime | undefined;
   let codingAgentRunnerRef: CodingAgentRunner | undefined;
-  /**
-   * Step 5: the detached delegation service, late-bound like the two refs above and for the same reason — the
-   * child runner it drives is the `CodingAgentRunner` built hundreds of lines below, and the completion service it
-   * reports through is built after that. A getter, so no caller can capture a service that does not exist yet.
-   */
+
   let codeSubagentOperationsRef: (() => CodeSubagentOperationService) | undefined;
-  /**
-   * Step 5: the delegation adapter the tool runtime reaches — the same one C12 built inline. It is a named accessor
-   * so the operations service can drive it and so the detached path and the blocking path are provably the same
-   * runner: there is one `createCodeSubagentChildRunner` call in this file, and both paths read it.
-   */
+
   let subagentChildRunnerWithAck: CodeSubagentDetachedRunner | undefined;
-  // The code tool runtime (step 2c-6c).
+
   const codeToolRuntimeWiring = createCodeToolRuntimeWiring({
     config,
     log: app.log,
@@ -1254,8 +990,7 @@ export function buildApp(config: AppConfig = {}) {
   });
   const { codeToolRuntime } = codeToolRuntimeWiring;
   codeToolRuntimeRef = codeToolRuntime;
-  // C1a: record the published tool-schema manifest (and fail fast if the registry disagrees with the
-  // published checksum), so a session can always be read with the exact tool versions it used.
+
   try {
     assertManifestConsistent();
     const manifest = currentToolManifest();
@@ -1302,7 +1037,7 @@ export function buildApp(config: AppConfig = {}) {
       const selected = prefs.addedModels.find((model) => model.id === prefs.routing.defaultModelId);
       return selected && isChatCapableModel(selected) ? [selected] : [];
     }, true);
-  // The project orchestrator and email automation hooks (step 2c-6g).
+
   const automationWiring = createEmailAutomationWiring({
     config,
     log: app.log,
@@ -1342,7 +1077,7 @@ export function buildApp(config: AppConfig = {}) {
   const emailMessagingAdapter = new EmailMessagingAdapter(emailInboxRepo, () => emailInboxWorker.triggerTick());
   const messagingGateway = new MessagingGateway().register(new TelegramMessagingAdapter()).register(whatsappMessagingAdapter).register(discordMessagingAdapter).register(slackMessagingAdapter).register(emailMessagingAdapter);
   const messagingScopeRouter = new MessagingScopeRouter(workspaceStore, messagingIntegrationsRepo);
-  // The automation executor (step 2c-6c).
+
   const { executeAutomation } = createAutomationExecutor({
     config,
     log: app.log,
@@ -1352,16 +1087,7 @@ export function buildApp(config: AppConfig = {}) {
     companyRuntime,
     emailInboxRepo,
   });
-  /**
-   * C10 (ТЗ item 5): the shared delivery path for every messaging notification NPATI sends on a background result.
-   * `notifyAutomation` below was the only caller of this shape; making it a named function is what lets a
-   * background code run use the **existing** Integrations channels instead of inventing a second notifier.
-   *
-   * The switch is read from the connection's own settings, so one connection can have automation notices on and
-   * background-run notices off. `notifications.backgroundResults` existed in the schema, in the migration defaults
-   * and in the UI in eight locales while **no server code read it** — this is the reader.
-   */
-  // The messaging connection notifier (step 2c-6h).
+
   const messagingNotificationsWiring = createMessagingNotificationsWiring({
     config,
     log: app.log,
@@ -1396,7 +1122,7 @@ export function buildApp(config: AppConfig = {}) {
   );
   const contentLibrary = new ContentLibraryStore(workspaceStore);
   const integrationsRepo = new IntegrationsRepository(config.databaseUrl);
-  // C13: the configured MCP integrations become the **only** endpoints the runtime MCP transport may dial.
+
   mcpIntegrationSourceForRuntime = configuredIntegrationsFrom(integrationsRepo);
   const getAIContext = async (auth: AuthContext) => {
     const preferences = await aiPreferences.get(auth);
@@ -1420,7 +1146,7 @@ export function buildApp(config: AppConfig = {}) {
   };
   const priorityTierFor = (auth: AuthContext): PriorityTier => auth.permissions.includes("admin:all") ? "enterprise" : auth.permissions.includes("workspace:write") ? "pro" : "free";
   const admissionFor = (auth: AuthContext) => ({ tenantId: auth.workspaceId, tier: priorityTierFor(auth), queueTimeoutMs: 30_000 });
-  // The chat orchestration (step 2c-7c-c-1).
+
   const chatOrchestration = createChatOrchestration({
     config,
     log: app.log,
@@ -1466,7 +1192,7 @@ export function buildApp(config: AppConfig = {}) {
     if(error instanceof SecurityPolicyViolation)return reply.code(error.status).send({error:{code:error.code,reasonCode:error.reasonCode,message:error.message}});
     return reply.send(error);
   });
-  // Platform base routes (step 2c-3): auth, AI, workspace, project and data-backend.
+
   registerPlatformBaseRoutes(app, {
     config,
     log: app.log,
@@ -1504,9 +1230,7 @@ export function buildApp(config: AppConfig = {}) {
     sandboxImagePolicy,
     workspaceStore,
   });
-  // C6: the coding agent loop. Wired to the GUARDED engine (`aiEngine`), never to `baseAiEngine`: that is
-  // what makes `policyContext` and the provider-data policy apply to every model call the loop makes.
-  // Code route wiring and registration (step 2c-4).
+
   const codeRoutes = registerCodeRouteWiring(app, {
     config,
     log: app.log,
@@ -1550,7 +1274,7 @@ export function buildApp(config: AppConfig = {}) {
   codingAgentRunnerRef = codeRoutes.codingAgentRunnerRef;
   codeSubagentOperationsRef = codeRoutes.codeSubagentOperationsRef;
   subagentChildRunnerWithAck = codeRoutes.subagentChildRunnerWithAck;
-  // Platform routes (step 2c-2): code, network, company, content, MCP, email and integrations.
+
   const platformRoutes = registerPlatformRoutes(app, {
     config,
     log: app.log,
@@ -1615,7 +1339,7 @@ export function buildApp(config: AppConfig = {}) {
   });
   codeUserQuestionReaperPort = platformRoutes.codeUserQuestionReaperPort;
   mcpApprovalPauseRelease = platformRoutes.mcpApprovalPauseRelease;
-  app.addHook("onClose", async () => { automationScheduler.stop(); codeReaper.stop(); if (sandboxIdleTimer) clearInterval(sandboxIdleTimer); if (sandboxRetentionTimer) clearInterval(sandboxRetentionTimer); if (backupTimer) clearInterval(backupTimer); if (auditVerifyTimer) clearInterval(auditVerifyTimer); if (auditAnchorTimer) clearInterval(auditAnchorTimer); if (runnerReadinessTimer) clearInterval(runnerReadinessTimer); storageReconciler?.stop(); await Promise.all([whatsappMessagingAdapter.shutdown(),discordMessagingAdapter.shutdown(),slackMessagingAdapter.shutdown()]); await emailInboxWorker.stop(); await emailInboxRepo.close(); await browserCredentials?.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await messagingIntegrationsRepo.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close(); /* G1 (item 2): the workspace store owns the main pool and was the one resource this hook never released. It is closed **last**, after every borrower has been stopped: `ApiKeysRepository`, `ScopedMemoryEngine` and `GuardrailPolicyRepository` (above) are all handed that same pool by the composition, so ending it first would fail their in-flight queries during shutdown. `close?.()` because `InMemoryWorkspaceStore` owns nothing. */ await workspaceStore.close?.(); });
+  app.addHook("onClose", async () => { automationScheduler.stop(); codeReaper.stop(); if (sandboxIdleTimer) clearInterval(sandboxIdleTimer); if (sandboxRetentionTimer) clearInterval(sandboxRetentionTimer); if (backupTimer) clearInterval(backupTimer); if (auditVerifyTimer) clearInterval(auditVerifyTimer); if (auditAnchorTimer) clearInterval(auditAnchorTimer); if (runnerReadinessTimer) clearInterval(runnerReadinessTimer); storageReconciler?.stop(); await Promise.all([whatsappMessagingAdapter.shutdown(),discordMessagingAdapter.shutdown(),slackMessagingAdapter.shutdown()]); await emailInboxWorker.stop(); await emailInboxRepo.close(); await browserCredentials?.close(); await companyRunQueue?.close(); await knowledgeQueue?.close(); await knowledgeRepo?.close(); await automationsRepo?.close(); await approvalsRepo?.close(); await integrationsRepo?.close(); await messagingIntegrationsRepo.close(); await auditRepo?.close(); await chatFiles?.close(); await storageProtection.close();  await workspaceStore.close?.(); });
   app.addHook("onReady", async () => {
     await workspaceStore.initialize();
     await whatsappMessagingAdapter.restore();
@@ -1625,15 +1349,13 @@ export function buildApp(config: AppConfig = {}) {
     await objectStorage?.initialize();
     if (chatFiles) { const legacy = await chatFiles.migrateLegacy(); if (legacy.failed) app.log.warn(legacy,"Some legacy attachments could not be migrated"); await chatFiles.cleanupPending(); }
     storageReconciler?.start();
-    // C6a: one pass at boot (catches leaks left by a previous process) and then periodically. The reaper
-    // never throws and never blocks startup: a failing step is reported in its summary and its metrics.
+
     void codeReaper.run().catch(() => undefined);
     codeReaper.start((summary) => { app.log.warn({ skipped: summary.skipped, errors: summary.errors }, "code_reaper_attention"); });
     emailInboxWorker.start();
     automationScheduler.start();
   });
 
-  // System routes (step 2c-1): liveness, readiness and the skills catalogue.
   registerHealthRoutes(app, {
     aiEngine,
     hub,
@@ -1644,7 +1366,6 @@ export function buildApp(config: AppConfig = {}) {
     coreBackendHealthCheck,
   });
 
-  // The capability catalogue and its inspector (step 2c-7).
   registerCapabilityRoutes(app, {
     config,
     log: app.log,
@@ -1656,7 +1377,6 @@ export function buildApp(config: AppConfig = {}) {
     workspaceStore,
   });
 
-  // Router, attachment, research-job and stream-cancel routes (step 2c-7b).
   registerMiscRoutes(app, {
     config,
     log: app.log,
@@ -1667,7 +1387,6 @@ export function buildApp(config: AppConfig = {}) {
     workspaceStore,
   });
 
-  // The chat endpoints other than the stream (step 2c-7c-b).
   registerChatRoutes(app, {
     config,
     log: app.log,
@@ -1686,7 +1405,6 @@ export function buildApp(config: AppConfig = {}) {
     boundedResponseChunks,
   });
 
-  // The chat stream endpoint (step 2c-7c-a).
   registerChatStreamRoutes(app, {
     config,
     log: app.log,
@@ -1721,4 +1439,3 @@ export function buildApp(config: AppConfig = {}) {
 
   return app;
 }
-

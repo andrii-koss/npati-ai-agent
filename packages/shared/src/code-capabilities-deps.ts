@@ -1,7 +1,4 @@
-/* The dependency code capabilities, split out of code-capabilities.ts in step 3d of
- * docs/refactoring/PLAN.md. Declarations are moved verbatim; code-capabilities.ts imports and
- * re-exports them, so every existing import path keeps working.
- */
+
 import type { CapabilityDefinition } from "./capabilities";
 import { READ_PERMISSION, SHELL_PERMISSION } from "./code-capabilities-shared";
 import type { CapabilityMatrixEntry } from "./capability-matrix";
@@ -88,13 +85,6 @@ export const CODE_DEPS_CAPABILITIES: CapabilityDefinition[] = [
   },
 ];
 
-/**
- * C9: planning tools (inventory ids 371-372), appended after the dependency group so the earlier groups keep
- * their exact ids and membership. They are `low` risk and require `workspace:read`: they change session
- * metadata (a plan draft, the todo list), never a workspace file. Marking them read-only is deliberate — it is
- * what lets them run in `plan` mode, the one mode whose purpose is to produce a plan — and it is exactly why
- * both tools are idempotent: C6a recovery repeats read-only tool calls.
- */
 export const CODE_DEPS_MATRIX: CapabilityMatrixEntry[] = CODE_DEPS_CAPABILITIES.map((capability) => ({
   id: capability.inventoryIds[0]!,
   capabilityId: capability.id,
@@ -107,5 +97,3 @@ export const CODE_DEPS_MATRIX: CapabilityMatrixEntry[] = CODE_DEPS_CAPABILITIES.
   testFiles: ["tests/coding-agent-c4a-capabilities.test.ts", "tests/coding-agent-c2-schema-parity.test.ts"],
   status: "VERIFIED_EXISTING",
 }));
-
-/** C9: the planning tools' audit-matrix entries (inventory ids 371-372). */

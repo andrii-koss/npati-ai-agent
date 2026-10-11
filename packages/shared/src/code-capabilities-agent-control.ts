@@ -1,7 +1,4 @@
-/* The agent-control code capabilities, split out of code-capabilities.ts in step 3d of
- * docs/refactoring/PLAN.md. Declarations are moved verbatim; code-capabilities.ts imports and
- * re-exports them, so every existing import path keeps working.
- */
+
 import type { CapabilityDefinition } from "./capabilities";
 import type { CapabilityMatrixEntry } from "./capability-matrix";
 

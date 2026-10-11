@@ -1,7 +1,3 @@
-/* Part 1 of the code-tool schema mirror, split out of code-capabilities.ts in step 3c of
- * docs/refactoring/PLAN.md. Entries are moved verbatim; code-capabilities.ts spreads the parts back
- * together in this exact order, so the resulting object is unchanged, key order included.
- */
 
 export const CODE_TOOL_SCHEMA_MIRROR_PART1: Record<string, { inputSchema: Record<string, unknown>; outputSchema: Record<string, unknown> }> = {
 "code.agent.spawn_async": {

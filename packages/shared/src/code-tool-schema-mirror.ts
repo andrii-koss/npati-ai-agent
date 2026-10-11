@@ -1,6 +1,4 @@
-/* The code-tool schema mirror as one object: the four parts, spread in their original order. Split out
- * of code-capabilities.ts in step 3d of docs/refactoring/PLAN.md so the capability groups can import it.
- */
+
 import { CODE_TOOL_SCHEMA_MIRROR_PART1 } from "./code-tool-schema-mirror-part1";
 import { CODE_TOOL_SCHEMA_MIRROR_PART2 } from "./code-tool-schema-mirror-part2";
 import { CODE_TOOL_SCHEMA_MIRROR_PART3 } from "./code-tool-schema-mirror-part3";
@@ -12,4 +10,3 @@ export const CODE_TOOL_SCHEMA_MIRROR: Record<string, { inputSchema: Record<strin
   ...CODE_TOOL_SCHEMA_MIRROR_PART3,
   ...CODE_TOOL_SCHEMA_MIRROR_PART4,
 };
-

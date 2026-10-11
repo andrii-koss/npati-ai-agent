@@ -1,6 +1,4 @@
-/* The process sandbox port of app.ts, extracted in step 2c-6h of
- * docs/refactoring/PLAN.md. Moved verbatim inside a factory that returns it.
- */
+
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { AppConfig } from "./app";
 import { CodeProcessSandboxPort } from "./code-process-manager";

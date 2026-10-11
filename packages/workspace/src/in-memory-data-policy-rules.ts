@@ -1,8 +1,4 @@
-/* The provider and project data-policy rules: pure validation shared by the in-memory data-policy store
- * and the workspace store itself, split out in step 3g of docs/refactoring/PLAN.md.
- *
- * Moved verbatim; the only edit is that private methods became exported functions.
- */
+
 import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionStatus, ProjectCodeSettings, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification, FeatureFlag, FeatureFlagInput, FeatureFlagHistoryEntry, CodeToolManifest, SandboxImage, SandboxImageInput, SandboxImageVariant, CodeSessionMode, ProjectCodeTrust, ProjectCodeTrustInput, ProjectMountedFolder, ProjectMountedFolderInput, CodeApprovalRule, CodeApprovalRuleInput, CodeApprovalRuleScope,
   CompanyMember, CompanyInvite, CompanyInviteInput, AcceptCompanyInviteInput, UpdateCompanyMemberRoleInput, RemoveCompanyMemberInput,
   ProviderDataPolicyRecord, UpsertProviderDataPolicyStoreInput, ProviderDataPolicyVersionRecord, ProjectDataPolicyRecord,
@@ -57,7 +53,7 @@ export function assertValidProviderPolicy(input: UpsertProviderDataPolicyStoreIn
         });
       }
     }
-    // Mandatory redaction is not configurable, for any provider kind.
+
     const missing = MANDATORY_PROVIDER_REDACTIONS.filter((kind) => !redactions.includes(kind));
     if (missing.length > 0) {
       throw new ProviderDataPolicyStoreError(

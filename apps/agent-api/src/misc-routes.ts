@@ -1,9 +1,4 @@
-/* Router, attachment, research-job and stream-cancel routes, extracted from app.ts
- * (step 2c-7b of docs/refactoring/PLAN.md).
- *
- * Moved verbatim; the only edits are the closure locals that became deps
- * (app.log -> log) and the module imports for the code that moved with it.
- */
+
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { AppConfig } from "./app";
 import { safeAttachmentName } from "./chat-attachments";

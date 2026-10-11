@@ -1,9 +1,4 @@
-/* The code-tool wiring of app.ts - the command registry, the skills service, the dependency
- * port and the pull-request description - extracted in step 2c-6 of docs/refactoring/PLAN.md.
- *
- * Moved verbatim inside a factory. The four late-bound refs stay in app.ts because they are
- * assigned after this call; everything this factory creates is returned.
- */
+
 import type { FastifyBaseLogger } from "fastify";
 import type { AppConfig } from "./app";
 import { createCodeCommandRegistry } from "./code-command-registry";
@@ -125,15 +120,6 @@ export function createCodeToolWiring(deps: CodeToolWiringDeps) {
     logger: { warn: (payload, message) => { log.warn(payload, message); } },
   });
 
-  /**
-   * C13: the Skill reader. `defaultSkillRegistry` is the **one** registry the `/skills` route serves; the
-   * metadata listing uses `list()` (which already strips the executable members) and the body is produced by the
-   * Skill's own `run`, which nothing calls until a Skill is selected.
-   *
-   * The `version` field of an `AgentSkill` is a semver string, while the pinned hash wants a stable number. The
-   * string is folded into a deterministic integer, so the same declared version always yields the same pin, and
-   * the semver string itself is carried inside the hashed body.
-   */
   const skillPinnedVersion = (version: string): number => {
     let hash = 2_166_136_261;
     for (let index = 0; index < version.length; index += 1) {
@@ -151,8 +137,7 @@ export function createCodeToolWiring(deps: CodeToolWiringDeps) {
         description: skill.description,
         version: skillPinnedVersion(skill.version),
         source: "builtin" as const,
-        // A Skill the platform itself ships is trusted by construction. A repository-sourced Skill would have to
-        // carry the project trust record here, which is why this field is explicit rather than implied.
+
         trusted: true,
         capabilities: [...skill.capabilities],
       })),
@@ -172,8 +157,7 @@ export function createCodeToolWiring(deps: CodeToolWiringDeps) {
       ].filter((line): line is string => line !== null);
       return { body: lines.join("\n"), version: skillPinnedVersion(skill.version), source: "builtin" as const, trusted: true };
     },
-    // The **existing** C5b guard. It is present whenever provider enforcement is on, so a Skill body is judged by
-    // the project's real policy (classification ceiling, content types, private-code rule, redaction list).
+
     ...(providerDataGuardInstance ? { providerDataGuard: providerDataGuardInstance.providerDataGuard } : {}),
     activity: {
       record: async (event) => {

@@ -1,12 +1,8 @@
-/* The mutating code capabilities, split out of code-capabilities.ts in step 3d of
- * docs/refactoring/PLAN.md. Declarations are moved verbatim; code-capabilities.ts imports and
- * re-exports them, so every existing import path keeps working.
- */
+
 import type { CapabilityDefinition } from "./capabilities";
 import { READ_PERMISSION, WRITE_PERMISSION } from "./code-capabilities-shared";
 import type { CapabilityMatrixEntry } from "./capability-matrix";
 import { CODE_TOOL_SCHEMA_MIRROR } from "./code-tool-schema-mirror";
-
 
 export const CODE_WRITE_CAPABILITIES: CapabilityDefinition[] = [
   {
@@ -192,20 +188,6 @@ export const CODE_WRITE_CAPABILITIES: CapabilityDefinition[] = [
   },
 ];
 
-/**
- * C4: sandbox execution tools.
- *
- * These are the first tools that run commands rather than touch files, so they are gated by the
- * `code.shell` sub-flag (on top of the master flag) and the two command-launching tools are `high` risk
- * with `requiresConfirmation: true`: a dangerous command must go through the existing approval system
- * before the sandbox runs it. `code.verify.run` only replays the project's configured verification
- * commands, so it stays `medium` and is gated by `code.write`.
- *
- * Secret handling is per call (`secretRefs`): the lease is scoped to one tool call, has a TTL, is
- * revoked when the call ends, and is never inherited by later calls or written into a shell profile.
- *
- * Inventory ids 362-367 continue the catalog (C3 ended at 361).
- */
 export const CODE_WRITE_MATRIX: CapabilityMatrixEntry[] = CODE_WRITE_CAPABILITIES.map((capability) => ({
   id: capability.inventoryIds[0]!,
   capabilityId: capability.id,
@@ -218,4 +200,3 @@ export const CODE_WRITE_MATRIX: CapabilityMatrixEntry[] = CODE_WRITE_CAPABILITIE
   testFiles: ["tests/coding-agent-c3-capabilities.test.ts", "tests/coding-agent-c2-schema-parity.test.ts"],
   status: "VERIFIED_EXISTING",
 }));
-

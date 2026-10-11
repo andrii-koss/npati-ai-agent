@@ -1,7 +1,3 @@
-/* The small builders shared by the code capability definitions and the code-tool schema mirror, split
- * out of code-capabilities.ts in step 3c of docs/refactoring/PLAN.md. Moved verbatim except for the
- * `export` keyword each declaration needs so both sides can import it.
- */
 
 export const READ_PERMISSION = ["workspace:read"];
 export function resultEnvelope(tool: string, data: Record<string, unknown>): Record<string, unknown> {

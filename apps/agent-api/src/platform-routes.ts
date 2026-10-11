@@ -1,12 +1,4 @@
-/* Code, platform, email and integration route registration, extracted from app.ts
- * (step 2c-2 of docs/refactoring/PLAN.md).
- *
- * Twenty-two registrars plus the per-route wiring they own (contexts, the messaging routes,
- * the email gateway hook). The block is moved verbatim; the edits are the closure locals that
- * became deps (app.log -> log, AUDIT_SYSTEM_WORKSPACE -> systemWorkspaceId) and the two late-bound
- * ports that buildApp reads after this call, which are declared here and returned instead of
- * assigned into closure variables.
- */
+
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { AppConfig } from "./app";
 import { registerA2AControlPlaneRoutes } from "./a2a-control-plane-routes";
@@ -172,15 +164,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
     getAuthContext: (request) => codeErasureContexts.get(request as object) ?? null,
     logger: log,
   });
-  /**
-   * C9: goals, plan revisions and the session todo list.
-   *
-   * Three details are deliberate. Reads and decisions go through the shared C5a gate with named actions, so a
-   * permission can never be authorised by handing in a convenient label. Every mutation is journalled **before**
-   * it is applied, so an audit outage refuses the change instead of applying it unrecorded. And approving a plan
-   * applies the mode the **user** chose, through the existing session-mode service — the plan body is model
-   * output and never selects a mode, which is the same boundary C8 draws for repository instructions.
-   */
+
   const codeGoalContexts = new WeakMap<object, AuthContext>();
   app.addHook("preHandler", async (request) => {
     const path = request.url.split("?")[0] ?? "";
@@ -193,8 +177,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
     getAuthContext: (request) => codeGoalContexts.get(request as object) ?? null,
     ...(codePrivilegedAudit ? { audit: codePrivilegedAudit } : {}),
     applyExecutionMode: async ({ ctx, companyId, sessionId, mode }) => {
-      // The revision comes from the session, so applying a mode after an approval is guarded by the same
-      // lost-update check the mode route uses; a session that moved on refuses instead of being overwritten.
+
       const session = await codeService.getSession(ctx, companyId, sessionId);
       await codeSessionModes.setMode(ctx, companyId, sessionId, {
         mode: String(mode),
@@ -204,18 +187,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
     },
     logger: log,
   });
-  /**
-   * C8: project instructions (`NPATI.md` / `AGENTS.md` / the shared `PROJECT.md`) and project trust.
-   *
-   * Two facts decided this shape. First, `CodeProjectTrustService.trust()`/`.revoke()` were implemented but
-   * **called from nowhere**, and the RBAC actions were already mapped, so trust was impossible to grant: a
-   * trust-gated feature with no way to grant trust is a dead path, not a dark-launched one. Second, the
-   * instructions read must ask that service on every request, so the route and the loader share one instance
-   * created above.
-   *
-   * One path-scoped preHandler with its own context map — the same mechanism every other code surface uses, so
-   * there is no second auth path.
-   */
+
   const codeInstructionsContexts = new WeakMap<object, AuthContext>();
   app.addHook("preHandler", async (request) => {
     const path = request.url.split("?")[0] ?? "";
@@ -232,8 +204,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
       }),
     buildDraft: async ({ ctx, companyId, projectId }) =>
       codeInstructionsLoader.buildDraft({ ctx, companyId, projectId }),
-    // Read surfaces: `code.instructions.read` and `code.instructions.init` both carry `workspace:read`, because
-    // drafting writes nothing — persisting the draft goes through `code.fs.write` and its own authorisation.
+
     authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input),
     getAuthContext: (request) => codeInstructionsContexts.get(request as object) ?? null,
     logger: log,
@@ -241,8 +212,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
   registerCodeProjectTrustRoutes(app, {
     trust: {
       get: async (ctx, companyId, projectId) => codeProjectTrust.get(ctx, companyId, projectId),
-      // The service still performs the owner/admin check and writes the audit entry *before* the store write;
-      // the route adds transport only, so the fail-closed ordering cannot be lost in a wrapper.
+
       trust: async (ctx, companyId, projectId, input) => codeProjectTrust.trust(ctx, companyId, projectId, input),
       revoke: async (ctx, companyId, projectId, input) => codeProjectTrust.revoke(ctx, companyId, projectId, input),
     },
@@ -250,16 +220,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
     getAuthContext: (request) => codeInstructionsContexts.get(request as object) ?? null,
     logger: log,
   });
-  /**
-   * C15: the mounted-folder allowlist. It shares the path-scoped preHandler above because it is the same kind of
-   * surface (an owner/admin decision about one project, read fresh on every request), and it shares the flag
-   * service and the workspace resolver built earlier — the resolver is what makes a confirmed folder the
-   * project's workspace, and the service is what makes confirming one possible at all.
-   *
-   * The service validates the path with the **same** function the sandbox runner uses
-   * (`validateMountedFolder`), so "what the API accepted" and "what the runner will accept before docker create"
-   * cannot drift into two policies.
-   */
+
   const codeMountedFolder = new CodeMountedFolderService({
     store: workspaceStore,
     flags: featureFlagService,
@@ -293,21 +254,9 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
     getAuthContext: (request) => codeInstructionsContexts.get(request as object) ?? null,
     logger: log,
   });
-  // C5: scoped approval rules are visible and revocable; every change is audited before it applies.
+
   registerCodeApprovalRoutes(app, authProvider, { store: workspaceStore, scope: codeApprovalScope });
-  /**
-   * C9: the surface a person answers a paused run on, plus the reaper port that releases a run whose question
-   * timed out.
-   *
-   * One path-scoped preHandler with its own context map — the same mechanism every other code surface uses, so
-   * there is no second auth path. `code.question.read` maps to `workspace:read` and `code.question.answer` to
-   * `workspace:write`; the service itself additionally refuses an agent or service principal before it reads
-   * anything, because an agent that could answer its own question would have granted itself the permission it
-   * asked for.
-   *
-   * This service carries the run state (unlike the tool-side instance), because a recorded answer resumes the
-   * run as `interrupted`/`user_answered` and an expiry releases it as `ask_user_timeout`.
-   */
+
   const codeQuestionContexts = new WeakMap<object, AuthContext>();
   app.addHook("preHandler", async (request) => {
     const path = request.url.split("?")[0] ?? "";
@@ -323,8 +272,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
     questionId: string;
     answeredBy?: string;
   }): Promise<void> => {
-    // The question **text** is deliberately not recorded: Activity is metadata, and the prompt is user-facing
-    // content that already lives on the question row under the session's classification.
+
     await activitySinkForKind<Record<string, unknown>>(codeActivitySink, "run_activity").record({
       kind: event.kind,
       companyId: event.companyId,
@@ -357,13 +305,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
     onActivity: (event) => { void codeQuestionActivity(event).catch(() => undefined); },
     now: () => Date.now(),
   });
-  /**
-   * C13 (owner blocker 1): the **one** release path of a run paused on a runtime MCP approval, shared by the
-   * approval decision route (a human approved or rejected) and the reaper's expiry sweep (nobody answered in
-   * time). It chooses between the two transitions C9 already owns — `resumeAfterAnswer` for "the answer arrived"
-   * and `markInterrupted` for "the wait ended without one" — so a paused run is released exactly like a run
-   * paused on a question, and the C10 resume can then continue the **same** run.
-   */
+
   const mcpApprovalPauseRelease = async (input: { companyId: string; runId: string; approvalId: string; reason: McpApprovalReleaseReason; answeredBy?: string }): Promise<unknown> => {
     const outcome = await releaseMcpApprovalPause(codeRunStateLog, input);
     if (outcome === "unsupported") {
@@ -371,7 +313,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
     }
     return outcome;
   };
-  // C4b: read-only sandbox network state (allowlist, decisions, enforcement) plus an audited re-probe.
+
   registerNetworkRoutes(app, {
     auth: authProvider,
     store: workspaceStore,
@@ -418,12 +360,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
     store: workspaceStore,
     repo: approvalsRepo,
     auditLog: auditLogService,
-    /**
-     * C13 (owner blocker 1): a decision on a **runtime MCP** approval is the answer a paused run is waiting for,
-     * so it releases that run through the same transition a question answer uses (`resumeAfterAnswer`). An
-     * ordinary approval (a file write, a git push, a dependency install) carries no MCP payload and is left
-     * exactly as it was: its own boundary consumes it.
-     */
+
     onDecided: async ({ ctx: decisionCtx, companyId, approval, decision }) => {
       const runId = mcpApprovalRunIdOf(approval.inputPayload);
       if (!runId || !mcpApprovalPauseRelease) return;
@@ -441,12 +378,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
     apiKeys:apiKeysRepo,
     store:workspaceStore,
     tools:companyToolRuntime,
-    /**
-     * C13 (owner decision 5): the owner/admin flow that may lower a runtime MCP tool's risk. The authorization
-     * (owner/admin only, agent principals refused), the audit-before-apply order and the durable policy row all
-     * live in `applyMcpRiskOverride`; this adapter only supplies the runtime store, the migration-085 policy
-     * store and the existing tamper-evident AuditLog — there is no second journal and no second authorization.
-     */
+
     runtimeRisk:{
       apply: (input) => applyMcpRiskOverride(
         {

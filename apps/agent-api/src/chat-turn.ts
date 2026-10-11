@@ -1,10 +1,4 @@
-/* The neutral-chat turn function, extracted from chat-orchestration.ts in step 2c-7c-c-3 of
- * docs/refactoring/PLAN.md.
- *
- * Moved verbatim inside a factory that returns the turn function and exports its own type, so the
- * parent destructures it with an exact inferred type. Boundary types are named through the parent's
- * deps interface and through the chat-actions factory, not re-declared.
- */
+
 import { BusinessActionHandler } from "./business-action-handler";
 import { summarizeBusinessProfileChat } from "./business-profile-response";
 import { ChatAttachmentInput, prepareChatAttachments } from "./chat-attachments";
@@ -110,9 +104,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
       }
     }
     const media = await prepareChatAttachments(aiEngine, effectiveMessage, attachments, progress);
-    // Attachment text is evidence for analysis. It must not decide whether the
-    // user requested a workspace mutation. A spreadsheet can legitimately
-    // contain phrases such as "delete company" without being an instruction.
+
     const safeUserRequest = SecurityPolicyEngine.protectText(effectiveMessage).sanitized;
     let conversation = memoryPolicy.noMemoryActive
       ? undefined
@@ -474,7 +466,6 @@ export function createChatTurn(deps: ChatTurnDeps) {
     }
     if (!companySettingsRequest) progress?.({ type: "final_generation_completed" });
 
-    // Automatic Spreadsheet File Editing & Attachment Generation
     if (chatFiles && conversation) {
       try {
         let targetAttachment: { name: string; mimeType: string; data: Buffer; kind?: string } | undefined = media.decoded.find(

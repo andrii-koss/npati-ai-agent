@@ -1,6 +1,4 @@
-/* The automation executor of app.ts, extracted in step 2c-6c of
- * docs/refactoring/PLAN.md. Moved verbatim inside a factory that returns it.
- */
+
 import type { FastifyBaseLogger } from "fastify";
 import type { AppConfig } from "./app";
 import { AuthContext, AuthContext as _AuthContext } from "@npati/workspace";
@@ -23,13 +21,7 @@ export interface CreateAutomationExecutorDeps {
 export function createAutomationExecutor(deps: CreateAutomationExecutorDeps) {
   const { log, agent, automationAllowedPermissions, browserCredentials, companyRuntime, emailInboxRepo } = deps;
   const executeAutomation = async (automation: import("./automations-repository").CompanyAutomation, executionKey: string) => {
-    /**
-     * C5a (owner decision): the unattended run executes as a **service identity** whose permissions are the
-     * reviewed inventory in `code-service-identity.ts`, instead of the owner with a fixed wide permission
-     * set. The owner id stays in the context because NPATI resolves companies by `user_id`
-     * (`assertCompany`), while `externalSubject` carries `service:automation:<id>` — so the principal is a
-     * service wherever it matters: it can never approve anything and can never reach production.
-     */
+
     const automationIdentity = serviceIdentityForAutomation({
       companyId: automation.companyId,
       automationId: automation.id,

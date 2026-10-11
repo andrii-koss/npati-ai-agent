@@ -1,10 +1,4 @@
-/* Auth, AI, workspace, project and data-backend route registration, extracted from app.ts
- * (step 2c-3 of docs/refactoring/PLAN.md).
- *
- * Nineteen registrars plus the project/data-backend teardown hook that belongs to them.
- * The block is moved verbatim; the only edits are the closure locals that became deps
- * (app.log -> log, AUDIT_SYSTEM_WORKSPACE -> systemWorkspaceId).
- */
+
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { AppConfig } from "./app";
 import { registerAIRoutes } from "./ai-routes";
@@ -127,9 +121,9 @@ export function registerPlatformBaseRoutes(app: FastifyInstance, deps: PlatformB
   registerProjectGitRoutes(app, projectGitService, authProvider);
   registerProjectImportRoutes(app, projectImportService, authProvider);
   registerCodeRoutes(app, authProvider, codeService, featureFlagService);
-  // C1b: the sandbox image admission port (list/allow/revoke/scan/verify for operators).
+
   registerSandboxImageRoutes(app, authProvider, sandboxImagePolicy, workspaceStore);
-  // C2: manual invocation harness for the read-only code.* tools (the runner calls the runtime directly).
+
   registerCodeToolRoutes(app, {
     auth: authProvider,
     runtime: codeToolRuntime,
