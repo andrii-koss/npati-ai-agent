@@ -302,7 +302,7 @@
       "expires_at": "2027-02-28"
     },
     "packages/workspace/src/in-memory-store.ts": {
-      "lines": 1730,
+      "lines": 1566,
       "reason": "in-memory twin of the postgres store; clean seams exhausted, plan step 3",
       "owner": "refactor/large-files",
       "expires_at": "2027-02-28"
