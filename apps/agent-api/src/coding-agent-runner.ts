@@ -740,74 +740,26 @@ export class CodingAgentRunner {
     };
 
     const runSelfReview = async (): Promise<void> => {
-      const state = selfReviewState;
-      if (!state) return;
-      const verdict = await state.execute({
-        input: {
-          originalGoal: prompt,
-          approvedPlan: await loadApprovedPlan(),
-          finalDiff: boundedDiff(this.selfReviewDiffChars),
-          changedFiles: runChanges().map((change) => ({
-            path: change.path,
-            tool: change.tool,
-            ...(change.status !== undefined ? { status: change.status } : {}),
-          })),
-          verification: verificationForReview(),
-          testIntegrity: testIntegrityForReview(),
-        },
-        reviewRequest: state.request(),
-        chat: async (request) => {
-          try {
-            const result = await this.ports.engine.chat({
-              messages: request.messages,
-
-              model: input.model,
-              ...(input.fallbackModel ? { fallbackModel: input.fallbackModel } : {}),
-              signal: input.signal,
-              idempotencyKey: request.idempotencyKey,
-              policyContext: {
-                companyId,
-                projectId,
-                sessionId,
-                dataClassification: session.dataClassification,
-              },
-            });
-            return { ok: true as const, content: result.content ?? "" };
-          } catch (error) {
-            const failure = error as { code?: string; message?: string };
-            return { ok: false as const, code: failure.code ?? "review_call_failed", message: failure.message };
-          }
-        },
-
-        ...(this.ports.providerDataGuard
-          ? {
-              guardPrompt: async (text: string) => {
-                await this.ports.providerDataGuard!.guardProviderBoundText(text, {
-                  model: input.model,
-                  policyContext: {
-                    companyId,
-                    projectId,
-                    sessionId,
-                    dataClassification: session.dataClassification,
-                  },
-                });
-              },
-            }
-          : {}),
+      const verdict = await this.runSelfReviewOnce({
+        input,
+        session,
+        companyId,
+        projectId,
+        sessionId,
+        steps,
+        prompt,
+        selfReviewState,
+        loadApprovedPlan,
+        runChanges,
+        verificationForReview,
+        testIntegrityForReview,
+        boundedDiff,
+        writeSelfReviewSummary,
+        setSelfReviewVerdict: (value) => { selfReviewVerdict = value; },
+        record,
       });
-      selfReviewVerdict = verdict;
-      writeSelfReviewSummary();
-      await record({
-        kind: "turn",
-        companyId, projectId, sessionId,
-        runId: input.runId,
-        turn: steps,
-
-        ok: verdict.status === "clean" || verdict.status === "repaired",
-        reason: `${describeSelfReview(verdict)} profile=${this.ports.selfReview?.profileId ?? "run-default"}`,
-      });
+      if (verdict) selfReviewVerdict = verdict;
     };
-
     const beginSelfReviewState = (): SelfReviewVerdict | null => {
       if (selfReviewPasses > 0 && selfReviewState) return selfReviewState.report();
       selfReviewPasses += 1;
@@ -2813,5 +2765,110 @@ export class CodingAgentRunner {
 
     }
     return { result: finish(status, reason, message), inboxOpened };
+  }
+
+  private async runSelfReviewOnce(args: {
+    input: CodingAgentRunInput;
+    session: CodeSession;
+    companyId: string;
+    projectId: string;
+    sessionId: string;
+    steps: number;
+    prompt: string;
+    selfReviewState: SelfReviewState | null;
+    loadApprovedPlan: () => Promise<string | null>;
+    runChanges: () => Array<{ path: string; tool: string; status?: string; diff?: string }>;
+    verificationForReview: () => string;
+    testIntegrityForReview: () => string;
+    boundedDiff: (limit: number) => string;
+    writeSelfReviewSummary: () => void;
+    setSelfReviewVerdict: (verdict: SelfReviewVerdict) => void;
+    record: (event: CodeRunActivityEvent) => Promise<void>;
+  }): Promise<SelfReviewVerdict | null> {
+    const {
+      input,
+      session,
+      companyId,
+      projectId,
+      sessionId,
+      steps,
+      prompt,
+      selfReviewState,
+      loadApprovedPlan,
+      runChanges,
+      verificationForReview,
+      testIntegrityForReview,
+      boundedDiff,
+      writeSelfReviewSummary,
+      setSelfReviewVerdict,
+      record,
+    } = args;
+    const state = selfReviewState;
+    if (!state) return null;
+    const verdict = await state.execute({
+      input: {
+        originalGoal: prompt,
+        approvedPlan: await loadApprovedPlan(),
+        finalDiff: boundedDiff(this.selfReviewDiffChars),
+        changedFiles: runChanges().map((change) => ({
+          path: change.path,
+          tool: change.tool,
+          ...(change.status !== undefined ? { status: change.status } : {}),
+        })),
+        verification: verificationForReview(),
+        testIntegrity: testIntegrityForReview(),
+      },
+      reviewRequest: state.request(),
+      chat: async (request) => {
+        try {
+          const result = await this.ports.engine.chat({
+            messages: request.messages,
+
+            model: input.model,
+            ...(input.fallbackModel ? { fallbackModel: input.fallbackModel } : {}),
+            signal: input.signal,
+            idempotencyKey: request.idempotencyKey,
+            policyContext: {
+              companyId,
+              projectId,
+              sessionId,
+              dataClassification: session.dataClassification,
+            },
+          });
+          return { ok: true as const, content: result.content ?? "" };
+        } catch (error) {
+          const failure = error as { code?: string; message?: string };
+          return { ok: false as const, code: failure.code ?? "review_call_failed", message: failure.message };
+        }
+      },
+
+      ...(this.ports.providerDataGuard
+        ? {
+            guardPrompt: async (text: string) => {
+              await this.ports.providerDataGuard!.guardProviderBoundText(text, {
+                model: input.model,
+                policyContext: {
+                  companyId,
+                  projectId,
+                  sessionId,
+                  dataClassification: session.dataClassification,
+                },
+              });
+            },
+          }
+        : {}),
+    });
+    setSelfReviewVerdict(verdict);
+    writeSelfReviewSummary();
+    await record({
+      kind: "turn",
+      companyId, projectId, sessionId,
+      runId: input.runId,
+      turn: steps,
+
+      ok: verdict.status === "clean" || verdict.status === "repaired",
+      reason: `${describeSelfReview(verdict)} profile=${this.ports.selfReview?.profileId ?? "run-default"}`,
+    });
+    return verdict;
   }
 }
