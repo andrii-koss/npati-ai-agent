@@ -1,7 +1,8 @@
 import { spawnSync } from "node:child_process";
 
 // Read the environment of the actual containers, not a possibly stale .env file.
-// Credentials travel over stdin to an ephemeral probe and are never printed.
+// Credentials travel over stdin to mc inside the existing MinIO container and are never printed.
+// No diagnostic container is created, so this also works while API is restarting.
 const [apiName, minioName] = process.argv.slice(2);
 if (!apiName || !minioName) {
   console.error("Usage: node scripts/diagnose-minio-docker.mjs <agent-api-container> <minio-container>");
@@ -23,29 +24,26 @@ const api = inspect(apiName), minio = inspect(minioName);
 const apiEnv = environment(api), minioEnv = environment(minio);
 const root = { accessKey: minioEnv.MINIO_ROOT_USER, secretKey: minioEnv.MINIO_ROOT_PASSWORD };
 const credentials = { accessKey: apiEnv.MINIO_ACCESS_KEY, secretKey: apiEnv.MINIO_SECRET_KEY };
-const probe = `
-import { Client } from 'minio';
-import { Agent } from 'node:http';
-let input='';for await(const chunk of process.stdin)input+=chunk;
-const config=JSON.parse(input);
-const results={};
-for(const [name,credentials] of Object.entries(config)){
-  if(!credentials.accessKey||!credentials.secretKey){results[name]={accepted:false,code:'MissingEnvironmentCredentials'};continue;}
-  const agent=new Agent({timeout:8000});
-  const client=new Client({endPoint:'127.0.0.1',port:9000,useSSL:false,region:'us-east-1',...credentials,transportAgent:agent});
-  try {
-    await client.listBuckets(); results[name]={accepted:true};
-    try { results[name].bucketExists=await client.bucketExists('npati-chat-files'); }
-    catch(error){const code=error.code;results[name].bucketCheckCode=typeof code==='string'&&/^[A-Za-z0-9]{1,80}$/.test(code)?code:'BucketProbeFailed';}
+function authenticate(credentials, endpoint = "http://127.0.0.1:9000") {
+  if (!credentials.accessKey || !credentials.secretKey) return { accepted: false, code: "MissingEnvironmentCredentials" };
+  const url = new URL(endpoint);
+  url.username = credentials.accessKey;
+  url.password = credentials.secretKey;
+  // MC_HOST avoids writing an alias containing credentials to a config file.
+  const result = spawnSync("docker", ["exec", "-i", minioName, "sh", "-c",
+    'IFS= read -r MC_HOST_npati; export MC_HOST_npati; mc --json ls npati'],
+    { input: url.href + "\n", encoding: "utf8", timeout: 15_000, maxBuffer: 4_000_000 });
+  if (result.status === 0) return { accepted: true };
+  // Raw mc errors can echo request details; emit only a validated S3 error code.
+  for (const line of ((result.stdout ?? "") + "\n" + (result.stderr ?? "")).split("\n")) {
+    try {
+      const code = JSON.parse(line)?.error?.cause?.error?.Code;
+      if (typeof code === "string" && /^[A-Za-z0-9]{1,80}$/.test(code)) return { accepted: false, code };
+    } catch { /* Non-JSON command output is never printed. */ }
   }
-  catch(error){const code=error.code;results[name]={accepted:false,code:typeof code==='string'&&/^[A-Za-z0-9]{1,80}$/.test(code)?code:'ProbeFailed'};}
-  finally{agent.destroy();}
+  return { accepted: false, code: result.error?.code === "ETIMEDOUT" ? "ProbeTimeout" : "ProbeFailedCheckMcAvailability" };
 }
-console.log(JSON.stringify(results));
-`;
-const output = docker(["run", "--rm", "-i", "--network", "container:" + minioName,
-  "--entrypoint", "node", api.Image, "--input-type=module", "-e", probe],
-  { input: JSON.stringify({ root, api: credentials }), timeout: 30_000 });
+const authentication = { root: authenticate(root), api: authenticate(credentials) };
 const result = {
   endpoint: apiEnv.MINIO_ENDPOINT,
   port: apiEnv.MINIO_PORT,
@@ -53,7 +51,7 @@ const result = {
   accessKeyMatchesRoot: Boolean(root.accessKey && credentials.accessKey === root.accessKey),
   secretKeyMatchesRoot: Boolean(root.secretKey && credentials.secretKey === root.secretKey),
   sharedNetworks: Object.keys(api.NetworkSettings.Networks ?? {}).filter(name => name in (minio.NetworkSettings.Networks ?? {})),
-  authenticationAgainstSelectedMinio: JSON.parse(output),
+  authenticationAgainstSelectedMinio: authentication,
 };
 console.log(JSON.stringify(result, null, 2));
 if (!result.authenticationAgainstSelectedMinio.api.accepted) process.exitCode = 1;

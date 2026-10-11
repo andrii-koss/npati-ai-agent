@@ -64,8 +64,8 @@ run this command on the Docker host from the repository directory:
 node scripts/diagnose-minio-docker.mjs <agent-api-container> <minio-container>
 ```
 
-The probe uses the API image's MinIO SDK, runs in the selected MinIO container's
-network namespace, and makes read-only authenticated requests. It works even if
+The probe uses `mc` inside the existing MinIO container and makes read-only
+authenticated requests. It creates no additional container and works even if
 API keeps restarting. `root.accepted: true` and `api.code: InvalidAccessKeyId`
 prove that the API key is not recognized by that selected MinIO instance.
 An API user may legitimately differ from root; matching values are not required
