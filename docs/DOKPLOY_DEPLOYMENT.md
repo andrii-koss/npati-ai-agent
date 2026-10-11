@@ -26,9 +26,10 @@ through the central NPATI backend. For ordinary self-hosting, keep `NPATI_DEPLOY
 `NPATI_DEPLOYMENT_TYPE=npati_hosted` and set the hosted registration token to the same
 server-only value configured in the central NPATI backend.
 
-This Compose runs sites inside one shared runner and is intended for self-hosted
-installations. Keep `NPATI_DEPLOYMENT_TYPE=self_hosted` for this deployment;
-the shared runtime refuses `npati_hosted` mode.
+This Compose explicitly selects `NPATI_PROJECT_RUNTIME_MODE=shared`: sites run inside
+one runner for both registration types. `NPATI_DEPLOYMENT_TYPE` controls account
+registration and browser sessions; it does not override this execution architecture.
+Keep the hosted registration type and token for the official `ai.npati.com` deployment.
 
 Set `OMNIROUTE_MANAGEMENT_PASSWORD` to a unique, strong password before first deployment.
 The Compose file supplies it as OmniRoute's `INITIAL_PASSWORD`, and Agent API uses the

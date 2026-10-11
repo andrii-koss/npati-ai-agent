@@ -20,7 +20,8 @@ NPATI
 LOCAL/SELF-HOSTED uses one shared runtime for all Projects. Projects, Coding Agent sessions,
 async subagents, background jobs and Preview create scoped directories and processes, never
 per-project workload or proxy containers. Deleting a Project must never destroy the shared runtime.
-HOSTED/ISOLATED retains per-project Docker isolation through an explicitly isolated profile.
+An explicitly isolated profile retains per-project Docker isolation. Hosted account registration
+can also use explicitly selected shared execution, as requested for the eleven-container deployment.
 Future implementation must not change this decision unless the owner explicitly requests an architecture change.
 
 `NPATI_PROJECT_RUNTIME_MODE=shared|isolated` selects the execution architecture;
@@ -80,9 +81,11 @@ Local launch uses the same Compose command as before, with the default sandbox o
 
 Existing legacy `npati-sb-*`, `npati-proxy-*`, and `npati-readiness-egress` containers are not automatically deleted. They are not used for newly created shared workspaces. Clean them up deliberately after confirming no isolated runner uses them. Do not remove application/data volumes.
 
-The previous Docker provider and server are retained for remote/isolated deployments. Explicit isolated configuration is `docker-compose.sandbox-isolated.yml`; Dokploy isolated configuration is `docker-compose.dokploy-isolated.yml`. Choose one runtime scheme for a deployment. Shared mode refuses arbitrary host-folder mounts. Using mounted folders requires an explicitly isolated deployment; a project never switches providers automatically.
+The previous Docker provider and server are retained for remote/isolated deployments in `docker-compose.sandbox-isolated.yml`. The selected Dokploy file `docker-compose.dokploy-isolated.yml` now uses shared execution. Choose one runtime scheme for a deployment. Shared mode refuses arbitrary host-folder mounts. Using mounted folders requires an explicitly isolated deployment; a project never switches providers automatically.
 
-For `NPATI_DEPLOYMENT_TYPE=npati_hosted`, retain the isolated configuration; the shared runtime default is the OSS/self-hosted deployment scheme.
+Without an explicit runtime mode, `NPATI_DEPLOYMENT_TYPE=npati_hosted` defaults to isolated execution.
+An explicit `NPATI_PROJECT_RUNTIME_MODE=shared` takes precedence, including for hosted accounts;
+`docker-compose.dokploy-isolated.yml` now selects this shared eleven-container scheme despite its legacy filename.
 
 After a runtime restart, recorded process IDs are marked stopped and persisted PIDs are never signaled (preventing PID-reuse bugs). Start Preview again. API Preview session tracking is still in memory, so an API restart also requires starting Preview again.
 

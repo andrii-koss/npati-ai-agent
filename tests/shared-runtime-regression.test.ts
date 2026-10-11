@@ -29,8 +29,22 @@ describe("frozen shared local runtime", () => {
     expect(projectRuntimeMode({ NPATI_SANDBOX_RUNNER_MODE: "local" })).toBe("shared");
     expect(projectRuntimeMode({ NPATI_DEPLOYMENT_TYPE: "npati_hosted" })).toBe("isolated");
     expect(projectRuntimeMode({ NPATI_PROJECT_RUNTIME_MODE: "isolated", NPATI_DEPLOYMENT_TYPE: "self_hosted" })).toBe("isolated");
-    expect(() => projectRuntimeMode({ NPATI_PROJECT_RUNTIME_MODE: "shared", NPATI_DEPLOYMENT_TYPE: "npati_hosted" })).toThrow("Hosted");
+    expect(projectRuntimeMode({ NPATI_DEPLOYMENT_TYPE: "npati_hosted", NPATI_SANDBOX_RUNNER_MODE: "local" })).toBe("isolated");
     expect(() => projectRuntimeMode({ NPATI_PROJECT_RUNTIME_MODE: "typo" })).toThrow("Invalid");
+  });
+  it("honors explicit shared architecture for hosted accounts without admitting the Docker provider", async () => {
+    vi.stubEnv("NPATI_DEPLOYMENT_TYPE", "npati_hosted");
+    vi.stubEnv("NPATI_PROJECT_RUNTIME_MODE", "shared");
+    expect(projectRuntimeMode()).toBe("shared");
+    expect(() => assertProjectRuntimeProvider("shared")).not.toThrow();
+    const admit = vi.fn();
+    await expect(new DockerSandboxProvider({}, { admit }).createSandbox(scope)).rejects.toMatchObject({ code: "runtime_architecture_violation" });
+    expect(admit).not.toHaveBeenCalled();
+    const transport = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ overall_ready: true, details: { runtimeMode: "shared" } })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: "hosted-shared-project" } })));
+    expect(await new RemoteSandboxProvider("https://runner.example", "x".repeat(32), transport).createSandbox(scope))
+      .toEqual({ id: "hosted-shared-project" });
   });
   it("refuses Docker creation immediately in shared mode, before image admission or Docker", async () => {
     vi.stubEnv("NPATI_PROJECT_RUNTIME_MODE", "shared");
