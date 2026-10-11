@@ -188,6 +188,9 @@ services:
       - no-new-privileges:true
       - seccomp=./docker/sandbox/project-runtime-seccomp.json
       - apparmor=unconfined
+      # Linux 5.15 rejects nested procfs mounts when Docker masks /proc paths.
+      # Project commands get a separate read-only procfs from Bubblewrap.
+      - systempaths=unconfined
     cpus: ${NPATI_PROJECT_RUNTIME_CPU:-4}
     mem_limit: ${NPATI_PROJECT_RUNTIME_MEMORY:-4g}
     pids_limit: 4096

@@ -38,6 +38,7 @@ services:
       - no-new-privileges:true
       - seccomp=./docker/sandbox/project-runtime-seccomp.json
       - apparmor=unconfined
+      - systempaths=unconfined
     devices:
       - /dev/net/tun:/dev/net/tun
     read_only: true
