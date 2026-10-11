@@ -1,6 +1,6 @@
 # Deploy NPATI Agent with Dokploy
 
-Use the dedicated `docker-compose.dokploy.yml`. It builds the web/API images from the
+Use the dedicated `docker-compose.dokploy.yml`. It builds one API image containing the frontend from the
 repository and keeps PostgreSQL, Redis, MinIO, Qdrant, Crawl4AI, OmniRoute, and the worker
 on an internal Compose network.
 
@@ -40,12 +40,16 @@ through OmniRoute's Security settings, and keep the Dokploy variable in sync.
 
 In the Compose service's **Domains** tab, add the public HTTPS domain with:
 
-- Service: `web`
-- Container port: `3000`
+- Service: `agent-api`
+- Container port: `3001`
 - HTTPS/certificate: enabled
 
-Do not expose or attach public domains to `agent-api`, PostgreSQL, Redis, MinIO, Qdrant,
-Crawl4AI, or OmniRoute. Browser API traffic goes through the web container at `/api/`.
+Do not expose or attach public domains to PostgreSQL, Redis, MinIO, Qdrant,
+Crawl4AI, or OmniRoute. The API container serves the frontend and handles browser API traffic at `/api/`.
+
+For an existing installation, update the Dokploy domain from `web:3000` to
+`agent-api:3001` before redeploying. The Compose deployment removes the obsolete
+web container with `--remove-orphans`; keep the same Compose project and persistent volumes.
 
 Set both of these variables to the same externally reachable HTTPS origin, without a
 trailing slash:

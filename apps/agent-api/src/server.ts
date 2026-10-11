@@ -20,6 +20,7 @@ const objectStorage = minioEndpoint && minioAccessKey && minioSecretKey ? new Mi
 
 const port = Number.parseInt(process.env.NPATI_AGENT_API_PORT ?? "3001", 10);
 const app = buildApp({
+  webDistDirectory: process.env.NPATI_WEB_DIST_DIR,
   webOrigin: process.env.NPATI_WEB_ORIGIN,
   omnirouteBaseUrl: process.env.OMNIROUTE_BASE_URL,
   omnirouteApiKey: process.env.OMNIROUTE_API_KEY,

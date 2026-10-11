@@ -3,6 +3,14 @@ RUN apk add --no-cache python3 git build-base
 COPY apps/agent-api/project-runtime-profiles.json apps/agent-api/build-project-runtime-profiles.cjs /tmp/npati-toolchain/
 RUN --mount=type=cache,id=npati-project-web-npm,target=/root/.npm node /tmp/npati-toolchain/build-project-runtime-profiles.cjs
 
+FROM node:24-alpine AS web-build
+WORKDIR /app
+COPY package.json package-lock.json tsconfig.base.json ./
+COPY apps/web ./apps/web
+COPY packages ./packages
+RUN npm ci
+RUN npm run build --workspace @npati/web
+
 FROM node:24-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
@@ -38,6 +46,8 @@ EXPOSE 7865
 CMD ["sh", "/opt/npati-sandbox-images/entrypoint.sh"]
 
 FROM runtime-base AS runtime
+ENV NPATI_WEB_DIST_DIR=/app/web
+COPY --from=web-build /app/apps/web/dist ./web
 # Session branch admission/checkpoints execute Git in the API/worker workspace,
 # before project commands are dispatched to the shared runtime.
 RUN apk add --no-cache postgresql-client git && git --version
