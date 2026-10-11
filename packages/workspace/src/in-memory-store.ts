@@ -56,6 +56,7 @@ import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from './
 import { now } from "./in-memory-clock";
 import { createProject, listProjects, getProject, updateProject, getProjectCodeTrust, getProjectMountedFolder, getProjectMountedFolderForSystem, updateProjectRepository, updateProjectPreview, archiveProject, deleteProject, createProjectCheckpoint, getProjectCheckpoint, deleteProjectCheckpoint, createProjectDeployment, getProjectDeployment, updateProjectDeployment, createProjectQaReport, getProjectQaReport, getProjectDataPolicy, getProjectForSystem, type InMemoryProjectState } from "./in-memory-project-store";
 import { setCompanyAgentParent, listGoals, createGoal, updateGoal, deleteGoal, listMemory, createMemory, updateMemory, type InMemoryGoalState } from "./in-memory-goal-store";
+import { createCodeSession, getCodeSession, listCodeSessions, createCodeApprovalRule, listCodeApprovalRules, deleteCodeApprovalRule, updateCodeSession, createCodeRunState, getCodeRunRequest, applyCodeRunStateEvent, getCodeRunState, getCodeRunTurn, listCodeRunTurns, listCodeRunStates, listCodeRunStatesForScan, listCodeProjectRefs, listCodeRunTurnsForScan, createCodeUserQuestion, getCodeUserQuestion, getCodeSessionHead, createCodeRunRecoveryNotice, listCodeRunRecoveryNotices, createCodeSessionRewind, getCodeSessionRewind, listCodeSessionRewinds, createCodeSessionFork, getCodeSessionFork, listCodeSessionForks, createCodeGoal, getCodeGoal, listCodeGoals, updateCodeGoal, createCodeSessionPlan, listCodeSessionPlans, listCodeSessionTodos, createCodeContextSummary, listCodeContextSummaries, createCodeActivityEvent, listCodeActivityEvents, type InMemoryCodeState } from "./in-memory-code-store";
 
 type StoredUserSetting = import('./types').UserSetting;
 export class InMemoryWorkspaceStore implements WorkspaceStore {
@@ -164,6 +165,20 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   private readonly codeUserQuestionState = new InMemoryCodeUserQuestionStore();
 
   private readonly codeSessionDurabilityState = new InMemoryCodeSessionDurabilityStore();
+
+  private codeState(): InMemoryCodeState {
+    return {
+      codeApprovalRules: this.codeApprovalRules,
+      codeGoalState: this.codeGoalState,
+      codeRunOps: this.codeRunOps,
+      codeSessionDurabilityState: this.codeSessionDurabilityState,
+      codeSessions: this.codeSessions,
+      codeUserQuestionState: this.codeUserQuestionState,
+      companyAgents: this.companyAgents,
+      assertCompany: this.assertCompany.bind(this),
+      getProject: this.getProject.bind(this),
+    };
+  }
 
   private goalState(): InMemoryGoalState {
     return {
@@ -491,51 +506,16 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return updateProject(this.projectState(), context, companyId, projectId, input);
   }
 
-  async createCodeSession(context: AuthContext, companyId: string, projectId: string, input: CodeSessionInput): Promise<CodeSession> {
-    const project = await this.getProject(context, companyId, projectId);
-    if (input.agentId && !this.companyAgents.has(input.agentId)) throw new WorkspaceAccessError("Agent does not belong to this company");
-    if (input.parentSessionId) {
-      const parent = await this.getCodeSession(context, companyId, input.parentSessionId);
-      if (parent.projectId !== projectId) throw new WorkspaceAccessError("Parent session belongs to another project");
-    }
-    const requested = input.dataClassification ?? project.dataClassification;
-    if (!isClassificationAtLeast(requested, project.dataClassification)) {
-      throw new WorkspaceAccessError("Session data classification cannot be lower than the project classification");
-    }
-    const id = input.childKey && input.parentSessionId
-      ? codeChildSessionId(context, companyId, projectId, input.parentSessionId, input.childKey) : randomUUID();
-    if (this.codeSessions.has(id)) return this.getCodeSession(context, companyId, id);
-    const timestamp = now();
-    const session: CodeSession = {
-      id, workspaceId: context.workspaceId, companyId, projectId, userId: context.userId,
-      agentId: input.agentId ?? null, mode: input.mode ?? "edit", modelProfile: input.modelProfile ?? null,
-      status: "active", parentSessionId: input.parentSessionId ?? null, runId: null,
-      summary: input.summary ?? null, dataClassification: requested,
-      retentionClass: input.retentionClass ?? project.retentionClass, toolManifestVersion: null,
-      revision: 1,
-      createdAt: timestamp, updatedAt: timestamp,
-    };
-    this.codeSessions.set(session.id, session);
-    return structuredClone(session);
+    async createCodeSession(context: AuthContext, companyId: string, projectId: string, input: CodeSessionInput): Promise<CodeSession> {
+    return createCodeSession(this.codeState(), context, companyId, projectId, input);
   }
 
-  async getCodeSession(context: AuthContext, companyId: string, sessionId: string): Promise<CodeSession> {
-    const session = this.codeSessions.get(sessionId);
-    if (!session || session.workspaceId !== context.workspaceId || session.companyId !== companyId
-      || session.userId !== context.userId) throw new WorkspaceNotFoundError("Code session not found");
-    return structuredClone(session);
+    async getCodeSession(context: AuthContext, companyId: string, sessionId: string): Promise<CodeSession> {
+    return getCodeSession(this.codeState(), context, companyId, sessionId);
   }
 
-  async listCodeSessions(context: AuthContext, companyId: string, projectId?: string, options: { includeArchived?: boolean; limit?: number } = {}): Promise<CodeSession[]> {
-    this.assertCompany(context, companyId);
-    const limit = Math.max(1, Math.min(options.limit ?? 50, 200));
-    return structuredClone([...this.codeSessions.values()]
-      .filter((session) => session.workspaceId === context.workspaceId && session.companyId === companyId
-        && session.userId === context.userId
-        && (!projectId || session.projectId === projectId)
-        && (options.includeArchived === true || session.status !== "archived"))
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id))
-      .slice(0, limit));
+    async listCodeSessions(context: AuthContext, companyId: string, projectId?: string, options: { includeArchived?: boolean; limit?: number } = {}): Promise<CodeSession[]> {
+    return listCodeSessions(this.codeState(), context, companyId, projectId, options);
   }
 
   async appendAuditEntry(context: AuthContext, companyId: string, input: AuditEntryInput): Promise<AuditEntry> {
@@ -664,42 +644,16 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return this.platformOps.latestCodeToolManifest();
   }
 
-  async createCodeApprovalRule(context: AuthContext, companyId: string, input: CodeApprovalRuleInput): Promise<CodeApprovalRule> {
-    this.assertCompany(context, companyId);
-    if (input.scope === "session" && !input.sessionId) {
-      throw new WorkspaceAccessError("A session-scoped approval rule must name its session");
-    }
-    if (!input.projectId) throw new WorkspaceAccessError("An approval rule must name its project");
-    const key = `${context.workspaceId}|${companyId}|${input.projectId}|${input.sessionId ?? ""}|${input.scope}|${input.action}`;
-    const existing = this.codeApprovalRules.get(key);
-    const record: CodeApprovalRule = {
-      id: existing?.id ?? randomUUID(), workspaceId: context.workspaceId, companyId,
-      projectId: input.projectId, sessionId: input.sessionId ?? null, createdBy: context.userId,
-      scope: input.scope, action: input.action, decision: "allow",
-      reason: input.reason ?? null, expiresAt: input.expiresAt ?? null,
-      revision: (existing?.revision ?? 0) + 1,
-      createdAt: existing?.createdAt ?? now(), updatedAt: now(),
-    };
-    this.codeApprovalRules.set(key, record);
-    return structuredClone(record);
+    async createCodeApprovalRule(context: AuthContext, companyId: string, input: CodeApprovalRuleInput): Promise<CodeApprovalRule> {
+    return createCodeApprovalRule(this.codeState(), context, companyId, input);
   }
 
-  async listCodeApprovalRules(context: AuthContext, companyId: string, filters: { projectId?: string; sessionId?: string; scope?: CodeApprovalRuleScope } = {}): Promise<CodeApprovalRule[]> {
-    return structuredClone([...this.codeApprovalRules.values()]
-      .filter((rule) => rule.workspaceId === context.workspaceId && rule.companyId === companyId)
-      .filter((rule) => (filters.projectId ? rule.projectId === filters.projectId : true))
-      .filter((rule) => (filters.sessionId ? rule.sessionId === filters.sessionId : true))
-      .filter((rule) => (filters.scope ? rule.scope === filters.scope : true))
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+    async listCodeApprovalRules(context: AuthContext, companyId: string, filters: { projectId?: string; sessionId?: string; scope?: CodeApprovalRuleScope } = {}): Promise<CodeApprovalRule[]> {
+    return listCodeApprovalRules(this.codeState(), context, companyId, filters);
   }
 
-  async deleteCodeApprovalRule(context: AuthContext, companyId: string, ruleId: string): Promise<void> {
-    this.assertCompany(context, companyId);
-    for (const [key, rule] of this.codeApprovalRules) {
-      if (rule.id === ruleId && rule.workspaceId === context.workspaceId && rule.companyId === companyId) {
-        this.codeApprovalRules.delete(key);
-      }
-    }
+    async deleteCodeApprovalRule(context: AuthContext, companyId: string, ruleId: string): Promise<void> {
+    return deleteCodeApprovalRule(this.codeState(), context, companyId, ruleId);
   }
 
   async findMatchingCodeApprovalRule(context: AuthContext, query: { companyId: string; projectId?: string | null; sessionId?: string | null; action: string }): Promise<CodeApprovalRule | null> {
@@ -740,28 +694,8 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return this.platformOps.latestVerifiedSandboxImage(context, variant);
   }
 
-  async updateCodeSession(context: AuthContext, companyId: string, sessionId: string, patch: { status?: CodeSessionStatus; summary?: string; runId?: string | null; modelProfile?: string; dataClassification?: DataClassification; retentionClass?: RetentionClass; toolManifestVersion?: number | null; mode?: CodeSessionMode; expectedRevision?: number }): Promise<CodeSession> {    const session = await this.getCodeSession(context, companyId, sessionId);
-    if (patch.dataClassification && !isClassificationAtLeast(patch.dataClassification, session.dataClassification)) {
-      throw new WorkspaceAccessError("Session data classification cannot be lowered through this endpoint");
-    }
-    if (patch.expectedRevision !== undefined && patch.expectedRevision !== session.revision) {
-      throw new WorkspaceAccessError("Code session changed by another request. Reload and try again.");
-    }
-    const next: CodeSession = {
-      ...session,
-      status: patch.status ?? session.status,
-      summary: patch.summary ?? session.summary,
-      runId: patch.runId === undefined ? session.runId : patch.runId,
-      modelProfile: patch.modelProfile ?? session.modelProfile,
-      dataClassification: patch.dataClassification ?? session.dataClassification,
-      retentionClass: patch.retentionClass ?? session.retentionClass,
-      toolManifestVersion: patch.toolManifestVersion === undefined ? session.toolManifestVersion : patch.toolManifestVersion,
-      mode: patch.mode ?? session.mode,
-      revision: session.revision + 1,
-      updatedAt: now(),
-    };
-    this.codeSessions.set(sessionId, next);
-    return structuredClone(next);
+    async updateCodeSession(context: AuthContext, companyId: string, sessionId: string, patch: { status?: CodeSessionStatus; summary?: string; runId?: string | null; modelProfile?: string; dataClassification?: DataClassification; retentionClass?: RetentionClass; toolManifestVersion?: number | null; mode?: CodeSessionMode; expectedRevision?: number }): Promise<CodeSession> {
+    return updateCodeSession(this.codeState(), context, companyId, sessionId, patch);
   }
 
     async getProjectCodeTrust(context: AuthContext, companyId: string, projectId: string): Promise<ProjectCodeTrust | null> {
@@ -1513,20 +1447,20 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return this.companyMembershipOps.findInviteByTokenHash(tokenHash);
   }
 
-  async createCodeRunState(input: CreateCodeRunStateInput): Promise<CodeRunStateRecord> {
-    return this.codeRunOps.createCodeRunState(input);
+    async createCodeRunState(input: CreateCodeRunStateInput): Promise<CodeRunStateRecord> {
+    return createCodeRunState(this.codeState(), input);
   }
 
-  async getCodeRunRequest(companyId: string, runId: string): Promise<CodeRunRequestRecord | null> {
-    return this.codeRunOps.getCodeRunRequest(companyId, runId);
+    async getCodeRunRequest(companyId: string, runId: string): Promise<CodeRunRequestRecord | null> {
+    return getCodeRunRequest(this.codeState(), companyId, runId);
   }
 
-  async applyCodeRunStateEvent(input: ApplyCodeRunStateEventInput): Promise<CodeRunStateRecord> {
-    return this.codeRunOps.applyCodeRunStateEvent(input);
+    async applyCodeRunStateEvent(input: ApplyCodeRunStateEventInput): Promise<CodeRunStateRecord> {
+    return applyCodeRunStateEvent(this.codeState(), input);
   }
 
-  async getCodeRunState(companyId: string, runId: string): Promise<CodeRunStateRecord | null> {
-    return this.codeRunOps.getCodeRunState(companyId, runId);
+    async getCodeRunState(companyId: string, runId: string): Promise<CodeRunStateRecord | null> {
+    return getCodeRunState(this.codeState(), companyId, runId);
   }
 
   async listStaleCodeRunStates(input: { now: Date; limit: number }): Promise<CodeRunStateRecord[]> {
@@ -1537,57 +1471,32 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return this.codeRunOps.upsertCodeRunTurn(input);
   }
 
-  async getCodeRunTurn(companyId: string, runId: string, turnIndex: number): Promise<CodeRunTurnRecord | null> {
-    return this.codeRunOps.getCodeRunTurn(companyId, runId, turnIndex);
+    async getCodeRunTurn(companyId: string, runId: string, turnIndex: number): Promise<CodeRunTurnRecord | null> {
+    return getCodeRunTurn(this.codeState(), companyId, runId, turnIndex);
   }
 
-  async listCodeRunTurns(companyId: string, runId: string): Promise<CodeRunTurnRecord[]> {
-    return this.codeRunOps.listCodeRunTurns(companyId, runId);
+    async listCodeRunTurns(companyId: string, runId: string): Promise<CodeRunTurnRecord[]> {
+    return listCodeRunTurns(this.codeState(), companyId, runId);
   }
 
-  async listCodeRunStates(input: ListCodeRunStatesInput): Promise<CodeRunStateRecord[]> {
-    return this.codeRunOps.listCodeRunStates(input);
+    async listCodeRunStates(input: ListCodeRunStatesInput): Promise<CodeRunStateRecord[]> {
+    return listCodeRunStates(this.codeState(), input);
   }
 
-  async listCodeRunStatesForScan(input: CodeRunStateScanInput): Promise<CodeRunScanPage<CodeRunStateRecord>> {
-    return this.codeRunOps.listCodeRunStatesForScan(input);
+    async listCodeRunStatesForScan(input: CodeRunStateScanInput): Promise<CodeRunScanPage<CodeRunStateRecord>> {
+    return listCodeRunStatesForScan(this.codeState(), input);
   }
 
-  async listCodeProjectRefs(input: CodeProjectRefScanInput): Promise<CodeProjectRefScanPage> {
-    const limit = clampScanLimit(input.limit);
-    const cursor = decodeCodeRunScanCursor(input.cursor);
-    const newest = new Map<string, { companyId: string; projectId: string; lastSessionAt: string }>();
-    for (const session of this.codeSessions.values()) {
-      if (input.companyId !== null && session.companyId !== input.companyId) continue;
-      const createdAt = typeof session.createdAt === "string" ? session.createdAt : new Date(String(session.createdAt)).toISOString();
-      const key = `${session.companyId}:${session.projectId}`;
-      const existing = newest.get(key);
-      if (!existing || existing.lastSessionAt < createdAt) {
-        newest.set(key, { companyId: session.companyId, projectId: session.projectId, lastSessionAt: createdAt });
-      }
-    }
-    const ordered = [...newest.values()].sort((a, b) =>
-      b.lastSessionAt.localeCompare(a.lastSessionAt) || a.projectId.localeCompare(b.projectId));
-    const afterCursor = cursor
-      ? ordered.filter((ref) => ref.lastSessionAt < cursor.startedAt
-        || (ref.lastSessionAt === cursor.startedAt && ref.projectId > cursor.runId))
-      : ordered;
-    const page = afterCursor.slice(0, limit);
-    const last = page[page.length - 1];
-    return {
-      items: page as CodeProjectRef[],
-      nextCursor: afterCursor.length > limit && last
-        ? encodeCodeRunScanCursor({ startedAt: last.lastSessionAt, runId: last.projectId, turnIndex: 0 })
-        : null,
-    };
+    async listCodeProjectRefs(input: CodeProjectRefScanInput): Promise<CodeProjectRefScanPage> {
+    return listCodeProjectRefs(this.codeState(), input);
   }
 
     async getProjectForSystem(companyId: string, projectId: string): Promise<Project | null> {
     return getProjectForSystem(this.projectState(), companyId, projectId);
   }
 
-  async listCodeRunTurnsForScan(input: CodeRunTurnScanInput): Promise<CodeRunScanPage<CodeRunTurnRecord>> {
-    return this.codeRunOps.listCodeRunTurnsForScan(input);
+    async listCodeRunTurnsForScan(input: CodeRunTurnScanInput): Promise<CodeRunScanPage<CodeRunTurnRecord>> {
+    return listCodeRunTurnsForScan(this.codeState(), input);
   }
 
   private activeOwnerCount(companyId: string): number {
@@ -1651,12 +1560,12 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return this.codeRunOps.listSnapshotConfigVersions(companyId, kind);
   }
 
-  async createCodeUserQuestion(input: CreateCodeUserQuestionInput): Promise<CodeUserQuestionRecord> {
-    return this.codeUserQuestionState.createQuestion(input);
+    async createCodeUserQuestion(input: CreateCodeUserQuestionInput): Promise<CodeUserQuestionRecord> {
+    return createCodeUserQuestion(this.codeState(), input);
   }
 
-  async getCodeUserQuestion(companyId: string, questionId: string): Promise<CodeUserQuestionRecord | null> {
-    return this.codeUserQuestionState.getQuestion(companyId, questionId);
+    async getCodeUserQuestion(companyId: string, questionId: string): Promise<CodeUserQuestionRecord | null> {
+    return getCodeUserQuestion(this.codeState(), companyId, questionId);
   }
 
   async getPendingCodeUserQuestionForRun(companyId: string, runId: string): Promise<CodeUserQuestionRecord | null> {
@@ -1679,32 +1588,32 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return this.codeUserQuestionState.cancelPendingQuestions(input);
   }
 
-  async getCodeSessionHead(companyId: string, sessionId: string): Promise<CodeSessionHeadRecord | null> {
-    return this.codeSessionDurabilityState.getHead(companyId, sessionId);
+    async getCodeSessionHead(companyId: string, sessionId: string): Promise<CodeSessionHeadRecord | null> {
+    return getCodeSessionHead(this.codeState(), companyId, sessionId);
   }
 
   async setCodeSessionHead(input: SetCodeSessionHeadInput): Promise<CodeSessionHeadRecord> {
     return this.codeSessionDurabilityState.setHead(input);
   }
 
-  async createCodeRunRecoveryNotice(input: CreateCodeRunRecoveryNoticeInput): Promise<CodeRunRecoveryNoticeRecord> {
-    return this.codeSessionDurabilityState.createNotice(input);
+    async createCodeRunRecoveryNotice(input: CreateCodeRunRecoveryNoticeInput): Promise<CodeRunRecoveryNoticeRecord> {
+    return createCodeRunRecoveryNotice(this.codeState(), input);
   }
 
   async getLatestCodeRunRecoveryNotice(companyId: string, runId: string): Promise<CodeRunRecoveryNoticeRecord | null> {
     return this.codeSessionDurabilityState.getLatestNotice(companyId, runId);
   }
 
-  async listCodeRunRecoveryNotices(input: { companyId: string; runId: string; limit?: number }): Promise<CodeRunRecoveryNoticeRecord[]> {
-    return this.codeSessionDurabilityState.listNotices(input);
+    async listCodeRunRecoveryNotices(input: { companyId: string; runId: string; limit?: number }): Promise<CodeRunRecoveryNoticeRecord[]> {
+    return listCodeRunRecoveryNotices(this.codeState(), input);
   }
 
-  async createCodeSessionRewind(input: CreateCodeSessionRewindInput): Promise<{ record: CodeSessionRewindRecord; replayed: boolean }> {
-    return this.codeSessionDurabilityState.createRewind(input);
+    async createCodeSessionRewind(input: CreateCodeSessionRewindInput): Promise<{ record: CodeSessionRewindRecord; replayed: boolean }> {
+    return createCodeSessionRewind(this.codeState(), input);
   }
 
-  async getCodeSessionRewind(companyId: string, operationId: string): Promise<CodeSessionRewindRecord | null> {
-    return this.codeSessionDurabilityState.getRewind(companyId, operationId);
+    async getCodeSessionRewind(companyId: string, operationId: string): Promise<CodeSessionRewindRecord | null> {
+    return getCodeSessionRewind(this.codeState(), companyId, operationId);
   }
 
   async reopenCodeSessionRewind(input: { companyId: string; operationId: string; staleMs?: number; now?: Date }): Promise<{ record: CodeSessionRewindRecord | null; reopened: boolean }> {
@@ -1715,60 +1624,60 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return this.codeSessionDurabilityState.completeRewind(input);
   }
 
-  async listCodeSessionRewinds(input: { companyId: string; sessionId: string; limit?: number }): Promise<CodeSessionRewindRecord[]> {
-    return this.codeSessionDurabilityState.listRewinds(input);
+    async listCodeSessionRewinds(input: { companyId: string; sessionId: string; limit?: number }): Promise<CodeSessionRewindRecord[]> {
+    return listCodeSessionRewinds(this.codeState(), input);
   }
 
-  async createCodeSessionFork(input: CreateCodeSessionForkInput): Promise<{ record: CodeSessionForkRecord; replayed: boolean }> {
-    return this.codeSessionDurabilityState.createFork(input);
+    async createCodeSessionFork(input: CreateCodeSessionForkInput): Promise<{ record: CodeSessionForkRecord; replayed: boolean }> {
+    return createCodeSessionFork(this.codeState(), input);
   }
 
-  async getCodeSessionFork(companyId: string, operationId: string): Promise<CodeSessionForkRecord | null> {
-    return this.codeSessionDurabilityState.getFork(companyId, operationId);
+    async getCodeSessionFork(companyId: string, operationId: string): Promise<CodeSessionForkRecord | null> {
+    return getCodeSessionFork(this.codeState(), companyId, operationId);
   }
 
   async completeCodeSessionFork(input: CompleteCodeSessionForkInput): Promise<CodeSessionForkRecord> {
     return this.codeSessionDurabilityState.completeFork(input);
   }
 
-  async listCodeSessionForks(input: { companyId: string; parentSessionId: string; limit?: number }): Promise<CodeSessionForkRecord[]> {
-    return this.codeSessionDurabilityState.listForks(input);
+    async listCodeSessionForks(input: { companyId: string; parentSessionId: string; limit?: number }): Promise<CodeSessionForkRecord[]> {
+    return listCodeSessionForks(this.codeState(), input);
   }
 
   async reopenCodeSessionFork(input: { companyId: string; operationId: string; staleMs?: number; now?: Date }): Promise<{ record: CodeSessionForkRecord | null; reopened: boolean }> {
     return this.codeSessionDurabilityState.reopenFork(input);
   }
 
-  async createCodeGoal(input: CreateCodeGoalInput): Promise<CodeGoalWithCriteria> {
-    return this.codeGoalState.createGoal(input);
+    async createCodeGoal(input: CreateCodeGoalInput): Promise<CodeGoalWithCriteria> {
+    return createCodeGoal(this.codeState(), input);
   }
 
-  async getCodeGoal(companyId: string, goalId: string): Promise<CodeGoalWithCriteria | null> {
-    return this.codeGoalState.getGoal(companyId, goalId);
+    async getCodeGoal(companyId: string, goalId: string): Promise<CodeGoalWithCriteria | null> {
+    return getCodeGoal(this.codeState(), companyId, goalId);
   }
 
-  async listCodeGoals(input: { companyId: string; sessionId?: string; projectId?: string; limit?: number }): Promise<CodeGoalRecord[]> {
-    return this.codeGoalState.listGoals(input);
+    async listCodeGoals(input: { companyId: string; sessionId?: string; projectId?: string; limit?: number }): Promise<CodeGoalRecord[]> {
+    return listCodeGoals(this.codeState(), input);
   }
 
-  async updateCodeGoal(input: UpdateCodeGoalInput): Promise<CodeGoalWithCriteria> {
-    return this.codeGoalState.updateGoal(input);
+    async updateCodeGoal(input: UpdateCodeGoalInput): Promise<CodeGoalWithCriteria> {
+    return updateCodeGoal(this.codeState(), input);
   }
 
   async setCodeGoalCriterionStatus(input: SetCodeGoalCriterionStatusInput): Promise<CodeGoalWithCriteria> {
     return this.codeGoalState.setCriterionStatus(input);
   }
 
-  async createCodeSessionPlan(input: CreateCodeSessionPlanInput): Promise<CodeSessionPlanRecord> {
-    return this.codeGoalState.createPlan(input);
+    async createCodeSessionPlan(input: CreateCodeSessionPlanInput): Promise<CodeSessionPlanRecord> {
+    return createCodeSessionPlan(this.codeState(), input);
   }
 
   async getLatestCodeSessionPlan(companyId: string, sessionId: string): Promise<CodeSessionPlanRecord | null> {
     return this.codeGoalState.getLatestPlan(companyId, sessionId);
   }
 
-  async listCodeSessionPlans(input: { companyId: string; sessionId: string; limit?: number }): Promise<CodeSessionPlanRecord[]> {
-    return this.codeGoalState.listPlans(input);
+    async listCodeSessionPlans(input: { companyId: string; sessionId: string; limit?: number }): Promise<CodeSessionPlanRecord[]> {
+    return listCodeSessionPlans(this.codeState(), input);
   }
 
   async decideCodeSessionPlan(input: DecideCodeSessionPlanInput): Promise<CodeSessionPlanRecord> {
@@ -1779,24 +1688,24 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return this.codeGoalState.replaceTodos(input);
   }
 
-  async listCodeSessionTodos(input: { companyId: string; sessionId: string }): Promise<CodeSessionTodoRecord[]> {
-    return this.codeGoalState.listTodos(input.companyId, input.sessionId);
+    async listCodeSessionTodos(input: { companyId: string; sessionId: string }): Promise<CodeSessionTodoRecord[]> {
+    return listCodeSessionTodos(this.codeState(), input);
   }
 
-  async createCodeContextSummary(input: CreateCodeContextSummaryInput): Promise<CodeContextSummaryRecord> {
-    return this.codeRunOps.createCodeContextSummary(input);
+    async createCodeContextSummary(input: CreateCodeContextSummaryInput): Promise<CodeContextSummaryRecord> {
+    return createCodeContextSummary(this.codeState(), input);
   }
 
-  async listCodeContextSummaries(input: ListCodeContextSummariesInput): Promise<CodeContextSummaryRecord[]> {
-    return this.codeRunOps.listCodeContextSummaries(input);
+    async listCodeContextSummaries(input: ListCodeContextSummariesInput): Promise<CodeContextSummaryRecord[]> {
+    return listCodeContextSummaries(this.codeState(), input);
   }
 
-  async createCodeActivityEvent(input: CreateCodeActivityEventInput): Promise<CodeActivityEventRecord> {
-    return this.codeRunOps.createCodeActivityEvent(input);
+    async createCodeActivityEvent(input: CreateCodeActivityEventInput): Promise<CodeActivityEventRecord> {
+    return createCodeActivityEvent(this.codeState(), input);
   }
 
-  async listCodeActivityEvents(input: ListCodeActivityEventsInput): Promise<CodeActivityEventRecord[]> {
-    return this.codeRunOps.listCodeActivityEvents(input);
+    async listCodeActivityEvents(input: ListCodeActivityEventsInput): Promise<CodeActivityEventRecord[]> {
+    return listCodeActivityEvents(this.codeState(), input);
   }
 
   async createReplayBundle(input: CreateReplayBundleInput): Promise<ReplayBundleRecord> {
