@@ -1461,3 +1461,10 @@ PostgresWorkspaceStore        ← публічний фасад; тонкі де
 **Чому це був ключовий крок:** саме ці п'ять методів викликаються звідусіль (`assertCompany` — 29 разів, `getBusiness` — 20, `getProject` — 18, `assertMember` — 12, `ensureIdentity` — 8), і без них кожен доменний модуль залежав би від фасада ✗. Тепер домени імпортують функції, а фасад делегує.
 
 **Перевірено:** `tsc --noEmit` (воркспейс, усі воркспейси, тестовий проєкт) — **exit 0** ✓ · `npm run lint` — **exit 0** ✓ · **c-серія** — **рівно 3 наявні падіння каталогу, як на базі** ✓ (регресій немає).
+### Крок 1c — перший домен: audit ✓
+
+`postgres-store.ts` 4 442 → **4 361**; сім методів аудиту (`appendAuditEntry` 37, `listAuditEntries` 14, `verifyAuditChain` 10, `auditChainState` 13, `listAuditAnchors` 7, `auditCompanies` 5, `systemAuditChains` 17 — разом 103 рядки) винесено в `postgres-audit-repository.ts` (123 рядки) як функції над `pool`. Фасад лишає **тонкі делегації з тими самими сигнатурами** ✓, тож публічний API не змінився, а всі виклики поза доменом (`latestAuditAnchor` → `listAuditAnchors`) працюють через фасад без правок ✓.
+
+**Тіла змінено двома механічними правками:** `this.pool` → аргумент `pool` ✓, `this.assertCompany(...)` → спільний `assertCompany(pool, ...)` із кроку 1b ✓ (саме для цього lookups і виносилися — домен не залежить від фасада ✓). SQL аудиту не дубльовано, транзакція `appendAuditEntry` (advisory-lock + COMMIT/ROLLBACK) збережена дослівно ✓.
+
+**Перевірено:** `tsc --noEmit` (воркспейс, усі воркспейси, тестовий проєкт) — **exit 0** ✓ · `npm run lint` — **exit 0** ✓ · **c-серія** — **рівно 3 наявні падіння каталогу, як на базі** ✓ (регресій немає).
