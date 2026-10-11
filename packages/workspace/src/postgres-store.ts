@@ -80,6 +80,7 @@ import {
   mapReplayBundleStepRow,
   mapSnapshotConfigVersionRow,
 } from "./postgres-row-mappers";
+import * as lookups from "./postgres-lookups";
 
 export class PostgresWorkspaceStore implements WorkspaceStore {
   private codeProcessesInstance?: PostgresCodeProcessStore;
@@ -1671,29 +1672,15 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   private async ensureIdentity(context: AuthContext) {
-    const client = await this.pool.connect();
-    try {
-      await client.query("BEGIN");
-      await client.query(`INSERT INTO users(id, external_subject, display_name) VALUES ($1,$2,$3)
-        ON CONFLICT(id) DO UPDATE SET external_subject=COALESCE(EXCLUDED.external_subject,users.external_subject), updated_at=now()`, [context.userId, context.externalSubject ?? null, "Dev User"]);
-      await client.query(`INSERT INTO workspaces(id,name,owner_user_id) VALUES ($1,$2,$3) ON CONFLICT(id) DO NOTHING`, [context.workspaceId, "My Workspace", context.userId]);
-      await client.query(`INSERT INTO workspace_members(workspace_id,user_id,role) VALUES ($1,$2,'owner') ON CONFLICT(workspace_id,user_id) DO NOTHING`, [context.workspaceId, context.userId]);
-      await client.query("COMMIT");
-    } catch (error) { await client.query("ROLLBACK"); throw error; }
-    finally { client.release(); }
+    await lookups.ensureIdentity(this.pool, context);
   }
 
   private async assertMember(context: AuthContext) {
-    const result = await this.pool.query("SELECT role FROM workspace_members WHERE workspace_id=$1 AND user_id=$2", [context.workspaceId, context.userId]);
-    if (!result.rowCount) throw new WorkspaceAccessError("Workspace access denied");
-    return String(result.rows[0].role);
+    return lookups.assertMember(this.pool, context);
   }
 
   async getBusiness(context: AuthContext, businessId: string) {
-    await this.assertMember(context);
-    const result = await this.pool.query<Business>(`SELECT ${businessColumns} FROM businesses WHERE id=$1 AND workspace_id=$2`, [businessId, context.workspaceId]);
-    if (!result.rowCount) throw new WorkspaceAccessError("Business is not available in this workspace");
-    return result.rows[0]!;
+    return lookups.getBusiness(this.pool, context, businessId);
   }
 
   async getUserBusiness(context: AuthContext, businessId: string) {
@@ -1808,11 +1795,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
 
 
   private async assertCompany(context: AuthContext, companyId: string) {
-    if (context.companyId && context.companyId !== companyId) throw new WorkspaceAccessError("API key is not valid for this company");
-    await this.assertMember(context);
-    const result = await this.pool.query<Company>(`SELECT ${companyColumns} FROM companies WHERE id=$1 AND workspace_id=$2 AND user_id=$3`, [companyId, context.workspaceId, context.userId]);
-    if (!result.rowCount) throw new WorkspaceAccessError("Company is not available to this user");
-    return result.rows[0]!;
+    return lookups.assertCompany(this.pool, context, companyId);
   }
 
   async listCompanies(context: AuthContext, requestedLimit = 20, cursor?: string) {
@@ -1995,12 +1978,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   async getProject(context: AuthContext, companyId: string, projectId: string) {
-    await this.assertCompany(context, companyId);
-    const result = await this.pool.query<Project>(`SELECT ${projectColumns} FROM projects
-      WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND created_by=$4`,
-      [projectId,context.workspaceId,companyId,context.userId]);
-    if (!result.rows[0]) throw new WorkspaceNotFoundError("Project not found");
-    return result.rows[0];
+    return lookups.getProject(this.pool, context, companyId, projectId);
   }
 
   async updateProject(context: AuthContext, companyId: string, projectId: string, input: { name?: string; expectedRevision: number; code?: ProjectCodeSettings }) {
