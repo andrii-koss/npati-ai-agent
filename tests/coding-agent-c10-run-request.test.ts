@@ -397,7 +397,7 @@ describe("security-gate: C10 run request — the decision itself", () => {
     expect(migration).toContain("CHECK (data_classification IN ('public','internal','confidential','restricted'))");
     expect(migration).toContain("CHECK (retention_class IN ('ephemeral','short','standard','extended','until_deleted'))");
     // The row is created by the same statement that records the request: the write is atomic with the run.
-    const store = ["postgres-store.ts", "postgres-code-runs-repository.ts"].map((f) => readFileSync(`packages/workspace/src/${f}`, "utf8")).join("\n");
+    const store = ["postgres-store.ts", "postgres-project-repositories.ts"].map((f) => readFileSync(`packages/workspace/src/${f}`, "utf8")).join("\n");
     expect(store).toContain("ON CONFLICT (run_id) DO NOTHING");
     expect(store).toMatch(/request_status, request_text, request_sha256, request_truncated, request_recorded_at/);
   });

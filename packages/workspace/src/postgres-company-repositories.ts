@@ -1,19 +1,251 @@
-/* The agent-graph domain of the Postgres workspace store, split out in an architectural step of
- * docs/refactoring/PLAN.md.
- *
- * The method bodies are the previous ones with mechanical rewrites only: `this.pool` became the `pool`
- * argument, calls to sibling methods in the same domain pass that pool on, and the shared ownership checks
- * come from postgres-lookups.ts. The facade keeps every public method as a thin delegation.
- */
 import { Pool } from "pg";
-import { assertCompany } from "./postgres-lookups";
+import { assertCompany, ensureIdentity, getBusiness } from "./postgres-store-support";
 import { randomUUID } from "node:crypto";
-import type { AuthContext, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyMember, CompanyInvite, CompanyInviteInput, UpdateCompanyMemberRoleInput, RemoveCompanyMemberInput } from "./types";
-import { isCompanyRole } from "./types";
-import { CompanyMembershipError, WorkspaceAccessError, WorkspaceNotFoundError } from "./types";
+import type { AuditAnchor, AuditChainState, AuditChainVerification, AuditEntry, AuditEntryInput, AuthContext, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInvite, CompanyInviteInput, CompanyMember, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, RemoveCompanyMemberInput, UpdateCompanyMemberRoleInput } from "./types";
+import { auditEntryHash, verifyAuditEntries } from "./audit-chain";
+import { auditAnchorColumns, auditEntryColumns, companyAgentColumns, companyEdgeColumns, companyInviteColumns, companyMemberColumns, companyRunColumns, companyRunEventColumns, companyRunStepColumns, companyToolAuditColumns, conversationColumns, goalColumns, lastActiveOwnerPredicate, memoryColumns } from "./postgres-store-schema";
+import { assertNoSecrets } from "@npati/memory";
+import { CompanyMembershipError, WorkspaceAccessError, WorkspaceNotFoundError, isCompanyRole } from "./types";
 import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from "./pagination";
-import { companyAgentColumns, companyEdgeColumns, companyRunColumns, companyRunStepColumns, companyToolAuditColumns, companyRunEventColumns, companyMemberColumns, companyInviteColumns, lastActiveOwnerPredicate } from "./postgres-store-schema";
 
+export async function appendAuditEntry(pool: Pool, context: AuthContext, companyId: string, input: AuditEntryInput): Promise<AuditEntry> {
+    await assertCompany(pool, context, companyId);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`audit:${companyId}`]);
+      const head = await client.query<{ sequence: string; entry_hash: string }>(
+        "SELECT sequence, entry_hash FROM audit_log WHERE company_id=$1 ORDER BY sequence DESC LIMIT 1",
+        [companyId],
+      );
+      const prevHash = head.rows[0]?.entry_hash ?? null;
+      const sequence = head.rows[0] ? Number(head.rows[0].sequence) + 1 : 1;
+      const createdAt = new Date().toISOString();
+      const id = randomUUID();
+      const metadata = input.metadata ?? {};
+      const entryHash = auditEntryHash(prevHash, {
+        id, companyId, sequence, createdAt, actor: input.actor, actorRole: input.actorRole,
+        requestId: input.requestId ?? null, correlationId: input.correlationId ?? null, snapshotId: input.snapshotId ?? null,
+        action: input.action, resourceType: input.resourceType, resourceId: input.resourceId ?? null,
+        projectId: input.projectId ?? null, decision: input.decision, payloadHash: input.payloadHash, metadata,
+      });
+      const inserted = await client.query<AuditEntry>(`INSERT INTO audit_log
+        (id, workspace_id, company_id, sequence, created_at, actor, actor_role, request_id, correlation_id, snapshot_id,
+         action, resource_type, resource_id, project_id, decision, payload_hash, prev_hash, entry_hash, metadata)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+        RETURNING ${auditEntryColumns}`,
+        [id, context.workspaceId, companyId, sequence, createdAt, input.actor, input.actorRole,
+          input.requestId ?? null, input.correlationId ?? null, input.snapshotId ?? null,
+          input.action, input.resourceType, input.resourceId ?? null, input.projectId ?? null,
+          input.decision, input.payloadHash, prevHash, entryHash, JSON.stringify(metadata)]);
+      await client.query("COMMIT");
+      return inserted.rows[0]!;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally { client.release(); }
+  }
+
+export async function listAuditEntries(pool: Pool, context: AuthContext, companyId: string, filters: { actor?: string; requestId?: string; correlationId?: string; action?: string; limit?: number; fromSequence?: number } = {}): Promise<AuditEntry[]> {
+    await assertCompany(pool, context, companyId);
+    const result = await pool.query<AuditEntry>(`SELECT ${auditEntryColumns} FROM audit_log
+      WHERE workspace_id=$1 AND company_id=$2
+        AND ($3::text IS NULL OR actor=$3)
+        AND ($4::text IS NULL OR request_id=$4)
+        AND ($5::text IS NULL OR correlation_id=$5)
+        AND ($6::text IS NULL OR action=$6)
+        AND ($7::bigint IS NULL OR sequence >= $7)
+      ORDER BY sequence ASC LIMIT $8`,
+      [context.workspaceId, companyId, filters.actor ?? null, filters.requestId ?? null, filters.correlationId ?? null,
+        filters.action ?? null, filters.fromSequence ?? null, Math.max(1, Math.min(filters.limit ?? 200, 1000))]);
+    return result.rows;
+  }
+
+export async function verifyAuditChain(pool: Pool, context: AuthContext, companyId: string, range: { fromSequence?: number; toSequence?: number } = {}): Promise<AuditChainVerification> {
+    await assertCompany(pool, context, companyId);
+    const result = await pool.query<AuditEntry>(`SELECT ${auditEntryColumns} FROM audit_log
+      WHERE workspace_id=$1 AND company_id=$2
+        AND ($3::bigint IS NULL OR sequence >= $3)
+        AND ($4::bigint IS NULL OR sequence <= $4)
+      ORDER BY sequence ASC`,
+      [context.workspaceId, companyId, range.fromSequence ?? null, range.toSequence ?? null]);
+    return verifyAuditEntries(result.rows);
+  }
+
+export async function auditChainState(pool: Pool, context: AuthContext, companyId: string): Promise<AuditChainState> {
+    await assertCompany(pool, context, companyId);
+    const result = await pool.query<{ entry_count: string; head_sequence: string | null; head_hash: string | null }>(
+      "SELECT count(*)::text AS entry_count, max(sequence)::text AS head_sequence, (array_agg(entry_hash ORDER BY sequence DESC))[1] AS head_hash FROM audit_log WHERE company_id=$1",
+      [companyId]);
+    const row = result.rows[0];
+    return {
+      companyId,
+      entryCount: Number(row?.entry_count ?? 0),
+      headSequence: Number(row?.head_sequence ?? 0),
+      headHash: row?.head_hash ?? null,
+    };
+  }
+
+export async function listAuditAnchors(pool: Pool, context: AuthContext, companyId: string, limit = 90): Promise<AuditAnchor[]> {
+    await assertCompany(pool, context, companyId);
+    const result = await pool.query<AuditAnchor>(`SELECT ${auditAnchorColumns} FROM audit_anchors
+      WHERE workspace_id=$1 AND company_id=$2 ORDER BY day DESC LIMIT $3`,
+      [context.workspaceId, companyId, Math.max(1, Math.min(limit, 365))]);
+    return result.rows;
+  }
+
+export async function auditCompanies(pool: Pool, context: AuthContext): Promise<string[]> {
+    const result = await pool.query<{ company_id: string }>(
+      "SELECT DISTINCT company_id FROM audit_log WHERE workspace_id=$1 ORDER BY company_id", [context.workspaceId]);
+    return result.rows.map((row) => row.company_id);
+  }
+
+export async function systemAuditChains(pool: Pool, workspaceId: string) {
+    const companies = await pool.query<{ company_id: string }>(
+      "SELECT DISTINCT company_id FROM audit_log WHERE workspace_id=$1 ORDER BY company_id", [workspaceId]);
+    const result: Array<{ companyId: string; state: AuditChainState; verification: AuditChainVerification }> = [];
+    for (const row of companies.rows) {
+      const entries = await pool.query<AuditEntry>(`SELECT ${auditEntryColumns} FROM audit_log
+        WHERE workspace_id=$1 AND company_id=$2 ORDER BY sequence ASC`, [workspaceId, row.company_id]);
+      const verification = verifyAuditEntries(entries.rows);
+      const last = entries.rows[entries.rows.length - 1];
+      result.push({
+        companyId: row.company_id,
+        state: { companyId: row.company_id, entryCount: entries.rows.length, headSequence: last?.sequence ?? 0, headHash: last?.entryHash ?? null },
+        verification: { ...verification, companyId: row.company_id },
+      });
+    }
+    return result;
+  }
+export async function listGoals(pool: Pool, context: AuthContext, businessId: string) {
+    await getBusiness(pool, context, businessId);
+    return (await pool.query<Goal>(`SELECT ${goalColumns} FROM goals WHERE workspace_id=$1 AND business_id=$2 ORDER BY priority, updated_at DESC`, [context.workspaceId, businessId])).rows;
+  }
+
+export async function createGoal(pool: Pool, context: AuthContext, businessId: string, input: GoalInput) {
+    await getBusiness(pool, context, businessId);
+    const values = [randomUUID(), context.workspaceId, businessId, context.userId, input.title.trim(), input.description ?? null, input.status ?? "active", input.targetValue ?? null, input.targetUnit ?? null, input.currentValue ?? null, input.targetDate ?? null, input.priority ?? 3];
+    const result = await pool.query<Goal>(`INSERT INTO goals(id,workspace_id,business_id,created_by_user_id,title,description,status,target_value,target_unit,current_value,target_date,priority)
+      VALUES (${values.map((_, index) => `$${index + 1}`).join(",")}) RETURNING ${goalColumns}`, values);
+    return result.rows[0]!;
+  }
+
+export async function updateGoal(pool: Pool, context: AuthContext, businessId: string, goalId: string, input: Partial<GoalInput>) {
+    await getBusiness(pool, context, businessId);
+    const values = [goalId, context.workspaceId, businessId, input.title, input.description, input.status, input.targetValue, input.targetUnit, input.currentValue, input.targetDate, input.priority];
+    const result = await pool.query<Goal>(`UPDATE goals SET title=COALESCE($4,title),description=COALESCE($5,description),status=COALESCE($6,status),target_value=COALESCE($7,target_value),target_unit=COALESCE($8,target_unit),current_value=COALESCE($9,current_value),target_date=COALESCE($10,target_date),priority=COALESCE($11,priority),updated_at=now()
+      WHERE id=$1 AND workspace_id=$2 AND business_id=$3 RETURNING ${goalColumns}`, values.map((value) => value === undefined ? null : value));
+    if (!result.rowCount) throw new WorkspaceAccessError("Goal is not available for this business");
+    return result.rows[0]!;
+  }
+
+export async function deleteGoal(pool: Pool, context: AuthContext, businessId: string, goalId: string) {
+    await getBusiness(pool, context, businessId);
+    return Boolean((await pool.query("DELETE FROM goals WHERE id=$1 AND workspace_id=$2 AND business_id=$3 RETURNING id", [goalId, context.workspaceId, businessId])).rowCount);
+  }
+
+export async function listMemory(pool: Pool, context: AuthContext, businessId: string, query = "", limit = 100) {
+    await getBusiness(pool, context, businessId);
+    const needle = `%${query.trim()}%`;
+    return (await pool.query<MemoryItem>(`SELECT ${memoryColumns} FROM memory_items WHERE workspace_id=$1 AND business_id=$2 AND ($3='' OR type ILIKE $4 OR title ILIKE $4 OR content ILIKE $4) ORDER BY updated_at DESC LIMIT $5`, [context.workspaceId, businessId, query.trim(), needle, Math.min(limit, 100)])).rows;
+  }
+
+export async function createMemory(pool: Pool, context: AuthContext, businessId: string, input: MemoryInput) {
+    await getBusiness(pool, context, businessId); assertNoSecrets(input);
+    const values = [randomUUID(), context.workspaceId, businessId, context.userId, input.type, input.title.trim(), input.content.trim(), input.source ?? "user", input.confidence ?? null];
+    const result = await pool.query<MemoryItem>(`INSERT INTO memory_items(id,workspace_id,business_id,user_id,type,title,content,source,confidence) VALUES (${values.map((_, index) => `$${index + 1}`).join(",")}) RETURNING ${memoryColumns}`, values);
+    return result.rows[0]!;
+  }
+
+export async function updateMemory(pool: Pool, context: AuthContext, businessId: string, memoryId: string, input: Partial<MemoryInput>) {
+    await getBusiness(pool, context, businessId); assertNoSecrets(input);
+    const values = [memoryId, context.workspaceId, businessId, input.type, input.title, input.content, input.source, input.confidence];
+    const result = await pool.query<MemoryItem>(`UPDATE memory_items SET type=COALESCE($4,type),title=COALESCE($5,title),content=COALESCE($6,content),source=COALESCE($7,source),confidence=COALESCE($8,confidence),updated_at=now() WHERE id=$1 AND workspace_id=$2 AND business_id=$3 RETURNING ${memoryColumns}`, values.map((value) => value === undefined ? null : value));
+    if (!result.rowCount) throw new WorkspaceAccessError("Memory is not available for this business");
+    return result.rows[0]!;
+  }
+
+export async function deleteMemory(pool: Pool, context: AuthContext, businessId: string, memoryId: string) {
+    await getBusiness(pool, context, businessId);
+    return Boolean((await pool.query("DELETE FROM memory_items WHERE id=$1 AND workspace_id=$2 AND business_id=$3 RETURNING id", [memoryId, context.workspaceId, businessId])).rowCount);
+  }
+
+export async function listConversations(pool: Pool, context: AuthContext, businessId: string) {
+    await getBusiness(pool, context, businessId);
+    return (await pool.query<Conversation>(`SELECT ${conversationColumns} FROM conversations WHERE workspace_id=$1 AND business_id=$2 AND user_id=$3 ORDER BY updated_at DESC`, [context.workspaceId, businessId, context.userId])).rows;
+  }
+
+export async function createConversation(pool: Pool, context: AuthContext, businessId: string, title: string) {
+    await getBusiness(pool, context, businessId);
+    const result = await pool.query<Conversation>(`INSERT INTO conversations(id,workspace_id,business_id,user_id,title) VALUES ($1,$2,$3,$4,$5) RETURNING ${conversationColumns}`, [randomUUID(), context.workspaceId, businessId, context.userId, title.trim().slice(0, 120) || "New conversation"]);
+    return result.rows[0]!;
+  }
+
+export async function getConversation(pool: Pool, context: AuthContext, businessId: string, conversationId: string) {
+    await getBusiness(pool, context, businessId);
+    const result = await pool.query<Conversation>(`SELECT ${conversationColumns} FROM conversations WHERE id=$1 AND workspace_id=$2 AND business_id=$3 AND user_id=$4`, [conversationId, context.workspaceId, businessId, context.userId]);
+    if (!result.rowCount) throw new WorkspaceAccessError("Conversation is not available for this business");
+    const messages = (await pool.query<ConversationMessage>(`SELECT id, conversation_id AS "conversationId", role, content, created_at AS "createdAt" FROM messages WHERE conversation_id=$1 ORDER BY created_at`, [conversationId])).rows;
+    return { conversation: result.rows[0]!, messages };
+  }
+
+export async function updateConversation(pool: Pool, context: AuthContext, businessId: string, conversationId: string, title: string) {
+    await getConversation(pool, context, businessId, conversationId);
+    const result = await pool.query<Conversation>(
+      `UPDATE conversations SET title=$1,updated_at=now() WHERE id=$2 RETURNING ${conversationColumns}`,
+      [title.trim().slice(0, 120) || "New conversation", conversationId],
+    );
+    return result.rows[0]!;
+  }
+
+export async function deleteConversation(pool: Pool, context: AuthContext, businessId: string, conversationId: string) {
+    await getConversation(pool, context, businessId, conversationId);
+    return Boolean((await pool.query("DELETE FROM conversations WHERE id=$1", [conversationId])).rowCount);
+  }
+
+export async function appendMessage(pool: Pool, context: AuthContext, businessId: string, conversationId: string, role: ConversationMessage["role"], content: string) {
+    await getConversation(pool, context, businessId, conversationId);
+    const result = await pool.query<ConversationMessage>(`INSERT INTO messages(id,conversation_id,role,content) VALUES ($1,$2,$3,$4) RETURNING id,conversation_id AS "conversationId",role,content,created_at AS "createdAt"`, [randomUUID(), conversationId, role, content]);
+    await pool.query("UPDATE conversations SET updated_at=now() WHERE id=$1", [conversationId]);
+    return result.rows[0]!;
+  }
+
+export async function listNeutralConversations(pool: Pool, context: AuthContext) {
+    await ensureIdentity(pool, context);
+    return (await pool.query<Conversation>(`SELECT ${conversationColumns} FROM conversations WHERE workspace_id=$1 AND business_id IS NULL AND user_id=$2 ORDER BY updated_at DESC`, [context.workspaceId, context.userId])).rows;
+  }
+
+export async function createNeutralConversation(pool: Pool, context: AuthContext, title: string) {
+    await ensureIdentity(pool, context);
+    const result = await pool.query<Conversation>(`INSERT INTO conversations(id,workspace_id,business_id,user_id,title) VALUES ($1,$2,NULL,$3,$4) RETURNING ${conversationColumns}`, [randomUUID(), context.workspaceId, context.userId, title.trim().slice(0, 120) || "New conversation"]);
+    return result.rows[0]!;
+  }
+
+export async function getNeutralConversation(pool: Pool, context: AuthContext, conversationId: string) {
+    await ensureIdentity(pool, context);
+    const result = await pool.query<Conversation>(`SELECT ${conversationColumns} FROM conversations WHERE id=$1 AND workspace_id=$2 AND business_id IS NULL AND user_id=$3`, [conversationId, context.workspaceId, context.userId]);
+    if (!result.rowCount) throw new WorkspaceAccessError("Conversation is not available to this user");
+    const messages = (await pool.query<ConversationMessage>(`SELECT id, conversation_id AS "conversationId", role, content, created_at AS "createdAt" FROM messages WHERE conversation_id=$1 ORDER BY created_at`, [conversationId])).rows;
+    return { conversation: result.rows[0]!, messages };
+  }
+
+export async function updateNeutralConversation(pool: Pool, context: AuthContext, conversationId: string, title: string) {
+    await getNeutralConversation(pool, context, conversationId);
+    const result = await pool.query<Conversation>(`UPDATE conversations SET title=$1,updated_at=now() WHERE id=$2 RETURNING ${conversationColumns}`, [title.trim().slice(0, 120) || "New conversation", conversationId]);
+    return result.rows[0]!;
+  }
+
+export async function deleteNeutralConversation(pool: Pool, context: AuthContext, conversationId: string) {
+    await getNeutralConversation(pool, context, conversationId);
+    return Boolean((await pool.query("DELETE FROM conversations WHERE id=$1", [conversationId])).rowCount);
+  }
+
+export async function appendNeutralMessage(pool: Pool, context: AuthContext, conversationId: string, role: ConversationMessage["role"], content: string) {
+    await getNeutralConversation(pool, context, conversationId);
+    const result = await pool.query<ConversationMessage>(`INSERT INTO messages(id,conversation_id,role,content) VALUES ($1,$2,$3,$4) RETURNING id,conversation_id AS "conversationId",role,content,created_at AS "createdAt"`, [randomUUID(), conversationId, role, content]);
+    await pool.query("UPDATE conversations SET updated_at=now() WHERE id=$1", [conversationId]);
+    return result.rows[0]!;
+  }
 export async function listCompanyAgents(pool: Pool, context: AuthContext, companyId: string) {
     await assertCompany(pool, context, companyId);
     return (await pool.query<CompanyAgent>(`SELECT ${companyAgentColumns} FROM company_agents
@@ -318,8 +550,8 @@ export async function createCompanyInvite(pool: Pool, input: CompanyInviteInput)
     if (!isCompanyRole(input.role)) {
       throw new CompanyMembershipError("invalid_company_role", `Unknown company role: ${String(input.role)}`, { httpStatus: 400 });
     }
-    // A token hash is unique (company_invites_token_hash_key): a duplicate must be refused loudly rather
-    // than silently reused, because two live invites would share one secret.
+    
+    
     const duplicate = await pool.query("SELECT 1 FROM company_invites WHERE token_hash=$1", [input.tokenHash]);
     if (duplicate.rowCount) {
       throw new CompanyMembershipError("invite_token_conflict", "An invite with this token hash already exists", { httpStatus: 409 });
@@ -332,7 +564,7 @@ export async function createCompanyInvite(pool: Pool, input: CompanyInviteInput)
       [input.id, input.companyId, input.email, input.role, input.tokenHash, input.expiresAt, input.createdBy,
         input.acceptedAt ?? null, input.createdAt ?? new Date()]);
     if (!result.rows[0]) {
-      // The unique index won a race with the check above.
+      
       throw new CompanyMembershipError("invite_token_conflict", "An invite with this token hash already exists", { httpStatus: 409 });
     }
     return result.rows[0];
@@ -356,7 +588,7 @@ export async function updateCompanyMemberRole(pool: Pool, input: UpdateCompanyMe
       RETURNING ${companyMemberColumns}`,
       [input.companyId, input.userId, input.role, input.expectedRevision, input.updatedAt]);
     if (result.rows[0]) return result.rows[0];
-    // The guarded write matched nothing: find out why, in the same order the in-memory store reports.
+    
     const current = await getCompanyMembership(pool, input.companyId, input.userId);
     if (!current) {
       throw new CompanyMembershipError("membership_not_found", "User is not a member of this company", { httpStatus: 404 });
@@ -385,7 +617,7 @@ export async function removeCompanyMember(pool: Pool, input: RemoveCompanyMember
         AND NOT (status='active' AND role='owner' AND ${lastActiveOwnerPredicate("$1")})`,
       [input.companyId, input.userId]);
     if (result.rowCount) return;
-    // Nothing was deleted: either there was no row, or the only-owner guard refused the delete.
+    
     const current = await getCompanyMembership(pool, input.companyId, input.userId);
     if (!current) return;
     const owners = await countCompanyOwners(pool, input.companyId);
