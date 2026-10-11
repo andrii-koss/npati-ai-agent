@@ -16,7 +16,7 @@ services:
       NPATI_PROJECT_RUNTIME_MODE: isolated
       NPATI_SANDBOX_RUNNER_MODE: ${NPATI_SANDBOX_RUNNER_MODE:-local}
       NPATI_SANDBOX_RUNNER_URL: ${NPATI_SANDBOX_RUNNER_URL:-http://sandbox-runner:7865}
-      NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:-}
+      NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:?NPATI_SANDBOX_RUNNER_SECRET must be at least 32 characters for isolated execution}
       NPATI_PREVIEW_SECRET: ${NPATI_PREVIEW_SECRET:-}
       # Public HTTPS base URL of the Project API (Data Studio). Without it generated sites and
       # apps get no PROJECT_API_URL/PROJECT_PUBLISHABLE_KEY and the SDK is not vendored.
@@ -164,10 +164,13 @@ services:
     environment:
       NPATI_PROJECT_RUNTIME_MODE: isolated
       NPATI_SANDBOX_RUNNER_MODE: local
-      NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:-}
-      NPATI_SANDBOX_IMAGE: npati/project-sandbox:local
-      NPATI_SANDBOX_EGRESS_IMAGE: npati/sandbox-egress:local
-      NPATI_BROWSER_QA_IMAGE: npati/browser-qa:local
+      NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:?NPATI_SANDBOX_RUNNER_SECRET must be at least 32 characters for isolated execution}
+      NPATI_SANDBOX_IMAGE: ${NPATI_SANDBOX_IMAGE:-npati/project-sandbox:local}
+      NPATI_SANDBOX_EGRESS_IMAGE: ${NPATI_SANDBOX_EGRESS_IMAGE:-npati/sandbox-egress:local}
+      NPATI_BROWSER_QA_IMAGE: ${NPATI_BROWSER_QA_IMAGE:-npati/browser-qa:local}
+      DATABASE_URL: postgresql://${NPATI_POSTGRES_USER:-npati}:${NPATI_POSTGRES_PASSWORD:?NPATI_POSTGRES_PASSWORD is required}@postgres:5432/${NPATI_POSTGRES_DB:-npati_agent}
+      NPATI_SANDBOX_SIGNATURE_IDENTITY: ${NPATI_SANDBOX_SIGNATURE_IDENTITY:-}
+      NPATI_SANDBOX_SIGNATURE_ISSUER: ${NPATI_SANDBOX_SIGNATURE_ISSUER:-https://token.actions.githubusercontent.com}
       # R1 (section A, item 4): the per-sandbox ceilings. These are the same start values the runner falls back
       # to (`sandbox-resource-quota.ts` defaults) — 2 vCPU / 4 GB / 512 pids / 10 GB — and before R1 this file
       # pinned 1 / 1536m / 128 / 1536 MiB, which silently overrode the code defaults because compose always sets
@@ -196,12 +199,14 @@ services:
     mem_limit: 512m
     pids_limit: 128
     healthcheck:
-      test: ["CMD-SHELL", "docker info >/dev/null 2>&1 && docker image inspect npati/project-sandbox:local npati/sandbox-egress:local >/dev/null 2>&1 && node -e \"fetch('http://127.0.0.1:7865/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7865/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 5
       start_period: 300s
-    networks: [npati-sandbox-control]
+    # The trusted runner needs database revocations and registry/signature access.
+    # Project containers still use their own internal networks, created by the provider.
+    networks: [npati-sandbox-control, npati-agent]
 
   crawler:
     build:

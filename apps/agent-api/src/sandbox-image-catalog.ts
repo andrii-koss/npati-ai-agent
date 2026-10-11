@@ -79,7 +79,29 @@ export function validateCatalog(catalog: SandboxImageCatalog): SandboxImageCatal
 export function parseCatalog(raw: string): SandboxImageCatalog {
   let parsed: unknown;
   try { parsed = JSON.parse(raw); } catch (error) { throw new SandboxImageCatalogError(`Image catalogue is not valid JSON: ${error instanceof Error ? error.message : "parse error"}`, [{ index: -1, reason: "invalid_json" }]); }
-  const catalog = parsed as SandboxImageCatalog;
+  // Publishing scripts write schemaVersion 1 with nested scan/signature/waiver
+  // metadata; older runtime catalogues use the flat persisted shape. Preserve
+  // their actual status and scan evidence when translating the published format.
+  const source = parsed as { images?: unknown[] } | null;
+  const catalog = {
+    ...(source ?? {}),
+    images: Array.isArray(source?.images) ? source.images.map(rawEntry => {
+      if (!rawEntry || typeof rawEntry !== "object") return rawEntry;
+      const entry = rawEntry as Record<string, any>;
+      return {
+        ...entry,
+        scanAt: entry.scanAt ?? entry.scan?.at,
+        scanTool: entry.scanTool ?? entry.scan?.tool,
+        scanCritical: entry.scanCritical ?? entry.scan?.critical,
+        scanHigh: entry.scanHigh ?? entry.scan?.high,
+        signature: typeof entry.signature === "string" ? entry.signature : entry.signature?.identity,
+        signatureIssuer: entry.signatureIssuer ?? entry.signature?.issuer,
+        waiverOwner: entry.waiverOwner ?? entry.waiver?.owner,
+        waiverExpiresAt: entry.waiverExpiresAt ?? entry.waiver?.expiresAt,
+        waiverReason: entry.waiverReason ?? entry.waiver?.reason,
+      };
+    }) : source?.images,
+  } as SandboxImageCatalog;
   const problems = validateCatalog(catalog);
   if (problems.length) throw new SandboxImageCatalogError(`Image catalogue is invalid (${problems.length} problem(s))`, problems);
   return catalog;

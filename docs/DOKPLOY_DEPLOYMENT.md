@@ -137,8 +137,26 @@ without the isolation boundary. Configure total runtime resources with
 
 For an older host or deployments requiring independent Docker isolation/quotas,
 choose `docker-compose.dokploy-isolated.yml` instead. Its runner uses the Docker
-socket and prepares the sandbox/egress images before accepting work. The isolated
-configuration retains the `NPATI_HOST_ADMISSION_*` settings.
+socket and pulls published sandbox/egress images before accepting work. Set
+`NPATI_SANDBOX_IMAGE` and `NPATI_SANDBOX_EGRESS_IMAGE` to immutable
+`registry/repository@sha256:<digest>` references, and set the shared
+`NPATI_SANDBOX_RUNNER_SECRET` (at least 32 characters). Production does not build
+the default `:local` images at startup.
+
+Publish and review images through `.github/workflows/sandbox-images.yml`. The
+runner includes Cosign and the catalogue from `docker/sandbox/images.json`;
+production admission requires a verified catalogue entry, a fresh vulnerability
+scan, and a valid signature. The repository's unverified entries are not production
+approval. Configure `NPATI_SANDBOX_SIGNATURE_IDENTITY` and
+`NPATI_SANDBOX_SIGNATURE_ISSUER` for your publishing workflow, and rebuild the
+runner after updating the reviewed catalogue. Do not enable
+`NPATI_SANDBOX_ALLOW_UNVERIFIED_IMAGES` in production.
+
+The trusted runner joins the application network for PostgreSQL and registry
+access. Project sandboxes still use their own isolated networks with an allowlisted
+egress proxy. `/health` checks image availability and network enforcement. Image
+admission is also checked when creating a sandbox. The isolated configuration
+retains the `NPATI_HOST_ADMISSION_*` settings.
 
 Read [shared runtime deployment and migration](website-builder/SHARED_PROJECT_RUNTIME.md)
 before switching an existing installation. The runtime's `projects` and state

@@ -197,7 +197,10 @@ void runnerPreflight().catch(() => console.error("[sandbox-runner-preflight] fai
 const resourceNames = (id: string) => /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id) ? { container: `npati-sb-${id}`, network: `npati-net-${id}` } : { container: null, network: null };
 const app = Fastify({ bodyLimit: 25_000_000, logger: false });
 const seen = new Map<string, number>();
-app.get("/health", async () => ({ status: "ok" }));
+app.get("/health", async (_request, reply) => {
+  const report = await runnerReadiness.collect();
+  return reply.code(report.overall_ready ? 200 : 503).send(report);
+});
 app.addContentTypeParser("application/json", { parseAs: "string" }, (_request, body, done) => done(null, body));
 /**
  * C4b (owner decision): the runner is the authoritative component for network enforcement, so it exposes

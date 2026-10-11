@@ -586,7 +586,7 @@ export interface SandboxImageInput {
   previousReference?: string | null;
 }
 /** The exact shape of `repo@sha256:<64 hex>`; used by both the store and the admission policy. */
-export const SANDBOX_IMAGE_REFERENCE_PATTERN = /^[a-z0-9][a-z0-9._/-]*(?::[0-9]+)?@sha256:[0-9a-f]{64}$/;
+export const SANDBOX_IMAGE_REFERENCE_PATTERN = /^(?:[a-z0-9][a-z0-9.-]*:[0-9]+\/)?[a-z0-9][a-z0-9._/-]*@sha256:[0-9a-f]{64}$/;
 
 export type CodeSessionMode = "plan" | "edit" | "auto" | "full_auto";export const CODE_SESSION_MODES: readonly CodeSessionMode[] = ["plan", "edit", "auto", "full_auto"] as const;
 export type CodeSessionStatus = "active" | "paused" | "awaiting_approval" | "completed" | "failed" | "cancelled" | "archived" | "suspended_by_flag";
