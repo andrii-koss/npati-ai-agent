@@ -27,6 +27,7 @@ import { diffAgentWorktree, removeAgentWorktree, type ProjectGitWorktreeExtraHos
 import { createCheckpoint, getCheckpoint, type ProjectGitCheckpointWriteHost } from "./project-git-checkpoint-write-service";
 import { push, type ProjectGitPushHost } from "./project-git-push-service";
 import { githubToken, acquireCredential, type ProjectGitCredentialHost } from "./project-git-credential-service";
+import { currentBranch, type ProjectGitBranchHost } from "./project-git-branch-service";
 
 const execFileAsync = promisify(execFile);
 
@@ -311,6 +312,12 @@ export class ProjectGitService {
     this.thresholds = {
       fileThreshold: thresholds?.fileThreshold ?? (Number(process.env.NPATI_CHECKPOINT_FILE_THRESHOLD) || defaultCheckpointThresholds.fileThreshold),
       lineThreshold: thresholds?.lineThreshold ?? (Number(process.env.NPATI_CHECKPOINT_LINE_THRESHOLD) || defaultCheckpointThresholds.lineThreshold),
+    };
+  }
+
+  private branchHost(): ProjectGitBranchHost {
+    return {
+      inspectRepository: this.inspectRepository.bind(this),
     };
   }
 
@@ -1051,31 +1058,13 @@ export class ProjectGitService {
    * was on its way to being refused. The inspection answers the same question with `lstat` and two
    * `rev-parse` probes, and an uninitialized workspace is reported as what it is.
    */
-  private async currentBranch(
+    private async currentBranch(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
     inspection?: GitRepositoryInspection,
   ): Promise<string> {
-    const state = inspection ?? await this.inspectRepository(ctx, companyId, projectId);
-    if (!state.initialized) {
-      // A caller that names no branch cannot be answered from a repository that does not exist, and this is
-      // the refusal that says so without creating one.
-      throw new GitError(
-        "repository_not_initialized",
-        "The project workspace has no git repository yet, so the branch of its checkout cannot be resolved; name the branch explicitly",
-        409,
-        { requiresInitialization: true, repositoryInitialized: false, projectId, repositoryState: "uninitialized" },
-      );
-    }
-    if (state.branch) return state.branch;
-    // A detached HEAD (or an unreadable checkout) answers nothing usable, which is not a branch to push by
-    // name: an unresolvable checkout is never a branch name to guess at.
-    throw new GitError(
-      "BRANCH_UNRESOLVED",
-      "The branch of the project checkout could not be resolved; name the branch explicitly",
-      409,
-    );
+    return currentBranch(this.branchHost(), ctx, companyId, projectId, inspection);
   }
 
   /**
