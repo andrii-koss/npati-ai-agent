@@ -28,6 +28,7 @@ import { createCheckpoint, getCheckpoint, type ProjectGitCheckpointWriteHost } f
 import { push, type ProjectGitPushHost } from "./project-git-push-service";
 import { githubToken, acquireCredential, type ProjectGitCredentialHost } from "./project-git-credential-service";
 import { currentBranch, type ProjectGitBranchHost } from "./project-git-branch-service";
+import { cleanupAllWorktrees, type ProjectGitCleanupHost } from "./project-git-cleanup-service";
 
 const execFileAsync = promisify(execFile);
 
@@ -312,6 +313,14 @@ export class ProjectGitService {
     this.thresholds = {
       fileThreshold: thresholds?.fileThreshold ?? (Number(process.env.NPATI_CHECKPOINT_FILE_THRESHOLD) || defaultCheckpointThresholds.fileThreshold),
       lineThreshold: thresholds?.lineThreshold ?? (Number(process.env.NPATI_CHECKPOINT_LINE_THRESHOLD) || defaultCheckpointThresholds.lineThreshold),
+    };
+  }
+
+  private cleanupHost(): ProjectGitCleanupHost {
+    return {
+      runGit: this.runGit.bind(this),
+      requireWrite: this.requireWrite.bind(this),
+      ensureRepository: this.ensureRepository.bind(this),
     };
   }
 
@@ -1256,38 +1265,12 @@ export class ProjectGitService {
     return removeAgentWorktree(this.worktreeExtraHost(), ctx, companyId, projectId, options);
   }
 
-  async cleanupAllWorktrees(
+    async cleanupAllWorktrees(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
   ): Promise<{ cleanedCount: number }> {
-    this.requireWrite(ctx);
-    const dir = await this.ensureRepository(ctx, companyId, projectId);
-    let cleanedCount = 0;
-
-    try {
-      const { stdout } = await this.runGit(dir, ["worktree", "list", "--porcelain"]);
-      const lines = stdout.split(/\r?\n/);
-      const wtBase = path.resolve(path.join(dir, ".worktrees"));
-
-      for (const line of lines) {
-        if (line.startsWith("worktree ")) {
-          const wtPath = path.resolve(line.slice(9).trim());
-          if (wtPath.startsWith(wtBase + path.sep)) {
-            try {
-              await this.runGit(dir, ["worktree", "remove", "--force", wtPath]);
-              cleanedCount++;
-            } catch {}
-            await rm(wtPath, { recursive: true, force: true }).catch(() => undefined);
-          }
-        }
-      }
-    } catch {}
-
-    await this.runGit(dir, ["worktree", "prune"]).catch(() => undefined);
-    await rm(path.join(dir, ".worktrees"), { recursive: true, force: true }).catch(() => undefined);
-
-    return { cleanedCount };
+    return cleanupAllWorktrees(this.cleanupHost(), ctx, companyId, projectId);
   }
 
     async listAgentWorktrees(
