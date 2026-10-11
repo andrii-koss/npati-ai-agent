@@ -78,8 +78,6 @@ services:
       NPATI_DATA_BACKUP_TICK_SECONDS: ${NPATI_DATA_BACKUP_TICK_SECONDS:-300}
       NPATI_DATA_BACKUP_DISABLED: ${NPATI_DATA_BACKUP_DISABLED:-}
       NPATI_PROMOTE_DATA_MAX_ROWS: ${NPATI_PROMOTE_DATA_MAX_ROWS:-500}
-      QDRANT_URL: http://qdrant:6333
-      QDRANT_INT8_ENABLED: "true"
       FTS5_DB_PATH: /app/data/company-memory-fts5.sqlite
       REDIS_URL: redis://redis:6379
       MINIO_ENDPOINT: minio
@@ -112,8 +110,6 @@ services:
       redis:
         condition: service_healthy
       minio:
-        condition: service_healthy
-      qdrant:
         condition: service_healthy
       crawler:
         condition: service_healthy
@@ -290,22 +286,6 @@ services:
       start_period: 30s
     networks: [npati-agent]
 
-  qdrant:
-    image: docker.io/qdrant/qdrant:v1.15.4
-    pull_policy: always
-    restart: unless-stopped
-    volumes:
-      - qdrant-data:/qdrant/storage
-    expose:
-      - "6333"
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333'"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 15s
-    networks: [npati-agent]
-
   minio:
     image: ${MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e}
     restart: unless-stopped
@@ -397,5 +377,4 @@ volumes:
   postgres-projects-snapshots:
   crawler-state:
   minio-data:
-  qdrant-data:
   browser-use-state:

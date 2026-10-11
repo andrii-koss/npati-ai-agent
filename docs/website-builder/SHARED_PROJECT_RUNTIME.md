@@ -21,7 +21,8 @@ LOCAL/SELF-HOSTED uses one shared runtime for all Projects. Projects, Coding Age
 async subagents, background jobs and Preview create scoped directories and processes, never
 per-project workload or proxy containers. Deleting a Project must never destroy the shared runtime.
 An explicitly isolated profile retains per-project Docker isolation. Hosted account registration
-can also use explicitly selected shared execution, as requested for the eleven-container deployment.
+can also use explicitly selected shared execution. The selected Dokploy deployment now uses
+ten services after removal of Qdrant; nine start while the runner diagnostic profile is disabled.
 Future implementation must not change this decision unless the owner explicitly requests an architecture change.
 
 `NPATI_PROJECT_RUNTIME_MODE=shared|isolated` selects the execution architecture;
@@ -85,7 +86,8 @@ The previous Docker provider and server are retained for remote/isolated deploym
 
 Without an explicit runtime mode, `NPATI_DEPLOYMENT_TYPE=npati_hosted` defaults to isolated execution.
 An explicit `NPATI_PROJECT_RUNTIME_MODE=shared` takes precedence, including for hosted accounts;
-`docker-compose.dokploy-isolated.yml` now selects this shared eleven-container scheme despite its legacy filename.
+`docker-compose.dokploy-isolated.yml` selects shared execution despite its legacy filename;
+vector retrieval uses the existing PostgreSQL/pgvector service instead of a Qdrant container.
 
 After a runtime restart, recorded process IDs are marked stopped and persisted PIDs are never signaled (preventing PID-reuse bugs). Start Preview again. API Preview session tracking is still in memory, so an API restart also requires starting Preview again.
 

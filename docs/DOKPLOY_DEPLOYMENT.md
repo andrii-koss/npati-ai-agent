@@ -1,11 +1,11 @@
 # Deploy NPATI Agent with Dokploy
 
 Use `docker-compose.dokploy-isolated.yml` for this deployment. It builds one API image containing the frontend from the
-repository and keeps PostgreSQL, Redis, MinIO, Qdrant, Crawl4AI, OmniRoute, and the worker
+repository and keeps PostgreSQL/pgvector, Redis, MinIO, Crawl4AI, OmniRoute, and the worker
 on an internal Compose network.
 
 `sandbox-runner` is temporarily disabled for deployment diagnostics: it is behind the
-`project-runtime` Compose profile. Default deployment starts ten services; project code
+`project-runtime` Compose profile. Default deployment starts nine services; project code
 execution and preview are unavailable until the profile is enabled. API and worker do
 not depend on runner health. Keep `COMPOSE_PROFILES` unset during this diagnostic deployment.
 If the previous runner container remains running, stop it with
@@ -111,12 +111,12 @@ regenerated.
 Use Dokploy's Compose preview before deploying. The deployment is ready when these services
 are healthy:
 
-- `web`
 - `agent-api`
 - `company-worker`
 - `crawler`
 - `omniroute`
-- `qdrant`
+- `browser-use-worker`
+- `postgres-projects`
 - `minio`
 - `redis`
 - `postgres`
@@ -146,9 +146,32 @@ without the isolation boundary. Configure total runtime resources with
 
 The deployed `docker-compose.dokploy-isolated.yml` keeps its existing filename
 for Dokploy compatibility, but runs the shared project runtime. It defines exactly
-11 services: agent-api, company-worker, sandbox-runner, postgres,
-postgres-projects, redis, minio, qdrant, omniroute, crawler and browser-use-worker.
+10 services: agent-api, company-worker, sandbox-runner, postgres,
+postgres-projects, redis, minio, omniroute, crawler and browser-use-worker.
+Nine start while the runner is temporarily disabled.
 Frontend assets are served by agent-api.
+
+### PostgreSQL vector search without Qdrant
+
+This Compose no longer starts Qdrant or supplies `QDRANT_URL` to API/worker.
+Company Knowledge already writes document chunks and embeddings into PostgreSQL
+and performs scoped vector and full-text retrieval there. SQLite FTS5 remains
+an in-process supplementary text index; it adds no container. Existing Qdrant
+support in the code is retained for other deployment configurations.
+
+On redeployment, `--remove-orphans` removes the old Qdrant container without
+deleting its named data volume. Preserve and back up the existing
+`<compose-project>_qdrant-data` volume until production data has been checked.
+Do not assume every Qdrant point exists in PostgreSQL: supplementary indexing
+previously ran before the PostgreSQL completion transaction. Documents left
+failed/processing must be inspected and, where appropriate, retried from the
+existing MinIO source files through Knowledge processing. Qdrant-only records
+without source files require a separate verified migration before discarding
+the old volume. No automatic import or volume deletion is performed.
+
+PostgreSQL's current knowledge schema has scope/full-text indexes but no vector
+HNSW/IVFFlat index. Large datasets require a measured index plan matching the
+actual embedding dimensions/model; removing Qdrant does not certify search latency.
 
 All project sites run inside sandbox-runner, with separate directories, UIDs,
 processes and assigned ports. Its internal allowlisted proxy runs in the same
@@ -257,13 +280,12 @@ The production Compose file uses named volumes for:
 - PostgreSQL
 - Redis
 - MinIO
-- Qdrant
 - OmniRoute
 - crawler state
 - Agent local state and installation identity
 
-Configure Dokploy backups for at least `postgres-data`, `minio-data`, `agent-data`, and
-`qdrant-data`. The `agent-data` volume contains the persistent installation ID and
+Configure Dokploy backups for at least `postgres-data`, `minio-data`, and `agent-data`.
+Preserve the former `qdrant-data` volume separately during migration. The `agent-data` volume contains the persistent installation ID and
 installation authorization state; losing it makes the deployment appear as a new Agent
 installation.
 
