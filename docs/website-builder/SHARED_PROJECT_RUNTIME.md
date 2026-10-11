@@ -98,6 +98,25 @@ After a runtime restart, recorded process IDs are marked stopped and persisted P
 
 ## Verification
 
+Runner access is measured with `scripts/benchmark-shared-project-runtime.mjs`, piped into Node inside `agent-api`. It creates and removes one temporary project, signs every request, and checks authenticated readiness before every operation as the API provider does. It measures runner RPCs and small file edits, excluding model generation, application database work, dependency installation and framework builds.
+
+Readiness checks run concurrently. Only a successful isolation proof is cached inside the runner for at most two seconds; proxy and IPv4/IPv6 firewall checks remain live. Concurrent callers share the current check. Every operation still receives a fresh authenticated readiness response and validates the backend mode and project scope. Failed checks or operations invalidate the proof, including probes already in flight; restarting the runner starts with an empty cache. Each command still establishes its own isolation boundary.
+
+The namespace/network probe executes `/bin/true` directly after setup. File upload/download retains the project UID, private filesystem/PID/network namespaces and command seccomp filter, but skips the network helper and preview relay because file synchronization needs no network. Commands, dependency installs and previews retain their network setup; only Preview launches the Node relay. Upload compares actual file contents without following final symlinks and preserves unchanged files, avoiding unnecessary watcher rebuilds. Upload still sends the full file snapshot and processes deletions. API canonical file reads run in batches of at most eight, preserving revision checks and sync quotas.
+
+On 2026-10-11, the local Docker Desktop stack built from `docker-compose.dokploy-isolated.yml` measured the following medians over 10 samples per case:
+
+| Operation | Original | First optimization | With short isolation cache |
+| --- | ---: | ---: | ---: |
+| Authenticated readiness | 269 ms | 120 ms | 11 ms (warm proof) |
+| Project status including readiness | 297 ms | 93 ms | 14 ms |
+| Small Node file edit including readiness | 477 ms | 323 ms | 223 ms |
+| Upload, edit, download, each including readiness | 1399 ms | 950 ms | 563 ms |
+
+After waiting for the cache to expire, one full readiness check took 153 ms. Cached-run p90 times were 14 ms for readiness, 368 ms for the edit and 649 ms for the sync/edit cycle. The benchmark includes cache expiry during repeated commands. These runner measurements exclude the API's canonical storage read batching.
+
+These are local measurements, not production latency guarantees. Project size, host load, model response time and install/build work affect the time visible in the Coding Agent UI.
+
 `scripts/verify-shared-project-runtime.cjs` creates random diagnostic projects and removes only those projects. It checks concurrent servers, port and context ownership, isolated environments/logs, cross-project reads/writes, symlink traversal, direct network/DNS bypass, and scoped stopping. Run through Node inside the API container:
 
 ```powershell

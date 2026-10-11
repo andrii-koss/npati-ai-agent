@@ -15,7 +15,8 @@ const checking = process.argv[2] === '--check';
 const [, , uid, project, port, cwd, ...rawCommand] = checking
   ? ['', '', String(process.getuid()), '', '0', '/', '/bin/true'] : process.argv;
 const preview = rawCommand[0] === '--preview';
-const command = preview ? rawCommand.slice(1) : rawCommand;
+const offline = rawCommand[0] === '--offline';
+const command = preview || offline ? rawCommand.slice(1) : rawCommand;
 if (!command.length || Number(uid) !== process.getuid()) process.exit(126);
 let sandbox, network, temporary;
 let exiting = false;
@@ -68,6 +69,17 @@ async function forward(socket, port) {
   });
 }
 try {
+  if (offline) {
+    // Trusted file sync needs the same filesystem/UID/seccomp boundary, but no
+    // network helper. The private network namespace has no external interface.
+    sandbox = spawn('/usr/bin/bwrap', [...base, '--bind', project, project, '--chdir', cwd,
+      '--seccomp', '3', '--', ...command], { stdio: ['inherit', 'inherit', 'inherit', filter] });
+    const code = await new Promise((resolve, reject) => {
+      sandbox.once('error', reject);
+      sandbox.once('exit', (code, signal) => resolve(code ?? (signal ? 137 : 126)));
+    });
+    await finish(code);
+  }
   // The API socket is outside both the project mount and its private /tmp.
   temporary = await mkdtemp('/tmp/npati-project-network-');
   const socket = `${temporary}/network.sock`;
@@ -75,8 +87,9 @@ try {
   const env = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'npm_config_proxy', 'npm_config_https_proxy']
     .flatMap(key => ['--setenv', key, proxy]);
   sandbox = spawn('/usr/bin/bwrap', [...base, ...(checking ? ['--clearenv'] : ['--bind', project, project]), '--chdir', cwd,
-    '--info-fd', '3', '--block-fd', '4', '--seccomp', '5', ...env, '--', '/usr/local/bin/node',
-    '/opt/npati-runtime/project-runtime-inner.mjs', preview ? port : '0', ...command],
+    '--info-fd', '3', '--block-fd', '4', '--seccomp', '5', ...env, '--',
+    // Only Preview needs the Node relay. Foreground commands execute directly.
+    ...(preview ? ['/usr/local/bin/node', '/opt/npati-runtime/project-runtime-inner.mjs', port, ...command] : command)],
     { stdio: ['inherit', 'inherit', 'inherit', 'pipe', 'pipe', filter] });
   const ended = new Promise(resolve => sandbox.once('exit', (code, signal) => resolve(code ?? (signal ? 137 : 126))));
   const info = JSON.parse(await dataFrom(sandbox.stdio[3], sandbox, 'sandbox'));

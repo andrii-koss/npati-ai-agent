@@ -44,10 +44,18 @@ try {
       { path: 'package.json', content: JSON.stringify({ name: 'npati-runtime-probe', version: '1.0.0', private: true, dependencies: { 'is-number': '7.0.0' } }) },
       { path: 'site.cjs', content: "require('node:http').createServer((q,r)=>r.end(require('node:fs').readFileSync('index.html'))).listen(Number(process.env.PORT),'127.0.0.1');" },
       { path: 'edit.cjs', content: `require('node:fs').writeFileSync('index.html','SITE_${i}_AGENT_EDITED'); require('node:fs').writeFileSync(process.env.HOME+'/persistent-marker','present');` },
+      { path: 'sync-check.cjs', content: "const fs=require('node:fs'),s=fs.statSync('index.html');console.log(JSON.stringify({inode:s.ino,modified:s.mtimeMs,content:fs.readFileSync('index.html','utf8')}));" },
+      { path: 'sync-link.cjs', content: "const fs=require('node:fs');fs.unlinkSync('index.html');fs.symlinkSync('/runtime-state/projects.json','index.html');" },
       { path: 'check.cjs', content: `const assert=require('node:assert/strict'),fs=require('node:fs'); assert.equal(fs.readFileSync(process.env.HOME+'/persistent-marker','utf8'),'present'); for(const path of ['/projects/${other.scope.projectId}/index.html','/runtime-state/projects.json','/var/run/docker.sock']){assert.throws(()=>fs.readFileSync(path));} assert.equal(require('is-number')(123),true); assert.notEqual(require('node:child_process').spawnSync('unshare',['-Ur','true']).status,0); console.log('FILES_ISOLATED_AND_DEPENDENCIES_READY');` },
       { path: 'network.cjs', content: `const assert=require('node:assert/strict'); (async()=>{assert.equal((await fetch('http://10.0.2.2:${project.port}/',{signal:AbortSignal.timeout(3000)})).status,200); for(const url of ['http://10.0.2.2:${other.port}/','http://10.0.2.2:7865/health','http://1.1.1.1/']){await assert.rejects(fetch(url,{signal:AbortSignal.timeout(2000)}));} console.log('NETWORK_ISOLATED');})().catch(e=>{console.error(e);process.exit(1)});` },
     ];
     await operation(project, 'uploadFiles', { files });
+    const unchanged = await execute(project, 'node sync-check.cjs');
+    await operation(project, 'uploadFiles', { files });
+    assert.equal((await execute(project, 'node sync-check.cjs')).stdout, unchanged.stdout, 'Unchanged sync must preserve file identity and timestamp for watchers');
+    await execute(project, 'node sync-link.cjs');
+    await operation(project, 'uploadFiles', { files });
+    assert.equal(JSON.parse((await execute(project, 'node sync-check.cjs')).stdout).content, `SITE_${i}_BEFORE`, 'Sync must replace a symlink rather than trust its target');
     await execute(project, 'node edit.cjs');
     const downloaded = await operation(project, 'downloadFiles');
     assert.equal(downloaded.find(file => file.path === 'index.html')?.content, `SITE_${i}_AGENT_EDITED`);

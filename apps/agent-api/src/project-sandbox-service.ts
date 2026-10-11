@@ -294,11 +294,16 @@ export class ProjectSandboxService {
     const entries = await this.workspace.listFiles(ctx, project.companyId, project.id);
     const files: SandboxFile[] = [];
     let total = 0;
-    for (const entry of entries.filter((item) => !artifact(item.path))) {
-      const file = await this.workspace.readFile(ctx, project.companyId, project.id, entry.path);
-      total += file.size;
-      if (files.length >= this.limits.syncMaxFiles || total > this.limits.syncMaxBytes) throw new SandboxProviderError("workspace_sync_limit", "Project exceeds sandbox sync limits", 413, "upload");
-      files.push({ path: file.path, content: file.content, revision: file.revision });
+    const sources = entries.filter((item) => !artifact(item.path));
+    if (sources.length > this.limits.syncMaxFiles) throw new SandboxProviderError("workspace_sync_limit", "Project exceeds sandbox sync limits", 413, "upload");
+    // Bound concurrency so large projects do not fan out hundreds of storage reads.
+    for (let offset = 0; offset < sources.length; offset += 8) {
+      const batch = await Promise.all(sources.slice(offset, offset + 8).map(entry => this.workspace.readFile(ctx, project.companyId, project.id, entry.path)));
+      for (const file of batch) {
+        total += file.size;
+        if (total > this.limits.syncMaxBytes) throw new SandboxProviderError("workspace_sync_limit", "Project exceeds sandbox sync limits", 413, "upload");
+        files.push({ path: file.path, content: file.content, revision: file.revision });
+      }
     }
     await this.provider.uploadFiles(scope, sandboxId, files);
     return new Map(files.map((file) => [file.path, file]));

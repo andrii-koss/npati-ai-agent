@@ -27,6 +27,7 @@
     "tests/web-frontend.test.ts",
     "tests/coding-agent-chat-website.test.ts",
     "tests/shared-runtime-regression.test.ts",
+    "tests/shared-runtime-readiness.test.ts",
     "tests/coding-agent-chat-website-postgres.test.ts",
     "tests/coding-agent-async-collect-barrier.test.ts",
     "tests/coding-agent-async-workspace.test.ts",
