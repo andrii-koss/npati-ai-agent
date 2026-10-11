@@ -4,6 +4,11 @@ import { PostgresDataProvider } from "../apps/agent-api/src/data-studio/data-pro
 const provider = new PostgresDataProvider({ maxCollections: 20, maxFields: 30, maxRows: 100 });
 
 describe("Data Studio schema compiler", () => {
+  it("uses a constrained explicit cast for field type conversion", () => {
+    const change = provider.alterField("orders", { name: "quantity", type: "integer" });
+    expect(change.upSql).toContain('TYPE bigint USING "quantity"::bigint');
+    expect(change.requiresSnapshot).toBe(true);
+  });
   it("marks data loss as destructive even if structure can be recreated", () => {
     const change = provider.dropField("orders", "note");
     expect(change.destructive).toBe(true);

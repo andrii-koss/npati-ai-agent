@@ -202,7 +202,7 @@ export class DataBackendRepository {
     return this.putSecret(ctx, companyId, id, environment, "signing", JSON.stringify(bundle));
   }
 
-  async attach(ctx: AuthContext, companyId: string, projectId: string, backendId: string | null): Promise<string | null> {
+  async attach(ctx: AuthContext, companyId: string, projectId: string, backendId: string | null, expectedBackendId?: string | null): Promise<string | null> {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
@@ -216,8 +216,9 @@ export class DataBackendRepository {
       const result = await client.query<{ dataBackendId: string | null }>(
         'UPDATE projects SET data_backend_id=$1,revision=revision+1,updated_at=now() ' +
         'WHERE id=$2 AND workspace_id=$3 AND company_id=$4 AND created_by=$5 AND status<>\'archived\' ' +
+        (expectedBackendId !== undefined ? 'AND data_backend_id IS NOT DISTINCT FROM $6 ' : '') +
         'RETURNING data_backend_id AS "dataBackendId"',
-        [backendId, projectId, ctx.workspaceId, companyId, ctx.userId],
+        [backendId, projectId, ctx.workspaceId, companyId, ctx.userId, ...(expectedBackendId !== undefined ? [expectedBackendId] : [])],
       );
       if (!result.rowCount) throw new DataStudioError(404, "attach_project", "Project not found", false, "ATTACH_NOT_FOUND");
       await client.query("COMMIT");

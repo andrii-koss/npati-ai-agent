@@ -1,4 +1,6 @@
 import type { CapabilityDefinition } from "./capabilities";
+import { CODE_DATA_CAPABILITIES } from "./code-capabilities-data";
+export { CODE_DATA_CAPABILITIES, CODE_DATA_MATRIX } from "./code-capabilities-data";
 import { READ_PERMISSION, resultEnvelope, FILE_ENTRY } from "./code-capabilities-shared";
 import { CODE_TOOL_SCHEMA_MIRROR_PART1 } from "./code-tool-schema-mirror-part1";
 import { CODE_TOOL_SCHEMA_MIRROR_PART2 } from "./code-tool-schema-mirror-part2";
@@ -26,6 +28,7 @@ export { CODE_SUBAGENT_CAPABILITIES, CODE_ASYNC_PROCESS_CAPABILITIES, CODE_SUBAG
 export { CODE_AGENT_CONTROL_CAPABILITIES, CODE_AGENT_CONTROL_MATRIX } from "./code-capabilities-agent-control";
 
 export const CODE_CAPABILITIES: CapabilityDefinition[] = [
+  ...CODE_DATA_CAPABILITIES,
   ...CODE_AGENT_CONTROL_CAPABILITIES,
   ...CODE_ASYNC_PROCESS_CAPABILITIES,
   ...CODE_READ_CAPABILITIES,

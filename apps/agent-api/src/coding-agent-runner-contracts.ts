@@ -66,6 +66,8 @@ import {
 } from "./execution-snapshot";
 
 export const CODE_RUN_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
+  "code.data.schema.inspect",
+  "code.data.rows.list",
   "code.shell.process.wait",
   "code.fs.read",
   "code.fs.list",

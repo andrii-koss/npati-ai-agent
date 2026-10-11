@@ -3,6 +3,8 @@ import type { DataBackendRepository } from "./repository";
 import type { DataProvider, SchemaOperation, SchemaSnapshot } from "./data-provider";
 import type { ProjectMigrationEngine } from "./migration-engine";
 import { DataStudioError, validateIdentifier } from "./identifier";
+import type { RowTransferInput } from "./row-transfer";
+import { isCodeChatWebsite } from "../code-chat-website";
 import { validateOperation } from "./studio-service";
 import { PROJECT_SDK_FILE_NAME, PROJECT_SDK_IMPORT_PATH } from "./project-sdk-file";
 import { TEMPLATE_CATALOG, validateTemplate, getDataSeed, validateDataSeed, type DataSchemaTemplate } from "@npati/shared";
@@ -14,6 +16,7 @@ const MAX_AGENT_INSERT_ROWS = 100;
 export interface AgentSchemaApplyOptions {
   dryRunOnly?: boolean;
   expectedFingerprint?: string;
+  expectedBackendId?: string;
   runId?: string;
   agentId?: string;
   approved?: boolean;
@@ -93,7 +96,7 @@ import type { ProjectAccessPolicy, ProjectAuthSettings } from "@npati/shared";
 
 export class AgentDataStudioService {
   constructor(
-    private readonly store: Pick<WorkspaceStore, "getProject">,
+    private readonly store: Pick<WorkspaceStore, "getProject"> & Partial<Pick<WorkspaceStore, "listProjects">>,
     private readonly repository: DataBackendRepository,
     private readonly provider: DataProvider,
     private readonly migrations: ProjectMigrationEngine,
@@ -114,6 +117,35 @@ export class AgentDataStudioService {
     const backend = await this.repository.get(ctx, companyId, project.dataBackendId);
     const env = await this.repository.environment(ctx, companyId, backend.id, "dev");
     return { backend, env, project };
+  }
+
+  async assertBackend(ctx: AuthContext, companyId: string, projectId: string, expectedBackendId: string) {
+    const { backend } = await this.context(ctx, companyId, projectId);
+    if (backend.id !== expectedBackendId) throw new DataStudioError(409, "project_data", "Project database attachment changed", false, "BACKEND_CHANGED");
+    return backend;
+  }
+
+  async transferRows(ctx: AuthContext, companyId: string, projectId: string, expectedBackendId: string, input: RowTransferInput) {
+    const backend = await this.assertBackend(ctx, companyId, projectId, expectedBackendId);
+    return this.migrations.transferRows(ctx, backend, input);
+  }
+
+  async attachToProject(ctx: AuthContext, companyId: string, projectId: string, input: { expectedBackendId: string; targetProjectId?: string; expectedTargetBackendId?: string | null; dryRun?: boolean }) {
+    const backend = await this.assertBackend(ctx, companyId, projectId, input.expectedBackendId);
+    if (!input.targetProjectId && input.dryRun) {
+      if (!this.store.listProjects) throw new DataStudioError(503, "attach", "Project listing is unavailable", false, "PROJECT_LIST_UNAVAILABLE");
+      const projects = await this.store.listProjects(ctx, companyId);
+      return { dryRun: true, backendId: backend.id, targets: projects.filter(p => p.id !== projectId && p.createdBy === ctx.userId && p.workspaceId === ctx.workspaceId && p.companyId === companyId && (p.type === "code_project" || isCodeChatWebsite(p))).map(p => ({ projectId: p.id, name: p.name, currentBackendId: p.dataBackendId ?? null })) };
+    }
+    if (!input.targetProjectId || (!input.dryRun && input.expectedTargetBackendId === undefined)) throw new DataStudioError(400, "attach", "Select a target and its current attachment before confirming", false, "INVALID_ATTACHMENT");
+    const target = await this.store.getProject(ctx, companyId, input.targetProjectId);
+    if (target.createdBy !== ctx.userId || target.workspaceId !== ctx.workspaceId || target.companyId !== companyId) throw new DataStudioError(404, "attach", "Target project not found", false, "ATTACH_NOT_FOUND");
+    if (target.type !== "code_project" && !isCodeChatWebsite(target)) throw new DataStudioError(400, "attach", "Target must be a website/code project", false, "INVALID_PROJECT");
+    if (input.dryRun) return { dryRun: true, backendId: backend.id, targetProjectId: target.id, currentBackendId: target.dataBackendId ?? null };
+    if ((target.dataBackendId ?? null) !== input.expectedTargetBackendId) throw new DataStudioError(409, "attach", "Target database attachment changed", false, "BACKEND_CHANGED");
+    await this.repository.attach(ctx, companyId, target.id, backend.id, input.expectedTargetBackendId);
+    await syncProjectMdSchema(ctx, companyId, target.id, backend.name, await this.provider.introspectSchema(backend, "dev"), this.workspace);
+    return { attached: true, backendId: backend.id, targetProjectId: target.id, previousBackendId: input.expectedTargetBackendId };
   }
 
   async inspectSchema(ctx: AuthContext, companyId: string, projectId: string) {
@@ -137,6 +169,7 @@ export class AgentDataStudioService {
     validateOperation(operation);
     const { backend, env } = await this.context(ctx, companyId, projectId);
 
+    if (options.expectedBackendId && backend.id !== options.expectedBackendId) throw new DataStudioError(409, "apply", "Project database attachment changed", false, "BACKEND_CHANGED");
     if (backend.status !== "ready" || env.status !== "ready") {
       throw new DataStudioError(409, "apply", "Backend is not ready", false, "BACKEND_NOT_READY");
     }
@@ -182,6 +215,7 @@ export class AgentDataStudioService {
     }
 
     const migration = await this.migrations.apply(ctx, {
+      ...(options.expectedFingerprint ? { expectedFingerprint: options.expectedFingerprint } : {}),
       backend,
       environment: "dev",
       operation,

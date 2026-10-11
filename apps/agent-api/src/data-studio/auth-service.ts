@@ -151,6 +151,9 @@ export class ProjectAuthService {
         const conn = await this.provisioner.getConnection(backend, environment, role);
         pool = new Pool({ ...conn, max: 5, connectionTimeoutMillis: 3000 });
       }
+      // Database deletion/restart may close idle auth connections. pg removes
+      // those clients; active authentication query failures still reject.
+      pool.on?.("error", () => {});
       this.pools.set(key, pool);
     }
     return pool;

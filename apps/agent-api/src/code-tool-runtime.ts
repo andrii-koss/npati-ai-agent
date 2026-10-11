@@ -47,6 +47,7 @@ import { HOOK_CONTEXT_NOTE } from "./code-hooks";
  */
 
 export type CodeToolErrorCode =
+  | "project_data_error"
   | "process_secret_promotion_denied" | "process_promotion_unavailable" | "process_output_cursor_lost"
   | "feature_disabled"
   | "company_access_denied"
@@ -600,7 +601,8 @@ export function validateArguments(schema: Record<string, unknown>, args: unknown
     const rule = properties[key];
     if (!rule) continue;
     if (raw === undefined || raw === null) {
-      if (required.includes(key)) throw new CodeToolError("invalid_arguments", `Argument ${key} must not be null`, 400);
+      const nullable = raw === null && (rule.type === "null" || (Array.isArray(rule.type) && rule.type.includes("null")));
+      if (required.includes(key) && !nullable) throw new CodeToolError("invalid_arguments", `Argument ${key} must not be null`, 400);
       continue;
     }
     const type = rule.type as string | undefined;
@@ -1024,7 +1026,27 @@ export class CodeToolRuntime {
       let checkpointId: string | null = null;
       let writeTargets: Array<{ path: string; exists: boolean }> = [];
       let approved = false;
-      if (write) {
+      if (tool.name.startsWith("code.data.") && write) {
+        if (tool.name === "code.data.backend.attach" && args.dryRun !== true && (typeof args.targetProjectId !== "string" || args.expectedTargetBackendId === undefined)) throw new CodeToolError("invalid_arguments", "Preview and select a target project and its current database attachment", 400, "arguments", false, tool.name);
+        if (tool.name !== "code.data.schema.apply" && args.dryRun !== true) {
+          if (!this.options.approvals) throw new CodeToolError("approval_unavailable", "Database changes require the approval system", 503, "approval", false, tool.name);
+          const payload = { projectId: input.projectId, sessionId, turnId, tool: tool.name, toolVersion: tool.version, args };
+          if (!input.approvalId) await this.requestApprovalDecision(ctx, input, tool, "delete", `${tool.name}: ${JSON.stringify(args)}`, payload);
+          if (!input.approvalId) throw new CodeToolError("approval_invalid", "Database approval is missing", 403, "approval", false, tool.name);
+          try {
+            await this.options.approvals.consume({ ctx, companyId: input.companyId, approvalId: input.approvalId, runId: input.runId ?? "", agentId: input.agentId ?? "", toolName: tool.name, inputPayload: payload });
+          } catch (error) {
+            const shaped = error as { code?: string; message?: string };
+            throw new CodeToolError(shaped.code === "approval_denied" || shaped.code === "approval_rejected" ? "approval_denied" : "approval_invalid", shaped.message ?? "Database approval does not match this operation", 403, "approval", false, tool.name);
+          }
+          approved = true;
+        }
+        // DB changes use Data Studio's migration journal/fingerprint, never a
+        // Git checkpoint or file undo. Record authorization before dispatch.
+        await this.recordAudit(ctx, { ...input, sessionId, tool: tool.name }, tool, "allowed", undefined, {
+          turnId, action: "pre_schema_write", strict: true,
+        });
+      } else if (write) {
         if (tool.name === "code.fs.undo_last_turn") {
           // Undo restores the turn checkpoint and returns immediately; it never reaches an executor.
           const restoredCheckpointId = await this.restoreTurn(ctx, { companyId: input.companyId, projectId: input.projectId, sessionId, turnId, tool: tool.name });

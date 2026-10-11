@@ -1,3 +1,4 @@
+import { CODE_DATA_MATRIX } from './code-capabilities-data';
 // Auto-generated Capability Matrix covering all 306 inventory items with evidence ownership
 export interface CapabilityMatrixEntry {
   id: number;
@@ -4859,3 +4860,4 @@ CAPABILITY_MATRIX.push(...CODE_GIT_MATRIX);
 CAPABILITY_MATRIX.push(...CODE_SUBAGENT_MATRIX);
 
 CAPABILITY_MATRIX.push(...CODE_ASYNC_PROCESS_MATRIX, ...CODE_AGENT_CONTROL_MATRIX);
+CAPABILITY_MATRIX.push(...CODE_DATA_MATRIX);

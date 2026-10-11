@@ -340,6 +340,9 @@ export class ProjectApiGatewayService {
 
     if (this.poolFactory) {
       pool = await this.poolFactory(backend, env);
+      // pg removes failed idle clients itself. An unhandled pool error would
+      // crash the entire API when a project database is removed/restarted.
+      pool.on?.("error", () => {});
       this.runtimePools.set(key, pool);
       return pool;
     }
@@ -354,6 +357,7 @@ export class ProjectApiGatewayService {
       max: 10,
       connectionTimeoutMillis: 5000,
     });
+    pool.on("error", () => {});
     this.runtimePools.set(key, pool);
     return pool;
   }

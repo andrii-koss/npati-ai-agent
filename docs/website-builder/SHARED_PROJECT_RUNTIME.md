@@ -98,6 +98,21 @@ After a runtime restart, recorded process IDs are marked stopped and persisted P
 
 ## Verification
 
+### Coding Agent access to project databases
+
+Coding Agent manifest v13 exposes six database tools through API-side Data Studio; project code and the model receive no database administrator credentials or Docker socket.
+
+- `code.data.schema.inspect`: schema, attached backend ID and fingerprint.
+- `code.data.schema.apply`: create a table, field or index (existing non-destructive behavior).
+- `code.data.schema.modify`: rename a table, alter a field type, drop a field or table. Actual execution requires an explicit approval bound to the backend, fingerprint and exact operation. Destructive operations take a snapshot through the migration engine; incompatible casts and dependent objects fail rather than silently cascading. Access-policy metadata follows table renames/removal.
+- `code.data.rows.list`: inspect up to 100 dev rows per page to select IDs.
+- `code.data.rows.transfer`: copy/move 1?1000 explicit row IDs between tables in the same attached dev database with an explicit field mapping. IDs and ownership fields are preserved. Execution requires approval; moves take a snapshot. Insert/delete and the transfer journal commit in one transaction. A duplicate ID or failed constraint rolls back the entire transfer; there is no skip/overwrite mode. Preview validates the schema, fields and source IDs but does not execute an insertion, so target constraints are checked during execution. Larger transfers require additional batches and confirmations.
+- `code.data.backend.attach`: attach the current database to another website/code project of the same owner, workspace and company. Preview without a target lists eligible projects with names/IDs; preview of a selected target returns its current attachment; confirmation binds that attachment so a concurrent change is refused. Requires workspace write and business management permission. Sharing changes the target's dev/prod backend reference, not the database contents, and leaves any previous backend intact. Each application still uses its Project API URL, publishable key, configured origins and access policies.
+
+Attach the first DataBackend in Data Studio and start a new Coding Agent chat after deployment; older sessions keep their frozen manifests, including v12. Schema/row writes target dev only. Production promotion remains the existing Data Studio workflow. Plan/review sessions cannot perform these writes. Raw SQL and model-supplied approval flags are not accepted. The human approval is consumed by CodeToolRuntime and cannot be reused with changed arguments. Database changes are journaled separately from file/Git undo.
+
+`scripts/verify-coding-agent-data.ts` exercises the real CodeToolRuntime, durable PostgreSQL approvals and project databases using temporary fixtures. It checks table/field/index creation, rename, type change, field/table deletion, snapshots, copy/move, conflict rollback, sharing across three projects, stale attachment/schema refusal, foreign-project denial, unchanged production and restricted runtime roles, then removes the temporary projects/databases. It does not call a paid model.
+
 Runner access is measured with `scripts/benchmark-shared-project-runtime.mjs`, piped into Node inside `agent-api`. It creates and removes one temporary project, signs every request, and checks authenticated readiness before every operation as the API provider does. It measures runner RPCs and small file edits, excluding model generation, application database work, dependency installation and framework builds.
 
 Readiness checks run concurrently. Only a successful isolation proof is cached inside the runner for at most two seconds; proxy and IPv4/IPv6 firewall checks remain live. Concurrent callers share the current check. Every operation still receives a fresh authenticated readiness response and validates the backend mode and project scope. Failed checks or operations invalidate the proof, including probes already in flight; restarting the runner starts with an empty cache. Each command still establishes its own isolation boundary.

@@ -22,12 +22,14 @@
     "allowJs": true
   },
   "include": [
+    "scripts/verify-coding-agent-data.ts",
     "tests/coding-agent-c1b-images.test.ts",
     "tests/minio-startup-diagnostics.test.ts",
     "tests/web-frontend.test.ts",
     "tests/coding-agent-chat-website.test.ts",
     "tests/shared-runtime-regression.test.ts",
     "tests/shared-runtime-readiness.test.ts",
+    "tests/coding-agent-data-tools.test.ts",
     "tests/coding-agent-chat-website-postgres.test.ts",
     "tests/coding-agent-async-collect-barrier.test.ts",
     "tests/coding-agent-async-workspace.test.ts",
