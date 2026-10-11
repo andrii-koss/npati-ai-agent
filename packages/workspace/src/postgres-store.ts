@@ -72,6 +72,14 @@ import migration017 from './migration-017';
 import migration030 from './migration-030';
 import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from './pagination';
 import { RETENTION_FROM, CODE_PROJECT_CHECKPOINT_PREDICATE, CODE_PROJECT_GUARD_FOR, RETENTION_AGE_COLUMN, RETENTION_EXTRA_PREDICATE, SQL_FRAGMENT_SHAPE, assertSqlFragment, RETENTION_WINDOW_EXPR, ERASE_FROM, ERASE_SCOPE_PREDICATE, ERASE_PROJECT_SCOPE_PREDICATE, ERASE_CLEAR_SESSION_REFERENCE, PROJECT_SCOPED_ERASE_TABLES, APPEND_ONLY_COUNTABLE, APPEND_ONLY_AGE_COLUMN, businessColumns, goalColumns, memoryColumns, conversationColumns, onboardingColumns, companyColumns, projectColumns, codeSessionColumns, projectCodeTrustColumns, projectMountedFolderColumns, auditEntryColumns, codeActivityEventColumns, codeContextSummaryColumns, replayBundleColumns, replayBundleStepColumns, auditAnchorColumns, featureFlagColumns, sandboxImageColumns, codeApprovalRuleColumns, projectCheckpointColumns, projectDeploymentColumns, projectQaReportColumns, companyAgentColumns, companyEdgeColumns, companyRunColumns, companyRunStepColumns, companyToolAuditColumns, companyRunEventColumns, companyMemberColumns, companyInviteColumns, lastActiveOwnerPredicate, providerDataPolicyColumns, providerDataPolicyVersionColumns, projectDataPolicyColumns, hostedProviderConsentColumns, codeRunStateColumns, codeRunTurnColumns, StoredUserSetting } from "./postgres-store-schema";
+import {
+  mapCodeActivityEventRow,
+  mapCodeContextSummaryRow,
+  mapExecutionSnapshotRow,
+  mapReplayBundleRow,
+  mapReplayBundleStepRow,
+  mapSnapshotConfigVersionRow,
+} from "./postgres-row-mappers";
 
 export class PostgresWorkspaceStore implements WorkspaceStore {
   private codeProcessesInstance?: PostgresCodeProcessStore;
@@ -3818,40 +3826,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
 
   // --- C6b: immutable execution snapshots and versioned configuration -------------------------------
 
-  private mapExecutionSnapshotRow(row: Record<string, unknown>): ExecutionSnapshotRecord {
-    return {
-      id: String(row.id),
-      workspaceId: String(row.workspace_id),
-      companyId: String(row.company_id),
-      projectId: String(row.project_id),
-      sessionId: String(row.session_id),
-      runId: row.run_id === null || row.run_id === undefined ? null : String(row.run_id),
-      snapshotVersion: Number(row.snapshot_version),
-      payload: (row.payload ?? {}) as Record<string, unknown>,
-      payloadHash: String(row.payload_hash),
-      prevSnapshotId: row.prev_snapshot_id ? String(row.prev_snapshot_id) : null,
-      prevPayloadHash: row.prev_payload_hash ? String(row.prev_payload_hash) : null,
-      trigger: String(row["trigger"]) as ExecutionSnapshotTrigger,
-      legacy: row.legacy === true,
-      createdAt: row.created_at as Date,
-      createdBy: String(row.created_by),
-    };
-  }
-
-  private mapSnapshotConfigVersionRow(row: Record<string, unknown>): SnapshotConfigVersionRecord {
-    return {
-      id: String(row.id),
-      workspaceId: String(row.workspace_id),
-      companyId: String(row.company_id),
-      kind: String(row.kind) as SnapshotConfigKind,
-      version: Number(row.version),
-      contentHash: String(row.content_hash),
-      content: (row.content ?? {}) as Record<string, unknown>,
-      createdAt: row.created_at as Date,
-      createdBy: String(row.created_by),
-    };
-  }
-
   private async insertExecutionSnapshot(record: ExecutionSnapshotRecord): Promise<void> {
     await this.pool.query(
       `INSERT INTO execution_snapshots(id, workspace_id, company_id, project_id, session_id, run_id,
@@ -3902,7 +3876,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       "SELECT * FROM execution_snapshots WHERE company_id=$1 AND id=$2", [companyId, snapshotId],
     );
     const row = result.rows[0];
-    return row ? this.mapExecutionSnapshotRow(row) : null;
+    return row ? mapExecutionSnapshotRow(row) : null;
   }
 
   async getLatestSnapshotForSession(companyId: string, sessionId: string): Promise<ExecutionSnapshotRecord | null> {
@@ -3911,7 +3885,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         ORDER BY snapshot_version DESC LIMIT 1`, [companyId, sessionId],
     );
     const row = result.rows[0];
-    return row ? this.mapExecutionSnapshotRow(row) : null;
+    return row ? mapExecutionSnapshotRow(row) : null;
   }
 
   async getSnapshotForRun(companyId: string, runId: string): Promise<ExecutionSnapshotRecord | null> {
@@ -3920,7 +3894,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         ORDER BY snapshot_version DESC LIMIT 1`, [companyId, runId],
     );
     const row = result.rows[0];
-    return row ? this.mapExecutionSnapshotRow(row) : null;
+    return row ? mapExecutionSnapshotRow(row) : null;
   }
 
   async listExecutionSnapshots(input: ListExecutionSnapshotsInput): Promise<ExecutionSnapshotRecord[]> {
@@ -3931,7 +3905,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         ORDER BY created_at DESC LIMIT $4`,
       [input.companyId, input.sessionId ?? null, input.projectId ?? null, limit],
     );
-    return result.rows.map((row) => this.mapExecutionSnapshotRow(row));
+    return result.rows.map((row) => mapExecutionSnapshotRow(row));
   }
 
   diffExecutionSnapshots(a: ExecutionSnapshotRecord, b: ExecutionSnapshotRecord): ExecutionSnapshotDiff {
@@ -3980,7 +3954,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       [companyId, kind, version],
     );
     const row = result.rows[0];
-    return row ? this.mapSnapshotConfigVersionRow(row) : null;
+    return row ? mapSnapshotConfigVersionRow(row) : null;
   }
 
   async findSnapshotConfigVersionByHash(
@@ -3991,7 +3965,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       [companyId, kind, contentHash],
     );
     const row = result.rows[0];
-    return row ? this.mapSnapshotConfigVersionRow(row) : null;
+    return row ? mapSnapshotConfigVersionRow(row) : null;
   }
 
   async listSnapshotConfigVersions(companyId: string, kind: SnapshotConfigKind): Promise<SnapshotConfigVersionRecord[]> {
@@ -3999,7 +3973,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       "SELECT * FROM code_snapshot_config_versions WHERE company_id=$1 AND kind=$2 ORDER BY version DESC",
       [companyId, kind],
     );
-    return result.rows.map((row) => this.mapSnapshotConfigVersionRow(row));
+    return result.rows.map((row) => mapSnapshotConfigVersionRow(row));
   }
 
   /**
@@ -4023,7 +3997,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         input.retentionClass ?? DEFAULT_RETENTION_CLASS,
         input.now ?? new Date()],
     );
-    return this.mapCodeActivityEventRow(result.rows[0]!);
+    return mapCodeActivityEventRow(result.rows[0]!);
   }
 
   async listCodeActivityEvents(input: ListCodeActivityEventsInput): Promise<CodeActivityEventRecord[]> {
@@ -4042,27 +4016,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         input.cursor ? new Date(decodeCodeActivityCursor(input.cursor).createdAt) : null,
         input.cursor ? decodeCodeActivityCursor(input.cursor).id : null, limit],
     );
-    return result.rows.map((row) => this.mapCodeActivityEventRow(row));
-  }
-
-  private mapCodeActivityEventRow(row: Record<string, unknown>): CodeActivityEventRecord {
-    return {
-      id: String(row.id),
-      workspaceId: String(row.workspaceId),
-      companyId: String(row.companyId),
-      projectId: row.projectId === null || row.projectId === undefined ? null : String(row.projectId),
-      sessionId: row.sessionId === null || row.sessionId === undefined ? null : String(row.sessionId),
-      runId: row.runId === null || row.runId === undefined ? null : String(row.runId),
-      snapshotId: row.snapshotId === null || row.snapshotId === undefined ? null : String(row.snapshotId),
-      parentRunId: row.parentRunId === null || row.parentRunId === undefined ? null : String(row.parentRunId),
-      parentToolCallId: row.parentToolCallId === null || row.parentToolCallId === undefined ? null : String(row.parentToolCallId),
-      parentEventId: row.parentEventId === null || row.parentEventId === undefined ? null : String(row.parentEventId),
-      kind: String(row.kind) as CodeActivityEventKind,
-      payload: (row.payload ?? {}) as Record<string, unknown>,
-      dataClassification: String(row.dataClassification) as DataClassification,
-      retentionClass: String(row.retentionClass) as RetentionClass,
-      createdAt: new Date(row.createdAt as string | Date),
-    };
+    return result.rows.map((row) => mapCodeActivityEventRow(row));
   }
 
   /**
@@ -4085,7 +4039,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         input.retentionClass ?? "short",
         input.now ?? new Date()],
     );
-    return this.mapCodeContextSummaryRow(result.rows[0]!);
+    return mapCodeContextSummaryRow(result.rows[0]!);
   }
 
   async listCodeContextSummaries(input: ListCodeContextSummariesInput): Promise<CodeContextSummaryRecord[]> {
@@ -4098,26 +4052,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         ORDER BY created_at DESC, id DESC LIMIT $4`,
       [input.companyId, input.sessionId ?? null, input.runId ?? null, limit],
     );
-    return result.rows.map((row) => this.mapCodeContextSummaryRow(row));
-  }
-
-  private mapCodeContextSummaryRow(row: Record<string, unknown>): CodeContextSummaryRecord {
-    return {
-      id: String(row.id),
-      companyId: String(row.companyId),
-      projectId: String(row.projectId),
-      sessionId: row.sessionId === null || row.sessionId === undefined ? null : String(row.sessionId),
-      runId: row.runId === null || row.runId === undefined ? null : String(row.runId),
-      snapshotId: row.snapshotId === null || row.snapshotId === undefined ? null : String(row.snapshotId),
-      turnIndex: Number(row.turnIndex ?? 0),
-      schemaVersion: Number(row.schemaVersion ?? 0),
-      summary: (row.summary ?? {}) as Record<string, unknown>,
-      summaryText: String(row.summaryText ?? ""),
-      contentHash: String(row.contentHash ?? ""),
-      dataClassification: String(row.dataClassification) as DataClassification,
-      retentionClass: String(row.retentionClass) as RetentionClass,
-      createdAt: new Date(row.createdAt as string | Date),
-    };
+    return result.rows.map((row) => mapCodeContextSummaryRow(row));
   }
 
   /**
@@ -4156,7 +4091,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         if (existing) return existing;
         throw new WorkspaceAccessError("Replay bundle conflict");
       }
-      const bundle = this.mapReplayBundleRow(inserted.rows[0]!);
+      const bundle = mapReplayBundleRow(inserted.rows[0]!);
       let seq = 0;
       for (const step of input.steps) {
         seq += 1;
@@ -4187,7 +4122,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       [companyId, runId, bundleVersion ?? null],
     );
     const row = result.rows[0];
-    return row ? this.mapReplayBundleRow(row) : null;
+    return row ? mapReplayBundleRow(row) : null;
   }
 
   /**
@@ -4200,7 +4135,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       [companyId, bundleId],
     );
     const row = result.rows[0];
-    return row ? this.mapReplayBundleRow(row) : null;
+    return row ? mapReplayBundleRow(row) : null;
   }
 
   async listReplayBundles(input: ListReplayBundlesInput): Promise<ReplayBundleRecord[]> {    const limit = Math.max(1, Math.min(input.limit ?? 100, 500));
@@ -4213,7 +4148,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         ORDER BY created_at DESC, id DESC LIMIT $5`,
       [input.companyId, input.runId ?? null, input.sessionId ?? null, input.executionSnapshotId ?? null, limit],
     );
-    return result.rows.map((row) => this.mapReplayBundleRow(row));
+    return result.rows.map((row) => mapReplayBundleRow(row));
   }
 
   async listReplayBundleSteps(companyId: string, bundleId: string): Promise<ReplayBundleStepRecord[]> {
@@ -4222,56 +4157,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         WHERE company_id=$1 AND bundle_id=$2 ORDER BY seq ASC`,
       [companyId, bundleId],
     );
-    return result.rows.map((row) => this.mapReplayBundleStepRow(row));
-  }
-
-  private mapReplayBundleRow(row: Record<string, unknown>): ReplayBundleRecord {
-    const nullable = (value: unknown): string | null =>
-      value === null || value === undefined ? null : String(value);
-    const nullableNumber = (value: unknown): number | null =>
-      value === null || value === undefined ? null : Number(value);
-    return {
-      id: String(row.id),
-      workspaceId: String(row.workspaceId),
-      companyId: String(row.companyId),
-      projectId: String(row.projectId),
-      sessionId: String(row.sessionId),
-      runId: String(row.runId),
-      executionSnapshotId: nullable(row.executionSnapshotId),
-      bundleVersion: Number(row.bundleVersion),
-      runnerVersion: nullable(row.runnerVersion),
-      systemPromptVersion: nullableNumber(row.systemPromptVersion),
-      systemPromptContentHash: nullable(row.systemPromptContentHash),
-      modelProfileVersion: nullableNumber(row.modelProfileVersion),
-      provider: nullable(row.provider),
-      model: nullable(row.model),
-      replayMode: String(row.replayMode) as ReplayMode,
-      sourceRunId: nullable(row.sourceRunId),
-      sourceSnapshotId: nullable(row.sourceSnapshotId),
-      terminalStatus: nullable(row.terminalStatus),
-      terminalReason: nullable(row.terminalReason),
-      payload: (row.payload ?? {}) as Record<string, unknown>,
-      payloadHash: String(row.payloadHash),
-      replayInputHash: String(row.replayInputHash),
-      dataClassification: String(row.dataClassification) as DataClassification,
-      retentionClass: String(row.retentionClass) as RetentionClass,
-      createdAt: new Date(row.createdAt as string | Date),
-    };
-  }
-
-  private mapReplayBundleStepRow(row: Record<string, unknown>): ReplayBundleStepRecord {
-    return {
-      id: String(row.id),
-      bundleId: String(row.bundleId),
-      companyId: String(row.companyId),
-      seq: Number(row.seq),
-      kind: String(row.kind) as ReplayStepKind,
-      turnIndex: Number(row.turnIndex),
-      toolCallId: row.toolCallId === null || row.toolCallId === undefined ? null : String(row.toolCallId),
-      payload: (row.payload ?? {}) as Record<string, unknown>,
-      payloadHash: String(row.payloadHash),
-      createdAt: new Date(row.createdAt as string | Date),
-    };
+    return result.rows.map((row) => mapReplayBundleStepRow(row));
   }
 
   // --- R1-C (items 11–13): retention and erasure ------------------------------------------------------
