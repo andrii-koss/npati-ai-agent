@@ -152,18 +152,21 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
     },
     logger: log,
   });
-  {
+  // onReady in app.ts initializes the store. Start recovery only after those
+  // hooks finish, so a fresh deployment cannot query tables before migrations.
+  let codeRunReconcileTimer: ReturnType<typeof setInterval> | undefined;
+  app.addHook("onListen", async () => {
     void codeRunReconciler.reconcileRuns().catch((error) => {
       log.warn({ err: error }, "code_run_reconcile_startup_failed");
     });
-    const codeRunReconcileTimer = setInterval(() => {
+    codeRunReconcileTimer = setInterval(() => {
       void codeRunReconciler.reconcileRuns().catch((error) => {
         log.warn({ err: error }, "code_run_reconcile_failed");
       });
     }, config.codeAgentLimits?.reaperIntervalMs ?? DEFAULT_CODE_AGENT_LIMITS.reaperIntervalMs);
     codeRunReconcileTimer.unref?.();
-    app.addHook("onClose", async () => { clearInterval(codeRunReconcileTimer); });
-  }
+  });
+  app.addHook("onClose", async () => { if (codeRunReconcileTimer) clearInterval(codeRunReconcileTimer); });
 
   registerCodeIntentRoutes(app, authProvider, {
     runner: {
