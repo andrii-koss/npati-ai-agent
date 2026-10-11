@@ -30,6 +30,7 @@ import { githubToken, acquireCredential, type ProjectGitCredentialHost } from ".
 import { currentBranch, type ProjectGitBranchHost } from "./project-git-branch-service";
 import { cleanupAllWorktrees, type ProjectGitCleanupHost } from "./project-git-cleanup-service";
 import { log, commit, type ProjectGitHistoryHost } from "./project-git-history-service";
+import { assertNoSymlinkPath, removePathForRevert, resolveRevertTarget, assertWorkspaceRevisionUnchanged, type ProjectGitGuardHost } from "./project-git-guard-service";
 
 const execFileAsync = promisify(execFile);
 
@@ -314,6 +315,16 @@ export class ProjectGitService {
     this.thresholds = {
       fileThreshold: thresholds?.fileThreshold ?? (Number(process.env.NPATI_CHECKPOINT_FILE_THRESHOLD) || defaultCheckpointThresholds.fileThreshold),
       lineThreshold: thresholds?.lineThreshold ?? (Number(process.env.NPATI_CHECKPOINT_LINE_THRESHOLD) || defaultCheckpointThresholds.lineThreshold),
+    };
+  }
+
+  private guardHost(): ProjectGitGuardHost {
+    return {
+      boundary: this.boundary,
+      workspaceStore: this.workspaceStore,
+      runGit: this.runGit.bind(this),
+      getCheckpoint: this.getCheckpoint.bind(this),
+      listCheckpoints: this.listCheckpoints.bind(this),
     };
   }
 
@@ -839,25 +850,13 @@ export class ProjectGitService {
    * to the newest checkpoint). A bare `HEAD` is deliberately **not** a fallback — anchoring on HEAD would silently
    * keep whatever the run committed after the checkpoint, which is the opposite of "revert to the checkpoint state".
    */
-  private async resolveRevertTarget(
+    private async resolveRevertTarget(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
     input: { checkpointId?: string; commitHash?: string },
   ): Promise<string> {
-    if (input.checkpointId) {
-      const checkpoint = await this.getCheckpoint(ctx, companyId, projectId, input.checkpointId);
-      if (!checkpoint.commitHash) throw new GitError("CHECKPOINT_NO_COMMIT", "Checkpoint does not have an associated commit hash", 400);
-      return checkpoint.commitHash;
-    }
-    if (input.commitHash) {
-      if (!/^[0-9a-fA-F]{7,64}$/.test(input.commitHash)) throw new GitError("INVALID_COMMIT", "Invalid commit hash", 400);
-      return input.commitHash;
-    }
-    const checkpoints = await this.listCheckpoints(ctx, companyId, projectId, 50);
-    const target = checkpoints.find((checkpoint) => checkpoint.trigger === "pre_run") ?? checkpoints[0];
-    if (!target?.commitHash) throw new GitError("NO_CHECKPOINT", "There is no checkpoint to revert these paths to", 409);
-    return target.commitHash;
+    return resolveRevertTarget(this.guardHost(), ctx, companyId, projectId, input);
   }
 
   /** Whether a path exists at a commit. `cat-file -e` exits non-zero for a path that is not in that tree. */
@@ -875,62 +874,13 @@ export class ProjectGitService {
    * reaches the checkpoint state. Every safety check happens before the deletion, and only the named path is touched:
    * parents are never pruned, so a revert can never take a directory with it.
    */
-  private async removePathForRevert(dir: string, file: string): Promise<void> {
-    const resolvedDir = path.resolve(dir);
-    const absolute = path.join(resolvedDir, ...file.split("/"));
-    const resolvedTarget = path.resolve(absolute);
-    if (resolvedTarget !== resolvedDir && !resolvedTarget.startsWith(resolvedDir + path.sep)) {
-      throw new GitError("INVALID_PATH", "Restore path escapes the project workspace", 403);
-    }
-    const entry = await lstat(absolute).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") return undefined;
-      throw error;
-    });
-    // Already absent: the checkpoint state is reached and there is nothing to delete.
-    if (!entry) return;
-    if (entry.isSymbolicLink()) throw new GitError("INVALID_PATH", "Symlink paths cannot be restored", 403);
-    const realDir = await realpath(dir).catch(() => undefined);
-    if (realDir) {
-      const real = await realpath(absolute).catch(() => undefined);
-      if (real && !samePath(real, path.join(realDir, ...file.split("/")))) {
-        // A junction or mount point that `lstat` did not flag: deleting through it would delete the target.
-        throw new GitError("INVALID_PATH", "Symlink paths cannot be restored", 403);
-      }
-    }
-    await rm(absolute, { recursive: entry.isDirectory(), force: true });
-    // Best-effort index bookkeeping so a tracked file does not stay staged as present. A path that is not tracked
-    // simply matches nothing, and index bookkeeping must never fail the revert.
-    await this.runGit(dir, ["rm", "--cached", "--ignore-unmatch", "-r", "--", file]).catch(() => undefined);
+    private async removePathForRevert(dir: string, file: string): Promise<void> {
+    return removePathForRevert(this.guardHost(), dir, file);
   }
 
   /** Refuse a path that is, or traverses, a symlink: git must never write through a link out of the workspace. */
-  private async assertNoSymlinkPath(dir: string, files: string[]): Promise<void> {
-    const resolvedDir = path.resolve(dir);
-    const realDir = await realpath(dir).catch(() => undefined);
-    for (const file of files) {
-      const parts = file.split("/");
-      let candidate = dir;
-      for (let index = 0; index < parts.length; index += 1) {
-        candidate = path.join(candidate, parts[index]!);
-        const entry = await lstat(candidate).catch((error: NodeJS.ErrnoException) => {
-          if (error.code === "ENOENT") return undefined;
-          throw error;
-        });
-        if (!entry) break;
-        if (entry.isSymbolicLink()) throw new GitError("INVALID_PATH", "Symlink paths cannot be restored", 403);
-        // `isSymbolicLink()` misses reparse points that the platform reports as directories (Windows junctions),
-        // so the resolved location is compared as well: a link anywhere along the path resolves outside the root.
-        if (realDir) {
-          const real = await realpath(candidate).catch(() => undefined);
-          if (real && !samePath(real, path.join(realDir, ...parts.slice(0, index + 1)))) {
-            throw new GitError("INVALID_PATH", "Symlink paths cannot be restored", 403);
-          }
-        }
-      }
-      if (!path.resolve(candidate).startsWith(resolvedDir + path.sep) && path.resolve(candidate) !== resolvedDir) {
-        throw new GitError("INVALID_PATH", "Restore path escapes the project workspace", 403);
-      }
-    }
+    private async assertNoSymlinkPath(dir: string, files: string[]): Promise<void> {
+    return assertNoSymlinkPath(this.guardHost(), dir, files);
   }
 
     async push(
@@ -1109,16 +1059,13 @@ export class ProjectGitService {
    * initialization and immediately before the credential lease and the push. A moved revision is
    * `workspace_revision_mismatch` (409, retryable) with no push at all.
    */
-  private async assertWorkspaceRevisionUnchanged(
+    private async assertWorkspaceRevisionUnchanged(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
     snapshot: CodeWorkspaceRevisionSnapshot | null,
   ): Promise<void> {
-    if (!snapshot) return;
-    const guard = this.boundary?.workspaceRevisions;
-    if (!guard) return;
-    await guard.assertUnchanged({ ctx, companyId, projectId }, snapshot, "git_push");
+    return assertWorkspaceRevisionUnchanged(this.guardHost(), ctx, companyId, projectId, snapshot);
   }
 
   /**
