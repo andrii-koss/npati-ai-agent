@@ -6,10 +6,10 @@ export type ProjectRuntimeMode = "shared" | "isolated";
 export function projectRuntimeMode(env: Record<string, string | undefined> = process.env): ProjectRuntimeMode {
   const configured = env.NPATI_PROJECT_RUNTIME_MODE;
   if (configured && configured !== "shared" && configured !== "isolated") throw new Error("Invalid NPATI_PROJECT_RUNTIME_MODE");
-  const mode: ProjectRuntimeMode = configured === "shared" || configured === "isolated" ? configured
-    : env.NPATI_DEPLOYMENT_TYPE === "self_hosted" || env.NPATI_SANDBOX_RUNNER_MODE === "local" ? "shared" : "isolated";
-  if (mode === "shared" && env.NPATI_DEPLOYMENT_TYPE === "npati_hosted") throw new Error("Hosted deployments require isolated project execution");
-  return mode;
+  // Account registration type does not override the explicitly selected execution architecture.
+  if (configured === "shared" || configured === "isolated") return configured;
+  if (env.NPATI_DEPLOYMENT_TYPE === "npati_hosted") return "isolated";
+  return env.NPATI_DEPLOYMENT_TYPE === "self_hosted" || env.NPATI_SANDBOX_RUNNER_MODE === "local" ? "shared" : "isolated";
 }
 export function assertProjectRuntimeProvider(kind: ProjectRuntimeMode, env: Record<string, string | undefined> = process.env): void {
   if (projectRuntimeMode(env) !== kind) throw new SandboxProviderError("runtime_architecture_violation", `Configured ${projectRuntimeMode(env)} runtime cannot use ${kind} provider`, 503, "provider_selection");
