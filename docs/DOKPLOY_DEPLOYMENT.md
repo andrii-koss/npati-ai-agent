@@ -4,13 +4,9 @@ Use `docker-compose.dokploy-isolated.yml` for this deployment. It builds one API
 repository and keeps PostgreSQL/pgvector, Redis, MinIO, Crawl4AI, OmniRoute, and the worker
 on an internal Compose network.
 
-`sandbox-runner` is temporarily disabled for deployment diagnostics: it is behind the
-`project-runtime` Compose profile. Default deployment starts nine services; project code
-execution and preview are unavailable until the profile is enabled. API and worker do
-not depend on runner health. Keep `COMPOSE_PROFILES` unset during this diagnostic deployment.
-If the previous runner container remains running, stop it with
-`docker stop ainpaticom-8azpx4-sandbox-runner-1`. Preserve the project runtime volumes.
-To restore execution, set `COMPOSE_PROFILES=project-runtime` in Dokploy and redeploy.
+`sandbox-runner` starts by default with the other services; no Compose profile is
+required. All ten services start during deployment. Project execution and preview
+use this single shared runner, with the existing project runtime volumes preserved.
 
 ## 1. Create the Compose service
 
@@ -169,7 +165,6 @@ The deployed `docker-compose.dokploy-isolated.yml` keeps its existing filename
 for Dokploy compatibility, but runs the shared project runtime. It defines exactly
 10 services: agent-api, company-worker, sandbox-runner, postgres,
 postgres-projects, redis, minio, omniroute, crawler and browser-use-worker.
-Nine start while the runner is temporarily disabled.
 Frontend assets are served by agent-api.
 
 ### PostgreSQL vector search without Qdrant

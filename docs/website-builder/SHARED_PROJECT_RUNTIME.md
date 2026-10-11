@@ -22,7 +22,7 @@ async subagents, background jobs and Preview create scoped directories and proce
 per-project workload or proxy containers. Deleting a Project must never destroy the shared runtime.
 An explicitly isolated profile retains per-project Docker isolation. Hosted account registration
 can also use explicitly selected shared execution. The selected Dokploy deployment now uses
-ten services after removal of Qdrant; nine start while the runner diagnostic profile is disabled.
+ten services after removal of Qdrant, including the shared sandbox-runner, all started by default.
 Future implementation must not change this decision unless the owner explicitly requests an architecture change.
 
 `NPATI_PROJECT_RUNTIME_MODE=shared|isolated` selects the execution architecture;
