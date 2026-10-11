@@ -31,6 +31,7 @@ import { currentBranch, type ProjectGitBranchHost } from "./project-git-branch-s
 import { cleanupAllWorktrees, type ProjectGitCleanupHost } from "./project-git-cleanup-service";
 import { log, commit, type ProjectGitHistoryHost } from "./project-git-history-service";
 import { assertNoSymlinkPath, removePathForRevert, resolveRevertTarget, assertWorkspaceRevisionUnchanged, type ProjectGitGuardHost } from "./project-git-guard-service";
+import { resolveProjectWorkspace, assertSafeIndex, ensureRepository, requireWrite, runGit, stage, type ProjectGitWorkspaceHost } from "./project-git-workspace-service";
 
 const execFileAsync = promisify(execFile);
 
@@ -318,6 +319,20 @@ export class ProjectGitService {
     };
   }
 
+  private workspaceHost(): ProjectGitWorkspaceHost {
+    return {
+      bases: this.bases,
+      projectService: this.projectService,
+      runGitImpl: this.runGitImpl,
+      validId: validId,
+      redactSecrets: redactSecrets,
+      parseConflictFiles: this.parseConflictFiles.bind(this),
+      status: this.status.bind(this),
+      execFileAsync: execFileAsync,
+      ensureRepositoryInitialized: this.ensureRepositoryInitialized.bind(this),
+    };
+  }
+
   private guardHost(): ProjectGitGuardHost {
     return {
       boundary: this.boundary,
@@ -465,95 +480,25 @@ export class ProjectGitService {
    * `create: false` and therefore creates **nothing** — a missing segment is reported as "this workspace
    * does not exist yet" instead of being materialised.
    */
-  private async resolveProjectWorkspace(
+    private async resolveProjectWorkspace(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
     options: { create: boolean },
   ): Promise<{ project: Project; dir: string; readOnly: boolean; mounted: boolean }> {
-    if (!validId(companyId) || !validId(projectId)) {
-      throw new GitError("INVALID_IDENTIFIER", "Invalid company or project identifier", 400);
-    }
-    const project = await this.projectService.get(ctx, companyId, projectId);
-    if (project.companyId !== companyId || project.id !== projectId || project.workspaceId !== ctx.workspaceId) {
-      throw new GitError("PROJECT_ACCESS_DENIED", "Access to project git workspace denied", 403);
-    }
-    if (project.status === "archived") {
-      throw new GitError("PROJECT_ARCHIVED", "Archived project cannot perform git operations", 409);
-    }
-    if (!ctx.permissions.some((permission) => ["*", "owner", "business:manage", "workspace:read", "workspace:write"].includes(permission))) throw new GitError("PROJECT_ACCESS_DENIED", "Git permission denied", 403);
-    /**
-     * C15: the workspace comes from the **same resolver** the `WorkspaceProvider` reads, so git, the file tools
-     * and the sandbox all act on one canonical directory. A mounted project's git repository is therefore the
-     * user's own repository in their own folder — not a copy under the managed root.
-     */
-    const resolved: WorkspaceBase = await this.bases.resolve(ctx, companyId, projectId);
-    const dir = resolved.base;
-    if (options.create && resolved.readOnly) {
-      // `inspectRepository` (create: false) stays allowed on an `ro` mount — reading a repository is the whole
-      // point of a read-only mount — while every path that may materialise a directory or write is refused.
-      throw new GitError("MOUNTED_FOLDER_READ_ONLY", "The mounted project folder is read only", 403);
-    }
-    /**
-     * The segments to walk differ by source. A managed workspace is created under the root, so the root, the
-     * company directory and the project directory are all checked for a link. A mounted folder already exists
-     * and its path was validated component by component by the resolver (realpath + `lstat`, which is what
-     * catches a junction), so the managed-root check must **not** be applied to it: the mount is deliberately
-     * outside that root, and comparing it against the root would refuse every legitimate mount.
-     */
-    const segments = resolved.mounted ? [dir] : [this.bases.managedRoot, path.join(this.bases.managedRoot, companyId), dir];
-    for (const segment of segments) {
-      if (options.create && !resolved.mounted) {
-        await mkdir(segment).catch((error: NodeJS.ErrnoException) => { if (error.code !== "EEXIST") throw error; });
-      }
-      // A read-only caller must tolerate a segment that does not exist, and must not create it: walking one
-      // level deeper would be meaningless (nothing below a missing directory exists) and every level above
-      // the missing one was already checked. The creating caller keeps the historical behaviour of a hard
-      // failure, because after its own `mkdir` a missing directory is a real error, not an absent workspace.
-      const entry = await lstat(segment).catch((error: NodeJS.ErrnoException) => {
-        if (error.code === "ENOENT" && !options.create) return null;
-        throw error;
-      });
-      if (!entry) break;
-      if (!entry.isDirectory() || entry.isSymbolicLink()) throw new GitError("INVALID_WORKSPACE", "Symlink workspace is not allowed", 403);
-    }
-    return { project, dir, readOnly: resolved.readOnly, mounted: resolved.mounted };
+    return resolveProjectWorkspace(this.workspaceHost(), ctx, companyId, projectId, options);
   }
 
   async getProjectPath(ctx: AuthContext, companyId: string, projectId: string): Promise<{ project: Project; dir: string }> {
     return this.resolveProjectWorkspace(ctx, companyId, projectId, { create: true });
   }
 
-  private async runGit(dir: string, args: string[], env: Record<string, string> = {}): Promise<{ stdout: string; stderr: string }> {
-    if (this.runGitImpl) return this.runGitImpl(dir, args, env);
-    try {
-      const result = await execFileAsync("git", ["-c", `core.hooksPath=${path.join(dir, ".git", "npati-disabled-hooks")}`, ...args], {
-        cwd: dir,
-        timeout: 45_000,
-        maxBuffer: 4 * 1024 * 1024,
-        env: {
-          ...process.env,
-          ...env,
-          GIT_TERMINAL_PROMPT: "0",
-        },
-      });
-      return { stdout: result.stdout, stderr: result.stderr };
-    } catch (err: any) {
-      const combined = redactSecrets(`${err.stdout ?? ""} ${err.stderr ?? ""} ${err.message ?? ""}`);
-      const conflictFiles = this.parseConflictFiles(combined);
-      if (conflictFiles.length > 0) {
-        throw new GitConflictError(conflictFiles, combined);
-      }
-      throw new GitError("GIT_COMMAND_FAILED", `Git command failed: ${combined.slice(0, 500)}`, 400);
-    }
+    private async runGit(dir: string, args: string[], env: Record<string, string> = {}): Promise<{ stdout: string; stderr: string }> {
+    return runGit(this.workspaceHost(), dir, args, env);
   }
 
-  private async assertSafeIndex(dir: string): Promise<void> {
-    const { stdout } = await this.runGit(dir, ["diff", "--no-ext-diff", "--cached", "--name-only", "-z"]);
-    for (const file of stdout.split("\0").filter(Boolean)) {
-      try { safeProjectPath(file); }
-      catch { throw new GitError("PROTECTED_FILE", "Protected files cannot be staged or committed", 403); }
-    }
+    private async assertSafeIndex(dir: string): Promise<void> {
+    return assertSafeIndex(this.workspaceHost(), dir);
   }
 
   private parseConflictFiles(output: string): string[] {
@@ -570,10 +515,8 @@ export class ProjectGitService {
     return [...files];
   }
 
-  private requireWrite(ctx: AuthContext): void {
-    if (!ctx.permissions.some((permission) => ["*", "owner", "business:manage", "workspace:write"].includes(permission))) {
-      throw new GitError("PROJECT_WRITE_DENIED", "Project Git write permission denied", 403);
-    }
+    private requireWrite(ctx: AuthContext): void {
+    return requireWrite(this.workspaceHost(), ctx);
   }
 
   async connectRepository(ctx: AuthContext, companyId: string, projectId: string, input: { url: string; branch?: string }): Promise<Project> {
@@ -650,8 +593,8 @@ export class ProjectGitService {
    * @deprecated mutating; use `inspectRepository()` to read the state and `ensureRepositoryInitialized()`
    * after the authorization and approval of a write.
    */
-  async ensureRepository(ctx: AuthContext, companyId: string, projectId: string): Promise<string> {
-    return this.ensureRepositoryInitialized(ctx, companyId, projectId);
+    async ensureRepository(ctx: AuthContext, companyId: string, projectId: string): Promise<string> {
+    return ensureRepository(this.workspaceHost(), ctx, companyId, projectId);
   }
 
     async status(ctx: AuthContext, companyId: string, projectId: string): Promise<GitStatusResult> {
@@ -693,23 +636,13 @@ export class ProjectGitService {
     return branch(this.repositoryHost(), ctx, companyId, projectId, options);
   }
 
-  async stage(
+    async stage(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
     files?: string[],
   ): Promise<{ staged: string[] }> {
-    this.requireWrite(ctx);
-    const dir = await this.ensureRepository(ctx, companyId, projectId);
-    if (!files || files.length === 0 || files.includes(".")) {
-      await this.runGit(dir, ["add", "-A"]);
-    } else {
-      const safeFiles = files.map((f) => safeProjectPath(f));
-      await this.runGit(dir, ["add", "--", ...safeFiles]);
-    }
-    await this.assertSafeIndex(dir);
-    const st = await this.status(ctx, companyId, projectId);
-    return { staged: st.staged };
+    return stage(this.workspaceHost(), ctx, companyId, projectId, files);
   }
 
     async commit(
