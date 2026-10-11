@@ -171,6 +171,8 @@ services:
       NPATI_SANDBOX_RUNNER_MODE: local
       NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:?NPATI_SANDBOX_RUNNER_SECRET must be at least 32 characters}
       ALLOWED_HOSTS: ${NPATI_SANDBOX_ALLOWED_HOSTS:-registry.npmjs.org,registry.yarnpkg.com,pypi.org,files.pythonhosted.org,github.com,codeload.github.com,api.github.com,objects.githubusercontent.com}
+    devices:
+      - /dev/net/tun:/dev/net/tun
     volumes:
       - project-runtime-workspaces:/projects
       - project-runtime-state:/runtime-state
@@ -181,7 +183,11 @@ services:
       - /tmp:rw,nosuid,nodev,size=64m
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE, SETUID, SETGID, KILL, NET_ADMIN]
-    security_opt: [no-new-privileges:true]
+    # Permit unprivileged namespace setup, without SYS_ADMIN or privileged mode.
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./docker/sandbox/project-runtime-seccomp.json
+      - apparmor=unconfined
     cpus: ${NPATI_PROJECT_RUNTIME_CPU:-4}
     mem_limit: ${NPATI_PROJECT_RUNTIME_MEMORY:-4g}
     pids_limit: 4096

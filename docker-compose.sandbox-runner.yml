@@ -34,7 +34,12 @@ services:
       - project-runtime-state:/runtime-state
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE, SETUID, SETGID, KILL, NET_ADMIN]
-    security_opt: [no-new-privileges:true]
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./docker/sandbox/project-runtime-seccomp.json
+      - apparmor=unconfined
+    devices:
+      - /dev/net/tun:/dev/net/tun
     read_only: true
     tmpfs:
       - /tmp:rw,nosuid,nodev,size=64m

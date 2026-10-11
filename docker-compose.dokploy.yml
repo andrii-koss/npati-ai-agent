@@ -172,12 +172,17 @@ services:
       - project-runtime-state:/runtime-state
     expose:
       - "7865"
+    devices:
+      - /dev/net/tun:/dev/net/tun
     read_only: true
     tmpfs:
       - /tmp:rw,nosuid,nodev,size=64m
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE, SETUID, SETGID, KILL, NET_ADMIN]
-    security_opt: [no-new-privileges:true]
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./docker/sandbox/project-runtime-seccomp.json
+      - apparmor=unconfined
     cpus: ${NPATI_PROJECT_RUNTIME_CPU:-4}
     mem_limit: ${NPATI_PROJECT_RUNTIME_MEMORY:-4g}
     pids_limit: 4096

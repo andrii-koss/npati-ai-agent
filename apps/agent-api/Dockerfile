@@ -61,12 +61,16 @@ CMD ["node", "dist/server.js"]
 FROM node:24-alpine AS project-runtime-tools
 USER root
 ENV NPATI_SANDBOX_RUNNER_MODE=local
-RUN apk add --no-cache python3 py3-pip git openssh-client ripgrep build-base linux-headers bash coreutils findutils util-linux procps jq unzip curl iptables
+RUN apk add --no-cache python3 py3-pip git openssh-client ripgrep build-base linux-headers bash coreutils findutils util-linux procps jq unzip curl iptables bubblewrap slirp4netns
 RUN npm install -g --prefix /opt/npati-package-managers --no-audit --no-fund pnpm@10 yarn@1.22.22
 COPY --from=project-web-toolchain /opt/npati-project-toolchain /opt/npati-project-toolchain
 COPY apps/agent-api/prepare-project-dependencies.cjs /opt/npati-runtime/prepare-project-dependencies.cjs
 COPY apps/agent-api/project-runtime-guard.c /tmp/project-runtime-guard.c
-RUN cc -O2 -Wall -Wextra -Werror /tmp/project-runtime-guard.c -o /usr/local/bin/npati-project-exec && rm /tmp/project-runtime-guard.c
+COPY apps/agent-api/project-runtime-launcher.mjs apps/agent-api/project-runtime-inner.mjs /opt/npati-runtime/
+RUN apk add --no-cache libseccomp-dev
+RUN cc -O2 -Wall -Wextra -Werror /tmp/project-runtime-guard.c -lseccomp -o /usr/local/bin/npati-project-exec \
+  && /usr/local/bin/npati-project-exec --emit-filter /opt/npati-runtime/project-command.seccomp \
+  && rm /tmp/project-runtime-guard.c
 COPY apps/agent-api/src/sandbox-egress-proxy.mjs /opt/npati-runtime/sandbox-egress-proxy.mjs
 COPY apps/agent-api/project-runtime-entrypoint.sh /opt/npati-runtime/entrypoint.sh
 RUN mkdir -p /projects /runtime-state && chmod 711 /projects && chmod 700 /runtime-state
