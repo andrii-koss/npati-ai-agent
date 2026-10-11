@@ -837,86 +837,29 @@ export class CodingAgentRunner {
       return { action: "complete" };
     };
 
-    const afterSelfReviewFix = async (): Promise<{ action: "complete" } | { action: "stop"; reason: CodingAgentStopReason; message: string }> => {
-      const changed = currentChangeSignature() !== verifiedSignature;
-      selfReviewFixPending = false;
-      if (!changed) {
-
-        selfReviewState?.noteFixOutcome(false);
-        selfReviewVerdict = selfReviewState?.report() ?? selfReviewVerdict;
-        writeSelfReviewSummary();
-        const outstanding = (selfReviewVerdict?.unresolved ?? []).filter((finding) => finding.blocking);
-        if (outstanding.length) {
-          return { action: "stop", reason: "self_review_unresolved", message: selfReviewStopMessage(selfReviewVerdict ?? undefined) };
-        }
-        return { action: "complete" };
-      }
-
-      const runAttempt = verificationLoop.report().verificationRuns + 1;
-      let outcome: CodeToolInvokeResult | CodeToolInvokeFailure;
-      try {
-        outcome = await this.ports.toolRuntime.invoke(ctx, {
-          companyId,
-          projectId,
-          sessionId,
-          tool: "code.verify.run",
-          args: { tools: [...verificationTools], changedOnly: true },
-          toolCallId: `verify:self-review:${turnId}:${runAttempt}`,
-          turnId,
-          ...(input.runId ? { runId: input.runId } : {}),
-          ...(stateRunId ? { runId: stateRunId } : {}),
-          ...(input.readOnlyIntent === true ? { readOnlyIntent: true } : {}),
-          ...capabilityScopeFields,
-        });
-      } catch (error) {
-        const failure = error as { code?: string; message?: string };
-        outcome = {
-          ok: false,
-          error: {
-            code: (failure.code ?? "verify_error") as CodeToolInvokeFailure["error"]["code"],
-            status: 500,
-            message: failure.message ?? "Verification failed to run",
-            tool: "code.verify.run",
-            step: "execute",
-            retryable: false,
-          },
-        };
-      }
-      const checks = toCheckReports(outcome);
-
-      verificationLoop.record(checks);
-      verificationLoop.blockFurtherRepairs();
-      writeVerificationSummary();
-      await record({
-        kind: "tool_call",
-        companyId, projectId, sessionId,
-        runId: input.runId,
-        turn: steps,
-        tool: "code.verify.run",
-        toolCallId: `verify:self-review:${turnId}:${runAttempt}`,
-        ok: outcome.ok,
-        ...(outcome.ok ? {} : { errorCode: String(outcome.error.code) }),
-        reason: "self_review_reverify",
-      });
-
-      const failed = checks.filter((check) => check.state !== "passed");
-      if (failed.length) {
-
-        selfReviewState?.noteFixOutcome(false);
-        selfReviewVerdict = selfReviewState?.report() ?? selfReviewVerdict;
-        writeSelfReviewSummary();
-        return {
-          action: "stop",
-          reason: "verification_failed",
-          message: `Stopped: the checks still fail after the self-review fix (${failed.map((check) => check.tool).join(", ")}).`,
-        };
-      }
-
-      selfReviewState?.noteFixOutcome(true);
-      selfReviewVerdict = selfReviewState?.report() ?? selfReviewVerdict;
-      writeSelfReviewSummary();
-      return { action: "complete" };
-    };
+    const afterSelfReviewFix = async (): Promise<{ action: "complete" } | { action: "stop"; reason: CodingAgentStopReason; message: string }> => this.afterSelfReviewFixOnce({
+      ctx,
+      input,
+      companyId,
+      projectId,
+      sessionId,
+      steps,
+      turnId,
+      stateRunId,
+      verificationTools,
+      capabilityScopeFields,
+      selfReviewState,
+      verificationLoop,
+      verifiedSignature,
+      currentChangeSignature,
+      getSelfReviewVerdict: () => selfReviewVerdict,
+      setSelfReviewVerdict: (verdict) => { selfReviewVerdict = verdict; },
+      setSelfReviewFixPending: (pending) => { selfReviewFixPending = pending; },
+      writeSelfReviewSummary,
+      writeVerificationSummary,
+      toCheckReports,
+      record,
+    });
 
     const admission = await this.admitRun({ ctx, input, session, companyId, projectId, sessionId });
     if (!admission.admitted) {
@@ -2870,5 +2813,135 @@ export class CodingAgentRunner {
       reason: `${describeSelfReview(verdict)} profile=${this.ports.selfReview?.profileId ?? "run-default"}`,
     });
     return verdict;
+  }
+
+  private async afterSelfReviewFixOnce(args: {
+    ctx: AuthContext;
+    input: CodingAgentRunInput;
+    companyId: string;
+    projectId: string;
+    sessionId: string;
+    steps: number;
+    turnId: string;
+    stateRunId: string | undefined;
+    verificationTools: readonly string[];
+    capabilityScopeFields: {
+      subagentWritePaths?: CodingAgentRunInput["subagentWritePaths"];
+      capabilityScope?: readonly string[];
+      parentRunId?: string;
+    };
+    selfReviewState: SelfReviewState | null;
+    verificationLoop: VerificationLoop;
+    verifiedSignature: string | null;
+    currentChangeSignature: () => string;
+    getSelfReviewVerdict: () => SelfReviewVerdict | null;
+    setSelfReviewVerdict: (verdict: SelfReviewVerdict | null) => void;
+    setSelfReviewFixPending: (pending: boolean) => void;
+    writeSelfReviewSummary: () => void;
+    writeVerificationSummary: () => void;
+    toCheckReports: (outcome: CodeToolInvokeResult | CodeToolInvokeFailure) => VerificationCheckReport[];
+    record: (event: CodeRunActivityEvent) => Promise<void>;
+  }): Promise<{ action: "complete" } | { action: "stop"; reason: CodingAgentStopReason; message: string }> {
+    const {
+      ctx,
+      input,
+      companyId,
+      projectId,
+      sessionId,
+      steps,
+      turnId,
+      stateRunId,
+      verificationTools,
+      capabilityScopeFields,
+      selfReviewState,
+      verificationLoop,
+      verifiedSignature,
+      currentChangeSignature,
+      getSelfReviewVerdict,
+      setSelfReviewVerdict,
+      setSelfReviewFixPending,
+      writeSelfReviewSummary,
+      writeVerificationSummary,
+      toCheckReports,
+      record,
+    } = args;
+    const changed = currentChangeSignature() !== verifiedSignature;
+    setSelfReviewFixPending(false);
+    if (!changed) {
+
+      selfReviewState?.noteFixOutcome(false);
+      setSelfReviewVerdict(selfReviewState?.report() ?? getSelfReviewVerdict());
+      writeSelfReviewSummary();
+      const outstanding = (getSelfReviewVerdict()?.unresolved ?? []).filter((finding) => finding.blocking);
+      if (outstanding.length) {
+        return { action: "stop", reason: "self_review_unresolved", message: selfReviewStopMessage(getSelfReviewVerdict() ?? undefined) };
+      }
+      return { action: "complete" };
+    }
+
+    const runAttempt = verificationLoop.report().verificationRuns + 1;
+    let outcome: CodeToolInvokeResult | CodeToolInvokeFailure;
+    try {
+      outcome = await this.ports.toolRuntime.invoke(ctx, {
+        companyId,
+        projectId,
+        sessionId,
+        tool: "code.verify.run",
+        args: { tools: [...verificationTools], changedOnly: true },
+        toolCallId: `verify:self-review:${turnId}:${runAttempt}`,
+        turnId,
+        ...(input.runId ? { runId: input.runId } : {}),
+        ...(stateRunId ? { runId: stateRunId } : {}),
+        ...(input.readOnlyIntent === true ? { readOnlyIntent: true } : {}),
+        ...capabilityScopeFields,
+      });
+    } catch (error) {
+      const failure = error as { code?: string; message?: string };
+      outcome = {
+        ok: false,
+        error: {
+          code: (failure.code ?? "verify_error") as CodeToolInvokeFailure["error"]["code"],
+          status: 500,
+          message: failure.message ?? "Verification failed to run",
+          tool: "code.verify.run",
+          step: "execute",
+          retryable: false,
+        },
+      };
+    }
+    const checks = toCheckReports(outcome);
+
+    verificationLoop.record(checks);
+    verificationLoop.blockFurtherRepairs();
+    writeVerificationSummary();
+    await record({
+      kind: "tool_call",
+      companyId, projectId, sessionId,
+      runId: input.runId,
+      turn: steps,
+      tool: "code.verify.run",
+      toolCallId: `verify:self-review:${turnId}:${runAttempt}`,
+      ok: outcome.ok,
+      ...(outcome.ok ? {} : { errorCode: String(outcome.error.code) }),
+      reason: "self_review_reverify",
+    });
+
+    const failed = checks.filter((check) => check.state !== "passed");
+    if (failed.length) {
+
+      selfReviewState?.noteFixOutcome(false);
+      setSelfReviewVerdict(selfReviewState?.report() ?? getSelfReviewVerdict());
+      writeSelfReviewSummary();
+      return {
+        action: "stop",
+        reason: "verification_failed",
+        message: `Stopped: the checks still fail after the self-review fix (${failed.map((check) => check.tool).join(", ")}).`,
+      };
+    }
+
+    selfReviewState?.noteFixOutcome(true);
+    setSelfReviewVerdict(selfReviewState?.report() ?? getSelfReviewVerdict());
+    writeSelfReviewSummary();
+    return { action: "complete" };
   }
 }
