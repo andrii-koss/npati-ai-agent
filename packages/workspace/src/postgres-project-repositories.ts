@@ -5,6 +5,11 @@ import type { ApplyCodeRunStateEventInput, AuthContext, CodeActivityEventRecord,
 import { CodeRunStateStoreError, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, WorkspaceNotFoundError, clampScanLimit, codeRunRequestStatus, decodeCodeActivityCursor, decodeCodeRunScanCursor, encodeCodeRunScanCursor } from "./types";
 import { codeActivityEventColumns, codeContextSummaryColumns, codeRunStateColumns, codeRunTurnColumns, projectCheckpointColumns, projectCodeTrustColumns, projectColumns, projectDeploymentColumns, projectMountedFolderColumns, projectQaReportColumns } from "./postgres-store-schema";
 import { mapCodeActivityEventRow, mapCodeContextSummaryRow } from "./postgres-store-support";
+import { assertProjectAgent } from "./postgres-company-repositories";
+import { codeChildSessionId } from "./code-child-session-id";
+import type { CodeProjectRefScanInput, CodeProjectRefScanPage, CodeSession, CodeSessionInput, CodeSessionMode, CodeSessionStatus } from "./types";
+import { WorkspaceAccessError, isClassificationAtLeast } from "./types";
+import { codeSessionColumns } from "./postgres-store-schema";
 
 export async function createProject(pool: Pool, context: AuthContext, companyId: string, input: ProjectInput, idempotencyKey: string) {
     await assertCompany(pool, context, companyId);
@@ -500,4 +505,102 @@ export async function listCodeContextSummaries(pool: Pool, input: ListCodeContex
       [input.companyId, input.sessionId ?? null, input.runId ?? null, limit],
     );
     return result.rows.map((row) => mapCodeContextSummaryRow(row));
+  }
+
+export async function createCodeSession(pool: Pool, context: AuthContext, companyId: string, projectId: string, input: CodeSessionInput): Promise<CodeSession> {
+    const project = await getProject(pool, context, companyId, projectId);
+    await assertProjectAgent(pool, context, companyId, input.agentId);
+    if (input.parentSessionId) {
+      const parent = await getCodeSession(pool, context, companyId, input.parentSessionId);
+      if (parent.projectId !== projectId) throw new WorkspaceAccessError("Parent session belongs to another project");
+    }
+
+    const requested = input.dataClassification ?? project.dataClassification;
+    if (!isClassificationAtLeast(requested, project.dataClassification)) {
+      throw new WorkspaceAccessError("Session data classification cannot be lower than the project classification");
+    }
+    const id = input.childKey && input.parentSessionId
+      ? codeChildSessionId(context, companyId, projectId, input.parentSessionId, input.childKey) : randomUUID();
+    const session = await pool.query<CodeSession>(`INSERT INTO code_sessions
+      (id, workspace_id, company_id, project_id, user_id, agent_id, mode, model_profile, status, parent_session_id,
+       summary, data_classification, retention_class)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,'active',$9,$10,$11,$12)
+      ON CONFLICT (id) DO NOTHING
+      RETURNING ${codeSessionColumns}`,
+      [id, context.workspaceId, companyId, projectId, context.userId, input.agentId ?? null,
+        input.mode ?? "edit", input.modelProfile ?? null, input.parentSessionId ?? null, input.summary ?? null,
+        requested, input.retentionClass ?? project.retentionClass]);
+    return session.rows[0] ?? getCodeSession(pool, context, companyId, id);
+  }
+export async function getCodeSession(pool: Pool, context: AuthContext, companyId: string, sessionId: string): Promise<CodeSession> {
+    const result = await pool.query<CodeSession>(`SELECT ${codeSessionColumns} FROM code_sessions
+      WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND user_id=$4`,
+      [sessionId, context.workspaceId, companyId, context.userId]);
+    if (!result.rows[0]) throw new WorkspaceNotFoundError("Code session not found");
+    return result.rows[0];
+  }
+export async function listCodeSessions(pool: Pool, context: AuthContext, companyId: string, projectId?: string, options: { includeArchived?: boolean; limit?: number } = {}): Promise<CodeSession[]> {
+    await assertCompany(pool, context, companyId);
+    const limit = Math.max(1, Math.min(options.limit ?? 50, 200));
+    const result = await pool.query<CodeSession>(`SELECT ${codeSessionColumns} FROM code_sessions
+      WHERE workspace_id=$1 AND company_id=$2 AND user_id=$3
+        AND ($4::text IS NULL OR project_id=$4)
+        AND ($5::boolean OR status<>'archived')
+      ORDER BY updated_at DESC, id LIMIT $6`,
+      [context.workspaceId, companyId, context.userId, projectId ?? null, options.includeArchived === true, limit]);
+    return result.rows;
+  }
+export async function updateCodeSession(pool: Pool, context: AuthContext, companyId: string, sessionId: string, patch: { status?: CodeSessionStatus; summary?: string; runId?: string | null; modelProfile?: string; dataClassification?: DataClassification; retentionClass?: RetentionClass; toolManifestVersion?: number | null; mode?: CodeSessionMode; expectedRevision?: number }): Promise<CodeSession> {
+    const current = await getCodeSession(pool, context, companyId, sessionId);
+    if (patch.dataClassification && !isClassificationAtLeast(patch.dataClassification, current.dataClassification)) {
+      throw new WorkspaceAccessError("Session data classification cannot be lowered through this endpoint");
+    }
+    if (patch.expectedRevision !== undefined && patch.expectedRevision !== current.revision) {
+      throw new WorkspaceAccessError("Code session changed by another request. Reload and try again.");
+    }
+    const result = await pool.query<CodeSession>(`UPDATE code_sessions
+      SET status=COALESCE($5,status),
+          summary=COALESCE($6,summary),
+          run_id=COALESCE($7,run_id),
+          model_profile=COALESCE($8,model_profile),
+          data_classification=COALESCE($9,data_classification),
+          retention_class=COALESCE($10,retention_class),
+          tool_manifest_version=COALESCE($11,tool_manifest_version),
+          mode=COALESCE($12,mode),
+          revision=revision+1,
+          updated_at=now()
+      WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND user_id=$4
+      RETURNING ${codeSessionColumns}`,
+      [sessionId, context.workspaceId, companyId, context.userId, patch.status ?? null, patch.summary ?? null,
+        patch.runId === undefined ? null : patch.runId, patch.modelProfile ?? null,
+        patch.dataClassification ?? null, patch.retentionClass ?? null,
+        patch.toolManifestVersion === undefined ? null : patch.toolManifestVersion, patch.mode ?? null]);
+    if (!result.rows[0]) throw new WorkspaceNotFoundError("Code session not found");
+    return result.rows[0];
+  }
+export async function listCodeProjectRefs(pool: Pool, input: CodeProjectRefScanInput): Promise<CodeProjectRefScanPage> {
+    const limit = clampScanLimit(input.limit);
+    const cursor = decodeCodeRunScanCursor(input.cursor);
+    const result = await pool.query<{ companyId: string; projectId: string; lastSessionAt: Date }>(
+      `SELECT company_id AS "companyId", project_id AS "projectId", max(created_at) AS "lastSessionAt"
+         FROM code_sessions
+        WHERE ($1::text IS NULL OR company_id=$1)
+        GROUP BY company_id, project_id
+       HAVING ($2::timestamptz IS NULL OR (max(created_at), project_id) < ($2::timestamptz, $3))
+        ORDER BY max(created_at) DESC, project_id ASC
+        LIMIT $4`,
+      [input.companyId, cursor?.startedAt ?? null, cursor?.runId ?? "", limit + 1],
+    );
+    const rows = result.rows.slice(0, limit);
+    const last = rows[rows.length - 1];
+    return {
+      items: rows.map((row) => ({
+        companyId: row.companyId,
+        projectId: row.projectId,
+        lastSessionAt: new Date(row.lastSessionAt).toISOString(),
+      })),
+      nextCursor: result.rows.length > limit && last
+        ? encodeCodeRunScanCursor({ startedAt: new Date(last.lastSessionAt).toISOString(), runId: last.projectId, turnIndex: 0 })
+        : null,
+    };
   }
