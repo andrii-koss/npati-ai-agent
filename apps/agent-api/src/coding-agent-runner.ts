@@ -1123,97 +1123,9 @@ export class CodingAgentRunner {
       return { action: "complete" };
     };
 
-    try {
-
-      await this.ports.flags.assertEnabled(ctx, CODE_AGENT_MASTER_FLAG, { companyId, userId: ctx.userId });
-
-      await this.ports.rbac.authorize(ctx, companyId, {
-        action: CODE_RUN_START_ACTION,
-        permission: CODE_RUN_START_PERMISSION,
-        projectId,
-        sessionId,
-        mode: session.mode,
-      });
-
-      if (this.ports.admissionGate) {
-        let refusing = false;
-        let code = "disk_pressure";
-        try {
-          refusing = this.ports.admissionGate.isRefusingNewRuns() === true;
-          code = this.ports.admissionGate.refusalCode?.() ?? code;
-        } catch {
-          refusing = true;
-          code = "admission_gate_unavailable";
-        }
-        if (refusing) {
-          return finish(
-            "failed",
-            "refused",
-            `The deployment is refusing new runs (${code}); the run was not started.`,
-            code,
-          );
-        }
-      }
-
-      if (input.imageReference) {
-        if (!this.ports.imageAdmission) {
-          return finish("failed", "refused", "Sandbox image admission policy is not configured; the run was not started.");
-        }
-        const admitted = await this.ports.imageAdmission.admit(ctx, { companyId, reference: input.imageReference });
-
-        this.ports.environment?.setSandboxImage({
-          digest: admitted.digest ?? null,
-          ...(admitted.sbomRef !== undefined ? { sbomRef: admitted.sbomRef } : {}),
-        });
-      }
-
-      const readerInput = {
-        ctx,
-        companyId,
-        projectId,
-        ...(sessionId ? { sessionId } : {}),
-        ...(input.model ? { model: input.model } : {}),
-      };
-      const readFact = async <T>(read: (() => Promise<T | null>) | undefined): Promise<T | null> => {
-        if (!read) return null;
-        try {
-          return await read();
-        } catch {
-          return null;
-        }
-      };
-      const policyComposition = await createCodeRunPolicyComposition({
-        ctx,
-        companyId,
-        projectId,
-        ...(sessionId ? { sessionId } : {}),
-        ...(this.ports.policyCompositionSources ? { sources: this.ports.policyCompositionSources } : {}),
-      });
-      this.ports.environment?.setPolicyComposition(policyComposition);
-      const factSources = this.ports.policyCompositionSources;
-      this.ports.environment?.setFeatureFlags(
-        await readFact(factSources?.featureFlags ? () => factSources.featureFlags!(readerInput) : undefined),
-      );
-      this.ports.environment?.setProviderDataPolicy(
-        await readFact(
-          factSources?.providerDataPolicy ? () => factSources.providerDataPolicy!(readerInput) : undefined,
-        ),
-      );
-      this.ports.environment?.setBaseCommit(
-        await readFact(
-          factSources?.baseCommit
-            ? () => factSources.baseCommit!({ ctx, companyId, projectId })
-            : undefined,
-        ),
-      );
-      this.ports.environment?.setToolchain(
-        await readFact(
-          factSources?.toolchain ? () => factSources.toolchain!({ ctx, companyId, projectId }) : undefined,
-        ),
-      );
-    } catch (error) {
-      const failure = error as { code?: string; message?: string };
-      return finish("failed", "refused", failure.message ?? `The run was refused (${failure.code ?? "refused"}).`);
+    const admission = await this.admitRun({ ctx, input, session, companyId, projectId, sessionId });
+    if (!admission.admitted) {
+      return finish(admission.status, admission.reason, admission.message, admission.code);
     }
 
     await this.ports.runEvents?.append({
@@ -2415,5 +2327,122 @@ export class CodingAgentRunner {
   ): void {
     summary.filesChanged = [...new Set(changes.map((change) => change.path))];
     summary.diffStats = { files: totals.files, linesAdded: totals.linesAdded, linesRemoved: totals.linesRemoved };
+  }
+
+  private async admitRun(args: {
+    ctx: AuthContext;
+    input: CodingAgentRunInput;
+    session: CodeSession;
+    companyId: string;
+    projectId: string;
+    sessionId: string;
+  }): Promise<
+    | { admitted: true }
+    | { admitted: false; status: CodingAgentRunStatus; reason: CodingAgentStopReason; message: string; code?: string }
+  > {
+    const { ctx, input, session, companyId, projectId, sessionId } = args;
+    try {
+      await this.ports.flags.assertEnabled(ctx, CODE_AGENT_MASTER_FLAG, { companyId, userId: ctx.userId });
+
+      await this.ports.rbac.authorize(ctx, companyId, {
+        action: CODE_RUN_START_ACTION,
+        permission: CODE_RUN_START_PERMISSION,
+        projectId,
+        sessionId,
+        mode: session.mode,
+      });
+
+      if (this.ports.admissionGate) {
+        let refusing = false;
+        let code = "disk_pressure";
+        try {
+          refusing = this.ports.admissionGate.isRefusingNewRuns() === true;
+          code = this.ports.admissionGate.refusalCode?.() ?? code;
+        } catch {
+          refusing = true;
+          code = "admission_gate_unavailable";
+        }
+        if (refusing) {
+          return {
+            admitted: false,
+            status: "failed",
+            reason: "refused",
+            message: `The deployment is refusing new runs (${code}); the run was not started.`,
+            code,
+          };
+        }
+      }
+
+      if (input.imageReference) {
+        if (!this.ports.imageAdmission) {
+          return {
+            admitted: false,
+            status: "failed",
+            reason: "refused",
+            message: "Sandbox image admission policy is not configured; the run was not started.",
+          };
+        }
+        const admitted = await this.ports.imageAdmission.admit(ctx, { companyId, reference: input.imageReference });
+
+        this.ports.environment?.setSandboxImage({
+          digest: admitted.digest ?? null,
+          ...(admitted.sbomRef !== undefined ? { sbomRef: admitted.sbomRef } : {}),
+        });
+      }
+
+      const readerInput = {
+        ctx,
+        companyId,
+        projectId,
+        ...(sessionId ? { sessionId } : {}),
+        ...(input.model ? { model: input.model } : {}),
+      };
+      const readFact = async <T>(read: (() => Promise<T | null>) | undefined): Promise<T | null> => {
+        if (!read) return null;
+        try {
+          return await read();
+        } catch {
+          return null;
+        }
+      };
+      const policyComposition = await createCodeRunPolicyComposition({
+        ctx,
+        companyId,
+        projectId,
+        ...(sessionId ? { sessionId } : {}),
+        ...(this.ports.policyCompositionSources ? { sources: this.ports.policyCompositionSources } : {}),
+      });
+      this.ports.environment?.setPolicyComposition(policyComposition);
+      const factSources = this.ports.policyCompositionSources;
+      this.ports.environment?.setFeatureFlags(
+        await readFact(factSources?.featureFlags ? () => factSources.featureFlags!(readerInput) : undefined),
+      );
+      this.ports.environment?.setProviderDataPolicy(
+        await readFact(
+          factSources?.providerDataPolicy ? () => factSources.providerDataPolicy!(readerInput) : undefined,
+        ),
+      );
+      this.ports.environment?.setBaseCommit(
+        await readFact(
+          factSources?.baseCommit
+            ? () => factSources.baseCommit!({ ctx, companyId, projectId })
+            : undefined,
+        ),
+      );
+      this.ports.environment?.setToolchain(
+        await readFact(
+          factSources?.toolchain ? () => factSources.toolchain!({ ctx, companyId, projectId }) : undefined,
+        ),
+      );
+      return { admitted: true };
+    } catch (error) {
+      const failure = error as { code?: string; message?: string };
+      return {
+        admitted: false,
+        status: "failed",
+        reason: "refused",
+        message: failure.message ?? `The run was refused (${failure.code ?? "refused"}).`,
+      };
+    }
   }
 }
