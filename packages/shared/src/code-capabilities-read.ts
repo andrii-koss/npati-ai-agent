@@ -1,7 +1,4 @@
-/* The read-only code capabilities, split out of code-capabilities.ts in step 3d of
- * docs/refactoring/PLAN.md. Declarations are moved verbatim; code-capabilities.ts imports and
- * re-exports them, so every existing import path keeps working.
- */
+
 import type { CapabilityDefinition } from "./capabilities";
 import { READ_PERMISSION } from "./code-capabilities-shared";
 import type { CapabilityMatrixEntry } from "./capability-matrix";
@@ -175,14 +172,3 @@ export const CODE_READ_MATRIX: CapabilityMatrixEntry[] = CODE_READ_CAPABILITIES.
   testFiles: ["tests/coding-agent-c2-schema-parity.test.ts", "tests/coding-agent-c2-tool-runtime.test.ts"],
   status: "VERIFIED_EXISTING",
 }));
-
-/**
- * C3: mutating Coding Agent tools.
- *
- * Every one of them is gated server-side by the `code.write` feature flag (on top of the master
- * `coding_agent.enabled` flag), requires `workspace:write`, runs only in the admitted sandbox, and is
- * checkpointed so a turn can be rolled back. `code.fs.delete` is the only `high` risk tool of the set
- * and the only one that requires an explicit approval; `code.fs.diff` stays read-only (`low`).
- *
- * Inventory ids 355-361 continue the catalog (C2 ended at 354).
- */

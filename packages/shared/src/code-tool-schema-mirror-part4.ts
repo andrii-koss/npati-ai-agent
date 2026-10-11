@@ -1,7 +1,3 @@
-/* Part 4 of the code-tool schema mirror, split out of code-capabilities.ts in step 3c of
- * docs/refactoring/PLAN.md. Entries are moved verbatim; code-capabilities.ts spreads the parts back
- * together in this exact order, so the resulting object is unchanged, key order included.
- */
 
 import { resultEnvelope } from "./code-capabilities-shared";
 
@@ -248,11 +244,7 @@ export const CODE_TOOL_SCHEMA_MIRROR_PART4: Record<string, { inputSchema: Record
       },
     }),
   },
-  /**
-   * C12: the delegation tool. It is a **metadata** tool like the git adapters — the child's transcript,
-   * file bodies and tool output never travel back — which is why its result schema is a bounded handoff
-   * digest rather than a nested run result.
-   */
+
   "code.agent.spawn": {
     inputSchema: {
       type: "object",

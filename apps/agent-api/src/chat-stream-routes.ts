@@ -1,8 +1,4 @@
-/* The chat stream endpoint, extracted from app.ts (step 2c-7c-a of docs/refactoring/PLAN.md).
- *
- * Moved verbatim; the only edits are the closure locals that became deps
- * (app.log -> log) and the module imports for the code that moved with it.
- */
+
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { AppConfig } from "./app";
 import { AuthenticationError } from "./auth";
@@ -88,19 +84,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
     noMemory?: boolean;
     ephemeral?: boolean;
   } }>("/chat/stream", async (request, reply) => {
-    /**
-     * C10 (ТЗ item 6): the code-run slot for **this** request, taken here — before `reply.hijack()` — so a run
-     * that cannot be admitted at all gets an honest HTTP answer instead of a status line that already said 200.
-     *
-     * The alternative (acquiring inside the code branch) was rejected for exactly that reason: the SSE headers are
-     * written before the branch is reached, so a `queue_full`/`queue_timeout` refusal would have had to be
-     * smuggled into the event stream while the protocol said the request succeeded.
-     *
-     * Cost of acquiring before the code intent is known: a request that turns out to be plain chat briefly holds
-     * a slot and releases it in the `finally` below. That is why the slot is only taken when the caller named a
-     * company **and** a project — the same two facts a code intent requires — so a request that provably cannot
-     * start a code run never touches the queue.
-     */
+
     let reservedCodeRunSlot: { lease: Awaited<ReturnType<CodeRunQueue["acquire"]>>; background: boolean } | null = null;
     try {
       const auth = await authProvider.authenticate(request);
@@ -142,7 +126,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
       });
       const creatingChatWebsite = (projectIntent.intent === "CREATE_WEBSITE" || projectIntent.intent === "CREATE_PROJECT")
         && projectIntent.targetDetails?.projectType !== "mobile_app";
-      // Resolve the conversation binding before admission. Never borrow another conversation's project.
+
       const boundCard = !creatingChatWebsite && request.body.conversationId && !memoryPolicy.noMemoryActive
         ? await getLatestChatProjectCard(workspaceStore, auth, request.body.conversationId, resolved.business?.id) : null;
       if (boundCard && !request.body.projectId) {
@@ -186,11 +170,6 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         return reply.code(409).send({ error: { code: "BUSINESS_REQUIRED", message: "Complete business setup before starting a streamed research chat." } });
       }
 
-      /**
-       * C10 (ТЗ item 6): take the code-run slot now, while an honest HTTP refusal is still possible. The
-       * `code.background_runs` flag decides whether this request may keep its run alive after the client goes
-       * away; it does **not** decide whether the limit applies, because the limit is a property of the deployment.
-       */
       if (activeCompanyId && activeProjectId) {
         let backgroundAllowed = false;
         try {
@@ -204,12 +183,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         request.raw.once("close", abandonWait);
         let lease: Awaited<ReturnType<CodeRunQueue["acquire"]>>;
         try {
-          /**
-           * R1 (section A, item 1): the periodic limit and the queue are entered through the **one** admission
-           * function, so the Workspace stream cannot start a run that the CLI would have been refused. Its
-           * refusal (`CodeRunRateLimitedError`, a `CodeRunRefusedError`) is handled below with the window's own
-           * retry-after.
-           */
+
           lease = await codeRunAdmission.admit(
             {
               workspaceId: auth.workspaceId,
@@ -220,7 +194,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
             { timeoutMs: codeRunQueueLimits.queueTimeoutMs, signal: waitController.signal },
           );
         } finally {
-          // The wait is over either way; the listener exists only to cancel a ticket nobody is waiting for.
+
           request.raw.off("close", abandonWait);
         }
         reservedCodeRunSlot = { background: backgroundAllowed, lease };
@@ -246,19 +220,12 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
       });
       reply.raw.flushHeaders();
       let sequence = 0;
-      /**
-       * C10 (ТЗ item 5): the client's own transport controller. Its signal still reaches the *streaming* work
-       * (`runNeutralMessage`, `companyRuntime.execute`) so a disconnect stops writing deltas — but it is **not**
-       * the signal a background code run executes under. See the code branch below for who owns that one.
-       */
+
       let codeBackgroundRunId: string | null = null;
       reply.raw.once("close",()=>{
         if(reply.raw.writableEnded)return;
         streamController.abort(new Error("Client disconnected"));
-        // A background run owns its own AbortController and its own queue slot, so a closed tab only detaches the
-        // viewer. Aborting here would be exactly the defect this step removes: a long task dying mid-write because
-        // somebody closed a tab. Stopping it is an explicit act (`/background/abort` or the Stop route), and the
-        // run's own `finally` below releases the slot either way.
+
         if(codeBackgroundRunId) request.log.info({ runId: codeBackgroundRunId }, "code_background_run_detached");
       });
       const send = (event: "progress" | "delta" | "result" | "error" | "code_session" | "code_inbox", data: unknown) => {
@@ -271,19 +238,11 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         if(distributedChatLease)void activeSessionRegistry.renew(auth.workspaceId,auth.userId,distributedChatLease,45);
       }, 15_000);
 
-      // C6: end-to-end chat path for CODE intents. It runs the real agent loop over the SAME stream (no
-      // second SSE endpoint, no second cancellation mechanism) and only when ALL of these hold: the operator
-      // enabled the Coding Agent, a company+project were resolved, the project is a code project, and the
-      // classifier recognises a code intent. Every other case — flag off, plain chat, website/mobile
-      // project, Run Company, email — falls through to the existing pipeline completely unchanged.
       try {
         const codingEnabled = activeCompanyId
           ? await featureFlagService.isEnabled(auth, CODE_AGENT_MASTER_FLAG, { companyId: activeCompanyId, userId: auth.userId }).catch(() => false)
           : false;
-        // C7: "continue this conversation in the active project". When the request names no project, the active
-        // context the user persisted (PUT /code/active-context) decides — that is what makes chat resume in the
-        // workspace they were last in instead of asking again. An explicit body projectId always wins, and a
-        // stored context that no longer validates (archived project, revoked access) is dropped rather than used.
+
         const storedActiveContext = codingEnabled && activeCompanyId && !activeProjectId
           ? await readCodeActiveContext(workspaceStore, auth, activeCompanyId).catch(() => null)
           : null;
@@ -312,8 +271,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
           const storedSession = effectiveSessionId
             ? await codeService.getSession(auth, activeCompanyId!, effectiveSessionId).catch(() => null)
             : null;
-          // The stored session is used only when it still belongs to the resolved project and is not archived;
-          // otherwise the newest session of that project is used, exactly as before.
+
           const codeSession = preparedChatSession ?? (storedSession && storedSession.status !== "archived" && storedSession.projectId === effectiveProjectId
             ? storedSession
             : codeSessions[0] ?? null);
@@ -322,27 +280,14 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
           } else {
             const runKey = `${codeSession.id}:${Date.now().toString(36)}`;
             if (await codeSessionInbox.isEnabled(auth, codeSession.companyId)) await codeSessionInbox.recoverTerminalTask(codeSession);
-            /**
-             * C10 (ТЗ items 5–6): the two gates that turn "a code run" into "a code run that survives the tab".
-             *
-             *  1. `code.background_runs` — the existing sub-flag, read at reservation time above. Off means
-             *     nothing about today's behaviour changes.
-             *  2. The run queue — one user and one Company may execute a bounded number of code runs at once, and
-             *     the waiting ones are served fairly. The slot was taken before the response was hijacked, so a
-             *     run that could not be admitted was refused with an HTTP status instead of an event.
-             */
+
             const reserved = reservedCodeRunSlot;
             reservedCodeRunSlot = null;
             const backgroundEnabled = reserved
               ? reserved.background
               : await featureFlagService.assertEnabled(auth, "code.background_runs", { companyId: activeCompanyId!, userId: auth.userId })
                 .then(() => true).catch(() => false);
-            /**
-             * The slot is normally the one taken before `reply.hijack()`, where a refusal can still be an HTTP
-             * status. The fallback refuses with the queue's own code instead of waiting: this path is past the point
-             * where a 429 could be sent, so holding the request would promise something the transport can no longer
-             * report.
-             */
+
             const lease = reserved
               ? reserved.lease
               : codeRunAdmission.canAdmit({ userId: auth.userId, companyId: activeCompanyId! })
@@ -357,10 +302,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
                   companyId: activeCompanyId!,
                   userId: auth.userId,
                   projectId: effectiveProjectId ?? null,
-                  /**
-                   * ТЗ item 5: completion, failure and an approval request are sent through the **existing**
-                   * Integrations channels. The terminal hook is where a run that nobody is watching says so.
-                   */
+
                   onTerminal: async (snapshot) => {
                     const detail = snapshot.status === "completed"
                       ? `Run ${snapshot.runId} finished successfully.`
@@ -383,17 +325,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
             if (chatInboxEnabled) send("code_session", { companyId: activeCompanyId, projectId: effectiveProjectId,
               sessionId: codeSession.id, inboxEnabled: true });
             let runResult: unknown;
-            /**
-             * C15: the loop itself, the cancellation registration and the terminal-status normalisation live in
-             * `code-session-run-executor.ts`, because the CLI/IDE run-start route drives the same loop and a second
-             * copy of "register the controller, clear a stale Stop, unregister in `finally`" is how a Stop ends up
-             * reaching one entry point and not the other. Only the transport differs: this branch adapts the chat
-             * SSE writer (`send`) onto the executor's sink, the run-start route passes the background registry's.
-             *
-             * The sink re-emits the same two chat events the branch emitted before the extraction, in the same
-             * order: `result` with the runner's own result (the `result` carrying the project card is still sent
-             * below it, once the card exists), then the background run's terminal state.
-             */
+
             const stopInboxObservation = chatInboxEnabled
               ? codeSessionInbox.observe(activeCompanyId!, codeSession.id, (revision) => send("code_inbox", { sessionId: codeSession.id, revision }))
               : () => {};
@@ -403,8 +335,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
               prompt: isCodeChatWebsite(codeProject)
                 ? `${message}\n\nWork in this existing website workspace. Start with package.json, the main page and its styles; implement the requested visible website before exploring unrelated files. Read files before editing; preserve working pages and the attached database/auth SDK (lib/project-client.ts). Do not re-scaffold or run create-next-app. Use code.deps.install for dependency installation, not compound shell setup commands. Do not start a dev server yourself. Once the requested edits are made, finish your response: the system runs the production build and starts Live Preview.`
                 : message,
-              // C11 (owner decision 10): `REVIEW_CODE` is a read-only intent, and this is the flag the runtime
-              // refuses writes on. It is derived from the routing decision, never from the message.
+
               ...(codeIntentIsReadOnly(codeDecision.intent) ? { readOnlyIntent: true } : {}),
               sink: {
                 signal: isBackground ? backgroundSink!.signal : streamController.signal,
@@ -426,16 +357,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
             const runTerminalStatus = executed.terminalStatus;
             const runReason = executed.reason;
             const needsApproval = executed.needsApproval;
-            /**
-             * ТЗ item 5: an approval request is pushed over the **existing** Integrations channels, because a run
-             * that stopped for a human decision and told nobody is a run that never continues. The detection is
-             * structural rather than guessed: the run's own status (`waiting_for_user`), the verification
-             * summary's `remaining` code, or the run's machine-readable refusal code.
-             *
-             * It is sent whenever there is a decision to make, also when the run is not a background run — an
-             * approval needs an answer either way, and the connection's own `notifications` switches decide
-             * whether anything is delivered at all.
-             */
+
             if (needsApproval) {
               try {
                 await notifyMessagingConnections({
@@ -450,11 +372,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
                 request.log.warn({ err: error }, "code_run_approval_notify_failed");
               }
             }
-            // C6/C10: release the sandbox after the run — on success, failure and cancellation. The project
-            // object that `destroy` needs is read **fresh**: `codeProject` above was loaded before the run, so
-            // its `sandboxId` is the pre-run value and is normally empty (the run creates the sandbox), which
-            // made this a no-op that leaked a live sandbox on every code run. Re-reading is what makes the
-            // release real, and it is asserted in `tests/coding-agent-c10-sandbox-retention.test.ts`.
+
             if (projectSandbox && !hasCodeChatPreview(runResult) && projectPreviewService.getSession(effectiveProjectId!)?.status !== "running" && await codeSessionInbox.mayCleanup(auth, codeSession, runResult)) {
               try {
                 const current = await projectService.get(auth, activeCompanyId!, effectiveProjectId!);
@@ -468,9 +386,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
             lease.release();
             void codeSessionInbox.settled(auth, codeSession, runResult)
               .catch((error) => request.log.warn({ err: error }, "code_inbox_wake_failed"));
-            // C7: the chat answer carries a card for the code project/session, so the conversation offers
-            // "Open Workspace" and "Changes" without the user hunting for the project. It is built from what the
-            // run actually reported (never from a guess) and persisted through the existing chat-card store.
+
             const finishedRun = runResult && typeof runResult === "object" ? (runResult as Partial<CodingAgentRunResult>) : null;
             const finishedProject = await projectService.get(auth, activeCompanyId!, effectiveProjectId!);
             const runStatus = typeof finishedRun?.status === "string" ? finishedRun.status : "unknown";
@@ -507,7 +423,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
                   await saveChatProjectCard(workspaceStore, auth, conversation.id, assistantMessage.id, codeCard);
                 }
               } catch (error) {
-                // A card is a convenience: failing to store it must not turn a completed run into a chat error.
+
                 request.log.warn({ err: error }, "code_chat_card_store_failed");
               }
             }
@@ -681,8 +597,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
       } finally {
         if(streamId&&activeChatStreams.get(streamId)?.controller===streamController)activeChatStreams.delete(streamId);
         if(distributedChatLease)await activeSessionRegistry.release(auth.workspaceId,auth.userId,distributedChatLease).catch(()=>false);
-        // C10 (ТЗ item 6): a slot that was reserved for a code run this request did not start must not stay
-        // occupied — the reservation is released here for every path that did not hand it to the run.
+
         reservedCodeRunSlot?.lease.release();
         reservedCodeRunSlot = null;
         clearInterval(heartbeat);
@@ -692,12 +607,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
       if (error instanceof AuthenticationError) {
         return reply.code(error.status).send({ error: { code: error.code, message: error.message } });
       }
-      /**
-       * R1 (section A, item 1): the **periodic** refusal is reported before the queue's own, because it is a
-       * subclass of the queue's error and it can say something the queue cannot — *when* the allowance returns.
-       * The `retry-after` is the window's own estimate rather than the queue timeout, which is the honest
-       * answer to "how long until I may start another run".
-       */
+
       if (error instanceof CodeRunRateLimitedError) {
         request.log.warn({ code: error.code, scope: error.scope }, "code_run_rate_limited");
         return reply
@@ -714,11 +624,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
             },
           });
       }
-      /**
-       * C10 (ТЗ item 6): the queue refused this run before anything was written. 429 with `retry-after` is the
-       * honest answer (the same shape the existing admission and storage limits use), and it is reachable only
-       * here — before `reply.hijack()` — which is exactly why the slot is taken this early.
-       */
+
       if (error instanceof CodeRunRefusedError) {
         request.log.warn({ code: error.code }, "code_run_queue_refused");
         return reply

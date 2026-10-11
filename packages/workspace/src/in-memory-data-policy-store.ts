@@ -1,9 +1,4 @@
-/* The provider and project data-policy domain of the in-memory workspace store, split out of
- * in-memory-store.ts in step 3g of docs/refactoring/PLAN.md.
- *
- * The methods are moved verbatim and keep the field names they use, so their bodies are unchanged; the
- * store hands this class the four maps it owns exclusively and delegates to it.
- */
+
 import { randomUUID } from "node:crypto";
 import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionStatus, ProjectCodeSettings, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification, FeatureFlag, FeatureFlagInput, FeatureFlagHistoryEntry, CodeToolManifest, SandboxImage, SandboxImageInput, SandboxImageVariant, CodeSessionMode, ProjectCodeTrust, ProjectCodeTrustInput, ProjectMountedFolder, ProjectMountedFolderInput, CodeApprovalRule, CodeApprovalRuleInput, CodeApprovalRuleScope,
   CompanyMember, CompanyInvite, CompanyInviteInput, AcceptCompanyInviteInput, UpdateCompanyMemberRoleInput, RemoveCompanyMemberInput,
@@ -74,7 +69,7 @@ export class InMemoryDataPolicyStore {
       trainingPolicy: input.trainingPolicy,
       region: input.region ?? null,
       jurisdiction: input.jurisdiction ?? null,
-      // The mandatory redactions are always present in what is stored, whatever the caller listed.
+
       requiredRedactions: [...new Set([...MANDATORY_PROVIDER_REDACTIONS, ...(input.requiredRedactions ?? [])])],
       allowedContentTypes: [...new Set<ProviderContentType>(input.allowedContentTypes ?? ["metadata"])],
       termsUrl: input.termsUrl ?? null,

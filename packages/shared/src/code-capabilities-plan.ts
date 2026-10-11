@@ -1,7 +1,4 @@
-/* The plan and ask-user code capabilities, split out of code-capabilities.ts in step 3d of
- * docs/refactoring/PLAN.md. Declarations are moved verbatim; code-capabilities.ts imports and
- * re-exports them, so every existing import path keeps working.
- */
+
 import type { CapabilityDefinition } from "./capabilities";
 import { READ_PERMISSION } from "./code-capabilities-shared";
 import type { CapabilityMatrixEntry } from "./capability-matrix";
@@ -63,17 +60,6 @@ export const CODE_PLAN_CAPABILITIES: CapabilityDefinition[] = [
   },
 ];
 
-/**
- * C9: `code.ask_user` (inventory id 373), appended **after** the planning group so that the ids 349–372 keep
- * their exact meaning and membership. A published inventory id that moved would silently re-point at another
- * capability in every stored audit matrix, so a new id is only ever appended.
- *
- * It asks a person to decide and pauses the run (`waiting_for_user`) until they answer. `low` risk,
- * `workspace:read`, no confirmation: the tool cannot change a file, a sandbox or the network, and asking a
- * question must never be gated behind the very permission whose scope is in doubt — an agent that cannot ask
- * would guess instead. It is in the narrow `PLAN_SAFE_TOOLS` list rather than the read-only class for the same
- * reason the plan tools are.
- */
 export const CODE_ASK_USER_CAPABILITIES: CapabilityDefinition[] = [
   {
     id: "code.ask_user",
@@ -104,24 +90,6 @@ export const CODE_ASK_USER_CAPABILITIES: CapabilityDefinition[] = [
   },
 ];
 
-/**
- * C11 (owner decision 2): the `code.git.*` workflow capabilities (inventory ids **374–384**), appended after
- * `code.ask_user`'s 373 so every previously published id keeps its exact meaning and membership.
- *
- * They are **adapters over the existing `ProjectGitService`**: no git implementation lives behind them, so
- * there is still exactly one git path (the service that already re-checks the protected-branch policy at its
- * boundary and consumes the approval record with the payload hash of the write). Three published facts are
- * therefore visible in the Capability Inspector and are the contract the executors must honour:
- *
- *  - three tools are **read-only** (`status`, `diff`, `log`); they are also the only git tools a
- *    `REVIEW_CODE` session may call, which is what makes "a review does not write to the repository" a
- *    server-side property rather than a prompt request;
- *  - `code.git.push`, `code.git.pr.create` and `code.git.pr.comment` are `high`/`medium` and
- *    approval-gated, and each carries its **own** approval binding (a branch pair, a `(base, head)` pair, a
- *    comment hash) — so an approval for one of them is never redeemable for another;
- *  - `code.git.restore` is `high` and approval-gated, because discarding uncommitted work is not
- *    recoverable from a checkpoint.
- */
 export const CODE_PLAN_MATRIX: CapabilityMatrixEntry[] = CODE_PLAN_CAPABILITIES.map((capability) => ({
   id: capability.inventoryIds[0]!,
   capabilityId: capability.id,
@@ -135,7 +103,6 @@ export const CODE_PLAN_MATRIX: CapabilityMatrixEntry[] = CODE_PLAN_CAPABILITIES.
   status: "VERIFIED_EXISTING",
 }));
 
-/** C9: `code.ask_user`'s audit-matrix entry (inventory id 373). */
 export const CODE_ASK_USER_MATRIX: CapabilityMatrixEntry[] = CODE_ASK_USER_CAPABILITIES.map((capability) => ({
   id: capability.inventoryIds[0]!,
   capabilityId: capability.id,
@@ -148,9 +115,3 @@ export const CODE_ASK_USER_MATRIX: CapabilityMatrixEntry[] = CODE_ASK_USER_CAPAB
   testFiles: ["tests/coding-agent-c9-ask-user.test.ts", "tests/coding-agent-c9-ask-user-runner.test.ts"],
   status: "VERIFIED_EXISTING",
 }));
-
-/**
- * C11: the `code.git.*` workflow tools' audit-matrix entries (inventory ids 374–384). Every one of them
- * delegates to the existing `ProjectGitService`; the matrix names the suite that proves it, so a
- * capability cannot claim to be verified by a file that does not test it.
- */

@@ -1,6 +1,4 @@
-/* The shell sandbox port of app.ts, extracted in step 2c-6h of
- * docs/refactoring/PLAN.md. Moved verbatim inside a factory that returns it.
- */
+
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { AppConfig } from "./app";
 import { CodeShellSandboxPort } from "./code-shell-runtime";
@@ -22,8 +20,7 @@ export function createShellSandboxPortWiring(deps: CreateShellSandboxPortWiringD
       const result = await projectSandbox!.execute(input.context, input.companyId, {
         projectId: input.projectId,
         command: input.command,
-        // Code sessions are authorized by the canonical code runtime, not Company-agent IDs.
-        // The sandbox's system path still checks the authenticated user's write permission.
+
         agentId: "system",
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(input.approved ? { approved: true } : {}),

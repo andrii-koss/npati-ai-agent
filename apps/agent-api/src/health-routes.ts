@@ -1,9 +1,4 @@
-/* Container liveness, readiness and the skills catalogue, extracted from app.ts
- * (step 2c-1 of docs/refactoring/PLAN.md).
- *
- * The code is moved verbatim: the only edit is the closure local that became a parameter
- * (workspaceStore -> store). buildInfo and defaultSkillRegistry stay module imports.
- */
+
 import type { FastifyInstance } from "fastify";
 import { defaultSkillRegistry } from "@npati/skills";
 import type { HealthResponse, ServiceHealth, ServiceStatus } from "@npati/shared";
@@ -26,8 +21,7 @@ export interface HealthRouteDeps {
 
 export function registerHealthRoutes(app: FastifyInstance, deps: HealthRouteDeps): void {
   const { aiEngine, hub, store, researchBundle, objectStorage, redisHealthCheck, coreBackendHealthCheck } = deps;
-  // Container liveness must not depend on optional or remote services. Fastify
-  // exposes this route only after the onReady initialization above completes.
+
   app.get("/health/live", async () => ({
     status: "ok" as const,
     timestamp: new Date().toISOString(),

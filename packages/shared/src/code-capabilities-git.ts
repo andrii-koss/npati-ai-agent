@@ -1,7 +1,4 @@
-/* The git code capabilities, split out of code-capabilities.ts in step 3d of
- * docs/refactoring/PLAN.md. Declarations are moved verbatim; code-capabilities.ts imports and
- * re-exports them, so every existing import path keeps working.
- */
+
 import type { CapabilityDefinition } from "./capabilities";
 import { READ_PERMISSION, WRITE_PERMISSION } from "./code-capabilities-shared";
 import type { CapabilityMatrixEntry } from "./capability-matrix";
@@ -286,29 +283,6 @@ export const CODE_GIT_CAPABILITIES: CapabilityDefinition[] = [
   },
 ];
 
-/**
- * C12: the delegation capability (inventory id **385**), appended after the git group so every previously
- * published id keeps its exact meaning and membership.
- *
- * One capability, because there is one act: hand a bounded task to a coding sub-agent. Its published facts are
- * the contract the server enforces:
- *
- *  - **Depth 1 is structural.** A run that has a parent is never offered this tool and the tool runtime refuses
- *    the name before the sub-flag, the arguments, the approval and the executor, so a child cannot delegate
- *    whatever the model asks for or the configuration says.
- *  - **A request is never a grant.** The child's tools are the intersection of this run's effective set, the
- *    child type's own profile and the requested list. A wildcard resolves only against the published registry;
- *    with no registry it grants nothing rather than meaning "everything".
- *  - **Metadata only in both directions.** The child receives the task text and a scope; the parent receives a
- *    bounded handoff digest (findings, paths, symbols, counts) and never the child's transcript, file bodies or
- *    tool output.
- *
- * `risk` is `medium`: it neither destroys work like `code.fs.delete` nor publishes anything like
- * `code.git.push`, but it does start another run that may write to the workspace, so it is not a read.
- * It is **not** approve-gated: approval belongs to the individual write the child attempts, which is judged by
- * the same policy engine as any other call — gating the delegation as well would ask the human twice for one
- * change and would teach the agent to avoid delegating.
- */
 export const CODE_GIT_MATRIX: CapabilityMatrixEntry[] = CODE_GIT_CAPABILITIES.map((capability) => ({
   id: capability.inventoryIds[0]!,
   capabilityId: capability.id,
@@ -321,9 +295,3 @@ export const CODE_GIT_MATRIX: CapabilityMatrixEntry[] = CODE_GIT_CAPABILITIES.ma
   testFiles: ["tests/coding-agent-c11-git-workflow.test.ts", "tests/coding-agent-c11-git-workflow-security.test.ts"],
   status: "VERIFIED_EXISTING",
 }));
-
-/**
- * C12: the delegation tool's audit-matrix entry (inventory id 385). The two suites named here are the ones
- * that prove the published behaviour: the scope suite drives the intersection and the depth limit, and the
- * workflow suite drives the executor, the handoff digest and the failure path.
- */

@@ -1,7 +1,4 @@
-/* The sub-agent and async-process code capabilities, split out of code-capabilities.ts in step 3d of
- * docs/refactoring/PLAN.md. Declarations are moved verbatim; code-capabilities.ts imports and
- * re-exports them, so every existing import path keeps working.
- */
+
 import type { CapabilityDefinition } from "./capabilities";
 import { READ_PERMISSION } from "./code-capabilities-shared";
 import type { CapabilityMatrixEntry } from "./capability-matrix";
@@ -37,7 +34,6 @@ export const CODE_SUBAGENT_CAPABILITIES: CapabilityDefinition[] = [
   },
 ];
 
-/** Every `code.*` capability (reads, mutating file tools, sandbox execution, dependencies, planning). */
 export const CODE_ASYNC_PROCESS_CAPABILITIES: CapabilityDefinition[] = [
   {"id":"code.shell.exec_async","inventoryIds":[386],"type":"tool","domain":"code","name":"Run tracked command","description":"Execute one tracked sandbox process. Wait up to waitTimeoutMs, then return the same handle for explicit collection. Foreground secret leases cannot be promoted.","useWhen":["Continue the run while a sandbox command is still running."],"doNotUseWhen":["The backend does not support durable process identity.","The command requires foreground secret leases."],"agentCallable":true,"userVisible":true,"risk":"high","requiresConfirmation":false,"requiredConnections":[],"requiredPermissions":["workspace:write"],"version":1, inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.exec_async"]!.inputSchema, outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.exec_async"]!.outputSchema },
 {"id":"code.shell.process.wait","inventoryIds":[387],"type":"tool","domain":"code","name":"Collect tracked process","description":"Collect bounded output and real terminal state of a tracked process. waitTimeoutMs=0 polls; a timeout preserves the same process handle.","useWhen":["Collect the real outcome of a previously started process."],"doNotUseWhen":["The backend does not support durable process identity.","The command requires foreground secret leases."],"agentCallable":true,"userVisible":true,"risk":"low","requiresConfirmation":false,"requiredConnections":[],"requiredPermissions":["workspace:read"],"version":1, inputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.process.wait"]!.inputSchema, outputSchema: CODE_TOOL_SCHEMA_MIRROR["code.shell.process.wait"]!.outputSchema }
@@ -58,12 +54,3 @@ export const CODE_SUBAGENT_MATRIX: CapabilityMatrixEntry[] = CODE_SUBAGENT_CAPAB
   testFiles: ["tests/coding-agent-c12-subagent-workflow.test.ts", "tests/coding-agent-c12-subagent-scope.test.ts"],
   status: "VERIFIED_EXISTING",
 }));
-
-/**
- * Which feature flag gates which code tool. The read/search tools *and* `code.fs.diff` need `code.read`
- * (they only read), every mutating tool needs `code.write`; both sit on top of the master
- * `coding_agent.enabled` flag. The decision is made from the capability's own permission requirement so
- * a read-only tool that happens to live in the write group (like `code.fs.diff`) cannot be reported as
- * write-gated. Exported so the Capability Inspector can show the flag that actually governs each
- * capability instead of assuming one flag for the whole `code` domain.
- */

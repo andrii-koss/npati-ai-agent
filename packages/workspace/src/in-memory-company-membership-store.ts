@@ -1,9 +1,4 @@
-/* The company membership domain of the in-memory workspace store - members and invites - split out of
- * in-memory-store.ts in step 3h of docs/refactoring/PLAN.md. Methods are moved verbatim.
- *
- * The methods are moved verbatim and keep the field names they use, so their bodies are unchanged. The
- * closure that selected this domain is closed: no method outside it is called from inside it.
- */
+
 import { randomUUID } from "node:crypto";
 import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionStatus, ProjectCodeSettings, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification, FeatureFlag, FeatureFlagInput, FeatureFlagHistoryEntry, CodeToolManifest, SandboxImage, SandboxImageInput, SandboxImageVariant, CodeSessionMode, ProjectCodeTrust, ProjectCodeTrustInput, ProjectMountedFolder, ProjectMountedFolderInput, CodeApprovalRule, CodeApprovalRuleInput, CodeApprovalRuleScope,
   CompanyMember, CompanyInvite, CompanyInviteInput, AcceptCompanyInviteInput, UpdateCompanyMemberRoleInput, RemoveCompanyMemberInput,
@@ -44,7 +39,7 @@ export class InMemoryCompanyMembershipStore {
     if (!isCompanyRole(input.role)) {
       throw new CompanyMembershipError("invalid_company_role", `Unknown company role: ${String(input.role)}`, { httpStatus: 400 });
     }
-    // Mirrors the unique indexes on company_invites: one id, one token hash — one live secret.
+
     if (this.companyInvites.has(input.id) || this.findInviteByTokenHash(input.tokenHash)) {
       throw new CompanyMembershipError(
         "invite_token_conflict",
@@ -83,7 +78,7 @@ export class InMemoryCompanyMembershipStore {
     }
     const key = `${invite.companyId}:${input.userId}`;
     const existing = this.companyMembers.get(key) ?? null;
-    // Accepting an invite must not demote the only active owner (the update path refuses it too).
+
     if (existing && this.isLastActiveOwnerDemotion(existing, invite.role)) {
       throw new CompanyMembershipError(
         "last_owner_protected",
@@ -96,7 +91,7 @@ export class InMemoryCompanyMembershipStore {
       id: existing?.id ?? `cm_${randomUUID()}`,
       companyId: invite.companyId,
       userId: input.userId,
-      // The invited role, verbatim: never a default and never derived from the previous row.
+
       role: invite.role,
       status: "active",
       invitedBy: existing?.invitedBy ?? invite.createdBy,
@@ -120,8 +115,7 @@ export class InMemoryCompanyMembershipStore {
       throw new CompanyMembershipError("membership_not_found", "User is not a member of this company", { httpStatus: 404 });
     }
     if (existing.revision !== input.expectedRevision) {
-      // The port contract: a stale revision is a conflict that writes nothing, and the caller can see
-      // both revisions.
+
       throw new CompanyMembershipError(
         "membership_revision_conflict",
         "Company member changed by another request. Reload and try again.",

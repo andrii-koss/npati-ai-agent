@@ -1,9 +1,4 @@
-/* The chat orchestration of app.ts - context building, the chat-action executors, the
- * business/company completion paths and the two turn functions - extracted in step 2c-7c-c-1
- *
- * of docs/refactoring/PLAN.md. Moved verbatim inside a factory: the closure locals arrive as one
- * deps object and the factory returns what the rest of app.ts still calls.
- */
+
 import { createChatTurn } from "./chat-turn";
 import { createChatActions } from "./chat-actions";
 import type { FastifyBaseLogger } from "fastify";
@@ -98,7 +93,7 @@ export interface ChatOrchestration {
 
 export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrchestration {
   const { log, admissionFor, agent, aiEngine, aiPreferences, apiKeysRepo, auditRepo, automationsRepo, browserCredentials, chatFiles, companyRunQueue, companyRuntime, config, contentLibrary, dataBackendService, emailAttachmentStorage, emailInboxRepo, emailInboxWorker, fileRepository, getAIContext, guardrailPolicies, hub, knowledgeRepo, memoryDocuments, objectStorage, persistBusinessLogo, researchBundle, runAutomation, scopedMemory, webResearch, workspaceStore } = deps;
-  // The chat action helpers (step 2c-7c-c-2).
+
   const chatActions = createChatActions({
     log,
     admissionFor,
@@ -345,7 +340,6 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
     return { ...result, businessAction: nativeBusinessAction ?? executedAction.businessAction, goalAction: goalCompletion.goalAction ?? executedAction.goalAction, emailAction: emailAction.emailAction, emailActions: emailAction.emailActions, companyAction: companyAction.companyAction, workspaceAction: workspaceAction.workspaceAction, companyRunId: workspaceAction.companyRunId, memoryCandidate: memoryPolicy.writeAllowed ? result.memoryCandidate : undefined, conversationId: conversation?.id, researchJobId: researchJob?.id, noMemory: memoryPolicy.noMemoryActive, contextCompaction: { applied: compaction.compacted, originalCount: compaction.originalCount, preservedCount: compaction.preservedMessages.length, failureReason: compaction.failureReason, automaticMemoryFlush } };
   }
 
-  // The neutral-chat turn (step 2c-7c-c-3).
   const { runNeutralMessage } = createChatTurn({
     admissionFor,
     agent,

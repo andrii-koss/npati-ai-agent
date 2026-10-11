@@ -1,7 +1,3 @@
-/* Part 3 of the code-tool schema mirror, split out of code-capabilities.ts in step 3c of
- * docs/refactoring/PLAN.md. Entries are moved verbatim; code-capabilities.ts spreads the parts back
- * together in this exact order, so the resulting object is unchanged, key order included.
- */
 
 import { resultEnvelope } from "./code-capabilities-shared";
 
@@ -557,11 +553,5 @@ export const CODE_TOOL_SCHEMA_MIRROR_PART3: Record<string, { inputSchema: Record
       },
     }),
   },
-  /**
-   * C11 (owner decision 2): the `code.git.*` workflow tools, mirroring `code-tool-schemas.json`.
-   *
-   * `workspaceRevision` is in every result that can change the tree: the caller compares it with the
-   * revision it captured, which is what makes a git operation and a sandbox build provably run against
-   * the same canonical revision.
-   */
+
 };

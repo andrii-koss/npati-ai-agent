@@ -23,7 +23,7 @@ import { providerPolicyKey as ruleProviderPolicyKey, assertValidProviderPolicy a
 import { InMemoryCodeRunStore } from "./in-memory-code-run-store";
 import { InMemoryCompanyMembershipStore } from "./in-memory-company-membership-store";
 import { InMemoryPlatformStore } from "./in-memory-platform-store";
-// C9: goals, plan revisions and session todos — shared rule implementation for both backends.
+
 import { InMemoryCodeGoalStore } from "./code-goal-store";
 import {
   InMemoryCodeUserQuestionStore,
@@ -31,7 +31,7 @@ import {
   type CodeUserQuestionRecord,
   type CreateCodeUserQuestionInput,
 } from "./code-question-store";
-// C10: session durability — shared rule implementation for both backends.
+
 import {
   InMemoryCodeSessionDurabilityStore,
   type CodeRunRecoveryNoticeRecord,
@@ -73,7 +73,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   private readonly projects = new Map<string, Project>();
   private readonly codeSessions = new Map<string, CodeSession>();
   private readonly projectCodeTrust = new Map<string, ProjectCodeTrust>();
-  /** C15: the confirmed mounted local folder of a project, keyed `companyId:projectId`. */
+
   private readonly projectMountedFolders = new Map<string, ProjectMountedFolder>();
   private readonly auditLog = new Map<string, AuditEntry[]>();
   private readonly auditAnchors = new Map<string, AuditAnchor[]>();
@@ -81,7 +81,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   private readonly featureFlagHistory: FeatureFlagHistoryEntry[] = [];
   private readonly codeToolManifests = new Map<number, CodeToolManifest>();
   private readonly sandboxImages = new Map<string, SandboxImage>();
-  // step 3h: the code-run state lives in its own class, handed the maps it reads
+
   private readonly platformOps = new InMemoryPlatformStore(
     this.featureFlags,
     this.featureFlagHistory,
@@ -89,13 +89,12 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     this.sandboxImages,
   );
   private readonly codeApprovalRules = new Map<string, CodeApprovalRule>();
-  // C5b: ProviderDataPolicy. Keys are tenant-scoped, and the empty-tenant marker keeps a platform default
-  // (`companyId === null`) from ever colliding with a real company id, mirroring the SQL `COALESCE` index.
+
   private readonly providerDataPolicies = new Map<string, ProviderDataPolicyRecord>();
   private readonly providerDataPolicyVersions: ProviderDataPolicyVersionRecord[] = [];
   private readonly projectDataPolicies = new Map<string, ProjectDataPolicyRecord>();
   private readonly hostedProviderConsent = new Map<string, ProviderHostedConsentRecord>();
-  // step 3g: the provider and project data-policy state lives in its own class, which owns these four maps
+
   private readonly dataPolicyOps = new InMemoryDataPolicyStore(
     this.providerDataPolicies,
     this.providerDataPolicyVersions,
@@ -123,33 +122,29 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   private readonly userSettings = new Map<string, StoredUserSetting>();
   private readonly businessCreateRequests = new Map<string, string>();
   private readonly onboardings = new Map<string, Omit<BusinessOnboardingSession, "business" | "totalFields" | "currentField">>();
-  // C5a: company membership. Members are keyed by (company, user) like the unique index in migration 072;
-  // invites by id, with the token hash acting as the second unique key.
+
   private readonly companyMembers = new Map<string, CompanyMember>();
   private readonly companyInvites = new Map<string, CompanyInvite>();
-  // step 3h: the code-run state lives in its own class, handed the maps it reads
+
   private readonly companyMembershipOps = new InMemoryCompanyMembershipStore(
     this.companyMembers,
     this.companyInvites,
   );
-  // C6a: run state. Runs are keyed by id (a run id is globally unique in the postgres table too); turns are
-  // keyed by (run, turnIndex) exactly like the primary key of `code_run_turns`.
+
   private readonly codeRunStates = new Map<string, CodeRunStateRecord>();
   private readonly codeRunTurns = new Map<string, CodeRunTurnRecord>();
-  // C10: the run's original request, keyed by run id like the row it belongs to. It is a separate map so the
-  // lease/status reads (the reaper's scans) never carry prompt content, exactly as the Postgres backend keeps
-  // the request columns out of its shared select list.
+
   private readonly codeRunRequests = new Map<string, CodeRunRequestRecord>();
-  // C6b: append-only snapshots and config versions. Keyed by id; the session chain is derived on read.
+
   private readonly executionSnapshots = new Map<string, ExecutionSnapshotRecord>();
   private readonly snapshotConfigVersions = new Map<string, SnapshotConfigVersionRecord>();
-  // C6b: durable Activity events. Append-only, keyed by id; reads sort newest first like the postgres index.
+
   private readonly codeActivityEvents = new Map<string, CodeActivityEventRecord>();
-  // C8: durable context summaries. Append-only, keyed by id; reads sort newest first like the postgres index.
+
   private readonly codeContextSummaries = new Map<string, CodeContextSummaryRecord>();
   private readonly replayBundles = new Map<string, ReplayBundleRecord>();
   private readonly replayBundleSteps = new Map<string, ReplayBundleStepRecord[]>();
-  // step 3h: the code-run state lives in its own class, handed the maps it reads
+
   private readonly codeRunOps = new InMemoryCodeRunStore(
     this.codeRunStates,
     this.codeRunRequests,
@@ -161,14 +156,11 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     this.replayBundles,
     this.replayBundleSteps,
   );
-  // C9: goals, plan revisions and session todos. The rules live in `code-goal-store.ts` and are shared with the
-  // Postgres backend, so "the database enforces it" cannot become "nothing enforces it" on this path.
+
   private readonly codeGoalState = new InMemoryCodeGoalStore();
-  // C9: `code.ask_user`. Same rules as the Postgres backend — the answer validation lives in the shared module.
+
   private readonly codeUserQuestionState = new InMemoryCodeUserQuestionStore();
-  // C10: the conversation cursor, the recovery notice and the two operation ledgers. Same rules as the Postgres
-  // backend (claim-before-perform, one head per session, revision-checked), because a rule that holds only in
-  // SQL stops holding on this path.
+
   private readonly codeSessionDurabilityState = new InMemoryCodeSessionDurabilityStore();
 
   async initialize(context?: AuthContext) {
@@ -304,7 +296,6 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return true;
   }
 
-
   private assertCompany(context: AuthContext, companyId: string) {
     if (context.companyId && context.companyId !== companyId) throw new WorkspaceAccessError("API key is not valid for this company");
     const company = this.companies.get(companyId);
@@ -425,7 +416,6 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return true;
   }
 
-
   async setCompanyMainAgent(context: AuthContext, companyId: string, agentId: string | null, expectedRevision: number) {
     const company = this.assertCompany(context, companyId);
     if (company.revision !== expectedRevision) throw new Error("Company was changed by another request. Reload and try again.");
@@ -458,7 +448,6 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     const items = rows.slice(0, limit), last = items.at(-1);
     return { items, nextCursor: rows.length > limit && last ? encodeBusinessCursor({ createdAt: last.createdAt, id: last.id }) : null };
   }
-
 
   async createProject(context: AuthContext, companyId: string, input: ProjectInput, idempotencyKey: string) {
     this.assertCompany(context, companyId);
@@ -513,8 +502,6 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return structuredClone(next);
   }
 
-  // --- C1: code sessions -------------------------------------------------------------------
-
   async createCodeSession(context: AuthContext, companyId: string, projectId: string, input: CodeSessionInput): Promise<CodeSession> {
     const project = await this.getProject(context, companyId, projectId);
     if (input.agentId && !this.companyAgents.has(input.agentId)) throw new WorkspaceAccessError("Agent does not belong to this company");
@@ -562,13 +549,6 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       .slice(0, limit));
   }
 
-  // --- C1c: append-only audit log ----------------------------------------------------------
-
-  /**
-   * Appends an audit entry, chaining it to the company's previous entry. Entries are stored frozen
-   * and returned as clones: there is no update or delete path anywhere in the store, which is the
-   * in-memory equivalent of the DB trigger used in PostgreSQL.
-   */
   async appendAuditEntry(context: AuthContext, companyId: string, input: AuditEntryInput): Promise<AuditEntry> {
     this.assertCompany(context, companyId);
     const chain = this.auditLog.get(companyId) ?? [];
@@ -653,7 +633,6 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       .sort();
   }
 
-  /** Background verifier path: no user context, workspace-scoped, hashes and counts only. */
   async systemAuditChains(workspaceId: string) {
     return [...this.auditLog.entries()]
       .filter(([, entries]) => entries.length > 0 && entries[0]!.workspaceId === workspaceId)
@@ -676,13 +655,6 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return structuredClone(record);
   }
 
-  // --- C1a: feature flags and tool manifests ------------------------------------------------
-
-  /**
-   * Sets or updates a flag row and always appends a history entry, mirroring the SQL store. The
-   * in-memory store is used by tests and local development, so it keeps identical semantics
-   * (revision conflict -> WorkspaceAccessError, one row per scope + scopeId + flagKey).
-   */
   async setFeatureFlag(context: AuthContext, input: FeatureFlagInput): Promise<FeatureFlag> {
     return this.platformOps.setFeatureFlag(context, input);
   }
@@ -702,8 +674,6 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   async latestCodeToolManifest(): Promise<CodeToolManifest | null> {
     return this.platformOps.latestCodeToolManifest();
   }
-
-  // --- C5: scoped approval rules ------------------------------------------------------------
 
   async createCodeApprovalRule(context: AuthContext, companyId: string, input: CodeApprovalRuleInput): Promise<CodeApprovalRule> {
     this.assertCompany(context, companyId);
@@ -750,8 +720,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       if (rule.workspaceId !== context.workspaceId || rule.companyId !== query.companyId) return false;
       if (rule.action !== query.action || rule.decision !== "allow") return false;
       if (rule.expiresAt && rule.expiresAt <= at) return false;
-      // A session rule additionally requires its project to match: a session belongs to exactly one
-      // project, so a session-scoped allowance must never leak into another project's requests.
+
       if (rule.scope === "session") {
         return Boolean(query.sessionId) && rule.sessionId === query.sessionId
           && Boolean(query.projectId) && rule.projectId === query.projectId;
@@ -761,8 +730,6 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     matches.sort((a, b) => (a.scope === b.scope ? b.createdAt.localeCompare(a.createdAt) : a.scope === "session" ? -1 : 1));
     return matches[0] ? structuredClone(matches[0]) : null;
   }
-
-  // --- C1b: sandbox image supply chain ------------------------------------------------------
 
   async listSandboxImages(context: AuthContext): Promise<SandboxImage[]> {
     return this.platformOps.listSandboxImages(context);
@@ -808,8 +775,6 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return structuredClone(next);
   }
 
-  // --- C5: project trust ---------------------------------------------------------------------
-
   async getProjectCodeTrust(context: AuthContext, companyId: string, projectId: string): Promise<ProjectCodeTrust | null> {
     this.assertCompany(context, companyId);
     return structuredClone(this.projectCodeTrust.get(`${companyId}:${projectId}`) ?? null);
@@ -841,8 +806,6 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return structuredClone(next);
   }
 
-  // --- C15: the mounted local folder allowlist ------------------------------------------------
-
   async getProjectMountedFolder(context: AuthContext, companyId: string, projectId: string): Promise<ProjectMountedFolder | null> {
     this.assertCompany(context, companyId);
     const record = this.projectMountedFolders.get(`${companyId}:${projectId}`);
@@ -850,11 +813,6 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return structuredClone(record);
   }
 
-  /**
-   * The runner-side read. The in-memory store is the declarative-catalogue fallback of the sandbox runner
-   * (no `DATABASE_URL`), so it answers from the same map — and because nothing can have confirmed a mount in
-   * a process that is not the API, the honest default there is `null`: the runner mounts nothing.
-   */
   async getProjectMountedFolderForSystem(companyId: string, projectId: string): Promise<ProjectMountedFolder | null> {
     return structuredClone(this.projectMountedFolders.get(`${companyId}:${projectId}`) ?? null);
   }
@@ -1146,7 +1104,6 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return true;
   }
 
-
   async listCompanyAgentEdges(context: AuthContext, companyId: string, agentIds?: string[]) {
     this.assertCompany(context, companyId);
     const filter = agentIds?.length ? new Set(agentIds) : null;
@@ -1234,8 +1191,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       run: structuredClone(run),
       steps: [...this.companyRunSteps.values()].filter((step) => step.runId === runId).sort((a, b) => a.stepOrder - b.stepOrder || a.lane - b.lane),
       toolAudit: [...this.companyToolAudit.values()].filter((entry) => entry.runId === runId).sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
-      // Map iteration preserves append order. Do not use the random UUID as a
-      // tie-breaker: multiple lifecycle events can share the same millisecond.
+
       backgroundEvents: [...this.companyRunEvents.values()].filter((entry) => entry.runId === runId),
       completionReport: completionStatus && run.completedAt ? { runId: run.id, companyId: run.companyId, status: completionStatus,
         result: run.result, errorCode: run.errorCode, errorMessage: run.errorMessage, workerId: run.workerId,
@@ -1306,7 +1262,6 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     this.companyRunEvents.set(row.id, row);
     return structuredClone(row);
   }
-
 
   async claimCompanyAgentRun(context: AuthContext, companyId: string, runId: string, workerId: string, leaseMs: number) {
     const { run } = await this.getCompanyAgentRun(context, companyId, runId);
@@ -1619,21 +1574,14 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return this.hydrateOnboarding(row);
   }
 
-  // --- C5a: company membership and invites ---------------------------------------------------
-  // The same semantics as the postgres store (and the `CodeMembershipStore` port in
-  // apps/agent-api/src/code-membership.ts): company-scoped, no `AuthContext`, no default role.
-
-  /** No row is `null`: membership is never assumed, and there is no "owner by default" fallback. */
   async getCompanyMembership(companyId: string, userId: string): Promise<CompanyMember | null> {
     return this.companyMembershipOps.getCompanyMembership(companyId, userId);
   }
 
-  /** The actual stored role and status of every member; nothing is inferred. */
   async listCompanyMembers(companyId: string): Promise<CompanyMember[]> {
     return this.companyMembershipOps.listCompanyMembers(companyId);
   }
 
-  /** Active owners only — a suspended owner cannot administer anything, so it is not a protection. */
   async countCompanyOwners(companyId: string): Promise<number> {
     return this.companyMembershipOps.countCompanyOwners(companyId);
   }
@@ -1642,53 +1590,26 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return this.companyMembershipOps.createCompanyInvite(input);
   }
 
-  /** Returns the invite in every state (expired and already accepted included) so callers can tell them apart. */
   async findCompanyInviteByTokenHash(tokenHash: string): Promise<CompanyInvite | null> {
     return this.companyMembershipOps.findCompanyInviteByTokenHash(tokenHash);
   }
 
-  /**
-   * The invite is re-read from the store, never trusted from the caller's copy: a token is single-use
-   * (`acceptedAt`) and dies at `expiresAt`. The invite is marked accepted only after the membership guard
-   * passed, so a refused acceptance does not burn the token — matching the postgres transaction.
-   */
   async acceptCompanyInvite(input: AcceptCompanyInviteInput): Promise<CompanyMember> {
     return this.companyMembershipOps.acceptCompanyInvite(input);
   }
 
-  /**
-   * Revision-checked role change: a stale `expectedRevision` is refused as the port's
-   * `membership_revision_conflict` (409, both revisions in `details`) with the tree-wide "changed by
-   * another request" message. The last-owner check comes after it, the same order the postgres store
-   * diagnoses, and both run before anything is written.
-   */
   async updateCompanyMemberRole(input: UpdateCompanyMemberRoleInput): Promise<CompanyMember> {
     return this.companyMembershipOps.updateCompanyMemberRole(input);
   }
 
-  /**
-   * Removing the last active owner is refused for the same reason as demoting it. Like the port's own
-   * implementation this is otherwise a delete: a user who is not a member is already refused with
-   * `membership_not_found` (404) by `CodeMembershipService` before the store is called.
-   */
   async removeCompanyMember(input: RemoveCompanyMemberInput): Promise<void> {
     return this.companyMembershipOps.removeCompanyMember(input);
   }
-
-  // --- C5b: ProviderDataPolicy ------------------------------------------------------------------
-  // The in-memory mirror of the postgres implementation: same validation, same monotonic versioning,
-  // same history snapshot, same tenant scoping. A platform default (`companyId === null`) never shares a
-  // key with a company row, which is what the SQL `COALESCE(company_id,'')` unique index enforces.
 
   private providerPolicyKey(companyId: string | null, providerId: string, modelPattern: string | null): string {
     return ruleProviderPolicyKey(companyId, providerId, modelPattern);
   }
 
-  /**
-   * Validation is duplicated here on purpose: a direct store call (bypassing the app-side service) must be
-   * as safe as one that went through it. The codes match `ProviderDataPolicyError` so one route mapper
-   * can handle both.
-   */
   private assertValidProviderPolicy(input: UpsertProviderDataPolicyStoreInput): void {
     return ruleAssertValidProviderPolicy(input);
   }
@@ -1707,11 +1628,6 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return this.dataPolicyOps.listProviderDataPolicies(companyId);
   }
 
-  /**
-   * Versioning: a new row starts at 1, an existing one is bumped by exactly one, and the accepted policy is
-   * snapshotted into the history with the acting `actor`. A stale `expectedPolicyVersion` is refused before
-   * anything is written, so two writers cannot silently overwrite each other.
-   */
   async upsertProviderDataPolicy(input: UpsertProviderDataPolicyStoreInput): Promise<ProviderDataPolicyRecord> {
     return this.dataPolicyOps.upsertProviderDataPolicy(input);
   }
@@ -1727,12 +1643,10 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return this.dataPolicyOps.getProjectDataPolicy(companyId, projectId);
   }
 
-  /** An unconfigured project is `confidential`, never `public`: the default lives here, not in the caller. */
   async upsertProjectDataPolicy(input: UpsertProjectDataPolicyStoreInput): Promise<ProjectDataPolicyRecord> {
     return this.dataPolicyOps.upsertProjectDataPolicy(input);
   }
 
-  /** A rule that could point outside the project is refused, never normalised into something safe-looking. */
   private assertValidPathRule(rule: ProjectDataPolicyPathRule): ProjectDataPolicyPathRule {
     return ruleAssertValidPathRule(rule);
   }
@@ -1750,8 +1664,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       providerId: input.providerId,
       grantedBy: input.grantedBy,
       grantedAt: input.grantedAt,
-      // A fresh grant clears any previous revocation: consent is explicit, and re-granting is the only way
-      // back from a revocation.
+
       revokedAt: null,
     };
     this.hostedProviderConsent.set(`${input.companyId}\u0000${input.projectId}\u0000${input.providerId}`, record);
@@ -1776,7 +1689,6 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return structuredClone(record);
   }
 
-  /** The row is returned whatever its state; a caller must treat `revokedAt !== null` as no consent. */
   async getHostedProviderConsent(input: {
     companyId: string;
     projectId: string;
@@ -1791,15 +1703,10 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return this.companyMembershipOps.findInviteByTokenHash(tokenHash);
   }
 
-  // --- C6a: durable Coding Agent run state --------------------------------------------------
-  // The same semantics as the postgres store, including the sequence guard, the atomic lease transition and
-  // the tool-call merge, so the reconciler behaves identically with and without a database.
-
   async createCodeRunState(input: CreateCodeRunStateInput): Promise<CodeRunStateRecord> {
     return this.codeRunOps.createCodeRunState(input);
   }
 
-  /** C10: the run's original request. A run of another company is indistinguishable from a missing one. */
   async getCodeRunRequest(companyId: string, runId: string): Promise<CodeRunRequestRecord | null> {
     return this.codeRunOps.getCodeRunRequest(companyId, runId);
   }
@@ -1828,29 +1735,14 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return this.codeRunOps.listCodeRunTurns(companyId, runId);
   }
 
-  /**
-   * C14: mirrors the postgres semantics of the same read — tenant predicate first, then the optional status and
-   * window filters, newest first, bounded by `limit`. A run of another company is never visible, and there is no
-   * system scope on this read (unlike `listCodeRunStatesForScan`), so a metrics caller cannot widen it.
-   */
   async listCodeRunStates(input: ListCodeRunStatesInput): Promise<CodeRunStateRecord[]> {
     return this.codeRunOps.listCodeRunStates(input);
   }
 
-  /**
-   * Keyset scan over running runs. The ordering is (startedAt, runId) and the cursor is the position of the
-   * last row of the previous page, so a row inserted while the reaper pages through cannot cause a row to be
-   * skipped or repeated.
-   */
   async listCodeRunStatesForScan(input: CodeRunStateScanInput): Promise<CodeRunScanPage<CodeRunStateRecord>> {
     return this.codeRunOps.listCodeRunStatesForScan(input);
   }
 
-  /**
-   * C10 (ТЗ item 7): the projects that own a code session, newest session first. Used by the sandbox-retention
-   * sweep to find a sandbox whose project the process no longer remembers. Two ids and a timestamp — no name,
-   * path or content leaves the store through this read.
-   */
   async listCodeProjectRefs(input: CodeProjectRefScanInput): Promise<CodeProjectRefScanPage> {
     const limit = clampScanLimit(input.limit);
     const cursor = decodeCodeRunScanCursor(input.cursor);
@@ -1880,18 +1772,12 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     };
   }
 
-  /**
-   * C10 (ТЗ item 7): one project by ids, without a user context. The retention sweep runs as the deployment's
-   * system identity, which owns no projects, so the tenant-scoped `getProject` cannot address them. `null` for an
-   * unknown or foreign id — the caller is the reaper, and there is no caller-supplied id to leak here.
-   */
   async getProjectForSystem(companyId: string, projectId: string): Promise<Project | null> {
     const project = this.projects.get(projectId);
     if (!project || project.companyId !== companyId) return null;
     return structuredClone(project);
   }
 
-  /** Keyset scan over the open turns, ordered by (startedAt, runId, turnIndex). */
   async listCodeRunTurnsForScan(input: CodeRunTurnScanInput): Promise<CodeRunScanPage<CodeRunTurnRecord>> {
     return this.codeRunOps.listCodeRunTurnsForScan(input);
   }
@@ -1900,17 +1786,13 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return this.companyMembershipOps.activeOwnerCount(companyId);
   }
 
-  /** True for the write that would leave the company without a usable owner (postgres: lastActiveOwnerPredicate). */
   private isLastActiveOwnerDemotion(member: CompanyMember, nextRole: string): boolean {
     return this.companyMembershipOps.isLastActiveOwnerDemotion(member, nextRole);
   }
 
-  /** Same predicate for a removal: the row itself must be the company's only active owner. */
   private isLastActiveOwner(member: CompanyMember): boolean {
     return this.companyMembershipOps.isLastActiveOwner(member);
   }
-
-  // --- C6b: immutable execution snapshots and versioned configuration -------------------------------
 
   async createExecutionSnapshot(input: CreateExecutionSnapshotInput): Promise<ExecutionSnapshotRecord> {
     return this.codeRunOps.createExecutionSnapshot(input);
@@ -1961,16 +1843,6 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return this.codeRunOps.listSnapshotConfigVersions(companyId, kind);
   }
 
-  /**
-   * C8: append-only context summaries. Mirrors the postgres ordering (`created_at DESC, id DESC`) so a read
-   * written against one store behaves identically on the other; there is deliberately no update or delete.
-   */
-  // --- C9: goals, plan revisions and session todos --------------------------------------------------
-  // Thin delegations: every rule (verified acceptance criteria before completion, revisioned plans, at most one
-  // todo in progress) is implemented once in `code-goal-store.ts` and shared with the Postgres backend.
-
-  // --- C9: `code.ask_user` — the persistent question ---------------------------------------------------
-
   async createCodeUserQuestion(input: CreateCodeUserQuestionInput): Promise<CodeUserQuestionRecord> {
     return this.codeUserQuestionState.createQuestion(input);
   }
@@ -1998,8 +1870,6 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   async cancelPendingCodeUserQuestions(input: { companyId: string; runId: string; now?: Date }): Promise<number> {
     return this.codeUserQuestionState.cancelPendingQuestions(input);
   }
-
-  // --- C10: session durability -------------------------------------------------------------------------
 
   async getCodeSessionHead(companyId: string, sessionId: string): Promise<CodeSessionHeadRecord | null> {
     return this.codeSessionDurabilityState.getHead(companyId, sessionId);
@@ -2113,10 +1983,6 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return this.codeRunOps.listCodeContextSummaries(input);
   }
 
-  /**
-   * C6b: append-only Activity events. Mirrors the postgres ordering (`created_at DESC, id DESC`) and the
-   * keyset cursor, so a read written against one store behaves identically on the other.
-   */
   async createCodeActivityEvent(input: CreateCodeActivityEventInput): Promise<CodeActivityEventRecord> {
     return this.codeRunOps.createCodeActivityEvent(input);
   }
@@ -2125,10 +1991,6 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return this.codeRunOps.listCodeActivityEvents(input);
   }
 
-  /**
-   * C6b: replay bundles. Mirrors the postgres semantics exactly: header plus ordered steps, idempotent by
-   * `(runId, bundleVersion)`, append-only (no update or delete method exists on either store).
-   */
   async createReplayBundle(input: CreateReplayBundleInput): Promise<ReplayBundleRecord> {
     return this.codeRunOps.createReplayBundle(input);
   }
@@ -2137,7 +1999,6 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return this.codeRunOps.getReplayBundle(companyId, runId, bundleVersion);
   }
 
-  /** C6b: by-id read, tenant-scoped (mirrors the postgres query). */
   async getReplayBundleById(companyId: string, bundleId: string): Promise<ReplayBundleRecord | null> {
     return this.codeRunOps.getReplayBundleById(companyId, bundleId);
   }

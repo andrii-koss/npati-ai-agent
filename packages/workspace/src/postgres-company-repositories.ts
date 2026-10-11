@@ -550,8 +550,7 @@ export async function createCompanyInvite(pool: Pool, input: CompanyInviteInput)
     if (!isCompanyRole(input.role)) {
       throw new CompanyMembershipError("invalid_company_role", `Unknown company role: ${String(input.role)}`, { httpStatus: 400 });
     }
-    
-    
+
     const duplicate = await pool.query("SELECT 1 FROM company_invites WHERE token_hash=$1", [input.tokenHash]);
     if (duplicate.rowCount) {
       throw new CompanyMembershipError("invite_token_conflict", "An invite with this token hash already exists", { httpStatus: 409 });
@@ -564,7 +563,7 @@ export async function createCompanyInvite(pool: Pool, input: CompanyInviteInput)
       [input.id, input.companyId, input.email, input.role, input.tokenHash, input.expiresAt, input.createdBy,
         input.acceptedAt ?? null, input.createdAt ?? new Date()]);
     if (!result.rows[0]) {
-      
+
       throw new CompanyMembershipError("invite_token_conflict", "An invite with this token hash already exists", { httpStatus: 409 });
     }
     return result.rows[0];
@@ -588,7 +587,7 @@ export async function updateCompanyMemberRole(pool: Pool, input: UpdateCompanyMe
       RETURNING ${companyMemberColumns}`,
       [input.companyId, input.userId, input.role, input.expectedRevision, input.updatedAt]);
     if (result.rows[0]) return result.rows[0];
-    
+
     const current = await getCompanyMembership(pool, input.companyId, input.userId);
     if (!current) {
       throw new CompanyMembershipError("membership_not_found", "User is not a member of this company", { httpStatus: 404 });
@@ -617,7 +616,7 @@ export async function removeCompanyMember(pool: Pool, input: RemoveCompanyMember
         AND NOT (status='active' AND role='owner' AND ${lastActiveOwnerPredicate("$1")})`,
       [input.companyId, input.userId]);
     if (result.rowCount) return;
-    
+
     const current = await getCompanyMembership(pool, input.companyId, input.userId);
     if (!current) return;
     const owners = await countCompanyOwners(pool, input.companyId);

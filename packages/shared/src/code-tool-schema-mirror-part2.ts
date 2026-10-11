@@ -1,7 +1,3 @@
-/* Part 2 of the code-tool schema mirror, split out of code-capabilities.ts in step 3c of
- * docs/refactoring/PLAN.md. Entries are moved verbatim; code-capabilities.ts spreads the parts back
- * together in this exact order, so the resulting object is unchanged, key order included.
- */
 
 import { resultEnvelope, FILE_ENTRY } from "./code-capabilities-shared";
 

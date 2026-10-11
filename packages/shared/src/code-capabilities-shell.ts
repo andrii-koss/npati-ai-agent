@@ -1,12 +1,8 @@
-/* The shell code capabilities, split out of code-capabilities.ts in step 3d of
- * docs/refactoring/PLAN.md. Declarations are moved verbatim; code-capabilities.ts imports and
- * re-exports them, so every existing import path keeps working.
- */
+
 import type { CapabilityDefinition } from "./capabilities";
 import { READ_PERMISSION, SHELL_PERMISSION } from "./code-capabilities-shared";
 import type { CapabilityMatrixEntry } from "./capability-matrix";
 import { CODE_TOOL_SCHEMA_MIRROR } from "./code-tool-schema-mirror";
-
 
 export const CODE_SHELL_CAPABILITIES: CapabilityDefinition[] = [
   {
@@ -28,9 +24,7 @@ export const CODE_SHELL_CAPABILITIES: CapabilityDefinition[] = [
     agentCallable: true,
     userVisible: true,
     risk: "high",
-    // Approval is decided by the server-side PolicyEngine from the command's risk class, not by the
-    // capability contract: a safe command inside an allowed session mode runs without an extra prompt,
-    // while an approval-class or hard-denied command is still gated (and hard-denied outright).
+
     requiresConfirmation: false,
     requiredConnections: [],
     requiredPermissions: SHELL_PERMISSION,
@@ -57,7 +51,7 @@ export const CODE_SHELL_CAPABILITIES: CapabilityDefinition[] = [
     agentCallable: true,
     userVisible: true,
     risk: "high",
-    // See code.shell.exec: the PolicyEngine, not the capability contract, decides approvals.
+
     requiresConfirmation: false,
     requiredConnections: [],
     requiredPermissions: SHELL_PERMISSION,
@@ -168,12 +162,6 @@ export const CODE_SHELL_CAPABILITIES: CapabilityDefinition[] = [
   },
 ];
 
-/**
- * C4a: dependency tools. `code.deps.inspect` only reads manifests and lockfiles (so it is gated by
- * `code.read`), the audit needs sandbox execution and the allowlisted registries (`code.shell`), and
- * `code.deps.add` mutates the dependency graph, so it is high risk and must be approved through the
- * existing approval system — an install is never a silent side effect.
- */
 export const CODE_SHELL_MATRIX: CapabilityMatrixEntry[] = CODE_SHELL_CAPABILITIES.map((capability) => ({
   id: capability.inventoryIds[0]!,
   capabilityId: capability.id,
@@ -186,4 +174,3 @@ export const CODE_SHELL_MATRIX: CapabilityMatrixEntry[] = CODE_SHELL_CAPABILITIE
   testFiles: ["tests/coding-agent-c4-capabilities.test.ts", "tests/coding-agent-c3-schema-executor-parity.test.ts"],
   status: "VERIFIED_EXISTING",
 }));
-

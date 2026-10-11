@@ -82,7 +82,7 @@ describe("security-gate: C13 MCP run path wiring — one discovery system, reach
      * The loop's own model call, not the file's first one: the self-review pass (`runSelfReview`) also calls the
      * engine and its method is defined earlier in the file. The search therefore starts at the loop.
      */
-    const loopStart = runnerSource.indexOf("// The loop. Each iteration is one assistant turn.");
+    const loopStart = runnerSource.indexOf("for (;;) {");
     const firstModelCall = runnerSource.indexOf("result = await this.ports.engine.chat({", loopStart);
     // Every anchor must exist, otherwise the ordering below would be comparing -1 with -1.
     expect(discovery).toBeGreaterThan(0);

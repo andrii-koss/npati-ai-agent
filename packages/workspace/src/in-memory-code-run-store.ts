@@ -1,10 +1,4 @@
-/* The code-run domain of the in-memory workspace store - run state, turns, requests, activity events,
- * context summaries, replay bundles and execution snapshots - split out of in-memory-store.ts in step 3h
- * of docs/refactoring/PLAN.md.
- *
- * The methods are moved verbatim and keep the field names they use, so their bodies are unchanged. The
- * closure that selected this domain is closed: no method outside it is called from inside it.
- */
+
 import { randomUUID } from "node:crypto";
 import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionStatus, ProjectCodeSettings, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification, FeatureFlag, FeatureFlagInput, FeatureFlagHistoryEntry, CodeToolManifest, SandboxImage, SandboxImageInput, SandboxImageVariant, CodeSessionMode, ProjectCodeTrust, ProjectCodeTrustInput, ProjectMountedFolder, ProjectMountedFolderInput, CodeApprovalRule, CodeApprovalRuleInput, CodeApprovalRuleScope,
   CompanyMember, CompanyInvite, CompanyInviteInput, AcceptCompanyInviteInput, UpdateCompanyMemberRoleInput, RemoveCompanyMemberInput,
@@ -37,9 +31,7 @@ export class InMemoryCodeRunStore {
 
   async createCodeRunState(input: CreateCodeRunStateInput): Promise<CodeRunStateRecord> {
     const existing = await this.getCodeRunState(input.companyId, input.runId);
-    // Idempotent by run: a retried create never rewinds the cursor, never steals the lease and — C10 — never
-    // rewrites the original request. A resume re-runs this call with the continuation prompt, and the original
-    // text must survive it.
+
     if (existing) return existing;
     const record: CodeRunStateRecord = {
       runId: input.runId,
@@ -88,7 +80,7 @@ export class InMemoryCodeRunStore {
         httpStatus: 404, details: { runId: input.runId },
       });
     }
-    // The sequence guard: a retried write (same or older seq) changes nothing at all.
+
     if (current.lastEventSeq >= input.seq) return structuredClone(current);
 
     const now = input.lease?.now ?? new Date();
@@ -124,7 +116,7 @@ export class InMemoryCodeRunStore {
 
   async getCodeRunState(companyId: string, runId: string): Promise<CodeRunStateRecord | null> {
     const record = this.codeRunStates.get(runId);
-    // A run of another company is indistinguishable from a missing one.
+
     if (!record || record.companyId !== companyId) return null;
     return structuredClone(record);
   }
@@ -149,7 +141,7 @@ export class InMemoryCodeRunStore {
       runId: input.runId,
       companyId: input.companyId,
       turnIndex: input.turnIndex,
-      // A turn that already finished is never reopened by a late write.
+
       status: input.status === "running" && existing && existing.status !== "running" ? existing.status : input.status,
       outcome: mergeCodeRunTurnOutcome(existing?.outcome ?? null, input.outcome ?? null),
       toolCalls: mergeCodeRunToolCalls(existing?.toolCalls ?? [], input.toolCalls ?? []),
@@ -242,7 +234,7 @@ export class InMemoryCodeRunStore {
 
   async createExecutionSnapshot(input: CreateExecutionSnapshotInput): Promise<ExecutionSnapshotRecord> {
     const id = input.id ?? randomUUID();
-    // A snapshot is evidence: reusing an id would rewrite history, so this is a refusal, not an upsert.
+
     if (this.executionSnapshots.has(id)) throw new ExecutionSnapshotImmutableError(`create with existing id ${id}`);
 
     const previous = await this.getLatestSnapshotForSession(input.companyId, input.sessionId);
@@ -298,8 +290,7 @@ export class InMemoryCodeRunStore {
 
   async createSnapshotConfigVersion(input: CreateSnapshotConfigVersionInput): Promise<SnapshotConfigVersionRecord> {
     const existing = await this.findSnapshotConfigVersionByHash(input.companyId, input.kind, input.contentHash);
-    // Identical content must reuse its version: a new row per call would make every snapshot point at a
-    // different "version" of the same text and destroy the meaning of the number.
+
     if (existing) return existing;
     const nextVersion = [...this.snapshotConfigVersions.values()]
       .filter((record) => record.companyId === input.companyId && record.kind === input.kind)
@@ -400,11 +391,11 @@ export class InMemoryCodeRunStore {
       .filter((record) => !input.sessionId || record.sessionId === input.sessionId)
       .filter((record) => !input.runId || record.runId === input.runId)
       .filter((record) => !input.snapshotId || record.snapshotId === input.snapshotId)
-      // C12: one level of the delegation tree — every event recorded under the run that delegated.
+
       .filter((record) => !input.parentRunId || record.parentRunId === input.parentRunId)
       .filter((record) => {
         if (!cursor) return true;
-        // Keyset comparison over (createdAt, id), newest first.
+
         const at = record.createdAt.getTime();
         const cursorAt = Date.parse(cursor.createdAt);
         return at < cursorAt || (at === cursorAt && record.id < cursor.id);
@@ -449,8 +440,7 @@ export class InMemoryCodeRunStore {
     let seq = 0;
     const seen = new Set<string>();
     for (const step of input.steps) {
-      // Idempotency mirrors the unique index on (bundleId, kind, turnIndex, toolCallId): a repeated step is
-      // dropped, never duplicated.
+
       const identity = `${step.kind}:${step.turnIndex}:${step.toolCallId ?? ""}`;
       if (seen.has(identity)) continue;
       seen.add(identity);

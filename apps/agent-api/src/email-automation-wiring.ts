@@ -1,7 +1,4 @@
-/* The project orchestrator and the email automation hooks of app.ts, extracted in step 2c-6g of
- * docs/refactoring/PLAN.md. Moved verbatim inside a factory that returns both.
- * Moved verbatim inside a factory that returns everything app.ts still uses.
- */
+
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { AppConfig } from "./app";
 import { CompanyRunQueueProducer } from "./company-run-queue";
@@ -71,16 +68,9 @@ export function createEmailAutomationWiring(deps: CreateEmailAutomationWiringDep
     projectBrowserQaService,
     dataBackendService,
     projectRedirectRepository,
-    // C12: the **one** lease manager of the deployment. `CompanyToolRuntime` above already holds this exact
-    // instance, so a path locked by the project task graph and the same path locked by a `project.files.*` tool
-    // are one lock instead of two managers that cannot see each other.
+
     projectFileLeaseManager,
-    /**
-     * C12: the mandatory verification after the merges, over the **same** `codeVerifyRunnerPort` the
-     * `code.verify.run` tool uses. There is no second verification path: the final check replays the project's
-     * configured `lint`/`typecheck`/`test`/`build` commands exactly as the tool does, and a deployment with no
-     * sandbox reports `unavailable` rather than a pass.
-     */
+
     codeVerifyRunnerPort
       ? {
           run: async ({ ctx, companyId, projectId, tools, changedOnly, timeoutMs }) =>

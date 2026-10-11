@@ -318,7 +318,7 @@ export async function applyCodeRunStateEvent(pool: Pool, input: ApplyCodeRunStat
       ],
     );
     if (result.rows[0]) return result.rows[0];
-    
+
     const current = await getCodeRunState(pool, input.companyId, input.runId);
     if (!current) {
       throw new CodeRunStateStoreError("code_run_state_not_found", "No such run state", {

@@ -1,8 +1,4 @@
-/* The code execution ports of app.ts - the reaper, the shell runtime, the verify runner, the
- * instructions loader and the hooks service - extracted in step 2c-6e of docs/refactoring/PLAN.md.
- *
- * Moved verbatim inside a factory that returns everything the rest of app.ts still uses.
- */
+
 import type { FastifyBaseLogger } from "fastify";
 import type { AppConfig } from "./app";
 import { CompanyApprovalsRepository } from "./approvals-repository";
@@ -70,13 +66,7 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
     },
     processRecords: { reapIdle: () => codeProcessManager.reapIdle() },
     shellSessions: { reap: () => codeShellRuntime.reap() },
-    // Detected, not assumed: until the approvals module exposes a bulk expiry (with its own audit) the
-    // step is reported as `port_unavailable` rather than reaching into its private pool.
-    //
-    // C13 (owner blocker 1): the sweep is also where a run paused on a **runtime MCP approval** is released, and
-    // it reuses the transition the question reaper uses (`markInterrupted`, reason `approval_timeout`). The rows
-    // come from the sweep that already read them, so "which record expired" and "which run is released" cannot
-    // disagree; a release that fails is swallowed per row, so one stuck run cannot stop the expiry of the rest.
+
     staleApprovals: asStaleApprovalReaper(
       approvalsRepo
         ? {
@@ -103,11 +93,7 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
           }
         : null,
     ),
-    /**
-     * C9: a question past its TTL releases the run it paused as `ask_user_timeout`, and no answer is invented.
-     * The port is resolved lazily (see the holder above) because it needs the run-state log; a dry run lists the
-     * expired questions for real, so this step is never reported as an unavailable preview.
-     */
+
     userQuestions: {
       previewCodeUserQuestions: async (input) => {
         if (!codeUserQuestionReaperPort) throw new Error("code_ask_user_reaper_not_ready");
@@ -122,19 +108,11 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
       usage: async () => {
         const { statfs } = await import("node:fs/promises");
         const stats = await statfs(process.cwd());
-        // NTFS reports no inode counters (files=ffree=0), rather than an exhausted filesystem.
+
         return { freeBytes: Number(stats.bavail) * Number(stats.bsize), ...(stats.files > 0 ? { freeInodes: Number(stats.ffree) } : {}) };
       },
     },
-    /**
-     * R1-C (item 11): retention, executed. The windows are derived from the limits this deployment already
-     * configured (`NPATI_CODE_TOOL_RESULT_RETENTION_DAYS` / `NPATI_CODE_TRANSCRIPT_RETENTION_DAYS`) and applied
-     * to each row's own `retention_class`; the port is `port_unavailable` when the store cannot delete code
-     * data (the in-memory backend), which is how a missing capability stays visible instead of looking clean.
-     *
-     * `audit_log`/`audit_anchors` are **not** reachable from this port: their 365-day retention is a separate
-     * contract (`audit-config.ts`) and this step must not be a second, uncoordinated writer of that journal.
-     */
+
     dataRetention: {
       preview: (input) => codeDataRetention.preview(input),
       apply: (input) => codeDataRetention.apply(input),
@@ -142,9 +120,9 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
     activity: { record: (event) => { log.info(event, "code_reaper"); } },
     logger: { warn: (payload, message) => { log.warn(payload, message ?? "code_reaper_warning"); }, info: () => undefined },
   });
-  /** Bookkeeping only: the process ports carry no session id, so the adapter remembers it per process. */
+
   const codeProcessSessions = new Map<string, { sessionId: string; companyId: string; projectId: string }>();
-  /** Stable short id used to bind a secret lease when the executor port carries no tool-call id. */
+
   const fnv1a = (value: string): string => {
     let hash = 0x811c9dc5;
     for (let index = 0; index < value.length; index += 1) {
@@ -168,11 +146,9 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
       env?: Record<string, string>; timeoutMs: number; secretRefs?: string[]; approved: boolean;
     }) => {
       const sessionId = input.sessionId ?? `${input.companyId}:${input.projectId}`;
-      // The port carries no tool-call id, so a stable id is derived from the call itself; the runtime
-      // idempotency window already guarantees the same call is not executed twice.
+
       const toolCallId = `${sessionId}:${input.turnId ?? "no-turn"}:${fnv1a(`code.shell.exec:${input.command}`)}`;
-      // C4: every secret reference becomes its own one-call lease (issue -> deliver -> revoke). The
-      // value itself never reaches this process: the sandbox resolves the reference it is given.
+
       const leaseIds: string[] = [];
       try {
         for (const [index, reference] of (input.secretRefs ?? []).entries()) {
@@ -214,12 +190,7 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
     },
     ...createCodeProcessControls(codeProcessManager, codeProcessSessions),
   } : undefined;
-  /**
-   * C4: verification runner. Commands come from the project toolchain detected in C1 — the runner never
-   * invents a command, and a tool without one is reported as unavailable instead of failing the call.
-   * Output parsing is the canonical `code-verify-parser.ts` (tsc/eslint/pytest/jest/vitest/go/cargo),
-   * which degrades to a bounded raw excerpt for unknown formats.
-   */
+
   const codeVerifyRunnerPort: CodeVerifyRunnerPort | undefined = projectSandbox ? {
     run: async (input: {
       ctx: AuthContext; companyId: string; projectId: string;
@@ -263,9 +234,7 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
       };
     },
   } : undefined;
-  // C4a: the dependency port. Inspection reads manifests through the existing workspace port, and both
-  // the audit and the install run through the C4 shell runtime port, which is the only path that carries
-  // the PolicyEngine decision — including the network enforcement gate, so nothing here can bypass it.
+
   const CODE_DEPS_MANIFESTS: ReadonlyArray<{ manager: string; manifest: string; lockfile: string | null }> = [
     { manager: "pnpm", manifest: "package.json", lockfile: "pnpm-lock.yaml" },
     { manager: "yarn", manifest: "package.json", lockfile: "yarn.lock" },
@@ -284,9 +253,7 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
       return (result as { content?: string } | null)?.content ?? null;
     } catch { return null; }
   };
-  // C8: one loader owns "which instruction files apply". It reuses `readWorkspaceText` (the same read path the
-  // dependency scanner uses) and asks the trust service on every load — trust is never cached, so a decision
-  // cannot outlive the content it was made about.
+
   const codeInstructionsLoader = createCodeInstructionsLoader({
     readFile: async ({ ctx, companyId, projectId, path }) => readWorkspaceText(ctx, companyId, projectId, path),
     isTrusted: async ({ ctx, companyId, projectId }) =>
@@ -304,20 +271,7 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
       }
     },
   });
-  /**
-   * C13 (owner decisions 1, 2 and 9): project lifecycle hooks.
-   *
-   * Wired on the **existing** lifecycle manager (`globalLifecycleHookManager`, the bus the admin routes
-   * already register handlers on) — no third event bus exists, and this service registers itself there as
-   * the executor of a project's `SessionStart` / `PreToolUse` / `PostToolUse` / `Stop` hooks.
-   *
-   * The three gates the owner named are structural here, in this order: the server-side `code.hooks` flag,
-   * then the project trust record, and only then the read of `.npati/hooks.json` — so an untrusted repository
-   * never has its hook config read, parsed or executed. Execution itself never touches the host: a `command`
-   * hook goes through `codeSandboxExecPort` (the one sandbox transport) and a `webhook` hook through
-   * `deliverWebhook` (the shared SSRF-safe client with the destination re-validated on every delivery and
-   * redirects off), so C4b is not bypassed by a single line.
-   */
+
   const codeHooksService = createCodeHooksService({
     bus: globalLifecycleHookManager,
     flags: featureFlagService,
@@ -326,25 +280,20 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
         isRepositoryInstructionsTrusted(codeProjectTrust, ctx, companyId, projectId),
     },
     readConfig: async ({ ctx, companyId, projectId, path }) => {
-      // Repository content, read through the same workspace API every other code read uses (`secret_path`
-      // and path validation included), and decoded here so the service can be tested without a filesystem.
+
       const text = await readWorkspaceText(ctx, companyId, projectId, path);
       if (text === null) return null;
       try {
         return JSON.parse(text) as unknown;
       } catch {
-        // A config that is not JSON is a refusal the hook service reports (`hook_config_invalid`), not a
-        // crash: returning the raw text would make it look parseable.
+
         throw new CodeHookError("hook_config_invalid", "The hooks config is not valid JSON");
       }
     },
     sandbox: codeSandboxExecPort,
     webhook: {
       deliver: async ({ url, body, timeoutMs, companyId, projectId }) => {
-        // The hook's own URL is its declared endpoint, and it is validated by the shared destination policy
-        // on *every* delivery (https only, no literal IP, no private/internal/metadata address, no redirects)
-        // before a socket is opened; `assertOutboundAllowed` inside `deliverWebhook` then decides whether the
-        // body may leave NPATI for this tenant at all.
+
         const delivered = await deliverWebhook(url, {
           method: "POST",
           headers: { "content-type": "application/json" },
