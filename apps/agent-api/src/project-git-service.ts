@@ -23,6 +23,7 @@ import { createPullRequest, commentOnPullRequest, type ProjectGitPullRequestHost
 import { restoreCheckpoint, restorePaths, type ProjectGitCheckpointHost } from "./project-git-checkpoint-service";
 import { requireGitWriteApproval, resolveWriteIntent, type ProjectGitApprovalHost } from "./project-git-approval-service";
 import { ensureRepositoryInitialized, inspectRepository, status, branch, type ProjectGitRepositoryHost } from "./project-git-repository-service";
+import { diffAgentWorktree, removeAgentWorktree, type ProjectGitWorktreeExtraHost } from "./project-git-worktree-extra-service";
 
 const execFileAsync = promisify(execFile);
 
@@ -307,6 +308,15 @@ export class ProjectGitService {
     this.thresholds = {
       fileThreshold: thresholds?.fileThreshold ?? (Number(process.env.NPATI_CHECKPOINT_FILE_THRESHOLD) || defaultCheckpointThresholds.fileThreshold),
       lineThreshold: thresholds?.lineThreshold ?? (Number(process.env.NPATI_CHECKPOINT_LINE_THRESHOLD) || defaultCheckpointThresholds.lineThreshold),
+    };
+  }
+
+  private worktreeExtraHost(): ProjectGitWorktreeExtraHost {
+    return {
+      runGit: this.runGit.bind(this),
+      requireWrite: this.requireWrite.bind(this),
+      ensureRepository: this.ensureRepository.bind(this),
+      getAgentWorktreePath: this.getAgentWorktreePath.bind(this),
     };
   }
 
@@ -1337,25 +1347,13 @@ export class ProjectGitService {
     return commitAgentWorktree(this.worktreeHost(), ctx, companyId, projectId, options);
   }
 
-  async diffAgentWorktree(
+    async diffAgentWorktree(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
     options: { agentSlug: string; baseBranch?: string },
   ): Promise<{ diff: string; files: string[] }> {
-    const dir = await this.ensureRepository(ctx, companyId, projectId);
-    const slug = safeAgentSlug(options.agentSlug);
-    const branch = `agent/${slug}`;
-    const baseBranch = options.baseBranch ?? "project/main";
-
-    const { stdout: namesOut } = await this.runGit(dir, ["diff", "--name-only", `${baseBranch}...${branch}`]);
-    const files = namesOut.split(/\r?\n/).filter(Boolean);
-
-    const { stdout: diffOut } = await this.runGit(dir, ["diff", "--no-ext-diff", `${baseBranch}...${branch}`]);
-    return {
-      diff: diffOut.slice(0, 128_000),
-      files,
-    };
+    return diffAgentWorktree(this.worktreeExtraHost(), ctx, companyId, projectId, options);
   }
 
   /**
@@ -1389,28 +1387,13 @@ export class ProjectGitService {
     return mergeAgentWorktree(this.worktreeHost(), ctx, companyId, projectId, options);
   }
 
-  async removeAgentWorktree(
+    async removeAgentWorktree(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
     options: { agentSlug: string; deleteBranch?: boolean },
   ): Promise<{ removed: boolean }> {
-    this.requireWrite(ctx);
-    const dir = await this.ensureRepository(ctx, companyId, projectId);
-    const slug = safeAgentSlug(options.agentSlug);
-    const wtDir = this.getAgentWorktreePath(dir, slug);
-
-    try {
-      await this.runGit(dir, ["worktree", "remove", "--force", wtDir]);
-    } catch {}
-    await this.runGit(dir, ["worktree", "prune"]).catch(() => undefined);
-    await rm(wtDir, { recursive: true, force: true }).catch(() => undefined);
-
-    if (options.deleteBranch) {
-      await this.runGit(dir, ["branch", "-D", `agent/${slug}`]).catch(() => undefined);
-    }
-
-    return { removed: true };
+    return removeAgentWorktree(this.worktreeExtraHost(), ctx, companyId, projectId, options);
   }
 
   async cleanupAllWorktrees(
