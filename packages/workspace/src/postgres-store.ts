@@ -84,18 +84,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   private readonly pool: Pool;
   constructor(databaseUrl: string) { this.pool = new Pool({ connectionString: databaseUrl, max: 10 }); }
 
-  /**
-   * G1 (item 2): the store owns this pool, so it is the component that must release it.
-   *
-   * Before this method existed the pool outlived every consumer: `apps/agent-api/src/app.ts` closed fifteen
-   * other repositories in its `onClose` hook and never this one, and the only place that tried to close it was
-   * a test that called a `close()` which did not exist anywhere in the repository — so the attempt threw
-   * *inside* a `finally` block and replaced the real assertion failure with `store.close is not a function`.
-   *
-   * Three repositories are built **on this same pool** (`ApiKeysRepository`, `ScopedMemoryEngine`,
-   * `GuardrailPolicyRepository` — they are handed `workspaceStore`'s pool by the composition), which is why the
-   * caller closes it last and why this method must not be reachable from those repositories: none of them owns it.
-   */
   async close(): Promise<void> { await this.pool.end(); }
 
   async initialize(context?: AuthContext) {
@@ -663,8 +651,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       finally { client.release(); }
     }
 
-
-
     const projectFoundation = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='054_project_foundation'");
     if (!projectFoundation.rowCount) {
       const client = await this.pool.connect();
@@ -880,8 +866,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
-    // C5a: company membership and invites. Additive: `workspace_members` keeps its meaning, and 072
-    // touches no existing table, row or query.
+
     const companyMembershipMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='072_company_membership_and_invites'");
     if (!companyMembershipMigration.rowCount) {
       const client = await this.pool.connect();
@@ -894,9 +879,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
-    // C5a: the company protected-branch policy read by the shell hard-deny phase
-    // (`CodeProtectedBranchRepository`). Additive: 073 creates its own table and index and touches no
-    // existing table, row or query.
+
     const protectedBranchesMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='073_company_protected_branches'");
     if (!protectedBranchesMigration.rowCount) {
       const client = await this.pool.connect();
@@ -909,8 +892,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
-    // C5b: ProviderDataPolicy, project classification, policy history and hosted-provider consent.
-    // Additive: 074 creates its own four tables and indexes and touches no existing table, row or query.
+
     const providerDataPoliciesMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='074_provider_data_policies'");
     if (!providerDataPoliciesMigration.rowCount) {
       const client = await this.pool.connect();
@@ -923,8 +905,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
-    // C6a: durable Coding Agent run state (turn boundaries, monotonic event sequence, lease/heartbeat).
-    // Additive: 075 creates its own two tables and indexes and touches no existing table, row or query.
+
     const codeRunStateMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='075_code_run_state'");
     if (!codeRunStateMigration.rowCount) {
       const client = await this.pool.connect();
@@ -937,8 +918,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
-    // C6b: immutable execution snapshots and the versioned system prompt / model profiles they reference.
-    // Additive: 076 creates its own two tables, indexes and append-only triggers; no existing table is touched.
+
     const executionSnapshotMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='076_execution_snapshots'");
     if (!executionSnapshotMigration.rowCount) {
       const client = await this.pool.connect();
@@ -951,8 +931,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
-    // C6b: durable Activity events with their `snapshot_id` (requirement 19).
-    // Additive: 077 creates its own table and four indexes and touches no existing table, row or query.
+
     const codeActivityEventsMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='077_code_activity_events'");
     if (!codeActivityEventsMigration.rowCount) {
       const client = await this.pool.connect();
@@ -965,8 +944,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
-    // C6b: versioned replay bundles (header + ordered steps) for deterministic replay.
-    // Additive: 078 creates its own two tables, indexes and append-only triggers; no existing table is touched.
+
     const replayBundlesMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='078_replay_bundles'");
     if (!replayBundlesMigration.rowCount) {
       const client = await this.pool.connect();
@@ -979,8 +957,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
-    // C8: durable context summaries (append-only session artifacts produced by conversation compaction).
-    // Additive: 079 creates its own table, four indexes and its append-only trigger; no existing table is touched.
+
     const contextSummariesMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='079_code_context_summaries'");
     if (!contextSummariesMigration.rowCount) {
       const client = await this.pool.connect();
@@ -993,9 +970,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
-    // C9: goals, plan revisions and session todos.
-    // Additive: 080 creates its own four tables, indexes and two acceptance triggers; no existing table is
-    // touched, and it deliberately adds no foreign key to `company_agent_runs` (a code run has no row there).
+
     const goalsAndPlansMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='080_code_goals_and_plans'");
     if (!goalsAndPlansMigration.rowCount) {
       const client = await this.pool.connect();
@@ -1008,10 +983,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
-    // C9: `code.ask_user` — the question a run waits on.
-    // Additive: 081 creates one new table and widens the `code_run_states.status` CHECK with
-    // `waiting_for_user`. Widening an allowed set is expand-only: an older application never writes the new
-    // value and keeps working against the new schema.
+
     const userQuestionsMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='081_code_user_questions'");
     if (!userQuestionsMigration.rowCount) {
       const client = await this.pool.connect();
@@ -1024,11 +996,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
-    // C10: session durability — the conversation cursor, the reconciler's notice and the rewind/fork ledgers.
-    // Additive: 082 creates four new tables, their indexes and one append-only trigger; no existing table is
-    // altered, and the only foreign key points at `code_sessions` (which exists since 065) rather than at a
-    // C12 structure. The cursor is what makes a conversation rewind possible without deleting the append-only
-    // replay bundle and the context summaries.
+
     const sessionDurabilityMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='082_code_session_durability'");
     if (!sessionDurabilityMigration.rowCount) {
       const client = await this.pool.connect();
@@ -1041,9 +1009,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
-    // C10: the run's original request. Additive: 083 adds seven columns and their CHECK constraints to the
-    // existing `code_run_states` table, so a previous application version keeps working against the new schema
-    // (it simply never writes the new columns, and their defaults read as "this run has no recorded request").
+
     const runRequestMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='083_code_run_request'");
     if (!runRequestMigration.rowCount) {
       const client = await this.pool.connect();
@@ -1056,10 +1022,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
-    // C12: the delegation tree of Activity events. Additive: 084 adds three nullable columns and one partial
-    // index to `code_activity_events`, so a previous application version keeps working against the new schema —
-    // it simply never writes the parent columns, and their `NULL` reads as "this event has no parent", which is
-    // the honest reading of every row written before the delegation tree existed.
+
     const activityParentMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='084_code_activity_parents'");
     if (!activityParentMigration.rowCount) {
       const client = await this.pool.connect();
@@ -1072,9 +1035,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
-    // C13 (owner decision 5): the durable owner/admin risk decisions for runtime MCP tools. Additive: 085
-    // creates one new table with its unique key, so a previous application version keeps working — it never
-    // reads the table, and every runtime MCP tool keeps the fail-closed `high` + approval-required default.
+
     const mcpToolPolicyMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='085_mcp_tool_policies'");
     if (!mcpToolPolicyMigration.rowCount) {
       const client = await this.pool.connect();
@@ -1087,9 +1048,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
-    // C15: the mounted local folder allowlist. Additive: 086 creates one new table with its per-project unique
-    // key and two reader indexes, so a previous application version keeps working — it never reads the table,
-    // and a project without a row keeps the managed workspace root (no mount is implied by its absence).
+
     const mountedFolderMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='086_project_mounted_folders'");
     if (!mountedFolderMigration.rowCount) {
       const client = await this.pool.connect();
@@ -1102,11 +1061,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
-    // R1-C (item 13): classification and retention on the three families that had neither. Additive: 087 adds
-    // two NOT NULL columns **with defaults** (so an existing row, and an insert from a previous application
-    // version, keeps working), the established CHECK vocabulary, and one retention index per table. No
-    // previous version reads any of it, and no row changes meaning — which is what "expand only" has to mean
-    // for `project_checkpoints`, a table the Website Builder also writes.
+
     const dataRetentionMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='087_code_data_retention'");
     if (!dataRetentionMigration.rowCount) {
       const client = await this.pool.connect();
@@ -1145,11 +1100,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     }
   }
 
-  // --- C9: `code.ask_user` — the persistent question --------------------------------------------------
-  // The rules (only an offered choice is accepted, an answered question is never re-answered, an unanswered one
-  // never carries an answer) live in `code-question-store.ts` and are shared with the in-memory backend. The
-  // database repeats the two structural ones as CHECK constraints in migration 081.
-
   private codeUserQuestionStoreInstance?: PostgresCodeUserQuestionStore;
 
   private questions(): PostgresCodeUserQuestionStore {
@@ -1186,11 +1136,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   async cancelPendingCodeUserQuestions(input: { companyId: string; runId: string; now?: Date }): Promise<number> {
     return this.questions().cancelPendingQuestions(input);
   }
-
-  // --- C10: session durability ----------------------------------------------------------------------
-  // The cursor of a conversation, the reconciler's notice and the two operation ledgers. The rules (one head
-  // per session, claim-before-perform, revision-checked updates) live in `code-session-durability-store.ts`
-  // and are shared with the in-memory backend; migration 082 repeats the structural ones as constraints.
 
   private codeSessionDurabilityInstance?: PostgresCodeSessionDurabilityStore;
 
@@ -1261,11 +1206,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return this.durability().reopenFork(input);
   }
 
-  // --- C9: goals, plan revisions and session todos --------------------------------------------------
-  // The rules (goal completion needs verified criteria, plans are revisioned, at most one todo in progress)
-  // live in `code-goal-store.ts` and are shared with the in-memory backend, so the two cannot drift. The
-  // database additionally enforces them with the triggers and partial unique indexes of migration 080.
-
   private codeGoalStoreInstance?: PostgresCodeGoalStore;
 
   private goals(): PostgresCodeGoalStore {
@@ -1317,8 +1257,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return this.goals().listTodos(input.companyId, input.sessionId);
   }
 
-  // --- C1b: sandbox image supply chain ------------------------------------------------------
-
   async listSandboxImages(context: AuthContext): Promise<SandboxImage[]> {
     const result = await this.pool.query<SandboxImage>(`SELECT ${sandboxImageColumns} FROM sandbox_images
       WHERE workspace_id=$1 ORDER BY variant, created_at DESC`, [context.workspaceId]);
@@ -1363,8 +1301,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       ORDER BY scan_at DESC NULLS LAST, created_at DESC LIMIT 1`, [context.workspaceId, variant]);
     return result.rows[0] ?? null;
   }
-
-  // --- C1a: feature flags and tool manifests ------------------------------------------------
 
   async listFeatureFlags(context: AuthContext): Promise<FeatureFlag[]> {
     const result = await this.pool.query<FeatureFlag>(`SELECT ${featureFlagColumns} FROM feature_flags
@@ -1423,14 +1359,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return result.rows[0] ?? null;
   }
 
-  // --- C1c: append-only audit log ----------------------------------------------------------
-
-  /**
-   * Appends one audit entry. The chain is computed inside a transaction that holds a per-company
-   * advisory lock, so concurrent privileged actions cannot fork or reorder the chain; the database
-   * triggers (migration 066) independently reject out-of-order inserts and any UPDATE/DELETE.
-   * Failures propagate: privileged actions must fail closed when the audit cannot be written.
-   */
   async appendAuditEntry(context: AuthContext, companyId: string, input: AuditEntryInput): Promise<AuditEntry> {
     return company.appendAuditEntry(this.pool, context, companyId, input);
   }
@@ -1439,11 +1367,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return company.listAuditEntries(this.pool, context, companyId, filters);
   }
 
-  /**
-   * C5: scoped approval rules. `once` approvals deliberately have no row here — they stay bound to a
-   * single payload hash in `company_approvals`, which is why a rule can only ever *add* a bounded
-   * allowance and can never widen a prohibition decided in an earlier policy phase.
-   */
   async createCodeApprovalRule(context: AuthContext, companyId: string, input: CodeApprovalRuleInput): Promise<CodeApprovalRule> {
     await this.assertCompany(context, companyId);
     if (input.scope === "session" && !input.sessionId) {
@@ -1486,7 +1409,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
 
   async findMatchingCodeApprovalRule(context: AuthContext, query: { companyId: string; projectId?: string | null; sessionId?: string | null; action: string }): Promise<CodeApprovalRule | null> {
     await this.assertCompany(context, query.companyId);
-    // Most specific first: a session rule wins over a project rule. Expired rules never match.
+
     const result = await this.pool.query<CodeApprovalRule>(
       `SELECT ${codeApprovalRuleColumns} FROM code_approval_rules
        WHERE workspace_id=$1 AND company_id=$2 AND action=$3 AND decision='allow'
@@ -1533,7 +1456,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return company.auditCompanies(this.pool, context);
   }
 
-  /** Background verifier path: no user context, workspace-scoped, hashes and counts only. */
   async systemAuditChains(workspaceId: string) {
     return company.systemAuditChains(this.pool, workspaceId);
   }
@@ -1705,7 +1627,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return Boolean((await this.pool.query("DELETE FROM businesses WHERE id=$1 AND workspace_id=$2 RETURNING id", [businessId, context.workspaceId])).rowCount);
   }
 
-
   private async assertCompany(context: AuthContext, companyId: string) {
     return support.assertCompany(this.pool, context, companyId);
   }
@@ -1832,7 +1753,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return Boolean((await this.pool.query("DELETE FROM companies WHERE id=$1 AND workspace_id=$2 AND user_id=$3 RETURNING id", [companyId, context.workspaceId, context.userId])).rowCount);
   }
 
-
   async setCompanyMainAgent(context: AuthContext, companyId: string, agentId: string | null, expectedRevision: number) {
     await this.assertCompany(context, companyId);
     if (agentId) await this.getCompanyAgent(context, companyId, agentId);
@@ -1850,7 +1770,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   async listCompanyAgentsPage(context: AuthContext, companyId: string, requestedLimit = 50, cursor?: string) {
     return company.listCompanyAgentsPage(this.pool, context, companyId, requestedLimit, cursor);
   }
-
 
   async createProject(context: AuthContext, companyId: string, input: ProjectInput, idempotencyKey: string) {
     return project.createProject(this.pool, context, companyId, input, idempotencyKey);
@@ -1908,8 +1827,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return project.deleteProject(this.pool, context, companyId, projectId);
   }
 
-  // --- C1: code sessions -------------------------------------------------------------------
-
   async createCodeSession(context: AuthContext, companyId: string, projectId: string, input: CodeSessionInput): Promise<CodeSession> {
     const project = await this.getProject(context, companyId, projectId);
     await this.assertProjectAgent(context, companyId, input.agentId);
@@ -1917,7 +1834,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       const parent = await this.getCodeSession(context, companyId, input.parentSessionId);
       if (parent.projectId !== projectId) throw new WorkspaceAccessError("Parent session belongs to another project");
     }
-    // A session can never be classified below its project; raising is always allowed here (C5a adds roles).
+
     const requested = input.dataClassification ?? project.dataClassification;
     if (!isClassificationAtLeast(requested, project.dataClassification)) {
       throw new WorkspaceAccessError("Session data classification cannot be lower than the project classification");
@@ -1985,16 +1902,10 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return result.rows[0];
   }
 
-  // --- C5: project trust ---------------------------------------------------------------------
-
   async getProjectCodeTrust(context: AuthContext, companyId: string, projectId: string): Promise<ProjectCodeTrust | null> {
     return project.getProjectCodeTrust(this.pool, context, companyId, projectId);
   }
 
-  /**
-   * Trust is a state change and therefore revision-checked. A missing row means "revision 0, not
-   * trusted", so the first write must pass `expectedRevision: 0`.
-   */
   async setProjectCodeTrust(context: AuthContext, companyId: string, projectId: string, input: ProjectCodeTrustInput): Promise<ProjectCodeTrust> {
     const existing = await this.getProjectCodeTrust(context, companyId, projectId);
     const currentRevision = existing?.revision ?? 0;
@@ -2020,26 +1931,14 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return result.rows[0]!;
   }
 
-  // --- C15: the mounted local folder allowlist ------------------------------------------------
-
   async getProjectMountedFolder(context: AuthContext, companyId: string, projectId: string): Promise<ProjectMountedFolder | null> {
     return project.getProjectMountedFolder(this.pool, context, companyId, projectId);
   }
 
-  /**
-   * The runner-side read: the same row, addressed by ids alone, because the sandbox runner has no user
-   * session. It is a point lookup on the per-project unique key, and `null` (unknown ids, no database) is the
-   * fail-closed answer — a runner that cannot read the allowlist mounts nothing.
-   */
   async getProjectMountedFolderForSystem(companyId: string, projectId: string): Promise<ProjectMountedFolder | null> {
     return project.getProjectMountedFolderForSystem(this.pool, companyId, projectId);
   }
 
-  /**
-   * The single writer of the allowlist. Revision-checked exactly like project trust: a missing row means
-   * "revision 0, no mount", so the first write must pass `expectedRevision: 0`, and a later confirmation
-   * cannot overwrite a decision another request made in the meantime.
-   */
   async setProjectMountedFolder(context: AuthContext, companyId: string, projectId: string, input: ProjectMountedFolderInput): Promise<ProjectMountedFolder> {
     const existing = await this.getProjectMountedFolder(context, companyId, projectId);
     if (input.expectedRevision !== (existing?.revision ?? 0)) {
@@ -2070,7 +1969,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return result.rows[0]!;
   }
 
-  /** Rejects an agent id that does not belong to the company (tenant isolation for sessions). */
   private async assertProjectAgent(context: AuthContext, companyId: string, agentId?: string) {
     return company.assertProjectAgent(this.pool, context, companyId, agentId);
   }
@@ -2132,7 +2030,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return company.createCompanyAgent(this.pool, context, companyId, input, idempotencyKey);
   }
 
-
   async updateCompanyAgent(context: AuthContext, companyId: string, agentId: string, input: Partial<CompanyAgentInput>, expectedRevision: number) {
     return company.updateCompanyAgent(this.pool, context, companyId, agentId, input, expectedRevision);
   }
@@ -2163,7 +2060,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   async listCompanyAgentEdges(context: AuthContext, companyId: string, agentIds?: string[]) {
     return company.listCompanyAgentEdges(this.pool, context, companyId, agentIds);
   }
-
 
   async setCompanyAgentParent(context: AuthContext, companyId: string, childAgentId: string, parentAgentId: string | null) {
     await this.assertCompany(context, companyId);
@@ -2233,7 +2129,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   async appendCompanyAgentRunEvent(context: AuthContext, companyId: string, runId: string, entry: Pick<CompanyAgentRunEvent, "eventKey" | "eventType" | "runStatus" | "message"> & Partial<Pick<CompanyAgentRunEvent, "workerId" | "attemptCount" | "details">>) {
     return company.appendCompanyAgentRunEvent(this.pool, context, companyId, runId, entry);
   }
-
 
   async claimCompanyAgentRun(context: AuthContext, companyId: string, runId: string, workerId: string, leaseMs: number) {
     return company.claimCompanyAgentRun(this.pool, context, companyId, runId, workerId, leaseMs);
@@ -2384,11 +2279,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return company.appendNeutralMessage(this.pool, context, conversationId, role, content);
   }
 
-  // --- C5a: company membership and invites ---------------------------------------------------
-  // Signatures mirror the `CodeMembershipStore` port (apps/agent-api/src/code-membership.ts) exactly:
-  // company-scoped, no `AuthContext`, because membership *is* the authorisation anchor.
-
-  /** No row is `null`: there is no "owner by default" fallback anywhere in the membership path. */
   async getCompanyMembership(companyId: string, userId: string): Promise<CompanyMember | null> {
     return company.getCompanyMembership(this.pool, companyId, userId);
   }
@@ -2397,11 +2287,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return company.listCompanyMembers(this.pool, companyId);
   }
 
-  /**
-   * Owners that could actually administer the company. A `suspended`/`invited` owner has no role
-   * (`CodeMembershipService.resolveRoleForUser` returns null for it), so counting it here would let the
-   * only *usable* owner be demoted or removed and leave the company without an administrator.
-   */
   async countCompanyOwners(companyId: string): Promise<number> {
     return company.countCompanyOwners(this.pool, companyId);
   }
@@ -2410,21 +2295,10 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return company.createCompanyInvite(this.pool, input);
   }
 
-  /**
-   * Returns the invite whatever its state (including expired and already accepted), so the caller can
-   * tell "not a valid token" apart from "valid but expired / already used".
-   */
   async findCompanyInviteByTokenHash(tokenHash: string): Promise<CompanyInvite | null> {
     return company.findCompanyInviteByTokenHash(this.pool, tokenHash);
   }
 
-  /**
-   * Accepting an invite creates or reactivates the membership row with the **invited** role.
-   *
-   * The invite is re-read and claimed inside one transaction: `accepted_at IS NULL AND expires_at > $2`
-   * means a token is single-use and dead after its TTL even if the caller still holds a copy of the row.
-   * If the membership write is refused, the transaction rolls back, so the token is not burned.
-   */
   async acceptCompanyInvite(input: AcceptCompanyInviteInput): Promise<CompanyMember> {
     const client = await this.pool.connect();
     try {
@@ -2446,8 +2320,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         }
         throw new CompanyMembershipError("invite_expired", "Invite token has expired", { httpStatus: 410 });
       }
-      // Accepting an invite must not demote the only active owner: the guard is part of the upsert, so
-      // even a direct store call (bypassing the service) cannot remove the company's administrator.
+
       const result = await client.query<CompanyMember>(`INSERT INTO company_members
         (id, company_id, user_id, role, status, invited_by, invited_at, accepted_at, created_at)
         VALUES($1,$2,$3,$4,'active',$5,$6,$7,$7)
@@ -2478,22 +2351,10 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     } finally { client.release(); }
   }
 
-  /**
-   * Revision-checked role change. `revision` is the optimistic token: a mismatch is refused with the
-   * port's `membership_revision_conflict` (and the tree-wide "changed by another request" message, which
-   * existing route mappers already translate to 409) instead of silently overwriting a concurrent write.
-   * The only-owner guard lives in the same statement, so `CodeMembershipService`'s earlier check cannot
-   * be raced.
-   */
   async updateCompanyMemberRole(input: UpdateCompanyMemberRoleInput): Promise<CompanyMember> {
     return company.updateCompanyMemberRole(this.pool, input);
   }
 
-  /**
-   * Removing the last active owner is refused for the same reason as demoting it. Like the port's own
-   * implementation this is otherwise a delete: a user who is not a member is already refused with
-   * `membership_not_found` (404) by `CodeMembershipService` before the store is called.
-   */
   async removeCompanyMember(input: RemoveCompanyMemberInput): Promise<void> {
     return company.removeCompanyMember(this.pool, input);
   }
@@ -2598,17 +2459,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return { ...current, business: { ...current.business, activationStatus: "active" as const }, status: "completed" as const, updatedAt: new Date().toISOString() };
   }
 
-  // --- C5b: ProviderDataPolicy ------------------------------------------------------------------
-  // Company-scoped and deliberately without `AuthContext`, mirroring the C5a membership convention: the
-  // policy is the *subject* of authorisation, and the app-side service has already resolved the principal.
-  // Every statement is scoped by `company_id` (with `NULL` meaning the platform default row), so one tenant
-  // can never read or write another's policy.
-
-  /**
-   * Validation duplicated from `provider-data-policy.ts` on purpose: a direct store call must be as safe as
-   * one that went through the service. The codes match the app-side error class so a single route mapper
-   * handles both.
-   */
   private assertValidProviderPolicy(input: UpsertProviderDataPolicyStoreInput): void {
     if (!isProviderDataPolicyKind(input.kind)) {
       throw new ProviderDataPolicyStoreError("invalid_policy_field", `Unsupported provider kind: ${String(input.kind)}`, {
@@ -2686,11 +2536,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return result.rows;
   }
 
-  /**
-   * One transaction: check the expected version, bump `policy_version` (previous + 1), then append the
-   * accepted snapshot to the history with the acting `actor`. A mismatch rolls back, so a concurrent writer
-   * can never be silently overwritten and the history always matches the live row.
-   */
   async upsertProviderDataPolicy(input: UpsertProviderDataPolicyStoreInput): Promise<ProviderDataPolicyRecord> {
     this.assertValidProviderPolicy(input);
     const client = await this.pool.connect();
@@ -2726,7 +2571,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         }
       }
 
-      // The mandatory redactions are unioned in, so a row written through this path can never omit them.
       const redactions = [...new Set([...MANDATORY_PROVIDER_REDACTIONS, ...(input.requiredRedactions ?? [])])];
       const contentTypes = [...new Set(input.allowedContentTypes ?? ["metadata"])];
       const result = await client.query<ProviderDataPolicyRecord>(
@@ -2801,7 +2645,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return result.rows[0] ?? null;
   }
 
-  /** An unconfigured project is `confidential` (never `public`): the default is applied here, on read. */
   async upsertProjectDataPolicy(input: UpsertProjectDataPolicyStoreInput): Promise<ProjectDataPolicyRecord> {
     const current = await this.getProjectDataPolicy(input.companyId, input.projectId);
     if (input.expectedPolicyVersion === null && current) {
@@ -2843,7 +2686,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return result.rows[0]!;
   }
 
-  /** A rule that could escape the project is refused, never normalised: a normalised escape is still one. */
   private assertValidPathRule(rule: ProjectDataPolicyPathRule): ProjectDataPolicyPathRule {
     const pattern = rule && typeof rule.pattern === "string" ? rule.pattern.trim() : "";
     const escapes = pattern.length === 0 || pattern.startsWith("/") || pattern.startsWith("~")
@@ -2872,7 +2714,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     grantedBy: string;
     grantedAt: Date;
   }): Promise<ProviderHostedConsentRecord> {
-    // A fresh grant clears a previous revocation: consent is explicit, and re-granting is the only way back.
+
     const result = await this.pool.query<ProviderHostedConsentRecord>(
       `INSERT INTO provider_hosted_consent
          (company_id, project_id, provider_id, granted_by, granted_at, revoked_at)
@@ -2905,7 +2747,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return result.rows[0];
   }
 
-  /** The row whatever its state; a caller must treat `revokedAt !== null` as no consent at all. */
   async getHostedProviderConsent(input: {
     companyId: string;
     projectId: string;
@@ -2919,36 +2760,14 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return result.rows[0] ?? null;
   }
 
-  // --- C6a: durable Coding Agent run state --------------------------------------------------
-
-  /**
-   * Creates the run row already leased by `owner`. `ON CONFLICT DO NOTHING` makes a retried create
-   * idempotent: the second call returns the existing row with its cursor and lease untouched, so a
-   * duplicated start can never rewind a run or steal its own lease.
-   */
   async createCodeRunState(input: CreateCodeRunStateInput): Promise<CodeRunStateRecord> {
     return project.createCodeRunState(this.pool, input);
   }
 
-  /**
-   * C10: the run's original request. One extra read for one extra column set — the request text is deliberately
-   * kept out of `codeRunStateColumns` so the reaper's and the reconciler's scans (which run every interval over
-   * every stale run) never pull prompt content into memory.
-   */
   async getCodeRunRequest(companyId: string, runId: string): Promise<CodeRunRequestRecord | null> {
     return project.getCodeRunRequest(this.pool, companyId, runId);
   }
 
-  /**
-   * One statement applies the whole patch, including the lease transition:
-   *
-   * - the `seq` guard (`last_event_seq < $seq`) makes a retried write a no-op, which is what lets the caller
-   *   write after every turn without worrying about duplicates;
-   * - the lease condition is expressed inside the same `WHERE`, so the check and the write cannot be split by
-   *   a concurrent writer. A refused lease transition still lets the non-lease part of the patch land (the
-   *   status/cursor of a run we no longer own is still true information), which is why the lease predicate is
-   *   written per-mode rather than as an early return.
-   */
   async applyCodeRunStateEvent(input: ApplyCodeRunStateEventInput): Promise<CodeRunStateRecord> {
     return project.applyCodeRunStateEvent(this.pool, input);
   }
@@ -2957,37 +2776,14 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return project.getCodeRunState(this.pool, companyId, runId);
   }
 
-  /**
-   * The reconciler's only system-wide read. It returns runs that *claim* to be running with a lease that has
-   * expired (or was never taken), which is exactly the set a crashed process leaves behind.
-   */
   async listStaleCodeRunStates(input: { now: Date; limit: number }): Promise<CodeRunStateRecord[]> {
     return project.listStaleCodeRunStates(this.pool, input);
   }
 
-  /**
-   * C14 (owner decision 3): the tenant-scoped read of run rows the metrics aggregation is built from.
-   *
-   * Three details are deliberate:
-   *
-   *   1. **`company_id=$1` is unconditional.** Unlike `listCodeRunStatesForScan` (whose `$1::text IS NULL` is the
-   *      reaper's documented system scope) there is no null branch here, so this read cannot be turned into a
-   *      cross-tenant scan by passing `null`.
-   *   2. **Every other filter is an optional parameter**, so one prepared statement serves "the finished runs of
-   *      this tenant", "the runs started since yesterday" and the unbounded first page without a second query
-   *      shape that could drift from this one.
-   *   3. **It selects existing columns only.** The success rate, the turn counts and the cost come from `status`
-   *      and the `details` bag the terminal state already carries; nothing here is a second record of a run.
-   */
   async listCodeRunStates(input: ListCodeRunStatesInput): Promise<CodeRunStateRecord[]> {
     return project.listCodeRunStates(this.pool, input);
   }
 
-  /**
-   * Records a turn boundary. Tool calls merge by `toolCallId` (the same call re-recorded with a terminal
-   * outcome replaces its pending entry), and a stored terminal outcome is never downgraded to
-   * `unknown_outcome` — a repeated late write must not turn a known result back into a doubt.
-   */
   async upsertCodeRunTurn(input: UpsertCodeRunTurnInput): Promise<CodeRunTurnRecord> {
     const existing = await this.getCodeRunTurn(input.companyId, input.runId, input.turnIndex);
     const merged = mergeCodeRunToolCalls(existing?.toolCalls ?? [], input.toolCalls ?? []);
@@ -3030,21 +2826,10 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return project.listCodeRunTurns(this.pool, companyId, runId);
   }
 
-  /**
-   * Keyset scan over the run rows, used by the reaper. One row beyond the limit is requested on purpose: it is
-   * the only reliable way to know whether a next page exists without a second query, and the extra row is
-   * dropped before returning.
-   */
   async listCodeRunStatesForScan(input: CodeRunStateScanInput): Promise<CodeRunScanPage<CodeRunStateRecord>> {
     return project.listCodeRunStatesForScan(this.pool, input);
   }
 
-  /**
-   * C10 (ТЗ item 7): the projects that own a code session, newest session first. Drives the sandbox-retention
-   * sweep, which must be able to find a sandbox that exists on disk while the process remembers nothing about it.
-   * The system scope (`companyId: null`) is the same one the run scans use and is only for the reaper. Two ids and
-   * a timestamp are selected — never a name, a path or any content.
-   */
   async listCodeProjectRefs(input: CodeProjectRefScanInput): Promise<CodeProjectRefScanPage> {
     const limit = clampScanLimit(input.limit);
     const cursor = decodeCodeRunScanCursor(input.cursor);
@@ -3072,21 +2857,13 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     };
   }
 
-  /**
-   * C10 (ТЗ item 7): one project by ids, without a user context, for the sandbox-retention sweep — which runs as the
-   * deployment's system identity and therefore cannot use the `createdBy`-scoped `getProject`. `null` for an unknown
-   * or foreign id.
-   */
   async getProjectForSystem(companyId: string, projectId: string): Promise<Project | null> {
     return project.getProjectForSystem(this.pool, companyId, projectId);
   }
 
-  /** Keyset scan over the open turns, used by the reaper to find tool calls with no progress. */
   async listCodeRunTurnsForScan(input: CodeRunTurnScanInput): Promise<CodeRunScanPage<CodeRunTurnRecord>> {
     return project.listCodeRunTurnsForScan(this.pool, input);
   }
-
-  // --- C6b: immutable execution snapshots and versioned configuration -------------------------------
 
   private async insertExecutionSnapshot(record: ExecutionSnapshotRecord): Promise<void> {
     await this.pool.query(
@@ -3103,7 +2880,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   async createExecutionSnapshot(input: CreateExecutionSnapshotInput): Promise<ExecutionSnapshotRecord> {
     const id = input.id ?? randomUUID();
     const attempted = await this.pool.query("SELECT 1 FROM execution_snapshots WHERE id=$1", [id]);
-    // A snapshot is evidence: reusing an id would overwrite history, so this is a refusal, not an upsert.
+
     if (attempted.rowCount) throw new ExecutionSnapshotImmutableError(`create with existing id ${id}`);
 
     const head = await this.pool.query<{ id: string; payload_hash: string; snapshot_version: number }>(
@@ -3181,8 +2958,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
 
   async createSnapshotConfigVersion(input: CreateSnapshotConfigVersionInput): Promise<SnapshotConfigVersionRecord> {
     const existing = await this.findSnapshotConfigVersionByHash(input.companyId, input.kind, input.contentHash);
-    // Identical content must reuse its version: a new row per call would make every snapshot point at a
-    // different "version" of the same text and destroy the meaning of the number.
+
     if (existing) return existing;
     const head = await this.pool.query<{ next: number }>(
       `SELECT COALESCE(MAX(version), 0) + 1 AS next FROM code_snapshot_config_versions
@@ -3238,10 +3014,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return result.rows.map((row) => support.mapSnapshotConfigVersionRow(row));
   }
 
-  /**
-   * C6b: durable Activity events. Append-only — there is deliberately no update or delete method, and the
-   * service layer rejects content-like payload keys before calling this (`code-run-activity-sink.ts`).
-   */
   async createCodeActivityEvent(input: CreateCodeActivityEventInput): Promise<CodeActivityEventRecord> {
     return project.createCodeActivityEvent(this.pool, input);
   }
@@ -3250,12 +3022,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return project.listCodeActivityEvents(this.pool, input);
   }
 
-  /**
-   * C8: a context summary is a derived session artifact, stored append-only (migration 079 refuses UPDATE and
-   * DELETE at the database level). `content_hash` is the hash of the exact compacted message list, so the
-   * stored row can be tied to reproducible replay input. Defaults are conservative: `confidential` data with a
-   * `short` retention, because a summary is derived and outliving its transcript buys nothing.
-   */
   async createCodeContextSummary(input: CreateCodeContextSummaryInput): Promise<CodeContextSummaryRecord> {
     return project.createCodeContextSummary(this.pool, input);
   }
@@ -3264,12 +3030,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return project.listCodeContextSummaries(this.pool, input);
   }
 
-  /**
-   * C6b: the bundle header and its ordered steps are written in **one transaction**, so a run never leaves a
-   * header claiming steps that are not there. Idempotent by `(run_id, bundle_version)`: a second recording of
-   * the same run returns the stored bundle (the unique index is the arbiter, not a pre-read, which would race).
-   * Append-only: there is deliberately no update or delete method.
-   */
   async createReplayBundle(input: CreateReplayBundleInput): Promise<ReplayBundleRecord> {
     const now = input.now ?? new Date();
     const client = await this.pool.connect();
@@ -3294,7 +3054,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
           input.retentionClass ?? DEFAULT_RETENTION_CLASS, now],
       );
       if (!inserted.rowCount) {
-        // The bundle already exists: return it instead of appending a second one (idempotency contract).
+
         await client.query("COMMIT");
         const existing = await this.getReplayBundle(input.companyId, input.runId, input.bundleVersion);
         if (existing) return existing;
@@ -3334,10 +3094,6 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return row ? support.mapReplayBundleRow(row) : null;
   }
 
-  /**
-   * C6b: by-id read, tenant-scoped. A replay status endpoint and the UI address a replay by its own id, so the
-   * store answers that directly instead of forcing each caller to query `code_replay_bundles` itself.
-   */
   async getReplayBundleById(companyId: string, bundleId: string): Promise<ReplayBundleRecord | null> {
     const result = await this.pool.query(
       `SELECT ${replayBundleColumns} FROM code_replay_bundles WHERE company_id=$1 AND id=$2 LIMIT 1`,
@@ -3369,34 +3125,11 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     return result.rows.map((row) => support.mapReplayBundleStepRow(row));
   }
 
-  // --- R1-C (items 11–13): retention and erasure ------------------------------------------------------
-
-  /**
-   * The data-lifecycle port. It is a getter rather than a set of methods on the store so that the port's
-   * surface is exactly what the reaper and the erasure service are allowed to call: a caller cannot reach
-   * `this.pool` through it, and a future backend without the capability simply has no member here.
-   */
   private readonly codeDataLifecyclePort: CodeDataLifecycleStore = {
     planCodeDataRetention: (input) => this.planCodeDataRetention(input),
     eraseCodeData: (input) => this.eraseCodeData(input),
   };
 
-  /**
-   * Counts — and, unless this is a dry run, deletes — the code rows of one Company whose **own**
-   * `retention_class` names a window they have outlived.
-   *
-   * Two properties are load-bearing:
-   *
-   *  1. **Nothing is inferred.** The eligible tables are `CODE_RETENTION_FAMILIES`; a table that is missing
-   *     from the frozen identifier maps throws (`code_data_lifecycle_table_unmapped`) instead of silently
-   *     contributing nothing, so adding a family to the vocabulary cannot half-work.
-   *  2. **The append-only evidence is counted, never deleted, and reported as retained.** A retention pass
-   *     that reported zero for `execution_snapshots` would be indistinguishable from one that had purged it;
-   *     the `retained` count plus its reason is what makes the difference visible in the reaper's metrics.
-   *
-   * The count and the delete happen in one transaction, so an insert between them cannot make `purged`
-   * disagree with what was measured.
-   */
   private async planCodeDataRetention(input: {
     companyId?: string;
     windows: CodeRetentionWindows;
@@ -3405,12 +3138,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }): Promise<CodeDataRetentionReport> {
     const client = await this.pool.connect();
     const families: CodeDataFamilyOutcome[] = [];
-    /**
-     * The tenant filter is part of every statement, not of a suffix a caller may forget: `$1` is either a
-     * Company id or `NULL` (the reaper's cross-tenant sweep), and `($1::text IS NULL OR …)` makes the two
-     * spellings one statement. Retention never runs without a tenant predicate, so a sweep cannot be widened
-     * into "every tenant's rows are one tenant's".
-     */
+
     const tenant = input.companyId ?? null;
     const windowParams = () => [
       tenant,
@@ -3435,8 +3163,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         const where =
           `($1::text IS NULL OR t.company_id=$1) AND ${ageColumn} < ${RETENTION_WINDOW_EXPR}` +
           ` AND t.retention_class = ANY($7::text[])` +
-          // The shared-table guard is part of the same statement as the delete, never a separate lookup: a
-          // checkpoint is only ever expired together with the proof that its project is a code project.
+
           (extra ? ` AND ${extra}` : "");
         const params = windowParams();
         const counted = await client.query<{ n: string }>(`SELECT count(*)::bigint AS n FROM ${from} WHERE ${where}`, params);
@@ -3450,14 +3177,11 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
       }
       const retainedFamilies: CodeDataFamilyOutcome[] = [];
       for (const family of CODE_APPEND_ONLY_EVIDENCE_FAMILIES) {
-        // The row's own age rule, exactly as for the erasable families — the only difference is that the
-        // matching rows are **counted and kept**, and the count is reported as `retained` with its reason so a
-        // pass can never look like a clean sweep of evidence it is forbidden to delete.
+
         const mappedFrom = APPEND_ONLY_COUNTABLE[family.table];
         const mappedAge = APPEND_ONLY_AGE_COLUMN[family.table];
         if (!mappedFrom || !mappedAge) {
-          // A recording whose steps have no timestamp of their own is counted through its header, and its own
-          // entry says so with the same reason instead of inventing a number.
+
           retainedFamilies.push({
             table: family.table,
             scope: family.scope,
@@ -3502,24 +3226,10 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     }
   }
 
-  /** The data-lifecycle port, or `undefined` when this backend cannot delete code data. */
   get codeDataLifecycle(): CodeDataLifecycleStore | undefined {
     return this.codeDataLifecyclePort;
   }
 
-  /**
-   * Forgets one session's — or one whole code project's — data, then reads back what remains.
-   *
-   * The sequence is deliberate: **delete, then verify, in the same transaction**, so the `remaining` numbers
-   * are a measurement of the state the erasure left behind rather than of a later one. `verified` is
-   * `outstanding.length === 0`, and `outstanding` is computed from those measurements, so a caller cannot
-   * report success over a family that still holds rows.
-   *
-   * Scope: only the code tables and only the caller's Company. The shared `projects` table is read (to answer
-   * "was this a code project, and is it still there?") and, for `kind: "project"`, deleted — which is the
-   * existing `deleteProject` semantics the lifecycle route already uses, including its cascade. No NPATI table
-   * outside the code surface is touched.
-   */
   private async eraseCodeData(input: {
     companyId: string;
     target: CodeDataErasureTarget;
@@ -3531,12 +3241,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
     const preserved: Array<{ table: string; reason: string }> = [];
     try {
       await client.query("BEGIN");
-      /**
-       * The project the project-scoped families are keyed by. For a session it is the session's own project —
-       * a checkpoint belongs to the project, so "everything of this session" includes the checkpoints taken
-       * while it ran. When the session row is already gone (a repeated erasure, which must stay idempotent) the
-       * project-scoped families are skipped rather than guessed.
-       */
+
       let projectId: string | undefined = target.kind === "project" ? target.projectId : target.projectId;
       if (target.kind === "session") {
         const session = await client.query<{ project_id: string }>(
@@ -3546,14 +3251,10 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         if ((session.rowCount ?? 0) > 0) projectId = session.rows[0]!.project_id;
       }
       const projectScoped = target.kind === "project";
-      /**
-       * The statement shape this erasure uses: a session names a session id, a project names a project id.
-       * `projectId` is undefined only when the named session could not be resolved, which the loop below turns
-       * into "skip the project-scoped families" rather than "delete from every project".
-       */
+
       const scopeKey = projectScoped ? projectId : key;
       const predicateSet = projectScoped ? ERASE_PROJECT_SCOPE_PREDICATE : ERASE_SCOPE_PREDICATE;
-      // Serialize against process admission before deleting either session or project content.
+
       const processRows = await client.query("SELECT project_id,state FROM code_process_projects WHERE company_id=$1 AND ($2::text IS NULL OR project_id=$2) FOR UPDATE", [input.companyId, projectId ?? null]);
       for (const row of processRows.rows) {
         const targeted = row.state.operations.filter((op: { sessionId: string; child?: { sessionId?: string } }) => projectScoped || op.sessionId === key || op.child?.sessionId === key);
@@ -3571,8 +3272,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
           continue;
         }
         const boundKey = family.scope === "project" && !projectScoped ? projectId : scopeKey;
-        // A project-scoped family with no known project is not this erasure's business: skipping it is what
-        // keeps a repeated session erasure from deleting every checkpoint of a project it cannot identify.
+
         if (boundKey === undefined) continue;
         const mappedTable = ERASE_FROM[family.table];
         const mappedPredicate = predicateSet[family.table];
@@ -3582,7 +3282,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         const table = assertSqlFragment(mappedTable, `table for ${family.table}`);
         const predicate = assertSqlFragment(mappedPredicate, `scope predicate for ${family.table}`);
         const removed = await client.query(`DELETE FROM ${table} WHERE ${predicate}`, [input.companyId, boundKey]);
-        // Read back in the same transaction: this is the measurement the report's `verified` is computed from.
+
         const left = await client.query<{ n: string }>(`SELECT count(*)::bigint AS n FROM ${table} WHERE ${predicate}`, [input.companyId, boundKey]);
         families.push({
           table: family.table,
@@ -3593,17 +3293,11 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
           remaining: Number(left.rows[0]?.n ?? 0),
         });
       }
-      // The session rows themselves. For a session erasure the targeted session is deleted **after** the
-      // families above, because several of their predicates reach the run rows through `code_run_states` —
-      // deleting it first would leave those rows unreachable and therefore unverified. For a project erasure
-      // every session of the project goes: a project whose sessions survived would still answer a session list,
-      // and "the project's data is gone" would be false in the one place a caller looks first. The cascade from
-      // `code_sessions` removes the heads and goals that have a foreign key to it; the rest were erased above.
+
       const sessionsRemoved = target.kind === "session"
         ? await client.query("DELETE FROM code_sessions WHERE company_id=$1 AND id=$2 RETURNING id", [input.companyId, key])
         : await client.query("DELETE FROM code_sessions WHERE company_id=$1 AND project_id=$2 RETURNING id", [input.companyId, target.projectId]);
-      // A session-scoped approval rule is a reference, not content: the binding is cleared so the rule stops
-      // pointing at a session that no longer exists, and the project's policy survives.
+
       if (target.kind === "session") {
         for (const reference of Object.values(ERASE_CLEAR_SESSION_REFERENCE)) {
           await client.query(
@@ -3613,12 +3307,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
           );
         }
       }
-      /**
-       * The rest of a whole project's code-owned rows. They are erased **after** the families, because their
-       * predicates are independent of the run/turn subqueries, and each one is read back so the answer's
-       * `outstanding` covers them: a project erasure that left its approval rules or its mount confirmation
-       * behind would be a partial erasure reported as a complete one.
-       */
+
       if (projectScoped) {
         for (const name of PROJECT_SCOPED_ERASE_TABLES) {
           const table = assertSqlFragment(name, "project-scoped table");
@@ -3635,18 +3324,12 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
           });
         }
       }
-      // The append-only evidence is named in the report on purpose: a caller must be able to see that the
-      // erasure was complete for the erasable data **and** that this evidence was deliberately not part of it.
+
       for (const family of CODE_APPEND_ONLY_EVIDENCE_FAMILIES) {
         preserved.push({ table: family.table, reason: family.retentionRefusal ?? "append_only_evidence" });
       }
       await client.query("COMMIT");
-      /**
-       * The session rows are part of the measurement too. A session erasure names one session and a project
-       * erasure names all of its sessions, and a project whose session rows survived would still answer a
-       * session list — so "nothing left" has to include them or the verification would be narrower than the
-       * erasure it is supposed to prove.
-       */
+
       const sessionsLeft = await client.query<{ n: string }>(
         "SELECT count(*)::bigint AS n FROM code_sessions WHERE company_id=$1 AND " +
           (target.kind === "session" ? "id=$2" : "project_id=$2"),
