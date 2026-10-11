@@ -55,9 +55,9 @@ export const LEGACY_FILE_URL_SITES: ReadonlyArray<{ file: string; reason: string
       "The page builder (4126 lines) is deliberately untouched by C7; migrating its five file call sites is a separate change with its own Website Builder regression run.",
   },
   {
-    file: "apps/web/src/BusinessWorkspace.tsx",
+    file: "apps/web/src/business-workspace-cards.tsx",
     reason:
-      "Chat static-preview reader; a parallel C7 stream is editing this file, so it is migrated after that change lands rather than risking a clobbering edit.",
+      "Chat static-preview reader, carried over from BusinessWorkspace.tsx when the file was split into shared state, cards and page views. Still a legacy site awaiting migration to the adapter, with the same scope as before the split.",
   },
 ];
 
