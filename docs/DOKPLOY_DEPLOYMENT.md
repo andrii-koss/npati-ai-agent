@@ -158,6 +158,31 @@ egress proxy. `/health` checks image availability and network enforcement. Image
 admission is also checked when creating a sandbox. The isolated configuration
 retains the `NPATI_HOST_ADMISSION_*` settings.
 
+### Validate the isolated deployment locally
+
+Use the same `docker-compose.dokploy-isolated.yml` as Dokploy. The preparation
+script creates only test environment values in an ignored artifact directory;
+it does not generate another Compose file or alter the service configuration.
+
+```bash
+node scripts/prepare-docker-validation.mjs
+docker compose --env-file artifacts/docker-validation-source/.env.validation -f docker-compose.dokploy-isolated.yml config --quiet
+docker compose --env-file artifacts/docker-validation-source/.env.validation -f docker-compose.dokploy-isolated.yml up -d --build
+```
+
+Test credentials and volumes belong to the separate
+`npati-isolated-source-20261011` project. Supply `MINIO_IMAGE` to the preparation
+script only if testing an explicitly selected mirror. Published signed sandbox
+image references and the reviewed catalogue are still required; the script does
+not enable development exceptions. The Dokploy file exposes API port 3001 to
+Docker networks without publishing a localhost port. Inspect the frontend from
+the API container or route it through Dokploy.
+
+This proves deployment behaviour with the recorded test environment, not with
+unavailable production credentials. Separate `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY`
+values must belong to an existing MinIO account; setting environment variables
+does not create that account.
+
 Read [shared runtime deployment and migration](website-builder/SHARED_PROJECT_RUNTIME.md)
 before switching an existing installation. The runtime's `projects` and state
 volumes are persistent; old per-project containers are not automatically deleted.
