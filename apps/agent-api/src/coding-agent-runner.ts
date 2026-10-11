@@ -337,78 +337,32 @@ export class CodingAgentRunner {
       reason: CodingAgentStopReason,
       message: string,
     ): Promise<CodingAgentRunResult> => {
-      if (unsettledChildren) { status = "interrupted"; reason = "active_subagent_unsettled"; }
-      if (inboxOpened && stateRunId) {
-        try {
-          if (this.ports.runState && !(await this.ports.runState.renewLease({ companyId, runId: stateRunId, owner: stateOwner })).held) {
-            return finish("interrupted", "interrupted", "The run lease changed before settlement. The replacement's state was not modified.");
-          }
-          await this.ports.inbox!.transact(session, { kind: "close", runId: stateRunId, owner: stateOwner });
-          inboxOpened = false;
-        } catch {
-
-          return finish("interrupted", "interrupted", "Durable inbox settlement could not be confirmed. Pending input remains recoverable.");
-        }
-      }
-
-      if (replayRecorder) {
-        try {
-          await replayRecorder.finalize({
-            ...(completionArtifacts.length ? { completionArtifacts } : {}),
-            terminalStatus: status,
-            terminalReason: reason,
-            compressionArtifacts,
-
-            commandExpansions: commandPrompt.provenance,
-          });
-        } catch (error) {
-          this.ports.logger?.warn("replay_bundle_refused", {
-            code: (error as { code?: string })?.code ?? "replay_bundle_error",
-            runId: stateRunId ?? input.runId,
-          });
-        }
-      }
-      if (stateRunId && this.ports.runState) {
-
-        const stateStatus = status === "cancelled"
-          ? "cancelled"
-          : status === "failed" ? "failed" : status === "interrupted" ? "interrupted" : "completed";
-        if (status === "interrupted" && (input.detachedChildInbox || unsettledChildren || reason === "async_collect_unsettled")) {
-          await writeState(() => this.ports.runState!.markInterrupted?.({ companyId, runId: stateRunId!, reason })
-            ?? this.ports.runState!.markFinished({ companyId, runId: stateRunId!, status: "interrupted", reason }));
-          await writeState(() => this.ports.runState!.releaseLease?.({ companyId, runId: stateRunId!, owner: stateOwner }) ?? Promise.resolve());
-        } else await writeState(() => this.ports.runState!.markFinished({
-          companyId, runId: stateRunId!, status: stateStatus, reason,
-
-          estimate: {
-            tokenCount: summary.tokens,
-            costUsd: Number.isFinite(summary.costUsd) ? summary.costUsd : null,
-            turns: summary.turns,
-            toolCalls: summary.toolCalls,
-            filesChanged: summary.filesChanged.length,
-            diffStats: summary.diffStats,
-
-            ...(summary.verification ? { verification: summary.verification } : {}),
-            ...(summary.scope ? { scope: summary.scope } : {}),
-
-            ...(selfReviewVerdict ? { selfReview: toPersistedSelfReview(selfReviewVerdict) } : {}),
-          },
-        }));
-      }
-
-      try {
-        await this.ports.lifecycleHooks?.stop({
-          ctx, companyId, projectId, sessionId,
-          ...(input.runId ? { runId: input.runId } : {}),
-          ...(stateRunId ? { runId: stateRunId } : {}),
-          snapshotId: snapshotId ?? null,
-          status,
-          reason,
-        });
-      } catch {
-
-      }
-      return finish(status, reason, message);
+      const stopped = await this.stopRun({
+        ctx,
+        input,
+        session,
+        companyId,
+        projectId,
+        sessionId,
+        status,
+        reason,
+        message,
+        inboxOpened,
+        stateRunId,
+        stateOwner,
+        summary,
+        snapshotId,
+        replayRecorder,
+        completionArtifacts,
+        compressionArtifacts,
+        commandProvenance: commandPrompt.provenance,
+        selfReviewVerdict,
+        unsettledChildren,
+        writeState,
+        finish,
+      });
+      inboxOpened = stopped.inboxOpened;
+      return stopped.result;
     };
 
     const pauseForUser = async (
@@ -2732,5 +2686,132 @@ export class CodingAgentRunner {
 
       ...(pendingApprovals.length ? { pendingApprovals: pendingApprovals.map((entry) => ({ ...entry })) } : {}),
     };
+  }
+
+  private async stopRun(args: {
+    ctx: AuthContext;
+    input: CodingAgentRunInput;
+    session: CodeSession;
+    companyId: string;
+    projectId: string;
+    sessionId: string;
+    status: Exclude<CodingAgentRunStatus, "waiting_for_user">;
+    reason: CodingAgentStopReason;
+    message: string;
+    inboxOpened: boolean;
+    stateRunId: string | undefined;
+    stateOwner: string;
+    summary: CodingAgentRunSummary;
+    snapshotId: string;
+    replayRecorder: CodeRunReplayRecorderPort | undefined;
+    completionArtifacts: Record<string, unknown>[];
+    compressionArtifacts: Record<string, unknown>[];
+    commandProvenance: readonly Record<string, unknown>[];
+    selfReviewVerdict: SelfReviewVerdict | null;
+    unsettledChildren: boolean;
+    writeState: (operation: () => Promise<unknown>) => Promise<void>;
+    finish: (
+      status: CodingAgentRunStatus,
+      reason: CodingAgentStopReason,
+      message: string,
+      code?: string,
+    ) => CodingAgentRunResult;
+  }): Promise<{ result: CodingAgentRunResult; inboxOpened: boolean }> {
+    const {
+      ctx,
+      input,
+      session,
+      companyId,
+      projectId,
+      sessionId,
+      message,
+      stateRunId,
+      stateOwner,
+      summary,
+      snapshotId,
+      replayRecorder,
+      completionArtifacts,
+      compressionArtifacts,
+      commandProvenance,
+      selfReviewVerdict,
+      unsettledChildren,
+      writeState,
+      finish,
+    } = args;
+    let status = args.status;
+    let reason = args.reason;
+    let inboxOpened = args.inboxOpened;
+    if (unsettledChildren) { status = "interrupted"; reason = "active_subagent_unsettled"; }
+    if (inboxOpened && stateRunId) {
+      try {
+        if (this.ports.runState && !(await this.ports.runState.renewLease({ companyId, runId: stateRunId, owner: stateOwner })).held) {
+          return { result: finish("interrupted", "interrupted", "The run lease changed before settlement. The replacement's state was not modified."), inboxOpened };
+        }
+        await this.ports.inbox!.transact(session, { kind: "close", runId: stateRunId, owner: stateOwner });
+        inboxOpened = false;
+      } catch {
+
+        return { result: finish("interrupted", "interrupted", "Durable inbox settlement could not be confirmed. Pending input remains recoverable."), inboxOpened };
+      }
+    }
+
+    if (replayRecorder) {
+      try {
+        await replayRecorder.finalize({
+          ...(completionArtifacts.length ? { completionArtifacts } : {}),
+          terminalStatus: status,
+          terminalReason: reason,
+          compressionArtifacts,
+
+          commandExpansions: commandProvenance,
+        });
+      } catch (error) {
+        this.ports.logger?.warn("replay_bundle_refused", {
+          code: (error as { code?: string })?.code ?? "replay_bundle_error",
+          runId: stateRunId ?? input.runId,
+        });
+      }
+    }
+    if (stateRunId && this.ports.runState) {
+
+      const stateStatus = status === "cancelled"
+        ? "cancelled"
+        : status === "failed" ? "failed" : status === "interrupted" ? "interrupted" : "completed";
+      if (status === "interrupted" && (input.detachedChildInbox || unsettledChildren || reason === "async_collect_unsettled")) {
+        await writeState(() => this.ports.runState!.markInterrupted?.({ companyId, runId: stateRunId!, reason })
+          ?? this.ports.runState!.markFinished({ companyId, runId: stateRunId!, status: "interrupted", reason }));
+        await writeState(() => this.ports.runState!.releaseLease?.({ companyId, runId: stateRunId!, owner: stateOwner }) ?? Promise.resolve());
+      } else await writeState(() => this.ports.runState!.markFinished({
+        companyId, runId: stateRunId!, status: stateStatus, reason,
+
+        estimate: {
+          tokenCount: summary.tokens,
+          costUsd: Number.isFinite(summary.costUsd) ? summary.costUsd : null,
+          turns: summary.turns,
+          toolCalls: summary.toolCalls,
+          filesChanged: summary.filesChanged.length,
+          diffStats: summary.diffStats,
+
+          ...(summary.verification ? { verification: summary.verification } : {}),
+          ...(summary.scope ? { scope: summary.scope } : {}),
+
+          ...(selfReviewVerdict ? { selfReview: toPersistedSelfReview(selfReviewVerdict) } : {}),
+        },
+      }));
+    }
+
+    try {
+      await this.ports.lifecycleHooks?.stop({
+        ctx, companyId, projectId, sessionId,
+        ...(input.runId ? { runId: input.runId } : {}),
+        ...(stateRunId ? { runId: stateRunId } : {}),
+        snapshotId: snapshotId ?? null,
+        status,
+        reason,
+      });
+    } catch {
+
+    }
+    return { result: finish(status, reason, message), inboxOpened };
   }
 }
