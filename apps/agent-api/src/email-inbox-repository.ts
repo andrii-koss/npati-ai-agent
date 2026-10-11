@@ -19,6 +19,7 @@ import { listContacts, getContact, upsertContact, listTemplates, createTemplate,
 import { checkRateLimit, recordSentEmail, reserveSendQuota, enqueueJob, claimJobs, completeJob, failJob, cancelPendingFollowups, createNotification, listNotifications, markNotificationRead, type EmailInboxJobsHost } from "./email-inbox-jobs-and-limits-repositories";
 import { messageCols, extractCandidateMessageIds } from "./email-inbox-repository-support";
 import { isExternalMessageDeleted, acquireLock, releaseLock, setHumanTakeover, listMessages, deletePendingAiDrafts, getMessage, findMessageByExternalId, createMessage, updateMessage, type EmailInboxMessageHost } from "./email-inbox-message-repositories";
+import { close, claimBrowserEmailWait, encryptAccountSecrets, decryptAccountSecrets, encryptLegacyAccountCredentials, withInboundMessageLock, createOAuthState, consumeOAuthState, listAccounts, listUserAccounts, getAccount, getAccountInternal, findAccountByEmail, findUserAccountByEmail, listAccountsForWorker, createAccount, updateAccount, deleteAccount, isCollisionLocked, type EmailInboxAccountHost } from "./email-inbox-account-repositories";
 
 const accountCols = `
   id, workspace_id AS "workspaceId", company_id AS "companyId", user_id AS "userId",
@@ -92,6 +93,18 @@ export class EmailInboxRepository {
     }
   }
 
+  private accountHost(): EmailInboxAccountHost {
+    return {
+      pool: this.pool,
+      vault: this.vault,
+      memoryAccounts: this.memoryAccounts,
+      memoryOAuthStates: this.memoryOAuthStates,
+      inboundLocks: this.inboundLocks,
+      accountCols: accountCols,
+      getThread: this.getThread.bind(this),
+    };
+  }
+
   private messageHost(): EmailInboxMessageHost {
     return {
       pool: this.pool,
@@ -123,479 +136,99 @@ export class EmailInboxRepository {
     };
   }
 
-  private encryptAccountSecrets(account: CompanyEmailAccount): CompanyEmailAccount {
-    const encrypt = (value?: string) => {
-      if (!value || value.startsWith("v1$")) return value;
-      return this.vault.encrypt(value);
-    };
-    return {
-      ...account,
-      imapConfig: {
-        ...account.imapConfig, password: encrypt(account.imapConfig.password),
-        accessToken: encrypt(account.imapConfig.accessToken), refreshToken: encrypt(account.imapConfig.refreshToken),
-        clientSecret: encrypt(account.imapConfig.clientSecret)
-      },
-      smtpConfig: {
-        ...account.smtpConfig, password: encrypt(account.smtpConfig.password),
-        accessToken: encrypt(account.smtpConfig.accessToken), refreshToken: encrypt(account.smtpConfig.refreshToken),
-        clientSecret: encrypt(account.smtpConfig.clientSecret)
-      },
-    };
+    private encryptAccountSecrets(account: CompanyEmailAccount): CompanyEmailAccount {
+    return encryptAccountSecrets(this.accountHost(), account);
   }
 
-  private decryptAccountSecrets(account: CompanyEmailAccount): CompanyEmailAccount {
-    const decrypt = (value?: string) => {
-      if (!value || !value.startsWith("v1$")) return value;
-      return this.vault.decrypt(value);
-    };
-    return {
-      ...account,
-      imapConfig: {
-        ...account.imapConfig, password: decrypt(account.imapConfig.password),
-        accessToken: decrypt(account.imapConfig.accessToken), refreshToken: decrypt(account.imapConfig.refreshToken),
-        clientSecret: decrypt(account.imapConfig.clientSecret)
-      },
-      smtpConfig: {
-        ...account.smtpConfig, password: decrypt(account.smtpConfig.password),
-        accessToken: decrypt(account.smtpConfig.accessToken), refreshToken: decrypt(account.smtpConfig.refreshToken),
-        clientSecret: decrypt(account.smtpConfig.clientSecret)
-      },
-    };
+    private decryptAccountSecrets(account: CompanyEmailAccount): CompanyEmailAccount {
+    return decryptAccountSecrets(this.accountHost(), account);
   }
 
-  async close(): Promise<void> {
-    if (this.pool) {
-      await this.pool.end().catch(() => undefined);
-    }
+    async close(): Promise<void> {
+    return close(this.accountHost());
   }
 
-  async claimBrowserEmailWait(ctx: AuthContext, companyId: string, sender: string, emailAccountId?: string): Promise<{ browserJobId: string; runId: string; profileId: string; campaignTargetId?: string | null } | null> {
-    if (!this.pool) return null;
-    const normalizedSender = sender.trim().toLowerCase();
-    const senderDomain = normalizedSender.split("@")[1] || normalizedSender;
-    const result = await this.pool.query<{ browserJobId: string; runId: string; profileId: string; campaignTargetId?: string | null }>(`
-      WITH candidate AS (
-        SELECT w.id FROM company_browser_email_waits w
-        LEFT JOIN company_browser_campaign_targets t ON t.id=w.campaign_target_id
-        WHERE w.workspace_id=$1 AND w.company_id=$2 AND w.user_id=$3 AND w.status='waiting_email'
-          AND (w.sender_hint IS NULL OR w.sender_hint='' OR w.sender_hint=$4 OR w.sender_hint=$5 OR $4 LIKE ('%@' || w.sender_hint))
-          AND (w.campaign_target_id IS NULL OR t.email_account_id=$6)
-        ORDER BY w.created_at DESC LIMIT 1 FOR UPDATE OF w SKIP LOCKED
-      )
-      UPDATE company_browser_email_waits w SET status='consumed',consumed_at=now()
-      FROM candidate c WHERE w.id=c.id
-      RETURNING w.browser_job_id AS "browserJobId",w.run_id::text AS "runId",w.profile_id AS "profileId",
-        w.campaign_target_id::text AS "campaignTargetId"`,
-      [ctx.workspaceId,companyId,ctx.userId,normalizedSender,senderDomain,emailAccountId || null]);
-    return result.rows[0] ?? null;
+    async claimBrowserEmailWait(ctx: AuthContext, companyId: string, sender: string, emailAccountId?: string): Promise<{ browserJobId: string; runId: string; profileId: string; campaignTargetId?: string | null } | null> {
+    return claimBrowserEmailWait(this.accountHost(), ctx, companyId, sender, emailAccountId);
   }
 
-  async encryptLegacyAccountCredentials(): Promise<number> {
-    if (!this.pool) {
-      let changed = 0;
-      for (const [id, account] of this.memoryAccounts) {
-        const protectedAccount = this.encryptAccountSecrets(account);
-        if (JSON.stringify(protectedAccount) !== JSON.stringify(account)) {
-          this.memoryAccounts.set(id, protectedAccount);
-          changed++;
-        }
-      }
-      return changed;
-    }
-    const result = await this.pool.query<CompanyEmailAccount>(
-      `SELECT ${accountCols} FROM company_email_accounts WHERE deleted_at IS NULL`
-    );
-    let changed = 0;
-    for (const account of result.rows) {
-      const protectedAccount = this.encryptAccountSecrets(account);
-      if (JSON.stringify(protectedAccount.imapConfig) === JSON.stringify(account.imapConfig)
-        && JSON.stringify(protectedAccount.smtpConfig) === JSON.stringify(account.smtpConfig)) continue;
-      await this.pool.query(
-        "UPDATE company_email_accounts SET imap_config=$1, smtp_config=$2, updated_at=now() WHERE id=$3",
-        [JSON.stringify(protectedAccount.imapConfig), JSON.stringify(protectedAccount.smtpConfig), account.id]
-      );
-      changed++;
-    }
-    return changed;
+    async encryptLegacyAccountCredentials(): Promise<number> {
+    return encryptLegacyAccountCredentials(this.accountHost());
   }
 
-  async withInboundMessageLock<T>(
+    async withInboundMessageLock<T>(
     workspaceId: string,
     companyId: string,
     externalMessageId: string,
     operation: () => Promise<T>
   ): Promise<T> {
-    const lockKey = `${workspaceId}:${companyId}:${externalMessageId.trim()}`;
-    if (this.pool) {
-      const client = await this.pool.connect();
-      try {
-        await client.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [lockKey]);
-        return await operation();
-      } finally {
-        await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [lockKey]).catch(() => undefined);
-        client.release();
-      }
-    }
-
-    const previous = this.inboundLocks.get(lockKey) || Promise.resolve();
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const tail = previous.then(() => gate);
-    this.inboundLocks.set(lockKey, tail);
-    await previous;
-    try {
-      return await operation();
-    } finally {
-      release();
-      if (this.inboundLocks.get(lockKey) === tail) this.inboundLocks.delete(lockKey);
-    }
+    return withInboundMessageLock(this.accountHost(), workspaceId, companyId, externalMessageId, operation);
   }
 
-  async createOAuthState(ctx: AuthContext, companyId: string, accountId: string, input: {
+    async createOAuthState(ctx: AuthContext, companyId: string, accountId: string, input: {
     stateHash: string; verifier: string; tokenUrl: string; clientId: string; clientSecret?: string;
     redirectUri: string; expiresAt: string;
   }): Promise<void> {
-    if (this.pool) {
-      await this.pool.query("DELETE FROM company_email_oauth_states WHERE expires_at <= now()");
-      await this.pool.query(
-        `INSERT INTO company_email_oauth_states
-          (state_hash, workspace_id, company_id, account_id, user_id, encrypted_verifier, token_url,
-           client_id, encrypted_client_secret, redirect_uri, expires_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-        [input.stateHash, ctx.workspaceId, companyId, accountId, ctx.userId, this.vault.encrypt(input.verifier),
-        input.tokenUrl, input.clientId, input.clientSecret ? this.vault.encrypt(input.clientSecret) : null,
-        input.redirectUri, input.expiresAt]
-      );
-      return;
-    }
-    this.memoryOAuthStates.set(input.stateHash, {
-      workspaceId: ctx.workspaceId, companyId, accountId, userId: ctx.userId,
-      verifier: input.verifier, tokenUrl: input.tokenUrl, clientId: input.clientId, clientSecret: input.clientSecret,
-      redirectUri: input.redirectUri, expiresAt: input.expiresAt
-    });
+    return createOAuthState(this.accountHost(), ctx, companyId, accountId, input);
   }
 
-  async consumeOAuthState(stateHash: string): Promise<{
+    async consumeOAuthState(stateHash: string): Promise<{
     workspaceId: string; companyId: string; accountId: string; userId: string; verifier: string;
     tokenUrl: string; clientId: string; clientSecret?: string; redirectUri: string;
   } | null> {
-    if (this.pool) {
-      const result = await this.pool.query<any>(
-        `DELETE FROM company_email_oauth_states WHERE state_hash=$1 AND expires_at > now()
-         RETURNING workspace_id AS "workspaceId", company_id AS "companyId", account_id AS "accountId",
-           user_id AS "userId", encrypted_verifier AS "encryptedVerifier", token_url AS "tokenUrl",
-           client_id AS "clientId", encrypted_client_secret AS "encryptedClientSecret", redirect_uri AS "redirectUri"`,
-        [stateHash]
-      );
-      const row = result.rows[0];
-      if (!row) return null;
-      return {
-        ...row, verifier: this.vault.decrypt(row.encryptedVerifier),
-        clientSecret: row.encryptedClientSecret ? this.vault.decrypt(row.encryptedClientSecret) : undefined
-      };
-    }
-    const item = this.memoryOAuthStates.get(stateHash);
-    this.memoryOAuthStates.delete(stateHash);
-    if (!item || new Date(item.expiresAt).getTime() <= Date.now()) return null;
-    const { expiresAt: _expiresAt, ...state } = item;
-    return state;
+    return consumeOAuthState(this.accountHost(), stateHash);
   }
 
   // =========================================================================
   // 1. Email Accounts
   // =========================================================================
 
-  async listAccounts(ctx: AuthContext, companyId: string): Promise<CompanyEmailAccount[]> {
-    if (this.pool) {
-      const result = await this.pool.query<CompanyEmailAccount>(
-        `SELECT ${accountCols} FROM company_email_accounts
-         WHERE workspace_id = $1 AND company_id = $2 AND deleted_at IS NULL
-         ORDER BY created_at ASC`,
-        [ctx.workspaceId, companyId]
-      );
-      return result.rows.map((account) => this.decryptAccountSecrets(account));
-    }
-
-    return Array.from(this.memoryAccounts.values())
-      .filter((a) => a.workspaceId === ctx.workspaceId && a.companyId === companyId)
-      .map((account) => this.decryptAccountSecrets(account));
+    async listAccounts(ctx: AuthContext, companyId: string): Promise<CompanyEmailAccount[]> {
+    return listAccounts(this.accountHost(), ctx, companyId);
   }
 
-  async listUserAccounts(ctx: AuthContext): Promise<CompanyEmailAccount[]> {
-    if (this.pool) {
-      const result = await this.pool.query<CompanyEmailAccount>(
-        `SELECT ${accountCols} FROM company_email_accounts
-         WHERE workspace_id = $1 AND user_id = $2 AND deleted_at IS NULL ORDER BY created_at ASC`,
-        [ctx.workspaceId, ctx.userId]
-      );
-      return result.rows.map((account) => this.decryptAccountSecrets(account));
-    }
-    return [...this.memoryAccounts.values()]
-      .filter((account) => account.workspaceId === ctx.workspaceId && account.userId === ctx.userId)
-      .map((account) => this.decryptAccountSecrets(account));
+    async listUserAccounts(ctx: AuthContext): Promise<CompanyEmailAccount[]> {
+    return listUserAccounts(this.accountHost(), ctx);
   }
 
-  async getAccount(ctx: AuthContext, companyId: string, accountId: string): Promise<CompanyEmailAccount | null> {
-    if (this.pool) {
-      const result = await this.pool.query<CompanyEmailAccount>(
-        `SELECT ${accountCols} FROM company_email_accounts
-         WHERE workspace_id = $1 AND company_id = $2 AND id = $3 AND deleted_at IS NULL`,
-        [ctx.workspaceId, companyId, accountId]
-      );
-      return result.rows[0] ? this.decryptAccountSecrets(result.rows[0]) : null;
-    }
-
-    const item = this.memoryAccounts.get(accountId);
-    return item && item.workspaceId === ctx.workspaceId && item.companyId === companyId
-      ? this.decryptAccountSecrets(item)
-      : null;
+    async getAccount(ctx: AuthContext, companyId: string, accountId: string): Promise<CompanyEmailAccount | null> {
+    return getAccount(this.accountHost(), ctx, companyId, accountId);
   }
 
-  async getAccountInternal(accountId: string): Promise<CompanyEmailAccount | null> {
-    if (this.pool) {
-      const result = await this.pool.query<CompanyEmailAccount>(
-        `SELECT ${accountCols} FROM company_email_accounts WHERE id = $1 AND deleted_at IS NULL`,
-        [accountId]
-      );
-      return result.rows[0] ? this.decryptAccountSecrets(result.rows[0]) : null;
-    }
-    const account = this.memoryAccounts.get(accountId);
-    return account ? this.decryptAccountSecrets(account) : null;
-
+    async getAccountInternal(accountId: string): Promise<CompanyEmailAccount | null> {
+    return getAccountInternal(this.accountHost(), accountId);
   }
-  async findAccountByEmail(companyId: string, emailAddress: string): Promise<CompanyEmailAccount | null> {
-    const normalized = emailAddress.trim().toLowerCase();
-    if (this.pool) {
-      const result = await this.pool.query<CompanyEmailAccount>(
-        `SELECT ${accountCols} FROM company_email_accounts
-         WHERE company_id = $1 AND LOWER(email_address) = $2 AND deleted_at IS NULL
-         LIMIT 1`,
-        [companyId, normalized]
-      );
-      return result.rows[0] ? this.decryptAccountSecrets(result.rows[0]) : null;
-    }
-
-    for (const a of this.memoryAccounts.values()) {
-      if (a.companyId === companyId && a.emailAddress.toLowerCase() === normalized) {
-        return this.decryptAccountSecrets(a);
-      }
-    }
-    return null;
+    async findAccountByEmail(companyId: string, emailAddress: string): Promise<CompanyEmailAccount | null> {
+    return findAccountByEmail(this.accountHost(), companyId, emailAddress);
   }
 
-  async findUserAccountByEmail(ctx: AuthContext, emailAddress: string): Promise<CompanyEmailAccount | null> {
-    const normalized = emailAddress.trim().toLowerCase();
-    if (this.pool) {
-      const result = await this.pool.query<CompanyEmailAccount>(
-        `SELECT ${accountCols} FROM company_email_accounts
-         WHERE workspace_id = $1 AND user_id = $2 AND LOWER(email_address) = $3 AND deleted_at IS NULL
-         LIMIT 1`,
-        [ctx.workspaceId, ctx.userId, normalized]
-      );
-      return result.rows[0] ? this.decryptAccountSecrets(result.rows[0]) : null;
-    }
-    for (const account of this.memoryAccounts.values()) {
-      if (account.workspaceId === ctx.workspaceId && account.userId === ctx.userId
-        && account.emailAddress.toLowerCase() === normalized) return this.decryptAccountSecrets(account);
-    }
-    return null;
+    async findUserAccountByEmail(ctx: AuthContext, emailAddress: string): Promise<CompanyEmailAccount | null> {
+    return findUserAccountByEmail(this.accountHost(), ctx, emailAddress);
   }
 
-  async listAccountsForWorker(): Promise<CompanyEmailAccount[]> {
-    if (this.pool) {
-      const result = await this.pool.query<CompanyEmailAccount>(
-        `SELECT ${accountCols} FROM company_email_accounts
-         WHERE deleted_at IS NULL AND status <> 'disabled'
-         ORDER BY created_at ASC`
-      );
-      return result.rows.map((account) => this.decryptAccountSecrets(account));
-    }
-    return Array.from(this.memoryAccounts.values())
-      .filter((account) => account.status !== "disabled")
-      .map((account) => this.decryptAccountSecrets(account));
+    async listAccountsForWorker(): Promise<CompanyEmailAccount[]> {
+    return listAccountsForWorker(this.accountHost());
   }
 
-  async createAccount(
+    async createAccount(
     ctx: AuthContext,
     companyId: string,
     input: Partial<CompanyEmailAccount> & { emailAddress: string }
   ): Promise<CompanyEmailAccount> {
-    const id = input.id || randomUUID();
-    const now = new Date().toISOString();
-    const account: CompanyEmailAccount = {
-      id,
-      workspaceId: ctx.workspaceId,
-      companyId,
-      userId: ctx.userId,
-      emailAddress: input.emailAddress.trim().toLowerCase(),
-      displayName: input.displayName || null,
-      agentId: input.agentId || null,
-      provider: input.provider || "imap_smtp",
-      connectionScope: input.connectionScope || (input.agentId ? "agent" : companyId.startsWith("personal:") ? "account" : "company"),
-      senderPolicy: input.senderPolicy || "allowlist",
-      allowedSenders: [...new Set((input.allowedSenders || []).map((value) => value.trim().toLowerCase()).filter(Boolean))],
-      allowedDomains: [...new Set((input.allowedDomains || []).map((value) => value.trim().toLowerCase().replace(/^\*?@/, "")).filter(Boolean))],
-      requireAuthenticatedSender: input.requireAuthenticatedSender ?? true,
-      outboundPolicy: input.outboundPolicy || "approval_required",
-      mode: input.mode || "approval",
-      status: input.status || "pending",
-      testMode: input.testMode ?? false,
-      confidenceThreshold: input.confidenceThreshold ?? 0.8,
-      languageMode: input.languageMode || "auto",
-      fallbackLanguage: input.fallbackLanguage || "en",
-      imapConfig: input.imapConfig || {},
-      smtpConfig: input.smtpConfig || {},
-      rateLimits: input.rateLimits || {
-        maxPerHour: 50,
-        maxPerDay: 500,
-        maxPerRecipientDaily: 100,
-        maxFollowups: 3,
-        maxCompanyPerHour: 500,
-        maxCompanyPerDay: 5000,
-      },
-      signatureConfig: input.signatureConfig || {},
-      followupConfig: input.followupConfig || {
-        enabled: false,
-        delayDays: 2,
-        maxFollowups: 2,
-        action: "draft",
-      },
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    const storedAccount = this.encryptAccountSecrets(account);
-    if (this.pool) {
-      const result = await this.pool.query<CompanyEmailAccount>(
-        `INSERT INTO company_email_accounts (
-          id, workspace_id, company_id, user_id, email_address, display_name,
-          agent_id, provider, connection_scope, sender_policy, allowed_senders,
-          allowed_domains, require_authenticated_sender, outbound_policy,
-          mode, status, test_mode, confidence_threshold, language_mode,
-          fallback_language, imap_config, smtp_config, rate_limits,
-          signature_config, followup_config, created_at, updated_at
-        ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-          $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27
-        ) RETURNING ${accountCols}`,
-        [
-          account.id,
-          account.workspaceId,
-          account.companyId,
-          account.userId,
-          account.emailAddress,
-          account.displayName,
-          account.agentId,
-          account.provider,
-          account.connectionScope,
-          account.senderPolicy,
-          account.allowedSenders,
-          account.allowedDomains,
-          account.requireAuthenticatedSender,
-          account.outboundPolicy,
-          account.mode,
-          account.status,
-          account.testMode,
-          account.confidenceThreshold,
-          account.languageMode,
-          account.fallbackLanguage,
-          JSON.stringify(storedAccount.imapConfig),
-          JSON.stringify(storedAccount.smtpConfig),
-          JSON.stringify(account.rateLimits),
-          JSON.stringify(account.signatureConfig),
-          JSON.stringify(account.followupConfig),
-          account.createdAt,
-          account.updatedAt,
-        ]
-      );
-      return this.decryptAccountSecrets(result.rows[0]!);
-    }
-
-    this.memoryAccounts.set(id, storedAccount);
-    return account;
+    return createAccount(this.accountHost(), ctx, companyId, input);
   }
 
-  async updateAccount(
+    async updateAccount(
     ctx: AuthContext,
     companyId: string,
     accountId: string,
     patch: Partial<CompanyEmailAccount>
   ): Promise<CompanyEmailAccount> {
-    const existing = await this.getAccount(ctx, companyId, accountId);
-    if (!existing) throw new Error("Email account not found.");
-
-    const now = new Date().toISOString();
-    const updated: CompanyEmailAccount = {
-      ...existing,
-      ...patch,
-      imapConfig: { ...existing.imapConfig, ...(patch.imapConfig || {}) },
-      smtpConfig: { ...existing.smtpConfig, ...(patch.smtpConfig || {}) },
-      rateLimits: { ...existing.rateLimits, ...(patch.rateLimits || {}) },
-      signatureConfig: { ...existing.signatureConfig, ...(patch.signatureConfig || {}) },
-      followupConfig: { ...existing.followupConfig, ...(patch.followupConfig || {}) },
-      updatedAt: now,
-    };
-
-    const storedAccount = this.encryptAccountSecrets(updated);
-    if (this.pool) {
-      const result = await this.pool.query<CompanyEmailAccount>(
-        `UPDATE company_email_accounts SET
-          display_name = $1, agent_id = $2, provider = $3, connection_scope = $4,
-          sender_policy = $5, allowed_senders = $6, allowed_domains = $7,
-          require_authenticated_sender = $8, outbound_policy = $9,
-          mode = $10, status = $11, test_mode = $12, confidence_threshold = $13,
-          language_mode = $14, fallback_language = $15, imap_config = $16, smtp_config = $17,
-          rate_limits = $18, signature_config = $19, followup_config = $20,
-          updated_at = $21
-        WHERE workspace_id = $22 AND company_id = $23 AND id = $24
-        RETURNING ${accountCols}`,
-        [
-          updated.displayName,
-          updated.agentId,
-          updated.provider,
-          updated.connectionScope,
-          updated.senderPolicy,
-          updated.allowedSenders,
-          updated.allowedDomains,
-          updated.requireAuthenticatedSender,
-          updated.outboundPolicy,
-          updated.mode,
-          updated.status,
-          updated.testMode,
-          updated.confidenceThreshold,
-          updated.languageMode,
-          updated.fallbackLanguage,
-          JSON.stringify(storedAccount.imapConfig),
-          JSON.stringify(storedAccount.smtpConfig),
-          JSON.stringify(updated.rateLimits),
-          JSON.stringify(updated.signatureConfig),
-          JSON.stringify(updated.followupConfig),
-          now,
-          ctx.workspaceId,
-          companyId,
-          accountId,
-        ]
-      );
-      return this.decryptAccountSecrets(result.rows[0]!);
-    }
-
-    this.memoryAccounts.set(accountId, storedAccount);
-    return updated;
+    return updateAccount(this.accountHost(), ctx, companyId, accountId, patch);
   }
 
-  async deleteAccount(ctx: AuthContext, companyId: string, accountId: string): Promise<void> {
-    if (this.pool) {
-      await this.pool.query(
-        `UPDATE company_email_accounts SET deleted_at = now()
-         WHERE workspace_id = $1 AND company_id = $2 AND id = $3`,
-        [ctx.workspaceId, companyId, accountId]
-      );
-      return;
-    }
-
-    this.memoryAccounts.delete(accountId);
+    async deleteAccount(ctx: AuthContext, companyId: string, accountId: string): Promise<void> {
+    return deleteAccount(this.accountHost(), ctx, companyId, accountId);
   }
 
   // =========================================================================
@@ -1157,22 +790,8 @@ export class EmailInboxRepository {
     return setHumanTakeover(this.messageHost(), ctx, companyId, threadId, takeover);
   }
 
-  async isCollisionLocked(ctx: AuthContext, companyId: string, threadId: string): Promise<{ locked: boolean; reason?: string }> {
-    const thread = await this.getThread(ctx, companyId, threadId);
-    if (!thread) return { locked: false };
-
-    if (thread.isHumanTakeover) {
-      return { locked: true, reason: "Human takeover is currently active on this thread." };
-    }
-
-    if (thread.lockedByUserId && thread.lockedAt) {
-      const lockAgeMs = Date.now() - new Date(thread.lockedAt).getTime();
-      if (lockAgeMs < 300_000) {
-        return { locked: true, reason: `Thread is locked by user (${Math.round(lockAgeMs / 1000)}s ago).` };
-      }
-    }
-
-    return { locked: false };
+    async isCollisionLocked(ctx: AuthContext, companyId: string, threadId: string): Promise<{ locked: boolean; reason?: string }> {
+    return isCollisionLocked(this.accountHost(), ctx, companyId, threadId);
   }
 
   // =========================================================================
