@@ -440,10 +440,13 @@ describe("security-gate: C15 wiring — one resolver, and the runner reads the a
     expect(app).toContain("mountedFolderFlags = featureFlagService");
 
     const git = readFileSync(path.resolve("apps/agent-api/src/project-git-service.ts"), "utf8");
-    // The git service no longer joins a root of its own: it asks the resolver.
+    const gitWorkspace = readFileSync(path.resolve("apps/agent-api/src/project-git-workspace-service.ts"), "utf8");
+    // The git service no longer joins a root of its own: it asks the resolver. The resolution itself now lives in
+    // the workspace primitives module, which the service reaches through a delegation, so neither file may join a root.
     expect(git.includes("path.join(this.workspaceRoot")).toBe(false);
-    expect(git).toContain("await this.bases.resolve(ctx, companyId, projectId)");
-    expect(git).toContain('"MOUNTED_FOLDER_READ_ONLY"');
+    expect(gitWorkspace.includes("path.join(this.workspaceRoot")).toBe(false);
+    expect(gitWorkspace).toContain("await host.bases.resolve(ctx, companyId, projectId)");
+    expect(gitWorkspace).toContain('"MOUNTED_FOLDER_READ_ONLY"');
   });
 
   it("the runner re-reads the allowlist from the database and gates the create with it", () => {
