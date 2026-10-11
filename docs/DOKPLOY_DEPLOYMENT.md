@@ -69,6 +69,15 @@ MinIO initialization is required before that server listens, so a rejected
 storage credential prevents both frontend and API from starting. Domain port
 13001 is not the container port and cannot fix a storage authentication failure.
 
+API and worker now address MinIO through the project-specific network alias
+`${COMPOSE_PROJECT_NAME}-minio-internal`, attached to the existing `npati-agent`
+network. This avoids resolving a different service named `minio` if a shared
+proxy network contains other deployments. Compose derives the project name
+from Dokploy's `-p` argument; do not override it with another deployment's name.
+Enable Dokploy's Isolated Deployments as described above. The alias prevents a
+generic-name collision but does not correct an unregistered API credential.
+No container or data volume name is changed by this alias update.
+
 To test credentials from the **actual containers** without displaying their values,
 run this command on the Docker host from the repository directory:
 

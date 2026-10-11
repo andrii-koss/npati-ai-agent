@@ -80,7 +80,9 @@ services:
       NPATI_PROMOTE_DATA_MAX_ROWS: ${NPATI_PROMOTE_DATA_MAX_ROWS:-500}
       FTS5_DB_PATH: /app/data/company-memory-fts5.sqlite
       REDIS_URL: redis://redis:6379
-      MINIO_ENDPOINT: minio
+      # Domains can attach the API to a shared proxy network. Avoid the generic
+      # "minio" alias there: always address this Compose project's own storage.
+      MINIO_ENDPOINT: ${COMPOSE_PROJECT_NAME:-npati-agent}-minio-internal
       MINIO_PORT: 9000
       MINIO_USE_SSL: "false"
       MINIO_REGION: ${MINIO_REGION:-us-east-1}
@@ -306,7 +308,10 @@ services:
       timeout: 5s
       retries: 8
       start_period: 15s
-    networks: [npati-agent]
+    networks:
+      npati-agent:
+        aliases:
+          - ${COMPOSE_PROJECT_NAME:-npati-agent}-minio-internal
 
   redis:
     image: redis:7-alpine
