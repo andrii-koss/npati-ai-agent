@@ -13,9 +13,8 @@ for firewall in iptables ip6tables; do
   "$firewall" -A NPATI_PROJECTS -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 done
 iptables -A NPATI_PROJECTS -p tcp -d 127.0.0.1 --dport 8080 -j ACCEPT
-# Landlock additionally limits loopback connections/binds to the project's port.
-iptables -A NPATI_PROJECTS -p tcp -d 127.0.0.1 -j ACCEPT
-ip6tables -A NPATI_PROJECTS -p tcp -d ::1 -j ACCEPT
+# Project code has a private network namespace. Its helper can reach only the
+# proxy and the project's preview port (added by the trusted supervisor).
 iptables -A NPATI_PROJECTS -j REJECT
 ip6tables -A NPATI_PROJECTS -j REJECT
 node /opt/npati-runtime/sandbox-egress-proxy.mjs &

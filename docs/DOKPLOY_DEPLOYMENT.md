@@ -155,11 +155,42 @@ All managed projects use separate workspaces, UIDs, processes and assigned ports
 inside it. There is no Docker socket or per-project Docker sandbox/proxy pair.
 The allowlisted network proxy runs inside the runtime.
 
-The host must support Landlock ABI 6 or newer (normally Linux 6.12+), IPv4/IPv6
-iptables, and the configured container capabilities. Startup refuses to run
-without the isolation boundary. Configure total runtime resources with
+The runner uses Bubblewrap user/mount/PID/IPC/network namespaces and slirp4netns,
+not Landlock ABI 6. Linux 5.15 has these kernel mechanisms; they must be enabled
+and permitted by the host security policy. Docker Desktop uses its Linux VM;
+native Windows containers are not supported. The runner maps `/dev/net/tun` for
+unprivileged network setup; the host must provide the standard Linux TUN device.
+Startup checks an actual
+unprivileged namespace launch and fails closed if unavailable. Configure total runtime resources with
 `NPATI_PROJECT_RUNTIME_CPU` (default 4) and `NPATI_PROJECT_RUNTIME_MEMORY`
 (default `4g`); these resources are shared between projects.
+
+The selected Compose service uses the committed namespace-enabled Docker seccomp
+profile and `apparmor=unconfined` only for sandbox-runner. It retains
+`no-new-privileges`, the limited existing capabilities, and no Docker socket;
+neither privileged mode nor SYS_ADMIN is enabled. The profile is derived from
+https://github.com/moby/profiles/blob/main/seccomp/default.json, with namespace
+setup syscalls allowed. Project commands drop supervisor privileges, disable
+further user namespaces and see only their writable project and read-only tools.
+UID 0 inside the private user namespace maps to the project's unprivileged UID
+outside it. A second seccomp filter denies namespace creation/joining, mount,
+ptrace and BPF operations for project code; ordinary processes/threads remain supported.
+Keep the seccomp file in the repository; its path is relative to the Compose file.
+Host configurations blocking user namespaces require administrator configuration;
+support on every kernel/security policy cannot be guaranteed. If startup reports
+`Project namespaces unavailable`, inspect this error and the host namespace policy.
+Updating to Linux 6.12 is not required by this implementation.
+
+The NPATI coding agent stays in the API. Its approved shell tools call the
+authenticated runner to edit/test project files, synchronize changes back to
+canonical storage and run previews. `/settings/code` configures that existing
+agent. External CLI agents are not installed in this stage; future installations
+must be project-local and persistent.
+
+Verify the runner RPC, file edits, npm installation, two previews and cross-project
+isolation by running `scripts/verify-shared-project-runtime.mjs` with Node inside
+agent-api. The script reads its runner URL/secret without printing the secret and
+removes its temporary projects afterward; it does not create Docker containers.
 
 The deployed `docker-compose.dokploy-isolated.yml` keeps its existing filename
 for Dokploy compatibility, but runs the shared project runtime. It defines exactly
@@ -198,7 +229,7 @@ project runtime volumes preserve project files and supervisor state.
 Use Dokploy's normal Compose deployment command with `up -d --build`.
 Set `NPATI_SANDBOX_RUNNER_SECRET` to at least 32 characters and keep the same
 value on API, worker and runner. Registry image overrides and signature identity
-variables are unused in this deployment. Host Landlock and firewall requirements
+variables are unused in this deployment. Host namespace and firewall requirements
 listed above still apply; do not disable isolation to work around an older host.
 
 ### Validate the isolated deployment locally

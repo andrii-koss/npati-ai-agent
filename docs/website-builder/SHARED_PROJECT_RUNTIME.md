@@ -44,13 +44,18 @@ Each logical sandbox stores its exact workspace/user/company/project scope, uniq
 ## Execution and isolation
 
 - Project children drop to their own UID; project directories have mode 0700.
-- A native launcher applies Linux Landlock filesystem restrictions to every command, sync operation, package script, and dev server. Writable access is limited to the selected project directory. Toolchain directories are readable/executable, not writable. Access through symlinks and `/proc/self/root` still encounters that boundary.
-- Landlock limits TCP bind/connect to the assigned project port and the shared proxy port. Signal and abstract Unix socket scopes isolate independently launched tasks.
+- A native launcher validates identity and drops supervisor privileges. Bubblewrap creates user, mount, PID, IPC, UTS and network namespaces for every command, sync operation and dev server. The selected project is writable, tools are read-only, /proc belongs to the command namespace, and further user namespaces are disabled.
+- An unprivileged slirp4netns helper provides networking outside the command namespace. Its private API socket is outside project mounts. UID firewall rules allow only the proxy and that project's preview port. Preview forwarding binds runner loopback and reaches an in-namespace relay supporting localhost-bound servers.
 - UID-based IPv4/IPv6 firewall rules block direct external connections and DNS, including attempts to reach an external server on the proxy's port. The existing allowlisted egress proxy runs as a process inside the runtime, not as another container.
 - No project child gets root capabilities, Docker access, or privilege escalation. The trusted supervisor retains only the capabilities required to assign UIDs, manage project processes/files, and install its firewall.
 - Foreground commands retain the existing timeouts. Preview processes are long-lived; stopping a logical sandbox stops only that project's UID/processes.
 
-**Host requirement: Linux with Landlock ABI 6 or newer (normally Linux 6.12+), and permission to apply container-local iptables/ip6tables rules.** Startup fails closed if these are unavailable; there is no unisolated fallback. The local Docker Desktop host reported Landlock ABI 7. Older VPS kernels must use the retained isolated runner or be upgraded.
+**Host requirement: Linux with enabled unprivileged user/mount/PID/IPC/network namespaces, and permission to apply container-local iptables/ip6tables rules.** Linux 5.15 supplies these mechanisms. Landlock is not required. Startup fails closed if namespace setup is unavailable. The selected production Compose includes namespace-enabled seccomp and AppArmor settings for this service without SYS_ADMIN or privileged mode. Host policies disabling user namespaces still need administrator configuration.
+
+Each command has a private network. A server reaches its own loopback directly;
+other commands can reach the project's running preview through gateway 10.0.2.2
+at the assigned project port. The NPATI coding orchestrator remains in the API
+and calls the existing shell/sync/preview contract. External CLI agents are a later stage.
 
 Container-wide limits are configured by `NPATI_PROJECT_RUNTIME_MEMORY` (default `4g`), `NPATI_PROJECT_RUNTIME_CPU` (default `4`), and the Compose PID ceiling. Child UID process/file-descriptor limits also apply. This mode does not offer the isolated Docker provider's independent per-project CPU/RAM/disk quotas; projects share the runtime's total resources.
 
@@ -70,7 +75,7 @@ The runtime image contains Node/npm/pnpm/yarn, Python/Git and six prepared depen
 
 For Nuxt 4 development in this single-port runtime, set `experimental: { viteEnvironmentApi: true }` in `nuxt.config.ts`. The framework diagnostic uses this setting. The default separate SSR/HMR server requests another random port and is intentionally blocked by project isolation; a production `nuxt build` output can also be served with `node .output/server/index.mjs` on the assigned `PORT`. Installing the prepared dependencies does not rewrite an existing project's Nuxt configuration.
 
-For a root `npm install` or `npm ci`, the existing provider invokes `prepare-project-dependencies.cjs` through the same project UID/Landlock boundary. Exact dependency sets and compatible lock graphs can use project-owned copies of prepared modules. No writable symlinks or shared project directories are introduced. A different explicit lockfile, dependency version, workspaces/overrides, or root install lifecycle keeps the normal npm execution path. `npm ci` without a lockfile still fails normally. Commands with other managers, arguments or subdirectory cwd also retain their normal execution.
+For a root `npm install` or `npm ci`, the existing provider invokes `prepare-project-dependencies.cjs` through the same project UID/namespace boundary. Exact dependency sets and compatible lock graphs can use project-owned copies of prepared modules. No writable symlinks or shared project directories are introduced. A different explicit lockfile, dependency version, workspaces/overrides, or root install lifecycle keeps the normal npm execution path. `npm ci` without a lockfile still fails normally. Commands with other managers, arguments or subdirectory cwd also retain their normal execution.
 
 Builds still run against the project's actual source. Generated Nuxt/Astro/cache artifacts are excluded from canonical source synchronization. The final project model response is limited by instruction to verified results within 120 words; it cannot write files or execute additional tools.
 

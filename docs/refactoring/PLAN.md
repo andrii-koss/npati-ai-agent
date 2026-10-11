@@ -1563,3 +1563,83 @@ PostgresWorkspaceStore        ← публічний фасад; тонкі де
 `run`: 2 093 → **2 006** рядки (разом з фазою 1: 2 181 → 2 006). Винесено в `replayApprovedToolCalls`: запис «unknown_outcome» перед викликом, виклик runtime-MCP-інструмента з відмовою `unknown_tool` для невідомого імені, запис результату, канонізація тексту, реплей-запис і подія активності — усе **дослівно** ✓.
 
 **Межа обрана за кодом:** цей блок має найменшу залежність від локальних змінних (13) і **не мутує жодної з них** ✗→✓ — він лише читає `steps`, `stateRunId` і торкається об'єктів (`summary.toolCalls`, `messages`), що передаються як аргументи ✓. Порядок викликів інструментів, семантика кроку і всі інваріанти C6/C9/C10/C12/C14 не змінюються ✓.
+
+---
+
+# ОНОВЛЕНИЙ ПЛАН (повторний аналіз файлів)
+
+Цей розділ **замінює всі попередні числа**. Він складений після того, як власник вніс свої коміти (`4595bc6 MinIO SDK10`, `758ad7e ai.npati.com`, `56e928c ai.npati.com-2`, `daf69af sandbox-runner`) і після того, як моя незавершена фаза 3 увійшла в дерево.
+
+## 1. Стан репозиторію на момент аналізу
+
+| | |
+|---|---|
+| Гілка | `main`, HEAD **`daf69af`** |
+| Мій рефакторинг | **у HEAD** ✓ (усі модулі, size-guard, baseline) |
+| `npm run typecheck` (усі воркспейси) | **exit 0** ✓ |
+| `npm run lint` (із size-guard) | **exit 0** ✓ |
+| Незакомічені зміни | `apps/agent-api/project-runtime-guard.c`, `docs/DOKPLOY_DEPLOYMENT.md` — **зміни власника** ✓ (я їх не чіпаю) |
+
+## 2. Розміри файлів зараз (топ-12 рукописних, без згенерованих і i18n)
+
+| Файл | Зараз | На старті робіт |
+|---|---|---|
+| `packages/workspace/src/postgres-store.ts` | **3 002** | 4 578 |
+| `apps/agent-api/src/coding-agent-runner.ts` | **2 546** | 4 802 |
+| `packages/workspace/src/types.ts` | 2 486 | — |
+| `apps/agent-api/src/email-inbox-repository.ts` | 2 347 | — |
+| `packages/workspace/src/in-memory-store.ts` | **2 013** | 2 795 |
+| `apps/agent-api/src/project-git-service.ts` | 1 955 | — |
+| `apps/agent-api/src/code-tool-runtime.ts` | 1 778 | — |
+| `apps/agent-api/src/app.ts` | **1 445** | 8 449 |
+| `apps/agent-api/src/data-studio/auth-service.ts` | 1 270 | — |
+| `apps/agent-api/src/code-tool-executors.ts` | 1 263 | — |
+| `apps/agent-api/src/code-policy-engine.ts` | 1 172 | — |
+| `apps/agent-api/src/email-routes.ts` | 1 172 | — |
+
+**Усього в baseline: 54 рукописні файли > 800 рядків**, усі з причиною, власником і терміном 2027-02-28 ✓.
+
+## 3. Що вже зроблено
+
+1. **`app.ts` 8 449 → 1 445** — 34 модулі-фабрики за доменами.
+2. **`postgres-store.ts` 4 578 → 3 002** — 8 доменів винесено + 3 модулі: `postgres-company-repositories.ts` (779), `postgres-workspace-repositories.ts` (748), `postgres-store-support.ts` (249); фасад — **227 методів, 127 із них тонкі делегації**, усі 127 звірено за порядком аргументів (0 розбіжностей).
+3. **`coding-agent-runner.ts` 4 802 → 2 546** — прибрано коментарі та **винесено 3 фази `run`**: `admitRun` (допуск і політика), `replayApprovedToolCalls` (схвалені виклики), `verifyOnce` (верифікація). **`run`: 2 181 → 1 977 рядків.**
+4. **`code-capabilities.ts` 4 079 → 121**; **`in-memory-store.ts` 2 795 → 2 013**.
+5. **Коментарі прибрано з 56 файлів** (3 159 рядків) — крім згенерованих, i18n, міграцій і тестів.
+6. **Source-size guard** у `npm run lint` — 4 режими відмови перевірено.
+7. **Тестовий базовий рівень зафіксовано виміром:** 25 наявних падінь на базі й 25 на гілці, **0 регресій**; у карантині 11 записів (10 реальних + 1 застарілий), **15 незадекларованих** ✗ — на підпис власника.
+
+## 4. Черга робіт (один крок = один коміт)
+
+### STEP 2 — далі фази `run` (клас має лише 8 методів, тож декомпозиція внутрішня)
+
+Виміряні кандидати за спаданням чистоти шва:
+
+| Блок | Рядків | Локальних | Мутацій |
+|---|---|---|---|
+| `evaluateChangeSet` (L631–676) | 46 | 11 | 3 |
+| `pauseForUser` (L441–493) | 53 | 13 | 2 |
+| `runVerification` → **зроблено** (`verifyOnce`) | 45 | 13 | 1 |
+| блок lease/відновлення (L1151–1205) | 55 | 11 | 3 |
+| `finish` (L303–353) | 51 | 12 | 1 |
+| `stop` (L362–440) | 79 | 18 | 2 |
+| `runSelfReview` (L899–967) | 69 | 19 | 3 |
+| `afterSelfReviewFix` (L1045–1125) | 81 | 21 | 3 |
+
+Коли фази виїдуть із `run`, зібрати їх в **`coding-agent-phases.ts`** — тоді `run` упаде до оркестратора, а файл runner-а опуститься нижче 800 ✓.
+
+### STEP 3 — решта файлів із baseline (54)
+
+Порядок за розміром і зв'язністю: `email-inbox-repository.ts` (2 347) → `project-git-service.ts` (1 955) → `code-tool-runtime.ts` (1 778) → `data-studio/auth-service.ts` (1 270) → `code-tool-executors.ts` (1 263) → `code-policy-engine.ts` (1 172) → `email-routes.ts` (1 172) → `multimodal-routes.ts` (1 166) → `company-runtime.ts` (1 131) → `coding-agent-runner-contracts.ts` (1 115) → `reliability-and-operations-routes.ts` (1 085) → `website-schema.ts` (1 068) → веб-сторінки (`ActivityPage`, `App`, `AutomationsPage`, `ChatMessageContent`, `CodeWorkspacePage`, `CompanyPage`, …).
+
+`packages/workspace/src/types.ts` (2 486) — **свідомо не чіпати** ✗: це один контракт, поділ розсипле його по файлах.
+
+### Борг, який лишається за власником
+
+- **15 незадекларованих падінь** (13 — невідповідність згенерованого каталогу: 391 проти 387, 127 проти 123, 43 проти 39; плюс `agent-api` spreadsheet і `project-intent-router`) ✗ — або полагодити, або внести в `known-failures.json` із причиною/власником/терміном.
+- **Застарілий запис** `data-studio-d5-completion` у карантині (тест проходить ✓) ✗.
+- **Кракозябри** в кількох раніших розділах цього плану ✗ (наслідок запису через pwsh): дані відновлюються з повідомлень комітів, розділ можна переписати.
+
+## 5. Правила кожного кроку (незмінні)
+
+Один крок = один коміт · після кожного кроку `tsc --noEmit` (воркспейс, усі воркспейси, тести) · `npm run lint` разом із size-guard · **c-серія з порівнянням множини фейлів** проти виміряної бази (не підрахунок) · не форсувати декомпозицію, якщо шов не чистий · не чіпати згенеровані файли, i18n-словники, міграції та карантин ✗.

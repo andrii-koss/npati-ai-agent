@@ -57,6 +57,11 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     // Container restart kills all project children. Never trust persisted PIDs.
     for (const entry of this.entries) for (const process of Object.values(entry.processes)) if (process.status === "running") { process.status = "stopped"; process.pid = undefined; }
+    for (const entry of this.entries) await this.allowProjectPort(entry);
+  }
+  private async allowProjectPort(entry: Entry) {
+    const rule = ["NPATI_PROJECTS", "-m", "owner", "--uid-owner", String(entry.uid), "-p", "tcp", "-d", "127.0.0.1", "--dport", String(entry.port), "-j", "ACCEPT"];
+    await executeFile("iptables", ["-C", ...rule]).catch(() => executeFile("iptables", ["-I", ...rule]));
   }
   private persist() {
     this.saving = this.saving.catch(() => undefined).then(async () => {
@@ -87,7 +92,7 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
     let uid = 10000;
     while (this.entries.some(item => item.uid === uid)) uid++;
     let port = 3001;
-    while (this.entries.some(item => item.port === port) || [7865, 8080].includes(port)) port++;
+    while (this.entries.some(item => item.port === port) || [7865, 8080, 59999].includes(port)) port++;
     if (uid > 60000 || port > 65000) throw new SandboxProviderError("runtime_capacity", "Shared runtime capacity reached", 429);
     const now = new Date().toISOString();
     const entry: Entry = { id: randomUUID(), scope: { ...scope }, uid, port, state: "created", createdAt: now, lastActivityAt: now, processes: {} };
@@ -101,6 +106,7 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
       for (const name of [".npati-runtime", ".npati-runtime/tmp", ".npati-runtime/home"]) {
         const target = path.join(directory, name); await mkdir(target, { recursive: true, mode: 0o700 }); await chown(target, uid, uid);
       }
+      await this.allowProjectPort(entry);
       await this.persist();
     } catch (error) { this.entries = this.entries.filter(item => item !== entry); throw error; }
     return this.status(entry);
@@ -126,6 +132,7 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
       this.outputSaves.delete(processId);
     }
     await rm(this.directory(entry), { recursive: true, force: true });
+    await executeFile("iptables", ["-D", "NPATI_PROJECTS", "-m", "owner", "--uid-owner", String(entry.uid), "-p", "tcp", "-d", "127.0.0.1", "--dport", String(entry.port), "-j", "ACCEPT"]);
     this.entries = this.entries.filter(item => item !== entry); await this.persist();
   }
   async getStatus(scope: SandboxScope, id: string) { return this.status(await this.entry(scope, id)); }
@@ -142,13 +149,13 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
       PORT: String(entry.port), HOST: "0.0.0.0", NODE_OPTIONS: "", NODE_PATH: "", LD_PRELOAD: "", LD_LIBRARY_PATH: "",
       HTTP_PROXY: "http://127.0.0.1:8080", HTTPS_PROXY: "http://127.0.0.1:8080", http_proxy: "http://127.0.0.1:8080", https_proxy: "http://127.0.0.1:8080",
       // Frameworks such as Nuxt fetch modules from their own dev server.
-      // Loopback stays restricted to the assigned project port by Landlock.
+      // Loopback belongs to the command namespace; its helper enforces egress.
       NO_PROXY: "localhost,127.0.0.1,0.0.0.0,::1", no_proxy: "localhost,127.0.0.1,0.0.0.0,::1",
       npm_config_proxy: "http://127.0.0.1:8080", npm_config_https_proxy: "http://127.0.0.1:8080", NPM_CONFIG_CACHE: `${directory}/.npati-runtime/npm`,
       npm_config_audit: "false", npm_config_fund: "false", NEXT_TELEMETRY_DISABLED: "1", CI: "1" };
   }
-  private launch(entry: Entry, executable: string, args: string[], cwd = ".", environment?: Record<string, string>, detached = false) {
-    return spawn(this.launcher, [String(entry.uid), this.directory(entry), String(entry.port), path.join(this.directory(entry), cwd), executable, ...args],
+  private launch(entry: Entry, executable: string, args: string[], cwd = ".", environment?: Record<string, string>, detached = false, preview = false) {
+    return spawn(this.launcher, [String(entry.uid), this.directory(entry), String(entry.port), path.join(this.directory(entry), cwd), ...(preview ? ["--preview"] : []), executable, ...args],
       { env: this.environment(entry, environment), detached, stdio: ["pipe", "pipe", "pipe"] });
   }
   private async collect(entry: Entry, executable: string, args: string[], input: string, options: SandboxCommandOptions, cwd = ".") {
@@ -230,7 +237,7 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
     // Reserve the caller's durable identity before launching. A replay never respawns the job.
     await this.persist();
     const log = await open(path.join(this.state, `${processId}.log`), "wx", 0o600);
-    const child = this.launch(entry, "sh", ["-s"], normalized.cwd, options.environment, true);
+    const child = this.launch(entry, "sh", ["-s"], normalized.cwd, options.environment, true, true);
     record.pid = child.pid;
     entry.processes[processId] = record; this.children.set(processId, child);
     let written = 0;
