@@ -1529,109 +1529,22 @@ export class CodingAgentRunner {
       }
     };
 
-    if (input.approvedToolCalls?.length) {
-      const approvedLines: string[] = [];
-      for (const approved of input.approvedToolCalls) {
-        const startedCall = this.now();
-        if (stateRunId && this.ports.runState) {
-          await writeState(() => this.ports.runState!.appendToolCall({
-            companyId, runId: stateRunId!, turnIndex: steps,
-            toolCallId: approved.toolCallId, tool: approved.tool, readOnly: false,
-            outcome: "unknown_outcome", startedAt: new Date(startedCall), finishedAt: null,
-          }));
-        }
-        let outcome: CodeToolInvokeResult | CodeToolInvokeFailure;
-        if (!runtimeToolByName.has(approved.tool) || !this.ports.runtimeCapabilities) {
-
-          outcome = {
-            ok: false,
-            error: {
-              code: "unknown_tool", status: 404, step: "resolve", retryable: false,
-              message: `The approved call names a runtime MCP tool this run does not offer: ${approved.tool}`,
-              tool: approved.tool,
-            },
-          };
-        } else {
-          try {
-            outcome = await this.ports.runtimeCapabilities.invoke({
-              ctx,
-              companyId,
-              projectId,
-              ...(sessionId ? { sessionId } : {}),
-              ...(stateRunId ?? input.runId ? { runId: stateRunId ?? input.runId } : {}),
-              ...(input.agentId ? { agentId: input.agentId } : {}),
-              ...(input.readOnlyIntent === true ? { readOnlyIntent: true } : {}),
-              tool: approved.tool,
-              args: approved.args,
-              toolCallId: approved.toolCallId,
-              approvalId: approved.approvalId,
-            });
-          } catch (error) {
-            const failure = error as { code?: string; message?: string; status?: number; step?: string; details?: Record<string, unknown> };
-            outcome = {
-              ok: false,
-              error: {
-                code: (failure.code ?? "tool_error") as CodeToolInvokeFailure["error"]["code"],
-                status: failure.status ?? 500,
-                message: failure.message ?? "The approved runtime MCP call failed",
-                tool: approved.tool,
-                step: failure.step ?? "execute",
-                retryable: false,
-                ...(failure.details ? { details: failure.details } : {}),
-              },
-            };
-          }
-        }
-        if (stateRunId && this.ports.runState) {
-          await writeState(() => this.ports.runState!.appendToolCall({
-            companyId, runId: stateRunId!, turnIndex: steps,
-            toolCallId: approved.toolCallId, tool: approved.tool, readOnly: false,
-            outcome: outcome.ok ? "ok" : "failed",
-            ...(outcome.ok ? {} : { errorCode: outcome.error.code }),
-            startedAt: new Date(startedCall), finishedAt: new Date(this.now()),
-          }));
-        }
-        summary.toolCalls += 1;
-        const text = canonicalizeSettledToolResult({
-          ok: outcome.ok,
-          tool: approved.tool,
-          ...(outcome.ok ? { result: outcome.result } : {}),
-          ...(outcome.ok ? { truncated: outcome.truncated } : {}),
-          ...(outcome.ok ? {} : { error: outcome.error }),
-          limit: this.limits.toolOutputChars,
-        });
-
-        replayRecorder?.recordToolCall({
-          turnIndex: steps,
-          toolCallId: approved.toolCallId,
-          tool: approved.tool,
-          toolVersion: toolVersionByName.get(approved.tool) ?? null,
-
-          argumentsHash: replayArgumentsHash(approved.args),
-          settledResult: text,
-          outcome: outcome.ok ? "ok" : "failed",
-          ...(outcome.ok ? {} : { errorCode: outcome.error.code }),
-          ...(outcome.ok ? { truncated: outcome.truncated === true } : {}),
-        });
-        await record({
-          kind: "tool_call",
-          companyId,
-          projectId,
-          sessionId,
-          runId: input.runId,
-          turn: steps,
-          tool: approved.tool,
-          toolCallId: approved.toolCallId,
-          ok: outcome.ok,
-          ...(outcome.ok ? {} : { errorCode: outcome.error.code }),
-          durationMs: this.now() - startedCall,
-        });
-        approvedLines.push(text);
-      }
-      if (approvedLines.length) {
-        messages.push({ role: "system", content: `${APPROVED_TOOL_CALLS_RESULT_HEADER}\n${approvedLines.join("\n")}` });
-      }
-    }
+    await this.replayApprovedToolCalls({
+      ctx,
+      input,
+      companyId,
+      projectId,
+      sessionId,
+      stateRunId,
+      steps,
+      runtimeToolByName,
+      toolVersionByName,
+      messages,
+      summary,
+      replayRecorder,
+      writeState,
+      record,
+    });
 
     for (;;) {
       if (leaseLost) {
@@ -2327,6 +2240,142 @@ export class CodingAgentRunner {
   ): void {
     summary.filesChanged = [...new Set(changes.map((change) => change.path))];
     summary.diffStats = { files: totals.files, linesAdded: totals.linesAdded, linesRemoved: totals.linesRemoved };
+  }
+
+  private async replayApprovedToolCalls(args: {
+    ctx: AuthContext;
+    input: CodingAgentRunInput;
+    companyId: string;
+    projectId: string;
+    sessionId: string;
+    stateRunId: string | undefined;
+    steps: number;
+    runtimeToolByName: { has(name: string): boolean };
+    toolVersionByName: { get(name: string): number | undefined };
+    messages: ChatMessage[];
+    summary: CodingAgentRunSummary;
+    replayRecorder: CodeRunReplayRecorderPort | undefined;
+    writeState: (operation: () => Promise<unknown>) => Promise<void>;
+    record: (event: CodeRunActivityEvent) => Promise<void>;
+  }): Promise<void> {
+    const {
+      ctx,
+      input,
+      companyId,
+      projectId,
+      sessionId,
+      stateRunId,
+      steps,
+      runtimeToolByName,
+      toolVersionByName,
+      messages,
+      summary,
+      replayRecorder,
+      writeState,
+      record,
+    } = args;
+    if (!input.approvedToolCalls?.length) return;
+    const approvedLines: string[] = [];
+    for (const approved of input.approvedToolCalls) {
+      const startedCall = this.now();
+      if (stateRunId && this.ports.runState) {
+        await writeState(() => this.ports.runState!.appendToolCall({
+          companyId, runId: stateRunId!, turnIndex: steps,
+          toolCallId: approved.toolCallId, tool: approved.tool, readOnly: false,
+          outcome: "unknown_outcome", startedAt: new Date(startedCall), finishedAt: null,
+        }));
+      }
+      let outcome: CodeToolInvokeResult | CodeToolInvokeFailure;
+      if (!runtimeToolByName.has(approved.tool) || !this.ports.runtimeCapabilities) {
+
+        outcome = {
+          ok: false,
+          error: {
+            code: "unknown_tool", status: 404, step: "resolve", retryable: false,
+            message: `The approved call names a runtime MCP tool this run does not offer: ${approved.tool}`,
+            tool: approved.tool,
+          },
+        };
+      } else {
+        try {
+          outcome = await this.ports.runtimeCapabilities.invoke({
+            ctx,
+            companyId,
+            projectId,
+            ...(sessionId ? { sessionId } : {}),
+            ...(stateRunId ?? input.runId ? { runId: stateRunId ?? input.runId } : {}),
+            ...(input.agentId ? { agentId: input.agentId } : {}),
+            ...(input.readOnlyIntent === true ? { readOnlyIntent: true } : {}),
+            tool: approved.tool,
+            args: approved.args,
+            toolCallId: approved.toolCallId,
+            approvalId: approved.approvalId,
+          });
+        } catch (error) {
+          const failure = error as { code?: string; message?: string; status?: number; step?: string; details?: Record<string, unknown> };
+          outcome = {
+            ok: false,
+            error: {
+              code: (failure.code ?? "tool_error") as CodeToolInvokeFailure["error"]["code"],
+              status: failure.status ?? 500,
+              message: failure.message ?? "The approved runtime MCP call failed",
+              tool: approved.tool,
+              step: failure.step ?? "execute",
+              retryable: false,
+              ...(failure.details ? { details: failure.details } : {}),
+            },
+          };
+        }
+      }
+      if (stateRunId && this.ports.runState) {
+        await writeState(() => this.ports.runState!.appendToolCall({
+          companyId, runId: stateRunId!, turnIndex: steps,
+          toolCallId: approved.toolCallId, tool: approved.tool, readOnly: false,
+          outcome: outcome.ok ? "ok" : "failed",
+          ...(outcome.ok ? {} : { errorCode: outcome.error.code }),
+          startedAt: new Date(startedCall), finishedAt: new Date(this.now()),
+        }));
+      }
+      summary.toolCalls += 1;
+      const text = canonicalizeSettledToolResult({
+        ok: outcome.ok,
+        tool: approved.tool,
+        ...(outcome.ok ? { result: outcome.result } : {}),
+        ...(outcome.ok ? { truncated: outcome.truncated } : {}),
+        ...(outcome.ok ? {} : { error: outcome.error }),
+        limit: this.limits.toolOutputChars,
+      });
+
+      replayRecorder?.recordToolCall({
+        turnIndex: steps,
+        toolCallId: approved.toolCallId,
+        tool: approved.tool,
+        toolVersion: toolVersionByName.get(approved.tool) ?? null,
+
+        argumentsHash: replayArgumentsHash(approved.args),
+        settledResult: text,
+        outcome: outcome.ok ? "ok" : "failed",
+        ...(outcome.ok ? {} : { errorCode: outcome.error.code }),
+        ...(outcome.ok ? { truncated: outcome.truncated === true } : {}),
+      });
+      await record({
+        kind: "tool_call",
+        companyId,
+        projectId,
+        sessionId,
+        runId: input.runId,
+        turn: steps,
+        tool: approved.tool,
+        toolCallId: approved.toolCallId,
+        ok: outcome.ok,
+        ...(outcome.ok ? {} : { errorCode: outcome.error.code }),
+        durationMs: this.now() - startedCall,
+      });
+      approvedLines.push(text);
+    }
+    if (approvedLines.length) {
+      messages.push({ role: "system", content: `${APPROVED_TOOL_CALLS_RESULT_HEADER}\n${approvedLines.join("\n")}` });
+    }
   }
 
   private async admitRun(args: {
