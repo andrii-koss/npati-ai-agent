@@ -1508,3 +1508,14 @@ PostgresWorkspaceStore        ← публічний фасад; тонкі де
 `postgres-store.ts` 3060 в†’ **3002**; 17 РјРµС‚РѕРґС–РІ (mapExecutionSnapshotRow, mapSnapshotConfigVersionRow, mapCodeActivityEventRow, mapCodeContextSummaryRow, mapReplayBundleRow, mapReplayBundleStepRow, ensureIdentity, assertMember, getBusiness, assertCompany, getProject, insertExecutionSnapshot, createExecutionSnapshot, getExecutionSnapshot, getLatestSnapshotForSession, getSnapshotForRun, listExecutionSnapshots) РІРёРЅРµСЃРµРЅРѕ РІ `postgres-store-support.ts` (249 СЂСЏРґРєС–РІ) СЏРє С„СѓРЅРєС†С–С— РЅР°Рґ `pool` (С‚Р°Р±Р»РёС†С–: `execution_snapshot*, snapshot_config_version*`). Р¤Р°СЃР°Рґ Р»РёС€Р°С” С‚РѕРЅРєС– РґРµР»РµРіР°С†С–С— Р· С‚РёРјРё СЃР°РјРёРјРё СЃРёРіРЅР°С‚СѓСЂР°РјРё, С‚РѕР¶ РїСѓР±Р»С–С‡РЅРёР№ API РЅРµ Р·РјС–РЅРёРІСЃСЏ, Р° РІСЃС– РІРёРєР»РёРєРё РїРѕР·Р° РґРѕРјРµРЅРѕРј РїСЂР°С†СЋСЋС‚СЊ С‡РµСЂРµР· С„Р°СЃР°Рґ Р±РµР· РїСЂР°РІРѕРє.
 
 **РџРµСЂРµРІС–СЂРµРЅРѕ:** `tsc --noEmit` (РІРѕСЂРєСЃРїРµР№СЃ, СѓСЃС– РІРѕСЂРєСЃРїРµР№СЃРё, С‚РµСЃС‚РѕРІРёР№ РїСЂРѕС”РєС‚) вЂ” exit 0 В· `npm run lint` вЂ” exit 0 В· **c-СЃРµСЂС–СЏ** вЂ” СЂС–РІРЅРѕ 3 РЅР°СЏРІРЅС– РїР°РґС–РЅРЅСЏ РєР°С‚Р°Р»РѕРіСѓ, СЏРє РЅР° Р±Р°Р·С– (СЂРµРіСЂРµСЃС–Р№ РЅРµРјР°С”).
+---
+
+## SOURCE-SIZE GUARD (реалізовано)
+
+`scripts/source-size-guard.mjs` + `scripts/lib/source-size-guard.mjs` + `source-size-baseline.json`, підключено в `npm run lint`.
+
+**Політика:** рукописний код понад **800** рядків мусить бути в baseline; понад **1200** — з причиною, власником і терміном; базовий файл може **зменшуватися, але не рости** (толеранс 2 % на матеріальність); запис, чий файл став ≤800, — **STALE** і червоний, тож baseline може лише скорочуватися; згенеровані файли, i18n-словники й міграції виключені; будь-яке інше виключення теж потребує запису з причиною.
+
+**Перевірено всі чотири режими:** реальний baseline — зелений · новий файл >800 — FAIL · матеріальне зростання (2000 → 3002) — FAIL · застарілий запис — FAIL.
+
+**Стан:** 54 рукописні файли понад 800 рядків, **усі з обґрунтуванням, власником `refactor/large-files` і терміном 2027-02-28**. Серед них — ті, які вже пройшли декомпозицію (`postgres-store.ts` 4578 → 3002, `coding-agent-runner.ts` 4802 → 2419) і ті, що попереду (веб-сторінки, решта API-модулів).
