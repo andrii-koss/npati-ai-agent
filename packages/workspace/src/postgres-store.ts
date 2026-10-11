@@ -1,6 +1,6 @@
 import * as support from "./postgres-store-support";
 import * as company from "./postgres-company-repositories";
-import * as project from "./postgres-project-repositories";
+import * as project from "./postgres-workspace-repositories";
 import { randomUUID } from "node:crypto";
 import { codeChildSessionId } from "./code-child-session-id";
 import { PostgresCodeInboxStore } from "./code-session-inbox-postgres";
@@ -1518,34 +1518,19 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   async getUserBusiness(context: AuthContext, businessId: string) {
-    await this.assertMember(context);
-    const result = await this.pool.query<Business>(`SELECT ${businessColumns} FROM businesses WHERE id=$1 AND workspace_id=$2 AND owner_user_id=$3`, [businessId, context.workspaceId, context.userId]);
-    if (!result.rowCount) throw new WorkspaceAccessError("Business is not available or not owned by this user");
-    return result.rows[0]!;
+    return project.getUserBusiness(this.pool, context, businessId);
   }
 
   async listBusinesses(context: AuthContext) {
-    await this.assertMember(context);
-    return (await this.pool.query<Business>(`SELECT ${businessColumns} FROM businesses WHERE workspace_id=$1 AND activation_status='active' ORDER BY created_at`, [context.workspaceId])).rows;
+    return project.listBusinesses(this.pool, context);
   }
 
   async listUserBusinesses(context: AuthContext) {
-    await this.assertMember(context);
-    return (await this.pool.query<Business>(`SELECT ${businessColumns} FROM businesses WHERE workspace_id=$1 AND owner_user_id=$2 AND activation_status='active' ORDER BY updated_at DESC`, [context.workspaceId, context.userId])).rows;
+    return project.listUserBusinesses(this.pool, context);
   }
 
   async listBusinessesPage(context: AuthContext, requestedLimit = 20, cursor?: string) {
-    await this.assertMember(context);
-    const limit = companyPageLimit(requestedLimit);
-    const after = decodeBusinessCursor(cursor);
-    const result = await this.pool.query<Business>(`SELECT ${businessColumns} FROM businesses
-      WHERE workspace_id=$1 AND activation_status='active'
-        AND ($2::timestamptz IS NULL OR (created_at,id) > ($2::timestamptz,$3::text))
-      ORDER BY created_at,id LIMIT $4`, [context.workspaceId, after?.createdAt ?? null, after?.id ?? '', limit + 1]);
-    const hasMore = result.rows.length > limit;
-    const items = result.rows.slice(0, limit);
-    const last = items.at(-1);
-    return { items, nextCursor: hasMore && last ? encodeBusinessCursor({ createdAt: last.createdAt, id: last.id }) : null };
+    return project.listBusinessesPage(this.pool, context, requestedLimit, cursor);
   }
 
   async overview(context: AuthContext): Promise<WorkspaceOverview> {
@@ -1571,60 +1556,23 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   async setCurrentBusiness(context: AuthContext, businessId: string) {
-    const business = await this.getBusiness(context, businessId);
-    if (business.activationStatus !== "active") throw new Error("Complete business onboarding before selecting this business");
-    await this.pool.query("UPDATE workspace_members SET current_business_id=$3 WHERE workspace_id=$1 AND user_id=$2", [context.workspaceId, context.userId, businessId]);
-    return business;
+    return project.setCurrentBusiness(this.pool, context, businessId);
   }
 
   async createBusiness(context: AuthContext, input: BusinessInput, idempotencyKey?: string) {
-    await this.assertMember(context);
-    const id = randomUUID();
-    const values = [id, context.workspaceId, context.userId, input.name.trim(), input.businessType ?? null, input.industry ?? null, input.niche ?? null, input.country ?? null, input.market ?? null, input.website ?? null, input.businessStage ?? "starting", input.teamType ?? null, input.businessModel ?? null, input.presenceType ?? null, input.description ?? null, input.audienceSummary ?? null, input.productsServicesSummary ?? null, input.legalName ?? null, input.contactEmail ?? null, input.contactPhone ?? null, input.postalAddress ?? null, input.registrationDetails ?? null, input.logoFileId || null, idempotencyKey ?? null];
-    if (!values[3]) throw new Error("Business name is required");
-    const result = await this.pool.query<Business>(`INSERT INTO businesses(id,workspace_id,owner_user_id,name,business_type,industry,niche,country,market,website,business_stage,team_type,business_model,presence_type,description,audience_summary,products_services_summary,legal_name,contact_email,contact_phone,postal_address,registration_details,logo_file_id,create_request_key)
-      VALUES (${values.map((_, index) => `$${index + 1}`).join(",")})
-      ON CONFLICT (workspace_id,owner_user_id,create_request_key) WHERE create_request_key IS NOT NULL DO NOTHING
-      RETURNING ${businessColumns}`, values);
-    const business = result.rows[0] ?? (idempotencyKey ? (await this.pool.query<Business>(`SELECT ${businessColumns} FROM businesses WHERE workspace_id=$1 AND owner_user_id=$2 AND create_request_key=$3`, [context.workspaceId, context.userId, idempotencyKey])).rows[0] : undefined);
-    if (!business) throw new Error('Could not create company');
-    await this.setCurrentBusiness(context, business.id);
-    return business;
+    return project.createBusiness(this.pool, context, input, idempotencyKey);
   }
 
   async updateBusiness(context: AuthContext, businessId: string, input: Partial<BusinessInput>) {
-    await this.getBusiness(context, businessId);
-    const values = [businessId, context.workspaceId, input.name, input.businessType, input.industry, input.niche, input.country, input.market, input.website, input.businessStage, input.teamType, input.businessModel, input.presenceType, input.description, input.audienceSummary, input.productsServicesSummary, input.legalName, input.contactEmail, input.contactPhone, input.postalAddress, input.registrationDetails, input.logoFileId || undefined];
-    const result = await this.pool.query<Business>(`UPDATE businesses SET
-      name=COALESCE($3,name), business_type=COALESCE($4,business_type), industry=COALESCE($5,industry), niche=COALESCE($6,niche),
-      country=COALESCE($7,country), market=COALESCE($8,market), website=COALESCE($9,website), business_stage=COALESCE($10,business_stage),
-      team_type=COALESCE($11,team_type), business_model=COALESCE($12,business_model), presence_type=COALESCE($13,presence_type),
-      description=COALESCE($14,description), audience_summary=COALESCE($15,audience_summary),
-      products_services_summary=COALESCE($16,products_services_summary),legal_name=COALESCE($17,legal_name),
-      contact_email=COALESCE($18,contact_email),contact_phone=COALESCE($19,contact_phone),postal_address=COALESCE($20,postal_address),
-      registration_details=COALESCE($21,registration_details),logo_file_id=COALESCE($22,logo_file_id),updated_at=now()
-      WHERE id=$1 AND workspace_id=$2 RETURNING ${businessColumns}`, values.map((value) => value === undefined ? null : value));
-    return result.rows[0]!;
+    return project.updateBusiness(this.pool, context, businessId, input);
   }
 
   async updateUserBusiness(context: AuthContext, businessId: string, input: Partial<BusinessInput>) {
-    await this.getUserBusiness(context, businessId);
-    const values = [businessId, context.workspaceId, context.userId, input.name, input.businessType, input.industry, input.niche, input.country, input.market, input.website, input.businessStage, input.teamType, input.businessModel, input.presenceType, input.description, input.audienceSummary, input.productsServicesSummary, input.legalName, input.contactEmail, input.contactPhone, input.postalAddress, input.registrationDetails, input.logoFileId || undefined];
-    const result = await this.pool.query<Business>(`UPDATE businesses SET
-      name=COALESCE($4,name), business_type=COALESCE($5,business_type), industry=COALESCE($6,industry), niche=COALESCE($7,niche),
-      country=COALESCE($8,country), market=COALESCE($9,market), website=COALESCE($10,website), business_stage=COALESCE($11,business_stage),
-      team_type=COALESCE($12,team_type), business_model=COALESCE($13,business_model), presence_type=COALESCE($14,presence_type),
-      description=COALESCE($15,description), audience_summary=COALESCE($16,audience_summary),
-      products_services_summary=COALESCE($17,products_services_summary),legal_name=COALESCE($18,legal_name),
-      contact_email=COALESCE($19,contact_email),contact_phone=COALESCE($20,contact_phone),postal_address=COALESCE($21,postal_address),
-      registration_details=COALESCE($22,registration_details),logo_file_id=COALESCE($23,logo_file_id),updated_at=now()
-      WHERE id=$1 AND workspace_id=$2 AND owner_user_id=$3 RETURNING ${businessColumns}`, values.map((value) => value === undefined ? null : value));
-    return result.rows[0]!;
+    return project.updateUserBusiness(this.pool, context, businessId, input);
   }
 
   async deleteBusiness(context: AuthContext, businessId: string) {
-    await this.getBusiness(context, businessId);
-    return Boolean((await this.pool.query("DELETE FROM businesses WHERE id=$1 AND workspace_id=$2 RETURNING id", [businessId, context.workspaceId])).rowCount);
+    return project.deleteBusiness(this.pool, context, businessId);
   }
 
   private async assertCompany(context: AuthContext, companyId: string) {
@@ -2178,34 +2126,19 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   private async hydrateOnboarding(context: AuthContext, row: Omit<BusinessOnboardingSession, "business" | "totalFields" | "currentField">): Promise<BusinessOnboardingSession> {
-    const flow = ONBOARDING_FLOWS[row.scenario];
-    const legacy = row.currentStep > 0 && !row.completedFields.some((field) => field === "businessSnapshot" || field === "businessGoal");
-    const currentStep = legacy && row.status === "active" ? 1 : row.currentStep;
-    const completedFields = legacy && row.status === "active" ? ["businessSnapshot"] : row.completedFields;
-    return { ...row, currentStep, completedFields, business: await this.getBusiness(context, row.businessId), totalFields: flow.length, currentField: flow[currentStep]?.field };
+    return project.hydrateOnboarding(this.pool, context, row);
   }
 
   async listOnboardings(context: AuthContext) {
-    await this.ensureIdentity(context);
-    const result = await this.pool.query<Omit<BusinessOnboardingSession, "business" | "totalFields" | "currentField">>(
-      "SELECT " + onboardingColumns + " FROM business_onboarding_sessions WHERE workspace_id=$1 AND user_id=$2 AND status<>$3 ORDER BY updated_at DESC,id DESC",
-      [context.workspaceId, context.userId, "completed"],
-    );
-    return Promise.all(result.rows.map((row) => this.hydrateOnboarding(context, row)));
+    return project.listOnboardings(this.pool, context);
   }
 
   async getOnboarding(context: AuthContext, businessId?: string) {
-    const rows = await this.listOnboardings(context);
-    return rows.find((row) => !businessId || row.businessId === businessId) ?? null;
+    return project.getOnboarding(this.pool, context, businessId);
   }
 
   private async getOnboardingSession(context: AuthContext, sessionId: string) {
-    await this.ensureIdentity(context);
-    const result = await this.pool.query<Omit<BusinessOnboardingSession, "business" | "totalFields" | "currentField">>(
-      "SELECT " + onboardingColumns + " FROM business_onboarding_sessions WHERE id=$1 AND workspace_id=$2 AND user_id=$3 AND status<>$4",
-      [sessionId, context.workspaceId, context.userId, "completed"],
-    );
-    return result.rowCount ? this.hydrateOnboarding(context, result.rows[0]!) : null;
+    return project.getOnboardingSession(this.pool, context, sessionId);
   }
 
   async startOnboarding(context: AuthContext, scenario: OnboardingScenario, options?: { forceNew?: boolean }) {
@@ -2231,35 +2164,11 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   }
 
   async advanceOnboarding(context: AuthContext, sessionId: string, input: { value?: string; skip?: boolean; businessPatch?: Partial<BusinessInput> }) {
-    const current = await this.getOnboardingSession(context, sessionId);
-    if (!current || current.id !== sessionId) throw new WorkspaceAccessError("Onboarding session is not available");
-    const step = ONBOARDING_FLOWS[current.scenario][current.currentStep];
-    if (!step) return current;
-    if (!input.skip) {
-      const value = input.value?.trim();
-      if (!value) throw new Error("An answer is required or this step can be skipped");
-      const stepPatch = step.field === "businessSnapshot" ? input.businessPatch ?? {} : step.field === "businessGoal" ? {} : onboardingBusinessPatch(step.field, value);
-      if (Object.keys(stepPatch).length > 0) await this.updateBusiness(context, current.businessId, stepPatch);
-    }
-    const nextStep = current.currentStep + 1;
-    const completedFields = input.skip ? current.completedFields : [...current.completedFields, step.field];
-    const skippedFields = input.skip ? [...current.skippedFields, step.field] : current.skippedFields;
-    const status = nextStep >= ONBOARDING_FLOWS[current.scenario].length ? "awaiting_confirmation" : "active";
-    await this.pool.query(
-      "UPDATE business_onboarding_sessions SET current_step=$4,completed_fields=$5::jsonb,skipped_fields=$6::jsonb,status=$7,updated_at=now() WHERE id=$1 AND workspace_id=$2 AND user_id=$3",
-      [sessionId, context.workspaceId, context.userId, nextStep, JSON.stringify(completedFields), JSON.stringify(skippedFields), status],
-    );
-    return (await this.getOnboarding(context, current.businessId))!;
+    return project.advanceOnboarding(this.pool, context, sessionId, input);
   }
 
   async setOnboardingStatus(context: AuthContext, sessionId: string, status: "active" | "paused") {
-    const current = await this.getOnboardingSession(context, sessionId);
-    if (!current || current.id !== sessionId) throw new WorkspaceAccessError("Onboarding session is not available");
-    await this.pool.query(
-      "UPDATE business_onboarding_sessions SET status=$4,updated_at=now() WHERE id=$1 AND workspace_id=$2 AND user_id=$3",
-      [sessionId, context.workspaceId, context.userId, status],
-    );
-    return (await this.getOnboarding(context, current.businessId))!;
+    return project.setOnboardingStatus(this.pool, context, sessionId, status);
   }
 
   async completeOnboarding(context: AuthContext, sessionId: string): Promise<BusinessOnboardingSession> {
