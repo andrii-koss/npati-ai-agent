@@ -176,6 +176,12 @@ UID 0 inside the private user namespace maps to the project's unprivileged UID
 outside it. A second seccomp filter denies namespace creation/joining, mount,
 ptrace and BPF operations for project code; ordinary processes/threads remain supported.
 Keep the seccomp file in the repository; its path is relative to the Compose file.
+The runner also requires `systempaths=unconfined`: Docker's default masked `/proc`
+paths can prevent Bubblewrap from mounting a private procfs on Linux 5.15
+(`bwrap: Can't mount proc on /proc: Operation not permitted`). This setting applies
+only to the runner. Project commands receive a separate read-only `/proc`, retain
+private PID/user/network namespaces and cannot mount or join other namespaces.
+See the [Moby explanation](https://github.com/moby/buildkit/blob/master/docs/rootless.md).
 Host configurations blocking user namespaces require administrator configuration;
 support on every kernel/security policy cannot be guaranteed. If startup reports
 `Project namespaces unavailable`, inspect this error and the host namespace policy.

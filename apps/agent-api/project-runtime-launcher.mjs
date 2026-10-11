@@ -10,7 +10,9 @@ const tools = ['/usr', '/bin', '/sbin', '/lib', '/lib64', '/etc',
   '/opt/npati-package-managers', '/opt/npati-project-toolchain',
   '/opt/npati-runtime/prepare-project-dependencies.cjs', '/opt/npati-runtime/project-runtime-inner.mjs'];
 const mounts = tools.filter(existsSync).flatMap(p => ['--ro-bind', p, p]);
-const base = [...common, ...mounts, '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp'];
+// Docker must allow this fresh procfs mount (systempaths=unconfined). Keep the
+// project's own procfs read-only so kernel controls cannot be changed by code.
+const base = [...common, ...mounts, '--proc', '/proc', '--remount-ro', '/proc', '--dev', '/dev', '--tmpfs', '/tmp'];
 const checking = process.argv[2] === '--check';
 const [, , uid, project, port, cwd, ...rawCommand] = checking
   ? ['', '', String(process.getuid()), '', '0', '/', '/bin/true'] : process.argv;
@@ -91,6 +93,10 @@ try {
     // Only Preview needs the Node relay. Foreground commands execute directly.
     ...(preview ? ['/usr/local/bin/node', '/opt/npati-runtime/project-runtime-inner.mjs', port, ...command] : command)],
     { stdio: ['inherit', 'inherit', 'inherit', 'pipe', 'pipe', filter] });
+  // Bubblewrap may fail after reporting its PID but before the release byte.
+  // Attach immediately: otherwise that race raises an unhandled EPIPE.
+  let releaseError;
+  sandbox.stdio[4].on('error', error => { releaseError = error; sandbox.kill('SIGKILL'); });
   const ended = new Promise(resolve => sandbox.once('exit', (code, signal) => resolve(code ?? (signal ? 137 : 126))));
   const info = JSON.parse(await dataFrom(sandbox.stdio[3], sandbox, 'sandbox'));
   network = spawn('/usr/bin/slirp4netns', ['--configure', '--disable-dns', '--mtu=65520', '--ready-fd=3',
@@ -99,7 +105,10 @@ try {
   await dataFrom(network.stdio[3], network, 'network');
   network.once('exit', () => { if (!exiting) sandbox.kill('SIGKILL'); });
   if (preview) await forward(socket, port);
-  sandbox.stdio[4].end('1');
+  if (releaseError) throw releaseError;
+  await new Promise((resolve, reject) => {
+    sandbox.stdio[4].end('1', error => error ? reject(error) : resolve());
+  });
   await finish(await ended);
 } catch (error) {
   console.error(`${checking ? 'Project namespaces unavailable' : 'Project namespace setup failed'}: ${error.message}. Check enabled user namespaces, /dev/net/tun and the runner seccomp/AppArmor settings; Landlock is not required.`);

@@ -183,6 +183,7 @@ services:
       - no-new-privileges:true
       - seccomp=./docker/sandbox/project-runtime-seccomp.json
       - apparmor=unconfined
+      - systempaths=unconfined
     cpus: ${NPATI_PROJECT_RUNTIME_CPU:-4}
     mem_limit: ${NPATI_PROJECT_RUNTIME_MEMORY:-4g}
     pids_limit: 4096
