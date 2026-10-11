@@ -1,6 +1,6 @@
 # Deploy NPATI Agent with Dokploy
 
-Use the dedicated `docker-compose.dokploy.yml`. It builds one API image containing the frontend from the
+Use `docker-compose.dokploy-isolated.yml` for this deployment. It builds one API image containing the frontend from the
 repository and keeps PostgreSQL, Redis, MinIO, Qdrant, Crawl4AI, OmniRoute, and the worker
 on an internal Compose network.
 
@@ -8,7 +8,7 @@ on an internal Compose network.
 
 1. In Dokploy, create a **Docker Compose** service (not Docker Stack).
 2. Connect the Git repository and production branch.
-3. Set the Compose path to `./docker-compose.dokploy.yml`.
+3. Set the Compose path to `./docker-compose.dokploy-isolated.yml`.
 4. Enable **Isolated Deployments**.
 5. Copy the variables from `.env.production.example` into the Dokploy Environment editor
    and replace every placeholder.
@@ -26,9 +26,9 @@ through the central NPATI backend. For ordinary self-hosting, keep `NPATI_DEPLOY
 `NPATI_DEPLOYMENT_TYPE=npati_hosted` and set the hosted registration token to the same
 server-only value configured in the central NPATI backend.
 
-The shared runtime in this default Compose is intended for OSS/self-hosted
-installations. Hosted deployments (`NPATI_DEPLOYMENT_TYPE=npati_hosted`) should
-use the retained `docker-compose.dokploy-isolated.yml` execution scheme.
+This Compose runs sites inside one shared runner and is intended for self-hosted
+installations. Keep `NPATI_DEPLOYMENT_TYPE=self_hosted` for this deployment;
+the shared runtime refuses `npati_hosted` mode.
 
 Set `OMNIROUTE_MANAGEMENT_PASSWORD` to a unique, strong password before first deployment.
 The Compose file supplies it as OmniRoute's `INITIAL_PASSWORD`, and Agent API uses the
@@ -135,28 +135,23 @@ without the isolation boundary. Configure total runtime resources with
 `NPATI_PROJECT_RUNTIME_CPU` (default 4) and `NPATI_PROJECT_RUNTIME_MEMORY`
 (default `4g`); these resources are shared between projects.
 
-For an older host or deployments requiring independent Docker isolation/quotas,
-choose `docker-compose.dokploy-isolated.yml` instead. Its runner uses the Docker
-socket and pulls published sandbox/egress images before accepting work. Set
-`NPATI_SANDBOX_IMAGE` and `NPATI_SANDBOX_EGRESS_IMAGE` to immutable
-`registry/repository@sha256:<digest>` references, and set the shared
-`NPATI_SANDBOX_RUNNER_SECRET` (at least 32 characters). Production does not build
-the default `:local` images at startup.
+The deployed `docker-compose.dokploy-isolated.yml` keeps its existing filename
+for Dokploy compatibility, but runs the shared project runtime. It defines exactly
+11 services: agent-api, company-worker, sandbox-runner, postgres,
+postgres-projects, redis, minio, qdrant, omniroute, crawler and browser-use-worker.
+Frontend assets are served by agent-api.
 
-Publish and review images through `.github/workflows/sandbox-images.yml`. The
-runner includes Cosign and the catalogue from `docker/sandbox/images.json`;
-production admission requires a verified catalogue entry, a fresh vulnerability
-scan, and a valid signature. The repository's unverified entries are not production
-approval. Configure `NPATI_SANDBOX_SIGNATURE_IDENTITY` and
-`NPATI_SANDBOX_SIGNATURE_ISSUER` for your publishing workflow, and rebuild the
-runner after updating the reviewed catalogue. Do not enable
-`NPATI_SANDBOX_ALLOW_UNVERIFIED_IMAGES` in production.
+All project sites run inside sandbox-runner, with separate directories, UIDs,
+processes and assigned ports. Its internal allowlisted proxy runs in the same
+container. There are no image preparation services or per-project Docker
+containers. The runner has no Docker CLI or mounted Docker socket. The two
+project runtime volumes preserve project files and supervisor state.
 
-The trusted runner joins the application network for PostgreSQL and registry
-access. Project sandboxes still use their own isolated networks with an allowlisted
-egress proxy. `/health` checks image availability and network enforcement. Image
-admission is also checked when creating a sandbox. The isolated configuration
-retains the `NPATI_HOST_ADMISSION_*` settings.
+Use Dokploy's normal Compose deployment command with `up -d --build`.
+Set `NPATI_SANDBOX_RUNNER_SECRET` to at least 32 characters and keep the same
+value on API, worker and runner. Registry image overrides and signature identity
+variables are unused in this deployment. Host Landlock and firewall requirements
+listed above still apply; do not disable isolation to work around an older host.
 
 ### Validate the isolated deployment locally
 
@@ -172,11 +167,12 @@ docker compose --env-file artifacts/docker-validation-source/.env.validation -f 
 
 Test credentials and volumes belong to the separate
 `npati-isolated-source-20261011` project. Supply `MINIO_IMAGE` to the preparation
-script only if testing an explicitly selected mirror. Published signed sandbox
-image references and the reviewed catalogue are still required; the script does
-not enable development exceptions. The Dokploy file exposes API port 3001 to
-Docker networks without publishing a localhost port. Inspect the frontend from
-the API container or route it through Dokploy.
+script only if testing an explicitly selected mirror. The shared runner is
+built by this same YAML; projects do not create Docker containers.
+The Dokploy file exposes API port 3001 to Docker networks and publishes it only
+on host loopback (`127.0.0.1`). `NPATI_AGENT_PUBLISHED_PORT` selects the host port
+(default 3001; the validation environment uses 13001). Dokploy routes the public
+domain to agent-api's container port 3001.
 
 This proves deployment behaviour with the recorded test environment, not with
 unavailable production credentials. Separate `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY`

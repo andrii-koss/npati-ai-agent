@@ -13,7 +13,7 @@ services:
       NODE_ENV: production
       NPATI_ENV: production
       NPATI_AGENT_API_PORT: 3001
-      NPATI_PROJECT_RUNTIME_MODE: isolated
+      NPATI_PROJECT_RUNTIME_MODE: shared
       NPATI_SANDBOX_RUNNER_MODE: ${NPATI_SANDBOX_RUNNER_MODE:-local}
       NPATI_SANDBOX_RUNNER_URL: ${NPATI_SANDBOX_RUNNER_URL:-http://sandbox-runner:7865}
       NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:?NPATI_SANDBOX_RUNNER_SECRET must be at least 32 characters for isolated execution}
@@ -97,6 +97,8 @@ services:
       NPATI_STORAGE_RECONCILE_PAGE_SIZE: ${NPATI_STORAGE_RECONCILE_PAGE_SIZE:-250}
     expose:
       - "3001"
+    ports:
+      - "127.0.0.1:${NPATI_AGENT_PUBLISHED_PORT:-3001}:3001"
     volumes:
       - agent-data:/app/data
       - postgres-projects-snapshots:/app/project-snapshots
@@ -159,54 +161,37 @@ services:
     build:
       context: .
       dockerfile: apps/agent-api/Dockerfile
-      target: sandbox-runner
+      target: project-runtime
+      args:
+        NPATI_BUILD_COMMIT: ${NPATI_BUILD_COMMIT:-unknown}
+        NPATI_BUILD_TIME: ${NPATI_BUILD_TIME:-unknown}
     restart: unless-stopped
     environment:
-      NPATI_PROJECT_RUNTIME_MODE: isolated
+      NPATI_PROJECT_RUNTIME_MODE: shared
       NPATI_SANDBOX_RUNNER_MODE: local
-      NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:?NPATI_SANDBOX_RUNNER_SECRET must be at least 32 characters for isolated execution}
-      NPATI_SANDBOX_IMAGE: ${NPATI_SANDBOX_IMAGE:-npati/project-sandbox:local}
-      NPATI_SANDBOX_EGRESS_IMAGE: ${NPATI_SANDBOX_EGRESS_IMAGE:-npati/sandbox-egress:local}
-      NPATI_BROWSER_QA_IMAGE: ${NPATI_BROWSER_QA_IMAGE:-npati/browser-qa:local}
-      DATABASE_URL: postgresql://${NPATI_POSTGRES_USER:-npati}:${NPATI_POSTGRES_PASSWORD:?NPATI_POSTGRES_PASSWORD is required}@postgres:5432/${NPATI_POSTGRES_DB:-npati_agent}
-      NPATI_SANDBOX_SIGNATURE_IDENTITY: ${NPATI_SANDBOX_SIGNATURE_IDENTITY:-}
-      NPATI_SANDBOX_SIGNATURE_ISSUER: ${NPATI_SANDBOX_SIGNATURE_ISSUER:-https://token.actions.githubusercontent.com}
-      # R1 (section A, item 4): the per-sandbox ceilings. These are the same start values the runner falls back
-      # to (`sandbox-resource-quota.ts` defaults) — 2 vCPU / 4 GB / 512 pids / 10 GB — and before R1 this file
-      # pinned 1 / 1536m / 128 / 1536 MiB, which silently overrode the code defaults because compose always sets
-      # the variable. The aggregate per-Company ceilings and host admission are configured on the runner itself;
-      # see .env.example.
-      NPATI_SANDBOX_CPU: ${NPATI_SANDBOX_CPU:-2}
-      NPATI_SANDBOX_MEMORY: ${NPATI_SANDBOX_MEMORY:-4096m}
-      NPATI_SANDBOX_PIDS: ${NPATI_SANDBOX_PIDS:-512}
-      NPATI_SANDBOX_DISK_BYTES: ${NPATI_SANDBOX_DISK_BYTES:-10737418240}
-      NPATI_HOST_ADMISSION_MAX_CPU_PERCENT: ${NPATI_HOST_ADMISSION_MAX_CPU_PERCENT:-80}
-      NPATI_HOST_ADMISSION_MIN_FREE_MEMORY_PERCENT: ${NPATI_HOST_ADMISSION_MIN_FREE_MEMORY_PERCENT:-15}
-      NPATI_HOST_ADMISSION_SAMPLE_TTL_MS: ${NPATI_HOST_ADMISSION_SAMPLE_TTL_MS:-5000}
-      NPATI_SANDBOX_SYNC_MAX_FILES: ${NPATI_SANDBOX_SYNC_MAX_FILES:-500}
-      NPATI_SANDBOX_SYNC_MAX_BYTES: ${NPATI_SANDBOX_SYNC_MAX_BYTES:-20000000}
-      NPATI_SANDBOX_ALLOWED_HOSTS: ${NPATI_SANDBOX_ALLOWED_HOSTS:-registry.npmjs.org,registry.yarnpkg.com,pypi.org,files.pythonhosted.org,repo.packagist.org,packagist.org,github.com,codeload.github.com,api.github.com,objects.githubusercontent.com}
-      # The Project API host is appended to the allowlist automatically from this value.
-      NPATI_PROJECT_API_PUBLIC_URL: ${NPATI_PROJECT_API_PUBLIC_URL:-}
+      NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:?NPATI_SANDBOX_RUNNER_SECRET must be at least 32 characters}
+      ALLOWED_HOSTS: ${NPATI_SANDBOX_ALLOWED_HOSTS:-registry.npmjs.org,registry.yarnpkg.com,pypi.org,files.pythonhosted.org,github.com,codeload.github.com,api.github.com,objects.githubusercontent.com}
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - project-runtime-workspaces:/projects
+      - project-runtime-state:/runtime-state
     expose:
       - "7865"
     read_only: true
     tmpfs:
-      - /tmp:rw,nosuid,nodev,size=32m
-    cpus: "1.0"
-    mem_limit: 512m
-    pids_limit: 128
+      - /tmp:rw,nosuid,nodev,size=64m
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, SETUID, SETGID, KILL, NET_ADMIN]
+    security_opt: [no-new-privileges:true]
+    cpus: ${NPATI_PROJECT_RUNTIME_CPU:-4}
+    mem_limit: ${NPATI_PROJECT_RUNTIME_MEMORY:-4g}
+    pids_limit: 4096
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7865/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 300s
-    # The trusted runner needs database revocations and registry/signature access.
-    # Project containers still use their own internal networks, created by the provider.
-    networks: [npati-sandbox-control, npati-agent]
+      start_period: 30s
+    networks: [npati-agent, npati-sandbox-control]
 
   crawler:
     build:
@@ -399,6 +384,8 @@ networks:
     internal: true
 
 volumes:
+  project-runtime-workspaces:
+  project-runtime-state:
   agent-data:
   omniroute-data:
   redis-data:
