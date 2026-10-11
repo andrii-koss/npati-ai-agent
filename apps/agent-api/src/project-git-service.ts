@@ -26,6 +26,7 @@ import { ensureRepositoryInitialized, inspectRepository, status, branch, type Pr
 import { diffAgentWorktree, removeAgentWorktree, type ProjectGitWorktreeExtraHost } from "./project-git-worktree-extra-service";
 import { createCheckpoint, getCheckpoint, type ProjectGitCheckpointWriteHost } from "./project-git-checkpoint-write-service";
 import { push, type ProjectGitPushHost } from "./project-git-push-service";
+import { githubToken, acquireCredential, type ProjectGitCredentialHost } from "./project-git-credential-service";
 
 const execFileAsync = promisify(execFile);
 
@@ -313,6 +314,13 @@ export class ProjectGitService {
     };
   }
 
+  private credentialHost(): ProjectGitCredentialHost {
+    return {
+      boundary: this.boundary,
+      resolveGithubCredential: this.resolveGithubCredential,
+    };
+  }
+
   private pushHost(): ProjectGitPushHost {
     return {
       boundary: this.boundary,
@@ -550,9 +558,8 @@ export class ProjectGitService {
     });
   }
 
-  private async githubToken(ctx: AuthContext, companyId: string, credentialId?: string): Promise<string> {
-    if (!credentialId || !this.resolveGithubCredential) throw new GitError("CREDENTIAL_MISSING", "A Company vault credential reference is required", 400);
-    return this.resolveGithubCredential(ctx, companyId, credentialId);
+    private async githubToken(ctx: AuthContext, companyId: string, credentialId?: string): Promise<string> {
+    return githubToken(this.credentialHost(), ctx, companyId, credentialId);
   }
 
   /**
@@ -1146,19 +1153,13 @@ export class ProjectGitService {
    * reaches `credentialEnvironment`, i.e. the process-scoped environment of one invocation — never
    * `.git/config`, never a log, never the returned result.
    */
-  private async acquireCredential(
+    private async acquireCredential(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
     input: { credentialId?: string; purpose: "git.push" | "pull_request.create" | "pull_request.comment"; toolCallId: string },
   ): Promise<{ value: string; leaseId: string | null }> {
-    if (this.boundary?.credentials && input.credentialId) {
-      const lease = await this.boundary.credentials.acquire({
-        ctx, companyId, projectId, credentialId: input.credentialId, toolCallId: input.toolCallId, purpose: input.purpose,
-      });
-      return { value: lease.value, leaseId: lease.leaseId };
-    }
-    return { value: await this.githubToken(ctx, companyId, input.credentialId), leaseId: null };
+    return acquireCredential(this.credentialHost(), ctx, companyId, projectId, input);
   }
 
   /**
