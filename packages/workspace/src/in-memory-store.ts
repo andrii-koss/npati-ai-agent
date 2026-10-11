@@ -55,6 +55,7 @@ import { ONBOARDING_FLOWS, onboardingBusinessPatch, onboardingPlaceholder } from
 import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from './pagination';
 import { now } from "./in-memory-clock";
 import { createProject, listProjects, getProject, updateProject, getProjectCodeTrust, getProjectMountedFolder, getProjectMountedFolderForSystem, updateProjectRepository, updateProjectPreview, archiveProject, deleteProject, createProjectCheckpoint, getProjectCheckpoint, deleteProjectCheckpoint, createProjectDeployment, getProjectDeployment, updateProjectDeployment, createProjectQaReport, getProjectQaReport, getProjectDataPolicy, getProjectForSystem, type InMemoryProjectState } from "./in-memory-project-store";
+import { setCompanyAgentParent, listGoals, createGoal, updateGoal, deleteGoal, listMemory, createMemory, updateMemory, type InMemoryGoalState } from "./in-memory-goal-store";
 
 type StoredUserSetting = import('./types').UserSetting;
 export class InMemoryWorkspaceStore implements WorkspaceStore {
@@ -163,6 +164,16 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   private readonly codeUserQuestionState = new InMemoryCodeUserQuestionStore();
 
   private readonly codeSessionDurabilityState = new InMemoryCodeSessionDurabilityStore();
+
+  private goalState(): InMemoryGoalState {
+    return {
+      companyEdges: this.companyEdges,
+      goals: this.goals,
+      memories: this.memories,
+      assertBusiness: this.assertBusiness.bind(this),
+      assertCompanyAgent: this.assertCompanyAgent.bind(this),
+    };
+  }
 
   private projectState(): InMemoryProjectState {
     return {
@@ -955,27 +966,8 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
   }
 
-  async setCompanyAgentParent(context: AuthContext, companyId: string, childAgentId: string, parentAgentId: string | null) {
-    this.assertCompanyAgent(context, companyId, childAgentId);
-    if (parentAgentId === childAgentId) throw new Error("An agent cannot be its own parent");
-    if (parentAgentId) this.assertCompanyAgent(context, companyId, parentAgentId);
-    const old = [...this.companyEdges.entries()].find(([, edge]) => edge.companyId === companyId && edge.childAgentId === childAgentId);
-    if (old) this.companyEdges.delete(old[0]);
-    if (!parentAgentId) return null;
-    const children = (id: string) => [...this.companyEdges.values()].filter((edge) => edge.companyId === companyId && edge.parentAgentId === id).map((edge) => edge.childAgentId);
-    const pending = [childAgentId], visited = new Set<string>();
-    while (pending.length) {
-      const id = pending.pop()!;
-      if (id === parentAgentId) {
-        if (old) this.companyEdges.set(old[0], old[1]);
-        throw new Error("Circular agent relationships are not allowed");
-      }
-      if (!visited.has(id)) { visited.add(id); pending.push(...children(id)); }
-    }
-    const edge: CompanyAgentEdge = { id: randomUUID(), workspaceId: context.workspaceId, companyId,
-      parentAgentId, childAgentId, relationType: "reports_to", createdAt: now() };
-    this.companyEdges.set(edge.id, edge);
-    return edge;
+    async setCompanyAgentParent(context: AuthContext, companyId: string, childAgentId: string, parentAgentId: string | null) {
+    return setCompanyAgentParent(this.goalState(), context, companyId, childAgentId, parentAgentId);
   }
 
   async createCompanyAgentRun(context: AuthContext, companyId: string, input: { task: string; requestedMode: "auto" | "single" | "pipeline" | "fusion"; projectId?: string }, idempotencyKey: string) {
@@ -1136,9 +1128,8 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
         permissions: ["workspace:read","business:manage"] }, companyId: run.companyId, runId: run.id }));
   }
 
-  async listGoals(context: AuthContext, businessId: string) {
-    this.assertBusiness(context, businessId);
-    return [...this.goals.values()].filter((goal) => goal.workspaceId === context.workspaceId && goal.businessId === businessId).sort((a, b) => a.priority - b.priority || b.updatedAt.localeCompare(a.updatedAt));
+    async listGoals(context: AuthContext, businessId: string) {
+    return listGoals(this.goalState(), context, businessId);
   }
 
   async listUserGoals(context: AuthContext) {
@@ -1153,13 +1144,8 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       .sort((a, b) => a.priority - b.priority || b.updatedAt.localeCompare(a.updatedAt));
   }
 
-  async createGoal(context: AuthContext, businessId: string, input: GoalInput) {
-    this.assertBusiness(context, businessId);
-    const timestamp = now();
-    const goal: Goal = { id: randomUUID(), workspaceId: context.workspaceId, businessId, createdByUserId: context.userId, status: input.status ?? "active", priority: input.priority ?? 3, createdAt: timestamp, updatedAt: timestamp, ...input, title: input.title.trim() };
-    if (!goal.title) throw new Error("Goal title is required");
-    this.goals.set(goal.id, goal);
-    return goal;
+    async createGoal(context: AuthContext, businessId: string, input: GoalInput) {
+    return createGoal(this.goalState(), context, businessId, input);
   }
 
   async linkGoal(context: AuthContext, businessId: string, goalId: string) {
@@ -1171,26 +1157,16 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return updated;
   }
 
-  async updateGoal(context: AuthContext, businessId: string, goalId: string, input: Partial<GoalInput>) {
-    this.assertBusiness(context, businessId);
-    const goal = this.goals.get(goalId);
-    if (!goal || goal.workspaceId !== context.workspaceId || goal.businessId !== businessId) throw new WorkspaceAccessError("Goal is not available for this business");
-    const updated = { ...goal, ...input, updatedAt: now() };
-    this.goals.set(goalId, updated);
-    return updated;
+    async updateGoal(context: AuthContext, businessId: string, goalId: string, input: Partial<GoalInput>) {
+    return updateGoal(this.goalState(), context, businessId, goalId, input);
   }
 
-  async deleteGoal(context: AuthContext, businessId: string, goalId: string) {
-    await this.updateGoal(context, businessId, goalId, {});
-    return this.goals.delete(goalId);
+    async deleteGoal(context: AuthContext, businessId: string, goalId: string) {
+    return deleteGoal(this.goalState(), context, businessId, goalId);
   }
 
-  async listMemory(context: AuthContext, businessId: string, query = "", limit = 100) {
-    this.assertBusiness(context, businessId);
-    const needle = query.trim().toLowerCase();
-    return [...this.memories.values()]
-      .filter((item) => item.workspaceId === context.workspaceId && item.businessId === businessId && (!needle || `${item.type} ${item.title} ${item.content}`.toLowerCase().includes(needle)))
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, limit);
+    async listMemory(context: AuthContext, businessId: string, query = "", limit = 100) {
+    return listMemory(this.goalState(), context, businessId, query, limit);
   }
 
   async listUserMemories(context: AuthContext, query = "", limit = 100) {
@@ -1206,12 +1182,8 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, limit);
   }
 
-  async createMemory(context: AuthContext, businessId: string, input: MemoryInput) {
-    this.assertBusiness(context, businessId); assertNoSecrets(input);
-    const timestamp = now();
-    const item: MemoryItem = { id: randomUUID(), workspaceId: context.workspaceId, businessId, userId: context.userId, source: input.source ?? "user", ...input, createdAt: timestamp, updatedAt: timestamp };
-    this.memories.set(item.id, item);
-    return item;
+    async createMemory(context: AuthContext, businessId: string, input: MemoryInput) {
+    return createMemory(this.goalState(), context, businessId, input);
   }
 
   async linkMemory(context: AuthContext, businessId: string, memoryId: string) {
@@ -1223,13 +1195,8 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return updated;
   }
 
-  async updateMemory(context: AuthContext, businessId: string, memoryId: string, input: Partial<MemoryInput>) {
-    this.assertBusiness(context, businessId); assertNoSecrets(input);
-    const item = this.memories.get(memoryId);
-    if (!item || item.workspaceId !== context.workspaceId || item.businessId !== businessId) throw new WorkspaceAccessError("Memory is not available for this business");
-    const updated = { ...item, ...input, updatedAt: now() };
-    this.memories.set(memoryId, updated);
-    return updated;
+    async updateMemory(context: AuthContext, businessId: string, memoryId: string, input: Partial<MemoryInput>) {
+    return updateMemory(this.goalState(), context, businessId, memoryId, input);
   }
 
   async deleteMemory(context: AuthContext, businessId: string, memoryId: string) {
