@@ -154,12 +154,12 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
       npm_config_proxy: "http://127.0.0.1:8080", npm_config_https_proxy: "http://127.0.0.1:8080", NPM_CONFIG_CACHE: `${directory}/.npati-runtime/npm`,
       npm_config_audit: "false", npm_config_fund: "false", NEXT_TELEMETRY_DISABLED: "1", CI: "1" };
   }
-  private launch(entry: Entry, executable: string, args: string[], cwd = ".", environment?: Record<string, string>, detached = false, preview = false) {
-    return spawn(this.launcher, [String(entry.uid), this.directory(entry), String(entry.port), path.join(this.directory(entry), cwd), ...(preview ? ["--preview"] : []), executable, ...args],
+  private launch(entry: Entry, executable: string, args: string[], cwd = ".", environment?: Record<string, string>, detached = false, preview = false, offline = false) {
+    return spawn(this.launcher, [String(entry.uid), this.directory(entry), String(entry.port), path.join(this.directory(entry), cwd), ...(preview ? ["--preview"] : offline ? ["--offline"] : []), executable, ...args],
       { env: this.environment(entry, environment), detached, stdio: ["pipe", "pipe", "pipe"] });
   }
-  private async collect(entry: Entry, executable: string, args: string[], input: string, options: SandboxCommandOptions, cwd = ".") {
-    const child = this.launch(entry, executable, args, cwd, options.environment, true);
+  private async collect(entry: Entry, executable: string, args: string[], input: string, options: SandboxCommandOptions, cwd = ".", offline = false) {
+    const child = this.launch(entry, executable, args, cwd, options.environment, true, false, offline);
     const jobs = this.jobs.get(entry.id) ?? new Set<ChildProcess>(); this.jobs.set(entry.id, jobs); jobs.add(child);
     const limit = Math.min(Math.max(options.outputLimitBytes, 1024), 32_000_000);
     let stdout = Buffer.alloc(0), stderr = Buffer.alloc(0), timedOut = false;
@@ -189,14 +189,29 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
     const sanitized = files.map(file => ({ path: safeProjectPath(file.path), content: file.content }));
     // Run file synchronization through the same OS boundary as project code.
     // A malicious symlink/race cannot make the root supervisor write elsewhere.
-    const script = `const fs=require('fs'),p=require('path');let b='';process.stdin.on('data',c=>b+=c);process.stdin.on('end',()=>{const files=JSON.parse(b),keep=new Set(files.map(f=>f.path));for(const f of files){const target=p.resolve(f.path);let parent=p.dirname(target);fs.mkdirSync(parent,{recursive:true});const temp=p.join(parent,'.npati-upload-'+require('crypto').randomUUID());fs.writeFileSync(temp,f.content,{flag:'wx',mode:0o600});fs.renameSync(temp,target)}function clean(dir){for(const item of fs.readdirSync(dir,{withFileTypes:true})){if(${excluded}.test(item.name))continue;const file=p.join(dir,item.name);if(item.isDirectory())clean(file);else if(!keep.has(file))fs.unlinkSync(file)}}clean('.')});`;
-    const result = await this.collect(entry, "node", ["-e", script], JSON.stringify(sanitized), { timeoutMs: 120000, outputLimitBytes: 64000 });
+    const script = `const fs=require('fs'),p=require('path');let b='';process.stdin.on('data',c=>b+=c);process.stdin.on('end',()=>{
+      const files=JSON.parse(b),keep=new Set(files.map(f=>f.path));
+      for(const f of files){
+        const target=p.resolve(f.path), content=Buffer.from(f.content);
+        // Compare the actual file, not cached metadata: commands may change it.
+        // NOFOLLOW/NONBLOCK prevents following a symlink or blocking on a FIFO.
+        try{const fd=fs.openSync(target,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK);
+          try{const stat=fs.fstatSync(fd);if(stat.isFile()&&stat.size===content.length&&fs.readFileSync(fd).equals(content))continue}
+          finally{fs.closeSync(fd)}
+        }catch{}
+        const parent=p.dirname(target);fs.mkdirSync(parent,{recursive:true});
+        const temp=p.join(parent,'.npati-upload-'+require('crypto').randomUUID());
+        fs.writeFileSync(temp,content,{flag:'wx',mode:0o600});fs.renameSync(temp,target);
+      }
+      function clean(dir){for(const item of fs.readdirSync(dir,{withFileTypes:true})){if(${excluded}.test(item.name))continue;const file=p.join(dir,item.name);if(item.isDirectory())clean(file);else if(!keep.has(file))fs.unlinkSync(file)}}clean('.');
+    });`;
+    const result = await this.collect(entry, "node", ["-e", script], JSON.stringify(sanitized), { timeoutMs: 120000, outputLimitBytes: 64000 }, ".", true);
     if (result.exitCode !== 0) throw new SandboxProviderError("workspace_sync_failed", result.stderr.slice(0, 1000), 403);
   }
   async downloadFiles(scope: SandboxScope, id: string) {
     const entry = await this.entry(scope, id);
     const script = `const fs=require('fs'),p=require('path');const files=[];let bytes=0;function walk(dir){for(const f of fs.readdirSync(dir,{withFileTypes:true})){if(${excluded}.test(f.name))continue;const file=p.join(dir,f.name);if(f.isSymbolicLink())throw Error('Project symlink denied');if(f.isDirectory())walk(file);else if(f.isFile()){const data=fs.readFileSync(file);bytes+=data.length;if(bytes>20000000||files.length>=500)throw Error('Workspace sync limit');const content=new TextDecoder('utf-8',{fatal:true}).decode(data);if(content.includes('\\0'))throw Error('Binary file denied');files.push({path:file,content})}}}walk('.');process.stdout.write(JSON.stringify(files));`;
-    const result = await this.collect(entry, "node", ["-e", script], "", { timeoutMs: 120000, outputLimitBytes: 32_000_000 });
+    const result = await this.collect(entry, "node", ["-e", script], "", { timeoutMs: 120000, outputLimitBytes: 32_000_000 }, ".", true);
     if (result.exitCode !== 0) throw new SandboxProviderError("workspace_sync_failed", result.stderr.slice(0, 1000), 403);
     return JSON.parse(result.stdout) as SandboxFile[];
   }

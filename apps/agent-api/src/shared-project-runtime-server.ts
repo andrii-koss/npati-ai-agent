@@ -5,6 +5,7 @@ import { SharedProjectRuntimeProvider } from "./shared-project-runtime-provider"
 import { authenticateRunnerRequest } from "./runner-readiness";
 import { assertProjectRuntimeProvider, SandboxProviderError, type SandboxScope, type SandboxCreateOptions, type SandboxCommandOptions, type SandboxFile, type PreviewProxyRequest } from "./sandbox-provider";
 import { runnerFailure } from "./sandbox-runner-diagnostics";
+import { createSharedRuntimeReadiness } from "./shared-runtime-readiness";
 
 const secret = process.env.NPATI_SANDBOX_RUNNER_SECRET ?? "";
 assertProjectRuntimeProvider("shared");
@@ -14,13 +15,16 @@ const seen = new Map<string, number>();
 const app = Fastify({ bodyLimit: 25_000_000, logger: false });
 app.addContentTypeParser("application/json", { parseAs: "string" }, (_request, body, done) => done(null, body));
 const execute = promisify(execFile);
+const readinessChecks = createSharedRuntimeReadiness({
+  isolation: () => execute("/usr/local/bin/npati-project-exec", ["--check"], { timeout: 4000 }).then(result => result.stdout.trim()),
+  proxy: () => fetch("http://127.0.0.1:8080/health", { signal: AbortSignal.timeout(3000) }).then(response => response.ok),
+  network: () => Promise.all(["iptables", "ip6tables"].map(program => execute(program, ["-C", "OUTPUT", "-m", "owner", "--uid-owner", "10000-60000", "-j", "NPATI_PROJECTS"], { timeout: 3000 }).then(() => true).catch(() => false))).then(results => results.every(Boolean)),
+});
 async function readiness() {
   const reasons: string[] = [];
-  const isolation = await execute("/usr/local/bin/npati-project-exec", ["--check"]).then(result => result.stdout.trim()).catch(() => { reasons.push("project_isolation_unavailable"); return null; });
-  const proxy = await fetch("http://127.0.0.1:8080/health", { signal: AbortSignal.timeout(3000) }).then(response => response.ok).catch(() => false);
+  const { isolation, proxy, network } = await readinessChecks.check();
+  if (!isolation) reasons.push("project_isolation_unavailable");
   if (!proxy) reasons.push("egress_proxy_unavailable");
-  const firewalls = await Promise.all(["iptables", "ip6tables"].map(program => execute(program, ["-C", "OUTPUT", "-m", "owner", "--uid-owner", "10000-60000", "-j", "NPATI_PROJECTS"]).then(() => true).catch(() => false)));
-  const network = firewalls.every(Boolean);
   if (!network) reasons.push("network_policy_unavailable");
   return { docker_ready: true, required_images_ready: true, egress_proxy_ready: proxy, network_policy_ready: network, dns_policy_ready: network,
     overall_ready: Boolean(isolation) && proxy && network, reasons, details: { runtimeMode: "shared", dockerRequired: false, isolation, projectRoot: "/projects" }, checkedAt: Date.now() };
@@ -64,6 +68,7 @@ app.post<{ Body: string }>("/v1/sandbox", async (request, reply) => {
     console.info("[project-runtime] " + JSON.stringify({ operation, projectId: scope.projectId, status: "ok" }));
     return { result: result ?? null };
   } catch (error) {
+    readinessChecks.invalidate();
     const known = runnerFailure(error, operation);
     console.error("[project-runtime] " + JSON.stringify({ operation, projectId: scope?.projectId, errorCode: known.code }));
     return reply.code(known.status).send({ error: { code: known.code, message: known.message, retryable: known.retryable, operation } });
