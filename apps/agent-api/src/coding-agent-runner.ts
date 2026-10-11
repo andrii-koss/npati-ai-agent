@@ -305,51 +305,24 @@ export class CodingAgentRunner {
       reason: CodingAgentStopReason,
       message: string,
       code?: string,
-    ): CodingAgentRunResult => {
-      stopHeartbeat();
-
-      this.ports.environment?.setRunSummary(null);
-      const finishedAt = this.now();
-
-      const reportedStatus: CodingAgentRunStatus = unsettledChildren && status !== "waiting_for_user" ? "interrupted" : status;
-      const reportedReason: CodingAgentStopReason = unsettledChildren && status !== "waiting_for_user"
-        ? "active_subagent_unsettled"
-        : reason;
-      return {
-        status: reportedStatus,
-        reason: reportedReason,
-        message: unsettledChildren && status !== "waiting_for_user"
-          ? `The run ended while a delegated sub-agent was still required; its completion has not been collected (${message})`
-          : message,
-        summary,
-        snapshotId,
-        startedAt,
-        finishedAt,
-        ...(code ? { code } : {}),
-        ...(input.runId ? { runId: input.runId } : {}),
-        ...(stateRunId ? { runId: stateRunId } : {}),
-        ...(model ? { model } : {}),
-        ...(provider ? { provider } : {}),
-
-        ...(lastBudget
-          ? {
-              context: {
-                currentTokens: lastBudget.currentTokens,
-                maxContextTokens: lastBudget.maxContextTokens,
-                utilizationRatio: lastBudget.utilizationRatio,
-                compactions: compactionCount,
-              },
-            }
-          : {}),
-
-        ...(summary.verification ? { verification: summary.verification } : {}),
-        ...(summary.scope ? { scope: summary.scope } : {}),
-
-        ...(summary.selfReview ? { selfReview: summary.selfReview } : {}),
-
-        ...(pendingApprovals.length ? { pendingApprovals: pendingApprovals.map((entry) => ({ ...entry })) } : {}),
-      };
-    };
+    ): CodingAgentRunResult => this.buildRunResult({
+      input,
+      summary,
+      pendingApprovals,
+      stopHeartbeat,
+      status,
+      reason,
+      message,
+      code,
+      unsettledChildren,
+      snapshotId,
+      startedAt,
+      stateRunId,
+      model,
+      provider,
+      lastBudget,
+      compactionCount,
+    });
 
     const writeState = async (operation: () => Promise<unknown>): Promise<void> => {
       try {
@@ -2678,5 +2651,86 @@ export class CodingAgentRunner {
         ),
       };
     }
+  }
+
+  private buildRunResult(args: {
+    input: CodingAgentRunInput;
+    summary: CodingAgentRunSummary;
+    pendingApprovals: CodingAgentPendingApproval[];
+    stopHeartbeat: () => void;
+    status: CodingAgentRunStatus;
+    reason: CodingAgentStopReason;
+    message: string;
+    code: string | undefined;
+    unsettledChildren: boolean;
+    snapshotId: string;
+    startedAt: number;
+    stateRunId: string | undefined;
+    model: string | undefined;
+    provider: string | undefined;
+    lastBudget: ModelRequestPressure | null;
+    compactionCount: number;
+  }): CodingAgentRunResult {
+    const {
+      input,
+      summary,
+      pendingApprovals,
+      stopHeartbeat,
+      status,
+      reason,
+      message,
+      code,
+      unsettledChildren,
+      snapshotId,
+      startedAt,
+      stateRunId,
+      model,
+      provider,
+      lastBudget,
+      compactionCount,
+    } = args;
+    stopHeartbeat();
+
+    this.ports.environment?.setRunSummary(null);
+    const finishedAt = this.now();
+
+    const reportedStatus: CodingAgentRunStatus = unsettledChildren && status !== "waiting_for_user" ? "interrupted" : status;
+    const reportedReason: CodingAgentStopReason = unsettledChildren && status !== "waiting_for_user"
+      ? "active_subagent_unsettled"
+      : reason;
+    return {
+      status: reportedStatus,
+      reason: reportedReason,
+      message: unsettledChildren && status !== "waiting_for_user"
+        ? `The run ended while a delegated sub-agent was still required; its completion has not been collected (${message})`
+        : message,
+      summary,
+      snapshotId,
+      startedAt,
+      finishedAt,
+      ...(code ? { code } : {}),
+      ...(input.runId ? { runId: input.runId } : {}),
+      ...(stateRunId ? { runId: stateRunId } : {}),
+      ...(model ? { model } : {}),
+      ...(provider ? { provider } : {}),
+
+      ...(lastBudget
+        ? {
+            context: {
+              currentTokens: lastBudget.currentTokens,
+              maxContextTokens: lastBudget.maxContextTokens,
+              utilizationRatio: lastBudget.utilizationRatio,
+              compactions: compactionCount,
+            },
+          }
+        : {}),
+
+      ...(summary.verification ? { verification: summary.verification } : {}),
+      ...(summary.scope ? { scope: summary.scope } : {}),
+
+      ...(summary.selfReview ? { selfReview: summary.selfReview } : {}),
+
+      ...(pendingApprovals.length ? { pendingApprovals: pendingApprovals.map((entry) => ({ ...entry })) } : {}),
+    };
   }
 }
