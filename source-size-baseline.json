@@ -74,7 +74,7 @@
       "expires_at": "2027-02-28"
     },
     "apps/agent-api/src/coding-agent-runner.ts": {
-      "lines": 2497,
+      "lines": 2575,
       "reason": "CodingAgentRunner: its phases are being extracted one per commit (plan step 2). The file grows while a phase is given an explicit argument object and then falls again when the phases move to their own module, so the recorded number is reviewed at each phase commit.",
       "owner": "refactor/large-files",
       "expires_at": "2027-02-28"
