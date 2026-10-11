@@ -50,7 +50,34 @@ export class MinioObjectStorage implements ObjectStorage {
     this.client=new Client({...clientConfig,transportAgent});
   }
   private deadline<T>(promise:Promise<T>,label:string){return withOperationTimeout(promise,this.operationTimeoutMs,label);}
-  async initialize(){for(const bucket of buckets)if(!await this.deadline(this.client.bucketExists(bucket),"MinIO bucket check"))await this.deadline(this.client.makeBucket(bucket,this.config.region??"us-east-1"),"MinIO bucket create");}
+  async initialize(){
+    for(const bucket of buckets){
+      let operation="bucket check";
+      try{
+        if(!await this.deadline(this.client.bucketExists(bucket),"MinIO bucket check")){
+          operation="bucket create";
+          await this.deadline(this.client.makeBucket(bucket,this.config.region??"us-east-1"),"MinIO bucket create");
+        }
+      }catch(error){
+        if((error as {code?:unknown})?.code!=="AccessDenied")throw error;
+        // HEAD has no XML error body; the SDK replaces all HTTP 403 reasons with
+        // AccessDenied. An authenticated GET can expose the real S3 error code.
+        let diagnosticCode="ListBucketsSucceeded";
+        try{await this.deadline(this.client.listBuckets(),"MinIO startup diagnostic");}
+        catch(diagnostic){
+          const code=(diagnostic as {code?:unknown})?.code;
+          diagnosticCode=typeof code==="string"&&/^[A-Za-z0-9]{1,80}$/.test(code)?code:"DiagnosticUnavailable";
+        }
+        const reason=diagnosticCode==="ListBucketsSucceeded"
+          ?"credentials accepted for ListBuckets, but this bucket operation was denied"
+          :"authenticated ListBuckets diagnostic: "+diagnosticCode;
+        // Do not log credentials or the GET error body (it may echo request data).
+        throw Object.assign(new Error("MinIO startup failed: "+operation+" for "+bucket+"; "+reason,{cause:error}),{
+          code:"AccessDenied",bucket,operation,diagnosticCode,
+        });
+      }
+    }
+  }
   async health(){try{await this.deadline(this.client.listBuckets(),"MinIO health");return "ok" as const;}catch{return "unavailable" as const;}}
   async put(bucket:string,key:string,data:Buffer,metadata:Record<string,string>={}){knownBucket(bucket);objectKey(key.split("/"));await this.deadline(this.client.putObject(bucket,key,data,data.length,metadata),"MinIO upload");}
   async get(bucket:string,key:string){knownBucket(bucket);objectKey(key.split("/"));const stream=await this.deadline(this.client.getObject(bucket,key),"MinIO download open");return withStreamTimeout(stream,this.streamIdleTimeoutMs,this.streamTotalTimeoutMs);}
