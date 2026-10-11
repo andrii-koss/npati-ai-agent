@@ -32,6 +32,7 @@ import { cleanupAllWorktrees, type ProjectGitCleanupHost } from "./project-git-c
 import { log, commit, type ProjectGitHistoryHost } from "./project-git-history-service";
 import { assertNoSymlinkPath, removePathForRevert, resolveRevertTarget, assertWorkspaceRevisionUnchanged, type ProjectGitGuardHost } from "./project-git-guard-service";
 import { resolveProjectWorkspace, assertSafeIndex, ensureRepository, requireWrite, runGit, stage, type ProjectGitWorkspaceHost } from "./project-git-workspace-service";
+import { getProjectPath, parseConflictFiles, connectRepository, restore, countWorkspaceFiles, isLargeChange, listCheckpoints, pathExistsInCommit, assertGitWriteBoundary, captureWorkspaceRevision, credentialEnvironment, getAgentWorktreePath, type ProjectGitCoreHost } from "./project-git-core-service";
 
 const execFileAsync = promisify(execFile);
 
@@ -319,6 +320,57 @@ export class ProjectGitService {
     };
   }
 
+  private coreHost(): ProjectGitCoreHost {
+    return {
+      bases: this.bases,
+      projectService: this.projectService,
+      workspaceStore: this.workspaceStore,
+      thresholds: this.thresholds,
+      boundary: this.boundary,
+      runGitImpl: this.runGitImpl,
+      resolveGithubCredential: this.resolveGithubCredential,
+      diff: this.diff.bind(this),
+      validId: validId,
+      redactSecrets: redactSecrets,
+      execFileAsync: execFileAsync,
+      resolveProjectWorkspace: this.resolveProjectWorkspace.bind(this),
+      runGit: this.runGit.bind(this),
+      assertSafeIndex: this.assertSafeIndex.bind(this),
+      requireWrite: this.requireWrite.bind(this),
+      githubToken: this.githubToken.bind(this),
+      inspectRepository: this.inspectRepository.bind(this),
+      ensureRepositoryInitialized: this.ensureRepositoryInitialized.bind(this),
+      ensureRepository: this.ensureRepository.bind(this),
+      status: this.status.bind(this),
+      log: this.log.bind(this),
+      branch: this.branch.bind(this),
+      stage: this.stage.bind(this),
+      commit: this.commit.bind(this),
+      createCheckpoint: this.createCheckpoint.bind(this),
+      getCheckpoint: this.getCheckpoint.bind(this),
+      restoreCheckpoint: this.restoreCheckpoint.bind(this),
+      restorePaths: this.restorePaths.bind(this),
+      resolveRevertTarget: this.resolveRevertTarget.bind(this),
+      removePathForRevert: this.removePathForRevert.bind(this),
+      assertNoSymlinkPath: this.assertNoSymlinkPath.bind(this),
+      push: this.push.bind(this),
+      createPullRequest: this.createPullRequest.bind(this),
+      commentOnPullRequest: this.commentOnPullRequest.bind(this),
+      resolveWriteIntent: this.resolveWriteIntent.bind(this),
+      currentBranch: this.currentBranch.bind(this),
+      requireGitWriteApproval: this.requireGitWriteApproval.bind(this),
+      assertWorkspaceRevisionUnchanged: this.assertWorkspaceRevisionUnchanged.bind(this),
+      acquireCredential: this.acquireCredential.bind(this),
+      createAgentWorktree: this.createAgentWorktree.bind(this),
+      commitAgentWorktree: this.commitAgentWorktree.bind(this),
+      diffAgentWorktree: this.diffAgentWorktree.bind(this),
+      mergeAgentWorktree: this.mergeAgentWorktree.bind(this),
+      removeAgentWorktree: this.removeAgentWorktree.bind(this),
+      cleanupAllWorktrees: this.cleanupAllWorktrees.bind(this),
+      listAgentWorktrees: this.listAgentWorktrees.bind(this),
+    };
+  }
+
   private workspaceHost(): ProjectGitWorkspaceHost {
     return {
       bases: this.bases,
@@ -489,8 +541,8 @@ export class ProjectGitService {
     return resolveProjectWorkspace(this.workspaceHost(), ctx, companyId, projectId, options);
   }
 
-  async getProjectPath(ctx: AuthContext, companyId: string, projectId: string): Promise<{ project: Project; dir: string }> {
-    return this.resolveProjectWorkspace(ctx, companyId, projectId, { create: true });
+    async getProjectPath(ctx: AuthContext, companyId: string, projectId: string): Promise<{ project: Project; dir: string }> {
+    return getProjectPath(this.coreHost(), ctx, companyId, projectId);
   }
 
     private async runGit(dir: string, args: string[], env: Record<string, string> = {}): Promise<{ stdout: string; stderr: string }> {
@@ -501,43 +553,16 @@ export class ProjectGitService {
     return assertSafeIndex(this.workspaceHost(), dir);
   }
 
-  private parseConflictFiles(output: string): string[] {
-    const files = new Set<string>();
-    const conflictRegex = /CONFLICT\s+\([^)]+\):\s+Merge conflict in\s+([^\r\n]+)/gi;
-    let match: RegExpExecArray | null;
-    while ((match = conflictRegex.exec(output)) !== null) {
-      if (match[1]) files.add(match[1].trim());
-    }
-    const bothModifiedRegex = /(?:both modified|both added|both deleted):\s+([^\r\n]+)/gi;
-    while ((match = bothModifiedRegex.exec(output)) !== null) {
-      if (match[1]) files.add(match[1].trim());
-    }
-    return [...files];
+    private parseConflictFiles(output: string): string[] {
+    return parseConflictFiles(this.coreHost(), output);
   }
 
     private requireWrite(ctx: AuthContext): void {
     return requireWrite(this.workspaceHost(), ctx);
   }
 
-  async connectRepository(ctx: AuthContext, companyId: string, projectId: string, input: { url: string; branch?: string }): Promise<Project> {
-    this.requireWrite(ctx);
-    await this.getProjectPath(ctx, companyId, projectId);
-    let parsed: URL;
-    try { parsed = new URL(input.url); } catch { throw new GitError("INVALID_REPOSITORY_URL", "Invalid repository URL", 400); }
-    if (parsed.protocol !== "https:" || parsed.hostname.toLowerCase() !== "github.com" || parsed.username || parsed.password || parsed.search || parsed.hash) {
-      throw new GitError("INVALID_REPOSITORY_URL", "A credential-free GitHub HTTPS URL is required", 400);
-    }
-    const segments = parsed.pathname.replace(/\/$/, "").replace(/\.git$/, "").split("/").filter(Boolean);
-    if (segments.length !== 2 || segments.some((segment) => !/^[A-Za-z0-9_.-]+$/.test(segment))) {
-      throw new GitError("INVALID_REPOSITORY_URL", "Invalid GitHub repository path", 400);
-    }
-    const branch = input.branch?.trim() || "main";
-    if (!/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,99}$/.test(branch) || branch.includes("..") || branch.includes("@{") || branch.endsWith(".lock")) {
-      throw new GitError("INVALID_BRANCH_NAME", "Invalid branch name", 400);
-    }
-    return this.workspaceStore.updateProjectRepository(ctx, companyId, projectId, {
-      provider: "github", url: `https://github.com/${segments[0]}/${segments[1]}.git`, branch,
-    });
+    async connectRepository(ctx: AuthContext, companyId: string, projectId: string, input: { url: string; branch?: string }): Promise<Project> {
+    return connectRepository(this.coreHost(), ctx, companyId, projectId, input);
   }
 
     private async githubToken(ctx: AuthContext, companyId: string, credentialId?: string): Promise<string> {
@@ -654,56 +679,25 @@ export class ProjectGitService {
     return commit(this.historyHost(), ctx, companyId, projectId, options);
   }
 
-  async restore(
+    async restore(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
     options: { files: string[] },
   ): Promise<{ restored: string[] }> {
-    this.requireWrite(ctx);
-    const dir = await this.ensureRepository(ctx, companyId, projectId);
-    if (!options.files || options.files.length === 0) {
-      throw new GitError("FILES_REQUIRED", "List of files to restore is required", 400);
-    }
-    const safeFiles = options.files.map((f) => safeProjectPath(f));
-    try {
-      await this.runGit(dir, ["checkout", "HEAD", "--", ...safeFiles]);
-    } catch {
-      await this.runGit(dir, ["restore", "--staged", "--worktree", "--", ...safeFiles]);
-    }
-    return { restored: safeFiles };
+    return restore(this.coreHost(), ctx, companyId, projectId, options);
   }
 
-  async countWorkspaceFiles(dir: string): Promise<number> {
-    let count = 0;
-    const countDir = async (cur: string) => {
-      const entries = await readdir(cur, { withFileTypes: true }).catch(() => []);
-      for (const e of entries) {
-        if (e.name === ".git" || e.name === "node_modules" || e.name === "dist") continue;
-        if (e.isDirectory()) await countDir(path.join(cur, e.name));
-        else if (e.isFile()) count++;
-      }
-    };
-    await countDir(dir);
-    return count;
+    async countWorkspaceFiles(dir: string): Promise<number> {
+    return countWorkspaceFiles(this.coreHost(), dir);
   }
 
-  async isLargeChange(
+    async isLargeChange(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
   ): Promise<{ isLarge: boolean; changedFiles: number; changedLines: number }> {
-    try {
-      const st = await this.status(ctx, companyId, projectId);
-      const changedFiles = new Set([...st.staged, ...st.unstaged, ...st.untracked]).size;
-      const { diff } = await this.diff(ctx, companyId, projectId);
-      const { diff: stagedDiff } = await this.diff(ctx, companyId, projectId, { staged: true });
-      const changedLines = (diff + "\n" + stagedDiff).split(/\r?\n/).filter((line) => /^[+-](?![+-])/.test(line)).length;
-      const isLarge = changedFiles >= this.thresholds.fileThreshold || changedLines >= this.thresholds.lineThreshold;
-      return { isLarge, changedFiles, changedLines };
-    } catch {
-      return { isLarge: false, changedFiles: 0, changedLines: 0 };
-    }
+    return isLargeChange(this.coreHost(), ctx, companyId, projectId);
   }
 
     async createCheckpoint(
@@ -715,14 +709,13 @@ export class ProjectGitService {
     return createCheckpoint(this.checkpointWriteHost(), ctx, companyId, projectId, input);
   }
 
-  async listCheckpoints(
+    async listCheckpoints(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
     limit = 50,
   ): Promise<ProjectCheckpoint[]> {
-    await this.getProjectPath(ctx, companyId, projectId);
-    return this.workspaceStore.listProjectCheckpoints(ctx, companyId, projectId, limit);
+    return listCheckpoints(this.coreHost(), ctx, companyId, projectId, limit);
   }
 
     async getCheckpoint(
@@ -793,13 +786,8 @@ export class ProjectGitService {
   }
 
   /** Whether a path exists at a commit. `cat-file -e` exits non-zero for a path that is not in that tree. */
-  private async pathExistsInCommit(dir: string, commit: string, file: string): Promise<boolean> {
-    try {
-      await this.runGit(dir, ["cat-file", "-e", `${commit}:${file}`]);
-      return true;
-    } catch {
-      return false;
-    }
+    private async pathExistsInCommit(dir: string, commit: string, file: string): Promise<boolean> {
+    return pathExistsInCommit(this.coreHost(), dir, commit, file);
   }
 
   /**
@@ -959,16 +947,8 @@ export class ProjectGitService {
    * C11 (owner decision 3): the second, independent protected-branch check, immediately before the write.
    * No port means no check, and no check means no write.
    */
-  private async assertGitWriteBoundary(ctx: AuthContext, companyId: string, intent: GitWriteIntent): Promise<void> {
-    const assertAllowed = this.boundary?.assertGitWriteAllowed;
-    if (!assertAllowed) {
-      throw new GitError(
-        "GIT_POLICY_UNAVAILABLE",
-        "The protected-branch policy is not wired to the git boundary; the remote write is refused",
-        503,
-      );
-    }
-    await assertAllowed(ctx, companyId, intent);
+    private async assertGitWriteBoundary(ctx: AuthContext, companyId: string, intent: GitWriteIntent): Promise<void> {
+    return assertGitWriteBoundary(this.coreHost(), ctx, companyId, intent);
   }
 
   /**
@@ -977,14 +957,12 @@ export class ProjectGitService {
    * in a test), in which case no revision is claimed rather than assumed unchanged. A guard that cannot read
    * the revision throws (`workspace_revision_mismatch`) — an unprovable revision is a refusal, never a pass.
    */
-  private async captureWorkspaceRevision(
+    private async captureWorkspaceRevision(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
   ): Promise<CodeWorkspaceRevisionSnapshot | null> {
-    const guard = this.boundary?.workspaceRevisions;
-    if (!guard) return null;
-    return guard.capture({ ctx, companyId, projectId });
+    return captureWorkspaceRevision(this.coreHost(), ctx, companyId, projectId);
   }
 
   /**
@@ -1029,31 +1007,14 @@ export class ProjectGitService {
    * and `GIT_TERMINAL_PROMPT=0` is already set by `runGit`. `GIT_CONFIG_NOSYSTEM=1` removes the system
    * config from the same invocation.
    */
-  private credentialEnvironment(token: string): Record<string, string> {
-    const auth = Buffer.from(`x-access-token:${token}`).toString("base64");
-    return {
-      GIT_CONFIG_NOSYSTEM: "1",
-      GIT_CONFIG_COUNT: "3",
-      GIT_CONFIG_KEY_0: "credential.helper",
-      GIT_CONFIG_VALUE_0: "",
-      GIT_CONFIG_KEY_1: "core.askPass",
-      GIT_CONFIG_VALUE_1: "",
-      GIT_CONFIG_KEY_2: "http.https://github.com/.extraheader",
-      GIT_CONFIG_VALUE_2: `Authorization: Basic ${auth}`,
-    };
+    private credentialEnvironment(token: string): Record<string, string> {
+    return credentialEnvironment(this.coreHost(), token);
   }
 
   private readonly mergeLocks = new Map<string, Promise<void>>();
 
-  getAgentWorktreePath(dir: string, agentSlug: string): string {
-    const slug = safeAgentSlug(agentSlug);
-    const wtBase = path.join(dir, ".worktrees");
-    const wtPath = path.join(wtBase, slug);
-    const resolved = path.resolve(wtPath);
-    if (!resolved.startsWith(path.resolve(wtBase) + path.sep)) {
-      throw new GitError("INVALID_WORKTREE_PATH", "Worktree path traversal attempt", 403);
-    }
-    return resolved;
+    getAgentWorktreePath(dir: string, agentSlug: string): string {
+    return getAgentWorktreePath(this.coreHost(), dir, agentSlug);
   }
 
     async createAgentWorktree(
