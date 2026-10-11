@@ -84,6 +84,8 @@ import {
   type ExecutionSnapshotProvider,
 } from "./execution-snapshot";
 import { CodingAgentStopReason, CodingAgentRunStatus, CODE_ASK_USER_TOOL, CodeRunToolDescriptor, CodeRunRuntimeToolDescriptor, CodeRunRuntimeDiscovery, CodeRunToolSchemaLike, CodeRunActivityEvent, CodeRunSkillProvenance, CodeRunReplayRecorderPort, CodingAgentRunnerPorts, CodingAgentRunInput, CodingAgentPendingApproval, CodingAgentRunSummary, CodingAgentSelfReviewFinding, CodingAgentRunResult, CODE_RUN_START_ACTION, CODE_RUN_START_PERMISSION, DEFAULT_ESTIMATED_TOKENS_PER_CALL, DEFAULT_ESTIMATED_COST_PER_CALL_USD, LOOP_REPEAT_THRESHOLD, MAX_ARGUMENT_CORRECTIONS, REMINDER_MESSAGE, APPROVED_TOOL_CALLS_RESULT_HEADER, CHECK_TOOL_PREFIXES, DEFAULT_VERIFICATION_TOOLS, DEFAULT_SELF_REVIEW_DIFF_CHARS, assertMetadataOnly, isReadOnlyRunTool, REVIEW_SAFE_RUN_GIT_TOOLS, createCodeRunPolicyComposition, buildSystemPrompt, chatContentText, toolCallSignature, toChatToolCall, bounded } from "./coding-agent-runner-contracts";
+import { CodingAgentRunPhases } from "./coding-agent-run-phases";
+import { CodingAgentReviewPhases } from "./coding-agent-review-phases";
 export * from "./coding-agent-runner-contracts";
 
 export class CodingAgentRunner {
@@ -94,6 +96,8 @@ export class CodingAgentRunner {
   private readonly estimatedCostPerCallUsd: number;
 
   private readonly selfReviewDiffChars: number;
+  private readonly reviewPhases: CodingAgentReviewPhases;
+  private readonly runPhases: CodingAgentRunPhases;
 
   constructor(private readonly ports: CodingAgentRunnerPorts) {
     this.limits = { ...resolveCodeAgentLimits(), ...ports.limits };
@@ -102,6 +106,18 @@ export class CodingAgentRunner {
     this.estimatedTokensPerCall = ports.estimatedTokensPerCall ?? DEFAULT_ESTIMATED_TOKENS_PER_CALL;
     this.estimatedCostPerCallUsd = ports.estimatedCostPerCallUsd ?? DEFAULT_ESTIMATED_COST_PER_CALL_USD;
     this.selfReviewDiffChars = Math.max(1_000, ports.selfReviewDiffChars ?? DEFAULT_SELF_REVIEW_DIFF_CHARS);
+    this.reviewPhases = new CodingAgentReviewPhases({
+      ports: this.ports,
+      limits: this.limits,
+      now: this.now,
+      selfReviewDiffChars: this.selfReviewDiffChars,
+    });
+    this.runPhases = new CodingAgentRunPhases({
+      ports: this.ports,
+      limits: this.limits,
+      now: this.now,
+      selfReviewDiffChars: this.selfReviewDiffChars,
+    });
   }
 
   get subagentLimits(): ResolvedCodeSubagentLimits {
@@ -305,7 +321,7 @@ export class CodingAgentRunner {
       reason: CodingAgentStopReason,
       message: string,
       code?: string,
-    ): CodingAgentRunResult => this.buildRunResult({
+    ): CodingAgentRunResult => this.runPhases.buildRunResult({
       input,
       summary,
       pendingApprovals,
@@ -337,7 +353,7 @@ export class CodingAgentRunner {
       reason: CodingAgentStopReason,
       message: string,
     ): Promise<CodingAgentRunResult> => {
-      const stopped = await this.stopRun({
+      const stopped = await this.runPhases.stopRun({
         ctx,
         input,
         session,
@@ -370,7 +386,7 @@ export class CodingAgentRunner {
 
       waitingFor: "question" | "approval" = "question",
     ): Promise<CodingAgentRunResult> => {
-      const paused = await this.pauseForUserOnce({
+      const paused = await this.runPhases.pauseForUserOnce({
         ctx,
         session,
         companyId,
@@ -530,7 +546,7 @@ export class CodingAgentRunner {
       findings.slice(0, 5).map((finding) => `${finding.path}:${finding.kind}`).join(", ");
 
     const evaluateChangeSet = async (): Promise<void> => {
-      const evaluated = await this.evaluateChangeSet({
+      const evaluated = await this.reviewPhases.evaluateChangeSet({
         input,
         companyId,
         projectId,
@@ -581,7 +597,7 @@ export class CodingAgentRunner {
       return verificationTools.map((tool) => ({ tool, state: "passed" }));
     };
 
-    const runVerification = (): Promise<void> => this.verifyOnce({
+    const runVerification = (): Promise<void> => this.reviewPhases.verifyOnce({
       ctx,
       input,
       companyId,
@@ -740,7 +756,7 @@ export class CodingAgentRunner {
     };
 
     const runSelfReview = async (): Promise<void> => {
-      const verdict = await this.runSelfReviewOnce({
+      const verdict = await this.reviewPhases.runSelfReviewOnce({
         input,
         session,
         companyId,
@@ -837,7 +853,7 @@ export class CodingAgentRunner {
       return { action: "complete" };
     };
 
-    const afterSelfReviewFix = async (): Promise<{ action: "complete" } | { action: "stop"; reason: CodingAgentStopReason; message: string }> => this.afterSelfReviewFixOnce({
+    const afterSelfReviewFix = async (): Promise<{ action: "complete" } | { action: "stop"; reason: CodingAgentStopReason; message: string }> => this.reviewPhases.afterSelfReviewFixOnce({
       ctx,
       input,
       companyId,
@@ -861,7 +877,7 @@ export class CodingAgentRunner {
       record,
     });
 
-    const admission = await this.admitRun({ ctx, input, session, companyId, projectId, sessionId });
+    const admission = await this.runPhases.admitRun({ ctx, input, session, companyId, projectId, sessionId });
     if (!admission.admitted) {
       return finish(admission.status, admission.reason, admission.message, admission.code);
     }
@@ -887,7 +903,7 @@ export class CodingAgentRunner {
 
     const useInbox = (!input.subagentScope || input.detachedChildInbox === true) && !!this.ports.inbox && await this.ports.inbox.isEnabled(ctx, companyId);
     if (this.ports.runState) {
-      const started = await this.startRunState({
+      const started = await this.runPhases.startRunState({
         ctx,
         input,
         session,
@@ -1238,7 +1254,7 @@ export class CodingAgentRunner {
       }
     };
 
-    await this.replayApprovedToolCalls({
+    await this.reviewPhases.replayApprovedToolCalls({
       ctx,
       input,
       companyId,
@@ -1951,997 +1967,13 @@ export class CodingAgentRunner {
     summary.diffStats = { files: totals.files, linesAdded: totals.linesAdded, linesRemoved: totals.linesRemoved };
   }
 
-  private async replayApprovedToolCalls(args: {
-    ctx: AuthContext;
-    input: CodingAgentRunInput;
-    companyId: string;
-    projectId: string;
-    sessionId: string;
-    stateRunId: string | undefined;
-    steps: number;
-    runtimeToolByName: { has(name: string): boolean };
-    toolVersionByName: { get(name: string): number | undefined };
-    messages: ChatMessage[];
-    summary: CodingAgentRunSummary;
-    replayRecorder: CodeRunReplayRecorderPort | undefined;
-    writeState: (operation: () => Promise<unknown>) => Promise<void>;
-    record: (event: CodeRunActivityEvent) => Promise<void>;
-  }): Promise<void> {
-    const {
-      ctx,
-      input,
-      companyId,
-      projectId,
-      sessionId,
-      stateRunId,
-      steps,
-      runtimeToolByName,
-      toolVersionByName,
-      messages,
-      summary,
-      replayRecorder,
-      writeState,
-      record,
-    } = args;
-    if (!input.approvedToolCalls?.length) return;
-    const approvedLines: string[] = [];
-    for (const approved of input.approvedToolCalls) {
-      const startedCall = this.now();
-      if (stateRunId && this.ports.runState) {
-        await writeState(() => this.ports.runState!.appendToolCall({
-          companyId, runId: stateRunId!, turnIndex: steps,
-          toolCallId: approved.toolCallId, tool: approved.tool, readOnly: false,
-          outcome: "unknown_outcome", startedAt: new Date(startedCall), finishedAt: null,
-        }));
-      }
-      let outcome: CodeToolInvokeResult | CodeToolInvokeFailure;
-      if (!runtimeToolByName.has(approved.tool) || !this.ports.runtimeCapabilities) {
 
-        outcome = {
-          ok: false,
-          error: {
-            code: "unknown_tool", status: 404, step: "resolve", retryable: false,
-            message: `The approved call names a runtime MCP tool this run does not offer: ${approved.tool}`,
-            tool: approved.tool,
-          },
-        };
-      } else {
-        try {
-          outcome = await this.ports.runtimeCapabilities.invoke({
-            ctx,
-            companyId,
-            projectId,
-            ...(sessionId ? { sessionId } : {}),
-            ...(stateRunId ?? input.runId ? { runId: stateRunId ?? input.runId } : {}),
-            ...(input.agentId ? { agentId: input.agentId } : {}),
-            ...(input.readOnlyIntent === true ? { readOnlyIntent: true } : {}),
-            tool: approved.tool,
-            args: approved.args,
-            toolCallId: approved.toolCallId,
-            approvalId: approved.approvalId,
-          });
-        } catch (error) {
-          const failure = error as { code?: string; message?: string; status?: number; step?: string; details?: Record<string, unknown> };
-          outcome = {
-            ok: false,
-            error: {
-              code: (failure.code ?? "tool_error") as CodeToolInvokeFailure["error"]["code"],
-              status: failure.status ?? 500,
-              message: failure.message ?? "The approved runtime MCP call failed",
-              tool: approved.tool,
-              step: failure.step ?? "execute",
-              retryable: false,
-              ...(failure.details ? { details: failure.details } : {}),
-            },
-          };
-        }
-      }
-      if (stateRunId && this.ports.runState) {
-        await writeState(() => this.ports.runState!.appendToolCall({
-          companyId, runId: stateRunId!, turnIndex: steps,
-          toolCallId: approved.toolCallId, tool: approved.tool, readOnly: false,
-          outcome: outcome.ok ? "ok" : "failed",
-          ...(outcome.ok ? {} : { errorCode: outcome.error.code }),
-          startedAt: new Date(startedCall), finishedAt: new Date(this.now()),
-        }));
-      }
-      summary.toolCalls += 1;
-      const text = canonicalizeSettledToolResult({
-        ok: outcome.ok,
-        tool: approved.tool,
-        ...(outcome.ok ? { result: outcome.result } : {}),
-        ...(outcome.ok ? { truncated: outcome.truncated } : {}),
-        ...(outcome.ok ? {} : { error: outcome.error }),
-        limit: this.limits.toolOutputChars,
-      });
 
-      replayRecorder?.recordToolCall({
-        turnIndex: steps,
-        toolCallId: approved.toolCallId,
-        tool: approved.tool,
-        toolVersion: toolVersionByName.get(approved.tool) ?? null,
 
-        argumentsHash: replayArgumentsHash(approved.args),
-        settledResult: text,
-        outcome: outcome.ok ? "ok" : "failed",
-        ...(outcome.ok ? {} : { errorCode: outcome.error.code }),
-        ...(outcome.ok ? { truncated: outcome.truncated === true } : {}),
-      });
-      await record({
-        kind: "tool_call",
-        companyId,
-        projectId,
-        sessionId,
-        runId: input.runId,
-        turn: steps,
-        tool: approved.tool,
-        toolCallId: approved.toolCallId,
-        ok: outcome.ok,
-        ...(outcome.ok ? {} : { errorCode: outcome.error.code }),
-        durationMs: this.now() - startedCall,
-      });
-      approvedLines.push(text);
-    }
-    if (approvedLines.length) {
-      messages.push({ role: "system", content: `${APPROVED_TOOL_CALLS_RESULT_HEADER}\n${approvedLines.join("\n")}` });
-    }
-  }
 
-  private async admitRun(args: {
-    ctx: AuthContext;
-    input: CodingAgentRunInput;
-    session: CodeSession;
-    companyId: string;
-    projectId: string;
-    sessionId: string;
-  }): Promise<
-    | { admitted: true }
-    | { admitted: false; status: CodingAgentRunStatus; reason: CodingAgentStopReason; message: string; code?: string }
-  > {
-    const { ctx, input, session, companyId, projectId, sessionId } = args;
-    try {
-      await this.ports.flags.assertEnabled(ctx, CODE_AGENT_MASTER_FLAG, { companyId, userId: ctx.userId });
 
-      await this.ports.rbac.authorize(ctx, companyId, {
-        action: CODE_RUN_START_ACTION,
-        permission: CODE_RUN_START_PERMISSION,
-        projectId,
-        sessionId,
-        mode: session.mode,
-      });
 
-      if (this.ports.admissionGate) {
-        let refusing = false;
-        let code = "disk_pressure";
-        try {
-          refusing = this.ports.admissionGate.isRefusingNewRuns() === true;
-          code = this.ports.admissionGate.refusalCode?.() ?? code;
-        } catch {
-          refusing = true;
-          code = "admission_gate_unavailable";
-        }
-        if (refusing) {
-          return {
-            admitted: false,
-            status: "failed",
-            reason: "refused",
-            message: `The deployment is refusing new runs (${code}); the run was not started.`,
-            code,
-          };
-        }
-      }
 
-      if (input.imageReference) {
-        if (!this.ports.imageAdmission) {
-          return {
-            admitted: false,
-            status: "failed",
-            reason: "refused",
-            message: "Sandbox image admission policy is not configured; the run was not started.",
-          };
-        }
-        const admitted = await this.ports.imageAdmission.admit(ctx, { companyId, reference: input.imageReference });
 
-        this.ports.environment?.setSandboxImage({
-          digest: admitted.digest ?? null,
-          ...(admitted.sbomRef !== undefined ? { sbomRef: admitted.sbomRef } : {}),
-        });
-      }
 
-      const readerInput = {
-        ctx,
-        companyId,
-        projectId,
-        ...(sessionId ? { sessionId } : {}),
-        ...(input.model ? { model: input.model } : {}),
-      };
-      const readFact = async <T>(read: (() => Promise<T | null>) | undefined): Promise<T | null> => {
-        if (!read) return null;
-        try {
-          return await read();
-        } catch {
-          return null;
-        }
-      };
-      const policyComposition = await createCodeRunPolicyComposition({
-        ctx,
-        companyId,
-        projectId,
-        ...(sessionId ? { sessionId } : {}),
-        ...(this.ports.policyCompositionSources ? { sources: this.ports.policyCompositionSources } : {}),
-      });
-      this.ports.environment?.setPolicyComposition(policyComposition);
-      const factSources = this.ports.policyCompositionSources;
-      this.ports.environment?.setFeatureFlags(
-        await readFact(factSources?.featureFlags ? () => factSources.featureFlags!(readerInput) : undefined),
-      );
-      this.ports.environment?.setProviderDataPolicy(
-        await readFact(
-          factSources?.providerDataPolicy ? () => factSources.providerDataPolicy!(readerInput) : undefined,
-        ),
-      );
-      this.ports.environment?.setBaseCommit(
-        await readFact(
-          factSources?.baseCommit
-            ? () => factSources.baseCommit!({ ctx, companyId, projectId })
-            : undefined,
-        ),
-      );
-      this.ports.environment?.setToolchain(
-        await readFact(
-          factSources?.toolchain ? () => factSources.toolchain!({ ctx, companyId, projectId }) : undefined,
-        ),
-      );
-      return { admitted: true };
-    } catch (error) {
-      const failure = error as { code?: string; message?: string };
-      return {
-        admitted: false,
-        status: "failed",
-        reason: "refused",
-        message: failure.message ?? `The run was refused (${failure.code ?? "refused"}).`,
-      };
-    }
-  }
-
-  private async verifyOnce(args: {
-    ctx: AuthContext;
-    input: CodingAgentRunInput;
-    companyId: string;
-    projectId: string;
-    sessionId: string;
-    stateRunId: string | undefined;
-    steps: number;
-    turnId: string;
-    verificationTools: readonly string[];
-    capabilityScopeFields: {
-      subagentWritePaths?: CodingAgentRunInput["subagentWritePaths"];
-      capabilityScope?: readonly string[];
-      parentRunId?: string;
-    };
-    verificationLoop: VerificationLoop;
-    toCheckReports: (outcome: CodeToolInvokeResult | CodeToolInvokeFailure) => VerificationCheckReport[];
-    record: (event: CodeRunActivityEvent) => Promise<void>;
-  }): Promise<void> {
-    const {
-      ctx,
-      input,
-      companyId,
-      projectId,
-      sessionId,
-      stateRunId,
-      steps,
-      turnId,
-      verificationTools,
-      capabilityScopeFields,
-      verificationLoop,
-      toCheckReports,
-      record,
-    } = args;
-    const attempt = verificationLoop.report().verificationRuns + 1;
-    let outcome: CodeToolInvokeResult | CodeToolInvokeFailure;
-    try {
-      outcome = await this.ports.toolRuntime.invoke(ctx, {
-        companyId,
-        projectId,
-        sessionId,
-        tool: "code.verify.run",
-        args: { tools: [...verificationTools], changedOnly: true },
-        toolCallId: `verify:${turnId}:${attempt}`,
-        turnId,
-        ...(input.runId ? { runId: input.runId } : {}),
-        ...(stateRunId ? { runId: stateRunId } : {}),
-        ...(input.readOnlyIntent === true ? { readOnlyIntent: true } : {}),
-        ...capabilityScopeFields,
-      });
-    } catch (error) {
-      const failure = error as { code?: string; message?: string };
-      outcome = {
-        ok: false,
-        error: {
-          code: (failure.code ?? "verify_error") as CodeToolInvokeFailure["error"]["code"],
-          status: 500,
-          message: failure.message ?? "Verification failed to run",
-          tool: "code.verify.run",
-          step: "execute",
-          retryable: false,
-        },
-      };
-    }
-    const checks = toCheckReports(outcome);
-    verificationLoop.record(checks);
-    await record({
-      kind: "tool_call",
-      companyId, projectId, sessionId,
-      runId: input.runId,
-      turn: steps,
-      tool: "code.verify.run",
-      toolCallId: `verify:${turnId}:${attempt}`,
-      ok: outcome.ok,
-      ...(outcome.ok ? {} : { errorCode: String(outcome.error.code) }),
-    });
-  }
-
-  private async evaluateChangeSet(args: {
-    input: CodingAgentRunInput;
-    companyId: string;
-    projectId: string;
-    sessionId: string;
-    steps: number;
-    prompt: string;
-    summary: CodingAgentRunSummary;
-    runChanges: () => Array<{ path: string; tool: string; status?: string; diff?: string }>;
-    record: (event: CodeRunActivityEvent) => Promise<void>;
-  }): Promise<{ testIntegrity: TestIntegrityVerdict | null; scopeGuard: ScopeGuardResult | null } | null> {
-    const { input, companyId, projectId, sessionId, steps, prompt, summary, runChanges, record } = args;
-    const changes = runChanges();
-    if (!changes.length) return null;
-    const testIntegrity = analyzeTestIntegrity(changes);
-    const scopeGuard = evaluateScopeGuard({
-      changedPaths: changes.map((change) => change.path),
-      requestText: prompt,
-      maxChangedFiles: this.limits.maxChangedFiles,
-    });
-    summary.scope = {
-      changedFiles: scopeGuard.changedFiles,
-      limit: scopeGuard.limit,
-      exceeded: scopeGuard.exceeded,
-      severity: scopeGuard.severity,
-      unrelatedPaths: scopeGuard.unrelatedPaths,
-      relatednessUnknown: scopeGuard.relatednessUnknown,
-      warnings: scopeGuard.warnings.map((warning) => ({
-        code: warning.code,
-        message: warning.message,
-        severity: warning.severity,
-        paths: warning.paths,
-      })),
-    };
-    for (const warning of scopeGuard.warnings) {
-
-      await record({
-        kind: "turn",
-        companyId, projectId, sessionId,
-        runId: input.runId,
-        turn: steps,
-        ok: warning.severity !== "critical",
-        reason: warning.code,
-      });
-    }
-    if (testIntegrity.flagged) {
-      await record({
-        kind: "turn",
-        companyId, projectId, sessionId,
-        runId: input.runId,
-        turn: steps,
-        ok: false,
-        reason: "test_integrity_flagged",
-      });
-    }
-    return { testIntegrity, scopeGuard };
-  }
-
-  private async pauseForUserOnce(args: {
-    ctx: AuthContext;
-    session: CodeSession;
-    companyId: string;
-    steps: number;
-    turnId: string;
-    stateRunId: string | undefined;
-    stateOwner: string;
-    inboxOpened: boolean;
-    summary: CodingAgentRunSummary;
-    question: { questionId: string; toolCallId: string };
-    waitingFor: "question" | "approval";
-    writeState: (operation: () => Promise<unknown>) => Promise<void>;
-    stopHeartbeat: () => void;
-    turnCheckpointId: () => string | null;
-    release: (reason: string) => Promise<void>;
-    finish: (
-      status: CodingAgentRunStatus,
-      reason: CodingAgentStopReason,
-      message: string,
-      code?: string,
-    ) => CodingAgentRunResult;
-  }): Promise<{ result: CodingAgentRunResult; inboxOpened: boolean }> {
-    const {
-      ctx,
-      session,
-      companyId,
-      steps,
-      turnId,
-      stateRunId,
-      stateOwner,
-      summary,
-      question,
-      waitingFor,
-      writeState,
-      stopHeartbeat,
-      turnCheckpointId,
-      release,
-      finish,
-    } = args;
-    let inboxOpened = args.inboxOpened;
-    if (stateRunId && this.ports.runState) {
-      if (this.ports.runState.markWaitingForUser) {
-        await writeState(() => this.ports.runState!.markWaitingForUser!({
-          companyId, runId: stateRunId!, questionId: question.questionId, toolCallId: question.toolCallId,
-        }));
-      } else {
-
-        this.ports.logger?.warn("run_state_pause_unsupported", {
-          runId: stateRunId, questionId: question.questionId,
-        });
-      }
-      await writeState(() => this.ports.runState!.appendTurn({
-        companyId, runId: stateRunId!, turnIndex: steps, status: "finished", outcome: "ok",
-        checkpointId: turnCheckpointId(),
-      }));
-    }
-    stopHeartbeat();
-
-    if (inboxOpened && stateRunId) {
-      try {
-        await this.ports.inbox!.transact(session, { kind: "pause", runId: stateRunId, owner: stateOwner });
-        inboxOpened = false;
-      } catch {
-        this.ports.logger?.warn("inbox_pause_not_recorded");
-      }
-    }
-    await release("waiting_for_user");
-    await this.ports.runEvents?.append({
-      eventKey: `code-run-waiting-for-user:${turnId}`,
-      eventType: "waiting_for_user",
-      runStatus: "waiting_for_user",
-      message: waitingFor === "approval"
-        ? "Coding Agent run is waiting for an approval decision"
-        : "Coding Agent run is waiting for the user to answer a question",
-    });
-    summary.turns = steps;
-    summary.remaining = waitingFor === "approval"
-      ? "The run is waiting for an approval decision."
-      : "The run is waiting for the user to answer a question.";
-    return {
-      result: finish(
-        "waiting_for_user",
-        "waiting_for_user",
-        waitingFor === "approval"
-          ? `Waiting for an approval decision on tool call ${question.toolCallId}.`
-          : `Waiting for the user to answer question ${question.questionId}.`,
-      ),
-      inboxOpened,
-    };
-  }
-
-  private async startRunState(args: {
-    ctx: AuthContext;
-    input: CodingAgentRunInput;
-    session: CodeSession;
-    companyId: string;
-    projectId: string;
-    sessionId: string;
-    stateOwner: string;
-    prompt: string;
-    useInbox: boolean;
-    finish: (
-      status: CodingAgentRunStatus,
-      reason: CodingAgentStopReason,
-      message: string,
-      code?: string,
-    ) => CodingAgentRunResult;
-  }): Promise<{ ok: true; runId: string } | { ok: false; result: CodingAgentRunResult }> {
-    const { ctx, input, session, companyId, projectId, sessionId, stateOwner, prompt, useInbox, finish } = args;
-    try {
-      const startedState = await this.ports.runState!.startRun({
-        ctx,
-        companyId,
-        projectId,
-        sessionId,
-        owner: stateOwner,
-        ...(input.runDetails ? { details: input.runDetails } : {}),
-        ...(input.runId ? { runId: input.runId } : {}),
-
-        request: prompt,
-        dataClassification: session.dataClassification,
-        retentionClass: session.retentionClass,
-      });
-      if (useInbox && !(await this.ports.runState!.renewLease({ companyId, runId: startedState.runId, owner: stateOwner })).held) {
-        return {
-          ok: false,
-          result: finish("interrupted", "interrupted", "Another worker already owns this run. No model or tool was dispatched."),
-        };
-      }
-      const stateRunId = startedState.runId;
-
-      if (this.ports.sessionRunLink && session.runId !== stateRunId) {
-        try {
-          const link = await this.ports.sessionRunLink({
-            ctx, companyId, projectId, sessionId, runId: stateRunId,
-          });
-          if (!link.linked) {
-            this.ports.logger?.warn("code_session_run_link_failed", {
-              sessionId, runId: stateRunId, reason: link.reason ?? "unknown",
-            });
-          }
-        } catch (error) {
-          this.ports.logger?.warn("code_session_run_link_error", {
-            sessionId, runId: stateRunId, reason: (error as Error).message,
-          });
-        }
-      }
-      return { ok: true, runId: stateRunId };
-    } catch (error) {
-      const failure = error as { code?: string; message?: string };
-      return {
-        ok: false,
-        result: finish(
-          "failed",
-          "refused",
-          failure.message ?? `The run state could not be recorded (${failure.code ?? "state_unavailable"}).`,
-        ),
-      };
-    }
-  }
-
-  private buildRunResult(args: {
-    input: CodingAgentRunInput;
-    summary: CodingAgentRunSummary;
-    pendingApprovals: CodingAgentPendingApproval[];
-    stopHeartbeat: () => void;
-    status: CodingAgentRunStatus;
-    reason: CodingAgentStopReason;
-    message: string;
-    code: string | undefined;
-    unsettledChildren: boolean;
-    snapshotId: string;
-    startedAt: number;
-    stateRunId: string | undefined;
-    model: string | undefined;
-    provider: string | undefined;
-    lastBudget: ModelRequestPressure | null;
-    compactionCount: number;
-  }): CodingAgentRunResult {
-    const {
-      input,
-      summary,
-      pendingApprovals,
-      stopHeartbeat,
-      status,
-      reason,
-      message,
-      code,
-      unsettledChildren,
-      snapshotId,
-      startedAt,
-      stateRunId,
-      model,
-      provider,
-      lastBudget,
-      compactionCount,
-    } = args;
-    stopHeartbeat();
-
-    this.ports.environment?.setRunSummary(null);
-    const finishedAt = this.now();
-
-    const reportedStatus: CodingAgentRunStatus = unsettledChildren && status !== "waiting_for_user" ? "interrupted" : status;
-    const reportedReason: CodingAgentStopReason = unsettledChildren && status !== "waiting_for_user"
-      ? "active_subagent_unsettled"
-      : reason;
-    return {
-      status: reportedStatus,
-      reason: reportedReason,
-      message: unsettledChildren && status !== "waiting_for_user"
-        ? `The run ended while a delegated sub-agent was still required; its completion has not been collected (${message})`
-        : message,
-      summary,
-      snapshotId,
-      startedAt,
-      finishedAt,
-      ...(code ? { code } : {}),
-      ...(input.runId ? { runId: input.runId } : {}),
-      ...(stateRunId ? { runId: stateRunId } : {}),
-      ...(model ? { model } : {}),
-      ...(provider ? { provider } : {}),
-
-      ...(lastBudget
-        ? {
-            context: {
-              currentTokens: lastBudget.currentTokens,
-              maxContextTokens: lastBudget.maxContextTokens,
-              utilizationRatio: lastBudget.utilizationRatio,
-              compactions: compactionCount,
-            },
-          }
-        : {}),
-
-      ...(summary.verification ? { verification: summary.verification } : {}),
-      ...(summary.scope ? { scope: summary.scope } : {}),
-
-      ...(summary.selfReview ? { selfReview: summary.selfReview } : {}),
-
-      ...(pendingApprovals.length ? { pendingApprovals: pendingApprovals.map((entry) => ({ ...entry })) } : {}),
-    };
-  }
-
-  private async stopRun(args: {
-    ctx: AuthContext;
-    input: CodingAgentRunInput;
-    session: CodeSession;
-    companyId: string;
-    projectId: string;
-    sessionId: string;
-    status: Exclude<CodingAgentRunStatus, "waiting_for_user">;
-    reason: CodingAgentStopReason;
-    message: string;
-    inboxOpened: boolean;
-    stateRunId: string | undefined;
-    stateOwner: string;
-    summary: CodingAgentRunSummary;
-    snapshotId: string;
-    replayRecorder: CodeRunReplayRecorderPort | undefined;
-    completionArtifacts: Record<string, unknown>[];
-    compressionArtifacts: Record<string, unknown>[];
-    commandProvenance: readonly Record<string, unknown>[];
-    selfReviewVerdict: SelfReviewVerdict | null;
-    unsettledChildren: boolean;
-    writeState: (operation: () => Promise<unknown>) => Promise<void>;
-    finish: (
-      status: CodingAgentRunStatus,
-      reason: CodingAgentStopReason,
-      message: string,
-      code?: string,
-    ) => CodingAgentRunResult;
-  }): Promise<{ result: CodingAgentRunResult; inboxOpened: boolean }> {
-    const {
-      ctx,
-      input,
-      session,
-      companyId,
-      projectId,
-      sessionId,
-      message,
-      stateRunId,
-      stateOwner,
-      summary,
-      snapshotId,
-      replayRecorder,
-      completionArtifacts,
-      compressionArtifacts,
-      commandProvenance,
-      selfReviewVerdict,
-      unsettledChildren,
-      writeState,
-      finish,
-    } = args;
-    let status = args.status;
-    let reason = args.reason;
-    let inboxOpened = args.inboxOpened;
-    if (unsettledChildren) { status = "interrupted"; reason = "active_subagent_unsettled"; }
-    if (inboxOpened && stateRunId) {
-      try {
-        if (this.ports.runState && !(await this.ports.runState.renewLease({ companyId, runId: stateRunId, owner: stateOwner })).held) {
-          return { result: finish("interrupted", "interrupted", "The run lease changed before settlement. The replacement's state was not modified."), inboxOpened };
-        }
-        await this.ports.inbox!.transact(session, { kind: "close", runId: stateRunId, owner: stateOwner });
-        inboxOpened = false;
-      } catch {
-
-        return { result: finish("interrupted", "interrupted", "Durable inbox settlement could not be confirmed. Pending input remains recoverable."), inboxOpened };
-      }
-    }
-
-    if (replayRecorder) {
-      try {
-        await replayRecorder.finalize({
-          ...(completionArtifacts.length ? { completionArtifacts } : {}),
-          terminalStatus: status,
-          terminalReason: reason,
-          compressionArtifacts,
-
-          commandExpansions: commandProvenance,
-        });
-      } catch (error) {
-        this.ports.logger?.warn("replay_bundle_refused", {
-          code: (error as { code?: string })?.code ?? "replay_bundle_error",
-          runId: stateRunId ?? input.runId,
-        });
-      }
-    }
-    if (stateRunId && this.ports.runState) {
-
-      const stateStatus = status === "cancelled"
-        ? "cancelled"
-        : status === "failed" ? "failed" : status === "interrupted" ? "interrupted" : "completed";
-      if (status === "interrupted" && (input.detachedChildInbox || unsettledChildren || reason === "async_collect_unsettled")) {
-        await writeState(() => this.ports.runState!.markInterrupted?.({ companyId, runId: stateRunId!, reason })
-          ?? this.ports.runState!.markFinished({ companyId, runId: stateRunId!, status: "interrupted", reason }));
-        await writeState(() => this.ports.runState!.releaseLease?.({ companyId, runId: stateRunId!, owner: stateOwner }) ?? Promise.resolve());
-      } else await writeState(() => this.ports.runState!.markFinished({
-        companyId, runId: stateRunId!, status: stateStatus, reason,
-
-        estimate: {
-          tokenCount: summary.tokens,
-          costUsd: Number.isFinite(summary.costUsd) ? summary.costUsd : null,
-          turns: summary.turns,
-          toolCalls: summary.toolCalls,
-          filesChanged: summary.filesChanged.length,
-          diffStats: summary.diffStats,
-
-          ...(summary.verification ? { verification: summary.verification } : {}),
-          ...(summary.scope ? { scope: summary.scope } : {}),
-
-          ...(selfReviewVerdict ? { selfReview: toPersistedSelfReview(selfReviewVerdict) } : {}),
-        },
-      }));
-    }
-
-    try {
-      await this.ports.lifecycleHooks?.stop({
-        ctx, companyId, projectId, sessionId,
-        ...(input.runId ? { runId: input.runId } : {}),
-        ...(stateRunId ? { runId: stateRunId } : {}),
-        snapshotId: snapshotId ?? null,
-        status,
-        reason,
-      });
-    } catch {
-
-    }
-    return { result: finish(status, reason, message), inboxOpened };
-  }
-
-  private async runSelfReviewOnce(args: {
-    input: CodingAgentRunInput;
-    session: CodeSession;
-    companyId: string;
-    projectId: string;
-    sessionId: string;
-    steps: number;
-    prompt: string;
-    selfReviewState: SelfReviewState | null;
-    loadApprovedPlan: () => Promise<string | null>;
-    runChanges: () => Array<{ path: string; tool: string; status?: string; diff?: string }>;
-    verificationForReview: () => string;
-    testIntegrityForReview: () => string;
-    boundedDiff: (limit: number) => string;
-    writeSelfReviewSummary: () => void;
-    setSelfReviewVerdict: (verdict: SelfReviewVerdict) => void;
-    record: (event: CodeRunActivityEvent) => Promise<void>;
-  }): Promise<SelfReviewVerdict | null> {
-    const {
-      input,
-      session,
-      companyId,
-      projectId,
-      sessionId,
-      steps,
-      prompt,
-      selfReviewState,
-      loadApprovedPlan,
-      runChanges,
-      verificationForReview,
-      testIntegrityForReview,
-      boundedDiff,
-      writeSelfReviewSummary,
-      setSelfReviewVerdict,
-      record,
-    } = args;
-    const state = selfReviewState;
-    if (!state) return null;
-    const verdict = await state.execute({
-      input: {
-        originalGoal: prompt,
-        approvedPlan: await loadApprovedPlan(),
-        finalDiff: boundedDiff(this.selfReviewDiffChars),
-        changedFiles: runChanges().map((change) => ({
-          path: change.path,
-          tool: change.tool,
-          ...(change.status !== undefined ? { status: change.status } : {}),
-        })),
-        verification: verificationForReview(),
-        testIntegrity: testIntegrityForReview(),
-      },
-      reviewRequest: state.request(),
-      chat: async (request) => {
-        try {
-          const result = await this.ports.engine.chat({
-            messages: request.messages,
-
-            model: input.model,
-            ...(input.fallbackModel ? { fallbackModel: input.fallbackModel } : {}),
-            signal: input.signal,
-            idempotencyKey: request.idempotencyKey,
-            policyContext: {
-              companyId,
-              projectId,
-              sessionId,
-              dataClassification: session.dataClassification,
-            },
-          });
-          return { ok: true as const, content: result.content ?? "" };
-        } catch (error) {
-          const failure = error as { code?: string; message?: string };
-          return { ok: false as const, code: failure.code ?? "review_call_failed", message: failure.message };
-        }
-      },
-
-      ...(this.ports.providerDataGuard
-        ? {
-            guardPrompt: async (text: string) => {
-              await this.ports.providerDataGuard!.guardProviderBoundText(text, {
-                model: input.model,
-                policyContext: {
-                  companyId,
-                  projectId,
-                  sessionId,
-                  dataClassification: session.dataClassification,
-                },
-              });
-            },
-          }
-        : {}),
-    });
-    setSelfReviewVerdict(verdict);
-    writeSelfReviewSummary();
-    await record({
-      kind: "turn",
-      companyId, projectId, sessionId,
-      runId: input.runId,
-      turn: steps,
-
-      ok: verdict.status === "clean" || verdict.status === "repaired",
-      reason: `${describeSelfReview(verdict)} profile=${this.ports.selfReview?.profileId ?? "run-default"}`,
-    });
-    return verdict;
-  }
-
-  private async afterSelfReviewFixOnce(args: {
-    ctx: AuthContext;
-    input: CodingAgentRunInput;
-    companyId: string;
-    projectId: string;
-    sessionId: string;
-    steps: number;
-    turnId: string;
-    stateRunId: string | undefined;
-    verificationTools: readonly string[];
-    capabilityScopeFields: {
-      subagentWritePaths?: CodingAgentRunInput["subagentWritePaths"];
-      capabilityScope?: readonly string[];
-      parentRunId?: string;
-    };
-    selfReviewState: SelfReviewState | null;
-    verificationLoop: VerificationLoop;
-    verifiedSignature: string | null;
-    currentChangeSignature: () => string;
-    getSelfReviewVerdict: () => SelfReviewVerdict | null;
-    setSelfReviewVerdict: (verdict: SelfReviewVerdict | null) => void;
-    setSelfReviewFixPending: (pending: boolean) => void;
-    writeSelfReviewSummary: () => void;
-    writeVerificationSummary: () => void;
-    toCheckReports: (outcome: CodeToolInvokeResult | CodeToolInvokeFailure) => VerificationCheckReport[];
-    record: (event: CodeRunActivityEvent) => Promise<void>;
-  }): Promise<{ action: "complete" } | { action: "stop"; reason: CodingAgentStopReason; message: string }> {
-    const {
-      ctx,
-      input,
-      companyId,
-      projectId,
-      sessionId,
-      steps,
-      turnId,
-      stateRunId,
-      verificationTools,
-      capabilityScopeFields,
-      selfReviewState,
-      verificationLoop,
-      verifiedSignature,
-      currentChangeSignature,
-      getSelfReviewVerdict,
-      setSelfReviewVerdict,
-      setSelfReviewFixPending,
-      writeSelfReviewSummary,
-      writeVerificationSummary,
-      toCheckReports,
-      record,
-    } = args;
-    const changed = currentChangeSignature() !== verifiedSignature;
-    setSelfReviewFixPending(false);
-    if (!changed) {
-
-      selfReviewState?.noteFixOutcome(false);
-      setSelfReviewVerdict(selfReviewState?.report() ?? getSelfReviewVerdict());
-      writeSelfReviewSummary();
-      const outstanding = (getSelfReviewVerdict()?.unresolved ?? []).filter((finding) => finding.blocking);
-      if (outstanding.length) {
-        return { action: "stop", reason: "self_review_unresolved", message: selfReviewStopMessage(getSelfReviewVerdict() ?? undefined) };
-      }
-      return { action: "complete" };
-    }
-
-    const runAttempt = verificationLoop.report().verificationRuns + 1;
-    let outcome: CodeToolInvokeResult | CodeToolInvokeFailure;
-    try {
-      outcome = await this.ports.toolRuntime.invoke(ctx, {
-        companyId,
-        projectId,
-        sessionId,
-        tool: "code.verify.run",
-        args: { tools: [...verificationTools], changedOnly: true },
-        toolCallId: `verify:self-review:${turnId}:${runAttempt}`,
-        turnId,
-        ...(input.runId ? { runId: input.runId } : {}),
-        ...(stateRunId ? { runId: stateRunId } : {}),
-        ...(input.readOnlyIntent === true ? { readOnlyIntent: true } : {}),
-        ...capabilityScopeFields,
-      });
-    } catch (error) {
-      const failure = error as { code?: string; message?: string };
-      outcome = {
-        ok: false,
-        error: {
-          code: (failure.code ?? "verify_error") as CodeToolInvokeFailure["error"]["code"],
-          status: 500,
-          message: failure.message ?? "Verification failed to run",
-          tool: "code.verify.run",
-          step: "execute",
-          retryable: false,
-        },
-      };
-    }
-    const checks = toCheckReports(outcome);
-
-    verificationLoop.record(checks);
-    verificationLoop.blockFurtherRepairs();
-    writeVerificationSummary();
-    await record({
-      kind: "tool_call",
-      companyId, projectId, sessionId,
-      runId: input.runId,
-      turn: steps,
-      tool: "code.verify.run",
-      toolCallId: `verify:self-review:${turnId}:${runAttempt}`,
-      ok: outcome.ok,
-      ...(outcome.ok ? {} : { errorCode: String(outcome.error.code) }),
-      reason: "self_review_reverify",
-    });
-
-    const failed = checks.filter((check) => check.state !== "passed");
-    if (failed.length) {
-
-      selfReviewState?.noteFixOutcome(false);
-      setSelfReviewVerdict(selfReviewState?.report() ?? getSelfReviewVerdict());
-      writeSelfReviewSummary();
-      return {
-        action: "stop",
-        reason: "verification_failed",
-        message: `Stopped: the checks still fail after the self-review fix (${failed.map((check) => check.tool).join(", ")}).`,
-      };
-    }
-
-    selfReviewState?.noteFixOutcome(true);
-    setSelfReviewVerdict(selfReviewState?.report() ?? getSelfReviewVerdict());
-    writeSelfReviewSummary();
-    return { action: "complete" };
-  }
 }

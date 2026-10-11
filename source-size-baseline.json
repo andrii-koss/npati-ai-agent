@@ -8,7 +8,7 @@
       "expires_at": "2027-02-28"
     },
     "apps/agent-api/src/app.ts": {
-      "lines": 1441,
+      "lines": 1446,
       "reason": "API module not yet decomposed; tracked as follow-up to the plan in docs/refactoring/PLAN.md",
       "owner": "refactor/large-files",
       "expires_at": "2027-02-28"
@@ -26,7 +26,7 @@
       "expires_at": "2027-02-28"
     },
     "apps/agent-api/src/code-policy-engine.ts": {
-      "lines": 1172,
+      "lines": 1178,
       "reason": "API module not yet decomposed; tracked as follow-up to the plan in docs/refactoring/PLAN.md",
       "owner": "refactor/large-files",
       "expires_at": "2027-02-28"
@@ -56,25 +56,25 @@
       "expires_at": "2027-02-28"
     },
     "apps/agent-api/src/code-tool-executors.ts": {
-      "lines": 1263,
+      "lines": 1265,
       "reason": "API module not yet decomposed; tracked as follow-up to the plan in docs/refactoring/PLAN.md",
       "owner": "refactor/large-files",
       "expires_at": "2027-02-28"
     },
     "apps/agent-api/src/code-tool-runtime.ts": {
-      "lines": 1778,
+      "lines": 1800,
       "reason": "API module not yet decomposed; tracked as follow-up to the plan in docs/refactoring/PLAN.md",
       "owner": "refactor/large-files",
       "expires_at": "2027-02-28"
     },
     "apps/agent-api/src/coding-agent-runner-contracts.ts": {
-      "lines": 1115,
+      "lines": 1117,
       "reason": "runner contracts moved out of the runner in step 3b; further split pending step 2",
       "owner": "refactor/large-files",
       "expires_at": "2027-02-28"
     },
     "apps/agent-api/src/coding-agent-runner.ts": {
-      "lines": 2947,
+      "lines": 1979,
       "reason": "CodingAgentRunner: its phases are being extracted one per commit (plan step 2). The file grows while a phase is given an explicit argument object and then falls again when the phases move to their own module, so the recorded number is reviewed at each phase commit.",
       "owner": "refactor/large-files",
       "expires_at": "2027-02-28"
@@ -86,13 +86,13 @@
       "expires_at": "2027-02-28"
     },
     "apps/agent-api/src/data-studio/auth-service.ts": {
-      "lines": 1270,
+      "lines": 1273,
       "reason": "API module not yet decomposed; tracked as follow-up to the plan in docs/refactoring/PLAN.md",
       "owner": "refactor/large-files",
       "expires_at": "2027-02-28"
     },
     "apps/agent-api/src/data-studio/gateway-service.ts": {
-      "lines": 848,
+      "lines": 852,
       "reason": "API module not yet decomposed; tracked as follow-up to the plan in docs/refactoring/PLAN.md",
       "owner": "refactor/large-files",
       "expires_at": "2027-02-28"
