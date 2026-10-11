@@ -1065,49 +1065,20 @@ export class CodingAgentRunner {
 
     const useInbox = (!input.subagentScope || input.detachedChildInbox === true) && !!this.ports.inbox && await this.ports.inbox.isEnabled(ctx, companyId);
     if (this.ports.runState) {
-      try {
-        const startedState = await this.ports.runState.startRun({
-          ctx,
-          companyId,
-          projectId,
-          sessionId,
-          owner: stateOwner,
-          ...(input.runDetails ? { details: input.runDetails } : {}),
-          ...(input.runId ? { runId: input.runId } : {}),
-
-          request: prompt,
-          dataClassification: session.dataClassification,
-          retentionClass: session.retentionClass,
-        });
-        if (useInbox && !(await this.ports.runState.renewLease({ companyId, runId: startedState.runId, owner: stateOwner })).held) {
-          return finish("interrupted", "interrupted", "Another worker already owns this run. No model or tool was dispatched.");
-        }
-        stateRunId = startedState.runId;
-
-        if (this.ports.sessionRunLink && session.runId !== stateRunId) {
-          try {
-            const link = await this.ports.sessionRunLink({
-              ctx, companyId, projectId, sessionId, runId: stateRunId,
-            });
-            if (!link.linked) {
-              this.ports.logger?.warn("code_session_run_link_failed", {
-                sessionId, runId: stateRunId, reason: link.reason ?? "unknown",
-              });
-            }
-          } catch (error) {
-            this.ports.logger?.warn("code_session_run_link_error", {
-              sessionId, runId: stateRunId, reason: (error as Error).message,
-            });
-          }
-        }
-      } catch (error) {
-        const failure = error as { code?: string; message?: string };
-        return finish(
-          "failed",
-          "refused",
-          failure.message ?? `The run state could not be recorded (${failure.code ?? "state_unavailable"}).`,
-        );
-      }
+      const started = await this.startRunState({
+        ctx,
+        input,
+        session,
+        companyId,
+        projectId,
+        sessionId,
+        stateOwner,
+        prompt,
+        useInbox,
+        finish,
+      });
+      if (!started.ok) return started.result;
+      stateRunId = started.runId;
 
       const heartbeatEveryMs = Math.max(1_000, this.limits.runHeartbeatMs);
       heartbeatTimer = setInterval(() => {
@@ -2637,5 +2608,75 @@ export class CodingAgentRunner {
       ),
       inboxOpened,
     };
+  }
+
+  private async startRunState(args: {
+    ctx: AuthContext;
+    input: CodingAgentRunInput;
+    session: CodeSession;
+    companyId: string;
+    projectId: string;
+    sessionId: string;
+    stateOwner: string;
+    prompt: string;
+    useInbox: boolean;
+    finish: (
+      status: CodingAgentRunStatus,
+      reason: CodingAgentStopReason,
+      message: string,
+      code?: string,
+    ) => CodingAgentRunResult;
+  }): Promise<{ ok: true; runId: string } | { ok: false; result: CodingAgentRunResult }> {
+    const { ctx, input, session, companyId, projectId, sessionId, stateOwner, prompt, useInbox, finish } = args;
+    try {
+      const startedState = await this.ports.runState!.startRun({
+        ctx,
+        companyId,
+        projectId,
+        sessionId,
+        owner: stateOwner,
+        ...(input.runDetails ? { details: input.runDetails } : {}),
+        ...(input.runId ? { runId: input.runId } : {}),
+
+        request: prompt,
+        dataClassification: session.dataClassification,
+        retentionClass: session.retentionClass,
+      });
+      if (useInbox && !(await this.ports.runState!.renewLease({ companyId, runId: startedState.runId, owner: stateOwner })).held) {
+        return {
+          ok: false,
+          result: finish("interrupted", "interrupted", "Another worker already owns this run. No model or tool was dispatched."),
+        };
+      }
+      const stateRunId = startedState.runId;
+
+      if (this.ports.sessionRunLink && session.runId !== stateRunId) {
+        try {
+          const link = await this.ports.sessionRunLink({
+            ctx, companyId, projectId, sessionId, runId: stateRunId,
+          });
+          if (!link.linked) {
+            this.ports.logger?.warn("code_session_run_link_failed", {
+              sessionId, runId: stateRunId, reason: link.reason ?? "unknown",
+            });
+          }
+        } catch (error) {
+          this.ports.logger?.warn("code_session_run_link_error", {
+            sessionId, runId: stateRunId, reason: (error as Error).message,
+          });
+        }
+      }
+      return { ok: true, runId: stateRunId };
+    } catch (error) {
+      const failure = error as { code?: string; message?: string };
+      return {
+        ok: false,
+        result: finish(
+          "failed",
+          "refused",
+          failure.message ?? `The run state could not be recorded (${failure.code ?? "state_unavailable"}).`,
+        ),
+      };
+    }
   }
 }
