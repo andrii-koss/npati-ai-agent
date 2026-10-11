@@ -2,6 +2,7 @@ import { logBuildInfo } from "./build-info";
 import { buildApp } from "./app";
 import { resolveCodeAgentLimits } from "./code-agent-config";
 import { MinioObjectStorage } from "./object-storage";
+import { lookup } from "node:dns/promises";
 
 const minioEndpoint = process.env.MINIO_ENDPOINT;
 const minioAccessKey = process.env.MINIO_ACCESS_KEY;
@@ -64,6 +65,17 @@ logBuildInfo("agent-api");
 try {
   await app.listen({ host: "0.0.0.0", port });
 } catch (error) {
-  app.log.error(error);
+  // Startup can fail before a terminal can attach. Report routing/configuration
+  // evidence in Logs without exposing either credential or its hash.
+  const addresses = minioEndpoint ? await Promise.race([
+    lookup(minioEndpoint, { all: true }).then(entries => entries.map(entry => entry.address)).catch(() => []),
+    new Promise<string[]>(resolve => setTimeout(() => resolve([]), 2000)),
+  ]) : [];
+  app.log.error({ err: error, objectStorage: {
+    endpoint: minioEndpoint, port: process.env.MINIO_PORT ?? "9000", addresses,
+    accessKeyPresent: Boolean(minioAccessKey), secretKeyPresent: Boolean(minioSecretKey),
+    accessKeyMatchesRootUser: process.env.MINIO_ROOT_USER ? minioAccessKey === process.env.MINIO_ROOT_USER : null,
+    credentialsHaveOuterWhitespace: [minioAccessKey, minioSecretKey].some(value => value !== undefined && value !== value.trim()),
+  } }, "API startup failed");
   process.exit(1);
 }
