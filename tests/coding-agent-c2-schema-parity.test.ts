@@ -33,6 +33,11 @@ import {
  * mirror drifts — a changed field without a version bump is never acceptable (rule 13).
  */
 const TOOL_NAMES = [
+  "code.data.schema.modify",
+  "code.data.rows.list",
+  "code.data.rows.transfer",
+  "code.data.backend.attach",
+  "code.data.schema.inspect", "code.data.schema.apply",
   "code.agent.spawn_async", "code.agent.continue", "code.agent.send_message", "code.agent.interrupt",
   "code.shell.exec_async", "code.shell.process.wait",
   "code.fs.list",
@@ -165,6 +170,11 @@ const APPROVAL_REQUIRED_TOOLS = new Set([
 
 /** C3/C4 risk contract: reads are low, mutations medium, deletion and command launch high. */
 const EXPECTED_RISK: Record<string, "low" | "medium" | "high"> = {
+  "code.data.schema.modify": "high",
+  "code.data.rows.list": "low",
+  "code.data.rows.transfer": "high",
+  "code.data.backend.attach": "high",
+  "code.data.schema.inspect": "low", "code.data.schema.apply": "medium",
   "code.agent.spawn_async": "medium", "code.agent.continue": "medium", "code.agent.send_message": "medium", "code.agent.interrupt": "medium",
   "code.shell.exec_async": "high", "code.shell.process.wait": "low",
   "code.fs.list": "low",

@@ -32,8 +32,10 @@ import { CodeShellRuntimePort } from "./code-tool-executors";
 import { CodeApprovalPort } from "./code-workspace-checkpoint";
 import { createCodeToolWiring } from "./code-tool-wiring";
 import { AuthContext } from "@npati/workspace";
+import type { AgentDataStudioService } from "./data-studio/agent-data-service";
 
 export interface CodeToolRuntimeWiringDeps {
+  agentDataStudioService?: AgentDataStudioService;
   config: AppConfig;
   log: FastifyBaseLogger;
   approvalsRepo: CompanyApprovalsRepository | undefined;
@@ -76,6 +78,8 @@ export function createCodeToolRuntimeWiring(deps: CodeToolRuntimeWiringDeps) {
     limits: config.codeAgentLimits,
 
     executors: allCanonicalExecutors({
+      projectData: deps.agentDataStudioService,
+      dataPolicy: enrichedPolicyEngine,
       projectLoader: async ({ ctx, companyId, projectId }) => {
         const project = await projectService.get(ctx, companyId, projectId);
         return project && (project.type === "code_project" || isCodeChatWebsite(project)) ? project as never : null;

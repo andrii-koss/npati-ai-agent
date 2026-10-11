@@ -1,6 +1,6 @@
 {
-  "manifestVersion": 11,
-  "checksum": "a1c20d6e1be84667c158b84f65e4afba78918b6794582752c7339218f826be6b",
+  "manifestVersion": 13,
+  "checksum": "de1711a2f4a4019846ad64fdd619a0ae7368893934fb1f9c5ee1dad5dca47d6f",
   "tools": [
     {
       "key": "code.agent.continue@1",
@@ -43,6 +43,48 @@
       "version": 1,
       "status": "active",
       "checksum": "de42bc30fa5cfd636963db95fa840523630ca1c98f2b94149e0b9dc44c4cd090"
+    },
+    {
+      "key": "code.data.backend.attach@1",
+      "name": "code.data.backend.attach",
+      "version": 1,
+      "status": "active",
+      "checksum": "205b996c8d477de0491928f12e30c403e0e32d5ba8e630f713f3df32fee0db6a"
+    },
+    {
+      "key": "code.data.rows.list@1",
+      "name": "code.data.rows.list",
+      "version": 1,
+      "status": "active",
+      "checksum": "98b777d960638ab2ee5373fa415f01c9020a21b24aa52ce2f5adaa465184cced"
+    },
+    {
+      "key": "code.data.rows.transfer@1",
+      "name": "code.data.rows.transfer",
+      "version": 1,
+      "status": "active",
+      "checksum": "bbb01e5946e8e177e69cb8581db47558c29fa21d3dc6d50ea7285a7e16ddf0b8"
+    },
+    {
+      "key": "code.data.schema.apply@1",
+      "name": "code.data.schema.apply",
+      "version": 1,
+      "status": "active",
+      "checksum": "3efb5d449b355437bbb43bd82ecd2aa12ccdca5001e8123f392fefecdb4089ff"
+    },
+    {
+      "key": "code.data.schema.inspect@1",
+      "name": "code.data.schema.inspect",
+      "version": 1,
+      "status": "active",
+      "checksum": "97b3192259ed217c215b3b9c25c857934f2021aa5ab7e4d7cfb13d4f47d67bd5"
+    },
+    {
+      "key": "code.data.schema.modify@1",
+      "name": "code.data.schema.modify",
+      "version": 1,
+      "status": "active",
+      "checksum": "5ff63dd8778590a3fdc0d696a27391ac71aeaa76373e2794fd716e527bbb69a7"
     },
     {
       "key": "code.deps.add@1",

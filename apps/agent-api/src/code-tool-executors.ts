@@ -1,4 +1,5 @@
 import { CodeToolError as CanonicalToolError } from "./code-tools-path";
+import { codeDataExecutors, type CodeDataToolOptions } from "./code-data-tools";
 import { canonicalCodeAgentControlExecutors } from "./code-agent-controls";
 import type { CodeSubagentOperationService } from "./code-subagent-operations";
 import {
@@ -958,7 +959,7 @@ export function canonicalPlanExecutors(options: CanonicalPlanExecutorOptions = {
  * the executor validates, intersects capabilities with the existing `SubagentToolPolicyGuard` and forwards.
  */
 export function allCanonicalExecutors(
-  options: CanonicalAskUserExecutorOptions & CanonicalGitExecutorOptions & CanonicalSubagentExecutorOptions = {},
+  options: CanonicalAskUserExecutorOptions & CanonicalGitExecutorOptions & CanonicalSubagentExecutorOptions & CodeDataToolOptions = {},
 ): Record<string, (input: CodeToolExecutionContext) => Promise<unknown>> {
   return {
     ...canonicalExecutors(options),
@@ -969,6 +970,7 @@ export function allCanonicalExecutors(
     ...canonicalAskUserExecutors(options),
     ...canonicalGitExecutors(options),
     ...canonicalSubagentExecutors(options),
+    ...codeDataExecutors(options),
   };
 }
 

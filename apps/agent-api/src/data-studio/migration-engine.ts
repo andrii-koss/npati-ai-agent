@@ -10,6 +10,7 @@ import type { ProjectAccessPolicy } from "@npati/shared";
 import { RlsPolicyCompiler } from "./rls-compiler";
 
 export interface MigrationRequest {
+  expectedFingerprint?: string;
   backend: DataBackend;
   environment: DataEnvironmentName;
   operation: SchemaOperation;
@@ -36,12 +37,18 @@ export interface MigrationResult extends MigrationPreview {
   snapshot?: ProjectSnapshot;
 }
 
+import { transferProjectRows, type RowTransferInput } from "./row-transfer";
+
 export class ProjectMigrationEngine {
   constructor(
     private readonly provisioner: DatabaseProvisioner,
     private readonly provider: DataProvider,
     private readonly repository: DataBackendRepository,
   ) {}
+
+  async transferRows(ctx: AuthContext, backend: DataBackend, input: RowTransferInput) {
+    return transferProjectRows(ctx, backend, input, this.provisioner, this.provider, this.repository);
+  }
 
   private async pool(backend: DataBackend, environment: DataEnvironmentName): Promise<Pool> {
     const connection = await this.provisioner.getConnection(backend, environment, "migrator");
@@ -94,6 +101,9 @@ export class ProjectMigrationEngine {
       await this.ensureHistory(pool);
       const current = await this.provider.introspectSchema(backend, environment);
       const actual = this.provider.schemaFingerprint(current);
+      if (request.expectedFingerprint && request.expectedFingerprint !== actual) {
+        throw new DataStudioError(409, "migration", "Schema changed concurrently", false, "STALE_SCHEMA");
+      }
       if (env.schemaFingerprint && env.schemaFingerprint !== actual) {
         await this.repository.setEnvironment(ctx, backend.companyId, backend.id, environment, { syncStatus: "drift_detected" });
         throw new DataStudioError(409, "drift", "Project schema changed outside NPATI", false, "SCHEMA_DRIFT");
@@ -139,6 +149,11 @@ export class ProjectMigrationEngine {
         [id, backend.id, environment, version, JSON.stringify(request.operation), change.reversible, change.destructive,
           change.requiresSnapshot, change.upSql, change.downSql ?? null, request.authorId, request.runId ?? null, checksum, snapshot?.id ?? null],
       );
+      if (request.operation.kind === "rename_collection") {
+        await this.repository.pool.query("UPDATE data_backend_access_policies SET collection_name=$3,policy_json=jsonb_set(policy_json,'{collection}',to_jsonb($3::text)),updated_at=now() WHERE backend_id=$1 AND environment=$2 AND collection_name=$4", [backend.id, environment, request.operation.next, request.operation.collection]);
+      } else if (request.operation.kind === "drop_collection") {
+        await this.repository.pool.query("DELETE FROM data_backend_access_policies WHERE backend_id=$1 AND environment=$2 AND collection_name=$3", [backend.id, environment, request.operation.collection]);
+      }
       await this.repository.setExpectedSchema(ctx, backend.companyId, backend.id, environment, updated, fingerprint);
       return { ...change, current, diff: { operation: request.operation, beforeFingerprint: actual, sql: change.upSql }, id, version, checksum, fingerprint, snapshot };
     } finally {
@@ -230,8 +245,8 @@ export class ProjectMigrationEngine {
     await this.repository.get(ctx, backend.companyId, backend.id);
     const env = await this.repository.environment(ctx, backend.companyId, backend.id, environment);
     if (env.syncStatus !== "synced") throw new DataStudioError(409, "rollback", "Environment requires reconciliation", false, "DRIFT_BLOCKED");
-    const row = await this.repository.pool.query<{ downSql: string | null; reversible: boolean; destructive: boolean }>(
-      'SELECT down_sql AS "downSql",reversible,destructive FROM data_backend_migrations WHERE id=$1 AND backend_id=$2 AND environment=$3 AND status=\'applied\'',
+    const row = await this.repository.pool.query<{ downSql: string | null; reversible: boolean; destructive: boolean; operation: SchemaOperation }>(
+      'SELECT down_sql AS "downSql",reversible,destructive,operation FROM data_backend_migrations WHERE id=$1 AND backend_id=$2 AND environment=$3 AND status=\'applied\'',
       [id, backend.id, environment],
     );
     if (!row.rowCount || !row.rows[0]!.reversible || row.rows[0]!.destructive || !row.rows[0]!.downSql) {
@@ -257,6 +272,10 @@ export class ProjectMigrationEngine {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
       await this.repository.pool.query("UPDATE data_backend_migrations SET status='rolled_back' WHERE id=$1", [id]);
+      const operation = row.rows[0]!.operation;
+      if (operation.kind === "rename_collection") {
+        await this.repository.pool.query("UPDATE data_backend_access_policies SET collection_name=$3,policy_json=jsonb_set(policy_json,'{collection}',to_jsonb($3::text)),updated_at=now() WHERE backend_id=$1 AND environment=$2 AND collection_name=$4", [backend.id, environment, operation.collection, operation.next]);
+      }
       const schema = await this.provider.introspectSchema(backend, environment);
       await this.repository.setExpectedSchema(ctx, backend.companyId, backend.id, environment, schema, this.provider.schemaFingerprint(schema));
     } finally {

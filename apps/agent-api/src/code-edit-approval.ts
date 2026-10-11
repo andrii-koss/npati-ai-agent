@@ -12,6 +12,10 @@
  * to the master flag. Kept in one place so the runtime can pick the sub-flag before it resolves the tool.
  */
 export const CODE_WRITE_TOOLS: ReadonlySet<string> = new Set([
+  "code.data.schema.apply",
+  "code.data.schema.modify",
+  "code.data.rows.transfer",
+  "code.data.backend.attach",
   "code.fs.write",
   "code.fs.edit",
   "code.fs.move",

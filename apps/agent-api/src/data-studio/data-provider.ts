@@ -161,7 +161,7 @@ export class PostgresDataProvider implements DataProvider {
   alterField(collection: string, field: FieldDefinition): SchemaChange {
     const table = quoteIdentifier(collection), column = quoteIdentifier(field.name), type = sqlTypes[field.type];
     if (!type || field.name === "id") throw new DataStudioError(400, "alter_field", "Invalid field", false, "INVALID_FIELD");
-    return { operation: "alter_field", upSql: "ALTER TABLE " + table + " ALTER COLUMN " + column + " TYPE " + type + ";",
+    return { operation: "alter_field", upSql: "ALTER TABLE " + table + " ALTER COLUMN " + column + " TYPE " + type + " USING " + column + "::" + type + ";",
       destructive: true, requiresSnapshot: true, reversible: false };
   }
 
@@ -205,6 +205,8 @@ export class PostgresDataProvider implements DataProvider {
     if (!pool) {
       const connection = await this.provisioner.getConnection(backend, environment, "runtime");
       pool = new Pool({ ...connection, max: 5, connectionTimeoutMillis: 3000 });
+      // Idle disconnects are removed by pg; active query errors still reject.
+      pool.on("error", () => {});
       this.pools.set(key, pool);
     }
     return pool;

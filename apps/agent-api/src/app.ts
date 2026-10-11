@@ -961,6 +961,7 @@ export function buildApp(config: AppConfig = {}) {
   let subagentChildRunnerWithAck: CodeSubagentDetachedRunner | undefined;
 
   const codeToolRuntimeWiring = createCodeToolRuntimeWiring({
+    agentDataStudioService,
     config,
     log: app.log,
     approvalsRepo,
