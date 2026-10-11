@@ -48,6 +48,26 @@ and the actual running MinIO instance. Changing API credentials requires
 recreating API and company-worker containers; changing MinIO root credentials
 requires recreating MinIO as well. Preserve the `minio-data` volume.
 
+To test credentials from the **actual containers** without displaying their values,
+run this command on the Docker host from the repository directory:
+
+```bash
+node scripts/diagnose-minio-docker.mjs <agent-api-container> <minio-container>
+```
+
+The probe uses the API image's MinIO SDK, runs in the selected MinIO container's
+network namespace, and makes read-only authenticated requests. It works even if
+API keeps restarting. `root.accepted: true` and `api.code: InvalidAccessKeyId`
+prove that the API key is not recognized by that selected MinIO instance.
+An API user may legitimately differ from root; matching values are not required
+when both probes succeed. If the probes succeed but API startup fails, check
+`MINIO_ENDPOINT`, port, TLS, DNS routing, and bucket permissions. The probe
+intentionally tests the selected instance directly, rather than trusting DNS.
+
+If pulling the default image from Quay fails, `MINIO_IMAGE` can select a
+digest-pinned image from your own registry or a verified mirror. This changes
+the image source only; keep the existing `minio-data` volume and credentials.
+
 ## 2. Configure the domain
 
 In the Compose service's **Domains** tab, add the public HTTPS domain with:
