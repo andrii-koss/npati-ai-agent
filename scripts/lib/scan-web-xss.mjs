@@ -60,10 +60,10 @@ export const ALLOWLIST = [
     reason: "renders only the output of sanitizeEmailHtml, an allowlist sanitizer with blocked tags and http(s)-only hrefs.",
   },
   {
-    file: "apps/web/src/EmailInboxPage.tsx",
+    file: "apps/web/src/email-inbox-shared.tsx",
     pattern: "innerHTML",
     occurrences: 1,
-    reason: "inside sanitizeEmailHtml itself: reads back the sanitized document body it just built.",
+    reason: "inside sanitizeEmailHtml itself, which moved here from EmailInboxPage.tsx: reads back the sanitized document body it just built.",
   },
   {
     file: "apps/web/src/AIProviderMarketplace.tsx",
