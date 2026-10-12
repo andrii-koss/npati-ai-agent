@@ -157,9 +157,6 @@
     "apps/web/src/EmailInboxPage.tsx": {
       "as-any": 3
     },
-    "apps/web/src/EmailSettingsPage.tsx": {
-      "as-any": 2
-    },
     "apps/web/src/GoalsPage.tsx": {
       "as-any": 2
     },
@@ -186,6 +183,9 @@
     },
     "packages/shared/src/website-renderer.ts": {
       "as-any": 1
+    },
+    "apps/web/src/email-settings-templates-section.tsx": {
+      "as-any": 2
     }
   }
 }
