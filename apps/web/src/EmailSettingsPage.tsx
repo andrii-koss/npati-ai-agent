@@ -15,6 +15,7 @@ import { EmailSettingsInboxBlock } from "./email-settings-inbox-block";
 import { EmailSettingsPermissionsBlock } from "./email-settings-permissions-block";
 import { EmailSettingsTestBlock } from "./email-settings-test-block";
 import { EmailSettingsOverviewBlock } from "./email-settings-overview-block";
+import { EmailSettingsHeaderBlock } from "./email-settings-header-block";
 
 export interface Company {
   id: string;
@@ -1073,84 +1074,7 @@ export function EmailSettingsPage() {
       )}
 
       {/* Search & Tabs Controls Bar matching /settings/automations */}
-      <div className="inspector-controls automations-controls">
-        <div className="inspector-search-box">
-          <span className="search-icon" aria-hidden="true">⌕</span>
-          <input
-            type="text"
-            role="searchbox"
-            placeholder={t("emailSettings.controls.searchPlaceholder")}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="inspector-search-input"
-            aria-label={t("emailSettings.controls.searchAriaLabel")}
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              className="search-clear-btn"
-              onClick={() => setSearchQuery("")}
-              aria-label={t("emailSettings.controls.clearSearch")}
-              title={t("emailSettings.controls.clearSearch")}
-            >
-              ×
-            </button>
-          )}
-        </div>
-
-        <div className="inspector-tabs" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "accounts"}
-            className={`inspector-tab ${activeTab === "accounts" ? "active" : ""}`}
-            onClick={() => setActiveTab("accounts")}
-          >
-            <span>{t("emailSettings.controls.tabAccounts")}</span>
-            <small className="tab-count">{accounts.length}</small>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "rules"}
-            className={`inspector-tab ${activeTab === "rules" ? "active" : ""}`}
-            onClick={() => setActiveTab("rules")}
-          >
-            <span>{t("emailSettings.controls.tabRules")}</span>
-            <small className="tab-count">{rules.length}</small>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "templates"}
-            className={`inspector-tab ${activeTab === "templates" ? "active" : ""}`}
-            onClick={() => setActiveTab("templates")}
-          >
-            <span>{t("emailSettings.controls.tabTemplates")}</span>
-            <small className="tab-count">{templates.length}</small>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "contacts"}
-            className={`inspector-tab ${activeTab === "contacts" ? "active" : ""}`}
-            onClick={() => setActiveTab("contacts")}
-          >
-            <span>{t("emailSettings.controls.tabContacts")}</span>
-            <small className="tab-count">{contacts.length}</small>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "permissions"}
-            className={`inspector-tab ${activeTab === "permissions" ? "active" : ""}`}
-            onClick={() => setActiveTab("permissions")}
-          >
-            <span>{t("emailSettings.controls.tabPermissions")}</span>
-            <small className="tab-count">{permissionKeys.length}</small>
-          </button>
-        </div>
-      </div>
+      <EmailSettingsHeaderBlock t={t} searchQuery={searchQuery} setSearchQuery={setSearchQuery} activeTab={activeTab} accounts={accounts} setActiveTab={setActiveTab} rules={rules} templates={templates} contacts={contacts} permissionKeys={permissionKeys} />
 
       {notice && (
         <div className="workspace-notice" style={{ marginBottom: 16 }}>
