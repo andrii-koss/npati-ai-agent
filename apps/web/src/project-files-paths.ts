@@ -59,6 +59,11 @@ export const LEGACY_FILE_URL_SITES: ReadonlyArray<{ file: string; reason: string
     reason:
       "Chat static-preview reader, carried over from BusinessWorkspace.tsx when the file was split into shared state, cards and page views. Still a legacy site awaiting migration to the adapter, with the same scope as before the split.",
   },
+  {
+    file: "apps/web/src/website-editor-drawers.tsx",
+    reason:
+      "Website editor file drawer reader, carried over from WebsiteEditor.tsx when the drawers were extracted. Still a legacy site awaiting migration to the adapter, with the same scope as before the split.",
+  },
 ];
 
 /** The single place a `files/*` path is assembled. */
