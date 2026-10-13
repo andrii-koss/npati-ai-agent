@@ -32,7 +32,7 @@ export function registerCodeExecutionModeRoutes(app: FastifyInstance, deps: {
       const ctx = await deps.auth.authenticate(request);
       const companyId = request.params.companyId;
       const view = await modes.get(ctx, companyId);
-      if (!view.canSelectGlobal) throw new CodeExecutionModeError("creator_admin_required", "Global requires the installation owner or an administrator");
+      if (!view.sourceAccessGranted) throw new CodeExecutionModeError("creator_admin_required", "Global requires the installation owner or an administrator");
       const root = modes.creatorSourceRoot;
       if (!root) throw new CodeExecutionModeError("creator_source_unconfigured", "The NPATI source repository is not mounted", 503);
       // A dist directory is not a source checkout. Validate before creating a project or session.

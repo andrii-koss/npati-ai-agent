@@ -5,6 +5,7 @@ services:
   agent-api:
     environment:
       NPATI_CREATOR_SOURCE_ROOT: ${NPATI_CREATOR_SOURCE_ROOT:?Set the absolute path of the NPATI source checkout}
+      NPATI_CREATOR_OWNER_USER_IDS: ${NPATI_CREATOR_OWNER_USER_IDS:-}
     volumes:
       - type: bind
         source: ${NPATI_CREATOR_SOURCE_ROOT}
@@ -12,6 +13,7 @@ services:
   company-worker:
     environment:
       NPATI_CREATOR_SOURCE_ROOT: ${NPATI_CREATOR_SOURCE_ROOT}
+      NPATI_CREATOR_OWNER_USER_IDS: ${NPATI_CREATOR_OWNER_USER_IDS:-}
     volumes:
       - type: bind
         source: ${NPATI_CREATOR_SOURCE_ROOT}
@@ -19,6 +21,7 @@ services:
   sandbox-runner:
     environment:
       NPATI_CREATOR_SOURCE_ROOT: ${NPATI_CREATOR_SOURCE_ROOT}
+      NPATI_CREATOR_OWNER_USER_IDS: ${NPATI_CREATOR_OWNER_USER_IDS:-}
     volumes:
       - type: bind
         source: ${NPATI_CREATOR_SOURCE_ROOT}

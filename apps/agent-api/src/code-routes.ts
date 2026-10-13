@@ -191,6 +191,16 @@ export function registerCodeRoutes(app: FastifyInstance, auth: AuthProvider, ser
 
   // --- C1a: feature flags ---------------------------------------------------------------
 
+  app.post<{ Params: CompanyParams }>("/companies/:companyId/code/initialize", async (request, reply) => {
+    try {
+      const { ctx, service } = await authorize(request, "business:manage");
+      if (!flags || !flags.usesCompanyDefaults) throw new FeatureDisabledError(CODE_AGENT_MASTER_FLAG);
+      await service.listProjects(ctx, request.params.companyId, true);
+      await flags.initialization.apply(ctx, request.params.companyId);
+      return { initialized: true };
+    } catch (error) { return fail(reply, error); }
+  });
+
   /** Read-only flag view: works while the feature is off, which is how the UI knows it is dark. */
   app.get<{ Params: CompanyParams }>("/companies/:companyId/code/flags", async (request, reply) => {
     try {
@@ -205,6 +215,7 @@ export function registerCodeRoutes(app: FastifyInstance, auth: AuthProvider, ser
         darkLaunch: described.darkLaunch,
         execution: await flags.executionModes.get(ctx, request.params.companyId),
         defaultsEnabled: flags.usesCompanyDefaults,
+        featuresInitialized: await flags.initialization.completed(ctx, request.params.companyId),
         management: {
           company: await flags.canManage(ctx, request.params.companyId),
           global: await flags.canManage(ctx),

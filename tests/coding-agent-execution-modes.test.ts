@@ -2,6 +2,7 @@ import path from "node:path";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import Fastify from "fastify";
+import { registerCodeRoutes } from "../apps/agent-api/src/code-routes";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
 import { FeatureFlagService, CODE_AGENT_SUB_FLAGS } from "../apps/agent-api/src/feature-flags";
@@ -56,10 +57,11 @@ describe("Coding Agent execution scopes", () => {
     await expect(flags.executionModes.set(user, company.id, "company", 0)).rejects.toMatchObject({ code: "mode_revision_conflict" });
   });
 
-  it("does not turn an ordinary company owner into an NPATI source administrator", async () => {
+  it("allows choosing Global without turning a company owner into a source administrator", async () => {
     const { flags, company } = await fixture();
-    await expect(flags.executionModes.set(user, company.id, "global", 0)).rejects.toMatchObject({ code: "creator_admin_required" });
-    await flags.executionModes.set(admin, company.id, "global", 0);
+    const selected = await flags.executionModes.set(user, company.id, "global", 0);
+    expect(selected).toMatchObject({ mode: "global", canSelectGlobal: true, sourceAccessGranted: false });
+    await expect(flags.executionModes.assertToolAllowed(user, company.id, "project", "code.fs.read")).rejects.toMatchObject({ code: "creator_admin_required" });
     await expect(flags.executionModes.assertToolAllowed(admin, company.id, "project", "code.fs.read")).rejects.toMatchObject({ code: "creator_workspace_required" });
   });
 
@@ -98,14 +100,15 @@ describe("Coding Agent execution scopes", () => {
   it("connects a source checkout through the existing mount and session APIs", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "npati-creator-"));
     vi.stubEnv("NPATI_CREATOR_SOURCE_ROOT", root);
-    const { flags, company, code, store } = await fixture(admin);
+    vi.stubEnv("NPATI_CREATOR_OWNER_USER_IDS", user.userId);
+    const { flags, company, code, store } = await fixture(user);
     await mkdir(path.join(root, "apps/web/src"), { recursive: true });
     await mkdir(path.join(root, "apps/agent-api/src"), { recursive: true });
     await Promise.all(["package.json", "apps/web/src/App.tsx", "apps/agent-api/src/server.ts"].map(file => writeFile(path.join(root, file), "{}")));
     const confirm = vi.fn(async (ctx, companyId, projectId, input) => store.setProjectMountedFolder(ctx, companyId, projectId,
       { path: input.path, mode: input.mode, confirmed: true, actor: ctx.userId, expectedRevision: input.expectedRevision }));
     const app = Fastify();
-    registerCodeExecutionModeRoutes(app, { auth: { authenticate: async () => admin } as never, flags, code,
+    registerCodeExecutionModeRoutes(app, { auth: { authenticate: async () => user } as never, flags, code,
       mounts: { get: (ctx, companyId, projectId) => store.getProjectMountedFolder(ctx, companyId, projectId), confirm } as never });
     try {
       const first = await app.inject({ method: "POST", url: `/companies/${company.id}/code/creator-workspace` });
@@ -130,5 +133,50 @@ describe("Coding Agent execution scopes", () => {
     await flags.executionModes.set(user, company.id, "sandbox", 0);
     await expect(delegate(user, company, { projectId: project.id, task: "Escape sandbox" }, new AbortController().signal)).rejects.toMatchObject({ code: "execution_scope_denied" });
     expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it("initializes all legacy company flags automatically once, then preserves later opt-outs", async () => {
+    const { flags, company, store } = await fixture();
+    for (const flagKey of ["coding_agent.enabled", "code.read", "code.write", "code.async_inbox"]) {
+      await store.setFeatureFlag(user, { scope: "company", scopeId: company.id, flagKey, enabled: false, stage: flagKey === "coding_agent.enabled" ? "off" : "internal" });
+    }
+    flags.invalidate(); // Simulate loading legacy rows on process startup.
+    expect((await flags.describe(user, { companyId: company.id })).master.enabled).toBe(false);
+    await Promise.all([flags.initialization.apply(user, company.id), flags.initialization.apply(user, company.id)]);
+    expect(await flags.initialization.completed(user, company.id)).toBe(true);
+    const enabled = await flags.describe(user, { companyId: company.id });
+    expect(enabled.master.enabled).toBe(true);
+    expect(enabled.flags.every(flag => flag.enabled)).toBe(true);
+    await flags.setFlag(user, { scope: "company", scopeId: company.id, flagKey: "code.shell", stage: "off", enabled: false });
+    await flags.initialization.apply(user, company.id);
+    expect(await flags.isEnabled(user, "code.shell", { companyId: company.id })).toBe(false);
+  });
+
+  it("grants source access to an explicitly configured, authenticated Creator owner without granting it to other users", async () => {
+    vi.stubEnv("NPATI_CREATOR_OWNER_USER_IDS", user.userId);
+    const { flags, company } = await fixture();
+    expect(await flags.executionModes.get(user, company.id)).toMatchObject({ canSelectGlobal: true, sourceAccessGranted: true });
+    const apiKey = { ...user, externalSubject: "npati:apikey:key", companyId: company.id };
+    expect((await flags.executionModes.get(apiKey, company.id)).sourceAccessGranted).toBe(false);
+    vi.stubEnv("NPATI_CREATOR_OWNER_USER_IDS", "another-account");
+    expect((await flags.executionModes.get(user, company.id)).sourceAccessGranted).toBe(false);
+  });
+
+  it("repairs a saved Master OFF through the initializer API and returns all checked flags", async () => {
+    const { flags, company, store, code } = await fixture();
+    await store.setFeatureFlag(user, { scope: "company", scopeId: company.id, flagKey: "coding_agent.enabled", enabled: false, stage: "off" });
+    flags.invalidate();
+    const app = Fastify();
+    registerCodeRoutes(app, { authenticate: async () => user } as never, code, flags);
+    try {
+      const before = await app.inject({ method: "GET", url: `/companies/${company.id}/code/flags` });
+      expect(before.json()).toMatchObject({ master: { enabled: false }, featuresInitialized: false, defaultsEnabled: true });
+      const initialized = await app.inject({ method: "POST", url: `/companies/${company.id}/code/initialize` });
+      expect(initialized.statusCode, initialized.body).toBe(200);
+      const after = (await app.inject({ method: "GET", url: `/companies/${company.id}/code/flags` })).json();
+      expect(after.master.enabled).toBe(true);
+      expect(after.flags.every((flag: { enabled: boolean }) => flag.enabled)).toBe(true);
+      expect(after.featuresInitialized).toBe(true);
+    } finally { await app.close(); }
   });
 });
