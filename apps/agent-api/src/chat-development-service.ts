@@ -71,7 +71,85 @@ export class ChatDevelopmentService {
     const inboxEnabled = new Map(await Promise.all(companies.map(async companyId => [companyId, this.d.inbox ? await this.d.inbox.isEnabled(ctx, companyId) : false] as const)));
     return Promise.all(items.filter(p => accessible.has(p.companyId)).map(async ({ requestId: _requestId, ...stored }) => {
       const activity = stored.runId ? await this.d.store.listCodeActivityEvents({ companyId: stored.companyId, runId: stored.runId, limit: 60 }) : [];
-      const tools = activity.filter(e => typeof e.payload.tool === "string").map(e => ({ id: e.id, stage: "tool", title: (/deps/.test(String(e.payload.tool)) ? "Installing dependencies" : /verify/.test(String(e.payload.tool)) ? "Verifying build and checks" : /write|patch|edit/.test(String(e.payload.tool)) ? "Updating project files" : /read|list|search/.test(String(e.payload.tool)) ? "Reading project files" : "Running a project operation") + (e.payload.ok === false ? ": failed" : ""), at: e.createdAt.toISOString() }));
+      let replaySteps: Array<{ kind: string; toolCallId: string | null; payload: Record<string, unknown> }> = [];
+      if (stored.runId) {
+        try {
+          const bundle = await this.d.store.getReplayBundle(stored.companyId, stored.runId);
+          if (bundle) replaySteps = await this.d.store.listReplayBundleSteps(stored.companyId, bundle.id);
+        } catch {}
+      }
+      const stepDetails = new Map<string, { command?: string; file?: string; cwd?: string; result?: string; durationMs?: number; errorCode?: string; ok?: boolean }>();
+      for (const step of replaySteps) {
+        if (step.kind === "model_step") {
+          const response = (step.payload as { response?: Record<string, unknown> }).response ?? {};
+          const toolCalls = Array.isArray(response.toolCalls) ? response.toolCalls : [];
+          for (const call of toolCalls) {
+            const callId = String((call as { id?: string }).id ?? "");
+            if (!callId) continue;
+            let parsedArgs: Record<string, unknown> = {};
+            try {
+              const rawArgs = (call as { arguments?: unknown }).arguments;
+              if (typeof rawArgs === "string") parsedArgs = JSON.parse(rawArgs);
+              else if (typeof rawArgs === "object" && rawArgs !== null) parsedArgs = rawArgs as Record<string, unknown>;
+            } catch {}
+            const existing = stepDetails.get(callId) ?? {};
+            const command = typeof parsedArgs.command === "string" ? parsedArgs.command : undefined;
+            const file = typeof parsedArgs.path === "string" ? parsedArgs.path : (typeof parsedArgs.file === "string" ? parsedArgs.file : undefined);
+            const cwd = typeof parsedArgs.cwd === "string" ? parsedArgs.cwd : undefined;
+            stepDetails.set(callId, { ...existing, command, file, cwd });
+          }
+        } else if (step.kind === "tool_call") {
+          const callId = String(step.toolCallId ?? "");
+          const shaped = step.payload;
+          const existing = stepDetails.get(callId) ?? {};
+          let resultStr: string | undefined;
+          if (typeof shaped.settledResult === "string") resultStr = shaped.settledResult;
+          else if (shaped.settledResult) {
+            try { resultStr = JSON.stringify(shaped.settledResult, null, 2); } catch { resultStr = String(shaped.settledResult); }
+          }
+          stepDetails.set(callId, {
+            ...existing,
+            result: resultStr,
+            durationMs: typeof shaped.durationMs === "number" ? shaped.durationMs : existing.durationMs,
+            errorCode: typeof shaped.errorCode === "string" ? shaped.errorCode : existing.errorCode,
+            ok: shaped.outcome === "success" || shaped.outcome === "ok",
+          });
+        }
+      }
+      const tools = activity.filter(e => typeof e.payload.tool === "string").map((e, index, arr) => {
+        const toolName = String(e.payload.tool);
+        const toolCallId = String(e.payload.toolCallId ?? e.id);
+        const details = stepDetails.get(toolCallId);
+        const isLastTool = index === arr.length - 1 && developmentIsActive(stored);
+        const isFailed = e.payload.ok === false || details?.ok === false;
+        const toolStatus = isFailed ? "failed" : (isLastTool ? "active" : "completed");
+
+        let actionDesc = "Running a project operation";
+        if (/deps/.test(toolName)) actionDesc = details?.command ? `Installing dependencies: ${details.command}` : "Installing dependencies";
+        else if (/verify/.test(toolName)) actionDesc = "Verifying build and checks";
+        else if (/write|patch|edit/.test(toolName)) actionDesc = details?.file ? `Updating file: ${details.file}` : "Updating project files";
+        else if (/read|list|search/.test(toolName)) actionDesc = details?.file ? `Reading file: ${details.file}` : "Reading project files";
+        else if (details?.command) actionDesc = `Executed command: ${details.command}`;
+
+        const durationMs = typeof e.payload.durationMs === "number" ? e.payload.durationMs : details?.durationMs;
+        const errorCode = typeof e.payload.errorCode === "string" ? e.payload.errorCode : details?.errorCode;
+
+        return {
+          id: e.id,
+          stage: "tool",
+          title: actionDesc + (isFailed ? ": failed" : ""),
+          at: e.createdAt.toISOString(),
+          status: toolStatus as any,
+          tool: toolName,
+          command: details?.command,
+          file: details?.file,
+          cwd: details?.cwd,
+          result: details?.result,
+          durationMs,
+          errorCode,
+          agentId: "Coding Agent",
+        };
+      });
       const item = { ...stored, progress: [...(stored.progress ?? []), ...tools].sort((a,b) => Date.parse(a.at) - Date.parse(b.at)), inboxEnabled: inboxEnabled.get(stored.companyId) ?? false };
       if (this.jobs.has(this.jobKey(ctx, item.id))) return item;
       const latest = runs.get(item.companyId)?.filter(r => r.sessionId === item.sessionId).sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime())[0];
@@ -151,8 +229,8 @@ export class ChatDevelopmentService {
     });
     return { conversationId, processes: created };
   }
-  private async report(ctx: AuthContext, id: string, stage: string, title: string) {
-    await this.change(ctx, items => items.map(item => item.id === id ? { ...item, progress: [...(item.progress ?? []), { id: randomUUID(), stage, title, at: new Date().toISOString() }].slice(-30), updatedAt: new Date().toISOString() } : item));
+  private async report(ctx: AuthContext, id: string, stage: string, title: string, details?: Record<string, unknown>) {
+    await this.change(ctx, items => items.map(item => item.id === id ? { ...item, progress: [...(item.progress ?? []), { id: randomUUID(), stage, title, at: new Date().toISOString(), ...details }].slice(-60), updatedAt: new Date().toISOString() } : item));
   }
   private async card(ctx: AuthContext, process: Entry, project: Project, text: string) {
     const current = (await this.entries(ctx)).find(p => p.id === process.id);
@@ -182,7 +260,7 @@ export class ChatDevelopmentService {
     const ensureActive = () => { if (controller.signal.aborted) throw new DevelopmentError("Stopped by request"); };
     try {
       await this.patch(ctx, process.id, { status: "preparing" });
-      await this.report(ctx, process.id, "project", "Preparing project workspace");
+      await this.report(ctx, process.id, "project", "Preparing project workspace", { tool: "code.workspace", status: "completed", agentId: "System" });
       ensureActive();
       const { project: raw } = await this.d.projects.create(ctx, process.companyId, {
         name: process.name, type: target.kind === "mobile_app" ? "mobile_app" : "code_project", description: message.slice(0, 5000),
@@ -192,7 +270,7 @@ export class ChatDevelopmentService {
       await this.patch(ctx, process.id, { projectId: raw.id, conversationId: process.conversationId });
       await this.card(ctx, process, raw, "Агент готує проєкт. Стан запуску відображається над полем чату.");
       ensureActive();
-      await this.report(ctx, process.id, "scaffold", "Preparing the existing " + target.framework + " template");
+      await this.report(ctx, process.id, "scaffold", "Preparing the existing " + target.framework + " template", { tool: "code.scaffold", status: "completed", agentId: "System" });
       const project = target.kind === "mobile_app"
         ? await this.d.preparer.prepareCodingMobile(ctx, raw, message)
         : await this.d.preparer.prepareCodingWebsite(ctx, raw, message, target.framework);
@@ -211,16 +289,36 @@ export class ChatDevelopmentService {
         await this.d.flags.assertEnabled(ctx, "code.shell", { companyId: process.companyId });
         const reports: Promise<void>[] = [];
         await this.d.preview.buildProject(ctx, process.companyId, project.id, stage => {
-          ensureActive(); reports.push(this.report(ctx, process.id, stage, stage === "dependencies" ? "Installing template dependencies" : "Building the template"));
+          ensureActive(); reports.push(this.report(ctx, process.id, stage, stage === "dependencies" ? "Installing template dependencies" : "Building the template", {
+            tool: stage === "dependencies" ? "code.deps.install" : "code.build",
+            command: stage === "dependencies" ? "npm install" : "npm run build",
+            cwd: `/workspace/${process.name}`,
+            status: "completed",
+            agentId: "System",
+          }));
         }).finally(() => Promise.all(reports));
         ensureActive();
-        await this.report(ctx, process.id, "preview", "Starting template Live Preview");
+        await this.report(ctx, process.id, "preview", "Starting template Live Preview", {
+          tool: "code.preview",
+          command: "npx next dev",
+          cwd: `/workspace/${process.name}`,
+          status: "completed",
+          agentId: "System",
+        });
         const initialPreview = await this.d.preview.startPreview(ctx, process.companyId, project.id, { signal: controller.signal });
         await this.patch(ctx, process.id, { previewUrl: initialPreview.previewUrl });
-        await this.report(ctx, process.id, "template_ready", "Template build passed; Live Preview is running. AI implementation is next.");
+        await this.report(ctx, process.id, "template_ready", "Template build passed; Live Preview is running. AI implementation is next.", {
+          tool: "code.preview",
+          status: "completed",
+          agentId: "System",
+        });
       }
       ensureActive();
-      await this.report(ctx, process.id, "agent", "Coding Agent is implementing the requested project");
+      await this.report(ctx, process.id, "agent", "Coding Agent is implementing the requested project", {
+        tool: "coding_agent",
+        status: "active",
+        agentId: "Coding Agent",
+      });
       const outcome = await this.d.executor.execute({ ctx, session, runId: process.runId, maxTurns: 16,
         prompt: "User request: " + message + "\nYour assigned project is " + target.name + " (" + target.kind + "). Implement ONLY this project, not the other requested projects. The existing template has already been prepared by the system. Make a focused first implementation: read package.json and " + (target.kind === "mobile_app" ? "App.tsx" : target.framework === "HTML/CSS" ? "index.html" : "app/page.tsx") + ", edit the visible page and its styles immediately, then finish. Do not explore unrelated modules or delegate this initial page task. You have at most 16 turns, including repairs. Preserve the attached database/auth SDK. Do not re-scaffold or run create-next-app. Template dependencies are already installed by the system. Only when adding a new package, use the available code.deps.add tool. Do not start a dev server. Finish implementation; the system will verify the production build and start Live Preview.",
         cancelRequested: () => controller.signal.aborted,
@@ -234,14 +332,23 @@ export class ChatDevelopmentService {
       const status = controller.signal.aborted ? "cancelled" : outcome.needsApproval ? "awaiting_approval"
         : outcome.terminalStatus === "completed" && !ready ? "failed" : outcome.terminalStatus;
       await this.patch(ctx, process.id, { status, detail: outcome.reason ?? (ready ? "Build passed · Live Preview" : "Live Preview has not started"), previewUrl: ready ? finished.previewUrl ?? undefined : undefined });
-      await this.report(ctx, process.id, status, result?.message || outcome.reason || (ready ? "Verified build and Live Preview are ready" : "Development stopped before verified completion"));
+      await this.report(ctx, process.id, status, result?.message || outcome.reason || (ready ? "Verified build and Live Preview are ready" : "Development stopped before verified completion"), {
+        tool: "code.verification",
+        status: status === "completed" ? "completed" : status === "failed" ? "failed" : status === "cancelled" ? "cancelled" : "waiting_for_approval",
+        result: result?.message || outcome.reason,
+        agentId: "System",
+      });
       if (status === "failed" || status === "cancelled") await this.d.projects.updatePreview(ctx, process.companyId, project.id, { status: "failed" });
       await this.card(ctx, process, finished, result?.message || (ready ? "Build passed. Live Preview is ready." : "Development ended: " + status));
     } catch (error) {
       const detail = error instanceof Error ? error.message : "Development failed";
       sink?.finish(controller.signal.aborted ? "cancelled" : "failed", detail);
       await this.patch(ctx, process.id, { status: controller.signal.aborted ? "cancelled" : "failed", detail });
-      await this.report(ctx, process.id, controller.signal.aborted ? "cancelled" : "failed", detail);
+      await this.report(ctx, process.id, controller.signal.aborted ? "cancelled" : "failed", detail, {
+        status: controller.signal.aborted ? "cancelled" : "failed",
+        error: detail,
+        agentId: "System",
+      });
       if (process.projectId && process.conversationId) {
         await this.d.projects.updatePreview(ctx, process.companyId, process.projectId, { status: "failed" });
         try { await this.card(ctx, process, await this.d.projects.get(ctx, process.companyId, process.projectId), detail); }

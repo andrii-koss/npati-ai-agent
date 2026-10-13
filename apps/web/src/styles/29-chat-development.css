@@ -17,3 +17,337 @@
   .chat-development-actions { grid-column: 2; justify-content: flex-end; }
   .chat-development-icon { width: 24px; height: 24px; }
 }
+
+/* ==========================================================================
+   Codex-Style Live Agent Execution Trace
+   ========================================================================== */
+
+.codex-trace-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+}
+
+.codex-trace-row {
+  display: flex !important;
+  flex-direction: column !important;
+  grid-template-columns: none !important;
+  width: 100%;
+  border-radius: 8px;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.codex-trace-row-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  width: 100%;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  box-sizing: border-box;
+  transition: background-color 0.15s ease;
+}
+
+.codex-trace-row-header:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.codex-trace-row.expanded > .codex-trace-row-header {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.codex-trace-icon-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  color: #555;
+}
+
+.codex-trace-icon-box svg {
+  width: 16px;
+  height: 16px;
+  stroke: #555;
+}
+
+.codex-trace-title-wrapper {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.codex-trace-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.codex-trace-title strong {
+  font-weight: 550;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codex-trace-agent-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 4px;
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+
+.codex-trace-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.codex-trace-duration-tag {
+  font-size: 11px;
+  color: #888;
+  font-variant-numeric: tabular-nums;
+}
+
+.codex-trace-status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 12px;
+  line-height: 1.4;
+}
+
+.codex-trace-status-pill.active {
+  background: #fff1f2;
+  color: var(--npati-red, #cf3035);
+  border: 1px solid #fecdd3;
+}
+
+.codex-trace-status-pill.completed {
+  background: #f0fdf4;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.codex-trace-status-pill.failed {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.codex-trace-status-pill.cancelled {
+  background: #f8fafc;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+}
+
+.codex-trace-status-pill.waiting_for_approval {
+  background: #fefce8;
+  color: #854d0e;
+  border: 1px solid #fef08a;
+}
+
+.codex-trace-chevron-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: #718096;
+  cursor: pointer;
+  transition: opacity 0.15s ease, color 0.15s ease;
+  opacity: 0;
+}
+
+.codex-trace-row:hover .codex-trace-chevron-btn,
+.codex-trace-row.expanded .codex-trace-chevron-btn,
+.codex-trace-chevron-btn:focus-visible {
+  opacity: 1;
+}
+
+@media (max-width: 680px) {
+  .codex-trace-chevron-btn {
+    opacity: 1;
+  }
+}
+
+.codex-trace-chevron-btn:hover {
+  color: #1a202c;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+/* Expanded Detail Panel */
+.codex-trace-detail-panel {
+  margin: 4px 0 6px 24px;
+  padding: 10px 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-sizing: border-box;
+  animation: codexSlideDown 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes codexSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.codex-trace-field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.codex-trace-field-name {
+  font-weight: 600;
+  color: #64748b;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+
+.codex-trace-badge {
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: #e2e8f0;
+  color: #334155;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.codex-trace-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.codex-trace-field-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.codex-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 10px;
+  color: #475569;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.codex-copy-btn:hover {
+  background: #f1f5f9;
+  color: var(--npati-red, #cf3035);
+  border-color: var(--npati-red, #cf3035);
+}
+
+.codex-code-box {
+  background: #1e1e2e;
+  color: #cdd6f4;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11.5px;
+  overflow-x: auto;
+  line-height: 1.4;
+}
+
+.codex-code-box code {
+  color: inherit;
+  font-family: inherit;
+}
+
+.codex-file-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: #e2e8f0;
+  color: #1e293b;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.codex-log-pre {
+  margin: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  overflow-x: auto;
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.codex-trace-meta-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 11px;
+  color: #475569;
+  padding-top: 4px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.codex-meta-val {
+  font-weight: 500;
+  color: #0f172a;
+}
+
+.codex-trace-error-msg {
+  color: #dc2626;
+  font-weight: 500;
+  width: 100%;
+}

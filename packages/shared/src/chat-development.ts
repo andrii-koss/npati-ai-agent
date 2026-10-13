@@ -1,10 +1,27 @@
 /** Shared deterministic routing: creation requests only, never ordinary project edits. */
 export type DevelopmentTarget = { name: string; kind: "website" | "blog" | "store" | "crm" | "mobile_app"; framework: "Next.js" | "HTML/CSS" | "Expo" };
+export type DevelopmentProcessProgressItem = {
+  id: string;
+  stage: string;
+  title: string;
+  at: string;
+  status?: "active" | "running" | "completed" | "failed" | "cancelled" | "waiting_for_approval";
+  tool?: string;
+  command?: string;
+  file?: string;
+  cwd?: string;
+  result?: string;
+  durationMs?: number;
+  exitCode?: number;
+  error?: string;
+  errorCode?: string;
+  agentId?: string;
+};
 export type DevelopmentProcess = {
   id: string; companyId: string; parentConversationId: string; conversationId?: string;
   projectId?: string; sessionId?: string; runId?: string; name: string; framework: string;
   status: "idle" | "queued" | "preparing" | "running" | "stopping" | "completed" | "failed" | "cancelled" | "interrupted" | "awaiting_approval";
-  progress?: { id: string; stage: string; title: string; at: string }[];
+  progress?: DevelopmentProcessProgressItem[];
   inboxEnabled?: boolean; hidden: boolean; createdAt: string; updatedAt: string; detail?: string; previewUrl?: string;
 };
 export const developmentIsActive = (p: DevelopmentProcess) => ["queued", "preparing", "running", "stopping"].includes(p.status);

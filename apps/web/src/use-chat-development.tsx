@@ -25,12 +25,15 @@ export function useChatDevelopment(options: {
     const data = await api<{ processes: DevelopmentProcess[] }>("/chat/development/processes");
     if (alive.current) setProcesses(data.processes);
   }
+  const anyActive = processes.some(developmentIsActive);
   useEffect(() => {
     alive.current = true;
     const poll = () => { void refresh().catch(() => {}); };
-    poll(); const timer = window.setInterval(poll, 2500);
+    poll();
+    const intervalMs = anyActive ? 1000 : 2500;
+    const timer = window.setInterval(poll, intervalMs);
     return () => { alive.current = false; window.clearInterval(timer); };
-  }, []);
+  }, [anyActive]);
   useEffect(() => {
     // Websites links recover a dedicated development chat, even after its previous chat was deleted.
     const companyId = search.get("company");
@@ -105,7 +108,7 @@ export function useChatDevelopment(options: {
   }
   const currentRoot = root ?? options.conversationId;
   const visible = processes.filter(p => p.parentConversationId === currentRoot || p.projectId === projectId || !p.hidden && (showAll || !currentRoot));
-  return { submit, submitting, card: (messages: Parameters<typeof developmentCard>[0], index: number) => developmentCard(messages, index, processes, options.conversationId), hideMessage: (messages: Parameters<typeof hideDevelopmentMessage>[0], index: number) => hideDevelopmentMessage(messages, index, processes), timeline: <ChatDevelopmentProgress process={processes.find(p => p.projectId === projectId && p.conversationId === options.conversationId)} />, panel: <ChatDevelopmentPanel processes={visible} projectId={projectId} isUk={language === "uk"} busyId={busyId}
+  return { submit, submitting, card: (messages: Parameters<typeof developmentCard>[0], index: number) => developmentCard(messages, index, processes, options.conversationId), hideMessage: (messages: Parameters<typeof hideDevelopmentMessage>[0], index: number) => hideDevelopmentMessage(messages, index, processes), timeline: <ChatDevelopmentProgress process={processes.find(p => p.projectId === projectId && p.conversationId === options.conversationId)} isUk={language === "uk"} />, panel: <ChatDevelopmentPanel processes={visible} projectId={projectId} isUk={language === "uk"} busyId={busyId}
     onOpen={id => { void action(id, "open"); }} onStop={id => { void action(id, "stop"); }} onHide={id => { void action(id, "hide"); }}
     onBack={() => { const parent = root ?? processes.find(p => p.projectId === projectId)?.parentConversationId; if (parent) navigate("/c/" + parent); }} /> };
 }
