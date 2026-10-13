@@ -199,12 +199,6 @@
       "owner": "refactor/large-files",
       "expires_at": "2027-02-28"
     },
-    "packages/shared/src/capability-catalog-audit.ts": {
-      "lines": 857,
-      "reason": "package module not yet decomposed; tracked as follow-up to the plan in docs/refactoring/PLAN.md",
-      "owner": "refactor/large-files",
-      "expires_at": "2027-02-28"
-    },
     "packages/shared/src/website-schema.ts": {
       "lines": 1068,
       "reason": "package module not yet decomposed; tracked as follow-up to the plan in docs/refactoring/PLAN.md",
