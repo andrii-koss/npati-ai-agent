@@ -1,82 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
-import { ChatMessageContent } from "./ChatMessageContent";
 import { confirmModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
+import {
+  type ContentItem,
+  STORAGE_DELETED_KEY,
+  STORAGE_EDITS_KEY,
+  STORAGE_CONTENT_ITEMS_KEY,
+  getDeletedIds,
+  getEditsMap,
+  getCachedContentItems,
+  updateCachedContentItems,
+  parseChatContentTask,
+} from "./content-page-types";
+import { ContentPageViewer } from "./content-page-viewer";
 
-export interface ContentItem {
-  id: string;
-  title: string;
-  type: "article" | "seo_structure" | "social_post" | "brief";
-  content: string;
-  sourceRunId?: string;
-  companyId?: string;
-  companyName?: string;
-  createdAt: string;
-}
-
-const STORAGE_DELETED_KEY = "npati_content_deleted_ids_v1";
-const STORAGE_EDITS_KEY = "npati_content_edits_v1";
-const STORAGE_CONTENT_ITEMS_KEY = "npati_content_items_cache_v1";
-
-function getDeletedIds(): string[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_DELETED_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function getEditsMap(): Record<string, Partial<ContentItem>> {
-  try {
-    const raw = localStorage.getItem(STORAGE_EDITS_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-}
-
-function getCachedContentItems(): ContentItem[] {
-  try {
-    const raw = sessionStorage.getItem(STORAGE_CONTENT_ITEMS_KEY) || localStorage.getItem(STORAGE_CONTENT_ITEMS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch {}
-  return [];
-}
-
-function updateCachedContentItems(items: ContentItem[]) {
-  try {
-    const serialized = JSON.stringify(items);
-    sessionStorage.setItem(STORAGE_CONTENT_ITEMS_KEY, serialized);
-    localStorage.setItem(STORAGE_CONTENT_ITEMS_KEY, serialized);
-  } catch {}
-}
-
-function parseChatContentTask(task: string): { title?: string; type?: ContentItem["type"]; task: string } {
-  const match = task.match(/^\[NPATI_CONTENT:(article|seo_blueprint|social_post|brief|strategy|other):([A-Za-z0-9_-]+)\]\s*/);
-  if (!match) return { task };
-  let title: string | undefined;
-  try {
-    const base64 = match[2]!.replace(/-/g, "+").replace(/_/g, "/");
-    const binary = atob(base64);
-    title = new TextDecoder().decode(Uint8Array.from(binary, (character) => character.charCodeAt(0)));
-  } catch {
-    title = undefined;
-  }
-  const mappedType: ContentItem["type"] = match[1] === "seo_blueprint"
-    ? "seo_structure"
-    : match[1] === "social_post"
-      ? "social_post"
-      : match[1] === "brief" || match[1] === "strategy"
-        ? "brief"
-        : "article";
-  return { title, type: mappedType, task: task.slice(match[0].length) };
-}
+export type { ContentItem };
 
 export function ContentPage() {
   const { t, language } = useTranslation();
@@ -603,253 +543,30 @@ export function ContentPage() {
           </aside>
 
           {/* Right Column: Active Document Reader & Studio */}
-          <section className="content-main-viewer" aria-label="Document reader">
-            {selectedItem ? (
-              <div className={`content-viewer-card ${isExpanded ? "expanded" : ""}`}>
-                {/* Document Reader Header */}
-                <header className="document-reader-header">
-                  {/* Top Row: Category Badge on left, Expand/Collapse toggle in top-right corner */}
-                  <div className="document-header-top-row">
-                    <span className={`content-badge badge-${isEditing ? editType : selectedItem.type}`}>
-                      {getBadgeLabel(isEditing ? editType : selectedItem.type)}
-                    </span>
-                    {!isEditing && (
-                      <button
-                        type="button"
-                        className={`content-action-btn expand-btn ${isExpanded ? "expanded" : ""}`}
-                        onClick={() => setIsExpanded((prev) => !prev)}
-                        title={isExpanded ? t("contentPage.viewer.collapseTitle") : t("contentPage.viewer.expandTitle")}
-                      >
-                        {isExpanded ? (
-                          <>
-                            <span aria-hidden="true">⤡</span> {t("contentPage.viewer.collapse")}
-                          </>
-                        ) : (
-                          <>
-                            <span aria-hidden="true">⤢</span> {t("contentPage.viewer.expand")}
-                          </>
-                        )}
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Main Row: Document Title and Actions toolbar */}
-                  <div className="document-header-main-row">
-                    <h2>{isEditing ? t("contentPage.viewer.editDocument") : selectedItem.title}</h2>
-
-                    {/* Actions toolbar */}
-                    <div className="document-header-actions">
-                      {!isEditing ? (
-                        <>
-                          <div className="document-view-toggle">
-                            <button
-                              type="button"
-                              className={`view-toggle-btn ${viewMode === "preview" ? "active" : ""}`}
-                              onClick={() => setViewMode("preview")}
-                              title={t("contentPage.viewer.views.previewTitle")}
-                            >
-                              {t("contentPage.viewer.views.preview")}
-                            </button>
-                            <button
-                              type="button"
-                              className={`view-toggle-btn ${viewMode === "raw" ? "active" : ""}`}
-                              onClick={() => setViewMode("raw")}
-                              title={t("contentPage.viewer.views.rawTitle")}
-                            >
-                              {t("contentPage.viewer.views.raw")}
-                            </button>
-                          </div>
-
-                          <button
-                            type="button"
-                            className="content-action-btn edit-btn"
-                            onClick={() => setIsEditing(true)}
-                            title={t("contentPage.viewer.actions.editTitle")}
-                          >
-                            {t("contentPage.viewer.actions.edit")}
-                          </button>
-
-                          <button
-                            type="button"
-                            className="content-action-btn delete-btn"
-                            onClick={() => handleDeleteItem()}
-                            title={t("contentPage.viewer.actions.deleteTitle")}
-                          >
-                            {t("contentPage.viewer.actions.delete")}
-                          </button>
-
-                          <button
-                            type="button"
-                            className={`content-action-btn copy-btn ${copied ? "copied" : ""}`}
-                            onClick={copyDocument}
-                            title={t("contentPage.viewer.actions.copyTitle")}
-                          >
-                            {copied ? t("contentPage.viewer.actions.copied") : t("contentPage.viewer.actions.copy")}
-                          </button>
-
-                          <button
-                            type="button"
-                            className="content-action-btn download-btn"
-                            onClick={downloadDocument}
-                            title={t("contentPage.viewer.actions.downloadTitle")}
-                          >
-                            {t("contentPage.viewer.actions.download")}
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            className="button-primary automations-action-primary content-save-btn"
-                            onClick={handleSaveEdit}
-                            title={t("contentPage.viewer.actions.saveChangesTitle")}
-                          >
-                            {t("contentPage.viewer.actions.saveChanges")}
-                          </button>
-                          <button
-                            type="button"
-                            className="button-secondary content-cancel-btn"
-                            onClick={() => {
-                              if (selectedItem) {
-                                setEditTitle(selectedItem.title);
-                                setEditType(selectedItem.type);
-                                setEditContent(selectedItem.content);
-                              }
-                              setIsEditing(false);
-                            }}
-                            title={t("contentPage.viewer.actions.cancelTitle")}
-                          >
-                            {t("contentPage.viewer.actions.cancel")}
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </header>
-
-                {/* Document Reading Metrics Ribbon */}
-                {documentMetrics && (
-                  <div className="document-metrics-ribbon">
-                    <div className="metric-chip">
-                      <strong>{documentMetrics.words.toLocaleString()}</strong>
-                      <span>{t("contentPage.viewer.metrics.words")}</span>
-                    </div>
-                    <div className="metric-chip">
-                      <strong>{documentMetrics.characters.toLocaleString()}</strong>
-                      <span>{t("contentPage.viewer.metrics.characters")}</span>
-                    </div>
-                    <div className="metric-chip">
-                      <strong>~{documentMetrics.readingTimeMinutes} min</strong>
-                      <span>{t("contentPage.viewer.metrics.readTime")}</span>
-                    </div>
-                    <div className="metric-chip">
-                      <strong>{new Date(selectedItem.createdAt).toLocaleDateString(language, { month: "short", day: "numeric", year: "numeric" })}</strong>
-                      <span>{t("contentPage.viewer.metrics.generatedDate")}</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Document Content View / Editor */}
-                <div className={`document-content-area ${isExpanded ? "expanded" : ""}`}>
-                  {isEditing ? (
-                    <div className="document-edit-form">
-                      <div className="document-edit-meta-row">
-                        <div className="document-edit-field flex-1">
-                          <label htmlFor="content-edit-title">{t("contentPage.viewer.editor.titleLabel")}</label>
-                          <input
-                            id="content-edit-title"
-                            type="text"
-                            className="document-edit-input"
-                            value={editTitle}
-                            onChange={(e) => setEditTitle(e.target.value)}
-                            placeholder={t("contentPage.viewer.editor.titlePlaceholder")}
-                          />
-                        </div>
-                        <div className="document-edit-field">
-                          <label htmlFor="content-edit-type">{t("contentPage.viewer.editor.typeLabel")}</label>
-                          <select
-                            id="content-edit-type"
-                            className="document-edit-select"
-                            value={editType}
-                            onChange={(e) => setEditType(e.target.value as ContentItem["type"])}
-                          >
-                            <option value="article">{t("contentPage.types.article")}</option>
-                            <option value="seo_structure">{t("contentPage.types.seoBlueprint")}</option>
-                            <option value="social_post">{t("contentPage.types.socialMedia")}</option>
-                            <option value="brief">{t("contentPage.types.briefPlan")}</option>
-                          </select>
-                        </div>
-                      </div>
-
-                      <div className="document-edit-field full-height">
-                        <div className="document-edit-label-row">
-                          <label htmlFor="content-edit-body">{t("contentPage.viewer.editor.bodyLabel")}</label>
-                          <span className="document-edit-hint">{t("contentPage.viewer.editor.saveHint")}</span>
-                        </div>
-                        <textarea
-                          id="content-edit-body"
-                          className="document-edit-textarea"
-                          value={editContent}
-                          onChange={(e) => setEditContent(e.target.value)}
-                          onKeyDown={(e) => {
-                            if ((e.ctrlKey || e.metaKey) && e.key === "s") {
-                              e.preventDefault();
-                              handleSaveEdit();
-                            }
-                          }}
-                          rows={14}
-                          placeholder={t("contentPage.viewer.editor.bodyPlaceholder")}
-                        />
-                      </div>
-                    </div>
-                  ) : viewMode === "preview" ? (
-                    <div className="document-preview-body">
-                      <ChatMessageContent content={selectedItem.content} />
-                    </div>
-                  ) : (
-                    <div className="document-raw-body">
-                      <pre><code>{selectedItem.content}</code></pre>
-                    </div>
-                  )}
-
-                  {!isEditing && !isExpanded && (
-                    <div className="document-expand-overlay">
-                      <button
-                        type="button"
-                        className="document-expand-banner-btn"
-                        onClick={() => setIsExpanded(true)}
-                        title={t("contentPage.viewer.expandTitle")}
-                      >
-                        <span className="expand-icon" aria-hidden="true">⤢</span>
-                        <span>{t("contentPage.viewer.overlay.expand")}</span>
-                      </button>
-                    </div>
-                  )}
-
-                  {!isEditing && isExpanded && (
-                    <div className="document-collapse-footer">
-                      <button
-                        type="button"
-                        className="document-collapse-banner-btn"
-                        onClick={() => {
-                          setIsExpanded(false);
-                          window.scrollTo({ top: 180, behavior: "smooth" });
-                        }}
-                        title={t("contentPage.viewer.collapseTitle")}
-                      >
-                        <span className="collapse-icon" aria-hidden="true">⤡</span>
-                        <span>{t("contentPage.viewer.overlay.collapse")}</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div className="content-viewer-card empty-selection">
-                <p>{t("contentPage.empty.selectDoc")}</p>
-              </div>
-            )}
-          </section>
+          <ContentPageViewer
+            selectedItem={selectedItem}
+            isExpanded={isExpanded}
+            setIsExpanded={setIsExpanded}
+            isEditing={isEditing}
+            setIsEditing={setIsEditing}
+            editTitle={editTitle}
+            setEditTitle={setEditTitle}
+            editType={editType}
+            setEditType={setEditType}
+            editContent={editContent}
+            setEditContent={setEditContent}
+            viewMode={viewMode}
+            setViewMode={setViewMode}
+            copied={copied}
+            copyDocument={copyDocument}
+            downloadDocument={downloadDocument}
+            handleDeleteItem={handleDeleteItem}
+            handleSaveEdit={handleSaveEdit}
+            getBadgeLabel={getBadgeLabel}
+            documentMetrics={documentMetrics}
+            language={language}
+            t={t}
+          />
         </div>
       )}
     </main>
