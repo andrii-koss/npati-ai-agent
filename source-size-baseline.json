@@ -25,12 +25,6 @@
       "owner": "refactor/large-files",
       "expires_at": "2027-02-28"
     },
-    "apps/agent-api/src/coding-agent-runner-contracts.ts": {
-      "lines": 1117,
-      "reason": "runner contracts moved out of the runner in step 3b; further split pending step 2",
-      "owner": "refactor/large-files",
-      "expires_at": "2027-02-28"
-    },
     "apps/agent-api/src/coding-agent-runner.ts": {
       "lines": 1979,
       "reason": "CodingAgentRunner: its phases are being extracted one per commit (plan step 2). The file grows while a phase is given an explicit argument object and then falls again when the phases move to their own module, so the recorded number is reviewed at each phase commit.",
