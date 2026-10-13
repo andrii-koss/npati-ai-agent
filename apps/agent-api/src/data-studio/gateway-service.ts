@@ -18,33 +18,27 @@ import type {
   ProjectApiUsage,
   ProjectApiInspectResult,
 } from "@npati/shared";
-
-export interface GatewayAuthResult {
-  project: any;
-  backend: DataBackend;
-  environment: DataEnvironmentName;
-  keyType: ProjectApiKeyType;
-  userId: string;
-  userRole: string;
-  userEmail?: string;
-  corsAllowedOrigins: string[];
-}
-
-export interface GatewayListOptions {
-  filter?: Record<string, unknown> | Array<{ field: string; operator: "eq" | "ne" | "gt" | "gte" | "lt" | "lte"; value: unknown }>;
-  sort?: string | Array<{ field: string; direction: "asc" | "desc" }>;
-  limit?: number;
-  offset?: number;
-  page?: number;
-  fields?: string[];
-  include?: string[];
-}
-
-/** Query complexity bounds for public Project API requests. */
-const MAX_FILTER_CLAUSES = 10;
-const MAX_SORT_CLAUSES = 5;
-const MAX_SELECT_FIELDS = 50;
-const MAX_RELATION_INCLUDES = 5;
+export * from "./gateway-types";
+export {
+  MAX_FILTER_CLAUSES,
+  MAX_SORT_CLAUSES,
+  MAX_SELECT_FIELDS,
+  MAX_RELATION_INCLUDES,
+} from "./gateway-query";
+import {
+  type GatewayAuthResult,
+  type GatewayListOptions,
+} from "./gateway-types";
+import {
+  assertQueryBounds,
+  buildFilterClauses,
+  buildOrderClauses,
+  expandRelations,
+} from "./gateway-query";
+import {
+  extractApiCollections,
+  buildApiEndpoints,
+} from "./gateway-inspection";
 
 export class ProjectApiGatewayService {
   private readonly rateLimiter = new ProjectApiRateLimiter();  private readonly recentLogs: ProjectApiRequestLog[] = [];
@@ -394,12 +388,7 @@ export class ProjectApiGatewayService {
     if (!allowed) throw new DataStudioError(403, "gateway", "Collection action is not permitted", false, "POLICY_DENIED");
   }
   private assertQueryBounds(options: { filter?: unknown; sort?: unknown; fields?: string[]; include?: string[] }): void {
-    const filters = Array.isArray(options.filter) ? options.filter.length : options.filter ? Object.keys(options.filter as Record<string, unknown>).length : 0;
-    if (filters > MAX_FILTER_CLAUSES) throw new DataStudioError(400, "gateway", `At most ${MAX_FILTER_CLAUSES} filters are allowed`, false, "INVALID_FILTER");
-    const sorts = Array.isArray(options.sort) ? options.sort.length : options.sort ? 1 : 0;
-    if (sorts > MAX_SORT_CLAUSES) throw new DataStudioError(400, "gateway", `At most ${MAX_SORT_CLAUSES} sort clauses are allowed`, false, "INVALID_QUERY");
-    if ((options.fields?.length ?? 0) > MAX_SELECT_FIELDS) throw new DataStudioError(400, "gateway", `At most ${MAX_SELECT_FIELDS} fields may be selected`, false, "INVALID_QUERY");
-    if ((options.include?.length ?? 0) > MAX_RELATION_INCLUDES) throw new DataStudioError(400, "gateway", `At most ${MAX_RELATION_INCLUDES} relations may be included`, false, "INVALID_QUERY");
+    assertQueryBounds(options);
   }
 
   private async assertCommerceMutation(auth: GatewayAuthResult, collection: string): Promise<void> {
@@ -438,44 +427,8 @@ export class ProjectApiGatewayService {
     this.assertQueryBounds(options);
 
     const values: unknown[] = [];
-    const filterClauses: string[] = [];
-
-    // Parse filters
-    if (options.filter) {
-      if (Array.isArray(options.filter)) {
-        for (const item of options.filter) {
-          validateIdentifier(item.field);
-          filterClauses.push(bindFilter(item.field, item.operator, item.value, values));
-        }
-      } else {
-        for (const [key, val] of Object.entries(options.filter)) {
-          validateIdentifier(key);
-          filterClauses.push(bindFilter(key, "eq", val, values));
-        }
-      }
-    }
-
-    // Parse sort
-    const orderClauses: string[] = [];
-    if (options.sort) {
-      const items = Array.isArray(options.sort) ? options.sort : [options.sort];
-      for (const item of items) {
-        if (typeof item === "string") {
-          const [field, dir = "asc"] = item.split(":");
-          validateIdentifier(field!);
-          const direction = dir?.toLowerCase() === "desc" ? "DESC" : "ASC";
-          orderClauses.push(`${quoteIdentifier(field!)} ${direction}`);
-        } else {
-          validateIdentifier(item.field);
-          orderClauses.push(`${quoteIdentifier(item.field)} ${item.direction === "desc" ? "DESC" : "ASC"}`);
-        }
-      }
-    }
-
-    // Default sorting by created_at if exists or id
-    if (!orderClauses.length) {
-      orderClauses.push(`${quoteIdentifier("id")} ASC`);
-    }
+    const filterClauses = buildFilterClauses(options.filter, values);
+    const orderClauses = buildOrderClauses(options.sort);
 
     // Parse field selection
     let selectFields = "*";
@@ -667,35 +620,7 @@ export class ProjectApiGatewayService {
     rows: any[],
     relationNames: string[],
   ): Promise<any[]> {
-    for (const rel of relationNames) {
-      const targetRelation = rel.trim();
-      validateIdentifier(targetRelation);
-
-      // Check foreign key column pattern e.g. "category" -> "category_id"
-      const fkCandidate = `${targetRelation}_id`;
-      const hasFk = rows.some((r) => r[fkCandidate] !== undefined);
-
-      if (hasFk) {
-        // Collect target IDs
-        const ids = [...new Set(rows.map((r) => r[fkCandidate]).filter((id) => id !== null && id !== undefined))];
-        if (ids.length) {
-          const plural = targetRelation.endsWith("s") ? targetRelation : `${targetRelation}s`;
-          const targetTable = (await client.query<{ exists: boolean }>(
-            "SELECT to_regclass($1) IS NOT NULL AS exists", [plural],
-          )).rows[0]?.exists ? plural : targetRelation;
-          await this.authorizeCollection(auth, targetTable, "select");
-          const relRes = await client.query(
-            `SELECT * FROM ${quoteIdentifier(targetTable)} WHERE id = ANY($1)`, [ids],
-          );
-          const lookup = new Map(relRes.rows.map((r) => [String(r.id), r]));
-          for (const row of rows) {
-            const fkVal = row[fkCandidate];
-            row[targetRelation] = fkVal ? lookup.get(String(fkVal)) || null : null;
-          }
-        }
-      }
-    }
-    return rows;
+    return expandRelations(auth, client, collection, rows, relationNames, (a, t, act) => this.authorizeCollection(a, t, act));
   }
 
   // =========================================================================
@@ -738,30 +663,8 @@ export class ProjectApiGatewayService {
       schema = await this.dataProvider.introspectSchema(backend, environment);
     }
 
-    const collections = schema.tables
-      .filter((t) => !t.name.startsWith("_npati_"))
-      .map((t) => ({
-        name: t.name,
-        fields: t.columns.map((c) => ({ name: c.name, type: c.type, required: !c.nullable })),
-      }));
-
-    const endpoints = [
-      { method: "POST", path: `/v1/projects/${projectId}/auth/register`, description: "Register end-user", authRequired: false, keyRequired: "publishable" as const },
-      { method: "POST", path: `/v1/projects/${projectId}/auth/login`, description: "Login end-user", authRequired: false, keyRequired: "publishable" as const },
-      { method: "POST", path: `/v1/projects/${projectId}/auth/logout`, description: "Logout end-user", authRequired: false, keyRequired: "publishable" as const },
-      { method: "GET", path: `/v1/projects/${projectId}/auth/me`, description: "Get current user profile", authRequired: true, keyRequired: "publishable" as const },
-      { method: "POST", path: `/v1/projects/${projectId}/auth/refresh`, description: "Refresh access token", authRequired: false, keyRequired: "publishable" as const },
-    ];
-
-    for (const col of collections) {
-      endpoints.push(
-        { method: "GET", path: `/v1/projects/${projectId}/data/${col.name}`, description: `List ${col.name}`, authRequired: false, keyRequired: "publishable" as const },
-        { method: "GET", path: `/v1/projects/${projectId}/data/${col.name}/:id`, description: `Get ${col.name} by ID`, authRequired: false, keyRequired: "publishable" as const },
-        { method: "POST", path: `/v1/projects/${projectId}/data/${col.name}`, description: `Create ${col.name}`, authRequired: false, keyRequired: "publishable" as const },
-        { method: "PATCH", path: `/v1/projects/${projectId}/data/${col.name}/:id`, description: `Update ${col.name}`, authRequired: false, keyRequired: "publishable" as const },
-        { method: "DELETE", path: `/v1/projects/${projectId}/data/${col.name}/:id`, description: `Delete ${col.name}`, authRequired: false, keyRequired: "publishable" as const },
-      );
-    }
+    const collections = extractApiCollections(schema);
+    const endpoints = buildApiEndpoints(projectId, collections);
 
     return {
       projectId,
