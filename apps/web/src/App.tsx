@@ -21,7 +21,7 @@ import { LanguageSwitcher } from "./LanguageSwitcher";
 import { WebsiteBuilderDashboard } from "./WebsiteBuilderDashboard";
 import { DataStudioPage } from "./DataStudioPage";
 import { DataStudioSettingsPage } from "./DataStudioSettingsPage";
-import { CodeSettingsPage } from "./CodeSettingsPage";
+import { CodeAgentsPage } from "./CodeAgentsPage";
 import { CodeWorkspacePage } from "./CodeWorkspacePage";
 
 function authHeaders(headers: HeadersInit = {}): HeadersInit {
@@ -1528,7 +1528,7 @@ export function App() {
             <Route path="/email" element={<Navigate to="/settings/email/inbox" replace />} />
             <Route path="/settings/capabilities" element={<Workspace><CapabilityInspectorPage /></Workspace>} />
             <Route path="/settings/data-studio" element={<Workspace><DataStudioSettingsPage /></Workspace>} />
-        <Route path="/settings/code" element={<Workspace><CodeSettingsPage /></Workspace>} />
+        <Route path="/settings/code" element={<Workspace><CodeAgentsPage /></Workspace>} />
         <Route path="/settings/code/:companyId/:projectId" element={<FullscreenRoute><CodeWorkspacePage /></FullscreenRoute>} />
             <Route path="/capabilities" element={<Navigate to="/settings/capabilities" replace />} />
             <Route path="/goals" element={<Workspace><GoalsPage /></Workspace>} />

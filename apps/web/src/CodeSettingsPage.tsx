@@ -566,18 +566,18 @@ export function CodeSettingsPage() {
   const unavailable = error?.code === "code_unavailable" || error?.code === "project_import_unavailable";
 
   return (
-    <main className="automations-container">
-      <header className="inspector-header automations-header">
+    <main className="automations-container code-agent-settings">
+      <header className="inspector-header automations-header marketplace-hero">
         <div className="automations-header-top">
           <div>
             <p className="eyebrow">{isUk ? "Налаштування · Code" : "Settings · Code"}</p>
             <h1>
-              <Link to="/settings" className="marketplace-back-button" aria-label={isUk ? "Назад до налаштувань" : "Back to settings"} title={isUk ? "Назад до налаштувань" : "Back to settings"}>
+              <Link to="/settings/code" className="marketplace-back-button" aria-label={isUk ? "Назад до агентів" : "Back to agents"} title={isUk ? "Назад до агентів" : "Back to agents"}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M19 12H5M12 19l-7-7 7-7" />
                 </svg>
               </Link>
-              <span>{isUk ? "Код" : "Code"}</span>
+              <span>NPATI Coding Agent</span>
             </h1>
             <p className="hero-copy">
               {isUk
