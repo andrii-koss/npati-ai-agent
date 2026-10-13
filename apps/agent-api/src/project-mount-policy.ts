@@ -53,7 +53,7 @@ export const MOUNTED_FOLDER_TARGET = "/workspace";
 
 /** Operator-configured roots a mounted folder may come from. Empty means "nothing may be mounted". */
 export function mountedFolderRoots(env: NodeJS.ProcessEnv = process.env): string[] {
-  return String(env.NPATI_MOUNTED_FOLDER_ROOTS ?? "")
+  return [env.NPATI_MOUNTED_FOLDER_ROOTS, env.NPATI_CREATOR_SOURCE_ROOT].filter(Boolean).join(",")
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0 && path.isAbsolute(entry));

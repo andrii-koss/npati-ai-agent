@@ -12,14 +12,14 @@ import { CodeSessionRunExecutor } from "../apps/agent-api/src/code-session-run-e
 const owner = { userId: "owner-1", workspaceId: "workspace:owner-1", permissions: ["owner", "admin:all", "workspace:write", "business:manage"] };
 
 describe("self-hosted coding defaults and installation ownership", () => {
-  it("enables stable coding features globally while experimental async inbox remains opt-in", async () => {
+  it("enables all supported coding features in Company by default", async () => {
     const store = new InMemoryWorkspaceStore();
     const flags = new FeatureFlagService(store, undefined, { enabledByDefault: true });
     for (const key of ["coding_agent.enabled", ...CODE_AGENT_SUB_FLAGS, "code.model_profile.hosted-native-tools"]) {
-      expect(await flags.isEnabled(owner, key, { companyId: "company-a" })).toBe(!["code.async_inbox", "code.async_processes", "code.async_subagents", "code.async_agent_control", "code.async_collect_barrier", "code.async_workspace"].includes(key));
+      expect(await flags.isEnabled(owner, key, { companyId: "company-a" })).toBe(true);
     }
     const described = await flags.describe(owner, { companyId: "company-a" });
-    expect(described.master).toMatchObject({ enabled: true, scope: "global", source: "self_hosted_default" });
+    expect(described.master).toMatchObject({ enabled: true, scope: "company", source: "company_default" });
   });
 
   it("preserves explicit opt-outs and an immediate global kill switch", async () => {

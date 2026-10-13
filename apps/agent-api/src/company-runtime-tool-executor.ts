@@ -85,12 +85,12 @@ export async function executeCompanyRunTools(params: CompanyRunToolsParams): Pro
     const agent = agents.get(plan.agentId);
     if (!agent) throw new CompanyRuntimeError("INVALID_TOOL_AGENT", "Tool request references an unavailable agent", 502);
     const tool = toolName(plan.tool), allowed = new Set(agent.tools.map(toolName));
-    if (allowedProjectId && tool.startsWith("project.") && plan.input.projectId !== allowedProjectId) {
+    if (allowedProjectId && (tool.startsWith("project.") || tool === "code.agent.spawn") && plan.input.projectId !== allowedProjectId) {
       await store.appendCompanyAgentToolAudit(ctx, company.id, runId, { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: {}, errorMessage: "Tool targets another project", reasonCode: "project_task_tenant", sequenceNumber: sequenceNumber++ });
       evidence.push("Project task target denied " + tool);
       continue;
     }
-    if (allowedProjectPaths?.length && tool.startsWith("project.")) {
+    if (allowedProjectPaths?.length && (tool.startsWith("project.") || tool === "code.agent.spawn")) {
       const mutation = tool.startsWith("project.files.") && !["project.files.read", "project.files.list", "project.files.search"].includes(tool);
       const paths = mutation ? (tool === "project.files.delete" && Array.isArray(plan.input.paths) ? plan.input.paths : [plan.input.path, ...(tool === "project.files.move" ? [plan.input.to] : [])]) : [];
       const inScope = (value: unknown) => typeof value === "string" && allowedProjectPaths.some((scope) => value === scope || value.startsWith(scope + "/"));

@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { getStoredAuthToken } from "./AuthContext";
 import { confirmModal } from "./ConfirmDialog";
+import { CodeExecutionModeControl, type CodeExecutionModeView } from "./CodeExecutionModeControl";
 
 /**
  * C1a: Coding Agent feature-flag panel.
  *
- * Self-hosted installations enable the agent by default; hosted deployments retain dark launch. Every
+ * Company is the default execution mode; supported functions are enabled for configured deployments. Every
  * mutation goes through the server (which enforces the owner/admin role, the security gate for stage
  * promotion and the audit journal). The UI never caches a decision: it re-reads the server state
  * after every change so a rolled-back or refused change is visible immediately.
@@ -30,6 +31,8 @@ export interface CodeFlagsState {
   flags: CodeFlag[];
   darkLaunch?: boolean;
   management?: { company: boolean; global: boolean };
+  execution?: CodeExecutionModeView;
+  defaultsEnabled?: boolean;
 }
 
 export interface FlagHistoryEntry {
@@ -138,7 +141,7 @@ export function CodeFlagsPanel({ companyId, isUk, notify, onMasterEnabledChange,
   const [loading, setLoading] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [scope, setScope] = useState<FlagScope>("global");
+  const scope = "company";
   const [history, setHistory] = useState<FlagHistoryEntry[]>([]);
   const [historyKey, setHistoryKey] = useState<string>("coding_agent.enabled");
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -152,7 +155,6 @@ export function CodeFlagsPanel({ companyId, isUk, notify, onMasterEnabledChange,
     try {
       const body = await apiFetch<CodeFlagsState>(`${base}/code/flags`);
       setState(body);
-      if (body.management && !body.management.global) setScope("company");
       setError(null);
       onMasterEnabledChange?.(body.master?.enabled ?? null);
     } catch (cause) {
@@ -190,7 +192,7 @@ export function CodeFlagsPanel({ companyId, isUk, notify, onMasterEnabledChange,
         body: JSON.stringify({
           scope, scopeId: scope === "company" ? companyId : undefined,
           flagKey: flag.key, enabled: nextEnabled,
-          stage: nextEnabled ? (flag.stage && flag.stage !== "off" ? flag.stage : "internal") : "off",
+          stage: nextEnabled ? (state?.defaultsEnabled ? "ga" : flag.stage && flag.stage !== "off" ? flag.stage : "internal") : "off",
         }),
       });
       notify("success", isUk
@@ -200,7 +202,7 @@ export function CodeFlagsPanel({ companyId, isUk, notify, onMasterEnabledChange,
     } catch (cause) {
       notify("error", flagErrorMessage(cause, isUk));
     } finally { setBusyKey(null); }
-  }, [base, companyId, isUk, load, notify, scope]);
+  }, [base, companyId, isUk, load, notify, scope, state?.defaultsEnabled]);
 
   const killSwitch = useCallback(async () => {
     const agreed = await confirmModal({
@@ -227,7 +229,7 @@ export function CodeFlagsPanel({ companyId, isUk, notify, onMasterEnabledChange,
     } finally { setBusyKey(null); }
   }, [base, companyId, isUk, load, notify, onSessionsSuspended, scope]);
 
-  const canManage = state?.management ? (scope === "global" ? state.management.global : state.management.company) : true;
+  const canManage = state?.management?.company ?? true;
   const master = state?.master;
   const darkLaunch = state?.darkLaunch === true || state?.master?.enabled === false;
 
@@ -237,8 +239,8 @@ export function CodeFlagsPanel({ companyId, isUk, notify, onMasterEnabledChange,
         <h2>{isUk ? "Feature flags (експериментально)" : "Feature flags (experimental)"}</h2>
         <p className="ds-muted">
           {isUk
-            ? "У self-hosted інсталяції Coding Agent ввімкнений відразу. Тут можна змінити доступність функцій."
-            : "Coding Agent is enabled automatically on self-hosted installations. Manage feature availability here."}
+            ? "За замовчуванням агент працює в режимі Company з увімкненими функціями. Тут можна змінити режим доступу та окремі функції."
+            : "The agent starts in Company mode with functions enabled. Manage execution scope and individual functions here."}
         </p>
       </div>
 
@@ -253,18 +255,8 @@ export function CodeFlagsPanel({ companyId, isUk, notify, onMasterEnabledChange,
       )}
 
       <div className="code-flags-scope">
-        <label className="ds-toolbar-field">
-          <span>{isUk ? "Область зміни" : "Change scope"}</span>
-          <select className="page-size-select" value={scope} onChange={(event) => setScope(event.target.value as FlagScope)}>
-            <option value="company">{isUk ? "Компанія" : "Company"}</option>
-            <option value="global" disabled={state?.management?.global === false}>{isUk ? "Глобально" : "Global"}</option>
-          </select>
-        </label>
-        {scope === "global" && (
-          <span className="code-flags-warning">
-            {isUk ? "Глобальна зміна впливає на всі компанії." : "A global change affects every company."}
-          </span>
-        )}
+        <CodeExecutionModeControl companyId={companyId} isUk={isUk} value={state?.execution}
+          canManage={canManage} onChanged={load} notify={notify} />
         <button type="button" className="button-secondary" onClick={() => void load()} disabled={loading}>
           {loading ? (isUk ? "Оновлення…" : "Refreshing…") : isUk ? "Оновити флаги" : "Refresh flags"}
         </button>

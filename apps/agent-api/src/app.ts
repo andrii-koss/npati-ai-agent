@@ -203,6 +203,7 @@ import { registerCodeRouteWiring } from "./code-route-wiring";
 import { registerCapabilityRoutes } from "./capability-routes";
 import { registerMiscRoutes } from "./misc-routes";
 import { registerChatStreamRoutes } from "./chat-stream-routes";
+import { createCompanyCodingDelegation } from "./code-company-delegation";
 import { registerChatRoutes } from "./chat-routes";
 import { createChatOrchestration } from "./chat-orchestration";
 import { createCodePolicyWiring } from "./code-policy-wiring";
@@ -543,7 +544,7 @@ export function buildApp(config: AppConfig = {}) {
   );
   const projectImportService = new ProjectImportService(workspaceStore, projectService, projectWorkspace, projectSandbox, projectPreviewService, projectGitService, browserCredentials);
 
-  const featureFlagService = new FeatureFlagService(workspaceStore, auditLogService, { enabledByDefault: selfHosted, allowPreGateRollout: selfHosted }, async (ctx, companyId) => {
+  const featureFlagService = new FeatureFlagService(workspaceStore, auditLogService, { enabledByDefault: config.deploymentType !== undefined, allowPreGateRollout: selfHosted }, async (ctx, companyId) => {
 
     let stopped = 0;
     try {
@@ -1276,6 +1277,7 @@ export function buildApp(config: AppConfig = {}) {
     workspaceStore,
   });
   const { codeRbacForRun, codeRunStateLog, codeSessionInbox, codeRunCancellation, codeSessionRunExecutor, codeRunQueueLimits, codeRunAdmission, codeBackgroundRuns, codeErasureContexts, codeDataErasure, codeRunEnvironment } = codeRoutes;
+  companyToolRuntime.setCodingDelegation(createCompanyCodingDelegation({ flags: featureFlagService, code: codeService, executor: codeSessionRunExecutor, admission: codeRunAdmission }));
   codingAgentRunnerRef = codeRoutes.codingAgentRunnerRef;
   codeSubagentOperationsRef = codeRoutes.codeSubagentOperationsRef;
   subagentChildRunnerWithAck = codeRoutes.subagentChildRunnerWithAck;

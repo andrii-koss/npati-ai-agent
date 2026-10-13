@@ -25,6 +25,7 @@ import { registerCodeDataErasureRoutes } from "./code-data-erasure-routes";
 import { registerCodeGoalRoutes } from "./code-goal-routes";
 import { createCodeInstructionsLoader } from "./code-instructions-loader";
 import { CodeMountedFolderService } from "./code-mounted-folder";
+import { registerCodeExecutionModeRoutes } from "./code-execution-mode-routes";
 import { registerCodeMountedFolderRoutes } from "./code-mounted-folder-routes";
 import { registerCodeProjectInstructionsRoutes } from "./code-project-instructions-routes";
 import { CodeProjectTrustService } from "./code-project-trust";
@@ -244,6 +245,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
         }
       : undefined,
   });
+  registerCodeExecutionModeRoutes(app, { auth: authProvider, flags: featureFlagService, code: codeService, mounts: codeMountedFolder });
   registerCodeMountedFolderRoutes(app, {
     mountedFolder: {
       get: async (ctx, companyId, projectId) => codeMountedFolder.get(ctx, companyId, projectId),

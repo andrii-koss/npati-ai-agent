@@ -784,6 +784,7 @@ export class CodeToolRuntime {
       if (!this.options.flags) throw new CodeToolError("feature_disabled", "Coding Agent is unavailable: feature flags are not configured", 403, "flags", false, "code.fs.undo_last_turn");
       await this.options.flags.assertEnabled(ctx, CODE_AGENT_MASTER_FLAG, { companyId: input.companyId, userId: ctx.userId });
       await this.options.flags.assertEnabled(ctx, "code.write", { companyId: input.companyId, userId: ctx.userId });
+      await this.options.flags.executionModes?.assertToolAllowed(ctx, input.companyId, input.projectId, "code.fs.undo_last_turn");
       const checkpointId = await this.restoreTurn(ctx, { companyId: input.companyId, projectId: input.projectId, sessionId, turnId, tool: "code.fs.undo_last_turn" });
       const result: CodeToolInvokeResult = {
         ok: true, tool: "code.fs.undo_last_turn", toolVersion: 1, schemaVersion: 1,
@@ -949,6 +950,7 @@ export class CodeToolRuntime {
 
       // (5) Arguments.
       const args = validateArguments(tool.inputSchema, input.args);
+      await this.options.flags.executionModes?.assertToolAllowed(ctx, input.companyId, input.projectId, tool.name, args);
       if (input.subagentWritePaths) {
         const scopedFileTools = ["code.fs.edit", "code.fs.write", "code.fs.move", "code.fs.delete", "code.fs.apply_patch"];
         const unsafe = this.isWriteTool(tool.name) || /^(code\.shell\.(exec|exec_async|process\.start)|code\.verify\.run|code\.deps\.(add|install|update|remove)|code\.git\.(branch|stage|commit|restore|push|pr))/.test(tool.name);
