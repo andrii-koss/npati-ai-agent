@@ -43,9 +43,6 @@
     "apps/agent-api/src/company-knowledge.ts": {
       "as-any": 6
     },
-    "apps/agent-api/src/company-runtime.ts": {
-      "as-any": 5
-    },
     "apps/agent-api/src/company-tool-runtime.ts": {
       "as-any": 9
     },
@@ -99,9 +96,6 @@
     },
     "apps/agent-api/src/misc-routes.ts": {
       "as-any": 1
-    },
-    "apps/agent-api/src/multimodal-routes.ts": {
-      "as-any": 7
     },
     "apps/agent-api/src/project-deploy-service.ts": {
       "as-any": 1
