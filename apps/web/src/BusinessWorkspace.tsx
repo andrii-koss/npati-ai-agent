@@ -683,6 +683,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
             </div>
           )}
           {messages.map((message, index) => {
+            if (development.hideMessage(messages, index)) return null;
             const isLatestAssistant = message.role === "assistant" && index === messages.length - 1;
             const hasResearch = progressEvents.some((event) => !event.type.startsWith("final_generation"));
             return (
@@ -710,7 +711,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
                 >
                   <PendingMessageAttachments value={message.attachments ?? []} />
                   {message.role === "user" ? <UserPromptMessage content={message.content} onEdit={(prompt) => { setInput(prompt); window.requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".onboarding-live-composer textarea")?.focus()); }} /> : <ChatMessageContent content={projectChatText(message.content, message.projectCard)} />}
-                  {message.projectCard && <ProjectChatCard card={message.projectCard} onActivate={(card) => { setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected }); setNotice(`Editing ${card.name}. Describe your changes in chat.`); }} />}
+                  {development.card(messages, index) && <ProjectChatCard card={development.card(messages, index)!} onActivate={(card) => { setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected }); setNotice(`Editing ${card.name}. Describe your changes in chat.`); }} />}
                   {message.role === "assistant" && !sending && (
                     <AssistantMessageToolbar
                       content={message.content}
@@ -742,6 +743,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           <div ref={streamEndRef} aria-hidden="true" />
         </div>
         {replyMeta?.memoryCandidate && <div className="memory-candidate"><div><strong>Remember this?</strong><p>{replyMeta.memoryCandidate.title}: {replyMeta.memoryCandidate.content}</p></div><button onClick={() => void remember()}>Remember</button><button onClick={() => setReplyMeta({ ...replyMeta, memoryCandidate: undefined })}>Not now</button></div>}
+        {development.timeline}
         {development.panel}
         <BusinessChatComposer
           input={input}

@@ -4,6 +4,7 @@ export type DevelopmentProcess = {
   id: string; companyId: string; parentConversationId: string; conversationId?: string;
   projectId?: string; sessionId?: string; runId?: string; name: string; framework: string;
   status: "idle" | "queued" | "preparing" | "running" | "stopping" | "completed" | "failed" | "cancelled" | "interrupted" | "awaiting_approval";
+  progress?: { id: string; stage: string; title: string; at: string }[];
   inboxEnabled?: boolean; hidden: boolean; createdAt: string; updatedAt: string; detail?: string; previewUrl?: string;
 };
 export const developmentIsActive = (p: DevelopmentProcess) => ["queued", "preparing", "running", "stopping"].includes(p.status);

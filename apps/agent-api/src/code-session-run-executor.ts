@@ -41,6 +41,7 @@ export interface CodeSessionRunPort {
     initialInboxMessageId?: string;
     verificationTools?: readonly string[];
     forceVerification?: boolean;
+    maxTurns?: number;
   }): Promise<unknown>;
 }
 
@@ -69,6 +70,7 @@ export interface CodeRunEventSink {
 export type CodeRunTerminalStatus = "completed" | "failed" | "cancelled";
 
 export interface CodeSessionRunInput {
+  maxTurns?: number;
   ctx: AuthContext;
   session: CodeSession;
   prompt: string;
@@ -163,6 +165,7 @@ export class CodeSessionRunExecutor {
         ctx: input.ctx,
         session: input.session,
         prompt: input.prompt,
+        ...(input.maxTurns !== undefined ? { maxTurns: input.maxTurns } : {}),
         ...(input.runId ? { runId: input.runId } : {}),
         ...(input.initialInboxMessageId ? { initialInboxMessageId: input.initialInboxMessageId } : {}),
         ...(model ? { model } : {}),
