@@ -22,3 +22,13 @@
   .chat-development-actions { grid-column: 2; justify-content: flex-end; }
   .chat-development-icon { width: 24px; height: 24px; }
 }
+
+.chat-development-progress { width: 100%; max-width: 900px; margin: 12px auto; padding: 16px; border-radius: 14px; background: var(--npati-gray-50, #f8f9fb); }
+.chat-development-progress-heading, .chat-development-progress li { display: flex; align-items: baseline; gap: 12px; }
+.chat-development-progress ol { list-style: none; padding: 0; margin: 14px 0 0; }
+.chat-development-progress li { margin: 8px 0; font-size: 13px; color: var(--npati-gray-500, #64748b); }
+.chat-development-dot { display: inline-block; width: 8px; height: 8px; flex-shrink: 0; border-radius: 50%; background: var(--npati-red, #cf3035); }
+.chat-development-dot.active, .chat-development-progress li.active .chat-development-dot { animation: chat-development-pulse 1.2s ease-in-out infinite; }
+.chat-development-progress p { font-size: 13px; overflow-wrap: anywhere; }
+@keyframes chat-development-pulse { 50% { opacity: .3; transform: scale(.75); } }
+@media (prefers-reduced-motion: reduce) { .chat-development-dot.active, .chat-development-progress li.active .chat-development-dot { animation: none; } }

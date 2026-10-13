@@ -40,7 +40,13 @@ async function fixture(maxConcurrentPerUser = 4) {
     }),
   });
   const prepare = async (ctx: AuthContext, project: Awaited<ReturnType<ProjectService["get"]>>, framework: string) => projects.updatePreview(ctx, project.companyId, project.id, { framework });
-  const ports = { store, projects, flags, code, executor, cancellation, background,
+  const previews = new Set<string>();
+  const preview = {
+    buildProject: vi.fn(async (_ctx: AuthContext, _companyId: string, _projectId: string, onStage?: (stage: "dependencies" | "build") => void) => { onStage?.("dependencies"); onStage?.("build"); }),
+    startPreview: vi.fn(async (ctx: AuthContext, companyId: string, projectId: string) => { previews.add(projectId); await projects.updatePreview(ctx, companyId, projectId, { lastBuildStatus: "ready", previewUrl: "https://preview.test/" + projectId }); return { status: "running", previewUrl: "https://preview.test/" + projectId }; }),
+    getSession: (projectId: string) => previews.has(projectId) ? { status: "running" } : undefined,
+  };
+  const ports = { store, projects, flags, code, executor, cancellation, background, preview: preview as never,
     admission: createCodeRunAdmission(queue, new CodeRunRateLimiter()),
     preparer: { prepareCodingWebsite: (ctx: AuthContext, p: Awaited<ReturnType<ProjectService["get"]>>, _message: string, framework: string) => prepare(ctx, p, framework), prepareCodingMobile: (ctx: AuthContext, p: Awaited<ReturnType<ProjectService["get"]>>) => prepare(ctx, p, "Expo") }, log: { warn: vi.fn() } };
   const service = new ChatDevelopmentService(ports); shutdown.push(() => service.close());
@@ -49,7 +55,7 @@ async function fixture(maxConcurrentPerUser = 4) {
     const run = controls.get(projectId)!;
     run.finish({ runId: run.input.runId, status: "completed", summary: { verification: { status: verified ? "passed" : "failed", requestedTools: ["build"] } } });
   };
-  return { store, company, projects, flags, code, controls, starts, service, start, finish, ports };
+  return { store, company, projects, flags, code, controls, starts, service, start, finish, ports, preview };
 }
 describe("development request planning", () => {
   it("routes the user's four projects and keeps a shop as one project", () => {
@@ -79,7 +85,7 @@ describe("chat development lifecycle with the real store, queue and executor", (
     await vi.waitFor(async () => expect((await f.service.list(owner)).map(p => p.status)).toEqual(["completed", "failed", "completed", "completed"]));
     const projects = await f.projects.list(owner, f.company.id);
     expect(projects.find(p => p.type === "mobile_app")?.framework).toBe("Expo");
-    expect(projects.filter(p => p.previewUrl)).toHaveLength(3);
+    expect(projects.filter(p => p.previewUrl)).toHaveLength(4); // Failed AI work retains the already-built template preview.
     expect((await getLatestChatProjectCard(f.store, owner, live[0]!.conversationId!))?.sessionId).toBe(live[0]!.sessionId);
   });
   it("isolates stop and hide, preserves projects, and restores their chats after deletion", async () => {
@@ -177,6 +183,29 @@ describe("chat development lifecycle with the real store, queue and executor", (
     expect((await f.service.openProject(owner, f.company.id, first.project.id)).url).toContain("project=" + first.project.id);
     expect(await f.projects.list(owner, f.company.id)).toHaveLength(2);
     expect(f.controls.size).toBe(0);
+  });
+  it("deploys the template before calling the model and keeps one honest project card on quota failure", async () => {
+    const f = await fixture(); const result = await f.start("Create an online store on Next.js");
+    await vi.waitFor(() => expect(f.controls.size).toBe(1));
+    const process = (await f.service.list(owner))[0]!;
+    expect(f.preview.buildProject).toHaveBeenCalledOnce(); expect(f.preview.startPreview).toHaveBeenCalledOnce();
+    expect(process.progress?.map(p => p.stage)).toEqual(expect.arrayContaining(["scaffold", "dependencies", "build", "preview", "template_ready", "agent"]));
+    const runner = f.controls.get(process.projectId!)!; expect(runner.input.maxTurns).toBe(16); expect(runner.input.prompt).not.toContain("code.deps.install"); expect(runner.input.prompt).toContain("code.deps.add");
+    const child = await f.store.getNeutralConversation(owner, process.conversationId!); expect(child.messages).toHaveLength(1);
+    expect((await getLatestChatProjectCard(f.store, owner, process.conversationId!))?.status).not.toBe("ready");
+    runner.finish({ status: "stopped", reason: "budget_exhausted", message: "A2A_TOKEN_QUOTA_EXCEEDED", runId: runner.input.runId });
+    await vi.waitFor(async () => expect((await f.service.list(owner))[0]?.status).toBe("failed"));
+    await vi.waitFor(async () => expect((await getLatestChatProjectCard(f.store, owner, process.conversationId!))?.status).toBe("failed"));
+    expect((await f.store.getNeutralConversation(owner, process.conversationId!)).messages).toHaveLength(1);
+    expect((await f.store.getNeutralConversation(owner, result.conversationId!)).messages).toHaveLength(2);
+  });
+  it("reports a template build failure without spending model tokens", async () => {
+    const f = await fixture(); f.preview.buildProject.mockRejectedValueOnce(new Error("Dependency install failed"));
+    await f.start("Create a Next.js website");
+    await vi.waitFor(async () => expect((await f.service.list(owner))[0]?.status).toBe("failed"));
+    expect(f.controls.size).toBe(0); expect(f.preview.startPreview).not.toHaveBeenCalled();
+    const process = (await f.service.list(owner))[0]!;
+    expect(process.progress?.at(-1)?.title).toContain("Dependency install failed");
   });
   it("authenticates and validates the HTTP entry points", async () => {
     const f = await fixture(); const app = Fastify();

@@ -339,7 +339,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
               ctx: auth,
               session: codeSession,
               prompt: isCodeChatWebsite(codeProject)
-                ? `${message}\n\nWork in this existing website workspace. Start with package.json, the main page and its styles; implement the requested visible website before exploring unrelated files. Read files before editing; preserve working pages and the attached database/auth SDK (lib/project-client.ts). Do not re-scaffold or run create-next-app. Use code.deps.install for dependency installation, not compound shell setup commands. Do not start a dev server yourself. Once the requested edits are made, finish your response: the system runs the production build and starts Live Preview.`
+                ? `${message}\n\nWork in this existing website workspace. Start with package.json, the main page and its styles; implement the requested visible website before exploring unrelated files. Read files before editing; preserve working pages and the attached database/auth SDK (lib/project-client.ts). Do not re-scaffold or run create-next-app. Use the available code.deps.add tool when adding a dependency. Initial template installation and build are managed by the system; do not invent a code.deps.install tool or use compound shell setup commands. Do not start a dev server yourself. Once the requested edits are made, finish your response: the system runs the production build and starts Live Preview.`
                 : message,
 
               ...(codeIntentIsReadOnly(codeDecision.intent) ? { readOnlyIntent: true } : {}),

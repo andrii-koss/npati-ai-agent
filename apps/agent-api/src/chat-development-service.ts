@@ -16,7 +16,7 @@ import { hasCodeChatPreview, isCodeChatWebsite } from "./code-chat-website";
 import { saveChatProjectCard } from "./project-chat-cards";
 
 const key = "chat-development-processes:v1";
-type Entry = DevelopmentProcess & { requestId: string; businessId?: string };
+type Entry = DevelopmentProcess & { requestId: string; businessId?: string; cardMessageId?: string };
 export class DevelopmentError extends Error {
   constructor(message: string, readonly status = 400) { super(message); }
 }
@@ -70,7 +70,9 @@ export class ChatDevelopmentService {
     })));
     const inboxEnabled = new Map(await Promise.all(companies.map(async companyId => [companyId, this.d.inbox ? await this.d.inbox.isEnabled(ctx, companyId) : false] as const)));
     return Promise.all(items.filter(p => accessible.has(p.companyId)).map(async ({ requestId: _requestId, ...stored }) => {
-      const item = { ...stored, inboxEnabled: inboxEnabled.get(stored.companyId) ?? false };
+      const activity = stored.runId ? await this.d.store.listCodeActivityEvents({ companyId: stored.companyId, runId: stored.runId, limit: 60 }) : [];
+      const tools = activity.filter(e => typeof e.payload.tool === "string").map(e => ({ id: e.id, stage: "tool", title: (/deps/.test(String(e.payload.tool)) ? "Installing dependencies" : /verify/.test(String(e.payload.tool)) ? "Verifying build and checks" : /write|patch|edit/.test(String(e.payload.tool)) ? "Updating project files" : /read|list|search/.test(String(e.payload.tool)) ? "Reading project files" : "Running a project operation") + (e.payload.ok === false ? ": failed" : ""), at: e.createdAt.toISOString() }));
+      const item = { ...stored, progress: [...(stored.progress ?? []), ...tools].sort((a,b) => Date.parse(a.at) - Date.parse(b.at)), inboxEnabled: inboxEnabled.get(stored.companyId) ?? false };
       if (this.jobs.has(this.jobKey(ctx, item.id))) return item;
       const latest = runs.get(item.companyId)?.filter(r => r.sessionId === item.sessionId).sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime())[0];
       if (latest && item.projectId) {
@@ -149,6 +151,9 @@ export class ChatDevelopmentService {
     });
     return { conversationId, processes: created };
   }
+  private async report(ctx: AuthContext, id: string, stage: string, title: string) {
+    await this.change(ctx, items => items.map(item => item.id === id ? { ...item, progress: [...(item.progress ?? []), { id: randomUUID(), stage, title, at: new Date().toISOString() }].slice(-30), updatedAt: new Date().toISOString() } : item));
+  }
   private async card(ctx: AuthContext, process: Entry, project: Project, text: string) {
     const current = (await this.entries(ctx)).find(p => p.id === process.id);
     if (current?.conversationId) process.conversationId = current.conversationId;
@@ -157,9 +162,14 @@ export class ChatDevelopmentService {
       process.conversationId = (await this.d.store.createNeutralConversation(ctx, project.name)).id;
       await this.patch(ctx, process.id, { conversationId: process.conversationId });
     }
-    const message = await this.d.store.appendNeutralMessage(ctx, process.conversationId, "assistant", text);
-    await saveChatProjectCard(this.d.store, ctx, process.conversationId, message.id, {
-      id: project.id, projectId: project.id, companyId: project.companyId, name: project.name, status: project.status,
+    let messageId = current?.conversationId === process.conversationId ? current.cardMessageId : undefined;
+    if (!messageId) {
+      messageId = (await this.d.store.appendNeutralMessage(ctx, process.conversationId, "assistant", process.name)).id;
+      await this.patch(ctx, process.id, { cardMessageId: messageId });
+    }
+    const view = (await this.entries(ctx)).find(item => item.id === process.id);
+    await saveChatProjectCard(this.d.store, ctx, process.conversationId, messageId, {
+      id: project.id, projectId: project.id, companyId: project.companyId, name: project.name, status: view?.status ?? "preparing",
       framework: project.framework, previewUrl: project.previewUrl ?? undefined, lastBuildStatus: project.lastBuildStatus ?? undefined,
       kind: "code_project", sessionId: process.sessionId, runId: process.runId,
     });
@@ -172,6 +182,7 @@ export class ChatDevelopmentService {
     const ensureActive = () => { if (controller.signal.aborted) throw new DevelopmentError("Stopped by request"); };
     try {
       await this.patch(ctx, process.id, { status: "preparing" });
+      await this.report(ctx, process.id, "project", "Preparing project workspace");
       ensureActive();
       const { project: raw } = await this.d.projects.create(ctx, process.companyId, {
         name: process.name, type: target.kind === "mobile_app" ? "mobile_app" : "code_project", description: message.slice(0, 5000),
@@ -181,6 +192,7 @@ export class ChatDevelopmentService {
       await this.patch(ctx, process.id, { projectId: raw.id, conversationId: process.conversationId });
       await this.card(ctx, process, raw, "Агент готує проєкт. Стан запуску відображається над полем чату.");
       ensureActive();
+      await this.report(ctx, process.id, "scaffold", "Preparing the existing " + target.framework + " template");
       const project = target.kind === "mobile_app"
         ? await this.d.preparer.prepareCodingMobile(ctx, raw, message)
         : await this.d.preparer.prepareCodingWebsite(ctx, raw, message, target.framework);
@@ -195,8 +207,22 @@ export class ChatDevelopmentService {
       sink = this.d.background.start({ runId: process.runId, sessionId: session.id, companyId: process.companyId, userId: ctx.userId, projectId: project.id });
       controller.signal.addEventListener("abort", () => this.d.background.abort(process.runId!, "Stopped by request"), { once: true });
       await this.patch(ctx, process.id, { status: "running" });
-      const outcome = await this.d.executor.execute({ ctx, session, runId: process.runId,
-        prompt: "User request: " + message + "\nYour assigned project is " + target.name + " (" + target.kind + "). Implement ONLY this project, not the other requested projects. Work in the existing scaffold; read package.json and the main page before editing. Preserve the attached database/auth SDK. Do not re-scaffold or run create-next-app. Use code.deps.install to install dependencies. Do not start a dev server. Finish implementation; the system will verify the production build and start Live Preview.",
+      if (this.d.preview) {
+        await this.d.flags.assertEnabled(ctx, "code.shell", { companyId: process.companyId });
+        const reports: Promise<void>[] = [];
+        await this.d.preview.buildProject(ctx, process.companyId, project.id, stage => {
+          ensureActive(); reports.push(this.report(ctx, process.id, stage, stage === "dependencies" ? "Installing template dependencies" : "Building the template"));
+        }).finally(() => Promise.all(reports));
+        ensureActive();
+        await this.report(ctx, process.id, "preview", "Starting template Live Preview");
+        const initialPreview = await this.d.preview.startPreview(ctx, process.companyId, project.id, { signal: controller.signal });
+        await this.patch(ctx, process.id, { previewUrl: initialPreview.previewUrl });
+        await this.report(ctx, process.id, "template_ready", "Template build passed; Live Preview is running. AI implementation is next.");
+      }
+      ensureActive();
+      await this.report(ctx, process.id, "agent", "Coding Agent is implementing the requested project");
+      const outcome = await this.d.executor.execute({ ctx, session, runId: process.runId, maxTurns: 16,
+        prompt: "User request: " + message + "\nYour assigned project is " + target.name + " (" + target.kind + "). Implement ONLY this project, not the other requested projects. The existing template has already been prepared by the system. Make a focused first implementation: read package.json and " + (target.kind === "mobile_app" ? "App.tsx" : target.framework === "HTML/CSS" ? "index.html" : "app/page.tsx") + ", edit the visible page and its styles immediately, then finish. Do not explore unrelated modules or delegate this initial page task. You have at most 16 turns, including repairs. Preserve the attached database/auth SDK. Do not re-scaffold or run create-next-app. Template dependencies are already installed by the system. Only when adding a new package, use the available code.deps.add tool. Do not start a dev server. Finish implementation; the system will verify the production build and start Live Preview.",
         cancelRequested: () => controller.signal.aborted,
         abort: () => this.d.background.abort(process.runId!, "Stopped by request"),
         sink: { signal: sink.signal, emitResult: result => sink!.emit("result", result), emitTerminal: (status, reason) => sink!.finish(status, reason) },
@@ -207,13 +233,17 @@ export class ChatDevelopmentService {
       const result = outcome.result as { message?: string } | null;
       const status = controller.signal.aborted ? "cancelled" : outcome.needsApproval ? "awaiting_approval"
         : outcome.terminalStatus === "completed" && !ready ? "failed" : outcome.terminalStatus;
-      await this.patch(ctx, process.id, { status, detail: outcome.reason ?? (ready ? "Build passed ? Live Preview" : "Live Preview has not started"), previewUrl: ready ? finished.previewUrl ?? undefined : undefined });
+      await this.patch(ctx, process.id, { status, detail: outcome.reason ?? (ready ? "Build passed · Live Preview" : "Live Preview has not started"), previewUrl: ready ? finished.previewUrl ?? undefined : undefined });
+      await this.report(ctx, process.id, status, result?.message || outcome.reason || (ready ? "Verified build and Live Preview are ready" : "Development stopped before verified completion"));
+      if (status === "failed" || status === "cancelled") await this.d.projects.updatePreview(ctx, process.companyId, project.id, { status: "failed" });
       await this.card(ctx, process, finished, result?.message || (ready ? "Build passed. Live Preview is ready." : "Development ended: " + status));
     } catch (error) {
       const detail = error instanceof Error ? error.message : "Development failed";
       sink?.finish(controller.signal.aborted ? "cancelled" : "failed", detail);
       await this.patch(ctx, process.id, { status: controller.signal.aborted ? "cancelled" : "failed", detail });
+      await this.report(ctx, process.id, controller.signal.aborted ? "cancelled" : "failed", detail);
       if (process.projectId && process.conversationId) {
+        await this.d.projects.updatePreview(ctx, process.companyId, process.projectId, { status: "failed" });
         try { await this.card(ctx, process, await this.d.projects.get(ctx, process.companyId, process.projectId), detail); }
         catch (saveError) { this.d.log.warn({ err: saveError }, "development_error_card_failed"); }
       }
@@ -286,7 +316,7 @@ export class ChatDevelopmentService {
     let changed = false;
     if (!process.conversationId || !await this.d.store.getNeutralConversation(ctx, process.conversationId).catch(() => null)) {
       process.conversationId = (await this.d.store.createNeutralConversation(ctx, project.name)).id;
-      await this.patch(ctx, process.id, { conversationId: process.conversationId });
+      await this.patch(ctx, process.id, { conversationId: process.conversationId, cardMessageId: undefined });
       await this.card(ctx, process, project, "Project development restored from Websites."); changed = true;
     }
     const parent = await this.d.store.getNeutralConversation(ctx, process.parentConversationId).catch(() => process.businessId ? this.d.store.getConversation(ctx, process.businessId, process.parentConversationId).catch(() => null) : null);

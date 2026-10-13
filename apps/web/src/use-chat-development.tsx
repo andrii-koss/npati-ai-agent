@@ -3,6 +3,8 @@ import { developmentIsActive, planChatDevelopment, requestsDevelopmentRestore, t
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "./business-workspace-shared";
 import type { CodeChatSession } from "./code-inbox-client";
+import { ChatDevelopmentProgress } from "./ChatDevelopmentProgress";
+import { developmentCard, hideDevelopmentMessage } from "./chat-development-view";
 import { ChatDevelopmentPanel } from "./ChatDevelopmentPanel";
 import { useTranslation } from "./i18n";
 export function useChatDevelopment(options: {
@@ -63,7 +65,14 @@ export function useChatDevelopment(options: {
     let targets;
     const restore = requestsDevelopmentRestore(message);
     try { targets = planChatDevelopment(message); } catch (error) { callbacks.current.onError((error as Error).message); return true; }
-    if (!restore && !targets.length) return false;
+    if (!restore && !targets.length) {
+      const current = processes.find(p => p.projectId === projectId && p.conversationId === options.conversationId);
+      if (current && developmentIsActive(current) && !current.progress?.some(event => event.stage === "agent")) {
+        callbacks.current.onError(language === "uk" ? "Триває встановлення заготовки. Дочекайтеся початку роботи агента перед надсиланням змін." : "Template installation is still running. Wait for the coding agent to start before sending changes.");
+        return true;
+      }
+      return false;
+    }
     if (sending.current) return true;
     sending.current = true; setSubmitting(true);
     try {
@@ -96,7 +105,7 @@ export function useChatDevelopment(options: {
   }
   const currentRoot = root ?? options.conversationId;
   const visible = processes.filter(p => p.parentConversationId === currentRoot || p.projectId === projectId || !p.hidden && (showAll || !currentRoot));
-  return { submit, submitting, panel: <ChatDevelopmentPanel processes={visible} projectId={projectId} isUk={language === "uk"} busyId={busyId}
+  return { submit, submitting, card: (messages: Parameters<typeof developmentCard>[0], index: number) => developmentCard(messages, index, processes, options.conversationId), hideMessage: (messages: Parameters<typeof hideDevelopmentMessage>[0], index: number) => hideDevelopmentMessage(messages, index, processes), timeline: <ChatDevelopmentProgress process={processes.find(p => p.projectId === projectId && p.conversationId === options.conversationId)} />, panel: <ChatDevelopmentPanel processes={visible} projectId={projectId} isUk={language === "uk"} busyId={busyId}
     onOpen={id => { void action(id, "open"); }} onStop={id => { void action(id, "stop"); }} onHide={id => { void action(id, "hide"); }}
     onBack={() => { const parent = root ?? processes.find(p => p.projectId === projectId)?.parentConversationId; if (parent) navigate("/c/" + parent); }} /> };
 }
