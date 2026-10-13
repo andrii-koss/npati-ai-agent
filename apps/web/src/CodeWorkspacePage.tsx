@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { getStoredAuthToken } from "./AuthContext";
 import { useTranslation } from "./i18n";
-import { CodeSnapshotPanel } from "./CodeSnapshotPanel";
 import { AsyncWorkspacePanel } from "./code-workspace/AsyncWorkspacePanel";
 // C14 (owner decision 3): the aggregated metrics of the company this project belongs to. It is a read-only
 // panel and it fetches its own report, so the page keeps holding one session-scoped state and the metrics stay
@@ -10,6 +8,27 @@ import { AsyncWorkspacePanel } from "./code-workspace/AsyncWorkspacePanel";
 import { CodeMetricsPanel } from "./code-workspace/CodeMetricsPanel";
 import { listProjectFiles, readProjectFile } from "./project-files-client";
 import { writeActiveCompanyId } from "./active-company";
+import {
+  type FileEntry,
+  type RunEvent,
+  type ActivityResponse,
+  type ChangesResponse,
+  type UsageResponse,
+  type PreviewStatus,
+  type PendingApproval,
+  type ApprovalScope,
+  type BottomTab,
+  type MobileView,
+  SESSION_MODES,
+  type SessionMode,
+  apiGet,
+  apiSend,
+  safeExternalUrl,
+  flattenFiles,
+  eventTitle,
+  eventFacts,
+} from "./code-workspace-page-types";
+import { CodeWorkspaceBottomTabs } from "./code-workspace-bottom-tabs";
 
 /**
  * Code Workspace (C7).
@@ -26,161 +45,6 @@ import { writeActiveCompanyId } from "./active-company";
  * tool results) is rendered as a text node — never as HTML, so `dangerouslySetInnerHTML`
  * is deliberately absent. Links are only rendered for http/https targets.
  */
-
-type FileEntry = {
-  path?: string;
-  name?: string;
-  type?: string;
-  size?: number;
-  children?: FileEntry[];
-};
-
-type RunEvent = {
-  id?: string;
-  kind?: string;
-  snapshotId?: string | null;
-  runId?: string | null;
-  payload?: Record<string, unknown> | null;
-  createdAt?: string;
-};
-
-type ActivityResponse = { events?: RunEvent[]; nextCursor?: string | null };
-
-type Change = {
-  path: string;
-  status?: string;
-  additions?: number;
-  deletions?: number;
-  diff?: string;
-};
-
-type ChangesResponse = { files?: Change[]; changes?: Change[]; diffStats?: { filesChanged?: number; additions?: number; deletions?: number } };
-
-type UsageResponse = {
-  /** The route answers in an envelope: `status`/`reason` describe the answer, `usage` carries the numbers. */
-  status?: string;
-  reason?: string;
-  usage?: {
-    tokens?: { input: number | null; output: number | null; total: number };
-    totalTokens?: number;
-    inputTokens?: number | null;
-    outputTokens?: number | null;
-    /** `true` means the numbers come from the runner's summary, not from provider metering. */
-    estimated?: boolean;
-    costUsd?: number | null;
-    costStatus?: string;
-    source?: string;
-  } | null;
-};
-
-type PreviewStatus = { status?: string; url?: string; port?: number; message?: string };
-
-type PendingApproval = {
-  id: string;
-  toolName?: string;
-  command?: string;
-  cwd?: string;
-  diff?: string;
-  reason?: string;
-  requestedBy?: string;
-  createdAt?: string;
-};
-
-type ApprovalScope = "once" | "session" | "project";
-
-type BottomTab = "changes" | "terminal" | "logs" | "activity";
-type MobileView = "all" | "files" | "stream" | "file" | "bottom";
-
-const SESSION_MODES = ["plan", "ask", "auto_edit", "full_auto_sandbox"] as const;
-type SessionMode = (typeof SESSION_MODES)[number];
-
-function authHeaders(): Headers {
-  const headers = new Headers();
-  const token = getStoredAuthToken();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-  return headers;
-}
-
-async function apiGet<T>(url: string): Promise<T> {
-  const response = await fetch(url, { headers: authHeaders() });
-  if (!response.ok) throw new Error(await readError(response));
-  return (await response.json()) as T;
-}
-
-async function apiSend<T>(method: "POST" | "PUT" | "DELETE", url: string, body?: unknown): Promise<T> {
-  const headers = authHeaders();
-  if (body !== undefined) headers.set("Content-Type", "application/json");
-  const response = await fetch(url, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  if (!response.ok) throw new Error(await readError(response));
-  return (await response.json()) as T;
-}
-
-async function readError(response: Response): Promise<string> {
-  try {
-    const data = (await response.json()) as { error?: { message?: string; code?: string } };
-    const code = data?.error?.code ? ` [${data.error.code}]` : "";
-    if (data?.error?.message) return `${data.error.message}${code}`;
-  } catch {
-    /* ignore */
-  }
-  return `HTTP ${response.status}`;
-}
-
-/** Only http/https links are ever rendered; `javascript:`/`data:` are silently dropped. */
-function safeExternalUrl(value: string | undefined): string | null {
-  if (!value) return null;
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
-  } catch {
-    return null;
-  }
-}
-
-function flattenFiles(entries: FileEntry[] | undefined, prefix = ""): Array<{ path: string; label: string; depth: number }> {
-  if (!entries) return [];
-  const out: Array<{ path: string; label: string; depth: number }> = [];
-  for (const entry of entries) {
-    const raw = entry.path ?? entry.name ?? "";
-    if (!raw) continue;
-    const path = prefix ? `${prefix}/${raw}` : raw;
-    const depth = path.split("/").length - 1;
-    if (entry.children && entry.children.length > 0) {
-      out.push(...flattenFiles(entry.children, path));
-    } else if (entry.type !== "directory") {
-      out.push({ path, label: raw, depth });
-    }
-  }
-  return out;
-}
-
-function eventTitle(event: RunEvent, isUk: boolean): string {
-  const kind = event.kind ?? "event";
-  const payload = event.payload ?? {};
-  const tool = typeof payload.tool === "string" ? payload.tool : undefined;
-  if (tool) return `${kind} · ${tool}`;
-  const action = typeof payload.action === "string" ? payload.action : undefined;
-  if (action) return `${kind} · ${action}`;
-  return kind || (isUk ? "подія" : "event");
-}
-
-/** Metadata-only summary: string/number/boolean leaves only, no nested content, bounded. */
-function eventFacts(event: RunEvent): Array<[string, string]> {
-  const payload = event.payload ?? {};
-  const facts: Array<[string, string]> = [];
-  for (const [key, value] of Object.entries(payload)) {
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-      const text = String(value);
-      facts.push([key, text.length > 200 ? `${text.slice(0, 200)}…` : text]);
-    }
-    if (facts.length >= 12) break;
-  }
-  return facts;
-}
 
 export function CodeWorkspacePage() {
   const { companyId = "", projectId = "" } = useParams();
@@ -731,81 +595,16 @@ function CodeWorkspaceContent() {
 
       <CodeMetricsPanel companyId={companyId} />
 
-      <section className="bottom-tabs">
-        <div className="bottom-tabs-nav" role="tablist">
-          {(["changes", "terminal", "logs", "activity"] as BottomTab[]).map((value) => (
-            <button
-              key={value}
-              type="button"
-              role="tab"
-              aria-selected={tab === value}
-              className={`bottom-tab-button ${tab === value ? "active" : ""}`}
-              onClick={() => setTab(value)}
-            >
-              {value === "changes"
-                ? isUk ? "Зміни" : "Changes"
-                : value === "terminal"
-                  ? "Terminal"
-                  : value === "logs"
-                    ? "Logs"
-                    : "Activity"}
-            </button>
-          ))}
-        </div>
-
-        <div className="bottom-tab-content">
-          {tab === "changes" && (
-            <div>
-              {!sessionId && <p className="ds-muted">{isUk ? "Сесію не вибрано." : "No session selected."}</p>}
-              {sessionId && changesError && <p className="ds-hint-error">{changesError}</p>}
-              {sessionId && !changesError && changedFiles.length === 0 && (
-                <p className="ds-muted">{isUk ? "Змін немає." : "No changes."}</p>
-              )}
-              <ul className="code-changes-list">
-                {changedFiles.map((change) => (
-                  <li key={change.path}>
-                    <div className="code-change-header">
-                      <code>{change.path}</code>
-                      <span className="ds-muted">
-                        {change.status ?? "modified"}
-                        {change.additions !== undefined ? ` +${change.additions}` : ""}
-                        {change.deletions !== undefined ? ` -${change.deletions}` : ""}
-                      </span>
-                    </div>
-                    {change.diff && <pre className="code-diff">{change.diff}</pre>}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {tab === "terminal" && (
-            <p className="ds-muted">
-              {isUk
-                ? "Вивід команд відображається в стрімі агента як результат tool call; окремий термінал — у Website Builder."
-                : "Use Process output in the async work panel for the current process output. Tool-call results also appear in the agent stream."}
-            </p>
-          )}
-
-          {tab === "logs" && (
-            <p className="ds-muted">
-              {isUk
-                ? "Логи run-у доступні в Activity (метадані) та в AuditLog для привілейованих дій."
-                : "Run logs are available in Activity (metadata) and in the AuditLog for privileged actions."}
-            </p>
-          )}
-
-          {tab === "activity" && (
-            runId ? (
-              <CodeSnapshotPanel companyId={companyId} runId={runId} isUk={isUk} />
-            ) : (
-              <p className="ds-muted">
-                {isUk ? "Activity з'явиться, коли сесія почне run." : "Activity appears once the session starts a run."}
-              </p>
-            )
-          )}
-        </div>
-      </section>
+      <CodeWorkspaceBottomTabs
+        tab={tab}
+        setTab={setTab}
+        isUk={isUk}
+        sessionId={sessionId}
+        runId={runId}
+        companyId={companyId}
+        changesError={changesError}
+        changedFiles={changedFiles}
+      />
 
       <section className="code-workspace-sessions">
         <button
