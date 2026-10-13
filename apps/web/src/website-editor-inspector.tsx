@@ -5,6 +5,7 @@ import {
   type WebsitePage,
   type WebsiteBlock,
   type BlockStyles,
+  type WebsiteTheme,
 } from "@npati/shared";
 import {
   IconSectionSymbol,
@@ -470,7 +471,7 @@ export function WebsiteEditorInspector({
                             type="color"
                             className="npati-builder-color-swatch"
                             value="#64748B"
-                            onChange={(e) => handleUpdateBlockStyle("accentColor" as any, e.target.value)}
+                            onChange={(e) => handleUpdateBlockStyle("accentColor", e.target.value)}
                           />
                           <input
                             type="text"
@@ -489,7 +490,7 @@ export function WebsiteEditorInspector({
                             type="color"
                             className="npati-builder-color-swatch"
                             value="#0F172A"
-                            onChange={(e) => handleUpdateBlockStyle("borderColor" as any, e.target.value)}
+                            onChange={(e) => handleUpdateBlockStyle("borderColor", e.target.value)}
                           />
                           <input
                             type="text"
@@ -637,13 +638,13 @@ export function WebsiteEditorInspector({
                             type="color"
                             className="npati-builder-color-swatch"
                             value={selectedBlock.styles?.accentColor?.startsWith("#") ? selectedBlock.styles.accentColor : "#475569"}
-                            onChange={(e) => handleUpdateBlockStyle("accentColor" as any, e.target.value)}
+                            onChange={(e) => handleUpdateBlockStyle("accentColor", e.target.value)}
                           />
                           <input
                             type="text"
                             className="npati-builder-color-code-input"
                             value={selectedBlock.styles?.accentColor || "#475569"}
-                            onChange={(e) => handleUpdateBlockStyle("accentColor" as any, e.target.value)}
+                            onChange={(e) => handleUpdateBlockStyle("accentColor", e.target.value)}
                           />
                         </div>
                       </div>
@@ -656,13 +657,13 @@ export function WebsiteEditorInspector({
                             type="color"
                             className="npati-builder-color-swatch"
                             value={selectedBlock.styles?.borderColor?.startsWith("#") ? selectedBlock.styles.borderColor : "#0F172A"}
-                            onChange={(e) => handleUpdateBlockStyle("borderColor" as any, e.target.value)}
+                            onChange={(e) => handleUpdateBlockStyle("borderColor", e.target.value)}
                           />
                           <input
                             type="text"
                             className="npati-builder-color-code-input"
                             value={selectedBlock.styles?.borderColor || "#0F172A"}
-                            onChange={(e) => handleUpdateBlockStyle("borderColor" as any, e.target.value)}
+                            onChange={(e) => handleUpdateBlockStyle("borderColor", e.target.value)}
                           />
                         </div>
                       </div>
@@ -680,7 +681,7 @@ export function WebsiteEditorInspector({
                             if (doc) {
                               pushDocumentChange({
                                 ...doc,
-                                theme: { ...doc.theme, fontFamily: e.target.value as any },
+                                theme: { ...doc.theme, fontFamily: e.target.value as WebsiteTheme["fontFamily"] },
                               });
                             }
                           }}
@@ -719,7 +720,7 @@ export function WebsiteEditorInspector({
                             if (doc) {
                               pushDocumentChange({
                                 ...doc,
-                                theme: { ...doc.theme, borderRadius: e.target.value as any },
+                                theme: { ...doc.theme, borderRadius: e.target.value as WebsiteTheme["borderRadius"] },
                               });
                             }
                           }}

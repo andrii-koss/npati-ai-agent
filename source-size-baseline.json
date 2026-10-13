@@ -265,12 +265,6 @@
       "owner": "refactor/large-files",
       "expires_at": "2027-02-28"
     },
-    "apps/web/src/WebsiteEditor.tsx": {
-      "lines": 1277,
-      "reason": "web page not yet decomposed by section; backlog after the API and packages work",
-      "owner": "refactor/large-files",
-      "expires_at": "2027-02-28"
-    },
     "packages/omniroute-adapter/src/omniroute-engine.ts": {
       "lines": 837,
       "reason": "package module not yet decomposed; tracked as follow-up to the plan in docs/refactoring/PLAN.md",
