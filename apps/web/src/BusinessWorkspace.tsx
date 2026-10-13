@@ -18,6 +18,7 @@ import { CodePendingMessages } from "./CodePendingMessages";
 import { InboxSubmission, requestCodeInbox, type InboxMessage } from "./code-inbox-client";
 import { useCodeInbox } from "./use-code-inbox";
 import { useChatResearchProgress } from "./use-chat-research-progress";
+import { useChatDevelopment } from "./use-chat-development";
 import { BusinessChatComposer } from "./business-workspace-composer";
 import { confirmModal, alertModal } from "./ConfirmDialog";
 import { detectChatMutationOperation, mutationProgressTargets } from "./chat-mutation-progress";
@@ -76,7 +77,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const [chatSearch] = useSearchParams();
   const [selectedProject, setSelectedProject] = useState<{ companyId: string; projectId: string; conversationId: string | null } | null>(() => {
     const projectId = chatSearch.get("project"); const selectedCompany = chatSearch.get("company");
-    return projectId && selectedCompany ? { projectId, companyId: selectedCompany, conversationId: null } : null;
+    return projectId && selectedCompany ? { projectId, companyId: selectedCompany, conversationId: initialConversationId ?? null } : null;
   });
   const [entryProjectCard, setEntryProjectCard] = useState<ProjectCardData | null>(null);
   useEffect(() => {
@@ -119,6 +120,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const chatSubmissionBusy = useRef(false);
   const [streamingResponse,setStreamingResponse]=useState(false);
   const [notice, setNotice] = useState(""); const [replyMeta, setReplyMeta] = useState<AgentReply | null>(null);
+  const development = useChatDevelopment({ companyId: companyId ?? readActiveCompanyId(), conversationId: selected, businessId: business?.id, onConversation: id => { void loadConversations(id); }, onError: setNotice, onAccepted: message => setInput(current => current.trim() === message ? "" : current), busy: sending, onSession: codeInbox.accept, boundSessionId: codeInbox.session?.sessionId });
   const [loadingHistory, setLoadingHistory] = useState(() => Boolean(initialConversationId));
   const [ttsVoice, setTtsVoice] = useState(() => {
     try {
@@ -391,6 +393,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (!noMemory && !attachments.length && !sending && !chatSubmissionBusy.current && await development.submit(input.trim())) return;
     const nextIntent = defaultHybridRouter.classifyProject({ message: input.trim(), activeCompanyId: companyId ?? readActiveCompanyId() });
     const createsProject = nextIntent.intent === "CREATE_WEBSITE" || nextIntent.intent === "CREATE_PROJECT";
     if (codeInbox.active && !createsProject) { await submitInbox("queue"); return; }
@@ -739,6 +742,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           <div ref={streamEndRef} aria-hidden="true" />
         </div>
         {replyMeta?.memoryCandidate && <div className="memory-candidate"><div><strong>Remember this?</strong><p>{replyMeta.memoryCandidate.title}: {replyMeta.memoryCandidate.content}</p></div><button onClick={() => void remember()}>Remember</button><button onClick={() => setReplyMeta({ ...replyMeta, memoryCandidate: undefined })}>Not now</button></div>}
+        {development.panel}
         <BusinessChatComposer
           input={input}
           setInput={setInput}

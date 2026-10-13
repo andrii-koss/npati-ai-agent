@@ -99,6 +99,7 @@ export function createMobileAppScaffold(options: MobileAppTemplateOptions): Mobi
         start: "expo start",
         web: "expo start --web",
         export: "expo export --platform web --output-dir dist",
+        build: "expo export --platform web --output-dir dist",
         android: "expo start --android",
         ios: "expo start --ios",
         typecheck: "tsc --noEmit",

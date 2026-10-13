@@ -4,6 +4,7 @@ import type { CodeSessionRunInput } from "./code-session-run-executor";
 /** Website chat uses the existing code loop and preview runtime; no second agent or queue. */
 export function isCodeChatWebsite(project: Pick<Project, "type" | "framework">): boolean {
   return ["website", "web_app", "landing_page"].includes(project.type)
+    || (project.type === "mobile_app" && project.framework === "Expo")
     || (project.type === "code_project" && /^(Next\.js|HTML\/CSS|React|Vite)$/i.test(project.framework ?? ""));
 }
 

@@ -202,6 +202,7 @@ import { registerPlatformBaseRoutes } from "./platform-base-routes";
 import { registerCodeRouteWiring } from "./code-route-wiring";
 import { registerCapabilityRoutes } from "./capability-routes";
 import { registerMiscRoutes } from "./misc-routes";
+import { registerChatDevelopmentRoutes } from "./chat-development-routes";
 import { registerChatStreamRoutes } from "./chat-stream-routes";
 import { createCompanyCodingDelegation } from "./code-company-delegation";
 import { registerChatRoutes } from "./chat-routes";
@@ -1411,6 +1412,9 @@ export function buildApp(config: AppConfig = {}) {
     workspaceStore,
     boundedResponseChunks,
   });
+
+  registerChatDevelopmentRoutes(app, { auth: authProvider, store: workspaceStore, code: codeService, flags: featureFlagService, projects: projectService,
+    preparer: projectOrchestrator, executor: codeSessionRunExecutor, admission: codeRunAdmission, background: codeBackgroundRuns, log: app.log, inbox: codeSessionInbox, sandbox: projectSandbox, preview: projectPreviewService, cancellation: codeRunCancellation });
 
   registerChatStreamRoutes(app, {
     config,
