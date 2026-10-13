@@ -116,7 +116,10 @@
       "as-any": 3
     },
     "apps/agent-api/src/reliability-and-operations-routes.ts": {
-      "as-any": 10
+      "as-any": 2
+    },
+    "apps/agent-api/src/reliability-session-and-eval-routes.ts": {
+      "as-any": 5
     },
     "apps/agent-api/src/sandbox-runner-server.ts": {
       "as-any": 5
