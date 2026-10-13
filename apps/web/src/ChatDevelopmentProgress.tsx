@@ -1,12 +1,21 @@
 import React from "react";
-import { developmentIsActive, type DevelopmentProcess } from "@npati/shared";
-export function ChatDevelopmentProgress({ process }: { process?: DevelopmentProcess }) {
-  if (!process) return null;
+import { developmentIsActive, type DevelopmentProcess, type ProjectProgressEvent } from "@npati/shared";
+import { ResearchProgressPanel, type ChatProgressEvent } from "./ResearchProgress";
+const stages: Record<string, ProjectProgressEvent["stage"]> = { project: "project", scaffold: "files", dependencies: "dependencies", build: "build", preview: "preview", template_ready: "preview", agent: "agent", tool: "agent", completed: "ready" };
+/** Translate real deployment events for the chat's existing presentation and animations. */
+export function developmentProgressEvents(process: DevelopmentProcess): ChatProgressEvent[] {
   const active = developmentIsActive(process);
-  return <section className="chat-development-progress" aria-label="Project deployment progress">
-    <div className="chat-development-progress-heading"><span className={active ? "chat-development-dot active" : "chat-development-dot"} aria-hidden="true" /><strong>{process.name} · {process.framework}</strong></div>
-    {process.previewUrl?.startsWith("/api/companies/") && <a href={process.previewUrl} target="_blank" rel="noopener noreferrer">{process.status === "completed" ? "Live Preview" : "Live Preview · template"}</a>}
-    <ol>{(process.progress ?? []).map((event, index, events) => <li key={event.id} className={active && index === events.length - 1 ? "active" : ""}><span className="chat-development-dot" aria-hidden="true" /><span>{event.title}</span></li>)}</ol>
-    {process.detail && !active && <p role={process.status === "failed" ? "alert" : undefined}>{process.detail}</p>}
-  </section>;
+  let previousStage: ProjectProgressEvent["stage"] = "project";
+  return (process.progress ?? []).map((event, index, events) => {
+    previousStage = stages[event.stage] ?? previousStage;
+    const terminalFailure = ["failed", "cancelled", "interrupted"].includes(event.stage);
+    return { type: "project_progress", stage: previousStage, title: event.title, timestamp: event.at, framework: process.framework,
+      status: terminalFailure ? "failed" : active && index === events.length - 1 ? "active" : "completed" };
+  });
+}
+export function ChatDevelopmentProgress({ process }: { process?: DevelopmentProcess }) {
+  if (!process || !process.progress?.length) return null;
+  const events = developmentProgressEvents(process);
+  return <ResearchProgressPanel key={process.runId ?? process.id} events={events} visibleCount={events.length}
+    completed={!developmentIsActive(process)} failed={["failed", "cancelled", "interrupted"].includes(process.status)} />;
 }
