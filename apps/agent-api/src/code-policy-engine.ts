@@ -1,26 +1,8 @@
 import type { AuthContext } from "@npati/workspace";
-import { CODE_READ_CAPABILITIES, CODE_SHELL_CAPABILITIES, CODE_WRITE_CAPABILITIES, CODE_DEPS_CAPABILITIES } from "@npati/shared";
 import { assertCapabilityGranted, CodeCapabilityError } from "./code-capability-groups";
-import { approvalActionFor, redactDenyComment } from "./code-approval-scope";
 import { hasAdminPermission, type CodeCanonicalSessionMode } from "./code-rbac";
-import {
-  MCP_APPROVAL_TTL_MS,
-  mcpApprovalPayloadFor,
-  type McpApprovalRuntimeSubject,
-} from "./mcp-approval";
-import { detectGitWriteAttempts } from "./code-shell-classifier";
-import { MCP_FLAG as MCP_RUNTIME_FLAG, isRuntimeMcpTool } from "./mcp-runtime-identity";
-import {
-  GIT_PUSH_REQUIRES_RESOLVED_BRANCH,
-  GIT_WRITE_INTENT_INVALID,
-  GIT_WRITE_INTENT_REQUIRED,
-  bindsRepositoryInitialization,
-  gitWriteIntentFromShellAttempt,
-  isGitWriteTool,
-  normalizeGitBranch,
-  normalizeGitWriteIntent,
-  type GitWriteIntent,
-} from "./code-git-write-policy";
+import type { McpApprovalRuntimeSubject } from "./mcp-approval";
+import type { GitWriteIntent } from "./code-git-write-policy";
 import {
   evaluateMigrationSafety,
   inferMigrationTargetFromCommand,
@@ -29,6 +11,26 @@ import {
   type MigrationSafetyVerdict,
   type MigrationTargetInput,
 } from "./code-migration-safety";
+import {
+  APPROVAL_GATED_TOOLS,
+  MASTER_FLAG,
+  MODE_RISK_MATRIX,
+  isAgentPrincipal,
+  isNetworkCommand,
+  isPlanSafeTool,
+  isReadOnlyTool,
+  isReviewSafeTool,
+  isShellTool,
+  isUnsafePath,
+  matrixModeFor,
+  permissionForTool,
+  subFlagForTool,
+} from "./code-policy-tools";
+import {
+  denyPolicyResult,
+  evaluateGitWriteIntents,
+  evaluatePolicyApproval,
+} from "./code-policy-git-and-approval";
 
 /**
  * C4: centralized server-side policy engine.
@@ -314,222 +316,6 @@ export class PolicyError extends Error {
     this.phase = phase;
     this.retryable = retryable;
   }
-}
-
-export const MASTER_FLAG = "coding_agent.enabled";
-export const READ_FLAG = "code.read";
-export const WRITE_FLAG = "code.write";
-export const SHELL_FLAG = "code.shell";
-/**
- * C11: git tooling has its own declared sub-flag (`feature-flags.ts`, off by default) and its own
- * capability group (`code-capability-groups.ts`). Before C11 the sub-flag existed while the mapping sent
- * every git tool to `code.write`, so enabling "writes" silently enabled git tooling too — the flag was
- * decorative. Git tools are named here so the mapping and the flag agree.
- */
-export const GIT_FLAG = "code.git";
-/**
- * C13 (owner decision 5): the sub-flag that gates **runtime MCP tools**. `code.mcp` has existed in
- * `CODE_AGENT_SUB_FLAGS` and in `CODE_FLAG_KEY_PATTERN` since the flag list was written, but nothing read it —
- * a flag that is settable and inert is worse than a missing one, because an operator who turns it off believes
- * something changed. It is its own flag rather than `code.write` because calling a third-party MCP server is a
- * different blast radius from editing a file: a workspace may want agent edits while forbidding outbound
- * server calls entirely.
- */
-export const MCP_FLAG = MCP_RUNTIME_FLAG;
-
-/**
- * Tools whose capability declaration demands a human approval. Derived from the shared capability
- * catalog so there is exactly one definition (a capability that declares `requiresConfirmation` must
- * be approved regardless of the command risk class).
- */
-const APPROVAL_GATED_TOOLS = new Set(
-  [...CODE_READ_CAPABILITIES, ...CODE_WRITE_CAPABILITIES, ...CODE_SHELL_CAPABILITIES, ...CODE_DEPS_CAPABILITIES]
-    .filter((capability) => capability.requiresConfirmation === true)
-    .map((capability) => capability.id),
-);
-
-/** The normalized modes of the owner's decision matrix. One definition, shared with `code-rbac.ts`. */
-export type MatrixMode = CodeCanonicalSessionMode;
-
-/**
- * Owner matrix: mode x risk. `hard_deny` is denied in every mode (phase 4 returns first, this row is
- * the documented backstop). The C1 session modes map onto these as:
- * plan -> plan, edit -> ask, auto -> auto_edit, full_auto -> full_auto_sandbox (mapping to confirm).
- */
-export const MODE_RISK_MATRIX: Record<MatrixMode, Record<PolicyRisk, PolicyDecision>> = {
-  plan: { safe: "allow", controlled: "deny", approval: "deny", hard_deny: "deny" },
-  ask: { safe: "allow", controlled: "require_approval", approval: "require_approval", hard_deny: "deny" },
-  auto_edit: { safe: "allow", controlled: "allow", approval: "require_approval", hard_deny: "deny" },
-  full_auto_sandbox: { safe: "allow", controlled: "allow", approval: "require_approval", hard_deny: "deny" },
-};
-
-export function matrixModeFor(mode: string | null | undefined): MatrixMode {
-  switch (mode) {
-    case "plan": return "plan";
-    case "edit": return "ask";
-    case "ask": return "ask";
-    case "auto": return "auto_edit";
-    case "auto_edit": return "auto_edit";
-    case "full_auto": return "full_auto_sandbox";
-    case "full_auto_sandbox": return "full_auto_sandbox";
-    default: return "plan";
-  }
-}
-
-const READ_TOOLS = new Set([
-  "code.data.schema.inspect",
-  "code.data.rows.list",
-  "code.fs.read", "code.fs.list", "code.fs.grep", "code.fs.tree",
-  "code.symbols.outline", "code.project.info", "code.fs.diff",
-  "code.shell.process.list", "code.shell.process.logs", "code.shell.process.wait",
-]);
-
-/**
- * C9 narrow planning allowance — an explicit **name list**, deliberately not a membership in `READ_TOOLS`.
- *
- * These tools carry session metadata (a plan draft, the todo list) or a question to the user. None of them
- * can touch the workspace, the sandbox or the network, which is why `plan` mode has to allow them. But
- * read-only is a *broad* class that grows every time a read tool is published, and plan mode must not
- * inherit that growth: with `isReadOnlyTool` as the gate, any future read tool would silently become
- * available in the one mode whose entire purpose is to plan without touching code. The owner's decision is
- * therefore a narrow, reviewable list, read by the same three places that used to read the class — the
- * `plan` branch below, the runner's offered-tool filter, and the sub-flag/permission mapping.
- */
-export const PLAN_SAFE_TOOLS = new Set(["code.plan.propose", "code.plan.update", "code.ask_user"]);
-
-/**
- * C11 (owner decision 10): the tools a **read-only intent** may call beyond the reads and the plan-safe
- * metadata tools.
- *
- * `code.git.status/diff/log` write nothing — not the working tree, not the index, not the remote — so a
- * review may inspect history and the change set. `code.git.pr.comment` is here for the other half of the
- * owner's decision: a review's finding belongs on the pull request, and posting it is *not* a repository
- * write, so it is permitted — but only through **its own** approval record, bound to the pull-request number
- * and a hash of the comment text (`gitToolApprovalPayload`). An approval for a push or for opening a pull
- * request cannot be redeemed as a comment, because the payloads differ.
- */
-export const REVIEW_SAFE_GIT_TOOLS = new Set(["code.git.status", "code.git.diff", "code.git.log", "code.git.pr.comment"]);
-
-const SHELL_TOOLS = new Set(["code.shell.exec_async", "code.shell.exec", "code.shell.process.start", "code.shell.process.stop"]);
-const WRITE_TOOLS = new Set([
-  "code.data.schema.apply",
-  "code.data.schema.modify",
-  "code.data.rows.transfer",
-  "code.data.backend.attach",
-  "code.fs.edit", "code.fs.apply_patch", "code.fs.write", "code.fs.move",
-  "code.fs.delete", "code.fs.undo_last_turn", "code.verify.run",
-]);
-
-/** Exported for tests and for the wiring layer, so the mapping has exactly one definition. */
-export function subFlagForTool(tool: string): string {
-  // C13: a runtime MCP tool is gated by `code.mcp`. Checked first because the id space (`mcp:<connection>/<tool>`)
-  // is disjoint from every static one, so there is no ordering question to get wrong.
-  if (isRuntimeMcpTool(tool)) return MCP_FLAG;
-  // Every shell capability (including the read-only process list/logs) is gated by the dedicated
-  // `code.shell` sub-flag, so an operator can forbid command execution while still allowing edits.
-  if (tool.startsWith("code.shell.")) return SHELL_FLAG;
-  if (SHELL_TOOLS.has(tool)) return SHELL_FLAG;
-  // C11: a git write is gated by the git sub-flag, not by `code.write`. Both are off by default, but
-  // they are different blast radii: enabling file edits must not enable pushing to a remote.
-  if (tool.startsWith("code.git.") || isGitWriteTool(tool)) return GIT_FLAG;
-  if (READ_TOOLS.has(tool)) return READ_FLAG;
-  // Plan/question tools never touch the workspace, so they follow the read flag rather than the write flag:
-  // gating a *question* behind "writes allowed" would push the agent to guess instead of asking.
-  if (PLAN_SAFE_TOOLS.has(tool)) return READ_FLAG;
-  return WRITE_FLAG;
-}
-export function permissionForTool(tool: string): "workspace:read" | "workspace:write" {
-  // Plan/question tools act on session metadata only, so the minimum workspace permission is a read — the
-  // same level their capability records declare. Requiring `workspace:write` here would be stricter than
-  // the tool's blast radius and would contradict the catalogue. The read-only git tools only read the
-  // repository's state, so they are reads too.
-  //
-  // C13: a runtime MCP tool is neither, and it is deliberately mapped to the **stricter** of the two. It is not
-  // derived from the tool name (an MCP tool called `read_file` is a claim by a third-party server, and a claim
-  // is not a permission), so it can only be reached by a principal that already holds `workspace:write` or
-  // `admin:all`.
-  return READ_TOOLS.has(tool) || PLAN_SAFE_TOOLS.has(tool) || REVIEW_SAFE_GIT_TOOLS.has(tool)
-    ? "workspace:read"
-    : "workspace:write";
-}
-/**
- * `isReadOnlyTool` keeps its original meaning — the C2/C3 `READ_TOOLS` class — because `plan` mode reads it:
- * a git read tool must not become available in `plan` merely by being read-only. The read-only *git* class
- * is `REVIEW_SAFE_GIT_TOOLS`, and only the review gate below consults it.
- */
-export function isReadOnlyTool(tool: string): boolean { return READ_TOOLS.has(tool); }
-export function isShellTool(tool: string): boolean { return SHELL_TOOLS.has(tool); }
-export function isPlanSafeTool(tool: string): boolean { return PLAN_SAFE_TOOLS.has(tool); }
-/**
- * C11 (owner decision 10): the complete set of tools a **read-only intent** may call. It is the union of the
- * three narrow lists the engine already keeps — the read tools, the plan-safe metadata tools and the
- * read-only git tools — so "read-only" has exactly one definition and a new tool cannot join it by accident.
- */
-export function isReviewSafeTool(tool: string): boolean {
-  return READ_TOOLS.has(tool) || PLAN_SAFE_TOOLS.has(tool) || REVIEW_SAFE_GIT_TOOLS.has(tool);
-}
-
-export function isAdmin(ctx: AuthContext): boolean {
-  // C5a: one definition of the admin vocabulary, shared with `code-rbac.ts`.
-  return hasAdminPermission(ctx.permissions);
-}
-
-/**
- * An agent (or an agent token) must never be an approver. Principals that identify themselves as
- * agents are recognised conservatively: any doubt resolves to "agent".
- */
-export function isAgentPrincipal(ctx: AuthContext): boolean {
-  const subject = String(ctx.externalSubject ?? "");
-  const userId = String(ctx.userId ?? "");
-  return subject.startsWith("agent:") || subject.startsWith("service:") || userId.startsWith("agent:");
-}
-
-/** Network-capable executables: denied until C4b guarantees egress enforcement. */
-const NETWORK_EXECUTABLES = new Set([
-  "curl", "wget", "ssh", "scp", "sftp", "nc", "netcat", "telnet", "ftp", "ping", "dig", "nslookup",
-]);
-const NETWORK_SUBCOMMANDS: Record<string, Set<string>> = {
-  npm: new Set(["install", "i", "add", "ci", "publish", "audit", "update", "exec"]),
-  pnpm: new Set(["install", "i", "add", "publish", "update", "dlx"]),
-  yarn: new Set(["install", "add", "publish", "up", "upgrade"]),
-  pip: new Set(["install", "download"]),
-  pip3: new Set(["install", "download"]),
-  poetry: new Set(["install", "add", "update"]),
-  uv: new Set(["pip", "sync", "add"]),
-  go: new Set(["get", "install", "mod"]),
-  cargo: new Set(["install", "add", "update", "publish"]),
-  git: new Set(["clone", "fetch", "pull", "push", "remote", "submodule", "ls-remote"]),
-  docker: new Set(["pull", "push", "login"]),
-  apt: new Set(["install", "update"]),
-  aptget: new Set(["install", "update"]),
-  gem: new Set(["install"]),
-  composer: new Set(["require", "install", "update"]),
-};
-
-export function isNetworkCommand(command: string): boolean {
-  const text = command.replace(/\s+/g, " ").trim();
-  if (!text) return false;
-  if (/https?:\/\//i.test(text)) return true;
-  // Split on shell separators, then look at the first word (and subcommand) of each segment.
-  for (const segment of text.split(/\|\||&&|;|\|/)) {
-    const words = segment.trim().split(" ").filter(Boolean);
-    // Skip leading VAR=value assignments and wrappers such as `npx`/`sudo`.
-    let index = 0;
-    while (index < words.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index]!) || words[index] === "sudo" || words[index] === "npx" || words[index] === "env")) index += 1;
-    const executable = (words[index] ?? "").split("/").pop() ?? "";
-    const subcommand = words[index + 1] ?? "";
-    if (NETWORK_EXECUTABLES.has(executable)) return true;
-    if (NETWORK_SUBCOMMANDS[executable]?.has(subcommand)) return true;
-  }
-  return false;
-}
-
-/** Conservative built-in path safety used when no canonical guard is injected. */
-export function isUnsafePath(path: string): boolean {
-  if (!path || path.includes("\0")) return true;
-  const normalised = path.replace(/\\/g, "/");
-  if (normalised.startsWith("/") || /^[A-Za-z]:\//.test(normalised) || normalised.startsWith("~")) return true;
-  return normalised.split("/").includes("..");
 }
 
 export class PolicyEngine {
@@ -872,307 +658,33 @@ export class PolicyEngine {
 
   /**
    * C11 (owner decision 3): every git write this request performs, as a typed intent.
-   *
-   * Three sources, and a refusal is always preferred over a guess:
-   *  - `request.git` — the typed intent a git tool supplies. It must be complete and internally
-   *    consistent, otherwise `git_write_intent_invalid` (a `force: true` "push", or no branch at all, is
-   *    not something to resolve in either direction);
-   *  - `request.command` — the shell path. A refspec names its branch; a push with **no** refspec gets its
-   *    branch from `gitBranchResolver` and is refused with `git_push_requires_resolved_branch` when the
-   *    resolver is absent, throws or answers with nothing. `branch: ""` therefore never reaches a decision;
-   *  - a git-write **tool** that supplies neither is refused with `git_write_intent_required`, because a
-   *    tool call has no command line and must not slip past the protected-branch phase.
-   *
-   * A command and a declared intent are both evaluated when both are present: a caller cannot declare a
-   * harmless target while the command line writes to another one.
    */
   private async gitWriteIntentsFor(
     request: PolicyRequest,
   ): Promise<{ intents: GitWriteIntent[] } | { refusal: PolicyResult }> {
-    const intents: GitWriteIntent[] = [];
-    if (request.git) {
-      const declared = normalizeGitWriteIntent(request.git);
-      if (!declared) {
-        return {
-          refusal: {
-            ...deny(
-              GIT_WRITE_INTENT_INVALID,
-              "The git write request is incomplete or inconsistent (operation, target branch and force must agree)",
-              403,
-              "hard_deny",
-            ),
-            risk: "hard_deny",
-          },
-        };
-      }
-      intents.push(declared);
-    }
-    if (request.command !== undefined) {
-      for (const attempt of detectGitWriteAttempts(request.command)) {
-        let resolved: string | null = null;
-        if (!normalizeGitBranch(attempt.branch)) {
-          try {
-            resolved = normalizeGitBranch((await this.deps.gitBranchResolver?.(request)) ?? "");
-          } catch (error) {
-            // A resolver that fails is not evidence that the branch is unprotected.
-            this.deps.logger?.warn({ err: error, companyId: request.companyId }, "policy_git_branch_resolution_failed");
-            resolved = "";
-          }
-        }
-        const intent = gitWriteIntentFromShellAttempt(attempt, resolved);
-        if (!intent) {
-          return {
-            refusal: {
-              ...deny(
-                GIT_PUSH_REQUIRES_RESOLVED_BRANCH,
-                "A git push without a refspec writes to the branch of the checkout; that branch could not be " +
-                  "resolved, so the write is refused rather than assumed to be unprotected",
-                403,
-                "hard_deny",
-              ),
-              risk: "hard_deny",
-            },
-          };
-        }
-        intents.push(intent);
-      }
-    }
-    if (!intents.length && isGitWriteTool(request.tool)) {
-      return {
-        refusal: {
-          ...deny(
-            GIT_WRITE_INTENT_REQUIRED,
-            `Tool ${request.tool} performs a remote git write, so it must carry the typed git intent ` +
-              "(operation, target branch, remote, force); without it the write cannot be checked against the " +
-              "protected-branch policy",
-            403,
-            "hard_deny",
-          ),
-          risk: "hard_deny",
-        },
-      };
-    }
-    return { intents };
+    return evaluateGitWriteIntents(this.deps, request);
   }
 
   private async requireApproval(
-    request: PolicyRequest, reasons: string[], risk: PolicyRisk | undefined, phase: PolicyPhase,
+    request: PolicyRequest,
+    reasons: string[],
+    risk: PolicyRisk | undefined,
+    phase: PolicyPhase,
     details?: Record<string, unknown>,
   ): Promise<PolicyResult> {
-    const approvals = this.deps.approvals;
-    /**
-     * C11 (owner decision 5): the approval is deferred to a boundary that binds it more strongly than this
-     * phase can. The git boundary rebuilds the payload from the branch it is about to write and consumes the
-     * record with that hash, so creating a record here (or spending the caller's) would be strictly worse:
-     * it would either add a second, weaker approval or leave the boundary with nothing to verify.
-     *
-     * The check sits **after** every hard-deny phase, so a deferred approval can never turn a refusal into an
-     * allow; and it sits before the missing-port refusal, because a deployment whose approval gateway is not
-     * wired here may still have a fully wired git boundary.
-     */
-    if (request.approvalDeferredByBoundary === true) {
-      return {
-        decision: "allow", phase, risk, status: 200,
-        reasons: [...reasons, APPROVAL_DEFERRED_REASON],
-      };
-    }
-    if (!approvals) return deny("approval_unavailable", "Approval system is not configured", 503, phase);
-    /**
-     * C13 (owner blocker 1): the approval **material** of a runtime MCP call.
-     *
-     * `mcpApprovalPayloadFor` is the one builder both sides use (see `mcp-approval.ts` for why that is the whole
-     * point). Two consequences are deliberate:
-     *
-     *  - the material is handed to the durable approval store as its `inputPayload`, so the row's own
-     *    `payload_hash` is the hash of *this* call — the same value the run path will present when it redeems
-     *    the record. Without it the store would hash an empty payload and no runtime MCP approval could ever be
-     *    consumed;
-     *  - the repo-shaped fields (`toolName`, `actionSummary`, `runId`, `agentId`, `riskLevel`, `ttlMs`) travel
-     *    with it, because `CompanyApprovalsRepository.requestApproval` is the real implementation behind this
-     *    port and it needs exactly those to write the row. A deployment whose approval gateway is the store
-     *    therefore creates a real, redeemable, one-shot approval for an MCP call.
-     */
-    // A `PolicyRequest` structurally satisfies `McpApprovalSubject`, which is what lets the run path and this
-    // phase build the material from the same values with the same function.
-    const mcpPayload = mcpApprovalPayloadFor(request);
-    const runtimeApprovalFields = mcpPayload
-      ? {
-          toolName: request.tool,
-          actionSummary: `Runtime MCP tool ${request.tool} requires an approval for this exact call`,
-          inputPayload: mcpPayload,
-          runId: request.runId ?? "",
-          agentId: request.agentId ?? "",
-          riskLevel: "high" as const,
-          // A paused run can outlive a tab and a process restart, so the window is the store's own maximum.
-          ttlMs: MCP_APPROVAL_TTL_MS,
-        }
-      : {};
-    if (request.approved === true || request.approvalId) {
-      const expected = payloadHashFor(request);
-      try {
-        await approvals.consumeApproved(request.ctx, request.companyId, String(request.approvalId ?? request.toolCallId ?? ""), {
-          ...(mcpPayload
-            ? {
-                // The consuming side of the same material: `run_id`, `agent_id`, `tool_name` and the payload
-                // hash are all matched by the store's own atomic statement.
-                runId: request.runId ?? "",
-                agentId: request.agentId ?? "",
-                toolName: request.tool,
-                inputPayload: mcpPayload,
-              }
-            : {}),
-          payloadHash: expected, tool: request.tool, toolCallId: request.toolCallId,
-        });
-      } catch (error) {
-        const code = (error as { code?: string }).code ?? "approval_invalid";
-        // A rejection is not a failure to consume: the reviewer's comment (redacted, capped, and
-        // explicitly marked as data) is what the model needs in order to change its approach.
-        const rejection = await this.describeRejection(request, code);
-        if (rejection) return rejection;
-        return deny(code, error instanceof Error ? error.message : "Approval could not be consumed", 409, phase);
-      }
-      return { decision: "allow", phase, reasons: [...reasons, "approval:consumed"], risk, status: 200 };
-    }
-    // C5: a standing rule for this action short-circuits the request. Never consulted for an approval
-    // raised in the `project_rules` phase, because that phase precedes the network enforcement gate.
-    if (this.deps.approvalRules && phase !== "project_rules") {
-      const action = approvalActionFor(request);
-      const rule = await this.deps.approvalRules
-        .findRule(request.ctx, {
-          companyId: request.companyId, projectId: request.projectId ?? null,
-          sessionId: request.sessionId ?? null, action,
-        })
-        .catch(() => null);
-      if (rule) {
-        request.ruleRef = { scope: rule.scope, id: rule.id };
-        return {
-          decision: "allow", phase, risk, status: 200,
-          reasons: [...reasons, `approval:rule:${rule.scope}`, `approval:rule_id:${rule.id}`, `approval:action:${action}`],
-        };
-      }
-    }
-    try {
-      const created = await approvals.requestApproval(request.ctx, request.companyId, {
-        tool: request.tool,
-        payloadHash: payloadHashFor(request),
-        toolCallId: request.toolCallId,
-        // The scope a caller asks for is recorded on the request; `once` (the default) creates no rule.
-        approvalScope: request.approvalScope ?? "once",
-        approvalTimeoutMs: request.approvalTimeoutMs ?? null,
-        digest: digestOf(request.command ?? request.paths?.join(",") ?? request.tool),
-        // C6a: what a migration would do (target, destructive, snapshot, plan). Metadata only — no SQL,
-        // no connection string and no credentials.
-        ...(details ? { migration: details } : {}),
-        // C13: the durable store's own fields plus the canonical MCP material, for a runtime MCP call.
-        ...runtimeApprovalFields,
-      });
-      return {
-        decision: "require_approval", phase, reasons: [...reasons, "approval:required"],
-        code: "approval_required", status: 403, risk, approvalId: created.id,
-      };
-    } catch (error) {
-      this.deps.logger?.warn({ err: error }, "policy_approval_request_failed");
-      return deny("approval_unavailable", "Approval request could not be created", 503, phase);
-    }
-  }
-
-  /**
-   * C5: turns a rejected approval into a structured `approval_denied` result carrying the reviewer's
-   * comment. Returns null when the approval was not actually rejected, so every other consumption
-   * failure keeps its existing code and status.
-   */
-  private async describeRejection(request: PolicyRequest, code: string): Promise<PolicyResult | null> {
-    if (!this.deps.getApproval) return null;
-    const approvalId = String(request.approvalId ?? request.toolCallId ?? "");
-    const approval = await this.deps.getApproval(request.ctx, request.companyId, approvalId).catch(() => null);
-    const status = String(approval?.status ?? "").toLowerCase();
-    if (status !== "rejected" && code !== "approval_rejected") return null;
-    const comment = redactDenyComment(approval?.comment ?? approval?.notes);
-    return {
-      decision: "deny", phase: "approval", status: 403, retryable: false,
-      code: "approval_denied",
-      reasons: ["approval:rejected", ...(comment ? [`approval:comment:${comment}`] : [])],
-    };
+    return evaluatePolicyApproval(this.deps, request, reasons, risk, phase, details);
   }
 }
 
-function deny(code: string, message: string, status: number, phase: PolicyPhase, retryable = false): PolicyResult {
-  return { decision: "deny", phase, reasons: [message], code, status, retryable };
+function deny(
+  code: string,
+  message: string,
+  status: number,
+  phase: PolicyPhase,
+  retryable = false,
+): PolicyResult {
+  return denyPolicyResult(code, message, status, phase, retryable);
 }
 
-/**
- * Deterministic payload hash: an approval must be consumed with exactly the payload that was
- * approved, so substituting the command or paths between approval and execution is detected.
- *
- * C11: when the request is a git write, the **typed target** is part of the material — `gitOperation`,
- * `sourceBranch`, `targetBranch`, `remoteBranch`, `remote`, `force` and the credential reference. Before
- * C11 a branch or a remote was not in the hash at all, so an approval granted for one push could be
- * consumed for a push to a different branch of the same repository. The key is added only when a git
- * intent is present, so every non-git request keeps its previous hash.
- *
- * C11 (owner decision 13): the same material carries the **repository initialization** fact, and only when
- * the write has to create the repository (`bindsRepositoryInitialization`, shared with
- * `gitApprovalPayload` so the two hashers cannot drift). An approval granted for "push into an existing
- * repository" therefore hashes differently from one granted for "create the repository and push", while
- * every write against an existing repository keeps the exact bytes — and the exact hash — it had before.
- *
- * C13 (owner blocker 1): a **runtime MCP call** adds the tool's runtime identity — `providerId`,
- * `connectionId`, `toolName`, the schema hash and the hash of the exact (normalised) arguments. An approval
- * for one MCP call therefore cannot be spent on another: a different tool, a server that changed its input
- * schema, or different arguments all move the hash. The key is added only when the request carries
- * `runtimeMcp`, so every other request keeps the exact bytes — and the exact hash — it had before.
- */
-export function payloadHashFor(request: PolicyRequest): string {
-  const material = JSON.stringify({
-    tool: request.tool,
-    command: request.command ?? null,
-    paths: [...(request.paths ?? [])].sort(),
-    projectId: request.projectId ?? null,
-    sessionId: request.sessionId ?? null,
-    ...(request.git
-      ? {
-          git: {
-            gitOperation: request.git.gitOperation,
-            sourceBranch: request.git.sourceBranch ?? null,
-            targetBranch: request.git.targetBranch ?? null,
-            remoteBranch: request.git.remoteBranch ?? null,
-            remote: request.git.remote ?? null,
-            force: request.git.force === true,
-            credentialId: request.git.credentialId ?? null,
-            ...(bindsRepositoryInitialization(request.git) ? { repositoryInitialized: false } : {}),
-          },
-        }
-      : {}),
-    ...(request.runtimeMcp
-      ? {
-          runtimeMcp: {
-            providerId: request.runtimeMcp.providerId,
-            connectionId: request.runtimeMcp.connectionId,
-            toolName: request.runtimeMcp.toolName,
-            schemaHash: request.runtimeMcp.schemaHash,
-            argsHash: request.runtimeMcp.argsHash,
-          },
-        }
-      : {}),
-  });
-  return fnv1a(material);
-}
-
-/** Non-cryptographic digest used only for logs (never for security decisions). */
-export function fnv1a(value: string): string {
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return hash.toString(16).padStart(8, "0");
-}
-
-export function digestOf(value: string): string { return fnv1a(value); }
-
-/**
- * C5: the canonical action a scoped rule is keyed by. The implementation lives in
- * `code-approval-scope.ts` so the grant path and this enforcement path cannot drift apart; it is
- * re-exported here because the policy surface is where callers look for it.
- */
-export { approvalActionFor } from "./code-approval-scope";
+export * from "./code-policy-tools";
+export * from "./code-policy-git-and-approval";
