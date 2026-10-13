@@ -21,6 +21,17 @@ export class InMemoryCompanyMembershipStore {
     private readonly companyInvites = new Map<string, CompanyInvite>(),
   ) {}
 
+  /** Record the creator's ownership; retries never overwrite an existing role or suspension. */
+  async recordCompanyCreator(companyId: string, userId: string): Promise<void> {
+    const key = `${companyId}:${userId}`;
+    if (this.companyMembers.has(key)) return;
+    const timestamp = new Date();
+    this.companyMembers.set(key, {
+      id: randomUUID(), companyId, userId, role: "owner", status: "active",
+      acceptedAt: timestamp, createdAt: timestamp, updatedAt: timestamp, revision: 1,
+    });
+  }
+
   async getCompanyMembership(companyId: string, userId: string): Promise<CompanyMember | null> {
     return structuredClone(this.companyMembers.get(`${companyId}:${userId}`) ?? null);
   }

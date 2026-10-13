@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
 import { AuthenticationError, type AuthProvider } from "./auth";
 import { CodeError, type CodeService } from "./code-service";
-import { hasAdminPermission, isAdminPrincipal } from "./code-rbac";
+import { hasAdminPermission } from "./code-rbac";
 import { CODE_AGENT_MASTER_FLAG, FeatureDisabledError, FeatureFlagError, isValidCodeFlagKey, type FeatureFlagService } from "./feature-flags";
 import { API_VERSION, resolveApiVersion } from "./api-versioning";
 import { CodeProjectRouteError, resolveCreateKind } from "./code-project-lifecycle-routes";
@@ -203,6 +203,10 @@ export function registerCodeRoutes(app: FastifyInstance, auth: AuthProvider, ser
         flags: described.flags.map((flag) => ({ key: flag.key, enabled: flag.enabled, scope: flag.scope, stage: flag.stage, source: flag.source })),
         master: { key: described.master.key, enabled: described.master.enabled, scope: described.master.scope, stage: described.master.stage, source: described.master.source },
         darkLaunch: described.darkLaunch,
+        management: {
+          company: await flags.canManage(ctx, request.params.companyId),
+          global: await flags.canManage(ctx),
+        },
         configured: (await flags.list(ctx)).filter((flag) => flag.scope === "global" || flag.scopeId === request.params.companyId),
       };
     } catch (error) { return fail(reply, error); }
@@ -225,9 +229,12 @@ export function registerCodeRoutes(app: FastifyInstance, auth: AuthProvider, ser
         const ctx = await auth.authenticate(request);
         if (!flags) return reply.code(503).send({ error: { code: "feature_disabled", message: "Feature flags are not configured", retryable: false } });
         // Changing a flag is an administrative act: `business:manage` alone must not be enough, so the
-        // role check runs before any company lookup (a plain member gets 403 flag_admin_required).
-        if (!isAdminPrincipal(ctx)) {
-          return reply.code(403).send({ error: { code: "flag_admin_required", message: "Changing a feature flag requires the owner/admin role", retryable: false } });
+        // A stored company owner/admin may change company flags; global changes require account administration.
+        if (!(await flags.canManage(ctx, request.body.scope === "company" ? request.params.companyId : undefined))) {
+          return reply.code(403).send({ error: { code: "flag_admin_required", message: "Changing a feature flag requires the owner/admin role for the selected scope", retryable: false } });
+        }
+        if (request.body.scope === "company" && request.body.scopeId !== request.params.companyId) {
+          return reply.code(400).send({ error: { code: "invalid_flag_key", message: "scopeId must match the company in the route", retryable: false } });
         }
         if (!isValidCodeFlagKey(request.body.flagKey)) {
           return reply.code(400).send({ error: { code: "invalid_flag_key", message: `Invalid coding flag key "${request.body.flagKey}"`, retryable: false } });
@@ -252,8 +259,8 @@ export function registerCodeRoutes(app: FastifyInstance, auth: AuthProvider, ser
         const ctx = await auth.authenticate(request);
         if (!flags) return reply.code(503).send({ error: { code: "feature_disabled", message: "Feature flags are not configured", retryable: false } });
         // Same administrative role requirement as a flag change; a plain member cannot stop the feature.
-        if (!isAdminPrincipal(ctx)) {
-          return reply.code(403).send({ error: { code: "flag_admin_required", message: "Using the kill switch requires the owner/admin role", retryable: false } });
+        if (!(await flags.canManage(ctx, request.body?.scope === "global" ? undefined : request.params.companyId))) {
+          return reply.code(403).send({ error: { code: "flag_admin_required", message: "Using the kill switch requires the owner/admin role for the selected scope", retryable: false } });
         }
         if (!service) return reply.code(503).send({ error: { code: "code_unavailable", message: "Coding Agent is unavailable", retryable: true } });
         await service.listProjects(ctx, request.params.companyId, true);

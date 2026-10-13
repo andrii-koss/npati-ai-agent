@@ -1098,6 +1098,18 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
         await client.query("COMMIT");
       } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
     }
+    const creatorMembershipMigration = await this.pool.query("SELECT 1 FROM schema_migrations WHERE version='090_company_creator_membership'");
+    if (!creatorMembershipMigration.rowCount) {
+      const client = await this.pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT pg_advisory_xact_lock(hashtext('090_company_creator_membership'))");
+        const { runMigration090 } = await import("./migration-090");
+        await runMigration090(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('090_company_creator_membership') ON CONFLICT DO NOTHING");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
+    }
   }
 
   private codeUserQuestionStoreInstance?: PostgresCodeUserQuestionStore;

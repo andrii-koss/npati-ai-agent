@@ -29,6 +29,7 @@ export interface CodeFlagsState {
   master: CodeFlag;
   flags: CodeFlag[];
   darkLaunch?: boolean;
+  management?: { company: boolean; global: boolean };
 }
 
 export interface FlagHistoryEntry {
@@ -151,6 +152,7 @@ export function CodeFlagsPanel({ companyId, isUk, notify, onMasterEnabledChange,
     try {
       const body = await apiFetch<CodeFlagsState>(`${base}/code/flags`);
       setState(body);
+      if (body.management && !body.management.global) setScope("company");
       setError(null);
       onMasterEnabledChange?.(body.master?.enabled ?? null);
     } catch (cause) {
@@ -211,9 +213,9 @@ export function CodeFlagsPanel({ companyId, isUk, notify, onMasterEnabledChange,
     if (!agreed) return;
     setBusyKey("coding_agent.enabled");
     try {
-      const body = await apiFetch<{ master: CodeFlag; suspendedSessions: number }>(`${base}/code/flags/kill-switch`, {
+      const body = await apiFetch<{ flag: CodeFlag; suspendedSessions: number }>(`${base}/code/flags/kill-switch`, {
         method: "POST",
-        body: JSON.stringify({ companyId }),
+        body: JSON.stringify({ scope }),
       });
       notify("success", isUk
         ? `Coding Agent вимкнено. Зупинено сесій: ${body.suspendedSessions ?? 0}.`
@@ -223,8 +225,9 @@ export function CodeFlagsPanel({ companyId, isUk, notify, onMasterEnabledChange,
     } catch (cause) {
       notify("error", flagErrorMessage(cause, isUk));
     } finally { setBusyKey(null); }
-  }, [base, companyId, isUk, load, notify, onSessionsSuspended]);
+  }, [base, companyId, isUk, load, notify, onSessionsSuspended, scope]);
 
+  const canManage = state?.management ? (scope === "global" ? state.management.global : state.management.company) : true;
   const master = state?.master;
   const darkLaunch = state?.darkLaunch === true || state?.master?.enabled === false;
 
@@ -254,7 +257,7 @@ export function CodeFlagsPanel({ companyId, isUk, notify, onMasterEnabledChange,
           <span>{isUk ? "Область зміни" : "Change scope"}</span>
           <select className="page-size-select" value={scope} onChange={(event) => setScope(event.target.value as FlagScope)}>
             <option value="company">{isUk ? "Компанія" : "Company"}</option>
-            <option value="global">{isUk ? "Глобально" : "Global"}</option>
+            <option value="global" disabled={state?.management?.global === false}>{isUk ? "Глобально" : "Global"}</option>
           </select>
         </label>
         {scope === "global" && (
@@ -287,7 +290,7 @@ export function CodeFlagsPanel({ companyId, isUk, notify, onMasterEnabledChange,
             <input
               type="checkbox"
               checked={master?.enabled === true}
-              disabled={busyKey === "coding_agent.enabled" || !master}
+              disabled={busyKey === "coding_agent.enabled" || !master || !canManage}
               onChange={(event) => master && void toggleFlag(master, event.target.checked)}
             />
             <span>{isUk ? "Master" : "Master"}</span>
@@ -295,7 +298,7 @@ export function CodeFlagsPanel({ companyId, isUk, notify, onMasterEnabledChange,
           <button
             type="button"
             className="automation-action-btn danger"
-            disabled={busyKey === "coding_agent.enabled" || !companyId}
+            disabled={busyKey === "coding_agent.enabled" || !companyId || !canManage}
             onClick={() => void killSwitch()}
           >
             {isUk ? "Kill switch" : "Kill switch"}
@@ -332,7 +335,7 @@ export function CodeFlagsPanel({ companyId, isUk, notify, onMasterEnabledChange,
                     <input
                       type="checkbox"
                       checked={flag.enabled}
-                      disabled={busyKey === flag.key}
+                      disabled={busyKey === flag.key || !canManage}
                       onChange={(event) => void toggleFlag(flag, event.target.checked)}
                     />
                   </label>

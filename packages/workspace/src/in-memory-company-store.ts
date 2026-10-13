@@ -100,6 +100,7 @@ export async function createCompany(host: InMemoryCompanyState, context: AuthCon
     };
     host.companies.set(company.id, company);
     host.companyCreateRequests.set(requestKey, company.id);
+    await host.companyMembershipOps.recordCompanyCreator(company.id, company.userId);
     return company;
   }
 
