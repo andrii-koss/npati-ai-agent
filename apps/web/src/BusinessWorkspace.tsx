@@ -17,6 +17,8 @@ import { cancelChatStream, streamChat } from "./chat-stream";
 import { CodePendingMessages } from "./CodePendingMessages";
 import { InboxSubmission, requestCodeInbox, type InboxMessage } from "./code-inbox-client";
 import { useCodeInbox } from "./use-code-inbox";
+import { useChatResearchProgress } from "./use-chat-research-progress";
+import { BusinessChatComposer } from "./business-workspace-composer";
 import { confirmModal, alertModal } from "./ConfirmDialog";
 import { detectChatMutationOperation, mutationProgressTargets } from "./chat-mutation-progress";
 import { Business, Goal, MemoryItem, Company, api, blankBusiness, Notice, useWorkspace, Skill, getCachedSkills, updateCachedSkills, PageIntro, EmptyBusiness } from "./business-workspace-shared";
@@ -65,7 +67,6 @@ function isWebsiteAnalysisRequest(message: string) {
   return /https?:\/\/|www\.|\b(?:website|webpage|site|scan|crawl)\b|сайт|вебсторінк|проскануй/iu.test(message);
 }
 
-const PAGE_PROGRESS_PRESENTATION_MS = 1200;
 
 export function BusinessChatPage({ initialPrompt = "", initialConversationId, neutralChat = false, companyId }: { initialPrompt?: string; initialConversationId?: string; neutralChat?: boolean; companyId?: string }) {
   const { t } = useTranslation();
@@ -204,19 +205,20 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       });
     }
   }, []);
-  const [progressEvents, setProgressEvents] = useState<ChatProgressEvent[]>([]);
-  const [visibleProgressCount, setVisibleProgressCount] = useState(0);
-  const [presentingProgressEvent, setPresentingProgressEvent] = useState<ChatProgressEvent | null>(null);
-  const [progressComplete, setProgressComplete] = useState(false);
-  const [progressFailed, setProgressFailed] = useState(false);
-  const progressCompleteRef = useRef(false);
   const flushDeltasRef = useRef<(() => void) | null>(null);
-  const progressEventsRef = useRef<ChatProgressEvent[]>([]);
-  const progressQueueRef = useRef<ChatProgressEvent[]>([]);
-  const pendingSearchResultsRef = useRef<ChatProgressEvent | null>(null);
-  const pageStartPendingRef = useRef(false);
-  const progressTimerRef = useRef<number | null>(null);
-  const nextProgressRevealRef = useRef(0);
+  const {
+    progressEvents,
+    visibleProgressCount,
+    presentingProgressEvent,
+    progressComplete,
+    progressFailed,
+    setProgressFailed,
+    markComplete,
+    enqueueProgress,
+    resetProgress,
+    progressCompleteRef,
+    progressEventsRef,
+  } = useChatResearchProgress(flushDeltasRef);
   const streamControllerRef=useRef<{controller:AbortController;streamId:string}|null>(null);
   const suggestions = useMemo(
     () => business
@@ -344,103 +346,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     }
   }, [messages, sending, activeTurn, scrollToBottom]);
   useEffect(() => () => {
-    if (progressTimerRef.current !== null) window.clearTimeout(progressTimerRef.current);
     streamControllerRef.current?.controller.abort();
   }, []);
-  function drainProgressQueue() {
-    const delay = Math.max(0, nextProgressRevealRef.current - Date.now());
-    progressTimerRef.current = window.setTimeout(() => {
-      const next = progressQueueRef.current[0];
-      if (!next) {
-        progressTimerRef.current = null;
-        if (progressEventsRef.current.some((e) => !e.type.startsWith("final_generation"))) {
-          progressCompleteRef.current = true;
-          setProgressComplete(true);
-          flushDeltasRef.current?.();
-        }
-        return;
-      }
-      const isPageResult = next.type === "page_fetch_completed" || next.type === "page_fetch_failed";
-      if (isPageResult) {
-        setPresentingProgressEvent(next);
-        progressTimerRef.current = window.setTimeout(() => {
-          progressQueueRef.current.shift();
-          setVisibleProgressCount((count) => count + 1);
-          setPresentingProgressEvent(null);
-          nextProgressRevealRef.current = Date.now() + 250;
-          progressTimerRef.current = null;
-          if (progressQueueRef.current.length > 0) {
-            drainProgressQueue();
-          } else {
-            progressCompleteRef.current = true;
-            setProgressComplete(true);
-            flushDeltasRef.current?.();
-          }
-        }, PAGE_PROGRESS_PRESENTATION_MS);
-        return;
-      }
-      progressQueueRef.current.shift();
-      setVisibleProgressCount((count) => count + 1);
-      nextProgressRevealRef.current = Date.now() + (next.type === "search_results_received" ? 0 : 800);
-      progressTimerRef.current = null;
-      if (progressQueueRef.current.length > 0) {
-        drainProgressQueue();
-      } else {
-        progressCompleteRef.current = true;
-        setProgressComplete(true);
-        flushDeltasRef.current?.();
-      }
-    }, delay);
-  }
-  function queueProgressEvent(event: ChatProgressEvent) {
-    const nextEvents = [...progressEventsRef.current, event];
-    progressEventsRef.current = nextEvents;
-    setProgressEvents(nextEvents);
-    progressQueueRef.current.push(event);
-    if (progressTimerRef.current === null) drainProgressQueue();
-  }
-  function enqueueProgress(event: ChatProgressEvent) {
-    if (event.type === "source_discovered") return;
-    if (event.type === "search_results_received") {
-      pendingSearchResultsRef.current = event;
-      return;
-    }
-    if (event.type === "page_fetch_started" && pendingSearchResultsRef.current) return;
-    if (
-      pendingSearchResultsRef.current
-      && (event.type === "page_fetch_completed" || event.type === "page_fetch_failed" || event.type === "research_completed")
-    ) {
-      queueProgressEvent(pendingSearchResultsRef.current);
-      pendingSearchResultsRef.current = null;
-    }
-    if (event.type === "page_fetch_started") {
-      // Web research emits transient duplicate starts while navigating. File
-      // attachments are distinct user inputs and every filename must remain
-      // visible in the shared progress panel.
-      if (pageStartPendingRef.current && event.domain !== "file") return;
-      if (event.domain !== "file") pageStartPendingRef.current = true;
-    }
-    if (event.type === "page_fetch_completed" || event.type === "page_fetch_failed" || event.type === "research_completed") {
-      pageStartPendingRef.current = false;
-    }
-    queueProgressEvent(event);
-  }
-  function resetProgress() {
-    if (progressTimerRef.current !== null) window.clearTimeout(progressTimerRef.current);
-    progressTimerRef.current = null;
-    progressQueueRef.current = [];
-    progressEventsRef.current = [];
-    pendingSearchResultsRef.current = null;
-    pageStartPendingRef.current = false;
-    setPresentingProgressEvent(null);
-    nextProgressRevealRef.current = 0;
-    setProgressEvents([]);
-    setVisibleProgressCount(0);
-    setProgressComplete(false);
-    setProgressFailed(false);
-    progressCompleteRef.current = false;
-    flushDeltasRef.current = null;
-  }
   async function submitInbox(mode: "queue" | "steer") {
     const session = codeInbox.session;
     const text = input.trim();
@@ -701,8 +608,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           },
         }));
       }
-      progressCompleteRef.current = true;
-      setProgressComplete(true);
+      markComplete();
     } catch (reason) {
       flushDeltas();
       const typed = reason as Error & { code?: string };
@@ -711,8 +617,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       }
       if (typed.name === "AbortError") {
         window.dispatchEvent(new CustomEvent("npati:company-changed", { detail: { action: "refresh" } }));
-        progressCompleteRef.current = true;
-        setProgressComplete(true);
+      markComplete();
         setNotice("");
         return;
       }
@@ -834,75 +739,34 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           <div ref={streamEndRef} aria-hidden="true" />
         </div>
         {replyMeta?.memoryCandidate && <div className="memory-candidate"><div><strong>Remember this?</strong><p>{replyMeta.memoryCandidate.title}: {replyMeta.memoryCandidate.content}</p></div><button onClick={() => void remember()}>Remember</button><button onClick={() => setReplyMeta({ ...replyMeta, memoryCandidate: undefined })}>Not now</button></div>}
-        <form className="onboarding-live-composer" onSubmit={(event) => void submit(event)}>
-          {codeInbox.session && (codeInbox.active || codeInbox.error || inboxNotice) && <>
-            <CodePendingMessages key={codeInbox.session.sessionId} receiptTarget={codeInbox.receiptTarget} snapshot={codeInbox.snapshot} error={codeInbox.error || inboxNotice} busy={inboxSubmitting} t={t} onChange={changeInboxMessage} />
-          </>}
-          {contextSwitcher}
-          {noMemory && (
-            <span className="composer-private-badge" title="Private request active: memory, chat history, and attachments are not saved">
-              <span className="composer-private-dot" aria-hidden="true" />
-              <span>Private request</span>
-            </span>
-          )}
-          {ttsEnabled && (
-            <span className="composer-tts-badge" title={`Text-to-Speech active (Voice: ${SPEECH_VOICES.find((v) => v.id === ttsVoice)?.label ?? ttsVoice})`}>
-              <span className="composer-tts-dot" aria-hidden="true" />
-              <span>TTS: {SPEECH_VOICES.find((v) => v.id === ttsVoice)?.label ?? ttsVoice}</span>
-            </span>
-          )}
-          <ChatAttachments
-            value={attachments}
-            onChange={(next) => { draftVersion.current++; setAttachments(next); }}
-            onError={setNotice}
-            disabled={sending || codeInbox.active}
-            privateRequestEnabled={chatMode === "private"}
-            onPrivateRequestChange={(enabled) => handleModeChange(enabled ? "private" : "none")}
-            ttsEnabled={chatMode === "tts"}
-            onTtsEnabledChange={(enabled) => handleModeChange(enabled ? "tts" : "none")}
-            ttsVoice={ttsVoice}
-            onTtsVoiceChange={handleTtsVoiceChange}
-            inputText={input}
-            onGenerateSpeech={generateSpeechForInput}
-            isGeneratingSpeech={isGeneratingSpeech}
-          />
-          <AutoResizeChatTextarea value={input} onChange={(event) => { draftVersion.current++; setInput(event.target.value); }} onKeyDown={sendOnEnter} placeholder={business ? t("chat.businessPlaceholder") : t("chat.placeholder")} />
-          <div className={codeInbox.active ? "composer-inbox-actions" : undefined}>
-            {codeInbox.active && <>
-              <button type="submit" disabled={inboxSubmitting || !input.trim()}>{t("codeInbox.queue")}</button>
-              <button type="button" disabled={inboxSubmitting || !input.trim()} onClick={() => void submitInbox("steer")}>{t("codeInbox.steer")}</button>
-            </>}
-            {sending ? (
-              <button
-                type="button"
-                className="chat-stop-btn"
-                onClick={() => {
-                  const active = streamControllerRef.current;
-                  if (active) void cancelChatStream(active.streamId).finally(() => active.controller.abort(new DOMException("Stopped", "AbortError")));
-                }}
-                aria-label="Stop generating"
-                title="Stop generating"
-              >
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
-                  <rect x="5" y="5" width="14" height="14" rx="2.5" />
-                </svg>
-              </button>
-            ) : !codeInbox.active ? (
-              <button
-                type="submit"
-                className="chat-send-btn"
-                disabled={!input.trim() && attachments.length === 0}
-                aria-label="Send"
-                title="Send"
-              >
-                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <line x1="4" y1="12" x2="20" y2="12" />
-                  <polyline points="14 6 20 12 14 18" />
-                </svg>
-              </button>
-            ) : null}
-          </div>
-        </form>
+        <BusinessChatComposer
+          input={input}
+          setInput={setInput}
+          attachments={attachments}
+          setAttachments={setAttachments}
+          draftVersion={draftVersion}
+          sending={sending}
+          codeInbox={codeInbox}
+          inboxNotice={inboxNotice}
+          inboxSubmitting={inboxSubmitting}
+          submitInbox={submitInbox}
+          changeInboxMessage={changeInboxMessage}
+          contextSwitcher={contextSwitcher}
+          noMemory={noMemory}
+          ttsEnabled={ttsEnabled}
+          chatMode={chatMode}
+          handleModeChange={handleModeChange}
+          ttsVoice={ttsVoice}
+          handleTtsVoiceChange={handleTtsVoiceChange}
+          generateSpeechForInput={generateSpeechForInput}
+          isGeneratingSpeech={isGeneratingSpeech}
+          sendOnEnter={sendOnEnter}
+          submit={submit}
+          business={business}
+          t={t}
+          setNotice={setNotice}
+          streamControllerRef={streamControllerRef}
+        />
       </div>
     </>
   );
