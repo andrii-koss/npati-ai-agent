@@ -18,164 +18,30 @@
  * exactly like the C5a membership port: the two must stay in sync, and the store's port is the contract.
  */
 
-export type ProviderDataPolicyKind = "hosted_third_party" | "self_hosted" | "local";
-export const PROVIDER_DATA_POLICY_KINDS: readonly ProviderDataPolicyKind[] =
-  ["hosted_third_party", "self_hosted", "local"] as const;
+export * from "./provider-data-policy-types";
+import {
+  type ProviderDataPolicyKind,
+  PROVIDER_DATA_POLICY_KINDS,
+  type ProviderTrainingPolicy,
+  PROVIDER_TRAINING_POLICIES,
+  type ProviderDataClassification,
+  PROVIDER_DATA_CLASSIFICATIONS,
+  type ProviderRedactionKind,
+  PROVIDER_REDACTION_KINDS,
+  MANDATORY_REDACTIONS,
+  type ProviderContentType,
+  PROVIDER_CONTENT_TYPES,
+  type ExternalRetention,
+  type ProviderDataPolicyRecord,
+  type UpsertProviderDataPolicyInput,
+  type ProviderDataPolicyVersionRecord,
+  type ProjectDataPolicyPathRule,
+  type ProjectDataPolicyRecord,
+  type UpsertProjectDataPolicyInput,
+  type ProviderHostedConsentRecord,
+  ProviderDataPolicyError,
+} from "./provider-data-policy-types";
 
-export type ProviderTrainingPolicy = "no_training" | "may_train" | "unknown";
-export const PROVIDER_TRAINING_POLICIES: readonly ProviderTrainingPolicy[] =
-  ["no_training", "may_train", "unknown"] as const;
-
-export type ProviderDataClassification = "public" | "internal" | "confidential" | "restricted";
-export const PROVIDER_DATA_CLASSIFICATIONS: readonly ProviderDataClassification[] =
-  ["public", "internal", "confidential", "restricted"] as const;
-
-/** Redaction kinds. `secrets`/`tokens`/`keys` are mandatory for every kind of provider. */
-export type ProviderRedactionKind = "secrets" | "tokens" | "keys" | "pii" | "email" | "internal_hostnames";
-export const PROVIDER_REDACTION_KINDS: readonly ProviderRedactionKind[] =
-  ["secrets", "tokens", "keys", "pii", "email", "internal_hostnames"] as const;
-/** Redaction that no policy, company or owner may switch off. */
-export const MANDATORY_REDACTIONS: readonly ProviderRedactionKind[] = ["secrets", "tokens", "keys"] as const;
-
-/**
- * Content types are an **allow** list: naming a type is what permits it. `code`, `diff`, `files`, `logs`,
- * `terminal` and `web` are the sensitive ones and are absent from the fail-closed default.
- */
-export type ProviderContentType =
-  | "metadata" | "prompt" | "code" | "diff" | "files" | "logs" | "terminal" | "web" | "embeddings";
-export const PROVIDER_CONTENT_TYPES: readonly ProviderContentType[] =
-  ["metadata", "prompt", "code", "diff", "files", "logs", "terminal", "web", "embeddings"] as const;
-/** The sensitive half of the vocabulary: never allowed by the fail-closed default. */
-export const SENSITIVE_CONTENT_TYPES: readonly ProviderContentType[] =
-  ["code", "diff", "files", "logs", "terminal", "web"] as const;
-
-export type ExternalRetention = "none" | "unknown" | `N_days:${number}`;
-
-export interface ProviderDataPolicyRecord {
-  id: string;
-  /** `null` marks a platform default that applies to every company. */
-  companyId: string | null;
-  providerId: string;
-  /** `null` means "the whole provider"; a value scopes the policy to matching model ids. */
-  modelPattern: string | null;
-  policyVersion: number;
-  kind: ProviderDataPolicyKind;
-  allowPrivateRepoCode: boolean;
-  maxDataClassification: ProviderDataClassification;
-  allowPromptCaching: boolean;
-  externalRetention: ExternalRetention;
-  trainingPolicy: ProviderTrainingPolicy;
-  region: string | null;
-  jurisdiction: string | null;
-  requiredRedactions: ProviderRedactionKind[];
-  allowedContentTypes: ProviderContentType[];
-  termsUrl: string | null;
-  lastReviewedAt: Date | null;
-  reviewedBy: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-/** The store's upsert argument: `expectedPolicyVersion` makes every write optimistic, never blind. */
-export interface UpsertProviderDataPolicyInput {
-  companyId: string | null;
-  providerId: string;
-  modelPattern: string | null;
-  actor: string;
-  kind: ProviderDataPolicyKind;
-  allowPrivateRepoCode: boolean;
-  maxDataClassification: ProviderDataClassification;
-  allowPromptCaching: boolean;
-  externalRetention: ExternalRetention;
-  trainingPolicy: ProviderTrainingPolicy;
-  region?: string | null;
-  jurisdiction?: string | null;
-  requiredRedactions?: readonly ProviderRedactionKind[];
-  allowedContentTypes?: readonly ProviderContentType[];
-  termsUrl?: string | null;
-  lastReviewedAt?: Date | null;
-  reviewedBy?: string | null;
-  /**
-   * `null` means "insert, this must not exist yet"; a number means "replace exactly this version".
-   * A mismatch is refused (`data_policy_revision_conflict`) instead of overwriting someone else's change.
-   */
-  expectedPolicyVersion: number | null;
-}
-
-export interface ProviderDataPolicyVersionRecord {
-  id: string;
-  companyId: string | null;
-  providerId: string;
-  modelPattern: string | null;
-  policyVersion: number;
-  /** The full policy snapshot as it was accepted. */
-  payload: unknown;
-  actor: string;
-  createdAt: Date;
-}
-
-export interface ProjectDataPolicyPathRule {
-  pattern: string;
-  classification: ProviderDataClassification;
-}
-
-export interface ProjectDataPolicyRecord {
-  companyId: string;
-  projectId: string;
-  /** Defaults to `confidential` — a project is never `public` unless someone says so explicitly. */
-  dataClassification: ProviderDataClassification;
-  pathRules: ProjectDataPolicyPathRule[];
-  policyVersion: number;
-  updatedBy: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface UpsertProjectDataPolicyInput {
-  companyId: string;
-  projectId: string;
-  actor: string;
-  dataClassification?: ProviderDataClassification;
-  pathRules?: readonly ProjectDataPolicyPathRule[];
-  expectedPolicyVersion?: number | null;
-}
-
-export interface ProviderHostedConsentRecord {
-  companyId: string;
-  projectId: string;
-  providerId: string;
-  grantedBy: string;
-  grantedAt: Date;
-  /** Non-null means the consent was withdrawn and must be treated as absent. */
-  revokedAt: Date | null;
-}
-
-/** Structured refusal, mirroring the shape the code routes already map to HTTP statuses. */
-export class ProviderDataPolicyError extends Error {
-  readonly code: string;
-  readonly httpStatus: number;
-  /** Alias of `httpStatus`: the tree's route mappers read either name, and so does the store error class. */
-  readonly status: number;
-  readonly retryable: boolean;
-  readonly details?: Record<string, unknown>;
-
-  constructor(
-    code: string,
-    message: string,
-    options: { httpStatus?: number; retryable?: boolean; details?: Record<string, unknown> } = {},
-  ) {
-    super(message);
-    this.name = "ProviderDataPolicyError";
-    this.code = code;
-    // A policy refusal denies unless it explicitly says otherwise.
-    this.httpStatus = options.httpStatus ?? 403;
-    this.status = this.httpStatus;
-    this.retryable = options.retryable ?? false;
-    this.details = options.details;
-  }
-}
-
-/** The minimum content a hosted provider may receive before an owner configures anything. */
 export const FAIL_CLOSED_ALLOWED_CONTENT_TYPES: readonly ProviderContentType[] = ["metadata"] as const;
 
 /**
