@@ -1,242 +1,33 @@
-import { classifyTerminalCommand, normalizeTerminalCommand } from "./terminal-command-policy";
-import { logTerminalPolicy } from "./terminal-policy-log";
-import { createHash } from "node:crypto";
 import { isChatCapableModel, type AIEngine, type AIModelSummary, type ChatResult } from "@npati/omniroute-adapter";
 import { chatInferenceCandidates, isUnavailableInferenceError } from "./chat-inference-candidates";
 import type { AuthContext, Business, Company, CompanyAgent, CompanyAgentRunDetails, CompanyRunMode, Goal, MemoryItem, WorkspaceStore } from "@npati/workspace";
 import { defaultEffectiveCapabilityResolver, EffectiveCapabilityResolver, defaultRiskApprovalService, RiskApprovalService } from "@npati/shared";
 import type { CompanyToolExecutor } from "./company-tool-runtime";
 import { SecurityPolicyEngine, SecurityPolicyViolation, type CompanyGuardrailPolicy } from "./security-guardrails";
-import { AutoExecReviewer } from "./auto-exec-reviewer";
 import { CostTelemetry } from "./cost-telemetry";
 import type { AuditRepository } from "./audit-repository";
 import { chatLanguageInstruction } from "./company-chat-i18n";
 import {
-  GIT_WRITE_INTENT_REQUIRED,
-  gitApprovalPayload,
-  gitWriteIntentFromToolInput,
-  isGitWriteTool,
-  pullRequestApprovalPayload,
-} from "./code-git-write-policy";
+  MAX_CANDIDATES,
+  MAX_SELECTED,
+  DEFAULT_TIMEOUT,
+  type Mode,
+  type ToolPlan,
+  type Plan,
+  type MemoryScope,
+  type DurableApprovalGateway,
+  type LinkedBusinessContext,
+  CompanyRuntimeError,
+  digest,
+  comboModel,
+  toolName,
+  json,
+  instruction,
+  parsePlan,
+} from "./company-runtime-types";
+import { executeCompanyRunTools } from "./company-runtime-tool-executor";
 
-const MAX_CANDIDATES = 60, MAX_SELECTED = 12, DEFAULT_TIMEOUT = 120_000;
-type Mode = Exclude<CompanyRunMode, "auto">;
-type ToolPlan = { agentId: string; tool: string; input: Record<string, unknown> };
-type Plan = { mode: Mode; agentIds: string[]; reviewerAgentId?: string; toolRequests: ToolPlan[] };
-type MemoryScope = { apiKeyId?: string; sessionId?: string };
-export interface DurableApprovalGateway {
-  requestApproval(ctx: AuthContext, companyId: string, input: { runId: string; agentId: string; toolName: string; riskLevel: "high" | "critical"; actionSummary: string; inputPayload: Record<string, unknown> }): Promise<{ id: string }>;
-  consumeApproved(ctx: AuthContext, companyId: string, id: string, input: { runId: string; agentId: string; toolName: string; inputPayload: Record<string, unknown> }): Promise<unknown>;
-}
-
-export function companyRunTelemetryHeaders(details: CompanyAgentRunDetails) {
-  const inference = details.toolAudit.filter((entry) => entry.toolName === "ai.inference");
-  const latest = inference.at(-1)?.inputSummary ?? {};
-  const number = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : 0;
-  return CostTelemetry.getRunTelemetryHeaders({
-    requestId: details.run.id,
-    modelId: typeof latest.modelId === "string" ? latest.modelId : details.run.omnirouteComboName,
-    provider: typeof latest.providerId === "string" ? latest.providerId : undefined,
-    strategy: typeof latest.routingStrategy === "string" ? latest.routingStrategy : details.run.executionMode ?? details.run.requestedMode,
-    totalTokens: details.run.totalTokens,
-    totalCostUsd: details.run.totalCost,
-    latencyMs: details.run.totalDurationMs,
-    cacheHit: inference.some((entry) => entry.inputSummary.cacheHit === true),
-    cachedTokens: inference.reduce((total, entry) => total + number(entry.inputSummary.cachedTokens), 0),
-    cacheSavingsUsd: inference.reduce((total, entry) => total + number(entry.inputSummary.cacheSavingsUsd), 0),
-    failoverCount: inference.reduce((total, entry) => total + number(entry.inputSummary.failoverCount), 0),
-    costSource: inference.some((entry) => entry.inputSummary.costSource === "upstream") ? "upstream" : "estimated",
-  });
-}
-
-export class CompanyRuntimeError extends Error {
-  constructor(public readonly code: string, message: string, public readonly status = 400) { super(message); }
-}
-const digest = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 24);
-const comboModel = (value: string | null | undefined) => value == null || value === "auto" || !isChatCapableModel({ id: value }) ? "auto/smart" : value;
-function toolName(value: string) {
-  const raw = value.trim().toLowerCase();
-  const key = raw.replace(/[ _-]+/g, ".");
-  const displayKey = raw.replace(/[^a-z0-9]+/g, ".").replace(/^\.|\.$/g, "");
-  const browserDisplayAliases: Record<string, string> = {
-    "browser.navigation.jobs": "browser.browser_tab_control",
-    "browser.forms.autonomous.tasks": "browser.browser_clicktype",
-    "browser.screenshots": "browser.browser_screenshots",
-    "browser.file.transfer": "browser.browser_downloads",
-  };
-  if (browserDisplayAliases[displayKey]) return browserDisplayAliases[displayKey]!;
-  const browserAliases: Record<string, string> = {
-    "browser.browser.tab.control": "browser.browser_tab_control",
-    "browser.browser.clicktype": "browser.browser_clicktype",
-    "browser.browser.snapshots": "browser.browser_snapshots",
-    "browser.browser.screenshots": "browser.browser_screenshots",
-    "browser.browser.downloads": "browser.browser_downloads",
-  };
-  if (browserAliases[key]) return browserAliases[key]!;
-  if (raw.startsWith("omniroute_") || key.startsWith("mcp.")) return "mcp";
-  if (key.startsWith("files.")) return "files";
-  return ({
-    "websearch": "web.search", "web.search": "web.search", "webfetch": "web.fetch", "web.fetch": "web.fetch",
-    crawler: "web.crawl", "web.crawl": "web.crawl", "text-to-speech": "audio.speech", tts: "audio.speech", "audio.speech": "audio.speech",
-    mcp: "mcp", files: "files", knowledge: "knowledge", exec: "exec", code: "exec", "company.memory": "storage.company_memory", "storage.company.memory": "storage.company_memory"
-  } as Record<string, string>)[key] ?? key;
-}
-function summary(input: Record<string, unknown>) {
-  return SecurityPolicyEngine.redactObject(Object.fromEntries(Object.entries(input).slice(0, 20).map(([key, value]) => [
-    key, /token|secret|password|api.?key|authorization|content|replacement|find/i.test(key) ? "[REDACTED]"
-      : typeof value === "string" ? value.slice(0, 500)
-        : typeof value === "number" || typeof value === "boolean" || value === null ? value : "[structured value]",
-  ])));
-}
-export function hasScopedBrowserAuthorization(
-  ctx: AuthContext,
-  tool: string,
-  operation: string,
-  input: Record<string, unknown>,
-) {
-  if (ctx.permissions.includes("browser:resume_email") &&
-    tool === "browser.browser_tab_control" && operation === "resume") {
-    return typeof input.jobId === "string" && Boolean(input.jobId.trim());
-  }
-  if (!ctx.permissions.includes("automation:execute_browser") ||
-    tool !== "browser.browser_clicktype" ||
-    !["register_account", "task"].includes(operation)) return false;
-  const domains = Array.isArray(input.allowedDomains)
-    ? input.allowedDomains.map(String).map((item) => item.trim().toLowerCase()).filter(Boolean).slice(0, 50)
-    : [];
-  if (!domains.length || typeof input.url !== "string") return false;
-  try {
-    const hostname = new URL(input.url).hostname.toLowerCase();
-    return domains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
-  } catch {
-    return false;
-  }
-}
-function json(value: unknown, max = 20_000) {
-  try { return JSON.stringify(value).slice(0, max); } catch { return "[unserializable]"; }
-}
-interface LinkedBusinessContext {
-  business?: Business;
-  goals?: Goal[];
-  memories?: MemoryItem[];
-}
-
-function context(company: Company, includeMemory = true, linked?: LinkedBusinessContext) {
-  const parts: (string | false | undefined | null)[] = [
-    `Company: ${company.name}`,
-    company.website && `Website: ${company.website}`,
-    company.industry && `Industry: ${company.industry}`,
-    company.description && `Description: ${company.description}`,
-    company.productsServices && `Products / Services: ${company.productsServices}`,
-    company.languages.length > 0 && `Languages: ${company.languages.join(", ")}`,
-    company.brandTone && `Brand tone: ${company.brandTone}`,
-    company.companyInstructions && `Company instructions: ${company.companyInstructions}`,
-  ];
-
-  if (linked?.business) {
-    const b = linked.business;
-    parts.push(
-      `\n=== LINKED BUSINESS IDEA / PROFILE ===`,
-      `Business Idea Name: ${b.name}`,
-      `Stage: ${b.businessStage}`,
-      b.industry && `Industry: ${b.industry}`,
-      b.niche && `Niche: ${b.niche}`,
-      b.market && `Market: ${b.market}`,
-      b.country && `Country: ${b.country}`,
-      b.teamType && `Team: ${b.teamType}`,
-      b.presenceType && `Presence: ${b.presenceType}`,
-      b.businessModel && `Business Model: ${b.businessModel}`,
-      b.website && `Website: ${b.website}`,
-      b.description && `Description: ${b.description}`,
-      b.productsServicesSummary && `Products / Services: ${b.productsServicesSummary}`,
-      b.audienceSummary && `Target Audience: ${b.audienceSummary}`,
-    );
-  }
-
-  if (linked?.goals && linked.goals.length > 0) {
-    parts.push(
-      `\n=== LINKED BUSINESS GOALS ===`,
-      ...linked.goals.map((g, i) => `${i + 1}. [${g.status.toUpperCase()}] ${g.title}${g.description ? `: ${g.description}` : ""}${g.targetValue ? ` (Target: ${g.targetValue} ${g.targetUnit ?? ""})` : ""}${g.targetDate ? ` (Due: ${g.targetDate})` : ""}`),
-    );
-  }
-
-  if (includeMemory && linked?.memories && linked.memories.length > 0) {
-    parts.push(
-      `\n=== LINKED BUSINESS MEMORY ===`,
-      ...linked.memories.map((m, i) => `${i + 1}. [${m.type}] ${m.title}: ${m.content}`),
-    );
-  }
-
-  if (includeMemory && company.knowledge.length) {
-    parts.push(`Company knowledge: ${json(company.knowledge, 8_000)}`);
-  }
-  if (includeMemory && Object.keys(company.memory).length) {
-    parts.push(`Company memory: ${json(company.memory, 8_000)}`);
-  }
-
-  return parts.filter(Boolean).join("\n");
-}
-
-function instruction(company: Company, agent: CompanyAgent, manager = false, includeMemory = true, linked?: LinkedBusinessContext) {
-  return [
-    "You are an AI Agent inside an NPATI Company.",
-    context(company, includeMemory, linked),
-    linked?.business && `AWARENESS MANDATE: You represent Company "${company.name}" linked to Business Idea "${linked.business.name}". You have complete immediate awareness of this company, its business idea, its goals, and its memory. NEVER ask the user which company, business idea, goal, or memory is active — you already know all of them seamlessly! When asked, answer directly with full knowledge from this context without hesitation.`,
-    `Agent name: ${agent.name}`,
-    `Agent role: ${agent.role}`,
-    agent.description && `Role description: ${agent.description}`,
-    agent.systemInstruction && `System instruction: ${agent.systemInstruction}`,
-    agent.promptGuidelines && `Prompt guidelines: ${agent.promptGuidelines}`,
-    includeMemory && agent.tools.map(toolName).includes("knowledge") && "Grounding rule: when Relevant Company Knowledge or Company Memory is supplied, treat it as authoritative. Copy exact factual values when asked. Never replace them with assumptions or invented facts; if the answer is absent, say that it is not available in Company Knowledge.",
-    !includeMemory && "Private no-memory request: do not read, request, infer, or write Company Knowledge, Company Memory, Files, or prior conversation memory.",
-    manager ? "As Main Agent, verify delegated work and return one final answer to the user."
-      : "Complete your assigned responsibility and return concrete work to the next agent.",
-  ].filter(Boolean).join("\n\n");
-}
-function delegationJson(content: string): Record<string, unknown> | undefined {
-  for (let start = content.indexOf("{"); start >= 0; start = content.indexOf("{", start + 1)) {
-    let depth = 0, quoted = false, escaped = false;
-    for (let end = start; end < content.length; end++) {
-      const char = content[end];
-      if (quoted) {
-        if (escaped) escaped = false;
-        else if (char === "\\") escaped = true;
-        else if (char === '"') quoted = false;
-      } else if (char === '"') quoted = true;
-      else if (char === "{") depth++;
-      else if (char === "}" && --depth === 0) {
-        try {
-          const value = JSON.parse(content.slice(start, end + 1)) as unknown;
-          if (value && typeof value === "object" && !Array.isArray(value) &&
-            ("mode" in value || "agentIds" in value || "toolRequests" in value)) {
-            return value as Record<string, unknown>;
-          }
-        } catch { /* Try the next complete object. */ }
-        break;
-      }
-    }
-  }
-  return undefined;
-}
-
-function parsePlan(content: string, requested: CompanyRunMode): Plan {
-  const value = delegationJson(content);
-  if (!value) throw new CompanyRuntimeError("INVALID_DELEGATION_PLAN", "Main Agent returned malformed delegation JSON", 502);
-  const mode = requested === "auto" ? value.mode : requested;
-  if (mode !== "single" && mode !== "pipeline" && mode !== "fusion") throw new CompanyRuntimeError("INVALID_DELEGATION_MODE", "Unsupported delegation mode", 502);
-  const agentIds = Array.isArray(value.agentIds) ? value.agentIds.filter((id): id is string => typeof id === "string") : [];
-  const reviewerAgentId = typeof value.reviewerAgentId === "string" ? value.reviewerAgentId : undefined;
-  const toolRequests = Array.isArray(value.toolRequests) ? value.toolRequests.flatMap((raw) => {
-    if (!raw || typeof raw !== "object") return [];
-    const item = raw as Record<string, unknown>;
-    if (typeof item.agentId !== "string" || typeof item.tool !== "string") return [];
-    return [{
-      agentId: item.agentId, tool: item.tool,
-      input: item.input && typeof item.input === "object" ? item.input as Record<string, unknown> : {}
-    }];
-  }) : [];
-  return { mode, agentIds: [...new Set(agentIds)], reviewerAgentId, toolRequests };
-}
+export * from "./company-runtime-types";
 
 export class CompanyDelegationRuntime {
   private readonly controllers = new Map<string, AbortController>();
@@ -431,7 +222,7 @@ export class CompanyDelegationRuntime {
               options.noMemory ? "NO-MEMORY IS ACTIVE: toolRequests must not contain knowledge, files, or storage.company_memory." : "",
               "Populate required input fields with concrete values. Omit a tool request if you cannot supply its required input; never emit an empty input for web.search, web.fetch or web.crawl.",
               "Use pipeline for dependent work and fusion for independent parallel perspectives.",
-            ].join("\n\n"))
+            ].filter(Boolean).join("\n\n")),
           },
         ],
       };
@@ -464,7 +255,6 @@ export class CompanyDelegationRuntime {
       }
       let plannedModel = planningRequest.model;
       const planned = await (async () => {
-        if (pendingState) return { taskId: existing.run.omnirouteTaskId ?? "resumed-plan", content: JSON.stringify(pendingState.plan), metadata: {} };
         let lastError: unknown;
         for (const model of planningCandidates.length ? planningCandidates : [planningRequest.model, "auto"]) {
           try { const result = await this.ai.a2aSend!({ ...planningRequest, model }); plannedModel = model; return result; }
@@ -528,7 +318,7 @@ export class CompanyDelegationRuntime {
       // Retrieved chunks are injected only into the Main Agent's final/grounding calls.
       // Specialists still require their own allowlist entry for direct knowledge tool calls.
       const knowledgeAllowed = !options.noMemory && mainTools.includes("knowledge");
-      const retrieved = knowledgeAllowed && this.knowledgeRetriever ? await this.knowledgeRetriever(ctx, companyId, [input.task, ...plan.toolRequests.map(request => request.tool)].join(" "), options.memoryScope).catch(() => ({ chunks: [], memories: [] })) : { chunks: [], memories: [] };
+      const retrieved = knowledgeAllowed && this.knowledgeRetriever ? await this.knowledgeRetriever(ctx, companyId, [input.task, ...plan.toolRequests.map(request=>request.tool)].join(" "), options.memoryScope).catch(() => ({ chunks: [], memories: [] })) : { chunks: [], memories: [] };
       const knowledge = {
         chunks: retrieved.chunks.map(item => ({ content: protect(item.content) })),
         memories: retrieved.memories.map(item => ({ content: protect(item.content), source: item.source, metadata: item.metadata })),
@@ -723,348 +513,50 @@ export class CompanyDelegationRuntime {
     return { costUsd, totalTokens: usage.totalTokens };
   }
 
-  private async tools(ctx: AuthContext, company: Company, runId: string, plans: ToolPlan[], agents: Map<string, CompanyAgent>, signal: AbortSignal, knowledge: { chunks: Array<{ content: string }>; memories: Array<{ content: string }> }, noMemory = false, approvalId?: string, allowedProjectPaths?: string[], allowedProjectId?: string, runProjectId?: string, onApprovalPending?: (nextToolIndex: number, evidence: string) => Promise<void>, previousEvidence?: string, startIndex = 0, runType = "company_run", onTool?: (tool: string, path?: string) => void) {
-    const evidence: string[] = previousEvidence ? [previousEvidence] : [];
-    let sequenceNumber = 1;
-    for (const [offset, plan] of plans.slice(startIndex, 10).entries()) {
-      const planIndex = startIndex + offset;
-      const approvedForCurrent = Boolean(approvalId && planIndex === startIndex);
-      if (signal.aborted) throw new DOMException("Cancelled", "AbortError");
-      const agent = agents.get(plan.agentId);
-      if (!agent) throw new CompanyRuntimeError("INVALID_TOOL_AGENT", "Tool request references an unavailable agent", 502);
-      const tool = toolName(plan.tool), allowed = new Set(agent.tools.map(toolName));
-      if (allowedProjectId && tool.startsWith("project.") && plan.input.projectId !== allowedProjectId) {
-        await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId, { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: {}, errorMessage: "Tool targets another project", reasonCode: "project_task_tenant", sequenceNumber: sequenceNumber++ });
-        evidence.push("Project task target denied " + tool);
-        continue;
-      }
-      if (allowedProjectPaths?.length && tool.startsWith("project.")) {
-        const mutation = tool.startsWith("project.files.") && !["project.files.read", "project.files.list", "project.files.search"].includes(tool);
-        const paths = mutation ? (tool === "project.files.delete" && Array.isArray(plan.input.paths) ? plan.input.paths : [plan.input.path, ...(tool === "project.files.move" ? [plan.input.to] : [])]) : [];
-        const inScope = (value: unknown) => typeof value === "string" && allowedProjectPaths.some((scope) => value === scope || value.startsWith(scope + "/"));
-        if ((!tool.startsWith("project.files.") || mutation && !paths.every(inScope))) {
-          await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId, { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: { path: plan.input.path }, errorMessage: "Tool is outside the assigned project file scope", reasonCode: "project_task_scope", sequenceNumber: sequenceNumber++ });
-          evidence.push("Project task scope denied " + tool);
-          continue;
-        }
-      }
-      if (noMemory && ["knowledge", "files", "storage.company_memory"].includes(tool)) {
-        await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId,
-          { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: summary(tool.startsWith("project.terminal.") ? { projectId: plan.input.projectId, action: plan.input.action } : plan.input), errorMessage: "No-memory request blocks persistent context access", reasonCode: "no_memory", sequenceNumber: sequenceNumber++ });
-        throw new CompanyRuntimeError("NO_MEMORY_TOOL_FORBIDDEN", `No-memory request may not use ${tool}`, 403);
-      }
-      if (!allowed.has(tool)) {
-        await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId,
-          { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: summary(tool.startsWith("project.terminal.") ? { projectId: plan.input.projectId, action: plan.input.action } : plan.input), errorMessage: "Tool is not permitted", reasonCode: "agent_allowlist", sequenceNumber: sequenceNumber++ });
-        throw new CompanyRuntimeError("TOOL_FORBIDDEN", `Agent "${agent.name}" may not use ${tool}`, 403);
-      }
-      if (tool !== "knowledge" && tool !== "exec") {
-        const check = this.capabilityResolver.canExecute({
-          auth: ctx,
-          activeContext: { contextType: "company", companyId: company.id, businessId: null },
-          company: { id: company.id, revision: company.revision },
-          agent: { id: agent.id, revision: agent.revision, tools: agent.tools.map(toolName) },
-        }, tool);
-        if (!check.allowed) {
-          await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId,
-            { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: summary(tool.startsWith("project.terminal.") ? { projectId: plan.input.projectId, action: plan.input.action } : plan.input), errorMessage: check.reason, reasonCode: check.detail?.reasonCode ?? "policy_denied", sequenceNumber: sequenceNumber++ });
-          throw new CompanyRuntimeError("TOOL_FORBIDDEN", `Agent "${agent.name}" may not use ${tool}: ${check.reason}`, 403);
-        }
-      }
-      if (tool === "exec" && !ctx.permissions.some((permission) => ["business:manage", "owner", "*"].includes(permission))) {
-        await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId,
-          { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: summary(tool.startsWith("project.terminal.") ? { projectId: plan.input.projectId, action: plan.input.action } : plan.input), errorMessage: "Exec requires business:manage permission", reasonCode: "tenant_permissions", sequenceNumber: sequenceNumber++ });
-        throw new CompanyRuntimeError("TOOL_FORBIDDEN", "Exec requires business:manage permission", 403);
-      }
-      if (tool === "exec") {
-        const code = typeof plan.input.code === "string" ? plan.input.code : "";
-        const review = AutoExecReviewer.reviewExecution({ type: "javascript", payload: code });
-        if (review.decision === "BLOCKED") {
-          await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId,
-            { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: summary(tool.startsWith("project.terminal.") ? { projectId: plan.input.projectId, action: plan.input.action } : plan.input), errorMessage: review.reasons.join("; "), reasonCode: "auto_exec_reviewer", sequenceNumber: sequenceNumber++ });
-          throw new CompanyRuntimeError("EXEC_REVIEW_BLOCKED", "Exec was blocked by the automatic security reviewer", 403);
-        }
-      }
-
-      // Risk & Human Approval Policy Check
-      const operation = typeof plan.input.operation === "string" ? plan.input.operation.trim().toLowerCase() : "";
-      const toolToAssess = operation ? `${tool}.${operation}` : plan.tool.includes(".") ? plan.tool : tool;
-      const scopedBrowserAuthorization = hasScopedBrowserAuthorization(ctx, tool, operation, plan.input);
-      const isTerminal = tool === "project.terminal.exec" || tool === "project.terminal.process";
-      const terminalStarts = tool === "project.terminal.exec" || (tool === "project.terminal.process" && plan.input.action === "start");
-      let normalizedTerminal: ReturnType<typeof normalizeTerminalCommand> | undefined;
-      if (terminalStarts) {
-        try {
-          normalizedTerminal = normalizeTerminalCommand({
-            command: typeof plan.input.command === "string" ? plan.input.command : undefined,
-            executable: typeof plan.input.executable === "string" ? plan.input.executable : undefined,
-            args: plan.input.args as string[] | undefined,
-            cwd: plan.input.cwd as string | undefined,
-          });
-        } catch (error) {
-          logTerminalPolicy({ rawCommand: String(plan.input.command ?? plan.input.executable ?? ""), normalizedCommand: "", sandboxId: typeof plan.input.sandboxId === "string" ? plan.input.sandboxId : undefined, projectId: String(plan.input.projectId ?? ""), decision: "deny", reason: error instanceof Error ? error.message : "Invalid command", policyRule: "invalid_command_structure", toolName: tool, executionContext: runProjectId ? "project_agent" : "company_generic", runId, agentId: agent.id, runType });
-          throw new CompanyRuntimeError("TOOL_FORBIDDEN", "Invalid terminal command structure", 400);
-        }
-      }
-      const terminalDecision = normalizedTerminal ? classifyTerminalCommand({ command: normalizedTerminal.command, cwd: normalizedTerminal.cwd }) : undefined;
-      const hasSecretReferences = isTerminal && Object.keys((plan.input.environmentReferences ?? {}) as Record<string, unknown>).length > 0;
-      const terminalNeedsApproval = Boolean(terminalDecision?.requiresApproval || hasSecretReferences);
-      let sandboxEvaluation: { allowed: boolean; reason: string; sandboxId?: string } = { allowed: false, reason: runProjectId ? "sandbox_adapter_unavailable" : "run_has_no_project" };
-      if (isTerminal && !terminalNeedsApproval && runProjectId) {
-        try {
-          sandboxEvaluation = this.toolRuntime.evaluateSandboxTerminal
-            ? await this.toolRuntime.evaluateSandboxTerminal(ctx, company, runProjectId, agent.id, tool, plan.input)
-            : { allowed: Boolean(this.toolRuntime.canAutoApproveSandboxTerminal && await this.toolRuntime.canAutoApproveSandboxTerminal(ctx, company, runProjectId, agent.id, tool, plan.input)), reason: "legacy_sandbox_adapter" };
-        } catch (error) {
-          logTerminalPolicy({ rawCommand: normalizedTerminal?.rawCommand ?? "", normalizedCommand: normalizedTerminal?.command ?? "", sandboxId: typeof plan.input.sandboxId === "string" ? plan.input.sandboxId : undefined, projectId: String(plan.input.projectId ?? ""), decision: "deny", reason: "sandbox_scope_check_failed", policyRule: "sandbox_scope", toolName: tool, executionContext: "project_agent", runId, agentId: agent.id, runType, cwd: normalizedTerminal?.cwd, rawArgs: normalizedTerminal?.args, commandPolicyRule: terminalDecision?.policyRule });
-          throw error;
-        }
-      }
-      const sandboxAutoApproval = isTerminal && !terminalNeedsApproval && sandboxEvaluation.allowed;
-      if (isTerminal) logTerminalPolicy({ rawCommand: normalizedTerminal?.rawCommand ?? String(plan.input.command ?? plan.input.executable ?? ""), normalizedCommand: normalizedTerminal?.command ?? "", sandboxId: sandboxEvaluation.sandboxId ?? (typeof plan.input.sandboxId === "string" ? plan.input.sandboxId : undefined), projectId: String(plan.input.projectId ?? ""), decision: sandboxAutoApproval ? "allow" : "approval", reason: terminalDecision?.requiresApproval ? terminalDecision.reason : hasSecretReferences ? "Secret references require approval" : sandboxEvaluation.reason, policyRule: terminalDecision?.requiresApproval ? terminalDecision.policyRule : hasSecretReferences ? "secret_references" : sandboxEvaluation.reason, toolName: tool, executionContext: runProjectId ? "project_agent" : "company_generic", runId, agentId: agent.id, runType, cwd: normalizedTerminal?.cwd, rawArgs: normalizedTerminal?.args, commandPolicyRule: terminalDecision?.policyRule });
-      const projectFileRisk = tool.startsWith("project.files.") ? (tool === "project.files.delete" ? "high" : "medium") : tool.startsWith("project.terminal.") ? sandboxAutoApproval ? "low" : "high" : tool.startsWith("project.preview.") ? "low" : tool.startsWith("project.deploy.") ? (tool === "project.deploy.publish" ? "high" : "low") : tool.startsWith("project.data.") ? (tool === "project.data.schema.inspect" || tool === "project.data.rows.list" || tool === "project.data.rows.read" || tool === "project.data.migrations.list" || tool === "project.data.templates.list" ? "low" : tool === "project.data.rows.create" || tool === "project.data.rows.update" ? "medium" : "high") : tool === "project.git.push" || tool === "project.git.pr" ? "high" : undefined;
-      /**
-       * C11 (owner decision 5): a remote git write is approved against its **typed target** — the
-       * operation, the branches, `force` and the credential reference — and never against the raw tool
-       * input. The git-policy boundary rebuilds this exact payload from the branch it is about to push and
-       * consumes the record with it, so an approval cannot be redeemed for another branch, and the
-       * `approved` flag the tool runtime receives is not proof of anything.
-       *
-       * A remote write whose target the model did not name cannot be approved at all: there would be no
-       * target to bind the human's decision to, so it is refused **before** an approval request exists
-       * (`GIT_WRITE_INTENT_REQUIRED`, and `GIT_PR_TARGET_REQUIRED` for the (base, head) pair of a PR).
-       */
-      const gitWriteIntent = isGitWriteTool(tool) ? gitWriteIntentFromToolInput(tool, plan.input as Record<string, unknown>) : null;
-      if (isGitWriteTool(tool) && !gitWriteIntent) {
-        throw new CompanyRuntimeError(
-          GIT_WRITE_INTENT_REQUIRED,
-          `Tool "${tool}" performs a remote git write, so it must name the branch it writes to`,
-          400,
-        );
-      }
-      const pullRequestTarget = tool === "project.git.pr"
-        ? { base: String(plan.input.base ?? "").trim(), head: String(plan.input.head ?? "").trim() }
-        : null;
-      if (pullRequestTarget && (!pullRequestTarget.base || !pullRequestTarget.head)) {
-        throw new CompanyRuntimeError(
-          "GIT_PR_TARGET_REQUIRED",
-          "A pull request must name the branch it targets (`base`) and the branch under review (`head`): the approval is bound to that pair",
-          400,
-        );
-      }
-      /**
-       * C11: the name the approval **record** carries for a remote git write is the tool id itself, never
-       * `toolToAssess`. `toolToAssess` appends `plan.input.operation` when the model set one, and the git
-       * boundary consumes the record under the tool id (`project.git.push`) — a derived name would make the
-       * record unmatchable and the push impossible to approve, which is fail-closed but silently useless.
-       */
-      const gitRecordTool = gitWriteIntent || pullRequestTarget ? tool : toolToAssess;
-      /**
-       * C11 (owner decision 13): a `project.git.push` whose repository does not exist yet is a different act
-       * — it creates the repository — and the approval is bound to that fact, exactly like the branch, the
-       * remote, `force` and the credential reference. The fact is resolved **read-only** through the git
-       * service's own inspector, never from `plan.input`: a claim by the model about the disk would be worth
-       * nothing. An unusable answer claims nothing (`null`), and the git boundary then refuses the write as a
-       * payload mismatch instead of approving an initialization it was not asked about.
-       */
-      let gitRepositoryState: { initialized: boolean } | null = null;
-      if (gitWriteIntent && this.toolRuntime.inspectRepositoryForApproval) {
-        gitRepositoryState = await this.toolRuntime
-          .inspectRepositoryForApproval(ctx, company.id, String(plan.input.projectId ?? ""))
-          .catch(() => null);
-      }
-      const approvalPayload = isTerminal
-        ? { projectId: plan.input.projectId, commandHash: createHash("sha256").update(normalizedTerminal?.command ?? String(plan.input.command ?? "")).digest("hex"), cwd: normalizedTerminal?.cwd === "." ? undefined : normalizedTerminal?.cwd, action: plan.input.action, environmentReferenceHash: createHash("sha256").update(JSON.stringify(plan.input.environmentReferences ?? {})).digest("hex") }
-        : gitWriteIntent
-          ? gitApprovalPayload({
-              projectId: String(plan.input.projectId ?? ""),
-              tool: gitRecordTool,
-              intent: { ...gitWriteIntent, repositoryInitialized: gitRepositoryState?.initialized ?? null },
-            })
-          : pullRequestTarget
-            ? pullRequestApprovalPayload({
-                projectId: String(plan.input.projectId ?? ""),
-                tool: gitRecordTool,
-                base: pullRequestTarget.base,
-                head: pullRequestTarget.head,
-                credentialId: typeof plan.input.credentialId === "string" ? plan.input.credentialId : null,
-              })
-            : plan.input;
-      if (this.riskApprovalService.requiresApproval(toolToAssess, projectFileRisk) && !scopedBrowserAuthorization) {
-        if (this.durableApprovals) {
-          if (!approvedForCurrent) {
-            const cleanPayload = { ...approvalPayload }; delete cleanPayload._approvalToken;
-            const req = await this.durableApprovals.requestApproval(ctx, company.id, {
-              runId, agentId: agent.id, toolName: gitRecordTool,
-              riskLevel: projectFileRisk === "high" ? "high" : this.riskApprovalService.classifyRisk(toolToAssess) === "critical" ? "critical" : "high",
-              actionSummary: tool === "project.deploy.publish" ? `Deploy ${plan.input.projectId ?? "project"} to ${plan.input.provider ?? "dokploy"} [${plan.input.environment ?? "production"}]` : `${agent.name} requests ${gitRecordTool}`, inputPayload: cleanPayload,
-            });
-            await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId, {
-              agentId: agent.id, toolName: toolToAssess, decision: "denied", status: "blocked",
-              inputSummary: summary(cleanPayload), errorMessage: `Human approval required. Approval request ID: ${req.id}`, reasonCode: "approval_required", sequenceNumber: sequenceNumber++
-            });
-            await onApprovalPending?.(planIndex, evidence.join("\n"));
-            throw new CompanyRuntimeError("APPROVAL_REQUIRED", `Tool "${toolToAssess}" requires human approval. Approval request ID: ${req.id}`, 403);
-          }
-          const cleanPayload = { ...approvalPayload }; delete cleanPayload._approvalToken;
-          if (gitWriteIntent || pullRequestTarget) {
-            /**
-             * C11 (owner decision 5): a remote git write consumes its approval **at the git boundary**,
-             * immediately before the side effect (`ProjectGitService.requireGitWriteApproval`), not here.
-             * Consuming it in this loop would spend the one-shot record before the write — leaving the
-             * boundary, which is the place that can recompute the payload hash from the *resolved* target,
-             * with nothing left to verify. It also means a run that is approved for a git write cannot
-             * have that approval spent on a different tool call in the same turn.
-             */
-          } else {
-            try { await this.durableApprovals.consumeApproved(ctx, company.id, approvalId!, { runId, agentId: agent.id, toolName: toolToAssess, inputPayload: cleanPayload }); }
-            catch (error) {
-              const code = (error as any)?.code ?? "APPROVAL_INVALID";
-              await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId, {
-                agentId: agent.id, toolName: toolToAssess, decision: "denied", status: "blocked",
-                inputSummary: summary(cleanPayload), errorMessage: error instanceof Error ? error.message : "Approval denied", reasonCode: String(code).toLowerCase(), sequenceNumber: sequenceNumber++
-              });
-              throw new CompanyRuntimeError(code, error instanceof Error ? error.message : "Approval denied", Number((error as any)?.status ?? 409));
-            }
-          }
-        } else {
-          /**
-           * C11: without the durable approval store there is no approval **record** for the git boundary to
-           * verify, and the HMAC token path cannot produce one. A remote git write is therefore refused
-           * instead of being executed on a token alone — `runId`-scoped token replay is not the same proof
-           * as "this record, this payload hash, consumed once, at the boundary".
-           */
-          if (gitWriteIntent || pullRequestTarget) {
-            throw new CompanyRuntimeError(
-              "GIT_APPROVAL_UNAVAILABLE",
-              "A remote git write requires the durable approval store so the git boundary can verify the approval record",
-              503,
-            );
-          }
-          const token = typeof plan.input._approvalToken === "string" ? plan.input._approvalToken : undefined;
-          if (!token) {
-            const req = this.riskApprovalService.createApprovalRequest(ctx, company.id, runId, agent.id, toolToAssess, approvalPayload);
-            await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId, {
-              agentId: agent.id,
-              toolName: toolToAssess,
-              decision: "denied",
-              status: "blocked",
-              inputSummary: summary(tool.startsWith("project.terminal.") ? approvalPayload : plan.input),
-              errorMessage: `Human approval required for high-risk operation '${toolToAssess}'. Approval request ID: ${req.id}`,
-              reasonCode: "approval_required",
-              sequenceNumber: sequenceNumber++,
-            });
-            await onApprovalPending?.(planIndex, evidence.join("\n"));
-            throw new CompanyRuntimeError("APPROVAL_REQUIRED", `Tool "${toolToAssess}" requires human approval before execution. Approval request ID: ${req.id}`, 403);
-          }
-
-          const verification = this.riskApprovalService.verifyApprovalToken(token, ctx, company.id, runId, toolToAssess, approvalPayload);
-          if (!verification.valid) {
-            await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId, {
-              agentId: agent.id,
-              toolName: toolToAssess,
-              decision: "denied",
-              status: "blocked",
-              inputSummary: summary(tool.startsWith("project.terminal.") ? approvalPayload : plan.input),
-              errorMessage: verification.reason ?? "Invalid approval token",
-              reasonCode: verification.reasonCode ?? "invalid_approval_token",
-              sequenceNumber: sequenceNumber++,
-            });
-            throw new CompanyRuntimeError("INVALID_APPROVAL_TOKEN", verification.reason ?? "Invalid approval token", 403);
-          }
-
-          const consumed = this.riskApprovalService.consumeToken(token);
-          if (!consumed) {
-            await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId, {
-              agentId: agent.id,
-              toolName: toolToAssess,
-              decision: "denied",
-              status: "blocked",
-              inputSummary: summary(tool.startsWith("project.terminal.") ? approvalPayload : plan.input),
-              errorMessage: "Approval token has already been consumed (replay attempt blocked)",
-              reasonCode: "already_consumed",
-              sequenceNumber: sequenceNumber++,
-            });
-            throw new CompanyRuntimeError("APPROVAL_ALREADY_USED", "Approval token has already been consumed", 409);
-          }
-        }
-      }
-
-      await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId,
-        { agentId: agent.id, toolName: tool, decision: "allowed", status: "requested", inputSummary: summary(tool.startsWith("project.terminal.") ? approvalPayload : plan.input), sequenceNumber: sequenceNumber++ });
-      const toolStart = performance.now();
-      try {
-        const cleanPayload = { ...plan.input };
-        delete cleanPayload._approvalToken;
-        const adapterInput = tool === "mcp" && plan.tool.trim().toLowerCase().startsWith("omniroute_")
-          ? { ...cleanPayload, name: plan.tool.trim() }
-          : tool === "files" && plan.tool.includes(".")
-            ? { ...cleanPayload, operation: plan.tool.split(".").at(-1) }
-            : cleanPayload;
-        if (tool === "web.search" && (!adapterInput.query || typeof adapterInput.query !== "string" || !(adapterInput.query as string).trim())) {
-          adapterInput.query = typeof adapterInput.q === "string" && (adapterInput.q as string).trim()
-            ? (adapterInput.q as string).trim()
-            : typeof adapterInput.topic === "string" && (adapterInput.topic as string).trim()
-              ? (adapterInput.topic as string).trim()
-              : company.name || "company information";
-        }
-        if (tool.startsWith("project.files.")) { adapterInput.__npatiAgentId = agent.id; adapterInput.__npatiTaskRunId = runId; if (tool === "project.files.delete") adapterInput.__npatiApprovalGranted = true; }
-        if (tool.startsWith("project.terminal.") || tool.startsWith("project.preview.") || tool.startsWith("project.git.") || tool.startsWith("project.deploy.") || tool.startsWith("project.data.") || tool.startsWith("project.auth.") || tool === "project.api.inspect") { adapterInput.__npatiAgentId = agent.id; adapterInput.__npatiTaskRunId = runId; adapterInput.__npatiApprovalGranted = tool === "project.deploy.publish" || tool === "project.data.schema.apply" || tool === "project.data.templates.apply" || tool === "project.data.rows.delete" || tool === "project.auth.configure" ? Boolean(approvedForCurrent || plan.input._approvalToken) : (!terminalNeedsApproval || Boolean(approvedForCurrent || plan.input._approvalToken)); }
-        /**
-         * C11 (owner decision 5): the approval **record id** travels to the git boundary, which is what
-         * verifies it (status, single use, expiry, payload hash). `__npatiApprovalGranted` above is a
-         * legacy hint and is deliberately not the proof for a git write: a flag can be set by anything that
-         * can build a tool input, an id can only name a row that a human decided.
-         */
-        if ((tool === "project.git.push" || tool === "project.git.pr") && approvedForCurrent && approvalId) {
-          adapterInput.__npatiApprovalId = approvalId;
-        }
-        if (tool === "email.send" || tool === "communications.email_send" || tool.startsWith("browser.")) adapterInput.__npatiTaskRunId = runId;
-        onTool?.(tool, tool.startsWith("project.files.") && typeof adapterInput.path === "string" ? adapterInput.path : undefined);
-        const result = tool === "knowledge" ? knowledge : await this.toolRuntime.execute(ctx, company, tool, adapterInput, signal);
-        const latencyMs = Math.round(performance.now() - toolStart);
-        await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId,
-          { agentId: agent.id, toolName: tool, decision: "allowed", status: "succeeded", inputSummary: summary(tool.startsWith("project.terminal.") ? approvalPayload : plan.input), latencyMs, sequenceNumber: sequenceNumber++ });
-        if (result && typeof result === "object" && (result as any)._npatiBrowserTrace === true && Array.isArray((result as any).trace)) {
-          for (const event of (result as any).trace.slice(0, 200)) {
-            const eventStatus = event?.status === "failed" ? "failed" : "succeeded";
-            const actionName = String(event?.action ?? "unknown").replace(/[^a-z0-9_.-]/gi, "_");
-            await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId, {
-              agentId: agent.id,
-              toolName: `browser.action.${actionName}`,
-              decision: "allowed",
-              status: eventStatus,
-              inputSummary: summary({ url: event?.url, detail: event?.detail, browserStatus: event?.status }),
-              errorMessage: eventStatus === "failed" ? String(event?.detail ?? "Browser action failed").slice(0, 500) : undefined,
-              reasonCode: ["waiting_email", "paused"].includes(event?.status) ? event.status : "browser_worker_trace",
-              sequenceNumber: sequenceNumber++,
-            });
-            await this.telemetry?.log(ctx, company.id, {
-              action: `browser.${actionName}`,
-              category: "automation",
-              resourceType: "browser_job",
-              resourceId: typeof (result as any).jobId === "string" ? (result as any).jobId : runId,
-              details: summary({ runId, agentId: agent.id, url: event?.url, detail: event?.detail, status: event?.status }),
-            }).catch(() => undefined);
-          }
-        }
-        evidence.push(`${agent.name} / ${tool}: ${json(result)}`);
-      } catch (error) {
-        if (signal.aborted) throw error;
-        const latencyMs = Math.round(performance.now() - toolStart);
-        await this.store.appendCompanyAgentToolAudit(ctx, company.id, runId, {
-          agentId: agent.id, toolName: tool,
-          decision: "allowed", status: "failed", inputSummary: summary(tool.startsWith("project.terminal.") ? approvalPayload : plan.input), latencyMs, sequenceNumber: sequenceNumber++,
-          errorMessage: (error instanceof Error ? error.message : String(error)).replace(/OmniRoute/gi, "NPATI AI").slice(0, 500)
-        });
-        if (tool.startsWith("browser.")) await this.telemetry?.log(ctx, company.id, {
-          action: "browser.failed", category: "automation", resourceType: "company_agent_run", resourceId: runId,
-          details: summary({ agentId: agent.id, tool, error: error instanceof Error ? error.message : String(error) }),
-        }).catch(() => undefined);
-        evidence.push(`${agent.name} / ${tool} (failed): ${(error instanceof Error ? error.message : String(error)).replace(/OmniRoute/gi, "NPATI AI")}`);
-      }
-    }
-    return evidence.join("\n\n");
+  private async tools(
+    ctx: AuthContext,
+    company: Company,
+    runId: string,
+    plans: ToolPlan[],
+    agents: Map<string, CompanyAgent>,
+    signal: AbortSignal,
+    knowledge: { chunks: Array<{ content: string }>; memories: Array<{ content: string; source?: string; metadata?: Record<string, unknown> }> },
+    noMemory = false,
+    approvalId?: string,
+    allowedProjectPaths?: string[],
+    allowedProjectId?: string,
+    runProjectId?: string,
+    onApprovalPending?: (nextToolIndex: number, evidence: string) => Promise<void>,
+    previousEvidence?: string,
+    startIndex = 0,
+    runType = "company_run",
+    onTool?: (tool: string, path?: string) => void,
+  ) {
+    return executeCompanyRunTools({
+      ctx,
+      company,
+      runId,
+      plans,
+      agents,
+      signal,
+      knowledge,
+      noMemory,
+      approvalId,
+      allowedProjectPaths,
+      allowedProjectId,
+      runProjectId,
+      onApprovalPending,
+      previousEvidence,
+      startIndex,
+      runType,
+      onTool,
+      store: this.store,
+      toolRuntime: this.toolRuntime,
+      capabilityResolver: this.capabilityResolver,
+      riskApprovalService: this.riskApprovalService,
+      durableApprovals: this.durableApprovals,
+      telemetry: this.telemetry,
+    });
   }
 
   private async combos(company: Company, main: CompanyAgent, selected: CompanyAgent[], reviewer: CompanyAgent | undefined, mode: Mode, signal: AbortSignal, includeMemory = true, linked?: LinkedBusinessContext, inferenceModels?: string[]) {
