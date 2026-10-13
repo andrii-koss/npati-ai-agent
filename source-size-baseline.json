@@ -37,12 +37,6 @@
       "owner": "refactor/large-files",
       "expires_at": "2027-02-28"
     },
-    "apps/agent-api/src/email-routes.ts": {
-      "lines": 1172,
-      "reason": "API module not yet decomposed; tracked as follow-up to the plan in docs/refactoring/PLAN.md",
-      "owner": "refactor/large-files",
-      "expires_at": "2027-02-28"
-    },
     "apps/web/src/App.tsx": {
       "lines": 1550,
       "reason": "web page not yet decomposed by section; backlog after the API and packages work",
