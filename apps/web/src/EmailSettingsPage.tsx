@@ -1,6 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { getStoredAuthToken } from "./AuthContext";
 import { chooseAvailableCompanyId, getInitialCompanyScope, readCachedCompanies, writeActiveCompanyId, writeCachedCompanies } from "./active-company";
 import { useWorkspace } from "./BusinessWorkspace";
 import { confirmModal } from "./ConfirmDialog";
@@ -18,187 +17,28 @@ import { EmailSettingsOverviewBlock } from "./email-settings-overview-block";
 import { EmailSettingsHeaderBlock } from "./email-settings-header-block";
 import { EmailSettingsSidebarBlock } from "./email-settings-sidebar-block";
 import { EmailSettingsFooterBlock } from "./email-settings-footer-block";
+import {
+  api,
+  readCachedAccounts,
+  writeCachedAccounts,
+  readCachedAnalytics,
+  writeCachedAnalytics,
+  type Company,
+  type Agent,
+  type EmailAccount,
+  type DnsCheckResult,
+  type EmailAnalytics,
+  type EmailPermissionKey,
+  type EmailRule,
+  type EmailTemplate,
+  type CompanyAutomation,
+  type ContactItem,
+} from "./email-settings-types";
+import { EmailSettingsHeroHeader, EmailSettingsStatsCards } from "./email-settings-hero-stats";
+import { useEmailRules } from "./use-email-rules";
+import { useEmailTemplatesContacts } from "./use-email-templates-contacts";
 
-export interface Company {
-  id: string;
-  name: string;
-}
-
-export interface Agent {
-  id: string;
-  name: string;
-  role: string;
-}
-
-export interface CompanyAutomation {
-  id: string;
-  name: string;
-  status: "active" | "paused" | "deleted";
-}
-
-export interface EmailAccount {
-  id: string;
-  emailAddress: string;
-  provider: "gmail" | "microsoft" | "imap_smtp";
-  connectionScope: "account" | "company" | "agent";
-  senderPolicy: "pairing" | "allowlist" | "open" | "disabled";
-  allowedSenders: string[];
-  allowedDomains: string[];
-  requireAuthenticatedSender: boolean;
-  outboundPolicy: "draft_only" | "approval_required" | "auto_send";
-  displayName?: string | null;
-  agentId?: string | null;
-  mode: "manual" | "approval" | "autopilot";
-  status: "connected" | "pending" | "auth_error" | "imap_error" | "smtp_error" | "dns_error" | "disabled";
-  testMode: boolean;
-  confidenceThreshold: number;
-  languageMode: string;
-  fallbackLanguage: string;
-  imapConfig: { authType?: "password" | "oauth2"; host?: string; port?: number; secure?: boolean; tls?: boolean; username?: string; password?: string; tokenUrl?: string; clientId?: string; tokenExpiresAt?: string; lastError?: string | null };
-  smtpConfig: { authType?: "password" | "oauth2"; host?: string; port?: number; secure?: boolean; username?: string; password?: string; tokenUrl?: string; clientId?: string; tokenExpiresAt?: string; fromName?: string; replyTo?: string; lastError?: string | null };
-  rateLimits: { maxPerHour: number; maxPerDay: number; maxPerRecipientDaily: number; maxFollowups: number; maxCompanyPerHour?: number; maxCompanyPerDay?: number };
-  followupConfig: { enabled: boolean; delayDays: number; maxFollowups: number; action: "draft" | "auto_send" | "create_task" | "notify_user" };
-  signatureConfig: { greeting?: string; signature?: string; footer?: string };
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface DnsRecordCheck {
-  recordType: "MX" | "SPF" | "DKIM" | "DMARC";
-  name: string;
-  found: boolean;
-  valid: boolean;
-  currentValue?: string;
-  expectedValueHint?: string;
-  recommendation?: string;
-}
-
-export interface DnsCheckResult {
-  domain: string;
-  verified: boolean;
-  records: DnsRecordCheck[];
-  summary: string;
-}
-
-export interface EmailRule {
-  id: string;
-  name: string;
-  priorityOrder: number;
-  isActive: boolean;
-  conditions: { senders?: string[]; domains?: string[]; subjectKeywords?: string[]; bodyKeywords?: string[]; detectedIntent?: string; attachmentTypes?: string[]; isVip?: boolean };
-  actions: { setMode?: string; setPriority?: string; setAgentId?: string; requireApproval?: boolean; createTask?: boolean; autoTagSpam?: boolean; autoReplyTemplateId?: string; startWorkflowId?: string };
-}
-
-export interface EmailTemplate {
-  id: string;
-  title: string;
-  category: string;
-  subjectTemplate?: string;
-  bodyTemplate: string;
-}
-
-export interface ContactItem {
-  id: string;
-  email: string;
-  name?: string | null;
-  companyName?: string | null;
-  phone?: string | null;
-  isVip: boolean;
-  isBlacklisted: boolean;
-  notes?: string | null;
-}
-
-export interface EmailAnalytics {
-  receivedEmails: number;
-  sentEmails: number;
-  aiAnswered: number;
-  humanAnswered: number;
-  draftedByAi: number;
-  approvedByHuman: number;
-  escalatedToHuman: number;
-  failedEmails: number;
-  bouncedEmails: number;
-  averageResponseTimeMinutes: number;
-  averageFirstResponseTimeMinutes: number;
-  editedAiResponsesCount: number;
-  automationRate: number;
-  confidenceDistribution: { high: number; medium: number; low: number };
-  volumeByDay: Array<{ date: string; received: number; sent: number }>;
-  volumeByAgent: Array<{ agentId: string; agentName: string; count: number }>;
-  volumeByAccount: Array<{ accountId: string; email: string; count: number }>;
-}
-
-export interface EmailPermissionKey {
-  id: string;
-  name: string;
-  keyPrefix: string;
-  scopes: string[];
-  lastUsedAt: string | null;
-  expiresAt: string | null;
-  revokedAt: string | null;
-  createdAt: string;
-}
-
-export const EMAIL_PERMISSION_OPTIONS = [
-  ["email:view", "View email module"],
-  ["email:manage_accounts", "Manage email accounts"],
-  ["email:read_messages", "Read messages"],
-  ["email:send_messages", "Send messages"],
-  ["email:delete_messages", "Delete messages"],
-  ["email:approve_drafts", "Approve AI drafts"],
-  ["email:configure_autopilot", "Configure Autopilot"],
-  ["email:configure_agents", "Configure agents and rules"],
-  ["email:view_analytics", "View analytics"],
-] as const;
-
-export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const headers = new Headers(init?.headers);
-  const token = getStoredAuthToken();
-  if (token) headers.set("authorization", `Bearer ${token}`);
-  if (init?.body != null && !headers.has("content-type")) headers.set("content-type", "application/json");
-  const response = await fetch(`/api${path}`, { ...init, headers });
-  const body = (await response.json().catch(() => null)) as T & { error?: { message?: string } | string; message?: string };
-  if (!response.ok) {
-    const apiMessage = typeof body?.error === "string" ? body?.message || body.error : body?.error?.message || body?.message;
-    const deploymentHint = response.status === 404 && (!apiMessage || /^Route .* not found$/i.test(apiMessage))
-      ? `${apiMessage ? `${apiMessage} ` : ""}Deploy/restart both the web and agent-api services from the same revision.`
-      : undefined;
-    throw new Error(apiMessage || deploymentHint || `Request failed (${response.status})`);
-  }
-  return body;
-}
-
-export function readCachedAccounts(companyId: string): EmailAccount[] {
-  try {
-    const raw = sessionStorage.getItem(`npati_email_accounts_${companyId}`);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-export function writeCachedAccounts(companyId: string, accounts: EmailAccount[]): void {
-  try {
-    sessionStorage.setItem(`npati_email_accounts_${companyId}`, JSON.stringify(accounts));
-  } catch {}
-}
-
-export function readCachedAnalytics(companyId: string): EmailAnalytics | null {
-  try {
-    const raw = sessionStorage.getItem(`npati_email_analytics_${companyId}`);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-export function writeCachedAnalytics(companyId: string, analytics: EmailAnalytics | null): void {
-  try {
-    if (analytics) {
-      sessionStorage.setItem(`npati_email_analytics_${companyId}`, JSON.stringify(analytics));
-    }
-  } catch {}
-}
+export * from "./email-settings-types";
 
 export function EmailSettingsPage() {
   const { t, language } = useTranslation();
@@ -281,51 +121,96 @@ export function EmailSettingsPage() {
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ id: string; success: boolean; message: string } | null>(null);
 
-  // Rules Drawer & State
-  const [rules, setRules] = useState<EmailRule[]>([]);
-  const [ruleDrawerOpen, setRuleDrawerOpen] = useState(false);
-  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
-  const [ruleName, setRuleName] = useState("");
-  const [ruleSubjectKeywords, setRuleSubjectKeywords] = useState("");
-  const [ruleBodyKeywords, setRuleBodyKeywords] = useState("");
-  const [ruleSenders, setRuleSenders] = useState("");
-  const [ruleDomains, setRuleDomains] = useState("");
-  const [ruleDetectedIntent, setRuleDetectedIntent] = useState("");
-  const [ruleAttachmentTypes, setRuleAttachmentTypes] = useState("");
-  const [ruleIsVip, setRuleIsVip] = useState(false);
-  const [rulePriority, setRulePriority] = useState("");
-  const [ruleMode, setRuleMode] = useState("");
-  const [ruleAgentId, setRuleAgentId] = useState("");
-  const [ruleRequireApproval, setRuleRequireApproval] = useState(false);
-  const [ruleCreateTask, setRuleCreateTask] = useState(false);
-  const [ruleAutoTagSpam, setRuleAutoTagSpam] = useState(false);
-  const [ruleTemplateId, setRuleTemplateId] = useState("");
-  const [ruleWorkflowId, setRuleWorkflowId] = useState("");
-  const [workflows, setWorkflows] = useState<CompanyAutomation[]>([]);
-  const [savingRule, setSavingRule] = useState(false);
+  const {
+    rules,
+    setRules,
+    ruleDrawerOpen,
+    setRuleDrawerOpen,
+    editingRuleId,
+    ruleName,
+    setRuleName,
+    ruleSubjectKeywords,
+    setRuleSubjectKeywords,
+    ruleBodyKeywords,
+    setRuleBodyKeywords,
+    ruleSenders,
+    setRuleSenders,
+    ruleDomains,
+    setRuleDomains,
+    ruleDetectedIntent,
+    setRuleDetectedIntent,
+    ruleAttachmentTypes,
+    setRuleAttachmentTypes,
+    ruleIsVip,
+    setRuleIsVip,
+    rulePriority,
+    setRulePriority,
+    ruleMode,
+    setRuleMode,
+    ruleAgentId,
+    setRuleAgentId,
+    ruleRequireApproval,
+    setRuleRequireApproval,
+    ruleCreateTask,
+    setRuleCreateTask,
+    ruleAutoTagSpam,
+    setRuleAutoTagSpam,
+    ruleTemplateId,
+    setRuleTemplateId,
+    ruleWorkflowId,
+    setRuleWorkflowId,
+    workflows,
+    setWorkflows,
+    savingRule,
+    openCreateRuleDrawer,
+    openEditRuleDrawer,
+    handleSaveRule,
+    handleDeleteRule,
+  } = useEmailRules(selectedCompanyId, agents, t, setNotice);
 
-  // Templates Drawer & State
-  const [templates, setTemplates] = useState<EmailTemplate[]>([]);
-  const [templateDrawerOpen, setTemplateDrawerOpen] = useState(false);
-  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
-  const [templateTitle, setTemplateTitle] = useState("");
-  const [templateCategory, setTemplateCategory] = useState("general");
-  const [templateSubject, setTemplateSubject] = useState("");
-  const [templateBody, setTemplateBody] = useState("");
-  const [savingTemplate, setSavingTemplate] = useState(false);
-
-  // Contacts Drawer & State
-  const [contacts, setContacts] = useState<ContactItem[]>([]);
-  const [contactDrawerOpen, setContactDrawerOpen] = useState(false);
-  const [editingContactEmail, setEditingContactEmail] = useState<string | null>(null);
-  const [contactEmail, setContactEmail] = useState("");
-  const [contactName, setContactName] = useState("");
-  const [contactCompanyName, setContactCompanyName] = useState("");
-  const [contactPhone, setContactPhone] = useState("");
-  const [contactIsVip, setContactIsVip] = useState(false);
-  const [contactIsBlacklisted, setContactIsBlacklisted] = useState(false);
-  const [contactNotes, setContactNotes] = useState("");
-  const [savingContact, setSavingContact] = useState(false);
+  const {
+    templates,
+    setTemplates,
+    templateDrawerOpen,
+    setTemplateDrawerOpen,
+    editingTemplateId,
+    templateTitle,
+    setTemplateTitle,
+    templateCategory,
+    setTemplateCategory,
+    templateSubject,
+    setTemplateSubject,
+    templateBody,
+    setTemplateBody,
+    savingTemplate,
+    openCreateTemplateDrawer,
+    openEditTemplateDrawer,
+    handleSaveTemplate,
+    handleDeleteTemplate,
+    contacts,
+    setContacts,
+    contactDrawerOpen,
+    setContactDrawerOpen,
+    editingContactEmail,
+    contactEmail,
+    setContactEmail,
+    contactName,
+    setContactName,
+    contactCompanyName,
+    setContactCompanyName,
+    contactPhone,
+    setContactPhone,
+    contactIsVip,
+    setContactIsVip,
+    contactIsBlacklisted,
+    setContactIsBlacklisted,
+    contactNotes,
+    setContactNotes,
+    savingContact,
+    openCreateContactDrawer,
+    openEditContactDrawer,
+    handleSaveContact,
+  } = useEmailTemplatesContacts(selectedCompanyId, t, setNotice);
 
   // Analytics
   const [analytics, setAnalytics] = useState<EmailAnalytics | null>(() => {
@@ -419,7 +304,7 @@ export function EmailSettingsPage() {
         return;
       }
       api<{ keys: EmailPermissionKey[] }>(`/companies/${selectedCompanyId}/api-keys`)
-        .then((r) => setPermissionKeys(r.keys.filter((key) => key.scopes.some((scope) => scope.startsWith("email:")))))
+        .then((r) => setPermissionKeys(r.keys.filter((key) => key.scopes.some((scope: string) => scope.startsWith("email:")))))
         .catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
     }
   }, [selectedCompanyId, activeTab]);
@@ -734,251 +619,6 @@ export function EmailSettingsPage() {
     }
   }
 
-  // --- Rule Drawer Handlers ---
-  function openCreateRuleDrawer() {
-    setEditingRuleId(null);
-    setRuleName("");
-    setRuleSubjectKeywords("");
-    setRuleBodyKeywords("");
-    setRuleSenders("");
-    setRuleDomains("");
-    setRuleDetectedIntent("");
-    setRuleAttachmentTypes("");
-    setRuleIsVip(false);
-    setRulePriority("high");
-    setRuleMode("");
-    setRuleAgentId(agents[0]?.id || "");
-    setRuleRequireApproval(false);
-    setRuleCreateTask(false);
-    setRuleAutoTagSpam(false);
-    setRuleTemplateId("");
-    setRuleWorkflowId("");
-    setRuleDrawerOpen(true);
-  }
-
-  function openEditRuleDrawer(rule: EmailRule) {
-    setEditingRuleId(rule.id);
-    setRuleName(rule.name);
-    setRuleSubjectKeywords((rule.conditions?.subjectKeywords || []).join(", "));
-    setRuleBodyKeywords((rule.conditions?.bodyKeywords || []).join(", "));
-    setRuleSenders((rule.conditions?.senders || []).join(", "));
-    setRuleDomains((rule.conditions?.domains || []).join(", "));
-    setRuleDetectedIntent(rule.conditions?.detectedIntent || "");
-    setRuleAttachmentTypes((rule.conditions?.attachmentTypes || []).join(", "));
-    setRuleIsVip(rule.conditions?.isVip || false);
-    setRulePriority(rule.actions?.setPriority || "");
-    setRuleMode(rule.actions?.setMode || "");
-    setRuleAgentId(rule.actions?.setAgentId || "");
-    setRuleRequireApproval(rule.actions?.requireApproval || false);
-    setRuleCreateTask(rule.actions?.createTask || false);
-    setRuleAutoTagSpam(rule.actions?.autoTagSpam || false);
-    setRuleTemplateId(rule.actions?.autoReplyTemplateId || "");
-    setRuleWorkflowId(rule.actions?.startWorkflowId || "");
-    setRuleDrawerOpen(true);
-  }
-
-  async function handleSaveRule(e: FormEvent) {
-    e.preventDefault();
-    if (!ruleName.trim()) {
-      setNotice(t("emailSettings.messages.ruleNameReq"));
-      return;
-    }
-    setSavingRule(true);
-    try {
-      const conditions: any = {};
-      const kw = ruleSubjectKeywords.split(",").map((s) => s.trim()).filter(Boolean);
-      if (kw.length > 0) conditions.subjectKeywords = kw;
-      const bodyKw = ruleBodyKeywords.split(",").map((s) => s.trim()).filter(Boolean);
-      if (bodyKw.length > 0) conditions.bodyKeywords = bodyKw;
-      const senders = ruleSenders.split(",").map((s) => s.trim()).filter(Boolean);
-      if (senders.length > 0) conditions.senders = senders;
-      const domains = ruleDomains.split(",").map((s) => s.trim()).filter(Boolean);
-      if (domains.length > 0) conditions.domains = domains;
-      if (ruleDetectedIntent) conditions.detectedIntent = ruleDetectedIntent;
-      const attachmentTypes = ruleAttachmentTypes.split(",").map((value) => value.trim()).filter(Boolean);
-      if (attachmentTypes.length > 0) conditions.attachmentTypes = attachmentTypes;
-      if (ruleIsVip) conditions.isVip = true;
-
-      const actions: any = {};
-      if (rulePriority) actions.setPriority = rulePriority;
-      if (ruleMode) actions.setMode = ruleMode;
-      if (selectedCompanyId !== "personal" && ruleAgentId) actions.setAgentId = ruleAgentId;
-      if (ruleRequireApproval) actions.requireApproval = true;
-      if (selectedCompanyId !== "personal" && ruleCreateTask) actions.createTask = true;
-      if (ruleAutoTagSpam) actions.autoTagSpam = true;
-      if (ruleTemplateId) actions.autoReplyTemplateId = ruleTemplateId;
-      if (selectedCompanyId !== "personal" && ruleWorkflowId) actions.startWorkflowId = ruleWorkflowId;
-
-      if (editingRuleId) {
-        const res = await api<{ rule: EmailRule }>(`/companies/${selectedCompanyId}/email-inbox/rules/${editingRuleId}`, {
-          method: "PATCH",
-          body: JSON.stringify({
-            name: ruleName.trim(),
-            conditions,
-            actions,
-          }),
-        });
-        setRules((prev) => prev.map((r) => (r.id === editingRuleId ? res.rule : r)));
-      } else {
-        const res = await api<{ rule: EmailRule }>(`/companies/${selectedCompanyId}/email-inbox/rules`, {
-          method: "POST",
-          body: JSON.stringify({
-            name: ruleName.trim(),
-            conditions,
-            actions,
-          }),
-        });
-        setRules((prev) => [...prev, res.rule]);
-      }
-      setRuleDrawerOpen(false);
-    } catch (err: any) {
-      setNotice(err.message);
-    } finally {
-      setSavingRule(false);
-    }
-  }
-
-  async function handleDeleteRule(id: string) {
-    const ok = await confirmModal({
-      title: t("emailSettings.dialogs.deleteRuleTitle"),
-      message: t("emailSettings.dialogs.deleteRuleMsg"),
-      isDanger: true,
-    });
-    if (!ok) return;
-    try {
-      await api(`/companies/${selectedCompanyId}/email-inbox/rules/${id}`, { method: "DELETE" });
-      setRules((prev) => prev.filter((r) => r.id !== id));
-    } catch (err: any) {
-      setNotice(err.message);
-    }
-  }
-
-  // --- Template Drawer Handlers ---
-  function openCreateTemplateDrawer() {
-    setEditingTemplateId(null);
-    setTemplateTitle("");
-    setTemplateCategory("general");
-    setTemplateSubject("");
-    setTemplateBody("Hello {{customer_name}},\n\nThank you for reaching out to {{company_name}}.\n\nBest regards,\n{{agent_name}}");
-    setTemplateDrawerOpen(true);
-  }
-
-  function openEditTemplateDrawer(tItem: EmailTemplate) {
-    setEditingTemplateId(tItem.id);
-    setTemplateTitle(tItem.title);
-    setTemplateCategory(tItem.category);
-    setTemplateSubject(tItem.subjectTemplate || "");
-    setTemplateBody(tItem.bodyTemplate);
-    setTemplateDrawerOpen(true);
-  }
-
-  async function handleSaveTemplate(e: FormEvent) {
-    e.preventDefault();
-    if (!templateTitle.trim() || !templateBody.trim()) {
-      setNotice(t("emailSettings.messages.templateFieldsReq"));
-      return;
-    }
-    setSavingTemplate(true);
-    try {
-      if (editingTemplateId) {
-        const res = await api<{ template: EmailTemplate }>(`/companies/${selectedCompanyId}/email-inbox/templates/${editingTemplateId}`, {
-          method: "PATCH",
-          body: JSON.stringify({
-            title: templateTitle.trim(),
-            category: templateCategory,
-            subjectTemplate: templateSubject.trim() || null,
-            bodyTemplate: templateBody,
-          }),
-        });
-        setTemplates((prev) => prev.map((item) => (item.id === editingTemplateId ? res.template : item)));
-      } else {
-        const res = await api<{ template: EmailTemplate }>(`/companies/${selectedCompanyId}/email-inbox/templates`, {
-          method: "POST",
-          body: JSON.stringify({
-            title: templateTitle.trim(),
-            category: templateCategory,
-            subjectTemplate: templateSubject.trim() || undefined,
-            bodyTemplate: templateBody,
-          }),
-        });
-        setTemplates((prev) => [...prev, res.template]);
-      }
-      setTemplateDrawerOpen(false);
-    } catch (err: any) {
-      setNotice(err.message);
-    } finally {
-      setSavingTemplate(false);
-    }
-  }
-
-  async function handleDeleteTemplate(id: string) {
-    const ok = await confirmModal({
-      title: t("emailSettings.dialogs.deleteTemplateTitle"),
-      message: t("emailSettings.dialogs.deleteTemplateMsg"),
-      isDanger: true,
-    });
-    if (!ok) return;
-    try {
-      await api(`/companies/${selectedCompanyId}/email-inbox/templates/${id}`, { method: "DELETE" });
-      setTemplates((prev) => prev.filter((item) => item.id !== id));
-    } catch (err: any) {
-      setNotice(err.message);
-    }
-  }
-
-  // --- Contact Drawer Handlers ---
-  function openCreateContactDrawer(isVip = true) {
-    setEditingContactEmail(null);
-    setContactEmail("");
-    setContactName("");
-    setContactCompanyName("");
-    setContactPhone("");
-    setContactIsVip(isVip);
-    setContactIsBlacklisted(false);
-    setContactNotes("");
-    setContactDrawerOpen(true);
-  }
-
-  function openEditContactDrawer(c: ContactItem) {
-    setEditingContactEmail(c.email);
-    setContactEmail(c.email);
-    setContactName(c.name || "");
-    setContactCompanyName(c.companyName || "");
-    setContactPhone(c.phone || "");
-    setContactIsVip(c.isVip);
-    setContactIsBlacklisted(c.isBlacklisted);
-    setContactNotes(c.notes || "");
-    setContactDrawerOpen(true);
-  }
-
-  async function handleSaveContact(e: FormEvent) {
-    e.preventDefault();
-    if (!contactEmail.includes("@")) {
-      setNotice(t("emailSettings.messages.validContactEmailReq"));
-      return;
-    }
-    setSavingContact(true);
-    try {
-      const res = await api<{ contact: ContactItem }>(`/companies/${selectedCompanyId}/email-inbox/contacts/${encodeURIComponent(contactEmail.trim().toLowerCase())}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          name: contactName.trim() || undefined,
-          companyName: contactCompanyName.trim() || undefined,
-          phone: contactPhone.trim() || undefined,
-          isVip: contactIsVip,
-          isBlacklisted: contactIsBlacklisted,
-          notes: contactNotes.trim() || undefined,
-        }),
-      });
-      setContacts((prev) => [...prev.filter((c) => c.email !== res.contact.email), res.contact]);
-      setContactDrawerOpen(false);
-    } catch (err: any) {
-      setNotice(err.message);
-    } finally {
-      setSavingContact(false);
-    }
-  }
-
   const filteredAccounts = useMemo(() => {
     if (!searchQuery.trim()) return accounts;
     const q = searchQuery.toLowerCase();
@@ -1008,68 +648,13 @@ export function EmailSettingsPage() {
   return (
     <main className="goals-container automations-container">
       {/* Hero Header matching /settings/automations and /settings/activity */}
-      <header className="inspector-header automations-header">
-        <div className="automations-header-top">
-          <div>
-            <p className="eyebrow">{t("emailSettings.eyebrow")}</p>
-            <h1>
-              <Link to="/settings" className="marketplace-back-button" aria-label={t("emailSettings.backAria")} title={t("emailSettings.backAria")}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M19 12H5M12 19l-7-7 7-7" />
-                </svg>
-              </Link>
-              <span>{t("emailSettings.title")}</span>
-            </h1>
-            <p className="hero-copy">
-              {t("emailSettings.heroCopy")}
-            </p>
-          </div>
-          <div className="automations-header-actions">
-            <Link
-              to={selectedCompanyId && selectedCompanyId !== "personal" ? `/settings/email/inbox?company=${encodeURIComponent(selectedCompanyId)}` : "/settings/email/inbox"}
-              className="button-secondary"
-              style={{ display: "inline-flex", alignItems: "center", textDecoration: "none" }}
-            >
-              {t("emailSettings.openInbox")}
-            </Link>
-            <button
-              type="button"
-              className="button-primary automations-action-primary"
-              onClick={openCreateDrawer}
-              title={t("emailSettings.addEmailTitle")}
-            >
-              {t("emailSettings.addEmailBtn")}
-            </button>
-          </div>
-        </div>
-      </header>
+      <EmailSettingsHeroHeader t={t} selectedCompanyId={selectedCompanyId} openCreateDrawer={openCreateDrawer} />
 
       {/* Mailbox Scope & Quick Actions Toolbar */}
       <EmailSettingsOverviewBlock selectedCompanyId={selectedCompanyId} t={t} setSelectedCompanyId={setSelectedCompanyId} setAgentId={setAgentId} setRuleAgentId={setRuleAgentId} setRuleWorkflowId={setRuleWorkflowId} setRuleCreateTask={setRuleCreateTask} setAccounts={setAccounts} setAnalytics={setAnalytics} companies={companies} accounts={accounts} />
 
       {/* 4 Stat Overview Cards matching /settings/activity and /settings/capabilities */}
-      <section className="overview-grid inspector-stats-grid automations-stats-grid">
-        <div>
-          <strong>{analytics?.receivedEmails ?? 0}</strong>
-          <span>{t("emailSettings.stats.totalReceived")}</span>
-          <small>{t("emailSettings.stats.totalReceivedDesc")}</small>
-        </div>
-        <div>
-          <strong>{analytics?.sentEmails ?? 0}</strong>
-          <span>{t("emailSettings.stats.totalSent")}</span>
-          <small>{t("emailSettings.stats.totalSentDesc")}</small>
-        </div>
-        <div>
-          <strong>{Math.round(analytics?.automationRate ?? 0)}%</strong>
-          <span>{t("emailSettings.stats.automationRate")}</span>
-          <small>{t("emailSettings.stats.automationRateDesc")}</small>
-        </div>
-        <div>
-          <strong>{analytics?.draftedByAi ?? 0}</strong>
-          <span>{t("emailSettings.stats.draftsPrepared")}</span>
-          <small>{t("emailSettings.stats.draftsPreparedDesc")}</small>
-        </div>
-      </section>
+      <EmailSettingsStatsCards analytics={analytics} t={t} />
 
       {analytics && (
         <EmailSettingsAccountFormSection analytics={analytics} t={t} setAnalyticsExpanded={setAnalyticsExpanded} analyticsExpanded={analyticsExpanded} />
