@@ -145,12 +145,6 @@
       "owner": "refactor/large-files",
       "expires_at": "2027-02-28"
     },
-    "packages/shared/src/website-schema.ts": {
-      "lines": 1068,
-      "reason": "package module not yet decomposed; tracked as follow-up to the plan in docs/refactoring/PLAN.md",
-      "owner": "refactor/large-files",
-      "expires_at": "2027-02-28"
-    },
     "packages/workspace/src/in-memory-store.ts": {
       "lines": 1566,
       "reason": "in-memory twin of the postgres store; clean seams exhausted, plan step 3",
