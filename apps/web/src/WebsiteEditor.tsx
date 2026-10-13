@@ -18,6 +18,9 @@ import { WebsiteEditorLeftPanel } from "./website-editor-left-panel";
 import { WebsiteEditorDrawers } from "./website-editor-drawers";
 import { WebsiteEditorCanvas } from "./website-editor-canvas";
 import { WebsiteEditorInspector } from "./website-editor-inspector";
+import { WebsiteEditorTopbar } from "./website-editor-topbar";
+import { WebsiteEditorPageModal } from "./website-editor-page-modal";
+import { useWebsiteEditorPageActions } from "./use-website-editor-page-actions";
 import { DeviceMode, LeftPanelTab, InspectorTab, InspectorSubTab, ActiveDrawer, PreviewStatusResponse, FileEntry, CheckpointItem, apiGet, apiPost, buildMockupDocument } from "./website-editor-support";
 export * from "./website-editor-icons";
 export * from "./website-editor-support";
@@ -63,22 +66,39 @@ export function WebsiteEditor() {
   const [openPageMenuId, setOpenPageMenuId] = useState<string | null>(null);
   const [openBlockMenuId, setOpenBlockMenuId] = useState<string | null>(null);
   const [inspectorBlockMenuOpen, setInspectorBlockMenuOpen] = useState(false);
-  const [addSectionMenuOpen, setAddSectionMenuOpen] = useState(false);
-  const [iconSearch, setIconSearch] = useState("");
-  const [pageModal, setPageModal] = useState<{
-    isOpen: boolean;
-    mode: "add" | "edit";
-    pageId?: string;
-    title: string;
-    slug: string;
-    icon: string;
-  }>({
-    isOpen: false,
-    mode: "add",
-    title: "",
-    slug: "",
-    icon: "file",
+  // Push new state to undo/redo history
+  const pushDocumentChange = useCallback((newDoc: WebsiteDocument) => {
+    setDoc(newDoc);
+    setSaveStatus("unsaved");
+    setHistory((prev) => {
+      const trimmed = prev.slice(0, historyIndex + 1);
+      return [...trimmed, newDoc];
+    });
+    setHistoryIndex((prev) => prev + 1);
+  }, [historyIndex]);
+
+  const {
+    pageModal,
+    setPageModal,
+    iconSearch,
+    setIconSearch,
+    handleRenameSite,
+    handleOpenAddPageModal,
+    handleOpenEditPageModal,
+    handleSavePageModal,
+    handleDuplicatePage,
+    handleMovePage,
+    handleDeletePage,
+  } = useWebsiteEditorPageActions({
+    doc,
+    activePageId,
+    setActivePageId,
+    setSelectedBlockId,
+    pushDocumentChange,
+    language,
   });
+
+  const [addSectionMenuOpen, setAddSectionMenuOpen] = useState(false);
 
   // Preview Mode: visual DOM preview vs running Next.js sandbox iframe
   const [previewMode, setPreviewMode] = useState<"visual" | "sandbox">("visual");
@@ -116,17 +136,6 @@ export function WebsiteEditor() {
     document.addEventListener("mousedown", handleOutsideClick);
     return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, []);
-
-  // Push new state to undo/redo history
-  const pushDocumentChange = useCallback((newDoc: WebsiteDocument) => {
-    setDoc(newDoc);
-    setSaveStatus("unsaved");
-    setHistory((prev) => {
-      const trimmed = prev.slice(0, historyIndex + 1);
-      return [...trimmed, newDoc];
-    });
-    setHistoryIndex((prev) => prev + 1);
-  }, [historyIndex]);
 
   const undo = () => {
     if (historyIndex > 0) {
@@ -379,20 +388,6 @@ export function WebsiteEditor() {
   }, [activePage, selectedBlockId]);
 
   // Rename site
-  const handleRenameSite = async () => {
-    if (!doc) return;
-    const next = await promptModal({
-      title: language === "uk" ? "Перейменувати сайт" : "Rename Website",
-      message: language === "uk" ? "Нова назва сайту:" : "New website name:",
-      defaultValue: doc.name,
-    });
-    if (!next || !next.trim() || next.trim() === doc.name) return;
-    pushDocumentChange({
-      ...doc,
-      name: next.trim(),
-      updatedAt: new Date().toISOString(),
-    });
-  };
 
   // Add block
   const handleAddBlock = (type: WebsiteBlockType) => {
@@ -523,161 +518,6 @@ export function WebsiteEditor() {
     pushDocumentChange({ ...doc, pages: updatedPages, updatedAt: new Date().toISOString() });
   };
 
-  // Page Handlers
-  const handleOpenAddPageModal = () => {
-    setPageModal({
-      isOpen: true,
-      mode: "add",
-      title: "",
-      slug: "",
-      icon: "file",
-    });
-  };
-
-  const handleOpenEditPageModal = (page: WebsitePage) => {
-    setPageModal({
-      isOpen: true,
-      mode: "edit",
-      pageId: page.id,
-      title: page.title,
-      slug: page.slug,
-      icon: page.icon || (page.slug === "/" ? "home" : "file"),
-    });
-  };
-
-  const handleSavePageModal = () => {
-    if (!doc || !pageModal.title.trim()) return;
-    const cleanTitle = pageModal.title.trim();
-    const cleanSlug = pageModal.slug.trim()
-      ? (pageModal.slug.startsWith("/") ? pageModal.slug : "/" + pageModal.slug)
-      : "/" + cleanTitle.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
-
-    if (pageModal.mode === "add") {
-      const newPage: WebsitePage = {
-        id: `page-${Math.random().toString(36).slice(2, 7)}`,
-        title: cleanTitle,
-        slug: cleanSlug,
-        icon: pageModal.icon,
-        blocks: [
-          {
-            id: `block-navbar-${Math.random().toString(36).slice(2, 7)}`,
-            type: "navbar",
-            name: "Header",
-            props: { ...COMPONENT_REGISTRY.navbar.defaultProps, brandName: doc.name },
-            styles: { ...COMPONENT_REGISTRY.navbar.defaultStyles, backgroundColor: "#ffffff", textColor: "#0f172a" },
-          },
-          {
-            id: `block-hero-${Math.random().toString(36).slice(2, 7)}`,
-            type: "hero",
-            name: "Hero Section",
-            props: { ...COMPONENT_REGISTRY.hero.defaultProps, title: cleanTitle, badge: "New Page" },
-            styles: { ...COMPONENT_REGISTRY.hero.defaultStyles, backgroundColor: "#F8FAFF", textColor: "#0f172a" },
-          },
-          {
-            id: `block-footer-${Math.random().toString(36).slice(2, 7)}`,
-            type: "footer",
-            name: "Footer",
-            props: { ...COMPONENT_REGISTRY.footer.defaultProps, brandName: doc.name },
-            styles: { ...COMPONENT_REGISTRY.footer.defaultStyles, backgroundColor: "#ffffff" },
-          },
-        ],
-      };
-      const newDoc: WebsiteDocument = {
-        ...doc,
-        pages: [...doc.pages, newPage],
-        updatedAt: new Date().toISOString(),
-      };
-      pushDocumentChange(newDoc);
-      setActivePageId(newPage.id);
-      setSelectedBlockId(newPage.blocks[1]?.id || newPage.blocks[0]?.id || null);
-    } else if (pageModal.mode === "edit" && pageModal.pageId) {
-      const updatedPages = doc.pages.map((p) =>
-        p.id === pageModal.pageId
-          ? { ...p, title: cleanTitle, slug: cleanSlug, icon: pageModal.icon }
-          : p
-      );
-      const newDoc: WebsiteDocument = {
-        ...doc,
-        pages: updatedPages,
-        updatedAt: new Date().toISOString(),
-      };
-      pushDocumentChange(newDoc);
-    }
-
-    setPageModal((prev) => ({ ...prev, isOpen: false }));
-  };
-
-  const handleDuplicatePage = (pageId: string) => {
-    if (!doc) return;
-    const page = doc.pages.find((p) => p.id === pageId);
-    if (!page) return;
-    const clone: WebsitePage = {
-      ...JSON.parse(JSON.stringify(page)),
-      id: `page-${Math.random().toString(36).slice(2, 7)}`,
-      title: `${page.title} (Copy)`,
-      slug: `${page.slug}-copy`,
-      blocks: page.blocks.map((b: any) => ({
-        ...b,
-        id: `block-${b.type}-${Math.random().toString(36).slice(2, 7)}`,
-      })),
-    };
-    const newDoc: WebsiteDocument = {
-      ...doc,
-      pages: [...doc.pages, clone],
-      updatedAt: new Date().toISOString(),
-    };
-    pushDocumentChange(newDoc);
-    setActivePageId(clone.id);
-  };
-
-  const handleMovePage = (pageId: string, direction: "up" | "down") => {
-    if (!doc) return;
-    const pages = [...doc.pages];
-    const index = pages.findIndex((p) => p.id === pageId);
-    if (index === -1) return;
-    if (direction === "up" && index > 0) {
-      const item = pages[index];
-      if (item) {
-        pages.splice(index, 1);
-        pages.splice(index - 1, 0, item);
-      }
-    } else if (direction === "down" && index < pages.length - 1) {
-      const item = pages[index];
-      if (item) {
-        pages.splice(index, 1);
-        pages.splice(index + 1, 0, item);
-      }
-    }
-    const newDoc: WebsiteDocument = {
-      ...doc,
-      pages,
-      updatedAt: new Date().toISOString(),
-    };
-    pushDocumentChange(newDoc);
-  };
-
-  // Delete page
-  const handleDeletePage = async (pageId: string) => {
-    if (!doc) return;
-    if (doc.pages.length <= 1) {
-      void alertModal({ message: "Cannot delete the only page of the website." });
-      return;
-    }
-    const ok = await confirmModal({
-      title: language === "uk" ? "Видалити сторінку?" : "Delete Page?",
-      message: language === "uk" ? "Ви впевнені, що хочете видалити цю сторінку?" : "Are you sure you want to delete this page?",
-      isDanger: true,
-    });
-    if (!ok) return;
-
-    const updatedPages = doc.pages.filter((p) => p.id !== pageId);
-    const newDoc: WebsiteDocument = { ...doc, pages: updatedPages, updatedAt: new Date().toISOString() };
-    pushDocumentChange(newDoc);
-    if (activePageId === pageId && updatedPages[0]) {
-      setActivePageId(updatedPages[0].id);
-      setSelectedBlockId(updatedPages[0].blocks[0]?.id || null);
-    }
-  };
 
   // Upload asset
   const handleUploadAsset = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -776,269 +616,33 @@ export function WebsiteEditor() {
       {/* ========================================================================= */}
       {/* TOP APPLICATION BAR                                                       */}
       {/* ========================================================================= */}
-      <header className="npati-builder-topbar">
-        {/* Left: Back button, Website name, Framework badge, Saved status */}
-        <div className="npati-builder-topbar-left">
-          <Link to="/settings/websites" className="npati-builder-back-btn" title="Back to Websites">
-            <IconBack />
-          </Link>
-
-          <div
-            className="npati-builder-site-title"
-            onClick={() => void handleRenameSite()}
-            title="Click to rename website"
-          >
-            <span>{doc?.name || "My Business Website"}</span>
-            <IconChevronDown />
-          </div>
-
-          <span className="npati-builder-framework-badge">
-            <span style={{ fontSize: "10px", opacity: 0.7, marginRight: "2px" }}>{doc?.framework === "static" ? "HTM" : "NEX"}</span>
-            {doc?.framework === "static" ? "HTML/CSS" : doc?.framework === "vite" ? "VITE" : "NEXT.JS"}
-          </span>
-
-          <div className={`npati-builder-save-status ${saveStatus}`}>
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: "50%",
-                background: saveStatus === "saved" ? "#10b981" : saveStatus === "saving" ? "#f59e0b" : "#94a3b8",
-              }}
-            />
-            <span>
-              {saveStatus === "saved" ? "Saved 2 minutes ago" : saveStatus === "saving" ? "Saving..." : "Unsaved"}
-            </span>
-          </div>
-        </div>
-
-        {/* Center: Device Mode Switcher (Desktop / Tablet / Mobile) */}
-        <div className="npati-builder-topbar-center">
-          <div className="npati-builder-device-segmented">
-            <button
-              type="button"
-              className={`npati-builder-device-btn ${deviceMode === "desktop" ? "active" : ""}`}
-              onClick={() => setDeviceMode("desktop")}
-              title="Desktop viewport"
-            >
-              <IconDesktop />
-              <span>Desktop</span>
-            </button>
-            <button
-              type="button"
-              className={`npati-builder-device-btn ${deviceMode === "tablet" ? "active" : ""}`}
-              onClick={() => setDeviceMode("tablet")}
-              title="Tablet viewport"
-            >
-              <IconTablet />
-              <span>Tablet</span>
-            </button>
-            <button
-              type="button"
-              className={`npati-builder-device-btn ${deviceMode === "mobile" ? "active" : ""}`}
-              onClick={() => setDeviceMode("mobile")}
-              title="Mobile viewport"
-            >
-              <IconMobile />
-              <span>Mobile</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Right: Actions (Undo, Redo, Save, Preview, Publish, More Menu, Close) */}
-        <div className="npati-builder-topbar-right">
-          <button
-            type="button"
-            className="npati-builder-icon-btn"
-            onClick={undo}
-            disabled={historyIndex <= 0}
-            title={language === "uk" ? "Скасувати (Ctrl+Z)" : "Undo"}
-          >
-            <IconUndo />
-          </button>
-          <button
-            type="button"
-            className="npati-builder-icon-btn"
-            onClick={redo}
-            disabled={historyIndex >= history.length - 1}
-            title={language === "uk" ? "Повторити (Ctrl+Y)" : "Redo"}
-          >
-            <IconRedo />
-          </button>
-
-          {/* SAVE BUTTON */}
-          <button
-            type="button"
-            className="npati-builder-save-btn"
-            onClick={() => void saveDocumentToProject()}
-            disabled={saveStatus === "saving" || visualConfigUnavailable || (doc?.framework === "static" && staticPreviewActive)}
-            title={language === "uk" ? "Зберегти зміни" : "Save changes"}
-          >
-            <IconSave />
-            <span>{saveStatus === "saving" ? (language === "uk" ? "Збереження..." : "Saving...") : (language === "uk" ? "Зберегти" : "Save")}</span>
-          </button>
-
-          {/* PREVIEW BUTTON */}
-          <button
-            type="button"
-            className={`npati-builder-preview-btn ${previewMode === "sandbox" ? "active" : ""}`}
-            onClick={() => {
-              if (doc?.framework === "static") {
-                setStaticPreviewActive((active) => !active);
-                return;
-              }
-              if (previewStatus?.isRunning) {
-                setPreviewMode((m) => (m === "visual" ? "sandbox" : "visual"));
-              } else {
-                void handleStartPreview();
-              }
-            }}
-            title="Toggle Live Preview"
-          >
-            <IconEye />
-            <span>{doc?.framework === "static" ? (staticPreviewActive ? (language === "uk" ? "Конструктор" : "Visual editor") : (language === "uk" ? "Перегляд сайту" : "Site preview")) : previewMode === "sandbox" ? (language === "uk" ? "Конструктор" : "Visual View") : (language === "uk" ? "Перегляд" : "Preview")}</span>
-          </button>
-
-          {/* PUBLISH BUTTON */}
-          <button
-            type="button"
-            className="npati-builder-publish-btn"
-            onClick={() => void handleDeploy()}
-            disabled={isDeploying}
-          >
-            <IconPublish />
-            <span>{isDeploying ? (language === "uk" ? "Публікація..." : "Publishing...") : (language === "uk" ? "Опублікувати" : "Publish")}</span>
-          </button>
-
-          {/* More options menu */}
-          <div style={{ position: "relative" }} ref={moreMenuRef}>
-            <button
-              type="button"
-              className="npati-builder-icon-btn"
-              onClick={() => setMoreMenuOpen((o) => !o)}
-              title="More Options"
-            >
-              <IconMore />
-            </button>
-
-            {moreMenuOpen && (
-              <div
-                style={{
-                  position: "absolute",
-                  top: "100%",
-                  right: 0,
-                  marginTop: "6px",
-                  width: "210px",
-                  background: "#ffffff",
-                  borderRadius: "10px",
-                  boxShadow: "0 10px 30px rgba(0, 0, 0, 0.12)",
-                  border: "1px solid #e2e8f0",
-                  padding: "6px",
-                  zIndex: 100,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "2px",
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => { setMoreMenuOpen(false); setActiveDrawer("ai"); }}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    width: "100%",
-                    padding: "8px 10px",
-                    background: "transparent",
-                    border: "none",
-                    borderRadius: "6px",
-                    fontSize: "13px",
-                    color: "#0f172a",
-                    cursor: "pointer",
-                    textAlign: "left",
-                  }}
-                >
-                  <IconSparkles />
-                  <span>AI Developer Agent</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setMoreMenuOpen(false); setActiveDrawer("files"); }}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    width: "100%",
-                    padding: "8px 10px",
-                    background: "transparent",
-                    border: "none",
-                    borderRadius: "6px",
-                    fontSize: "13px",
-                    color: "#0f172a",
-                    cursor: "pointer",
-                    textAlign: "left",
-                  }}
-                >
-                  <IconFile />
-                  <span>Project Files & Code</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setMoreMenuOpen(false); setActiveDrawer("history"); }}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    width: "100%",
-                    padding: "8px 10px",
-                    background: "transparent",
-                    border: "none",
-                    borderRadius: "6px",
-                    fontSize: "13px",
-                    color: "#0f172a",
-                    cursor: "pointer",
-                    textAlign: "left",
-                  }}
-                >
-                  <IconGrip />
-                  <span>Checkpoints & Git</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setMoreMenuOpen(false); setInspectorTab("advanced"); }}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    width: "100%",
-                    padding: "8px 10px",
-                    background: "transparent",
-                    border: "none",
-                    borderRadius: "6px",
-                    fontSize: "13px",
-                    color: "#0f172a",
-                    cursor: "pointer",
-                    textAlign: "left",
-                  }}
-                >
-                  <IconPublish />
-                  <span>SEO & Meta Tags</span>
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Close button matching project style */}
-          <Link
-            to="/settings/websites"
-            className="npati-builder-close-btn"
-            title={language === "uk" ? "Закрити" : "Close"}
-            aria-label="Close"
-          >
-            <IconClose />
-          </Link>
-        </div>
-      </header>
+      <WebsiteEditorTopbar
+        doc={doc}
+        handleRenameSite={handleRenameSite}
+        saveStatus={saveStatus}
+        deviceMode={deviceMode}
+        setDeviceMode={setDeviceMode}
+        undo={undo}
+        redo={redo}
+        historyIndex={historyIndex}
+        historyLength={history.length}
+        saveDocumentToProject={saveDocumentToProject}
+        visualConfigUnavailable={visualConfigUnavailable}
+        staticPreviewActive={staticPreviewActive}
+        previewMode={previewMode}
+        previewStatus={previewStatus}
+        setStaticPreviewActive={setStaticPreviewActive}
+        setPreviewMode={setPreviewMode}
+        handleStartPreview={handleStartPreview}
+        handleDeploy={handleDeploy}
+        isDeploying={isDeploying}
+        moreMenuOpen={moreMenuOpen}
+        setMoreMenuOpen={setMoreMenuOpen}
+        moreMenuRef={moreMenuRef}
+        setActiveDrawer={setActiveDrawer}
+        setInspectorTab={setInspectorTab}
+        language={language}
+      />
 
       {/* ========================================================================= */}
       {/* MAIN 3-PANEL BODY                                                         */}
@@ -1151,127 +755,14 @@ export function WebsiteEditor() {
         setCheckpoints={setCheckpoints}
       />
 
-      {/* Page Modal: Add / Edit page with icon picker */}
-      {pageModal.isOpen && (
-        <div className="npati-builder-modal-backdrop" onClick={() => setPageModal((p) => ({ ...p, isOpen: false }))}>
-          <div className="npati-builder-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="npati-builder-modal-header">
-              <span className="npati-builder-modal-title">
-                {pageModal.mode === "add"
-                  ? (language === "uk" ? "Додати нову сторінку" : "Add New Page")
-                  : (language === "uk" ? "Налаштування сторінки" : "Page Settings")}
-              </span>
-              <button
-                type="button"
-                className="npati-builder-close-btn"
-                onClick={() => setPageModal((p) => ({ ...p, isOpen: false }))}
-                title={language === "uk" ? "Закрити" : "Close"}
-              >
-                <IconClose />
-              </button>
-            </div>
-            <div className="npati-builder-modal-body">
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-                <div className="npati-builder-form-group" style={{ marginBottom: 0 }}>
-                  <label className="npati-builder-form-label">
-                    {language === "uk" ? "Назва сторінки" : "Page Title"}
-                  </label>
-                  <input
-                    type="text"
-                    className="npati-builder-input"
-                    placeholder="e.g. Services"
-                    value={pageModal.title}
-                    onChange={(e) => {
-                      const title = e.target.value;
-                      const autoSlug = "/" + title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-                      setPageModal((p) => ({
-                        ...p,
-                        title,
-                        slug: p.mode === "add" ? autoSlug : p.slug,
-                      }));
-                    }}
-                    autoFocus
-                  />
-                </div>
-
-                <div className="npati-builder-form-group" style={{ marginBottom: 0 }}>
-                  <label className="npati-builder-form-label">
-                    {language === "uk" ? "URL адреса (Slug)" : "URL Slug"}
-                  </label>
-                  <input
-                    type="text"
-                    className="npati-builder-input"
-                    placeholder="/services"
-                    value={pageModal.slug}
-                    onChange={(e) => setPageModal((p) => ({ ...p, slug: e.target.value }))}
-                  />
-                </div>
-              </div>
-
-              <div className="npati-builder-form-group">
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
-                  <label className="npati-builder-form-label" style={{ marginBottom: 0 }}>
-                    {language === "uk" ? "Виберіть іконку" : "Select Icon"}
-                  </label>
-                  <span style={{ fontSize: "11.5px", color: "#64748b", fontWeight: 500 }}>
-                    {
-                      PAGE_ICON_OPTIONS.filter((ic) =>
-                        !iconSearch || ic.label.toLowerCase().includes(iconSearch.toLowerCase()) || ic.id.includes(iconSearch.toLowerCase())
-                      ).length
-                    }{" "}
-                    {language === "uk" ? "доступно" : "available"}
-                  </span>
-                </div>
-
-                <input
-                  type="text"
-                  className="npati-builder-input"
-                  placeholder={language === "uk" ? "Пошук іконки (Home, Services, Blog, FAQ...)" : "Search icon (Home, Services, Blog, FAQ...)"}
-                  value={iconSearch}
-                  onChange={(e) => setIconSearch(e.target.value)}
-                  style={{ marginBottom: "6px", fontSize: "12px", padding: "7px 10px" }}
-                />
-
-                <div className="npati-builder-icon-grid">
-                  {PAGE_ICON_OPTIONS.filter((ic) =>
-                    !iconSearch || ic.label.toLowerCase().includes(iconSearch.toLowerCase()) || ic.id.includes(iconSearch.toLowerCase())
-                  ).map((ic) => (
-                    <button
-                      key={ic.id}
-                      type="button"
-                      className={`npati-builder-icon-option ${pageModal.icon === ic.id ? "active" : ""}`}
-                      onClick={() => setPageModal((p) => ({ ...p, icon: ic.id }))}
-                      title={ic.label}
-                    >
-                      <RenderPageIcon icon={ic.id} size={15} />
-                      <span>{ic.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <div className="npati-builder-modal-footer">
-              <button
-                type="button"
-                className="button-secondary"
-                onClick={() => setPageModal((p) => ({ ...p, isOpen: false }))}
-              >
-                {language === "uk" ? "Скасувати" : "Cancel"}
-              </button>
-              <button
-                type="button"
-                className="button-primary"
-                disabled={!pageModal.title.trim()}
-                onClick={handleSavePageModal}
-              >
-                {pageModal.mode === "add"
-                  ? (language === "uk" ? "Створити сторінку" : "Create Page")
-                  : (language === "uk" ? "Зберегти" : "Save Changes")}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <WebsiteEditorPageModal
+        pageModal={pageModal}
+        setPageModal={setPageModal}
+        iconSearch={iconSearch}
+        setIconSearch={setIconSearch}
+        handleSavePageModal={handleSavePageModal}
+        language={language}
+      />
     </div>
   );
 }

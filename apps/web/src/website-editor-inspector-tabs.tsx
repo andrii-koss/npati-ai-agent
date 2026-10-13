@@ -1,5 +1,5 @@
 import React from "react";
-import { type WebsiteDocument, type WebsitePage } from "@npati/shared";
+import { type WebsiteDocument, type WebsitePage, type WebsiteTheme } from "@npati/shared";
 import { IconFile, IconGrip, IconSparkles } from "./website-editor-icons";
 import { type ActiveDrawer } from "./website-editor-support";
 
@@ -114,7 +114,7 @@ export function WebsiteEditorInspectorDesignTab({
             onChange={(e) => {
               pushDocumentChange({
                 ...doc,
-                theme: { ...doc.theme, fontFamily: e.target.value as any },
+                theme: { ...doc.theme, fontFamily: e.target.value as WebsiteTheme["fontFamily"] },
               });
             }}
           >
@@ -137,7 +137,7 @@ export function WebsiteEditorInspectorDesignTab({
             onChange={(e) => {
               pushDocumentChange({
                 ...doc,
-                theme: { ...doc.theme, borderRadius: e.target.value as any },
+                theme: { ...doc.theme, borderRadius: e.target.value as WebsiteTheme["borderRadius"] },
               });
             }}
           >
