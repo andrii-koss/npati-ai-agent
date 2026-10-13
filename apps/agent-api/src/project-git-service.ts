@@ -35,163 +35,40 @@ import { resolveProjectWorkspace, assertSafeIndex, ensureRepository, requireWrit
 import { getProjectPath, parseConflictFiles, connectRepository, restore, countWorkspaceFiles, isLargeChange, listCheckpoints, pathExistsInCommit, assertGitWriteBoundary, captureWorkspaceRevision, credentialEnvironment, getAgentWorktreePath, type ProjectGitCoreHost } from "./project-git-core-service";
 import { GitError, GitConflictError, GitConflictEscalationError, GitApprovalRequiredError, validId, redactSecrets, execFileAsync } from "./project-git-shared";
 export { GitError, GitConflictError, GitConflictEscalationError, GitApprovalRequiredError, validId, redactSecrets, execFileAsync } from "./project-git-shared";
-
-export interface GitStatusResult {
-  branch: string;
-  clean: boolean;
-  staged: string[];
-  unstaged: string[];
-  untracked: string[];
-}
-
-export interface GitLogEntry {
-  hash: string;
-  author: string;
-  date: string;
-  message: string;
-}
-
-export interface GitBranchResult {
-  current: string;
-  branches: string[];
-}
-
-/**
- * C11 (owner decision 13, the last known issue): the **read-only** answer to "what state is this project's
- * repository in?".
- *
- * `inspectRepository()` produces it and performs no mutation of any kind: it resolves the workspace path
- * without creating it, `lstat`s `.git`, and — only when `.git` exists — runs the two read-only `git rev-parse`
- * probes below. There is deliberately no `git init`, no `git config`, no `git add` and no write of any file,
- * so a request that is still to be authorised cannot leave a trace on disk. `initialized: false` is a fact a
- * caller reports (`repository_not_initialized`) rather than a state it silently repairs.
- */
-export interface GitRepositoryInspection {
-  /** The project the workspace belongs to (loaded through the same authorization checks as `getProjectPath`). */
-  project: Project;
-  /** The project workspace directory. It may not exist yet; an inspection never creates it. */
-  dir: string;
-  /** `true` when `<dir>/.git` is a directory that belongs to this workspace. */
-  initialized: boolean;
-  /** The checked-out branch, or `null` when it cannot be established (never a guess). */
-  branch: string | null;
-}
-
-/**
- * C11 (owner decision 13): the canonical workspace revision, as this boundary reads it.
- *
- * The shape is structural, so `ProjectGitService` does not import the guard implementation and the two stay
- * independently testable. `CodeWorkspaceRevisionGuard` satisfies it as it stands.
- */
-export interface ProjectGitRevisionPort {
-  capture(scope: { ctx: AuthContext; companyId: string; projectId: string }): Promise<CodeWorkspaceRevisionSnapshot>;
-  assertUnchanged(
-    scope: { ctx: AuthContext; companyId: string; projectId: string },
-    snapshot: CodeWorkspaceRevisionSnapshot,
-    phase: WorkspaceRevisionPhase,
-  ): Promise<unknown>;
-}
-
-/**
- * C11 (owner decision 5): the proof a remote git write needs. `approvalId` names a **real approval
- * record**, and `runId`/`agentId`/`toolName` are the context the record was created for; the port below
- * consumes it atomically, which verifies status, single use, expiry **and the payload hash**.
- */
-export interface GitWriteApprovalRequest {
-  approvalId: string;
-  runId: string;
-  agentId: string;
-  toolName: string;
-}
-
-/**
- * C11 (owner decision 5): the approval record, consumed with the payload hash of the exact write.
- *
- * The structural shape is the existing durable-approval gateway (`CompanyApprovalsRepository
- * .consumeApproved`), deliberately not a new mechanism: the SQL update is what makes "status approved,
- * not consumed, not expired, payload hash matches" a single atomic decision.
- */
-export interface GitApprovalPort {
-  consumeApproved(
-    ctx: AuthContext,
-    companyId: string,
-    approvalId: string,
-    params: { runId: string; agentId: string; toolName: string; inputPayload: Record<string, unknown> },
-  ): Promise<unknown>;
-}
-
-/** C11 (owner decision 6): one credential lease for exactly one host git invocation. */
-export interface HostGitCredentialLease {
-  leaseId: string;
-  /** Used only in the process-scoped environment of this single git invocation. */
-  value: string;
-}
-
-export interface HostGitCredentialPort {
-  /** Issues one lease and resolves its value; the caller revokes it in a `finally`. */
-  acquire(input: {
-    ctx: AuthContext;
-    companyId: string;
-    projectId: string;
-    credentialId: string;
-    toolCallId: string;
-    purpose: "git.push" | "pull_request.create" | "pull_request.comment";
-  }): Promise<HostGitCredentialLease>;
-  revoke(leaseId: string, reason: string): Promise<void>;
-}
-
-/**
- * C11 (owner decisions 3, 5 and 6): the git-policy boundary of this service.
- *
- * Every member is optional at the type level and **mandatory in effect**: a remote write refuses
- * (`GIT_POLICY_UNAVAILABLE`, `GIT_APPROVAL_UNAVAILABLE`, `GIT_APPROVAL_RECORD_REQUIRED`) when the
- * corresponding port is missing, so a caller that builds the service by hand cannot accidentally push
- * without the two checks. Injection is structural (no service import), which is what keeps this module
- * free of the policy, approval and lease implementations.
- */
-export interface ProjectGitBoundary {
-  /**
-   * The company protected-branch policy, re-consulted **immediately before** the write. This is a second,
-   * independent call: the policy engine already decided, but a direct service call (a route, a script, a
-   * future tool) would bypass the engine, and that is exactly the path this closes. `assertGitWriteAllowed`
-   * throws `CodeProtectedBranchError` (403, `protected_branch_write_denied` / `force_push_denied`).
-   */
-  assertGitWriteAllowed?: (ctx: AuthContext, companyId: string, input: GitWriteIntent) => Promise<unknown>;
-  /** The real approval record for this exact write (`payload_hash` included). */
-  approvals?: GitApprovalPort;
-  /** One-operation credential leases for the host git process. */
-  credentials?: HostGitCredentialPort;
-  /**
-   * C11 (owner decision 7 + 13): the canonical workspace revision. It is read **before** the approval is
-   * consumed and re-checked **after** the write's own initialization (if any) and immediately before the
-   * credential lease and the push, because the initialization itself changes the canonical workspace. A
-   * moved revision is `workspace_revision_mismatch` (409) with no push. Absent → no revision is claimed,
-   * which is the hand-built-service case (a test), never production.
-   */
-  workspaceRevisions?: ProjectGitRevisionPort;
-}
-
-export interface CheckpointThresholds {
-  fileThreshold: number;
-  lineThreshold: number;
-}
-
-export const defaultCheckpointThresholds: CheckpointThresholds = {
-  fileThreshold: 5,
-  lineThreshold: 200,
-};
-
-export function safeAgentSlug(slug: string): string {
-  if (typeof slug !== "string" || !slug || slug.includes("/") || slug.includes("\\") || slug.includes("..")) {
-    throw new GitError("INVALID_AGENT_SLUG", "Invalid agent slug for worktree", 400);
-  }
-  const clean = slug.toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50);
-  if (!clean || clean === "." || clean === "..") throw new GitError("INVALID_AGENT_SLUG", "Invalid agent slug for worktree", 400);
-  return clean;
-}
-
-/** Exported for the security-gate suite: redaction of a credential-bearing git error is pinned directly. */
-export { redactSecrets as redactGitSecrets };
+export * from "./project-git-types";
+import {
+  type ProjectGitHostState,
+  buildGitCoreHost,
+  buildGitWorkspaceHost,
+  buildGitGuardHost,
+  buildGitHistoryHost,
+  buildGitCleanupHost,
+  buildGitBranchHost,
+  buildGitCredentialHost,
+  buildGitPushHost,
+  buildGitCheckpointWriteHost,
+  buildGitWorktreeExtraHost,
+  buildGitRepositoryHost,
+  buildGitApprovalHost,
+  buildGitCheckpointHost,
+  buildGitPullRequestHost,
+  buildGitWorktreeHost,
+} from "./project-git-hosts";
+import {
+  type GitStatusResult,
+  type GitLogEntry,
+  type GitBranchResult,
+  type GitRepositoryInspection,
+  type ProjectGitRevisionPort,
+  type GitWriteApprovalRequest,
+  type GitApprovalPort,
+  type HostGitCredentialLease,
+  type HostGitCredentialPort,
+  type ProjectGitBoundary,
+  type CheckpointThresholds,
+  defaultCheckpointThresholds,
+  safeAgentSlug,
+} from "./project-git-types";
 
 export class ProjectGitService {
   private readonly thresholds: CheckpointThresholds;
@@ -230,206 +107,77 @@ export class ProjectGitService {
     };
   }
 
-  private coreHost(): ProjectGitCoreHost {
+  private get hostState(): ProjectGitHostState {
     return {
       bases: this.bases,
-      projectService: this.projectService,
       workspaceStore: this.workspaceStore,
+      projectService: this.projectService,
       thresholds: this.thresholds,
       boundary: this.boundary,
       runGitImpl: this.runGitImpl,
       resolveGithubCredential: this.resolveGithubCredential,
-      diff: this.diff.bind(this),
-      validId: validId,
-      redactSecrets: redactSecrets,
-      execFileAsync: execFileAsync,
-      resolveProjectWorkspace: this.resolveProjectWorkspace.bind(this),
-      runGit: this.runGit.bind(this),
-      assertSafeIndex: this.assertSafeIndex.bind(this),
-      requireWrite: this.requireWrite.bind(this),
-      githubToken: this.githubToken.bind(this),
-      inspectRepository: this.inspectRepository.bind(this),
-      ensureRepositoryInitialized: this.ensureRepositoryInitialized.bind(this),
-      ensureRepository: this.ensureRepository.bind(this),
-      status: this.status.bind(this),
-      log: this.log.bind(this),
-      branch: this.branch.bind(this),
-      stage: this.stage.bind(this),
-      commit: this.commit.bind(this),
-      createCheckpoint: this.createCheckpoint.bind(this),
-      getCheckpoint: this.getCheckpoint.bind(this),
-      restoreCheckpoint: this.restoreCheckpoint.bind(this),
-      restorePaths: this.restorePaths.bind(this),
-      resolveRevertTarget: this.resolveRevertTarget.bind(this),
-      removePathForRevert: this.removePathForRevert.bind(this),
-      assertNoSymlinkPath: this.assertNoSymlinkPath.bind(this),
-      push: this.push.bind(this),
-      createPullRequest: this.createPullRequest.bind(this),
-      commentOnPullRequest: this.commentOnPullRequest.bind(this),
-      resolveWriteIntent: this.resolveWriteIntent.bind(this),
-      currentBranch: this.currentBranch.bind(this),
-      requireGitWriteApproval: this.requireGitWriteApproval.bind(this),
-      assertWorkspaceRevisionUnchanged: this.assertWorkspaceRevisionUnchanged.bind(this),
-      acquireCredential: this.acquireCredential.bind(this),
-      createAgentWorktree: this.createAgentWorktree.bind(this),
-      commitAgentWorktree: this.commitAgentWorktree.bind(this),
-      diffAgentWorktree: this.diffAgentWorktree.bind(this),
-      mergeAgentWorktree: this.mergeAgentWorktree.bind(this),
-      removeAgentWorktree: this.removeAgentWorktree.bind(this),
-      cleanupAllWorktrees: this.cleanupAllWorktrees.bind(this),
-      listAgentWorktrees: this.listAgentWorktrees.bind(this),
+      mergeLocks: this.mergeLocks,
     };
+  }
+
+  private coreHost(): ProjectGitCoreHost {
+    return buildGitCoreHost(this.hostState, this);
   }
 
   private workspaceHost(): ProjectGitWorkspaceHost {
-    return {
-      bases: this.bases,
-      projectService: this.projectService,
-      runGitImpl: this.runGitImpl,
-      validId: validId,
-      redactSecrets: redactSecrets,
-      parseConflictFiles: this.parseConflictFiles.bind(this),
-      status: this.status.bind(this),
-      execFileAsync: execFileAsync,
-      ensureRepositoryInitialized: this.ensureRepositoryInitialized.bind(this),
-    };
+    return buildGitWorkspaceHost(this.hostState, this);
   }
 
   private guardHost(): ProjectGitGuardHost {
-    return {
-      boundary: this.boundary,
-      workspaceStore: this.workspaceStore,
-      runGit: this.runGit.bind(this),
-      getCheckpoint: this.getCheckpoint.bind(this),
-      listCheckpoints: this.listCheckpoints.bind(this),
-    };
+    return buildGitGuardHost(this.hostState, this);
   }
 
   private historyHost(): ProjectGitHistoryHost {
-    return {
-      runGit: this.runGit.bind(this),
-      requireWrite: this.requireWrite.bind(this),
-      ensureRepository: this.ensureRepository.bind(this),
-      assertSafeIndex: this.assertSafeIndex.bind(this),
-      status: this.status.bind(this),
-      stage: this.stage.bind(this),
-    };
+    return buildGitHistoryHost(this.hostState, this);
   }
 
   private cleanupHost(): ProjectGitCleanupHost {
-    return {
-      runGit: this.runGit.bind(this),
-      requireWrite: this.requireWrite.bind(this),
-      ensureRepository: this.ensureRepository.bind(this),
-    };
+    return buildGitCleanupHost(this.hostState, this);
   }
 
   private branchHost(): ProjectGitBranchHost {
-    return {
-      inspectRepository: this.inspectRepository.bind(this),
-    };
+    return buildGitBranchHost(this);
   }
 
   private credentialHost(): ProjectGitCredentialHost {
-    return {
-      boundary: this.boundary,
-      resolveGithubCredential: this.resolveGithubCredential,
-    };
+    return buildGitCredentialHost(this.hostState);
   }
 
   private pushHost(): ProjectGitPushHost {
-    return {
-      boundary: this.boundary,
-      resolveGithubCredential: this.resolveGithubCredential,
-      runGit: this.runGit.bind(this),
-      requireWrite: this.requireWrite.bind(this),
-      requireGitWriteApproval: this.requireGitWriteApproval.bind(this),
-      acquireCredential: this.acquireCredential.bind(this),
-      ensureRepositoryInitialized: this.ensureRepositoryInitialized.bind(this),
-      inspectRepository: this.inspectRepository.bind(this),
-      resolveWriteIntent: this.resolveWriteIntent.bind(this),
-      assertGitWriteBoundary: this.assertGitWriteBoundary.bind(this),
-      captureWorkspaceRevision: this.captureWorkspaceRevision.bind(this),
-      assertWorkspaceRevisionUnchanged: this.assertWorkspaceRevisionUnchanged.bind(this),
-      credentialEnvironment: this.credentialEnvironment.bind(this),
-    };
+    return buildGitPushHost(this.hostState, this);
   }
 
   private checkpointWriteHost(): ProjectGitCheckpointWriteHost {
-    return {
-      workspaceStore: this.workspaceStore,
-      assertSafeIndex: this.assertSafeIndex.bind(this),
-      ensureRepository: this.ensureRepository.bind(this),
-      getProjectPath: this.getProjectPath.bind(this),
-      requireWrite: this.requireWrite.bind(this),
-      runGit: this.runGit.bind(this),
-      status: this.status.bind(this),
-      countWorkspaceFiles: this.countWorkspaceFiles.bind(this),
-    };
+    return buildGitCheckpointWriteHost(this.hostState, this);
   }
 
   private worktreeExtraHost(): ProjectGitWorktreeExtraHost {
-    return {
-      runGit: this.runGit.bind(this),
-      requireWrite: this.requireWrite.bind(this),
-      ensureRepository: this.ensureRepository.bind(this),
-      getAgentWorktreePath: this.getAgentWorktreePath.bind(this),
-    };
+    return buildGitWorktreeExtraHost(this);
   }
 
   private repositoryHost(): ProjectGitRepositoryHost {
-    return {
-      bases: this.bases,
-      assertSafeIndex: this.assertSafeIndex.bind(this),
-      ensureRepository: this.ensureRepository.bind(this),
-      requireWrite: this.requireWrite.bind(this),
-      runGit: this.runGit.bind(this),
-      resolveProjectWorkspace: this.resolveProjectWorkspace.bind(this),
-    };
+    return buildGitRepositoryHost(this.hostState, this);
   }
 
   private approvalHost(): ProjectGitApprovalHost {
-    return {
-      boundary: this.boundary,
-      currentBranch: this.currentBranch.bind(this),
-    };
+    return buildGitApprovalHost(this.hostState, this);
   }
 
   private checkpointHost(): ProjectGitCheckpointHost {
-    return {
-      requireWrite: this.requireWrite.bind(this),
-      ensureRepository: this.ensureRepository.bind(this),
-      getCheckpoint: this.getCheckpoint.bind(this),
-      createCheckpoint: this.createCheckpoint.bind(this),
-      runGit: this.runGit.bind(this),
-      assertNoSymlinkPath: this.assertNoSymlinkPath.bind(this),
-      resolveRevertTarget: this.resolveRevertTarget.bind(this),
-      pathExistsInCommit: this.pathExistsInCommit.bind(this),
-      removePathForRevert: this.removePathForRevert.bind(this),
-    };
+    return buildGitCheckpointHost(this);
   }
 
   private pullRequestHost(): ProjectGitPullRequestHost {
-    return {
-      boundary: this.boundary,
-      resolveGithubCredential: this.resolveGithubCredential,
-      getProjectPath: this.getProjectPath.bind(this),
-      requireGitWriteApproval: this.requireGitWriteApproval.bind(this),
-      requireWrite: this.requireWrite.bind(this),
-      acquireCredential: this.acquireCredential.bind(this),
-    };
+    return buildGitPullRequestHost(this.hostState, this);
   }
 
   private worktreeHost(): ProjectGitWorktreeHost {
-    return {
-      mergeLocks: this.mergeLocks,
-      runGit: this.runGit.bind(this),
-      requireWrite: this.requireWrite.bind(this),
-      ensureRepository: this.ensureRepository.bind(this),
-      branch: this.branch.bind(this),
-      getAgentWorktreePath: this.getAgentWorktreePath.bind(this),
-      safeAgentSlug: safeAgentSlug,
-    };
+    return buildGitWorktreeHost(this.hostState, this);
   }
 
   /**
