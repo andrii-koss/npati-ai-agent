@@ -9,6 +9,7 @@ interface StoredMode { mode: CodeExecutionMode; creatorProjectId?: string; creat
 export interface CodeExecutionModeView extends StoredMode {
   revision: number;
   canSelectGlobal: boolean;
+  sourceAccessGranted: boolean;
   creatorConfigured: boolean;
 }
 export class CodeExecutionModeError extends Error {
@@ -38,8 +39,11 @@ export class CodeExecutionModeService {
   async get(ctx: AuthContext, companyId: string): Promise<CodeExecutionModeView> {
     const setting = await this.setting(ctx, companyId);
     return { ...setting.value, revision: setting.row?.revision ?? 0,
-      canSelectGlobal: isAdminPrincipal(ctx) && !ctx.companyId
-        && !ctx.externalSubject?.startsWith("npati:apikey:") && !ctx.externalSubject?.startsWith("npati:remote:"),
+      canSelectGlobal: await this.canManageCompany(ctx, companyId),
+      sourceAccessGranted: !ctx.companyId
+        && !ctx.externalSubject?.startsWith("npati:apikey:") && !ctx.externalSubject?.startsWith("npati:remote:")
+        && (isAdminPrincipal(ctx) || (ctx.externalSubject?.startsWith("npati:") === true
+          && (process.env.NPATI_CREATOR_OWNER_USER_IDS ?? "").split(",").map(id => id.trim()).filter(Boolean).includes(ctx.userId))),
       creatorConfigured: !!this.creatorSourceRoot };
   }
 
@@ -64,7 +68,7 @@ export class CodeExecutionModeService {
 
   async bindCreator(ctx: AuthContext, companyId: string, projectId: string, sessionId: string) {
     const view = await this.get(ctx, companyId);
-    if (!view.canSelectGlobal) throw new CodeExecutionModeError("creator_admin_required", "Global requires the installation owner or an administrator");
+    if (!view.sourceAccessGranted) throw new CodeExecutionModeError("creator_admin_required", "Global requires the installation owner or an administrator");
     if (!this.creatorSourceRoot) throw new CodeExecutionModeError("creator_source_unconfigured", "The NPATI source repository is not mounted", 503);
     await this.store.getProject(ctx, companyId, projectId);
     return this.save(ctx, companyId, { mode: "global", creatorProjectId: projectId, creatorSessionId: sessionId }, view.revision);
@@ -77,7 +81,7 @@ export class CodeExecutionModeService {
     const mounted = !!mount?.confirmedAt && !mount.revokedAt;
     const sourceMount = mounted && !!this.creatorSourceRoot && path.resolve(mount!.path) === path.resolve(this.creatorSourceRoot);
     if (view.mode === "global") {
-      if (!view.canSelectGlobal) throw new CodeExecutionModeError("creator_admin_required", "Global requires the installation owner or an administrator");
+      if (!view.sourceAccessGranted) throw new CodeExecutionModeError("creator_admin_required", "Global requires the installation owner or an administrator");
       if (!sourceMount || view.creatorProjectId !== projectId || mount?.mode !== "rw") {
         throw new CodeExecutionModeError("creator_workspace_required", "Open the mounted NPATI Creator Workspace to work in Global mode");
       }

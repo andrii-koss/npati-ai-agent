@@ -1,5 +1,6 @@
 import { hasAdminPermission, isAdminPrincipal, classifyPrincipal } from "./code-rbac";
 import { CodeExecutionModeService } from "./code-execution-mode";
+import { CodeFeatureInitialization } from "./code-feature-initialization";
 import type {
   AuthContext, CodeSession, FeatureFlag, FeatureFlagHistoryEntry, FeatureFlagInput, FeatureFlagScope, FeatureFlagStage, WorkspaceStore,
 } from "@npati/workspace";
@@ -132,6 +133,7 @@ const MAX_CACHE_TTL_MS = 30_000;
  */
 export class FeatureFlagService {
   readonly executionModes: CodeExecutionModeService;
+  readonly initialization: CodeFeatureInitialization;
   private readonly enabledByDefault: boolean;
   get usesCompanyDefaults(): boolean { return this.enabledByDefault; }
   private readonly cache = new Map<string, { resolution: FlagResolution; expiresAt: number }>();
@@ -147,6 +149,7 @@ export class FeatureFlagService {
     private readonly stopSandboxes?: (ctx: AuthContext, companyId: string) => Promise<number>,
   ) {
     this.enabledByDefault = config.enabledByDefault ?? false;
+    this.initialization = new CodeFeatureInitialization(store, this);
     this.executionModes = new CodeExecutionModeService(store, (ctx, companyId) => this.canManage(ctx, companyId), audit);
     const requested = config.cacheTtlMs ?? Number.parseInt(process.env.NPATI_CODE_FLAG_CACHE_TTL_MS ?? "", 10);
     const ttl = Number.isFinite(requested) && requested > 0 ? requested : 15_000;

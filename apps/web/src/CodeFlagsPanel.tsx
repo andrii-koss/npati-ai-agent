@@ -33,6 +33,7 @@ export interface CodeFlagsState {
   management?: { company: boolean; global: boolean };
   execution?: CodeExecutionModeView;
   defaultsEnabled?: boolean;
+  featuresInitialized?: boolean;
 }
 
 export interface FlagHistoryEntry {
@@ -153,7 +154,11 @@ export function CodeFlagsPanel({ companyId, isUk, notify, onMasterEnabledChange,
     if (!companyId) { setState(null); onMasterEnabledChange?.(null); return; }
     setLoading(true);
     try {
-      const body = await apiFetch<CodeFlagsState>(`${base}/code/flags`);
+      let body = await apiFetch<CodeFlagsState>(`${base}/code/flags`);
+      if (body.defaultsEnabled && body.management?.company && body.featuresInitialized === false) {
+        await apiFetch(`${base}/code/initialize`, { method: "POST" });
+        body = await apiFetch<CodeFlagsState>(`${base}/code/flags`);
+      }
       setState(body);
       setError(null);
       onMasterEnabledChange?.(body.master?.enabled ?? null);

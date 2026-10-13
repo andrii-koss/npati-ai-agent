@@ -5,7 +5,7 @@ import { getStoredAuthToken } from "./AuthContext";
 export type CodeExecutionMode = "global" | "company" | "sandbox";
 export interface CodeExecutionModeView {
   mode: CodeExecutionMode; revision: number; canSelectGlobal: boolean; creatorConfigured: boolean;
-  creatorProjectId?: string; creatorSessionId?: string;
+  creatorProjectId?: string; creatorSessionId?: string; sourceAccessGranted?: boolean;
 }
 
 export function CodeExecutionModeControl({ companyId, isUk, value, canManage, onChanged, notify }: {
@@ -40,6 +40,10 @@ export function CodeExecutionModeControl({ companyId, isUk, value, canManage, on
     try {
       await request("/code/execution-mode", { mode: next, expectedRevision: value.revision });
       await onChanged();
+      if (next === "global" && value.creatorConfigured && value.sourceAccessGranted) {
+        await request("/code/creator-workspace");
+        await onChanged();
+      }
     } catch (error) { notify("error", error instanceof Error ? error.message : String(error)); }
     finally { setBusy(false); }
   };
@@ -57,7 +61,7 @@ export function CodeExecutionModeControl({ companyId, isUk, value, canManage, on
         <span>{isUk ? "Режим доступу" : "Change scope"}</span>
         <select className="page-size-select" value={mode} disabled={busy || !value || !canManage}
           onChange={(event) => void change(event.target.value as CodeExecutionMode)}>
-          <option value="global" disabled={!value?.canSelectGlobal}>Global</option>
+          <option value="global">Global</option>
           <option value="company">Company</option>
           <option value="sandbox">Sandbox / Data Studio</option>
         </select>
@@ -65,10 +69,13 @@ export function CodeExecutionModeControl({ companyId, isUk, value, canManage, on
       <p className="ds-muted">{copy[mode]}</p>
       {mode === "global" && (
         <div>
+          {value?.creatorConfigured && !value.sourceAccessGranted && <p className="ds-muted">{isUk
+            ? "Для роботи з вихідним кодом NPATI потрібен доступ власника цієї інсталяції."
+            : "Access to NPATI source code requires authorization from this installation's owner."}</p>}
           {!value?.creatorConfigured && <p className="ds-muted">{isUk
             ? "Підключіть копію репозиторію NPATI до цієї інсталяції, щоб відкрити Creator Workspace."
             : "Connect an NPATI source checkout to this installation to open Creator Workspace."}</p>}
-          <button type="button" className="button-primary" disabled={busy || !value?.creatorConfigured || !value.canSelectGlobal}
+          <button type="button" className="button-primary" disabled={busy || !value?.creatorConfigured || !value.sourceAccessGranted}
             onClick={() => void openCreator()}>{busy ? (isUk ? "Відкриття…" : "Opening…") : (isUk ? "Відкрити Creator Workspace" : "Open Creator Workspace")}</button>
         </div>
       )}
