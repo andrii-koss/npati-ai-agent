@@ -122,6 +122,15 @@ export class ProjectOrchestrator {
     return initSharedProjectContext(this.projectWorkspace, ctx, companyId, projectId, details);
   }
 
+  async prepareCodingMobile(ctx: AuthContext, project: Project, prompt: string): Promise<Project> {
+    const scheme = project.appScheme ?? defaultAppScheme(project.name);
+    await this.scaffoldMobileAppProject(ctx, project.companyId, project.id, project.name, scheme);
+    await this.registerMobileRedirects(ctx, project.companyId, project.id, scheme);
+    await this.projectService.updatePreview(ctx, project.companyId, project.id, { framework: "Expo", runtime: "expo" });
+    await this.initSharedProjectContext(ctx, project.companyId, project.id, { name: project.name, description: prompt, framework: "Expo", projectType: "mobile_app" });
+    return this.projectService.get(ctx, project.companyId, project.id);
+  }
+
   async prepareCodingWebsite(ctx: AuthContext, project: Project, prompt: string, framework: string): Promise<Project> {
     await this.scaffoldWebsiteProject(ctx, project.companyId, project.id, project.name, framework === "Next.js" ? "nextjs" : "static", prompt);
     await this.projectService.updatePreview(ctx, project.companyId, project.id, { framework });

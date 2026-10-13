@@ -41,11 +41,11 @@ export interface CodeRunQueueLimits {
  * `maxQueueDepth` moved 200 → **50** in R1: the first is the requirement's "5 parallel runs per Company", the
  * second is its "bounded queue length, start value 50". Both changes are explicit and both are only the
  * *default* — `NPATI_CODE_RUN_MAX_CONCURRENT_PER_COMPANY` and `NPATI_CODE_RUN_QUEUE_MAX_DEPTH` still override
- * them and every value is still clamped by the ceilings below. `maxConcurrentPerUser` (2) and
- * `queueTimeoutMs` (120 s) are unchanged, because R1 starts them at exactly those values.
+ * them and every value is still clamped by the ceilings below. `maxConcurrentPerUser` now allows four chat projects;
+ * `queueTimeoutMs` remains 120 seconds. Explicit operator limits still take precedence.
  */
 export const DEFAULT_CODE_RUN_QUEUE_LIMITS: CodeRunQueueLimits = {
-  maxConcurrentPerUser: 2,
+  maxConcurrentPerUser: 4,
   maxConcurrentPerCompany: 5,
   queueTimeoutMs: 120_000,
   maxQueueDepth: 50,

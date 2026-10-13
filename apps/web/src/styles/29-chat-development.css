@@ -1,0 +1,24 @@
+/* Keep project activity next to the composer, in the existing settings/chat palette. */
+.chat-development-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: 100%; max-width: 900px; margin: 12px auto 8px; }
+.chat-development-tile { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 10px 12px; border: 1px solid var(--npati-gray-100, #e5e7eb); border-radius: 14px; background: var(--npati-gray-50, #f8f9fb); color: var(--npati-black, #172033); }
+.chat-development-tile.current { border-color: var(--npati-red, #cf3035); }
+.chat-development-label { flex: 1; min-width: 0; border: 0; background: transparent; text-align: left; padding: 0; color: inherit; cursor: pointer; }
+.chat-development-label strong, .chat-development-label span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-development-label strong { font-size: 13px; line-height: 1.5; }
+.chat-development-label span { color: var(--npati-gray-500, #64748b); font-size: 11px; line-height: 1.5; }
+.chat-development-actions { display: flex; gap: 2px; }
+.chat-development-icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 28px; height: 28px; border: 0; border-radius: 7px; background: transparent; color: inherit; cursor: pointer; }
+.chat-development-icon svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.chat-development-icon:hover { background: var(--npati-gray-100, #e5e7eb); }
+.chat-development-icon:disabled, .chat-development-label:disabled { opacity: .45; cursor: default; }
+.chat-development-icon:focus-visible, .chat-development-label:focus-visible { outline: 2px solid var(--npati-red, #cf3035); outline-offset: 3px; }
+.chat-development-spinner { width: 16px; height: 16px; flex-shrink: 0; border: 2px solid var(--npati-gray-100, #e5e7eb); border-top-color: var(--npati-red, #cf3035); border-radius: 50%; animation: chat-development-spin .9s linear infinite; }
+.chat-development-state { width: 16px; text-align: center; color: #23834b; flex-shrink: 0; }
+.chat-development-tile[data-status="failed"] .chat-development-state { color: #cf3035; }
+@keyframes chat-development-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .chat-development-spinner { animation: none; } }
+@media (max-width: 540px) {
+  .chat-development-tile { display: grid; grid-template-columns: 16px minmax(0, 1fr); padding: 8px; gap: 4px; }
+  .chat-development-actions { grid-column: 2; justify-content: flex-end; }
+  .chat-development-icon { width: 24px; height: 24px; }
+}
