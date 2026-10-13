@@ -24,89 +24,31 @@
  */
 import { CAPABILITY_CATALOG } from "./capability-catalog";
 import { CAPABILITY_MATRIX, type CapabilityMatrixEntry } from "./capability-matrix";
-import { defaultCapabilityRegistry, type CapabilityDefinition, type CapabilityRisk } from "./capabilities";
-import { CapabilityInspectorService, type InspectorReport } from "./capability-inspector";
+import { defaultCapabilityRegistry, type CapabilityDefinition } from "./capabilities";
+import { CapabilityInspectorService } from "./capability-inspector";
+import {
+  STATIC_CATALOG_BASELINE,
+  TOOL_SCHEMA_MANIFEST_VERSION,
+  type CapabilityAuditIssue,
+  type CapabilityAuditResult,
+  type PublishedToolSchemaManifest,
+  type CombinedCapabilityView,
+  type CapabilityCatalogAuditReport,
+  type RuntimeProviderCapabilityOverlay,
+  stableJson,
+  duplicates,
+  symmetricDifference,
+  summarize,
+  issueCollector,
+} from "./capability-catalog-audit-types";
+import {
+  defaultRuntimeProviderCapabilityOverlay,
+  createRuntimeOverlayProbe,
+  hashRuntimeOverlayEntries,
+} from "./capability-catalog-audit-overlay";
 
-/**
- * The static baseline this gate pins. A legitimate catalog change updates this one constant (and the
- * baseline assertions in the capability suites); an accidental one — a duplicated id, a capability that
- * only reached one of the three stores — fails here instead of hiding in a printed number.
- *
- * `total = agentCallable + runtimeOnly` is asserted, not assumed: the seed literal's `42 + 264` grew to
- * this value through `push(...)` during C9/C11/C12, which is exactly the change the old gate could not see.
- */
-export const STATIC_CATALOG_BASELINE = {
-  total: 391,
-  agentCallable: 127,
-  runtimeOnly: 264,
-} as const;
-
-/**
- * Version of `apps/agent-api/src/code-tool-schemas.published.json` (the schema manifest the model-facing
- * tool registry publishes). Pinned here on purpose: a manifest bump is a reviewable event, and
- * `scripts/code-tool-schemas-generate.mjs --manifest-version N` is where it comes from.
- */
-export const TOOL_SCHEMA_MANIFEST_VERSION = 11;
-
-export interface CapabilityAuditIssue {
-  /** Stable machine-readable code; the negative control asserts on these, never on prose. */
-  code: string;
-  detail: string;
-}
-
-export interface CapabilityAuditResult {
-  ok: boolean;
-  issues: CapabilityAuditIssue[];
-  /** Measured values, so a caller can print what was actually observed instead of a restated constant. */
-  facts: Record<string, string | number | boolean>;
-}
-
-/* ---------------------------------------------------------------------------------------------------
- * Shared helpers
- * ------------------------------------------------------------------------------------------------- */
-
-/** Deterministic JSON: keys sorted, `undefined` folded into `null` so two shapes compare structurally. */
-export function stableJson(value: unknown): string {
-  if (value === null || value === undefined) return "null";
-  if (typeof value !== "object") return JSON.stringify(value) ?? "null";
-  if (Array.isArray(value)) return `[${value.map((item) => stableJson(item)).join(",")}]`;
-  const entries = Object.entries(value as Record<string, unknown>)
-    .filter(([, item]) => item !== undefined)
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`).join(",")}}`;
-}
-
-function duplicates(values: readonly (string | number)[]): Array<string | number> {
-  const seen = new Set<string | number>();
-  const repeated = new Set<string | number>();
-  for (const value of values) {
-    if (seen.has(value)) repeated.add(value);
-    seen.add(value);
-  }
-  return [...repeated];
-}
-
-/** Values present on exactly one side, sorted — used to compare two stores by identity, not by count. */
-function symmetricDifference(left: readonly string[], right: readonly string[]): string[] {
-  const leftSet = new Set(left);
-  const rightSet = new Set(right);
-  const only = new Set<string>();
-  for (const value of leftSet) if (!rightSet.has(value)) only.add(value);
-  for (const value of rightSet) if (!leftSet.has(value)) only.add(value);
-  return [...only].sort();
-}
-
-function summarize(values: readonly (string | number)[], limit = 6): string {
-  const shown = values.slice(0, limit).join(", ");
-  return values.length > limit ? `${shown}, … (+${values.length - limit} more)` : shown;
-}
-
-/** Collector so every check reads as `fail("stable_code", "measured detail")` against its own list. */
-function issueCollector(issues: CapabilityAuditIssue[]): (code: string, detail: string) => void {
-  return (code, detail) => {
-    issues.push({ code, detail });
-  };
-}
+export * from "./capability-catalog-audit-types";
+export * from "./capability-catalog-audit-overlay";
 
 /**
  * The three static stores the gate compares against each other. They are authored separately (the catalog,
@@ -288,22 +230,7 @@ export function checkStaticCatalogIntegrity(): CapabilityAuditResult {
  * 2. Static manifest / schema parity
  * ------------------------------------------------------------------------------------------------- */
 
-/** One entry of `apps/agent-api/src/code-tool-schemas.published.json`. */
-export interface PublishedToolSchemaEntry {
-  key: string;
-  name: string;
-  version: number;
-  status: string;
-  checksum?: string;
-  /** Canonical schema JSON, stored as a string by the generator. */
-  canonical: string;
-}
 
-export interface PublishedToolSchemaManifest {
-  manifestVersion: number;
-  checksum?: string;
-  tools: PublishedToolSchemaEntry[];
-}
 
 /**
  * Parity between the static catalog and the **published** tool-schema manifest. The manifest is the
@@ -410,138 +337,7 @@ export function checkStaticManifestParity(
  * 3. Runtime provider overlay (interface + safe empty stub)
  * ------------------------------------------------------------------------------------------------- */
 
-/**
- * One capability a runtime provider (MCP server, plugin, remote tool host) offers at runtime. These are
- * **never** static catalog entries: they exist only while their provider is connected, so they must never
- * be counted as static capabilities.
- */
-export interface RuntimeProviderCapability {
-  /** Stable, provider-namespaced id (for example `mcp:filesystem/read_file`). */
-  id: string;
-  /** Provider identity, for example `mcp:filesystem`. */
-  providerId: string;
-  name: string;
-  agentCallable: boolean;
-  risk: CapabilityRisk;
-  /** Optional transport/provider origin for display; never a secret and never an instruction. */
-  source?: string;
-  /**
-   * C13 (owner decision 5): the **runtime record** an MCP discovery publishes. All of these are optional so
-   * the pre-MCP probe overlay and the null stub keep their shape (and their empty-list hash), while a real
-   * runtime tool carries the facts the owner named: the configured connection, the tool name, the schema
-   * hash/version, the risk, the approval requirement, the discovery time and the connection scope.
-   *
-   * Every one of them is part of `hashRuntimeOverlayEntries`, which is what makes the runtime manifest hash a
-   * real change detector: a changed schema, a changed risk (an owner override) or a re-discovery all mint a
-   * new revision — a manifest that hashed only the display fields would answer "unchanged" for exactly the
-   * change replay must refuse to ignore.
-   */
-  connectionId?: string;
-  toolName?: string;
-  /** Hash of the published input schema. A schema change is a new tool contract, therefore a new revision. */
-  schemaHash?: string;
-  /** The schema version the provider declares, when it declares one (MCP servers usually do not). */
-  schemaVersion?: string | number;
-  approvalRequired?: boolean;
-  /** ISO timestamp of the discovery that produced this record. */
-  discoveredAt?: string;
-  /** The scope the connection was configured in (for example `company`). */
-  connectionScope?: string;
-  /** Where `risk` came from: the fail-closed runtime default, or an owner/admin policy override. */
-  riskSource?: "runtime_default" | "owner_policy";
-}
 
-/**
- * Rule 24 interface: the runtime overlay MCP discovery will implement. `list()` returns what the provider
- * currently offers (empty while nothing is connected), `hash()` is a stable change detector for exactly
- * that list.
- */
-export interface RuntimeProviderCapabilityOverlay {
-  readonly providerId: string;
-  list(): RuntimeProviderCapability[];
-  hash(): string;
-}
-
-export const NULL_RUNTIME_PROVIDER_ID = "null-runtime-provider-overlay";
-
-/**
- * The only runtime overlay that exists today: MCP is not implemented (C13 is the step that will add it), so
- * this provider reports zero capabilities and the stable hash of an empty list. It is a safe stub, not a
- * placeholder that pretends to discover something.
- */
-export class NullRuntimeProviderCapabilityOverlay implements RuntimeProviderCapabilityOverlay {
-  readonly providerId = NULL_RUNTIME_PROVIDER_ID;
-
-  list(): RuntimeProviderCapability[] {
-    return [];
-  }
-
-  hash(): string {
-    return hashRuntimeOverlayEntries([]);
-  }
-}
-
-export const defaultRuntimeProviderCapabilityOverlay: RuntimeProviderCapabilityOverlay =
-  new NullRuntimeProviderCapabilityOverlay();
-
-/**
- * Stable hash of an overlay listing. FNV-1a in two lanes — deliberately not a security hash: this is a
- * change detector, and `@npati/shared` is bundled into the web app, so no Node builtin is imported here.
- */
-export function hashRuntimeOverlayEntries(entries: readonly RuntimeProviderCapability[]): string {
-  const canonical = stableJson(
-    entries.map((entry) => ({
-      id: entry.id,
-      providerId: entry.providerId,
-      name: entry.name,
-      agentCallable: entry.agentCallable,
-      risk: entry.risk,
-      source: entry.source ?? null,
-      // C13: the runtime record, folded in **only when the entry carries it**, so an entry written before
-      // this field existed hashes exactly as it did and the null overlay keeps its pinned empty-list hash.
-      ...(entry.connectionId === undefined ? {} : { connectionId: entry.connectionId }),
-      ...(entry.toolName === undefined ? {} : { toolName: entry.toolName }),
-      ...(entry.schemaHash === undefined ? {} : { schemaHash: entry.schemaHash }),
-      ...(entry.schemaVersion === undefined ? {} : { schemaVersion: entry.schemaVersion }),
-      ...(entry.approvalRequired === undefined ? {} : { approvalRequired: entry.approvalRequired }),
-      ...(entry.discoveredAt === undefined ? {} : { discoveredAt: entry.discoveredAt }),
-      ...(entry.connectionScope === undefined ? {} : { connectionScope: entry.connectionScope }),
-      ...(entry.riskSource === undefined ? {} : { riskSource: entry.riskSource }),
-    })),
-  );
-  let laneA = 0x811c9dc5;
-  let laneB = 0x7f4a7c15;
-  for (let index = 0; index < canonical.length; index++) {
-    const code = canonical.charCodeAt(index);
-    laneA = Math.imul(laneA ^ code, 0x01000193) >>> 0;
-    laneB = Math.imul(laneB ^ code, 0x85ebca6b) >>> 0;
-  }
-  const hex = (value: number): string => value.toString(16).padStart(8, "0");
-  return `fnv1a64:${hex(laneA)}${hex(laneB)}`;
-}
-
-/**
- * A synthetic overlay used **only** to prove the checks below are not vacuous: it is never registered,
- * never merged into the static stores and never counted in any static number. It exists so the gate can
- * show, on every run, that its combined view really does consume the overlay (and that the static counts
- * really do ignore it).
- */
-export function createRuntimeOverlayProbe(entryCount = 3): RuntimeProviderCapabilityOverlay {
-  const entries: RuntimeProviderCapability[] = Array.from({ length: entryCount }, (_, index) => ({
-    id: `c13.audit.probe.overlay_${index + 1}`,
-    providerId: "c13-audit-probe",
-    name: `C13 audit probe capability ${index + 1}`,
-    agentCallable: true,
-    risk: "low",
-    source: "c13-audit-probe",
-  }));
-  const hashed = hashRuntimeOverlayEntries(entries);
-  return {
-    providerId: "c13-audit-probe",
-    list: () => entries.map((entry) => ({ ...entry })),
-    hash: () => hashed,
-  };
-}
 
 /**
  * Integrity of the runtime overlay. Today the overlay must be empty (MCP discovery has not landed), its
@@ -648,36 +444,7 @@ export function checkRuntimeOverlayIntegrity(
  * 4. Combined Capability Inspector view
  * ------------------------------------------------------------------------------------------------- */
 
-export type CapabilitySourceKind = "static-capability-matrix" | "runtime-provider-overlay";
 
-export interface CombinedCapabilitySource {
-  kind: CapabilitySourceKind;
-  /** Provider id for the overlay source, store name for the static one. */
-  id: string;
-  label: string;
-  count: number;
-  agentCallable: number;
-}
-
-export interface CombinedCapabilityView {
-  counts: {
-    staticTotal: number;
-    staticAgentCallable: number;
-    staticRuntimeOnly: number;
-    overlayTotal: number;
-    overlayAgentCallable: number;
-    combinedTotal: number;
-    combinedAgentCallable: number;
-  };
-  /**
-   * Both sources, each with its own count. The combined view is a superset of the Inspector's report: the
-   * static source is literally `CapabilityInspectorService.inspect("all")` (which reads `CAPABILITY_MATRIX`),
-   * and the overlay source is the runtime provider listing — never one folded into the other.
-   */
-  sources: CombinedCapabilitySource[];
-  staticItems: InspectorReport["items"];
-  overlayItems: RuntimeProviderCapability[];
-}
 
 /**
  * Builds the combined view = static Inspector report + runtime overlay. The static items are the real
@@ -814,13 +581,7 @@ export function checkCombinedInspectorView(
  * Aggregate
  * ------------------------------------------------------------------------------------------------- */
 
-export interface CapabilityCatalogAuditReport {
-  ok: boolean;
-  staticCatalogIntegrity: CapabilityAuditResult;
-  staticManifestParity: CapabilityAuditResult;
-  runtimeOverlayIntegrity: CapabilityAuditResult;
-  combinedInspectorView: CapabilityAuditResult;
-}
+
 
 /**
  * Runs the four checks in one call so both gates (`scripts/verify-capability-matrix.mjs` and
