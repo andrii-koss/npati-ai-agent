@@ -444,6 +444,7 @@ export interface CodingAgentRunnerPorts {
   };
   flags: {
     assertEnabled(ctx: AuthContext, flagKey: string, options?: { companyId?: string; userId?: string }): Promise<unknown>;
+    executionModes?: { assertToolAllowed(ctx: AuthContext, companyId: string, projectId: string | undefined, tool: string): Promise<void> };
   };
 
   rbac: {

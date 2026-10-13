@@ -1,4 +1,5 @@
 import { hasAdminPermission, isAdminPrincipal, classifyPrincipal } from "./code-rbac";
+import { CodeExecutionModeService } from "./code-execution-mode";
 import type {
   AuthContext, CodeSession, FeatureFlag, FeatureFlagHistoryEntry, FeatureFlagInput, FeatureFlagScope, FeatureFlagStage, WorkspaceStore,
 } from "@npati/workspace";
@@ -8,15 +9,15 @@ import type { AuditLogService } from "./audit-log";
 /**
  * C1a: server-side feature flags for the Coding Agent.
  *
- * The Coding Agent is dark by default: every new path (API, tools, sandbox, model calls) must ask this
- * service, and a missing store/flag means "disabled", never "enabled". Resolution is
+ * Configured deployments enable supported features in Company by default. Every entry point asks this
+ * service; explicit opt-outs and the master kill switch take precedence. Resolution is
  * user -> company -> global (the most specific row wins) with a mandatory master gate, so enabling a
  * company never leaks to another one.
  */
 
 export const CODE_AGENT_MASTER_FLAG = "coding_agent.enabled";
 
-/** Sub-flags of the master switch. All are off by default. */
+/** Supported sub-flags; configured deployments enable these by default. */
 export const CODE_AGENT_SUB_FLAGS = [
   "code.read",
   "code.write",
@@ -28,7 +29,7 @@ export const CODE_AGENT_SUB_FLAGS = [
   "code.hooks",
   "code.mcp",
   "code.full_auto_sandbox",
-  /** C8: the repo map enters the model-visible context, so it stays off until enabled explicitly. */
+  /** C8: repo map context follows the configured feature defaults and explicit overrides. */
   "code.repo_map",
   /**
    * C10: durable session operations. Each is its own flag because each has a different blast radius: a resume
@@ -109,7 +110,7 @@ export interface FlagResolution {
   scopeId: string;
   stage: FeatureFlagStage;
   /** Why the flag resolved this way: `no_row` means nothing was configured (dark launch). */
-  source: "user" | "company" | "global" | "no_row" | "self_hosted_default";
+  source: "user" | "company" | "global" | "no_row" | "self_hosted_default" | "company_default";
 }
 
 export interface FeatureFlagServiceConfig {
@@ -130,7 +131,9 @@ const MAX_CACHE_TTL_MS = 30_000;
  * small and synchronous in its decisions: `isEnabled` never performs the privileged action itself.
  */
 export class FeatureFlagService {
+  readonly executionModes: CodeExecutionModeService;
   private readonly enabledByDefault: boolean;
+  get usesCompanyDefaults(): boolean { return this.enabledByDefault; }
   private readonly cache = new Map<string, { resolution: FlagResolution; expiresAt: number }>();
   private readonly cacheTtlMs: number;
   private readonly allowPreGateRollout: boolean;
@@ -144,6 +147,7 @@ export class FeatureFlagService {
     private readonly stopSandboxes?: (ctx: AuthContext, companyId: string) => Promise<number>,
   ) {
     this.enabledByDefault = config.enabledByDefault ?? false;
+    this.executionModes = new CodeExecutionModeService(store, (ctx, companyId) => this.canManage(ctx, companyId), audit);
     const requested = config.cacheTtlMs ?? Number.parseInt(process.env.NPATI_CODE_FLAG_CACHE_TTL_MS ?? "", 10);
     const ttl = Number.isFinite(requested) && requested > 0 ? requested : 15_000;
     this.cacheTtlMs = Math.min(Math.max(ttl, 1_000), MAX_CACHE_TTL_MS);
@@ -237,12 +241,12 @@ export class FeatureFlagService {
           enabled: applicable.every(({ flag }) => this.stageAllows(ctx, flag, options, companyAdmin)),
           scope: winner.flag.scope, scopeId: winner.flag.scopeId, stage: winner.flag.stage, source: winner.source,
         }
-        : this.defaultResolution(flagKey);
+        : this.defaultResolution(flagKey, options);
     } else {
       const master = await this.resolve(ctx, CODE_AGENT_MASTER_FLAG, options);
       resolution = own
         ? { ...own, enabled: own.enabled && master.enabled }
-        : { ...this.defaultResolution(flagKey), enabled: this.defaultResolution(flagKey).enabled && master.enabled };
+        : { ...this.defaultResolution(flagKey, options), enabled: this.defaultResolution(flagKey, options).enabled && master.enabled };
     }
     this.cache.set(key, { resolution, expiresAt: Date.now() + this.cacheTtlMs });
     return resolution;
@@ -253,9 +257,13 @@ export class FeatureFlagService {
     return (await this.resolve(ctx, flagKey, options)).enabled;
   }
 
-  private defaultResolution(flagKey: string): FlagResolution {
-    const enabled = this.enabledByDefault && !["code.async_inbox", "code.async_processes", "code.async_subagents", "code.async_agent_control", "code.async_collect_barrier", "code.async_workspace"].includes(flagKey);
-    return { key: flagKey, enabled, scope: "global", scopeId: "", stage: enabled ? "ga" : "off", source: enabled ? "self_hosted_default" : "no_row" };
+  private defaultResolution(flagKey: string, options: FlagEvaluationContext = {}): FlagResolution {
+    const enabled = this.enabledByDefault && (flagKey === CODE_AGENT_MASTER_FLAG
+      || (CODE_AGENT_SUB_FLAGS as readonly string[]).includes(flagKey)
+      || ["code.model_profile.hosted-native-tools", "code.model_profile.hosted-native-tools-small-context", "code.model_profile.local-text-tools"].includes(flagKey));
+    const company = enabled && options.companyId;
+    return { key: flagKey, enabled, scope: company ? "company" : "global", scopeId: company || "",
+      stage: enabled ? "ga" : "off", source: enabled ? (company ? "company_default" : "self_hosted_default") : "no_row" };
   }
 
   /** Deny-by-default gate used by every code entry point (routes and services alike). */
@@ -320,7 +328,9 @@ export class FeatureFlagService {
     if (!isValidCodeFlagKey(input.flagKey)) throw new FeatureFlagError("invalid_flag_key", `Invalid coding flag key "${input.flagKey}"`, 400);
     if (!FEATURE_FLAG_SCOPES.includes(input.scope)) throw new FeatureFlagError("invalid_flag_key", `Invalid flag scope "${input.scope}"`, 400);
     const stage = input.stage;
-    if (stage && stage !== "off" && stage !== "internal" && !this.allowPreGateRollout) {
+    const companyDefaultStage = this.enabledByDefault && input.scope === "company" && stage === "ga"
+      && this.defaultResolution(input.flagKey, { companyId: input.scopeId }).enabled;
+    if (stage && stage !== "off" && stage !== "internal" && !this.allowPreGateRollout && !companyDefaultStage) {
       throw new FeatureFlagError("gate_not_passed", "Stages above internal require the security gate (G1) and rollout readiness (R1); set NPATI_ALLOW_PRE_GATE_ROLLOUT=true for an explicit pre-gate rollout", 409);
     }
     if (input.scope !== "global" && !input.scopeId) throw new FeatureFlagError("invalid_flag_key", "scopeId is required for company and user scoped flags", 400);

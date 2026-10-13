@@ -70,6 +70,8 @@ function record(value: unknown) {
 }
 
 export class CompanyToolRuntime implements CompanyToolExecutor {
+  private codingDelegation?: (ctx: AuthContext, company: Company, input: Record<string, unknown>, signal: AbortSignal) => Promise<unknown>;
+  setCodingDelegation(handler: NonNullable<CompanyToolRuntime["codingDelegation"]>): void { this.codingDelegation = handler; }
   async canAutoApproveSandboxTerminal(context: AuthContext, company: Company, runProjectId: string, agentId: string, tool: "project.terminal.exec" | "project.terminal.process", input: Record<string, unknown>): Promise<boolean> {
     return (await this.evaluateSandboxTerminal(context, company, runProjectId, agentId, tool, input)).allowed;
   }
@@ -111,6 +113,10 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
 
   async execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal) {
     if (signal.aborted) throw new DOMException("Cancelled", "AbortError");
+    if (tool === "code.agent.spawn") {
+      if (!this.codingDelegation) throw new Error("Company coding delegation is not configured");
+      return this.codingDelegation(context, company, input, signal);
+    }
     if (tool === "web.search") {
       const q = typeof input.query === "string" && input.query.trim()
         ? input.query.trim()

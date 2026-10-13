@@ -213,7 +213,8 @@ export interface PolicyResult {
 }
 
 export interface PolicyEngineDeps {
-  flags?: { assertEnabled(ctx: AuthContext, key: string, opts: { companyId: string }): Promise<boolean> };
+  flags?: { assertEnabled(ctx: AuthContext, key: string, opts: { companyId: string }): Promise<boolean>;
+    executionModes?: { assertToolAllowed(ctx: AuthContext, companyId: string, projectId: string | undefined, tool: string): Promise<void> } };
   /**
    * Registry lookup: returns the published capability or undefined.
    *
@@ -344,6 +345,7 @@ export class PolicyEngine {
     const flags = this.deps.flags;
     if (!flags) return deny("policy_engine_unavailable", "Feature flags are not configured", 503, "feature_flag");
     try {
+      await flags.executionModes?.assertToolAllowed(ctx, request.companyId, request.projectId, tool);
       await flags.assertEnabled(ctx, MASTER_FLAG, { companyId: request.companyId });
       await flags.assertEnabled(ctx, subFlagForTool(tool), { companyId: request.companyId });
     } catch (error) {

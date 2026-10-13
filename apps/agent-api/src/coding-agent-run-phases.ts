@@ -34,6 +34,7 @@ export class CodingAgentRunPhases {
   > {
     const { ctx, input, session, companyId, projectId, sessionId } = args;
     try {
+      await this.ports.flags.executionModes?.assertToolAllowed(ctx, companyId, projectId, "code.project.info");
       await this.ports.flags.assertEnabled(ctx, CODE_AGENT_MASTER_FLAG, { companyId, userId: ctx.userId });
 
       await this.ports.rbac.authorize(ctx, companyId, {

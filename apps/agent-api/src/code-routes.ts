@@ -203,6 +203,8 @@ export function registerCodeRoutes(app: FastifyInstance, auth: AuthProvider, ser
         flags: described.flags.map((flag) => ({ key: flag.key, enabled: flag.enabled, scope: flag.scope, stage: flag.stage, source: flag.source })),
         master: { key: described.master.key, enabled: described.master.enabled, scope: described.master.scope, stage: described.master.stage, source: described.master.source },
         darkLaunch: described.darkLaunch,
+        execution: await flags.executionModes.get(ctx, request.params.companyId),
+        defaultsEnabled: flags.usesCompanyDefaults,
         management: {
           company: await flags.canManage(ctx, request.params.companyId),
           global: await flags.canManage(ctx),

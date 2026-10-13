@@ -124,7 +124,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         activeProjectId,
         hasWorkspace: Boolean(overview.currentBusiness || resolved.company || resolved.project),
       });
-      const creatingChatWebsite = (projectIntent.intent === "CREATE_WEBSITE" || projectIntent.intent === "CREATE_PROJECT")
+      let creatingChatWebsite = (projectIntent.intent === "CREATE_WEBSITE" || projectIntent.intent === "CREATE_PROJECT")
         && projectIntent.targetDetails?.projectType !== "mobile_app";
 
       const boundCard = !creatingChatWebsite && request.body.conversationId && !memoryPolicy.noMemoryActive
@@ -142,6 +142,12 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
       const chatCodingEnabled = activeCompanyId
         ? await featureFlagService.isEnabled(auth, CODE_AGENT_MASTER_FLAG, { companyId: activeCompanyId, userId: auth.userId }) : false;
       if (chatCodingEnabled && activeCompanyId) {
+        const execution = await featureFlagService.executionModes.get(auth, activeCompanyId);
+        if (execution.mode === "global") {
+          if (!execution.creatorProjectId || !execution.canSelectGlobal) throw new Error("Open the NPATI Creator Workspace before using Global in chat");
+          activeProjectId = execution.creatorProjectId;
+          creatingChatWebsite = false;
+        }
         if (creatingChatWebsite && !projectIntent.needsClarification && !projectIntent.unsupportedIntentMessage) {
           let project = await codeService.createProject(auth, activeCompanyId,
             { name: extractCleanProjectName(message, projectIntent.targetDetails?.entityName), description: message },
