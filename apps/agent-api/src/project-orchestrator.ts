@@ -3,9 +3,9 @@ import type { ProjectDeployService } from "./project-deploy-service";
 import type { ProjectBrowserQaService } from "./project-browser-qa-service";
 import { ProjectMultiAgentService, type ProjectMultiAgentOptions } from "./project-multi-agent";
 import type { ProjectFileLeaseManager } from "./project-file-lock";
-import { WEBSITE_FILE_TOOLS, PROJECT_PREVIEW_TOOLS, canBuildWebsite, canBuildMobileApp } from "./project-agent-capabilities";
+import { WEBSITE_FILE_TOOLS } from "./project-agent-capabilities";
 import { DataStudioError } from "./data-studio/identifier";
-import type { AuthContext, Company, CompanyAgent, CompanyAgentRunDetails, Project, WorkspaceStore } from "@npati/workspace";
+import type { AuthContext, CompanyAgent, CompanyAgentRunDetails, Project, WorkspaceStore } from "@npati/workspace";
 import { WorkspaceNotFoundError } from "@npati/workspace";
 import type { ProjectService } from "./project-service";
 import type { ProjectWorkspace } from "./project-workspace";
@@ -16,73 +16,28 @@ import type { DataBackendService } from "./data-studio/service";
 import type { ProjectRedirectRepository } from "./data-studio/redirect-repository";
 import {
   type ProjectCardData, type ProjectProgressEvent, type ProjectActionData, type ProjectIntentDecision, extractFramework,
-  createDefaultWebsiteDocument, getWebsiteAdapter, createMobileAppScaffold, defaultAppScheme, slugifyProjectName,
-  isDataCapabilityPermitted, DATA_CAPABILITY_GROUPS,
+  defaultAppScheme,
 } from "@npati/shared";
+import {
+  extractCleanProjectName,
+  isModelError,
+  ProjectOrchestrationError,
+} from "./project-orchestrator-types";
+import {
+  ensureDataAgent,
+  ensureMobileAppAgent,
+  ensureWebsiteAgent,
+  getSharedProjectContext,
+  initSharedProjectContext,
+  recordScaffoldFallback,
+  registerMobileRedirects,
+  resolveMobileDataBackend,
+  scaffoldMobileAppProject,
+  scaffoldWebsiteProject,
+  selectProjectAgent,
+} from "./project-orchestrator-scaffold";
 
-export class ProjectOrchestrationError extends Error {
-  constructor(public readonly code: string, message: string, public readonly status = 400) {
-    super(message);
-    this.name = "ProjectOrchestrationError";
-  }
-}
-
-export function isModelError(error: unknown): boolean {
-  if (!error) return false;
-  const msg = error instanceof Error ? error.message : String(error);
-  if (/InferenceRouteFailure|SelfHealingExhaustedError|OmniRouteError|model_routing_failed|model_unavailable|No chat-compatible inference model|AI inference failed|(?:NPATI AI|OmniRoute) chat failed|Provider returned empty content/i.test(msg)) {
-    return true;
-  }
-  if (/\b(?:401|403|404)\b/i.test(msg) && /\b(?:model|route|provider|unsupported|denied|auth|unauthorized|not found)\b/i.test(msg)) {
-    return true;
-  }
-  if (/\b(?:does not support|unsupported model|no valid candidate)\b/i.test(msg)) {
-    return true;
-  }
-  return false;
-}
-
-export function extractCleanProjectName(prompt: string, explicitName?: string): string {
-  if (explicitName && explicitName.trim()) {
-    const trimmed = explicitName.trim().replace(/^["'«]+|["'»]+$/g, "");
-    if (trimmed.length > 0) return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
-  }
-
-  let cleaned = (prompt || "").trim();
-
-  const commandPatterns = [
-    /^(?:створи(?: мені)?|зроби(?: мені)?|розроби(?: мені)?|побудуй|запусти|згенеруй|відкрий)\s+(?:(?:новий|сучасний|адаптивний|тестовий|демо)\s+)*(?:веб-?сайт|сайт|проєкт|проект|лендінг|додаток)(?:\s+(?:для|під|про|компанії))?/iu,
-    /^(?:створи(?:ти)?|зроби(?:ти)?)\s+(?:новий\s+)?(?:веб-?сайт|сайт|проєкт|проект)/iu,
-    /^(?:please\s+)?(?:create|build|make|generate|launch|develop)(?:\s+me)?(?:\s+a)?\s+(?:(?:new|modern|responsive|test|demo)\s+)*(?:website|site|project|landing(?:\s+page)?|web\s*app)(?:\s+(?:for|about))?/iu,
-  ];
-
-  for (const pattern of commandPatterns) {
-    cleaned = cleaned.replace(pattern, "").trim();
-  }
-  // Framework and execution instructions belong in the description, not the display name.
-  cleaned = cleaned.replace(/\s+(?:на|on|using|with)\s+(?:next\.?js|react|vite|expo|html(?:\/css)?)(?:\b|(?=\s|[,.;]))[\s\S]*$/iu, "").trim();
-  cleaned = cleaned.replace(/[,;]\s*(?:запусти|збери|покажи|run|build|start|launch)(?:\s|$)[\s\S]*$/iu, "").trim();
-
-  cleaned = cleaned.replace(/^[,:;—–\-.\s]+/, "").trim();
-
-  const firstSentence = cleaned.split(/(?:\.\s+|\n+)/)[0]?.trim() || "";
-  if (firstSentence && firstSentence.length >= 2 && firstSentence.length <= 60) {
-    cleaned = firstSentence;
-  }
-
-  cleaned = cleaned.replace(/[,:;—–\-.\s]+$/, "").trim();
-  cleaned = cleaned.replace(/^["'«]+|["'»]+$/g, "").trim();
-
-  if (!cleaned || cleaned.length < 2) {
-    return "Website Project";
-  }
-
-  cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
-  if (cleaned.length > 50) {
-    cleaned = `${cleaned.slice(0, 47)}...`;
-  }
-  return cleaned;
-}
+export * from "./project-orchestrator-types";
 
 export class ProjectOrchestrator {
   constructor(
@@ -118,101 +73,20 @@ export class ProjectOrchestrator {
    * NEVER checks agent.name. Only agents with the website file tools are eligible.
    */
   async selectProjectAgent(ctx: AuthContext, companyId: string, requiredCapabilities: string[] = [...WEBSITE_FILE_TOOLS]): Promise<CompanyAgent | undefined> {
-    const company = await this.workspaceStore.getCompany(ctx, companyId);
-    if (!company) throw new ProjectOrchestrationError("COMPANY_NOT_FOUND", `Company ${companyId} not found`, 404);
-
-    const agents = await this.workspaceStore.listCompanyAgents(ctx, companyId);
-    const activeAgents = agents.filter((a) => a.isActive && requiredCapabilities.every((cap) => a.tools?.includes(cap)));
-
-    const DEVELOPER_KEYWORDS = /(?:developer|engineer|frontend|fullstack|software|web|coder|programmer|розробник|програміст|верстальник|фронтенд)/i;
-
-    let bestAgent: CompanyAgent | undefined;
-    let highestScore = -1;
-
-    for (const agent of activeAgents) {
-      let score = 0;
-      const tools = agent.tools ?? [];
-
-      // Capability score
-      for (const cap of requiredCapabilities) {
-        if (tools.includes(cap) || tools.includes("*")) score += 10;
-      }
-      if (tools.some((t) => t.startsWith("project.terminal."))) score += 5;
-      if (tools.some((t) => t.startsWith("project.preview."))) score += 5;
-      if (tools.some((t) => t.startsWith("project.git."))) score += 5;
-      if (tools.some((t) => t.startsWith("project.deploy."))) score += 5;
-      if (tools.some((t) => t.startsWith("project.qa."))) score += 5;
-
-      // Role and instruction semantic relevance (NOT agent.name)
-      const roleText = `${agent.role} ${agent.description ?? ""} ${agent.systemInstruction ?? ""}`;
-      if (DEVELOPER_KEYWORDS.test(roleText)) score += 20;
-
-      if (score > highestScore) {
-        highestScore = score;
-        bestAgent = agent;
-      }
-    }
-
-    return bestAgent;
+    return selectProjectAgent(this.workspaceStore, ctx, companyId, requiredCapabilities);
   }
 
   private async ensureWebsiteAgent(ctx: AuthContext, companyId: string): Promise<CompanyAgent> {
-    const existing = await this.selectProjectAgent(ctx, companyId);
-    if (existing) return existing;
-    const company = await this.workspaceStore.getCompany(ctx, companyId);
-    const main = company.mainAgentId
-      ? await this.workspaceStore.getCompanyAgent(ctx, companyId, company.mainAgentId)
-      : undefined;
-    const agent = await this.workspaceStore.createCompanyAgent(ctx, companyId, {
-      name: "Website Builder",
-      role: "Frontend developer",
-      description: "Builds and repairs websites requested in chat.",
-      systemInstruction: "Inspect the project files, implement the requested website, and verify the result.",
-      modelId: main?.modelId,
-      tools: [...WEBSITE_FILE_TOOLS, ...PROJECT_PREVIEW_TOOLS, ...DATA_CAPABILITY_GROUPS["data.read"], ...DATA_CAPABILITY_GROUPS["data.schema"], ...DATA_CAPABILITY_GROUPS["data.write"], ...DATA_CAPABILITY_GROUPS["auth.admin"]],
-      isActive: true,
-    }, "website-builder-agent-v1");
-    if (!canBuildWebsite(agent) || !agent.isActive) {
-      throw new ProjectOrchestrationError("NO_QUALIFIED_AGENT", "No active agent has the required website project tools.", 400);
-    }
-    return agent;
+    return ensureWebsiteAgent(this.workspaceStore, ctx, companyId);
   }
 
   private async ensureDataAgent(ctx: AuthContext, companyId: string): Promise<CompanyAgent> {
-    const required = ["project.data.schema.inspect", "project.data.schema.apply"];
-    const agents = await this.workspaceStore.listCompanyAgents(ctx, companyId);
-    const existing = agents.find(agent => agent.isActive && required.every(tool => isDataCapabilityPermitted(agent.tools, tool)));
-    if (existing) return existing;
-    const company = await this.workspaceStore.getCompany(ctx, companyId);
-    const main = company.mainAgentId ? await this.workspaceStore.getCompanyAgent(ctx, companyId, company.mainAgentId) : undefined;
-    return this.workspaceStore.createCompanyAgent(ctx, companyId, {
-      name: "Data Builder", role: "Database developer", isActive: true, modelId: main?.modelId,
-      systemInstruction: "Inspect the active project's schema before proposing structured schema changes. Use add_field for new columns; do not reapply a template to add a field. Work only in dev and respect migration approvals.",
-      tools: [...DATA_CAPABILITY_GROUPS["data.read"], ...DATA_CAPABILITY_GROUPS["data.schema"], ...DATA_CAPABILITY_GROUPS["data.write"], ...DATA_CAPABILITY_GROUPS["auth.admin"]],
-    }, "data-builder-agent-v1");
+    return ensureDataAgent(this.workspaceStore, ctx, companyId);
   }
 
   /** Mobile projects (D6) get an Expo-focused agent with the same file and preview tools. */
   private async ensureMobileAppAgent(ctx: AuthContext, companyId: string): Promise<CompanyAgent> {
-    const existing = await this.selectProjectAgent(ctx, companyId);
-    if (existing) return existing;
-    const company = await this.workspaceStore.getCompany(ctx, companyId);
-    const main = company.mainAgentId
-      ? await this.workspaceStore.getCompanyAgent(ctx, companyId, company.mainAgentId)
-      : undefined;
-    const agent = await this.workspaceStore.createCompanyAgent(ctx, companyId, {
-      name: "Mobile App Builder",
-      role: "Mobile app developer",
-      description: "Builds Expo (React Native) apps that use the project Project API and Project Auth.",
-      systemInstruction: "Inspect the mobile project files, implement the requested screens with the vendored SDK, and verify the Expo Web preview.",
-      modelId: main?.modelId,
-      tools: [...WEBSITE_FILE_TOOLS, ...PROJECT_PREVIEW_TOOLS],
-      isActive: true,
-    }, "mobile-app-builder-agent-v1");
-    if (!canBuildMobileApp(agent) || !agent.isActive) {
-      throw new ProjectOrchestrationError("NO_QUALIFIED_AGENT", "No active agent has the required mobile project tools.", 400);
-    }
-    return agent;
+    return ensureMobileAppAgent(this.workspaceStore, ctx, companyId);
   }
 
   /**
@@ -224,43 +98,16 @@ export class ProjectOrchestrator {
     companyId: string,
     requested: { dataBackendId?: string; prompt?: string },
   ): Promise<{ backendId?: string; choices?: Array<{ id: string; name: string }> }> {
-    if (!this.dataBackends) return { backendId: undefined };
-    const backends = await this.dataBackends.list(ctx, companyId);
-    const usable = backends.filter((backend) => backend.status === "ready");
-    if (!usable.length) {
-      throw new ProjectOrchestrationError(
-        "DATA_BACKEND_REQUIRED",
-        "This Company has no DataBackend yet. Create Data and a schema for the website first (Data Studio), then the mobile app can share them.",
-        400,
-      );
-    }
-    if (requested.dataBackendId) {
-      const match = usable.find((backend) => backend.id === requested.dataBackendId);
-      if (!match) throw new ProjectOrchestrationError("DATA_BACKEND_NOT_FOUND", "The requested DataBackend is not available for this Company", 404);
-      return { backendId: match.id };
-    }
-    if (usable.length === 1) return { backendId: usable[0]!.id };
-    const prompt = (requested.prompt ?? "").toLowerCase();
-    const named = usable.filter((backend) => backend.name && prompt.includes(backend.name.toLowerCase()));
-    if (named.length === 1) return { backendId: named[0]!.id };
-    return { choices: usable.map((backend) => ({ id: backend.id, name: backend.name })) };
+    return resolveMobileDataBackend(this.dataBackends, ctx, companyId, requested);
   }
 
   /** Registers the app deep link so verification and reset links can return to the app (D6). */
-  private async registerMobileRedirects(ctx: AuthContext, companyId: string, projectId: string, scheme: string) {
-    if (!this.authRedirects) return;
-    const url = `${scheme}://auth/callback`;
-    for (const environment of ["dev", "prod"] as const) {
-      await this.authRedirects.replace(ctx, companyId, projectId, environment, [url]).catch(() => undefined);
-    }
+  private async registerMobileRedirects(ctx: AuthContext, companyId: string, projectId: string, scheme: string): Promise<void> {
+    return registerMobileRedirects(this.authRedirects, ctx, companyId, projectId, scheme);
   }
 
-  private async scaffoldMobileAppProject(ctx: AuthContext, companyId: string, projectId: string, projectName: string, scheme: string) {
-    const scaffold = createMobileAppScaffold({ name: projectName, slug: slugifyProjectName(projectName), scheme });
-    for (const [filePath, content] of Object.entries(scaffold.files)) {
-      try { await this.projectWorkspace.readFile(ctx, companyId, projectId, filePath); }
-      catch { await this.projectWorkspace.createFile(ctx, companyId, projectId, filePath, content); }
-    }
+  private async scaffoldMobileAppProject(ctx: AuthContext, companyId: string, projectId: string, projectName: string, scheme: string): Promise<void> {
+    return scaffoldMobileAppProject(this.projectWorkspace, ctx, companyId, projectId, projectName, scheme);
   }
 
   /**
@@ -272,63 +119,7 @@ export class ProjectOrchestrator {
     projectId: string,
     details: { name: string; description?: string; framework?: string; purpose?: string; projectType?: "website" | "mobile_app" | "code_project" }
   ): Promise<string> {
-    const isMobileApp = details.projectType === "mobile_app";
-    const content = isMobileApp
-      ? [
-          `# ${details.name}`,
-          "",
-          "## Purpose & Overview",
-          details.purpose || details.description || "AI-generated mobile app (Expo / React Native).",
-          "",
-          "## Architecture & Tech Stack",
-          `- Framework: ${details.framework || "Expo (React Native)"} with TypeScript`,
-          "- Preview: Expo Web export served in the sandbox (Live Preview); store builds are not part of this step.",
-          "",
-          "## Backend Rules (Project API & Project Auth)",
-          "- This app shares the DataBackend of its website: same collections, same end users, same access policies and RLS. Never create or copy a database.",
-          "- Use only PROJECT_PUBLISHABLE_KEY (public). PROJECT_SECRET_KEY, DATABASE_URL and any database role credentials must never appear in the app code, bundle, logs or prompts.",
-          "- Import the client SDK from `./npati-client` (already generated in the project root) and pass the deep link redirect from `./src/config`.",
-          "- Refresh tokens stay in expo-secure-store; never fall back to plain AsyncStorage.",
-          "",
-          "## Engineering Mandate & Guidelines",
-          "- **Targeted Edits Rule**: always search and inspect relevant files before modifying. Make surgical, targeted edits.",
-          "- **No Blind Rewrites**: do NOT recreate the whole project or overwrite unchanged screens.",
-          "- **Preserve Stability**: keep navigation, auth state and API wiring intact across iterations.",
-          "",
-          "## Project Status",
-          `- Initialized: ${new Date().toISOString()}`,
-          "- Mode: Active development",
-        ].join("\n")
-      : [
-          `# ${details.name}`,
-          "",
-          "## Purpose & Overview",
-          details.purpose || details.description || "Modern AI-generated web project.",
-          "",
-          "## Architecture & Tech Stack",
-          `- Framework: ${details.framework || "Vite + React"}`,
-          "- Language: TypeScript / JavaScript",
-          "",
-          "## Engineering Mandate & Guidelines",
-          details.projectType === "code_project"
-            ? "- Source files are the source of truth. Edit this website in the Coding Agent workspace; preserve the attached database/auth SDK and existing routes."
-            : "- **Single Source of Truth**: website.config.json defines all pages, blocks, components, styles, and content. When modifying or creating sections, keep website.config.json synchronized so the visual editor and live preview stay in sync.",
-          "- **Targeted Edits Rule**: Always search and inspect relevant files before modifying. Make surgical, targeted edits.",
-          "- **No Blind Rewrites**: Do NOT recreate the entire project or overwrite unchanged components.",
-          "- **Preserve Stability**: Ensure configuration, routing, and functional components remain intact across iterations.",
-          "",
-          "## Project Status",
-          `- Initialized: ${new Date().toISOString()}`,
-          "- Mode: Active development",
-        ].join("\n");
-
-    try {
-      const existing = await this.projectWorkspace.readFile(ctx, companyId, projectId, "PROJECT.md");
-      await this.projectWorkspace.writeFile(ctx, companyId, projectId, "PROJECT.md", content, existing.revision);
-    } catch {
-      await this.projectWorkspace.createFile(ctx, companyId, projectId, "PROJECT.md", content);
-    }
-    return content;
+    return initSharedProjectContext(this.projectWorkspace, ctx, companyId, projectId, details);
   }
 
   async prepareCodingWebsite(ctx: AuthContext, project: Project, prompt: string, framework: string): Promise<Project> {
@@ -341,39 +132,21 @@ export class ProjectOrchestrator {
     return this.projectService.get(ctx, project.companyId, project.id);
   }
 
-  private async scaffoldWebsiteProject(ctx: AuthContext, companyId: string, projectId: string, projectName: string, framework: "nextjs" | "static", prompt?: string) {
-    const template = /hosting|хост|vps|сервер|domain|домен/iu.test(`${projectName} ${prompt ?? ""}`) ? "hosting" : "landing";
-    const doc = createDefaultWebsiteDocument(projectName, framework, { template });
-    const adapter = getWebsiteAdapter(framework);
-    const files = adapter.scaffoldProject(doc);
-    for (const [filePath, content] of Object.entries(files)) {
-      try { await this.projectWorkspace.readFile(ctx, companyId, projectId, filePath); }
-      catch { await this.projectWorkspace.createFile(ctx, companyId, projectId, filePath, content); }
-    }
+  private async scaffoldWebsiteProject(ctx: AuthContext, companyId: string, projectId: string, projectName: string, framework: "nextjs" | "static", prompt?: string): Promise<void> {
+    return scaffoldWebsiteProject(this.projectWorkspace, ctx, companyId, projectId, projectName, framework, prompt);
   }
+
   /**
    * Retrieves the shared PROJECT.md if present.
    */
   async getSharedProjectContext(ctx: AuthContext, companyId: string, projectId: string): Promise<string | undefined> {
-    try {
-      const file = await this.projectWorkspace.readFile(ctx, companyId, projectId, "PROJECT.md");
-      return file.content;
-    } catch {
-      return undefined;
-    }
+    return getSharedProjectContext(this.projectWorkspace, ctx, companyId, projectId);
   }
 
   private async recordScaffoldFallback(
     ctx: AuthContext, companyId: string, project: Project, idempotencyKey: string,
   ): Promise<CompanyAgentRunDetails> {
-    const result = `Створено стартовий сайт "${project.name}" на базі ${project.framework}. AI-персоналізацію не завершено; базовий сайт доступний для перегляду й редагування.`;
-    const { run } = await this.workspaceStore.createCompanyAgentRun(ctx, companyId, {
-      task: `Create starter website: ${project.name}`, requestedMode: "single", projectId: project.id,
-    }, `${idempotencyKey}:scaffold-fallback`);
-    await this.workspaceStore.updateCompanyAgentRun(ctx, companyId, run.id, {
-      status: "completed", executionMode: "single", selectedAgentIds: [], result,
-    });
-    return this.workspaceStore.getCompanyAgentRun(ctx, companyId, run.id);
+    return recordScaffoldFallback(this.workspaceStore, ctx, companyId, project, idempotencyKey);
   }
 
   /**
