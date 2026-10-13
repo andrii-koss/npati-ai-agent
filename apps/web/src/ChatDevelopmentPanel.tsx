@@ -17,11 +17,11 @@ export function ChatDevelopmentPanel({ processes, projectId, isUk = false, busyI
       const current = !!projectId && process.projectId === projectId;
       const working = developmentIsActive(process);
       const disabled = busyId === process.id;
-      return <div key={process.id} className={"chat-development-tile" + (current ? " current" : "")} data-status={process.status}>
+      return <div key={process.id} className={"chat-development-tile research-page-row " + (working ? "active" : process.status === "completed" ? "completed" : process.status === "failed" ? "failed" : "") + (current ? " current" : "")} data-status={process.status}>
         {current ? <button type="button" className="chat-development-icon" onClick={onBack} aria-label={isUk ? "Назад до основного чату" : "Back to main chat"}>←</button>
-          : <span className={working ? "chat-development-spinner" : "chat-development-state"} aria-hidden="true">{working ? "" : process.status === "completed" ? "✓" : "·"}</span>}
+          : <span className="research-progress-state" aria-hidden="true">{working ? "●" : process.status === "completed" ? "✓" : "·"}</span>}
         <button type="button" className="chat-development-label" disabled={!process.projectId || disabled} onClick={() => onOpen(process.id)} title={process.detail}>
-          <strong>{process.name}</strong><span>{labels[process.status][isUk ? 1 : 0]} ? {process.framework}</span>
+          <strong className={working ? "research-active-text" : undefined}>{process.name}</strong><span>{labels[process.status][isUk ? 1 : 0]} ? {process.framework}</span>
         </button>
         <div className="chat-development-actions">
           <button type="button" className="chat-development-icon" disabled={!process.projectId || disabled} onClick={() => onOpen(process.id)} aria-label={(isUk ? "Редагувати: " : "Edit in chat: ") + process.name} title={isUk ? "Редагувати в чаті" : "Edit in chat"}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5 4 4M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L4 15Z"/></svg></button>

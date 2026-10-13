@@ -12,23 +12,8 @@
 .chat-development-icon:hover { background: var(--npati-gray-100, #e5e7eb); }
 .chat-development-icon:disabled, .chat-development-label:disabled { opacity: .45; cursor: default; }
 .chat-development-icon:focus-visible, .chat-development-label:focus-visible { outline: 2px solid var(--npati-red, #cf3035); outline-offset: 3px; }
-.chat-development-spinner { width: 16px; height: 16px; flex-shrink: 0; border: 2px solid var(--npati-gray-100, #e5e7eb); border-top-color: var(--npati-red, #cf3035); border-radius: 50%; animation: chat-development-spin .9s linear infinite; }
-.chat-development-state { width: 16px; text-align: center; color: #23834b; flex-shrink: 0; }
-.chat-development-tile[data-status="failed"] .chat-development-state { color: #cf3035; }
-@keyframes chat-development-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .chat-development-spinner { animation: none; } }
 @media (max-width: 540px) {
   .chat-development-tile { display: grid; grid-template-columns: 16px minmax(0, 1fr); padding: 8px; gap: 4px; }
   .chat-development-actions { grid-column: 2; justify-content: flex-end; }
   .chat-development-icon { width: 24px; height: 24px; }
 }
-
-.chat-development-progress { width: 100%; max-width: 900px; margin: 12px auto; padding: 16px; border-radius: 14px; background: var(--npati-gray-50, #f8f9fb); }
-.chat-development-progress-heading, .chat-development-progress li { display: flex; align-items: baseline; gap: 12px; }
-.chat-development-progress ol { list-style: none; padding: 0; margin: 14px 0 0; }
-.chat-development-progress li { margin: 8px 0; font-size: 13px; color: var(--npati-gray-500, #64748b); }
-.chat-development-dot { display: inline-block; width: 8px; height: 8px; flex-shrink: 0; border-radius: 50%; background: var(--npati-red, #cf3035); }
-.chat-development-dot.active, .chat-development-progress li.active .chat-development-dot { animation: chat-development-pulse 1.2s ease-in-out infinite; }
-.chat-development-progress p { font-size: 13px; overflow-wrap: anywhere; }
-@keyframes chat-development-pulse { 50% { opacity: .3; transform: scale(.75); } }
-@media (prefers-reduced-motion: reduce) { .chat-development-dot.active, .chat-development-progress li.active .chat-development-dot { animation: none; } }

@@ -8,8 +8,8 @@ const props = { onOpen() {}, onStop() {}, onHide() {}, onBack() {} };
 describe("chat development panel", () => {
   it("shows at most four processes with real running indicators and accessible actions", () => {
     const markup = renderToStaticMarkup(<ChatDevelopmentPanel {...props} processes={[1, 2, 3, 4, 5].map(n => process(n))} />);
-    expect(markup.match(/class="chat-development-tile"/g)).toHaveLength(4);
-    expect(markup.match(/class="chat-development-spinner"/g)).toHaveLength(4);
+    expect(markup.match(/class="chat-development-tile research-page-row active"/g)).toHaveLength(4);
+    expect(markup.match(/class="research-progress-state"/g)).toHaveLength(4);
     expect(markup).toContain('aria-label="Hide from panel: Website 1"');
     expect(markup).toContain('aria-label="Edit in chat: Website 1"');
     expect(markup).toContain('aria-label="Stop: Website 1"');
@@ -18,7 +18,7 @@ describe("chat development panel", () => {
     const current = { ...process(1), hidden: true };
     const markup = renderToStaticMarkup(<ChatDevelopmentPanel {...props} processes={[process(2, "completed"), process(3, "completed"), process(4, "completed"), process(5, "completed"), current]} projectId="project-1" />);
     expect(markup).toContain('aria-label="Back to main chat"');
-    expect(markup).not.toContain('class="chat-development-spinner"');
+    expect(markup.match(/class="research-progress-state"/g)).toHaveLength(3);
     expect(markup).toContain('data-status="completed"');
     expect(markup).toContain("Ready");
   });
