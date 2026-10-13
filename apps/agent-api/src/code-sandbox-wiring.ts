@@ -109,6 +109,15 @@ export function createCodeSandboxWiring(deps: CreateCodeSandboxWiringDeps) {
     },
   };
 
+  /**
+   * C4 (owner decision): every code tool execution decision passes through this single server-side
+   * engine, in this fixed phase order — the long form of the same list is the engine's header comment
+   * (`code-policy-engine.ts`), which is where the order is defined:
+   *   1 feature_flag -> 2 rbac -> 3 capability -> 4 capability_groups -> 5 trust -> 6 hard_deny ->
+   *   7 session_mode -> 8 project_rules -> 9 network_enforcement -> 10 approval -> 11 risk_classification
+   * A direct API or tool call cannot skip it: the shell runtime refuses to run anything when no
+   * policy engine is injected.
+   */
   const runnerReadiness = sandboxRunnerUrl && sandboxRunnerSecret
     ? new RunnerReadinessClient({
         baseUrl: sandboxRunnerUrl,
