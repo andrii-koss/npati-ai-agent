@@ -1,4 +1,4 @@
-import { hasAdminPermission } from "./code-rbac";
+import { hasAdminPermission, isAdminPrincipal, classifyPrincipal } from "./code-rbac";
 import type {
   AuthContext, CodeSession, FeatureFlag, FeatureFlagHistoryEntry, FeatureFlagInput, FeatureFlagScope, FeatureFlagStage, WorkspaceStore,
 } from "@npati/workspace";
@@ -158,7 +158,7 @@ export class FeatureFlagService {
   }
 
   private cacheKey(ctx: AuthContext, flagKey: string, options: FlagEvaluationContext): string {
-    return `${ctx.workspaceId}|${options.companyId ?? ""}|${options.userId ?? ctx.userId}|${flagKey}`;
+    return `${ctx.workspaceId}|${options.companyId ?? ""}|${options.userId ?? ctx.userId}|${flagKey}|${ctx.externalSubject ?? ""}|${ctx.companyId ?? ""}|${[...ctx.permissions].sort().join(",")}`;
   }
 
   private rows(ctx: AuthContext, flagKey: string): Promise<FeatureFlag[]> {
@@ -166,12 +166,12 @@ export class FeatureFlagService {
   }
 
   /** Stage semantics: `off` denies, `internal` needs an administrative actor, `allowlist` needs an id. */
-  private stageAllows(ctx: AuthContext, flag: FeatureFlag, options: FlagEvaluationContext): boolean {
+  private stageAllows(ctx: AuthContext, flag: FeatureFlag, options: FlagEvaluationContext, companyAdmin = false): boolean {
     if (!flag.enabled) return false;
     const subject = options.userId ?? ctx.userId;
     switch (flag.stage) {
       case "off": return false;
-      case "internal": return hasAdminPermission(ctx.permissions);
+      case "internal": return hasAdminPermission(ctx.permissions) || (flag.scope === "company" && companyAdmin);
       case "allowlist": return flag.allowlist.includes(subject) || (options.companyId ? flag.allowlist.includes(options.companyId) : false);
       case "percent": {
         if (flag.rolloutPercent <= 0) return false;
@@ -196,12 +196,12 @@ export class FeatureFlagService {
     return candidates;
   }
 
-  private resolveFrom(rows: FeatureFlag[], ctx: AuthContext, options: FlagEvaluationContext): FlagResolution | null {
+  private resolveFrom(rows: FeatureFlag[], ctx: AuthContext, options: FlagEvaluationContext, companyAdmin = false): FlagResolution | null {
     const winner = this.applicableRows(rows, ctx, options)[0];
     if (!winner) return null;
     return {
       key: winner.flag.flagKey,
-      enabled: this.stageAllows(ctx, winner.flag, options),
+      enabled: this.stageAllows(ctx, winner.flag, options, companyAdmin),
       scope: winner.flag.scope,
       scopeId: winner.flag.scopeId,
       stage: winner.flag.stage,
@@ -220,7 +220,9 @@ export class FeatureFlagService {
     if (cached && cached.expiresAt > Date.now()) return cached.resolution;
 
     const rows = await this.rows(ctx, flagKey);
-    const own = this.resolveFrom(rows, ctx, options);
+    const companyAdmin = rows.some((flag) => flag.scope === "company" && flag.scopeId === options.companyId && flag.stage === "internal")
+      && !!options.companyId && await this.canManage(ctx, options.companyId);
+    const own = this.resolveFrom(rows, ctx, options, companyAdmin);
     let resolution: FlagResolution;
     if (flagKey === CODE_AGENT_MASTER_FLAG) {
       // The master flag is a kill switch, so it is authoritative across scopes: it must be enabled at
@@ -232,7 +234,7 @@ export class FeatureFlagService {
       resolution = winner
         ? {
           key: flagKey,
-          enabled: applicable.every(({ flag }) => this.stageAllows(ctx, flag, options)),
+          enabled: applicable.every(({ flag }) => this.stageAllows(ctx, flag, options, companyAdmin)),
           scope: winner.flag.scope, scopeId: winner.flag.scopeId, stage: winner.flag.stage, source: winner.source,
         }
         : this.defaultResolution(flagKey);
@@ -286,8 +288,21 @@ export class FeatureFlagService {
     return this.store.listFeatureFlagHistory(ctx, flagKey, limit);
   }
 
-  private assertAdmin(ctx: AuthContext, action: string): void {
-    if (!hasAdminPermission(ctx.permissions)) {
+  /** A company role permits only that company's controls; it never grants global administration. */
+  async canManage(ctx: AuthContext, companyId?: string): Promise<boolean> {
+    if (ctx.companyId || classifyPrincipal(ctx) !== "user"
+        || ctx.externalSubject?.startsWith("npati:apikey:") || ctx.externalSubject?.startsWith("npati:remote:")) return false;
+    if (isAdminPrincipal(ctx)) return true;
+    if (!companyId) return false;
+    try {
+      await this.store.getCompany(ctx, companyId);
+      const member = await this.store.getCompanyMembership(companyId, ctx.userId);
+      return member?.status === "active" && (member.role === "owner" || member.role === "admin");
+    } catch { return false; }
+  }
+
+  private async assertAdmin(ctx: AuthContext, action: string, companyId?: string): Promise<void> {
+    if (!(await this.canManage(ctx, companyId))) {
       throw new FeatureFlagError("flag_admin_required", `${action} requires the owner/admin role`, 403);
     }
   }
@@ -301,7 +316,7 @@ export class FeatureFlagService {
    * that did not take effect (which is the safe direction for this control).
    */
   async setFlag(ctx: AuthContext, input: FeatureFlagInput, options: { auditCompanyId?: string } = {}): Promise<FeatureFlag> {
-    this.assertAdmin(ctx, "Changing a feature flag");
+    await this.assertAdmin(ctx, "Changing a feature flag", input.scope === "company" ? input.scopeId : undefined);
     if (!isValidCodeFlagKey(input.flagKey)) throw new FeatureFlagError("invalid_flag_key", `Invalid coding flag key "${input.flagKey}"`, 400);
     if (!FEATURE_FLAG_SCOPES.includes(input.scope)) throw new FeatureFlagError("invalid_flag_key", `Invalid flag scope "${input.scope}"`, 400);
     const stage = input.stage;
@@ -343,7 +358,7 @@ export class FeatureFlagService {
    * clean up the projects best-effort. Secret-lease revocation and full sandbox teardown are C4/C6.
    */
   async killSwitch(ctx: AuthContext, options: { companyId?: string; reason?: string } = {}): Promise<{ flag: FeatureFlag; suspendedSessions: number; stoppedSandboxes: number }> {
-    this.assertAdmin(ctx, "Using the kill switch");
+    await this.assertAdmin(ctx, "Using the kill switch", options.companyId);
     const scope: FeatureFlagScope = options.companyId ? "company" : "global";
     const scopeId = options.companyId ?? "";
     const sessions = options.companyId

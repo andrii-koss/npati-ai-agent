@@ -660,6 +660,11 @@ export async function createCompany(pool: Pool, context: AuthContext, input: Com
     const company = result.rows[0] ?? (await pool.query<Company>(`SELECT ${companyColumns} FROM companies
       WHERE workspace_id=$1 AND user_id=$2 AND create_request_key=$3`, [context.workspaceId, context.userId, idempotencyKey])).rows[0];
     if (!company) throw new Error("Could not create company");
+    // Persist real ownership, including an idempotent retry after an interrupted creation.
+    await pool.query(`INSERT INTO company_members (id, company_id, user_id, role, status, accepted_at)
+      SELECT $1, $2, $3, 'owner', 'active', now()
+      WHERE NOT EXISTS (SELECT 1 FROM company_members WHERE company_id = $2)
+      ON CONFLICT (company_id, user_id) DO NOTHING`, [randomUUID(), company.id, company.userId]);
     return company;
   }
 export async function convertBusinessToCompany(pool: Pool, context: AuthContext, businessId: string, input: BusinessToCompanyInput, idempotencyKey: string): Promise<{ company: Company; created: boolean }> {
