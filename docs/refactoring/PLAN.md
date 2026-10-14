@@ -882,7 +882,7 @@ registerEmailInboxRoutes(app, deps)  →  registerEmailAccountRoutes(app, deps) 
 | 23 | `apps/web/src/i18n/types.ts` | 2 631 | [ ] |
 | 24 | `apps/web/src/BusinessWorkspace.tsx` | 2 106 | [ ] |
 | 25 | `apps/web/src/EmailInboxPage.tsx` | 2 013 | [ ] |
-| 26 | `apps/web/src/DataStudioPage.tsx` | 1 976 | [ ] |
+| 26 | `apps/web/src/DataStudioPage.tsx` | 1 976 | [x] (скорочено до 704 рядків) |
 | 27 | `apps/web/src/DataStudioSettingsPage.tsx` | 1 939 | [ ] |
 | 28 | `apps/web/src/App.tsx` | 1 550 | [ ] |
 | 29 | `apps/web/src/ProjectPage.tsx` | 1 475 | [ ] |
@@ -933,7 +933,7 @@ registerEmailInboxRoutes(app, deps)  →  registerEmailAccountRoutes(app, deps) 
 **Верифікація.** `npm run lint` (обов'язково!), `npm run typecheck`, `npm run test:web`, `npm run build --workspace @npati/web`.
 **Effort:** M–L (краще двома PR).
 
-### [ ] Крок 26 — `apps/web/src/DataStudioPage.tsx` (1 976 → ~14 модулів)
+### [x] Крок 26 — `apps/web/src/DataStudioPage.tsx` (1 976 → 704 рядки, 16 модулів) — ВИКОНАНО ✓
 
 **Факти.** Один компонент `DataStudioPage` L116–1976; типи L13–115; **~90 `useState`** L121–290; хендлери згруповані банерами `// ---`: backend attach/create 291–332, schema-операції через preview-diff 333–383, collection 384–424, field 425–460, relation 461–473, revert міграції 474–494, row CRUD 495–599, import/export 600–663. Порожній стан 664–748. Основний UI 749–1522 (header 763–832, banners 833–856, сайдбар колекцій 857–949, правий вміст 950–1522 з union табів `"data"|"schema"|"migrations"|"auth"|"api"|"backups"|"operations"` на L132). Модалки/дровери 1523–1976: create collection 1523, add field 1559, add relation 1643, schema dry-run diff 1708, row drawer 1775, import rows 1865, drift 1914.
 
@@ -1715,3 +1715,26 @@ PostgresWorkspaceStore        ← публічний фасад; тонкі де
 - Винесено FrameworkIcon, FRAMEWORK_STARTERS, FrameworkStarterOption та копірайтинг у website-builder-constants.tsx (252 рядки).
 - Розмір опустився нижче baseline (1 166 < 1 367), усунуто блокер зростання GROWTH.
 - npm run lint та npm run typecheck — повністю зелені (Exit 0).
+
+### 4. apps/web/src/DataStudioPage.tsx (1 977 → 704 рядки, −1 273 рядки, ДОСЯГНУТО <= 800)
+- Завершено Крок 26 плану рефакторингу.
+- Створено модульну структуру в `apps/web/src/data-studio/` (усі модулі $\le 350$ рядків):
+  - `types.ts` (97 рядків): спільні типи `FieldType`, `FieldDefinition`, `SchemaOperation`, `SchemaSnapshot`, `MigrationItem`, `OverviewData`, `PreviewDiff`, `FilterItem`, `FilterOperator`, `RelationCardinality`.
+  - `api.ts` (17 рядків): ізольований хелпер `apiFetch`.
+  - `useDataStudioRows.ts` (295 рядків): хук стану рядків, фільтрів, пошуку, сортування, пагінації, CRUD дій, експорту CSV/JSON та імпорту.
+  - `DataStudioHeader.tsx` (137 рядків): хлібні крихти, перемикач env (dev/prod), статус синхронізації/drift, lock міграцій.
+  - `DataStudioEmptyBackend.tsx` (113 рядків): порожній стан підключення DataBackend.
+  - `CollectionsSidebar.tsx` (122 рядки): список колекцій та навігація по табах API, Auth, Migrations, Backups, Operations.
+  - `DataStudioRowsView.tsx` (342 рядки): таблиця рядків, пошук, фільтри, сортування, пагінація, тулбар дій.
+  - `DataStudioSchemaView.tsx` (115 рядків): таблиця колонок схеми, типи, зв'язки (FK).
+  - `MigrationsPane.tsx` (104 рядки): таблиця історії міграцій схеми та відкат reversible міграцій.
+  - `CreateCollectionModal.tsx` (57 рядків): створення нової колекції.
+  - `AddFieldModal.tsx` (124 рядки): додавання нового поля з типами/enum.
+  - `AddRelationModal.tsx` (99 рядків): налаштування зв'язків N:1, 1:N, M:N.
+  - `SchemaDiffModal.tsx` (91 рядок): перегляд dry-run SQL згенерованої схеми з підтвердженням деструктивних операцій.
+  - `RowDrawer.tsx` (117 рядків): дровер створення та редагування запису з динамічними типами полів.
+  - `ImportRowsModal.tsx` (80 рядків): модалка імпорту CSV/JSON.
+  - `DriftModal.tsx` (74 рядки): інспекція розбіжностей schema drift.
+- `DataStudioPage.tsx` зменшено з **1 977** до **704 рядків** ($\le 800$), збережено всі реекспорти контрактів для сумісності з `DataStudioSettingsPage.tsx` та `App.tsx`.
+- `npm run lint` та `npm run typecheck` проходять з кодом 0; `source-size-baseline.json` оновлено (файл вибув з переліку файлів >800 рядків).
+
