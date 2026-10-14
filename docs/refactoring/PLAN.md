@@ -776,7 +776,7 @@ sha256(concat(01..28)) == sha256(оригінал)
 |---|---|---:|---|
 | 13 | `apps/agent-api/src/email-inbox-repository.ts` | 2 347 | [ ] |
 | 14 | `apps/agent-api/src/project-git-service.ts` | 1 955 | [ ] |
-| 15 | `apps/agent-api/src/code-tool-runtime.ts` | 1 778 | [ ] |
+| 15 | `apps/agent-api/src/code-tool-runtime.ts` | 1 778 | [x] (549 рядків) |
 | 16 | `apps/agent-api/src/data-studio/auth-service.ts` | 1 270 | [ ] |
 | 17 | `apps/agent-api/src/code-tool-executors.ts` | 1 263 | [ ] |
 | 18 | `apps/agent-api/src/code-policy-engine.ts` | 1 172 | [ ] |
@@ -807,7 +807,7 @@ sha256(concat(01..28)) == sha256(оригінал)
 **Верифікація.** `npm run typecheck` + `npx vitest run tests/coding-agent-c11-git-workflow-security.test.ts tests/coding-agent-c15-mount-sandbox.test.ts tests/coding-agent-c5a-protected-branches.test.ts`.
 **Effort:** L.
 
-### [ ] Крок 15 — `code-tool-runtime.ts` (1 778 → ~7 модулів)
+### [x] Крок 15 — `code-tool-runtime.ts` (виконано: 1 806 → 549 рядків, 6 модулів-колабораторів)
 
 **Факти.** Union `CodeToolErrorCode` L49–169 (~121 рядок), `CANONICAL_ERROR_CODES` L170–219, `canonicalFailure` L220–246, `CodeToolError` L247–266, порти L267–531, експортовані хелпери L533–637 (`isSensitiveWorkspacePath`, `assertSafeWorkspacePath`, `sha256Hex`, `wrapUntrustedResult`, `validateArguments`), дефолтні порти L638–728, клас `CodeToolRuntime` L729–1775 — де **`invoke` L817–1275 — це 460 рядків**, і приватні хелпери L1276–1775 (`collectWriteTargets` 1283, `assertReadBeforeWrite` 1323, `assertApproved` 1353, `requestApprovalDecision` 1477, `ensureTurnCheckpoint` 1523, `restoreTurn` 1546, `diffForTurn` 1560, `recordRevisionConflict` 1602, `preToolPolicyAllows` 1618, `runPostWriteHooks` 1642, `recordActivity` 1725, `recordAudit` 1739).
 
