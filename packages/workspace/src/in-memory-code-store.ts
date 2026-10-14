@@ -283,3 +283,26 @@ export async function listCodeActivityEvents(host: InMemoryCodeState, input: Lis
     return host.codeRunOps.listCodeActivityEvents(input);
   }
 
+export async function findMatchingCodeApprovalRule(
+  host: InMemoryCodeState,
+  context: AuthContext,
+  query: { companyId: string; projectId?: string | null; sessionId?: string | null; action: string },
+): Promise<CodeApprovalRule | null> {
+  host.assertCompany(context, query.companyId);
+  const at = now();
+  const matches = [...host.codeApprovalRules.values()].filter((rule: CodeApprovalRule) => {
+    if (rule.workspaceId !== context.workspaceId || rule.companyId !== query.companyId) return false;
+    if (rule.action !== query.action || rule.decision !== "allow") return false;
+    if (rule.expiresAt && rule.expiresAt <= at) return false;
+
+    if (rule.scope === "session") {
+      return Boolean(query.sessionId) && rule.sessionId === query.sessionId
+        && Boolean(query.projectId) && rule.projectId === query.projectId;
+    }
+    return Boolean(query.projectId) && rule.projectId === query.projectId;
+  });
+  matches.sort((a: CodeApprovalRule, b: CodeApprovalRule) => (a.scope === b.scope ? b.createdAt.localeCompare(a.createdAt) : a.scope === "session" ? -1 : 1));
+  return matches[0] ? structuredClone(matches[0]) : null;
+}
+
+

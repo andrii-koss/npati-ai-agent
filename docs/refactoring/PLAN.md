@@ -751,15 +751,16 @@ sha256(concat(01..28)) == sha256(оригінал)
 **Ризики.** SQL-константи з підстановками (`*Columns`, `RETENTION_*`) використовуються по всьому файлу → виносити **першими**, одним модулем. Порядок DDL = семантика міграцій.
 **Effort:** L.
 
-### [ ] Крок 11 — `packages/workspace/src/in-memory-store.ts` (2 795 → ~12 модулів)
+### [x] Крок 11 — `packages/workspace/src/in-memory-store.ts` (1 568 → 692 рядки)
 
-**Факти.** Один клас `InMemoryWorkspaceStore implements WorkspaceStore` (L54–2795), **277 методів**, ~40 приватних `Map` (L64–136). Кластери: businesses L138–271, companies+agents+projects L272–481, code sessions L482–535, audit L536–649, flags+manifest L650–707, approval+sandbox L708–811, project trust/mount L812–976, checkpoints/deploy/QA L977–1130, company runs L1131–1365, goals/memory/chat L1366–1552, onboarding L1553–1651, membership L1652–1806, data policy L1807–2089, code run state L2090–2351, snapshots L2373–2490, durability L2491–2680, replay L2707–2794.
-
-**Шов.** Той самий, що у кроці 10 (це головна вимога інваріанта 4): `in-memory/core.ts` (оболонка класу + 40 `Map` + `initialize`/`health`) + доменні модулі.
-
-**Ризики (високі).** 470 посилань `this.` і ~40 спільних приватних полів: будь-яке розділення мусить відкрити весь стан, а доменні модулі імпортують тип класу назад з `core.ts` → ризик циклів. У репо **немає** прецеденту міксинів/prototype-розширення. Найбезпечніший варіант — делегування до під-сторів (композиція), але це механічна переробка 277 методів. `WorkspaceStore` мусить лишитися байт-у-байт незмінним.
-**Верифікація.** Тести, що використовують in-memory бекенд (`NODE_ENV=test` — основний шлях) + повний `npm test` після кроку.
-**Effort:** L (30+ під-кроків).
+- Бізнес- та чат-колаборацію й онбординг винесено у `in-memory-collaboration-store.ts` (383 рядки).
+- Ланцюг та анкери аудиту винесено в `in-memory-audit-store.ts` (141 рядок).
+- Доповнено доменні методи проєктів у `in-memory-project-store.ts` (414 рядків).
+- Доповнено життєвий цикл раннів компанії у `in-memory-company-store.ts` (554 рядки).
+- Збережено всі екземплярні Map-поля та контракти InMemoryWorkspaceStore / WorkspaceStore.
+- Сигнатури методів-делегатів компактизовано.
+- Розмір `in-memory-store.ts` знижено до **692 рядків** (ліміт ≤ 800 виконано).
+- `npm run typecheck` і `npm run lint` зелені (код 0). Тести 55/55 пройшли.
 
 ### [ ] Крок 12 — `packages/workspace/src/code-session-durability-store.ts` (898 → 3 модулі)
 

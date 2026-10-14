@@ -109,12 +109,6 @@
       "owner": "refactor/large-files",
       "expires_at": "2027-02-28"
     },
-    "packages/workspace/src/in-memory-store.ts": {
-      "lines": 1567,
-      "reason": "in-memory twin of the postgres store; clean seams exhausted, plan step 3",
-      "owner": "refactor/large-files",
-      "expires_at": "2027-02-28"
-    },
     "packages/workspace/src/types.ts": {
       "lines": 2486,
       "reason": "shared workspace types; splitting would scatter one contract across files",

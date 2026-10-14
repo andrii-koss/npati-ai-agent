@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { AuthContext, Business, BusinessInput, Company, CompanyAgent, CompanyAgentInput, CompanyAgentRun, CompanyInput, CompanyMember, CompanyInvite, CompanyInviteInput, UpdateCompanyMemberRoleInput, ProviderHostedConsentRecord } from "./types";
+import type { AuthContext, Business, BusinessInput, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyAgentRunEvent, CompanyInput, CompanyMember, CompanyInvite, CompanyInviteInput, UpdateCompanyMemberRoleInput, ProviderHostedConsentRecord } from "./types";
 import { WorkspaceAccessError, WorkspaceNotFoundError, ProviderDataPolicyStoreError } from "./types";
 import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from "./pagination";
 import { now } from "./in-memory-clock";
@@ -359,4 +359,195 @@ export async function revokeHostedProviderConsent(host: InMemoryCompanyState, in
     host.hostedProviderConsent.set(key, record);
     return structuredClone(record);
   }
+
+export async function setCompanyMainAgent(
+  host: InMemoryCompanyState,
+  context: AuthContext,
+  companyId: string,
+  agentId: string | null,
+  expectedRevision: number,
+) {
+  const company = assertCompany(host, context, companyId);
+  if (company.revision !== expectedRevision) throw new Error("Company was changed by another request. Reload and try again.");
+  if (agentId) assertCompanyAgent(host, context, companyId, agentId);
+  const updated = { ...company, mainAgentId: agentId ?? undefined, revision: company.revision + 1, updatedAt: now() };
+  host.companies.set(companyId, updated);
+  return updated;
+}
+
+export async function convertBusinessToCompany(
+  host: InMemoryCompanyState,
+  context: AuthContext,
+  businessId: string,
+  input: BusinessToCompanyInput,
+  idempotencyKey: string,
+): Promise<{ company: Company; created: boolean }> {
+  const business = host.assertBusiness(context, businessId);
+  const requestKey = `${context.workspaceId}:${context.userId}:${idempotencyKey}`;
+  const existingId = host.companyCreateRequests.get(requestKey);
+  if (existingId) {
+    return { company: structuredClone(assertCompany(host, context, existingId)), created: false };
+  }
+
+  const memory: Record<string, unknown> = {};
+  if (input.includeConfirmedMemory) {
+    const memories = [...host.memories.values()].filter((item: any) => item.businessId === businessId && item.workspaceId === context.workspaceId);
+    memory["confirmed_business_facts"] = memories.map((m: any) => m.content);
+  }
+  if (input.includeGoals) {
+    const goals = [...host.goals.values()].filter((item: any) => item.businessId === businessId && item.workspaceId === context.workspaceId);
+    memory["transferred_goals"] = goals.map((g: any) => ({ title: g.title, description: g.description, status: g.status }));
+  }
+
+  const instructionParts: string[] = [];
+  if (input.includeInstructions) {
+    if (business.description) instructionParts.push(`Business Description: ${business.description}`);
+    if (business.businessModel) instructionParts.push(`Business Model: ${business.businessModel}`);
+  }
+  if (input.includeResearchSummary) {
+    if (business.audienceSummary) instructionParts.push(`Target Audience: ${business.audienceSummary}`);
+    if (business.market) instructionParts.push(`Market & Niche: ${business.market} / ${business.niche ?? ""}`);
+  }
+
+  const companyInput: CompanyInput = {
+    name: input.companyName?.trim() || business.name,
+    businessId: business.id,
+    website: business.website,
+    industry: business.industry,
+    description: business.description,
+    productsServices: business.productsServicesSummary,
+    knowledge: business.logoFileId ? [{ attachmentId: business.logoFileId, kind: "image", name: "Company logo", source: "linked_business" }] : [],
+    companyInstructions: instructionParts.length > 0 ? instructionParts.join("\n\n") : undefined,
+    memory,
+    languages: ["Ukrainian", "English"],
+    status: "active",
+  };
+
+  const company = await createCompany(host, context, companyInput, idempotencyKey);
+
+  const mainAgent = await createCompanyAgent(host, context, company.id, {
+    name: "Main Agent",
+    role: "Coordinator",
+    description: `Primary executive agent for ${company.name}`,
+    tools: ["web.search", "files", "knowledge"],
+    isActive: true,
+  }, `${idempotencyKey}:main-agent`);
+
+  await setCompanyMainAgent(host, context, company.id, mainAgent.id, company.revision);
+  const updatedCompany = assertCompany(host, context, company.id);
+
+  return { company: structuredClone(updatedCompany), created: true };
+}
+
+export async function listRecoverableCompanyAgentRuns(host: InMemoryCompanyState, limit = 200) {
+  return [...host.companyRuns.values()].filter((run) => !run.cancelRequested && run.attemptCount < run.maxAttempts
+    && Date.parse(run.nextAttemptAt) <= Date.now() && (run.status === "queued"
+      || (["planning","running"].includes(run.status) && run.leaseExpiresAt != null && Date.parse(run.leaseExpiresAt) < Date.now())))
+    .slice(0,limit).map((run) => ({ context: { workspaceId: run.workspaceId,userId: run.userId,
+      permissions: ["workspace:read","business:manage"] }, companyId: run.companyId, runId: run.id }));
+}
+
+export async function replaceCompanyAgentRunSteps(
+  host: InMemoryCompanyState,
+  context: AuthContext,
+  companyId: string,
+  runId: string,
+  steps: Array<Pick<CompanyAgentRunStep, "agentId" | "stepOrder" | "lane" | "role" | "status" | "modelId">>,
+) {
+  await getCompanyAgentRun(host, context, companyId, runId);
+  const unique = new Set(steps.map((step) => step.agentId));
+  if (unique.size !== steps.length) throw new Error("A run cannot contain the same agent twice");
+  for (const agentId of unique) assertCompanyAgent(host, context, companyId, agentId);
+  for (const [id, step] of host.companyRunSteps) if (step.runId === runId) host.companyRunSteps.delete(id);
+  const timestamp = now();
+  return steps.map((step) => {
+    const row: CompanyAgentRunStep = { id: randomUUID(), workspaceId: context.workspaceId, companyId, runId,
+      ...step, createdAt: timestamp, updatedAt: timestamp };
+    host.companyRunSteps.set(row.id, row);
+    return structuredClone(row);
+  });
+}
+
+export async function appendCompanyAgentToolAudit(
+  host: InMemoryCompanyState,
+  context: AuthContext,
+  companyId: string,
+  runId: string,
+  entry: Pick<CompanyAgentToolAudit, "agentId" | "toolName" | "decision" | "status" | "inputSummary" | "errorMessage"> & Partial<Pick<CompanyAgentToolAudit, "latencyMs" | "cost" | "tokens" | "reasonCode" | "sequenceNumber">>,
+) {
+  await getCompanyAgentRun(host, context, companyId, runId);
+  assertCompanyAgent(host, context, companyId, entry.agentId);
+  const terminal = entry.status === "succeeded" || entry.status === "failed" || entry.status === "blocked";
+  const timestamp = now();
+  const row: CompanyAgentToolAudit = { id: randomUUID(), workspaceId: context.workspaceId, companyId, runId,
+    ...entry, createdAt: timestamp, completedAt: terminal ? timestamp : undefined };
+  host.companyToolAudit.set(row.id, row);
+  return structuredClone(row);
+}
+
+export async function appendCompanyAgentRunEvent(
+  host: InMemoryCompanyState,
+  context: AuthContext,
+  companyId: string,
+  runId: string,
+  entry: Pick<CompanyAgentRunEvent, "eventKey" | "eventType" | "runStatus" | "message"> & Partial<Pick<CompanyAgentRunEvent, "workerId" | "attemptCount" | "details">>,
+) {
+  const { run } = await getCompanyAgentRun(host, context, companyId, runId);
+  const existing = [...host.companyRunEvents.values()].find((item) => item.runId === runId && item.eventKey === entry.eventKey);
+  if (existing) return structuredClone(existing);
+  const row: CompanyAgentRunEvent = { id: randomUUID(), workspaceId: context.workspaceId, companyId, runId,
+    eventKey: entry.eventKey, eventType: entry.eventType, runStatus: entry.runStatus, workerId: entry.workerId,
+    attemptCount: entry.attemptCount ?? run.attemptCount, message: entry.message.slice(0, 1000),
+    details: structuredClone(entry.details ?? {}), createdAt: now() };
+  host.companyRunEvents.set(row.id, row);
+  return structuredClone(row);
+}
+
+export async function claimCompanyAgentRun(
+  host: InMemoryCompanyState,
+  context: AuthContext,
+  companyId: string,
+  runId: string,
+  workerId: string,
+  leaseMs: number,
+) {
+  const { run } = await getCompanyAgentRun(host, context, companyId, runId);
+  const stale = run.leaseExpiresAt != null && Date.parse(run.leaseExpiresAt) < Date.now();
+  if (run.cancelRequested || run.attemptCount >= run.maxAttempts || Date.parse(run.nextAttemptAt) > Date.now()
+    || (run.status !== "queued" && !(["planning","running"].includes(run.status) && stale))) return false;
+  await updateCompanyAgentRun(host, context, companyId, runId, { status: "planning", workerId,
+    attemptCount: run.attemptCount + 1, lastHeartbeatAt: now(), leaseExpiresAt: new Date(Date.now()+leaseMs).toISOString() });
+  return true;
+}
+
+export async function heartbeatCompanyAgentRun(
+  host: InMemoryCompanyState,
+  context: AuthContext,
+  companyId: string,
+  runId: string,
+  workerId: string,
+  leaseMs: number,
+) {
+  const { run } = await getCompanyAgentRun(host, context, companyId, runId);
+  if (run.workerId !== workerId || run.cancelRequested || !["planning","running"].includes(run.status)) return false;
+  await updateCompanyAgentRun(host, context, companyId, runId, { lastHeartbeatAt: now(), leaseExpiresAt: new Date(Date.now()+leaseMs).toISOString() });
+  return true;
+}
+
+export async function requeueCompanyAgentRun(
+  host: InMemoryCompanyState,
+  context: AuthContext,
+  companyId: string,
+  runId: string,
+  workerId: string,
+  delayMs: number,
+) {
+  const { run } = await getCompanyAgentRun(host, context, companyId, runId);
+  if (run.workerId !== workerId || run.cancelRequested || run.attemptCount >= run.maxAttempts) return false;
+  await updateCompanyAgentRun(host, context, companyId, runId, { status: "queued", workerId: undefined,
+    leaseExpiresAt: undefined, nextAttemptAt: new Date(Date.now()+delayMs).toISOString() });
+  return true;
+}
+
+
 

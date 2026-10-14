@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { AuthContext, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, ProjectCodeSettings, ProjectCodeTrust, ProjectMountedFolder, ProjectDataPolicyRecord } from "./types";
-import { WorkspaceNotFoundError, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS } from "./types";
+import type { AuthContext, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, ProjectCodeSettings, ProjectCodeTrust, ProjectCodeTrustInput, ProjectMountedFolder, ProjectMountedFolderInput, ProjectDataPolicyRecord } from "./types";
+import { WorkspaceNotFoundError, WorkspaceAccessError, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS } from "./types";
 import { now } from "./in-memory-clock";
 
 export interface InMemoryProjectState {
@@ -272,4 +272,142 @@ export async function getProjectForSystem(host: InMemoryProjectState, companyId:
     if (!project || project.companyId !== companyId) return null;
     return structuredClone(project);
   }
+
+export async function setProjectCodeTrust(
+  host: InMemoryProjectState,
+  context: AuthContext,
+  companyId: string,
+  projectId: string,
+  input: ProjectCodeTrustInput,
+): Promise<ProjectCodeTrust> {
+  host.assertCompany(context, companyId);
+  const key = `${companyId}:${projectId}`;
+  const existing = host.projectCodeTrust.get(key);
+  if (input.expectedRevision !== (existing?.revision ?? 0)) {
+    throw new WorkspaceAccessError("Project trust changed by another request. Reload and try again.");
+  }
+  const timestamp = now();
+  const next: ProjectCodeTrust = {
+    id: existing?.id ?? randomUUID(),
+    workspaceId: context.workspaceId,
+    companyId,
+    projectId,
+    trusted: input.trusted,
+    trustedBy: input.trusted ? input.actor : (existing?.trustedBy ?? null),
+    trustedAt: input.trusted ? timestamp : (existing?.trustedAt ?? null),
+    revokedBy: input.trusted ? (existing?.revokedBy ?? null) : input.actor,
+    revokedAt: input.trusted ? (existing?.revokedAt ?? null) : timestamp,
+    reason: input.reason ?? null,
+    revision: (existing?.revision ?? 0) + 1,
+    updatedAt: timestamp,
+  };
+  host.projectCodeTrust.set(key, next);
+  return structuredClone(next);
+}
+
+export async function setProjectMountedFolder(
+  host: InMemoryProjectState,
+  context: AuthContext,
+  companyId: string,
+  projectId: string,
+  input: ProjectMountedFolderInput,
+): Promise<ProjectMountedFolder> {
+  host.assertCompany(context, companyId);
+  const key = `${companyId}:${projectId}`;
+  const existing = host.projectMountedFolders.get(key);
+  if (input.expectedRevision !== (existing?.revision ?? 0)) {
+    throw new WorkspaceAccessError("Mounted folder changed by another request. Reload and try again.");
+  }
+  const timestamp = now();
+  const next: ProjectMountedFolder = {
+    id: existing?.id ?? randomUUID(),
+    workspaceId: context.workspaceId,
+    companyId,
+    projectId,
+    path: input.path,
+    mode: input.mode,
+    confirmedBy: input.confirmed ? input.actor : (existing?.confirmedBy ?? null),
+    confirmedAt: input.confirmed ? timestamp : (existing?.confirmedAt ?? null),
+    revokedBy: input.confirmed ? (existing?.revokedBy ?? null) : input.actor,
+    revokedAt: input.confirmed ? (existing?.revokedAt ?? null) : timestamp,
+    reason: input.reason ?? null,
+    revision: (existing?.revision ?? 0) + 1,
+    updatedAt: timestamp,
+  };
+  host.projectMountedFolders.set(key, next);
+  return structuredClone(next);
+}
+
+export async function setProjectSandbox(
+  host: InMemoryProjectState,
+  context: AuthContext,
+  companyId: string,
+  projectId: string,
+  sandboxId: string | null,
+  expectedSandboxId: string | null,
+): Promise<Project> {
+  const project = await getProject(host, context, companyId, projectId);
+  if ((project.sandboxId ?? null) !== expectedSandboxId || project.status === "archived") {
+    throw new Error("Project sandbox changed by another request or is archived");
+  }
+  const next: Project = { ...project, sandboxId: sandboxId ?? undefined, revision: project.revision + 1, updatedAt: now() };
+  host.projects.set(projectId, next);
+  return structuredClone(next);
+}
+
+export async function listProjectCheckpoints(
+  host: InMemoryProjectState,
+  context: AuthContext,
+  companyId: string,
+  projectId: string,
+  limit = 50,
+): Promise<ProjectCheckpoint[]> {
+  await getProject(host, context, companyId, projectId);
+  const safeLimit = Math.max(1, Math.min(limit, 200));
+  return structuredClone([...host.projectCheckpoints.values()]
+    .filter((c: any) => c.workspaceId === context.workspaceId && c.companyId === companyId && c.projectId === projectId)
+    .sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+    .slice(0, safeLimit));
+}
+
+export async function listProjectDeployments(
+  host: InMemoryProjectState,
+  context: AuthContext,
+  companyId: string,
+  projectId: string,
+  limit = 50,
+): Promise<ProjectDeployment[]> {
+  await getProject(host, context, companyId, projectId);
+  const safeLimit = Math.max(1, Math.min(limit, 200));
+  return structuredClone([...host.projectDeployments.values()]
+    .filter((d: any) => d.workspaceId === context.workspaceId && d.companyId === companyId && d.projectId === projectId)
+    .sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+    .slice(0, safeLimit));
+}
+
+export async function listProjectQaReports(
+  host: InMemoryProjectState,
+  context: AuthContext,
+  companyId: string,
+  projectId: string,
+  limit = 50,
+): Promise<ProjectQaReport[]> {
+  await getProject(host, context, companyId, projectId);
+  const safeLimit = Math.max(1, Math.min(limit, 200));
+  return structuredClone([...host.projectQaReports.values()]
+    .filter((r: any) => r.workspaceId === context.workspaceId && r.companyId === companyId && r.projectId === projectId)
+    .sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+    .slice(0, safeLimit));
+}
+
+export async function getLatestProjectQaReport(
+  host: InMemoryProjectState,
+  context: AuthContext,
+  companyId: string,
+  projectId: string,
+): Promise<ProjectQaReport | null> {
+  const list = await listProjectQaReports(host, context, companyId, projectId, 1);
+  return list[0] ?? null;
+}
+
 
