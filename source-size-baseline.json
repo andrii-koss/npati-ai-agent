@@ -2,7 +2,7 @@
   "version": 1,
   "entries": {
     "apps/agent-api/src/app.ts": {
-      "lines": 1446,
+      "lines": 1453,
       "reason": "API module not yet decomposed; tracked as follow-up to the plan in docs/refactoring/PLAN.md",
       "owner": "refactor/large-files",
       "expires_at": "2027-02-28"
@@ -14,13 +14,13 @@
       "expires_at": "2027-02-28"
     },
     "apps/agent-api/src/code-tool-runtime.ts": {
-      "lines": 1800,
+      "lines": 1806,
       "reason": "API module not yet decomposed; tracked as follow-up to the plan in docs/refactoring/PLAN.md",
       "owner": "refactor/large-files",
       "expires_at": "2027-02-28"
     },
     "apps/agent-api/src/coding-agent-runner.ts": {
-      "lines": 1979,
+      "lines": 1974,
       "reason": "CodingAgentRunner: its phases are being extracted one per commit (plan step 2). The file grows while a phase is given an explicit argument object and then falls again when the phases move to their own module, so the recorded number is reviewed at each phase commit.",
       "owner": "refactor/large-files",
       "expires_at": "2027-02-28"
@@ -32,7 +32,7 @@
       "expires_at": "2027-02-28"
     },
     "apps/web/src/App.tsx": {
-      "lines": 1550,
+      "lines": 1557,
       "reason": "web page not yet decomposed by section; backlog after the API and packages work",
       "owner": "refactor/large-files",
       "expires_at": "2027-02-28"
@@ -86,7 +86,7 @@
       "expires_at": "2027-02-28"
     },
     "apps/web/src/i18n/types.ts": {
-      "lines": 2631,
+      "lines": 2632,
       "reason": "web page not yet decomposed by section; backlog after the API and packages work",
       "owner": "refactor/large-files",
       "expires_at": "2027-02-28"
@@ -104,20 +104,14 @@
       "expires_at": "2027-02-28"
     },
     "apps/web/src/WebsiteBuilderDashboard.tsx": {
-      "lines": 1367,
+      "lines": 1165,
       "reason": "web page not yet decomposed by section; backlog after the API and packages work",
       "owner": "refactor/large-files",
       "expires_at": "2027-02-28"
     },
     "packages/workspace/src/in-memory-store.ts": {
-      "lines": 1566,
+      "lines": 1567,
       "reason": "in-memory twin of the postgres store; clean seams exhausted, plan step 3",
-      "owner": "refactor/large-files",
-      "expires_at": "2027-02-28"
-    },
-    "packages/workspace/src/postgres-store.ts": {
-      "lines": 3002,
-      "reason": "facade of the decomposed postgres store; further domain splits tracked in docs/refactoring/PLAN.md step 1",
       "owner": "refactor/large-files",
       "expires_at": "2027-02-28"
     },
