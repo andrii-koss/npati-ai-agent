@@ -1,3 +1,4 @@
+import { ptExecutionTrace, additionalExecutionTrace } from "./locales/request-execution";
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
 import type { SupportedLanguage, TranslationSchema, LanguageInfo } from "./types";
 import { SUPPORTED_LANGUAGES } from "./types";
@@ -133,3 +134,8 @@ export function useTranslation() {
 
 export { SUPPORTED_LANGUAGES };
 export type { SupportedLanguage };
+
+/** Reuse the same dictionaries for request-language activity without changing UI preferences. */
+export function executionTraceText(language: string, key: string) {
+  return (language === "pt" ? ptExecutionTrace[key] : additionalExecutionTrace[language]?.[key] ?? dictionaries[language as SupportedLanguage]?.executionTrace[key]) ?? en.executionTrace[key] ?? key;
+}

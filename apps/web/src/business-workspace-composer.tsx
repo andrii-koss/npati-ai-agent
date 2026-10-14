@@ -2,10 +2,8 @@ import React, { FormEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode } from
 import { SPEECH_VOICES } from "./speech-voices";
 import { ChatAttachments, type ChatAttachmentInput } from "./ChatAttachments";
 import { AutoResizeChatTextarea } from "./AutoResizeChatTextarea";
-import { CodePendingMessages } from "./CodePendingMessages";
 import { cancelChatStream } from "./chat-stream";
 import type { Business } from "./business-workspace-shared";
-import type { InboxMessage } from "./code-inbox-client";
 
 export interface BusinessChatComposerProps {
   input: string;
@@ -15,10 +13,7 @@ export interface BusinessChatComposerProps {
   draftVersion: React.MutableRefObject<number>;
   sending: boolean;
   codeInbox: any;
-  inboxNotice: string;
   inboxSubmitting: boolean;
-  submitInbox: (mode: "queue" | "steer") => Promise<void>;
-  changeInboxMessage: (message: InboxMessage, text?: string) => Promise<boolean>;
   contextSwitcher: ReactNode;
   noMemory: boolean;
   ttsEnabled: boolean;
@@ -44,10 +39,7 @@ export function BusinessChatComposer({
   draftVersion,
   sending,
   codeInbox,
-  inboxNotice,
   inboxSubmitting,
-  submitInbox,
-  changeInboxMessage,
   contextSwitcher,
   noMemory,
   ttsEnabled,
@@ -66,17 +58,6 @@ export function BusinessChatComposer({
 }: BusinessChatComposerProps) {
   return (
     <form className="onboarding-live-composer" onSubmit={(event) => void submit(event)}>
-      {codeInbox.session && (codeInbox.active || codeInbox.error || inboxNotice) && (
-        <CodePendingMessages
-          key={codeInbox.session.sessionId}
-          receiptTarget={codeInbox.receiptTarget}
-          snapshot={codeInbox.snapshot}
-          error={codeInbox.error || inboxNotice}
-          busy={inboxSubmitting}
-          t={t}
-          onChange={changeInboxMessage}
-        />
-      )}
       {contextSwitcher}
       {noMemory && (
         <span
@@ -123,22 +104,8 @@ export function BusinessChatComposer({
         onKeyDown={sendOnEnter}
         placeholder={business ? t("chat.businessPlaceholder") : t("chat.placeholder")}
       />
-      <div className={codeInbox.active ? "composer-inbox-actions" : undefined}>
-        {codeInbox.active && (
-          <>
-            <button type="submit" disabled={inboxSubmitting || !input.trim()}>
-              {t("codeInbox.queue")}
-            </button>
-            <button
-              type="button"
-              disabled={inboxSubmitting || !input.trim()}
-              onClick={() => void submitInbox("steer")}
-            >
-              {t("codeInbox.steer")}
-            </button>
-          </>
-        )}
-        {sending ? (
+      <div>
+        {sending && (!codeInbox.active || !input.trim()) ? (
           <button
             type="button"
             className="chat-stop-btn"
@@ -157,11 +124,11 @@ export function BusinessChatComposer({
               <rect x="5" y="5" width="14" height="14" rx="2.5" />
             </svg>
           </button>
-        ) : !codeInbox.active ? (
+        ) : (
           <button
             type="submit"
             className="chat-send-btn"
-            disabled={!input.trim() && attachments.length === 0}
+            disabled={inboxSubmitting || (!input.trim() && attachments.length === 0)}
             aria-label="Send"
             title="Send"
           >
@@ -180,7 +147,7 @@ export function BusinessChatComposer({
               <polyline points="14 6 20 12 14 18" />
             </svg>
           </button>
-        ) : null}
+        )}
       </div>
     </form>
   );

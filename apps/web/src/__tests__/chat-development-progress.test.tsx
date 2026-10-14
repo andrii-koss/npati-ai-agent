@@ -4,32 +4,35 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { DevelopmentProcess, ProjectCardData } from "@npati/shared";
 import { ChatDevelopmentProgress, ChatDevelopmentPreview } from "../ChatDevelopmentProgress";
+import { AgentExecutionTrace } from "../AgentExecutionTrace";
 import { developmentCard, hideDevelopmentMessage, projectConversationUrl } from "../chat-development-view";
 const process: DevelopmentProcess = { id: "process", companyId: "company", projectId: "project", conversationId: "child", parentConversationId: "parent", name: "Online store", framework: "Next.js", status: "running", hidden: false, createdAt: "", updatedAt: "", progress: [{ id: "install", stage: "dependencies", title: "Installing dependencies", status: "running", at: "" }] };
 const card: ProjectCardData = { id: "project", projectId: "project", companyId: "company", name: "Online store", status: "ready", kind: "code_project" };
 describe("project deployment chat", () => {
   it("renders an animated dot and actual stages only with a project process", () => {
     const markup = renderToStaticMarkup(<ChatDevelopmentProgress process={process} />);
-    expect(markup).toContain('class="assistant research-progress"'); expect(markup).toContain('class="research-progress-state"'); expect(markup).toMatch(/class="[^"]*research-progress-globe/); expect(markup).toContain('class="research-active-text"'); expect(markup).not.toContain('chat-development-dot'); expect(markup).not.toContain('<section'); expect(markup).toContain("Installing dependencies");
+    expect(markup).toContain('class="assistant research-progress coding-run-activity"'); expect(markup).toContain('class="research-progress-state"'); expect(markup).toMatch(/class="[^"]*research-progress-globe/); expect(markup).toContain('class="research-active-text"'); expect(markup).not.toContain('chat-development-dot'); expect(markup).not.toContain('<section'); expect(markup).toContain("Installing dependencies");
     expect(renderToStaticMarkup(<ChatDevelopmentProgress />)).toBe("");
   });
   it("keeps separate tool calls and deduplicates only the same execution identity", () => {
     const busy = { ...process, progress: [...process.progress!, ...Array.from({ length: 20 }, (_, i) => ({ id: "read-" + i, stage: "tool", title: "Reading project files", at: "" }))] };
     const markup = renderToStaticMarkup(<ChatDevelopmentProgress process={busy} />);
-    expect(markup.match(/Reading project files/g)).toHaveLength(20);
-    expect(markup.match(/research-page-row/g)).toHaveLength(21);
+    expect(markup.match(/research-page-row/g)).toHaveLength(1);
+    expect(markup).toContain('aria-expanded="false"');
+    const details = renderToStaticMarkup(<AgentExecutionTrace process={busy} nested />);
+    expect(details.match(/Reading project files/g)).toHaveLength(20);
   });
   it("preserves waiting, failure and cancellation without animating completed operations", async () => {
     const { AgentExecutionTrace } = await import("../AgentExecutionTrace");
     const items = ["completed", "waiting_for_approval", "failed", "cancelled", "running", "running"].map((status, i) => ({ id: "call-" + i, stage: "build", title: "Building project", at: "", status: status as "running", agentId: i === 5 ? "worker-2" : "worker-1" }));
     const markup = renderToStaticMarkup(<AgentExecutionTrace process={{ ...process, progress: items }} />);
     expect(markup.match(/class="research-active-text"/g)).toHaveLength(2);
-    expect(markup).toContain("Waiting for approval"); expect(markup).toContain("Failed"); expect(markup).toContain("Cancelled");
-    expect(markup.match(/codex-trace-status-pill completed/g)).toHaveLength(1);
+    expect(markup).toContain('data-status="waiting_for_approval"'); expect(markup).toContain('data-status="failed"'); expect(markup).toContain('data-status="cancelled"');
+    expect(markup).not.toContain("codex-trace-status-pill");
     expect(markup).toContain('aria-controls="trace-detail-call-0"'); expect(markup).toContain('inert=""');
-    expect(markup).toContain("worker-2");
+    expect(markup).not.toContain("worker-2");
     const duplicates = renderToStaticMarkup(<AgentExecutionTrace items={[items[0]!, { ...items[0]!, status: "failed" }]} />);
-    expect(duplicates.match(/research-page-row/g)).toHaveLength(1); expect(duplicates).toContain("Failed");
+    expect(duplicates.match(/research-page-row/g)).toHaveLength(1); expect(duplicates).toContain('data-status="failed"');
   });
   it("hides duplicate placeholder messages and cards but retains substantive replies", () => {
     const messages = [{ content: "Coding Agent session started.", projectCard: card }, { content: "I changed the page", projectCard: card }, { content: "Stopped: A2A_TOKEN_QUOTA_EXCEEDED", projectCard: card }];
@@ -131,15 +134,15 @@ describe("project deployment chat", () => {
       ],
     };
 
-    const markupUk = renderToStaticMarkup(<ChatDevelopmentProgress process={nextJsProcess} isUk={true} />);
+    const markupUk = renderToStaticMarkup(<AgentExecutionTrace process={nextJsProcess} isUk={true} nested />);
     expect(markupUk).toContain("Виконана команда: npm install");
     expect(markupUk).toContain("Виконана команда: npm run build");
     expect(markupUk).toContain("Запуск Live Preview");
-    expect(markupUk).toContain("frontend-agent");
+    expect(markupUk).not.toContain("frontend-agent");
     expect(markupUk).toContain("codex-trace-row");
-    expect(markupUk).toContain("codex-trace-status-pill");
+    expect(markupUk).not.toContain("codex-trace-status-pill");
 
-    const markupEn = renderToStaticMarkup(<ChatDevelopmentProgress process={nextJsProcess} isUk={false} />);
+    const markupEn = renderToStaticMarkup(<AgentExecutionTrace process={nextJsProcess} isUk={false} nested />);
     expect(markupEn).toContain("Executed command: npm install");
     expect(markupEn).toContain("Executed command: npm run build");
     expect(markupEn).toContain("Starting Live Preview");

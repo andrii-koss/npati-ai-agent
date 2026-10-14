@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activitySlots, chatTimeline, normalizeActivity, nearChatBottom } from "../chat-timeline";
+import { activitySlots, codingActivityRuns, mergeConversationMessages, chatTimeline, normalizeActivity, nearChatBottom } from "../chat-timeline";
 import type { Message } from "../business-workspace-cards";
 const at = (n: number) => new Date(1000 * n).toISOString();
 const messages: Message[] = [ {id:"u1",role:"user",content:"Create site",createdAt:at(1)}, {id:"a1",role:"assistant",content:"Ready",createdAt:at(4)}, {id:"u2",role:"user",content:"Change button",createdAt:at(5)}, {id:"a2",role:"assistant",content:"Changed",createdAt:at(8)} ];
@@ -35,4 +35,22 @@ describe("chat chronological activity", () => {
 it("preserves factual multi-file changes and structured test counts without fabricating missing details", () => {
   const rows = normalizeActivity([{...event("patch",2),files:[{path:"app/page.tsx",action:"modified",linesAdded:4,linesRemoved:2,diff:"+token=secret"},{path:"app/contact.tsx",action:"created"},null],tests:{total:24,passed:23,failed:1,skipped:0}}]);
   expect(rows[0]?.files).toHaveLength(2);expect(rows[0]?.files?.[0]?.diff).toBe("+token=[REDACTED]");expect(rows[0]?.files?.[1]?.linesAdded).toBeUndefined();expect(rows[0]?.tests?.failed).toBe(1);
+});
+
+it("anchors a whole run once, preserves completed runs and shows actual running state before the first tool",()=>{
+ const process: import("@npati/shared").DevelopmentProcess = {companyId:"c",parentConversationId:"parent",name:"Site",framework:"Next.js",hidden:false,createdAt:at(1),updatedAt:at(6),id:"p",initialRunId:"r1",runId:"r2",status:"running",runStatuses:{r1:"completed",r2:"running"},runStartedAts:{r2:at(6)},runLanguages:{r2:"uk"}};
+ const entries=chatTimeline(messages,[{...event("a",2),runId:"r1",status:"completed"},{...event("b",3),runId:"r1",status:"completed"}],"chat",process);
+ expect(entries.filter(entry=>entry.kind==="activity")).toHaveLength(2);
+ expect(codingActivityRuns([{...event("a",2),runId:"r1",status:"completed"}],process).map(group=>group.status)).toEqual(["completed","running"]);
+ const merged=mergeConversationMessages(messages,[{id:"queued",role:"user",content:"More changes",createdAt:at(6)}]);
+ expect(mergeConversationMessages(merged,[{id:"queued",role:"user",content:"More changes",createdAt:at(6)}])).toHaveLength(5);
+});
+
+it.each(["en","uk","de","fr","es","it","pl","pt","nl","tr","ru","zh","ja","ko","ar","hi"])("provides request-language summaries and command labels for %s",async language=>{
+ const {executionTraceText}=await import("../i18n");expect(executionTraceText(language,"runningCommand")).toContain("{{command}}");expect(executionTraceText(language,"operationsDone")).toContain("{{count}}");if(language!=="en")expect(executionTraceText(language,"working")).not.toBe(executionTraceText("en","working"));
+});
+
+it("keeps the running row anchored when the first tool arrives after a public assistant update",()=>{
+ const process: import("@npati/shared").DevelopmentProcess={id:"p",companyId:"c",parentConversationId:"parent",name:"Site",framework:"Next.js",hidden:false,createdAt:at(1),updatedAt:at(6),runId:"r",initialRunId:"initial",status:"running",runStatuses:{r:"running"},runStartedAts:{r:at(2)}};
+ const before=codingActivityRuns([],process)[0]!;const after=codingActivityRuns([{...event("call",3),runId:"r"}],process)[0]!;expect(after.id).toBe(before.id);expect(after.at).toBe(before.at);
 });

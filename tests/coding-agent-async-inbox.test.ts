@@ -130,10 +130,12 @@ describe("async inbox: durable state and races", () => {
     await expect(h.submit("secret", "queue", `sk-${"a".repeat(40)}`)).rejects.toMatchObject({ code: "inbox_credential_refused" });
     expect((await h.op({ kind: "read" })).state.messages).toEqual([]);
   });
-  it("keeps the experimental flag off even on self-hosted installations", async () => {
+  it("uses the configured self-hosted default for the inbox without bypassing disabled installations", async () => {
     const flags = new FeatureFlagService(new InMemoryWorkspaceStore(), undefined, { enabledByDefault: true });
     expect(await flags.isEnabled(ctx, "coding_agent.enabled")).toBe(true);
-    expect(await flags.isEnabled(ctx, "code.async_inbox")).toBe(false);
+    expect(await flags.isEnabled(ctx, "code.async_inbox")).toBe(true);
+    const disabled = new FeatureFlagService(new InMemoryWorkspaceStore(), undefined, { enabledByDefault: false });
+    expect(await disabled.isEnabled(ctx, "code.async_inbox")).toBe(false);
   });
   it("does not lose a wake arriving during the prior wake's last await", async () => {
     const h = setup(); let entered!: () => void; let release!: () => void;

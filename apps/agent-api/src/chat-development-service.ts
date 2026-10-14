@@ -1,5 +1,6 @@
+import { resolveCodingConversationLanguage, chatLanguageInstruction, codingStartCopy } from "./company-chat-i18n";
 import { randomUUID } from "node:crypto";
-import { developmentIsActive, planChatDevelopment, type DevelopmentProcess, type DevelopmentTarget } from "@npati/shared";
+import { DEVELOPMENT_PROCESS_SETTINGS_KEY, sanitizeExecutionTrace, developmentIsActive, planChatDevelopment, type DevelopmentProcess, type DevelopmentTarget } from "@npati/shared";
 import { WorkspaceNotFoundError, WorkspaceAccessError, type AuthContext, type Project, type WorkspaceStore } from "@npati/workspace";
 import type { CodeService } from "./code-service";
 import type { FeatureFlagService } from "./feature-flags";
@@ -18,7 +19,7 @@ import { saveChatProjectCard } from "./project-chat-cards";
 import { developmentTrace, sanitizeProgress, selectDevelopmentTraceRuns, executionTimestamp, executionResultDetails } from "./chat-development-trace";
 import type { ProjectTerminalEventsRepository } from "./project-terminal-events";
 
-const key = "chat-development-processes:v1";
+const key = DEVELOPMENT_PROCESS_SETTINGS_KEY;
 type Entry = DevelopmentProcess & { requestId: string; businessId?: string; cardMessageId?: string; resultMessageId?: string };
 export class DevelopmentError extends Error {
   constructor(message: string, readonly status = 400) { super(message); }
@@ -89,8 +90,30 @@ export class ChatDevelopmentService {
       const progress = await developmentTrace(this.d.store, ctx, traceProcess, this.d.terminalEvents);
       const history = await Promise.all([...traceRuns.roots, ...traceRuns.children].filter(run => run.runId !== traceProcess.runId).map(run =>
         developmentTrace(this.d.store, ctx, { ...stored, progress: [], runId: run.runId, sessionId: run.sessionId })));
+      const conversationMessages: NonNullable<DevelopmentProcess["conversationMessages"]> = [];
+      const queueLanguages = new Map<string,string>();
+      const chatHistory = stored.conversationId ? (await this.d.store.getNeutralConversation(ctx,stored.conversationId).catch(()=>({messages:[]}))).messages : [];
+      if (stored.sessionId && this.d.inbox && inboxEnabled.get(stored.companyId)) {
+        const session = await this.d.code.getSession(ctx,stored.companyId,stored.sessionId);
+        const inbox = await this.d.inbox.transact(session,{kind:"read"});
+        const history = [{role:"user",content:project?.description ?? "",createdAt:project?.createdAt ?? stored.createdAt}];
+        for (const message of inbox.state.messages.filter(item=>!item.completion && item.authorId===ctx.userId && item.status!=="discarded")) {
+          conversationMessages.push({id:"inbox:"+message.id,role:"user",content:message.text,createdAt:message.createdAt});
+          const language = resolveCodingConversationLanguage(message.text,[...history,...chatHistory.filter(item=>item.role==="user" && Date.parse(item.createdAt)<Date.parse(message.createdAt))].sort((a,b)=>(Date.parse(a.createdAt)||0)-(Date.parse(b.createdAt)||0))); history.push({role:"user",content:message.text,createdAt:message.createdAt});
+          if (!message.runId) continue;
+          queueLanguages.set(message.runId,language);
+          const bundle = await this.d.store.getReplayBundle(stored.companyId,message.runId);
+          if (!bundle) continue;
+          const steps = await this.d.store.listReplayBundleSteps(stored.companyId,bundle.id);
+          const last = steps.filter(step=>step.kind==="model_step").at(-1);
+          const response = last?.payload.response as {content?:unknown;toolCalls?:unknown[]}|undefined;
+          if (typeof response?.content === "string" && response.content.trim() && !response.toolCalls?.length && !/^\s*[<{\[]/u.test(response.content)) conversationMessages.push({id:"inbox-reply:"+message.runId,role:"assistant",content:sanitizeExecutionTrace(response.content),createdAt:new Date(executionTimestamp(last!.createdAt) ?? Date.parse(message.createdAt)).toISOString()});
+        }
+      }
+      const runLanguages = Object.fromEntries(traceRuns.roots.map(run => [run.runId, queueLanguages.get(run.runId) ?? resolveCodingConversationLanguage("",[{role:"user",content:project?.description ?? ""},...chatHistory.filter(message=>message.role==="user" && Date.parse(message.createdAt) <= (executionTimestamp(run.startedAt) ?? Infinity))]) ]));
       const merged = Array.from(new Map([...progress, ...history.flat()].map(event => [event.id, event])).values()).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
-      const item = { ...traceProcess, progress: merged, inboxEnabled: inboxEnabled.get(stored.companyId) ?? false };
+      for (const event of merged) if (event.runId && queueLanguages.has(event.runId)) event.language = queueLanguages.get(event.runId);
+      const item = { ...traceProcess, conversationMessages, initialRunId: stored.runId, runLanguages, runStartedAts: Object.fromEntries([...traceRuns.roots,...traceRuns.children].map(run=>[run.runId,new Date(executionTimestamp(run.startedAt) ?? executionTimestamp(stored.createdAt) ?? 0).toISOString()])), runStatuses: Object.fromEntries([...traceRuns.roots, ...traceRuns.children].map(run => [run.runId, run.status])), progress: merged, inboxEnabled: inboxEnabled.get(stored.companyId) ?? false };
       if (this.jobs.has(this.jobKey(ctx, item.id))) return item;
       const latest = latestRun;
       if (latest && item.projectId) {
@@ -144,10 +167,12 @@ export class ChatDevelopmentService {
         return this.d.store.getConversation(ctx, input.businessId, conversationId!);
       });
     } else conversationId = (await this.d.store.createNeutralConversation(ctx, input.message.slice(0, 80))).id;
+    const history = (await this.d.store.getNeutralConversation(ctx, conversationId!).catch(() => ({ messages: [] }))).messages;
+    const responseLanguage = resolveCodingConversationLanguage(input.message, history);
     const now = new Date().toISOString();
     const created: Entry[] = targets.map(target => ({
       id: randomUUID(), requestId: input.requestId, companyId: input.companyId,
-      parentConversationId: conversationId!, businessId: input.businessId, name: target.name, framework: target.framework, status: "queued", hidden: false, createdAt: now, updatedAt: now
+      parentConversationId: conversationId!, responseLanguage, businessId: input.businessId, name: target.name, framework: target.framework, status: "queued", hidden: false, createdAt: now, updatedAt: now
     }));
     await this.change(ctx, items => {
       if (items.filter(p => !!currentViews.get(p.id) && developmentIsActive(currentViews.get(p.id)!)).length + created.length > 4) throw new DevelopmentError("Four development processes are already active. Stop or wait for a process before starting another.", 409);
@@ -161,7 +186,7 @@ export class ChatDevelopmentService {
     };
     try {
       await append("user", input.message);
-      await append("assistant", "Підключаю агента кодування. Починаю розробку в sandbox: " + targets.map(t => t.name + " (" + t.framework + ")").join(", ") + ". Після змін система перевірить build і запустить Live Preview.");
+      await append("assistant", codingStartCopy(responseLanguage) + ": " + targets.map(t => t.name + " (" + t.framework + ")").join(", ") + ".");
     } catch (error) {
       for (const process of created) await this.patch(ctx, process.id, { status: "failed", detail: "Could not save the chat." });
       throw error;
@@ -288,8 +313,8 @@ export class ChatDevelopmentService {
       });
       const outcome = await this.d.executor.execute({
         ctx, session, runId: process.runId, maxTurns: 16,
-        onActivity: event => this.recordActivity(ctx, process.companyId, session!.id, process.conversationId, event),
-        prompt: "User request: " + message + "\nYour assigned project is " + target.name + " (" + target.kind + "). Implement ONLY this project, not the other requested projects. The existing template has already been prepared by the system. Make a focused first implementation: read package.json and " + (target.kind === "mobile_app" ? "App.tsx" : target.framework === "HTML/CSS" ? "index.html" : "app/page.tsx") + ", edit the visible page and its styles immediately, then finish. Do not explore unrelated modules or delegate this initial page task. You have at most 16 turns, including repairs. Preserve the attached database/auth SDK. Do not re-scaffold or run create-next-app. Template dependencies are already installed by the system. Only when adding a new package, use the available code.deps.add tool. Do not start a dev server. Finish implementation; the system will verify the production build and start Live Preview.",
+        onActivity: event => this.recordActivity(ctx, process.companyId, session!.id, process.conversationId, { ...event, language: process.responseLanguage }),
+        prompt: "User request: " + message + "\nYour assigned project is " + target.name + " (" + target.kind + "). Implement ONLY this project, not the other requested projects. The existing template has already been prepared by the system. Make a focused first implementation: read package.json and " + (target.kind === "mobile_app" ? "App.tsx" : target.framework === "HTML/CSS" ? "index.html" : "app/page.tsx") + ", edit the visible page and its styles immediately, then finish. Do not explore unrelated modules or delegate this initial page task. You have at most 16 turns, including repairs. Preserve the attached database/auth SDK. Do not re-scaffold or run create-next-app. Template dependencies are already installed by the system. Only when adding a new package, use the available code.deps.add tool. Do not start a dev server. Finish implementation; the system will verify the production build and start Live Preview." + chatLanguageInstruction(message, [], process.responseLanguage as import("./company-chat-i18n").CompanyChatLanguage),
         cancelRequested: () => controller.signal.aborted,
         abort: () => this.d.background.abort(process.runId!, "Stopped by request"),
         sink: { signal: sink.signal, emitResult: result => sink!.emit("result", result), emitTerminal: (status, reason) => sink!.finish(status, reason) },

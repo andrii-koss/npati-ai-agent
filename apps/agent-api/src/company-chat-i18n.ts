@@ -198,3 +198,14 @@ export function chatLanguageInstruction(
 export function insertCompanyName(template: string, name: string): string {
   return template.replace("{name}", name);
 }
+
+/** Coding language uses user prose, never commands, paths or the English orchestration wrapper. */
+export function resolveCodingConversationLanguage(message: string, history: Array<{role:string;content:string | null | unknown[]}> = []) {
+  const prose = (text:string) => text.replace(/\b(?:npm|pnpm|yarn|bun|git)\s+(?:(?:run|exec)\s+)?[\w:.-]+(?:\s+--[\w=-]+)*/giu," ").replace(/(?:[\w.-]+[\/\\])+[\w.-]+|\b[\w.-]+\.(?:tsx?|jsx?|json|css|html|md|py)\b/giu," ").replace(/\b(?:Next\.js|Live Preview|build|Sandbox|Docker)\b/giu," ");
+  return resolveConversationLanguage(prose(message),history.map(item=>({...item,content:typeof item.content==="string" ? prose(item.content) : item.content})));
+}
+export function codingStartCopy(language: CompanyChatLanguage) {
+  const labels: Partial<Record<CompanyChatLanguage,string>> = { en:"Starting development in Sandbox",uk:"\u041f\u043e\u0447\u0438\u043d\u0430\u044e \u0440\u043e\u0437\u0440\u043e\u0431\u043a\u0443 \u0432 Sandbox",de:"Starte die Entwicklung in Sandbox",fr:"D\u00e9marrage du d\u00e9veloppement dans Sandbox",es:"Iniciando el desarrollo en Sandbox",it:"Avvio dello sviluppo in Sandbox",pl:"Rozpoczynam tworzenie w Sandbox",pt:"Iniciando o desenvolvimento no Sandbox" };
+  Object.assign(labels,{"nl":"Start de ontwikkeling in Sandbox","tr":"Sandbox içinde geliştirmeye başlıyorum","ru":"Начинаю разработку в Sandbox","zh":"开始在 Sandbox 中开发","ja":"Sandbox で開発を開始します","ko":"Sandbox에서 개발을 시작합니다","ar":"أبدأ التطوير في Sandbox","hi":"Sandbox में विकास शुरू कर रहा हूँ"});
+  return labels[language] ?? labels.en!;
+}

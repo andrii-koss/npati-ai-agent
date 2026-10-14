@@ -2,6 +2,7 @@ import { getStoredAuthToken } from "./AuthContext";
 
 export type CodeChatSession = { companyId: string; projectId: string; sessionId: string; inboxEnabled: true };
 export type InboxMessage = { id: string; requestId: string; text: string; target: "next-turn" | "next-step";
+  createdAt?: string;
   status: "pending" | "claimed" | "admitted" | "discarded"; revision: number; runId: string | null; completion?: { eventId: string; resultRef: string; status: string; processId: string } };
 export type InboxSnapshot = { revision: number; phase: "idle" | "reserved" | "running" | "sealed" | "settled";
   runId: string | null; lastError: string | null; messages: InboxMessage[]; receipt?: InboxMessage | null };
