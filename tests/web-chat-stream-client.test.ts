@@ -4,6 +4,13 @@ import {cancelChatStream,streamChat} from "../apps/web/src/chat-stream";
 afterEach(()=>vi.unstubAllGlobals());
 
 describe("WebChat SSE client",()=>{
+  it("ignores invalid JSON, non-text deltas and invalid session/progress payloads", async () => {
+    vi.stubGlobal("localStorage",{getItem:()=>null});
+    const body = new ReadableStream<Uint8Array>({start(c){c.enqueue(new TextEncoder().encode('event: delta\ndata: invalid\n\nevent: delta\ndata: {"delta":{}}\n\nevent: code_session\ndata: {}\n\nevent: progress\ndata: {"type":"page_fetch_completed","url":{}}\n\nevent: result\ndata: {"message":"done"}'));c.close();}});
+    vi.stubGlobal("fetch",vi.fn().mockResolvedValue(new Response(body)));const progress=vi.fn(),delta=vi.fn(),session=vi.fn();
+    expect(await streamChat({message:"edit"},progress,{onDelta:delta,onCodeSession:session})).toEqual({message:"done"});
+    expect(progress).not.toHaveBeenCalled();expect(delta).not.toHaveBeenCalled();expect(session).not.toHaveBeenCalled();
+  });
   it("parses split progress, delta and result frames in order",async()=>{
     vi.stubGlobal("localStorage",{getItem:()=>"token"});
     const encoder=new TextEncoder();
@@ -22,6 +29,21 @@ describe("WebChat SSE client",()=>{
     expect(result).toEqual({message:"Hello world"});
   });
 
+  it("ignores routing metadata and malformed progress while continuing a coding reply", async () => {
+    vi.stubGlobal("localStorage",{getItem:()=>"token"});
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({start(c){c.enqueue(encoder.encode('event: progress\ndata: {"routed":"code_runner","runId":"run"}\n\nevent: progress\ndata: null\n\nevent: progress\ndata: {"type":"project_progress","stage":"build","status":"completed"}\n\nevent: delta\ndata: {"delta":"Updated the button"}\n\nevent: result\ndata: {"message":"Updated the button"}\n\n'));c.close();}});
+    vi.stubGlobal("fetch",vi.fn().mockResolvedValue(new Response(body)));
+    const events: string[] = [], deltas: string[] = [];
+    const result = await streamChat<{message:string}>({message:"Make the button green",projectId:"project"}, e => { events.push(e.type); expect(() => e.type.startsWith("final_generation")).not.toThrow(); }, {onDelta: d=>deltas.push(d)});
+    expect(events).toEqual(["project_progress"]);expect(deltas).toEqual(["Updated the button"]);expect(result.message).toBe("Updated the button");
+  });
+  it("ignores an untyped final progress frame without a trailing delimiter", async () => {
+    vi.stubGlobal("localStorage",{getItem:()=>null});
+    const body = new ReadableStream<Uint8Array>({start(c){c.enqueue(new TextEncoder().encode('event: result\ndata: {"message":"done"}\n\nevent: progress\ndata: {"routed":"code_runner"}'));c.close();}});
+    vi.stubGlobal("fetch",vi.fn().mockResolvedValue(new Response(body)));const progress=vi.fn();
+    expect(await streamChat({message:"edit"},progress)).toEqual({message:"done"});expect(progress).not.toHaveBeenCalled();
+  });
   it("propagates cancellation to the browser fetch",async()=>{
     vi.stubGlobal("localStorage",{getItem:()=>null});
     const fetchMock=vi.fn((_url:string,init?:RequestInit)=>new Promise<Response>((_resolve,reject)=>init?.signal?.addEventListener("abort",()=>reject(init.signal?.reason),{once:true})));

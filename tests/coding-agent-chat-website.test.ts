@@ -97,7 +97,13 @@ describe("Coding Agent website chat", () => {
       const second = await app.inject({ method: "POST", url: "/chat/stream", payload: { conversationId: created.conversationId, contextType: "none", message: "Зроби кнопку зеленою" } });
       const edited = finalResult(second.body);
       expect(edited, second.body).toMatchObject({ routed: "code_runner", projectCard: { projectId: created.projectCard.projectId, sessionId: created.projectCard.sessionId } });
+      const third = await app.inject({ method: "POST", url: "/chat/stream", payload: { conversationId: created.conversationId, companyId: company.id, projectId: created.projectCard.projectId, contextType: "project", message: "Create a contact form on this website" } });
+      expect(finalResult(third.body), third.body).toMatchObject({ routed: "code_runner", projectCard: { projectId: created.projectCard.projectId, sessionId: created.projectCard.sessionId }, conversationId: created.conversationId });
       expect(await store.listProjects(ctx, company.id)).toHaveLength(1);
+      const saved = (await store.getNeutralConversation(ctx,created.conversationId)).messages;
+      expect(saved.map(item=>item.role)).toEqual(["user","assistant","user","assistant","user","assistant"]);
+      expect(saved[0]?.id).toBe(created.userMessage.id);expect(saved[1]?.id).toBe(created.assistantMessage.id);
+      expect(saved.every((item,i)=> i===0 || Date.parse(item.createdAt)>Date.parse(saved[i-1]!.createdAt))).toBe(true);
       // In-memory app wiring has no privileged audit port. Routing must not bypass that refusal.
       expect(created.run).toMatchObject({ status: "failed", reason: "refused" });
       expect(created.run.message).toContain("audit_unavailable");

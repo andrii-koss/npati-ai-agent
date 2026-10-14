@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect, useCallback } from "react";
+import { isChatProgressEvent } from "./chat-stream";
 import type { ChatProgressEvent } from "./ResearchProgress";
 
 const PAGE_PROGRESS_PRESENTATION_MS = 1200;
@@ -72,7 +73,7 @@ export function useChatResearchProgress(flushDeltasRef: React.MutableRefObject<(
   }, [drainProgressQueue]);
 
   const enqueueProgress = useCallback((event: ChatProgressEvent) => {
-    if (event.type === "source_discovered") return;
+    if (!isChatProgressEvent(event) || event.type === "source_discovered") return;
     if (event.type === "search_results_received") {
       pendingSearchResultsRef.current = event;
       return;

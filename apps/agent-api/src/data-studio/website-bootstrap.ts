@@ -33,7 +33,7 @@ export async function bootstrapWebsiteData(ctx: AuthContext, project: Project, p
   const { backends, repository, provider, migrations, agentData, auth, gateway, studio, workspace } = services;
   const companyId = project.companyId;
   const commerce = isCommerceWebsite(prompt);
-  const publicBase = process.env.NPATI_PROJECT_API_PUBLIC_URL;
+  const publicBase = process.env.NPATI_PROJECT_API_PUBLIC_URL || process.env.NPATI_AGENT_PUBLIC_DOMAIN || process.env.NPATI_WEB_ORIGIN;
   if (!publicBase) throw new DataStudioError(503, "website_bootstrap", "Configure NPATI_PROJECT_API_PUBLIC_URL to connect the website to its database", false, "PROJECT_API_URL_REQUIRED");
   let publicUrl: URL;
   try { publicUrl = new URL(publicBase); } catch { throw new DataStudioError(503, "website_bootstrap", "Invalid Project API public URL", false, "INVALID_API_URL"); }

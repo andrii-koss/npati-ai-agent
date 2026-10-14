@@ -1031,7 +1031,8 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
 
   async appendMessage(context: AuthContext, businessId: string, conversationId: string, role: ConversationMessage["role"], content: string) {
     const { conversation } = await this.getConversation(context, businessId, conversationId);
-    const message: ConversationMessage = { id: randomUUID(), conversationId, role, content, createdAt: now() };
+    const last = Math.max(0, ...[...this.messages.values()].filter(item => item.conversationId === conversationId).map(item => Date.parse(item.createdAt)));
+    const message: ConversationMessage = { id: randomUUID(), conversationId, role, content, createdAt: new Date(Math.max(Date.now(), last + 1)).toISOString() };
     this.messages.set(message.id, message);
     this.conversations.set(conversationId, { ...conversation, updatedAt: message.createdAt });
     return message;

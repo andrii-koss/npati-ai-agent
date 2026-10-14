@@ -2,6 +2,15 @@ import type { ChatProgressEvent } from "./ResearchProgress";
 import type { ChatAttachmentInput } from "./ChatAttachments";
 import type { CodeChatSession } from "./code-inbox-client";
 
+const progressTypes = new Set(["search_started", "search_results_received", "source_discovered", "page_fetch_started", "page_fetch_completed", "page_fetch_failed", "action_started", "action_completed", "project_progress", "research_completed", "final_generation_started", "final_generation_completed", "final_generation_failed"]);
+/** Routing metadata uses the same wire channel but is not a presentation event. */
+export function isChatProgressEvent(value: unknown): value is ChatProgressEvent {
+  if (!value || typeof value !== "object") return false;
+  const event = value as Record<string, unknown>;
+  if (typeof event.type !== "string" || !progressTypes.has(event.type)) return false;
+  return ["timestamp", "query", "url", "domain", "title", "error", "stage", "status", "framework"].every(key => event[key] === undefined || typeof event[key] === "string")
+    && ["resultCount", "sourceCount", "pageCount"].every(key => event[key] === undefined || typeof event[key] === "number" && Number.isFinite(event[key]));
+}
 type StreamEnvelope<T> =
   | { event: "progress"; data: ChatProgressEvent }
   | { event: "delta"; data: { delta: string } }
@@ -18,7 +27,14 @@ function parseBlock<T>(block: string): StreamEnvelope<T> | null {
     if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
   }
   if (!event || data.length === 0) return null;
-  return { event, data: JSON.parse(data.join("\n")) } as StreamEnvelope<T>;
+  try {
+    const payload = JSON.parse(data.join("\n"));
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+    if (event === "delta" && typeof payload.delta !== "string") return null;
+    if (event === "code_session" && !["companyId", "projectId", "sessionId"].every(key => typeof payload[key] === "string")) return null;
+    if (event === "code_inbox" && (typeof payload.sessionId !== "string" || !Number.isFinite(payload.revision))) return null;
+    return { event, data: payload } as StreamEnvelope<T>;
+  } catch { return null; }
 }
 
 export async function streamChat<T>(
@@ -74,7 +90,7 @@ export async function streamChat<T>(
     for (const block of blocks) {
       const envelope = parseBlock<T>(block);
       if (!envelope) continue;
-      if (envelope.event === "progress") onProgress(envelope.data);
+      if (envelope.event === "progress" && isChatProgressEvent(envelope.data)) onProgress(envelope.data);
       if (envelope.event === "delta") options.onDelta?.(envelope.data.delta);
       if (envelope.event === "code_session") options.onCodeSession?.(envelope.data);
       if (envelope.event === "code_inbox") options.onCodeInbox?.(envelope.data.sessionId, envelope.data.revision);
@@ -89,7 +105,7 @@ export async function streamChat<T>(
   }
   if(buffer.trim()){
     const envelope=parseBlock<T>(buffer);
-    if(envelope?.event==="progress")onProgress(envelope.data);
+    if(envelope?.event==="progress" && isChatProgressEvent(envelope.data))onProgress(envelope.data);
     if(envelope?.event==="delta")options.onDelta?.(envelope.data.delta);
     if(envelope?.event==="code_session")options.onCodeSession?.(envelope.data);
     if(envelope?.event==="code_inbox")options.onCodeInbox?.(envelope.data.sessionId,envelope.data.revision);

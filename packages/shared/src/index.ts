@@ -37,6 +37,8 @@ export interface AgentMessage {
 }
 
 export interface AgentReply {
+  userMessage?: { id: string; createdAt: string };
+  assistantMessage?: { id: string; createdAt: string };
   message: string;
   suggestedActions: string[];
   companyAction?: { action: "create" | "update" | "delete"; companyId: string; companyName: string; agentCount: number };
@@ -238,3 +240,5 @@ export * from "./mobile-app-template";
 export * from "./project-data-seeds";
 
 export * from "./chat-development";
+
+export { sanitizeExecutionTrace } from "./execution-trace";

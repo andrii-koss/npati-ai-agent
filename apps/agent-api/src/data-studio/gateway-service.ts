@@ -119,7 +119,7 @@ export class ProjectApiGatewayService {
     const authorized = await this.store.getProject(ctx, companyId, projectId);
     const { project, backend } = await this.resolveProject(projectId);
     if (project.companyId !== companyId || authorized.dataBackendId !== backend.id) throw new DataStudioError(403, "gateway", "Project access denied", false, "PROJECT_FORBIDDEN");
-    const publicBase = process.env.NPATI_PROJECT_API_PUBLIC_URL;
+    const publicBase = process.env.NPATI_PROJECT_API_PUBLIC_URL || process.env.NPATI_AGENT_PUBLIC_DOMAIN || process.env.NPATI_WEB_ORIGIN;
     if (!publicBase) return {};
     const parsed = new URL(publicBase);
     if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) {

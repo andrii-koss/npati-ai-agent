@@ -66,6 +66,7 @@ export interface ChatStreamRouteDeps {
   projectService: ProjectService;
   runBusinessMessage: (auth: AuthContext, businessId: string, message: string, conversationId: string | undefined, log: { warn(value: unknown, message?: string): void }, progress?: ResearchProgressListener, attachments?: ChatAttachmentInput[], memoryPolicy?: NoMemoryEvaluationResult, signal?: AbortSignal) => Promise<{ message: string; companyAction?: { companyId: string; action: string } }>;
   runNeutralMessage: (auth: AuthContext, message: string, conversationId: string | undefined, attachments?: ChatAttachmentInput[], progress?: ResearchProgressListener, memoryPolicy?: NoMemoryEvaluationResult, onDelta?: (chunk: string) => void, signal?: AbortSignal, managementCompany?: { id: string; name: string }) => Promise<{ message: string; companyAction?: { companyId: string; action: string } }>;
+  chatDevelopment?: import("./chat-development-service").ChatDevelopmentService;
   workspaceStore: ReturnType<typeof createCoreServices>["workspaceStore"];
   boundedResponseChunks: (value: string, maxCharacters?: number) => Iterable<string>;
 }
@@ -284,6 +285,16 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
           if (!codeSession) {
             send("result", { routed: "clarify", intent: codeDecision.intent, message: "Which project should I work in? Create or select a code session first." });
           } else {
+            let cardConversationId: string | undefined;
+            let savedUser: { id: string; createdAt: string } | undefined;
+            let savedAssistant: { id: string; createdAt: string } | undefined;
+            if (memoryPolicy.writeAllowed) {
+              const conversation = request.body.conversationId
+                ? (await workspaceStore.getNeutralConversation(auth, request.body.conversationId)).conversation
+                : await workspaceStore.createNeutralConversation(auth, conversationTitle(message));
+              cardConversationId = conversation.id;
+              savedUser = await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", message);
+            }
             const runKey = `${codeSession.id}:${Date.now().toString(36)}`;
             if (await codeSessionInbox.isEnabled(auth, codeSession.companyId)) await codeSessionInbox.recoverTerminalTask(codeSession);
 
@@ -338,6 +349,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
             const executed = await codeSessionRunExecutor.execute({
               ctx: auth,
               session: codeSession,
+              onActivity: memoryPolicy.writeAllowed ? event => deps.chatDevelopment?.recordActivity(auth, activeCompanyId!, codeSession.id, cardConversationId, event) ?? Promise.resolve() : undefined,
               prompt: isCodeChatWebsite(codeProject)
                 ? `${message}\n\nWork in this existing website workspace. Start with package.json, the main page and its styles; implement the requested visible website before exploring unrelated files. Read files before editing; preserve working pages and the attached database/auth SDK (lib/project-client.ts). Do not re-scaffold or run create-next-app. Use the available code.deps.add tool when adding a dependency. Initial template installation and build are managed by the system; do not invent a code.deps.install tool or use compound shell setup commands. Do not start a dev server yourself. Once the requested edits are made, finish your response: the system runs the production build and starts Live Preview.`
                 : message,
@@ -413,19 +425,15 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
               ...(typeof changedFiles === "number" ? { changesCount: changedFiles } : {}),
               ...(typeof finishedRun?.runId === "string" ? { runId: finishedRun.runId } : {}),
             };
-            let cardConversationId: string | undefined;
-            if (memoryPolicy.writeAllowed) {
+            if (memoryPolicy.writeAllowed && cardConversationId) {
               try {
-                const conversation = request.body.conversationId
-                  ? (await workspaceStore.getNeutralConversation(auth, request.body.conversationId)).conversation
-                  : await workspaceStore.createNeutralConversation(auth, conversationTitle(message));
+                const conversation = { id: cardConversationId };
                 if (conversation) {
-                  cardConversationId = conversation.id;
-                  await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", message);
                   const summary = typeof finishedRun?.message === "string" && finishedRun.message
                     ? finishedRun.message
                     : `The code agent finished with status ${runStatus}.`;
                   const assistantMessage = await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", summary);
+                  savedAssistant = assistantMessage;
                   await saveChatProjectCard(workspaceStore, auth, conversation.id, assistantMessage.id, codeCard);
                 }
               } catch (error) {
@@ -437,6 +445,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
               routed: "code_runner",
               intent: codeDecision.intent,
               run: runResult,
+              userMessage: savedUser, assistantMessage: savedAssistant,
               projectCard: codeCard,
               message: finishedRun?.message ?? `The code agent finished with status ${runStatus}.`,
               activeContext: { contextType: "project", companyId: activeCompanyId, projectId: effectiveProjectId, businessId: null },

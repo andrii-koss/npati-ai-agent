@@ -3,7 +3,8 @@ import { developmentIsActive, planChatDevelopment, requestsDevelopmentRestore, t
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "./business-workspace-shared";
 import type { CodeChatSession } from "./code-inbox-client";
-import { ChatDevelopmentProgress } from "./ChatDevelopmentProgress";
+import { watchDevelopmentTrace } from "./chat-development-stream";
+import { ChatDevelopmentProgress, ChatDevelopmentPreview } from "./ChatDevelopmentProgress";
 import { developmentCard, hideDevelopmentMessage } from "./chat-development-view";
 import { ChatDevelopmentPanel } from "./ChatDevelopmentPanel";
 import { useTranslation } from "./i18n";
@@ -12,8 +13,10 @@ export function useChatDevelopment(options: {
 }) {
   const navigate = useNavigate(); const [search] = useSearchParams();
   const { language } = useTranslation();
-  const projectId = search.get("project") ?? undefined; const root = search.get("developmentRoot");
+  const queryProjectId = search.get("project") ?? undefined; const root = search.get("developmentRoot");
   const [processes, setProcesses] = useState<DevelopmentProcess[]>([]);
+  const currentProcess = processes.find(p => p.conversationId === options.conversationId && (!queryProjectId || p.projectId === queryProjectId));
+  const projectId = queryProjectId ?? currentProcess?.projectId;
   const [busyId, setBusyId] = useState<string>();
   const [showAll, setShowAll] = useState(false);
   const previousStatuses = useRef(new Map<string, string>());
@@ -21,18 +24,26 @@ export function useChatDevelopment(options: {
   const [submitting, setSubmitting] = useState(false);
   const callbacks = useRef(options); callbacks.current = options;
   const sending = useRef(false); const alive = useRef(true);
+  const refreshing = useRef<Promise<void> | undefined>(undefined);
   async function refresh() {
+    if (refreshing.current) return refreshing.current;
+    const task = async () => {
     const data = await api<{ processes: DevelopmentProcess[] }>("/chat/development/processes");
     if (alive.current) setProcesses(data.processes);
+    };
+    refreshing.current = task();
+    try { await refreshing.current; } finally { refreshing.current = undefined; }
   }
   const anyActive = processes.some(developmentIsActive);
   useEffect(() => {
     alive.current = true;
     const poll = () => { void refresh().catch(() => {}); };
     poll();
-    const intervalMs = anyActive ? 1000 : 2500;
+    const controller = new AbortController();
+    void watchDevelopmentTrace(controller.signal, poll);
+    const intervalMs = anyActive ? 5000 : 10000;
     const timer = window.setInterval(poll, intervalMs);
-    return () => { alive.current = false; window.clearInterval(timer); };
+    return () => { alive.current = false; controller.abort(); window.clearInterval(timer); };
   }, [anyActive]);
   useEffect(() => {
     // Websites links recover a dedicated development chat, even after its previous chat was deleted.
@@ -51,9 +62,11 @@ export function useChatDevelopment(options: {
   useEffect(() => {
     const process = processes.find(p => p.projectId === projectId && p.conversationId === options.conversationId);
     if (!process) return;
+    if (options.busy) return;
+    const signature = process.status + ":" + process.updatedAt;
     const previous = previousStatuses.current.get(process.id);
-    previousStatuses.current.set(process.id, process.status);
-    if (previous && previous !== process.status && !developmentIsActive(process) && !options.busy && options.conversationId) callbacks.current.onConversation(options.conversationId);
+    previousStatuses.current.set(process.id, signature);
+    if (previous && previous !== signature && !developmentIsActive(process) && options.conversationId) callbacks.current.onConversation(options.conversationId);
   }, [processes, projectId, options.conversationId, options.busy]);
   async function action(id: string, action: "open" | "stop" | "hide") {
     setBusyId(id);
@@ -67,7 +80,7 @@ export function useChatDevelopment(options: {
   async function submit(message: string): Promise<boolean> {
     let targets;
     const restore = requestsDevelopmentRestore(message);
-    try { targets = planChatDevelopment(message); } catch (error) { callbacks.current.onError((error as Error).message); return true; }
+    try { targets = planChatDevelopment(message, projectId); } catch (error) { callbacks.current.onError((error as Error).message); return true; }
     if (!restore && !targets.length) {
       const current = processes.find(p => p.projectId === projectId && p.conversationId === options.conversationId);
       if (current && developmentIsActive(current) && !current.progress?.some(event => event.stage === "agent")) {
@@ -93,22 +106,23 @@ export function useChatDevelopment(options: {
         companyId = data.companies[0]!.id;
       }
       const originalConversationId = callbacks.current.conversationId;
-      const payload = JSON.stringify([companyId, message, originalConversationId]);
+      const creationConversationId = currentProcess?.parentConversationId ?? originalConversationId;
+      const payload = JSON.stringify([companyId, message, creationConversationId]);
       if (retry.current?.payload !== payload) retry.current = { payload, requestId: crypto.randomUUID() };
       const data = await api<{ conversationId: string; processes: DevelopmentProcess[] }>("/chat/development/processes", { method: "POST", body: JSON.stringify({ companyId, message,
-        conversationId: callbacks.current.conversationId ?? undefined, businessId: callbacks.current.businessId, requestId: retry.current.requestId }) });
+        conversationId: creationConversationId ?? undefined, businessId: callbacks.current.businessId, requestId: retry.current.requestId }) });
       retry.current = undefined; if (!alive.current) return true; callbacks.current.onAccepted(message);
       callbacks.current.onConversation(data.conversationId);
-      if (!originalConversationId) navigate("/c/" + data.conversationId, { replace: true });
+      if (originalConversationId !== data.conversationId) navigate("/c/" + data.conversationId, { replace: !originalConversationId });
       await refresh();
       window.dispatchEvent(new Event("npati:conversations-changed"));
       return true;
     } catch (error) { callbacks.current.onError(error instanceof Error ? error.message : "Could not start development"); return true; }
     finally { sending.current = false; if (alive.current) setSubmitting(false); }
   }
-  const currentRoot = root ?? options.conversationId;
+  const currentRoot = root ?? currentProcess?.parentConversationId ?? options.conversationId;
   const visible = processes.filter(p => p.parentConversationId === currentRoot || p.projectId === projectId || !p.hidden && (showAll || !currentRoot));
-  return { submit, submitting, card: (messages: Parameters<typeof developmentCard>[0], index: number) => developmentCard(messages, index, processes, options.conversationId), hideMessage: (messages: Parameters<typeof hideDevelopmentMessage>[0], index: number) => hideDevelopmentMessage(messages, index, processes), timeline: <ChatDevelopmentProgress process={processes.find(p => p.projectId === projectId && p.conversationId === options.conversationId)} isUk={language === "uk"} />, panel: <ChatDevelopmentPanel processes={visible} projectId={projectId} isUk={language === "uk"} busyId={busyId}
+  return { submit, submitting, project: currentProcess, card: (messages: Parameters<typeof developmentCard>[0], index: number) => developmentCard(messages, index, processes, options.conversationId), hideMessage: (messages: Parameters<typeof hideDevelopmentMessage>[0], index: number) => hideDevelopmentMessage(messages, index, processes), preview: <ChatDevelopmentPreview process={currentProcess} />, timeline: <ChatDevelopmentProgress process={currentProcess} isUk={language === "uk"} />, panel: <ChatDevelopmentPanel processes={visible} projectId={projectId} isUk={language === "uk"} busyId={busyId}
     onOpen={id => { void action(id, "open"); }} onStop={id => { void action(id, "stop"); }} onHide={id => { void action(id, "hide"); }}
     onBack={() => { const parent = root ?? processes.find(p => p.projectId === projectId)?.parentConversationId; if (parent) navigate("/c/" + parent); }} /> };
 }

@@ -1413,10 +1413,11 @@ export function buildApp(config: AppConfig = {}) {
     boundedResponseChunks,
   });
 
-  registerChatDevelopmentRoutes(app, { auth: authProvider, store: workspaceStore, code: codeService, flags: featureFlagService, projects: projectService,
-    preparer: projectOrchestrator, executor: codeSessionRunExecutor, admission: codeRunAdmission, background: codeBackgroundRuns, log: app.log, inbox: codeSessionInbox, sandbox: projectSandbox, preview: projectPreviewService, cancellation: codeRunCancellation });
+  const chatDevelopment = registerChatDevelopmentRoutes(app, { auth: authProvider, store: workspaceStore, code: codeService, flags: featureFlagService, projects: projectService,
+    terminalEvents: projectTerminalEvents, preparer: projectOrchestrator, executor: codeSessionRunExecutor, admission: codeRunAdmission, background: codeBackgroundRuns, log: app.log, inbox: codeSessionInbox, sandbox: projectSandbox, preview: projectPreviewService, cancellation: codeRunCancellation });
 
   registerChatStreamRoutes(app, {
+    chatDevelopment,
     config,
     log: app.log,
     boundedResponseChunks,

@@ -207,9 +207,16 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
           results.push({ tool, ok: false, summary: `No ${tool} command is configured for this project`, findings: [] });
           continue;
         }
-        const result = await projectSandbox!.execute(input.ctx, input.companyId, {
-          projectId: input.projectId, command, agentId: "system",
-        }) as { stdout?: string; stderr?: string; output?: string; exitCode?: number };
+        let result: { stdout?: string; stderr?: string; output?: string; exitCode?: number } | undefined;
+        try {
+          result = await projectSandbox!.execute(input.ctx, input.companyId, {
+            projectId: input.projectId, command, agentId: "system", approved: true,
+          }) as { stdout?: string; stderr?: string; output?: string; exitCode?: number };
+        } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error);
+          results.push({ tool, ok: false, summary: `${tool} execution failed: ${errMsg}`, findings: [errMsg], raw: errMsg });
+          continue;
+        }
         const output = `${result?.stdout ?? result?.output ?? ""}${result?.stderr ? `\n${result.stderr}` : ""}`.trim();
         const exitCode = typeof result?.exitCode === "number" ? result.exitCode : 1;
         const parsed = parseVerifyOutput(detectVerifyTool(output, command), output, exitCode);

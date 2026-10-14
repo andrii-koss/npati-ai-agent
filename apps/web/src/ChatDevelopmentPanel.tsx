@@ -21,7 +21,7 @@ export function ChatDevelopmentPanel({ processes, projectId, isUk = false, busyI
         {current ? <button type="button" className="chat-development-icon" onClick={onBack} aria-label={isUk ? "Назад до основного чату" : "Back to main chat"}>←</button>
           : <span className="research-progress-state" aria-hidden="true">{working ? "●" : process.status === "completed" ? "✓" : "·"}</span>}
         <button type="button" className="chat-development-label" disabled={!process.projectId || disabled} onClick={() => onOpen(process.id)} title={process.detail}>
-          <strong className={working ? "research-active-text" : undefined}>{process.name}</strong><span>{labels[process.status][isUk ? 1 : 0]} ? {process.framework}</span>
+          <strong className={working ? "research-active-text" : undefined}>{process.name}</strong><span>{(labels[process.status] ?? [process.status, process.status])[isUk ? 1 : 0]} {"\u00b7"} {process.framework}</span>
         </button>
         <div className="chat-development-actions">
           <button type="button" className="chat-development-icon" disabled={!process.projectId || disabled} onClick={() => onOpen(process.id)} aria-label={(isUk ? "Редагувати: " : "Edit in chat: ") + process.name} title={isUk ? "Редагувати в чаті" : "Edit in chat"}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5 4 4M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L4 15Z"/></svg></button>

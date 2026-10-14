@@ -60,8 +60,19 @@ export function createCodePolicyWiring(deps: CreateCodePolicyWiringDeps) {
     classifier: (command) => classifyShellCommand(command),
     approvals: approvalsRepo
       ? {
-
-          requestApproval: async (ctx, companyId, input) => approvalsRepo!.requestApproval(ctx, companyId, input as never),
+          requestApproval: async (ctx, companyId, rawInput: Record<string, unknown>) => {
+            const toolName = String(rawInput.toolName ?? rawInput.tool ?? "unknown_tool");
+            const actionSummary = String(rawInput.actionSummary ?? rawInput.digest ?? rawInput.command ?? toolName);
+            return approvalsRepo!.requestApproval(ctx, companyId, {
+              runId: typeof rawInput.runId === "string" ? rawInput.runId : undefined,
+              agentId: typeof rawInput.agentId === "string" ? rawInput.agentId : undefined,
+              toolName,
+              actionSummary,
+              inputPayload: (rawInput.inputPayload as Record<string, unknown>) ?? rawInput,
+              riskLevel: (rawInput.riskLevel as "high" | "critical") ?? "high",
+              ttlMs: typeof rawInput.approvalTimeoutMs === "number" ? rawInput.approvalTimeoutMs : undefined,
+            });
+          },
           consumeApproved: async (ctx, companyId, id, params) => approvalsRepo!.consumeApproved(ctx, companyId, id, params as never),
         }
       : undefined,

@@ -1,3 +1,4 @@
+import { emitCodingActivity } from "./coding-agent-runner-contracts";
 
 import type {
   ChatMessage,
@@ -1519,6 +1520,13 @@ export class CodingAgentRunner {
       });
 
       const callsToRun = executableToolCalls(normalized);
+      // Presentation observer only: failures never change tool execution or policy.
+      const publishActivity = async (event: import("@npati/shared").DevelopmentProcessProgressItem) => {
+        await emitCodingActivity(input, event);
+      };
+      if (callsToRun.length && result.toolCalls?.length && result.content?.trim() && !/\<\/?(?:think|analysis|tool_call|tool_calls)\b/i.test(result.content)) {
+        await publishActivity({ id: `${stateRunId ?? input.runId}:message:${steps}`, runId: stateRunId ?? input.runId, sequence: steps * 1000, kind: "assistant_message", stage: "planning", title: result.content, at: new Date(this.now()).toISOString(), status: "completed", agentId: input.agentId ?? "NPATI Coding Agent" });
+      }
       const assistantText = result.content ?? "";
 
       const openTurn = async (): Promise<void> => {
@@ -1723,6 +1731,8 @@ export class CodingAgentRunner {
             outcome: "unknown_outcome", startedAt: new Date(startedCall), finishedAt: null,
           }));
         }
+        const activityStart = { id: `${stateRunId ?? input.runId}:${call.id}`, runId: stateRunId ?? input.runId, sequence: steps * 1000 + callsToRun.indexOf(call) + 1, stage: "tool", title: call.name, tool: call.name, at: new Date(startedCall).toISOString(), command: typeof call.arguments.command === "string" ? call.arguments.command : undefined, file: typeof call.arguments.path === "string" ? call.arguments.path : undefined, cwd: typeof call.arguments.cwd === "string" ? call.arguments.cwd : undefined, agentId: input.agentId ?? "NPATI Coding Agent" };
+        await publishActivity({ ...activityStart, status: "running" });
         const invokeInput = {
           leaseOwner: stateOwner,
           companyId,
@@ -1785,6 +1795,7 @@ export class CodingAgentRunner {
             startedAt: new Date(startedCall), finishedAt: new Date(this.now()),
           }));
         }
+        await publishActivity({ ...activityStart, status: result.ok ? "completed" : result.error.code === "approval_required" ? "awaiting_approval" : input.signal?.aborted ? "cancelled" : "failed", durationMs: this.now() - startedCall, result: JSON.stringify(result.ok ? result.result : result.error), ...(result.ok ? { resultTruncated: result.truncated } : { error: result.error.message, errorCode: result.error.code }) });
         summary.toolCalls += 1;
         if (CHECK_TOOL_PREFIXES.some((prefix) => call.name.startsWith(prefix)) && result.ok) {
           if (!summary.checksRun.includes(call.name)) summary.checksRun.push(call.name);
