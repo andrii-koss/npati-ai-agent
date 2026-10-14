@@ -315,6 +315,26 @@ export class ProjectPreviewService {
     // API session state is transient, but the runner may still own the old listener.
     if (!existing) await this.sandbox.stopRecordedPreview(ctx, companyId, projectId, devCommand);
 
+    // Ensure dependencies are installed before starting the dev server for node/framework projects
+    if (detected.framework !== "static" && files.some((f) => f.path === "package.json")) {
+      const paths = new Set(files.map((f) => f.path));
+      const installCmd = detected.packageManager === "pnpm" && paths.has("pnpm-lock.yaml")
+        ? "pnpm install"
+        : detected.packageManager === "yarn" && paths.has("yarn.lock")
+          ? "yarn install"
+          : "npm install";
+      try {
+        await this.sandbox.execute(ctx, companyId, {
+          projectId,
+          command: installCmd,
+          agentId: options.agentId || "system",
+          approved: true,
+        });
+      } catch (installErr) {
+        console.warn(`[startPreview] Dependency preparation warning for project ${projectId}:`, installErr);
+      }
+    }
+
     // Start process in sandbox
     options.signal?.throwIfAborted();
     const result = await this.sandbox.process(ctx, companyId, {
