@@ -59,6 +59,20 @@ async function fixture(maxConcurrentPerUser = 4) {
   return { store, company, projects, flags, code, controls, starts, service, start, finish, ports, preview };
 }
 describe("durable coding activity", () => {
+  it("adds the original request language to the coding prompt rather than the English orchestration wrapper", async () => {
+    const f=await fixture();await f.start("\u0421\u0442\u0432\u043e\u0440\u0438 \u0442\u0435\u0441\u0442\u043e\u0432\u0438\u0439 \u0441\u0430\u0439\u0442 \u043d\u0430 Next.js, \u0437\u0430\u043f\u0443\u0441\u0442\u0438 build \u0456 Live Preview");
+    await vi.waitFor(()=>expect(f.controls.size).toBe(1));
+    const process=(await f.service.list(owner))[0]!;expect(process.responseLanguage).toBe("uk");expect(f.controls.get(process.projectId!)!.input.prompt).toContain("Reply entirely in Ukrainian");
+  });
+  it("projects accepted queue messages and real replies from existing inbox and replay after refresh",async()=>{
+    const f=await fixture();await f.start("Create a Next.js website");await vi.waitFor(()=>expect(f.controls.size).toBe(1));const process=(await f.service.list(owner))[0]!;
+    const inbox={isEnabled:async()=>true,transact:async()=>({state:{messages:[{id:"queued",authorId:owner.userId,text:"Please change the footer to green",status:"admitted",runId:"queued-run",createdAt:new Date().toISOString()},{id:"foreign",authorId:"other",text:"foreign",status:"admitted",runId:"foreign-run",createdAt:new Date().toISOString()}]}})};
+    vi.spyOn(f.store,"getReplayBundle").mockImplementation(async(_company,run)=>run==="queued-run" ? {id:"bundle"} as never : null);
+    vi.spyOn(f.store,"listReplayBundleSteps").mockResolvedValue([{kind:"model_step",createdAt:new Date(),payload:{response:{content:"Changed the footer to green.",toolCalls:[]}}}] as never);
+    const reader=new ChatDevelopmentService({...f.ports,inbox:inbox as never});
+    const first=(await reader.list(owner))[0]!.conversationMessages!;expect(first.map(item=>item.role)).toEqual(["user","assistant"]);expect(first[1]?.content).toBe("Changed the footer to green.");
+    expect((await reader.list(owner))[0]!.conversationMessages!.map(item=>item.id)).toEqual(first.map(item=>item.id));expect(JSON.stringify(first)).not.toContain("foreign");await reader.close();
+  });
   it("stores the child user before execution, recovers operation updates and appends the true result", async () => {
     const f = await fixture(); const request = "Create a website on Next.js";
     const started = await f.start(request); await vi.waitFor(() => expect(f.controls.size).toBe(1));

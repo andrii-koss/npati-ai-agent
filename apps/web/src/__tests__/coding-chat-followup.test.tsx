@@ -19,9 +19,13 @@ it.each(["/c/child?company=company&project=project&developmentRoot=parent", "/c/
   mocks.api.mockImplementation(async (url: string) => url === "/chat/development/processes" ? {processes:[process]} : url === "/conversations" ? [] : url === "/conversations/child" ? {messages:[{id:"card",role:"assistant",content:process.name,projectCard:card,createdAt:""}]} : {});
   const requests: Record<string,unknown>[] = [];
   let changes: ReadableStreamDefaultController<Uint8Array>;
+  let inboxPhase="settled";const queuedRequests: Record<string,unknown>[]=[];
   vi.stubGlobal("fetch",vi.fn(async (url: string, init?:RequestInit) => {
     if(url === "/api/chat/development/processes/stream") return new Response(new ReadableStream({start(c){changes=c;init?.signal?.addEventListener("abort",()=>c.close(),{once:true});}}));
-    if(url.includes("/code/sessions/session/messages")) return new Response(JSON.stringify({ revision:1,phase:"settled",runId:"run",lastError:null,messages:[] }));
+    if(url.includes("/code/sessions/session/messages")) {
+      if(init?.method === "POST") { const request=JSON.parse(String(init.body));queuedRequests.push(request);const receipt={id:"queued",requestId:request.requestId,text:request.text,target:"next-turn",status:"pending",revision:2,runId:null,createdAt:new Date().toISOString()};return new Response(JSON.stringify({revision:2,phase:"sealed",runId:"run",lastError:null,messages:[receipt],receipt}),{status:202}); }
+      return new Response(JSON.stringify({revision:1,phase:inboxPhase,runId:"run",lastError:null,messages:[]}));
+    }
     if(url.endsWith("/preview/status")) return new Response(JSON.stringify({isRunning:true}));
     if(url.endsWith("/preview/token")) return new Response(JSON.stringify({token:"preview-token"}));
     if(url === "/api/chat/stream") {
@@ -69,4 +73,12 @@ it.each(["/c/child?company=company&project=project&developmentRoot=parent", "/c/
   expect(requests).toHaveLength(3);expect(requests[2]).toMatchObject({projectId:"project",companyId:"company",conversationId:"child"});
   expect(host.textContent).toContain("Changed the footer to blue.");
   expect(document.querySelector('[aria-label="Preview of Company website"] iframe')).not.toBeNull();
+  inboxPhase="sealed";await act(async()=>{window.dispatchEvent(new Event("focus"));await new Promise(resolve=>setTimeout(resolve,30));});
+  for(const text of ["Pending coding messages","Next task","Add to current work"])expect(host.textContent).not.toContain(text);
+  expect(host.querySelector(".code-pending-messages")).toBeNull();expect(host.querySelector(".chat-send-btn")).not.toBeNull();
+  await act(async()=>{setter.call(textarea,"Make the footer red");textarea.dispatchEvent(new Event("input",{bubbles:true}));});
+  await act(async()=>{host.querySelector("form")!.dispatchEvent(new Event("submit",{bubbles:true,cancelable:true}));});
+  expect(queuedRequests).toHaveLength(1);expect(queuedRequests[0]).toMatchObject({mode:"queue",text:"Make the footer red"});expect(requests).toHaveLength(3);
+  expect(host.querySelector("article.user:last-of-type")?.textContent ?? host.textContent).toContain("Make the footer red");
+  expect(host.querySelector(".code-pending-messages")).toBeNull();
 });

@@ -1,3 +1,5 @@
+import { DEVELOPMENT_PROCESS_SETTINGS_KEY, type DevelopmentProcess } from "@npati/shared";
+import { resolveCodingConversationLanguage, chatLanguageInstruction } from "./company-chat-i18n";
 
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { CodeRouteDeps } from "./code-route-wiring";
@@ -349,7 +351,14 @@ export function registerCodeRunRoutes(app: FastifyInstance, input: RegisterCodeR
         if (!message?.runId || signal.aborted) return;
         const sink = codeBackgroundRuns.start({ runId: message.runId, sessionId: session.id, companyId: session.companyId,
           projectId: session.projectId, userId: ctx.userId });
-        const outcome = await codeSessionRunExecutor.execute({ ctx, session, prompt: message.text,
+        const projectForLanguage = await projectService.get(ctx, session.companyId, session.projectId);
+        const savedBindings = (await workspaceStore.getUserSetting(ctx,DEVELOPMENT_PROCESS_SETTINGS_KEY))?.value;
+        const binding = Array.isArray(savedBindings) ? (savedBindings as DevelopmentProcess[]).find(item=>item.companyId===session.companyId && item.sessionId===session.id) : undefined;
+        const chatHistory = binding?.conversationId ? (await workspaceStore.getNeutralConversation(ctx,binding.conversationId).catch(()=>({messages:[]}))).messages : [];
+        const priorMessages = [...chatHistory.filter(item=>item.role==="user" && Date.parse(item.createdAt)<Date.parse(message.createdAt)), ...snapshot.state.messages.filter(item => !item.completion && item.authorId === ctx.userId && item.createdAt < message.createdAt).map(item=>({role:"user",content:item.text,createdAt:item.createdAt}))].sort((a,b)=>Date.parse(a.createdAt)-Date.parse(b.createdAt));
+        const languageHistory = [{role:"user",content:projectForLanguage.description ?? ""}, ...priorMessages];
+        const responseLanguage = resolveCodingConversationLanguage(message.text, languageHistory);
+        const outcome = await codeSessionRunExecutor.execute({ ctx, session, prompt: message.text + chatLanguageInstruction(message.text, languageHistory, responseLanguage),
           runId: message.runId, initialInboxMessageId: message.id,
           sink: { signal: sink.signal, emitResult: (result) => sink.emit("result", { routed: "code_runner", runId: message.runId, run: result }),
             emitTerminal: (status, reason) => sink.finish(status, reason) },

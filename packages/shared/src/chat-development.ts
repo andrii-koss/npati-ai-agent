@@ -1,3 +1,4 @@
+export const DEVELOPMENT_PROCESS_SETTINGS_KEY = "chat-development-processes:v1";
 import { classifyProjectIntent } from "./project-intent";
 /** Shared deterministic routing: creation requests only, never ordinary project edits. */
 export type DevelopmentTarget = { name: string; kind: "website" | "blog" | "store" | "crm" | "mobile_app"; framework: "Next.js" | "HTML/CSS" | "Expo" };
@@ -6,6 +7,7 @@ export type DevelopmentProcessProgressItem = {
   stage: string;
   title: string;
   at: string;
+  language?: string;
   conversationId?: string;
   sequence?: number;
   kind?: "operation" | "assistant_message";
@@ -35,6 +37,8 @@ export type DevelopmentProcess = {
   id: string; companyId: string; parentConversationId: string; conversationId?: string;
   projectId?: string; sessionId?: string; runId?: string; name: string; framework: string;
   status: "idle" | "queued" | "preparing" | "running" | "stopping" | "completed" | "failed" | "cancelled" | "interrupted" | "awaiting_approval";
+  conversationMessages?: { id: string; role: "user" | "assistant"; content: string; createdAt: string }[];
+  initialRunId?: string; responseLanguage?: string; runStatuses?: Record<string, string>; runStartedAts?: Record<string,string>; runLanguages?: Record<string,string>;
   progress?: DevelopmentProcessProgressItem[];
   inboxEnabled?: boolean; hidden: boolean; createdAt: string; updatedAt: string; detail?: string; previewUrl?: string;
 };

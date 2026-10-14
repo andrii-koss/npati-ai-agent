@@ -2,6 +2,10 @@ import type { TranslationSchema } from "../types";
 
 export const it: TranslationSchema = {
   executionTrace: {
+    runningCommand: "Esecuzione di {{command}}",
+    operationsDone: "{{count}} operazioni eseguite",
+    testsPassed: "Superati",
+    working: "Lavoro sul progetto",
     skipped: "Saltati",
   "pending": "In attesa",
   "running": "In esecuzione",

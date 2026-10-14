@@ -1,3 +1,4 @@
+import { resolveCodingConversationLanguage, chatLanguageInstruction } from "./company-chat-i18n";
 
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { AppConfig } from "./app";
@@ -285,6 +286,12 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
           if (!codeSession) {
             send("result", { routed: "clarify", intent: codeDecision.intent, message: "Which project should I work in? Create or select a code session first." });
           } else {
+            let languageHistory = !memoryPolicy.noMemoryActive && request.body.conversationId ? (await workspaceStore.getNeutralConversation(auth, request.body.conversationId).catch(() => ({ messages: [] }))).messages : [];
+            if (!memoryPolicy.noMemoryActive && await codeSessionInbox.isEnabled(auth, codeSession.companyId)) {
+              const snapshot = await codeSessionInbox.transact(codeSession,{kind:"read"});
+              languageHistory = [...languageHistory, ...snapshot.state.messages.filter(item=>!item.completion && item.authorId===auth.userId && item.status!=="discarded").map(item=>({id:item.id,conversationId:request.body.conversationId ?? "",role:"user" as const,content:item.text,createdAt:item.createdAt}))].sort((a,b)=>Date.parse(a.createdAt)-Date.parse(b.createdAt));
+            }
+            const responseLanguage = resolveCodingConversationLanguage(message, languageHistory);
             let cardConversationId: string | undefined;
             let savedUser: { id: string; createdAt: string } | undefined;
             let savedAssistant: { id: string; createdAt: string } | undefined;
@@ -349,10 +356,10 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
             const executed = await codeSessionRunExecutor.execute({
               ctx: auth,
               session: codeSession,
-              onActivity: memoryPolicy.writeAllowed ? event => deps.chatDevelopment?.recordActivity(auth, activeCompanyId!, codeSession.id, cardConversationId, event) ?? Promise.resolve() : undefined,
-              prompt: isCodeChatWebsite(codeProject)
+              onActivity: memoryPolicy.writeAllowed ? event => deps.chatDevelopment?.recordActivity(auth, activeCompanyId!, codeSession.id, cardConversationId, { ...event, language: responseLanguage }) ?? Promise.resolve() : undefined,
+              prompt: (isCodeChatWebsite(codeProject)
                 ? `${message}\n\nWork in this existing website workspace. Start with package.json, the main page and its styles; implement the requested visible website before exploring unrelated files. Read files before editing; preserve working pages and the attached database/auth SDK (lib/project-client.ts). Do not re-scaffold or run create-next-app. Use the available code.deps.add tool when adding a dependency. Initial template installation and build are managed by the system; do not invent a code.deps.install tool or use compound shell setup commands. Do not start a dev server yourself. Once the requested edits are made, finish your response: the system runs the production build and starts Live Preview.`
-                : message,
+                : message) + chatLanguageInstruction(message, languageHistory, responseLanguage),
 
               ...(codeIntentIsReadOnly(codeDecision.intent) ? { readOnlyIntent: true } : {}),
               sink: {

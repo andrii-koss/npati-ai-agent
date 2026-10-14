@@ -14,12 +14,11 @@ import { SPEECH_VOICES } from "./speech-voices";
 import { persistedModeLabel } from "./code-workspace/actions";
 import { ResearchProgressPanel, type ChatProgressEvent } from "./ResearchProgress";
 import { cancelChatStream, streamChat } from "./chat-stream";
-import { CodePendingMessages } from "./CodePendingMessages";
-import { InboxSubmission, requestCodeInbox, type InboxMessage } from "./code-inbox-client";
+import { InboxSubmission } from "./code-inbox-client";
 import { useCodeInbox } from "./use-code-inbox";
 import { projectConversationUrl } from "./chat-development-view";
 import { useChatResearchProgress } from "./use-chat-research-progress";
-import { chatTimeline, nearChatBottom } from "./chat-timeline";
+import { chatTimeline, mergeConversationMessages, nearChatBottom } from "./chat-timeline";
 import { ChatDevelopmentProgress } from "./ChatDevelopmentProgress";
 import { useChatDevelopment } from "./use-chat-development";
 import { BusinessChatComposer } from "./business-workspace-composer";
@@ -114,8 +113,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     }
   }, [codeInbox.session?.projectId, codeInbox.snapshot?.phase, codeInbox.snapshot?.runId]);
   const [inboxSubmitting, setInboxSubmitting] = useState(false);
-  const [inboxNotice, setInboxNotice] = useState("");
-  useEffect(() => { setInboxNotice(""); }, [selected, codeInbox.session?.sessionId]);
+  useEffect(() => { setNotice(""); }, [selected, codeInbox.session?.sessionId]);
   const inboxSubmission = useRef(new InboxSubmission());
   const inboxMutationBusy = useRef(false);
   const draftVersion = useRef(0);
@@ -325,42 +323,24 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     const session = codeInbox.session;
     const text = input.trim();
     if (!session || !text || inboxMutationBusy.current) return;
-    if (attachments.length || noMemory || ttsEnabled) { setInboxNotice(t("codeInbox.textOnly")); return; }
+    if (attachments.length || noMemory || ttsEnabled) { setNotice(t("codeInbox.textOnly")); return; }
     const version = draftVersion.current, generation = codeInbox.generation.current;
     inboxMutationBusy.current = true; setInboxSubmitting(true);
     try {
       await inboxSubmission.current.send(session, text, mode, { version, generation,
         currentVersion: () => draftVersion.current, currentGeneration: () => codeInbox.generation.current,
-        apply: (next) => codeInbox.applySnapshot(next, session.sessionId),
+        apply: (next) => { codeInbox.applySnapshot(next, session.sessionId); if (next.receipt && !next.receipt.completion) setMessages(current => mergeConversationMessages(current,[{id:"inbox:"+next.receipt!.id,role:"user",content:next.receipt!.text,createdAt:next.receipt!.createdAt ?? new Date().toISOString()}])); },
         clear: () => { draftVersion.current++; setInput(""); },
       });
       if (generation !== codeInbox.generation.current) return;
       // The server may turn a late steer into next-turn. The pending panel uses the receipt target.
-      setInboxNotice("");
+      setNotice("");
     } catch (reason) {
-      if (generation === codeInbox.generation.current) setInboxNotice(reason instanceof Error ? reason.message : t("common.error"));
+      if (generation === codeInbox.generation.current) setNotice(reason instanceof Error ? reason.message : t("common.error"));
       // Leave the draft and retry identity intact, including an ambiguous transport failure.
     } finally {
       inboxMutationBusy.current = false; setInboxSubmitting(false);
     }
-  }
-  async function changeInboxMessage(message: InboxMessage, text?: string) {
-    const session = codeInbox.session;
-    if (!session || inboxMutationBusy.current) return false;
-    const generation = codeInbox.generation.current;
-    inboxMutationBusy.current = true; setInboxSubmitting(true);
-    try {
-      const next = await requestCodeInbox(session, text === undefined ? "DELETE" : "PUT",
-        { expectedRevision: message.revision, ...(text !== undefined ? { text } : {}) }, message.id);
-      if (generation !== codeInbox.generation.current) return false;
-      codeInbox.applySnapshot(next, session.sessionId); setInboxNotice(""); return true;
-    } catch (reason) {
-      if (generation !== codeInbox.generation.current) return false;
-      setInboxNotice(reason instanceof Error ? reason.message : t("common.error"));
-      // A claim/edit conflict must refresh authoritative state rather than repeat a stale mutation.
-      try { codeInbox.applySnapshot(await requestCodeInbox(session), session.sessionId); } catch { /* Retain the error and draft. */ }
-      return false;
-    } finally { inboxMutationBusy.current = false; setInboxSubmitting(false); }
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -634,7 +614,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       event.currentTarget.form?.requestSubmit();
     }
   }
-  const timeline = chatTimeline(messages, development.project?.progress, selected);
+  const displayMessages = mergeConversationMessages(messages,development.project?.conversationMessages);
+  const timeline = chatTimeline(displayMessages, development.project?.progress, selected, development.project);
   return (
     <>
       {notice && (
@@ -655,10 +636,10 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
             </div>
           )}
           {timeline.map(entry => {
-            if (entry.kind === "activity") return <ChatDevelopmentProgress key={"activity:" + entry.item.id} process={development.project} items={[entry.item]} />;
+            if (entry.kind === "activity") return <ChatDevelopmentProgress key={"activity:" + entry.item.id} process={development.project} items={entry.run?.items ?? [entry.item]} run={entry.run} />;
             const { message, index } = entry;
-            if (development.hideMessage(messages, index)) return null;
-            const isLatestAssistant = message.role === "assistant" && index === messages.length - 1;
+            if (development.hideMessage(displayMessages, index)) return null;
+            const isLatestAssistant = message.role === "assistant" && index === displayMessages.length - 1;
             const hasResearch = !development.project && progressEvents.some((event) => !event.type.startsWith("final_generation"));
             return (
               <Fragment key={message.id}>
@@ -673,10 +654,10 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
                 )}
                 <article
                   ref={(el) => {
-                    if (index === messages.length - 1) {
+                    if (index === displayMessages.length - 1) {
                       latestMessageRef.current = el;
                     }
-                    if (message.role === "user" && message.content === activeTurn && !messages.slice(index + 1).some((item) => item.role === "user" && item.content === activeTurn)) {
+                    if (message.role === "user" && message.content === activeTurn && !displayMessages.slice(index + 1).some((item) => item.role === "user" && item.content === activeTurn)) {
                       activeTurnRef.current = el;
                     }
                   }}
@@ -685,14 +666,14 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
                 >
                   <PendingMessageAttachments value={message.attachments ?? []} />
                   {message.role === "user" ? <UserPromptMessage content={message.content} onEdit={(prompt) => { setInput(prompt); window.requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".onboarding-live-composer textarea")?.focus()); }} /> : <ChatMessageContent content={projectChatText(message.content, message.projectCard)} />}
-                  {development.card(messages, index) && <ProjectChatCard card={development.card(messages, index)!} onActivate={(card) => { setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected }); }} />}
+                  {development.card(displayMessages, index) && <ProjectChatCard card={development.card(messages, index)!} onActivate={(card) => { setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected }); }} />}
                   {message.role === "assistant" && !sending && (
                     <AssistantMessageToolbar
                       content={message.content}
                       onRegenerate={() => {
                         for (let k = index - 1; k >= 0; k--) {
-                          if (messages[k]?.role === "user") {
-                            setInput(messages[k]!.content);
+                          if (displayMessages[k]?.role === "user") {
+                            setInput(displayMessages[k]!.content);
                             break;
                           }
                         }
@@ -727,10 +708,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           draftVersion={draftVersion}
           sending={sending}
           codeInbox={codeInbox}
-          inboxNotice={inboxNotice}
           inboxSubmitting={inboxSubmitting}
-          submitInbox={submitInbox}
-          changeInboxMessage={changeInboxMessage}
           contextSwitcher={contextSwitcher}
           noMemory={noMemory}
           ttsEnabled={ttsEnabled}

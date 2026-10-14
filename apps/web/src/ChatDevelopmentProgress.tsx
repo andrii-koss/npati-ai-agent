@@ -1,13 +1,14 @@
 import React from "react";
 import type { DevelopmentProcess, DevelopmentProcessProgressItem } from "@npati/shared";
 import { ProjectChatCard } from "./business-workspace-cards";
-import { normalizeActivity } from "./chat-timeline";
+import { normalizeActivity, codingActivityRuns, type CodingActivityRun } from "./chat-timeline";
 import { ChatMessageContent } from "./ChatMessageContent";
 import { AgentExecutionTrace } from "./AgentExecutionTrace";
-export function ChatDevelopmentProgress({ process, items, isUk }: { process?: DevelopmentProcess; items?: DevelopmentProcessProgressItem[]; isUk?: boolean }) {
+export function ChatDevelopmentProgress({ process, items, run, isUk }: { process?: DevelopmentProcess; items?: DevelopmentProcessProgressItem[]; run?: CodingActivityRun; isUk?: boolean }) {
   const rows = normalizeActivity(items ?? process?.progress);
-  if (!process || !rows.length) return null;
-  return <>{rows.map(item => item.kind === "assistant_message" ? <article key={item.id} className="assistant"><ChatMessageContent content={item.title} /></article> : <AgentExecutionTrace key={item.id} process={process} items={[item]} isUk={isUk} />)}</>;
+  if (!process || !rows.length && !run && !Object.keys(process.runStatuses ?? {}).length) return null;
+  if (run) return <AgentExecutionTrace process={process} items={run.items} run={run} isUk={isUk} />;
+  return <>{rows.filter(item=>item.kind==="assistant_message").map(item=><article key={item.id} className="assistant"><ChatMessageContent content={item.title} /></article>)}{codingActivityRuns(rows,process).map(group=><AgentExecutionTrace key={group.id} process={process} items={group.items} run={group} isUk={isUk} />)}</>;
 }
 /** Reuse the existing preview drawer; keep it mounted while the agent edits this project. */
 export function ChatDevelopmentPreview({ process }: { process?: DevelopmentProcess }) {
