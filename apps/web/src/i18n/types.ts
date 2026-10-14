@@ -18,6 +18,7 @@ export const SUPPORTED_LANGUAGES: LanguageInfo[] = [
 ];
 
 export interface TranslationSchema {
+  executionTrace: Record<string, string>;
   projectSection: {
     types: {
       website: string;

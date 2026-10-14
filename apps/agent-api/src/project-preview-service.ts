@@ -190,7 +190,7 @@ export class ProjectPreviewService {
     this.secret = secret || process.env.NPATI_PREVIEW_SECRET || randomBytes(32).toString("hex");
   }
 
-  async buildProject(ctx: AuthContext, companyId: string, projectId: string, onStage?: (stage: "dependencies" | "build") => void): Promise<void> {
+  async buildProject(ctx: AuthContext, companyId: string, projectId: string, onStage?: (stage: "dependencies" | "build", details?: { command: string; status: "running" | "completed" | "failed"; stdout?: string; stderr?: string; exitCode?: number; durationMs?: number }) => void): Promise<void> {
     if (!this.sandbox) throw new PreviewError("sandbox_unavailable", "Sandbox runner is not configured", 503);
     const files = await this.workspace.listFiles(ctx, companyId, projectId);
     const stack = await detectProjectStack(files, async (filePath) => (await this.workspace.readFile(ctx, companyId, projectId, filePath)).content);
@@ -202,10 +202,14 @@ export class ProjectPreviewService {
       : stack.packageManager === "pnpm" && paths.has("pnpm-lock.yaml") ? "pnpm install --frozen-lockfile"
       : `${stack.packageManager} install`;
     try {
-      onStage?.("dependencies");
-      await this.sandbox.execute(ctx, companyId, { projectId, command: install, agentId: "system", approved: true });
-      onStage?.("build");
-      await this.sandbox.execute(ctx, companyId, { projectId, command: `${stack.packageManager} run build`, agentId: "system", approved: true });
+      for (const [stage, command] of [["dependencies", install], ["build", stack.packageManager + " run build"]] as const) {
+        onStage?.(stage, { command, status: "running" });
+        try {
+          const result = await this.sandbox.execute(ctx, companyId, { projectId, command, agentId: "system", approved: true });
+          onStage?.(stage, { command, status: result.exitCode === 0 ? "completed" : "failed", stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode ?? undefined, durationMs: result.durationMs });
+          if (result.exitCode !== 0) throw new PreviewError("build_failed", "Command failed: " + command, 409);
+        } catch (error) { onStage?.(stage, { command, status: "failed" }); throw error; }
+      }
     } catch (error) {
       if (error instanceof SandboxProviderError && sandboxInfrastructureErrors.has(error.code)) {
         throw new PreviewError("sandbox_unavailable", error.message, error.status);

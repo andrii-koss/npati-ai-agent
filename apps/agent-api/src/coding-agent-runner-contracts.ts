@@ -1,3 +1,5 @@
+import { sanitizeExecutionTrace } from "@npati/shared";
+import type { DevelopmentProcessProgressItem } from "@npati/shared";
 
 import type {
   ChatMessage,
@@ -100,6 +102,7 @@ export * from "./coding-agent-runner-ports";
 export * from "./coding-agent-runner-prompt";
 
 export interface CodingAgentRunInput {
+  onActivity?: (event: DevelopmentProcessProgressItem) => Promise<void>;
 
   initialInboxMessageId?: string;
   ctx: AuthContext;
@@ -280,3 +283,11 @@ export interface CodingAgentRunResult {
   pendingApprovals?: CodingAgentPendingApproval[];
 }
 
+
+/** Best-effort presentation, never a policy decision or an execution prerequisite. */
+export async function emitCodingActivity(input: { onActivity?: CodingAgentRunInput["onActivity"] }, event: DevelopmentProcessProgressItem) {
+  if (!input.onActivity) return;
+  const safe = { ...event };
+  for (const key of ["title", "command", "file", "cwd", "result", "stdout", "stderr", "error", "diff"] as const) if (typeof safe[key] === "string") safe[key] = sanitizeExecutionTrace(safe[key]!);
+  try { await input.onActivity(safe); } catch { /* The existing durable Run/Replay remains authoritative. */ }
+}

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { developmentIsActive, planChatDevelopment, type DevelopmentProcess, type DevelopmentTarget } from "@npati/shared";
-import type { AuthContext, Project, WorkspaceStore } from "@npati/workspace";
+import { WorkspaceNotFoundError, WorkspaceAccessError, type AuthContext, type Project, type WorkspaceStore } from "@npati/workspace";
 import type { CodeService } from "./code-service";
 import type { FeatureFlagService } from "./feature-flags";
 import type { ProjectService } from "./project-service";
@@ -15,8 +15,11 @@ import type { CodeRunCancellationRegistry } from "./code-run-cancellation";
 import { hasCodeChatPreview, isCodeChatWebsite } from "./code-chat-website";
 import { saveChatProjectCard } from "./project-chat-cards";
 
+import { developmentTrace, sanitizeProgress, selectDevelopmentTraceRuns, executionTimestamp, executionResultDetails } from "./chat-development-trace";
+import type { ProjectTerminalEventsRepository } from "./project-terminal-events";
+
 const key = "chat-development-processes:v1";
-type Entry = DevelopmentProcess & { requestId: string; businessId?: string; cardMessageId?: string };
+type Entry = DevelopmentProcess & { requestId: string; businessId?: string; cardMessageId?: string; resultMessageId?: string };
 export class DevelopmentError extends Error {
   constructor(message: string, readonly status = 400) { super(message); }
 }
@@ -24,6 +27,7 @@ export type DevelopmentPorts = {
   store: WorkspaceStore; code: CodeService; flags: FeatureFlagService; projects: ProjectService;
   preparer: Pick<ProjectOrchestrator, "prepareCodingWebsite" | "prepareCodingMobile">;
   executor: Pick<CodeSessionRunExecutor, "execute">; admission: CodeRunAdmission; background: CodeBackgroundRunRegistry;
+  terminalEvents?: ProjectTerminalEventsRepository;
   inbox?: CodeSessionInboxService; sandbox?: ProjectSandboxService; preview?: ProjectPreviewService; cancellation?: CodeRunCancellationRegistry;
   log: { warn(payload: unknown, message?: string): void };
 };
@@ -31,15 +35,22 @@ export type DevelopmentPorts = {
 export class ChatDevelopmentService {
   private jobs = new Map<string, { controller: AbortController; promise: Promise<void> }>();
   private starts = new Map<string, Promise<unknown>>();
+  private updates = new Map<string, Promise<unknown>>();
   private closing = false;
-  constructor(private readonly d: DevelopmentPorts) {}
+  constructor(private readonly d: DevelopmentPorts) { }
   private owner(ctx: AuthContext) { return ctx.workspaceId + ":" + ctx.userId; }
   private jobKey(ctx: AuthContext, id: string) { return this.owner(ctx) + ":" + id; }
   private async entries(ctx: AuthContext): Promise<Entry[]> {
     const value = (await this.d.store.getUserSetting(ctx, key))?.value;
     return Array.isArray(value) ? value as Entry[] : [];
   }
-  private async change(ctx: AuthContext, fn: (items: Entry[]) => Entry[]) {
+  private async change(ctx: AuthContext, fn: (items: Entry[]) => Entry[]): Promise<Entry[]> {
+    const owner = this.owner(ctx);
+    const work = (this.updates.get(owner) ?? Promise.resolve()).catch(() => {}).then(() => this.changeOwned(ctx, fn));
+    this.updates.set(owner, work);
+    try { return await work; } finally { if (this.updates.get(owner) === work) this.updates.delete(owner); }
+  }
+  private async changeOwned(ctx: AuthContext, fn: (items: Entry[]) => Entry[]) {
     for (let n = 0; n < 12; n++) {
       const setting = await this.d.store.getUserSetting(ctx, key);
       const items = Array.isArray(setting?.value) ? setting.value as Entry[] : [];
@@ -69,93 +80,21 @@ export class ChatDevelopmentService {
       return [companyId, await this.d.store.listCodeRunStates({ companyId, limit: 200 })] as const;
     })));
     const inboxEnabled = new Map(await Promise.all(companies.map(async companyId => [companyId, this.d.inbox ? await this.d.inbox.isEnabled(ctx, companyId) : false] as const)));
-    return Promise.all(items.filter(p => accessible.has(p.companyId)).map(async ({ requestId: _requestId, ...stored }) => {
-      const activity = stored.runId ? await this.d.store.listCodeActivityEvents({ companyId: stored.companyId, runId: stored.runId, limit: 60 }) : [];
-      let replaySteps: Array<{ kind: string; toolCallId: string | null; payload: Record<string, unknown> }> = [];
-      if (stored.runId) {
-        try {
-          const bundle = await this.d.store.getReplayBundle(stored.companyId, stored.runId);
-          if (bundle) replaySteps = await this.d.store.listReplayBundleSteps(stored.companyId, bundle.id);
-        } catch {}
-      }
-      const stepDetails = new Map<string, { command?: string; file?: string; cwd?: string; result?: string; durationMs?: number; errorCode?: string; ok?: boolean }>();
-      for (const step of replaySteps) {
-        if (step.kind === "model_step") {
-          const response = (step.payload as { response?: Record<string, unknown> }).response ?? {};
-          const toolCalls = Array.isArray(response.toolCalls) ? response.toolCalls : [];
-          for (const call of toolCalls) {
-            const callId = String((call as { id?: string }).id ?? "");
-            if (!callId) continue;
-            let parsedArgs: Record<string, unknown> = {};
-            try {
-              const rawArgs = (call as { arguments?: unknown }).arguments;
-              if (typeof rawArgs === "string") parsedArgs = JSON.parse(rawArgs);
-              else if (typeof rawArgs === "object" && rawArgs !== null) parsedArgs = rawArgs as Record<string, unknown>;
-            } catch {}
-            const existing = stepDetails.get(callId) ?? {};
-            const command = typeof parsedArgs.command === "string" ? parsedArgs.command : undefined;
-            const file = typeof parsedArgs.path === "string" ? parsedArgs.path : (typeof parsedArgs.file === "string" ? parsedArgs.file : undefined);
-            const cwd = typeof parsedArgs.cwd === "string" ? parsedArgs.cwd : undefined;
-            stepDetails.set(callId, { ...existing, command, file, cwd });
-          }
-        } else if (step.kind === "tool_call") {
-          const callId = String(step.toolCallId ?? "");
-          const shaped = step.payload;
-          const existing = stepDetails.get(callId) ?? {};
-          let resultStr: string | undefined;
-          if (typeof shaped.settledResult === "string") resultStr = shaped.settledResult;
-          else if (shaped.settledResult) {
-            try { resultStr = JSON.stringify(shaped.settledResult, null, 2); } catch { resultStr = String(shaped.settledResult); }
-          }
-          stepDetails.set(callId, {
-            ...existing,
-            result: resultStr,
-            durationMs: typeof shaped.durationMs === "number" ? shaped.durationMs : existing.durationMs,
-            errorCode: typeof shaped.errorCode === "string" ? shaped.errorCode : existing.errorCode,
-            ok: shaped.outcome === "success" || shaped.outcome === "ok",
-          });
-        }
-      }
-      const tools = activity.filter(e => typeof e.payload.tool === "string").map((e, index, arr) => {
-        const toolName = String(e.payload.tool);
-        const toolCallId = String(e.payload.toolCallId ?? e.id);
-        const details = stepDetails.get(toolCallId);
-        const isLastTool = index === arr.length - 1 && developmentIsActive(stored);
-        const isFailed = e.payload.ok === false || details?.ok === false;
-        const toolStatus = isFailed ? "failed" : (isLastTool ? "active" : "completed");
-
-        let actionDesc = "Running a project operation";
-        if (/deps/.test(toolName)) actionDesc = details?.command ? `Installing dependencies: ${details.command}` : "Installing dependencies";
-        else if (/verify/.test(toolName)) actionDesc = "Verifying build and checks";
-        else if (/write|patch|edit/.test(toolName)) actionDesc = details?.file ? `Updating file: ${details.file}` : "Updating project files";
-        else if (/read|list|search/.test(toolName)) actionDesc = details?.file ? `Reading file: ${details.file}` : "Reading project files";
-        else if (details?.command) actionDesc = `Executed command: ${details.command}`;
-
-        const durationMs = typeof e.payload.durationMs === "number" ? e.payload.durationMs : details?.durationMs;
-        const errorCode = typeof e.payload.errorCode === "string" ? e.payload.errorCode : details?.errorCode;
-
-        return {
-          id: e.id,
-          stage: "tool",
-          title: actionDesc + (isFailed ? ": failed" : ""),
-          at: e.createdAt.toISOString(),
-          status: toolStatus as any,
-          tool: toolName,
-          command: details?.command,
-          file: details?.file,
-          cwd: details?.cwd,
-          result: details?.result,
-          durationMs,
-          errorCode,
-          agentId: "Coding Agent",
-        };
-      });
-      const item = { ...stored, progress: [...(stored.progress ?? []), ...tools].sort((a,b) => Date.parse(a.at) - Date.parse(b.at)), inboxEnabled: inboxEnabled.get(stored.companyId) ?? false };
+    const views = await Promise.all(items.filter(p => accessible.has(p.companyId)).map(async ({ requestId: _requestId, ...stored }): Promise<DevelopmentProcess | null> => {
+      try {
+      const project = stored.projectId ? await this.d.projects.get(ctx, stored.companyId, stored.projectId) : null;
+      const traceRuns = selectDevelopmentTraceRuns(runs.get(stored.companyId) ?? [], ctx, stored);
+      const latestRun = traceRuns.roots.sort((a, b) => (executionTimestamp(b.startedAt) ?? 0) - (executionTimestamp(a.startedAt) ?? 0))[0];
+      const traceProcess = latestRun ? { ...stored, runId: latestRun.runId } : stored;
+      const progress = await developmentTrace(this.d.store, ctx, traceProcess, this.d.terminalEvents);
+      const history = await Promise.all([...traceRuns.roots, ...traceRuns.children].filter(run => run.runId !== traceProcess.runId).map(run =>
+        developmentTrace(this.d.store, ctx, { ...stored, progress: [], runId: run.runId, sessionId: run.sessionId })));
+      const merged = Array.from(new Map([...progress, ...history.flat()].map(event => [event.id, event])).values()).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+      const item = { ...traceProcess, progress: merged, inboxEnabled: inboxEnabled.get(stored.companyId) ?? false };
       if (this.jobs.has(this.jobKey(ctx, item.id))) return item;
-      const latest = runs.get(item.companyId)?.filter(r => r.sessionId === item.sessionId).sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime())[0];
+      const latest = latestRun;
       if (latest && item.projectId) {
-        if (latest.runId === item.runId && !developmentIsActive(item) && !["interrupted", "awaiting_approval"].includes(item.status)) return item;
-        const project = await this.d.projects.get(ctx, item.companyId, item.projectId).catch(() => null);
+        if (latest.runId === stored.runId && !developmentIsActive(item) && !["interrupted", "awaiting_approval"].includes(item.status)) return item;
         const live = this.d.background.isLive(latest.runId);
         const status: DevelopmentProcess["status"] = live || latest.status === "running" ? item.status === "stopping" && item.runId === latest.runId ? "stopping" : "running" : latest.status === "waiting_for_user" ? "awaiting_approval"
           : latest.status === "completed" && (!project?.previewUrl || project.lastBuildStatus !== "ready") ? "failed" : latest.status;
@@ -164,14 +103,20 @@ export class ChatDevelopmentService {
       // Pre-session setup has no durable lease. Do not keep an orphaned setup spinner forever.
       if (developmentIsActive(item) && Date.now() - Date.parse(item.updatedAt) > 300_000) return { ...item, status: "interrupted" as const, detail: "The API process stopped before the session started." };
       return item;
+      } catch (error) {
+        // Also covers a project removed between authorization and its terminal-log read.
+        if (error instanceof WorkspaceNotFoundError || error instanceof WorkspaceAccessError) return null;
+        throw error;
+      }
     }));
+    return views.filter((item): item is DevelopmentProcess => item !== null);
   }
   private async serialize<T>(ctx: AuthContext, task: () => Promise<T>): Promise<T> {
     if (this.closing) throw new DevelopmentError("Development service is shutting down", 503);
     // Serialize identity creation per authenticated owner; updates use store revisions.
     const owner = this.owner(ctx);
     const previous = this.starts.get(owner) ?? Promise.resolve();
-    const work = previous.catch(() => {}).then(task);
+    const work = previous.catch(() => { }).then(task);
     this.starts.set(owner, work);
     try { return await work; } finally { if (this.starts.get(owner) === work) this.starts.delete(owner); }
   }
@@ -200,10 +145,12 @@ export class ChatDevelopmentService {
       });
     } else conversationId = (await this.d.store.createNeutralConversation(ctx, input.message.slice(0, 80))).id;
     const now = new Date().toISOString();
-    const created: Entry[] = targets.map(target => ({ id: randomUUID(), requestId: input.requestId, companyId: input.companyId,
-      parentConversationId: conversationId!, businessId: input.businessId, name: target.name, framework: target.framework, status: "queued", hidden: false, createdAt: now, updatedAt: now }));
+    const created: Entry[] = targets.map(target => ({
+      id: randomUUID(), requestId: input.requestId, companyId: input.companyId,
+      parentConversationId: conversationId!, businessId: input.businessId, name: target.name, framework: target.framework, status: "queued", hidden: false, createdAt: now, updatedAt: now
+    }));
     await this.change(ctx, items => {
-      if (items.filter(p => developmentIsActive(currentViews.get(p.id) ?? p)).length + created.length > 4) throw new DevelopmentError("Four development processes are already active. Stop or wait for a process before starting another.", 409);
+      if (items.filter(p => !!currentViews.get(p.id) && developmentIsActive(currentViews.get(p.id)!)).length + created.length > 4) throw new DevelopmentError("Four development processes are already active. Stop or wait for a process before starting another.", 409);
       // Keep four tiles visible; old projects remain in Websites and in their own chats.
       const visibleOld = created.length === 4 ? [] : items.filter(p => !p.hidden).slice(-(4 - created.length)).map(p => p.id);
       return this.bounded(ctx, [...items.map(p => ({ ...p, hidden: !visibleOld.includes(p.id) })), ...created], new Set([...currentViews.values()].filter(developmentIsActive).map(p => p.id)));
@@ -229,8 +176,25 @@ export class ChatDevelopmentService {
     });
     return { conversationId, processes: created };
   }
+  async recordActivity(ctx: AuthContext, companyId: string, sessionId: string, conversationId: string | undefined, event: import("@npati/shared").DevelopmentProcessProgressItem) {
+    const owned = (await this.entries(ctx)).find(p => p.companyId === companyId && p.sessionId === sessionId && (!conversationId || p.conversationId === conversationId));
+    if (!owned) return;
+    const details = executionResultDetails(event.result);
+    const safe = sanitizeProgress({ ...event, ...details, status: ["cancelled", "awaiting_approval", "waiting_for_approval"].includes(event.status ?? "") ? event.status : details.status ?? event.status, conversationId: owned.conversationId });
+    await this.change(ctx, items => items.map(p => p.id !== owned.id ? p : { ...p, progress: [...(p.progress ?? []).filter(item => item.id !== safe.id), safe], updatedAt: new Date().toISOString() }));
+  }
   private async report(ctx: AuthContext, id: string, stage: string, title: string, details?: Record<string, unknown>) {
-    await this.change(ctx, items => items.map(item => item.id === id ? { ...item, progress: [...(item.progress ?? []), { id: randomUUID(), stage, title, at: new Date().toISOString(), ...details }].slice(-60), updatedAt: new Date().toISOString() } : item));
+    await this.change(ctx, items => items.map(item => {
+      if (item.id !== id) return item;
+      const eventId = id + ":" + stage;
+      const previous = item.progress?.find(event => event.id === eventId);
+      const event = sanitizeProgress({ ...previous, id: eventId, stage, title, at: previous?.at ?? new Date().toISOString(), ...Object.fromEntries(Object.entries(details ?? {}).filter(([, value]) => value !== undefined)) });
+      return { ...item, progress: [...(item.progress ?? []).filter(event => event.id !== eventId), event].slice(-200), updatedAt: new Date().toISOString() };
+    }));
+  }
+  private async settleProgress(ctx: AuthContext, id: string, status: DevelopmentProcess["status"]) {
+    await this.change(ctx, items => items.map(item => item.id !== id ? item : { ...item, progress: item.progress?.map(event =>
+      ["active", "running"].includes(event.status ?? "") ? { ...event, status: status === "awaiting_approval" ? "waiting_for_approval" as const : status === "completed" ? "completed" as const : status === "cancelled" ? "cancelled" as const : "failed" as const } : event) }));
   }
   private async card(ctx: AuthContext, process: Entry, project: Project, text: string) {
     const current = (await this.entries(ctx)).find(p => p.id === process.id);
@@ -242,10 +206,17 @@ export class ChatDevelopmentService {
     }
     let messageId = current?.conversationId === process.conversationId ? current.cardMessageId : undefined;
     if (!messageId) {
-      messageId = (await this.d.store.appendNeutralMessage(ctx, process.conversationId, "assistant", process.name)).id;
+      const chat = await this.d.store.getNeutralConversation(ctx, process.conversationId);
+      // Routing metadata belongs to the existing request, not an extra overview bubble.
+      messageId = chat.messages.find(item => item.role === "user")?.id
+        ?? (await this.d.store.appendNeutralMessage(ctx, process.conversationId, "assistant", process.name)).id;
       await this.patch(ctx, process.id, { cardMessageId: messageId });
     }
     const view = (await this.entries(ctx)).find(item => item.id === process.id);
+    if (view && !developmentIsActive(view) && view.status !== "idle" && !view.resultMessageId && text.trim()) {
+      const result = await this.d.store.appendNeutralMessage(ctx, process.conversationId, "assistant", text);
+      await this.patch(ctx, process.id, { resultMessageId: result.id });
+    }
     await saveChatProjectCard(this.d.store, ctx, process.conversationId, messageId, {
       id: project.id, projectId: project.id, companyId: project.companyId, name: project.name, status: view?.status ?? "preparing",
       framework: project.framework, previewUrl: project.previewUrl ?? undefined, lastBuildStatus: project.lastBuildStatus ?? undefined,
@@ -260,21 +231,25 @@ export class ChatDevelopmentService {
     const ensureActive = () => { if (controller.signal.aborted) throw new DevelopmentError("Stopped by request"); };
     try {
       await this.patch(ctx, process.id, { status: "preparing" });
-      await this.report(ctx, process.id, "project", "Preparing project workspace", { tool: "code.workspace", status: "completed", agentId: "System" });
+      process.conversationId = (await this.d.store.createNeutralConversation(ctx, process.name)).id;
+      await this.d.store.appendNeutralMessage(ctx, process.conversationId, "user", message);
+      await this.patch(ctx, process.id, { conversationId: process.conversationId });
+      await this.report(ctx, process.id, "project", "Preparing project workspace", { tool: "code.workspace", status: "running", agentId: "System" });
       ensureActive();
       const { project: raw } = await this.d.projects.create(ctx, process.companyId, {
         name: process.name, type: target.kind === "mobile_app" ? "mobile_app" : "code_project", description: message.slice(0, 5000),
       }, "chat-development:" + process.id);
+      await this.report(ctx, process.id, "project", "Project workspace prepared", { tool: "code.workspace", status: "completed", agentId: "System" });
       process.projectId = raw.id;
-      process.conversationId = (await this.d.store.createNeutralConversation(ctx, process.name)).id;
       await this.patch(ctx, process.id, { projectId: raw.id, conversationId: process.conversationId });
       await this.card(ctx, process, raw, "Агент готує проєкт. Стан запуску відображається над полем чату.");
       ensureActive();
-      await this.report(ctx, process.id, "scaffold", "Preparing the existing " + target.framework + " template", { tool: "code.scaffold", status: "completed", agentId: "System" });
+      await this.report(ctx, process.id, "scaffold", "Preparing the existing " + target.framework + " template", { tool: "code.scaffold", status: "running", agentId: "System" });
       const project = target.kind === "mobile_app"
         ? await this.d.preparer.prepareCodingMobile(ctx, raw, message)
         : await this.d.preparer.prepareCodingWebsite(ctx, raw, message, target.framework);
       ensureActive();
+      await this.report(ctx, process.id, "scaffold", "Project template prepared", { tool: "code.scaffold", status: "completed", agentId: "System" });
       await this.d.code.detectAndPersist(ctx, process.companyId, project.id);
       session = await this.d.code.createSession(ctx, process.companyId, project.id, { mode: "auto" });
       process.sessionId = session.id; process.runId = randomUUID();
@@ -287,25 +262,17 @@ export class ChatDevelopmentService {
       await this.patch(ctx, process.id, { status: "running" });
       if (this.d.preview) {
         await this.d.flags.assertEnabled(ctx, "code.shell", { companyId: process.companyId });
-        const reports: Promise<void>[] = [];
-        await this.d.preview.buildProject(ctx, process.companyId, project.id, stage => {
-          ensureActive(); reports.push(this.report(ctx, process.id, stage, stage === "dependencies" ? "Installing template dependencies" : "Building the template", {
-            tool: stage === "dependencies" ? "code.deps.install" : "code.build",
-            command: stage === "dependencies" ? "npm install" : "npm run build",
-            cwd: `/workspace/${process.name}`,
-            status: "completed",
-            agentId: "System",
+        let reports = Promise.resolve();
+        await this.d.preview.buildProject(ctx, process.companyId, project.id, (stage, details) => {
+          ensureActive();
+          reports = reports.then(() => this.report(ctx, process.id, stage, stage === "dependencies" ? "Installing dependencies" : "Building project", {
+            status: "running", agentId: "System", ...details, result: details?.stdout || details?.stderr ? [details.stdout, details.stderr].filter(Boolean).join("\n") : undefined,
           }));
-        }).finally(() => Promise.all(reports));
+        }).finally(() => reports);
         ensureActive();
-        await this.report(ctx, process.id, "preview", "Starting template Live Preview", {
-          tool: "code.preview",
-          command: "npx next dev",
-          cwd: `/workspace/${process.name}`,
-          status: "completed",
-          agentId: "System",
-        });
+        await this.report(ctx, process.id, "preview", "Starting Live Preview", { status: "running", agentId: "System" });
         const initialPreview = await this.d.preview.startPreview(ctx, process.companyId, project.id, { signal: controller.signal });
+        await this.report(ctx, process.id, "preview", "Live Preview started", { status: "completed", agentId: "System" });
         await this.patch(ctx, process.id, { previewUrl: initialPreview.previewUrl });
         await this.report(ctx, process.id, "template_ready", "Template build passed; Live Preview is running. AI implementation is next.", {
           tool: "code.preview",
@@ -319,7 +286,9 @@ export class ChatDevelopmentService {
         status: "active",
         agentId: "Coding Agent",
       });
-      const outcome = await this.d.executor.execute({ ctx, session, runId: process.runId, maxTurns: 16,
+      const outcome = await this.d.executor.execute({
+        ctx, session, runId: process.runId, maxTurns: 16,
+        onActivity: event => this.recordActivity(ctx, process.companyId, session!.id, process.conversationId, event),
         prompt: "User request: " + message + "\nYour assigned project is " + target.name + " (" + target.kind + "). Implement ONLY this project, not the other requested projects. The existing template has already been prepared by the system. Make a focused first implementation: read package.json and " + (target.kind === "mobile_app" ? "App.tsx" : target.framework === "HTML/CSS" ? "index.html" : "app/page.tsx") + ", edit the visible page and its styles immediately, then finish. Do not explore unrelated modules or delegate this initial page task. You have at most 16 turns, including repairs. Preserve the attached database/auth SDK. Do not re-scaffold or run create-next-app. Template dependencies are already installed by the system. Only when adding a new package, use the available code.deps.add tool. Do not start a dev server. Finish implementation; the system will verify the production build and start Live Preview.",
         cancelRequested: () => controller.signal.aborted,
         abort: () => this.d.background.abort(process.runId!, "Stopped by request"),
@@ -331,6 +300,7 @@ export class ChatDevelopmentService {
       const result = outcome.result as { message?: string } | null;
       const status = controller.signal.aborted ? "cancelled" : outcome.needsApproval ? "awaiting_approval"
         : outcome.terminalStatus === "completed" && !ready ? "failed" : outcome.terminalStatus;
+      await this.settleProgress(ctx, process.id, status);
       await this.patch(ctx, process.id, { status, detail: outcome.reason ?? (ready ? "Build passed · Live Preview" : "Live Preview has not started"), previewUrl: ready ? finished.previewUrl ?? undefined : undefined });
       await this.report(ctx, process.id, status, result?.message || outcome.reason || (ready ? "Verified build and Live Preview are ready" : "Development stopped before verified completion"), {
         tool: "code.verification",
@@ -344,6 +314,7 @@ export class ChatDevelopmentService {
       const detail = error instanceof Error ? error.message : "Development failed";
       sink?.finish(controller.signal.aborted ? "cancelled" : "failed", detail);
       await this.patch(ctx, process.id, { status: controller.signal.aborted ? "cancelled" : "failed", detail });
+      await this.settleProgress(ctx, process.id, controller.signal.aborted ? "cancelled" : "failed");
       await this.report(ctx, process.id, controller.signal.aborted ? "cancelled" : "failed", detail, {
         status: controller.signal.aborted ? "cancelled" : "failed",
         error: detail,
@@ -357,8 +328,8 @@ export class ChatDevelopmentService {
     } finally {
       try {
         if (process.projectId && this.d.sandbox && !hasCodeChatPreview(runResult)
-            && this.d.preview?.getSession(process.projectId)?.status !== "running"
-            && (!session || !this.d.inbox || await this.d.inbox.mayCleanup(ctx, session, runResult))) {
+          && this.d.preview?.getSession(process.projectId)?.status !== "running"
+          && (!session || !this.d.inbox || await this.d.inbox.mayCleanup(ctx, session, runResult))) {
           await this.d.sandbox.releaseAfterRun(ctx, await this.d.projects.get(ctx, process.companyId, process.projectId));
         }
       } catch (error) { this.d.log.warn({ err: error }, "development_sandbox_cleanup_failed"); }
@@ -385,9 +356,11 @@ export class ChatDevelopmentService {
     const adopted: Entry[] = await Promise.all(projects.map(async project => {
       const sessions = await this.d.code.listSessions(ctx, project.companyId, project.id, { limit: 20 });
       const session = sessions.find(s => s.status === "active");
-      return { id: randomUUID(), requestId: randomUUID(), companyId: project.companyId, projectId: project.id, sessionId: session?.id,
+      return {
+        id: randomUUID(), requestId: randomUUID(), companyId: project.companyId, projectId: project.id, sessionId: session?.id,
         parentConversationId: root.id, name: project.name, framework: project.framework ?? "", status: project.previewUrl && project.lastBuildStatus === "ready" ? "completed" : project.lastBuildStatus === "failed" ? "failed" : "idle",
-        hidden: true, createdAt: project.createdAt, updatedAt: new Date().toISOString() };
+        hidden: true, createdAt: project.createdAt, updatedAt: new Date().toISOString()
+      };
     }));
     await this.change(ctx, items => this.bounded(ctx, [...items, ...adopted.filter(p => !items.some(existing => existing.projectId === p.projectId))]));
   }
@@ -423,7 +396,7 @@ export class ChatDevelopmentService {
     let changed = false;
     if (!process.conversationId || !await this.d.store.getNeutralConversation(ctx, process.conversationId).catch(() => null)) {
       process.conversationId = (await this.d.store.createNeutralConversation(ctx, project.name)).id;
-      await this.patch(ctx, process.id, { conversationId: process.conversationId, cardMessageId: undefined });
+      await this.patch(ctx, process.id, { conversationId: process.conversationId, cardMessageId: undefined, resultMessageId: undefined });
       await this.card(ctx, process, project, "Project development restored from Websites."); changed = true;
     }
     const parent = await this.d.store.getNeutralConversation(ctx, process.parentConversationId).catch(() => process.businessId ? this.d.store.getConversation(ctx, process.businessId, process.parentConversationId).catch(() => null) : null);
@@ -444,8 +417,10 @@ export class ChatDevelopmentService {
     if (!process) {
       const root = await this.d.store.createNeutralConversation(ctx, "Development projects");
       const now = new Date().toISOString();
-      process = { id: randomUUID(), requestId: randomUUID(), companyId, projectId, parentConversationId: root.id, name: project.name,
-        framework: project.framework ?? "", status: project.previewUrl && project.lastBuildStatus === "ready" ? "completed" : project.lastBuildStatus === "failed" ? "failed" : "idle", hidden: true, createdAt: now, updatedAt: now };
+      process = {
+        id: randomUUID(), requestId: randomUUID(), companyId, projectId, parentConversationId: root.id, name: project.name,
+        framework: project.framework ?? "", status: project.previewUrl && project.lastBuildStatus === "ready" ? "completed" : project.lastBuildStatus === "failed" ? "failed" : "idle", hidden: true, createdAt: now, updatedAt: now
+      };
       const activeIds = new Set((await this.list(ctx)).filter(developmentIsActive).map(p => p.id));
       await this.change(ctx, items => this.bounded(ctx, [...items, process!], activeIds));
     }

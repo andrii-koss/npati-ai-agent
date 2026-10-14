@@ -201,6 +201,11 @@ export function classifyProjectIntent(rawInput: ProjectIntentInput | string): Pr
     });
   }
 
+  // Creating a component inside the selected site is an edit of that workspace.
+  if (input.activeProjectId && /(?:create|make|build|\u0441\u0442\u0432\u043e\u0440|\u0437\u0440\u043e\u0431|\u0434\u043e\u0434\u0430).*(?:\bform\b|\bmenu\b|\bbutton\b|\bpage\b|\bsection\b|\bheader\b|\bfooter\b|\bcomponent\b|\u0444\u043e\u0440\u043c|\u043c\u0435\u043d\u044e|\u043a\u043d\u043e\u043f\u043a|\u0441\u0442\u043e\u0440\u0456\u043d\u043a|\u0441\u0435\u043a\u0446|\u043a\u043e\u043c\u043f\u043e\u043d\u0435\u043d\u0442)/iu.test(text)
+    && !/(?:\bnew\s+(?:website|site|project|store|blog|app)\b|\u043d\u043e\u0432[\u0438\u0430\u0443\u0435\u043e\u0439\u0456\u043d]*\s+(?:\u0441\u0430\u0439\u0442|\u043f\u0440\u043e\u0454\u043a\u0442|\u043c\u0430\u0433\u0430\u0437\u0438\u043d|\u0431\u043b\u043e\u0433|\u0434\u043e\u0434\u0430\u0442\u043e\u043a))/iu.test(text)) {
+    return buildDecision({ intent: "EDIT_PROJECT", confidence: 0.9, isExecutableInStep5: true, needsClarification: false });
+  }
   // A new site/app must win over ancillary build, preview and data requests.
   if (CREATE_PROJECT_REGEX.test(text) && (/створи|створити|зроби|розроби|згенеруй|create|generate|make|build\s+(?:a|an)\s/iu.test(text) || !PREVIEW_REGEX.test(text) && !BUILD_REGEX.test(text) && !TEST_REGEX.test(text)) || CREATE_STORE_REGEX.test(text) && !/таблиц|колекці|схем|table|collection|schema/iu.test(text)) {
     const isMobileApp = isMobileAppRequest(text);

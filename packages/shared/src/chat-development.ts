@@ -1,3 +1,4 @@
+import { classifyProjectIntent } from "./project-intent";
 /** Shared deterministic routing: creation requests only, never ordinary project edits. */
 export type DevelopmentTarget = { name: string; kind: "website" | "blog" | "store" | "crm" | "mobile_app"; framework: "Next.js" | "HTML/CSS" | "Expo" };
 export type DevelopmentProcessProgressItem = {
@@ -5,12 +6,25 @@ export type DevelopmentProcessProgressItem = {
   stage: string;
   title: string;
   at: string;
-  status?: "active" | "running" | "completed" | "failed" | "cancelled" | "waiting_for_approval";
+  conversationId?: string;
+  sequence?: number;
+  kind?: "operation" | "assistant_message";
+  files?: { path: string; action?: "created" | "modified" | "deleted"; linesAdded?: number; linesRemoved?: number; diff?: string }[];
+  fileChange?: "created" | "modified" | "deleted";
+  diff?: string;
+  linesAdded?: number;
+  linesRemoved?: number;
+  tests?: { passed: number; failed: number; skipped: number; total: number };
+  status?: "pending" | "awaiting_approval" | "active" | "running" | "completed" | "failed" | "cancelled" | "waiting_for_approval";
   tool?: string;
   command?: string;
   file?: string;
   cwd?: string;
   result?: string;
+  stdout?: string;
+  stderr?: string;
+  resultTruncated?: boolean;
+  runId?: string;
   durationMs?: number;
   exitCode?: number;
   error?: string;
@@ -28,7 +42,8 @@ export const developmentIsActive = (p: DevelopmentProcess) => ["queued", "prepar
 export function requestsDevelopmentRestore(message: string): boolean {
   return /(?:open|show|restore|відкри|покаж|віднов|открой).*(?:development processes|процеси.*розроб|процессы.*разраб)/iu.test(message);
 }
-export function planChatDevelopment(message: string): DevelopmentTarget[] {
+export function planChatDevelopment(message: string, activeProjectId?: string): DevelopmentTarget[] {
+  if (activeProjectId && !["CREATE_PROJECT", "CREATE_WEBSITE"].includes(classifyProjectIntent({ message, activeProjectId }).intent)) return [];
   if (!/(?:\bcreate\b|\bbuild\s+(?:a\s+|an\s+|new\s+|[1-4]\s+)?(?:website|site|shop|store|blog|mobile|crm)|\bmake\b|створ|зроби|создай|создать)/iu.test(message)) return [];
   if (/(?:create|make|створ|зроби|создай).*(?:\bpage\b|\bcomponent\b|\bbutton\b|\bheader\b|сторінк|компонент|кнопк)/iu.test(message)
       && !/(?:new\s+(?:website|site)|новий\s+сайт)/iu.test(message)) return [];

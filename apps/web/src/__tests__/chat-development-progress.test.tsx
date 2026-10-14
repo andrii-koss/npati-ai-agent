@@ -1,23 +1,35 @@
 import React from "react";
+import { MemoryRouter } from "react-router-dom";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { DevelopmentProcess, ProjectCardData } from "@npati/shared";
-import { ChatDevelopmentProgress, developmentProgressEvents } from "../ChatDevelopmentProgress";
-import { developmentCard, hideDevelopmentMessage } from "../chat-development-view";
-const process: DevelopmentProcess = { id: "process", companyId: "company", projectId: "project", conversationId: "child", parentConversationId: "parent", name: "Online store", framework: "Next.js", status: "running", hidden: false, createdAt: "", updatedAt: "", progress: [{ id: "install", stage: "dependencies", title: "Installing dependencies", at: "" }] };
+import { ChatDevelopmentProgress, ChatDevelopmentPreview } from "../ChatDevelopmentProgress";
+import { developmentCard, hideDevelopmentMessage, projectConversationUrl } from "../chat-development-view";
+const process: DevelopmentProcess = { id: "process", companyId: "company", projectId: "project", conversationId: "child", parentConversationId: "parent", name: "Online store", framework: "Next.js", status: "running", hidden: false, createdAt: "", updatedAt: "", progress: [{ id: "install", stage: "dependencies", title: "Installing dependencies", status: "running", at: "" }] };
 const card: ProjectCardData = { id: "project", projectId: "project", companyId: "company", name: "Online store", status: "ready", kind: "code_project" };
 describe("project deployment chat", () => {
   it("renders an animated dot and actual stages only with a project process", () => {
     const markup = renderToStaticMarkup(<ChatDevelopmentProgress process={process} />);
-    expect(markup).toContain('class="assistant research-progress"'); expect(markup).toContain('class="research-progress-state"'); expect(markup).toContain('class="research-progress-globe"'); expect(markup).toContain('class="research-active-text"'); expect(markup).not.toContain('chat-development-dot'); expect(markup).not.toContain('<section'); expect(markup).toContain("Installing dependencies");
+    expect(markup).toContain('class="assistant research-progress"'); expect(markup).toContain('class="research-progress-state"'); expect(markup).toMatch(/class="[^"]*research-progress-globe/); expect(markup).toContain('class="research-active-text"'); expect(markup).not.toContain('chat-development-dot'); expect(markup).not.toContain('<section'); expect(markup).toContain("Installing dependencies");
     expect(renderToStaticMarkup(<ChatDevelopmentProgress />)).toBe("");
   });
-  it("groups repeated file activity in the existing agent step instead of adding many rows", () => {
+  it("keeps separate tool calls and deduplicates only the same execution identity", () => {
     const busy = { ...process, progress: [...process.progress!, ...Array.from({ length: 20 }, (_, i) => ({ id: "read-" + i, stage: "tool", title: "Reading project files", at: "" }))] };
     const markup = renderToStaticMarkup(<ChatDevelopmentProgress process={busy} />);
-    expect(markup.match(/Reading project files/g)).toHaveLength(1);
-    expect(markup.match(/research-page-row/g)).toHaveLength(2);
-    expect(developmentProgressEvents(busy).at(-1)).toMatchObject({ stage: "agent", status: "active" });
+    expect(markup.match(/Reading project files/g)).toHaveLength(20);
+    expect(markup.match(/research-page-row/g)).toHaveLength(21);
+  });
+  it("preserves waiting, failure and cancellation without animating completed operations", async () => {
+    const { AgentExecutionTrace } = await import("../AgentExecutionTrace");
+    const items = ["completed", "waiting_for_approval", "failed", "cancelled", "running", "running"].map((status, i) => ({ id: "call-" + i, stage: "build", title: "Building project", at: "", status: status as "running", agentId: i === 5 ? "worker-2" : "worker-1" }));
+    const markup = renderToStaticMarkup(<AgentExecutionTrace process={{ ...process, progress: items }} />);
+    expect(markup.match(/class="research-active-text"/g)).toHaveLength(2);
+    expect(markup).toContain("Waiting for approval"); expect(markup).toContain("Failed"); expect(markup).toContain("Cancelled");
+    expect(markup.match(/codex-trace-status-pill completed/g)).toHaveLength(1);
+    expect(markup).toContain('aria-controls="trace-detail-call-0"'); expect(markup).toContain('inert=""');
+    expect(markup).toContain("worker-2");
+    const duplicates = renderToStaticMarkup(<AgentExecutionTrace items={[items[0]!, { ...items[0]!, status: "failed" }]} />);
+    expect(duplicates.match(/research-page-row/g)).toHaveLength(1); expect(duplicates).toContain("Failed");
   });
   it("hides duplicate placeholder messages and cards but retains substantive replies", () => {
     const messages = [{ content: "Coding Agent session started.", projectCard: card }, { content: "I changed the page", projectCard: card }, { content: "Stopped: A2A_TOKEN_QUOTA_EXCEEDED", projectCard: card }];
@@ -25,8 +37,22 @@ describe("project deployment chat", () => {
     expect(hideDevelopmentMessage(messages, 1, [process])).toBe(false);
     const failed = { ...process, status: "failed" as const };
     expect(developmentCard(messages, 0, [failed], "child")).toBeNull();
-    expect(developmentCard(messages, 2, [failed], "child")?.status).toBe("failed");
+    expect(developmentCard(messages, 2, [failed], "child")).toBeNull();
     expect(developmentCard(messages, 2, [failed], "parent")).toBeNull();
+  });
+  it("shows only Preview beneath the completed trace and retains substantive replies", () => {
+    const completed = { ...process, status: "completed" as const, previewUrl: "/preview/project", progress: [{ ...process.progress![0]!, status: "completed" as const }] };
+    const html = renderToStaticMarkup(<MemoryRouter><ChatDevelopmentProgress process={completed} /><ChatDevelopmentPreview process={completed} /></MemoryRouter>);
+    expect(html.indexOf("chat-development-preview")).toBeGreaterThan(html.indexOf("codex-trace-row"));
+    expect(html.match(/>Preview<\/button>/g)).toHaveLength(1);expect(html).not.toContain("Code ");expect(html).not.toContain("Edit in chat");expect(html).not.toContain("Live Preview Active");
+    expect(hideDevelopmentMessage([{ content: process.name, projectCard: card }], 0, [completed])).toBe(true);
+    expect(hideDevelopmentMessage([{ content: "I changed the button", projectCard: card }], 0, [completed])).toBe(false);
+    expect(developmentCard([{ content: "I changed the button", projectCard: card }], 0, [completed], "child")).toBeNull();
+  });
+  it("preserves project and parent-chat identity after a coding reply", () => {
+    const search = new URLSearchParams("company=c&project=p&developmentRoot=parent");
+    expect(projectConversationUrl("child", {companyId:"c",projectId:"p"},search)).toBe("/c/child?company=c&project=p&developmentRoot=parent");
+    expect(projectConversationUrl("other", {companyId:"c",projectId:"other"},search)).not.toContain("developmentRoot");
   });
   it("never calls an unbuilt template ready and shows no card while a process runs", () => {
     const messages = [{ content: "Online store", projectCard: card }];
@@ -120,10 +146,10 @@ describe("project deployment chat", () => {
   });
   it("sanitizes secrets, credentials and tokens from commands and results", async () => {
     const { sanitizeTraceSecrets, AgentExecutionTrace } = await import("../AgentExecutionTrace");
-    expect(sanitizeTraceSecrets("curl -H 'Authorization: Bearer mySecretToken123456789' https://api.npati.test")).toContain("Bearer [REDACTED_TOKEN]");
-    expect(sanitizeTraceSecrets("echo sk-abcdef1234567890abcdef1234567890")).toContain("[REDACTED_KEY]");
-    expect(sanitizeTraceSecrets("git clone https://ghp_1234567890abcdefghijklmnopqrstuvwxyz12@github.com/repo.git")).toContain("[REDACTED_TOKEN]");
-    expect(sanitizeTraceSecrets("api_key: \"super_secret_api_key_value\"")).toContain('api_key: "[REDACTED]"');
+    expect(sanitizeTraceSecrets("curl -H 'Authorization: Bearer mySecretToken123456789' https://api.npati.test")).toContain("Bearer [REDACTED]");
+    expect(sanitizeTraceSecrets("echo sk-abcdef1234567890abcdef1234567890")).toContain("[REDACTED]");
+    expect(sanitizeTraceSecrets("git clone https://ghp_1234567890abcdefghijklmnopqrstuvwxyz12@github.com/repo.git")).toContain("[REDACTED]");
+    expect(sanitizeTraceSecrets("api_key: \"super_secret_api_key_value\"")).toContain('api_key: [REDACTED]');
 
     const itemWithSecret = {
       id: "trace-secret",

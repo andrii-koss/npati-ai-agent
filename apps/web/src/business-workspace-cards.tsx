@@ -256,7 +256,7 @@ export function BusinessForm({ initial, mode, onCancel, onSaved }: { initial?: B
     </form>
   );
 }
-export function ProjectChatCard({ card, onActivate }: { card: ProjectCardData; onActivate?: (card: ProjectCardData) => void }) {
+export function ProjectChatCard({ card, onActivate, previewOnly = false }: { card: ProjectCardData; onActivate?: (card: ProjectCardData) => void; previewOnly?: boolean }) {
   const navigate = useNavigate();
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState(card.previewUrl ?? "");
@@ -373,7 +373,7 @@ export function ProjectChatCard({ card, onActivate }: { card: ProjectCardData; o
 
   return (
     <div className="project-chat-card-container">
-      <div className="project-chat-card">
+      {previewOnly ? <button type="button" className="button-primary" onClick={() => void openPreview()}>Preview</button> : <div className="project-chat-card">
         <div className="project-chat-card-top">
           <div className="project-chat-card-info">
             <span className="project-chat-card-icon">{isCodeProject ? "⌨️" : "🌐"}</span>
@@ -393,7 +393,7 @@ export function ProjectChatCard({ card, onActivate }: { card: ProjectCardData; o
           {card.previewUrl && <span className="preview-live-badge">● Live Preview Active</span>}
         </div>
         <div className="project-chat-card-actions">
-          <button type="button" className="button-primary" disabled={isCodeProject && !card.previewUrl && ["stopped", "failed", "cancelled", "waiting_for_user"].includes(card.status)} onClick={() => { onActivate?.(card); void openPreview(); }}>Preview</button>
+          <button type="button" className="button-primary" disabled={isCodeProject && !card.previewUrl && ["stopped", "failed", "cancelled", "waiting_for_user"].includes(card.status)} onClick={() => { void openPreview(); }}>Preview</button>
           <button type="button" className="button-secondary" onClick={() => onActivate?.(card)}>Edit in chat</button>
           {isCodeProject && codeWorkspaceUrl && <button type="button" className="button-secondary" onClick={() => navigate(codeChangesUrl!)}>Changes{typeof card.changesCount === "number" ? ` (${card.changesCount})` : ""}</button>}
           {isCodeProject && card.codeMode && persistedModeLabel(card.codeMode, false) && (
@@ -405,7 +405,7 @@ export function ProjectChatCard({ card, onActivate }: { card: ProjectCardData; o
             </Link>
           )}
         </div>
-      </div>
+      </div>}
       {previewOpen && createPortal(
         <div className="project-chat-preview-layer">
           <aside className="project-chat-preview-drawer" role="complementary" aria-label={`Preview of ${card.name}`}>

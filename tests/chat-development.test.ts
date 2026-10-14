@@ -1,6 +1,6 @@
 import Fastify from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
+import { InMemoryWorkspaceStore, WorkspaceNotFoundError, type AuthContext } from "@npati/workspace";
 import { planChatDevelopment, requestsDevelopmentRestore } from "@npati/shared";
 import { FeatureFlagService } from "../apps/agent-api/src/feature-flags";
 import { ProjectService } from "../apps/agent-api/src/project-service";
@@ -14,6 +14,7 @@ import { createCodeRunAdmission } from "../apps/agent-api/src/code-run-admission
 import { finishCodeChatWebsite } from "../apps/agent-api/src/code-chat-website";
 import { ChatDevelopmentService } from "../apps/agent-api/src/chat-development-service";
 import { registerChatDevelopmentRoutes } from "../apps/agent-api/src/chat-development-routes";
+import { ProjectTerminalEventsRepository } from "../apps/agent-api/src/project-terminal-events";
 import { getLatestChatProjectCard } from "../apps/agent-api/src/project-chat-cards";
 const owner: AuthContext = { userId: "owner", workspaceId: "ws-owner", permissions: ["workspace:write", "business:manage"] };
 const bulk = "Масово створи мені сайт для компанії, блог, мобільний додаток і CRM";
@@ -46,7 +47,7 @@ async function fixture(maxConcurrentPerUser = 4) {
     startPreview: vi.fn(async (ctx: AuthContext, companyId: string, projectId: string) => { previews.add(projectId); await projects.updatePreview(ctx, companyId, projectId, { lastBuildStatus: "ready", previewUrl: "https://preview.test/" + projectId }); return { status: "running", previewUrl: "https://preview.test/" + projectId }; }),
     getSession: (projectId: string) => previews.has(projectId) ? { status: "running" } : undefined,
   };
-  const ports = { store, projects, flags, code, executor, cancellation, background, preview: preview as never,
+  const ports = { terminalEvents: new ProjectTerminalEventsRepository(projects), store, projects, flags, code, executor, cancellation, background, preview: preview as never,
     admission: createCodeRunAdmission(queue, new CodeRunRateLimiter()),
     preparer: { prepareCodingWebsite: (ctx: AuthContext, p: Awaited<ReturnType<ProjectService["get"]>>, _message: string, framework: string) => prepare(ctx, p, framework), prepareCodingMobile: (ctx: AuthContext, p: Awaited<ReturnType<ProjectService["get"]>>) => prepare(ctx, p, "Expo") }, log: { warn: vi.fn() } };
   const service = new ChatDevelopmentService(ports); shutdown.push(() => service.close());
@@ -57,6 +58,26 @@ async function fixture(maxConcurrentPerUser = 4) {
   };
   return { store, company, projects, flags, code, controls, starts, service, start, finish, ports, preview };
 }
+describe("durable coding activity", () => {
+  it("stores the child user before execution, recovers operation updates and appends the true result", async () => {
+    const f = await fixture(); const request = "Create a website on Next.js";
+    const started = await f.start(request); await vi.waitFor(() => expect(f.controls.size).toBe(1));
+    const process = (await f.service.list(owner))[0]!; const before = await f.store.getNeutralConversation(owner,process.conversationId!);
+    expect(before.messages[0]).toMatchObject({role:"user",content:request});
+    const callback = f.controls.get(process.projectId!)!.input.onActivity!;
+    const event = {id: process.runId + ":build-call",runId:process.runId,stage:"tool",title:"Build",at:new Date().toISOString(),command:"npm run build token=secret",status:"running" as const};
+    await callback(event); await callback({...event,status:"completed",result:JSON.stringify({stdout:"built password=p",exitCode:0,tests:{passed:24,failed:0,skipped:0,total:24}})});
+    const restored = new ChatDevelopmentService(f.ports);
+    const progress = (await restored.list(owner))[0]!.progress!.filter(x=>x.id===event.id);
+    expect(progress).toHaveLength(1);expect(progress[0]).toMatchObject({status:"completed",command:"npm run build token=[REDACTED]",exitCode:0,tests:{passed:24,total:24}});expect(progress[0]?.stdout).toContain("password=[REDACTED]");
+    await f.service.recordActivity({...owner,userId:"other"},f.company.id,process.sessionId!,process.conversationId,event);
+    expect((await f.service.list(owner))[0]!.progress!.filter(x=>x.id===event.id)).toHaveLength(1);
+    f.controls.get(process.projectId!)!.finish({status:"completed",runId:process.runId,message:"Implemented the requested storefront.",summary:{verification:{status:"passed",requestedTools:["build"]}}});
+    await vi.waitFor(async () => expect((await f.store.getNeutralConversation(owner,process.conversationId!)).messages.at(-1)?.content).toBe("Implemented the requested storefront."));
+    expect((await f.store.getNeutralConversation(owner,started.conversationId)).messages[0]?.role).toBe("user");
+    await restored.close();
+  });
+});
 describe("development request planning", () => {
   it("routes the user's four projects and keeps a shop as one project", () => {
     expect(planChatDevelopment(bulk).map(t => t.kind)).toEqual(["website", "blog", "mobile_app", "crm"]);
@@ -64,6 +85,8 @@ describe("development request planning", () => {
     expect(planChatDevelopment("Change the header of my website")).toEqual([]);
     expect(planChatDevelopment("Run build and Live Preview for my website")).toEqual([]);
     expect(planChatDevelopment("Create a page in my website")).toEqual([]);
+    expect(planChatDevelopment("Create a contact form on this website", "existing")).toEqual([]);
+    expect(planChatDevelopment("Create a new website with a contact form", "existing")).toHaveLength(1);
     expect(planChatDevelopment("Create 4 websites")).toHaveLength(4);
     expect(() => planChatDevelopment("Create 5 websites")).toThrow("four");
     expect(requestsDevelopmentRestore("відкрий усі процеси розробки")).toBe(true);
@@ -160,6 +183,38 @@ describe("chat development lifecycle with the real store, queue and executor", (
     expect((await f.service.list(owner)).filter(p => !p.hidden)).toHaveLength(4);
     expect(await f.projects.list(owner, f.company.id)).toHaveLength(8);
   });
+  it("ignores deleted projects in persisted history and accepts a new creation request", async () => {
+    const f = await fixture();
+    await f.start("Create a website", "first");
+    await vi.waitFor(() => expect(f.controls.size).toBe(1));
+    const first = (await f.service.list(owner))[0]!;
+    f.finish(first.projectId!);
+    await vi.waitFor(async () => expect((await f.service.list(owner))[0]?.status).toBe("completed"));
+    await f.projects.delete(owner, f.company.id, first.projectId!);
+    expect(await f.service.list(owner)).toEqual([]);
+    const result = await f.start("Create a Next.js website", "second");
+    expect(result.processes).toHaveLength(1);
+    await vi.waitFor(() => expect(f.controls.size).toBe(2));
+    expect((await f.service.list(owner)).map(p => p.projectId)).not.toContain(first.projectId);
+  });
+  it("does not count stale running entries for deleted projects against the four-project limit", async () => {
+    const f = await fixture();
+    const now = new Date().toISOString();
+    await f.store.setUserSetting(owner, "chat-development-processes:v1", Array.from({ length: 4 }, (_, i) => ({ id: "stale-" + i, requestId: "stale-" + i, projectId: "deleted-" + i, companyId: f.company.id, parentConversationId: "old", name: "Old", framework: "Next.js", status: "running", hidden: false, createdAt: now, updatedAt: now })), 0);
+    expect(await f.service.list(owner)).toEqual([]);
+    const result = await f.start("Create a Next.js website", "new-request");
+    expect(result.processes).toHaveLength(1);
+    await vi.waitFor(() => expect(f.controls.size).toBe(1));
+  });
+  it("filters inaccessible projects before reading their terminal trace and propagates infrastructure errors", async () => {
+    const f = await fixture(); const now = new Date().toISOString();
+    await f.store.setUserSetting(owner, "chat-development-processes:v1", [{ id: "foreign", projectId: "foreign", companyId: f.company.id, parentConversationId: "old", name: "Old", framework: "Next.js", status: "completed", hidden: false, createdAt: now, updatedAt: now }], 0);
+    const get = vi.spyOn(f.projects, "get").mockRejectedValue(new WorkspaceNotFoundError("Project not found"));
+    const terminal = vi.spyOn(f.ports.terminalEvents, "list");
+    expect(await f.service.list(owner)).toEqual([]); expect(terminal).not.toHaveBeenCalled();
+    get.mockRejectedValue(new Error("Database unavailable"));
+    await expect(f.service.list(owner)).rejects.toThrow("Database unavailable");
+  });
   it("keeps Global and disabled features from starting sandbox projects", async () => {
     const f = await fixture();
     await f.flags.executionModes.set(owner, f.company.id, "global", 0);
@@ -196,7 +251,9 @@ describe("chat development lifecycle with the real store, queue and executor", (
     runner.finish({ status: "stopped", reason: "budget_exhausted", message: "A2A_TOKEN_QUOTA_EXCEEDED", runId: runner.input.runId });
     await vi.waitFor(async () => expect((await f.service.list(owner))[0]?.status).toBe("failed"));
     await vi.waitFor(async () => expect((await getLatestChatProjectCard(f.store, owner, process.conversationId!))?.status).toBe("failed"));
-    expect((await f.store.getNeutralConversation(owner, process.conversationId!)).messages).toHaveLength(1);
+    const finishedChat = await f.store.getNeutralConversation(owner, process.conversationId!);
+    expect(finishedChat.messages.map(item=>item.role)).toEqual(["user","assistant"]);
+    expect(finishedChat.messages.at(-1)?.content).toBe("A2A_TOKEN_QUOTA_EXCEEDED");
     expect((await f.store.getNeutralConversation(owner, result.conversationId!)).messages).toHaveLength(2);
   });
   it("reports a template build failure without spending model tokens", async () => {
@@ -206,6 +263,28 @@ describe("chat development lifecycle with the real store, queue and executor", (
     expect(f.controls.size).toBe(0); expect(f.preview.startPreview).not.toHaveBeenCalled();
     const process = (await f.service.list(owner))[0]!;
     expect(process.progress?.at(-1)?.title).toContain("Dependency install failed");
+  });
+  it("streams real persisted changes over HTTP and recovers the same history on reconnect", async () => {
+    const f = await fixture(); const app = Fastify(); shutdown.push(() => app.close());
+    registerChatDevelopmentRoutes(app, { ...f.ports, auth: { authenticate: async () => owner } });
+    const base = await app.listen({ port: 0, host: "127.0.0.1" });
+    const controller = new AbortController();
+    const response = await fetch(base + "/chat/development/processes/stream", { signal: controller.signal });
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    const reader = response.body!.getReader(), decode = new TextDecoder();
+    expect(decode.decode((await reader.read()).value)).toContain("event: change");
+    await f.start("Create a Next.js website");
+    await vi.waitFor(() => expect(f.controls.size).toBe(1));
+    let frame = "";
+    while (!frame.includes("event: change")) frame += decode.decode((await reader.read()).value);
+    controller.abort(); await reader.cancel().catch(() => {});
+    const snapshot = await (await fetch(base + "/chat/development/processes")).json();
+    expect(snapshot.processes[0].progress.some((event: { stage: string }) => event.stage === "agent")).toBe(true);
+    const reconnect = new AbortController();
+    const resumed = await fetch(base + "/chat/development/processes/stream", { signal: reconnect.signal });
+    const resumedReader = resumed.body!.getReader();
+    expect(decode.decode((await resumedReader.read()).value)).toContain("event: change");
+    reconnect.abort(); await resumedReader.cancel().catch(() => {});
   });
   it("authenticates and validates the HTTP entry points", async () => {
     const f = await fixture(); const app = Fastify();

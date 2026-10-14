@@ -1,3 +1,4 @@
+import { emitCodingActivity } from "./coding-agent-runner-contracts";
 import type { AuthContext, Project } from "@npati/workspace";
 import type { CodeSessionRunInput } from "./code-session-run-executor";
 
@@ -28,10 +29,15 @@ export async function finishCodeChatWebsite(input: CodeSessionRunInput, result: 
     await ports.markFailed(input.ctx, companyId, projectId);
     return { ...run, status: "failed", reason: "website_build_not_verified", message: "Production build has not passed. Live Preview was not started." };
   }
+  const runId = typeof (result as { runId?: unknown })?.runId === "string" ? (result as { runId: string }).runId : input.runId;
+  const activity = { id: `${runId}:website-preview`, runId, stage: "preview", title: "Starting Live Preview", at: new Date().toISOString(), agentId: "System" };
+  await emitCodingActivity(input, { ...activity, status: "running" });
   try {
     const preview = await ports.startPreview(input.ctx, companyId, projectId, input.sink?.signal);
+    await emitCodingActivity(input, { ...activity, status: preview.status === "running" ? "completed" : "failed", durationMs: Date.now() - Date.parse(activity.at) });
     return { ...run, websitePreview: preview };
   } catch (error) {
+    await emitCodingActivity(input, { ...activity, status: input.sink?.signal.aborted ? "cancelled" : "failed", error: error instanceof Error ? error.message : "Preview failed" });
     await ports.markFailed(input.ctx, companyId, projectId);
     throw error;
   }

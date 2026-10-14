@@ -17,7 +17,10 @@ import { cancelChatStream, streamChat } from "./chat-stream";
 import { CodePendingMessages } from "./CodePendingMessages";
 import { InboxSubmission, requestCodeInbox, type InboxMessage } from "./code-inbox-client";
 import { useCodeInbox } from "./use-code-inbox";
+import { projectConversationUrl } from "./chat-development-view";
 import { useChatResearchProgress } from "./use-chat-research-progress";
+import { chatTimeline, nearChatBottom } from "./chat-timeline";
+import { ChatDevelopmentProgress } from "./ChatDevelopmentProgress";
 import { useChatDevelopment } from "./use-chat-development";
 import { BusinessChatComposer } from "./business-workspace-composer";
 import { confirmModal, alertModal } from "./ConfirmDialog";
@@ -187,26 +190,19 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const latestMessageRef = useRef<HTMLElement>(null);
   const [activeTurn, setActiveTurn] = useState("");
 
+  const followBottomRef = useRef(true);
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    if (!followBottomRef.current) return;
     if (messageStreamRef.current) {
       messageStreamRef.current.scrollTo({
         top: messageStreamRef.current.scrollHeight,
         behavior,
       });
     }
-    streamEndRef.current?.scrollIntoView({ behavior, block: "end" });
+
   }, []);
 
-  const scrollToLatestMessageStart = useCallback((behavior: ScrollBehavior = "auto") => {
-    if (latestMessageRef.current) {
-      latestMessageRef.current.scrollIntoView({ behavior, block: "start" });
-    } else if (messageStreamRef.current) {
-      messageStreamRef.current.scrollTo({
-        top: messageStreamRef.current.scrollHeight,
-        behavior,
-      });
-    }
-  }, []);
+  const scrollToLatestMessageStart = scrollToBottom;
   const flushDeltasRef = useRef<(() => void) | null>(null);
   const {
     progressEvents,
@@ -263,29 +259,13 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         // The active turn already has stable React keys and the final streamed text.
         // Replacing it with persisted message IDs remounts both bubbles and flashes.
         if (preserveActiveTurn) return loaded;
-        setMessages((current) => {
-          if (current.length === loaded.length) {
-            const allMatch = current.every((cur, i) => loaded[i]?.role === cur.role);
-            if (allMatch) {
-              return current.map((cur, i) => {
-                const lod = loaded[i]!;
-                if (cur.id === lod.id && cur.content === lod.content && cur.projectCard === lod.projectCard) return cur;
-                return { ...cur, id: lod.id, content: lod.content, projectCard: lod.projectCard ?? cur.projectCard };
-              });
-            }
-          }
-          return loaded;
-        });
+        setMessages(loaded);
         if (!preserveActiveTurn && !activeTurn) {
           window.requestAnimationFrame(() => {
             scrollToLatestMessageStart("auto");
             setTimeout(() => scrollToLatestMessageStart("auto"), 50);
             setTimeout(() => scrollToLatestMessageStart("auto"), 150);
             setTimeout(() => scrollToLatestMessageStart("auto"), 300);
-          });
-        } else if (activeTurn && activeTurnRef.current) {
-          window.requestAnimationFrame(() => {
-            activeTurnRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
           });
         }
         return loaded;
@@ -305,6 +285,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       return;
     }
 
+    followBottomRef.current = true;
     setSelected(initialConversationId ?? null);
     setReplyMeta(null);
     setNotice("");
@@ -334,19 +315,9 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     return () => window.removeEventListener("npati:chat-image-loaded", handleImageLoaded);
   }, [activeTurn, scrollToBottom]);
   useEffect(() => {
-    // When there is an active turn (user just sent a message or assistant is replying),
-    // do NOT scroll to the bottom of the long message!
-    // The user must always see the beginning of the conversation turn.
-    if (activeTurn) {
-      return;
-    }
-    if (!sending) {
-      const frame = window.requestAnimationFrame(() => {
-        scrollToBottom("smooth");
-      });
-      return () => window.cancelAnimationFrame(frame);
-    }
-  }, [messages, sending, activeTurn, scrollToBottom]);
+    const frame = window.requestAnimationFrame(() => scrollToBottom("auto"));
+    return () => window.cancelAnimationFrame(frame);
+  }, [messages, sending, development.project?.progress, scrollToBottom]);
   useEffect(() => () => {
     streamControllerRef.current?.controller.abort();
   }, []);
@@ -394,7 +365,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!noMemory && !attachments.length && !sending && !chatSubmissionBusy.current && await development.submit(input.trim())) return;
-    const nextIntent = defaultHybridRouter.classifyProject({ message: input.trim(), activeCompanyId: companyId ?? readActiveCompanyId() });
+    const boundProjectId = development.project?.projectId ?? codeInbox.session?.projectId ?? (selectedProject?.conversationId === selected ? selectedProject.projectId : undefined);
+    const nextIntent = defaultHybridRouter.classifyProject({ message: input.trim(), activeProjectId: boundProjectId, activeCompanyId: companyId ?? readActiveCompanyId() });
     const createsProject = nextIntent.intent === "CREATE_WEBSITE" || nextIntent.intent === "CREATE_PROJECT";
     if (codeInbox.active && !createsProject) { await submitInbox("queue"); return; }
     const message = input.trim(); if ((!message && attachments.length === 0) || sending || chatSubmissionBusy.current) return;
@@ -408,7 +380,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     // An earlier history request must not replace the optimistic turn after it starts.
     historyLoadVersionRef.current += 1;
     const privateRequest = noMemory;
-    const optimisticId = `pending-${Date.now()}`;
+    const optimisticId = `pending-${crypto.randomUUID()}`;
     let sentAttachments = [...attachments];
 
     if (ttsEnabled && message && !sentAttachments.some((item) => item.kind === "audio")) {
@@ -449,7 +421,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     }
 
     const optimisticContent = message;
-    const projectProgressIntent = defaultHybridRouter.classifyProject({ message: requestMessage, activeCompanyId: companyId ?? readActiveCompanyId() });
+    const projectProgressIntent = defaultHybridRouter.classifyProject({ message: requestMessage, activeProjectId: boundProjectId, activeCompanyId: companyId ?? readActiveCompanyId() });
     const mutationContext = companyId ? "company" : business ? "business" : "none";
     const pendingMutation = detectChatMutationOperation(requestMessage, mutationContext);
     const mutationTargets = pendingMutation
@@ -460,16 +432,13 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     const optimisticMessage: Message = { id: optimisticId, role: "user", content: optimisticContent, createdAt: new Date().toISOString(), attachments: sentAttachments };
     setMessages((current) => [...current, optimisticMessage]);
     resetProgress();
-    if (projectProgressIntent.intent !== "CHAT") enqueueProgress({ type: "project_progress", stage: "project", status: "active", title: /[\u0400-\u04ff]/u.test(requestMessage) ? "Підготовка запиту" : "Preparing request", timestamp: new Date().toISOString() });
+    if (projectProgressIntent.intent !== "CHAT" && !development.project) enqueueProgress({ type: "project_progress", stage: "project", status: "active", title: /[\u0400-\u04ff]/u.test(requestMessage) ? "Підготовка запиту" : "Preparing request", timestamp: new Date().toISOString() });
     for (const mutationTarget of mutationTargets) enqueueProgress({ type: "action_started", ...mutationTarget, timestamp: new Date().toISOString() });
     setSending(true); setStreamingResponse(false); setNotice("");
     if (draftVersion.current === submittedDraftVersion) { setInput(""); setAttachments([]); }
     setReplyMeta(null);
-    window.requestAnimationFrame(() => {
-      activeTurnRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      setTimeout(() => activeTurnRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
-      setTimeout(() => activeTurnRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
-    });
+    followBottomRef.current = true;
+    window.requestAnimationFrame(() => scrollToBottom("auto"));
     const assistantId = crypto.randomUUID();
     let receivedDelta = false;
     let rawAssistantContent = "";
@@ -484,7 +453,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       if (!visibleContent.trim()) return;
       if (!receivedDelta) {
         receivedDelta = true;
-        activeTurnRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        scrollToBottom("auto");
       }
       setStreamingResponse(true);
       setMessages((current) => {
@@ -506,13 +475,14 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     };
     flushDeltasRef.current = flushDeltas;
 
-    const activeCompanyForRequest = (!createsProject && selectedProject?.conversationId === selected ? selectedProject.companyId : null) ?? companyId ?? readActiveCompanyId();
+    const activeCompanyForRequest = (!createsProject ? development.project?.companyId : null) ?? (!createsProject && selectedProject?.conversationId === selected ? selectedProject.companyId : null) ?? companyId ?? readActiveCompanyId();
     let activeProjectId: string | undefined;
-    const projectIntent = defaultHybridRouter.classifyProject({ message: requestMessage, activeCompanyId: activeCompanyForRequest });
+    const projectIntent = defaultHybridRouter.classifyProject({ message: requestMessage, activeProjectId: boundProjectId, activeCompanyId: activeCompanyForRequest });
     const isNewProjectRequest = projectIntent.intent === "CREATE_WEBSITE" || projectIntent.intent === "CREATE_PROJECT";
     if (!isNewProjectRequest) {
       const latestCard = [...messages].reverse().find(item => item.projectCard)?.projectCard;
-      if (selectedProject?.conversationId === selected && selectedProject.companyId === activeCompanyForRequest) activeProjectId = selectedProject.projectId;
+      if (development.project?.companyId === activeCompanyForRequest) activeProjectId = development.project.projectId;
+      else if (selectedProject?.conversationId === selected && selectedProject.companyId === activeCompanyForRequest) activeProjectId = selectedProject.projectId;
       else if (latestCard?.companyId === activeCompanyForRequest) activeProjectId = latestCard.projectId ?? latestCard.id;
       try {
         const stored = sessionStorage.getItem("npati_active_project");
@@ -576,12 +546,13 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           if (!readActiveCompanyId() && result.activeContext.companyId) writeActiveCompanyId(result.activeContext.companyId);
         } catch {}
       }
-      setMessages((current) => {
+      setMessages((currentMessages) => {
+        const current = currentMessages.map(item => item.id === optimisticId && result.userMessage ? { ...item, ...result.userMessage } : item);
         const found = current.some((item) => item.id === assistantId);
         if (!cleanedMessage) return current.filter((item) => item.id !== assistantId);
         return found
-          ? current.map((item) => item.id === assistantId ? { ...item, content: cleanedMessage, projectCard: result.projectCard } : item)
-          : [...current, { id: assistantId, role: "assistant", content: cleanedMessage, projectCard: result.projectCard, createdAt: new Date().toISOString() }];
+          ? current.map((item) => item.id === assistantId ? { ...item, ...result.assistantMessage, content: cleanedMessage, projectCard: result.projectCard } : item)
+          : [...current, { id: assistantId, role: "assistant", content: cleanedMessage, projectCard: result.projectCard, createdAt: new Date().toISOString(), ...result.assistantMessage }];
       });
       if (!privateRequest && result.conversationId) {
         if (selectedChatRef.current === conversationAtSubmit) codeInbox.bindConversation(result.conversationId);
@@ -589,7 +560,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         window.history.replaceState(
           { ...window.history.state, usr: business ? { businessId: business.id } : { neutralChat: true } },
           "",
-          `/c/${result.conversationId}`
+          projectConversationUrl(result.conversationId, result.activeContext?.projectId ? result.activeContext : activeProjectId && activeCompanyForRequest ? { companyId: activeCompanyForRequest, projectId: activeProjectId } : undefined, chatSearch)
         );
         if (companyId && result.activeContext?.contextType === "none") {
           navigate(`/c/${result.conversationId}`, { replace: true, state: { neutralChat: true } });
@@ -663,6 +634,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       event.currentTarget.form?.requestSubmit();
     }
   }
+  const timeline = chatTimeline(messages, development.project?.progress, selected);
   return (
     <>
       {notice && (
@@ -674,7 +646,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         />
       )}
       <div className="onboarding-live-chat standard-live-chat">
-        <div className="message-stream" ref={messageStreamRef}>
+        <div className="message-stream" ref={messageStreamRef} onScroll={() => { if (messageStreamRef.current) followBottomRef.current = nearChatBottom(messageStreamRef.current); }}>
           {entryProjectCard && !selected && <ProjectChatCard card={entryProjectCard} onActivate={(card) => setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected })} />}
           {messages.length === 0 && !selected && !initialConversationId && !loadingHistory && (
             <div className="chat-welcome">
@@ -682,10 +654,12 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
               <p>{business ? t("chat.businessEmptySubtitle", { name: business.name }) : t("chat.emptySubtitle")}</p>
             </div>
           )}
-          {messages.map((message, index) => {
+          {timeline.map(entry => {
+            if (entry.kind === "activity") return <ChatDevelopmentProgress key={"activity:" + entry.item.id} process={development.project} items={[entry.item]} />;
+            const { message, index } = entry;
             if (development.hideMessage(messages, index)) return null;
             const isLatestAssistant = message.role === "assistant" && index === messages.length - 1;
-            const hasResearch = progressEvents.some((event) => !event.type.startsWith("final_generation"));
+            const hasResearch = !development.project && progressEvents.some((event) => !event.type.startsWith("final_generation"));
             return (
               <Fragment key={message.id}>
                 {isLatestAssistant && hasResearch && (
@@ -711,7 +685,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
                 >
                   <PendingMessageAttachments value={message.attachments ?? []} />
                   {message.role === "user" ? <UserPromptMessage content={message.content} onEdit={(prompt) => { setInput(prompt); window.requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".onboarding-live-composer textarea")?.focus()); }} /> : <ChatMessageContent content={projectChatText(message.content, message.projectCard)} />}
-                  {development.card(messages, index) && <ProjectChatCard card={development.card(messages, index)!} onActivate={(card) => { setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected }); setNotice(`Editing ${card.name}. Describe your changes in chat.`); }} />}
+                  {development.card(messages, index) && <ProjectChatCard card={development.card(messages, index)!} onActivate={(card) => { setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected }); }} />}
                   {message.role === "assistant" && !sending && (
                     <AssistantMessageToolbar
                       content={message.content}
@@ -729,7 +703,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
               </Fragment>
             );
           })}
-          {!messages.some((m, idx) => m.role === "assistant" && idx === messages.length - 1) && progressEvents.some((event) => !event.type.startsWith("final_generation")) && (
+          {!development.project && !messages.some((m, idx) => m.role === "assistant" && idx === messages.length - 1) && progressEvents.some((event) => !event.type.startsWith("final_generation")) && (
             <ResearchProgressPanel
               events={progressEvents}
               visibleCount={visibleProgressCount}
@@ -738,8 +712,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
               failed={!sending && progressFailed}
             />
           )}
-          {sending && !streamingResponse && !progressEvents.some((event) => !event.type.startsWith("final_generation")) && <article className="assistant thinking thinking-status" aria-label="NPATI Agent is working"><p>{isWebsiteAnalysisRequest(activeTurn) ? "Analyzing website and sources…" : businessThinkingSteps[thinkingStep]}</p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span></article>}
-          {development.timeline}
+          {!development.project && sending && !streamingResponse && !progressEvents.some((event) => !event.type.startsWith("final_generation")) && <article className="assistant thinking thinking-status" aria-label="NPATI Agent is working"><p>{isWebsiteAnalysisRequest(activeTurn) ? "Analyzing website and sources…" : businessThinkingSteps[thinkingStep]}</p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span></article>}
+          {development.preview}
           {messages.length > 0 && <div className="chat-scroll-spacer" aria-hidden="true" />}
           <div ref={streamEndRef} aria-hidden="true" />
         </div>

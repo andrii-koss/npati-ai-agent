@@ -1,3 +1,4 @@
+import type { DevelopmentProcessProgressItem } from "@npati/shared";
 import type { AuthContext, CodeSession } from "@npati/workspace";
 import { VERIFICATION_APPROVAL_REQUIRED } from "./code-verification-loop";
 
@@ -42,6 +43,7 @@ export interface CodeSessionRunPort {
     verificationTools?: readonly string[];
     forceVerification?: boolean;
     maxTurns?: number;
+    onActivity?: (event: DevelopmentProcessProgressItem) => Promise<void>;
   }): Promise<unknown>;
 }
 
@@ -70,6 +72,7 @@ export interface CodeRunEventSink {
 export type CodeRunTerminalStatus = "completed" | "failed" | "cancelled";
 
 export interface CodeSessionRunInput {
+  onActivity?: (event: DevelopmentProcessProgressItem) => Promise<void>;
   maxTurns?: number;
   ctx: AuthContext;
   session: CodeSession;
@@ -165,6 +168,7 @@ export class CodeSessionRunExecutor {
         ctx: input.ctx,
         session: input.session,
         prompt: input.prompt,
+        ...(input.onActivity ? { onActivity: input.onActivity } : {}),
         ...(input.maxTurns !== undefined ? { maxTurns: input.maxTurns } : {}),
         ...(input.runId ? { runId: input.runId } : {}),
         ...(input.initialInboxMessageId ? { initialInboxMessageId: input.initialInboxMessageId } : {}),

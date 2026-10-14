@@ -188,7 +188,7 @@ export async function getConversation(pool: Pool, context: AuthContext, business
     await getBusiness(pool, context, businessId);
     const result = await pool.query<Conversation>(`SELECT ${conversationColumns} FROM conversations WHERE id=$1 AND workspace_id=$2 AND business_id=$3 AND user_id=$4`, [conversationId, context.workspaceId, businessId, context.userId]);
     if (!result.rowCount) throw new WorkspaceAccessError("Conversation is not available for this business");
-    const messages = (await pool.query<ConversationMessage>(`SELECT id, conversation_id AS "conversationId", role, content, created_at AS "createdAt" FROM messages WHERE conversation_id=$1 ORDER BY created_at`, [conversationId])).rows;
+    const messages = (await pool.query<ConversationMessage>(`SELECT id, conversation_id AS "conversationId", role, content, created_at AS "createdAt" FROM messages WHERE conversation_id=$1 ORDER BY created_at,id`, [conversationId])).rows;
     return { conversation: result.rows[0]!, messages };
   }
 
@@ -208,9 +208,19 @@ export async function deleteConversation(pool: Pool, context: AuthContext, busin
 
 export async function appendMessage(pool: Pool, context: AuthContext, businessId: string, conversationId: string, role: ConversationMessage["role"], content: string) {
     await getConversation(pool, context, businessId, conversationId);
-    const result = await pool.query<ConversationMessage>(`INSERT INTO messages(id,conversation_id,role,content) VALUES ($1,$2,$3,$4) RETURNING id,conversation_id AS "conversationId",role,content,created_at AS "createdAt"`, [randomUUID(), conversationId, role, content]);
-    await pool.query("UPDATE conversations SET updated_at=now() WHERE id=$1", [conversationId]);
-    return result.rows[0]!;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      // Serialize appends and use millisecond precision so JSON/JS retains the guaranteed order.
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", ["chat:" + conversationId]);
+      const result = await client.query<ConversationMessage>(`INSERT INTO messages(id,conversation_id,role,content,created_at)
+        SELECT $1,$2,$3,$4,GREATEST(date_trunc('milliseconds',clock_timestamp()), COALESCE(MAX(created_at) + interval '1 millisecond',clock_timestamp()))
+        FROM messages WHERE conversation_id=$2 RETURNING id,conversation_id AS "conversationId",role,content,created_at AS "createdAt"`, [randomUUID(), conversationId, role, content]);
+      await client.query("UPDATE conversations SET updated_at=clock_timestamp() WHERE id=$1", [conversationId]);
+      await client.query("COMMIT");
+      return result.rows[0]!;
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
   }
 
 export async function listNeutralConversations(pool: Pool, context: AuthContext) {

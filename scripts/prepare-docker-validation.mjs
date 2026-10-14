@@ -25,6 +25,7 @@ Object.assign(env,{
  NPATI_BACKEND_URL:process.env.NPATI_BACKEND_URL||'https://www.npati.com',
  NPATI_WEB_ORIGIN:'http://127.0.0.1:13001',
  NPATI_AGENT_PUBLIC_DOMAIN:'http://127.0.0.1:13001',
+ NPATI_PROJECT_API_PUBLIC_URL:'http://127.0.0.1:13001',
  NPATI_AGENT_PUBLISHED_PORT:'13001',
  NPATI_BUILD_COMMIT:spawnSync('git',['rev-parse','--short','HEAD'],{encoding:'utf8'}).stdout.trim(),
  NPATI_BUILD_TIME:new Date().toISOString(),

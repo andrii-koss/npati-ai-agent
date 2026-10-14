@@ -8,12 +8,8 @@ import { defineConfig } from "vitest/config";
  * fixed suite list (65 suites). Editing the root config would put those suites — and the gate itself — at
  * risk for a UI-only concern, so web tests live here and run through `npm run test:web`.
  *
- * `environment: "node"` is deliberate: jsdom and @testing-library/react are **not** installed in this
- * repository, and this stream must not pretend otherwise. The components are presentational and rendered
- * with `react-dom/server`'s `renderToStaticMarkup`, which is exactly what the security-relevant
- * assertions need (a payload must appear as escaped text rather than markup); interaction semantics are
- * covered by the pure request mapping in `actions.ts`. Click-through tests with jsdom + RTL are a
- * deliberate follow-up, not something silently skipped here.
+ * Node remains the default for SSR/security tests. Interaction suites opt into jsdom
+ * with a file-level environment annotation and exercise native buttons and clipboard behavior.
  */
 export default defineConfig({
   test: {

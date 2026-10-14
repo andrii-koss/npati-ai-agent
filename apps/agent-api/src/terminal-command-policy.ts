@@ -37,8 +37,8 @@ export function normalizeTerminalCommand(input: string | TerminalCommandSpec): N
   if (spec.executable !== undefined && (typeof spec.executable !== "string" || spec.executable !== rawCommand.trim().split(/\s+/)[0])) throw new Error("Conflicting terminal executable");
   if (spec.args !== undefined && (!Array.isArray(spec.args) || spec.args.length > 64 || !spec.args.every((arg) => typeof arg === "string" && /^[A-Za-z0-9._/@+=:-]+$/.test(arg)))) throw new Error("Invalid terminal arguments");
   const rawWords = rawCommand.trim().split(/\s+/);
-  const words = [...rawWords, ...(spec.args ?? [])];
-  const command = /[\r\n]/.test(rawCommand) ? rawCommand.trim() + (spec.args?.length ? " " + spec.args.join(" ") : "") : words.join(" ");
+  const words = spec.command && rawWords.length > 1 ? rawWords : [...rawWords, ...(spec.args ?? [])];
+  const command = /[\r\n]/.test(rawCommand) ? rawCommand.trim() + (spec.args?.length && rawWords.length <= 1 ? " " + spec.args.join(" ") : "") : words.join(" ");
   if (command.length > 4096) throw new Error("Invalid terminal command");
   const cwdInput = spec.cwd ?? ".";
   if (typeof cwdInput !== "string") throw new Error("Invalid terminal cwd");

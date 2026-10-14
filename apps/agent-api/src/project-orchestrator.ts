@@ -727,11 +727,13 @@ export class ProjectOrchestrator {
       ? isCreate && lastBuildStatus === "failed"
         ? `Файли сайту "${project.name}" збережено, але перегляд не запущено.`
         : `Не вдалося ${isCreate ? "створити сайт" : "оновити проєкт"} "${project.name}".`
+      : runDetails.run.result?.includes("AI-персоналізацію не завершено")
+        ? `${runDetails.run.result}${project.framework === "HTML/CSS" ? " Натисніть Preview, щоб побачити сторінку в чаті." : ""}`
       : project.framework === "HTML/CSS" && isCreate
-        ? `${runDetails.run.result?.includes("AI-персоналізацію не завершено") ? runDetails.run.result + " " : `Створено HTML/CSS сайт "${project.name}". `}Натисніть Preview, щоб побачити сторінку в чаті.`
-        : hasInternalCalls && !isCreate
-          ? `Перегляд показує збережену версію проєкту "${project.name}". ${lastBuildStatus === "success" ? "Build завершено успішно." : ""}`
-        : `${isCreate ? "Створено" : "Оновлено"} проєкт «${project.name}».${lastBuildStatus === "success" ? " Build успішний." : ""}${previewUrl ? " Live Preview готовий." : ""}`;
+        ? `Створено HTML/CSS сайт "${project.name}". Натисніть Preview, щоб побачити сторінку в чаті.`
+      : hasInternalCalls && !isCreate
+        ? `Перегляд показує збережену версію проєкту "${project.name}". ${lastBuildStatus === "success" ? "Build завершено успішно." : ""}`
+      : `${isCreate ? "Створено" : "Оновлено"} проєкт «${project.name}».${lastBuildStatus === "success" ? " Build успішний." : ""}${previewUrl ? " Live Preview готовий." : ""}`;
 
     if (runDetails.run.status === "failed" && runFailedDueToModel) {
       responseMessage += `\n\n⚠️ Model routing failed: ${runErrorMessage.slice(0, 300)}`;

@@ -1,3 +1,4 @@
+import { emitCodingActivity } from "./coding-agent-runner-contracts";
 import type { CodingAgentRunnerPorts } from "./coding-agent-runner-contracts";
 import type { CodeAgentLimits } from "./code-agent-config";
 import type { ChatMessage } from "@npati/omniroute-adapter";
@@ -196,6 +197,8 @@ export class CodingAgentReviewPhases {
       record,
     } = args;
     const attempt = verificationLoop.report().verificationRuns + 1;
+    const activity = { id: `${stateRunId ?? input.runId}:verify:${turnId}:${attempt}`, runId: stateRunId ?? input.runId, stage: "build", title: "Verifying build and checks", tool: "code.verify.run", at: new Date(this.now()).toISOString(), agentId: input.agentId ?? "NPATI Coding Agent" };
+    await emitCodingActivity(input, { ...activity, status: "running" });
     let outcome: CodeToolInvokeResult | CodeToolInvokeFailure;
     try {
       outcome = await this.ports.toolRuntime.invoke(ctx, {
@@ -226,6 +229,7 @@ export class CodingAgentReviewPhases {
       };
     }
     const checks = toCheckReports(outcome);
+    await emitCodingActivity(input, { ...activity, status: checks.some(check => check.state === "approval_required") ? "awaiting_approval" : checks.every(check => check.state === "passed") ? "completed" : "failed", result: JSON.stringify(outcome.ok ? outcome.result : outcome.error), durationMs: this.now() - Date.parse(activity.at) });
     verificationLoop.record(checks);
     await record({
       kind: "tool_call",
@@ -467,6 +471,8 @@ export class CodingAgentReviewPhases {
     }
 
     const runAttempt = verificationLoop.report().verificationRuns + 1;
+    const activity = { id: `${stateRunId ?? input.runId}:verify:self-review:${turnId}:${runAttempt}`, runId: stateRunId ?? input.runId, stage: "build", title: "Verifying build and checks", tool: "code.verify.run", at: new Date(this.now()).toISOString(), agentId: input.agentId ?? "NPATI Coding Agent" };
+    await emitCodingActivity(input, { ...activity, status: "running" });
     let outcome: CodeToolInvokeResult | CodeToolInvokeFailure;
     try {
       outcome = await this.ports.toolRuntime.invoke(ctx, {
@@ -497,7 +503,7 @@ export class CodingAgentReviewPhases {
       };
     }
     const checks = toCheckReports(outcome);
-
+    await emitCodingActivity(input, { ...activity, status: checks.some(check => check.state === "approval_required") ? "awaiting_approval" : checks.every(check => check.state === "passed") ? "completed" : "failed", result: JSON.stringify(outcome.ok ? outcome.result : outcome.error), durationMs: this.now() - Date.parse(activity.at) });
     verificationLoop.record(checks);
     verificationLoop.blockFurtherRepairs();
     writeVerificationSummary();

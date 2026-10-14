@@ -9,7 +9,32 @@ function fail(reply: FastifyReply, error: unknown) {
 }
 export function registerChatDevelopmentRoutes(app: FastifyInstance, deps: DevelopmentPorts & { auth: AuthProvider }) {
   const service = new ChatDevelopmentService(deps);
-  app.addHook("preClose", () => service.close());
+  const streams = new Set<() => void>();
+  app.addHook("preClose", async () => { for (const close of streams) close(); await service.close(); });
+  // Transport only: snapshots use the existing persisted runtime records.
+  app.get("/chat/development/processes/stream", async (request, reply) => {
+    try {
+      const ctx = await deps.auth.authenticate(request);
+      const initial = await service.list(ctx);
+      reply.hijack();
+      reply.raw.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
+      let closed = false, signature = "", timer: ReturnType<typeof setTimeout>;
+      const close = () => { if (closed) return; closed = true; clearTimeout(timer); streams.delete(close); reply.raw.end(); };
+      streams.add(close); reply.raw.on("close", close);
+      const publish = (processes: Awaited<ReturnType<typeof service.list>>) => {
+        const next = JSON.stringify(processes);
+        if (signature !== next) { signature = next; reply.raw.write("event: change\ndata: {}\n\n"); }
+        else reply.raw.write(": heartbeat\n\n");
+      };
+      const poll = async () => {
+        if (closed) return;
+        try { const processes = await service.list(ctx); if (!closed) publish(processes); }
+        catch { close(); return; }
+        if (!closed) timer = setTimeout(poll, 1000);
+      };
+      publish(initial); timer = setTimeout(poll, 1000);
+    } catch (error) { return fail(reply, error); }
+  });
   app.get("/chat/development/processes", async (request, reply) => {
     try { return { processes: await service.list(await deps.auth.authenticate(request)) }; } catch (error) { return fail(reply, error); }
   });
@@ -34,4 +59,5 @@ export function registerChatDevelopmentRoutes(app: FastifyInstance, deps: Develo
     } } } }, async (request, reply) => {
       try { return await service.openProject(await deps.auth.authenticate(request), request.body.companyId, request.body.projectId); } catch (error) { return fail(reply, error); }
     });
+  return service;
 }
