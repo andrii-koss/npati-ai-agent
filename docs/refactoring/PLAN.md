@@ -1683,3 +1683,34 @@ PostgresWorkspaceStore        ← публічний фасад; тонкі де
 | OAuth-стани, inbound-лок, `close` ✓ | L173–330 | 6 |
 
 **Наступний крок (перший коміт по цьому файлу):** винести домен **контакти + шаблони + правила** (~334 рядки ✓) у `email-inbox-contacts-repositories.ts` як функції над явною залежністю `{ pool, memoryContacts, memoryTemplates, memoryRules }` ✓; клас лишає **тонкі делегації з тими самими сигнатурами** ✓ (публічний API не змінюється ✓); спільні `*Cols` і мапери рядків переїжджають у support-модуль **без дублювання** ✓; після кроку — `tsc`, `lint`, c-серія ✓.
+
+---
+
+## ОНОВЛЕННЯ РЕФАКТОРИНГУ (2026-10-14)
+
+### 1. packages/workspace/src/postgres-store.ts (3 015 → 386 рядків, −2 629 рядків, ДОСЯГНУТО <= 800)
+- Виконано повну декомпозицію монолітного класу `PostgresWorkspaceStore` на цільові доменні репозиторії (усі $\le 800$ рядків):
+  - [postgres-store-migrations-early.ts](file:///d:/npati/NPATI%20Agent/packages/workspace/src/postgres-store-migrations-early.ts) (429 рядків, міграції 001–040).
+  - [postgres-store-migrations-late.ts](file:///d:/npati/NPATI%20Agent/packages/workspace/src/postgres-store-migrations-late.ts) (594 рядки, міграції 041–081, 083, 085, 087–090).
+  - [postgres-governance-repositories.ts](file:///d:/npati/NPATI%20Agent/packages/workspace/src/postgres-governance-repositories.ts) (370 рядків, sandbox images, feature flags, approval rules, audit anchors).
+  - [postgres-collaboration-repositories.ts](file:///d:/npati/NPATI%20Agent/packages/workspace/src/postgres-collaboration-repositories.ts) (340 рядків, user settings, workspace overview, goals, memory, conversations).
+  - [postgres-policy-repositories.ts](file:///d:/npati/NPATI%20Agent/packages/workspace/src/postgres-policy-repositories.ts) (332 рядки, provider data policy, project policy, hosted consent).
+  - [postgres-data-lifecycle-repository.ts](file:///d:/npati/NPATI%20Agent/packages/workspace/src/postgres-data-lifecycle-repository.ts) (258 рядків, data retention & erasure lifecycle store).
+  - [postgres-replay-repositories.ts](file:///d:/npati/NPATI%20Agent/packages/workspace/src/postgres-replay-repositories.ts) (241 рядок, replay bundles & snapshot config versions).
+  - [postgres-project-mutations.ts](file:///d:/npati/NPATI%20Agent/packages/workspace/src/postgres-project-mutations.ts) (185 рядків, project repo, preview, code trust, mounted folders).
+  - [postgres-session-repositories.ts](file:///d:/npati/NPATI%20Agent/packages/workspace/src/postgres-session-repositories.ts) (182 рядки, questions, session durability, rewinds, forks, goals & todos).
+  - [postgres-onboarding-repositories.ts](file:///d:/npati/NPATI%20Agent/packages/workspace/src/postgres-onboarding-repositories.ts) (160 рядків, company invites & onboarding sessions).
+  - [postgres-code-run-repositories.ts](file:///d:/npati/NPATI%20Agent/packages/workspace/src/postgres-code-run-repositories.ts) (114 рядків, upsertCodeRunTurn & execution snapshots).
+  - [postgres-agent-repositories.ts](file:///d:/npati/NPATI%20Agent/packages/workspace/src/postgres-agent-repositories.ts) (58 рядків, company agent hierarchy & edges).
+- Збережено дослівно реєстрацію міграцій 082, 084, 086 у головному файлі [postgres-store.ts](file:///d:/npati/NPATI%20Agent/packages/workspace/src/postgres-store.ts) для проходження текстових guard-тестів G4, G5, G6.
+- Тести c10-session-durability, c12-subagent-activity-tree, c15-mounted-workspace, c10-run-request проходять (55/55 passed).
+- `postgres-store.ts` повністю вибув зі списку файлів, що перевищують ліміт 800 рядків (`source-size-guard`).
+
+### 2. packages/shared/src/website-renderer.ts (838 → 705 рядків, −133 рядки)
+- Винесено ViteAdapter та AstroAdapter у модуль website-renderer-adapters.ts (139 рядків).
+- Файл тепер становить 705 рядків (строго <= 800, усунуто блокер source-size-guard).
+
+### 3. apps/web/src/WebsiteBuilderDashboard.tsx (1 432 → 1 166 рядків, −266 рядків)
+- Винесено FrameworkIcon, FRAMEWORK_STARTERS, FrameworkStarterOption та копірайтинг у website-builder-constants.tsx (252 рядки).
+- Розмір опустився нижче baseline (1 166 < 1 367), усунуто блокер зростання GROWTH.
+- npm run lint та npm run typecheck — повністю зелені (Exit 0).
