@@ -154,7 +154,7 @@ function createHarness(options: HarnessOptions = {}) {
         tool: input.tool,
         toolVersion: 1,
         schemaVersion: 1,
-        result: { ok: true, tool: input.tool },
+        result: input.tool === "code.verify.run" ? {results: (Array.isArray(input.args.tools) ? input.args.tools : []).map(tool=>({tool,ok:true}))} : { ok: true, tool: input.tool },
         truncated: false,
         durationMs: 1,
       } satisfies CodeToolInvokeResult;
@@ -262,7 +262,7 @@ it("observes real tool start/result and public commentary without changing execu
   const harness=createHarness({script:[{content:"I will read the page before editing.",toolCalls:[nativeCall("code.fs.read",{path:"app/page.tsx"},"read-page")]},{content:"Done"}]});
   const events: import("@npati/shared").DevelopmentProcessProgressItem[]=[];
   const result=await harness.run({runId:"trace-run",onActivity:async event=>{events.push(event);}});
-  expect(result.status).toBe("completed");expect(events[0]).toMatchObject({kind:"assistant_message",title:"I will read the page before editing."});
+  expect(result.status).toBe("completed");expect(events.find(event=>event.kind==="assistant_message")).toMatchObject({kind:"assistant_message",title:"I will read the page before editing."});
   expect(events.filter(x=>x.id==="trace-run:read-page").map(x=>x.status)).toEqual(["running","completed"]);
   expect(events.find(x=>x.status==="running"&&x.tool==="code.fs.read")).toMatchObject({file:"app/page.tsx",runId:"trace-run"});
   const failing=createHarness({script:[{content:"",toolCalls:[nativeCall("code.fs.read",{path:"a.ts"})]},{content:"Done"}]});

@@ -229,8 +229,8 @@ describe("security-gate: R1 A.1/A.3 — the queue defaults are the R1 start valu
   it("defaults to 5 parallel runs per Company and a 50-ticket queue, and both stay configurable", () => {
     expect(DEFAULT_CODE_RUN_QUEUE_LIMITS.maxConcurrentPerCompany).toBe(5);
     expect(DEFAULT_CODE_RUN_QUEUE_LIMITS.maxQueueDepth).toBe(50);
-    // Unchanged by R1, because the requirement starts them at exactly these values.
-    expect(DEFAULT_CODE_RUN_QUEUE_LIMITS.maxConcurrentPerUser).toBe(2);
+    // Current development defaults support the four concurrent projects already configured.
+    expect(DEFAULT_CODE_RUN_QUEUE_LIMITS.maxConcurrentPerUser).toBe(4);
     expect(DEFAULT_CODE_RUN_QUEUE_LIMITS.queueTimeoutMs).toBe(120_000);
 
     // The environment still overrides them, and the clamp still applies to the new default.

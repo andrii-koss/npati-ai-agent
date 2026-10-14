@@ -7,6 +7,7 @@ export function sanitizeProgress(item: DevelopmentProcessProgressItem): Developm
   for (const field of ["title", "tool", "command", "arguments", "fileContent", "file", "cwd", "result", "stdout", "stderr", "error", "errorCode", "agentId", "diff"] as const) {
     if (typeof safe[field] === "string") safe[field] = sanitizeExecutionTrace(safe[field]!);
   }
+  if(safe.modelUsage) safe.modelUsage={...safe.modelUsage,model:safe.modelUsage.model ? sanitizeExecutionTrace(safe.modelUsage.model) : undefined,provider:safe.modelUsage.provider ? sanitizeExecutionTrace(safe.modelUsage.provider) : undefined};
   if (safe.files) safe.files = safe.files.slice(0,200).map(file => ({ ...file, path: sanitizeExecutionTrace(file.path), diff: file.diff ? sanitizeExecutionTrace(file.diff).slice(0,128_000) : undefined }));
   for (const field of ["arguments", "fileContent"] as const) if (safe[field] && safe[field]!.length > 128_000) { safe[field] = safe[field]!.slice(0,128_000); safe.resultTruncated = true; }
   if (safe.result && safe.result.length > 128_000) { safe.result = safe.result.slice(0, 128_000); safe.resultTruncated = true; }
@@ -40,7 +41,7 @@ export function executionResultDetails(value: unknown): Partial<DevelopmentProce
   const recordedOutput = reports.map(report => string(report.raw)).filter(Boolean).join("\n\n");
   const counts = object(data.tests);
   const tests = ["passed","failed","skipped","total"].every(key => numeric(counts[key]) !== undefined && Number(counts[key]) >= 0) ? counts as {passed:number;failed:number;skipped:number;total:number} : undefined;
-  return Object.fromEntries(Object.entries({status: typeof data.exitCode === "number" && data.exitCode !== 0 || typeof object(data.stats).failed === "number" && Number(object(data.stats).failed) > 0 ? "failed" : undefined, file:string(data.path),fileContent:data.binary === true || data.encoding === "base64" ? undefined : string(data.content) ?? readLines,stdout:string(data.stdout) ?? (recordedOutput || undefined),stderr:string(data.stderr),exitCode:numeric(data.exitCode),diff:string(data.diff),linesAdded:numeric(data.linesAdded),linesRemoved:numeric(data.linesRemoved),fileChange:actions[String(data.status)],files,tests}).filter(([,value]) => value !== undefined)) as Partial<DevelopmentProcessProgressItem>;
+  return Object.fromEntries(Object.entries({status: typeof data.exitCode === "number" && data.exitCode !== 0 || typeof object(data.stats).failed === "number" && Number(object(data.stats).failed) > 0 ? "failed" : undefined, dryRun:typeof data.dryRun==="boolean"?data.dryRun:undefined,file:string(data.path),fileContent:data.binary === true || data.encoding === "base64" ? undefined : string(data.content) ?? readLines,stdout:string(data.stdout) ?? (recordedOutput || undefined),stderr:string(data.stderr),exitCode:numeric(data.exitCode),diff:string(data.diff),linesAdded:numeric(data.linesAdded),linesRemoved:numeric(data.linesRemoved),fileChange:actions[String(data.status)],files,tests}).filter(([,value]) => value !== undefined)) as Partial<DevelopmentProcessProgressItem>;
 }
 /** JSONB serializes nested Date values as ISO strings; pg does not revive them. */
 export function executionTimestamp(value: unknown): number | undefined {
@@ -60,6 +61,9 @@ export async function developmentTrace(store: WorkspaceStore, ctx: AuthContext, 
   if (run && (run.workspaceId !== ctx.workspaceId || run.projectId !== process.projectId || run.sessionId !== process.sessionId)) return progress;
   const calls = new Map<string, DevelopmentProcessProgressItem>();
   if (run) {
+    const activity = await store.listCodeActivityEvents({ companyId: process.companyId, runId: run.runId, limit: 200 });
+    const usages = new Map(progress.filter(item=>item.modelUsage).map(item=>[item.modelUsage!.turn,item.modelUsage!]));
+    for(const event of activity) { const p=event.payload; if(event.kind==="run_activity" && !p.tool && typeof p.turn==="number" && typeof p.bytes==="number" && p.bytes>0 && !usages.has(p.turn)) usages.set(p.turn,{id:run.runId+":model:"+p.turn,turn:p.turn,totalTokens:p.bytes,toolCallIds:[]}); }
     const turns = await store.listCodeRunTurns(process.companyId, run.runId);
     const bundle = await store.getReplayBundle(process.companyId, run.runId);
     const steps = bundle ? await store.listReplayBundleSteps(process.companyId, bundle.id) : [];
@@ -68,7 +72,9 @@ export async function developmentTrace(store: WorkspaceStore, ctx: AuthContext, 
     for (const step of steps) {
       const payload = object(step.payload);
       if (step.kind === "model_step") {
-        const requested = object(payload.response).toolCalls;
+        const response=object(payload.response), usage=object(response.usage);
+        if(typeof payload.turnIndex==="number" && typeof usage.totalTokens==="number") usages.set(payload.turnIndex,{id:run.runId+":model:"+payload.turnIndex,turn:payload.turnIndex,totalTokens:usage.totalTokens,inputTokens:typeof usage.promptTokens==="number"?usage.promptTokens:undefined,outputTokens:typeof usage.completionTokens==="number"?usage.completionTokens:undefined,toolCallIds:Array.isArray(response.toolCalls)?response.toolCalls.map(raw=>String(object(raw).id)):[]});
+        const requested = response.toolCalls;
         if (Array.isArray(requested)) for (const call of requested) {
           const c = object(call); if (typeof c.id === "string") args.set(c.id, object(c.arguments));
         }
@@ -92,6 +98,7 @@ export async function developmentTrace(store: WorkspaceStore, ctx: AuthContext, 
       const output = live?.result ?? string(replay?.settledResult);
       calls.set(call.toolCallId, sanitizeProgress({
         ...live, ...resultDetails,
+        modelUsage: live?.modelUsage ?? usages.get(turn.turnIndex), dryRun: typeof input.dryRun==="boolean" ? input.dryRun : live?.dryRun ?? resultDetails.dryRun,
         id: run.runId + ":" + call.toolCallId, runId: run.runId, stage: "tool", title: call.tool,
         at: executionIso(call.startedAt, executionIso(turn.startedAt, executionIso(run.startedAt, process.createdAt))), status: status === "completed" && (resultDetails.status === "failed" || live?.status === "failed") ? "failed" : status, tool: call.tool,
         arguments: Object.keys(input).length ? JSON.stringify(input, null, 2) : live?.arguments,
@@ -103,7 +110,7 @@ export async function developmentTrace(store: WorkspaceStore, ctx: AuthContext, 
       }));
     }
     // Some older runs only have Activity metadata, not write-ahead call records.
-    const activity = await store.listCodeActivityEvents({ companyId: process.companyId, runId: run.runId, limit: 200 });
+    for(const usage of usages.values()) if(!progress.some(item=>item.id===usage.id)) progress.push({id:usage.id,runId:run.runId,stage:"model_usage",title:"Model usage",at:process.createdAt,status:"completed",modelUsage:usage});
     for (const event of activity) {
       const p = event.payload, id = String(p.toolCallId ?? event.id);
       if (typeof p.tool !== "string" || calls.has(id)) continue;
@@ -114,7 +121,7 @@ export async function developmentTrace(store: WorkspaceStore, ctx: AuthContext, 
       const live = progress.find(item => item.id === run.runId + ":" + id);
       const recordedResult = live?.result ?? string(p.result);
       calls.set(id, sanitizeProgress({ ...live, ...executionResultDetails(recordedResult), id: run.runId + ":" + id, runId: run.runId, stage: "tool", title: p.tool,
-        tool: p.tool, at: live?.at ?? executionIso(event.createdAt, process.createdAt), status: p.ok === false ? "failed" : live?.status ?? "completed",
+        tool: p.tool, at: live?.at ?? executionIso(event.createdAt, process.createdAt), status: p.errorCode === "approval_required" ? "waiting_for_approval" : p.ok === false ? "failed" : live?.status ?? "completed",
         result: recordedResult, command: string(p.command) ?? live?.command, file: string(p.path) ?? live?.file, cwd: string(p.cwd) ?? live?.cwd,
         durationMs: typeof p.durationMs === "number" ? p.durationMs : live?.durationMs, errorCode: string(p.errorCode) ?? live?.errorCode, agentId: string(p.agentId) ?? live?.agentId }));
     }

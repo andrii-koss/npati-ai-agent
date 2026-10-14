@@ -763,6 +763,10 @@ export class CodeToolRuntime {
   }
 
   /** Turn-scoped summary used by `code.fs.diff` and by `GET …/code/diff`. */
+  async verificationRevision(ctx: AuthContext, companyId: string, projectId: string, sessionId: string): Promise<string | null> {
+    return this.options.revisions ? (await this.options.revisions.capture({ctx,companyId,projectId,sessionId})).revision : null;
+  }
+
   turnSummary(sessionId: string, turnId: string) {
     return this.turns.summary(sessionId, turnId);
   }

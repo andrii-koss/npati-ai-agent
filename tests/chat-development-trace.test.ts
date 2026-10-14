@@ -139,3 +139,13 @@ it("renders recorded numbered read lines as readable source code and excludes bi
   expect(executionResultDetails({data:{path:"app/page.tsx",lines:[{n:1,text:"export default function Page() {"},{n:2,text:"  return null;"},{n:3,text:"}"}],encoding:"utf8"}})).toMatchObject({fileContent:"export default function Page() {\n  return null;\n}"});
   expect(executionResultDetails({data:{binary:true,content:"raw",lines:[{n:1,text:"raw"}]}}).fileContent).toBeUndefined();
 });
+
+it("does not turn a durable approval requirement into a generic failure on Activity replay",async()=>{
+ const f=fixture("completed");f.mocks.listCodeRunTurns.mockResolvedValue([]);f.mocks.listReplayBundleSteps.mockResolvedValue([]);f.mocks.listCodeActivityEvents.mockResolvedValue([{id:"grep",createdAt:new Date("2026-10-13T10:00:01Z"),payload:{tool:"code.fs.grep",toolCallId:"grep",ok:false,errorCode:"approval_required"}}]);
+ const rows=await developmentTrace(f.store,ctx,process);expect(rows[0]).toMatchObject({tool:"code.fs.grep",status:"waiting_for_approval",errorCode:"approval_required"});
+});
+
+it("restores real usage from canonical activity and replay without allocating tokens between a turn's tools",async()=>{
+ const f=fixture("completed");f.mocks.listCodeRunTurns.mockResolvedValue([{turnIndex:1,toolCalls:[f.calls[0]]}]);f.mocks.listReplayBundleSteps.mockResolvedValue([{kind:"model_step",payload:{turnIndex:1,response:{usage:{totalTokens:150,promptTokens:120,completionTokens:30},toolCalls:[{id:"read-1",arguments:'{"path":"app/page.tsx"}'}]}}}]);
+ const rows=await developmentTrace(f.store,ctx,process);expect(rows.find(e=>e.id==="run:read-1")?.modelUsage).toMatchObject({turn:1,inputTokens:120,outputTokens:30,totalTokens:150});expect(rows.filter(e=>e.stage==="model_usage")).toHaveLength(1);
+});

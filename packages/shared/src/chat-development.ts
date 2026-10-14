@@ -2,7 +2,10 @@ export const DEVELOPMENT_PROCESS_SETTINGS_KEY = "chat-development-processes:v1";
 import { classifyProjectIntent } from "./project-intent";
 /** Shared deterministic routing: creation requests only, never ordinary project edits. */
 export type DevelopmentTarget = { name: string; kind: "website" | "blog" | "store" | "crm" | "mobile_app"; framework: "Next.js" | "HTML/CSS" | "Expo" };
+export type ModelTurnUsage = { id: string; turn: number; totalTokens?: number; inputTokens?: number; outputTokens?: number; costUsd?: number; model?: string; provider?: string; toolCallIds: string[]; durationMs?: number };
 export type DevelopmentProcessProgressItem = {
+  modelUsage?: ModelTurnUsage;
+  dryRun?: boolean;
   id: string;
   stage: string;
   title: string;

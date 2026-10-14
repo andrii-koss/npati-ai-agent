@@ -2,6 +2,14 @@ import type { TranslationSchema } from "../types";
 
 export const uk: TranslationSchema = {
   executionTrace: {
+"usage": "Токени моделі",
+"inputTokens": "Вхідні",
+"outputTokens": "Вихідні",
+"totalTokens": "Усього",
+"sharedTurn": "Спільний запит для {{count}} викликів",
+"unavailableTokens": "Не записано",
+"operationStatus": "Результат",
+"dryRun": "Перевірка без застосування змін",
     runningCommand: "Виконує команду: {{command}}",
     operationsDone: "Виконано операцій: {{count}}",
     testsPassed: "Пройдено",

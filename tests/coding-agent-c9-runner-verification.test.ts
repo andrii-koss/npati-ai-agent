@@ -74,6 +74,10 @@ interface ChangeRow {
 interface HarnessOptions {
   script?: Array<ChatResult | Error>;
   changes?: ChangeRow[];
+  quota?: CodingAgentRunnerPorts["quota"];
+  revision?: () => string | null;
+  modelRequest?: (request: CodingAgentChatRequest) => void;
+  readResult?: unknown;
   verify?: () => CodeToolInvokeResult | CodeToolInvokeFailure;
   limits?: Partial<CodeAgentLimits>;
   verificationTools?: readonly string[];
@@ -88,13 +92,14 @@ function createHarness(options: HarnessOptions = {}) {
   const script = [...(options.script ?? [{ content: "done" }])];
 
   const toolRuntime: CodingAgentRunnerPorts["toolRuntime"] = {
+    ...(options.revision ? {verificationRevision:async()=>options.revision!()} : {}),
     listTools: () => TOOLS.map((tool) => ({ ...tool })),
     invoke: async (_ctx, input) => {
       invocations.push({ tool: input.tool, toolCallId: input.toolCallId });
       if (input.tool === "code.verify.run") {
         return options.verify ? options.verify() : okResult("code.verify.run", { checks: [{ tool: "typecheck", passed: true }, { tool: "test", passed: true }] });
       }
-      return okResult(input.tool);
+      return okResult(input.tool,input.tool==="code.fs.read" && options.readResult ? options.readResult : undefined);
     },
     turnSummary: () => ({
       files: (options.changes ?? []).length,
@@ -105,12 +110,13 @@ function createHarness(options: HarnessOptions = {}) {
   };
 
   const ports: CodingAgentRunnerPorts = {
+    ...(options.quota ? {quota:options.quota} : {}),
     flags: { assertEnabled: async () => true },
     rbac: { authorize: async () => ({ allowed: true }) },
     toolRuntime,
     engine: {
       chat: async (request) => {
-        engineCalls.push(request);
+        engineCalls.push(request);options.modelRequest?.(request);
         const next = script.shift();
         if (next instanceof Error) throw next;
         return next ?? { content: "done" };
@@ -155,6 +161,16 @@ const editThenFinish: Array<ChatResult> = [
   { content: "editing", toolCalls: [nativeCall("code.fs.edit", { path: "src/a.ts" })] },
   { content: "all done" },
 ];
+
+it("finishes and verifies beyond the obsolete 16-turn chat override within the configured budget", async () => {
+  const reads: ChatResult[] = Array.from({ length: 16 }, (_, index) => ({ content: "", toolCalls: [nativeCall("code.fs.read", { path: `src/file-${index}.ts` }, `read-${index}`)] }));
+  const harness = createHarness({ script: [...reads, ...editThenFinish], limits: { maxStepsPerRun: 40 } });
+  const result = await harness.run();
+  expect(result.status).toBe("completed");
+  expect(result.verification?.status).toBe("passed");
+  expect(harness.invocations.filter(entry => entry.tool === "code.verify.run")).toHaveLength(1);
+  expect(harness.engineCalls).toHaveLength(18);
+});
 
 describe("security-gate: C9 runner — verification runs after a change and can repair", () => {
   it("verifies the change and reports a clean pass", async () => {
@@ -362,4 +378,35 @@ describe("security-gate: C9 runner — scope guard and the separation from argum
     expect(result.verification).toBeUndefined();
     expect(harness.invocations.filter((entry) => entry.tool === "code.verify.run")).toHaveLength(0);
   });
+});
+
+it("reuses a successful model-requested build only for the same canonical workspace revision",async()=>{
+ const harness=createHarness({revision:()=>"revision-a",verificationTools:["build"],verify:()=>okResult("code.verify.run",{kind:"tool_result",data:{results:[{tool:"build",ok:true}],stats:{failed:0}}}),script:[{toolCalls:[nativeCall("code.fs.edit",{path:"src/a.ts",find:"old",replacement:"new"})]},{toolCalls:[nativeCall("code.verify.run",{path:".",tools:["build"]})]},{content:"Done"}]});
+ const result=await harness.run({forceVerification:true});expect(result.status).toBe("completed");expect(harness.invocations.filter(call=>call.tool==="code.verify.run")).toHaveLength(1);expect(harness.invocations.find(call=>call.tool==="code.verify.run")?.toolCallId).toBe("call-code.verify.run");
+});
+it("rebuilds when the canonical source changes after model verification",async()=>{
+ let reads=0;const harness=createHarness({revision:()=>++reads<=2?"revision-a":"revision-b",verificationTools:["build"],verify:()=>okResult("code.verify.run",{results:[{tool:"build",ok:true}]}),script:[{toolCalls:[nativeCall("code.fs.edit",{path:"src/a.ts",find:"old",replacement:"new"})]},{toolCalls:[nativeCall("code.verify.run",{path:".",tools:["build"]})]},{content:"Done"}]});
+ const result=await harness.run({forceVerification:true});expect(result.status).toBe("completed");expect(harness.invocations.filter(call=>call.tool==="code.verify.run"),JSON.stringify({reads,all:harness.invocations})).toHaveLength(2);
+});
+it("does not reuse a partial check report or a failed build",async()=>{
+ let checks=0;const harness=createHarness({revision:()=>"a",verificationTools:["build","test"],verify:()=>okResult("code.verify.run",++checks===1?{results:[{tool:"build",ok:true}]}:{results:[{tool:"build",ok:true},{tool:"test",ok:true}]}),script:[{toolCalls:[nativeCall("code.fs.edit",{path:"src/a.ts",find:"old",replacement:"new"})]},{toolCalls:[nativeCall("code.verify.run",{path:".",tools:["build"]})]},{content:"Done"}]});
+ const result=await harness.run({forceVerification:true});expect(result.status).toBe("completed");expect(checks).toBe(2);
+});
+it("records actual provider usage once per model call and shares it between that call's tools",async()=>{
+ const seen:import("@npati/shared").DevelopmentProcessProgressItem[]=[];const harness=createHarness({verificationTools:[],changes:[],script:[{usage:{totalTokens:150,promptTokens:120,completionTokens:30},toolCalls:[nativeCall("code.fs.read",{path:"src/a.ts"},"one"),nativeCall("code.fs.read",{path:"src/b.ts"},"two")]},{usage:{totalTokens:70,promptTokens:60,completionTokens:10},content:"Done"}]});
+ await harness.run({onActivity:async event=>{seen.push(event)}});const usage=seen.filter(e=>e.stage==="model_usage");expect(usage.map(e=>e.modelUsage?.totalTokens)).toEqual([150,70]);expect(seen.filter(e=>e.stage==="tool").every(e=>e.modelUsage?.totalTokens===150)).toBe(true);
+});
+
+it("compacts old tool output without stripping native call IDs or accumulating summary messages",async()=>{
+ const snapshots:import("@npati/omniroute-adapter").ChatMessage[][]=[];const script=Array.from({length:8},(_,i)=>({content:"Read relevant source",toolCalls:[nativeCall("code.fs.read",{path:"src/a"+i+".ts"},"read-"+i)]}));
+ const harness=createHarness({changes:[],verificationTools:[],limits:{modelInputTokens:1},readResult:{content:"source line\n".repeat(1000)},modelRequest:request=>snapshots.push(structuredClone(request.messages)),script:[...script,{content:"Done"}]});
+ await harness.run();expect(snapshots.at(-1)!.filter(m=>m.role==="system"&&String(m.content).startsWith("Context summary of"))).toHaveLength(1);
+ const final=snapshots.at(-1)!;expect(final.filter(m=>m.role==="tool").every(m=>m.tool_call_id)).toBe(true);expect(final.filter(m=>m.role==="assistant"&&m.tool_calls?.length)).toHaveLength(8);expect(final.some(m=>String(m.content).includes("[tool result elided by context compaction]"))).toBe(true);
+});
+
+it("checks estimated full request pressure before billing a model call and never charges each tool separately",async()=>{
+ const charges:number[]=[];const quota={checkQuota:(_id:string,tokens:number)=>({allowed:tokens<500,remainingTokens:500,error:tokens>=500?"budget exceeded":undefined}),recordUsage:(_id:string,tokens:number)=>{charges.push(tokens)}};
+ const blocked=createHarness({quota,script:[{content:"Done",usage:{totalTokens:9999}}]});const stopped=await blocked.run();expect(stopped.reason).toBe("budget_exhausted");expect(blocked.engineCalls).toHaveLength(0);expect(charges).toEqual([]);
+ const allowed=createHarness({verificationTools:[],changes:[],quota:{...quota,checkQuota:()=>({allowed:true,remainingTokens:500000})},script:[{usage:{totalTokens:150},toolCalls:[nativeCall("code.fs.read",{path:"a.ts"},"a"),nativeCall("code.fs.read",{path:"b.ts"},"b")]},{content:"Done",usage:{totalTokens:20}}]});
+ await allowed.run();expect(charges).toEqual([150,20]);
 });

@@ -85,3 +85,13 @@ it("renders successive phases around real public updates and stops the previous 
   for(const button of host.querySelectorAll<HTMLButtonElement>(".coding-run-header"))await act(async()=>button.click());
   expect(rows[0]!.querySelectorAll(".coding-operation-history .codex-trace-row")).toHaveLength(1);expect(rows[1]!.querySelectorAll(".coding-operation-history .codex-trace-row")).toHaveLength(1);
 });
+
+it("shows factual per-turn token usage shared by tools and does not count model metadata as an operation",async()=>{
+  const {AgentExecutionTrace}=await import("../AgentExecutionTrace");Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});const host=document.createElement("div");document.body.append(host);root=createRoot(host);
+  const usage={id:"r:model:1",turn:1,inputTokens:120,outputTokens:30,totalTokens:150,toolCallIds:["a","b"],model:"test-model",costUsd:0.01};
+  await act(async()=>root!.render(<AgentExecutionTrace items={[{id:"r:a",runId:"r",stage:"tool",tool:"code.fs.apply_patch",title:"patch",at:"",status:"completed",dryRun:true,modelUsage:usage}]}/>));await act(async()=>host.querySelector<HTMLButtonElement>(".codex-trace-row-header")!.click());
+  expect(host.textContent).toContain("120");expect(host.textContent).toContain("30");expect(host.textContent).toContain("150");expect(host.textContent).toContain("Shared by 2 tool calls");expect(host.textContent).toContain("Dry run: changes not applied");expect(host.textContent).not.toContain("File updated");
+  const {codingActivityStages}=await import("../chat-timeline");const process:DevelopmentProcess={id:"p",companyId:"c",parentConversationId:"parent",name:"Site",framework:"Next.js",hidden:false,status:"completed",createdAt:"",updatedAt:"",runId:"r",initialRunId:"r"};
+  const stages=codingActivityStages([{id:"r:usage",runId:"r",stage:"model_usage",title:"Usage",at:"",status:"completed",modelUsage:usage},{id:"r:a",runId:"r",stage:"tool",title:"read",at:"",status:"completed",modelUsage:usage},{id:"r:b",runId:"r",stage:"tool",title:"read",at:"",status:"completed",modelUsage:usage}],process);
+  expect(stages[0]!.items).toHaveLength(2);expect(stages[0]!.usage).toHaveLength(1);
+});

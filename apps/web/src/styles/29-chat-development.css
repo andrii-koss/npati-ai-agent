@@ -499,3 +499,5 @@
 
 .coding-preview-trigger { display: inline-flex; align-items: center; gap: 8px; }
 .coding-preview-framework { padding-right: 8px; border-right: 1px solid currentColor; font-weight: 600; }
+
+.codex-trace-usage { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; font-size: 12px; color: var(--text-secondary, #64748b); padding: 4px 0; }

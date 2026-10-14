@@ -27,9 +27,10 @@ function operation(item: DevelopmentProcessProgressItem) {
 function title(item: DevelopmentProcessProgressItem, t: Labels, active: boolean) {
   if (!item.status) return sanitizeExecutionTrace(item.command ? item.tool + ": " + item.command : item.title);
   if (item.command) { const command = sanitizeExecutionTrace(item.command).slice(0,100); return active ? t("runningCommand").replace("{{command}}",command) : t("executed") + ": " + command; }
+  if (item.dryRun) return t("dryRun");
   const [kind] = operation(item);
   if (item.files && item.files.length > 1) return t(kind) + ": " + item.files.length;
-  if (item.file) return t(active ? kind : kind === "reading" ? "read" : "updated") + ": " + sanitizeExecutionTrace(item.file);
+  if (item.file) return t(active ? kind : kind === "reading" ? "read" : kind === "editing" ? "updated" : kind) + ": " + sanitizeExecutionTrace(item.file);
   return kind === "command" ? sanitizeExecutionTrace(item.title) : t(kind);
 }
 export function formatProcessTitle(item: DevelopmentProcessProgressItem, isUk: boolean, active: boolean) { return title(item, key => (isUk ? uk : en).executionTrace[key] ?? key, active); }
@@ -45,6 +46,7 @@ export function AgentExecutionTrace({ process, items: directItems, run, nested =
   const copy = useCallback(async (text: string, id: string) => {
     try { await navigator.clipboard.writeText(sanitizeExecutionTrace(text)); setCopied(id); setTimeout(() => setCopied(current => current === id ? undefined : current), 1800); } catch { /* Clipboard denial does not stop the run. */ }
   }, []);
+  const usageView = (usage: NonNullable<DevelopmentProcessProgressItem["modelUsage"]>) => <div className="codex-trace-usage" key={usage.id}><strong>{t("usage")} / #{usage.turn}</strong>{usage.model && <code>{sanitizeExecutionTrace(usage.model)}</code>}<span>{t("inputTokens")}: {usage.inputTokens ?? t("unavailableTokens")} / {t("outputTokens")}: {usage.outputTokens ?? t("unavailableTokens")} / {t("totalTokens")}: {usage.totalTokens ?? t("unavailableTokens")}</span>{usage.costUsd !== undefined && <span>${usage.costUsd.toFixed(6)}</span>}{usage.toolCallIds.length>1 && <small>{t("sharedTurn").replace("{{count}}",String(usage.toolCallIds.length))}</small>}</div>;
   const items = normalizeActivity(directItems ?? process?.progress);
   if (!items.length && !run) return null;
   if (run) {
@@ -52,7 +54,7 @@ export function AgentExecutionTrace({ process, items: directItems, run, nested =
     const current = [...items].reverse().find(item=>["running","active","awaiting_approval","waiting_for_approval"].includes(item.status??"")) ?? (running ? {id:run.id,stage:"agent",title:"",at:run.at,status:"running" as const} : items.at(-1) ?? {id:run.id,stage:"agent",title:"",at:run.at,status:"pending" as const});
     const [, Icon] = operation(current);
     const label = run.status === "completed" ? t("operationsDone").replace("{{count}}",String(items.filter(item=>item.stage!=="agent").length)) : running ? title(current,t,true) : t(run.status === "waiting_for_approval" ? "awaiting_approval" : run.status);
-    return <article className="assistant research-progress coding-run-activity" aria-live="polite"><div className={"research-page-row codex-trace-row " + (running ? "active" : run.status) + (runOpen ? " expanded" : "")} data-run-id={run.runId ?? run.id}><button type="button" className="codex-trace-row-header coding-run-header" aria-expanded={runOpen} aria-controls={"run-detail-" + run.id} onClick={()=>{setHistoryMounted(true);setRunOpen(previous=>!previous);}}><span className="research-progress-state" aria-hidden="true">{run.status === "completed" ? <Check size={12}/> : run.status === "failed" ? <AlertCircle size={12}/> : run.status === "cancelled" ? <X size={12}/> : "\u25cf"}</span><Icon className="research-progress-globe" size={16} aria-hidden="true"/><span dir="auto" className={running ? "research-active-text" : undefined}>{label}</span><span className="codex-trace-chevron-btn" aria-hidden="true">{runOpen ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}</span></button><div className="codex-trace-collapse" aria-hidden={!runOpen} inert={!runOpen} onTransitionEnd={event=>{if(!runOpen && event.target===event.currentTarget)setHistoryMounted(false);}}> <div className="codex-trace-collapse-inner"><div id={"run-detail-" + run.id} className="coding-run-history">{runOpen && run.runId && <a href={"/activity?runId="+encodeURIComponent(run.runId)}>{t("viewRun")}</a>}{historyMounted && <AgentExecutionTrace process={process ? {...process,runId:run.runId} : undefined} items={items} isUk={isUk} language={run.language} nested />}</div></div></div></div></article>;
+    return <article className="assistant research-progress coding-run-activity" aria-live="polite"><div className={"research-page-row codex-trace-row " + (running ? "active" : run.status) + (runOpen ? " expanded" : "")} data-run-id={run.runId ?? run.id}><button type="button" className="codex-trace-row-header coding-run-header" aria-expanded={runOpen} aria-controls={"run-detail-" + run.id} onClick={()=>{setHistoryMounted(true);setRunOpen(previous=>!previous);}}><span className="research-progress-state" aria-hidden="true">{run.status === "completed" ? <Check size={12}/> : run.status === "failed" ? <AlertCircle size={12}/> : run.status === "cancelled" ? <X size={12}/> : "\u25cf"}</span><Icon className="research-progress-globe" size={16} aria-hidden="true"/><span dir="auto" className={running ? "research-active-text" : undefined}>{label}</span><span className="codex-trace-chevron-btn" aria-hidden="true">{runOpen ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}</span></button><div className="codex-trace-collapse" aria-hidden={!runOpen} inert={!runOpen} onTransitionEnd={event=>{if(!runOpen && event.target===event.currentTarget)setHistoryMounted(false);}}> <div className="codex-trace-collapse-inner"><div id={"run-detail-" + run.id} className="coding-run-history">{runOpen && run.runId && <a href={"/activity?runId="+encodeURIComponent(run.runId)}>{t("viewRun")}</a>}{runOpen && run.usage?.map(usageView)}{historyMounted && <AgentExecutionTrace process={process ? {...process,runId:run.runId} : undefined} items={items} isUk={isUk} language={run.language} nested />}</div></div></div></div></article>;
   }
   return <article className={nested ? "coding-operation-history" : "assistant research-progress"} aria-live="polite"><div className={"research-page-list codex-trace-list " + className}>
     {items.map(item => {
@@ -72,6 +74,9 @@ export function AgentExecutionTrace({ process, items: directItems, run, nested =
         </button>
         <div className="codex-trace-collapse" aria-hidden={!open} inert={!open}><div className="codex-trace-collapse-inner"><div id={"trace-detail-" + item.id} className="codex-trace-detail-panel">
           {(item.runId || process?.runId) && <a href={"/activity?runId=" + encodeURIComponent(item.runId ?? process?.runId ?? "")}>{t("viewRun")}</a>}
+          <div>{t("operationStatus")}: {t(status === "active" ? "running" : status === "waiting_for_approval" ? "awaiting_approval" : status)}</div>
+          {item.dryRun && <div>{t("dryRun")}</div>}
+          {item.modelUsage ? usageView(item.modelUsage) : <div>{t("usage")}: {t("unavailableTokens")}</div>}
           {item.tool && <div>{t("tool")}: <code>{safe(item.tool)}</code></div>}
           {item.command && <div className="codex-trace-field"><div className="codex-trace-field-top"><span>{t("command")}</span>{copyButton(item.command,"cmd-" + item.id,"copyCommand")}</div><div className="codex-code-box"><code>{safe(item.command)}</code></div></div>}
           {item.arguments && !item.command && <div className="codex-trace-field"><div className="codex-trace-field-top"><span>{t("tool")}: {safe(item.tool ?? "")}</span>{copyButton(item.arguments,"args-" + item.id,"copyLog")}</div><pre className="codex-log-pre">{safe(item.arguments)}</pre></div>}
@@ -86,7 +91,7 @@ export function AgentExecutionTrace({ process, items: directItems, run, nested =
           {item.result && item.fileContent === undefined && item.stdout === undefined && item.stderr === undefined && !item.diff && !item.files?.some(file => file.diff) && !item.tests && log(item.result,t("output"))}{item.resultTruncated && <span>{t("limited")}</span>}
           {item.durationMs !== undefined && <div>{t("duration")}: {(item.durationMs/1000).toFixed(2)}s</div>}
           {item.exitCode !== undefined && <div>{t("exitCode")}: {item.exitCode}</div>}
-          {(item.error || item.errorCode) && <div className="codex-trace-error-msg">{t("error")}: {safe(item.error ?? item.errorCode ?? "")}</div>}
+          {(item.error || item.errorCode) && <div className="codex-trace-error-msg">{t(item.errorCode === "approval_required" ? "awaiting_approval" : "error")}: {safe(item.error ?? (item.errorCode === "approval_required" ? t("awaiting_approval") : item.errorCode ?? ""))}</div>}
         </div></div></div>
       </div>;
     })}

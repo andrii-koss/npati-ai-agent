@@ -23,6 +23,8 @@ export interface CodeAgentLimits {
   editRepairAttempts: number;
   repairLoopAttempts: number;
   contextCompressionRatio: number;
+  /** Compact old outputs before a large-context model repeatedly bills them. */
+  modelInputTokens?: number;
   /**
    * C12: nesting levels allowed below a main run. This was dead configuration (zero readers) until the
    * capability scope started reading it; it is clamped to the structural limit, so configuration may turn
@@ -71,6 +73,7 @@ export const DEFAULT_CODE_AGENT_LIMITS: CodeAgentLimits = {
   editRepairAttempts: 2,
   repairLoopAttempts: 3,
   contextCompressionRatio: 0.75,
+  modelInputTokens: 16_384,
   /** C12: one nesting level below a main run — the structural limit (`code-subagent-limits.ts`). */
   subagentDepth: 1,
   /** C12: the hard ceiling for parallel subagent work; `resolveCodeSubagentLimits` clamps every read of it. */
@@ -112,6 +115,7 @@ export function resolveCodeAgentLimits(env: NodeJS.ProcessEnv = process.env): Co
     parallelReadOnlyCalls: positiveInt(env.NPATI_CODE_PARALLEL_READONLY, DEFAULT_CODE_AGENT_LIMITS.parallelReadOnlyCalls),
     editRepairAttempts: positiveInt(env.NPATI_CODE_EDIT_REPAIR_ATTEMPTS, DEFAULT_CODE_AGENT_LIMITS.editRepairAttempts),
     repairLoopAttempts: positiveInt(env.NPATI_CODE_REPAIR_LOOP, DEFAULT_CODE_AGENT_LIMITS.repairLoopAttempts),
+    modelInputTokens: positiveInt(env.NPATI_CODE_MODEL_INPUT_TOKENS, DEFAULT_CODE_AGENT_LIMITS.modelInputTokens ?? 16_384),
     contextCompressionRatio: positiveFloat(env.NPATI_CODE_CONTEXT_COMPRESSION_RATIO, DEFAULT_CODE_AGENT_LIMITS.contextCompressionRatio),
     subagentDepth: clampCodeSubagentDepth(env.NPATI_CODE_SUBAGENT_DEPTH ?? DEFAULT_CODE_AGENT_LIMITS.subagentDepth),
     subagentParallelism: clampCodeSubagentParallelism(env.NPATI_CODE_SUBAGENT_PARALLELISM ?? DEFAULT_CODE_AGENT_LIMITS.subagentParallelism),

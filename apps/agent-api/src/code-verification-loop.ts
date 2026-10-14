@@ -224,3 +224,15 @@ export function formatRepairInstruction(report: VerificationReport): string {
     "report success while a check is failing; if a test change is genuinely required, say why in your summary.",
   ].join("\n");
 }
+
+/** Canonical executor transport success is not proof that the requested checks passed. */
+export function verificationChecks(outcome: import("./code-tool-runtime").CodeToolInvokeResult | import("./code-tool-runtime").CodeToolInvokeFailure, requested: readonly string[]): VerificationCheckReport[] {
+  if(!outcome.ok)return requested.map(tool=>({tool,state:outcome.error.code==="approval_required"?"approval_required":outcome.error.code==="tool_not_configured"||outcome.error.code==="feature_disabled"?"unavailable":"failed",code:String(outcome.error.code),message:outcome.error.message}));
+  const object=(value:unknown):Record<string,unknown>=>value&&typeof value==="object"?value as Record<string,unknown>:{};
+  const root=object(outcome.result);const payload=object(root.data??root.result??root);
+  const reports=Array.isArray(payload.checks)?payload.checks:Array.isArray(payload.results)?payload.results:[];
+  return requested.map(tool=>{const value=reports.map(object).find(row=>(row.tool??row.name)===tool);
+    if(!value)return {tool,state:"unavailable",code:"verification_result_missing"};
+    const passed=value.ok===true||value.passed===true||value.state==="passed"||value.status==="passed";
+    return {tool,state:passed?"passed":value.state==="unavailable"?"unavailable":"failed",...(typeof value.code==="string"?{code:value.code}:{})};});
+}
