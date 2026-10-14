@@ -15,6 +15,7 @@ import {
 } from "@npati/shared";
 import {
   chooseAvailableCompanyId,
+  readActiveCompanyId,
   readCachedCompanies,
   writeActiveCompanyId,
 } from "./active-company";
@@ -329,6 +330,41 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return json as T;
 }
 
+const WEBSITES_CACHE_PREFIX = "npati_websites_cache_v1_";
+const WEBSITES_LATEST_CACHE_KEY = "npati_websites_cache_latest_v1";
+
+function getCachedWebsites(companyId?: string): WebsiteProject[] | null {
+  try {
+    if (companyId) {
+      const raw = sessionStorage.getItem(WEBSITES_CACHE_PREFIX + companyId)
+        || localStorage.getItem(WEBSITES_CACHE_PREFIX + companyId);
+      if (raw !== null) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    }
+    const latest = sessionStorage.getItem(WEBSITES_LATEST_CACHE_KEY)
+      || localStorage.getItem(WEBSITES_LATEST_CACHE_KEY);
+    if (latest) {
+      const parsed = JSON.parse(latest);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {}
+  return null;
+}
+
+function updateCachedWebsites(companyId: string, items: WebsiteProject[]) {
+  try {
+    const serialized = JSON.stringify(items);
+    if (companyId) {
+      sessionStorage.setItem(WEBSITES_CACHE_PREFIX + companyId, serialized);
+      localStorage.setItem(WEBSITES_CACHE_PREFIX + companyId, serialized);
+    }
+    sessionStorage.setItem(WEBSITES_LATEST_CACHE_KEY, serialized);
+    localStorage.setItem(WEBSITES_LATEST_CACHE_KEY, serialized);
+  } catch {}
+}
+
 export function WebsiteBuilderDashboard() {
   const navigate = useNavigate();
   const { language } = useTranslation();
@@ -339,10 +375,16 @@ export function WebsiteBuilderDashboard() {
         : value === "mobile_app" ? t.typeMobileApp
           : t.typeWebsite;
 
-  const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
-  const [companyId, setCompanyId] = useState<string>("");
-  const [websites, setWebsites] = useState<WebsiteProject[]>([]);
-  const [loading, setLoading] = useState(true);
+  const initialCompanyId = useMemo(() => {
+    const cached = readCachedCompanies();
+    const active = readActiveCompanyId();
+    return chooseAvailableCompanyId(cached, { requested: active });
+  }, []);
+  const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>(() => readCachedCompanies());
+  const [companyId, setCompanyId] = useState<string>(initialCompanyId);
+  const initialWebsites = useMemo(() => getCachedWebsites(initialCompanyId), [initialCompanyId]);
+  const [websites, setWebsites] = useState<WebsiteProject[]>(() => initialWebsites ?? []);
+  const [loading, setLoading] = useState(() => initialWebsites === null);
   const [error, setError] = useState("");
 
   // Filters & Search
@@ -386,19 +428,27 @@ export function WebsiteBuilderDashboard() {
         const cached = readCachedCompanies();
         if (cached.length > 0 && active) {
           setCompanies(cached);
-          const initialId = chooseAvailableCompanyId(cached);
-          setCompanyId(initialId);
+          const initialId = chooseAvailableCompanyId(cached, { requested: readActiveCompanyId() });
+          if (initialId) setCompanyId((prev) => prev || initialId);
         }
 
         const res = await apiFetch<{ companies: Array<{ id: string; name: string }> }>("/companies");
         if (!active) return;
         const list = res.companies || [];
         setCompanies(list);
-        const resolved = chooseAvailableCompanyId(list);
+        if (list.length === 0) {
+          setWebsites([]);
+          setLoading(false);
+          return;
+        }
+        const resolved = chooseAvailableCompanyId(list, { requested: readActiveCompanyId() });
         setCompanyId(resolved);
         writeActiveCompanyId(resolved);
       } catch (err: any) {
-        if (active) setError(err.message || t.loadError);
+        if (active) {
+          setError(err.message || t.loadError);
+          setLoading(false);
+        }
       }
     }
     void loadCompanies();
@@ -408,18 +458,18 @@ export function WebsiteBuilderDashboard() {
   }, []);
 
   // Load Websites for Company
-  const loadWebsites = async () => {
-    if (!companyId) {
-      setWebsites([]);
-      setLoading(false);
+  const loadWebsites = async (targetCompanyId?: string) => {
+    const id = targetCompanyId ?? companyId;
+    if (!id) {
       return;
     }
-    setLoading(true);
     try {
       const res = await apiFetch<{ projects: WebsiteProject[] }>(
-        `/companies/${encodeURIComponent(companyId)}/projects?includeArchived=true`
+        `/companies/${encodeURIComponent(id)}/projects?includeArchived=true`
       );
-      setWebsites((res.projects || []).filter(site => site.type !== "code_project" || /^(Next\.js|HTML\/CSS|React|Vite)$/i.test(site.framework ?? "")));
+      const nextProjects = (res.projects || []).filter(site => site.type !== "code_project" || /^(Next\.js|HTML\/CSS|React|Vite)$/i.test(site.framework ?? ""));
+      setWebsites(nextProjects);
+      updateCachedWebsites(id, nextProjects);
       setError("");
     } catch (err: any) {
       setError(err.message || t.loadError);
@@ -429,7 +479,9 @@ export function WebsiteBuilderDashboard() {
   };
 
   useEffect(() => {
-    void loadWebsites();
+    if (companyId) {
+      void loadWebsites(companyId);
+    }
   }, [companyId]);
 
   // When framework selection changes in drawer, update suggested values.
@@ -681,8 +733,13 @@ export function WebsiteBuilderDashboard() {
               <select
                 value={companyId}
                 onChange={(e) => {
-                  setCompanyId(e.target.value);
-                  writeActiveCompanyId(e.target.value);
+                  const nextCompanyId = e.target.value;
+                  setCompanyId(nextCompanyId);
+                  writeActiveCompanyId(nextCompanyId);
+                  const cached = getCachedWebsites(nextCompanyId);
+                  if (cached !== null) {
+                    setWebsites(cached);
+                  }
                 }}
                 className="company-select"
                 style={{
@@ -809,30 +866,30 @@ export function WebsiteBuilderDashboard() {
       )}
 
       {/* Grid of Website Projects */}
-      {loading ? null : filteredWebsites.length === 0 ? (
-        <div
-          className="company-run-card"
-          style={{
-            textAlign: "center",
-            padding: "4rem 2rem",
-            background: "#ffffff",
-            borderRadius: "16px",
-            border: "1px dashed #cbd5e1",
-          }}
-        >
-          <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>🌐</div>
-          <h3 style={{ fontSize: "1.3rem", fontWeight: 700, margin: "0 0 0.5rem 0", color: "#111111" }}>
-            {t.emptyTitle}
-          </h3>
-          <p style={{ color: "#64748b", maxWidth: "500px", margin: "0 auto 1.75rem auto", fontSize: "14px", lineHeight: 1.6 }}>
-            {t.emptySubtitle}
-          </p>
+      {websites.length === 0 ? (
+        <div className="automations-empty-card">
+          <div className="automations-empty-icon">🌐</div>
+          <h3>{t.emptyTitle}</h3>
+          <p>{t.emptySubtitle}</p>
           <button
             type="button"
-            className="button-primary"
+            className="button-primary automations-action-primary"
             onClick={() => setModalOpen(true)}
           >
             + {t.createNow}
+          </button>
+        </div>
+      ) : filteredWebsites.length === 0 ? (
+        <div className="automations-empty-card">
+          <div className="automations-empty-icon">🔍</div>
+          <h3>{language === "uk" ? "Нічого не знайдено" : "No matching websites"}</h3>
+          <p>{language === "uk" ? "Спробуйте змінити пошуковий запит або скинути фільтри." : "Try adjusting your search query or clear the active filters."}</p>
+          <button
+            type="button"
+            className="button-secondary"
+            onClick={() => { setSearchQuery(""); setStatusFilter("all"); setFrameworkFilter("all"); }}
+          >
+            {language === "uk" ? "Скинути фільтри" : "Clear filters"}
           </button>
         </div>
       ) : (
