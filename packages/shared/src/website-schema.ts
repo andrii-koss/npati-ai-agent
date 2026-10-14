@@ -6,7 +6,7 @@ import type { WebsiteBlock, WebsiteDocument, WebsiteDomainConfig } from "./websi
 
 export function createDefaultWebsiteDocument(
   name: string,
-  framework: "nextjs" | "vite" | "static" = "nextjs",
+  framework: "nextjs" | "vite" | "static" | "astro" = "nextjs",
   options: {
     purpose?: string;
     primaryColor?: string;

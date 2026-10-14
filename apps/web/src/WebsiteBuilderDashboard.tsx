@@ -40,98 +40,149 @@ export interface WebsiteProject {
   updatedAt: string;
 }
 
-interface TemplateOption {
-  id: "hosting" | "saas" | "ecommerce" | "portfolio" | "landing" | "blank";
-  icon: string;
-  title: string;
-  titleUk: string;
-  desc: string;
-  descUk: string;
-  badge: string;
-  pagesCount: number;
-  blocks: string[];
-  defaultName: string;
-  defaultDesc: string;
+function FrameworkIcon({ id }: { id: string }) {
+  if (id === "html-css") {
+    return (
+      <svg width="24" height="24" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path fill="#E44D26" d="M19.037 113.876L9.032 1.661h109.936l-10.016 112.198-45.019 12.48z"/>
+        <path fill="#F16529" d="M64 116.8l36.378-10.086 8.559-95.878H64z"/>
+        <path fill="#EBEBEB" d="M64 52.455H45.788L44.53 38.361H64V24.599H29.489l.33 3.692 3.382 37.927H64zm0 35.743l-.061.017-15.327-4.14-.979-10.975H33.816l1.928 21.609 28.193 7.826.063-.017z"/>
+        <path fill="#FFFFFF" d="M63.952 52.455v13.763h16.947l-1.597 17.849-15.35 4.143v14.319l28.215-7.82.207-2.325 3.234-36.233.335-3.696h-3.708zm0-27.856v13.762h33.244l.276-3.092.628-6.978.329-3.692z"/>
+      </svg>
+    );
+  }
+  if (id === "nextjs") {
+    return (
+      <svg width="24" height="24" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <circle cx="64" cy="64" r="64" fill="#000000"/>
+        <path fill="url(#next_devicon_a)" d="M106.317 112.014 49.167 38.4H38.4v51.179h8.614v-40.24l52.54 67.884a64.216 64.216 0 0 0 6.763-5.209z"/>
+        <path fill="url(#next_devicon_b)" d="M81.778 38.4h8.533v51.2h-8.533z"/>
+        <defs>
+          <linearGradient id="next_devicon_a" x1="109" x2="144.5" y1="116.5" y2="160.5" gradientTransform="scale(.71111)" gradientUnits="userSpaceOnUse">
+            <stop stopColor="#ffffff"/>
+            <stop offset="1" stopColor="#ffffff" stopOpacity="0"/>
+          </linearGradient>
+          <linearGradient id="next_devicon_b" x1="121" x2="120.799" y1="54" y2="106.875" gradientTransform="scale(.71111)" gradientUnits="userSpaceOnUse">
+            <stop stopColor="#ffffff"/>
+            <stop offset="1" stopColor="#ffffff" stopOpacity="0"/>
+          </linearGradient>
+        </defs>
+      </svg>
+    );
+  }
+  if (id === "vite") {
+    return (
+      <svg width="24" height="24" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs>
+          <linearGradient id="vite_devicon_a" x1="6" x2="235" y1="33" y2="344" gradientTransform="translate(0 .937) scale(.3122)" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stopColor="#41d1ff"/>
+            <stop offset="1" stopColor="#bd34fe"/>
+          </linearGradient>
+          <linearGradient id="vite_devicon_b" x1="194.651" x2="236.076" y1="8.818" y2="292.989" gradientTransform="translate(0 .937) scale(.3122)" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stopColor="#ffea83"/>
+            <stop offset=".083" stopColor="#ffdd35"/>
+            <stop offset="1" stopColor="#ffa800"/>
+          </linearGradient>
+        </defs>
+        <path fill="url(#vite_devicon_a)" d="M124.766 19.52 67.324 122.238c-1.187 2.121-4.234 2.133-5.437.024L3.305 19.532c-1.313-2.302.652-5.087 3.261-4.622L64.07 25.187a3.09 3.09 0 0 0 1.11 0l56.3-10.261c2.598-.473 4.575 2.289 3.286 4.594Zm0 0"/>
+        <path fill="url(#vite_devicon_b)" d="M91.46 1.43 48.954 9.758a1.56 1.56 0 0 0-1.258 1.437l-2.617 44.168a1.563 1.563 0 0 0 1.91 1.614l11.836-2.735a1.562 1.562 0 0 1 1.88 1.836l-3.517 17.219a1.562 1.562 0 0 0 1.985 1.805l7.308-2.223c1.133-.344 2.223.652 1.985 1.812l-5.59 27.047c-.348 1.692 1.902 2.614 2.84 1.164l.625-.968 34.64-69.13c.582-1.16-.421-2.48-1.69-2.234l-12.185 2.352a1.558 1.558 0 0 1-1.793-1.965l7.95-27.562A1.56 1.56 0 0 0 91.46 1.43Zm0 0"/>
+      </svg>
+    );
+  }
+  if (id === "astro") {
+    return (
+      <svg width="24" height="24" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs>
+          <linearGradient id="astro_devicon_flame" x1="1001.68" x2="790.326" y1="652.45" y2="1094.91" gradientTransform="scale(.1)" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stopColor="#ff1639"/>
+            <stop offset="1" stopColor="#ff1639" stopOpacity="0"/>
+          </linearGradient>
+        </defs>
+        <path fill="#ffffff" d="M81.504 9.465c.973 1.207 1.469 2.836 2.457 6.09l21.656 71.136a90.079 90.079 0 0 0-25.89-8.765L65.629 30.28a1.833 1.833 0 0 0-3.52.004L48.18 77.902a90.104 90.104 0 0 0-26.003 8.778l21.758-71.14c.996-3.25 1.492-4.876 2.464-6.083a8.023 8.023 0 0 1 3.243-2.398c1.433-.575 3.136-.575 6.535-.575H71.72c3.402 0 5.105 0 6.543.579a7.988 7.988 0 0 1 3.242 2.402Zm0 0"/>
+        <path fill="#ff5d01" d="M84.094 90.074c-3.57 3.055-10.696 5.137-18.903 5.137-10.07 0-18.515-3.137-20.754-7.356-.8 2.418-.98 5.184-.98 6.954 0 0-.527 8.675 5.508 14.71a5.671 5.671 0 0 1 5.672-5.671c5.37 0 5.367 4.683 5.363 8.488v.336c0 5.773 3.527 10.719 8.543 12.805a11.62 11.62 0 0 1-1.172-5.098c0-5.508 3.23-7.555 6.988-9.938 2.989-1.894 6.309-4 8.594-8.222a15.513 15.513 0 0 0 1.875-7.41 15.55 15.55 0 0 0-.734-4.735Zm0 0"/>
+        <path fill="url(#astro_devicon_flame)" d="M84.094 90.074c-3.57 3.055-10.696 5.137-18.903 5.137-10.07 0-18.515-3.137-20.754-7.356-.8 2.418-.98 5.184-.98 6.954 0 0-.527 8.675 5.508 14.71a5.671 5.671 0 0 1 5.672-5.671c5.37 0 5.367 4.683 5.363 8.488v.336c0 5.773 3.527 10.719 8.543 12.805a11.62 11.62 0 0 1-1.172-5.098c0-5.508 3.23-7.555 6.988-9.938 2.989-1.894 6.309-4 8.594-8.222a15.513 15.513 0 0 0 1.875-7.41 15.55 15.55 0 0 0-.734-4.735Zm0 0"/>
+      </svg>
+    );
+  }
+  return null;
 }
 
-const TEMPLATES: TemplateOption[] = [
+interface FrameworkStarterOption {
+  id: "html-css" | "nextjs" | "vite" | "astro";
+  frameworkKey: "HTML/CSS" | "Next.js" | "Vite" | "Astro";
+  name: string;
+  runtimeLabel: string;
+  runtimeLabelUk: string;
+  verifiedLabel: string;
+  tags: string[];
+  defaultPort: number;
+  defaultType: "website" | "landing_page" | "web_app";
+  defaultName: string;
+  defaultNameUk: string;
+  defaultDesc: string;
+  defaultDescUk: string;
+}
+
+const FRAMEWORK_STARTERS: FrameworkStarterOption[] = [
   {
-    id: "hosting",
-    icon: "⚡",
-    title: "Cloud & Web Hosting",
-    titleUk: "Хмарний хостинг та домени",
-    desc: "Complete 5-page setup with domain search, NVMe specs, server tiers, and FAQ.",
-    descUk: "Готовий сайт на 5 сторінок з пошуком доменів, характеристиками NVMe, тарифами та FAQ.",
-    badge: "Recommended",
-    pagesCount: 5,
-    blocks: ["Navbar", "Hero", "Features", "Pricing", "FAQ", "CTA", "Contact", "Footer"],
-    defaultName: "CloudScale Hosting",
-    defaultDesc: "Modern cloud hosting company with domain registration, VPS tiers, and 24/7 support.",
+    id: "html-css",
+    frameworkKey: "HTML/CSS",
+    name: "HTML / CSS",
+    runtimeLabel: "Shared NPATI Sandbox runtime",
+    runtimeLabelUk: "Спільне середовище NPATI Sandbox",
+    verifiedLabel: "Verified",
+    tags: ["HTML5", "CSS3", "JavaScript", "Instant Preview", "Static Build"],
+    defaultPort: 3000,
+    defaultType: "website",
+    defaultName: "Modern HTML/CSS Website",
+    defaultNameUk: "Сучасний HTML/CSS сайт",
+    defaultDesc: "Clean, responsive static website with modern HTML5, CSS3 layout, and instant live preview.",
+    defaultDescUk: "Швидкий адаптивний статичний сайт із сучасним макетом на HTML5 та CSS3.",
   },
   {
-    id: "saas",
-    icon: "🚀",
-    title: "SaaS & AI Platform",
-    titleUk: "SaaS та AI Платформа",
-    desc: "High-impact tech startup landing with live metrics, feature grid, and pricing cards.",
-    descUk: "Ефективний лендінг для технологічного стартапу з метриками, блоками фіч та тарифами.",
-    badge: "Popular",
-    pagesCount: 3,
-    blocks: ["Navbar", "Hero", "Features", "Stats", "Pricing", "Testimonials", "CTA", "Footer"],
-    defaultName: "Cognitive AI Studio",
-    defaultDesc: "Autonomous AI agents and intelligent workflows for modern engineering teams.",
+    id: "nextjs",
+    frameworkKey: "Next.js",
+    name: "Next.js",
+    runtimeLabel: "Shared NPATI Sandbox runtime",
+    runtimeLabelUk: "Спільне середовище NPATI Sandbox",
+    verifiedLabel: "Verified",
+    tags: ["App Router", "React 18", "TypeScript", "Server Actions", "API Routes"],
+    defaultPort: 3000,
+    defaultType: "website",
+    defaultName: "Next.js Web Platform",
+    defaultNameUk: "Веб-платформа Next.js",
+    defaultDesc: "Full-stack web application powered by Next.js 14 App Router, TypeScript, and server components.",
+    defaultDescUk: "Повнофункціональний веб-застосунок на Next.js 14 App Router з підтримкою TypeScript.",
   },
   {
-    id: "ecommerce",
-    icon: "🛍️",
-    title: "E-Commerce & Store",
-    titleUk: "Інтернет-магазин",
-    desc: "Showcase physical or digital products with featured grid, reviews, and promo banners.",
-    descUk: "Вітрина товарів чи цифрових послуг із сіткою товарів, відгуками та промо-блоками.",
-    badge: "Store",
-    pagesCount: 3,
-    blocks: ["Navbar", "Hero", "Gallery", "Features", "Testimonials", "CTA", "Footer"],
-    defaultName: "Nordic Minimal Goods",
-    defaultDesc: "Curated collection of premium everyday essentials and sustainable accessories.",
+    id: "vite",
+    frameworkKey: "Vite",
+    name: "Vite",
+    runtimeLabel: "Shared NPATI Sandbox runtime",
+    runtimeLabelUk: "Спільне середовище NPATI Sandbox",
+    verifiedLabel: "Verified",
+    tags: ["React 18", "Vite HMR", "TypeScript", "SPA", "Tailwind CSS"],
+    defaultPort: 5173,
+    defaultType: "web_app",
+    defaultName: "Vite React Studio",
+    defaultNameUk: "Vite React Студія",
+    defaultDesc: "Ultra-fast single page application with instant Vite HMR, React 18, and modular components.",
+    defaultDescUk: "Ультрашвидкий SPA-застосунок з миттєвим гарячим перезавантаженням на Vite та React 18.",
   },
   {
-    id: "portfolio",
-    icon: "💼",
-    title: "Agency & Portfolio",
-    titleUk: "Агенція та портфоліо",
-    desc: "Modern creative showcase with case studies gallery, team members, and contact form.",
-    descUk: "Сучасна презентація робіт із галереєю кейсів, командою та формою зв'язку.",
-    badge: "Creative",
-    pagesCount: 4,
-    blocks: ["Navbar", "Hero", "Gallery", "Team", "Testimonials", "Contact", "Footer"],
-    defaultName: "Apex Design Agency",
-    defaultDesc: "Award-winning digital experience design and full-stack software development.",
-  },
-  {
-    id: "landing",
-    icon: "📄",
-    title: "High-Converting Landing",
-    titleUk: "Конверсійний лендінг",
-    desc: "Focused single-page site optimized for lead generation, waiting lists, or event launch.",
-    descUk: "Фокусована сторінка, оптимізована під збір лідів, список очікування або презентацію продукту.",
-    badge: "Single Page",
-    pagesCount: 1,
-    blocks: ["Navbar", "Hero", "Features", "Pricing", "CTA", "Footer"],
-    defaultName: "Product Launch Pro",
-    defaultDesc: "Transform your daily productivity with our next-generation browser extension.",
-  },
-  {
-    id: "blank",
-    icon: "✏️",
-    title: "Clean Blank Canvas",
-    titleUk: "Чистий аркуш",
-    desc: "Minimal starter with Navbar, Hero and Footer. Build your layout block by block.",
-    descUk: "Мінімальний старт з меню, hero та футером. Додавайте власні блоки один за одним.",
-    badge: "Custom",
-    pagesCount: 1,
-    blocks: ["Navbar", "Hero", "Footer"],
-    defaultName: "My Custom Website",
-    defaultDesc: "Custom website edited with NPATI Coding Agent in chat.",
+    id: "astro",
+    frameworkKey: "Astro",
+    name: "Astro",
+    runtimeLabel: "Shared NPATI Sandbox runtime",
+    runtimeLabelUk: "Спільне середовище NPATI Sandbox",
+    verifiedLabel: "Verified",
+    tags: ["Islands", "Zero JS", "Markdown / MDX", "Content Collections", "Multi-page"],
+    defaultPort: 4321,
+    defaultType: "website",
+    defaultName: "Astro Content Hub",
+    defaultNameUk: "Контент-хаб на Astro",
+    defaultDesc: "High-performance content website with Astro islands architecture and zero unnecessary JavaScript.",
+    defaultDescUk: "Високопродуктивний сайт з острівною архітектурою Astro та мінімальним завантаженням JS.",
   },
 ];
 
@@ -162,10 +213,9 @@ const copy = {
     deletePrompt: "Permanently delete this website project and all its files? This action cannot be undone.",
     drawerKicker: "WEBSITE STARTER",
     drawerTitle: "Create New Website",
-    drawerSubtitle: "Select a starter block template and customize your project details.",
-    sectionTemplate: "1. Choose Starter Blocks & Template",
-    sectionDetails: "2. Website Details",
-    sectionDomain: "3. Domain & SSL / Network",
+    drawerSubtitle: "Select a framework runtime to deploy and customize your project details.",
+    sectionTemplate: "1. Choose Framework & Runtime",
+    sectionDomain: "2. Domain & SSL / Network",
     domainTitle: "Domain",
     domainDesc: "In this section you can edit a domain",
     domainWarning: "Whenever you make changes to domains, remember to redeploy your compose to apply the changes.",
@@ -225,10 +275,9 @@ const copy = {
     deletePrompt: "Назавжди видалити цей сайт і всі його файли? Цю дію неможливо скасувати.",
     drawerKicker: "СТАРТОВИЙ САЙТ",
     drawerTitle: "Створити новий сайт",
-    drawerSubtitle: "Оберіть структуру блоків та вкажіть назву сайту.",
-    sectionTemplate: "1. Оберіть структуру блоків та шаблон",
-    sectionDetails: "2. Налаштування проєкту",
-    sectionDomain: "3. Домен, порт та SSL-сертифікат",
+    drawerSubtitle: "Оберіть фреймворк для розгортання в ізольованому середовищі.",
+    sectionTemplate: "1. Оберіть фреймворк та середовище",
+    sectionDomain: "2. Домен, порт та SSL-сертифікат",
     domainTitle: "Домен",
     domainDesc: "У цьому розділі ви можете налаштувати прив'язку домену",
     domainWarning: "Кожного разу при зміні доменів не забудьте перерозгорнути compose, щоб застосувати зміни.",
@@ -303,10 +352,10 @@ export function WebsiteBuilderDashboard() {
 
   // Create Modal State
   const [modalOpen, setModalOpen] = useState(false);
-  const [selectedTemplate, setSelectedTemplate] = useState<TemplateOption["id"]>("hosting");
-  const [name, setName] = useState(TEMPLATES[0]?.defaultName ?? "CloudScale Hosting");
-  const [description, setDescription] = useState(TEMPLATES[0]?.defaultDesc ?? "Modern cloud hosting company");
-  const [framework, setFramework] = useState("Next.js");
+  const [selectedFramework, setSelectedFramework] = useState<FrameworkStarterOption["id"]>("html-css");
+  const [name, setName] = useState(FRAMEWORK_STARTERS[0]?.defaultName ?? "Modern HTML/CSS Website");
+  const [description, setDescription] = useState(FRAMEWORK_STARTERS[0]?.defaultDesc ?? "Clean responsive website");
+  const [framework, setFramework] = useState<string>("HTML/CSS");
   const [type, setType] = useState<"website" | "landing_page" | "web_app" | "mobile_app">("website");
   const [domain, setDomain] = useState("");
   const [internalPath, setInternalPath] = useState("/");
@@ -319,8 +368,11 @@ export function WebsiteBuilderDashboard() {
 
   // Sync default container port with framework selection
   useEffect(() => {
-    if (framework.toLowerCase().includes("vite")) {
-      setContainerPort(80);
+    const fw = framework.toLowerCase();
+    if (fw.includes("vite")) {
+      setContainerPort(5173);
+    } else if (fw.includes("astro")) {
+      setContainerPort(4321);
     } else {
       setContainerPort(3000);
     }
@@ -380,13 +432,14 @@ export function WebsiteBuilderDashboard() {
     void loadWebsites();
   }, [companyId]);
 
-  // When template selection changes in drawer, update suggested values.
-  // Mobile app projects pick their own templates, so the page-count heuristic must not reset them.
-  const handleSelectTemplate = (tpl: TemplateOption) => {
-    setSelectedTemplate(tpl.id);
-    setName(tpl.defaultName);
-    setDescription(language === "uk" ? tpl.descUk : tpl.desc);
-    setType((current) => current === "mobile_app" ? current : tpl.pagesCount > 1 ? "website" : "landing_page");
+  // When framework selection changes in drawer, update suggested values.
+  const handleSelectFramework = (fw: FrameworkStarterOption) => {
+    setSelectedFramework(fw.id);
+    setFramework(fw.frameworkKey);
+    setContainerPort(fw.defaultPort);
+    setName(language === "uk" ? fw.defaultNameUk : fw.defaultName);
+    setDescription(language === "uk" ? fw.defaultDescUk : fw.defaultDesc);
+    setType((current) => current === "mobile_app" ? current : fw.defaultType);
   };
 
   const filteredWebsites = useMemo(() => {
@@ -402,8 +455,10 @@ export function WebsiteBuilderDashboard() {
 
       if (frameworkFilter !== "all") {
         const fw = (site.framework || "").toLowerCase();
+        if (frameworkFilter === "static" && !fw.includes("static") && !fw.includes("html")) return false;
         if (frameworkFilter === "nextjs" && !fw.includes("next")) return false;
         if (frameworkFilter === "vite" && !fw.includes("vite")) return false;
+        if (frameworkFilter === "astro" && !fw.includes("astro")) return false;
       }
       return true;
     });
@@ -454,14 +509,26 @@ export function WebsiteBuilderDashboard() {
 
       // Initialize project files. Mobile projects get the Expo template (D6) so the workspace
       // never mixes a Next.js/Vite scaffold into a React Native app.
-      const isVite = framework.toLowerCase().includes("vite");
+      const fwLower = framework.toLowerCase();
+      const isVite = fwLower.includes("vite");
+      const isStatic = fwLower.includes("html") || fwLower.includes("static");
+      const isAstro = fwLower.includes("astro");
       const isMobileApp = type === "mobile_app";
+
+      const targetFramework: "nextjs" | "vite" | "static" | "astro" = isStatic
+        ? "static"
+        : isVite
+        ? "vite"
+        : isAstro
+        ? "astro"
+        : "nextjs";
+
       const doc: WebsiteDocument = createDefaultWebsiteDocument(
         name.trim(),
-        isVite ? "vite" : "nextjs",
+        targetFramework,
         {
           purpose: description.trim(),
-          template: selectedTemplate,
+          template: "blank",
           domainConfig,
         }
       );
@@ -698,8 +765,10 @@ export function WebsiteBuilderDashboard() {
           }}
         >
           <option value="all">{t.filterAll}</option>
-          <option value="nextjs">Next.js 14</option>
-          <option value="vite">Vite + React</option>
+          <option value="static">HTML / CSS</option>
+          <option value="nextjs">Next.js</option>
+          <option value="vite">Vite</option>
+          <option value="astro">Astro</option>
         </select>
 
         <select
@@ -1032,7 +1101,7 @@ export function WebsiteBuilderDashboard() {
                 </p>
               )}
 
-              {/* Section 1: Template & Block Starter Selection */}
+              {/* Section 1: Framework Starter Selection */}
               <section>
                 <h3>{t.sectionTemplate}</h3>
                 <p style={{ margin: "0 0 14px 0", fontSize: "13px", color: "#64748b" }}>
@@ -1040,153 +1109,84 @@ export function WebsiteBuilderDashboard() {
                 </p>
 
                 <div
+                  className="provider-grid"
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: "12px",
+                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                    gap: "14px",
                   }}
                 >
-                  {TEMPLATES.map((tpl) => {
-                    const isSelected = selectedTemplate === tpl.id;
+                  {FRAMEWORK_STARTERS.map((fw) => {
+                    const isSelected = selectedFramework === fw.id;
                     return (
-                      <div
-                        key={tpl.id}
-                        onClick={() => handleSelectTemplate(tpl)}
+                      <article
+                        key={fw.id}
+                        className={`provider-card is-connected${isSelected ? " selected" : ""}`}
+                        onClick={() => handleSelectFramework(fw)}
                         style={{
-                          border: isSelected
-                            ? "2px solid var(--npati-red, #e11d2e)"
-                            : "1.5px solid #e2e8f0",
-                          background: isSelected ? "#fff5f5" : "#ffffff",
-                          borderRadius: "14px",
-                          padding: "14px 16px",
                           cursor: "pointer",
-                          transition: "all 0.16s ease",
-                          position: "relative",
-                          display: "flex",
-                          flexDirection: "column",
-                          justifyContent: "space-between",
+                          borderColor: isSelected ? "var(--npati-red, #e11d2e)" : "#f2b6bd",
+                          borderWidth: "1px",
+                          borderStyle: "solid",
+                          boxShadow: isSelected
+                            ? "0 4px 14px rgba(225, 29, 46, 0.12)"
+                            : undefined,
+                          background: isSelected ? "#fffbfb" : "#ffffff",
+                          outline: "none",
                         }}
                       >
-                        <div>
-                          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "6px" }}>
-                            <span
-                              style={{
-                                fontSize: "11px",
-                                fontWeight: 700,
-                                padding: "2px 7px",
-                                borderRadius: "6px",
-                                background: isSelected ? "var(--npati-red, #e11d2e)" : "#f1f5f9",
-                                color: isSelected ? "#ffffff" : "#475569",
-                              }}
-                            >
-                              {tpl.badge}
-                            </span>
-                          </div>
-
-                          <h4 style={{ margin: "0 0 4px 0", fontSize: "14px", fontWeight: 700, color: "#111111" }}>
-                            {language === "uk" ? tpl.titleUk : tpl.title}
-                          </h4>
-
-                          <p style={{ margin: "0 0 10px 0", fontSize: "12px", color: "#64748b", lineHeight: 1.4 }}>
-                            {language === "uk" ? tpl.descUk : tpl.desc}
-                          </p>
-                        </div>
-
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginTop: "auto" }}>
+                        <div className="provider-card-main" style={{ cursor: "pointer" }}>
                           <span
+                            className="provider-avatar"
+                            aria-hidden="true"
                             style={{
-                              fontSize: "11px",
-                              fontWeight: 600,
-                              color: isSelected ? "var(--npati-red, #e11d2e)" : "#0284c7",
+                              width: "38px",
+                              height: "38px",
+                              borderRadius: "11px",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexShrink: 0,
+                              background: fw.id === "html-css" ? "#fff5f2" : fw.id === "nextjs" ? "#000000" : fw.id === "vite" ? "#18181b" : "#0b0f19",
+                              border: "1px solid rgba(0, 0, 0, 0.08)",
+                              boxShadow: "0 2px 6px rgba(0, 0, 0, 0.06)",
                             }}
                           >
-                            ✓ {tpl.pagesCount} {t.pages} · {tpl.blocks.slice(0, 3).join(", ")}...
+                            <FrameworkIcon id={fw.id} />
+                          </span>
+                          <span className="provider-title">
+                            <strong>{fw.name}</strong>
+                            <small>{language === "uk" ? fw.runtimeLabelUk : fw.runtimeLabel}</small>
+                          </span>
+                          <span
+                            className={`connection-light ${isSelected ? "on" : ""}`}
+                            aria-label={isSelected ? "Selected" : "Available"}
+                            style={{ marginLeft: "auto", justifySelf: "end" }}
+                          />
+                        </div>
+                        <div className="provider-badges" style={{ margin: "12px 0 8px" }}>
+                          <span className="status-pill verified">
+                            ✓ {language === "uk" ? "Перевірено" : "Verified"}
                           </span>
                         </div>
-                      </div>
+                        <div className="capability-row" style={{ marginTop: 0, gap: 6 }}>
+                          {fw.tags.map((tag) => (
+                            <span key={tag}>{tag}</span>
+                          ))}
+                        </div>
+                      </article>
                     );
                   })}
                 </div>
               </section>
 
-              {/* Section 2: Project Details */}
-              <section>
-                <h3>{t.sectionDetails}</h3>
-
-                <label>
-                  <span>{t.nameLabel} *</span>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. CloudScale Hosting"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                  />
-                </label>
-
-                <label>
-                  <span>{t.descLabel}</span>
-                  <textarea
-                    rows={3}
-                    placeholder="Describe your website purpose, products, and target audience..."
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                  />
-                </label>
-
-                <div className="company-form-grid">
-                  <label>
-                    <span>{t.frameworkLabel}</span>
-                    <select
-                      value={framework}
-                      onChange={(e) => setFramework(e.target.value)}
-                    >
-                      <option value="Next.js">Next.js 14 App Router (Recommended)</option>
-                      <option value="Vite">Vite + React</option>
-                    </select>
-                  </label>
-
-                  <label>
-                    <span>{t.typeLabel}</span>
-                    <select
-                      value={type}
-                      onChange={(e) => setType(e.target.value as any)}
-                    >
-                      <option value="website">{t.typeWebsite}</option>
-                      <option value="landing_page">{t.typeLanding}</option>
-                      <option value="web_app">{t.typeWebApp}</option>
-                      <option value="mobile_app">{t.typeMobileApp}</option>
-                    </select>
-                  </label>
-                </div>
-              </section>
-
-              {/* Section 3: Domain, Port & SSL */}
+              {/* Section 2: Domain, Port & SSL */}
               <section>
                 <h3>{t.sectionDomain}</h3>
                 <p style={{ margin: "0 0 10px 0", fontSize: "13px", color: "#64748b" }}>
                   {t.domainDesc}
                 </p>
 
-                {/* Info / Notice Banner */}
-                <div
-                  style={{
-                    background: "#f0f9ff",
-                    border: "1px solid #bae6fd",
-                    borderRadius: "8px",
-                    padding: "10px 14px",
-                    fontSize: "12.5px",
-                    color: "#0369a1",
-                    lineHeight: 1.45,
-                    marginBottom: "16px",
-                    display: "flex",
-                    gap: "8px",
-                    alignItems: "flex-start",
-                  }}
-                >
-                  <span style={{ fontSize: "15px" }}>ℹ️</span>
-                  <div>{t.domainWarning}</div>
-                </div>
 
                 {/* 1. Domain */}
                 <label>
@@ -1342,7 +1342,7 @@ export function WebsiteBuilderDashboard() {
                 </div>
               </section>
 
-              <footer>
+              <footer style={{ justifyContent: "flex-end" }}>
                 <button
                   type="button"
                   className="button-secondary"
