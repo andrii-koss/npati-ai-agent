@@ -1176,7 +1176,14 @@ function LegacyChatRoute() {
 
 function WebsiteChatRoute() {
   const { companyId = "", projectId = "" } = useParams();
-  return <Navigate to={`/chat?company=${encodeURIComponent(companyId)}&project=${encodeURIComponent(projectId)}`} replace />;
+  const location = useLocation();
+  return (
+    <Navigate
+      to={`/chat?company=${encodeURIComponent(companyId)}&project=${encodeURIComponent(projectId)}`}
+      state={location.state}
+      replace
+    />
+  );
 }
 
 function CanonicalChatRoute() {
