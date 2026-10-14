@@ -90,7 +90,7 @@ export interface WebsiteDocument {
   version: "1.0";
   id: string;
   name: string;
-  framework: "nextjs" | "vite" | "static";
+  framework: "nextjs" | "vite" | "static" | "astro";
   theme: WebsiteTheme;
   pages: WebsitePage[];
   assets?: WebsiteAsset[];
