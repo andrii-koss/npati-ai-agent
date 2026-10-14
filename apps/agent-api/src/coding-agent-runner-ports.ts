@@ -107,6 +107,7 @@ export interface CodeRunToolRuntimePort {
     },
   ): Promise<CodeToolInvokeResult | CodeToolInvokeFailure>;
 
+  verificationRevision?(ctx: AuthContext, companyId: string, projectId: string, sessionId: string): Promise<string | null>;
   turnSummary?(sessionId: string, turnId: string): {
     files: number;
     linesAdded: number;

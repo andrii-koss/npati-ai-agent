@@ -54,6 +54,7 @@ import {
   VERIFICATION_REPAIR_EXHAUSTED,
   VERIFICATION_UNAVAILABLE,
   createVerificationLoop,
+  verificationChecks,
   formatRepairInstruction,
   type VerificationCheckReport,
   type VerificationLoop,
@@ -294,6 +295,8 @@ export class CodingAgentRunner {
     let selfReviewPasses = 0;
 
     let verifiedSignature: string | null = null;
+    let verifiedRevision: string | null = null;
+    const readVerificationRevision = () => this.ports.toolRuntime.verificationRevision?.(ctx,companyId,projectId,sessionId).catch(()=>null) ?? Promise.resolve(null);
 
     let selfReviewFixPending = false;
 
@@ -478,7 +481,7 @@ export class CodingAgentRunner {
           : { ...event, modelProfileFallbackReason };
         assertMetadataOnly(withProfileReason as unknown as Record<string, unknown>);
         if (!this.ports.activity) return;
-        await this.ports.activity.record({ ...withProfileReason, snapshotId: snapshotId || undefined });
+        await this.ports.activity.record({ ...withProfileReason, runId: stateRunId ?? withProfileReason.runId, snapshotId: snapshotId || undefined });
       } catch {
 
       }
@@ -563,40 +566,7 @@ export class CodingAgentRunner {
       scopeGuard = evaluated.scopeGuard;
     };
 
-    const toCheckReports = (outcome: CodeToolInvokeResult | CodeToolInvokeFailure): VerificationCheckReport[] => {
-      if (!outcome.ok) {
-        const code = String(outcome.error.code);
-
-        const state = code === "approval_required"
-          ? "approval_required"
-          : code === "tool_not_configured" || code === "feature_disabled"
-            ? "unavailable"
-            : "failed";
-        return verificationTools.map((tool) => ({
-          tool,
-          state,
-          code,
-          message: outcome.error.message,
-        }));
-      }
-      const payload = outcome.result as { checks?: unknown } | null | undefined;
-      const reported = Array.isArray(payload?.checks) ? payload.checks : [];
-      const mapped: VerificationCheckReport[] = [];
-      for (const entry of reported) {
-        if (!entry || typeof entry !== "object") continue;
-        const value = entry as Record<string, unknown>;
-        const tool = typeof value.tool === "string" ? value.tool : typeof value.name === "string" ? value.name : "unknown";
-        const passed = value.ok === true || value.passed === true || value.state === "passed" || value.status === "passed";
-        mapped.push({
-          tool,
-          state: passed ? "passed" : value.state === "unavailable" ? "unavailable" : "failed",
-          ...(typeof value.code === "string" ? { code: value.code } : {}),
-        });
-      }
-      if (mapped.length) return mapped;
-
-      return verificationTools.map((tool) => ({ tool, state: "passed" }));
-    };
+    const toCheckReports = (outcome: CodeToolInvokeResult | CodeToolInvokeFailure) => verificationChecks(outcome,verificationTools);
 
     const runVerification = (): Promise<void> => this.reviewPhases.verifyOnce({
       ctx,
@@ -791,7 +761,8 @@ export class CodingAgentRunner {
     };
 
     const verifyAndDecide = async (): Promise<"passed" | "repair" | "approval_required" | "unavailable" | "exhausted"> => {
-      await runVerification();
+      const revision = verifiedRevision ? await readVerificationRevision() : null;
+      if (!revision || revision !== verifiedRevision || verificationLoop.status() !== "passed" || verifiedSignature !== currentChangeSignature()) await runVerification();
 
       verifiedSignature = currentChangeSignature();
       writeVerificationSummary();
@@ -1311,9 +1282,11 @@ export class CodingAgentRunner {
         summary.remaining = "Time limit reached; the task may be unfinished.";
         return stop("stopped", "time_limit", `Stopped after ${this.limits.maxRunMinutes} minutes: the time limit was reached.`);
       }
+      let quotaRemaining: number | undefined;
       if (this.ports.quota) {
 
-        const verdict = this.ports.quota.checkQuota(input.quotaSessionId ?? sessionId, this.estimatedTokensPerCall, this.estimatedCostPerCallUsd, delegationDepth, { userId: ctx.userId, companyId });
+        const verdict = this.ports.quota.checkQuota(input.quotaSessionId ?? sessionId, 0, this.estimatedCostPerCallUsd, delegationDepth, { userId: ctx.userId, companyId });
+        quotaRemaining = verdict.remainingTokens;
         if (!verdict.allowed) {
           await release("budget_exhausted");
           summary.remaining = verdict.error ?? "Budget exhausted.";
@@ -1322,23 +1295,22 @@ export class CodingAgentRunner {
       }
 
       let result: ChatResult;
+      let modelStarted = this.now();
 
       lastBudget = resolveModelRequestPressure({
         systemPrompt,
         toolSchemas: JSON.stringify(definitions),
-        ...(projectInstructions ? { projectInstructions: projectInstructions.body } : {}),
-        ...(contextBlocks ? { contextBlocks } : {}),
-        messages: messages.map((message) => ({ role: message.role, content: chatContentText(message.content) })),
+        messages: messages.slice(1).map((message) => ({ role: message.role, content: chatContentText(message.content) + (message.tool_calls ? JSON.stringify(message.tool_calls) : "") })),
         contextWindow: profile.contextWindow,
-        compressionRatio: this.limits.contextCompressionRatio,
+        compressionRatio: Math.min(this.limits.contextCompressionRatio,(this.limits.modelInputTokens ?? 16_384)/profile.contextWindow),
       });
-      if (lastBudget.actionRequired) {
+      if (lastBudget.actionRequired || quotaRemaining !== undefined && lastBudget.currentTokens + this.estimatedTokensPerCall > quotaRemaining) {
         const compactable = messages.map((message) => {
           const carrier = message as unknown as { toolCallId?: string; name?: string; toolVersion?: number };
           return {
             role: message.role as string,
             content: chatContentText(message.content),
-            ...(carrier.toolCallId ? { toolCallId: carrier.toolCallId } : {}),
+            ...(message.tool_call_id ?? carrier.toolCallId ? { toolCallId: message.tool_call_id ?? carrier.toolCallId } : {}),
             ...(carrier.name ? { toolName: carrier.name } : {}),
             ...(carrier.toolVersion !== undefined ? { toolVersion: carrier.toolVersion } : {}),
           };
@@ -1363,15 +1335,14 @@ export class CodingAgentRunner {
             const values = await this.ports.secretLeaseValues({ sessionId, companyId, projectId });
             assertNoLeaseValuesInSummary(summaryText, values ?? []);
           }
-          const rebuilt: ChatMessage[] = compaction.messages.map((message) => ({
-            role: message.role as ChatMessage["role"],
-            content: message.content,
-          }));
-          if (rebuilt.length === messages.length) {
+          const rebuilt: ChatMessage[] = compaction.messages.map((message,index) => ({ ...messages[index]!, content: message.content }));
+          if (rebuilt.length === messages.length && compaction.stubbed > 0) {
             messages.length = 0;
             messages.push(...rebuilt);
 
-            messages.splice(2, 0, { role: "system", content: summaryText } as ChatMessage);
+            const summaryIndex=messages.findIndex(message=>message.role==="system" && typeof message.content==="string" && message.content.startsWith("Context summary of the earlier part of this session"));
+            if(summaryIndex>=0) messages[summaryIndex]={role:"system",content:summaryText};
+            else messages.splice(2,0,{role:"system",content:summaryText});
             compactionCount += 1;
             compressionArtifacts.push(compaction.artifact as unknown as Record<string, unknown>);
             await record({
@@ -1421,7 +1392,13 @@ export class CodingAgentRunner {
           });
         }
       }
+      if (this.ports.quota) {
+        const requestTokens = resolveModelRequestPressure({systemPrompt,toolSchemas:JSON.stringify(definitions),messages:messages.slice(1).map(message=>({role:message.role,content:chatContentText(message.content)+(message.tool_calls?JSON.stringify(message.tool_calls):"")})),contextWindow:profile.contextWindow,compressionRatio:this.limits.contextCompressionRatio}).currentTokens;
+        const verdict=this.ports.quota.checkQuota(input.quotaSessionId ?? sessionId,requestTokens+this.estimatedTokensPerCall,this.estimatedCostPerCallUsd,delegationDepth,{userId:ctx.userId,companyId});
+        if(!verdict.allowed) { await release("budget_exhausted"); summary.remaining=verdict.error ?? "Budget exhausted."; return stop("stopped","budget_exhausted",`Stopped: ${summary.remaining}`); }
+      }
       try {
+        modelStarted = this.now();
         result = await this.ports.engine.chat({
           messages,
           ...(definitions.length ? { tools: definitions } : {}),
@@ -1456,7 +1433,9 @@ export class CodingAgentRunner {
       summary.turns = steps;
       model = result.model ?? model;
       provider = result.telemetry?.provider ?? provider;
-      const tokens = result.usage?.totalTokens ?? 0;
+      const tokens = result.usage?.totalTokens ?? ((result.usage?.promptTokens ?? 0) + (result.usage?.completionTokens ?? 0));
+      const modelUsage = {id:`${stateRunId ?? input.runId}:model:${steps}`,turn:steps,totalTokens:result.usage ? tokens : undefined,inputTokens:result.usage?.promptTokens,outputTokens:result.usage?.completionTokens,costUsd:result.telemetry?.costUsd,model:result.model ?? input.model,provider:result.telemetry?.provider,toolCallIds:(result.toolCalls ?? []).map(call=>call.id),durationMs:this.now()-modelStarted};
+      await emitCodingActivity(input, {id:modelUsage.id,runId:stateRunId ?? input.runId,stage:"model_usage",title:"Model usage",at:new Date(modelStarted).toISOString(),status:"completed",modelUsage});
       summary.tokens += tokens;
       const costUsd = result.telemetry?.costUsd ?? 0;
       summary.costUsd += costUsd;
@@ -1731,7 +1710,7 @@ export class CodingAgentRunner {
             outcome: "unknown_outcome", startedAt: new Date(startedCall), finishedAt: null,
           }));
         }
-        const activityStart = { id: `${stateRunId ?? input.runId}:${call.id}`, runId: stateRunId ?? input.runId, sequence: steps * 1000 + callsToRun.indexOf(call) + 1, stage: "tool", title: call.name, tool: call.name, at: new Date(startedCall).toISOString(), command: typeof call.arguments.command === "string" ? call.arguments.command : undefined, file: typeof call.arguments.path === "string" ? call.arguments.path : undefined, cwd: typeof call.arguments.cwd === "string" ? call.arguments.cwd : undefined, agentId: input.agentId ?? "NPATI Coding Agent" };
+        const activityStart = { id: `${stateRunId ?? input.runId}:${call.id}`, runId: stateRunId ?? input.runId, sequence: steps * 1000 + callsToRun.indexOf(call) + 1, stage: "tool", modelUsage, title: call.name, tool: call.name, at: new Date(startedCall).toISOString(), command: typeof call.arguments.command === "string" ? call.arguments.command : undefined, file: typeof call.arguments.path === "string" ? call.arguments.path : undefined, cwd: typeof call.arguments.cwd === "string" ? call.arguments.cwd : undefined, agentId: input.agentId ?? "NPATI Coding Agent" };
         await publishActivity({ ...activityStart, status: "running" });
         const invokeInput = {
           leaseOwner: stateOwner,
@@ -1751,6 +1730,7 @@ export class CodingAgentRunner {
 
           ...capabilityScopeFields,
         };
+        const beforeVerification = call.name === "code.verify.run" ? await readVerificationRevision() : null;
         let result: CodeToolInvokeResult | CodeToolInvokeFailure;
         try {
 
@@ -1794,6 +1774,10 @@ export class CodingAgentRunner {
             ...(result.ok ? {} : { errorCode: result.error.code }),
             startedAt: new Date(startedCall), finishedAt: new Date(this.now()),
           }));
+        }
+        if(call.name === "code.verify.run" && result.ok && beforeVerification && beforeVerification === await readVerificationRevision()) {
+          const checks = toCheckReports(result);
+          if(checks.length && checks.every(check=>check.state==="passed")) { verificationLoop.record(checks); verifiedSignature=currentChangeSignature(); verifiedRevision=beforeVerification; }
         }
         await publishActivity({ ...activityStart, status: result.ok ? "completed" : result.error.code === "approval_required" ? "awaiting_approval" : input.signal?.aborted ? "cancelled" : "failed", durationMs: this.now() - startedCall, result: JSON.stringify(result.ok ? result.result : result.error), ...(result.ok ? { resultTruncated: result.truncated } : { error: result.error.message, errorCode: result.error.code }) });
         summary.toolCalls += 1;
@@ -1841,7 +1825,7 @@ export class CodingAgentRunner {
           ...(outcome.result.ok ? {} : { errorCode: outcome.result.error.code }),
           ...(outcome.result.ok ? { truncated: outcome.result.truncated === true } : {}),
         });
-        messages.push({ role: "tool", tool_call_id: outcome.call.id, content: text });
+        messages.push({ role: "tool", tool_call_id: outcome.call.id, name: outcome.call.name, content: text });
         if (outcome.result.ok && stateRunId && ["code.shell.exec_async", "code.shell.process.wait"].includes(outcome.call.name)) {
           const notice = await this.ports.completions?.admittedTool(ctx, session, outcome.result.result,
             { runId: stateRunId, owner: stateOwner, turnIndex: steps, text }, outcome.result.processReceipt);

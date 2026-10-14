@@ -177,3 +177,8 @@ it("does not offer an old or template Preview while coding or parallel work is s
   expect(html({...process,status:"completed"})).toContain('>Preview</span>');
   expect(html({...process,status:"completed",runStatuses:{current:"completed",child:"running"}})).not.toContain('>Preview</span>');
 });
+
+it("labels a searched directory as search rather than a modified file",()=>{
+ const html=renderToStaticMarkup(<AgentExecutionTrace isUk items={[{id:"grep",stage:"tool",tool:"code.fs.grep",title:"grep",file:"components",status:"waiting_for_approval",at:"",errorCode:"approval_required"}]}/>);
+ expect(html).not.toContain("Файл змінено");expect(html).toContain('data-status="waiting_for_approval"');
+});

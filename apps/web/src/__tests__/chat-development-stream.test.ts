@@ -19,3 +19,13 @@ describe("development trace transport", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 });
+
+it("delivers validated snapshots immediately instead of requiring a duplicate GET",async()=>{
+ const controller=new AbortController();const process={id:"p",companyId:"c",parentConversationId:"parent",name:"Site",framework:"Next.js",createdAt:"",updatedAt:"",hidden:false,status:"running"};
+ const change=vi.fn(()=>controller.abort());const body=new ReadableStream<Uint8Array>({start(c){c.enqueue(new TextEncoder().encode('event: change\ndata: '+JSON.stringify({processes:[process]})+'\n\n'));c.close();}});
+ vi.stubGlobal("fetch",vi.fn().mockResolvedValue(new Response(body)));await watchDevelopmentTrace(controller.signal,change);expect(change).toHaveBeenCalledWith([process]);
+});
+it("recovers invalid snapshots via a normal change hint",async()=>{
+ const controller=new AbortController();const change=vi.fn(()=>controller.abort());const body=new ReadableStream<Uint8Array>({start(c){c.enqueue(new TextEncoder().encode('event: change\ndata: {"processes":[{"name":{}}]}\n\n'));c.close();}});
+ vi.stubGlobal("fetch",vi.fn().mockResolvedValue(new Response(body)));await watchDevelopmentTrace(controller.signal,change);expect(change).toHaveBeenCalledWith(undefined);
+});

@@ -303,7 +303,7 @@ export function compactConversation(input: CompactionInput): CompactionResult {
   const compacted = messages.map((message, index) => {
     const elidable = index >= protectedCount && index < elidableEnd;
     if (!elidable) return message;
-    if (message.role !== "tool") return message;
+    if (message.role !== "tool" || message.content.startsWith(STUB_MARKER) || stubFor(message).length >= message.content.length) return message;
     stubbed += 1;
     return {
       ...message,

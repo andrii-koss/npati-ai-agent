@@ -23,7 +23,7 @@ export function registerChatDevelopmentRoutes(app: FastifyInstance, deps: Develo
       streams.add(close); reply.raw.on("close", close);
       const publish = (processes: Awaited<ReturnType<typeof service.list>>) => {
         const next = JSON.stringify(processes);
-        if (signature !== next) { signature = next; reply.raw.write("event: change\ndata: {}\n\n"); }
+        if (signature !== next) { signature = next; reply.raw.write("event: change\ndata: " + JSON.stringify({ processes }) + "\n\n"); }
         else reply.raw.write(": heartbeat\n\n");
       };
       const poll = async () => {

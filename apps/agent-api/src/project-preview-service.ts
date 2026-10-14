@@ -190,19 +190,20 @@ export class ProjectPreviewService {
     this.secret = secret || process.env.NPATI_PREVIEW_SECRET || randomBytes(32).toString("hex");
   }
 
-  async buildProject(ctx: AuthContext, companyId: string, projectId: string, onStage?: (stage: "dependencies" | "build", details?: { command: string; status: "running" | "completed" | "failed"; stdout?: string; stderr?: string; exitCode?: number; durationMs?: number }) => void): Promise<void> {
+  async buildProject(ctx: AuthContext, companyId: string, projectId: string, onStage?: (stage: "dependencies" | "build", details?: { command: string; status: "running" | "completed" | "failed"; stdout?: string; stderr?: string; exitCode?: number; durationMs?: number }) => void, options: { dependenciesOnly?: boolean } = {}): Promise<void> {
     if (!this.sandbox) throw new PreviewError("sandbox_unavailable", "Sandbox runner is not configured", 503);
     const files = await this.workspace.listFiles(ctx, companyId, projectId);
     const stack = await detectProjectStack(files, async (filePath) => (await this.workspace.readFile(ctx, companyId, projectId, filePath)).content);
     const paths = new Set(files.map((file) => file.path));
     if (!paths.has("package.json")) return;
     const manifest = JSON.parse((await this.workspace.readFile(ctx, companyId, projectId, "package.json")).content) as { scripts?: Record<string, string> };
-    if (!manifest.scripts?.build) return;
+    if (!options.dependenciesOnly && !manifest.scripts?.build) return;
     const install = stack.packageManager === "npm" && paths.has("package-lock.json") ? "npm ci"
       : stack.packageManager === "pnpm" && paths.has("pnpm-lock.yaml") ? "pnpm install --frozen-lockfile"
       : `${stack.packageManager} install`;
     try {
       for (const [stage, command] of [["dependencies", install], ["build", stack.packageManager + " run build"]] as const) {
+        if (options.dependenciesOnly && stage === "build") break;
         onStage?.(stage, { command, status: "running" });
         try {
           const result = await this.sandbox.execute(ctx, companyId, { projectId, command, agentId: "system", approved: true });

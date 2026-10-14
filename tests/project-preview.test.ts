@@ -163,6 +163,19 @@ async function fixture() {
 }
 
 describe("Step 4 — Project Preview & Changes", () => {
+  it("prepares dependencies without building or starting Preview before agent edits", async () => {
+    const { preview, sandbox, workspace, company, project } = await fixture();
+    await workspace.createFile(owner, company.id, project.id, "package.json", JSON.stringify({ scripts: { build: "next build" }, dependencies: { next: "15.0.0" } }));
+    const execute = vi.spyOn(sandbox, "execute").mockResolvedValue(commandResult());
+    const stages: string[] = [];
+    await preview.buildProject(owner, company.id, project.id, stage => stages.push(stage), { dependenciesOnly: true });
+    expect(execute.mock.calls.map(call => call[2].command)).toEqual(["npm install"]);
+    expect(stages).toEqual(["dependencies", "dependencies"]);
+    expect(preview.getSession(project.id)).toBeUndefined();
+    execute.mockClear();
+    await preview.buildProject(owner, company.id, project.id);
+    expect(execute.mock.calls.map(call => call[2].command)).toEqual(["npm install", "npm run build"]);
+  });
   it("waits for HTTP readiness before publishing the preview", async () => {
     const { preview, sandbox, workspace, company, project } = await fixture();
     await workspace.createFile(owner, company.id, project.id, "index.html", "Ready");

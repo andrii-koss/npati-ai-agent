@@ -2,6 +2,14 @@ import type { TranslationSchema } from "../types";
 
 export const es: TranslationSchema = {
   executionTrace: {
+"usage": "Tokens del modelo",
+"inputTokens": "Entrada",
+"outputTokens": "Salida",
+"totalTokens": "Total",
+"sharedTurn": "Compartido por {{count}} llamadas",
+"unavailableTokens": "No registrado",
+"operationStatus": "Resultado",
+"dryRun": "Simulación: cambios no aplicados",
     runningCommand: "Ejecutando {{command}}",
     operationsDone: "{{count}} operaciones realizadas",
     testsPassed: "Aprobados",

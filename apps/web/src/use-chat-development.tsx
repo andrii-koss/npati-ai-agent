@@ -24,12 +24,14 @@ export function useChatDevelopment(options: {
   const [submitting, setSubmitting] = useState(false);
   const callbacks = useRef(options); callbacks.current = options;
   const sending = useRef(false); const alive = useRef(true);
+  const snapshotGeneration = useRef(0);
   const refreshing = useRef<Promise<void> | undefined>(undefined);
   async function refresh() {
     if (refreshing.current) return refreshing.current;
+    const generation = snapshotGeneration.current;
     const task = async () => {
     const data = await api<{ processes: DevelopmentProcess[] }>("/chat/development/processes");
-    if (alive.current) setProcesses(data.processes);
+    if (alive.current && generation === snapshotGeneration.current) setProcesses(data.processes);
     };
     refreshing.current = task();
     try { await refreshing.current; } finally { refreshing.current = undefined; }
@@ -40,7 +42,10 @@ export function useChatDevelopment(options: {
     const poll = () => { void refresh().catch(() => {}); };
     poll();
     const controller = new AbortController();
-    void watchDevelopmentTrace(controller.signal, poll);
+    void watchDevelopmentTrace(controller.signal, snapshot => {
+      if (snapshot && !controller.signal.aborted) { snapshotGeneration.current++; setProcesses(snapshot); }
+      else poll();
+    });
     const intervalMs = anyActive ? 5000 : 10000;
     const timer = window.setInterval(poll, intervalMs);
     return () => { alive.current = false; controller.abort(); window.clearInterval(timer); };

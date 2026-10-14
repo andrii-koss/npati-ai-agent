@@ -293,17 +293,8 @@ export class ChatDevelopmentService {
           reports = reports.then(() => this.report(ctx, process.id, stage, stage === "dependencies" ? "Installing dependencies" : "Building project", {
             status: "running", agentId: "System", ...details, result: details?.stdout || details?.stderr ? [details.stdout, details.stderr].filter(Boolean).join("\n") : undefined,
           }));
-        }).finally(() => reports);
-        ensureActive();
-        await this.report(ctx, process.id, "preview", "Starting Live Preview", { status: "running", agentId: "System" });
-        const initialPreview = await this.d.preview.startPreview(ctx, process.companyId, project.id, { signal: controller.signal });
-        await this.report(ctx, process.id, "preview", "Live Preview started", { status: "completed", agentId: "System" });
-        await this.patch(ctx, process.id, { previewUrl: initialPreview.previewUrl });
-        await this.report(ctx, process.id, "template_ready", "Template build passed; Live Preview is running. AI implementation is next.", {
-          tool: "code.preview",
-          status: "completed",
-          agentId: "System",
-        });
+        }, { dependenciesOnly: true }).finally(() => reports);
+
       }
       ensureActive();
       await this.report(ctx, process.id, "agent", "Coding Agent is implementing the requested project", {
@@ -312,9 +303,9 @@ export class ChatDevelopmentService {
         agentId: "Coding Agent",
       });
       const outcome = await this.d.executor.execute({
-        ctx, session, runId: process.runId, maxTurns: 16,
+        ctx, session, runId: process.runId,
         onActivity: event => this.recordActivity(ctx, process.companyId, session!.id, process.conversationId, { ...event, language: process.responseLanguage }),
-        prompt: "User request: " + message + "\nYour assigned project is " + target.name + " (" + target.kind + "). Implement ONLY this project, not the other requested projects. The existing template has already been prepared by the system. Make a focused first implementation: read package.json and " + (target.kind === "mobile_app" ? "App.tsx" : target.framework === "HTML/CSS" ? "index.html" : "app/page.tsx") + ", edit the visible page and its styles immediately, then finish. Do not explore unrelated modules or delegate this initial page task. You have at most 16 turns, including repairs. Preserve the attached database/auth SDK. Do not re-scaffold or run create-next-app. Template dependencies are already installed by the system. Only when adding a new package, use the available code.deps.add tool. Do not start a dev server. Finish implementation; the system will verify the production build and start Live Preview." + chatLanguageInstruction(message, [], process.responseLanguage as import("./company-chat-i18n").CompanyChatLanguage) + codingChatResponseInstruction(),
+        prompt: "User request: " + message + "\nYour assigned project is " + target.name + " (" + target.kind + "). Implement ONLY this project, not the other requested projects. The existing template has already been prepared by the system. Make a focused first implementation: read package.json and " + (target.kind === "mobile_app" ? "App.tsx" : target.framework === "HTML/CSS" ? "index.html" : "app/page.tsx") + ", edit the visible page and its styles immediately, then finish. Do not explore unrelated modules or delegate this initial page task. Use the configured runtime budget, reserving time for verification and repairs. Batch independent file reads. Read only files needed for this request; do not survey the whole template. Preserve the attached database/auth SDK. Do not re-scaffold or run create-next-app. Template dependencies are already installed by the system. Only when adding a new package, use the available code.deps.add tool. Do not start a dev server. Finish implementation; the system will verify the production build and start Live Preview." + chatLanguageInstruction(message, [], process.responseLanguage as import("./company-chat-i18n").CompanyChatLanguage) + codingChatResponseInstruction(),
         cancelRequested: () => controller.signal.aborted,
         abort: () => this.d.background.abort(process.runId!, "Stopped by request"),
         sink: { signal: sink.signal, emitResult: result => sink!.emit("result", result), emitTerminal: (status, reason) => sink!.finish(status, reason) },

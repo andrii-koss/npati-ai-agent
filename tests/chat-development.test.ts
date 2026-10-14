@@ -43,7 +43,7 @@ async function fixture(maxConcurrentPerUser = 4) {
   const prepare = async (ctx: AuthContext, project: Awaited<ReturnType<ProjectService["get"]>>, framework: string) => projects.updatePreview(ctx, project.companyId, project.id, { framework });
   const previews = new Set<string>();
   const preview = {
-    buildProject: vi.fn(async (_ctx: AuthContext, _companyId: string, _projectId: string, onStage?: (stage: "dependencies" | "build") => void) => { onStage?.("dependencies"); onStage?.("build"); }),
+    buildProject: vi.fn(async (_ctx: AuthContext, _companyId: string, _projectId: string, onStage?: (stage: "dependencies" | "build") => void, options?: {dependenciesOnly?:boolean}) => { onStage?.("dependencies"); if(!options?.dependenciesOnly)onStage?.("build"); }),
     startPreview: vi.fn(async (ctx: AuthContext, companyId: string, projectId: string) => { previews.add(projectId); await projects.updatePreview(ctx, companyId, projectId, { lastBuildStatus: "ready", previewUrl: "https://preview.test/" + projectId }); return { status: "running", previewUrl: "https://preview.test/" + projectId }; }),
     getSession: (projectId: string) => previews.has(projectId) ? { status: "running" } : undefined,
   };
@@ -122,7 +122,7 @@ describe("chat development lifecycle with the real store, queue and executor", (
     await vi.waitFor(async () => expect((await f.service.list(owner)).map(p => p.status)).toEqual(["completed", "failed", "completed", "completed"]));
     const projects = await f.projects.list(owner, f.company.id);
     expect(projects.find(p => p.type === "mobile_app")?.framework).toBe("Expo");
-    expect(projects.filter(p => p.previewUrl)).toHaveLength(4); // Failed AI work retains the already-built template preview.
+    expect(projects.filter(p => p.previewUrl)).toHaveLength(3); // Only verified runs publish a preview.
     expect((await getLatestChatProjectCard(f.store, owner, live[0]!.conversationId!))?.sessionId).toBe(live[0]!.sessionId);
   });
   it("isolates stop and hide, preserves projects, and restores their chats after deletion", async () => {
@@ -253,13 +253,13 @@ describe("chat development lifecycle with the real store, queue and executor", (
     expect(await f.projects.list(owner, f.company.id)).toHaveLength(2);
     expect(f.controls.size).toBe(0);
   });
-  it("deploys the template before calling the model and keeps one honest project card on quota failure", async () => {
+  it("installs dependencies without building a placeholder, respects runtime limits and retains a failed chat", async () => {
     const f = await fixture(); const result = await f.start("Create an online store on Next.js");
     await vi.waitFor(() => expect(f.controls.size).toBe(1));
     const process = (await f.service.list(owner))[0]!;
-    expect(f.preview.buildProject).toHaveBeenCalledOnce(); expect(f.preview.startPreview).toHaveBeenCalledOnce();
-    expect(process.progress?.map(p => p.stage)).toEqual(expect.arrayContaining(["scaffold", "dependencies", "build", "preview", "template_ready", "agent"]));
-    const runner = f.controls.get(process.projectId!)!; expect(runner.input.maxTurns).toBe(16); expect(runner.input.prompt).not.toContain("code.deps.install"); expect(runner.input.prompt).toContain("code.deps.add");
+    expect(f.preview.buildProject).toHaveBeenCalledOnce(); expect(f.preview.buildProject.mock.calls[0]?.[4]).toEqual({dependenciesOnly:true}); expect(f.preview.startPreview).not.toHaveBeenCalled();
+    expect(process.progress?.map(p => p.stage)).toEqual(expect.arrayContaining(["scaffold", "dependencies", "agent"]));
+    const runner = f.controls.get(process.projectId!)!; expect(runner.input.maxTurns).toBeUndefined(); expect(process.progress?.some(p=>["build","preview","template_ready"].includes(p.stage))).toBe(false); expect(runner.input.prompt).not.toContain("code.deps.install"); expect(runner.input.prompt).toContain("code.deps.add");
     const child = await f.store.getNeutralConversation(owner, process.conversationId!); expect(child.messages).toHaveLength(1);
     expect((await getLatestChatProjectCard(f.store, owner, process.conversationId!))?.status).not.toBe("ready");
     runner.finish({ status: "stopped", reason: "budget_exhausted", message: "A2A_TOKEN_QUOTA_EXCEEDED", runId: runner.input.runId });

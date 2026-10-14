@@ -17,6 +17,13 @@ export function normalizeActivity(value: unknown): DevelopmentProcessProgressIte
       if (!file || typeof file.path !== "string") return [];
       return [{ path: sanitizeExecutionTrace(file.path), action: ["created", "modified", "deleted"].includes(String(file.action)) ? file.action as "created" | "modified" | "deleted" : undefined, diff: typeof file.diff === "string" ? sanitizeExecutionTrace(file.diff) : undefined, linesAdded: typeof file.linesAdded === "number" && Number.isFinite(file.linesAdded) ? file.linesAdded : undefined, linesRemoved: typeof file.linesRemoved === "number" && Number.isFinite(file.linesRemoved) ? file.linesRemoved : undefined }];
     });
+    if (raw.modelUsage && typeof raw.modelUsage.id==="string" && Number.isFinite(raw.modelUsage.turn)) {
+      const usage={id:raw.modelUsage.id,turn:raw.modelUsage.turn,toolCallIds:Array.isArray(raw.modelUsage.toolCallIds)?raw.modelUsage.toolCallIds.filter((id:unknown)=>typeof id==="string"):[]} as NonNullable<DevelopmentProcessProgressItem["modelUsage"]>;
+      for(const key of ["totalTokens","inputTokens","outputTokens","costUsd","durationMs"] as const)if(typeof raw.modelUsage[key]==="number" && Number.isFinite(raw.modelUsage[key]) && raw.modelUsage[key]>=0)usage[key]=raw.modelUsage[key];
+      for(const key of ["model","provider"] as const)if(typeof raw.modelUsage[key]==="string")usage[key]=sanitizeExecutionTrace(raw.modelUsage[key]);
+      item.modelUsage=usage;
+    }
+    if(typeof raw.dryRun==="boolean") item.dryRun=raw.dryRun;
     if (typeof raw.resultTruncated === "boolean") item.resultTruncated = raw.resultTruncated;
     const tests = raw.tests;
     if (tests && ["passed", "failed", "skipped", "total"].every(key => typeof tests[key] === "number" && Number.isFinite(tests[key]) && tests[key] >= 0)) item.tests = tests;
@@ -44,7 +51,7 @@ export function nearChatBottom(element: Pick<HTMLElement, "scrollHeight" | "scro
   return element.scrollHeight - element.scrollTop - element.clientHeight <= 96;
 }
 
-export type CodingActivityRun = { id: string; runId?: string; at: string; items: DevelopmentProcessProgressItem[]; status: string; language?: string; sequence?: number };
+export type CodingActivityRun = { id: string; runId?: string; at: string; items: DevelopmentProcessProgressItem[]; status: string; language?: string; sequence?: number; usage?: NonNullable<DevelopmentProcessProgressItem["modelUsage"]>[] };
 export function codingActivityRuns(value: unknown, process?: DevelopmentProcess): CodingActivityRun[] {
   const rows = normalizeActivity(value).filter(item => item.kind !== "assistant_message" && item.stage !== "template_ready");
   const groups = new Map<string, CodingActivityRun>();
@@ -84,7 +91,7 @@ export function codingActivityStages(value: unknown, process?: DevelopmentProces
   const activeStates = ["running","pending","waiting_for_approval"];
   const result: CodingActivityRun[] = [];
   for (const run of codingActivityRuns(normalized,process)) {
-    const operations = run.items.filter(item=>!["agent","completed"].includes(item.stage));
+    const operations = run.items.filter(item=>!["agent","completed","model_usage"].includes(item.stage));
     const lastAt = Math.max(Date.parse(run.at)||0,...operations.map(item=>Date.parse(item.at)||0));
     const boundaries = normalized.filter(item=>item.kind==="assistant_message" && (item.runId===run.runId || !item.runId && !run.runId));
     for (const message of messages) {
@@ -107,6 +114,7 @@ export function codingActivityStages(value: unknown, process?: DevelopmentProces
       if(!stage.items.length && !activeStates.includes(run.status))continue;
       if(index===ordered.length-1 && activeStates.includes(run.status))stage.status=run.status;
       else stage.status=stage.items.some(item=>["running","active"].includes(item.status??"")) && activeStates.includes(run.status) ? "running" : stage.items.some(item=>["awaiting_approval","waiting_for_approval"].includes(item.status??"")) && activeStates.includes(run.status) ? "waiting_for_approval" : stage.items.some(item=>item.status==="failed") ? "failed" : run.status==="cancelled" && stage.items.some(item=>item.status==="cancelled") ? "cancelled" : "completed";
+      stage.usage=[...new Map([...stage.items.map(item=>item.modelUsage),...run.items.filter(item=>item.stage==="model_usage" && item.modelUsage && (stage.items.some(action=>action.modelUsage?.id===item.modelUsage?.id) || index===ordered.length-1 && !item.modelUsage.toolCallIds.length)).map(item=>item.modelUsage)].filter((usage): usage is NonNullable<DevelopmentProcessProgressItem["modelUsage"]>=>Boolean(usage)).map(usage=>[usage.id,usage])).values()];
       result.push(stage);
     }
   }
