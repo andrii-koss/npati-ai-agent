@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activitySlots, codingActivityRuns, mergeConversationMessages, chatTimeline, normalizeActivity, nearChatBottom } from "../chat-timeline";
+import { activitySlots, codingActivityRuns, codingActivityStages, mergeConversationMessages, chatTimeline, normalizeActivity, nearChatBottom } from "../chat-timeline";
 import type { Message } from "../business-workspace-cards";
 const at = (n: number) => new Date(1000 * n).toISOString();
 const messages: Message[] = [ {id:"u1",role:"user",content:"Create site",createdAt:at(1)}, {id:"a1",role:"assistant",content:"Ready",createdAt:at(4)}, {id:"u2",role:"user",content:"Change button",createdAt:at(5)}, {id:"a2",role:"assistant",content:"Changed",createdAt:at(8)} ];
@@ -53,4 +53,23 @@ it.each(["en","uk","de","fr","es","it","pl","pt","nl","tr","ru","zh","ja","ko","
 it("keeps the running row anchored when the first tool arrives after a public assistant update",()=>{
  const process: import("@npati/shared").DevelopmentProcess={id:"p",companyId:"c",parentConversationId:"parent",name:"Site",framework:"Next.js",hidden:false,createdAt:at(1),updatedAt:at(6),runId:"r",initialRunId:"initial",status:"running",runStatuses:{r:"running"},runStartedAts:{r:at(2)}};
  const before=codingActivityRuns([],process)[0]!;const after=codingActivityRuns([{...event("call",3),runId:"r"}],process)[0]!;expect(after.id).toBe(before.id);expect(after.at).toBe(before.at);
+});
+
+it("splits actual actions across public commentary phases and moves activity to the current phase",()=>{
+ const process:import("@npati/shared").DevelopmentProcess={id:"p",companyId:"c",parentConversationId:"parent",name:"Site",framework:"Next.js",hidden:false,createdAt:at(0),updatedAt:at(12),runId:"r",initialRunId:"r",status:"running",runStatuses:{r:"running",empty:"completed"}};
+ const operations=[1,3,4,6,7,9,11].map((time,index)=>({...event("tool-"+index,time),runId:"r",status:index===6?"running":"completed",command:index===6?"npm run build":undefined}));
+ const comments=[2,5,8,10].map((time,index)=>({...event("comment-"+index,time),runId:"r",kind:"assistant_message" as const,stage:"planning",title:"Actual progress "+index,status:"completed"}));
+ const rows=[...operations,...comments]; const stages=codingActivityStages(rows,process);
+ expect(stages.map(stage=>stage.items.length)).toEqual([1,2,2,1,1]);expect(stages.map(stage=>stage.status)).toEqual(["completed","completed","completed","completed","running"]);
+ expect(stages.flatMap(stage=>stage.items.map(item=>item.id)).sort()).toEqual(operations.map(item=>item.id).sort());
+ const timeline=chatTimeline([],rows,"chat",process);expect(timeline.filter(entry=>entry.kind==="activity").map(entry=>entry.kind==="activity"&&entry.run?entry.run.items.length:entry.kind==="activity"?entry.item.title:"" )).toEqual([1,"Actual progress 0",2,"Actual progress 1",2,"Actual progress 2",1,"Actual progress 3",1]);
+ const settled={...process,status:"completed" as const,runStatuses:{r:"completed",empty:"completed"}};
+ expect(codingActivityStages(rows.map(item=>({...item,status:"completed"})),settled).map(stage=>stage.items.length)).toEqual([1,2,2,1,1]);
+ expect(codingActivityStages([],settled)).toEqual([]);
+ expect(codingActivityStages(JSON.parse(JSON.stringify(rows)),process).map(stage=>stage.id)).toEqual(stages.map(stage=>stage.id));
+});
+it("orders commentary before its phase when the events share a timestamp",()=>{
+ const process:import("@npati/shared").DevelopmentProcess={id:"p",companyId:"c",parentConversationId:"parent",name:"Site",framework:"Next.js",hidden:false,createdAt:at(1),updatedAt:at(2),runId:"r",initialRunId:"r",status:"running"};
+ const rows=[{...event("comment",2),runId:"r",kind:"assistant_message" as const,sequence:1000,title:"Reading next"},{...event("read",2),runId:"r",sequence:1001}];
+ const entries=chatTimeline([],rows,"chat",process);expect(entries.map(entry=>entry.kind==="activity"?entry.run?"phase":"comment":"message")).toEqual(["comment","phase"]);
 });

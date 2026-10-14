@@ -83,3 +83,59 @@ describe("existing runtime execution trace projection", () => {
     expect(output).not.toContain('"p"'); expect(output).not.toContain("sensitive-value"); expect(output).not.toContain("alice:pass"); expect(output).not.toContain("hello.secret.value"); expect(output).not.toContain("sk-proj-");
   });
 });
+
+it("retains real verification output when Activity contains only metadata", async () => {
+  const f = fixture("completed"); f.mocks.listCodeRunTurns.mockResolvedValue([]); f.mocks.listReplayBundleSteps.mockResolvedValue([]);
+  f.mocks.listCodeActivityEvents.mockResolvedValue([{id:"v",createdAt:new Date("2026-10-13T10:00:04Z"),payload:{tool:"code.verify.run",toolCallId:"verify",ok:true}}]);
+  const saved = {...process,progress:[{id:"run:verify",runId:"run",stage:"build",title:"verify",at:"2026-10-13T10:00:01Z",status:"completed" as const,durationMs:3000,result:JSON.stringify({results:[{tool:"build",ok:true,raw:"Actual Next.js build output"}],stats:{failed:0}})}]};
+  const first = await developmentTrace(f.store,ctx,saved);
+  expect(first.find(e=>e.id==="run:verify")).toMatchObject({stdout:"Actual Next.js build output",durationMs:3000});
+  expect(await developmentTrace(f.store,ctx,JSON.parse(JSON.stringify(saved)))).toEqual(first);
+});
+it("restores real file editing inputs and diffs from replay",async()=>{
+  const f=fixture("completed");f.mocks.listCodeRunTurns.mockResolvedValue([{toolCalls:[{...f.calls[0],tool:"code.fs.edit"}]}]);
+  f.mocks.listReplayBundleSteps.mockResolvedValue([{kind:"model_step",payload:{response:{toolCalls:[{id:"read-1",arguments:JSON.stringify({path:"app/page.tsx",oldText:"Old",newText:"New",token:"secret123"})}]}}},{kind:"tool_call",toolCallId:"read-1",payload:{settledResult:JSON.stringify({ok:true,result:{path:"app/page.tsx",diff:"-Old\n+New",linesAdded:1,linesRemoved:1}})}}]);
+  const rows=await developmentTrace(f.store,ctx,process);const row=rows.find(e=>e.id==="run:read-1")!;
+  expect(row).toMatchObject({file:"app/page.tsx",diff:"-Old\n+New"});expect(row.arguments).toContain('"newText": "New"');expect(row.arguments).not.toContain("secret123");
+});
+it("associates untagged verification terminal commands by recorded output and interval only",async()=>{
+  const f=fixture("completed");f.mocks.listCodeRunTurns.mockResolvedValue([]);f.mocks.listCodeActivityEvents.mockResolvedValue([]);
+  const output="Actual Next.js build output with verified production routes";
+  const saved={...process,progress:[{id:"agent",stage:"agent",title:"work",at:"2026-10-13T10:00:00Z"},{id:"run:verify",runId:"run",stage:"build",tool:"code.verify.run",title:"verify",status:"completed" as const,at:"2026-10-13T10:00:01Z",durationMs:3000,result:JSON.stringify({results:[{raw:output}]})}]};
+  const log={id:"log",commandSummary:"npm run build",output,createdAt:"2026-10-13T10:00:04Z",durationMs:3000,exitCode:0,status:"completed"};
+  const terminal={list:vi.fn().mockResolvedValue([log,{...log,id:"foreign",output:"A different parallel operation with unrelated output"},{...log,id:"later",createdAt:"2026-10-13T10:01:04Z"}])} as unknown as import("../apps/agent-api/src/project-terminal-events").ProjectTerminalEventsRepository;
+  const rows=await developmentTrace(f.store,ctx,saved,terminal);
+  expect(rows.find(e=>e.id==="terminal:log")).toMatchObject({command:"npm run build",result:output,runId:"run",exitCode:0});
+  expect(rows.some(e=>e.id==="terminal:foreign"||e.id==="terminal:later")).toBe(false);
+});
+
+it("keeps readable file content when write-ahead calls have no replay bundle",async()=>{
+  const f=fixture("completed");f.mocks.listReplayBundleSteps.mockResolvedValue([]);
+  const saved={...process,progress:[{id:"run:read-1",runId:"run",tool:"code.fs.read",stage:"tool",title:"read",at:"2026-10-13T10:00:01Z",status:"completed" as const,result:JSON.stringify({content:"export default function Page() { return null; }",encoding:"utf8"})}]};
+  const rows=await developmentTrace(f.store,ctx,saved);expect(rows.find(e=>e.id==="run:read-1")).toMatchObject({fileContent:"export default function Page() { return null; }"});
+});
+
+it("keeps the actual review report instead of a synthetic skipped replay placeholder and deduplicates its metadata",async()=>{
+  const f=fixture("completed");f.mocks.listCodeRunTurns.mockResolvedValue([{toolCalls:[{...f.calls[0],toolCallId:"verify",tool:"code.verify.run",finishedAt:new Date("2026-10-13T10:00:04Z")}]}]);
+  f.mocks.listReplayBundleSteps.mockResolvedValue([{kind:"tool_call",toolCallId:"verify",payload:{settledResult:"skipped"}}]);
+  f.mocks.listCodeActivityEvents.mockResolvedValue([{id:"metadata-only",createdAt:new Date("2026-10-13T10:00:04Z"),payload:{tool:"code.verify.run",ok:true,durationMs:3000}}]);
+  const saved={...process,progress:[{id:"run:verify",runId:"run",stage:"build",title:"verify",at:"2026-10-13T10:00:01Z",status:"completed" as const,durationMs:3000,result:JSON.stringify({results:[{raw:"Compiled successfully"}]})}]};
+  const rows=await developmentTrace(f.store,ctx,saved);expect(rows).toHaveLength(1);expect(rows[0]).toMatchObject({stdout:"Compiled successfully",durationMs:3000});expect(rows[0]!.result).not.toBe("skipped");
+});
+
+it("prefers the durable public report to metadata placeholder results when there are no turn records",async()=>{
+  const f=fixture("completed");f.mocks.listCodeRunTurns.mockResolvedValue([]);f.mocks.listReplayBundleSteps.mockResolvedValue([]);
+  f.mocks.listCodeActivityEvents.mockResolvedValue([{id:"canonical",createdAt:new Date("2026-10-13T10:00:04Z"),payload:{tool:"code.verify.run",toolCallId:"verify",ok:true,result:"skipped",durationMs:3000}},{id:"duplicate",createdAt:new Date("2026-10-13T10:00:04Z"),payload:{tool:"code.verify.run",ok:true,durationMs:3000}}]);
+  const saved={...process,progress:[{id:"run:verify",runId:"run",tool:"code.verify.run",stage:"build",title:"verify",at:"2026-10-13T10:00:01Z",status:"completed" as const,durationMs:3000,result:JSON.stringify({results:[{raw:"Compiled successfully"}]})}]};
+  const rows=await developmentTrace(f.store,ctx,saved);expect(rows).toHaveLength(1);expect(rows[0]).toMatchObject({stdout:"Compiled successfully"});
+});
+
+it("unwraps canonical tool result envelopes into actual logs and file content",()=>{
+  expect(executionResultDetails(JSON.stringify({kind:"tool_result",tool:"code.verify.run",data:{results:[{raw:"Production build output"}],stats:{failed:0}}}))).toMatchObject({stdout:"Production build output"});
+  expect(executionResultDetails({data:{content:"const title = 'Site';",encoding:"utf8"}})).toMatchObject({fileContent:"const title = 'Site';"});
+});
+
+it("renders recorded numbered read lines as readable source code and excludes binary content",()=>{
+  expect(executionResultDetails({data:{path:"app/page.tsx",lines:[{n:1,text:"export default function Page() {"},{n:2,text:"  return null;"},{n:3,text:"}"}],encoding:"utf8"}})).toMatchObject({fileContent:"export default function Page() {\n  return null;\n}"});
+  expect(executionResultDetails({data:{binary:true,content:"raw",lines:[{n:1,text:"raw"}]}}).fileContent).toBeUndefined();
+});

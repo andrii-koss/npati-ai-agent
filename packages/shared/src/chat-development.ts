@@ -20,6 +20,8 @@ export type DevelopmentProcessProgressItem = {
   status?: "pending" | "awaiting_approval" | "active" | "running" | "completed" | "failed" | "cancelled" | "waiting_for_approval";
   tool?: string;
   command?: string;
+  arguments?: string;
+  fileContent?: string;
   file?: string;
   cwd?: string;
   result?: string;

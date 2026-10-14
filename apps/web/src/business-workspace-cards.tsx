@@ -1,3 +1,4 @@
+import { Monitor } from "lucide-react";
 import { getStoredAuthToken } from "./AuthContext";
 import { useTranslation } from "./i18n";
 import type { ProjectCardData } from "@npati/shared";
@@ -256,7 +257,7 @@ export function BusinessForm({ initial, mode, onCancel, onSaved }: { initial?: B
     </form>
   );
 }
-export function ProjectChatCard({ card, onActivate, previewOnly = false }: { card: ProjectCardData; onActivate?: (card: ProjectCardData) => void; previewOnly?: boolean }) {
+export function ProjectChatCard({ card, onActivate, previewOnly = false, showPreviewTrigger = true }: { card: ProjectCardData; onActivate?: (card: ProjectCardData) => void; previewOnly?: boolean; showPreviewTrigger?: boolean }) {
   const navigate = useNavigate();
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState(card.previewUrl ?? "");
@@ -373,7 +374,7 @@ export function ProjectChatCard({ card, onActivate, previewOnly = false }: { car
 
   return (
     <div className="project-chat-card-container">
-      {previewOnly ? <button type="button" className="button-primary" onClick={() => void openPreview()}>Preview</button> : <div className="project-chat-card">
+      {previewOnly ? (showPreviewTrigger ? <button type="button" className="button-primary coding-preview-trigger" onClick={() => void openPreview()}><Monitor size={16} aria-hidden="true" />{card.framework && <span className="coding-preview-framework">{card.framework}</span>}<span>Preview</span></button> : null) : <div className="project-chat-card">
         <div className="project-chat-card-top">
           <div className="project-chat-card-info">
             <span className="project-chat-card-icon">{isCodeProject ? "⌨️" : "🌐"}</span>

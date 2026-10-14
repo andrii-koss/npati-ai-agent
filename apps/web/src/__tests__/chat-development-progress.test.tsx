@@ -47,7 +47,7 @@ describe("project deployment chat", () => {
     const completed = { ...process, status: "completed" as const, previewUrl: "/preview/project", progress: [{ ...process.progress![0]!, status: "completed" as const }] };
     const html = renderToStaticMarkup(<MemoryRouter><ChatDevelopmentProgress process={completed} /><ChatDevelopmentPreview process={completed} /></MemoryRouter>);
     expect(html.indexOf("chat-development-preview")).toBeGreaterThan(html.indexOf("codex-trace-row"));
-    expect(html.match(/>Preview<\/button>/g)).toHaveLength(1);expect(html).not.toContain("Code ");expect(html).not.toContain("Edit in chat");expect(html).not.toContain("Live Preview Active");
+    expect(html.match(/>Preview<\/span>/g)).toHaveLength(1);expect(html).not.toContain("Code ");expect(html).not.toContain("Edit in chat");expect(html).not.toContain("Live Preview Active");
     expect(hideDevelopmentMessage([{ content: process.name, projectCard: card }], 0, [completed])).toBe(true);
     expect(hideDevelopmentMessage([{ content: "I changed the button", projectCard: card }], 0, [completed])).toBe(false);
     expect(developmentCard([{ content: "I changed the button", projectCard: card }], 0, [completed], "child")).toBeNull();
@@ -168,4 +168,12 @@ describe("project deployment chat", () => {
     const markup = renderToStaticMarkup(<AgentExecutionTrace items={[itemWithSecret]} />);
     expect(markup).not.toContain("sk-abcdef1234567890abcdef1234567890");
   });
+});
+
+it("does not offer an old or template Preview while coding or parallel work is still active",()=>{
+  const process:DevelopmentProcess={id:"p",companyId:"c",projectId:"project",parentConversationId:"parent",name:"Site",framework:"Next.js",status:"running",hidden:false,createdAt:"",updatedAt:"",previewUrl:"/existing-preview",runId:"current",initialRunId:"current"};
+  const html=(p:DevelopmentProcess)=>renderToStaticMarkup(<MemoryRouter><ChatDevelopmentPreview process={p}/></MemoryRouter>);
+  for(const status of ["preparing","running","stopping","awaiting_approval","failed","cancelled"] as const)expect(html({...process,status})).not.toContain('>Preview</span>');
+  expect(html({...process,status:"completed"})).toContain('>Preview</span>');
+  expect(html({...process,status:"completed",runStatuses:{current:"completed",child:"running"}})).not.toContain('>Preview</span>');
 });

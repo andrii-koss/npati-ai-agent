@@ -62,7 +62,7 @@ describe("durable coding activity", () => {
   it("adds the original request language to the coding prompt rather than the English orchestration wrapper", async () => {
     const f=await fixture();await f.start("\u0421\u0442\u0432\u043e\u0440\u0438 \u0442\u0435\u0441\u0442\u043e\u0432\u0438\u0439 \u0441\u0430\u0439\u0442 \u043d\u0430 Next.js, \u0437\u0430\u043f\u0443\u0441\u0442\u0438 build \u0456 Live Preview");
     await vi.waitFor(()=>expect(f.controls.size).toBe(1));
-    const process=(await f.service.list(owner))[0]!;expect(process.responseLanguage).toBe("uk");expect(f.controls.get(process.projectId!)!.input.prompt).toContain("Reply entirely in Ukrainian");
+    const process=(await f.service.list(owner))[0]!;expect(process.responseLanguage).toBe("uk");expect(f.controls.get(process.projectId!)!.input.prompt).toContain("Reply entirely in Ukrainian");expect(f.controls.get(process.projectId!)!.input.prompt).toContain("2-4 concise sentences");
   });
   it("projects accepted queue messages and real replies from existing inbox and replay after refresh",async()=>{
     const f=await fixture();await f.start("Create a Next.js website");await vi.waitFor(()=>expect(f.controls.size).toBe(1));const process=(await f.service.list(owner))[0]!;
