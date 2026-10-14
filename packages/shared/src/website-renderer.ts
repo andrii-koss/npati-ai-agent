@@ -750,7 +750,7 @@ export class AstroAdapter implements WebsiteRendererAdapter {
           preview: "astro preview --host 0.0.0.0",
         },
         dependencies: {
-          astro: "^4.15.0",
+          astro: "5.7.13",
         },
       },
       null,

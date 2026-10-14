@@ -733,51 +733,44 @@ export function WebsiteBuilderDashboard() {
           boxShadow: "0 1px 3px rgba(0,0,0,0.03)",
         }}
       >
-        <div style={{ flex: "1 1 260px", position: "relative" }}>
+        <div className="inspector-search-box" style={{ flex: "1 1 260px" }}>
+          <span className="search-icon" aria-hidden="true">⌕</span>
           <input
-            type="search"
+            type="text"
+            role="searchbox"
             placeholder={t.searchPlaceholder}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            style={{
-              width: "100%",
-              padding: "9px 12px 9px 36px",
-              background: "#f8fafc",
-              border: "1px solid #e2e8f0",
-              borderRadius: "10px",
-              color: "#111111",
-              fontSize: "14px",
-              boxSizing: "border-box",
-            }}
+            className="inspector-search-input"
+            aria-label={t.searchPlaceholder}
           />
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="#94a3b8"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}
-          >
-            <circle cx="11" cy="11" r="8" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
+          {searchQuery && (
+            <button
+              type="button"
+              className="search-clear-btn"
+              onClick={() => setSearchQuery("")}
+              aria-label="Clear search"
+              title="Clear search"
+            >
+              ×
+            </button>
+          )}
         </div>
 
         <select
           value={frameworkFilter}
           onChange={(e) => setFrameworkFilter(e.target.value)}
           style={{
-            padding: "9px 14px",
-            background: "#ffffff",
-            border: "1px solid #e2e8f0",
-            borderRadius: "10px",
+            height: "44px",
+            padding: "0 14px",
+            background: "var(--npati-gray-50)",
+            border: "1px solid var(--npati-gray-100)",
+            borderRadius: "12px",
             color: "#111111",
             fontSize: "13.5px",
             fontWeight: 500,
             cursor: "pointer",
+            outline: "none",
           }}
         >
           <option value="all">{t.filterAll}</option>
@@ -791,14 +784,16 @@ export function WebsiteBuilderDashboard() {
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value as any)}
           style={{
-            padding: "9px 14px",
-            background: "#ffffff",
-            border: "1px solid #e2e8f0",
-            borderRadius: "10px",
+            height: "44px",
+            padding: "0 14px",
+            background: "var(--npati-gray-50)",
+            border: "1px solid var(--npati-gray-100)",
+            borderRadius: "12px",
             color: "#111111",
             fontSize: "13.5px",
             fontWeight: 500,
             cursor: "pointer",
+            outline: "none",
           }}
         >
           <option value="active">{t.statusActive}</option>
@@ -814,11 +809,7 @@ export function WebsiteBuilderDashboard() {
       )}
 
       {/* Grid of Website Projects */}
-      {loading ? (
-        <div style={{ textAlign: "center", padding: "4rem", color: "#64748b" }}>
-          <p>Loading website projects...</p>
-        </div>
-      ) : filteredWebsites.length === 0 ? (
+      {loading ? null : filteredWebsites.length === 0 ? (
         <div
           className="company-run-card"
           style={{
