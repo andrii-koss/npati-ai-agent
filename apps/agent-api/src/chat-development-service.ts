@@ -1,4 +1,4 @@
-import { resolveCodingConversationLanguage, chatLanguageInstruction, codingStartCopy } from "./company-chat-i18n";
+import { resolveCodingConversationLanguage, codingChatResponseInstruction, chatLanguageInstruction, codingStartCopy } from "./company-chat-i18n";
 import { randomUUID } from "node:crypto";
 import { DEVELOPMENT_PROCESS_SETTINGS_KEY, sanitizeExecutionTrace, developmentIsActive, planChatDevelopment, type DevelopmentProcess, type DevelopmentTarget } from "@npati/shared";
 import { WorkspaceNotFoundError, WorkspaceAccessError, type AuthContext, type Project, type WorkspaceStore } from "@npati/workspace";
@@ -89,7 +89,7 @@ export class ChatDevelopmentService {
       const traceProcess = latestRun ? { ...stored, runId: latestRun.runId } : stored;
       const progress = await developmentTrace(this.d.store, ctx, traceProcess, this.d.terminalEvents);
       const history = await Promise.all([...traceRuns.roots, ...traceRuns.children].filter(run => run.runId !== traceProcess.runId).map(run =>
-        developmentTrace(this.d.store, ctx, { ...stored, progress: [], runId: run.runId, sessionId: run.sessionId })));
+        developmentTrace(this.d.store, ctx, { ...stored, progress: (stored.progress ?? []).filter(event => event.runId === run.runId), runId: run.runId, sessionId: run.sessionId }, this.d.terminalEvents)));
       const conversationMessages: NonNullable<DevelopmentProcess["conversationMessages"]> = [];
       const queueLanguages = new Map<string,string>();
       const chatHistory = stored.conversationId ? (await this.d.store.getNeutralConversation(ctx,stored.conversationId).catch(()=>({messages:[]}))).messages : [];
@@ -314,7 +314,7 @@ export class ChatDevelopmentService {
       const outcome = await this.d.executor.execute({
         ctx, session, runId: process.runId, maxTurns: 16,
         onActivity: event => this.recordActivity(ctx, process.companyId, session!.id, process.conversationId, { ...event, language: process.responseLanguage }),
-        prompt: "User request: " + message + "\nYour assigned project is " + target.name + " (" + target.kind + "). Implement ONLY this project, not the other requested projects. The existing template has already been prepared by the system. Make a focused first implementation: read package.json and " + (target.kind === "mobile_app" ? "App.tsx" : target.framework === "HTML/CSS" ? "index.html" : "app/page.tsx") + ", edit the visible page and its styles immediately, then finish. Do not explore unrelated modules or delegate this initial page task. You have at most 16 turns, including repairs. Preserve the attached database/auth SDK. Do not re-scaffold or run create-next-app. Template dependencies are already installed by the system. Only when adding a new package, use the available code.deps.add tool. Do not start a dev server. Finish implementation; the system will verify the production build and start Live Preview." + chatLanguageInstruction(message, [], process.responseLanguage as import("./company-chat-i18n").CompanyChatLanguage),
+        prompt: "User request: " + message + "\nYour assigned project is " + target.name + " (" + target.kind + "). Implement ONLY this project, not the other requested projects. The existing template has already been prepared by the system. Make a focused first implementation: read package.json and " + (target.kind === "mobile_app" ? "App.tsx" : target.framework === "HTML/CSS" ? "index.html" : "app/page.tsx") + ", edit the visible page and its styles immediately, then finish. Do not explore unrelated modules or delegate this initial page task. You have at most 16 turns, including repairs. Preserve the attached database/auth SDK. Do not re-scaffold or run create-next-app. Template dependencies are already installed by the system. Only when adding a new package, use the available code.deps.add tool. Do not start a dev server. Finish implementation; the system will verify the production build and start Live Preview." + chatLanguageInstruction(message, [], process.responseLanguage as import("./company-chat-i18n").CompanyChatLanguage) + codingChatResponseInstruction(),
         cancelRequested: () => controller.signal.aborted,
         abort: () => this.d.background.abort(process.runId!, "Stopped by request"),
         sink: { signal: sink.signal, emitResult: result => sink!.emit("result", result), emitTerminal: (status, reason) => sink!.finish(status, reason) },

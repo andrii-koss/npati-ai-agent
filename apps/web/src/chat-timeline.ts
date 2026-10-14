@@ -8,7 +8,7 @@ export function normalizeActivity(value: unknown): DevelopmentProcessProgressIte
   for (const raw of value) {
     if (!raw || typeof raw !== "object" || typeof raw.id !== "string" || !raw.id || typeof raw.stage !== "string" || typeof raw.title !== "string" || typeof raw.at !== "string") continue;
     const item: DevelopmentProcessProgressItem = { id: raw.id, stage: raw.stage, title: sanitizeExecutionTrace(raw.title), at: raw.at };
-    for (const field of ["tool", "command", "file", "cwd", "result", "stdout", "stderr", "error", "errorCode", "agentId", "runId", "conversationId", "diff", "language"] as const) if (typeof raw[field] === "string") item[field] = sanitizeExecutionTrace(raw[field]);
+    for (const field of ["tool", "command", "arguments", "fileContent", "file", "cwd", "result", "stdout", "stderr", "error", "errorCode", "agentId", "runId", "conversationId", "diff", "language"] as const) if (typeof raw[field] === "string") item[field] = sanitizeExecutionTrace(raw[field]);
     for (const field of ["durationMs", "sequence", "exitCode", "linesAdded", "linesRemoved"] as const) if (typeof raw[field] === "number" && Number.isFinite(raw[field])) item[field] = raw[field];
     if (["pending", "active", "running", "completed", "failed", "cancelled", "waiting_for_approval", "awaiting_approval"].includes(raw.status)) item.status = raw.status;
     if (["created", "modified", "deleted"].includes(raw.fileChange)) item.fileChange = raw.fileChange;
@@ -44,7 +44,7 @@ export function nearChatBottom(element: Pick<HTMLElement, "scrollHeight" | "scro
   return element.scrollHeight - element.scrollTop - element.clientHeight <= 96;
 }
 
-export type CodingActivityRun = { id: string; runId?: string; at: string; items: DevelopmentProcessProgressItem[]; status: string; language?: string };
+export type CodingActivityRun = { id: string; runId?: string; at: string; items: DevelopmentProcessProgressItem[]; status: string; language?: string; sequence?: number };
 export function codingActivityRuns(value: unknown, process?: DevelopmentProcess): CodingActivityRun[] {
   const rows = normalizeActivity(value).filter(item => item.kind !== "assistant_message" && item.stage !== "template_ready");
   const groups = new Map<string, CodingActivityRun>();
@@ -76,11 +76,48 @@ export function codingActivityRuns(value: unknown, process?: DevelopmentProcess)
   }
   return [...groups.values()];
 }
+
+/** Public commentary bounds a phase; commands keep their real Run and call IDs. */
+export function codingActivityStages(value: unknown, process?: DevelopmentProcess, messages: Message[] = []): CodingActivityRun[] {
+  const normalized = normalizeActivity(value);
+  const compare = (a: {at:string;sequence?:number;id:string}, b: {at:string;sequence?:number;id:string}) => (Date.parse(a.at)||0)-(Date.parse(b.at)||0)||(a.sequence??0)-(b.sequence??0)||a.id.localeCompare(b.id);
+  const activeStates = ["running","pending","waiting_for_approval"];
+  const result: CodingActivityRun[] = [];
+  for (const run of codingActivityRuns(normalized,process)) {
+    const operations = run.items.filter(item=>!["agent","completed"].includes(item.stage));
+    const lastAt = Math.max(Date.parse(run.at)||0,...operations.map(item=>Date.parse(item.at)||0));
+    const boundaries = normalized.filter(item=>item.kind==="assistant_message" && (item.runId===run.runId || !item.runId && !run.runId));
+    for (const message of messages) {
+      const time=Date.parse(message.createdAt);
+      if(time>=(Date.parse(run.at)||0) && time<=lastAt) boundaries.push({id:message.id,stage:"message",title:"",at:message.createdAt});
+    }
+    boundaries.sort(compare);
+    const phases = new Map<string,CodingActivityRun>();
+    const phase = (boundary?: DevelopmentProcessProgressItem) => {
+      const id=boundary ? run.id+":after:"+boundary.id : run.id;
+      const existing=phases.get(id);
+      if(existing)return existing;
+      const next={...run,id,at:boundary?.at ?? run.at,sequence:boundary ? (boundary.sequence ?? 0)+0.5 : run.sequence,items:[] as DevelopmentProcessProgressItem[]};phases.set(id,next);return next;
+    };
+    for (const operation of operations) phase([...boundaries].reverse().find(boundary=>compare(boundary,operation)<=0)).items.push(operation);
+    if(activeStates.includes(run.status)) phase(boundaries.at(-1));
+    const ordered=[...phases.values()].sort(compare);
+    for(let index=0;index<ordered.length;index++) {
+      const stage=ordered[index]!;
+      if(!stage.items.length && !activeStates.includes(run.status))continue;
+      if(index===ordered.length-1 && activeStates.includes(run.status))stage.status=run.status;
+      else stage.status=stage.items.some(item=>["running","active"].includes(item.status??"")) && activeStates.includes(run.status) ? "running" : stage.items.some(item=>["awaiting_approval","waiting_for_approval"].includes(item.status??"")) && activeStates.includes(run.status) ? "waiting_for_approval" : stage.items.some(item=>item.status==="failed") ? "failed" : run.status==="cancelled" && stage.items.some(item=>item.status==="cancelled") ? "cancelled" : "completed";
+      result.push(stage);
+    }
+  }
+  return result;
+}
+
 export function chatTimeline(messages: Message[], value: unknown, conversationId?: string | null, process?: DevelopmentProcess) {
   const normalized = normalizeActivity(value).filter(item => !item.conversationId || item.conversationId === conversationId);
-  const groups = codingActivityRuns(normalized,process);
-  const anchors = groups.map(group=>({id:group.id,stage:"run",title:"",at:group.at}));
-  const slots = activitySlots(messages,[...normalized.filter(item=>item.kind==="assistant_message"),...anchors],conversationId);
+  const groups = codingActivityStages(normalized,process,messages);
+  const anchors = groups.map(group=>({id:group.id,stage:"run",title:"",at:group.at,sequence:group.sequence}));
+  const slots = activitySlots(messages,[...normalized.filter(item=>item.kind==="assistant_message" && !messages.some(message=>message.role==="assistant" && message.content.trim()===item.title.trim())),...anchors],conversationId);
   const entries: ({ kind: "message"; message: Message; index: number } | { kind: "activity"; item: DevelopmentProcessProgressItem; run?: CodingActivityRun })[] = [];
   for (let index=0; index<=messages.length; index++) {
     for (const item of slots.get(index) ?? []) entries.push({kind:"activity",item,run:groups.find(group=>group.id===item.id)});

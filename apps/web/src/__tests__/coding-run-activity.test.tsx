@@ -45,3 +45,43 @@ it("offers the existing Send button for a new queued request during coding and p
   const active=renderToStaticMarkup(<BusinessChatComposer {...props}/>);expect(active).toContain("chat-send-btn");expect(active).not.toContain("code-pending-messages");expect(active).not.toContain("codeInbox.queue");
   expect(renderToStaticMarkup(<BusinessChatComposer {...{...props,input:""}}/>)).toContain("chat-stop-btn");
 });
+
+it("expands real command output and code changes inside the run instead of metadata-only panels",async()=>{
+  Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});const host=document.createElement("div");document.body.append(host);root=createRoot(host);
+  const process:DevelopmentProcess={id:"p",companyId:"c",parentConversationId:"parent",name:"Site",framework:"Next.js",status:"completed",hidden:false,createdAt:"",updatedAt:"",runId:"run",initialRunId:"run",progress:[{id:"read",runId:"run",stage:"tool",tool:"code.fs.read",title:"Read",at:"2026-10-14T10:00:00Z",status:"completed",file:"app/page.tsx",fileContent:"export default function Page() { return <h1>Site</h1>; }"},{id:"edit",runId:"run",stage:"tool",tool:"code.fs.edit",title:"Edit",at:"2026-10-14T10:00:01Z",status:"completed",arguments:'{"path":"app/page.tsx","newText":"New"}',diff:"-Old\n+New"},{id:"build",runId:"run",stage:"build",title:"Build",at:"2026-10-14T10:00:02Z",status:"completed",command:"npm run build",stdout:"Compiled successfully",stderr:"",exitCode:0}]};
+  await act(async()=>root!.render(<ChatDevelopmentProgress process={process}/>));await act(async()=>host.querySelector<HTMLButtonElement>(".coding-run-header")!.click());
+  for(const header of host.querySelectorAll<HTMLButtonElement>(".coding-operation-history .codex-trace-row-header"))await act(async()=>header.click());
+  const panels=host.querySelectorAll(".codex-trace-detail-panel");expect(panels).toHaveLength(3);
+  expect(panels[0]!.textContent).toContain("export default function Page()");expect(panels[1]!.textContent).toContain("-Old\n+New");expect(panels[1]!.textContent).toContain('"newText":"New"');expect(panels[2]!.textContent).toContain("npm run build");expect(panels[2]!.textContent).toContain("Compiled successfully");expect(panels[2]!.textContent).toContain("0");expect(host.querySelector('button[title="Copy command"]')).not.toBeNull();
+});
+
+it("shows Preview only with settled activity and keeps an already open iframe during the next edit",async()=>{
+  const {MemoryRouter}=await import("react-router-dom");const {ChatDevelopmentPreview}=await import("../ChatDevelopmentProgress");
+  vi.spyOn(globalThis,"fetch").mockImplementation(async input=>new Response(JSON.stringify(String(input).endsWith("/status")?{isRunning:true}:{token:"test-preview-token"}),{status:200}));
+  Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});const host=document.createElement("div");document.body.append(host);root=createRoot(host);
+  const process:DevelopmentProcess={id:"p",companyId:"c",projectId:"project",parentConversationId:"parent",name:"Site",framework:"Next.js",status:"running",hidden:false,createdAt:"",updatedAt:"",runId:"run",initialRunId:"run",previewUrl:"/previous-preview",progress:[{id:"build",runId:"run",stage:"build",title:"Build",at:"",status:"running",command:"npm run build"}]};
+  const render=async(p:DevelopmentProcess)=>act(async()=>root!.render(<MemoryRouter><ChatDevelopmentProgress process={p}/><ChatDevelopmentPreview process={p}/></MemoryRouter>));
+  await render(process);expect(host.querySelector(".chat-development-preview button")).toBeNull();expect(host.querySelector(".research-active-text")).not.toBeNull();
+  const done={...process,status:"completed" as const,progress:process.progress!.map(e=>({...e,status:"completed" as const}))};
+  await render(done);expect(host.querySelector(".research-active-text")).toBeNull();const button=host.querySelector<HTMLButtonElement>(".chat-development-preview button")!;expect(button).not.toBeNull();expect(button.querySelector(".coding-preview-framework")?.textContent).toBe("Next.js");await act(async()=>button.click());
+  const iframe=document.querySelector('[aria-label="Preview of Site"] iframe');expect(iframe).not.toBeNull();
+  await render(process);expect(host.querySelector(".chat-development-preview button")).toBeNull();expect(document.querySelector('[aria-label="Preview of Site"] iframe')).toBe(iframe);
+  await render(done);expect(host.querySelector(".chat-development-preview button")).not.toBeNull();expect(document.querySelector('[aria-label="Preview of Site"] iframe')).toBe(iframe);
+});
+
+it("renders a standalone public update without creating zero-operation rows from other Run metadata",async()=>{
+  Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});const host=document.createElement("div");document.body.append(host);root=createRoot(host);
+  const process:DevelopmentProcess={id:"p",companyId:"c",parentConversationId:"parent",name:"Site",framework:"Next.js",hidden:false,status:"completed",createdAt:"",updatedAt:"",runId:"r",initialRunId:"r",runStatuses:{r:"completed",other:"completed"}};
+  await act(async()=>root!.render(<ChatDevelopmentProgress process={process} items={[{id:"message",stage:"planning",kind:"assistant_message",runId:"r",title:"Now editing the files",at:""}]}/>));
+  expect(host.textContent).toBe("Now editing the files");expect(host.querySelectorAll(".coding-run-activity")).toHaveLength(0);
+});
+
+it("renders successive phases around real public updates and stops the previous phase animation",async()=>{
+  Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});const host=document.createElement("div");document.body.append(host);root=createRoot(host);
+  const at=(n:number)=>new Date(n*1000).toISOString();const process:DevelopmentProcess={id:"p",companyId:"c",parentConversationId:"parent",name:"Site",framework:"Next.js",hidden:false,status:"running",createdAt:at(0),updatedAt:at(5),runId:"r",initialRunId:"r",runStatuses:{r:"running",old:"completed"},progress:[{id:"read",stage:"tool",tool:"code.fs.read",runId:"r",title:"Read",file:"app/page.tsx",at:at(1),status:"completed"},{id:"update",kind:"assistant_message",stage:"planning",runId:"r",title:"Now editing the page",at:at(2),status:"completed"},{id:"edit",stage:"tool",tool:"code.fs.edit",runId:"r",title:"Edit",file:"app/page.tsx",at:at(3),status:"running"}]};
+  await act(async()=>root!.render(<ChatDevelopmentProgress process={process}/>));
+  const rows=host.querySelectorAll(".coding-run-activity");expect(rows).toHaveLength(2);expect(rows[0]!.querySelector(".research-active-text")).toBeNull();expect(rows[1]!.querySelector(".research-active-text")).not.toBeNull();
+  const message=[...host.querySelectorAll("article")].find(e=>e.textContent==="Now editing the page")!;expect(rows[0]!.compareDocumentPosition(message)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();expect(message.compareDocumentPosition(rows[1]!)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  for(const button of host.querySelectorAll<HTMLButtonElement>(".coding-run-header"))await act(async()=>button.click());
+  expect(rows[0]!.querySelectorAll(".coding-operation-history .codex-trace-row")).toHaveLength(1);expect(rows[1]!.querySelectorAll(".coding-operation-history .codex-trace-row")).toHaveLength(1);
+});

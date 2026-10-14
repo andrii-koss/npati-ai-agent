@@ -209,3 +209,8 @@ export function codingStartCopy(language: CompanyChatLanguage) {
   Object.assign(labels,{"nl":"Start de ontwikkeling in Sandbox","tr":"Sandbox içinde geliştirmeye başlıyorum","ru":"Начинаю разработку в Sandbox","zh":"开始在 Sandbox 中开发","ja":"Sandbox で開発を開始します","ko":"Sandbox에서 개발을 시작합니다","ar":"أبدأ التطوير في Sandbox","hi":"Sandbox में विकास शुरू कर रहा हूँ"});
   return labels[language] ?? labels.en!;
 }
+
+/** User-facing copy policy only; execution and verification remain unchanged. */
+export function codingChatResponseInstruction(): string {
+  return "\nCommunication: keep public progress updates to one short sentence about the actual next action. Unless the user explicitly asks for a detailed report, finish with 2-4 concise sentences: the concrete changes, actual verification result, and any actionable blocker. Do not repeat command logs, a file-by-file report, unchanged-file lists or unsolicited next steps; real execution details are available in the chat activity. Do not claim Preview is ready before the system confirms it. Answer in the user request language.";
+}

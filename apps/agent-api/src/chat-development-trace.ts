@@ -4,10 +4,11 @@ import type { ProjectTerminalEventsRepository } from "./project-terminal-events"
 
 export function sanitizeProgress(item: DevelopmentProcessProgressItem): DevelopmentProcessProgressItem {
   const safe = { ...item };
-  for (const field of ["title", "tool", "command", "file", "cwd", "result", "stdout", "stderr", "error", "errorCode", "agentId", "diff"] as const) {
+  for (const field of ["title", "tool", "command", "arguments", "fileContent", "file", "cwd", "result", "stdout", "stderr", "error", "errorCode", "agentId", "diff"] as const) {
     if (typeof safe[field] === "string") safe[field] = sanitizeExecutionTrace(safe[field]!);
   }
   if (safe.files) safe.files = safe.files.slice(0,200).map(file => ({ ...file, path: sanitizeExecutionTrace(file.path), diff: file.diff ? sanitizeExecutionTrace(file.diff).slice(0,128_000) : undefined }));
+  for (const field of ["arguments", "fileContent"] as const) if (safe[field] && safe[field]!.length > 128_000) { safe[field] = safe[field]!.slice(0,128_000); safe.resultTruncated = true; }
   if (safe.result && safe.result.length > 128_000) { safe.result = safe.result.slice(0, 128_000); safe.resultTruncated = true; }
   return safe;
 }
@@ -29,13 +30,17 @@ function object(value: unknown): Record<string, unknown> {
 }
 /** The same factual tool-result fields serve live updates and recorded replay. */
 export function executionResultDetails(value: unknown): Partial<DevelopmentProcessProgressItem> {
-  const data = object(value);
+  const envelope = object(value);
+  const data = object(envelope.data ?? envelope.result ?? envelope);
   const numeric = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : undefined;
   const actions: Record<string,string> = { add: "created", update: "modified", delete: "deleted", created: "created", modified: "modified", deleted: "deleted" };
   const files = Array.isArray(data.files) ? data.files.slice(0,200).flatMap(raw => { const file = object(raw); if (typeof file.path !== "string") return []; return [{path:file.path,action:actions[String(file.action)] as "created" | "modified" | "deleted" | undefined,diff:string(file.diff),linesAdded:numeric(file.linesAdded),linesRemoved:numeric(file.linesRemoved)}]; }) : undefined;
+  const readLines = Array.isArray(data.lines) && data.lines.every(line => typeof object(line).text === "string") ? data.lines.map(line => String(object(line).text)).join("\n") : undefined;
+  const reports = Array.isArray(data.results) ? data.results.map(object) : [];
+  const recordedOutput = reports.map(report => string(report.raw)).filter(Boolean).join("\n\n");
   const counts = object(data.tests);
   const tests = ["passed","failed","skipped","total"].every(key => numeric(counts[key]) !== undefined && Number(counts[key]) >= 0) ? counts as {passed:number;failed:number;skipped:number;total:number} : undefined;
-  return Object.fromEntries(Object.entries({status: typeof data.exitCode === "number" && data.exitCode !== 0 || typeof object(data.stats).failed === "number" && Number(object(data.stats).failed) > 0 ? "failed" : undefined, file:string(data.path),stdout:string(data.stdout),stderr:string(data.stderr),exitCode:numeric(data.exitCode),diff:string(data.diff),linesAdded:numeric(data.linesAdded),linesRemoved:numeric(data.linesRemoved),fileChange:actions[String(data.status)],files,tests}).filter(([,value]) => value !== undefined)) as Partial<DevelopmentProcessProgressItem>;
+  return Object.fromEntries(Object.entries({status: typeof data.exitCode === "number" && data.exitCode !== 0 || typeof object(data.stats).failed === "number" && Number(object(data.stats).failed) > 0 ? "failed" : undefined, file:string(data.path),fileContent:data.binary === true || data.encoding === "base64" ? undefined : string(data.content) ?? readLines,stdout:string(data.stdout) ?? (recordedOutput || undefined),stderr:string(data.stderr),exitCode:numeric(data.exitCode),diff:string(data.diff),linesAdded:numeric(data.linesAdded),linesRemoved:numeric(data.linesRemoved),fileChange:actions[String(data.status)],files,tests}).filter(([,value]) => value !== undefined)) as Partial<DevelopmentProcessProgressItem>;
 }
 /** JSONB serializes nested Date values as ISO strings; pg does not revive them. */
 export function executionTimestamp(value: unknown): number | undefined {
@@ -75,21 +80,25 @@ export async function developmentTrace(store: WorkspaceStore, ctx: AuthContext, 
       const data = object(result.data ?? result.result ?? result);
       const input = args.get(call.toolCallId) ?? {};
       const live = progress.find(item => item.id === run.runId + ":" + call.toolCallId);
+      const resultDetails = executionResultDetails(live?.result ?? data);
       const started = executionTimestamp(call.startedAt);
       const finished = executionTimestamp(call.finishedAt);
       const unfinished = !call.finishedAt;
       const status = call.errorCode === "approval_required" ? "waiting_for_approval" : run.status === "cancelled" && (unfinished || call.outcome !== "ok" || live?.status === "cancelled" || typeof data.exitCode === "number" && data.exitCode !== 0) ? "cancelled" : unfinished ? run.status === "waiting_for_user" ? "waiting_for_approval"
         : run.status === "cancelled" ? "cancelled" : run.status === "running" ? "running" : "failed"
         : call.outcome === "ok" ? "completed" : "failed";
-      const output = string(replay?.settledResult);
+      // Synthetic review replay entries can contain only "skipped". The durable
+      // public activity carries the actual verification report in that case.
+      const output = live?.result ?? string(replay?.settledResult);
       calls.set(call.toolCallId, sanitizeProgress({
-        ...live, ...executionResultDetails(data),
+        ...live, ...resultDetails,
         id: run.runId + ":" + call.toolCallId, runId: run.runId, stage: "tool", title: call.tool,
-        at: executionIso(call.startedAt, executionIso(turn.startedAt, executionIso(run.startedAt, process.createdAt))), status: status === "completed" && (executionResultDetails(data).status === "failed" || live?.status === "failed") ? "failed" : status, tool: call.tool,
-        command: string(input.command) ?? live?.command, file: string(input.path ?? input.file) ?? executionResultDetails(data).file ?? live?.file, cwd: string(input.cwd) ?? live?.cwd,
+        at: executionIso(call.startedAt, executionIso(turn.startedAt, executionIso(run.startedAt, process.createdAt))), status: status === "completed" && (resultDetails.status === "failed" || live?.status === "failed") ? "failed" : status, tool: call.tool,
+        arguments: Object.keys(input).length ? JSON.stringify(input, null, 2) : live?.arguments,
+        command: string(input.command) ?? live?.command, file: string(input.path ?? input.file) ?? resultDetails.file ?? live?.file, cwd: string(input.cwd) ?? live?.cwd,
         result: output ?? live?.result, resultTruncated: replay?.truncated === true || live?.resultTruncated,
-        durationMs: started !== undefined && finished !== undefined && finished >= started ? finished - started : undefined,
-        error: string(data.error) ?? string(object(result.error).message), errorCode: call.errorCode ?? string(replay?.errorCode),
+        durationMs: started !== undefined && finished !== undefined && finished >= started ? finished - started : live?.durationMs,
+        error: string(data.error) ?? string(object(result.error).message) ?? live?.error, errorCode: call.errorCode ?? string(replay?.errorCode) ?? live?.errorCode,
         agentId: string(input.agentId) ?? string(run.details.agentId) ?? (typeof run.details.agentType === "string" ? run.details.agentType + " " + run.runId.slice(0, 8) : "NPATI Coding Agent"),
       }));
     }
@@ -98,9 +107,16 @@ export async function developmentTrace(store: WorkspaceStore, ctx: AuthContext, 
     for (const event of activity) {
       const p = event.payload, id = String(p.toolCallId ?? event.id);
       if (typeof p.tool !== "string" || calls.has(id)) continue;
-      calls.set(id, sanitizeProgress({ id: run.runId + ":" + id, runId: run.runId, stage: "tool", title: p.tool,
-        tool: p.tool, at: executionIso(event.createdAt, process.createdAt), status: p.ok === false ? "failed" : "completed",
-        durationMs: typeof p.durationMs === "number" ? p.durationMs : undefined, errorCode: string(p.errorCode), agentId: string(p.agentId) }));
+      const eventAt = executionTimestamp(event.createdAt);
+      if (!p.toolCallId && eventAt !== undefined && typeof p.durationMs === "number" && [...progress, ...calls.values()].some(call =>
+        call.runId === run.runId && call.tool === p.tool && call.durationMs !== undefined && Math.abs(call.durationMs - Number(p.durationMs)) < 100 &&
+        Math.abs(eventAt - Date.parse(call.at) - call.durationMs) < 2000)) continue;
+      const live = progress.find(item => item.id === run.runId + ":" + id);
+      const recordedResult = live?.result ?? string(p.result);
+      calls.set(id, sanitizeProgress({ ...live, ...executionResultDetails(recordedResult), id: run.runId + ":" + id, runId: run.runId, stage: "tool", title: p.tool,
+        tool: p.tool, at: live?.at ?? executionIso(event.createdAt, process.createdAt), status: p.ok === false ? "failed" : live?.status ?? "completed",
+        result: recordedResult, command: string(p.command) ?? live?.command, file: string(p.path) ?? live?.file, cwd: string(p.cwd) ?? live?.cwd,
+        durationMs: typeof p.durationMs === "number" ? p.durationMs : live?.durationMs, errorCode: string(p.errorCode) ?? live?.errorCode, agentId: string(p.agentId) ?? live?.agentId }));
     }
   }
   if (terminal && process.projectId) {
@@ -108,13 +124,20 @@ export async function developmentTrace(store: WorkspaceStore, ctx: AuthContext, 
     for (const log of logs) {
       const at = Date.parse(log.createdAt);
       const setupEnd = process.progress?.find(event => event.stage === "agent")?.at;
-      if (log.runId ? log.runId !== process.runId : at < Date.parse(process.createdAt) || (setupEnd && at > Date.parse(setupEnd))) continue;
+      const candidates = [...progress, ...calls.values()];
+      // Verification commands are logged without a runId. Attach only when the
+      // actual output AND execution interval match this run's recorded tool result.
+      const matchedVerification = !log.runId && log.output.trim().length >= 32 && candidates.find(call =>
+        call.runId === process.runId && call.tool === "code.verify.run" && call.durationMs !== undefined &&
+        at >= Date.parse(call.at) && at <= Date.parse(call.at) + call.durationMs + 2000 &&
+        (call.stdout ?? executionResultDetails(call.result).stdout ?? "").includes(sanitizeExecutionTrace(log.output.trim()).slice(0, 1000)));
+      if (log.runId ? log.runId !== process.runId : !matchedVerification && (at < Date.parse(process.createdAt) || (setupEnd && at > Date.parse(setupEnd)))) continue;
       // Shell calls already have their result in replay; avoid rendering the same command twice.
       const existing = [...progress, ...calls.values()].find(call => call.command === sanitizeExecutionTrace(log.commandSummary) && Math.abs(Date.parse(call.at) - Date.parse(log.createdAt)) <= log.durationMs + 2000);
       const details = { command: log.commandSummary, result: log.output, exitCode: log.exitCode ?? undefined,
         durationMs: log.durationMs, errorCode: log.errorCode, agentId: log.agentId };
       if (existing) { Object.assign(existing, sanitizeProgress({ ...existing, ...details })); continue; }
-      progress.push(sanitizeProgress({ id: "terminal:" + log.id, stage: "command", title: "Running command", at: log.createdAt,
+      progress.push(sanitizeProgress({ id: "terminal:" + log.id, runId: log.runId ?? (matchedVerification ? process.runId : undefined), stage: "command", title: "Running command", at: log.createdAt,
         status: log.status === "failed" || log.status === "timed_out" ? "failed" : log.status === "stopped" ? "cancelled" : "completed",
         ...details }));
     }

@@ -74,14 +74,16 @@ export function AgentExecutionTrace({ process, items: directItems, run, nested =
           {(item.runId || process?.runId) && <a href={"/activity?runId=" + encodeURIComponent(item.runId ?? process?.runId ?? "")}>{t("viewRun")}</a>}
           {item.tool && <div>{t("tool")}: <code>{safe(item.tool)}</code></div>}
           {item.command && <div className="codex-trace-field"><div className="codex-trace-field-top"><span>{t("command")}</span>{copyButton(item.command,"cmd-" + item.id,"copyCommand")}</div><div className="codex-code-box"><code>{safe(item.command)}</code></div></div>}
+          {item.arguments && !item.command && <div className="codex-trace-field"><div className="codex-trace-field-top"><span>{t("tool")}: {safe(item.tool ?? "")}</span>{copyButton(item.arguments,"args-" + item.id,"copyLog")}</div><pre className="codex-log-pre">{safe(item.arguments)}</pre></div>}
           {item.cwd && <div>{t("workingDir")}: <code>{safe(item.cwd)}</code></div>}
           {process?.name && <div>{t("project")}: {safe(process.name)}</div>}
           {item.file && <div>{t("file")}: <code className="codex-file-code">{safe(item.file)}</code>{item.fileChange && <span> {t(item.fileChange)}</span>}{item.linesAdded !== undefined && <span> +{item.linesAdded}</span>}{item.linesRemoved !== undefined && <span> -{item.linesRemoved}</span>}</div>}
           {item.files?.map((file,index) => <div key={file.path + index}><code className="codex-file-code">{file.path}</code>{file.action && <span> {t(file.action)}</span>}{file.linesAdded !== undefined && <span> +{file.linesAdded}</span>}{file.linesRemoved !== undefined && <span> -{file.linesRemoved}</span>}{file.diff && log(file.diff,"diff " + file.path)}</div>)}
           {item.diff && !item.files?.some(file => file.diff) && log(item.diff,"diff")}
           {item.tests && <div>{t("testing")}: {item.tests.passed}/{item.tests.total} {t("testsPassed")}, {item.tests.failed} {t("failed")}, {item.tests.skipped} {t("skipped")}</div>}
+          {item.fileContent !== undefined && log(item.fileContent,t("output"))}
           {item.stdout !== undefined && log(item.stdout,"stdout")}{item.stderr !== undefined && log(item.stderr,"stderr")}
-          {item.result && item.stdout === undefined && item.stderr === undefined && !item.diff && !item.files?.length && !item.tests && log(item.result,t("output"))}{item.resultTruncated && <span>{t("limited")}</span>}
+          {item.result && item.fileContent === undefined && item.stdout === undefined && item.stderr === undefined && !item.diff && !item.files?.some(file => file.diff) && !item.tests && log(item.result,t("output"))}{item.resultTruncated && <span>{t("limited")}</span>}
           {item.durationMs !== undefined && <div>{t("duration")}: {(item.durationMs/1000).toFixed(2)}s</div>}
           {item.exitCode !== undefined && <div>{t("exitCode")}: {item.exitCode}</div>}
           {(item.error || item.errorCode) && <div className="codex-trace-error-msg">{t("error")}: {safe(item.error ?? item.errorCode ?? "")}</div>}
