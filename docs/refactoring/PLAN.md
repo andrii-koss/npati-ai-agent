@@ -307,7 +307,7 @@ refactor(<scope>): split <file> into <N> modules (step <N>)
 | 3 | `packages/shared/src/code-capabilities.ts` | 4 079 | [ ] |
 | 4 | `packages/shared/src/capability-catalog.ts` | 7 283 | [ ] |
 | 5 | `packages/shared/src/capability-matrix.ts` | 4 861 | [ ] |
-| 6 | `apps/agent-api/src/coding-agent-runner.ts` | 4 802 | [ ] |
+| 6 | `apps/agent-api/src/coding-agent-runner.ts` | 4 802 → **584** | [x] 1 975 → 584 (7 модулів-співробітників) |
 | 7 | `apps/web/src/WebsiteEditor.tsx` | 4 126 | [ ] |
 | 8 | `apps/web/src/EmailSettingsPage.tsx` | 2 923 | [ ] |
 
@@ -627,7 +627,7 @@ sha256(concat(01..28)) == sha256(оригінал)
 
 ---
 
-### [ ] Крок 6 — `apps/agent-api/src/coding-agent-runner.ts` (4 802 → ~7 модулів)
+### [x] Крок 6 — `apps/agent-api/src/coding-agent-runner.ts` (1 975 → 584 рядки, 7 модулів)
 
 **Факти (замірено).** 64 топ-левел декларації; **~1 000 рядків (126–1 128) — самі лише типи/порти** (`CodeRunStatePort`, `CodeRunReplayPort`, `CodingAgentRunnerPorts`, …); клас `CodingAgentRunner` починається на 1 681 і тягнеться до кінця (~3 100 рядків).
 
