@@ -55,12 +55,6 @@
       "owner": "refactor/large-files",
       "expires_at": "2027-02-28"
     },
-    "apps/web/src/DataStudioSettingsPage.tsx": {
-      "lines": 1939,
-      "reason": "web page not yet decomposed by section; backlog after the API and packages work",
-      "owner": "refactor/large-files",
-      "expires_at": "2027-02-28"
-    },
     "apps/web/src/EmailInboxPage.tsx": {
       "lines": 1748,
       "reason": "web page not yet decomposed by section; backlog after the API and packages work",

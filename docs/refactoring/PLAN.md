@@ -883,7 +883,7 @@ registerEmailInboxRoutes(app, deps)  →  registerEmailAccountRoutes(app, deps) 
 | 24 | `apps/web/src/BusinessWorkspace.tsx` | 2 106 | [ ] |
 | 25 | `apps/web/src/EmailInboxPage.tsx` | 2 013 | [ ] |
 | 26 | `apps/web/src/DataStudioPage.tsx` | 1 976 | [x] (скорочено до 704 рядків) |
-| 27 | `apps/web/src/DataStudioSettingsPage.tsx` | 1 939 | [ ] |
+| 27 | `apps/web/src/DataStudioSettingsPage.tsx` | 1 939 → **706** | [x] (скорочено до 706 рядків, винесено data-studio-settings/) |
 | 28 | `apps/web/src/App.tsx` | 1 550 | [ ] |
 | 29 | `apps/web/src/ProjectPage.tsx` | 1 475 | [ ] |
 | 30 | `apps/web/src/IntegrationsPage.tsx` | 1 470 | [ ] |
@@ -945,7 +945,7 @@ registerEmailInboxRoutes(app, deps)  →  registerEmailAccountRoutes(app, deps) 
 **Порядок.** Спершу 7 модалок/дроверів (найдешевше), потім панелі.
 **Effort:** L (M, якщо обмежитись модалками/дроверами).
 
-### [ ] Крок 27 — `apps/web/src/DataStudioSettingsPage.tsx` (1 939 → ~6 модулів) — один із найдешевших
+### [x] Крок 27 — `apps/web/src/DataStudioSettingsPage.tsx` (1 939 → 706 рядків, винесено data-studio-settings/)
 
 **Факти.** Типи L11–126, константи L129–136, хелпери L140–198 (`apiFetch`, `errorCode`, `statusPillClass`, `formatBytes`, …), головний компонент L199–1306, і **три вже окремі prop-driven компоненти**: `CreateDatabaseDrawer` L1307–1434, `TransferDatabaseDrawer` L1435–1579, `SchemaDrawer` L1580–1938. Наприкінці `export default DataStudioSettingsPage` (L1939), який `App.tsx:23` **не використовує** (там іменований імпорт).
 
