@@ -884,7 +884,7 @@ registerEmailInboxRoutes(app, deps)  →  registerEmailAccountRoutes(app, deps) 
 | 25 | `apps/web/src/EmailInboxPage.tsx` | 2 013 → **773** | [x] (скорочено до 773 рядків, винесено email-inbox/) |
 | 26 | `apps/web/src/DataStudioPage.tsx` | 1 976 | [x] (скорочено до 704 рядків) |
 | 27 | `apps/web/src/DataStudioSettingsPage.tsx` | 1 939 → **706** | [x] (скорочено до 706 рядків, винесено data-studio-settings/) |
-| 28 | `apps/web/src/App.tsx` | 1 550 | [ ] |
+| 28 | `apps/web/src/App.tsx` | 1 550 → **626** | [x] (скорочено до 626 рядків, винесено shell/) |
 | 29 | `apps/web/src/ProjectPage.tsx` | 1 475 | [ ] |
 | 30 | `apps/web/src/IntegrationsPage.tsx` | 1 470 | [ ] |
 | 31 | `apps/web/src/WebsiteBuilderDashboard.tsx` | 1 367 | [ ] |
@@ -956,7 +956,7 @@ registerEmailInboxRoutes(app, deps)  →  registerEmailAccountRoutes(app, deps) 
 **Верифікація.** `npm run lint`, `npm run typecheck`, `npm run test:web`, `npm run build --workspace @npati/web`.
 **Effort:** M.
 
-### [ ] Крок 28 — `apps/web/src/App.tsx` (1 550 → ~10 модулів)
+### [x] Крок 28 — `apps/web/src/App.tsx` (1 558 → 626 рядків + модулі в `shell/`) — ВИКОНАНО ✓
 
 **Факти.** Модульний мутабельний стан кешів: `legacyChatStorageResetMarker` L57, `clearLegacyLocalChatsOnce` L58; `cachedSidebarConversations`/`isSidebarConversationsLoaded`/`activeSidebarConversationsFetch`/`cachedChatOpen`/`cachedBusinessOpen` L253–257; `cachedSidebarDrafts`/`cachedSidebarBusinesses`/`isSidebarBusinessesLoaded` L297–299 з гетерами/сетерами L259–362. Інлайн-компоненти: `BrandMark` 69, `NpatiAgentLogo` 71, **`ChatUserMenu` 80–163**, `Home` 165–250, 7 іконок 364–451, **`Sidebar` 463–1054 (~590 рядків)**, `FullscreenRoute` 1059, `Workspace` 1072–1132, `CanonicalChatRoute` 1182–1252, `SettingsPage` 1262–1477 (літерал карток 1264–1453), `App` 1493–1550. **44 `<Route>` у L1500–1544, нуль `lazy(`**, і **8 імпортів стоять у середині файлу — L1253–1260**.
 
