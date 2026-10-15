@@ -242,17 +242,25 @@ export function CodeSandboxImagesPanel({ companyId, isUk, notify }: {
   }
 
   return (
-    <section className="code-images" aria-label={isUk ? "Образи sandbox" : "Sandbox images"}>
-      <div className="code-images-header">
-        <div>
-          <div className="ds-section-title">{isUk ? "Образи sandbox" : "Sandbox images"}</div>
-          <p className="ds-muted">
-            {isUk
-              ? "Лише образи, закріплені за digest, допускаються до запуску. Скани, SBOM і waiver враховуються політикою."
-              : "Only digest-pinned images are admitted. Scans, SBOM and waivers are enforced by policy."}
-          </p>
+    <section className="browser-campaign-card code-sandbox-images-panel" aria-label={isUk ? "Образи sandbox" : "Sandbox images"}>
+      <div className="browser-campaign-card-header">
+        <div className="browser-card-title-group">
+          <span className="browser-card-icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
+              <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+            </svg>
+          </span>
+          <div>
+            <h3>{isUk ? "Образи sandbox" : "Sandbox images"}</h3>
+            <p>
+              {isUk
+                ? "Лише образи, закріплені за digest, допускаються до запуску. Скани, SBOM і waiver враховуються політикою."
+                : "Only digest-pinned images are admitted. Scans, SBOM and waivers are enforced by policy."}
+            </p>
+          </div>
         </div>
-        <div className="code-images-actions">
+        <div className="code-images-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
           <button type="button" className="button-secondary" onClick={() => void reload()} disabled={loading}>
             {loading ? (isUk ? "Оновлення…" : "Refreshing…") : (isUk ? "Оновити" : "Refresh")}
           </button>
@@ -264,29 +272,37 @@ export function CodeSandboxImagesPanel({ companyId, isUk, notify }: {
 
       {error && <div className="data-studio-alert error">{error}</div>}
 
-      {state && !state.catalog?.configured && (
-        <div className="data-studio-alert info">
-          {isUk
-            ? "Образи не сконфігуровано — каталог docker/sandbox/images.json не знайдено; у dev-режимі можливі лише unverified-образи."
-            : "Images are not configured — docker/sandbox/images.json was not found; in dev mode only unverified images are possible."}
-        </div>
-      )}
 
-      <div className="code-images-stats">
-        <span className="status-pill default">{isUk ? "Усього" : "Total"}: {stats.total}</span>
-        <span className="status-pill allowed">{isUk ? "Перевірено" : "Verified"}: {stats.verified}</span>
-        <span className="status-pill denied">{isUk ? "Відкликано" : "Revoked"}: {stats.revoked}</span>
-        <span className={`status-pill ${stats.critical > 0 ? "denied" : "allowed"}`}>Critical: {stats.critical}</span>
-        {state && <span className="status-pill default">maxScanAgeDays: {state.policy?.maxScanAgeDays ?? 0}</span>}
+      <div className="overview-grid inspector-stats-grid" style={{ marginBottom: "20px" }}>
+        <div>
+          <strong>{stats.total}</strong>
+          <span>{isUk ? "Усього" : "Total"}</span>
+          <small>{isUk ? "Зареєстровані образи" : "Registered sandbox images"}</small>
+        </div>
+        <div>
+          <strong>{stats.verified}</strong>
+          <span>{isUk ? "Перевірено" : "Verified"}</span>
+          <small>{isUk ? "Допущені політикою" : "Admitted by policy"}</small>
+        </div>
+        <div>
+          <strong>{stats.revoked}</strong>
+          <span>{isUk ? "Відкликано" : "Revoked"}</span>
+          <small>{isUk ? "Заблоковані образи" : "Blocked references"}</small>
+        </div>
+        <div>
+          <strong>{stats.critical}</strong>
+          <span>Critical</span>
+          <small>maxScanAge: {state?.policy?.maxScanAgeDays ?? 14}d</small>
+        </div>
       </div>
 
       {state && state.images.length === 0 && !loading ? (
-        <div className="automations-empty-card">
+        <div className="automations-empty-card" style={{ padding: "36px 20px", marginBottom: "18px" }}>
           <div className="automations-empty-icon">🐳</div>
           <p>{isUk ? "Жодного образу не зареєстровано." : "No images registered yet."}</p>
         </div>
       ) : (
-        <div className="automations-table-container">
+        <div className="automations-table-container" style={{ marginBottom: "18px" }}>
           <table className="automations-table">
             <thead>
               <tr>
@@ -331,30 +347,41 @@ export function CodeSandboxImagesPanel({ companyId, isUk, notify }: {
         </div>
       )}
 
-      <div className="code-images-admission">
-        <div className="ds-section-title">{isUk ? "Admission check" : "Admission check"}</div>
-        <p className="ds-muted">
-          {isUk
-            ? "Перевіряє, чи буде образ допущено до запуску. Нічого не запускає."
-            : "Checks whether an image would be admitted to a run. Starts nothing."}
-        </p>
-        <div className="code-images-admission-row">
-          <input
-            className="inspector-search-input"
-            placeholder="ghcr.io/npati/code-sandbox-node@sha256:…"
-            value={admissionReference}
-            onChange={(event) => setAdmissionReference(event.target.value)}
-          />
-          <button type="button" className="button-secondary" onClick={() => void runAdmissionCheck()} disabled={busy === "admission"}>
-            {isUk ? "Перевірити" : "Check"}
-          </button>
-        </div>
-        {admission && (
-          <div className={`data-studio-alert ${admission.ok ? "info" : "warning"}`}>
-            {admission.message}
+      <div className="browser-campaign-card-header" style={{ marginTop: "18px", paddingTop: "20px", borderTop: "1px solid var(--npati-gray-100)" }}>
+        <div className="browser-card-title-group">
+          <span className="browser-card-icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              <polyline points="9 12 12 15 16 10" />
+            </svg>
+          </span>
+          <div>
+            <h3>{isUk ? "Перевірка допуску (Admission check)" : "Admission check"}</h3>
+            <p>
+              {isUk
+                ? "Перевіряє, чи буде образ допущено до запуску. Нічого не запускає."
+                : "Checks whether an image would be admitted to a run. Starts nothing."}
+            </p>
           </div>
-        )}
+        </div>
       </div>
+      <div className="code-images-admission-row" style={{ display: "flex", gap: "10px", alignItems: "center", marginTop: "12px", flexWrap: "wrap" }}>
+        <input
+          className="inspector-search-input"
+          style={{ flex: 1, minWidth: "260px", height: "42px", padding: "0 14px", border: "1px solid #d9d9d9", borderRadius: "10px", fontSize: "13px" }}
+          placeholder="ghcr.io/npati/code-sandbox-node@sha256:…"
+          value={admissionReference}
+          onChange={(event) => setAdmissionReference(event.target.value)}
+        />
+        <button type="button" className="button-secondary" style={{ height: "42px", padding: "0 18px", borderRadius: "10px" }} onClick={() => void runAdmissionCheck()} disabled={busy === "admission"}>
+          {isUk ? "Перевірити" : "Check"}
+        </button>
+      </div>
+      {admission && (
+        <div className={`data-studio-alert ${admission.ok ? "info" : "warning"}`} style={{ marginTop: "12px" }}>
+          {admission.message}
+        </div>
+      )}
 
       {drawerOpen && (
         <Drawer

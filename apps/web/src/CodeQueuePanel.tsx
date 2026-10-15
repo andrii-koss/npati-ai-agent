@@ -77,60 +77,223 @@ export function CodeQueuePanel({ companyId, isUk }: { companyId: string; isUk: b
   const periodMinutes = status ? Math.round(status.rateLimits.limits.periodMs / 60_000) : 0;
 
   return (
-    <section className="code-images-panel" aria-label={isUk ? "Черга код-ранів" : "Code run queue"} data-panel="code-run-queue">
-      <div className="ds-section-title">{isUk ? "Черга код-ранів" : "Code run queue"}</div>
-      <p className="ds-muted">
-        {isUk
-          ? "Стан черги та лімітів. Панель нічого не запускає і не змінює."
-          : "The state of the queue and its limits. This panel starts and changes nothing."}
-      </p>
-      <div className="browser-form-footer">
-        <button type="button" className="button-secondary" data-action="refresh-queue" onClick={() => void load()} disabled={loading || !companyId}>
+    <section className="browser-campaign-card code-run-queue-panel" aria-label={isUk ? "Черга код-ранів" : "Code run queue"} data-panel="code-run-queue">
+      <div className="browser-campaign-card-header">
+        <div className="browser-card-title-group">
+          <span className="browser-card-icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg>
+          </span>
+          <div>
+            <h3>{isUk ? "Черга код-ранів" : "Code run queue"}</h3>
+            <p>
+              {isUk
+                ? "Стан черги та лімітів. Панель нічого не запускає і не змінює."
+                : "The state of the queue and its limits. This panel starts and changes nothing."}
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          className="button-secondary"
+          data-action="refresh-queue"
+          onClick={() => void load()}
+          disabled={loading || !companyId}
+        >
           {loading ? (isUk ? "Оновлення…" : "Refreshing…") : isUk ? "Оновити" : "Refresh"}
         </button>
       </div>
+
       {error && <div className="data-studio-alert warning" data-field="queue-error">{error}</div>}
       {status && (
         <>
-          <div className="code-detail-row" data-field="queue-totals">
-            <span>{isUk ? "Виконується / у черзі" : "Active / queued"}</span>
-            <code>{`${status.active} / ${status.queued}`}</code>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+              gap: "12px",
+              marginBottom: "18px",
+            }}
+          >
+            <div
+              style={{
+                padding: "16px 20px",
+                background: "#ffffff",
+                border: "1px solid var(--npati-gray-100)",
+                borderRadius: "14px",
+                boxShadow: "0 2px 8px rgba(17, 17, 17, 0.03)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "16px",
+              }}
+            >
+              <div>
+                <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--npati-black)" }}>
+                  {isUk ? "Виконується / у черзі" : "Active / queued"}
+                </div>
+                <small style={{ fontSize: "11.5px", color: "#64748b", display: "block", marginTop: "2px" }}>
+                  {isUk ? "Поточний стан черги" : "Current queue status"}
+                </small>
+              </div>
+              <span
+                data-field="queue-totals"
+                style={{
+                  fontSize: "15px",
+                  fontWeight: 800,
+                  fontFamily: "ui-monospace, monospace",
+                  color: "var(--npati-black)",
+                  background: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: "8px",
+                  padding: "5px 12px",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {`${status.active} / ${status.queued}`}
+              </span>
+            </div>
+
+            <div
+              style={{
+                padding: "16px 20px",
+                background: "#ffffff",
+                border: "1px solid var(--npati-gray-100)",
+                borderRadius: "14px",
+                boxShadow: "0 2px 8px rgba(17, 17, 17, 0.03)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "16px",
+              }}
+            >
+              <div>
+                <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--npati-black)" }}>
+                  {isUk ? "Паралельно (ви / компанія)" : "Parallel (you / company)"}
+                </div>
+                <small style={{ fontSize: "11.5px", color: "#64748b", display: "block", marginTop: "2px" }}>
+                  {isUk ? "Ліміт одночасних запусків" : "Current concurrency"}
+                </small>
+              </div>
+              <span
+                data-field="queue-concurrency"
+                style={{
+                  fontSize: "15px",
+                  fontWeight: 800,
+                  fontFamily: "ui-monospace, monospace",
+                  color: "var(--npati-black)",
+                  background: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: "8px",
+                  padding: "5px 12px",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {`${status.userActive} / ${status.limits.maxConcurrentPerUser} · ${status.companyActive} / ${status.limits.maxConcurrentPerCompany}`}
+              </span>
+            </div>
+
+            <div
+              style={{
+                padding: "16px 20px",
+                background: "#ffffff",
+                border: "1px solid var(--npati-gray-100)",
+                borderRadius: "14px",
+                boxShadow: "0 2px 8px rgba(17, 17, 17, 0.03)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "16px",
+              }}
+            >
+              <div>
+                <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--npati-black)" }}>
+                  {isUk ? `Запуски за ${periodMinutes} хв (ви / компанія)` : `Starts per ${periodMinutes} min`}
+                </div>
+                <small style={{ fontSize: "11.5px", color: "#64748b", display: "block", marginTop: "2px" }}>
+                  {isUk ? "Періодичний ліміт запусків" : "You / company"}
+                </small>
+              </div>
+              <span
+                data-field="queue-rate"
+                style={{
+                  fontSize: "15px",
+                  fontWeight: 800,
+                  fontFamily: "ui-monospace, monospace",
+                  color: "var(--npati-black)",
+                  background: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: "8px",
+                  padding: "5px 12px",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {`${status.rateLimits.user.used}/${status.rateLimits.user.limit} · ${status.rateLimits.company.used}/${status.rateLimits.company.limit}`}
+              </span>
+            </div>
+
+            <div
+              style={{
+                padding: "16px 20px",
+                background: "#ffffff",
+                border: "1px solid var(--npati-gray-100)",
+                borderRadius: "14px",
+                boxShadow: "0 2px 8px rgba(17, 17, 17, 0.03)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "16px",
+              }}
+            >
+              <div>
+                <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--npati-black)" }}>
+                  {isUk ? "Максимальна довжина черги" : "Maximum queue length"}
+                </div>
+                <small style={{ fontSize: "11.5px", color: "#64748b", display: "block", marginTop: "2px" }}>
+                  {isUk ? "Обмеження місткості черги" : "Company depth limit"}
+                </small>
+              </div>
+              <span
+                data-field="queue-depth"
+                style={{
+                  fontSize: "15px",
+                  fontWeight: 800,
+                  fontFamily: "ui-monospace, monospace",
+                  color: "var(--npati-black)",
+                  background: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: "8px",
+                  padding: "5px 12px",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {status.limits.maxQueueDepth}
+              </span>
+            </div>
           </div>
-          <div className="code-detail-row" data-field="queue-concurrency">
-            <span>{isUk ? "Паралельно (ви / компанія)" : "Parallel (you / company)"}</span>
-            <code>{`${status.userActive} / ${status.limits.maxConcurrentPerUser} · ${status.companyActive} / ${status.limits.maxConcurrentPerCompany}`}</code>
-          </div>
-          <div className="code-detail-row" data-field="queue-rate">
-            <span>{isUk ? `Запуски за ${periodMinutes} хв (ви / компанія)` : `Starts per ${periodMinutes} min (you / company)`}</span>
-            <code>{`${status.rateLimits.user.used}/${status.rateLimits.user.limit} · ${status.rateLimits.company.used}/${status.rateLimits.company.limit}`}</code>
-          </div>
-          <div className="code-detail-row" data-field="queue-depth">
-            <span>{isUk ? "Максимальна довжина черги" : "Maximum queue length"}</span>
-            <code>{status.limits.maxQueueDepth}</code>
-          </div>
-          {status.queue.length === 0 ? (
-            <p className="ds-muted" data-field="queue-empty">
-              {isUk ? "У цій компанії нічого не чекає." : "Nothing from this company is waiting."}
-            </p>
-          ) : (
-            <table className="ds-table" data-field="queue-tickets">
-              <thead>
-                <tr>
-                  <th>{isUk ? "Місце" : "Position"}</th>
-                  <th>{isUk ? "Сесія" : "Session"}</th>
-                  <th>{isUk ? "Очікування" : "Waiting"}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {status.queue.map((entry) => (
-                  <tr key={entry.sessionId}>
-                    <td>{entry.position}</td>
-                    <td><code>{entry.sessionId}</code></td>
-                    <td className="ds-muted">{formatQueueWait(entry.waitedMs)}</td>
+
+          {status.queue.length > 0 && (
+            <div className="automations-table-container">
+              <table className="automations-table" data-field="queue-tickets">
+                <thead>
+                  <tr>
+                    <th>{isUk ? "Місце" : "Position"}</th>
+                    <th>{isUk ? "Сесія" : "Session"}</th>
+                    <th>{isUk ? "Очікування" : "Waiting"}</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {status.queue.map((entry) => (
+                    <tr key={entry.sessionId}>
+                      <td><strong>#{entry.position}</strong></td>
+                      <td><code>{entry.sessionId}</code></td>
+                      <td className="ds-muted">{formatQueueWait(entry.waitedMs)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </>
       )}
