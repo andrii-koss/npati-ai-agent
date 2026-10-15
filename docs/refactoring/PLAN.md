@@ -889,7 +889,7 @@ registerEmailInboxRoutes(app, deps)  →  registerEmailAccountRoutes(app, deps) 
 | 30 | `apps/web/src/IntegrationsPage.tsx` | 1 470 | [ ] |
 | 31 | `apps/web/src/WebsiteBuilderDashboard.tsx` | 1 367 | [ ] |
 | 32 | `apps/web/src/CompanyPage.tsx` | 1 363 | [ ] |
-| 33 | `apps/web/src/CodeSettingsPage.tsx` | 1 360 | [ ] |
+| 33 | `apps/web/src/CodeSettingsPage.tsx` | 1 360 → 688 | [x] |
 | 34 | `apps/web/src/AutomationsPage.tsx` | 1 324 | [ ] |
 | 35 | `apps/web/src/ChatMessageContent.tsx` | 1 259 | [ ] |
 | 36 | `apps/web/src/ActivityPage.tsx` | 1 001 | [ ] |
@@ -976,7 +976,7 @@ registerEmailInboxRoutes(app, deps)  →  registerEmailAccountRoutes(app, deps) 
 | 30 | `IntegrationsPage.tsx` (1 470) | `as any: 2` | `ConnectionManager` L107–727 (11 гілок `section === "…"` L291–726) → `connection-sections/*`; `IntegrationDrawer` 728–1171; кеші 1172–1215; `ui.tsx` 63–89 |
 | 31 | `WebsiteBuilderDashboard.tsx` (1 367) | ⚠️ `c7-project-files-adapter.test.ts:138–139` вимагає `"/settings/code/"` **саме тут**; `as any: 3` | `TEMPLATES` 57–137 → `templates.ts`; `copy` (i18n en/uk) 138–266 → `copy.ts`; `apiFetch` 267–282; модалка створення → окремий компонент; ~10 сетерів форми L305–312 → один об'єкт/редюсер |
 | 32 | `CompanyPage.tsx` (1 363) | ⚠️ XSS `dangerouslySetInnerHTML` ×2 (allowlist:36–41, notice ~L843) | `OrgChart` 190–233, `RunCard` 946–1063, `KnowledgePanel` 1080–1225, `CompanyDrawer` 1226–1255, `AgentDrawer` 1256–1362, `company-tools.ts` 48–99, `company-cache.ts` 100–161 |
-| 33 | `CodeSettingsPage.tsx` (1 360) | немає (найчистіший) | `CreateProjectDrawer` 925–1081, `ProjectDetailsDrawer` 1082–1271, `CreateSessionDrawer` 1272–1360, `Drawer.tsx` 229–269, `labels.ts` 100–228, `types.ts` 15–80 |
+| 33 | `CodeSettingsPage.tsx` (1 360 → 688) ✓ | немає (найчистіший) | `CreateProjectDrawer` 925–1081, `ProjectDetailsDrawer` 1082–1271, `CreateSessionDrawer` 1272–1360, `Drawer.tsx` 229–269, `labels.ts` 100–228, `types.ts` 15–80 |
 | 34 | `AutomationsPage.tsx` (1 324) | немає | `BrowserCampaignPanel` 890–1149, `AutomationEditorDrawer` 1150–1260, `AutomationHistoryDrawer` 1261–1324, кеші 94–155; спершу `useAutomationForm()`, інакше поверхня пропсів ~25 |
 | 35 | `ChatMessageContent.tsx` (1 259) | ⚠️ **XSS: `dangerouslySetInnerHTML` ×2 + `innerHTML` ×8** (allowlist:43–55) | `cards/EditableContentCard.tsx` 776–1033 (**володіє всіма 8 `innerHTML`**), `cards/sanitize-card-html.ts` 629–775, `attachments/*` 235–438, `blocks/*` 439–628, `sources.tsx` 93–234, `text.ts` 7–92; ⚠️ `faviconUrls`/`failedFavicons` (L22–23) → **один** модуль, інакше кеш форкається |
 | 36 | `ActivityPage.tsx` (1 001) | `as any: 1` | `TraceDetail.tsx` 778–1000 (потрібні лише 3 пропси: `activeRunDetails` 139–146, `copiedId` 168, `viewMode` 154), `TaskDispatchCard.tsx` 529–639, `StatCards.tsx` 398–421, `run-cache.ts` 88–124, `types.ts` 14–81 |
