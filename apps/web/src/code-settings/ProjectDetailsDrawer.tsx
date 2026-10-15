@@ -105,34 +105,51 @@ export function ProjectDetailsDrawer({
       isUk={isUk}
       onClose={onClose}
     >
-      <form onSubmit={submit}>
+      <form
+        onSubmit={submit}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          minHeight: "calc(100% - 88px)",
+        }}
+      >
         <section>
           <h3>{isUk ? "Стан" : "State"}</h3>
           <div className="code-detail-row">
             <span>{isUk ? "Статус" : "Status"}</span>
-            <span className={`status-pill ${projectStatusClass(project.status)}`}>
+            <span className={`status-pill ${projectStatusClass(project.status)}`} style={{ textTransform: "capitalize", fontWeight: 600 }}>
               {project.status ?? "—"}
             </span>
           </div>
           <div className="code-detail-row">
             <span>{isUk ? "Тип" : "Type"}</span>
-            <code>{project.type ?? "code_project"}</code>
+            <code style={{ background: "#f8fafc", padding: "2px 8px", borderRadius: "6px", border: "1px solid #e2e8f0", color: "#334155", fontSize: "12px", fontFamily: "ui-monospace, monospace" }}>
+              {project.type ?? "code_project"}
+            </code>
           </div>
           <div className="code-detail-row">
             <span>ID</span>
-            <code>{project.id}</code>
+            <code style={{ background: "#f8fafc", padding: "2px 8px", borderRadius: "6px", border: "1px solid #e2e8f0", color: "#334155", fontSize: "12px", fontFamily: "ui-monospace, monospace" }}>
+              {project.id}
+            </code>
           </div>
           <div className="code-detail-row">
             <span>{isUk ? "Ревізія" : "Revision"}</span>
-            <code>{project.revision}</code>
+            <code style={{ background: "#f8fafc", padding: "2px 8px", borderRadius: "6px", border: "1px solid #e2e8f0", color: "#334155", fontSize: "12px", fontFamily: "ui-monospace, monospace" }}>
+              {project.revision}
+            </code>
           </div>
           <div className="code-detail-row">
             <span>{isUk ? "Оновлено" : "Updated"}</span>
-            <span className="ds-muted">{formatDate(project.updatedAt, isUk)}</span>
+            <span className="ds-muted" style={{ color: "#475569", fontSize: "12.5px" }}>
+              {formatDate(project.updatedAt, isUk)}
+            </span>
           </div>
           <div className="code-detail-row">
             <span>{isUk ? "Репозиторій" : "Repository"}</span>
-            <span className="ds-muted">{project.repositoryUrl ?? "—"}</span>
+            <span className="ds-muted" style={{ color: "#475569", fontSize: "12.5px" }}>
+              {project.repositoryUrl ?? "—"}
+            </span>
           </div>
         </section>
 
@@ -142,11 +159,15 @@ export function ProjectDetailsDrawer({
             <>
               <div className="code-detail-row">
                 <span>{isUk ? "Джерело" : "Source"}</span>
-                <span className="ds-muted">{project.toolchain.source ?? "detected"}</span>
+                <span className="ds-muted" style={{ color: "#475569", fontSize: "12.5px" }}>
+                  {project.toolchain.source ?? "detected"}
+                </span>
               </div>
               <div className="code-detail-row">
                 <span>{isUk ? "Визначено" : "Detected at"}</span>
-                <span className="ds-muted">{formatDate(project.toolchain.detectedAt, isUk)}</span>
+                <span className="ds-muted" style={{ color: "#475569", fontSize: "12.5px" }}>
+                  {formatDate(project.toolchain.detectedAt, isUk)}
+                </span>
               </div>
               <div className="code-detail-row">
                 <span>{isUk ? "Мови" : "Languages"}</span>
@@ -177,12 +198,14 @@ export function ProjectDetailsDrawer({
               {(project.toolchain.evidence ?? []).length > 0 && (
                 <div className="code-detail-row">
                   <span>{isUk ? "Ознаки" : "Evidence"}</span>
-                  <span className="ds-muted">{(project.toolchain.evidence ?? []).join(", ")}</span>
+                  <span className="ds-muted" style={{ color: "#475569", fontSize: "12.5px" }}>
+                    {(project.toolchain.evidence ?? []).join(", ")}
+                  </span>
                 </div>
               )}
             </>
           ) : (
-            <p className="ds-muted">
+            <p className="ds-muted" style={{ color: "#64748b", fontSize: "13px" }}>
               {isUk ? "Toolchain ще не визначено." : "Toolchain is not detected yet."}
             </p>
           )}
@@ -231,7 +254,7 @@ export function ProjectDetailsDrawer({
               onChange={(event) => setVerifyBuild(event.target.value)}
             />
           </label>
-          <p className="ds-muted">
+          <p className="ds-muted" style={{ fontSize: "12px", color: "var(--npati-gray-500, #64748b)", lineHeight: 1.45, margin: "2px 0 0" }}>
             {isUk
               ? "Порожнє поле означає, що команда не задана (агент не запускатиме її як перевірку)."
               : "An empty field means the command is unset (the agent will not run it as a check)."}
@@ -262,7 +285,10 @@ export function ProjectDetailsDrawer({
                 </option>
               ))}
             </select>
-            <small>
+            <small
+              className="browser-form-hint"
+              style={{ fontSize: "12px", color: "var(--npati-gray-500, #64748b)", lineHeight: 1.45, marginTop: "2px" }}
+            >
               {isUk
                 ? "Підвищувати можна; зниження відхиляється сервером."
                 : "Raising is allowed; lowering is refused by the server."}
@@ -284,13 +310,16 @@ export function ProjectDetailsDrawer({
         </section>
 
         {localError && (
-          <div className="data-studio-alert error" role="alert">
+          <div className="data-studio-alert error" role="alert" style={{ margin: "14px 26px 0" }}>
             {localError}
           </div>
         )}
 
-        <div className="browser-form-footer">
-          <div className="browser-form-footer-hint">
+        <footer>
+          <span
+            className="browser-form-footer-hint"
+            style={{ fontSize: "12.5px", color: "var(--npati-gray-500, #64748b)", fontWeight: 500, lineHeight: 1.4 }}
+          >
             {readOnly
               ? (readOnlyTitle ??
                 (isUk
@@ -299,29 +328,30 @@ export function ProjectDetailsDrawer({
               : isUk
                 ? "Зміни зберігаються з перевіркою revision."
                 : "Changes are saved with a revision check."}
-          </div>
-          <div className="code-detail-actions">
+          </span>
+          <div className="code-detail-actions" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             {project.status !== "archived" && (
               <button
                 type="button"
-                className="automation-action-btn danger"
+                className="danger-button"
                 disabled={busy || readOnly}
                 title={readOnly ? readOnlyTitle : undefined}
                 onClick={onArchive}
+                style={{ minHeight: "40px", padding: "0 16px", fontSize: "13px" }}
               >
                 {isUk ? "Архівувати" : "Archive"}
               </button>
             )}
             <button
               type="submit"
-              className="button-primary automations-action-primary browser-submit-btn"
+              className="button-primary automations-action-primary"
               disabled={saving || readOnly}
               title={readOnly ? readOnlyTitle : undefined}
             >
               {saving ? (isUk ? "Збереження…" : "Saving…") : isUk ? "Зберегти" : "Save"}
             </button>
           </div>
-        </div>
+        </footer>
       </form>
     </Drawer>
   );
