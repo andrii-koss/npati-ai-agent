@@ -22,8 +22,10 @@ import { AgentReply, ContextValidationError, defaultHybridRouter } from "@npati/
 import { ResearchProgressListener } from "@npati/web-research";
 import { AuthContext, OnboardingScenario, WorkspaceAccessError } from "@npati/workspace";
 import type { AgentAIContext } from "@npati/agent";
+import { readIntentHistory } from "./chat-project-intent";
 
 export interface ChatRouteDeps {
+  resolveProjectIntent?: import("./chat-project-intent").ChatProjectIntentResolver;
   config: AppConfig;
   log: FastifyBaseLogger;
   activeChatStreams: Map<string,{controller:AbortController;workspaceId:string;userId:string}>;
@@ -171,11 +173,17 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
       };
 
       const prompt = chatBody.message?.trim();
-      const resolved = await activeContextResolver.resolveChat(auth, requestedContext, prompt ?? "");
+      const history = !memoryPolicy.noMemoryActive
+        ? await readIntentHistory(workspaceStore, auth, request.body.conversationId, requestedContext.businessId) : [];
+      const semantic = await deps.resolveProjectIntent?.(auth, {
+        message: prompt ?? "", activeCompanyId: requestedContext.companyId, activeProjectId: requestedContext.projectId,
+        conversationHistory: history,
+      });
+      const resolved = await activeContextResolver.resolveChat(auth, requestedContext, prompt ?? "", semantic?.decision);
       const activeProjId = resolved.project?.id ?? null;
       const activeCompId = requestedContext.companyId ?? resolved.company?.id ?? resolved.project?.companyId ?? null;
 
-      const intentDecision = defaultHybridRouter.classifyProject({
+      const intentDecision = semantic?.decision ?? defaultHybridRouter.classifyProject({
         message: prompt || "",
         activeCompanyId: activeCompId,
         activeProjectId: activeProjId,

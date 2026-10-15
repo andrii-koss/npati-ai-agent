@@ -15,6 +15,7 @@ import {
 } from "./code-tool-runtime";
 import {
   canonicalizeSettledToolResult,
+  boundText,
   replayArgumentsHash,
 } from "./code-replay-bundle";
 import {
@@ -38,6 +39,7 @@ import {
   emitCodingActivity,
 } from "./coding-agent-runner-contracts";
 import type { CodingAgentReviewCoordinator } from "./coding-agent-review-coordinator";
+import { compactWriteReceipt, recordWrittenFiles } from "./code-write-receipt";
 
 export interface ToolWavesExecutionHost {
   ports: CodingAgentRunnerPorts;
@@ -324,6 +326,7 @@ export class CodingAgentToolWaves {
         ...(result.ok ? { resultTruncated: result.truncated } : { error: result.error.message, errorCode: result.error.code }),
       });
       summary.toolCalls += 1;
+      if (result.ok && call.arguments.dryRun !== true) recordWrittenFiles(summary, call.name, result.result);
       if (CHECK_TOOL_PREFIXES.some((prefix) => call.name.startsWith(prefix)) && result.ok) {
         if (!summary.checksRun.includes(call.name)) summary.checksRun.push(call.name);
       }
@@ -355,18 +358,21 @@ export class CodingAgentToolWaves {
         ...(outcome.result.ok ? {} : { error: outcome.result.error }),
         limit: limits.toolOutputChars,
       });
+      const modelText = outcome.result.ok ? boundText(compactWriteReceipt(outcome.call.name, JSON.stringify({
+        ok:true,tool:outcome.call.name,result:outcome.result.result,truncated:outcome.result.truncated === true,
+      })), limits.toolOutputChars) : text;
       replayRecorder?.recordToolCall({
         turnIndex: steps,
         toolCallId: outcome.call.id,
         tool: outcome.call.name,
         toolVersion: toolVersionByName.get(outcome.call.name) ?? null,
         argumentsHash: replayArgumentsHash(outcome.call.arguments),
-        settledResult: text,
+        settledResult: modelText,
         outcome: outcome.result.ok ? "ok" : "failed",
         ...(outcome.result.ok ? {} : { errorCode: outcome.result.error.code }),
         ...(outcome.result.ok ? { truncated: outcome.result.truncated === true } : {}),
       });
-      messages.push({ role: "tool", tool_call_id: outcome.call.id, name: outcome.call.name, content: text });
+      messages.push({ role: "tool", tool_call_id: outcome.call.id, name: outcome.call.name, content: modelText });
       if (outcome.result.ok && stateRunId && ["code.shell.exec_async", "code.shell.process.wait"].includes(outcome.call.name)) {
         const notice = await ports.completions?.admittedTool(
           ctx,

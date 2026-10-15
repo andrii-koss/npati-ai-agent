@@ -29,7 +29,7 @@ beforeEach(async () => {
 afterEach(async () => { await app.close(); await rm(root, { recursive: true, force: true }); });
 
 describe("frontend and API in one HTTP server", () => {
-  it.each(["/", "/settings/code/company/project", "/projects/company/project", "/companies/company/projects/project/data", "/unknown-page"])("serves browser navigation at %s", async (url) => {
+  it.each(["/", "/activity?runId=running-agent", "/c/active-chat", "/settings/code/company/project", "/projects/company/project", "/companies/company/projects/project/data", "/unknown-page"])("serves browser navigation at %s", async (url) => {
     const response = await app.inject({ url, headers: { accept: "text/html" } });
     expect(response.statusCode).toBe(200);
     expect(response.body).toBe(html);

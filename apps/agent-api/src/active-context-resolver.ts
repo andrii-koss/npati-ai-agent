@@ -27,9 +27,9 @@ export class ActiveContextResolver {
   constructor(private readonly store: WorkspaceStore) {}
 
   /** A new Project request must not validate or reuse the previous chat's Project. */
-  async resolveChat(auth: AuthContext, requested: Parameters<ActiveContextResolver["resolve"]>[1], message: string): Promise<ResolvedActiveContext> {
+  async resolveChat(auth: AuthContext, requested: Parameters<ActiveContextResolver["resolve"]>[1], message: string, decision?: import("@npati/shared").ProjectIntentDecision): Promise<ResolvedActiveContext> {
     const validated = validateActiveContext(requested ?? {});
-    const intent = defaultHybridRouter.classifyProject({ message, activeCompanyId: validated.companyId, activeProjectId: validated.projectId });
+    const intent = decision ?? defaultHybridRouter.classifyProject({ message, activeCompanyId: validated.companyId, activeProjectId: validated.projectId });
     if (validated.projectId && (intent.intent === "CREATE_WEBSITE" || intent.intent === "CREATE_PROJECT")) {
       return this.resolve(auth, { contextType: "company", companyId: validated.companyId });
     }

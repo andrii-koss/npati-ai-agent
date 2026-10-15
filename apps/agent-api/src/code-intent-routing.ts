@@ -168,6 +168,7 @@ function emptyClassification(reason: string): CodeIntentDecision {
  */
 export function resolveChatCodeIntent(input: {
   message: string;
+  projectIntent?: Parameters<typeof classifyCodeIntent>[0]["projectIntent"];
   codingEnabled: boolean;
   companyId?: string | null;
   projectId?: string | null;
@@ -178,6 +179,10 @@ export function resolveChatCodeIntent(input: {
   // Flag off (or unreadable) → byte-for-byte the previous chat behaviour.
   if (!input.codingEnabled) return { mode: "chat" };
   if (!input.companyId) return { mode: "chat" };
+  // A semantic CHAT decision (e.g. a question or negated request) must not be
+  // reinterpreted as execution by incidental code keywords or a session binding.
+  if (input.projectIntent === "CHAT") return { mode: "chat" };
+  if (!input.projectId && (input.projectIntent === "CREATE_WEBSITE" || input.projectIntent === "CREATE_PROJECT")) return { mode: "chat" };
   // A website/mobile project is handled by the existing project pipeline, never by the agent loop.
   if (input.projectKind && input.projectKind !== "code_project" && !input.sessionBound) return { mode: "chat" };
 
@@ -185,6 +190,7 @@ export function resolveChatCodeIntent(input: {
     message: input.message,
     activeProjectId: input.projectId ?? null,
     projectKind: input.projectId ? "code_project" : "unknown",
+    projectIntent: input.projectIntent,
   });
   if (classification.intent === "CHAT") {
     return input.sessionBound && input.projectId

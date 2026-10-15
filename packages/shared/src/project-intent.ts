@@ -58,7 +58,7 @@ export function isMobileAppRequest(message: string): boolean {
   const text = message.toLowerCase();
   if (!MOBILE_APP_REGEX.test(text)) return false;
   // "мобільний" alone may describe a responsive website; require an app/Expo signal.
-  return /(?:додаток|застосун\p{L}*|app|expo|react\s*native|android|ios)/iu.test(text);
+  return /(?:додаток|застосун\p{L}*|\bapp\b(?!\.)|\bexpo\b|react\s*native|\bandroid\b|\bios\b)/iu.test(text);
 }
 
 const EXPLANATION_REGEX = /^(?:що таке|як працює|поясни|розкажи про|різниця між|чому|what is|how does|how do|explain|tell me about|difference between|why is)\b/i;
@@ -103,7 +103,9 @@ function extractEntityName(message: string): string | undefined {
 }
 
 export function extractFramework(message: string): string | undefined {
-  const lower = message.toLowerCase();
+  // Forbidden frameworks in a specification are constraints, not selections.
+  const lower = message.toLowerCase().split(/\n|(?<=[.!?])\s+/u)
+    .filter(line => !/(?:не\s+використовуй|не\s+використовувати|без\s|do\s+not\s+use|don't\s+use|must\s+not\s+use)/iu.test(line)).join("\n");
   if (lower.includes("expo") || lower.includes("react native") || lower.includes("react-native")) return "Expo";
   if (lower.includes("next.js") || lower.includes("nextjs") || lower.includes("next")) return "Next.js";
   if (lower.includes("vite")) return "Vite";
@@ -138,6 +140,33 @@ export function classifyProjectIntent(rawInput: ProjectIntentInput | string): Pr
       isExecutableInStep5: false,
       needsClarification: false,
     });
+  }
+
+  // The opening request defines a new deliverable. QA, preview, schema and repair
+  // steps later in a long specification must not turn it into work on an existing project.
+  const opening = text.split(/\r?\n\s*\r?\n/u).slice(0, 2).join(" ")
+    .replace(/[#*`]/gu, "").replace(/[,;:]/gu, " ").replace(/\s+/gu, " ").trim();
+  const componentRequest = Boolean(input.activeProjectId) && /^(?:create|make|build|створи|зроби|додай)(?:\s+[\p{L}]+){0,2}\s+(?:form|menu|button|page|section|header|footer|component|форм\p{L}*|меню|кнопк\p{L}*|сторінк\p{L}*|секці\p{L}*|компонент\p{L}*)(?=\s|$)/iu.test(opening);
+  if (/^(?:(?:завдання|task)\s+)?(?:створи(?:ти)?|зроби|розроби|згенеруй|create|build|make|generate)\s/iu.test(opening)
+    && (CREATE_PROJECT_REGEX.test(opening) || CREATE_STORE_REGEX.test(opening))
+    && !componentRequest && !EXPLANATION_REGEX.test(opening)) {
+    const isMobileApp = isMobileAppRequest(opening);
+    const isWebsite = !isMobileApp && /сайт|лендінг|магазин|website|web\s*site|landing|store|shop/iu.test(opening);
+    // A page/component inside an existing project remains an edit.
+    if (isWebsite || isMobileApp || /про[єе]кт|\bproject\b/iu.test(opening)) {
+      return buildDecision({
+        intent: isWebsite ? "CREATE_WEBSITE" : "CREATE_PROJECT",
+        confidence: 0.96,
+        isExecutableInStep5: true,
+        needsClarification: false,
+        targetDetails: {
+          topic: text,
+          framework: isMobileApp ? "Expo" : extractFramework(text),
+          entityName: extractEntityName(text),
+          projectType: isMobileApp ? "mobile_app" : "website",
+        },
+      });
+    }
   }
 
   // 2. Connect repository

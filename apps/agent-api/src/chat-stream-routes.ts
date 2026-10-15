@@ -38,8 +38,10 @@ import { ResearchProgressEvent, ResearchProgressListener } from "@npati/web-rese
 import { AuthContext, CodeSession, WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
 import type { CodeRunCancellationRegistry } from "./code-run-cancellation";
 import type { CodeSessionRunExecutor } from "./code-session-run-executor";
+import { readIntentHistory } from "./chat-project-intent";
 
 export interface ChatStreamRouteDeps {
+  resolveProjectIntent?: import("./chat-project-intent").ChatProjectIntentResolver;
   config: AppConfig;
   log: FastifyBaseLogger;
   activeChatStreams: Map<string,{controller:AbortController;workspaceId:string;userId:string}>;
@@ -116,11 +118,17 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         projectId: request.body.projectId ?? null,
       };
 
-      const resolved = await activeContextResolver.resolveChat(auth, requestedContext, message);
+      const history = !memoryPolicy.noMemoryActive
+        ? await readIntentHistory(workspaceStore, auth, request.body.conversationId, requestedContext.businessId) : [];
+      const semantic = await deps.resolveProjectIntent?.(auth, {
+        message, activeCompanyId: requestedContext.companyId, activeProjectId: requestedContext.projectId,
+        conversationHistory: history,
+      });
+      const resolved = await activeContextResolver.resolveChat(auth, requestedContext, message, semantic?.decision);
 
       let activeProjectId = resolved.project?.id ?? null;
       let activeCompanyId = request.body.companyId ?? resolved.company?.id ?? resolved.project?.companyId ?? null;
-      const projectIntent = defaultHybridRouter.classifyProject({
+      const projectIntent = semantic?.decision ?? defaultHybridRouter.classifyProject({
         message,
         activeCompanyId,
         activeProjectId,
@@ -152,7 +160,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         }
         if (creatingChatWebsite && !projectIntent.needsClarification && !projectIntent.unsupportedIntentMessage) {
           let project = await codeService.createProject(auth, activeCompanyId,
-            { name: extractCleanProjectName(message, projectIntent.targetDetails?.entityName), description: message },
+            { name: extractCleanProjectName(message, projectIntent.targetDetails?.entityName), description: message.slice(0, 5000) },
             `chat-website:${auth.userId}:${request.headers["idempotency-key"] ?? streamId ?? crypto.randomUUID()}`);
           const framework = projectIntent.targetDetails?.framework === "HTML/CSS" ? "HTML/CSS" : "Next.js";
           project = await projectOrchestrator.prepareCodingWebsite(auth, project, message, framework);
@@ -262,6 +270,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         const codeProjectKind = codeProject ? ((codeProject as { type?: string }).type === "code_project" ? "code_project" : "website") : null;
         const codeDecision = resolveChatCodeIntent({
           message,
+          projectIntent: semantic?.source === "semantic" ? projectIntent.intent : undefined,
           codingEnabled,
           companyId: activeCompanyId,
           projectId: codeProject ? effectiveProjectId : null,

@@ -10,6 +10,14 @@ function fail(reply: FastifyReply, error: unknown) {
 export function registerChatDevelopmentRoutes(app: FastifyInstance, deps: DevelopmentPorts & { auth: AuthProvider }) {
   const service = new ChatDevelopmentService(deps);
   const streams = new Set<() => void>();
+  app.post<{ Body: { message: string; companyId?: string; projectId?: string; conversationId?: string; businessId?: string } }>("/chat/development/plan",
+    { schema: { body: { type: "object", additionalProperties: false, required: ["message"], properties: {
+      message: { type: "string", minLength: 1, maxLength: 32000 }, companyId: { type: "string", minLength: 1, maxLength: 200 },
+      projectId: { type: "string", minLength: 1, maxLength: 200 }, conversationId: { type: "string", minLength: 1, maxLength: 200 },
+      businessId: { type: "string", minLength: 1, maxLength: 200 },
+    } } } }, async (request, reply) => {
+      try { return { targets: await service.plan(await deps.auth.authenticate(request), request.body) }; } catch (error) { return fail(reply, error); }
+    });
   app.addHook("preClose", async () => { for (const close of streams) close(); await service.close(); });
   // Transport only: snapshots use the existing persisted runtime records.
   app.get("/chat/development/processes/stream", async (request, reply) => {
@@ -28,11 +36,12 @@ export function registerChatDevelopmentRoutes(app: FastifyInstance, deps: Develo
       };
       const poll = async () => {
         if (closed) return;
+        if (reply.raw.writableNeedDrain) { timer = setTimeout(poll, 3000); return; }
         try { const processes = await service.list(ctx); if (!closed) publish(processes); }
         catch { close(); return; }
-        if (!closed) timer = setTimeout(poll, 1000);
+        if (!closed) timer = setTimeout(poll, 3000);
       };
-      publish(initial); timer = setTimeout(poll, 1000);
+      publish(initial); timer = setTimeout(poll, 3000);
     } catch (error) { return fail(reply, error); }
   });
   app.get("/chat/development/processes", async (request, reply) => {

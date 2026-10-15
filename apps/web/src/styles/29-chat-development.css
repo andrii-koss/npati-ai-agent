@@ -478,6 +478,9 @@
 .coding-run-header { min-height: 32px; padding: 4px 8px; font-size: 14px; line-height: 24px; }
 .coding-run-header .codex-trace-chevron-btn { margin-left: auto; }
 .coding-run-history { padding: 2px 0 4px 18px; }
+.coding-changed-files { list-style: none; padding: 2px 12px 6px 36px; margin: 0; font-size: 12px; color: var(--text-primary, #444); }
+.coding-changed-files li { display: flex; align-items: baseline; gap: 5px; padding: 2px 0; }
+.coding-changed-files code { overflow-wrap: anywhere; min-width: 0; }
 .message-stream article.coding-operation-history { padding: 0; margin: 0; border: 0; min-height: 0; }
 .coding-operation-history .codex-trace-row { margin: 0; padding: 0; }
 .coding-operation-history .codex-trace-row-header { min-height: 30px; padding: 3px 8px; }

@@ -19,7 +19,9 @@ const toolCall = (id: string, name: string, args: Record<string, unknown>): Chat
 function engine(chat: AIEngine["chat"]): AIEngine {
   return {
     supportsNativeTools: () => true,
-    chat,
+    chat: request => request.messages[0]?.content.startsWith("Classify the user's primary intent")
+      ? Promise.resolve({ content: JSON.stringify({ intent: "CHAT", confidence: 1, targets: [] }) })
+      : chat(request),
     async *stream() { throw new Error("Native tool selection must use the server-side loop"); },
     listModels: async () => [],
     getModel: async () => undefined,

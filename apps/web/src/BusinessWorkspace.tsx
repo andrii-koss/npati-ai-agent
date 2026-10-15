@@ -72,7 +72,7 @@ function isWebsiteAnalysisRequest(message: string) {
 
 
 export function BusinessChatPage({ initialPrompt = "", initialConversationId, neutralChat = false, companyId }: { initialPrompt?: string; initialConversationId?: string; neutralChat?: boolean; companyId?: string }) {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const { overview } = useWorkspace(); const business = neutralChat || companyId ? null : overview?.currentBusiness;
   const contextSwitcher = useContext(ChatContextSwitcherContext);
   const navigate = useNavigate();
@@ -665,7 +665,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
                   aria-label={message.role === "user" ? "Your message" : "NPATI Agent message"}
                 >
                   <PendingMessageAttachments value={message.attachments ?? []} />
-                  {message.role === "user" ? <UserPromptMessage content={message.content} onEdit={(prompt) => { setInput(prompt); window.requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".onboarding-live-composer textarea")?.focus()); }} /> : <ChatMessageContent content={projectChatText(message.content, message.projectCard)} />}
+                  {message.role === "user" ? <UserPromptMessage content={message.content} onEdit={(prompt) => { setInput(prompt); window.requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".onboarding-live-composer textarea")?.focus()); }} /> : <ChatMessageContent content={projectChatText(message.content, message.projectCard,development.project?.responseLanguage ?? language)} />}
                   {development.card(displayMessages, index) && <ProjectChatCard card={development.card(messages, index)!} onActivate={(card) => { setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected }); }} />}
                   {message.role === "assistant" && !sending && (
                     <AssistantMessageToolbar

@@ -1,6 +1,7 @@
 import type { ServiceHealth } from "@npati/shared";
 import { isChatCapableModel } from "./normalization";
 import { providerToolNames } from "./provider-tool-names";
+import { retainProviderContinuation } from "./provider-continuation";
 import type { A2AMessageRequest, A2AMessageResult, AIEngine, AudioTranscriptionInput, AudioTranscriptionResult, ChatContentPart, ChatMessage, ChatToolCall, EmbeddingInput, EmbeddingResult, ModerationInput, ModerationResult, RerankInput, RerankResult, ChatRequest, ChatResult, MCPToolCallRequest, ModelInfo, OmniRouteComboInput, OmniRouteConfig, OmniRouteResilienceSnapshot, SpeechAudioFormat, SpeechSynthesisInput, SpeechSynthesisResult, WebFetchInput, WebPageResult, WebSearchInput, WebSearchResponse } from "./types";
 
 import {
@@ -118,12 +119,12 @@ export class OmniRouteEngine implements AIEngine {
         provider?: string;
         usage?: Record<string, unknown>;
         usageMetadata?: Record<string, unknown>;
-        choices?: Array<{ finish_reason?: string; message?: { content?: string | null; tool_calls?: ChatToolCall[] } }>;
+        choices?: Array<{ finish_reason?: string; message?: { content?: string | null; tool_calls?: ChatToolCall[]; reasoning_content?: string; reasoning_text?: string } }>;
         output_text?: string;
         output?: Array<Record<string, any>>;
       };
       const toolCalls = wire.decode(useResponses ? responseToolCalls(payload) : payload.choices?.[0]?.message?.tool_calls ?? []);
-      return {
+      return retainProviderContinuation({
         content: useResponses ? responsesText(payload) : payload.choices?.[0]?.message?.content ?? "",
         ...(toolCalls.length ? { toolCalls } : {}),
         finishReason: useResponses ? (toolCalls.length ? "tool_calls" : "stop") : payload.choices?.[0]?.finish_reason,
@@ -140,7 +141,7 @@ export class OmniRouteEngine implements AIEngine {
           cacheSavingsUsd: numericHeader(response.headers, "x-omniroute-cache-savings-usd", "x-cache-savings-usd"),
           failoverCount: numericHeader(response.headers, "x-omniroute-failover-count", "x-failover-count") ?? index,
         },
-      };
+      }, useResponses ? undefined : payload.choices?.[0]?.message);
     }
     throw new Error(lastError);
   }

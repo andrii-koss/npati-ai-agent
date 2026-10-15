@@ -1,4 +1,5 @@
 import { emitCodingActivity } from "./coding-agent-runner-contracts";
+import { providerContinuationFor } from "@npati/omniroute-adapter";
 import type {
   ChatMessage,
   ChatResult,
@@ -422,7 +423,7 @@ export class CodingAgentRunner {
       if (this.ports.quota) {
         const requestTokens = resolveModelRequestPressure({
           systemPrompt, toolSchemas: JSON.stringify(definitions),
-          messages: messages.slice(1).map((m) => ({ role: m.role, content: chatContentText(m.content) + (m.tool_calls ? JSON.stringify(m.tool_calls) : "") })),
+          messages: messages.slice(1).map((m) => ({ role: m.role, content: chatContentText(m.content) + (m.tool_calls ? JSON.stringify(m.tool_calls) : "") + (m.reasoning_content ?? "") + (m.reasoning_text ?? "") })),
           contextWindow: profile.contextWindow, compressionRatio: this.limits.contextCompressionRatio,
         }).currentTokens;
         const verdict = this.ports.quota.checkQuota(input.quotaSessionId ?? sessionId, requestTokens + this.estimatedTokensPerCall, this.estimatedCostPerCallUsd, delegationDepth, { userId: ctx.userId, companyId });
@@ -435,6 +436,11 @@ export class CodingAgentRunner {
 
       let result: ChatResult;
       let modelStarted = this.now();
+      const thinking = {
+        id: `${stateRunId ?? input.runId}:thinking:${steps + 1}`, runId: stateRunId ?? input.runId,
+        stage: "planning", title: "Preparing the next implementation step", at: new Date(modelStarted).toISOString(),
+      };
+      await emitCodingActivity(input, { ...thinking, status: "running" });
       try {
         modelStarted = this.now();
         result = await this.ports.engine.chat({
@@ -448,6 +454,7 @@ export class CodingAgentRunner {
           policyContext: { companyId, projectId, sessionId, dataClassification: session.dataClassification },
         });
       } catch (error) {
+        await emitCodingActivity(input, { ...thinking, status: input.signal?.aborted ? "cancelled" : "failed", durationMs: this.now() - modelStarted });
         if (input.detachedChildInbox && (input.signal?.reason as { code?: string } | undefined)?.code === "subagent_interrupt") {
           return stop("interrupted", "interrupted", "The child was interrupted during its model request and can be continued.");
         }
@@ -462,6 +469,7 @@ export class CodingAgentRunner {
       }
 
       steps += 1;
+      await emitCodingActivity(input, { ...thinking, status: "completed", durationMs: this.now() - modelStarted });
       summary.turns = steps;
       model = result.model ?? model;
       provider = result.telemetry?.provider ?? provider;
@@ -572,7 +580,7 @@ export class CodingAgentRunner {
 
       await openTurn();
 
-      const assistantMessage: ChatMessage = { role: "assistant", content: assistantText };
+      const assistantMessage: ChatMessage = { ...providerContinuationFor(result), role: "assistant", content: assistantText };
       if (normalized.calls.length) assistantMessage.tool_calls = normalized.calls.map(toChatToolCall);
       messages.push(assistantMessage);
 

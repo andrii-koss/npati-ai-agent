@@ -26,7 +26,9 @@ export async function watchDevelopmentTrace(signal: AbortSignal, onChange: (proc
               } catch { /* Older/malformed hints recover through the existing GET. */ }
               onChange(processes); }
           }
-          if (buffer.length > 64_000) throw new Error("Invalid trace frame");
+          // A real file diff can span many network chunks. The old 64 KB limit
+          // disconnected before the frame completed and froze the last visible step.
+          if (buffer.length > 8 * 1024 * 1024) throw new Error("Invalid trace frame");
         }
       } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
     } catch { if (signal.aborted) return; }

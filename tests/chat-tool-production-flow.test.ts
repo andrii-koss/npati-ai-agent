@@ -31,6 +31,9 @@ function productionPathEngine(requests: ChatRequest[]): AIEngine {
   return {
     supportsNativeTools: () => true,
     chat: async (request) => {
+      if (request.messages[0]?.content.startsWith("Classify the user's primary intent")) {
+        return { content: JSON.stringify({ intent: "CHAT", confidence: 1, targets: [] }) };
+      }
       requests.push(request);
       const last = request.messages.at(-1);
       const user = latestUser(request);
@@ -260,6 +263,9 @@ describe("production chat endpoint tool execution", () => {
     const webResearch = researchService();
     const ai = productionPathEngine(requests);
     ai.chat = async (request) => {
+      if (request.messages[0]?.content.startsWith("Classify the user's primary intent")) {
+        return { content: JSON.stringify({ intent: "CHAT", confidence: 1, targets: [] }) };
+      }
       requests.push(request);
       if (request.messages.at(-1)?.role === "tool") return { content: "A pesquisa foi concluída com fontes externas verificadas." };
       return { content: "", toolCalls: [call("pt-search", "web_search", { query: "concorrentes atuais de automação em Portugal" })] };

@@ -2,6 +2,8 @@ import type { ChatMessage, ChatToolDefinition } from "@npati/omniroute-adapter";
 import type { CodeSession } from "@npati/workspace";
 import type { CodeAgentLimits } from "./code-agent-config";
 import type { CodeModelProfile } from "./code-model-profiles";
+import { compactWrittenArguments } from "./code-write-receipt";
+import { createHash } from "node:crypto";
 import { resolveModelRequestPressure, type ModelRequestPressure } from "./code-context-budget";
 import {
   COMPACTION_SCHEMA_VERSION,
@@ -67,7 +69,7 @@ export async function compactConversationContextIfNeeded(args: CompactContextArg
     toolSchemas: JSON.stringify(definitions),
     messages: messages.slice(1).map((message) => ({
       role: message.role,
-      content: chatContentText(message.content) + (message.tool_calls ? JSON.stringify(message.tool_calls) : ""),
+      content: chatContentText(message.content) + (message.tool_calls ? JSON.stringify(message.tool_calls) : "") + (message.reasoning_content ?? "") + (message.reasoning_text ?? ""),
     })),
     contextWindow: profile.contextWindow,
     compressionRatio: Math.min(limits.contextCompressionRatio, (limits.modelInputTokens ?? 16_384) / profile.contextWindow),
@@ -108,12 +110,16 @@ export async function compactConversationContextIfNeeded(args: CompactContextArg
         assertNoLeaseValuesInSummary(summaryText, values ?? []);
       }
 
-      const rebuilt: ChatMessage[] = compaction.messages.map((message, index) => ({
+      const contentCompacted: ChatMessage[] = compaction.messages.map((message, index) => ({
         ...messages[index]!,
         content: message.content,
       }));
+      // Tool-output stubs alone do not remove the code in assistant.tool_calls.
+      // Run against the original successful receipts, before replacing any output.
+      const argumentCompaction = compactWrittenArguments(contentCompacted, messages);
+      const rebuilt = argumentCompaction.messages;
 
-      if (rebuilt.length === messages.length && compaction.stubbed > 0) {
+      if (compaction.stubbed > 0 || argumentCompaction.references.length > 0) {
         messages.length = 0;
         messages.push(...rebuilt);
 
@@ -124,7 +130,10 @@ export async function compactConversationContextIfNeeded(args: CompactContextArg
         else messages.splice(2, 0, { role: "system", content: summaryText });
 
         compacted = true;
-        compressionArtifacts.push(compaction.artifact as unknown as Record<string, unknown>);
+        compressionArtifacts.push({ ...compaction.artifact,
+          ...(argumentCompaction.references.length ? {prunedToolArguments:argumentCompaction.references,
+            modelRequestHash:"sha256:"+createHash("sha256").update(JSON.stringify(messages)).digest("hex")} : {}),
+        } as unknown as Record<string, unknown>);
 
         await record({
           kind: "turn",

@@ -45,6 +45,7 @@ import { registerMiscRoutes } from "./misc-routes";
 import { registerChatRoutes } from "./chat-routes";
 import { registerChatDevelopmentRoutes } from "./chat-development-routes";
 import { registerChatStreamRoutes } from "./chat-stream-routes";
+import { createChatProjectIntentResolver } from "./chat-project-intent";
 
 export interface AppRoutesAndLifecycleDeps {
   app: FastifyInstance;
@@ -265,7 +266,9 @@ export function registerAppRoutesAndLifecycle(deps: AppRoutesAndLifecycleDeps) {
     workspaceStore,
   });
 
+  const resolveProjectIntent = createChatProjectIntentResolver({ engine: aiEngine, getAIContext, log });
   registerChatRoutes(app, {
+    resolveProjectIntent,
     config,
     log,
     activeChatStreams,
@@ -284,6 +287,7 @@ export function registerAppRoutesAndLifecycle(deps: AppRoutesAndLifecycleDeps) {
   });
 
   const chatDevelopment = registerChatDevelopmentRoutes(app, {
+    resolveProjectIntent,
     auth: authProvider,
     store: workspaceStore,
     code: codeService,
@@ -302,6 +306,7 @@ export function registerAppRoutesAndLifecycle(deps: AppRoutesAndLifecycleDeps) {
   });
 
   registerChatStreamRoutes(app, {
+    resolveProjectIntent,
     chatDevelopment,
     config,
     log,

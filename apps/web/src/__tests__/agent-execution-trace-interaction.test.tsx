@@ -12,6 +12,18 @@ async function mount() {
   return host;
 }
 describe("execution row interaction", () => {
+  it("shows the edited file and factual change counts without expanding the history", async () => {
+    const host = await mount();
+    const items = [{id:"edit",stage:"tool",title:"code.fs.write",tool:"code.fs.write",file:"assets/js/app.js",linesAdded:120,linesRemoved:8,diff:"large private diff",at:new Date().toISOString(),status:"completed" as const},
+      {id:"thinking",stage:"planning",title:"Waiting for model",at:new Date().toISOString(),status:"running" as const}];
+    await act(async()=>root!.render(<AgentExecutionTrace items={items} run={{id:"run",runId:"run",at:"",items,status:"running"}} />));
+    expect(host.querySelector(".coding-changed-files")?.textContent).toContain("assets/js/app.js");
+    expect(host.querySelector(".coding-changed-files")?.textContent).toContain("+120");
+    expect(host.querySelector(".coding-changed-files")?.textContent).toContain("-8");
+    expect(host.querySelector(".coding-run-header")?.textContent).not.toContain("Editing files");
+    expect(host.querySelector(".codex-log-pre")).toBeNull();
+    expect(host.querySelector(".codex-trace-duration-tag")).not.toBeNull();
+  });
   it("keeps expansion and DOM identity across live completion, failed parallel operations and malformed payloads", async () => {
     const host=await mount();const header=host.querySelector<HTMLButtonElement>(".codex-trace-row-header")!;
     await act(async()=>header.click());
