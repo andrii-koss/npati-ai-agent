@@ -885,8 +885,8 @@ registerEmailInboxRoutes(app, deps)  →  registerEmailAccountRoutes(app, deps) 
 | 26 | `apps/web/src/DataStudioPage.tsx` | 1 976 | [x] (скорочено до 704 рядків) |
 | 27 | `apps/web/src/DataStudioSettingsPage.tsx` | 1 939 → **706** | [x] (скорочено до 706 рядків, винесено data-studio-settings/) |
 | 28 | `apps/web/src/App.tsx` | 1 550 → **626** | [x] (скорочено до 626 рядків, винесено shell/) |
-| 29 | `apps/web/src/ProjectPage.tsx` | 1 475 | [ ] |
-| 30 | `apps/web/src/IntegrationsPage.tsx` | 1 470 | [ ] |
+| 29 | `apps/web/src/ProjectPage.tsx` | 1 475 → **690** | [x] (скорочено до 690 рядків, винесено project-page/) |
+| 30 | `apps/web/src/IntegrationsPage.tsx` | 1 470 → **269** | [x] (скорочено до 269 рядків, винесено integrations/) |
 | 31 | `apps/web/src/WebsiteBuilderDashboard.tsx` | 1 367 | [ ] |
 | 32 | `apps/web/src/CompanyPage.tsx` | 1 363 | [ ] |
 | 33 | `apps/web/src/CodeSettingsPage.tsx` | 1 360 → 688 | [x] |
@@ -972,8 +972,8 @@ registerEmailInboxRoutes(app, deps)  →  registerEmailAccountRoutes(app, deps) 
 
 | Крок | Файл | Guard | Шов |
 |---|---|---|---|
-| 29 | `ProjectPage.tsx` (1 475) | ⚠️ XSS `attr:template-src` ×1 (QA-скриншот, allowlist:76–81); `c7-project-files-adapter.test.ts:132–136` вимагає `./project-files-client` **саме в цьому файлі** і забороняє file-URL патерн | типи 8–88, api 90–122, шапка 611–694, 3 колонки 732–932, дровер 933–1475 → `drawer/{ChangesTab,TerminalTab,CheckpointsTab,DeploymentsTab,QaTab,LogsTab,ActivityTab}.tsx` (1005–1475) + `panels/*` |
-| 30 | `IntegrationsPage.tsx` (1 470) | `as any: 2` | `ConnectionManager` L107–727 (11 гілок `section === "…"` L291–726) → `connection-sections/*`; `IntegrationDrawer` 728–1171; кеші 1172–1215; `ui.tsx` 63–89 |
+| 29 | `ProjectPage.tsx` (1 475 → 690) ✓ | ⚠️ XSS `attr:template-src` ×1 (перенесено на `project-page/drawer/QaTab.tsx`); `c7-project-files-adapter.test.ts` пройдено | типи, api, 3 колонки (`panels/*`), дровер (`drawer/*`) винесено у `project-page/` |
+| 30 | `IntegrationsPage.tsx` (1 470 → 269) ✓ | `as any: 2 → 0` | `ConnectionManager` L107–727 → `sections/*` + `ConnectionManager.tsx`; `IntegrationDrawer` 728–1171 → `ConnectForms.tsx` + `IntegrationDrawer.tsx`; кеші `cache.ts`; `types.ts`, `ui.tsx` |
 | 31 | `WebsiteBuilderDashboard.tsx` (1 367) | ⚠️ `c7-project-files-adapter.test.ts:138–139` вимагає `"/settings/code/"` **саме тут**; `as any: 3` | `TEMPLATES` 57–137 → `templates.ts`; `copy` (i18n en/uk) 138–266 → `copy.ts`; `apiFetch` 267–282; модалка створення → окремий компонент; ~10 сетерів форми L305–312 → один об'єкт/редюсер |
 | 32 | `CompanyPage.tsx` (1 363) | ⚠️ XSS `dangerouslySetInnerHTML` ×2 (allowlist:36–41, notice ~L843) | `OrgChart` 190–233, `RunCard` 946–1063, `KnowledgePanel` 1080–1225, `CompanyDrawer` 1226–1255, `AgentDrawer` 1256–1362, `company-tools.ts` 48–99, `company-cache.ts` 100–161 |
 | 33 | `CodeSettingsPage.tsx` (1 360 → 688) ✓ | немає (найчистіший) | `CreateProjectDrawer` 925–1081, `ProjectDetailsDrawer` 1082–1271, `CreateSessionDrawer` 1272–1360, `Drawer.tsx` 229–269, `labels.ts` 100–228, `types.ts` 15–80 |

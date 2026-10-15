@@ -73,7 +73,7 @@ export const ALLOWLIST = [
       "icon URL whose only interpolation is encodeURIComponent(providerId) inside a literal /api/ai/providers/… path — the host and scheme are literals.",
   },
   {
-    file: "apps/web/src/ProjectPage.tsx",
+    file: "apps/web/src/project-page/drawer/QaTab.tsx",
     pattern: "attr:template-src",
     occurrences: 1,
     reason:
