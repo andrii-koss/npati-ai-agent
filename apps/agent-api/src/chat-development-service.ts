@@ -18,6 +18,7 @@ import { saveChatProjectCard } from "./project-chat-cards";
 
 import { developmentTrace, sanitizeProgress, selectDevelopmentTraceRuns, executionTimestamp, executionResultDetails } from "./chat-development-trace";
 import type { ProjectTerminalEventsRepository } from "./project-terminal-events";
+import { readIntentHistory } from "./chat-project-intent";
 
 const key = DEVELOPMENT_PROCESS_SETTINGS_KEY;
 type Entry = DevelopmentProcess & { requestId: string; businessId?: string; cardMessageId?: string; resultMessageId?: string };
@@ -25,6 +26,7 @@ export class DevelopmentError extends Error {
   constructor(message: string, readonly status = 400) { super(message); }
 }
 export type DevelopmentPorts = {
+  resolveProjectIntent?: import("./chat-project-intent").ChatProjectIntentResolver;
   store: WorkspaceStore; code: CodeService; flags: FeatureFlagService; projects: ProjectService;
   preparer: Pick<ProjectOrchestrator, "prepareCodingWebsite" | "prepareCodingMobile">;
   executor: Pick<CodeSessionRunExecutor, "execute">; admission: CodeRunAdmission; background: CodeBackgroundRunRegistry;
@@ -38,6 +40,7 @@ export class ChatDevelopmentService {
   private starts = new Map<string, Promise<unknown>>();
   private updates = new Map<string, Promise<unknown>>();
   private closing = false;
+  private readonly projections = new Map<string, Promise<DevelopmentProcess[]>>();
   constructor(private readonly d: DevelopmentPorts) { }
   private owner(ctx: AuthContext) { return ctx.workspaceId + ":" + ctx.userId; }
   private jobKey(ctx: AuthContext, id: string) { return this.owner(ctx) + ":" + id; }
@@ -71,6 +74,15 @@ export class ChatDevelopmentService {
     await this.change(ctx, items => items.map(item => item.id === id ? { ...item, ...patch, updatedAt: new Date().toISOString() } : item));
   }
   async list(ctx: AuthContext): Promise<DevelopmentProcess[]> {
+    const key = this.owner(ctx);
+    const pending = this.projections.get(key);
+    if (pending) return pending;
+    const task = this.listOwned(ctx);
+    this.projections.set(key, task);
+    try { return await task; }
+    finally { if (this.projections.get(key) === task) this.projections.delete(key); }
+  }
+  private async listOwned(ctx: AuthContext): Promise<DevelopmentProcess[]> {
     const items = await this.entries(ctx);
     const companyIds = [...new Set(items.map(p => p.companyId))];
     const accessible = new Set((await Promise.all(companyIds.map(async companyId => {
@@ -146,6 +158,15 @@ export class ChatDevelopmentService {
   async start(ctx: AuthContext, input: { companyId: string; message: string; conversationId?: string; businessId?: string; requestId: string }) {
     return this.serialize(ctx, () => this.startOwned(ctx, input));
   }
+  async plan(ctx: AuthContext, input: { message: string; projectId?: string; companyId?: string; conversationId?: string; businessId?: string }) {
+    if (input.projectId && !input.companyId) throw new DevelopmentError("Company is required for project context");
+    if (input.companyId) await this.d.store.getCompany(ctx, input.companyId);
+    if (input.projectId) await this.d.projects.get(ctx, input.companyId!, input.projectId);
+    const history = await readIntentHistory(this.d.store, ctx, input.conversationId, input.businessId);
+    if (!this.d.resolveProjectIntent) return planChatDevelopment(input.message, input.projectId);
+    return (await this.d.resolveProjectIntent(ctx, { message: input.message, activeProjectId: input.projectId,
+      activeCompanyId: input.companyId, conversationHistory: history })).targets;
+  }
   private async startOwned(ctx: AuthContext, input: { companyId: string; message: string; conversationId?: string; businessId?: string; requestId: string }) {
     if (!ctx.permissions.some(p => ["*", "owner", "admin:all", "business:manage", "workspace:write"].includes(p))) throw new DevelopmentError("Coding Agent write permission denied", 403);
     await this.d.store.getCompany(ctx, input.companyId);
@@ -156,7 +177,7 @@ export class ChatDevelopmentService {
     const existing = await this.entries(ctx);
     const duplicate = existing.filter(p => p.requestId === input.requestId);
     if (duplicate.length) return { conversationId: duplicate[0]!.parentConversationId, processes: duplicate };
-    const targets = planChatDevelopment(input.message);
+    const targets = await this.plan(ctx, input);
     if (!targets.length) throw new DevelopmentError("Describe a website, blog, shop, mobile app or CRM to create.");
     const currentViews = new Map((await this.list(ctx)).map(p => [p.id, p]));
     if ([...currentViews.values()].filter(developmentIsActive).length + targets.length > 4) throw new DevelopmentError("Four development processes are already active. Stop or wait for a process before starting another.", 409);
@@ -305,7 +326,7 @@ export class ChatDevelopmentService {
       const outcome = await this.d.executor.execute({
         ctx, session, runId: process.runId,
         onActivity: event => this.recordActivity(ctx, process.companyId, session!.id, process.conversationId, { ...event, language: process.responseLanguage }),
-        prompt: "User request: " + message + "\nYour assigned project is " + target.name + " (" + target.kind + "). Implement ONLY this project, not the other requested projects. The existing template has already been prepared by the system. Make a focused first implementation: read package.json and " + (target.kind === "mobile_app" ? "App.tsx" : target.framework === "HTML/CSS" ? "index.html" : "app/page.tsx") + ", edit the visible page and its styles immediately, then finish. Do not explore unrelated modules or delegate this initial page task. Use the configured runtime budget, reserving time for verification and repairs. Batch independent file reads. Read only files needed for this request; do not survey the whole template. Preserve the attached database/auth SDK. Do not re-scaffold or run create-next-app. Template dependencies are already installed by the system. Only when adding a new package, use the available code.deps.add tool. Do not start a dev server. Finish implementation; the system will verify the production build and start Live Preview." + chatLanguageInstruction(message, [], process.responseLanguage as import("./company-chat-i18n").CompanyChatLanguage) + codingChatResponseInstruction(),
+        prompt: "User request: " + message + "\nYour assigned project is " + target.name + " (" + target.kind + "). Implement ONLY this project's complete user specification, including every requested page and working interaction. Other independent requested projects have their own workspaces. The existing template has already been prepared by the system. Start with " + (target.kind === "mobile_app" ? "App.tsx" : target.framework === "HTML/CSS" ? "index.html" : "package.json and app/page.tsx") + ", then create all required files. Do not stop after the homepage or an initial visual implementation. Keep a checklist of the requested deliverables and verify them before declaring completion. Use the configured runtime budget, reserving time for verification and repairs. Batch independent file reads and related file changes; avoid reading back full files you just wrote. Read only files needed for this request. Preserve the attached database/auth SDK. Do not re-scaffold or run create-next-app. Template dependencies are already installed by the system. Only when adding a new package, use the available code.deps.add tool. Do not start a dev server. The system starts Live Preview after successful implementation and verification. If a limit prevents completion, state which deliverables remain; never claim the site is complete." + chatLanguageInstruction(message, [], process.responseLanguage as import("./company-chat-i18n").CompanyChatLanguage) + codingChatResponseInstruction(),
         cancelRequested: () => controller.signal.aborted,
         abort: () => this.d.background.abort(process.runId!, "Stopped by request"),
         sink: { signal: sink.signal, emitResult: result => sink!.emit("result", result), emitTerminal: (status, reason) => sink!.finish(status, reason) },

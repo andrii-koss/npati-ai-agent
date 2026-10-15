@@ -13,10 +13,13 @@ import {
 } from "./chat-message-sources";
 import { AudioAttachmentPlayer, SynthesizedVoiceAudioPlayer } from "./chat-message-audio";
 import { RenderedCodeBlock, RenderedTableBlock } from "./chat-message-code-table";
+import { codingStopCopy } from "./coding-stop-copy";
 
 export { collectSourceTitles, isSourceCitationLine, toTrackedChatUrl };
 
-export function projectChatText(content: string, card?: ProjectCardData): string {
+export function projectChatText(content: string, card?: ProjectCardData, language?: string): string {
+  const stop = codingStopCopy(content,language);
+  if (stop !== content) return stop;
   if (card?.kind !== "code_project" && card?.status === "previewing" && (card.buildStatus ?? card.lastBuildStatus) === "success" && content.length > 300) {
     return `Проєкт «${card.name}» готовий. Build успішний, Live Preview працює.`;
   }

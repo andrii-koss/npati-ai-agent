@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatResult } from "@npati/omniroute-adapter";
+import { retainProviderContinuation } from "@npati/omniroute-adapter";
 import type { AuthContext, CodeSession } from "@npati/workspace";
 import type { CodeAgentLimits } from "../apps/agent-api/src/code-agent-config";
 import type { CodeToolInvokeFailure, CodeToolInvokeResult } from "../apps/agent-api/src/code-tool-runtime";
@@ -269,6 +270,13 @@ it("observes real tool start/result and public commentary without changing execu
   expect((await failing.run({onActivity:async()=>{throw new Error("UI unavailable");}})).status).toBe("completed");
 });
 describe("security-gate: C6 runner — tool execution and the model contract", () => {
+  it("passes opaque provider continuation with the next assistant tool turn", async () => {
+    const harness=createHarness({script:[retainProviderContinuation({content:"Reading",toolCalls:[nativeCall("code.fs.read",{path:"index.html"})]},{reasoning_content:"opaque-test-continuation"}),{content:"Done"}]});
+    const result=await harness.run();
+    expect(result.status).toBe("completed");
+    expect(harness.engineCalls[1]!.messages.find(message=>message.role==="assistant")?.reasoning_content).toBe("opaque-test-continuation");
+    expect(JSON.stringify(harness.activity)).not.toContain("opaque-test-continuation");
+  });
   it("runs the canonical build for an explicit website build task even without source changes", async () => {
     const harness = createHarness({ script: [{ content: "Build the existing site." }] });
     const result = await harness.run({ verificationTools: ["build"], forceVerification: true });

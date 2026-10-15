@@ -462,7 +462,7 @@ describe("security-gate: C6a runner — durable state while the loop runs", () =
     { name: "code.fs.edit", version: 1, status: "active", description: "edit", write: true },
   ];
 
-  function runnerHarness(options: { script?: Array<ChatResult | Error>; toolDelayMs?: number; heartbeatMs?: number; renewHeld?: () => boolean } = {}) {
+  function runnerHarness(options: { script?: Array<ChatResult | Error>; toolDelayMs?: number; heartbeatMs?: number; renewHeld?: () => boolean; quotaDenied?: boolean } = {}) {
     const store = new InMemoryWorkspaceStore();
     const clock = { t: Date.parse("2026-01-01T00:00:00.000Z") };
     const log = new CodeRunStateLog({
@@ -476,6 +476,7 @@ describe("security-gate: C6a runner — durable state while the loop runs", () =
     const invocations: string[] = [];
 
     const ports: CodingAgentRunnerPorts = {
+      ...(options.quotaDenied ? { quota: { checkQuota: () => ({ allowed: false, error: "Budget exhausted" }), recordUsage() {} } } : {}),
       flags: { assertEnabled: async () => true },
       rbac: { authorize: async () => ({ allowed: true }) },
       toolRuntime: {
@@ -531,6 +532,14 @@ describe("security-gate: C6a runner — durable state while the loop runs", () =
 
   const nativeCall = (name: string, args: Record<string, unknown>, id: string) => ({
     id, type: "function" as const, function: { name, arguments: JSON.stringify(args) },
+  });
+
+  it("persists budget exhaustion as a failed run instead of a completed task", async () => {
+    const harness = runnerHarness({ quotaDenied: true });
+    const result = await harness.run({ runId: "budget-limited" });
+    expect(result.reason).toBe("budget_exhausted");
+    expect(result.status).toBe("stopped");
+    expect(await harness.store.getCodeRunState("company-1", "budget-limited")).toMatchObject({ status: "failed", details: { stopReason: "budget_exhausted" } });
   });
 
   it("records the tool call before it runs and persists each turn as the loop advances", async () => {

@@ -26,6 +26,9 @@ export interface ChatMessage {
   tool_call_id?: string;
   name?: string;
   tool_calls?: ChatToolCall[];
+  /** Opaque provider continuation, never user-visible answer content. */
+  reasoning_content?: string;
+  reasoning_text?: string;
 }
 
 export type ChatToolChoice = "auto" | "none" | "required" | {

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { developmentIsActive, planChatDevelopment, requestsDevelopmentRestore, type DevelopmentProcess } from "@npati/shared";
+import { developmentIsActive, requestsDevelopmentRestore, type DevelopmentProcess, type DevelopmentTarget } from "@npati/shared";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "./business-workspace-shared";
 import type { CodeChatSession } from "./code-inbox-client";
@@ -22,6 +22,7 @@ export function useChatDevelopment(options: {
   const previousStatuses = useRef(new Map<string, string>());
   const retry = useRef<{ payload: string; requestId: string } | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
+  const planning = useRef(false);
   const callbacks = useRef(options); callbacks.current = options;
   const sending = useRef(false); const alive = useRef(true);
   const snapshotGeneration = useRef(0);
@@ -39,16 +40,28 @@ export function useChatDevelopment(options: {
   const anyActive = processes.some(developmentIsActive);
   useEffect(() => {
     alive.current = true;
-    const poll = () => { void refresh().catch(() => {}); };
-    poll();
-    const controller = new AbortController();
-    void watchDevelopmentTrace(controller.signal, snapshot => {
-      if (snapshot && !controller.signal.aborted) { snapshotGeneration.current++; setProcesses(snapshot); }
-      else poll();
-    });
+    const poll = () => { if (!document.hidden) void refresh().catch(() => {}); };
+    let controller: AbortController | undefined;
+    const visibility = () => {
+      controller?.abort(); controller = undefined;
+      if (document.hidden) return;
+      poll();
+      // Hidden tabs must release HTTP/1 connections, leaving navigation and
+      // Activity requests available while a visible chat receives live updates.
+      {
+        const stream = new AbortController(); controller = stream;
+        void watchDevelopmentTrace(stream.signal, snapshot => {
+          if (stream.signal.aborted) return;
+          if (snapshot) { snapshotGeneration.current++; setProcesses(snapshot); }
+          else poll();
+        });
+      }
+    };
+    visibility();
+    document.addEventListener("visibilitychange", visibility);
     const intervalMs = anyActive ? 5000 : 10000;
     const timer = window.setInterval(poll, intervalMs);
-    return () => { alive.current = false; controller.abort(); window.clearInterval(timer); };
+    return () => { alive.current = false; controller?.abort(); window.clearInterval(timer); document.removeEventListener("visibilitychange", visibility); };
   }, [anyActive]);
   useEffect(() => {
     // Websites links recover a dedicated development chat, even after its previous chat was deleted.
@@ -85,7 +98,15 @@ export function useChatDevelopment(options: {
   async function submit(message: string): Promise<boolean> {
     let targets;
     const restore = requestsDevelopmentRestore(message);
-    try { targets = planChatDevelopment(message, projectId); } catch (error) { callbacks.current.onError((error as Error).message); return true; }
+    if (planning.current || sending.current) return true;
+    planning.current = true;
+    try {
+      targets = restore ? [] : (await api<{ targets: DevelopmentTarget[] }>("/chat/development/plan", {
+        method: "POST", body: JSON.stringify({ message, projectId, companyId: callbacks.current.companyId ?? currentProcess?.companyId ?? undefined,
+          conversationId: callbacks.current.conversationId ?? undefined, businessId: callbacks.current.businessId }),
+      })).targets ?? [];
+    } catch (error) { callbacks.current.onError((error as Error).message); return true; }
+    finally { planning.current = false; }
     if (!restore && !targets.length) {
       const current = processes.find(p => p.projectId === projectId && p.conversationId === options.conversationId);
       if (current && developmentIsActive(current) && !current.progress?.some(event => event.stage === "agent")) {

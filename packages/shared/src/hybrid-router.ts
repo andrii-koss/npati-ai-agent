@@ -72,25 +72,6 @@ export class HybridRouter {
     const lower = message.toLowerCase();
     const matchedSignals: RouterSignal[] = [];
 
-    // 1. Deterministic Signal Extraction
-    const hasUrl = URL_REGEX.test(message);
-    if (hasUrl) matchedSignals.push("url_detected");
-
-    const hasTime = TIME_SENSITIVE_KEYWORDS.some((kw) => lower.includes(kw));
-    if (hasTime) matchedSignals.push("time_sensitive");
-
-    const hasBrowser = BROWSER_KEYWORDS.some((kw) => lower.includes(kw));
-    if (hasBrowser) matchedSignals.push("browser_action");
-
-    const hasCrawl = CRAWL_KEYWORDS.some((kw) => lower.includes(kw));
-    if (hasCrawl) matchedSignals.push("crawl_action");
-
-    const hasFile = FILE_KEYWORDS.some((kw) => lower.includes(kw));
-    if (hasFile) matchedSignals.push("file_action");
-
-    const isPureExplanation = EXPLANATION_PREFIXES.some((prefix) => lower.startsWith(prefix) || lower.includes(prefix));
-    if (isPureExplanation) matchedSignals.push("pure_explanation");
-
     const projectIntentDecision = classifyProjectIntent({
       message,
       conversationHistory: input.conversationHistory,
@@ -99,6 +80,26 @@ export class HybridRouter {
       hasWorkspace: input.hasWorkspace,
       lastRunStatus: input.lastRunStatus,
     });
+    const creatingProject = projectIntentDecision.intent.startsWith("CREATE_");
+
+    // 1. Deterministic Signal Extraction
+    const hasUrl = !creatingProject && URL_REGEX.test(message);
+    if (hasUrl) matchedSignals.push("url_detected");
+
+    const hasTime = !creatingProject && TIME_SENSITIVE_KEYWORDS.some((kw) => lower.includes(kw));
+    if (hasTime) matchedSignals.push("time_sensitive");
+
+    const hasBrowser = !creatingProject && BROWSER_KEYWORDS.some((kw) => lower.includes(kw));
+    if (hasBrowser) matchedSignals.push("browser_action");
+
+    const hasCrawl = !creatingProject && CRAWL_KEYWORDS.some((kw) => lower.includes(kw));
+    if (hasCrawl) matchedSignals.push("crawl_action");
+
+    const hasFile = FILE_KEYWORDS.some((kw) => lower.includes(kw));
+    if (hasFile) matchedSignals.push("file_action");
+
+    const isPureExplanation = !projectIntentDecision.isProjectIntent && EXPLANATION_PREFIXES.some((prefix) => lower.startsWith(prefix) || lower.includes(prefix));
+    if (isPureExplanation) matchedSignals.push("pure_explanation");
 
     if (projectIntentDecision.intent.startsWith("CREATE_")) matchedSignals.push("website_create");
     else if (projectIntentDecision.intent.startsWith("EDIT_")) matchedSignals.push("website_edit");
@@ -125,7 +126,9 @@ export class HybridRouter {
 
     // 3. Domain & Candidate Classification
     let primaryDomain: CapabilityDomain | undefined;
-    if (projectIntentDecision.intent === "ADD_DATA_MODEL" || projectIntentDecision.intent === "EDIT_DATA_MODEL") {
+    if (creatingProject) {
+      primaryDomain = "files";
+    } else if (projectIntentDecision.intent === "ADD_DATA_MODEL" || projectIntentDecision.intent === "EDIT_DATA_MODEL") {
       primaryDomain = "storage";
     } else if (hasBrowser) {
       primaryDomain = "browser";

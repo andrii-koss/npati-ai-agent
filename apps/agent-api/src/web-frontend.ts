@@ -1,7 +1,7 @@
 import fastifyStatic from "@fastify/static";
 import type { FastifyInstance } from "fastify";
 import type { IncomingMessage } from "node:http";
-import { access } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 const apiRequests = new WeakSet<IncomingMessage>();
@@ -23,7 +23,8 @@ const dataStudioPage = /^\/companies\/[^/]+\/projects\/[^/]+\/data\/?$/;
 
 export function registerWebFrontend(app: FastifyInstance, directory: string): void {
   const root = path.resolve(directory);
-  app.addHook("onReady", async () => { await access(path.join(root, "index.html")); });
+  let indexHtml: Buffer;
+  app.addHook("onReady", async () => { indexHtml = await readFile(path.join(root, "index.html")); });
   app.register(fastifyStatic, {
     root,
     index: false,
@@ -59,7 +60,11 @@ export function registerWebFrontend(app: FastifyInstance, directory: string): vo
     const navigation = request.headers.accept?.includes("text/html");
     if (pathname === "/" || (navigation && !pathname.startsWith("/assets/") && !path.posix.extname(pathname)
       && (staticRoute || frontendPage.test(pathname) || dataStudioPage.test(pathname)))) {
-      return reply.sendFile("index.html");
+      // Complete navigation in this hook; asynchronous sendFile can race the
+      // wildcard/not-found handler and send a JSON error with an HTML MIME type.
+      return reply.type("text/html; charset=utf-8").header("Cache-Control", "no-cache")
+        .header("X-Content-Type-Options", "nosniff").header("Content-Length", indexHtml.length)
+        .send(request.method === "HEAD" ? undefined : indexHtml);
     }
   });
 }

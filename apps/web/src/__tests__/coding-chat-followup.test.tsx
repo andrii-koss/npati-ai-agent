@@ -81,4 +81,12 @@ it.each(["/c/child?company=company&project=project&developmentRoot=parent", "/c/
   expect(queuedRequests).toHaveLength(1);expect(queuedRequests[0]).toMatchObject({mode:"queue",text:"Make the footer red"});expect(requests).toHaveLength(3);
   expect(host.querySelector("article.user:last-of-type")?.textContent ?? host.textContent).toContain("Make the footer red");
   expect(host.querySelector(".code-pending-messages")).toBeNull();
+  const traceCalls = () => vi.mocked(fetch).mock.calls.filter(([url])=>url==="/api/chat/development/processes/stream");
+  const activeTrace = traceCalls().at(-1)![1]!.signal!;
+  const hidden = vi.spyOn(document,"hidden","get").mockReturnValue(true);
+  await act(async()=>document.dispatchEvent(new Event("visibilitychange")));
+  expect(activeTrace.aborted).toBe(true);
+  hidden.mockReturnValue(false);
+  await act(async()=>document.dispatchEvent(new Event("visibilitychange")));
+  expect(traceCalls().at(-1)![1]!.signal!.aborted).toBe(false);
 });

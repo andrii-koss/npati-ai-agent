@@ -1,4 +1,4 @@
-import { OmniRouteEngine } from "@npati/omniroute-adapter";
+import { OmniRouteEngine, providerContinuationFor } from "@npati/omniroute-adapter";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -43,6 +43,18 @@ async function seedModels(engine: OmniRouteEngine, models: Array<{ id: string; t
 }
 
 describe("OmniRoute adapter", () => {
+  it("round-trips thinking-provider continuation without exposing it in serialized chat results", async () => {
+    const fetchMock=vi.fn().mockImplementation(async()=>new Response(JSON.stringify({choices:[{message:{content:"Writing",reasoning_content:"private-provider-state",reasoning_text:"opaque-wire-state"}}]}),{status:200}));
+    vi.stubGlobal("fetch",fetchMock);
+    const engine=new OmniRouteEngine({baseUrl:"http://omniroute:20128"});
+    const result=await engine.chat({model:"test/model",messages:[{role:"user",content:"Create a site"}]});
+    const wrapped={...result,model:"test/model"};
+    expect(JSON.stringify(wrapped)).not.toContain("private-provider-state");
+    expect(JSON.stringify(wrapped)).not.toContain("opaque-wire-state");
+    await engine.chat({model:"test/model",messages:[{...providerContinuationFor(wrapped),role:"assistant",content:result.content}]});
+    const body=JSON.parse(String(fetchMock.mock.calls[1]![1].body));
+    expect(body.messages[0]).toMatchObject({reasoning_content:"private-provider-state",reasoning_text:"opaque-wire-state"});
+  });
   it("sends the current DeepSeek Flash API model ID for a selected V4.1 model", async () => {
     const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({
       choices: [{ message: { content: "ok" } }],

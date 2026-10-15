@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -79,7 +80,13 @@ describe("Coding Agent website chat", () => {
     const directory = await mkdtemp(path.join(tmpdir(), "npati-chat-website-"));
     const store = new InMemoryWorkspaceStore(); await store.initialize();
     const company = await store.createCompany(ctx, { name: "Website company" }, "stream-website-company");
-    const engine: AIEngine = { chat: async () => ({ content: "Updated the website." }), async *stream() { yield "Updated the website."; },
+    const indirectRequest = "I'd like a working photography portfolio with a gallery and contact form. Plain HTML and CSS please.";
+    const engine: AIEngine = { chat: async request => {
+      if (String(request.messages[0]?.content ?? "").startsWith("Classify the user's primary intent") && JSON.parse(String(request.messages[1]?.content ?? "{}")).message === indirectRequest) {
+        return { content: JSON.stringify({ intent: "CREATE_WEBSITE", confidence: 0.99, targets: [{ name: "Photography", kind: "website", framework: "HTML/CSS" }] }) };
+      }
+      return { content: "Updated the website." };
+    }, async *stream() { yield "Updated the website."; },
       listModels: async () => [], getModel: async () => undefined, executeTool: async () => undefined,
       searchMemory: async () => [], saveMemory: async () => undefined, getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }) };
     const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
@@ -90,10 +97,12 @@ describe("Coding Agent website chat", () => {
       return events.at(-1);
     };
     try {
-      const first = await app.inject({ method: "POST", url: "/chat/stream", payload: { companyId: company.id, contextType: "company", message: "Створи тестовий сайт на HTML/CSS" } });
+      const specification = readFileSync(new URL("./fixtures/website-intent/novashop.uk.txt", import.meta.url), "utf8").trim();
+      const first = await app.inject({ method: "POST", url: "/chat/stream", payload: { companyId: company.id, contextType: "company", message: specification } });
       expect(first.statusCode, first.body).toBe(200);
       const created = finalResult(first.body);
       expect(created, first.body).toMatchObject({ routed: "code_runner", projectCard: { kind: "code_project", framework: "HTML/CSS" } });
+      expect((await store.getProject(ctx, company.id, created.projectCard.projectId)).description).toBe(specification.slice(0, 5000).trim());
       const second = await app.inject({ method: "POST", url: "/chat/stream", payload: { conversationId: created.conversationId, contextType: "none", message: "Зроби кнопку зеленою" } });
       const edited = finalResult(second.body);
       expect(edited, second.body).toMatchObject({ routed: "code_runner", projectCard: { projectId: created.projectCard.projectId, sessionId: created.projectCard.sessionId } });
@@ -101,6 +110,7 @@ describe("Coding Agent website chat", () => {
       expect(finalResult(third.body), third.body).toMatchObject({ routed: "code_runner", projectCard: { projectId: created.projectCard.projectId, sessionId: created.projectCard.sessionId }, conversationId: created.conversationId });
       expect(await store.listProjects(ctx, company.id)).toHaveLength(1);
       const saved = (await store.getNeutralConversation(ctx,created.conversationId)).messages;
+      expect(saved[0]?.content).toBe(specification);
       expect(saved.map(item=>item.role)).toEqual(["user","assistant","user","assistant","user","assistant"]);
       expect(saved[0]?.id).toBe(created.userMessage.id);expect(saved[1]?.id).toBe(created.assistantMessage.id);
       expect(saved.every((item,i)=> i===0 || Date.parse(item.createdAt)>Date.parse(saved[i-1]!.createdAt))).toBe(true);
@@ -108,6 +118,13 @@ describe("Coding Agent website chat", () => {
       expect(created.run).toMatchObject({ status: "failed", reason: "refused" });
       expect(created.run.message).toContain("audit_unavailable");
       expect(created.projectCard.previewUrl).toBeUndefined();
+      const indirect = await app.inject({ method: "POST", url: "/chat/stream", payload: {
+        companyId: company.id, projectId: created.projectCard.projectId, contextType: "project", conversationId: created.conversationId, message: indirectRequest,
+      } });
+      const newProject = finalResult(indirect.body);
+      expect(newProject, indirect.body).toMatchObject({ routed: "code_runner", projectCard: { framework: "HTML/CSS", name: "Photography" } });
+      expect(newProject.projectCard.projectId).not.toBe(created.projectCard.projectId);
+      expect(await store.listProjects(ctx, company.id)).toHaveLength(2);
     } finally { await app.close(); await rm(directory, { recursive: true, force: true }); }
   });
 });

@@ -59,6 +59,12 @@ async function fixture(maxConcurrentPerUser = 4) {
   return { store, company, projects, flags, code, controls, starts, service, start, finish, ports, preview };
 }
 describe("durable coding activity", () => {
+  it("shares concurrent projections for the same owner without multiplying database reads", async () => {
+    const f = await fixture();
+    const reads = vi.spyOn(f.store,"getUserSetting");
+    await Promise.all([f.service.list(owner),f.service.list(owner),f.service.list(owner)]);
+    expect(reads.mock.calls.filter(([,key])=>key==="chat-development-processes:v1")).toHaveLength(1);
+  });
   it("adds the original request language to the coding prompt rather than the English orchestration wrapper", async () => {
     const f=await fixture();await f.start("\u0421\u0442\u0432\u043e\u0440\u0438 \u0442\u0435\u0441\u0442\u043e\u0432\u0438\u0439 \u0441\u0430\u0439\u0442 \u043d\u0430 Next.js, \u0437\u0430\u043f\u0443\u0441\u0442\u0438 build \u0456 Live Preview");
     await vi.waitFor(()=>expect(f.controls.size).toBe(1));
@@ -93,6 +99,30 @@ describe("durable coding activity", () => {
   });
 });
 describe("development request planning", () => {
+  it("uses the authorized server decision for planning and project execution in any language", async () => {
+    const f = await fixture();
+    const app = Fastify();
+    shutdown.push(() => app.close());
+    const message = "写真家のポートフォリオを作ってください。";
+    const targets = [{ name: "写真", kind: "website" as const, framework: "HTML/CSS" as const }];
+    const resolveProjectIntent = vi.fn(async () => ({
+      source: "semantic" as const, targets,
+      decision: { intent: "CREATE_WEBSITE" as const, confidence: 0.99, isExecutableInStep5: true, executable: true, isProjectIntent: true, needsClarification: false },
+    }));
+    registerChatDevelopmentRoutes(app, { ...f.ports, auth: { authenticate: async () => owner }, resolveProjectIntent });
+    const planned = await app.inject({ method: "POST", url: "/chat/development/plan", payload: { message, companyId: f.company.id } });
+    expect(planned.statusCode, planned.body).toBe(200);
+    expect(planned.json()).toEqual({ targets });
+    expect(resolveProjectIntent).toHaveBeenLastCalledWith(owner, expect.objectContaining({ message }));
+    const denied = await app.inject({ method: "POST", url: "/chat/development/plan", payload: { message, companyId: "foreign-company" } });
+    expect(denied.statusCode).not.toBe(200);
+    expect(resolveProjectIntent).toHaveBeenCalledTimes(1);
+    const started = await app.inject({ method: "POST", url: "/chat/development/processes", payload: { message, companyId: f.company.id, requestId: "semantic-ja" } });
+    expect(started.statusCode, started.body).toBe(200);
+    expect(started.json().processes).toMatchObject([{ name: "写真", framework: "HTML/CSS" }]);
+    await vi.waitFor(() => expect(f.controls.size).toBe(1));
+    expect([...f.controls.values()][0]!.input.prompt).toContain(message);
+  });
   it("routes the user's four projects and keeps a shop as one project", () => {
     expect(planChatDevelopment(bulk).map(t => t.kind)).toEqual(["website", "blog", "mobile_app", "crm"]);
     expect(planChatDevelopment("Створи тестовий сайт інтернет магазин на Next.js, запусти build і Live Preview.")).toEqual([{ kind: "store", name: "Online store", framework: "Next.js" }]);

@@ -470,7 +470,7 @@ export class CodingAgentRunPhases {
 
       const stateStatus = status === "cancelled"
         ? "cancelled"
-        : status === "failed" ? "failed" : status === "interrupted" ? "interrupted" : "completed";
+        : status === "failed" || status === "stopped" ? "failed" : status === "interrupted" ? "interrupted" : "completed";
       if (status === "interrupted" && (input.detachedChildInbox || unsettledChildren || reason === "async_collect_unsettled")) {
         await writeState(() => this.ports.runState!.markInterrupted?.({ companyId, runId: stateRunId!, reason })
           ?? this.ports.runState!.markFinished({ companyId, runId: stateRunId!, status: "interrupted", reason }));
