@@ -55,11 +55,20 @@ export function CreateSessionDrawer({
       isUk={isUk}
       onClose={onClose}
     >
-      <form onSubmit={submit}>
-        <section>
+      <form
+        onSubmit={submit}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          minHeight: "calc(100% - 88px)",
+        }}
+      >
+        <section style={{ flex: 1 }}>
           <h3>{isUk ? "Параметри сесії" : "Session settings"}</h3>
           <label className="browser-form-field">
-            <span>{isUk ? "Код-проєкт" : "Code project"}</span>
+            <span>
+              {isUk ? "Код-проєкт" : "Code project"} <i className="required-star">*</i>
+            </span>
             <select
               ref={projectRef}
               value={projectId}
@@ -86,7 +95,15 @@ export function CreateSessionDrawer({
                 </option>
               ))}
             </select>
-            <small>
+            <small
+              className="browser-form-hint"
+              style={{
+                fontSize: "12px",
+                lineHeight: 1.45,
+                color: "var(--npati-gray-500, #64748b)",
+                marginTop: "2px",
+              }}
+            >
               {isUk
                 ? "plan — читання і планування; ask — правки після підтвердження; auto_edit — автоматичні правки, ризикові дії після підтвердження; full_auto_sandbox — автономна робота в sandbox."
                 : "plan — read and plan; ask — approve edits; auto_edit — automatic edits with approval for risky actions; full_auto_sandbox — autonomous sandbox work."}
@@ -108,20 +125,23 @@ export function CreateSessionDrawer({
         </section>
 
         {localError && (
-          <div className="data-studio-alert error" role="alert">
+          <div className="data-studio-alert error" role="alert" style={{ margin: "14px 26px 0" }}>
             {localError}
           </div>
         )}
 
-        <div className="browser-form-footer">
-          <div className="browser-form-footer-hint">
+        <footer>
+          <span
+            className="browser-form-footer-hint"
+            style={{ fontSize: "12.5px", color: "var(--npati-gray-500, #64748b)", fontWeight: 500, lineHeight: 1.4 }}
+          >
             {isUk
               ? "Після створення відкриється Workspace. Введіть завдання, щоб запустити агента."
               : "The workspace opens after creation. Enter a task to start the agent."}
-          </div>
+          </span>
           <button
             type="submit"
-            className="button-primary automations-action-primary browser-submit-btn"
+            className="button-primary automations-action-primary"
             disabled={!projectId || working}
           >
             {working
@@ -132,7 +152,7 @@ export function CreateSessionDrawer({
                 ? "Створити сесію"
                 : "Create session"}
           </button>
-        </div>
+        </footer>
       </form>
     </Drawer>
   );
