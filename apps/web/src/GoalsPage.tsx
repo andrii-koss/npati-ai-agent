@@ -378,61 +378,63 @@ export function GoalsPage() {
           )}
         </div>
 
-        <div className="inspector-tabs" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={statusFilter === "all"}
-            className={`inspector-tab ${statusFilter === "all" ? "active" : ""}`}
-            onClick={() => setStatusFilter("all")}
-          >
-            <span>{t("goalsPage.tabs.all")}</span>
-            <small className="tab-count">{goals.length}</small>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={statusFilter === "active"}
-            className={`inspector-tab ${statusFilter === "active" ? "active" : ""}`}
-            onClick={() => setStatusFilter("active")}
-          >
-            <span>{t("goalsPage.tabs.active")}</span>
-            <small className="tab-count">{stats.active}</small>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={statusFilter === "paused"}
-            className={`inspector-tab ${statusFilter === "paused" ? "active" : ""}`}
-            onClick={() => setStatusFilter("paused")}
-          >
-            <span>{t("goalsPage.tabs.paused")}</span>
-            <small className="tab-count">{stats.paused}</small>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={statusFilter === "completed"}
-            className={`inspector-tab ${statusFilter === "completed" ? "active" : ""}`}
-            onClick={() => setStatusFilter("completed")}
-          >
-            <span>{t("goalsPage.tabs.completed")}</span>
-            <small className="tab-count">{stats.completed}</small>
-          </button>
-        </div>
+        <div className="goals-controls-row">
+          <div className="inspector-tabs" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={statusFilter === "all"}
+              className={`inspector-tab ${statusFilter === "all" ? "active" : ""}`}
+              onClick={() => setStatusFilter("all")}
+            >
+              <span>{t("goalsPage.tabs.all")}</span>
+              <small className="tab-count">{goals.length}</small>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={statusFilter === "active"}
+              className={`inspector-tab ${statusFilter === "active" ? "active" : ""}`}
+              onClick={() => setStatusFilter("active")}
+            >
+              <span>{t("goalsPage.tabs.active")}</span>
+              <small className="tab-count">{stats.active}</small>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={statusFilter === "paused"}
+              className={`inspector-tab ${statusFilter === "paused" ? "active" : ""}`}
+              onClick={() => setStatusFilter("paused")}
+            >
+              <span>{t("goalsPage.tabs.paused")}</span>
+              <small className="tab-count">{stats.paused}</small>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={statusFilter === "completed"}
+              className={`inspector-tab ${statusFilter === "completed" ? "active" : ""}`}
+              onClick={() => setStatusFilter("completed")}
+            >
+              <span>{t("goalsPage.tabs.completed")}</span>
+              <small className="tab-count">{stats.completed}</small>
+            </button>
+          </div>
 
-        <div className="goals-priority-filter">
-          <select
-            value={priorityFilter}
-            onChange={(e) => setPriorityFilter(e.target.value as any)}
-            className="page-size-select goals-select"
-            aria-label={t("goalsPage.filterByPriority")}
-          >
-            <option value="all">{t("goalsPage.priorities.all")}</option>
-            <option value="1">{t("goalsPage.priorities.high")}</option>
-            <option value="2">{t("goalsPage.priorities.normal")}</option>
-            <option value="3">{t("goalsPage.priorities.low")}</option>
-          </select>
+          <div className="goals-priority-filter">
+            <select
+              value={priorityFilter}
+              onChange={(e) => setPriorityFilter(e.target.value as any)}
+              className="page-size-select goals-select"
+              aria-label={t("goalsPage.filterByPriority")}
+            >
+              <option value="all">{t("goalsPage.priorities.all")}</option>
+              <option value="1">{t("goalsPage.priorities.high")}</option>
+              <option value="2">{t("goalsPage.priorities.normal")}</option>
+              <option value="3">{t("goalsPage.priorities.low")}</option>
+            </select>
+          </div>
         </div>
       </div>
 
