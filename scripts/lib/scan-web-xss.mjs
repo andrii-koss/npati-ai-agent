@@ -54,7 +54,7 @@ export const ALLOWLIST = [
       "the contentEditable card mirrors its own HTML between the inline card and the fullscreen body in the same document. Every read of that node (input handler, fullscreen toggle, __html) goes through sanitizeCardHtml first, and sanitizeCardHtml itself reads back the body it just sanitized; writes only ever receive sanitized markup. Nothing is persisted.",
   },
   {
-    file: "apps/web/src/EmailInboxPage.tsx",
+    file: "apps/web/src/email-inbox/MessagesTimeline.tsx",
     pattern: "dangerouslySetInnerHTML",
     occurrences: 1,
     reason: "renders only the output of sanitizeEmailHtml, an allowlist sanitizer with blocked tags and http(s)-only hrefs.",
