@@ -707,14 +707,14 @@ sha256(concat(01..28)) == sha256(оригінал)
 
 | # | Файл | Рядків | Стан |
 |---|---|---:|---|
-| 9 | `packages/workspace/src/types.ts` | 2 486 | [ ] |
+| 9 | `packages/workspace/src/types.ts` | 2 486 → **725** | [x] (скорочено до 725 рядків, модулі в types/) |
 | 10 | `packages/workspace/src/postgres-store.ts` | 5 025 | [ ] |
 | 11 | `packages/workspace/src/in-memory-store.ts` | 2 795 | [ ] |
 | 12 | `packages/workspace/src/code-session-durability-store.ts` | 898 | [ ] |
 
 > Фаза робиться **як один серіал**: спочатку типи, потім обидва бекенди за **однаковим** доменним швом. Це найризикованіша частина плану.
 
-### [ ] Крок 9 — `packages/workspace/src/types.ts` (2 486 → ~10 модулів)
+### [x] Крок 9 — `packages/workspace/src/types.ts` (2 486 → 725 рядків + 16 модулів у `types/`) — виконано
 
 **Факти.** Це **не** чистий файл типів. (a) L1–119: type-only імпорти + **три наявні барелі** (`code-goal-types` L37–66, `code-question-store` L67–89, `code-session-durability-store` L95–119 — уже винесені з коментарями про уникнення циклу). (b) L121–1647: доменні типи **плюс рантайм** — const-масиви (`PROJECT_TYPES` L156, `DATA_CLASSIFICATIONS` L164, `RETENTION_CLASSES` L167, `CODE_SESSION_MODES` L591, `COMPANY_ROLES` L993), функції (`isClassificationAtLeast` L172, `resolveCodeRetentionWindows` L211, `mergeCodeRunToolCalls` L1512, `encodeCodeRunScanCursor` L1567), класи помилок (`WorkspaceAccessError` L967, `CodeRunStateStoreError` L1598). (c) `export interface WorkspaceStore` **L1648–2140 (492 рядки)**, далі типи L2140–2486.
 
