@@ -380,7 +380,7 @@ sha256(concat(01..28)) == sha256(оригінал)
 
 ---
 
-### [ ] Крок 2 — `apps/agent-api/src/app.ts` (8 441 → ~15 модулів ≤ 800)
+### [x] Крок 2 — `apps/agent-api/src/app.ts` (1 454 → 725 рядків, знято з baseline)
 
 **Чому другий.** Головний блокер для агента: один файл 8 441 рядок / 521 KB, у якому вся проводка застосунку.
 
@@ -774,18 +774,18 @@ sha256(concat(01..28)) == sha256(оригінал)
 
 | # | Файл | Рядків | Стан |
 |---|---|---:|---|
-| 13 | `apps/agent-api/src/email-inbox-repository.ts` | 2 347 | [ ] |
+| 13 | `apps/agent-api/src/email-inbox-repository.ts` | 2 347 | [x] (690 рядків) |
 | 14 | `apps/agent-api/src/project-git-service.ts` | 1 955 | [ ] |
 | 15 | `apps/agent-api/src/code-tool-runtime.ts` | 1 778 | [x] (549 рядків) |
-| 16 | `apps/agent-api/src/data-studio/auth-service.ts` | 1 270 | [ ] |
-| 17 | `apps/agent-api/src/code-tool-executors.ts` | 1 263 | [ ] |
+| 16 | `apps/agent-api/src/data-studio/auth-service.ts` | 1 270 | [x] (468 рядків) |
+| 17 | `apps/agent-api/src/code-tool-executors.ts` | 1 263 | [x] (226 рядків) |
 | 18 | `apps/agent-api/src/code-policy-engine.ts` | 1 172 | [ ] |
 | 19 | `apps/agent-api/src/email-routes.ts` | 1 172 | [ ] |
 | 20 | `apps/agent-api/src/multimodal-routes.ts` | 1 166 | [ ] |
 | 21 | `apps/agent-api/src/company-runtime.ts` | 1 131 | [ ] |
 | 22 | `apps/agent-api/src/reliability-and-operations-routes.ts` | 1 085 | [ ] |
 
-### [ ] Крок 13 — `email-inbox-repository.ts` (2 347 → ~11 модулів)
+### [x] Крок 13 — `email-inbox-repository.ts` (виконано: 2 347 → 690 рядків, 6 доменних репозиторіїв)
 
 **Факти.** Клас `EmailInboxRepository` (L103–2347), **76 методів**; перед ним `normalizeEmailSubject` L58–69, `extractCandidateMessageIds` L71–101 і SQL-константи `accountCols` L19, `threadCols` L33, `messageCols` L46. Кластери: crypto/legacy L133–262, OAuth state L263–316, accounts L317–611, threads+locks L612–1233, messages+drafts L1234–1465, contacts L1466–1595, templates L1596–1719, rules L1720–1851, rate limit/quota L1852–2036, jobs L2037–2171, notifications+analytics L2172–2347.
 
@@ -817,7 +817,7 @@ sha256(concat(01..28)) == sha256(оригінал)
 **Верифікація.** `npm run typecheck`, `npm run audit:code-tools`, `npx vitest run tests/coding-agent-c2-* tests/coding-agent-c3-* tests/coding-agent-c12-*`.
 **Effort:** L.
 
-### [ ] Крок 16 — `data-studio/auth-service.ts` (1 270 → ~7 модулів)
+### [x] Крок 16 — `data-studio/auth-service.ts` (виконано: 1 274 → 468 рядків, 6 модулів)
 
 **Факти.** Один клас `ProjectAuthService` L43–1270, **~40 методів**. Спільна проводка: `ownerContext` 63, `resolveAuthRedirect` 71, `authLink` 85, `getRedirectUrls` 91, `updateRedirectUrls` 97, `getBackend` 111, `getPool` 144, `ensureInitialized` 162, `getAuthSettings` 187, `updateAuthSettings` 199, `expectedIss`/`expectedAud` 217/221. Далі: `register` 229, `login` 362, `refresh` 471, `logout` 566, `me` 592; `verifyEmail` 646, `forgotPassword` 696, `resetPassword` 743, `changePassword` 809; `listUsers` 854, `setUserStatus` 924, `setUserRoles` 946; `getAccessPolicies` 990, `applyAccessPolicies` 1000; `rotateSigningKey` 1044; `findUserReferenceCollections` 1068, `exportUserData` 1084, `previewDeleteUser` 1146, `deleteUser` 1197; `close` 1266.
 
@@ -828,7 +828,7 @@ sha256(concat(01..28)) == sha256(оригінал)
 **Верифікація.** `npm run typecheck`, `npx vitest run tests/data-studio-project-auth.test.ts` (це і крок 43).
 **Effort:** L.
 
-### [ ] Крок 17 — `code-tool-executors.ts` (1 263 → ~8 модулів)
+### [x] Крок 17 — `code-tool-executors.ts` (виконано: 1 266 → 226 рядків, 7 модулів)
 
 **Факти.** Спільний шар: `rethrowCanonical` L48, `toCanonicalPort` L67, хелпери L156–349 (`writePortOf`, `readCurrent`, `expectedRevisionFor`, `applyUnifiedDiffToFile`, `patchBlocks`, `toEngineWritePort`, `engineOptions`, `canonicalEditArgs`). Родини: write-виконавці `canonicalWriteExecutors` L350–503, shell L504–760, deps L761–863, plan L864–959, `allCanonicalExecutors` L960–982, subagent L983–1038, ask_user L1039–1151, `runSandboxPostWriteHook` L1152–1174, `canonicalExecutors` L1175–1263.
 

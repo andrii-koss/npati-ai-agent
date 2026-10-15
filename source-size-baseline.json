@@ -1,24 +1,6 @@
 {
   "version": 1,
   "entries": {
-    "apps/agent-api/src/app.ts": {
-      "lines": 1453,
-      "reason": "API module not yet decomposed; tracked as follow-up to the plan in docs/refactoring/PLAN.md",
-      "owner": "refactor/large-files",
-      "expires_at": "2027-02-28"
-    },
-    "apps/agent-api/src/code-tool-executors.ts": {
-      "lines": 1265,
-      "reason": "API module not yet decomposed; tracked as follow-up to the plan in docs/refactoring/PLAN.md",
-      "owner": "refactor/large-files",
-      "expires_at": "2027-02-28"
-    },
-    "apps/agent-api/src/data-studio/auth-service.ts": {
-      "lines": 1273,
-      "reason": "API module not yet decomposed; tracked as follow-up to the plan in docs/refactoring/PLAN.md",
-      "owner": "refactor/large-files",
-      "expires_at": "2027-02-28"
-    },
     "apps/web/src/App.tsx": {
       "lines": 1557,
       "reason": "web page not yet decomposed by section; backlog after the API and packages work",
