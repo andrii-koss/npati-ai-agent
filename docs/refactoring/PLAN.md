@@ -881,7 +881,7 @@ registerEmailInboxRoutes(app, deps)  →  registerEmailAccountRoutes(app, deps) 
 |---|---|---:|---|
 | 23 | `apps/web/src/i18n/types.ts` | 2 631 → **178** | [x] (скорочено до 178 рядків, модулі в schema/) |
 | 24 | `apps/web/src/BusinessWorkspace.tsx` | 2 106 | [ ] |
-| 25 | `apps/web/src/EmailInboxPage.tsx` | 2 013 | [ ] |
+| 25 | `apps/web/src/EmailInboxPage.tsx` | 2 013 → **773** | [x] (скорочено до 773 рядків, винесено email-inbox/) |
 | 26 | `apps/web/src/DataStudioPage.tsx` | 1 976 | [x] (скорочено до 704 рядків) |
 | 27 | `apps/web/src/DataStudioSettingsPage.tsx` | 1 939 → **706** | [x] (скорочено до 706 рядків, винесено data-studio-settings/) |
 | 28 | `apps/web/src/App.tsx` | 1 550 | [ ] |
@@ -922,7 +922,7 @@ registerEmailInboxRoutes(app, deps)  →  registerEmailAccountRoutes(app, deps) 
 **Ризики.** `BusinessChatPage` (840 рядків) — окрема внутрішня декомпозиція (список повідомлень, композер, кроки прогресу, активація картки проєкту) — винести в **окремий наступний крок**, не в цей.
 **Effort:** M (або L, якщо чіпати `BusinessChatPage`).
 
-### [ ] Крок 25 — `apps/web/src/EmailInboxPage.tsx` (2 013 → ~8 модулів)
+### [x] Крок 25 — `apps/web/src/EmailInboxPage.tsx` (1 748 → 773 рядки + 11 модулів у `email-inbox/`) — виконано
 
 **Факти.** Модульні хелпери: `getStatusLabel` L86–109, `sanitizeEmailHtml` L111–151, `api`-обгортка ~L176–196, `toDataUrl` ~L199–211, `EmailImageAttachment` L213–274. Компонент `EmailInboxPage` L276–2013: ~80 хуків L277–434, ~20 хендлерів L447–995, далі Top Header L910, Toolbar L953, **3-колонкова картка L1058–1800** (ліва тека L1063–1171, середній список L1172–1283, роздільник L1284–1297, права панель треда L1298–1800: заголовок L1312, дії L1429, контекст клієнта L1499, попередження L1539, блок чернетки L1546, таймлайн L1627, історія L1705), композер L1801–2013.
 
