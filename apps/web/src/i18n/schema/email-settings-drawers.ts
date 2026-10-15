@@ -1,0 +1,162 @@
+export interface EmailSettingsRuleDrawerSchema {
+      kicker: string;
+      editTitle: string;
+      newTitle: string;
+      ruleParams: string;
+      ruleNameLabel: string;
+      ruleNamePlaceholder: string;
+      triggerConditions: string;
+      subjectKeywordsLabel: string;
+      subjectKeywordsPlaceholder: string;
+      subjectKeywordsHint: string;
+      senderPatternsLabel: string;
+      senderPatternsPlaceholder: string;
+      senderDomainsLabel: string;
+      senderDomainsPlaceholder: string;
+      bodyKeywordsLabel: string;
+      bodyKeywordsPlaceholder: string;
+      detectedIntentLabel: string;
+      intents: {
+        any: string;
+        support: string;
+        billing: string;
+        refund: string;
+        cancellation: string;
+        sales: string;
+        marketing: string;
+        general: string;
+      };
+      attachmentTypesLabel: string;
+      attachmentTypesPlaceholder: string;
+      attachmentTypesHint: string;
+      vipOnlyLabel: string;
+      automatedActions: string;
+      priorityLabel: string;
+      priorities: {
+        noChange: string;
+        urgent: string;
+        high: string;
+        normal: string;
+        low: string;
+      };
+      modeLabel: string;
+      modes: {
+        noChange: string;
+        autopilot: string;
+        approval: string;
+        manual: string;
+      };
+      assignAgentLabel: string;
+      assignAgentNoChange: string;
+      templateLabel: string;
+      templateGenerateAi: string;
+      workflowLabel: string;
+      workflowNoChange: string;
+      requireApprovalLabel: string;
+      createTaskPersonal: string;
+      createTaskCompany: string;
+      autoTagSpamLabel: string;
+      saveRule: string;
+      createRule: string;
+      savingRule: string;
+};
+
+export interface EmailSettingsTemplateDrawerSchema {
+      kicker: string;
+      editTitle: string;
+      newTitle: string;
+      templateDetails: string;
+      titleLabel: string;
+      titlePlaceholder: string;
+      categoryLabel: string;
+      categories: {
+        general: string;
+        support: string;
+        billing: string;
+        sales: string;
+        information: string;
+      };
+      subjectLabel: string;
+      subjectPlaceholder: string;
+      bodyDetails: string;
+      insertVariable: string;
+      bodyLabel: string;
+      bodyPlaceholder: string;
+      saveTemplate: string;
+      createTemplate: string;
+      savingTemplate: string;
+};
+
+export interface EmailSettingsContactDrawerSchema {
+      kicker: string;
+      editTitle: string;
+      newTitle: string;
+      infoHeading: string;
+      emailLabel: string;
+      emailPlaceholder: string;
+      nameLabel: string;
+      namePlaceholder: string;
+      companyLabel: string;
+      companyPlaceholder: string;
+      phoneLabel: string;
+      phonePlaceholder: string;
+      flagsHeading: string;
+      markVipLabel: string;
+      blacklistLabel: string;
+      notesLabel: string;
+      notesPlaceholder: string;
+      saveContact: string;
+      addContact: string;
+      savingContact: string;
+};
+
+export interface EmailSettingsDnsDrawerSchema {
+      kicker: string;
+      titleAudit: string;
+      queryingDns: string;
+      domainVerified: string;
+      actionRecommended: string;
+      recordHeading: string;
+      statusValid: string;
+      statusInvalid: string;
+      statusMissing: string;
+      currentValue: string;
+      recommendation: string;
+      noResult: string;
+      closeAudit: string;
+};
+
+export interface EmailSettingsDialogsSchema {
+      deleteAccountTitle: string;
+      deleteAccountMsg: string;
+      deleteRuleTitle: string;
+      deleteRuleMsg: string;
+      deleteTemplateTitle: string;
+      deleteTemplateMsg: string;
+      revokeKeyTitle: string;
+      revokeKeyMsg: string;
+      revokeKeyConfirm: string;
+};
+
+export interface EmailSettingsMessagesSchema {
+      emailInvalid: string;
+      imapHostReq: string;
+      imapPortReq: string;
+      imapUserReq: string;
+      smtpHostReq: string;
+      smtpPortReq: string;
+      smtpUserReq: string;
+      imapPassReq: string;
+      smtpPassReq: string;
+      oauthReq: string;
+      duplicateEmail: string;
+      correctFields: string;
+      ruleNameReq: string;
+      templateFieldsReq: string;
+      validContactEmailReq: string;
+      personalKeysNotice: string;
+      oauthSaveNotice: string;
+      oauthOpenedNotice: string;
+      verifiedConnection: string;
+      failedConnection: string;
+};
