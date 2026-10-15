@@ -4,9 +4,6 @@
     "apps/agent-api/src/a2a-control-plane-routes.ts": {
       "as-any": 4
     },
-    "apps/agent-api/src/app.ts": {
-      "as-any": 1
-    },
     "apps/agent-api/src/approvals-routes.ts": {
       "as-any": 1
     },
@@ -142,17 +139,8 @@
     "apps/web/src/DataStudioAuthSection.tsx": {
       "as-any": 1
     },
-    "apps/web/src/DataStudioPage.tsx": {
-      "as-any": 3
-    },
-    "apps/web/src/EmailInboxPage.tsx": {
-      "as-any": 3
-    },
     "apps/web/src/GoalsPage.tsx": {
       "as-any": 1
-    },
-    "apps/web/src/IntegrationsPage.tsx": {
-      "as-any": 2
     },
     "apps/web/src/WebsiteBuilderDashboard.tsx": {
       "as-any": 2
