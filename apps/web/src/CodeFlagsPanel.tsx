@@ -259,44 +259,115 @@ export function CodeFlagsPanel({ companyId, isUk, notify, onMasterEnabledChange,
         </div>
       )}
 
-      <div className="code-flags-scope">
-        <CodeExecutionModeControl companyId={companyId} isUk={isUk} value={state?.execution}
-          canManage={canManage} onChanged={load} notify={notify} />
-        <button type="button" className="button-secondary" onClick={() => void load()} disabled={loading}>
+      <div
+        className="code-flags-scope-card"
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: "14px",
+          padding: "16px 20px",
+          background: "#f8fafc",
+          border: "1px solid #e2e8f0",
+          borderRadius: "14px",
+        }}
+      >
+        <div style={{ flex: 1, minWidth: "260px" }}>
+          <CodeExecutionModeControl
+            companyId={companyId}
+            isUk={isUk}
+            value={state?.execution}
+            canManage={canManage}
+            onChanged={load}
+            notify={notify}
+          />
+        </div>
+        <button
+          type="button"
+          className="button-secondary"
+          onClick={() => void load()}
+          disabled={loading}
+          style={{ minHeight: "38px", padding: "0 16px", borderRadius: "10px", fontWeight: 650, whiteSpace: "nowrap" }}
+        >
           {loading ? (isUk ? "Оновлення…" : "Refreshing…") : isUk ? "Оновити флаги" : "Refresh flags"}
         </button>
       </div>
 
-      <div className="code-flags-master">
-        <div className="code-flags-master-main">
-          <strong><code>{master?.key ?? "coding_agent.enabled"}</code></strong>
-          <span className="ds-muted">
+      <div
+        className="code-flags-master"
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "16px",
+          padding: "18px 20px",
+          background: "#ffffff",
+          border: "1px solid #e2e8f0",
+          borderRadius: "14px",
+          boxShadow: "0 1px 3px rgba(0, 0, 0, 0.04)",
+        }}
+      >
+        <div className="code-flags-master-main" style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+            <strong style={{ fontSize: "14px" }}>
+              <code style={{ background: "#f1f5f9", padding: "3px 8px", borderRadius: "6px", border: "1px solid #e2e8f0", color: "#1e293b", fontFamily: "ui-monospace, monospace" }}>
+                {master?.key ?? "coding_agent.enabled"}
+              </code>
+            </strong>
+            <div className="code-flags-pills" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <span className={`status-pill ${enabledPillClass(master?.enabled === true)}`}>
+                {master?.enabled ? (isUk ? "увімкнено" : "enabled") : isUk ? "вимкнено" : "disabled"}
+              </span>
+              {master?.stage && (
+                <span className={`status-pill ${stagePillClass(master.stage)}`}>
+                  {STAGE_LABELS[master.stage]?.toUpperCase()}
+                </span>
+              )}
+              {master?.scope && <span className="data-studio-badge">{master.scope}</span>}
+              {master?.source && master.source !== master.scope && (
+                <span className="ds-muted" style={{ fontSize: "12px" }}>{master.source}</span>
+              )}
+            </div>
+          </div>
+          <span className="ds-muted" style={{ fontSize: "12.5px", color: "#64748b" }}>
             {isUk ? "Master kill switch для всього Coding Agent" : "Master kill switch for the whole Coding Agent"}
           </span>
-          <div className="code-flags-pills">
-            <span className={`status-pill ${enabledPillClass(master?.enabled === true)}`}>
-              {master?.enabled ? (isUk ? "увімкнено" : "enabled") : isUk ? "вимкнено" : "disabled"}
-            </span>
-            {master?.stage && <span className={`status-pill ${stagePillClass(master.stage)}`}>{STAGE_LABELS[master.stage]}</span>}
-            {master?.scope && <span className="data-studio-badge">{master.scope}</span>}
-            {master?.source && <span className="ds-muted">{master.source}</span>}
-          </div>
         </div>
-        <div className="code-flags-master-actions">
-          <label className="code-switch" title={isUk ? "Увімкнути або вимкнути Coding Agent" : "Enable or disable the Coding Agent"}>
+        <div className="code-flags-master-actions" style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+          <label
+            className="code-switch"
+            title={isUk ? "Увімкнути або вимкнути Coding Agent" : "Enable or disable the Coding Agent"}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              cursor: "pointer",
+              padding: "8px 12px",
+              borderRadius: "10px",
+              background: master?.enabled ? "rgba(34, 197, 94, 0.08)" : "#f1f5f9",
+              border: `1px solid ${master?.enabled ? "rgba(34, 197, 94, 0.25)" : "#e2e8f0"}`,
+              transition: "all 140ms ease",
+            }}
+          >
             <input
               type="checkbox"
               checked={master?.enabled === true}
               disabled={busyKey === "coding_agent.enabled" || !master || !canManage}
               onChange={(event) => master && void toggleFlag(master, event.target.checked)}
+              style={{ width: "16px", height: "16px", accentColor: "var(--npati-red)" }}
             />
-            <span>{isUk ? "Master" : "Master"}</span>
+            <span style={{ fontSize: "13px", fontWeight: 700, color: master?.enabled ? "#15803d" : "#64748b" }}>
+              {isUk ? "Master" : "Master"}: {master?.enabled ? (isUk ? "Увімкнено" : "ON") : (isUk ? "Вимкнено" : "OFF")}
+            </span>
           </label>
           <button
             type="button"
-            className="automation-action-btn danger"
+            className="danger-button"
             disabled={busyKey === "coding_agent.enabled" || !companyId || !canManage}
             onClick={() => void killSwitch()}
+            style={{ minHeight: "38px", padding: "0 16px", fontSize: "13px", fontWeight: 650, borderRadius: "10px" }}
           >
             {isUk ? "Kill switch" : "Kill switch"}
           </button>
