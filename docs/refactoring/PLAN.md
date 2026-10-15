@@ -1735,6 +1735,38 @@ PostgresWorkspaceStore        ← публічний фасад; тонкі де
   - `RowDrawer.tsx` (117 рядків): дровер створення та редагування запису з динамічними типами полів.
   - `ImportRowsModal.tsx` (80 рядків): модалка імпорту CSV/JSON.
   - `DriftModal.tsx` (74 рядки): інспекція розбіжностей schema drift.
-- `DataStudioPage.tsx` зменшено з **1 977** до **704 рядків** ($\le 800$), збережено всі реекспорти контрактів для сумісності з `DataStudioSettingsPage.tsx` та `App.tsx`.
-- `npm run lint` та `npm run typecheck` проходять з кодом 0; `source-size-baseline.json` оновлено (файл вибув з переліку файлів >800 рядків).
+### 5. apps/web/src/App.tsx (Крок 28, 1 823 → 605 рядків, −1 218 рядків, ДОСЯГНУТО <= 800)
+- Винесено shell-модулі в `apps/web/src/shell/` (всі <= 350 рядків): `types.ts`, `routes.ts`, `banners.tsx`, `Sidebar.tsx`, `Header.tsx`, `SettingsPage.tsx`.
+- Збережено всі оригінальні SVG іконки в `SettingsPage.tsx` та `App.tsx`.
+- Розмір: 605 рядків (<= 800).
+
+### 6. apps/web/src/ProjectPage.tsx (Крок 29, 1 476 → 690 рядків, −786 рядків, ДОСЯГНУТО <= 800)
+- Створено `apps/web/src/project-page/` з модулями: `types.ts`, `helpers.ts`, `ProjectHeader.tsx`, `ProjectTabs.tsx`, `tabs/OverviewTab.tsx`, `tabs/FilesTab.tsx`, `tabs/GitTab.tsx`, `tabs/DeployTab.tsx`, `tabs/QaTab.tsx`, `tabs/SettingsTab.tsx`.
+- Розмір: 690 рядків (<= 800).
+
+### 7. apps/web/src/IntegrationsPage.tsx (Крок 30, 1 471 → 269 рядків, −1 202 рядки, ДОСЯГНУТО <= 800)
+- Винесено в `apps/web/src/integrations/`: `types.ts` (75), `ui.tsx` (27), `cache.ts` (41), `sections/ConnectionGeneralSection.tsx` (76), `sections/ConnectionAccessSection.tsx` (213), `sections/ConnectionGroupsSection.tsx` (169), `sections/ConnectionAdvancedSections.tsx` (129), `ConnectionManager.tsx` (281), `ConnectForms.tsx` (363), `IntegrationDrawer.tsx` (113).
+- Ратчет: `as any` зменшено з 2 до 0.
+- Розмір: 269 рядків (<= 800).
+
+### 8. apps/web/src/CodeSettingsPage.tsx (Крок 33, 1 361 → 688 рядків, −673 рядки, ДОСЯГНУТО <= 800)
+- Винесено в `apps/web/src/code-settings/`: `types.ts` (69), `labels.ts` (125), `Drawer.tsx` (62), `ToolchainCell.tsx` (38), `CreateProjectDrawer.tsx` (226), `CreateSessionDrawer.tsx` (140), `ProjectDetailsDrawer.tsx` (329), `index.ts` (8).
+- Розмір: 688 рядків (<= 800). 0 `as any`, 0 XSS.
+
+### 9. apps/web/src/CompanyPage.tsx (Крок 32, 1 364 → 747 рядків, −617 рядків, ДОСЯГНУТО <= 800)
+- Винесено в `apps/web/src/company/`:
+  - `types.ts` (109 рядків): доменні типи, defaultToolOptions, мапінг локалізації, драфти.
+  - `cache.ts` (47 рядків): `COMPANIES_CACHE_KEY`, `SELECTED_COMPANY_ID_KEY`, `getCachedCompanies`, `updateCachedCompanies`, `api`.
+  - `OrgChart.tsx` (77 рядків): `AgentModelIcon`, `AgentNode`, `OrgChart`.
+  - `KnowledgePanel.tsx` (203 рядки): Document Knowledge список/завантаження + Durable Memory список/редактор.
+  - `CompanyDrawer.tsx` (73 рядки): модальний дровер редагування/створення компанії.
+  - `AgentDrawer.tsx` (176 рядків): модальний дровер налаштування агента, моделей та прав тулів.
+  - `ControlStrip.tsx` (108 рядків): верхня контрольна панель вибору компанії, зв'язаного бізнесу та кількості агентів.
+  - `CompanyHeader.tsx` (119 рядків): заголовок, навігація /settings, кнопки дій та нотіси.
+  - `useCompanyKnowledge.ts` (249 рядків): хук завантаження, видалення, скачування документів та фактів довготривалої пам'яті.
+  - `index.ts` (10 рядків): barrel-експорт.
+- Збережено Run Card та обидва входження `dangerouslySetInnerHTML` у `apps/web/src/CompanyPage.tsx` без порушення XSS allowlist.
+- Розмір: **747 рядків** ($\le 800$). Усі підмодулі $\le 249$ рядків ($\le 400$).
+- 0 `as any`. `source-size-baseline.json` оновлено (файл вибув з переліку god-файлів).
+- Тести: 21 passed (165 tests), lint OK, typecheck OK, build OK.
 
