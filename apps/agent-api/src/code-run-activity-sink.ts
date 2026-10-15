@@ -221,7 +221,9 @@ export function createCodeRunActivitySink(options: CodeRunActivitySinkOptions): 
         retentionClass,
         payload,
       };
-      options.log?.(logPayload, identity.kind);
+      // A broken diagnostic logger must not prevent the durable insert.
+      const log = (value: Record<string, unknown>, message: string) => { try { options.log?.(value, message); } catch { /* best effort */ } };
+      log(logPayload, identity.kind);
 
       try {
         const created = await options.store.createCodeActivityEvent({
@@ -244,7 +246,7 @@ export function createCodeRunActivitySink(options: CodeRunActivitySinkOptions): 
       } catch (error) {
         // Bookkeeping must never change a decision: report, do not throw.
         const message = error instanceof Error ? error.message : String(error);
-        options.log?.({ kind: identity.kind, companyId: identity.companyId, errorCode: "activity_persist_failed", message }, "activity_persist_failed");
+        log({ kind: identity.kind, companyId: identity.companyId, errorCode: "activity_persist_failed" }, "activity_persist_failed");
         return { persisted: false, errorCode: "activity_persist_failed", errorMessage: message };
       }
     },
@@ -262,7 +264,8 @@ export function activitySinkForKind<T extends object>(
 ): { record(event: T): Promise<void> } {
   return {
     async record(event: T): Promise<void> {
-      const { identity, payload } = splitActivityEvent({ ...(event as Record<string, unknown>), kind });
+      const source=event as Record<string,unknown>;
+      const { identity, payload } = splitActivityEvent({ ...source, ...(typeof source.kind==="string" && source.kind!==kind?{eventType:source.kind}:{}), kind });
       await sink.record(identity, payload);
     },
   };

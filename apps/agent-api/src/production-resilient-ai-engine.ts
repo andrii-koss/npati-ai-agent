@@ -1,4 +1,4 @@
-import { isNonChatSpecialtyModel, type AIEngine, type ChatRequest, type ChatResult } from "@npati/omniroute-adapter";
+import { isNonChatSpecialtyModel, observeProviderAttempt, type AIEngine, type ChatRequest, type ChatResult } from "@npati/omniroute-adapter";
 import { AdaptiveAdmissionQueue, SelfHealingAutoCombo, SelfHealingExhaustedError, type PriorityTier } from "./resilience-admission-queue";
 
 function providerFromModel(model: string) {
@@ -133,10 +133,16 @@ export function createProductionResilientAIEngine(base: AIEngine, options: Resil
 
     const startedAt = Date.now();
     const healed = await SelfHealingAutoCombo.executeWithHealing(
-      models.map((model) => ({
+      models.map((model,index) => ({
         modelId: model,
         provider: providerFromModel(model),
-        execute: () => base.chat({ ...request, model, fallbackModel: undefined }),
+        execute: async () => {
+          try {return await base.chat({ ...request, model, fallbackModel: undefined });}
+          catch(error) {
+            if(index<models.length-1 && isRetryableInferenceFailure(error) && !request.signal?.aborted) await observeProviderAttempt(request,{model,phase:"failed",httpStatus:failedAttempt(model,error).httpStatus,errorCode:"provider_retry",retryScheduled:true});
+            throw error;
+          }
+        },
       })),
       { shouldRetry: isRetryableInferenceFailure, signal: request.signal },
     ).catch((error: unknown) => {

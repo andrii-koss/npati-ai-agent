@@ -215,7 +215,14 @@ export interface CodeRunStatePort {
 }
 
 export interface CodeRunActivityEvent {
-  kind: "run_started" | "turn" | "tool_call" | "reminder" | "run_finished" | "session_branch";
+  kind: "run_started" | "turn" | "tool_call" | "reminder" | "run_finished" | "session_branch" | "model_call";
+  phase?: "started" | "completed" | "failed";
+  model?: string;
+  provider?: string;
+  httpStatus?: number;
+  attempt?: number;
+  retryScheduled?: boolean;
+  modelPurpose?: "self_review";
   companyId: string;
   projectId: string;
   sessionId?: string;

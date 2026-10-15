@@ -2,6 +2,7 @@ import type { ServiceHealth } from "@npati/shared";
 import { isChatCapableModel } from "./normalization";
 import { providerToolNames } from "./provider-tool-names";
 import { retainProviderContinuation } from "./provider-continuation";
+import { observeProviderAttempt } from "./provider-attempt";
 import type { A2AMessageRequest, A2AMessageResult, AIEngine, AudioTranscriptionInput, AudioTranscriptionResult, ChatContentPart, ChatMessage, ChatToolCall, EmbeddingInput, EmbeddingResult, ModerationInput, ModerationResult, RerankInput, RerankResult, ChatRequest, ChatResult, MCPToolCallRequest, ModelInfo, OmniRouteComboInput, OmniRouteConfig, OmniRouteResilienceSnapshot, SpeechAudioFormat, SpeechSynthesisInput, SpeechSynthesisResult, WebFetchInput, WebPageResult, WebSearchInput, WebSearchResponse } from "./types";
 
 import {
@@ -92,12 +93,18 @@ export class OmniRouteEngine implements AIEngine {
             ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
             ...(wire.tools?.length ? { tools: wire.tools, tool_choice: wire.toolChoice ?? "auto", parallel_tool_calls: false } : {}),
           };
-      const response = await fetch(`${this.baseUrl}${path}`, {
+      const attemptStarted=Date.now();
+      await observeProviderAttempt(request,{model,phase:"started"});
+      let response:Response;
+      try { response = await fetch(`${this.baseUrl}${path}`, {
         method: "POST",
         headers: this.headers(request.compression, request.idempotencyKey),
         body: JSON.stringify(body),
         signal: requestSignal(request.signal, request.timeoutMs ?? 180_000),
-      });
+      }); } catch(error) {
+        await observeProviderAttempt(request,{model,phase:"failed",durationMs:Date.now()-attemptStarted,errorCode:request.signal?.aborted?"aborted":error instanceof Error && /timeout/i.test(error.name+error.message)?"provider_timeout":"provider_connection_error"});
+        throw error;
+      }
       if (!response.ok) {
         const detail = await response.text().catch(() => "");
         let message = "";
@@ -111,8 +118,9 @@ export class OmniRouteEngine implements AIEngine {
         const canRetryNext = index < candidateModels.length - 1;
         const retryable = response.status === 400 || response.status === 401 || response.status === 403 || response.status === 404 || response.status === 408 || response.status === 409 || response.status === 429 || response.status >= 500
           || /unsupported|quota|rate.?limit|unavailable|model.*(?:missing|disabled|locked|does not support|invalid)/i.test(message);
+        await observeProviderAttempt(request,{model,phase:"failed",durationMs:Date.now()-attemptStarted,httpStatus:response.status,errorCode:"provider_http_error",retryScheduled:canRetryNext && retryable});
         if (canRetryNext && retryable) continue;
-        throw new Error(lastError);
+        throw Object.assign(new Error(lastError),{httpStatus:response.status,code:"provider_http_error"});
       }
       const payload = (await response.json()) as {
         model?: string;
@@ -124,6 +132,7 @@ export class OmniRouteEngine implements AIEngine {
         output?: Array<Record<string, any>>;
       };
       const toolCalls = wire.decode(useResponses ? responseToolCalls(payload) : payload.choices?.[0]?.message?.tool_calls ?? []);
+      await observeProviderAttempt(request,{model:payload.model ?? model,phase:"completed",durationMs:Date.now()-attemptStarted,httpStatus:response.status});
       return retainProviderContinuation({
         content: useResponses ? responsesText(payload) : payload.choices?.[0]?.message?.content ?? "",
         ...(toolCalls.length ? { toolCalls } : {}),

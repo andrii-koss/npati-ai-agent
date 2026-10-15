@@ -44,6 +44,10 @@ export interface CompletionReport {
 }
 
 export interface CompanyRun {
+  workerId?:string;
+  heartbeatAt?:string;
+  leaseExpiresAt?:string;
+  turnIndex?:number;
   id: string;
   companyId: string;
   projectId?: string;

@@ -2,12 +2,14 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import type { AuthProvider } from "./auth";
 import { AuthenticationError } from "./auth";
 import { ChatDevelopmentService, DevelopmentError, type DevelopmentPorts } from "./chat-development-service";
+import { registerCodeMonitorRoutes } from "./code-monitor-routes";
 function fail(reply: FastifyReply, error: unknown) {
   const shaped = error as { status?: number; httpStatus?: number; code?: string; message?: string };
   return reply.code(error instanceof AuthenticationError ? error.status : error instanceof DevelopmentError ? error.status : shaped.httpStatus ?? shaped.status ?? 500)
     .send({ error: { code: shaped.code ?? "development_error", message: shaped.message ?? "Development request failed", retryable: false } });
 }
 export function registerChatDevelopmentRoutes(app: FastifyInstance, deps: DevelopmentPorts & { auth: AuthProvider }) {
+  registerCodeMonitorRoutes(app, deps);
   const service = new ChatDevelopmentService(deps);
   const streams = new Set<() => void>();
   app.post<{ Body: { message: string; companyId?: string; projectId?: string; conversationId?: string; businessId?: string } }>("/chat/development/plan",

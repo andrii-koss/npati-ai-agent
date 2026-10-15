@@ -7,7 +7,7 @@ import { en } from "./i18n/locales/en";
 import { uk } from "./i18n/locales/uk";
 import { normalizeActivity, type CodingActivityRun } from "./chat-timeline";
 import { codingStopCopy } from "./coding-stop-copy";
-export interface AgentExecutionTraceProps { process?: DevelopmentProcess; items?: DevelopmentProcessProgressItem[]; isUk?: boolean; className?: string; run?: CodingActivityRun; nested?: boolean; language?: string }
+export interface AgentExecutionTraceProps { process?: DevelopmentProcess; items?: DevelopmentProcessProgressItem[]; isUk?: boolean; className?: string; run?: CodingActivityRun; nested?: boolean; language?: string; showIdentity?:boolean }
 export const sanitizeTraceSecrets = sanitizeExecutionTrace;
 type Labels = (key: string) => string;
 function operation(item: DevelopmentProcessProgressItem) {
@@ -35,7 +35,7 @@ function title(item: DevelopmentProcessProgressItem, t: Labels, active: boolean)
   return kind === "command" ? sanitizeExecutionTrace(item.title) : t(kind);
 }
 export function formatProcessTitle(item: DevelopmentProcessProgressItem, isUk: boolean, active: boolean) { return title(item, key => (isUk ? uk : en).executionTrace[key] ?? key, active); }
-export function AgentExecutionTrace({ process, items: directItems, run, nested = false, language, isUk = false, className = "" }: AgentExecutionTraceProps) {
+export function AgentExecutionTrace({ process, items: directItems, run, nested = false, language, isUk = false, className = "",showIdentity=false }: AgentExecutionTraceProps) {
   const i18n = useContext(I18nContextRef);
   const t: Labels = key => executionTraceText(run?.language ?? language ?? (isUk ? "uk" : i18n?.language ?? "en"),key);
   const [runOpen, setRunOpen] = useState(false);
@@ -93,6 +93,8 @@ export function AgentExecutionTrace({ process, items: directItems, run, nested =
         <div className="codex-trace-collapse" aria-hidden={!open} inert={!open}><div className="codex-trace-collapse-inner">{open && <div id={"trace-detail-" + item.id} className="codex-trace-detail-panel">
           {(item.runId || process?.runId) && <a href={"/activity?runId=" + encodeURIComponent(item.runId ?? process?.runId ?? "")}>{t("viewRun")}</a>}
           <div>{t("operationStatus")}: {t(status === "active" ? "running" : status === "waiting_for_approval" ? "awaiting_approval" : status)}</div>
+          {item.stage==="provider_retry" && <div>{isUk?"Заплановано спробу з наступною моделлю":"Retry scheduled with the next configured model"}</div>}
+          <div><time dateTime={item.at}>{item.at}</time>{showIdentity && item.agentId && <> · {safe(item.agentId)}</>}{item.modelUsage?.provider && <> · {safe(item.modelUsage.provider)}</>}</div>
           {item.dryRun && <div>{t("dryRun")}</div>}
           {item.modelUsage ? usageView(item.modelUsage) : <div>{t("usage")}: {t("unavailableTokens")}</div>}
           {item.tool && <div>{t("tool")}: <code>{safe(item.tool)}</code></div>}

@@ -391,11 +391,13 @@ export async function listProjectQaReports(
   companyId: string,
   projectId: string,
   limit = 50,
+  runId?: string,
 ): Promise<ProjectQaReport[]> {
   await getProject(host, context, companyId, projectId);
   const safeLimit = Math.max(1, Math.min(limit, 200));
   return structuredClone([...host.projectQaReports.values()]
     .filter((r: any) => r.workspaceId === context.workspaceId && r.companyId === companyId && r.projectId === projectId)
+    .filter((r: ProjectQaReport) => !runId || r.runId === runId)
     .sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
     .slice(0, safeLimit));
 }

@@ -212,13 +212,13 @@ export async function createProjectQaReport(pool: Pool, context: AuthContext, co
     return result.rows[0]!;
   }
 
-export async function listProjectQaReports(pool: Pool, context: AuthContext, companyId: string, projectId: string, limit = 50): Promise<ProjectQaReport[]> {
+export async function listProjectQaReports(pool: Pool, context: AuthContext, companyId: string, projectId: string, limit = 50, runId?: string): Promise<ProjectQaReport[]> {
     await getProject(pool, context, companyId, projectId);
     const safeLimit = Math.max(1, Math.min(limit, 200));
     const result = await pool.query<ProjectQaReport>(`SELECT ${projectQaReportColumns} FROM project_qa_reports
       WHERE workspace_id=$1 AND company_id=$2 AND project_id=$3
-      ORDER BY created_at DESC, id DESC LIMIT $4`,
-      [context.workspaceId, companyId, projectId, safeLimit]);
+      AND ($5::text IS NULL OR run_id=$5) ORDER BY created_at DESC, id DESC LIMIT $4`,
+      [context.workspaceId, companyId, projectId, safeLimit, runId ?? null]);
     return result.rows;
   }
 
@@ -358,6 +358,7 @@ export async function listStaleCodeRunStates(pool: Pool, input: { now: Date; lim
   }
 
 export async function listCodeRunStates(pool: Pool, input: ListCodeRunStatesInput): Promise<CodeRunStateRecord[]> {
+    const cursor=decodeCodeRunScanCursor(input.cursor);
     const limit = Math.max(1, Math.min(input.limit ?? 200, 500));
     const statuses = input.statuses && input.statuses.length > 0 ? [...input.statuses] : null;
     const result = await pool.query<CodeRunStateRecord>(
@@ -366,9 +367,10 @@ export async function listCodeRunStates(pool: Pool, input: ListCodeRunStatesInpu
           AND ($2::text[] IS NULL OR status = ANY($2::text[]))
           AND ($3::timestamptz IS NULL OR started_at >= $3::timestamptz)
           AND ($4::timestamptz IS NULL OR started_at < $4::timestamptz)
+          AND ($6::timestamptz IS NULL OR started_at < $6::timestamptz OR (started_at = $6::timestamptz AND run_id > $7::text))
         ORDER BY started_at DESC, run_id ASC
         LIMIT $5`,
-      [input.companyId, statuses, input.startedAfter ?? null, input.startedBefore ?? null, limit],
+      [input.companyId, statuses, input.startedAfter ?? null, input.startedBefore ?? null, limit, cursor?.startedAt ?? null, cursor?.runId ?? null],
     );
     return result.rows;
   }

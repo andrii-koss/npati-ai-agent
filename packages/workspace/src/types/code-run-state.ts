@@ -202,6 +202,8 @@ export interface CodeRunStateScanInput {
  * record of what happened.
  */
 export interface ListCodeRunStatesInput {
+  /** Stable descending-start/ascending-id history cursor. */
+  cursor?: string;
   /** Required tenant predicate; there is no system scope on this read. */
   companyId: string;
   /** Restrict to these run statuses. Omitted means every status. */
