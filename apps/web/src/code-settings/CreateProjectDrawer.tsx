@@ -190,13 +190,16 @@ export function CreateProjectDrawer({
         </section>
 
         {localError && (
-          <div className="data-studio-alert error" role="alert">
+          <div className="data-studio-alert error" role="alert" style={{ margin: "14px 26px 0" }}>
             {localError}
           </div>
         )}
 
-        <div className="browser-form-footer">
-          <div className="browser-form-footer-hint">
+        <footer>
+          <span
+            className="browser-form-footer-hint"
+            style={{ fontSize: "12.5px", color: "var(--npati-gray-500, #64748b)", fontWeight: 500, lineHeight: 1.4 }}
+          >
             {companyName
               ? isUk
                 ? `Буде створено в компанії «${companyName}».`
@@ -204,10 +207,10 @@ export function CreateProjectDrawer({
               : isUk
                 ? "Буде створено код-проєкт."
                 : "A code project will be created."}
-          </div>
+          </span>
           <button
             type="submit"
-            className="button-primary automations-action-primary browser-submit-btn"
+            className="button-primary automations-action-primary"
             disabled={!canSubmit || working}
           >
             {working
@@ -218,7 +221,7 @@ export function CreateProjectDrawer({
                 ? "Створити проєкт"
                 : "Create project"}
           </button>
-        </div>
+        </footer>
       </form>
     </Drawer>
   );
