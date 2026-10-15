@@ -362,7 +362,7 @@ export interface WorkspaceStore {
   getProjectDeployment(context: AuthContext, companyId: string, projectId: string, deploymentId: string): Promise<ProjectDeployment | null>;
   updateProjectDeployment(context: AuthContext, companyId: string, projectId: string, deploymentId: string, patch: Partial<ProjectDeployment>): Promise<ProjectDeployment>;
   createProjectQaReport(context: AuthContext, companyId: string, projectId: string, input: CreateProjectQaReportInput): Promise<ProjectQaReport>;
-  listProjectQaReports(context: AuthContext, companyId: string, projectId: string, limit?: number): Promise<ProjectQaReport[]>;
+  listProjectQaReports(context: AuthContext, companyId: string, projectId: string, limit?: number, runId?: string): Promise<ProjectQaReport[]>;
   getProjectQaReport(context: AuthContext, companyId: string, projectId: string, reportId: string): Promise<ProjectQaReport | null>;
   getLatestProjectQaReport(context: AuthContext, companyId: string, projectId: string): Promise<ProjectQaReport | null>;
   listCompanyAgents(context: AuthContext, companyId: string): Promise<CompanyAgent[]>;

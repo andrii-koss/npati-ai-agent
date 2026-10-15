@@ -1,5 +1,6 @@
-import { sanitizeExecutionTrace, type DevelopmentProcess, type DevelopmentProcessProgressItem } from "@npati/shared";
+import { sanitizeExecutionTrace, normalizeCodeRunStatus, type DevelopmentProcess, type DevelopmentProcessProgressItem } from "@npati/shared";
 import type { AuthContext, WorkspaceStore, CodeRunStateRecord } from "@npati/workspace";
+import { encodeCodeActivityCursor } from "@npati/workspace";
 import type { ProjectTerminalEventsRepository } from "./project-terminal-events";
 
 export function sanitizeProgress(item: DevelopmentProcessProgressItem): DevelopmentProcessProgressItem {
@@ -9,7 +10,7 @@ export function sanitizeProgress(item: DevelopmentProcessProgressItem): Developm
   }
   if(safe.modelUsage) safe.modelUsage={...safe.modelUsage,model:safe.modelUsage.model ? sanitizeExecutionTrace(safe.modelUsage.model) : undefined,provider:safe.modelUsage.provider ? sanitizeExecutionTrace(safe.modelUsage.provider) : undefined};
   if (safe.files) safe.files = safe.files.slice(0,200).map(file => ({ ...file, path: sanitizeExecutionTrace(file.path), diff: file.diff ? sanitizeExecutionTrace(file.diff).slice(0,128_000) : undefined }));
-  for (const field of ["arguments", "fileContent"] as const) if (safe[field] && safe[field]!.length > 128_000) { safe[field] = safe[field]!.slice(0,128_000); safe.resultTruncated = true; }
+  for (const field of ["arguments", "fileContent", "stdout", "stderr", "diff"] as const) if (safe[field] && safe[field]!.length > 128_000) { safe[field] = safe[field]!.slice(0,128_000); safe.resultTruncated = true; }
   if (safe.result && safe.result.length > 128_000) { safe.result = safe.result.slice(0, 128_000); safe.resultTruncated = true; }
   return safe;
 }
@@ -41,7 +42,7 @@ export function executionResultDetails(value: unknown): Partial<DevelopmentProce
   const recordedOutput = reports.map(report => string(report.raw)).filter(Boolean).join("\n\n");
   const counts = object(data.tests);
   const tests = ["passed","failed","skipped","total"].every(key => numeric(counts[key]) !== undefined && Number(counts[key]) >= 0) ? counts as {passed:number;failed:number;skipped:number;total:number} : undefined;
-  return Object.fromEntries(Object.entries({status: typeof data.exitCode === "number" && data.exitCode !== 0 || typeof object(data.stats).failed === "number" && Number(object(data.stats).failed) > 0 ? "failed" : undefined, dryRun:typeof data.dryRun==="boolean"?data.dryRun:undefined,file:string(data.path),fileContent:data.binary === true || data.encoding === "base64" ? undefined : string(data.content) ?? readLines,stdout:string(data.stdout) ?? (recordedOutput || undefined),stderr:string(data.stderr),exitCode:numeric(data.exitCode),diff:string(data.diff),linesAdded:numeric(data.linesAdded),linesRemoved:numeric(data.linesRemoved),fileChange:actions[String(data.status)],files,tests}).filter(([,value]) => value !== undefined)) as Partial<DevelopmentProcessProgressItem>;
+  return Object.fromEntries(Object.entries({status: envelope.ok === false || data.ok === false || data.success === false || (tests?.failed ?? 0) > 0 || reports.some(report => report.ok === false) || typeof data.exitCode === "number" && data.exitCode !== 0 || typeof object(data.stats).failed === "number" && Number(object(data.stats).failed) > 0 ? "failed" : undefined, dryRun:typeof data.dryRun==="boolean"?data.dryRun:undefined,file:string(data.path),fileContent:data.binary === true || data.encoding === "base64" ? undefined : string(data.content) ?? readLines,stdout:string(data.stdout) ?? (recordedOutput || undefined),stderr:string(data.stderr),exitCode:numeric(data.exitCode),diff:string(data.diff),linesAdded:numeric(data.linesAdded),linesRemoved:numeric(data.linesRemoved),fileChange:actions[String(data.status)],files,tests}).filter(([,value]) => value !== undefined)) as Partial<DevelopmentProcessProgressItem>;
 }
 /** JSONB serializes nested Date values as ISO strings; pg does not revive them. */
 export function executionTimestamp(value: unknown): number | undefined {
@@ -57,12 +58,34 @@ const string = (value: unknown) => typeof value === "string" ? value : undefined
 /** Projection of existing write-ahead calls, replay results and terminal logs. Writes no execution ledger. */
 export async function developmentTrace(store: WorkspaceStore, ctx: AuthContext, process: DevelopmentProcess, terminal?: ProjectTerminalEventsRepository): Promise<DevelopmentProcessProgressItem[]> {
   const progress = (process.progress ?? []).map(sanitizeProgress);
-  const run = process.runId ? await store.getCodeRunState(process.companyId, process.runId) : null;
+  const recordedRun = process.runId ? await store.getCodeRunState(process.companyId, process.runId) : null;
+  const run = recordedRun ? {...recordedRun,status:normalizeCodeRunStatus(recordedRun.status,recordedRun.details?.stopReason)} : null;
   if (run && (run.workspaceId !== ctx.workspaceId || run.projectId !== process.projectId || run.sessionId !== process.sessionId)) return progress;
   const calls = new Map<string, DevelopmentProcessProgressItem>();
   if (run) {
     const activity = await store.listCodeActivityEvents({ companyId: process.companyId, runId: run.runId, limit: 200 });
-    const usages = new Map(progress.filter(item=>item.modelUsage).map(item=>[item.modelUsage!.turn,item.modelUsage!]));
+    // Read all metadata pages rather than silently losing early calls on long runs.
+    let page = activity.slice();
+    while(page.length===200) {
+      const last=page.at(-1)!;
+      page=await store.listCodeActivityEvents({companyId:process.companyId,runId:run.runId,limit:200,cursor:encodeCodeActivityCursor({createdAt:new Date(last.createdAt),id:last.id})});
+      if(!page.length || page.at(-1)?.id===last.id) break;
+      activity.push(...page);
+    }
+    activity.sort((a,b)=>(executionTimestamp(a.createdAt) ?? 0)-(executionTimestamp(b.createdAt) ?? 0) || a.id.localeCompare(b.id));
+    for(const event of activity) {
+      const p=event.payload;
+      if(event.kind!=="run_activity" || p.eventType!=="model_call" || !["started","completed","failed"].includes(String(p.phase)) || typeof p.turn!=="number") continue;
+      const id=p.modelPurpose==="self_review" ? `${run.runId}:self-review:${p.turn}`+(typeof p.attempt==="number"?":attempt:"+p.attempt:"") : run.runId+":thinking:"+p.turn+(typeof p.attempt==="number"?":attempt:"+p.attempt:"");
+      const existing=progress.find(e=>e.id===id);
+      const phase=p.phase;
+      if(existing && phase==="started" && ["completed","failed"].includes(existing.status ?? "")) continue;
+      const at=phase==="started" ? new Date(executionTimestamp(event.createdAt) ?? Date.parse(process.createdAt)).toISOString() : existing?.at ?? new Date((executionTimestamp(event.createdAt) ?? Date.parse(process.createdAt))-(typeof p.durationMs==="number"?p.durationMs:0)).toISOString();
+      const item=sanitizeProgress({...existing,id,runId:run.runId,stage:p.retryScheduled===true?"provider_retry":"planning",title:typeof p.model==="string"?`Model call · ${p.model}`:"Model call",at,status:phase==="failed"?"failed":phase==="completed"?"completed":"running",durationMs:typeof p.durationMs==="number"?p.durationMs:existing?.durationMs,errorCode:typeof p.errorCode==="string"?p.errorCode:existing?.errorCode,error:phase==="failed" && typeof p.httpStatus==="number"?`AI Provider HTTP ${p.httpStatus}`:existing?.error});
+      item.modelUsage={...existing?.modelUsage,id,turn:p.turn,model:typeof p.model==="string"?sanitizeExecutionTrace(p.model):undefined,provider:typeof p.provider==="string"?sanitizeExecutionTrace(p.provider):undefined,toolCallIds:[]};
+      if(existing) Object.assign(existing,item); else progress.push(item);
+    }
+    const usages = new Map(progress.filter(item=>item.modelUsage && item.stage!=="planning" && item.stage!=="provider_retry").map(item=>[item.modelUsage!.turn,item.modelUsage!]));
     for(const event of activity) { const p=event.payload; if(event.kind==="run_activity" && !p.tool && typeof p.turn==="number" && typeof p.bytes==="number" && p.bytes>0 && !usages.has(p.turn)) usages.set(p.turn,{id:run.runId+":model:"+p.turn,turn:p.turn,totalTokens:p.bytes,toolCallIds:[]}); }
     const turns = await store.listCodeRunTurns(process.companyId, run.runId);
     const bundle = await store.getReplayBundle(process.companyId, run.runId);
@@ -73,7 +96,7 @@ export async function developmentTrace(store: WorkspaceStore, ctx: AuthContext, 
       const payload = object(step.payload);
       if (step.kind === "model_step") {
         const response=object(payload.response), usage=object(response.usage);
-        if(typeof payload.turnIndex==="number" && typeof usage.totalTokens==="number") usages.set(payload.turnIndex,{id:run.runId+":model:"+payload.turnIndex,turn:payload.turnIndex,totalTokens:usage.totalTokens,inputTokens:typeof usage.promptTokens==="number"?usage.promptTokens:undefined,outputTokens:typeof usage.completionTokens==="number"?usage.completionTokens:undefined,toolCallIds:Array.isArray(response.toolCalls)?response.toolCalls.map(raw=>String(object(raw).id)):[]});
+        if(typeof payload.turnIndex==="number" && typeof usage.totalTokens==="number") usages.set(payload.turnIndex,{id:run.runId+":model:"+payload.turnIndex,turn:payload.turnIndex,model:string(response.model),provider:string(response.provider),totalTokens:usage.totalTokens,inputTokens:typeof usage.promptTokens==="number"?usage.promptTokens:undefined,outputTokens:typeof usage.completionTokens==="number"?usage.completionTokens:undefined,toolCallIds:Array.isArray(response.toolCalls)?response.toolCalls.map(raw=>String(object(raw).id)):[]});
         const requested = response.toolCalls;
         if (Array.isArray(requested)) for (const call of requested) {
           const c = object(call); if (typeof c.id === "string") args.set(c.id, object(c.arguments));
@@ -138,14 +161,14 @@ export async function developmentTrace(store: WorkspaceStore, ctx: AuthContext, 
         call.runId === process.runId && call.tool === "code.verify.run" && call.durationMs !== undefined &&
         at >= Date.parse(call.at) && at <= Date.parse(call.at) + call.durationMs + 2000 &&
         (call.stdout ?? executionResultDetails(call.result).stdout ?? "").includes(sanitizeExecutionTrace(log.output.trim()).slice(0, 1000)));
-      if (log.runId ? log.runId !== process.runId : !matchedVerification && (at < Date.parse(process.createdAt) || (setupEnd && at > Date.parse(setupEnd)))) continue;
+      if (log.runId ? log.runId !== process.runId : !matchedVerification && (!setupEnd || at < Date.parse(process.createdAt) || (setupEnd && at > Date.parse(setupEnd)))) continue;
       // Shell calls already have their result in replay; avoid rendering the same command twice.
       const existing = [...progress, ...calls.values()].find(call => call.command === sanitizeExecutionTrace(log.commandSummary) && Math.abs(Date.parse(call.at) - Date.parse(log.createdAt)) <= log.durationMs + 2000);
       const details = { command: log.commandSummary, result: log.output, exitCode: log.exitCode ?? undefined,
         durationMs: log.durationMs, errorCode: log.errorCode, agentId: log.agentId };
-      if (existing) { Object.assign(existing, sanitizeProgress({ ...existing, ...details })); continue; }
+      if (existing) { Object.assign(existing, sanitizeProgress({ ...existing, ...details, status:log.exitCode !== null && log.exitCode !== 0 || log.status==="failed" || log.status==="timed_out" ? "failed" : log.status==="running" ? "running" : log.status==="stopped" ? "cancelled" : existing.status === "failed" ? "failed" : "completed" })); continue; }
       progress.push(sanitizeProgress({ id: "terminal:" + log.id, runId: log.runId ?? (matchedVerification ? process.runId : undefined), stage: "command", title: "Running command", at: log.createdAt,
-        status: log.status === "failed" || log.status === "timed_out" ? "failed" : log.status === "stopped" ? "cancelled" : "completed",
+        status: log.status === "failed" || log.status === "timed_out" || log.exitCode !== null && log.exitCode !== 0 ? "failed" : log.status === "running" ? "running" : log.status === "stopped" ? "cancelled" : "completed",
         ...details }));
     }
   }

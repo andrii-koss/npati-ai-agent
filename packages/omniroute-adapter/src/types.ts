@@ -37,6 +37,8 @@ export type ChatToolChoice = "auto" | "none" | "required" | {
 };
 
 export interface ChatRequest {
+  /** Best-effort metadata observer; never receives credentials, prompts or provider bodies. */
+  onProviderAttempt?: (event: {model:string;phase:"started"|"completed"|"failed";durationMs?:number;httpStatus?:number;errorCode?:string;retryScheduled?:boolean}) => void | Promise<void>;
   messages: ChatMessage[];
   model?: string;
   fallbackModel?: string;

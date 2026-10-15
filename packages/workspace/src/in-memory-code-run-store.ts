@@ -168,6 +168,7 @@ export class InMemoryCodeRunStore {
   }
 
   async listCodeRunStates(input: ListCodeRunStatesInput): Promise<CodeRunStateRecord[]> {
+    const cursor=decodeCodeRunScanCursor(input.cursor);
     const limit = Math.max(1, Math.min(input.limit ?? 200, 500));
     const statuses = input.statuses ? new Set(input.statuses) : null;
     return structuredClone([...this.codeRunStates.values()]
@@ -175,6 +176,7 @@ export class InMemoryCodeRunStore {
       .filter((record) => !statuses || statuses.has(record.status))
       .filter((record) => !input.startedAfter || record.startedAt.getTime() >= input.startedAfter.getTime())
       .filter((record) => !input.startedBefore || record.startedAt.getTime() < input.startedBefore.getTime())
+      .filter(record=>!cursor || record.startedAt.getTime()<Date.parse(cursor.startedAt) || record.startedAt.getTime()===Date.parse(cursor.startedAt) && record.runId>cursor.runId)
       .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime() || a.runId.localeCompare(b.runId))
       .slice(0, limit));
   }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 // C6b: read-only "why did this run act this way" — execution snapshot, snapshot diff and replay status.
 import { CodeSnapshotPanel } from "./CodeSnapshotPanel";
 import { Link } from "react-router-dom";
@@ -29,6 +29,7 @@ import {
 } from "./activity-types";
 import { ActivityTraceDetail } from "./activity-trace-detail";
 import { ActivityStatsCards } from "./activity-stats-cards";
+import { CodeRunMonitor } from "./CodeRunMonitor";
 
 export function ActivityPage() {
   const { t, language } = useTranslation();
@@ -42,6 +43,11 @@ export function ActivityPage() {
   const [companies, setCompanies] = useState<CompanyItem[]>(initialCompanies);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>(initialCompanyId);
   const [runs, setRuns] = useState<CompanyRun[]>(initialRuns);
+  const selectedCompanyRef=useRef(selectedCompanyId);
+  selectedCompanyRef.current=selectedCompanyId;
+  const [codingCursor,setCodingCursor]=useState<string|null>(null);
+  const historyCursor=useRef<{companyId:string;cursor:string|null}|null>(null);
+  const runsRef=useRef(runs);runsRef.current=runs;
   const queryRunId = new URLSearchParams(window.location.search).get("runId");
   const [selectedRunId, setSelectedRunId] = useState<string>(() => (queryRunId || initialRuns[0]?.id) ?? "");
   const [activeRunDetails, setActiveRunDetails] = useState<{
@@ -79,6 +85,7 @@ export function ActivityPage() {
     setSelectedCompanyId(companyId);
     writeActiveCompanyId(companyId);
     const cachedForNewCompany = getCachedRuns(companyId);
+    setRuns([]);setSelectedRunId("");setActiveRunDetails(null);setCodingCursor(null);
     if (cachedForNewCompany.length > 0) {
       setRuns(cachedForNewCompany);
       setSelectedRunId(cachedForNewCompany[0]?.id ?? "");
@@ -120,17 +127,26 @@ export function ActivityPage() {
     if (token) headers["authorization"] = `Bearer ${token}`;
 
     try {
-      const res = await fetch(`/api/companies/${companyId}/runs?limit=50`, { headers });
+      const [res, coding] = await Promise.all([fetch(`/api/companies/${companyId}/runs?limit=50`, { headers }),fetch(`/api/companies/${companyId}/code/monitor/runs`, { headers })]);
       if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to load runs`);
       const data = (await res.json()) as { runs?: CompanyRun[] };
-      const items = data.runs ?? [];
-      setRuns(items);
+      if(!coding.ok) throw new Error(`HTTP ${coding.status}: Failed to load Coding Runs`);
+      const codeData=await coding.json() as {runs:CompanyRun[];nextCursor:string|null};
+      const items = [...codeData.runs,...(data.runs ?? [])].sort((a,b)=>Date.parse(b.createdAt)-Date.parse(a.createdAt));
+      if(queryRunId && !items.some(r=>r.id===queryRunId)) {
+        const linked=await fetch(`/api/companies/${companyId}/code/monitor/runs/${encodeURIComponent(queryRunId)}?limit=1`,{headers});
+        if(linked.ok) items.unshift((await linked.json()).run);
+      }
+      if(selectedCompanyRef.current!==companyId) return;
+      if(historyCursor.current?.companyId!==companyId) historyCursor.current={companyId,cursor:codeData.nextCursor};
+      setCodingCursor(historyCursor.current.cursor);
+      setRuns(previous=>[...items,...previous.filter(r=>r.companyId===companyId && r.requestedMode.startsWith("coding") && !items.some(item=>item.id===r.id))]);
       updateCachedRuns(companyId, items);
 
       if (items.length > 0) {
         // If current selection is still in list keep it, otherwise pick first
         setSelectedRunId((prev) => {
-          if (prev && items.some((r) => r.id === prev)) return prev;
+          if (prev && (items.some((r) => r.id === prev) || runsRef.current.some(r=>r.companyId===companyId && r.id===prev && r.requestedMode.startsWith("coding")))) return prev;
           return items[0]?.id ?? "";
         });
       } else {
@@ -154,6 +170,7 @@ export function ActivityPage() {
   // Fetch run details when selectedRunId changes
   useEffect(() => {
     if (!selectedCompanyId || !selectedRunId) return;
+    if(runs.find(r=>r.id===selectedRunId)?.requestedMode.startsWith("coding")) {setActiveRunDetails(null);return;}
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const headers: HeadersInit = {};
@@ -177,10 +194,28 @@ export function ActivityPage() {
         setRuns((previous) => previous.map((run) => run.id === data.run.id ? data.run : run));
         if (["queued", "planning", "running", "cancelling"].includes(data.run.status)) timer = setTimeout(loadDetails, 1500);
       })
-      .catch(() => {});
+      .catch((err) => {if(!stopped) {setError(String(err));timer=setTimeout(loadDetails,3000);}});
     void loadDetails();
     return () => { stopped = true; if (timer) clearTimeout(timer); };
-  }, [selectedCompanyId, selectedRunId]);
+  }, [selectedCompanyId, selectedRunId, runs.find(r=>r.id===selectedRunId)?.requestedMode]);
+
+  useEffect(()=>{
+    if(!selectedCompanyId) return;
+    const timer=setInterval(()=>{if(!document.hidden) void loadRuns(selectedCompanyId);},10000);
+    return()=>clearInterval(timer);
+  },[selectedCompanyId]);
+
+  const loadOlderCodingRuns=async()=>{
+    if(!codingCursor) return;
+    try {
+      const token=getStoredAuthToken();
+      const response=await fetch(`/api/companies/${selectedCompanyId}/code/monitor/runs?cursor=${encodeURIComponent(codingCursor)}`,{headers:token?{authorization:`Bearer ${token}`}:{}});
+      if(!response.ok) throw new Error(`Monitoring HTTP ${response.status}`);
+      const data=await response.json() as {runs:CompanyRun[];nextCursor:string|null};
+      if(selectedCompanyRef.current!==selectedCompanyId) return;
+      setRuns(previous=>[...previous,...data.runs.filter(r=>!previous.some(old=>old.id===r.id))]);setCodingCursor(data.nextCursor);historyCursor.current={companyId:selectedCompanyId,cursor:data.nextCursor};
+    }catch(error){setError(String(error));}
+  };
 
   // Handle task dispatch
   const handleDispatch = async (overridePrompt?: string) => {
@@ -628,10 +663,12 @@ export function ActivityPage() {
                   })}
                 </div>
               )}
+              {codingCursor && <button type="button" className="button-secondary" onClick={()=>void loadOlderCodingRuns()}>{language==="uk"?"Попередні Coding Runs":"Older Coding Runs"}</button>}
             </aside>
 
             {/* Main: Execution Trace & Policy Inspection */}
             <section className="activity-trace-detail">
+            {runs.find(r=>r.id===selectedRunId)?.requestedMode.startsWith("coding") ? <CodeRunMonitor key={selectedRunId} companyId={selectedCompanyId} runId={selectedRunId} isUk={language==="uk"}/> : <>
             <ActivityTraceDetail
               activeRunDetails={activeRunDetails}
               projectTasks={projectTasks}
@@ -641,6 +678,7 @@ export function ActivityPage() {
               language={language}
               t={t}
             />
+            </>}
             {/* C6b: the minimum Run Trace needs to explain a run's environment and policies. A run with no
                 snapshot says legacy_no_snapshot rather than rendering an error. */}
             {selectedRunId ? (

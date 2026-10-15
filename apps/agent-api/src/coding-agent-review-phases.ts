@@ -354,8 +354,15 @@ export class CodingAgentReviewPhases {
       },
       reviewRequest: state.request(),
       chat: async (request) => {
+        const started=this.now();
+        const metadata={kind:"model_call" as const,companyId,projectId,sessionId,turn:steps,modelPurpose:"self_review" as const,model:input.model};
+        const activity={id:`${input.runId ?? sessionId}:self-review:${steps}`,runId:input.runId,stage:"planning",title:"Reviewing implementation",at:new Date(started).toISOString()};
+        await record({...metadata,phase:"started"});
+        await emitCodingActivity(input,{...activity,status:"running"});
+        let attempt=0;
         try {
           const result = await this.ports.engine.chat({
+            onProviderAttempt:async(event)=>{if(event.phase==="started") attempt++;await record({...metadata,attempt,...event});},
             messages: request.messages,
 
             model: input.model,
@@ -369,9 +376,13 @@ export class CodingAgentReviewPhases {
               dataClassification: session.dataClassification,
             },
           });
+          await record({...metadata,phase:"completed",model:result.model ?? input.model,provider:result.telemetry?.provider,durationMs:this.now()-started});
+          await emitCodingActivity(input,{...activity,status:"completed",durationMs:this.now()-started,modelUsage:{id:activity.id,turn:steps,model:result.model ?? input.model,provider:result.telemetry?.provider,totalTokens:result.usage?.totalTokens,inputTokens:result.usage?.promptTokens,outputTokens:result.usage?.completionTokens,toolCallIds:[]}});
           return { ok: true as const, content: result.content ?? "" };
         } catch (error) {
           const failure = error as { code?: string; message?: string };
+          await record({...metadata,phase:"failed",errorCode:failure.code ?? "review_call_failed",durationMs:this.now()-started});
+          await emitCodingActivity(input,{...activity,status:"failed",error:failure.message,errorCode:failure.code ?? "review_call_failed",durationMs:this.now()-started});
           return { ok: false as const, code: failure.code ?? "review_call_failed", message: failure.message };
         }
       },

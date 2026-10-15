@@ -257,7 +257,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   async getProjectDeployment(context: AuthContext, companyId: string, projectId: string, deploymentId: string): Promise<ProjectDeployment | null> { return project.getProjectDeployment(this.pool, context, companyId, projectId, deploymentId); }
   async updateProjectDeployment(context: AuthContext, companyId: string, projectId: string, deploymentId: string, patch: Partial<ProjectDeployment>): Promise<ProjectDeployment> { return project.updateProjectDeployment(this.pool, context, companyId, projectId, deploymentId, patch); }
   async createProjectQaReport(context: AuthContext, companyId: string, projectId: string, input: CreateProjectQaReportInput): Promise<ProjectQaReport> { return project.createProjectQaReport(this.pool, context, companyId, projectId, input); }
-  async listProjectQaReports(context: AuthContext, companyId: string, projectId: string, limit = 50): Promise<ProjectQaReport[]> { return project.listProjectQaReports(this.pool, context, companyId, projectId, limit); }
+  async listProjectQaReports(context: AuthContext, companyId: string, projectId: string, limit = 50, runId?: string): Promise<ProjectQaReport[]> { return project.listProjectQaReports(this.pool, context, companyId, projectId, limit, runId); }
   async getProjectQaReport(context: AuthContext, companyId: string, projectId: string, reportId: string): Promise<ProjectQaReport | null> { return project.getProjectQaReport(this.pool, context, companyId, projectId, reportId); }
   async getLatestProjectQaReport(context: AuthContext, companyId: string, projectId: string): Promise<ProjectQaReport | null> {
     const list = await this.listProjectQaReports(context, companyId, projectId, 1);

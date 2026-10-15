@@ -441,9 +441,15 @@ export class CodingAgentRunner {
         stage: "planning", title: "Preparing the next implementation step", at: new Date(modelStarted).toISOString(),
       };
       await emitCodingActivity(input, { ...thinking, status: "running" });
+      await record({kind:"model_call",phase:"started",companyId,projectId,sessionId,turn:steps+1,model:input.model});
       try {
         modelStarted = this.now();
+        let providerAttempt=0;
         result = await this.ports.engine.chat({
+          onProviderAttempt:async(event)=>{
+            if(event.phase==="started") providerAttempt++;
+            await record({kind:"model_call",companyId,projectId,sessionId,turn:steps+1,attempt:providerAttempt,...event});
+          },
           messages,
           ...(definitions.length ? { tools: definitions } : {}),
           ...(definitions.length ? { toolChoice: "auto" as const } : {}),
@@ -454,7 +460,9 @@ export class CodingAgentRunner {
           policyContext: { companyId, projectId, sessionId, dataClassification: session.dataClassification },
         });
       } catch (error) {
-        await emitCodingActivity(input, { ...thinking, status: input.signal?.aborted ? "cancelled" : "failed", durationMs: this.now() - modelStarted });
+        const diagnostic=error as {code?:string;message?:string;status?:number;statusCode?:number;httpStatus?:number};
+        await record({kind:"model_call",phase:"failed",companyId,projectId,sessionId,turn:steps+1,model:input.model,durationMs:this.now()-modelStarted,errorCode:diagnostic.code ?? "provider_error",httpStatus:diagnostic.httpStatus ?? diagnostic.statusCode ?? diagnostic.status});
+        await emitCodingActivity(input, { ...thinking, status: input.signal?.aborted ? "cancelled" : "failed", durationMs: this.now() - modelStarted,error:diagnostic.message,errorCode:diagnostic.code ?? "provider_error" });
         if (input.detachedChildInbox && (input.signal?.reason as { code?: string } | undefined)?.code === "subagent_interrupt") {
           return stop("interrupted", "interrupted", "The child was interrupted during its model request and can be continued.");
         }
@@ -469,6 +477,7 @@ export class CodingAgentRunner {
       }
 
       steps += 1;
+      await record({kind:"model_call",phase:"completed",companyId,projectId,sessionId,turn:steps,model:result.model ?? input.model,provider:result.telemetry?.provider,durationMs:this.now()-modelStarted});
       await emitCodingActivity(input, { ...thinking, status: "completed", durationMs: this.now() - modelStarted });
       summary.turns = steps;
       model = result.model ?? model;

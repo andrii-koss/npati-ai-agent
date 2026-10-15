@@ -2,6 +2,7 @@
 import type { Pool } from "pg";
 import type { AuthContext } from "@npati/workspace";
 import type { ProjectService } from "./project-service";
+import { sanitizeExecutionTrace } from "@npati/shared";
 
 export interface ProjectTerminalEvent {
   id: string; workspaceId: string; companyId: string; projectId: string; userId: string;
@@ -15,7 +16,7 @@ export class ProjectTerminalEventsRepository {
   constructor(private readonly projects: Pick<ProjectService, "get">, private readonly pool?: Pool) {}
   async append(ctx: AuthContext, companyId: string, projectId: string, input: Omit<ProjectTerminalEvent, "id" | "workspaceId" | "companyId" | "projectId" | "userId" | "createdAt">) {
     await this.projects.get(ctx, companyId, projectId);
-    const event: ProjectTerminalEvent = { ...input, id: randomUUID(), workspaceId: ctx.workspaceId, companyId, projectId, userId: ctx.userId, commandSummary: input.commandSummary.slice(0, 2048), output: input.output.slice(0, 128_000), createdAt: new Date().toISOString() };
+    const event: ProjectTerminalEvent = { ...input, id: randomUUID(), workspaceId: ctx.workspaceId, companyId, projectId, userId: ctx.userId, commandSummary: sanitizeExecutionTrace(input.commandSummary).slice(0, 2048), output: sanitizeExecutionTrace(input.output).slice(0, 128_000), errorCode:input.errorCode ? sanitizeExecutionTrace(input.errorCode) : undefined, createdAt: new Date().toISOString() };
     if (this.pool) await this.pool.query(`INSERT INTO project_terminal_events
       (id,workspace_id,company_id,project_id,user_id,run_id,agent_id,sandbox_id,process_id,command_summary,risk_level,status,exit_code,output,error_code,duration_ms,created_at)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,

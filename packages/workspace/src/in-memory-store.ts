@@ -378,7 +378,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   async getProjectDeployment(context: AuthContext, companyId: string, projectId: string, deploymentId: string): Promise<ProjectDeployment | null> { return getProjectDeployment(this.projectState(), context, companyId, projectId, deploymentId); }
   async updateProjectDeployment(context: AuthContext, companyId: string, projectId: string, deploymentId: string, patch: Partial<ProjectDeployment>): Promise<ProjectDeployment> { return updateProjectDeployment(this.projectState(), context, companyId, projectId, deploymentId, patch); }
   async createProjectQaReport(context: AuthContext, companyId: string, projectId: string, input: CreateProjectQaReportInput): Promise<ProjectQaReport> { return createProjectQaReport(this.projectState(), context, companyId, projectId, input); }
-  async listProjectQaReports(context: AuthContext, companyId: string, projectId: string, limit = 50): Promise<ProjectQaReport[]> { return listProjectQaReports(this.projectState(), context, companyId, projectId, limit); }
+  async listProjectQaReports(context: AuthContext, companyId: string, projectId: string, limit = 50, runId?: string): Promise<ProjectQaReport[]> { return listProjectQaReports(this.projectState(), context, companyId, projectId, limit, runId); }
   async getProjectQaReport(context: AuthContext, companyId: string, projectId: string, reportId: string): Promise<ProjectQaReport | null> { return getProjectQaReport(this.projectState(), context, companyId, projectId, reportId); }
   async getLatestProjectQaReport(context: AuthContext, companyId: string, projectId: string): Promise<ProjectQaReport | null> { return getLatestProjectQaReport(this.projectState(), context, companyId, projectId); }
 
