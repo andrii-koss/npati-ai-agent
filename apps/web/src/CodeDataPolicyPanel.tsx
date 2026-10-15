@@ -368,14 +368,24 @@ export function CodeDataPolicyPanel({ companyId, isUk, notify }: {
   const staleCount = useMemo(() => policies.filter((policy) => policy.stale).length, [policies]);
 
   return (
-    <section className="ds-section-title" aria-label={isUk ? "Політика даних провайдерів" : "Provider data policy"}>
-      <div>
-        <h2>{isUk ? "Політика даних провайдерів (C5b)" : "Provider data policy (C5b)"}</h2>
-        <p className="ds-muted">
-          {isUk
-            ? "Що саме можна надсилати кожному AI-провайдеру. Невідомий hosted-провайдер за замовчуванням отримує лише public-дані без коду й без кешування; змінювати політику може лише власник компанії."
-            : "What may be sent to each AI provider. An unknown hosted provider defaults to public data only, with no code and no caching; only the company owner may change the policy."}
-        </p>
+    <section className="browser-campaign-card code-data-policy-panel" aria-label={isUk ? "Політика даних провайдерів" : "Provider data policy"}>
+      <div className="browser-campaign-card-header">
+        <div className="browser-card-title-group">
+          <span className="browser-card-icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+          </span>
+          <div>
+            <h3>{isUk ? "Політика даних провайдерів (C5b)" : "Provider data policy (C5b)"}</h3>
+            <p>
+              {isUk
+                ? "Що саме можна надсилати кожному AI-провайдеру. Невідомий hosted-провайдер за замовчуванням отримує лише public-дані без коду й без кешування; змінювати політику може лише власник компанії."
+                : "What may be sent to each AI provider. An unknown hosted provider defaults to public data only, with no code and no caching; only the company owner may change the policy."}
+            </p>
+          </div>
+        </div>
       </div>
 
       {loading && <p className="ds-muted">{isUk ? "Завантаження…" : "Loading…"}</p>}
@@ -392,7 +402,7 @@ export function CodeDataPolicyPanel({ companyId, isUk, notify }: {
           )}
 
           {policies.length === 0 ? (
-            <div className="data-studio-alert info" role="status">
+            <div className="workspace-notice" role="status" style={{ margin: "14px 0" }}>
               {isUk
                 ? "Політик ще немає: кожен провайдер вважається зовнішнім і обмежений public-даними, доки власник не налаштує політику."
                 : "No policies yet: every provider is treated as a hosted third party limited to public data until an owner configures one."}
@@ -472,7 +482,7 @@ export function CodeDataPolicyPanel({ companyId, isUk, notify }: {
           )}
 
           {platformDefaults.length > 0 && (
-            <details className="code-limits">
+            <details className="code-limits" style={{ marginTop: "14px" }}>
               <summary>{isUk ? "Платформенні дефолти (усі компанії)" : "Platform defaults (all companies)"}</summary>
               <ul>
                 {platformDefaults.map((policy) => (
@@ -485,75 +495,125 @@ export function CodeDataPolicyPanel({ companyId, isUk, notify }: {
             </details>
           )}
 
-          <section className="ds-section-title">
-            <div>
-              <h3>{isUk ? "Проєкт" : "Project"}</h3>
-              <p className="ds-muted">
-                {isUk
-                  ? "Класифікація проєкту та правила за шляхами. Зниження класу вимагає ролі власника; підвищення — звичайний запис."
-                  : "Project classification and path rules. Lowering the class requires the owner role; raising it is an ordinary write."}
-              </p>
-            </div>
-          </section>
-
-          <label className="browser-form-field">
-            <span>{isUk ? "Код-проєкт" : "Code project"}</span>
-            <select value={projectId} onChange={(event) => setProjectId(event.target.value)}>
-              <option value="">{isUk ? "— оберіть проєкт —" : "— select a project —"}</option>
-              {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-            </select>
-          </label>
-
-          {projectPolicy && (
-            <>
-              <div className="code-detail-row">
-                <span>{isUk ? "Ефективна класифікація (для передачі)" : "Effective classification (for transfer)"}</span>
-                <span>
-                  <span className="data-studio-badge">
-                    {classificationLabel(projectPolicy.effectiveClassification ?? projectPolicy.dataClassification, isUk)}
-                  </span>
-                  {projectPolicy.effectiveFromProjectRecord && (
-                    <small className="ds-muted">
-                      {" "}
-                      {isUk
-                        ? `(піднята класифікацією проєкту: ${classificationLabel(projectPolicy.projectRecordClassification, isUk)})`
-                        : `(raised by the project classification: ${classificationLabel(projectPolicy.projectRecordClassification, isUk)})`}
-                    </small>
-                  )}
-                </span>
-              </div>
-              <div className="code-detail-row">
-                <span>{isUk ? "Класифікація" : "Classification"}</span>
-                <select
-                  value={projectPolicy.dataClassification}
-                  disabled={saving}
-                  onChange={(event) => void changeClassification(event.target.value as Classification)}
-                >
-                  {CLASSIFICATIONS.map((value) => <option key={value} value={value}>{classificationLabel(value, isUk)}</option>)}
-                </select>
-              </div>
-              <label className="browser-form-field">
-                <span>{isUk ? "Правила за шляхами (по одному на рядок)" : "Path rules (one per line)"}</span>
-                <textarea
-                  rows={4}
-                  value={pathRulesText}
-                  placeholder={"**/secrets/** = restricted\nvendor/** = public"}
-                  onChange={(event) => setPathRulesText(event.target.value)}
-                />
-                <small>
+          <div
+            className="browser-campaign-card-header"
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "20px",
+              flexWrap: "wrap",
+              marginTop: "24px",
+              paddingTop: "20px",
+              borderTop: "1px solid var(--npati-gray-100)",
+            }}
+          >
+            <div className="browser-card-title-group" style={{ flex: 1, minWidth: "260px" }}>
+              <span className="browser-card-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                </svg>
+              </span>
+              <div>
+                <h3>{isUk ? "Проєкт" : "Project"}</h3>
+                <p>
                   {isUk
-                    ? "Формат: pattern = classification. Правило з «..» або абсолютним шляхом відхиляється сервером."
-                    : "Format: pattern = classification. A rule using “..” or an absolute path is refused by the server."}
-                </small>
-              </label>
-              <div className="browser-form-footer">
-                <button type="button" className="button-secondary" disabled={saving} onClick={() => void saveProject()}>
-                  {isUk ? "Зберегти політику проєкту" : "Save project policy"}
-                </button>
-                <button type="button" className="button-secondary" disabled={saving} onClick={() => void loadEligibility()}>
-                  {isUk ? "Перевірити, хто отримає код" : "Check who receives the code"}
-                </button>
+                    ? "Класифікація проєкту та правила за шляхами. Зниження класу вимагає ролі власника; підвищення — звичайний запис."
+                    : "Project classification and path rules. Lowering the class requires the owner role; raising it is an ordinary write."}
+                </p>
               </div>
+            </div>
+
+            <div style={{ minWidth: "240px", maxWidth: "340px", flexShrink: 0 }}>
+              <select
+                value={projectId}
+                onChange={(event) => setProjectId(event.target.value)}
+                style={{
+                  width: "100%",
+                  height: "42px",
+                  padding: "0 14px",
+                  borderRadius: "10px",
+                  border: "1px solid #d9d9d9",
+                  fontSize: "13px",
+                  background: "#ffffff",
+                  color: "var(--npati-black)",
+                  outline: "none",
+                }}
+                aria-label={isUk ? "Код-проєкт" : "Code project"}
+              >
+                <option value="">{isUk ? "— оберіть проєкт —" : "— select a project —"}</option>
+                {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gap: "16px", marginTop: "12px" }}>
+
+            {projectPolicy && (
+              <>
+                <div className="code-detail-row" style={{ padding: "8px 0" }}>
+                  <span style={{ color: "#64748b", fontWeight: 500 }}>{isUk ? "Ефективна класифікація (для передачі)" : "Effective classification (for transfer)"}</span>
+                  <span>
+                    <span className="data-studio-badge">
+                      {classificationLabel(projectPolicy.effectiveClassification ?? projectPolicy.dataClassification, isUk)}
+                    </span>
+                    {projectPolicy.effectiveFromProjectRecord && (
+                      <small className="ds-muted">
+                        {" "}
+                        {isUk
+                          ? `(піднята класифікацією проєкту: ${classificationLabel(projectPolicy.projectRecordClassification, isUk)})`
+                          : `(raised by the project classification: ${classificationLabel(projectPolicy.projectRecordClassification, isUk)})`}
+                      </small>
+                    )}
+                  </span>
+                </div>
+                <div className="code-detail-row" style={{ padding: "8px 0" }}>
+                  <span style={{ color: "#64748b", fontWeight: 500 }}>{isUk ? "Класифікація" : "Classification"}</span>
+                  <select
+                    value={projectPolicy.dataClassification}
+                    disabled={saving}
+                    onChange={(event) => void changeClassification(event.target.value as Classification)}
+                    style={{ minHeight: "36px", borderRadius: "8px", padding: "0 10px", background: "#ffffff" }}
+                  >
+                    {CLASSIFICATIONS.map((value) => <option key={value} value={value}>{classificationLabel(value, isUk)}</option>)}
+                  </select>
+                </div>
+                <label className="browser-form-field">
+                  <span>{isUk ? "Правила за шляхами (по одному на рядок)" : "Path rules (one per line)"}</span>
+                  <textarea
+                    rows={4}
+                    value={pathRulesText}
+                    placeholder={"**/secrets/** = restricted\nvendor/** = public"}
+                    onChange={(event) => setPathRulesText(event.target.value)}
+                    style={{ fontFamily: "ui-monospace, monospace", fontSize: "12.5px" }}
+                  />
+                  <small className="browser-form-hint" style={{ fontSize: "12px", color: "var(--npati-gray-500, #64748b)", lineHeight: 1.45, marginTop: "2px" }}>
+                    {isUk
+                      ? "Формат: pattern = classification. Правило з «..» або абсолютним шляхом відхиляється сервером."
+                      : "Format: pattern = classification. A rule using “..” or an absolute path is refused by the server."}
+                  </small>
+                </label>
+                <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginTop: "4px" }}>
+                  <button
+                    type="button"
+                    className="button-primary automations-action-primary"
+                    disabled={saving}
+                    onClick={() => void saveProject()}
+                  >
+                    {saving ? (isUk ? "Збереження…" : "Saving…") : (isUk ? "Зберегти політику проєкту" : "Save project policy")}
+                  </button>
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    disabled={saving}
+                    onClick={() => void loadEligibility()}
+                  >
+                    {isUk ? "Перевірити, хто отримає код" : "Check who receives the code"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
 
               {eligibility && (
                 <div className="automations-table-container">
@@ -604,8 +664,6 @@ export function CodeDataPolicyPanel({ companyId, isUk, notify }: {
                   </table>
                 </div>
               )}
-            </>
-          )}
         </>
       )}
     </section>

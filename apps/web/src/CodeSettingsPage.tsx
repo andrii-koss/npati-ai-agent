@@ -399,31 +399,6 @@ export function CodeSettingsPage() {
         </div>
       </section>
 
-      <div className="inspector-controls automations-controls">
-        <div className="inspector-search-box">
-          <span className="search-icon" aria-hidden="true">⌕</span>
-          <input
-            type="text"
-            role="searchbox"
-            className="inspector-search-input"
-            aria-label={isUk ? "Пошук код-проєктів" : "Search code projects"}
-            placeholder={isUk ? "Пошук за назвою або репозиторієм…" : "Search by name or repository…"}
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-          />
-          {searchQuery && (
-            <button type="button" className="search-clear-btn" aria-label={isUk ? "Очистити" : "Clear"} onClick={() => setSearchQuery("")}>×</button>
-          )}
-        </div>
-        <label className="ds-checkbox">
-          <input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} />
-          <span>{isUk ? "Показати архівовані" : "Show archived"}</span>
-        </label>
-        <button type="button" className="button-secondary" onClick={reload} disabled={loading || !companyId}>
-          {loading ? (isUk ? "Оновлення…" : "Refreshing…") : isUk ? "Оновити" : "Refresh"}
-        </button>
-      </div>
-
       {error && (
         <div className={`data-studio-alert ${unavailable ? "warning" : "error"}`} role="alert">
           {error.message}
@@ -554,11 +529,7 @@ export function CodeSettingsPage() {
             </button>
           </section>
 
-          {sessions.length === 0 ? (
-            <div className="data-studio-alert info" role="status">
-              {isUk ? "Сесій ще немає. Створіть сесію для код-проєкту, щоб почати роботу." : "No sessions yet. Create one for a code project to get started."}
-            </div>
-          ) : (
+          {sessions.length > 0 && (
             <div className="automations-table-container">
               <table className="automations-table">
                 <thead>
@@ -632,20 +603,78 @@ export function CodeSettingsPage() {
           {/* R1 (section A, item 3): the queue's state is visible instead of being inferable only from a refusal. */}
           {companyId && <CodeQueuePanel companyId={companyId} isUk={isUk} />}
 
-          <details className="code-limits">
-            <summary>{isUk ? "Ліміти (конфігурація)" : "Limits (configuration)"}</summary>
+          <section className="browser-campaign-card code-limits-panel" aria-label={isUk ? "Ліміти (конфігурація)" : "Limits (configuration)"}>
+            <div className="browser-campaign-card-header">
+              <div className="browser-card-title-group">
+                <span className="browser-card-icon" aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="4" y1="21" x2="4" y2="14" />
+                    <line x1="4" y1="10" x2="4" y2="3" />
+                    <line x1="12" y1="21" x2="12" y2="12" />
+                    <line x1="12" y1="8" x2="12" y2="3" />
+                    <line x1="20" y1="21" x2="20" y2="16" />
+                    <line x1="20" y1="12" x2="20" y2="3" />
+                    <line x1="1" y1="14" x2="7" y2="14" />
+                    <line x1="9" y1="8" x2="15" y2="8" />
+                    <line x1="17" y1="16" x2="23" y2="16" />
+                  </svg>
+                </span>
+                <div>
+                  <h3>{isUk ? "Ліміти (конфігурація)" : "Limits (configuration)"}</h3>
+                  <p>
+                    {isUk
+                      ? "Параметри та обмеження ресурсів середовища виконання Coding Agent."
+                      : "The state of runtime limits and security bounds. This panel starts and changes nothing."}
+                  </p>
+                </div>
+              </div>
+            </div>
+
             {limitsError && <p className="ds-muted">{limitsError}</p>}
             {limits && (
-              <ul>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+                  gap: "10px",
+                  marginTop: "6px",
+                }}
+              >
                 {Object.entries(limits).map(([key, value]) => (
-                  <li key={key}>
-                    <code>{key}</code>
-                    <span>{typeof value === "object" && value !== null ? JSON.stringify(value) : String(value)}</span>
-                  </li>
+                  <div
+                    key={key}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "10px",
+                      padding: "10px 14px",
+                      background: "#ffffff",
+                      border: "1px solid var(--npati-gray-100)",
+                      borderRadius: "10px",
+                      boxShadow: "0 1px 3px rgba(17, 17, 17, 0.03)",
+                    }}
+                  >
+                    <code style={{ color: "var(--npati-black)", fontWeight: 600, fontSize: "12px", fontFamily: "ui-monospace, monospace" }}>{key}</code>
+                    <span
+                      style={{
+                        fontWeight: 700,
+                        fontSize: "12px",
+                        color: "var(--npati-red)",
+                        background: "#ffffff",
+                        border: "1px solid rgba(225, 29, 46, 0.25)",
+                        padding: "2px 8px",
+                        borderRadius: "6px",
+                        fontFamily: "ui-monospace, monospace",
+                      }}
+                    >
+                      {typeof value === "object" && value !== null ? JSON.stringify(value) : String(value)}
+                    </span>
+                  </div>
                 ))}
-              </ul>
+              </div>
             )}
-          </details>
+          </section>
         </>
       )}
 
