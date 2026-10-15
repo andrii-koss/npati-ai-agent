@@ -879,7 +879,7 @@ registerEmailInboxRoutes(app, deps)  →  registerEmailAccountRoutes(app, deps) 
 
 | # | Файл | Рядків | Стан |
 |---|---|---:|---|
-| 23 | `apps/web/src/i18n/types.ts` | 2 631 | [ ] |
+| 23 | `apps/web/src/i18n/types.ts` | 2 631 → **178** | [x] (скорочено до 178 рядків, модулі в schema/) |
 | 24 | `apps/web/src/BusinessWorkspace.tsx` | 2 106 | [ ] |
 | 25 | `apps/web/src/EmailInboxPage.tsx` | 2 013 | [ ] |
 | 26 | `apps/web/src/DataStudioPage.tsx` | 1 976 | [x] (скорочено до 704 рядків) |
@@ -896,7 +896,7 @@ registerEmailInboxRoutes(app, deps)  →  registerEmailAccountRoutes(app, deps) 
 
 > ⚠️ Файли 25, 29, 32, 35 та 30 — у XSS-allowlist (G1). Файли 24, 26–28, 31, 33, 34, 36 — перевірити G1/G2 перед кроком.
 
-### [ ] Крок 23 — `apps/web/src/i18n/types.ts` (2 631 → ~25 модулів + shim) — правильна альтернатива розділенню локалей
+### [x] Крок 23 — `apps/web/src/i18n/types.ts` (2 631 → 178 рядків + 14 модулів у `schema/`) — виконано
 
 **Факти.** `SupportedLanguage` L1, `LanguageInfo` L3–8, `SUPPORTED_LANGUAGES` L10–18, далі **один монолітний `export interface TranslationSchema` L20–2628** (2609 рядків), 24 блочні неймспейси + `codeInbox` одним рядком. Найбільші: `emailSettings` L1117–1545 (429), `integrationsPage` L2240–2608 (369), `companySettings` L535–798 (264).
 
