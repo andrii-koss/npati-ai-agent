@@ -20,84 +20,19 @@ import {
   writeActiveCompanyId,
 } from "./active-company";
 
-export interface WebsiteProject {
-  id: string;
-  companyId: string;
-  name: string;
-  description?: string;
-  type: "website" | "web_app" | "landing_page" | "mobile_app" | "code_project";
-  status: string;
-  framework?: string;
-  repositoryBranch?: string;
-  sandboxId?: string;
-  previewUrl?: string;
-  previewPort?: number;
-  lastBuildStatus?: string;
-  deploymentStatus?: string;
-  deploymentUrl?: string;
-  lastDeployedAt?: string;
-  revision: number;
-  createdAt?: string;
-  updatedAt: string;
-}
-
 import {
-  FrameworkIcon,
-  type FrameworkStarterOption,
-  FRAMEWORK_STARTERS,
+  type WebsiteProject,
+  apiFetch,
+  getCachedWebsites,
+  updateCachedWebsites,
+} from "./website-builder-cache";
+import {
   websiteBuilderCopy as copy,
+  FRAMEWORK_STARTERS,
+  type FrameworkStarterOption,
 } from "./website-builder-constants";
-
-async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const headers = new Headers(init?.headers);
-  const token = getStoredAuthToken();
-  if (token) headers.set("Authorization", "Bearer " + token);
-  if (init?.body && !headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
-  }
-  const res = await fetch("/api" + path, { ...init, headers });
-  if (res.status === 204) return undefined as T;
-  const json = (await res.json().catch(() => null)) as any;
-  if (!res.ok) {
-    throw new Error(json?.error?.message || json?.message || `Request failed with status ${res.status}`);
-  }
-  return json as T;
-}
-
-const WEBSITES_CACHE_PREFIX = "npati_websites_cache_v1_";
-const WEBSITES_LATEST_CACHE_KEY = "npati_websites_cache_latest_v1";
-
-function getCachedWebsites(companyId?: string): WebsiteProject[] | null {
-  try {
-    if (companyId) {
-      const raw = sessionStorage.getItem(WEBSITES_CACHE_PREFIX + companyId)
-        || localStorage.getItem(WEBSITES_CACHE_PREFIX + companyId);
-      if (raw !== null) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    }
-    const latest = sessionStorage.getItem(WEBSITES_LATEST_CACHE_KEY)
-      || localStorage.getItem(WEBSITES_LATEST_CACHE_KEY);
-    if (latest) {
-      const parsed = JSON.parse(latest);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch {}
-  return null;
-}
-
-function updateCachedWebsites(companyId: string, items: WebsiteProject[]) {
-  try {
-    const serialized = JSON.stringify(items);
-    if (companyId) {
-      sessionStorage.setItem(WEBSITES_CACHE_PREFIX + companyId, serialized);
-      localStorage.setItem(WEBSITES_CACHE_PREFIX + companyId, serialized);
-    }
-    sessionStorage.setItem(WEBSITES_LATEST_CACHE_KEY, serialized);
-    localStorage.setItem(WEBSITES_LATEST_CACHE_KEY, serialized);
-  } catch {}
-}
+import { CreateWebsiteDrawer } from "./website-builder-drawer";
+import { WebsiteFiltersBar } from "./website-builder-filters";
 
 export function WebsiteBuilderDashboard() {
   const navigate = useNavigate();
@@ -509,89 +444,15 @@ export function WebsiteBuilderDashboard() {
         </div>
       </header>
 
-      {/* Filter and Search Bar (Clean NPATI Controls) */}
-      <div
-        style={{
-          display: "flex",
-          gap: "12px",
-          marginBottom: "24px",
-          flexWrap: "wrap",
-          alignItems: "center",
-          background: "#ffffff",
-          padding: "14px 18px",
-          borderRadius: "14px",
-          border: "1px solid #e4e4e7",
-          boxShadow: "0 1px 3px rgba(0,0,0,0.03)",
-        }}
-      >
-        <div className="inspector-search-box" style={{ flex: "1 1 260px" }}>
-          <span className="search-icon" aria-hidden="true">⌕</span>
-          <input
-            type="text"
-            role="searchbox"
-            placeholder={t.searchPlaceholder}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="inspector-search-input"
-            aria-label={t.searchPlaceholder}
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              className="search-clear-btn"
-              onClick={() => setSearchQuery("")}
-              aria-label="Clear search"
-              title="Clear search"
-            >
-              ×
-            </button>
-          )}
-        </div>
-
-        <select
-          value={frameworkFilter}
-          onChange={(e) => setFrameworkFilter(e.target.value)}
-          style={{
-            height: "44px",
-            padding: "0 14px",
-            background: "var(--npati-gray-50)",
-            border: "1px solid var(--npati-gray-100)",
-            borderRadius: "12px",
-            color: "#111111",
-            fontSize: "13.5px",
-            fontWeight: 500,
-            cursor: "pointer",
-            outline: "none",
-          }}
-        >
-          <option value="all">{t.filterAll}</option>
-          <option value="static">HTML / CSS</option>
-          <option value="nextjs">Next.js</option>
-          <option value="vite">Vite</option>
-          <option value="astro">Astro</option>
-        </select>
-
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as any)}
-          style={{
-            height: "44px",
-            padding: "0 14px",
-            background: "var(--npati-gray-50)",
-            border: "1px solid var(--npati-gray-100)",
-            borderRadius: "12px",
-            color: "#111111",
-            fontSize: "13.5px",
-            fontWeight: 500,
-            cursor: "pointer",
-            outline: "none",
-          }}
-        >
-          <option value="active">{t.statusActive}</option>
-          <option value="all">{t.filterStatusAll}</option>
-          <option value="archived">{t.statusArchived}</option>
-        </select>
-      </div>
+      <WebsiteFiltersBar
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
+        frameworkFilter={frameworkFilter}
+        setFrameworkFilter={setFrameworkFilter}
+        statusFilter={statusFilter}
+        setStatusFilter={setStatusFilter}
+        t={t}
+      />
 
       {error && (
         <div role="alert" className="project-error" style={{ marginBottom: "1.5rem" }}>
@@ -862,304 +723,33 @@ export function WebsiteBuilderDashboard() {
         </div>
       )}
 
-      {/* ========================================================
-          CREATE WEBSITE DRAWER (100% NATIVE NPATI DESIGN SYSTEM)
-          ======================================================== */}
-      {modalOpen && (
-        <div
-          className="company-drawer-backdrop"
-          onMouseDown={() => setModalOpen(false)}
-        >
-          <aside
-            className="company-drawer"
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <header>
-              <div>
-                <span>{t.drawerKicker}</span>
-                <h2>{t.drawerTitle}</h2>
-              </div>
-              <button
-                type="button"
-                className="company-drawer-close"
-                onClick={() => setModalOpen(false)}
-                aria-label={t.cancel}
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </header>
-
-            <form onSubmit={(e) => void handleCreate(e)}>
-              {error && (
-                <p role="alert" className="project-error" style={{ margin: "16px 26px 0 26px" }}>
-                  {error}
-                </p>
-              )}
-
-              {/* Section 1: Framework Starter Selection */}
-              <section>
-                <h3>{t.sectionTemplate}</h3>
-                <p style={{ margin: "0 0 14px 0", fontSize: "13px", color: "#64748b" }}>
-                  {t.drawerSubtitle}
-                </p>
-
-                <div
-                  className="provider-grid"
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                    gap: "14px",
-                  }}
-                >
-                  {FRAMEWORK_STARTERS.map((fw) => {
-                    const isSelected = selectedFramework === fw.id;
-                    return (
-                      <article
-                        key={fw.id}
-                        className={`provider-card is-connected${isSelected ? " selected" : ""}`}
-                        onClick={() => handleSelectFramework(fw)}
-                        style={{
-                          cursor: "pointer",
-                          borderColor: isSelected ? "var(--npati-red, #e11d2e)" : "#f2b6bd",
-                          borderWidth: "1px",
-                          borderStyle: "solid",
-                          boxShadow: isSelected
-                            ? "0 4px 14px rgba(225, 29, 46, 0.12)"
-                            : undefined,
-                          background: "#ffffff",
-                          outline: "none",
-                        }}
-                      >
-                        <div className="provider-card-main" style={{ cursor: "pointer" }}>
-                          <span
-                            className="provider-avatar"
-                            aria-hidden="true"
-                            style={{
-                              width: "38px",
-                              height: "38px",
-                              borderRadius: "11px",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              flexShrink: 0,
-                              background: fw.id === "html-css" ? "#fff5f2" : fw.id === "nextjs" ? "#000000" : fw.id === "vite" ? "#18181b" : "#0b0f19",
-                              border: "1px solid rgba(0, 0, 0, 0.08)",
-                              boxShadow: "0 2px 6px rgba(0, 0, 0, 0.06)",
-                            }}
-                          >
-                            <FrameworkIcon id={fw.id} />
-                          </span>
-                          <span className="provider-title">
-                            <strong>{fw.name}</strong>
-                            <small>{language === "uk" ? fw.runtimeLabelUk : fw.runtimeLabel}</small>
-                          </span>
-                          <span
-                            className={`connection-light ${isSelected ? "on" : ""}`}
-                            aria-label={isSelected ? "Selected" : "Available"}
-                            style={{ marginLeft: "auto", justifySelf: "end" }}
-                          />
-                        </div>
-                        <div className="provider-badges" style={{ margin: "12px 0 8px" }}>
-                          <span className="status-pill verified">
-                            ✓ {language === "uk" ? "Перевірено" : "Verified"}
-                          </span>
-                        </div>
-                        <div className="capability-row" style={{ marginTop: 0, gap: 6 }}>
-                          {fw.tags.map((tag) => (
-                            <span key={tag}>{tag}</span>
-                          ))}
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              </section>
-
-              {/* Section 2: Domain, Port & SSL */}
-              <section>
-                <h3>{t.sectionDomain}</h3>
-                <p style={{ margin: "0 0 10px 0", fontSize: "13px", color: "#64748b" }}>
-                  {t.domainDesc}
-                </p>
-
-
-                {/* 1. Domain */}
-                <label>
-                  <span>{t.domainLabel}</span>
-                  <input
-                    type="text"
-                    placeholder="ai.npati.com"
-                    value={domain}
-                    onChange={(e) => setDomain(e.target.value)}
-                  />
-                  <span style={{ fontSize: "11.5px", color: "#64748b", marginTop: "3px" }}>
-                    {domain.trim()
-                      ? `Target domain: https://${domain.trim().replace(/^https?:\/\//, "")}`
-                      : `${t.technicalDomainNotice} (${(name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "mysite") + "-temp.preview.npati.com"})`}
-                  </span>
-                </label>
-
-                {/* 2. Path */}
-                <div style={{ marginTop: "12px" }}>
-                  <label>
-                    <span>{t.pathLabel}</span>
-                    <input
-                      type="text"
-                      placeholder="/"
-                      value={internalPath}
-                      onChange={(e) => setInternalPath(e.target.value)}
-                    />
-                    <span style={{ fontSize: "11.5px", color: "#64748b", marginTop: "3px" }}>
-                      {t.pathDesc}
-                    </span>
-                  </label>
-
-                  <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", marginTop: "8px" }}>
-                    <input
-                      type="checkbox"
-                      checked={stripPath}
-                      onChange={(e) => setStripPath(e.target.checked)}
-                      style={{ width: "16px", height: "16px", accentColor: "var(--npati-red, #d83438)" }}
-                    />
-                    <span style={{ fontSize: "12.5px", color: "#334155", fontWeight: 500 }}>
-                      {t.stripPathLabel}
-                    </span>
-                  </label>
-                </div>
-
-                {/* 3. Port */}
-                <div style={{ marginTop: "12px" }}>
-                  <label>
-                    <span>{t.portLabel}</span>
-                    <input
-                      type="number"
-                      placeholder={framework.toLowerCase().includes("vite") ? "80" : "3000"}
-                      value={containerPort}
-                      onChange={(e) => setContainerPort(Number(e.target.value) || 0)}
-                    />
-                    <span style={{ fontSize: "11.5px", color: "#64748b", marginTop: "3px" }}>
-                      {t.portDesc}
-                    </span>
-                  </label>
-                </div>
-
-                {/* 4. Custom Entrypoint */}
-                <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "6px" }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
-                    <input
-                      type="checkbox"
-                      checked={useCustomEntrypoint}
-                      onChange={(e) => setUseCustomEntrypoint(e.target.checked)}
-                      style={{ width: "16px", height: "16px", accentColor: "var(--npati-red, #d83438)" }}
-                    />
-                    <span style={{ fontSize: "13px", color: "#0f172a", fontWeight: 600 }}>
-                      {t.customEntrypointLabel}
-                    </span>
-                  </label>
-                  <span style={{ fontSize: "11.5px", color: "#64748b", marginLeft: "24px" }}>
-                    {t.customEntrypointDesc}
-                  </span>
-
-                  {useCustomEntrypoint && (
-                    <input
-                      type="text"
-                      placeholder="web, websecure"
-                      value={customEntrypoint}
-                      onChange={(e) => setCustomEntrypoint(e.target.value)}
-                      style={{ marginLeft: "24px", marginTop: "4px" }}
-                    />
-                  )}
-                </div>
-
-                {/* 5. SSL Certificate */}
-                <div
-                  style={{
-                    border: "1px solid #e2e8f0",
-                    borderRadius: "10px",
-                    padding: "14px",
-                    background: "#f8fafc",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "10px",
-                    marginTop: "14px",
-                  }}
-                >
-                  <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", margin: 0 }}>
-                    <input
-                      type="checkbox"
-                      checked={autoSsl}
-                      onChange={(e) => setAutoSsl(e.target.checked)}
-                      style={{ width: "16px", height: "16px", accentColor: "var(--npati-red, #d83438)" }}
-                    />
-                    <span style={{ fontSize: "13px", color: "#0f172a", fontWeight: 700 }}>
-                      {t.sslLabel}
-                    </span>
-                  </label>
-
-                  {autoSsl && (
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "flex-start",
-                        gap: "10px",
-                        padding: "10px 12px",
-                        background: "#ffffff",
-                        border: "1px solid #cbd5e1",
-                        borderRadius: "8px",
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: "28px",
-                          height: "28px",
-                          borderRadius: "6px",
-                          background: "#ecfdf5",
-                          color: "#059669",
-                          display: "grid",
-                          placeItems: "center",
-                          flexShrink: 0,
-                          fontWeight: 700,
-                          fontSize: "14px",
-                        }}
-                      >
-                        🔒
-                      </div>
-                      <div>
-                        <div style={{ fontSize: "13px", fontWeight: 700, color: "#0f172a" }}>
-                          {t.letsEncryptTitle}
-                        </div>
-                        <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
-                          {t.letsEncryptDesc}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </section>
-
-              <footer style={{ justifyContent: "flex-end" }}>
-                <button
-                  type="button"
-                  className="button-secondary"
-                  onClick={() => setModalOpen(false)}
-                >
-                  {t.cancel}
-                </button>
-                <button
-                  type="submit"
-                  className="button-primary"
-                  disabled={busy || !name.trim()}
-                >
-                  {busy ? t.creating : t.createBtn}
-                </button>
-              </footer>
-            </form>
-          </aside>
-        </div>
-      )}
+      <CreateWebsiteDrawer
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        t={t}
+        language={language}
+        handleCreate={handleCreate}
+        error={error}
+        selectedFramework={selectedFramework}
+        handleSelectFramework={handleSelectFramework}
+        domain={domain}
+        setDomain={setDomain}
+        name={name}
+        internalPath={internalPath}
+        setInternalPath={setInternalPath}
+        stripPath={stripPath}
+        setStripPath={setStripPath}
+        framework={framework}
+        containerPort={containerPort}
+        setContainerPort={setContainerPort}
+        useCustomEntrypoint={useCustomEntrypoint}
+        setUseCustomEntrypoint={setUseCustomEntrypoint}
+        customEntrypoint={customEntrypoint}
+        setCustomEntrypoint={setCustomEntrypoint}
+        autoSsl={autoSsl}
+        setAutoSsl={setAutoSsl}
+        busy={busy}
+      />
     </main>
   );
 }
