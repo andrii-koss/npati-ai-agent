@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getStoredAuthToken } from "./AuthContext";
 import { confirmModal } from "./ConfirmDialog";
+import { Drawer } from "./code-settings/Drawer";
 
 /**
  * C1b: sandbox image administration panel (Settings -> Code).
@@ -356,53 +357,134 @@ export function CodeSandboxImagesPanel({ companyId, isUk, notify }: {
       </div>
 
       {drawerOpen && (
-        <div className="company-drawer-backdrop" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) setDrawerOpen(false); }}>
-          <aside className="company-drawer automations-drawer" role="dialog" aria-modal="true">
-            <button type="button" className="automations-drawer-close" onClick={() => setDrawerOpen(false)}>×</button>
-            <div className="ds-section-title">{isUk ? "Додати образ sandbox" : "Add a sandbox image"}</div>
-            <div className="browser-form-field">
-              <label>{isUk ? "Варіант" : "Variant"}</label>
-              <select value={form.variant} onChange={(event) => setForm({ ...form, variant: event.target.value })}>
-                {["base", "node", "python", "php", "go", "rust", "java", "full"].map((value) => <option key={value} value={value}>{value}</option>)}
-              </select>
-            </div>
-            <div className="browser-form-field">
-              <label>{isUk ? "Референс (digest)" : "Reference (digest)"}</label>
-              <input value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} placeholder="repo@sha256:…" />
-              {referenceError && <div className="ds-hint-error">{referenceError}</div>}
-            </div>
-            <div className="browser-form-field">
-              <label>{isUk ? "Статус" : "Status"}</label>
-              <select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as SandboxImageStatus })}>
-                {["unverified", "verified", "deprecated"].map((value) => <option key={value} value={value}>{value}</option>)}
-              </select>
-            </div>
-            <div className="browser-form-field">
-              <label>SBOM</label>
-              <input value={form.sbomPath} onChange={(event) => setForm({ ...form, sbomPath: event.target.value })} placeholder="sbom/code-sandbox-node.json" />
-            </div>
-            <div className="browser-form-field">
-              <label>{isUk ? "Скан (tool / critical / high)" : "Scan (tool / critical / high)"}</label>
-              <div className="code-images-admission-row">
-                <input value={form.scanTool} onChange={(event) => setForm({ ...form, scanTool: event.target.value })} placeholder="trivy" />
-                <input type="number" min={0} value={form.scanCritical} onChange={(event) => setForm({ ...form, scanCritical: event.target.value })} />
-                <input type="number" min={0} value={form.scanHigh} onChange={(event) => setForm({ ...form, scanHigh: event.target.value })} />
+        <Drawer
+          title={isUk ? "Додати образ sandbox" : "Add a sandbox image"}
+          subtitle={isUk ? "Code · sandbox" : "Code · sandbox"}
+          closeLabel={isUk ? "Закрити" : "Close"}
+          isUk={isUk}
+          onClose={() => setDrawerOpen(false)}
+        >
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submitImage();
+            }}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              minHeight: "calc(100% - 88px)",
+            }}
+          >
+            <section style={{ flex: 1, padding: "22px 26px", display: "grid", gap: "16px" }}>
+              <label className="browser-form-field">
+                <span>{isUk ? "Варіант" : "Variant"}</span>
+                <select
+                  value={form.variant}
+                  onChange={(event) => setForm({ ...form, variant: event.target.value })}
+                >
+                  {["base", "node", "python", "php", "go", "rust", "java", "full"].map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="browser-form-field">
+                <span>
+                  {isUk ? "Референс (digest)" : "Reference (digest)"} <i className="required-star">*</i>
+                </span>
+                <input
+                  value={form.reference}
+                  onChange={(event) => setForm({ ...form, reference: event.target.value })}
+                  placeholder="repo@sha256:…"
+                />
+                {referenceError && <div className="ds-hint-error">{referenceError}</div>}
+              </label>
+
+              <label className="browser-form-field">
+                <span>{isUk ? "Статус" : "Status"}</span>
+                <select
+                  value={form.status}
+                  onChange={(event) => setForm({ ...form, status: event.target.value as SandboxImageStatus })}
+                >
+                  {["unverified", "verified", "deprecated"].map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="browser-form-field">
+                <span>SBOM</span>
+                <input
+                  value={form.sbomPath}
+                  onChange={(event) => setForm({ ...form, sbomPath: event.target.value })}
+                  placeholder="sbom/code-sandbox-node.json"
+                />
+              </label>
+
+              <div className="browser-form-field">
+                <span>{isUk ? "Скан (tool / critical / high)" : "Scan (tool / critical / high)"}</span>
+                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: "10px" }}>
+                  <input
+                    value={form.scanTool}
+                    onChange={(event) => setForm({ ...form, scanTool: event.target.value })}
+                    placeholder="trivy"
+                  />
+                  <input
+                    type="number"
+                    min={0}
+                    value={form.scanCritical}
+                    onChange={(event) => setForm({ ...form, scanCritical: event.target.value })}
+                    placeholder="Critical"
+                    title={isUk ? "Кількість критичних" : "Critical count"}
+                  />
+                  <input
+                    type="number"
+                    min={0}
+                    value={form.scanHigh}
+                    onChange={(event) => setForm({ ...form, scanHigh: event.target.value })}
+                    placeholder="High"
+                    title={isUk ? "Кількість високих" : "High count"}
+                  />
+                </div>
               </div>
-            </div>
-            <div className="browser-form-field">
-              <label>{isUk ? "Waiver (власник)" : "Waiver (owner)"}</label>
-              <input value={form.waiverOwner} onChange={(event) => setForm({ ...form, waiverOwner: event.target.value })} placeholder="security@company" />
-            </div>
-            <div className="browser-form-footer">
-              <span className="browser-form-footer-hint">
+
+              <label className="browser-form-field">
+                <span>{isUk ? "Waiver (власник)" : "Waiver (owner)"}</span>
+                <input
+                  value={form.waiverOwner}
+                  onChange={(event) => setForm({ ...form, waiverOwner: event.target.value })}
+                  placeholder="security@company"
+                />
+              </label>
+            </section>
+
+            <footer>
+              <span
+                className="browser-form-footer-hint"
+                style={{ fontSize: "12.5px", color: "var(--npati-gray-500, #64748b)", fontWeight: 500, lineHeight: 1.4 }}
+              >
                 {isUk ? "Лише закріплені за digest образи; тег або :latest буде відхилено сервером." : "Digest-pinned images only; tags and :latest are refused by the server."}
               </span>
-              <button type="button" className="button-primary automations-action-primary browser-submit-btn" disabled={busy === "create" || !form.reference.trim() || Boolean(referenceError)} onClick={() => void submitImage()}>
-                {isUk ? "Додати" : "Add"}
+              <button
+                type="submit"
+                className="button-primary automations-action-primary"
+                disabled={busy === "create" || !form.reference.trim() || Boolean(referenceError)}
+              >
+                {busy === "create"
+                  ? isUk
+                    ? "Додавання…"
+                    : "Adding…"
+                  : isUk
+                    ? "Додати"
+                    : "Add"}
               </button>
-            </div>
-          </aside>
-        </div>
+            </footer>
+          </form>
+        </Drawer>
       )}
     </section>
   );

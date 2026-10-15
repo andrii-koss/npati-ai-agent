@@ -57,16 +57,25 @@ export function CodeExecutionModeControl({ companyId, isUk, value, canManage, on
   };
   return (
     <div className="code-execution-control">
-      <label className="ds-toolbar-field">
-        <span>{isUk ? "Режим доступу" : "Change scope"}</span>
-        <select className="page-size-select" value={mode} disabled={busy || !value || !canManage}
-          onChange={(event) => void change(event.target.value as CodeExecutionMode)}>
+      <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+        <span style={{ fontSize: "13px", fontWeight: 700, color: "#1f2937" }}>
+          {isUk ? "Режим доступу" : "Change scope"}
+        </span>
+        <select
+          className="page-size-select"
+          value={mode}
+          disabled={busy || !value || !canManage}
+          onChange={(event) => void change(event.target.value as CodeExecutionMode)}
+          style={{ minHeight: "36px", borderRadius: "8px", padding: "0 10px", fontWeight: 600 }}
+        >
           <option value="global">Global</option>
           <option value="company">Company</option>
           <option value="sandbox">Sandbox / Data Studio</option>
         </select>
-      </label>
-      <p className="ds-muted">{copy[mode]}</p>
+      </div>
+      <p className="ds-muted" style={{ margin: "4px 0 0", fontSize: "12.5px", color: "#64748b", lineHeight: 1.4 }}>
+        {copy[mode]}
+      </p>
       {mode === "global" && (
         <div>
           {value?.creatorConfigured && !value.sourceAccessGranted && <p className="ds-muted">{isUk
