@@ -67,7 +67,9 @@ COPY --from=project-web-toolchain /opt/npati-project-toolchain /opt/npati-projec
 COPY apps/agent-api/prepare-project-dependencies.cjs /opt/npati-runtime/prepare-project-dependencies.cjs
 COPY apps/agent-api/project-runtime-guard.c /tmp/project-runtime-guard.c
 COPY apps/agent-api/project-runtime-launcher.mjs apps/agent-api/project-runtime-inner.mjs /opt/npati-runtime/
-RUN apk add --no-cache libseccomp-dev
+RUN apk add --no-cache libseccomp-dev chromium font-noto
+RUN npm install --prefix /opt/npati-qa --omit=dev --ignore-scripts --no-audit --no-fund playwright@1.63.0
+COPY apps/agent-api/browser-qa-runner.mjs /opt/npati-qa/browser-qa-runner.mjs
 RUN cc -O2 -Wall -Wextra -Werror /tmp/project-runtime-guard.c -lseccomp -o /usr/local/bin/npati-project-exec \
   && /usr/local/bin/npati-project-exec --emit-filter /opt/npati-runtime/project-command.seccomp \
   && rm /tmp/project-runtime-guard.c

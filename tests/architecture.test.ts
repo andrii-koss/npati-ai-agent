@@ -67,7 +67,8 @@ describe("architecture boundaries", () => {
     expect(appSource).toContain('<Route path="/company"');
     expect(appSource).toContain('<Route path="/settings/company"');
     expect(appSource).not.toContain('<Route path="/agents"');
-    expect(companyPage).toContain('init?.body != null');
+    const companyApi = readFileSync(join(process.cwd(), "apps", "web", "src", "company", "cache.ts"), "utf8");
+    expect(companyApi).toContain('init?.body != null');
     expect(companyPage).toContain('?expectedRevision=');
   });
 });

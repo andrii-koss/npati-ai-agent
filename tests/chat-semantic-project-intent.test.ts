@@ -13,6 +13,90 @@ function fixture(value: unknown) {
 const creation = { intent: "CREATE_WEBSITE", confidence: 0.98, targets: [{ name: "Portfolio", kind: "website", framework: "HTML/CSS" }] };
 
 describe("semantic project routing", () => {
+  it("finishes cancellation even when the routing provider ignores its signal", async () => {
+    const f = fixture(creation), controller = new AbortController();
+    f.chat.mockImplementationOnce(() => new Promise(() => undefined));
+    const pending = f.resolve(auth, { message: "Build a website", signal: controller.signal });
+    await vi.waitFor(() => expect(f.chat).toHaveBeenCalledOnce());
+    controller.abort(new Error("cancel ignored provider"));
+    await expect(pending).rejects.toThrow("cancel ignored provider");
+    expect(f.log.warn).not.toHaveBeenCalled();
+  });
+
+  it("preserves deterministic onboarding help without a classifier call", async () => {
+    const f = fixture(creation);
+    expect((await f.resolve(auth, { message: "Поясніть, як працює агент NPATI" })).decision.intent).toBe("CHAT");
+    expect(f.chat).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("keeps edits to a current or earlier attached workbook on the document path: %s", async previous => {
+    const f = fixture(creation);
+    const result = await f.resolve(auth, { message: "Додай новий стовпець та поверни змінений файл",
+      ...(previous ? { conversationHistory: [{ role: "user", content: "[[npati-attachment:document:11111111-1111-4111-8111-111111111111:roadmap.xlsx]]" }] }
+        : { attachmentNames: ["roadmap.xlsx"] }) });
+    expect(result).toMatchObject({ source: "deterministic", decision: { intent: "CHAT" }, targets: [] });
+    expect(f.chat).not.toHaveBeenCalled();
+  });
+
+  it.each([{ message: "Add a database table", activeProjectId: undefined }, { message: "Add a column", activeProjectId: "project" }])(
+    "retains semantic project/data routing despite a spreadsheet when explicitly requested: %j", async input => {
+      const f = fixture({ intent: "ADD_DATA_MODEL", confidence: 0.99, targets: [] });
+      expect((await f.resolve(auth, { ...input, attachmentNames: ["roadmap.xlsx"] })).decision.intent).toBe("ADD_DATA_MODEL");
+      expect(f.chat).toHaveBeenCalledOnce();
+    });
+
+  it("does not route an already cancelled request", async () => {
+    const f = fixture(creation), controller = new AbortController();
+    controller.abort(new Error("cancelled before routing"));
+    await expect(f.resolve(auth, { message: "Build a website", signal: controller.signal })).rejects.toThrow("cancelled before routing");
+    expect(f.chat).not.toHaveBeenCalled();
+  });
+
+  it("propagates cancellation to the provider and never converts it into fallback execution", async () => {
+    const f = fixture(creation), controller = new AbortController();
+    f.chat.mockImplementationOnce(async request => {
+      expect(request.signal).toBeDefined();
+      controller.abort(new Error("cancelled during routing"));
+      expect(request.signal?.aborted).toBe(true);
+      return { content: JSON.stringify(creation) };
+    });
+    await expect(f.resolve(auth, { message: "Build a website", signal: controller.signal })).rejects.toThrow("cancelled during routing");
+    expect(f.log.warn).not.toHaveBeenCalled();
+  });
+
+  it("handles large Business specifications without an extra routing request", async () => {
+    const f = fixture(creation);
+    const message = "Create a business profile named Context Studio\n" + "Background data. ".repeat(6250);
+    expect((await f.resolve(auth, { message })).decision.intent).toBe("CHAT");
+    expect(f.chat).not.toHaveBeenCalled();
+  });
+
+  it("redacts credentials and personal data from the routing request and history", async () => {
+    const f = fixture(creation);
+    await f.resolve(auth, { message: "Build a website. Contact alice@example.com with sk-proj-1234567890abcdef1234567890",
+      conversationHistory: [{ role: "user", content: "Contact prior@example.com with sk-proj-abcdef1234567890abcdef1234567890" }] });
+    expect(f.chat).toHaveBeenCalledOnce();
+    const sent = JSON.stringify(f.chat.mock.calls);
+    expect(sent).not.toContain("alice@example.com");
+    expect(sent).not.toContain("prior@example.com");
+    expect(sent).not.toContain("sk-proj-");
+    expect(sent).toContain("[REDACTED");
+  });
+
+  it.each([
+    "Create a company named NovaScale with five agents",
+    "Create a business profile named Context Studio",
+    "Now add a goal to this business: Reach 100 customers",
+    "Fill Recommended Prompts for the selected company's agents",
+    "Delete everything that was just created",
+  ])("preserves recognized settings requests without a routing model call: %s", async message => {
+    const f = fixture(creation);
+    expect(await f.resolve(auth, { message })).toMatchObject({
+      source: "deterministic", decision: { intent: "CHAT", isProjectIntent: false }, targets: [],
+    });
+    expect(f.chat).not.toHaveBeenCalled();
+  });
+
   it.each([
     "I need a polished portfolio with a gallery. Please build it and show a preview.",
     "Мені потрібен сайт школи з розкладом та записом на заняття. Зробиш?",

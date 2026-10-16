@@ -166,14 +166,6 @@ export class CodingAgentToolWaves {
     } = this.host;
 
     for (const rejected of normalized.rejected) {
-      if (rejected.code === "partial_tool_call") {
-        messages.push({
-          role: "tool",
-          tool_call_id: rejected.id ?? `partial:${messages.length}`,
-          content: JSON.stringify(toolCallFeedback(rejected)),
-        });
-        continue;
-      }
       const key = `${rejected.name ?? "unknown"}:${rejected.code}`;
       const count = (this.argumentCorrections.get(key) ?? 0) + 1;
       this.argumentCorrections.set(key, count);
@@ -399,7 +391,17 @@ export class CodingAgentToolWaves {
     if (toolSteps[toolSteps.length - 1] !== steps) toolSteps.push(steps);
 
     const pending = [...callsToRun];
+    const cancelled = async () => {
+      if (input.signal?.aborted) return true;
+      try { return await input.cancelRequested?.() ?? false; } catch { return false; }
+    };
     while (pending.length) {
+      if (await cancelled()) {
+        if (input.detachedChildInbox && (input.signal?.reason as { code?: string } | undefined)?.code === "subagent_interrupt") return { action: "stopped", result: await stop("interrupted", "interrupted", "The child was interrupted between tool calls and can be continued.") };
+        await release("cancelled");
+        await ports.runEvents?.append({ eventKey: `code-run-cancelled:${this.host.turnId}`, eventType: "cancelled", runStatus: "cancelled", message: "Coding Agent run cancelled between tool calls" });
+        return { action: "stopped", result: await stop("cancelled", "cancelled", "The run was cancelled between tool calls. Remaining calls were not executed.") };
+      }
       const head = pending.shift();
       if (!head) break;
       if (isReadOnlyRunTool(head.name)) {

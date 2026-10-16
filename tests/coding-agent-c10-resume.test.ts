@@ -253,8 +253,9 @@ describe("security-gate: C10 resume — the same run, continued", () => {
     const h = await harness({ runStatus: "interrupted" });
     const before = await h.store.getCodeRunState(COMPANY, RUN);
     expect(before?.status).toBe("interrupted");
-    // The lease of the dead worker may still be named on the row; what matters is that it is no longer live.
-    expect(before?.leaseExpiresAt?.getTime()).toBeLessThan(h.clock.t);
+    // Recovery releases its claimed lease before offering continuation.
+    expect(before?.leaseExpiresAt).toBeNull();
+    expect(before?.leaseOwner).toBeNull();
 
     const outcome = await h.resume();
     expect(outcome.status).toBe("resumed");

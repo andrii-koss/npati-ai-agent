@@ -306,7 +306,8 @@ export class CodingAgentRunner {
       });
       snapshotId = snapshot.snapshotId;
     } catch {
-      snapshotId = EMPTY_SNAPSHOT_ID;
+      await release("snapshot_unavailable");
+      return { ...await stop("failed", "refused", "Execution snapshot could not be persisted. No model request or tool call was executed."), code: "snapshot_unavailable" };
     }
 
     replayRecorder = this.ports.replayBundle?.start({
@@ -466,9 +467,10 @@ export class CodingAgentRunner {
         if (input.detachedChildInbox && (input.signal?.reason as { code?: string } | undefined)?.code === "subagent_interrupt") {
           return stop("interrupted", "interrupted", "The child was interrupted during its model request and can be continued.");
         }
-        if (input.detachedChildInbox && input.signal?.aborted) {
+        if (input.signal?.aborted || await cancelled()) {
           await release("cancelled");
-          return stop("cancelled", "cancelled", "The delegated run was cancelled.");
+          await this.ports.runEvents?.append({ eventKey: `code-run-cancelled:${turnId}`, eventType: "cancelled", runStatus: "cancelled", message: "Coding Agent run cancelled during model request" });
+          return stop("cancelled", "cancelled", "The run was cancelled during its model request.");
         }
         const failure = error as { code?: string; message?: string };
         await release("provider_error");
@@ -507,6 +509,15 @@ export class CodingAgentRunner {
       }
       await record({ kind: "turn", companyId, projectId, sessionId, runId: input.runId, turn: steps, bytes: tokens });
 
+      // Account for a completed provider response even when cancellation arrived in flight. Never execute its calls.
+      if (await cancelled()) {
+        if (input.detachedChildInbox && (input.signal?.reason as { code?: string } | undefined)?.code === "subagent_interrupt") return stop("interrupted", "interrupted", "The child was interrupted after its model request and can be continued.");
+        await release("cancelled");
+        await this.ports.runEvents?.append({ eventKey: `code-run-cancelled:${turnId}`, eventType: "cancelled", runStatus: "cancelled", message: "Coding Agent run cancelled after model request" });
+        return stop("cancelled", "cancelled", "The run was cancelled after its model request. No returned tool calls were executed.");
+      }
+
+
       if (result.toolCalls?.length) sawNativeToolCalls = true;
 
       const mode = resolveEffectiveToolCallingMode(profile, { sawNativeToolCalls: sawNativeToolCalls || engineSupportsNativeTools });
@@ -514,6 +525,9 @@ export class CodingAgentRunner {
         payload: { toolCalls: result.toolCalls ?? null, content: result.content ?? null, finishReason: result.finishReason ?? null },
         profile, mode, knownTools, validate: validateArguments,
       });
+      // Text adapters synthesize IDs per response; scope them to this turn before deduplication.
+      for (const call of normalized.calls) if (call.source === "text" || call.id.startsWith("text:")) call.id = `${turnId}:${steps}:${call.id}`;
+      for (const rejected of normalized.rejected) if (rejected.id?.startsWith("text:")) rejected.id = `${turnId}:${steps}:${rejected.id}`;
 
       replayRecorder?.recordModelStep({
         turnIndex: steps,
@@ -590,7 +604,15 @@ export class CodingAgentRunner {
       await openTurn();
 
       const assistantMessage: ChatMessage = { ...providerContinuationFor(result), role: "assistant", content: assistantText };
-      if (normalized.calls.length) assistantMessage.tool_calls = normalized.calls.map(toChatToolCall);
+      const historyCalls = callsToRun.map(toChatToolCall);
+      for (const [index, rejected] of normalized.rejected.entries()) {
+        rejected.id ??= normalized.calls.find((call) => call.partial && call.name === rejected.name)?.id ?? `rejected:${steps}:${index}`;
+        // Rejected calls still need a matching assistant entry before their tool feedback.
+        if (!historyCalls.some((call) => call.id === rejected.id)) historyCalls.push({
+          id: rejected.id, type: "function", function: { name: rejected.name ?? "invalid_tool_call", arguments: "{}" },
+        });
+      }
+      if (historyCalls.length) assistantMessage.tool_calls = historyCalls;
       messages.push(assistantMessage);
 
       const waveOutcome = await toolWaves.executeTurnTools({ steps, normalized, callsToRun, profile, modelUsage });

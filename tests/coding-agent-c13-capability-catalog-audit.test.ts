@@ -315,9 +315,9 @@ describe("C13 static manifest / schema parity", () => {
   it("matches the published manifest v9 and its 37 code tools, schema by schema", () => {
     const result = checkStaticManifestParity(readManifest());
     expect(result.ok).toBe(true);
-    expect(result.facts.manifestVersion).toBe(11);
-    expect(result.facts.manifestTools).toBe(43);
-    expect(result.facts.catalogCodeTools).toBe(43);
+    expect(result.facts.manifestVersion).toBe(13);
+    expect(result.facts.manifestTools).toBe(49);
+    expect(result.facts.catalogCodeTools).toBe(49);
     expect(result.issues.length).toBe(0);
   });
 
@@ -359,11 +359,11 @@ describe("C13 static manifest / schema parity", () => {
       const result = checkStaticManifestParity(readManifest());
       expect(result.ok).toBe(false);
       expect(codes(result)).toContain("catalog_code_tool_missing_from_manifest");
-      expect(result.facts.catalogCodeTools).toBe(44);
+      expect(result.facts.catalogCodeTools).toBe(50);
     } finally {
       CAPABILITY_CATALOG.pop();
     }
     expect(checkStaticManifestParity(readManifest()).ok).toBe(true);
-    expect(checkStaticManifestParity(readManifest()).facts.catalogCodeTools).toBe(43);
+    expect(checkStaticManifestParity(readManifest()).facts.catalogCodeTools).toBe(49);
   });
 });

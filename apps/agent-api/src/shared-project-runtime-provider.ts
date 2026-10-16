@@ -8,6 +8,8 @@ import {
   type SandboxStatus, type SandboxCreateOptions, type SandboxCommandOptions, type SandboxCommandResult,
   type SandboxFile, type PreviewProxyRequest, type PreviewProxyResponse,
 } from "./sandbox-provider";
+import { assertBrowserQaOptions, parseBrowserQaResult, browserQaFailure } from "./sandbox-browser-qa";
+import type { SandboxBrowserQaOptions, SandboxBrowserQaResult } from "./sandbox-provider";
 import { normalizeTerminalCommand, classifyTerminalCommand } from "./terminal-command-policy";
 import { safeProjectPath } from "./project-workspace";
 import { gitShellHardeningEnv, resolveDepsPolicyLimits } from "./code-deps-policy";
@@ -219,6 +221,18 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
     if (!Number.isInteger(requestedPort) || requestedPort < 1024 || requestedPort > 65535) throw new SandboxProviderError("invalid_port", "Invalid preview port", 400);
     const entry = await this.entry(scope, id);
     return { port: entry.port, internalHost: "127.0.0.1" };
+  }
+  async inspectBrowser(scope: SandboxScope, id: string, options: SandboxBrowserQaOptions): Promise<SandboxBrowserQaResult> {
+    const entry = await this.entry(scope, id);
+    assertBrowserQaOptions(options);
+    if (options.port !== entry.port) throw new SandboxProviderError("project_port_denied", "Preview port belongs to another Project", 403);
+    // The existing launcher supplies this project's UID, namespaces, seccomp and egress rules.
+    // No supervisor credentials, Docker transport or caller-selected destination enter the browser.
+    const result = await this.collect(entry, "node", ["/opt/npati-qa/browser-qa-runner.mjs", "--shared-runtime"],
+      JSON.stringify({ ...options, host: "10.0.2.2" }), { timeoutMs: options.timeoutMs + 5000, outputLimitBytes: 3_000_000 });
+    if (result.status === "timed_out") throw new SandboxProviderError("qa_timeout", "Browser QA timed out", 504, "browser_qa", "project.qa.inspect");
+    if (result.exitCode !== 0) throw browserQaFailure(result.stdout);
+    return parseBrowserQaResult(result.stdout);
   }
   async proxyPreview(scope: SandboxScope, id: string, options: PreviewProxyRequest): Promise<PreviewProxyResponse> {
     const entry = await this.entry(scope, id);

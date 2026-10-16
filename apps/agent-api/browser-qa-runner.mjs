@@ -1,7 +1,8 @@
 import { chromium } from "playwright";
 
+let stage = "input";
 const fail = (code) => {
-  process.stdout.write(JSON.stringify({ error: code }));
+  process.stdout.write(JSON.stringify({ error: code, stage }));
   process.exitCode = 1;
 };
 try {
@@ -12,7 +13,10 @@ try {
   }
   const input = JSON.parse(Buffer.concat(chunks).toString("utf8"));
   const { host, port, path, viewport, timeoutMs, maxScreenshotBytes, maxBrokenLinks, screenshot } = input;
-  if (!/^npati-sb-[0-9a-f-]{36}$/.test(host) || !Number.isInteger(port) || port < 1 || port > 65535 ||
+  const shared = process.argv.includes("--shared-runtime");
+  // The launcher gives every command a private /tmp; short paths fit Unix sockets.
+  if (shared) process.env.TMPDIR = "/tmp";
+  if (!(shared ? host === "10.0.2.2" : /^npati-sb-[0-9a-f-]{36}$/.test(host)) || !Number.isInteger(port) || port < 1 || port > 65535 ||
       typeof path !== "string" || !/^\/(?!\/)[A-Za-z0-9/_~.%-]*$/.test(path) || path.includes("..") ||
       !Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 60000 ||
       !Number.isInteger(viewport?.width) || viewport.width < 320 || viewport.width > 1920 ||
@@ -20,7 +24,8 @@ try {
       !Number.isInteger(maxScreenshotBytes) || maxScreenshotBytes < 50000 || maxScreenshotBytes > 2000000 ||
       !Number.isInteger(maxBrokenLinks) || maxBrokenLinks < 1 || maxBrokenLinks > 50) throw new Error("invalid_input");
   const origin = `http://${host}:${port}`;
-  const browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
+  stage = "launch";
+  const browser = await chromium.launch({ headless: true, ...(shared ? { executablePath: "/usr/bin/chromium-browser" } : {}), args: ["--no-sandbox", "--disable-dev-shm-usage", ...(shared ? ["--no-proxy-server"] : [])] });
   try {
     const context = await browser.newContext({ viewport, serviceWorkers: "block", acceptDownloads: false });
     await context.route("**/*", async route => {
@@ -35,9 +40,11 @@ try {
     page.on("console", message => { if (message.type() === "error") consoleErrorCount++; });
     page.on("pageerror", () => { consoleErrorCount++; });
     const started = Date.now();
+    stage = "navigation";
     const response = await page.goto(origin + path, { waitUntil: "domcontentloaded", timeout: timeoutMs });
     await page.waitForLoadState("networkidle", { timeout: Math.min(3000, Math.max(500, timeoutMs - (Date.now() - started))) }).catch(() => undefined);
     const loadTimeMs = Date.now() - started;
+    stage = "inspection";
     const observations = await page.evaluate(() => {
       const violations = [];
       const add = (rule, impact, selector) => {
@@ -71,6 +78,7 @@ try {
         totalSizeBytes: new TextEncoder().encode(document.documentElement.outerHTML).length,
       };
     });
+    stage = "links";
     const brokenLinks = [];
     for (const href of observations.links.slice(0, maxBrokenLinks)) {
       if (!href || href === "#") { brokenLinks.push({ href: "(empty)", error: "Placeholder link" }); continue; }
@@ -83,6 +91,7 @@ try {
       } catch { brokenLinks.push({ href: link.pathname.slice(0, 200), error: "Local link request failed" }); }
     }
     let captured;
+    stage = "screenshot";
     if (screenshot) {
       const boxes = await page.evaluate(({ width, height }) => {
         const tags = "header,nav,main,section,article,aside,footer,h1,h2,h3,p,button,a,input,textarea,img,svg,canvas,video";

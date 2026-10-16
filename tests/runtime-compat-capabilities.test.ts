@@ -9,12 +9,12 @@ import { readApiSources } from "./lib/api-source";
 const apps: Array<ReturnType<typeof buildApp>> = [];
 afterEach(async () => Promise.all(apps.splice(0).map((app) => app.close())));
 
-function runtime() {
+function runtime(permissions = ["workspace:read", "workspace:write", "chat:use"], calls?: ChatRequest[]) {
   const authProvider: AuthProvider = { authenticate: async () => ({
-    workspaceId: "workspace-a", userId: "user-a", permissions: ["workspace:read", "workspace:write", "chat:use"],
+    workspaceId: "workspace-a", userId: "user-a", permissions,
   }) };
   const aiEngine = {
-    chat: async (request: ChatRequest) => ({ content: `Reply: ${String(request.messages.at(-1)?.content)}`, model: request.model }),
+    chat: async (request: ChatRequest) => { calls?.push(request); return { content: `Reply: ${String(request.messages.at(-1)?.content)}`, model: request.model }; },
     stream: async function* () { yield "ok"; },
     listModels: async () => [{ id: "openai/gpt-test", name: "GPT Test" }],
     getModel: async () => undefined,
@@ -30,6 +30,26 @@ function runtime() {
 }
 
 describe("production runtime capabilities #8-#15", () => {
+  it("keeps browser chat distinct and executes native chat once with the selected model", async () => {
+    const calls: ChatRequest[] = [], app = runtime(undefined, calls);
+    const native = await app.inject({ method: "POST", url: "/api/chat?test=1", payload: { model: "openai/gpt-test", messages: [{ role: "user", content: "hello" }], stream: false } });
+    expect(native.statusCode, native.body).toBe(200);
+    expect(native.json()).toMatchObject({ done: true, message: { role: "assistant", content: "Reply: hello" } });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ model: "openai/gpt-test", admission: { tenantId: "workspace-a" } });
+    const browser = await app.inject({ method: "POST", url: "/api/chat", payload: { message: "Hello", contextType: "none" } });
+    expect(browser.statusCode).toBe(200);
+    expect(browser.json().message).toBeTypeOf("string");
+    expect(browser.json().done).toBeUndefined();
+  });
+
+  it("preserves authorization on every native prefixed endpoint", async () => {
+    const calls: ChatRequest[] = [], app = runtime(["workspace:read"], calls);
+    for (const url of ["/api/version", "/api/tags"]) expect((await app.inject({ method: "GET", url })).statusCode).toBe(403);
+    for (const url of ["/api/chat", "/api/generate"]) expect((await app.inject({ method: "POST", url, payload: { model: "openai/gpt-test", prompt: "hello", messages: [{ role: "user", content: "hello" }] } })).statusCode).toBe(403);
+    expect(calls).toHaveLength(0);
+  });
+
   it("exposes authenticated Ollama model, generate, chat and version contracts", async () => {
     const app = runtime();
     expect((await app.inject({ method: "GET", url: "/api/version" })).statusCode).toBe(200);
@@ -37,7 +57,7 @@ describe("production runtime capabilities #8-#15", () => {
     const generated = await app.inject({ method: "POST", url: "/api/generate", payload: { model: "openai/gpt-test", prompt: "hello", stream: false } });
     expect(generated.json()).toMatchObject({ model: "openai/gpt-test", response: "Reply: hello", done: true });
     const chat = await app.inject({ method: "POST", url: "/api/chat", payload: { model: "openai/gpt-test", messages: [{ role: "user", content: "hello" }] } });
-    expect(chat.headers["content-type"]).toContain("application/x-ndjson");
+    expect(chat.headers["content-type"], chat.body).toContain("application/x-ndjson");
     expect(JSON.parse(chat.body.trim())).toMatchObject({ message: { role: "assistant", content: "Reply: hello" }, done: true });
   });
 

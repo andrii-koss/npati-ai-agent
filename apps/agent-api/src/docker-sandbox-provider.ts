@@ -1,3 +1,4 @@
+import { assertBrowserQaOptions, parseBrowserQaResult, browserQaFailure } from "./sandbox-browser-qa";
 import { spawn } from "node:child_process";
 import type { SandboxImageAdmission } from "./sandbox-image-policy";
 import type { EgressEnforcement } from "./sandbox-egress-enforcement";
@@ -394,7 +395,8 @@ fi
     if (result.code !== 0 && /^(?:error response from daemon|cannot connect to the docker daemon|permission denied while trying to connect|docker: error)/i.test(text(result.stderr).trim())) throw dockerFailure("exec", text(result.stderr), result.timedOut);
     if (result.timedOut) await this.stopSandbox(scope, id).catch(() => undefined);
     if (result.code !== 0 && !result.timedOut) {
-      console.warn(`[sandbox-runner] command failed (exit ${result.code}):\nSTDOUT: ${text(result.stdout).slice(0, 1000)}\nSTDERR: ${text(result.stderr).slice(0, 1000)}`);
+      // Output is returned through the lease-aware runtime redactor; it must never reach runner logs raw.
+      console.warn("[sandbox-runner] command failed", { sandboxId: id, exitCode: result.code, durationMs: Date.now() - started });
     }
     return {
       status: result.timedOut || result.code === 124 || result.code === 137 ? "timed_out" : result.code === 0 ? "completed" : "failed", exitCode: result.timedOut ? null : result.code,
@@ -403,15 +405,7 @@ fi
   }
   async inspectBrowser(scope: SandboxScope, id: string, options: SandboxBrowserQaOptions): Promise<SandboxBrowserQaResult> {
     const names = await this.inspect(scope, id);
-    if (!Number.isInteger(options.port) || options.port < 1 || options.port > 65535 ||
-        !/^\/(?!\/)[A-Za-z0-9/_~.%-]*$/.test(options.path) || options.path.includes("..") ||
-        !Number.isInteger(options.timeoutMs) || options.timeoutMs < 1000 || options.timeoutMs > 60000 ||
-        !Number.isInteger(options.maxScreenshotBytes) || options.maxScreenshotBytes < 50000 || options.maxScreenshotBytes > 2000000 ||
-        !Number.isInteger(options.maxBrokenLinks) || options.maxBrokenLinks < 1 || options.maxBrokenLinks > 50 ||
-        !Number.isInteger(options.viewport.width) || options.viewport.width < 320 || options.viewport.width > 1920 ||
-        !Number.isInteger(options.viewport.height) || options.viewport.height < 320 || options.viewport.height > 1200) {
-      throw new SandboxProviderError("invalid_qa_options", "Invalid browser QA options", 400, "browser_qa", "project.qa.inspect");
-    }
+    assertBrowserQaOptions(options);
     const container = `npati-qa-${randomUUID()}`;
     this.touch(id);
     try {
@@ -421,11 +415,8 @@ fi
         "--env", "HOME=/tmp", "-i", process.env.NPATI_BROWSER_QA_IMAGE || "npati/browser-qa:local"],
         options.timeoutMs + 5000, JSON.stringify({ ...options, host: names.sandbox }), 3_000_000);
       if (result.timedOut) throw new SandboxProviderError("qa_timeout", "Browser QA timed out or exceeded its output limit", 504, "browser_qa", "project.qa.inspect");
-      if (result.code !== 0) throw new SandboxProviderError("qa_failed", "Browser QA runner failed", 503, "browser_qa", "project.qa.inspect");
-      const parsed = JSON.parse(result.stdout.toString("utf8")) as SandboxBrowserQaResult;
-      if (!Number.isInteger(parsed.statusCode) || !Array.isArray(parsed.brokenLinks) || !Array.isArray(parsed.accessibility))
-        throw new SandboxProviderError("qa_invalid_result", "Browser QA runner returned invalid output", 503, "browser_qa", "project.qa.inspect");
-      return parsed;
+      if (result.code !== 0) throw browserQaFailure(result.stdout.toString("utf8"));
+      return parseBrowserQaResult(result.stdout.toString("utf8"));
     } finally {
       await args("docker", ["rm", "-f", container], 5000).catch(() => undefined);
     }

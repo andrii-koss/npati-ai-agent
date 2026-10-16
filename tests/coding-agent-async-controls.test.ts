@@ -270,7 +270,7 @@ describe("Step 6: controls use the existing runner, inbox and C10 continuation",
     ] as const) {
       const result = await runtime.invoke(ctx, { companyId: "c", projectId: "p", sessionId: child.id, tool, args,
         toolCallId: "scope-call", parentRunId: "root", capabilityScope: [tool], subagentWritePaths: ["src"] });
-      expect(result).toMatchObject({ ok: false, error: { code: "subagent_path_outside_scope" } });
+      expect(result, JSON.stringify({ tool, result })).toMatchObject({ ok: false, error: { code: "subagent_path_outside_scope" } });
     }
     expect(execute).not.toHaveBeenCalled();
   });

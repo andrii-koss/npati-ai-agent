@@ -1,6 +1,7 @@
 import type { CodeRunStateRecord, CodeRunToolCallRecord } from "@npati/workspace";
 import type { CodeRunBoundary, CodeRunStateLog } from "./code-run-state";
 import { scanTextForSecrets } from "./code-secret-scanner";
+import { randomUUID } from "node:crypto";
 
 /**
  * C6a: the run reconciler.
@@ -182,17 +183,27 @@ export class CodeRunReconciler {
         report.skipped += 1;
         continue;
       }
+      const owner = `${this.owner}:${randomUUID()}`;
+      if (!dryRun) {
+        // The scan is a snapshot. A worker can renew or resume before we act on it.
+        const claimed = await this.log.acquireLease({ companyId: state.companyId, runId: state.runId, owner, now });
+        if (!claimed.held) { report.skipped += 1; continue; }
+        if (claimed.state.status !== "running") {
+          await this.log.releaseLease({ companyId: state.companyId, runId: state.runId, owner });
+          report.skipped += 1; continue;
+        }
+      }
       const boundary = await this.log.loadTurnBoundary(state.companyId, state.runId);
       const notice = await this.buildNotice(state, boundary, dryRun);
       if (!dryRun) {
+        await this.markIncompleteTurn(state, boundary);
         // The run leaves `running`, which is what makes a second pass a no-op.
         await this.log.markInterrupted({
           companyId: state.companyId,
           runId: state.runId,
           reason: "lease_expired",
-          ...(state.leaseOwner === this.owner ? { owner: this.owner } : {}),
+          owner,
         });
-        await this.markIncompleteTurn(state, boundary);
         await this.storeNotice(state, notice);
         this.recordActivity({
           kind: "run_interrupted",
@@ -225,8 +236,7 @@ export class CodeRunReconciler {
     if (state.status === "waiting_for_user") return false;
     if (state.status !== "running") return false;
     const leased = state.leaseExpiresAt !== null && state.leaseExpiresAt.getTime() >= now.getTime();
-    if (!leased) return true;
-    return state.leaseOwner !== this.owner;
+    return !leased;
   }
 
   /** Marks the interrupted turn as failed with an unknown outcome, so the boundary is complete. */

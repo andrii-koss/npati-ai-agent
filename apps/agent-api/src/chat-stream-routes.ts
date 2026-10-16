@@ -20,7 +20,8 @@ import { CodingAgentRunResult } from "./coding-agent-runner";
 import { CompanyChatActions } from "./company-chat-actions";
 import { CompanyDelegationRuntime, companyRunTelemetryHeaders } from "./company-runtime";
 import { createCoreServices } from "./core-services";
-import { ActiveSessionLease, ActiveSessionRegistry } from "./distributed-session-registry";
+import { ActiveSessionRegistry } from "./distributed-session-registry";
+import { ChatStreamLeaseError, reserveChatStream } from "./chat-stream-lease";
 import { EmailChatActions } from "./email-chat-actions";
 import { NoMemoryEvaluationResult, PerRequestNoMemoryGate } from "./ephemeral-no-memory-and-rtk";
 import { CODE_AGENT_MASTER_FLAG, FeatureFlagService } from "./feature-flags";
@@ -90,9 +91,13 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
   } }>("/chat/stream", async (request, reply) => {
 
     let reservedCodeRunSlot: { lease: Awaited<ReturnType<CodeRunQueue["acquire"]>>; background: boolean } | null = null;
+    const streamController = new AbortController();
+    let streamId: string | undefined;
+    let releaseStream: (() => Promise<void>) | undefined;
+    const abortPreflight = () => { if (!reply.raw.writableEnded) streamController.abort(new Error("Client disconnected")); };
     try {
       const auth = await authProvider.authenticate(request);
-      const streamId=request.body.streamId?.trim();
+      streamId=request.body.streamId?.trim();
       if(streamId&&!/^[A-Za-z0-9._:-]{8,100}$/.test(streamId))return reply.code(400).send({error:{code:"INVALID_STREAM_ID",message:"Invalid chat stream identifier."}});
       const memoryPolicy = PerRequestNoMemoryGate.evaluate(request.headers, request.body);
       let hasConnectedProviders = true;
@@ -110,6 +115,9 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
       const message = request.body.message?.trim() ?? "";
       if (!message && !request.body.attachments?.length) return reply.code(400).send({ error: { code: "MESSAGE_REQUIRED", message: "Enter a message or attach a photo or voice message." } });
 
+      reply.raw.once("close", abortPreflight);
+      releaseStream = await reserveChatStream({ owner: auth, streamId, controller: streamController, activeStreams: activeChatStreams, registry: activeSessionRegistry });
+      streamController.signal.throwIfAborted();
       const overview = await workspaceStore.overview(auth);
       const requestedContext = {
         contextType: request.body.contextType ?? (request.body.projectId ? "project" : request.body.companyId ? "company" : "business"),
@@ -122,7 +130,8 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         ? await readIntentHistory(workspaceStore, auth, request.body.conversationId, requestedContext.businessId) : [];
       const semantic = await deps.resolveProjectIntent?.(auth, {
         message, activeCompanyId: requestedContext.companyId, activeProjectId: requestedContext.projectId,
-        conversationHistory: history,
+        attachmentNames: request.body.attachments?.flatMap(item => typeof item?.name === "string" ? [item.name] : []),
+        conversationHistory: history, signal: streamController.signal,
       });
       const resolved = await activeContextResolver.resolveChat(auth, requestedContext, message, semantic?.decision);
 
@@ -197,6 +206,8 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         const waitController = new AbortController();
         const abandonWait = () => waitController.abort(new Error("Client disconnected while queued"));
         request.raw.once("close", abandonWait);
+        streamController.signal.addEventListener("abort", abandonWait, { once: true });
+        if (streamController.signal.aborted) abandonWait();
         let lease: Awaited<ReturnType<CodeRunQueue["acquire"]>>;
         try {
 
@@ -212,21 +223,12 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         } finally {
 
           request.raw.off("close", abandonWait);
+          streamController.signal.removeEventListener("abort", abandonWait);
         }
         reservedCodeRunSlot = { background: backgroundAllowed, lease };
       }
 
-      const streamController=new AbortController();
-      let distributedChatLease:ActiveSessionLease|undefined;
-      if(streamId){
-        if(activeChatStreams.has(streamId))return reply.code(409).send({error:{code:"STREAM_ALREADY_ACTIVE",message:"This chat stream is already active."}});
-        distributedChatLease = await activeSessionRegistry.acquire(auth.workspaceId, auth.userId, `chat:${streamId}`, 45).catch((err) => {
-          request.log.warn({ err }, "Distributed chat lease acquisition failed; proceeding with local lock");
-          return undefined;
-        });
-        if(!distributedChatLease && activeChatStreams.has(streamId))return reply.code(409).send({error:{code:"STREAM_ALREADY_ACTIVE",message:"This chat stream is already active on another API replica."}});
-        activeChatStreams.set(streamId,{controller:streamController,workspaceId:auth.workspaceId,userId:auth.userId});
-      }
+      streamController.signal.throwIfAborted();
       reply.hijack();
       reply.raw.writeHead(200, {
         "content-type": "text/event-stream; charset=utf-8",
@@ -238,6 +240,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
       let sequence = 0;
 
       let codeBackgroundRunId: string | null = null;
+      reply.raw.off("close", abortPreflight);
       reply.raw.once("close",()=>{
         if(reply.raw.writableEnded)return;
         streamController.abort(new Error("Client disconnected"));
@@ -251,7 +254,6 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
       };
       const heartbeat = setInterval(() => {
         if (!reply.raw.destroyed) reply.raw.write(": heartbeat\n\n");
-        if(distributedChatLease)void activeSessionRegistry.renew(auth.workspaceId,auth.userId,distributedChatLease,45);
       }, 15_000);
 
       try {
@@ -626,8 +628,6 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         progress({ type: "final_generation_failed", error: detail });
         send("error", { error: { code: expected ? (error as any).code ?? "ERROR" : "AGENT_UNAVAILABLE", message: detail } });
       } finally {
-        if(streamId&&activeChatStreams.get(streamId)?.controller===streamController)activeChatStreams.delete(streamId);
-        if(distributedChatLease)await activeSessionRegistry.release(auth.workspaceId,auth.userId,distributedChatLease).catch(()=>false);
 
         reservedCodeRunSlot?.lease.release();
         reservedCodeRunSlot = null;
@@ -635,6 +635,11 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         reply.raw.end();
       }
     } catch (error) {
+      if (error instanceof ChatStreamLeaseError) return reply.code(error.status).send({ error: { code: error.code, message: error.message, retryable: error.status === 503 } });
+      if (streamController.signal.aborted) {
+        if (!reply.sent && !reply.raw.destroyed) return reply.code(499).send({ error: { code: "CHAT_CANCELLED", message: "Chat request cancelled.", retryable: false } });
+        return;
+      }
       if (error instanceof AuthenticationError) {
         return reply.code(error.status).send({ error: { code: error.code, message: error.message } });
       }
@@ -677,6 +682,10 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         const errorMessage = error instanceof Error ? error.message : "Could not start the chat stream.";
         return reply.code(500).send({ error: { code: "STREAM_UNAVAILABLE", message: errorMessage } });
       }
+    } finally {
+      reply.raw.off("close", abortPreflight);
+      reservedCodeRunSlot?.lease.release();
+      await releaseStream?.();
     }
   });
 }

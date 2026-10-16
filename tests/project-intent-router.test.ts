@@ -1,4 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
 import { rm, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -21,6 +22,14 @@ import type { CompanyDelegationRuntime } from "../apps/agent-api/src/company-run
 import { PreviewError, type ProjectPreviewService } from "../apps/agent-api/src/project-preview-service";
 
 const roots: string[] = [];
+it("keeps a complete Company setup specification out of project schema routing", () => {
+  const message = readFileSync(new URL("./fixtures/novascale-ai-company.txt", import.meta.url), "utf8");
+  expect(classifyProjectIntent(message)).toMatchObject({ intent: "CHAT", needsClarification: false });
+  for (const opening of ["Створи компанію NovaScale", "Crie uma empresa NovaScale"]) {
+    expect(classifyProjectIntent(opening + "\n\nAgents should create data models and run tests.")).toMatchObject({ intent: "CHAT", needsClarification: false });
+  }
+  expect(classifyProjectIntent("Create a company website with a data model").intent).toBe("CREATE_WEBSITE");
+});
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((r) => rm(r, { recursive: true, force: true })));
 });

@@ -2,6 +2,17 @@
 
 Це третій план, після Website Builder (кроки 0-11) і Data Studio (D0-D7). Мета: щоб агент NPATI міг читати, писати й змінювати код, запускати команди та перевіряти результат, як це роблять Claude Code, Codex та подібні системи, але на ваших моделях (AI Providers) і всередині існуючої архітектури Company / Capabilities / Runs / Activity.
 
+> Audit checkpoint, 2026-10-15: [implementation repairs and actual limits](2026-10-15-full-system-audit.md),
+> [431-entry source inventory](2026-10-15-plan-inventory.md), and
+> [verification results](2026-10-15-verification-results.md). This plan is a specification, not a completion ledger.
+> Continuation 2026-10-16: F16–F20 repair Company/Business intent, routing privacy, large prompts and cancellation accounting; see the updated report and verification evidence.
+> Full acceptance remains open. Real shared-runtime Node/Python/Vite/Next commands, builds and HTTP Preview were
+> exercised. Shared Browser QA was implemented on 2026-10-16; real fixture detection, file repair and two-viewport QA passed in a temporary runtime. Autonomous scenarios A–L, mandatory
+> automatic CI, production image admission and deployment crash/recovery certification are not marked complete.
+> The shared/self-hosted runtime decision in `docs/website-builder/SHARED_PROJECT_RUNTIME.md` supersedes assumptions
+> about one Docker container per project. Current self-hosted flag defaults also differ from the original dark-launch
+> specification. This audit preserves the configured self-hosted defaults. Published tool schemas/checksums are preserved.
+
 Як користуватися:
 
 1. Кожен крок запускайте окремою сесією кодувального агента.

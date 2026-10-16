@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
 import { CompanyChatActions } from "../apps/agent-api/src/company-chat-actions";
-import { detectCompanyChatLanguage } from "../apps/agent-api/src/company-chat-i18n";
+import { detectCompanyChatLanguage, isLocalizedCompanyManagementRequest } from "../apps/agent-api/src/company-chat-i18n";
 import { compositeCreationCopy } from "../apps/agent-api/src/composite-chat-i18n";
 import { defaultLocalizedAgentProfiles } from "../apps/agent-api/src/company-agent-profile-i18n";
 import { stripInternalChatActions } from "../apps/web/src/ChatMessageContent";
@@ -13,6 +13,12 @@ const bob: AuthContext = { userId: "bob", workspaceId: "shared", permissions: ["
 const directive = (value: object) => `Done.\n\n\`\`\`company-action\n${JSON.stringify(value)}\n\`\`\``;
 
 describe("company management from chat", () => {
+  it("checks long localized settings messages linearly while preserving line boundaries", () => {
+    expect(isLocalizedCompanyManagementRequest("Background data. ".repeat(6250))).toBe(false);
+    expect(isLocalizedCompanyManagementRequest("Notes\nCrée une entreprise avec trois agents")).toBe(true);
+    expect(isLocalizedCompanyManagementRequest("Crée quelque chose\nune entreprise")).toBe(false);
+  });
+
   it("detects popular chat languages", () => {
     expect([
       ["Create a company with agents", "en"],

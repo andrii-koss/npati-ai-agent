@@ -1,4 +1,5 @@
 import type { AuthContext } from "@npati/workspace";
+import { canonicalJson } from "@npati/workspace";
 import { resolveCodeAgentLimits, type CodeAgentLimits } from "./code-agent-config";
 import { CODE_TOOL_SCHEMAS, type CodeToolSchema } from "./code-tool-registry";
 import { CODE_AGENT_MASTER_FLAG } from "./feature-flags";
@@ -14,7 +15,7 @@ import {
   isCodeGitTool,
 } from "./code-git-workflow";
 import type { CodeWorkspaceRevisionSnapshot } from "./code-workspace-revision";
-import { parsePatch } from "./code-tools-patch";
+import { patchTargets } from "./code-tools-patch";
 import {
   CodeTurnTracker, extractWriteChanges, resolveTurnTrackingOptions, revisionConflictDetails,
   type CodeWriteChange,
@@ -35,6 +36,7 @@ import type {
 import {
   codeSubFlagForTool,
   validateArguments,
+  sha256Hex,
 } from "./code-tool-runtime-guards";
 import { CodeToolWriteGuard } from "./code-tool-runtime-write-guard";
 import { CodeToolHooksCoordinator, toFailure } from "./code-tool-runtime-hooks";
@@ -51,7 +53,7 @@ export class CodeToolRuntime {
   private readonly limits: CodeAgentLimits;
   private readonly schemas: readonly CodeToolSchema[];
   private readonly tracker: ReadTracker;
-  private readonly idempotency = new Map<string, { at: number; result: CodeToolInvokeResult }>();
+  private readonly idempotency = new Map<string, { at: number; signature: string; result: CodeToolInvokeResult }>();
   private readonly idempotencyTtlMs: number;
   private readonly executors: Record<string, (input: CodeToolExecutionContext) => Promise<unknown>>;
   private readonly writeTools: ReadonlySet<string>;
@@ -241,12 +243,11 @@ export class CodeToolRuntime {
 
       // (5) Arguments
       const args = validateArguments(tool.inputSchema, input.args);
-      await this.options.flags.executionModes?.assertToolAllowed(ctx, input.companyId, input.projectId, tool.name, args);
       if (input.subagentWritePaths) {
         const scopedFileTools = ["code.fs.edit", "code.fs.write", "code.fs.move", "code.fs.delete", "code.fs.apply_patch"];
         const unsafe = this.isWriteTool(tool.name) || /^(code\.shell\.(exec|exec_async|process\.start)|code\.verify\.run|code\.deps\.(add|install|update|remove)|code\.git\.(branch|stage|commit|restore|push|pr))/.test(tool.name);
         if (unsafe) {
-          const paths = tool.name === "code.fs.apply_patch" ? parsePatch(args.patch).files.map((file) => file.path)
+          const paths = tool.name === "code.fs.apply_patch" ? patchTargets(String(args.patch ?? "")).map((file) => file.path)
             : [args.path, args.from, args.to].filter((value): value is string => typeof value === "string");
           if (!scopedFileTools.includes(tool.name) || !paths.length || paths.some((path) => {
             const normalized = this.guardPath(path);
@@ -254,6 +255,7 @@ export class CodeToolRuntime {
           })) throw new CodeToolError("subagent_path_outside_scope", "The writing child must stay inside its recorded file scope", 403, "policy", false, tool.name);
         }
       }
+      await this.options.flags.executionModes?.assertToolAllowed(ctx, input.companyId, input.projectId, tool.name, args);
       if (tool.name === "code.fs.undo_last_turn" && args.confirm !== true) {
         throw new CodeToolError("invalid_arguments", "code.fs.undo_last_turn requires confirm: true", 400, "validate_arguments", false, tool.name);
       }
@@ -282,9 +284,12 @@ export class CodeToolRuntime {
       }
 
       // (6) Idempotency
-      const cacheKey = `${sessionId}:${input.toolCallId}`;
+      const cacheKey = canonicalJson([ctx.workspaceId, ctx.userId, input.companyId, input.projectId, sessionId, input.toolCallId]);
+      const signature = sha256Hex(canonicalJson({ tool: tool.name, version: tool.version, args }));
+      for (const [key, entry] of this.idempotency) if (Date.now() - entry.at > this.idempotencyTtlMs) this.idempotency.delete(key);
       const cached = this.idempotency.get(cacheKey);
       if (cached && Date.now() - cached.at <= this.idempotencyTtlMs) {
+        if (cached.signature !== signature) throw new CodeToolError("invalid_arguments", "Tool call identity was reused for different arguments", 409, "idempotency", false, tool.name);
         return { ...cached.result, cached: true };
       }
 
@@ -324,7 +329,7 @@ export class CodeToolRuntime {
             ok: true, tool: tool.name, toolVersion: tool.version, schemaVersion: tool.version,
             result: this.wrap(tool.name, payload), truncated: false, durationMs: Date.now() - started,
           };
-          this.idempotency.set(cacheKey, { at: Date.now(), result });
+          this.idempotency.set(cacheKey, { at: Date.now(), signature, result });
           await this.hooksCoordinator.recordActivity({ ...input, tool: tool.name, toolVersion: tool.version, durationMs: result.durationMs, bytes: 0, truncated: false, ok: true });
           await this.hooksCoordinator.recordAudit(ctx, { ...input, sessionId, tool: tool.name }, tool, "allowed", undefined, { checkpointId: restoredCheckpointId, turnId, action: "undo_last_turn" });
           return result;
@@ -335,7 +340,7 @@ export class CodeToolRuntime {
             ok: true, tool: tool.name, toolVersion: tool.version, schemaVersion: tool.version,
             result: this.wrap(tool.name, turnScoped), truncated: false, durationMs: Date.now() - started,
           };
-          this.idempotency.set(cacheKey, { at: Date.now(), result });
+          this.idempotency.set(cacheKey, { at: Date.now(), signature, result });
           await this.hooksCoordinator.recordActivity({ ...input, tool: tool.name, toolVersion: tool.version, durationMs: result.durationMs, bytes: 0, truncated: false, ok: true });
           await this.hooksCoordinator.recordAudit(ctx, { ...input, sessionId, tool: tool.name }, tool, "allowed");
           return result;
@@ -343,7 +348,7 @@ export class CodeToolRuntime {
         const targets = await this.writeGuard.collectWriteTargets(ctx, input, tool.name, args);
         writeTargets = targets;
         await this.writeGuard.assertReadBeforeWrite(ctx, input, sessionId, targets);
-        const approval = await this.writeGuard.assertApproved(ctx, input, tool, targets, sessionId, turnId);
+        const approval = await this.writeGuard.assertApproved(ctx, input, tool, targets, sessionId, turnId, undefined, args);
         approved = approval.approved;
         checkpointId = await this.writeGuard.ensureTurnCheckpoint(ctx, { companyId: input.companyId, projectId: input.projectId, sessionId, turnId, runId: input.runId, tool: tool.name });
         await this.hooksCoordinator.recordAudit(ctx, { ...input, sessionId, tool: tool.name }, tool, "allowed", undefined, {
@@ -489,7 +494,7 @@ export class CodeToolRuntime {
         const receipt = raw as { kind?: unknown; processId?: unknown };
         if (typeof receipt.kind === "string" && typeof receipt.processId === "string") result.processReceipt = { kind: receipt.kind, processId: receipt.processId };
       }
-      this.idempotency.set(cacheKey, { at: Date.now(), result });
+      this.idempotency.set(cacheKey, { at: Date.now(), signature, result });
       await this.hooksCoordinator.recordActivity({ ...input, tool: tool.name, toolVersion: tool.version, durationMs: result.durationMs, bytes: serialized.length, truncated, ok: true });
       await this.hooksCoordinator.recordAudit(ctx, { ...input, sessionId, tool: tool.name }, tool, "allowed", undefined, { checkpointId, turnId, changes: write ? this.turns.listChanges(sessionId, turnId).length : 0, ...(input.snapshotId ? { snapshotId: input.snapshotId } : {}) });
       return result;

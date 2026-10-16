@@ -1,0 +1,178 @@
+# Coding Agent audit and repairs — 2026-10-15
+
+## Verdict and evidence boundary
+
+**The requested full acceptance is not complete. Production readiness and parity with other coding agents are not certified.** This audit includes actual implementation changes, regression executions, and real execution through the existing shared Docker runner. It does not label scripted providers or direct runner acceptance as autonomous agent E2E.
+
+The [plan inventory](2026-10-15-plan-inventory.md) enumerates 431 numbered/bulleted entries across all 27 PLAN stages, with implementation and supporting suite links. Its `Untested` entries are an explicit remaining-work inventory, not a claim that each item has been audited. Shared rules and unnumbered prose still require individual sign-off. In particular, source mapping and a passing unit suite do not satisfy runtime acceptance.
+
+All command evidence is under [artifacts/coding-agent-audit-2026-10-15](../../artifacts/coding-agent-audit-2026-10-15/). These are local artifacts, normally ignored by Git. The running Docker deployment predates these source repairs; it was not replaced during this audit. Real runner results establish backend behavior, while regression results establish the changed local source behavior. Neither is misrepresented as the other.
+
+Host: Windows/PowerShell, Node 22.13.1 (below package.json's supported floor 22.22.2). Existing API/worker/runner containers were healthy. Container Node is 24.21.0. The deployment's Compose name includes `isolated`, but the actual runner implements **shared** project execution. Scope checks, project UIDs, process/port allocation and egress enforcement remain in the existing runtime; no Docker socket or host execution was added to project tools.
+
+## Continuation — 2026-10-16
+
+Continued the same audit after the initial full run. Repaired long-request routing, settings/native-action compatibility, provider-boundary privacy and cancellation accounting (F16–F20 below). The first mixed focused execution retained a long Business Profile timeout; its isolated rerun passed all three tests at the normal 10-second timeout. This is not a clean-baseline claim. New full-suite/security/typecheck results are recorded in the generated verification page; earlier reports remain as evidence.
+
+The managed local command helper intermittently failed with `setup refresh had errors`; approved local Node/Git execution was used for repository validation. `apply_patch` refused the workspace reparse-point path, so bounded Node edits were used within this workspace. No application sandbox permissions, runtime network rules or deployment settings were changed.
+
+## Architecture checked
+
+The entry points continue through CodeService / CodeSessionRunExecutor / CodingAgentRunner, with existing Company capability selection. The runner constructs context and tools, invokes AIEngine, normalizes calls, executes read waves and serial writes, records outcomes, then verifies/reviews. Existing WorkspaceProvider/ProjectService own files, revisions, checkpoints and previews. PolicyEngine/RBAC/approval boundaries remain server-side. CodeRunStateLog owns leases and recovery metadata; replay bundles and the durable inbox support continuation.
+
+The relevant implementations are indexed per stage in the inventory. Additional inspected boundaries include [shared runtime](../../apps/agent-api/src/shared-project-runtime-provider.ts), [shared runner HTTP operations](../../apps/agent-api/src/shared-project-runtime-server.ts), [Preview](../../apps/agent-api/src/project-preview-service.ts), [Browser QA](../../apps/agent-api/src/project-browser-qa-service.ts), [OmniRoute engine](../../packages/omniroute-adapter/src/omniroute-engine.ts), [Activity sink](../../apps/agent-api/src/code-run-activity-sink.ts), and [monitor routes](../../apps/agent-api/src/code-monitor-routes.ts).
+
+## Defects repaired
+
+| ID / severity | Failure and resulting behavior | Implementation | Regression evidence |
+| --- | --- | --- | --- |
+| F01 / High | Patch file targets escaped read-before-write and bulk/sensitive approval collection. Canonical and unified patch targets are now collected before writes; child scope uses the same target enumerator. | `code-tool-runtime-write-guard.ts`, `code-tools-patch.ts`, `code-tool-runtime.ts` | `coding-agent-c3-runtime.test.ts`: both formats require prior reads; async child scope regression |
+| F02 / High | Deleting through a patch bypassed the delete-specific approval. Runtime and canonical commit boundary require approval. | Same guard and patch engine | C3 runtime: exact approved deletion succeeds; unapproved deletion performs no writes |
+| F03 / High | An edit approval did not bind the proposed arguments or prior content. Payload now includes an argument hash and tracked file hashes, refusing payload substitution. Existing outstanding edit approvals may need reissue. | `code-tool-runtime-write-guard.ts` | C3 runtime: substituted patch refused; original approved patch accepted |
+| F04 / High | Patch failure left new files empty and deleted files missing. Canonical and legacy commits now share rollback, preserve metadata, remove newly created files, restore deleted files and report incomplete rollback without silently overwriting detected concurrent edits. | [shared patch transaction](../../apps/agent-api/src/code-patch-transaction.ts), `code-tools-patch.ts`, `code-tool-executors-write.ts` | [patch recovery regressions](../../tests/coding-agent-patch-recovery.test.ts), existing C3 engine/runtime/parity suites |
+| F05 / High | Truncated/malformed canonical patches could partially apply; hunk counts and output size were not enforced. Missing/extra markers, count mismatch and oversized output now fail before mutation. | `code-tools-patch.ts`, shared transaction | New recovery suite: no files change for malformed/oversized patches. A malformed Python eval fixture was corrected to an insertion hunk; expected output assertions were retained. |
+| F06 / High | Cancellation during model work could be reported as provider failure or execute late returned calls. Cancellation is checked after model completion and between serial tools; cancelled model errors retain the cancellation status. | `coding-agent-runner.ts`, `coding-agent-tool-waves.ts` | C6 stop conditions: late provider response produces zero tool calls; rejected aborted request returns cancelled |
+| F07 / High | Invalid tool arguments produced tool feedback without a matching assistant call, poisoning subsequent native-tool requests. Rejected calls now have matching history entries; partial calls consume the correction budget; synthesized text IDs include the turn identity. | Same runner/waves | C6 runner: unknown-call and partial-call history correlation, no partial execution |
+| F08 / High | Recovery could act on a stale scan after another worker resumed, or replay the same read from two reconcilers. Recovery now takes an atomic lease before acting, rechecks state and releases its lease after interruption. | `code-run-reconciler.ts`, `code-run-state.ts` | C6a: resumed-worker race and concurrent reconciler tests; C10 resume/checkpoint-link tests |
+| F09 / High | Tool result cache keys omitted tenant/project context and did not bind arguments. Keys now include caller/workspace/company/project/session; changed payload reuse is refused; expired entries are pruned. This does not replace durable side-effect fencing. | `code-tool-runtime.ts` | C3 runtime: same ID/different arguments refused; another project cannot receive the cached receipt |
+| F10 / High | Failure to persist a configured execution snapshot silently became a legacy run. Run now fails before model/tool execution with `snapshot_unavailable`. An absent provider still uses the existing NullSnapshotProvider. | `coding-agent-runner.ts` | C6 stop conditions: configured failing snapshot yields zero model calls |
+| F11 / Medium | Async workspace's old dark-launch assertion contradicted the current explicit self-hosted default used by execution-mode/ownership/inbox tests. The assertion now checks both configured modes; production defaults are preserved. | `coding-agent-async-workspace.test.ts` | Async workspace, inbox, execution-mode and self-hosted default regressions |
+| F12 / Medium | Static catalog audit pinned an old catalog/manifest, making current Inspector/audit gates fail. Updated independent exact pins to 397 total / 133 callable / 264 runtime-only, manifest 13 / 49 code tools. Historical checksums and mutation negative controls remain. | `capability-catalog-audit-types.ts`, capability/Inspector/schema tests | Catalog audit 4/4 checks; schema guard; C2/C4/C9/C11/C12/C13/Inspector suites |
+| F13 / Medium | `npm run build` failed before compilation because an untracked `OMNIROUTE_VERSION` file was required. Generator now uses the pinned submodule's package version/commit when release metadata is absent. | `scripts/generate-omniroute-provider-catalog.mjs` | Generator produces the same catalog; API and web builds rerun |
+| F14 / High | Isolated runner printed raw stdout/stderr on command failure before lease-aware redaction. Failure logging now contains only sandbox identity, exit code and elapsed time. Output still returns through the existing redaction boundary. | `docker-sandbox-provider.ts` | Source inspection plus sandbox-provider/diagnostics/SecretLease regression suites; no real isolated leased-secret drill in this audit |
+| F15 / High | Write adapters could consume a truncated file as complete content. Canonical editing and legacy/canonical patches now refuse truncated workspace reads before writing, preserving the unread tail. | `code-tool-executors-write.ts` | New recovery suite uses the actual `createProjectWorkspaceReadPort` truncation with edit and both patch formats; all assert zero writes. `file-safety-final.json`: 69 tests passed. |
+
+| F16 / High | Incidental data-model/test responsibilities in a long Company setup request overrode its primary intent and requested an active project. The opening Company/Business request now stays on the existing settings path; explicit project/site requests retain priority. | `packages/shared/src/project-intent.ts` | `routing-final.json`: 66 passed, including the actual NovaScale specification and Ukrainian/Portuguese cases. |
+| F17 / High | Semantic project preflight called a provider for already recognized Company/Business management and consumed native-action responses. Existing settings recognizers now retain deterministic routing when no explicit project action is present, including contextual Company deletion confirmation. | `chat-project-intent.ts` | Company/Business integration suites and semantic multilingual website tests; final execution recorded below. Initial timeout evidence retained. |
+| F18 / High | Semantic project classification sent credentials and personal data in prompt/history before the existing security boundary. It now applies SecurityPolicyEngine to both before the provider call. | Same resolver | `routing-privacy.json`: 32 passed, including the real neutral-chat provider redaction regression. Routing/privacy suites added to the fixed security gate. |
+| F19 / Medium | A completed provider response arriving after cancellation left an open model-call trace and omitted charged tokens. Usage/accounting and completion records now precede cancellation return, while zero returned tools execute. | `coding-agent-runner.ts` | `cancellation-trace.json`: 45 passed; late-response regression asserts 18 charged tokens, completed model/Activity records and zero tool calls. |
+| F20 / Medium | Unanchored Company recognition lookaheads rescanned long prompts at every input position. Both whole-message checks now anchor at the start; matching behavior is preserved without repeated suffix scanning. | `company-chat-actions.ts` | Existing multilingual management cases plus a roughly 100 KB settings prompt in the semantic routing suite; full regression result below. |
+
+| F21 / High | Shared runtime exposed Browser QA in API services but neither dispatched nor implemented `inspectBrowser`. It now runs the existing Playwright script through the project's existing UID/namespace/egress boundary, verifies ownership and its assigned preview port, and bounds time/output. Both providers share input/result validation. | `shared-project-runtime-provider.ts`, `shared-project-runtime-server.ts`, `sandbox-browser-qa.ts`, `Dockerfile`, launcher | Real `shared-browser-qa-live.json`: 10 passed checks, two sandbox cleanups; temporary container cleanup passed. New shared QA suite and existing QA/provider tests. |
+| F22 / High | Real Chromium launch failed because the project TMPDIR exceeded the Unix socket path limit. Shared QA now uses its command namespace's existing private `/tmp`; mount, UID and seccomp policies are unchanged. | `browser-qa-runner.mjs` | Real failed launch diagnostic retained; successful detection and post-fix browser rerun after the repair. Source regression protects the short private path. |
+| F23 / High | Chromium sent project-local preview navigation through the package egress proxy and failed. Shared QA explicitly disables browser proxy selection for this local transport. Destination, origin, ownership, project-port and UID firewall restrictions remain authoritative. | Same QA runner | Diagnostic Node HTTP 200 / direct browser HTTP 200; real final browser scenario and foreign-port/project refusals. |
+| F24 / Medium | Browser failures were indistinguishable. Runner now reports only a fixed stage vocabulary; both providers expose that stage while refusing arbitrary stdout/page content in diagnostics. | QA runner and shared validation helper | New unit case checks known launch stage, unknown/private stage and malformed output; real navigation failure diagnosed through the production contract. |
+
+Additional test maintenance: source-composition checks now inspect the actual extracted MCP wiring module; a fresh MCP installation asserts its visible missing-source refusal. Shared-budget fixtures account for input-context pressure and still assert that a child cannot spend after parent exhaustion. The original checkpoint had 166 gate suites; the continuation registers routing and privacy suites and shared Browser QA suites for 169 configured suites. These changes preserve assertions rather than skipping tests or adding quarantine entries.
+
+Rollback limitations: compensating writes are not a filesystem transaction. Concurrent changes detected during rollback are preserved and surfaced as `rollbackIncomplete`; callers must inspect the checkpoint. Metadata is retained when the underlying port exposes it. The context-first delete port still has no atomic revision parameter, and recreation after a successful delete has a remaining race with an external writer. No guarantee of atomic rollback after process death is made.
+
+## PLAN stage matrix
+
+`Partial` means implementation and supporting tests exist but the stage's full acceptance is not demonstrated here. `Untested` means no current end-to-end certification. The detailed inventory deliberately does not promote all items based on a stage-level result.
+
+| Stage | Current audit status | Evidence / remaining boundary |
+| --- | --- | --- |
+| C0 | Partial | Prior architecture audit reviewed; new architecture/source inventory, defects and live checks recorded. Not every original audit claim re-certified. |
+| C1 | Partial | Code projects/sessions/toolchain and scoped workspace code; real four-stack runner acceptance. Full API import/private-clone lifecycle not rerun. |
+| C1c | Untested | Audit chain/store/security suites exist; no new PostgreSQL privilege/anchor/tamper drill. |
+| C1a | Partial | Flag/version tests, schema guard and optional-surface default repair. Self-hosted defaults differ from original universal dark-launch plan. |
+| C1b | Partial | Admission code fails closed; catalog guard reports six unverified placeholder images. No new production signature/SBOM/registry admission certification. |
+| C2 | Partial | Search/read/capability tests; current exact catalog and Inspector pins repaired. Large real repository search benchmark not run. |
+| C3 | Partial | High-priority patch/approval/cache repairs verified locally. Real backend file uploads run. Full concurrent filesystem/worker-crash patch atomicity remains unproven. |
+| C4 | Partial | Real commands, installs/builds, background servers, HTTP previews and ownership refusals on four stacks. Full CPU/RAM/disk exhaustion drills not run. |
+| C4a | Partial | Policies/guards covered by security suites; real npm lock generation and script-disabled ci/build run. Yarn/pnpm/sdist/private-registry drills not rerun. |
+| C4b | Partial | Existing proxy/default-deny/shared-runtime network tests. No live DNS-rebinding/redirect/firewall attack campaign in this audit. |
+| C5 | Partial | Exact payload/content binding repaired; policy and approval suites. Full UI approval/reconnect flow still not certified. |
+| C5a | Partial | RBAC/prod-operation and protected-branch suites. No real multi-user/two-person production exercise. |
+| C5b | Partial | Provider guard/routing/redaction suites. No live provider data-retention or account-policy certification. |
+| C6 | Partial | Bounded loop/cancellation/protocol repairs; runner suites. Full autonomous live-model A–L campaign not run. |
+| C6a | Partial | Concurrent recovery and stale-scan races repaired and exercised with real state-store logic/in-memory storage. No deployment worker kill/restart drill. |
+| C6b | Partial | Snapshot persistence fail-closed repair; replay/snapshot suites. Live reproducibility is not deterministic equivalence. |
+| C7 | Partial | Shared Browser QA implemented; real fixture findings, same-project fix and two-viewport revalidation passed. Full live UI/supported-stack browser certification remains open. |
+| G1 | Broken | Automatic CI remains disabled by the existing documented owner decision. A local passing gate cannot make CI a mandatory merge/release check. |
+| R1 | Partial | Queue/quota/retention/metrics implementations and suites. No measured p95 SLO, production admission load test or backup erasure certification. |
+| C8 | Partial | Compaction/instructions/repo-map tests. No live model task with dozens of edits plus worker restart in this audit. |
+| C9 | Partial | Bounded verification/self-review suites and real backend failing/passing command infrastructure. No fully autonomous live-model repair demonstration. |
+| C10 | Partial | Resume/recovery/checkpoint suites; lease handoff repaired. Real worker restart and human approval across a closed browser still required. |
+| C11 | Partial | Git/protected-branch suites. No external push/PR was sent or claimed as passed. |
+| C12 | Partial | Existing scoped child runner, budgets, locks and async controls tested. No real multi-model parallel merge campaign. |
+| C13 | Partial | Hooks/MCP/commands/skills suites and wiring checks. No external MCP service provisioned for acceptance. |
+| C14 | Partial | Deterministic corpus/security tests. Scripted corpus is not a live-model quality benchmark. |
+| C15 | Untested | Mounted workspace, CLI and IDE protocol code/specification located. No new real local mount/IDE acceptance; optional external CLI adapter not certified. |
+
+## Real execution and requested scenarios A–L
+
+Reproduction script: [verify-coding-runtime-live.mjs](../../scripts/verify-coding-runtime-live.mjs). It runs inside the existing API container using its existing runner URL and signing key in memory. It creates random scopes, signs requests, and destroys only the sandboxes it created in `finally`. No signing keys or authorization tokens enter its report. Four fixtures coexist before cleanup. [live-runtime.json](../../artifacts/coding-agent-audit-2026-10-15/live-runtime.json) contains identities, command stdout/stderr/status, QA refusals and cleanup results.
+
+Actual backend checks: **40 checks: 36 passed, 4 failed** (all four failures are the shared runner's `inspectBrowser` refusal). All four cleanup operations succeeded. Node `npm test`, Python `compileall`, Vite `npm run build` and Next `npm run build` succeeded. Vite/Next lock generation and `npm ci --ignore-scripts` succeeded. Each background server returned the expected content through runner `proxyPreview`; each foreign-project status request was denied. Python here is a standard-library HTTP application, not a certified Flask/Django dependency workflow. The Node arithmetic fixture test is only runner execution evidence; HTTP response evidence is a separate check, not claimed as comprehensive API correctness.
+
+The initial acceptance-script attempt assumed port 3000 and failed Preview in shared mode. That was a harness error, corrected by using `exposePort`; the initial report is preserved separately. No production port policy was loosened.
+
+| Scenario | Status | What actually ran / what remains |
+| --- | --- | --- |
+| A — Next shop | Partial | Real two-page Next fixture, dependencies, build, server and Preview. No autonomous creation or browser QA/design certification. |
+| B — second user message | Untested | Existing continuity/inbox regressions are hermetic; no second live-model request on the fixture. |
+| C — React/Vite | Partial | Actual React/Vite install/build/server/Preview. Browser rendering, interaction and repeated edit are not certified. |
+| D — Node API | Partial | Actual Node test command, server and JSON HTTP response. Not an autonomous endpoint implementation/test campaign. |
+| E — Python | Partial | Actual Python compilation/server/HTTP content. No external web-framework install or autonomous generation. |
+| F — intentional build error | Untested | Scripted verification/repair and eval fixtures exist; no new autonomous live repair drill. |
+| G — provider/worker/sandbox failures | Partial | Provider and recovery regressions; new stale-scan/concurrent-reconciler tests. No production worker restart or injected live provider outage. |
+| H — concurrent projects | Partial | Four real scoped sandboxes/processes coexist; foreign-project status denied; per-project Preview ports work. Full cross-project file/network/trace intrusion campaign not run. |
+| I — long task/compaction | Untested | Long-session and replay-compaction tests are simulations, not live E2E. |
+| J — Ukrainian/English/Portuguese | Untested | Language/intents regressions exist; no three-language live-model acceptance conversation. |
+| K — cancel/resume/approval/dedup | Partial | Real runner/state logic exercised by regression tests; new cancellation/cache/recovery cases. No full live UI approval/reconnect scenario. |
+| L — Activity throughout A–K | Untested | Existing monitor/provider/trace suites run with the full suite. Direct signed runner acceptance bypasses Coding Runs and cannot establish Activity correlation for autonomous scenarios. |
+
+No A–L scenario is marked Passed on simulation evidence.
+
+## Real shared Browser QA — 2026-10-16
+
+Implemented the missing shared transport and exercised it in a **separate temporary shared-runtime container**, retaining the same capability set, read-only rootfs, project UID, namespaces, seccomp, egress policy and per-project ports. No existing service or volume was replaced. The container used the existing local runtime/toolchain plus the current compiled API, QA script, Chromium and pinned Playwright. This is not certification of a clean build of the full application Dockerfile: that build was interrupted when host free RAM fell to roughly 570 MB; a smaller audit-only image was built and its exact image ID is recorded.
+
+Reproduction: `node scripts/run-shared-browser-audit.mjs` after building the audit image. The harness streams its [verification script](../../scripts/verify-shared-browser-qa.mjs) through stdin, signs requests in memory, creates two random project scopes, and removes only its generated container. The initial `docker cp` approach was refused by the read-only rootfs; no permissions were relaxed to bypass it. Docker Desktop was initially stopped, then started for these checks.
+
+[Actual QA evidence](../../artifacts/coding-agent-audit-2026-10-15/shared-browser-qa-live.json): **10/10 checks passed**. A real Chromium page detected console/runtime errors, a broken local link and accessibility violations in an authored fixture and generated a redacted screenshot. Updating `index.html` in the same project and running QA again at 375×667 and 1280×800 produced zero findings. A second project's scope and preview port were both refused. Both sandbox cleanups and the [temporary container cleanup](../../artifacts/coding-agent-audit-2026-10-15/shared-browser-runtime.json) passed. Failed launch/navigation attempts and their diagnostics remain in separately named artifacts.
+
+This establishes the actual backend browser path and repeat-after-fix behavior on a static HTTP fixture. It does **not** certify autonomous AI diagnosis/repair, Next/Vite browser workflows, interaction assertions, full responsive-layout correctness, external network-failure reporting, or Activity correlation for A–L. Existing deployment images still predate these changes. The QA runner currently closes WebSockets; dev-server/HMR console behavior needs explicit follow-up on supported stacks.
+
+## Activity and observability findings
+
+The monitor reads persisted Coding Run state and existing development-process records with company/project/workspace checks, pagination and status normalization. The Activity sink rejects content/secrets, persists independently of logger failure, and returns storage failures without changing execution decisions. The runner records model attempts and tool correlations; terminal/trace presentation uses the existing sanitizers. Existing UI design is retained.
+
+The existing Async Workspace drill also ran in real Chromium: six control/queue/output/reload/reconnect checks passed with mocked HTTP responses. Its initial cold Vite navigation timed out; the failed initial report and successful retry are both retained. This is UI contract evidence, not Browser QA of the authored application fixtures. The preceding local security gate passed **166 files / 2,439 tests**, with zero failures or skips.
+
+Limits still needing targeted verification: silent Activity store failure may leave a diagnostic gap even though execution proceeds; reconnect/retention must be tested against real DB/SSE; metadata-only events are not full tool-output retention. No claim of lossless trace under database failure is made. Real direct runner checks do not create Coding Run IDs. Relevant tests: `code-run-monitor.test.ts`, `code-provider-monitor.test.ts`, `run-trace-and-observability.test.ts`, C6b Activity snapshot, C12 Activity tree, C4b network Activity, C5 decision Activity and C13 hooks Activity.
+
+## Public capability reference matrix
+
+Sources fetched on 2026-10-15: [Codex CLI](https://learn.chatgpt.com/docs/codex/cli), [Codex subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents), [OpenAI approvals/security](https://learn.chatgpt.com/docs/agent-approvals-security), [Claude Code overview](https://code.claude.com/docs/en/overview), [Claude subagents](https://code.claude.com/docs/en/sub-agents), [Hermes tools](https://hermes-agent.nousresearch.com/docs/user-guide/features/tools). These describe capabilities, not comparative reliability measurements. `Not established` means the fetched sources do not establish a dedicated feature; it does not mean the product lacks it.
+
+| Capability | NPATI audited boundary | Codex | Claude Code | Hermes |
+| --- | --- | --- | --- | --- |
+| Code understanding | Read/search/repo-map; live quality unmeasured | Repository work | Codebase analysis | File/search tools |
+| Planning/execution | Plans and bounded runner | Agent workflows | Agent workflows | Todo/delegation |
+| File editing/patching | Guards/rollback repaired | File edits | File edits | Patch/file tools |
+| Repository search | Files/grep/symbols | Repository exploration | Repository exploration | File/search tools |
+| Terminal execution | Four real stacks | CLI commands | CLI commands | Multiple backends |
+| Tool calling | Native/text protocol repaired | Agent tools | Agent tools | Tool registry |
+| Context management | Compaction tests; live gap | Session context | Isolated child context/compaction | Memory/session recall |
+| Autonomous debugging | Bounded repair; live gap | Coding workflow | Bug-fix workflow | Tool-assisted workflow |
+| Multi-file refactoring | Local patch regressions | Coding workflow | Multi-file workflow | File tools; quality unmeasured |
+| Test execution | Real backend commands | Commands | Commands | Terminal |
+| Browser automation | Shared QA implemented; real fixture browser recovery verified | Surface/tool dependent | Chrome integration | Browser toolset |
+| Git workflows | Policies/tests; no real push | Repository workflows | Developer integrations | Via terminal; dedicated PR flow not established |
+| Subagents/delegation | Scoped existing child runs | Subagents | Custom subagents | delegate_task |
+| Long-running tasks | Durable state/processes; restart gap | Sessions/background work | Background agents | Process tools |
+| Session continuation | Inbox/resume regressions | Sessions | Sessions | Session recall |
+| Error recovery | Recovery race repaired; live gap | Harness behavior; no equivalence claim | Harness behavior; no equivalence claim | Backend-dependent |
+| Security/approvals | Policies/tests; full red-team gap | Sandbox/approval controls | Independent tool permissions | Backend-dependent |
+| Observability | Activity/monitor; live L gap | Product-specific logs | Transcripts | Session tools |
+| Developer experience | Workspace/CLI; no full UI drill | CLI and app surfaces | Terminal/IDE/desktop/web | CLI and tools |
+
+Architecture is intentionally different: Hermes documents a persistent container shared across its process when Docker is chosen; NPATI additionally scopes project identity, processes and ports. No identical architecture or product-level parity is inferred.
+
+## Open blockers and next verification order
+
+1. **High: broader browser and rollout acceptance remains open.** Shared QA source and a real fixture loop are now verified (F21–F24), including post-fix revalidation and scope denials. The full fresh Dockerfile build, deployed source parity, Next/Vite/HMR, interaction assertions, responsive correctness and comprehensive network findings still need acceptance. Healthy browser-use-worker alone does not supply this contract.
+2. **High: whole-platform regression failures remain.** See the final verification artifact; do not reuse the historical 12-failure quarantine as an explanation without a clean-baseline reproduction. Existing unrelated source-contract, Company chat, approvals, privacy, migration inventory and API tests need diagnosis. No quarantine additions or skip flags were used.
+3. **High: complete A–L autonomous E2E is outstanding.** Provision an isolated application tenant and configured eligible chat model, execute the actual chat/CLI runner path, and retain Run/Step/Tool IDs and browser reports. Direct sandbox operations cannot certify planning, language, second-message continuity or Activity.
+4. **High: rollout/security evidence incomplete.** CI is manual by existing owner policy; unverified sandbox-image entries are placeholders. Shared and isolated deployment security must be tested separately. No global Full Access or network expansion was used.
+5. **Reliability boundaries:** current in-memory tool-result caching is not a distributed in-flight deduplication ledger. Durable run/process fencing must be exercised with duplicate queue delivery and worker death at side-effect boundaries. Patch rollback remains compensating, not transactional against arbitrary external writers.
+6. **Still unmeasured:** production DB tampering/privileges, SLO load/p95, retention and encrypted backup deletion, memory/disk/fork exhaustion, real provider streaming failure and cost accuracy, all declared language/package-manager variants.
+
+The next priorities are remaining runtime/security failures, supported-stack Browser QA and full image verification, then autonomous E2E. Adding new agent roles or replacing stable orchestration is not supported by this evidence.
+
+## Verification record
+
+The exact current checks and remaining failing assertions are generated into [verification results](2026-10-15-verification-results.md). Initial and intermediate failed runs remain in artifacts; a later focused pass does not erase a failed full-suite result. Reports must be regenerated after further code edits.

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { InMemoryWorkspaceStore } from "@npati/workspace";
 import type { AuthContext, CodeRunToolCallRecord } from "@npati/workspace";
 import { CodeRunStateLog, type CodeRunStateStorePort } from "../apps/agent-api/src/code-run-state";
@@ -153,6 +153,30 @@ describe("security-gate: C6a reconciler — a dead run becomes decidable", () =>
 });
 
 describe("security-gate: C6a reconciler — idempotent, dry-run safe, lease aware", () => {
+  it("does not interrupt a worker that resumed after the stale scan", async () => {
+    const { store, log, reconciler, clock, replayed } = setup();
+    await interruptedRun(log); clock.t = T0 + 60_000;
+    const scan = log.listStaleRuns.bind(log);
+    vi.spyOn(log, "listStaleRuns").mockImplementationOnce(async input => {
+      const stale = await scan(input);
+      await log.acquireLease({ companyId: "company-1", runId: "run-1", owner: "resumed-worker" });
+      return stale;
+    });
+    const report = await reconciler.reconcileRuns();
+    expect(report.interrupted).toEqual([]); expect(report.skipped).toBe(1);
+    expect(replayed).toEqual([]);
+    expect(await store.getCodeRunState("company-1", "run-1")).toMatchObject({ status: "running", leaseOwner: "resumed-worker" });
+  });
+
+  it("allows only one of two concurrent reconcilers to replay a stale read", async () => {
+    const { log, clock, replayed } = setup();
+    await interruptedRun(log); clock.t = T0 + 60_000;
+    const make = () => new CodeRunReconciler({ log, now: () => clock.t, replayReadOnly: async ({ call }) => { replayed.push(call); return { ok: true }; } });
+    const reports = await Promise.all([make().reconcileRuns(), make().reconcileRuns()]);
+    expect(reports.flatMap(report => report.interrupted)).toEqual(["run-1"]);
+    expect(replayed).toHaveLength(1);
+  });
+
   it("changes nothing on a dry run and reports the same recovery set", async () => {
     const { store, log, reconciler, clock, replayed } = setup();
     await interruptedRun(log);

@@ -2,6 +2,23 @@
 
 Update this file after every completed step.
 
+2026-10-16: Audit continuation repairs primary Company intent, preserves native settings routes, redacts
+semantic-router prompt/history, closes completed-provider accounting after cancellation, and avoids repeated
+long-prompt management scans. See F16–F20 and the latest [verification results](2026-10-15-verification-results.md).
+Shared Browser QA is implemented (F21–F24): real Chromium findings, same-project repair, two-viewport revalidation
+and foreign-project/port denials passed 10 checks in a temporary runtime; sandbox/container cleanup passed.
+A fresh full Dockerfile build and autonomous A–L acceptance remain open; see the latest gate/full-suite verdicts.
+
+2026-10-15: [Full-system audit and repairs — in progress](2026-10-15-full-system-audit.md).
+Patch target/approval/rollback safety, truncated-file edit refusal, cancellation boundaries, rejected-tool
+history, snapshot persistence, recovery leasing, cache scoping, isolated-runner logging and catalog/build
+guards were repaired. [Verification results](2026-10-15-verification-results.md) distinguish focused tests,
+full-platform failures and real shared-runner acceptance. The local security gate passed 166 suites / 2439 tests
+with no failures/skips. Four real stack fixtures installed/built or verified, served HTTP Preview and were cleaned
+up; shared Browser QA is missing. The [431-entry PLAN inventory](2026-10-15-plan-inventory.md) is source mapping,
+not individual requirement sign-off. Autonomous A–L acceptance and full-platform regression closure remain open.
+This checkpoint does not complete the audit, certify parity, authorize rollout or supersede existing deployment policy.
+
 2026-10-10: [Async Coding Agent — крок 4 завершено: completion → inbox](async-completions-step-4.md).
 Атомарний terminal result/outbox, scoped collection, admission після context append, wait suppression,
 recovery без respawn, replay completion artifacts та quota для нових idle tasks підключено до чинного runner.

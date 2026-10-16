@@ -142,11 +142,11 @@ export class CodeRunStateLog {
   }
 
   /** Takes the lease when it is free, expired or already ours. Returns the stored state either way. */
-  async acquireLease(input: { companyId: string; runId: string; owner: string }): Promise<{ held: boolean; state: CodeRunStateRecord }> {
+  async acquireLease(input: { companyId: string; runId: string; owner: string; now?: Date }): Promise<{ held: boolean; state: CodeRunStateRecord }> {
     const state = await this.apply(input.runId, {
       companyId: input.companyId,
       runId: input.runId,
-      lease: { mode: "acquire", owner: input.owner, now: new Date(this.now()), leaseMs: this.leaseMs },
+      lease: { mode: "acquire", owner: input.owner, now: input.now ?? new Date(this.now()), leaseMs: this.leaseMs },
     });
     return { held: state.leaseOwner === input.owner, state };
   }

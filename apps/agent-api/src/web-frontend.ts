@@ -11,6 +11,8 @@ export function rewriteBrowserApiUrl(request: IncomingMessage): string {
   const url = request.url ?? "/";
   if (/^\/api(?:\/|\?|$)/.test(url)) {
     apiRequests.add(request);
+    // These Ollama paths already include /api and do not collide with browser endpoints.
+    if (/^\/api\/(?:version|tags|generate)(?:\?|$)/.test(url)) return url;
     const rewritten = url.slice(4);
     return rewritten.startsWith("/") ? rewritten : "/" + rewritten;
   }

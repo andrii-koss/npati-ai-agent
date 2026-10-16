@@ -172,6 +172,44 @@ const readFile = async (h: Harness, path: string, toolCallId?: string) =>
   });
 
 describe("security-gate: C3 read-before-write", () => {
+  it("binds cached tool results to project identity and exact arguments", async () => {
+    const h = harness();
+    const first = await invoke(h, "code.fs.read", { path: "src/orders.ts" }, { toolCallId: "same-id" });
+    expect(first.ok).toBe(true);
+    const swapped = await invoke(h, "code.fs.read", { path: "other.ts" }, { toolCallId: "same-id" });
+    expect(swapped).toMatchObject({ ok: false, error: { code: "invalid_arguments", step: "idempotency" } });
+    const otherProject = await invoke(h, "code.fs.read", { path: "src/orders.ts" }, { toolCallId: "same-id", projectId: "other-project" });
+    expect(otherProject.ok).toBe(true);
+    if (otherProject.ok) expect(otherProject.cached).not.toBe(true);
+  });
+
+  it.each([
+    "*** Begin Patch\n*** Delete File: src/orders.ts\n*** End Patch",
+    "--- a/src/orders.ts\n+++ b/src/orders.ts\n@@ -1 +1 @@\n-old\n+new",
+  ])("requires prior reads for patch targets in both formats", async patch => {
+    const h = harness();
+    const result = await invoke(h, "code.fs.apply_patch", { patch });
+    expect(result).toMatchObject({ ok: false, error: { code: "read_before_write_required" } });
+    expect(h.writes).toEqual([]);
+  });
+
+  it("requires approval for patch deletion and binds approval to the exact operation", async () => {
+    const h = harness();
+    await readFile(h, "src/orders.ts");
+    const patch = "*** Begin Patch\n*** Delete File: src/orders.ts\n*** End Patch";
+    const requested = await invoke(h, "code.fs.apply_patch", { patch });
+    expect(requested).toMatchObject({ ok: false, error: { code: "approval_required" } });
+    expect(h.files.has("src/orders.ts")).toBe(true);
+    expect(h.approvals).toHaveLength(1);
+    const changed = "*** Begin Patch\n*** Delete File: src/orders.ts\n*** Add File: injected.txt\n+injected\n*** End Patch";
+    const swapped = await invoke(h, "code.fs.apply_patch", { patch: changed }, { approvalId: h.approvals[0]!.id });
+    expect(swapped).toMatchObject({ ok: false, error: { code: "approval_invalid" } });
+    expect(h.writes).toEqual([]);
+    const approved = await invoke(h, "code.fs.apply_patch", { patch }, { approvalId: h.approvals[0]!.id });
+    expect(approved.ok).toBe(true);
+    expect(h.files.has("src/orders.ts")).toBe(false);
+  });
+
   it("refuses a write to an existing file that was never read in this session", async () => {
     const h = harness();
     const result = await invoke(h, "code.fs.write", { path: "src/orders.ts", content: "changed" });

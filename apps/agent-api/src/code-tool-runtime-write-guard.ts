@@ -16,6 +16,8 @@ import type { CodeTurnTracker } from "./code-workspace-checkpoint";
 import type { CodeReadPort, CodeToolRuntimeOptions } from "./code-tool-runtime-ports";
 import { describeGitApprovalAction } from "./code-tool-runtime-guards";
 import { CodeToolError } from "./code-tool-runtime-errors";
+import { patchTargets } from "./code-tools-patch";
+import { createHash } from "node:crypto";
 
 export interface CodeToolWriteGuardContext {
   options: CodeToolRuntimeOptions;
@@ -44,7 +46,7 @@ export class CodeToolWriteGuard {
   async collectWriteTargets(
     authCtx: AuthContext,
     input: { companyId: string; projectId: string },
-    _tool: string,
+    tool: string,
     args: Record<string, unknown>,
   ): Promise<Array<{ path: string; exists: boolean }>> {
     const candidates = new Set<string>();
@@ -57,6 +59,9 @@ export class CodeToolWriteGuard {
     add(args.filePath);
     add(args.from);
     add(args.to && args.from ? undefined : args.to);
+    if (tool === "code.fs.apply_patch" && typeof args.patch === "string") {
+      for (const target of patchTargets(args.patch)) add(target.path);
+    }
     for (const key of ["files", "paths", "edits", "updates", "changes"]) {
       const list = args[key];
       if (!Array.isArray(list)) continue;
@@ -120,9 +125,10 @@ export class CodeToolWriteGuard {
     sessionId: string,
     turnId: string,
     gitInput?: { args: Record<string, unknown> },
+    writeArgs?: Record<string, unknown>,
   ): Promise<{ required: boolean; approved: boolean }> {
     const decision = requiresApproval({
-      tool: tool.name,
+      tool: tool.name === "code.fs.apply_patch" && typeof writeArgs?.patch === "string" && patchTargets(writeArgs.patch).some((target) => target.action === "delete") ? "code.fs.delete" : tool.name,
       targets: targets.map((target) => ({ path: target.path, sensitive: isSensitivePath(target.path) })),
       policy: this.ctx.approvalPolicy,
     });
@@ -142,8 +148,9 @@ export class CodeToolWriteGuard {
       ? gitToolApprovalPayload({ projectId: input.projectId, tool: tool.name, args: gitInput.args, repositoryInitialized })
       : null;
     const payload = boundaryConsumes ? gitPayload! : buildApprovalPayload({
-      tool: tool.name, toolVersion: tool.version, turnId, sessionId, targets,
-      ...(gitPayload ? { extra: { git: gitPayload } } : {}),
+      tool: tool.name, toolVersion: tool.version, turnId, sessionId,
+      targets: targets.map((target) => ({ ...target, sha256: this.ctx.tracker.get(sessionId, target.path)?.sha256 ?? null })),
+      extra: { ...(gitPayload ? { git: gitPayload } : {}), ...(writeArgs ? { argumentsHash: createHash("sha256").update(JSON.stringify(writeArgs)).digest("hex") } : {}) },
     });
     const reason = gitApprovalRequired ? "git_write" : decision.reason;
     const summary = gitApprovalRequired

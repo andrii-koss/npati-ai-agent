@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { SharedProjectRuntimeProvider } from "./shared-project-runtime-provider";
 import { authenticateRunnerRequest } from "./runner-readiness";
-import { assertProjectRuntimeProvider, SandboxProviderError, type SandboxScope, type SandboxCreateOptions, type SandboxCommandOptions, type SandboxFile, type PreviewProxyRequest } from "./sandbox-provider";
+import { assertProjectRuntimeProvider, SandboxProviderError, type SandboxScope, type SandboxCreateOptions, type SandboxCommandOptions, type SandboxFile, type PreviewProxyRequest, type SandboxBrowserQaOptions } from "./sandbox-provider";
 import { runnerFailure } from "./sandbox-runner-diagnostics";
 import { createSharedRuntimeReadiness } from "./shared-runtime-readiness";
 
@@ -62,6 +62,7 @@ app.post<{ Body: string }>("/v1/sandbox", async (request, reply) => {
       case "getLogs": result = await provider.getLogs(scope, id, p.processId as string | undefined); break;
       case "getProcessOutput": result = await provider.getProcessOutput(scope, id, String(p.processId ?? "")); break;
       case "exposePort": result = await provider.exposePort(scope, id, Number(p.port)); break;
+      case "inspectBrowser": result = await provider.inspectBrowser(scope, id, p.options as SandboxBrowserQaOptions); break;
       case "proxyPreview": result = await provider.proxyPreview(scope, id, p.options as PreviewProxyRequest); break;
       default: throw new SandboxProviderError("invalid_operation", "Operation is unavailable in shared runtime", 400);
     }
