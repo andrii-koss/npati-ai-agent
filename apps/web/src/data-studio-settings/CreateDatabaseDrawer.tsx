@@ -100,26 +100,26 @@ export function CreateDatabaseDrawer({ isUk, busy, companyName, onClose, onCreat
             )}
           </section>
 
-          {localError && <div className="data-studio-alert error" role="alert">{localError}</div>}
-
-          <div className="browser-form-footer">
-            <div className="browser-form-footer-hint">
-              {companyName
-                ? (isUk
-                  ? `Буде створено в компанії «${companyName}»: два середовища (dev і prod) з окремими ролями доступу.`
-                  : `Created in the company “${companyName}”: two environments (dev and prod) with separate access roles.`)
-                : (isUk
-                  ? "Буде створено два середовища (dev і prod) з окремими ролями доступу."
-                  : "Two environments (dev and prod) with separate access roles will be created.")}
+          {localError && (
+            <div className="data-studio-alert error" role="alert" style={{ margin: "14px 26px 0" }}>
+              {localError}
             </div>
-            <button type="submit" className="button-primary automations-action-primary browser-submit-btn" disabled={!canSubmit || working || busy}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          )}
+
+          <footer style={{ justifyContent: "flex-end" }}>
+            <button
+              type="submit"
+              className="button-primary automations-action-primary"
+              disabled={!canSubmit || working || busy}
+              style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "8px", whiteSpace: "nowrap" }}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0 }}>
                 <line x1="12" y1="5" x2="12" y2="19" />
                 <line x1="5" y1="12" x2="19" y2="12" />
               </svg>
-              {working || busy ? (isUk ? "Створення…" : "Creating…") : isUk ? "Створити базу" : "Create database"}
+              <span>{working || busy ? (isUk ? "Створення…" : "Creating…") : isUk ? "Створити базу" : "Create database"}</span>
             </button>
-          </div>
+          </footer>
         </form>
       </aside>
     </div>
