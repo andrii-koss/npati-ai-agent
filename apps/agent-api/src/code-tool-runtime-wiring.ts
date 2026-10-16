@@ -19,7 +19,7 @@ import { CodeShellRuntime, resolveMigrationTargetConfig } from "./code-shell-run
 import { CodeSubagentDetachedRunner, CodeSubagentOperationService } from "./code-subagent-operations";
 import { CodeVerifyRunnerPort, allCanonicalExecutors, runSandboxPostWriteHook } from "./code-tool-executors";
 import { CODE_TOOL_SCHEMAS } from "./code-tool-registry";
-import { CodeToolRuntime, createProjectWorkspaceReadPort, createProjectWorkspaceWritePort } from "./code-tool-runtime";
+import { CodeToolRuntime, createProjectWorkspaceReadPort, createProjectWorkspaceWritePort, type SandboxExecPort } from "./code-tool-runtime";
 import { CodeTurnTracker, codeCheckpointPortFromGit } from "./code-workspace-checkpoint";
 import { CodeWorkspaceRevisionGuard } from "./code-workspace-revision";
 import { CodingAgentRunner } from "./coding-agent-runner";
@@ -49,7 +49,7 @@ export interface CodeToolRuntimeWiringDeps {
   codeProjectWorkspaceWritePort: ReturnType<typeof createProjectWorkspaceWritePort>;
   codeProtectedBranches: CodeProtectedBranchService;
   codeReadTracker: ReadTracker;
-  codeSandboxExecPort: { execute: (ctx: AuthContext, companyId: string, request: { projectId: string; command: string; cwd?: string | undefined; timeoutMs?: number | undefined }) => Promise<{ stdout: string; exitCode: number | undefined }> } | undefined;
+  codeSandboxExecPort: SandboxExecPort | undefined;
   codeService: CodeService;
   codeShellRuntimePort: CodeShellRuntimePort | undefined;
   codeSubagentOperationsRef: (() => CodeSubagentOperationService) | undefined;

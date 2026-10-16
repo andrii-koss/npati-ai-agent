@@ -102,6 +102,22 @@ export interface CodeReadPort {
 /** Minimal sandbox execution port (satisfied by `ProjectSandboxService.execute`). */
 export interface SandboxExecPort {
   execute(ctx: AuthContext, companyId: string, request: { projectId: string; command: string; cwd?: string; timeoutMs?: number }): Promise<{ stdout?: string; output?: string; exitCode?: number }>;
+  search?(
+    ctx: AuthContext,
+    companyId: string,
+    request: {
+      projectId: string;
+      query: string;
+      path?: string;
+      maxResults?: number;
+      timeoutMs?: number;
+      glob?: string;
+      type?: string;
+      ignoreCase?: boolean;
+      fixedStrings?: boolean;
+      contextLines?: number;
+    },
+  ): Promise<{ matches: Array<{ path: string; line: number; text: string }>; truncated: boolean }>;
 }
 
 /**

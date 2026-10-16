@@ -472,6 +472,78 @@ export class ProjectSandboxService {
     return (await this.evaluateAutoApprovalTerminal(ctx, companyId, runProjectId, request, tool)).allowed;
   }
   execute(ctx: AuthContext, companyId: string, request: TerminalRequest) { return this.run(ctx, companyId, request, "project.terminal.exec"); }
+  async search(
+    ctx: AuthContext,
+    companyId: string,
+    request: {
+      projectId: string;
+      query: string;
+      path?: string;
+      maxResults?: number;
+      timeoutMs?: number;
+      glob?: string;
+      type?: string;
+      ignoreCase?: boolean;
+      fixedStrings?: boolean;
+      contextLines?: number;
+    },
+  ): Promise<{ matches: Array<{ path: string; line: number; text: string }>; truncated: boolean }> {
+    await this.agent(ctx, companyId, "system", "project.terminal.exec");
+    const project = await this.project(ctx, companyId, request.projectId);
+    this.touch(ctx, project);
+
+    if (typeof request.query !== "string" || !request.query.trim()) {
+      return { matches: [], truncated: false };
+    }
+    const maxResults = Math.max(1, Math.min(request.maxResults ?? 200, 1000));
+    const timeoutMs = Math.max(1000, Math.min(request.timeoutMs ?? 15_000, 60_000));
+
+    let target = ".";
+    if (request.path && request.path !== ".") {
+      const safe = safeProjectPath(request.path);
+      target = `./${safe.replace(/^\.?\/+/, "")}`;
+    }
+
+    const b64Query = Buffer.from(request.query, "utf8").toString("base64");
+    const flags: string[] = ["--line-number", "--no-heading", "--color=never", `--max-count ${maxResults}`];
+    if (request.ignoreCase) flags.push("-i");
+    if (request.fixedStrings) flags.push("-F");
+    if (request.contextLines && request.contextLines > 0) {
+      flags.push(`-C ${Math.max(0, Math.min(10, request.contextLines))}`);
+    }
+    if (request.glob && /^[a-zA-Z0-9_*.-]+$/.test(request.glob)) {
+      flags.push(`--glob '${request.glob}'`);
+    }
+    if (request.type && /^[a-zA-Z0-9_-]+$/.test(request.type)) {
+      flags.push(`--type '${request.type}'`);
+    }
+
+    const command = `QUERY="$(printf '%s' "${b64Query}" | base64 -d)" && rg ${flags.join(" ")} -e "$QUERY" ${target}`;
+
+    const ready = await this.ensure(ctx, project);
+    await this.upload(ctx, ready.project, ready.scope, ready.sandboxId, ready.mount);
+    const raw = await this.provider.executeCommand(ready.scope, ready.sandboxId, command, {
+      timeoutMs,
+      outputLimitBytes: this.limits.outputLimitBytes,
+    });
+
+    const stdout = raw.stdout ?? "";
+    const matches: Array<{ path: string; line: number; text: string }> = [];
+    for (const line of stdout.split("\n")) {
+      if (!line.trim()) continue;
+      const firstColon = line.indexOf(":");
+      if (firstColon === -1) continue;
+      const secondColon = line.indexOf(":", firstColon + 1);
+      if (secondColon === -1) continue;
+      const filePath = line.slice(0, firstColon).replace(/^\.\//, "");
+      const lineNum = Number.parseInt(line.slice(firstColon + 1, secondColon), 10);
+      const text = line.slice(secondColon + 1).slice(0, 500);
+      if (filePath.startsWith("../") || filePath.startsWith("/workspace/.npati-runtime")) continue;
+      matches.push({ path: filePath, line: Number.isFinite(lineNum) ? lineNum : 0, text });
+      if (matches.length >= maxResults) break;
+    }
+    return { matches, truncated: matches.length >= maxResults || raw.status === "timed_out" };
+  }
   async startTrackedProcess(ctx: AuthContext, companyId: string, request: TerminalRequest, beforeStart: (snapshot: ProcessWorkspaceSnapshot) => Promise<void>, captureMountedBaseline = false) {
     if (!await this.supportsTrackedProcesses(ctx, companyId, request.projectId)) throw new SandboxProviderError("process_promotion_unavailable", "Provider has no durable process identity capability", 503);
     if (!request.processId || !uuid(request.processId) || Object.keys(request.environmentReferences ?? {}).length) throw new SandboxProviderError("process_promotion_unavailable", "Tracked processes cannot inherit foreground secrets", 403);

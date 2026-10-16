@@ -43,9 +43,12 @@ export function createProjectWorkspaceReadPort(
       }
       return { path: file.path, content: text, revision: file.revision, sha256: sha256Hex(content), totalLines: lines.length, truncated };
     },
-    async runSearch({ ctx, companyId, projectId, query, path, maxResults, timeoutMs }) {
+    async runSearch({ ctx, companyId, projectId, query, path, maxResults, timeoutMs, glob, type, ignoreCase, fixedStrings, contextLines }) {
       if (!sandbox) {
         throw new CodeToolError("sandbox_unavailable", "Text search requires the sandbox runner; it is not available in this deployment", 503, "execute", true);
+      }
+      if (typeof sandbox.search === "function") {
+        return sandbox.search(ctx, companyId, { projectId, query, path, maxResults, timeoutMs, glob, type, ignoreCase, fixedStrings, contextLines });
       }
       const target = path && path !== "." ? `./${path}` : ".";
       const escaped = query.replace(/'/g, "'\\''");

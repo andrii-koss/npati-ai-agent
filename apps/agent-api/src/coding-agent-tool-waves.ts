@@ -322,6 +322,13 @@ export class CodingAgentToolWaves {
       if (CHECK_TOOL_PREFIXES.some((prefix) => call.name.startsWith(prefix)) && result.ok) {
         if (!summary.checksRun.includes(call.name)) summary.checksRun.push(call.name);
       }
+      if (result.ok) {
+        for (const key of this.argumentCorrections.keys()) {
+          if (key.startsWith(`${call.name}:`)) {
+            this.argumentCorrections.delete(key);
+          }
+        }
+      }
       await record({
         kind: "tool_call",
         companyId,

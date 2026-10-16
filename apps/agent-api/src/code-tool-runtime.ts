@@ -242,7 +242,7 @@ export class CodeToolRuntime {
       await this.options.flags.assertEnabled(ctx, codeSubFlagForTool(tool.name, write), { companyId: input.companyId, userId: ctx.userId });
 
       // (5) Arguments
-      const args = validateArguments(tool.inputSchema, input.args);
+      const args = validateArguments(tool.inputSchema, input.args, tool.name);
       if (input.subagentWritePaths) {
         const scopedFileTools = ["code.fs.edit", "code.fs.write", "code.fs.move", "code.fs.delete", "code.fs.apply_patch"];
         const unsafe = this.isWriteTool(tool.name) || /^(code\.shell\.(exec|exec_async|process\.start)|code\.verify\.run|code\.deps\.(add|install|update|remove)|code\.git\.(branch|stage|commit|restore|push|pr))/.test(tool.name);
