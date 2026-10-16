@@ -32,11 +32,12 @@ const fixtures = [
   { name: "node", entries: { "package.json": pkg({ scripts: { test: "node --test" }, type: "module" }), "server.mjs": "import http from 'node:http';http.createServer((req,res)=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify({ok:true,path:req.url}));}).listen(Number(process.env.PORT ?? 3000),'0.0.0.0');", "api.test.mjs": "import {test} from 'node:test';import assert from 'node:assert/strict';test('arithmetic',()=>assert.equal(2+2,4));" }, verify: "npm test", start: "node server.mjs", expected: "ok" },
   { name: "python", entries: { "index.html": "<!doctype html><html lang='en'><title>Python audit</title><h1>Python audit</h1></html>" }, verify: "python3 -m compileall .", start: "python3 -m http.server 3000", expected: "Python audit" },
   { name: "vite", install: true, entries: { "package.json": pkg({ type: "module", scripts: { build: "vite build", dev: "vite --host 0.0.0.0 --port 3000" }, dependencies: { vite: "7.1.12", react: "19.2.0", "react-dom": "19.2.0" } }), "index.html": "<!doctype html><html lang='en'><title>Vite audit</title><body><div id='root'></div><script type='module' src='/src.jsx'></script></body></html>", "src.jsx": "import React from 'react';import{createRoot}from'react-dom/client';createRoot(document.getElementById('root')).render(<main><h1>Vite audit</h1><button onClick={e=>e.currentTarget.textContent='Updated'}>Change</button></main>);" }, verify: "npm run build", start: "npm run dev", expected: "root" },
-  { name: "next", install: true, entries: { "package.json": pkg({ scripts: { build: "next build", dev: "next dev --hostname 0.0.0.0 --port 3000" }, dependencies: { next: "15.5.7", react: "19.2.0", "react-dom": "19.2.0" } }), "app/layout.jsx": "export default function Layout({children}){return <html lang='en'><body style={{margin:'auto',maxWidth:1000,padding:20}}>{children}</body></html>}", "app/page.jsx": "export default function Page(){return <main><h1>Audit shop</h1><a href='/products'>Products</a></main>}", "app/products/page.jsx": "export default function Products(){return <main><h1>Products</h1><a href='/'>Home</a></main>}" }, verify: "npm run build", start: "npm run dev", expected: "Audit shop" },
+  { name: "next", install: true, entries: { "package.json": pkg({ scripts: { build: "next build", dev: "next dev --hostname 0.0.0.0 --port 3000" }, dependencies: { next: "15.5.7", react: "19.2.0", "react-dom": "19.2.0" } }), "app/layout.jsx": "export const metadata={title:'Audit shop'};export default function Layout({children}){return <html lang='en'><body style={{margin:'auto',maxWidth:1000,padding:20}}>{children}</body></html>}", "app/page.jsx": "export default function Page(){return <main><h1>Audit shop</h1><a href='/products'>Products</a></main>}", "app/products/page.jsx": "export default function Products(){return <main><h1>Products</h1><a href='/'>Home</a></main>}" }, verify: "npm run build", start: "npm run dev", expected: "Audit shop" },
 ];
 try {
   // Two sandboxes remain alive concurrently so scope checks exercise actual isolation.
   for (const fixture of fixtures) {
+    if (process.env.NPATI_AUDIT_STACKS && process.env.NPATI_AUDIT_STACKS !== "all" && fixture.name !== process.env.NPATI_AUDIT_STACKS) continue;
     const scope = Object.fromEntries(["workspaceId", "userId", "companyId", "projectId"].map(key => [key, randomUUID()]));
     const created = await check(`${fixture.name}:create`, () => call("createSandbox", { scope }));
     if (!created) continue;
@@ -57,8 +58,8 @@ try {
       if (!install) continue;
     }
     await check(`${fixture.name}:verify`, () => exec(fixture.verify));
-    const process = await check(`${fixture.name}:process`, () => call("startProcess", { ...common, command: fixture.start, options: { timeoutMs: 30_000, outputLimitBytes: 16_000 } }));
-    if (!process) continue;
+    const background = await check(`${fixture.name}:process`, () => call("startProcess", { ...common, command: fixture.start, options: { timeoutMs: 30_000, outputLimitBytes: 16_000 } }));
+    if (!background) continue;
     await check(`${fixture.name}:preview`, async () => {
       let last;
       for (let attempt = 0; attempt < 20; attempt++) {
@@ -70,8 +71,16 @@ try {
     });
     await check(`${fixture.name}:browser`, async () => {
       const qa = await call("inspectBrowser", { ...common, options: { port, path: "/", viewport: { width: 390, height: 844 }, timeoutMs: 30_000, maxScreenshotBytes: 500_000, maxBrokenLinks: 20, screenshot: false } }, 60_000);
-      assert(qa.statusCode === 200 && qa.consoleErrorCount === 0 && qa.brokenLinks.length === 0 && qa.accessibility.length === 0, `Browser QA findings: ${JSON.stringify(qa)}`); return qa;
+      assert(qa.statusCode === 200 && qa.consoleErrorCount === 0 && (fixture.name === "node" || qa.brokenLinks.length === 0 && qa.accessibility.length === 0), `Browser QA findings: ${JSON.stringify(qa)}`); return { ...qa, htmlChecksApplicable: fixture.name !== "node" };
     });
+    if (fixture.name === "vite" && report.checks.at(-1)?.status === "failed") {
+      // Diagnostics run only on this authored fixture, never on user projects or production QA logs.
+      await check("vite:fixture-diagnostic", async () => {
+        await call("uploadFiles", { ...common, files: [...files(fixture.entries), { path: "npati-audit-browser.cjs", content: "const {chromium}=require('/opt/npati-qa/node_modules/playwright');process.env.TMPDIR='/tmp';(async()=>{const origin='http://10.0.2.2:'+process.env.PORT;const browser=await chromium.launch({headless:true,executablePath:'/usr/bin/chromium-browser',args:['--no-sandbox','--disable-dev-shm-usage','--no-proxy-server']});try{const context=await browser.newContext({serviceWorkers:'block',acceptDownloads:false});await context.route('**/*',route=>new URL(route.request().url()).origin===origin?route.continue():route.abort());const page=await context.newPage();await page.routeWebSocket('**/*',socket=>socket.close());const errors=[];page.on('console',message=>{if(message.type()==='error')errors.push(message.text().slice(0,500))});page.on('pageerror',error=>errors.push(String(error.message).slice(0,500)));await page.goto(origin,{waitUntil:'networkidle',timeout:30000});process.stdout.write(JSON.stringify({fixtureOnly:true,errors:errors.slice(0,10),heading:await page.locator('h1').textContent()}))}finally{await browser.close()}})().catch(error=>{console.error(String(error.message));process.exitCode=1})" }] });
+        const result = await exec("node npati-audit-browser.cjs");
+        return JSON.parse(result.stdout);
+      });
+    }
     await check(`${fixture.name}:ownership`, async () => {
       try { await call("getStatus", { ...common, scope: { ...scope, projectId: randomUUID() } }); }
       catch (error) { assert(error.httpStatus === 403 || error.httpStatus === 404, "Unexpected refusal"); return { denied: true, code: error.code }; }

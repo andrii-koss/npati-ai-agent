@@ -67,6 +67,7 @@ export class CompanyDelegationRuntime {
   async process(ctx: AuthContext, companyId: string, runId: string, options: { noMemory?: boolean; memoryScope?: MemoryScope; preferredAgentId?: string; approvalId?: string; suppressTools?: boolean; callBudget?: { remaining: number }; allowedProjectPaths?: string[]; allowedProjectId?: string; onTool?: (tool: string, path?: string) => void; signal?: AbortSignal } = {}): Promise<CompanyAgentRunDetails> {
     const existing = await this.store.getCompanyAgentRun(ctx, companyId, runId);
     if (options.approvalId && existing.run.status !== "awaiting_approval") throw new CompanyRuntimeError("APPROVAL_INVALID", "Run is not awaiting approval", 409);
+    if (!options.approvalId && ["completed", "cancelled", "failed", "awaiting_approval"].includes(existing.run.status)) return existing;
     const pendingState = options.approvalId ? await this.store.getCompanyRunPendingPlan(ctx, companyId, runId) as { plan: Plan; nextToolIndex: number; evidence: string } | null : null;
     if (options.approvalId && (!pendingState || !pendingState.plan || !Number.isInteger(pendingState.nextToolIndex))) throw new CompanyRuntimeError("APPROVAL_INVALID", "Pending run plan is unavailable", 409);
     const created = { run: existing.run };
@@ -175,7 +176,7 @@ export class CompanyDelegationRuntime {
       const planningMemory = !options.noMemory && mainTools.includes("knowledge") && this.knowledgeRetriever ? await this.knowledgeRetriever(ctx, companyId, input.task, options.memoryScope).catch(() => ({ chunks: [], memories: [] })) : { chunks: [], memories: [] };
       const actionPlanningContext = planningMemory.memories.filter(memory => memory.source === "action_sensitive").map(memory => memory.content).join("\n");
       await this.ai.ensureA2AEnabled();
-      if (options.callBudget && --options.callBudget.remaining < 0) throw new CompanyRuntimeError("MODEL_CALL_BUDGET_EXCEEDED", "Project model call limit reached", 429);
+      if (!pendingState && options.callBudget && --options.callBudget.remaining < 0) throw new CompanyRuntimeError("MODEL_CALL_BUDGET_EXCEEDED", "Project model call limit reached", 429);
       const resolvedAddedModels = typeof this.addedModelsResolver === "function" ? (await this.addedModelsResolver(ctx).catch(() => [])) : [];
       const inferenceModels = this.strictInferenceRouting
         ? resolvedAddedModels.filter(isChatCapableModel).map((model) => model.id)
@@ -248,48 +249,52 @@ export class CompanyDelegationRuntime {
           ].join("\n\n")) },
         ];
       }
-      const planningCandidates = [...planningModels];
-      if (!this.strictInferenceRouting) {
-        if (!planningCandidates.includes("auto")) planningCandidates.push("auto");
-        if (!planningCandidates.includes("auto/smart")) planningCandidates.push("auto/smart");
-      }
-      let plannedModel = planningRequest.model;
-      const planned = await (async () => {
-        let lastError: unknown;
-        for (const model of planningCandidates.length ? planningCandidates : [planningRequest.model, "auto"]) {
-          try { const result = await this.ai.a2aSend!({ ...planningRequest, model }); plannedModel = model; return result; }
-          catch (error) { lastError = error; if (!isUnavailableInferenceError(error)) throw error; }
-        }
-        throw new CompanyRuntimeError("model_routing_failed", `All chat-compatible models failed: ${String(lastError)}`, 503);
-      })();
-      await this.store.updateCompanyAgentRun(ctx, companyId, created.run.id, { omnirouteTaskId: planned.taskId });
       let plan: Plan;
-      try {
-        plan = parsePlan(planned.content, input.mode ?? "auto");
-      } catch (error) {
-        if (!(error instanceof CompanyRuntimeError) || error.code !== "INVALID_DELEGATION_PLAN" ||
-          !existing.run.projectId || !options.preferredAgentId) throw error;
-        if (options.callBudget && --options.callBudget.remaining < 0)
-          throw new CompanyRuntimeError("MODEL_CALL_BUDGET_EXCEEDED", "Project model call limit reached", 429);
-        const preferred = candidates.find((agent) => agent.id === options.preferredAgentId);
-        if (!preferred) throw new CompanyRuntimeError("BOUND_AGENT_UNAVAILABLE", "The bound Company Agent is inactive or unavailable", 409);
-        const repaired = await this.ai.a2aSend!({
-          ...planningRequest, model: plannedModel,
-          idempotencyKey: `${created.run.id}:plan-repair`,
-          messages: [
-            { role: "system", content: "Return exactly one valid JSON object. No markdown or explanation. Keys: mode, agentIds, toolRequests. mode must be single. Use only the provided agent ID and permitted tools." },
-            { role: "user", content: [
-              `Project ID: ${existing.run.projectId}`,
-              `Agent ID: ${preferred.id}`,
-              `Permitted tools: ${preferred.tools.map(toolName).join(", ")}`,
-              `Task: ${protectedTask.slice(0, 3000)}`,
-              `Previous response to repair: ${planned.content.slice(0, 3000)}`,
-              `Required shape: {"mode":"single","agentIds":["${preferred.id}"],"toolRequests":[]}`,
-            ].join("\n") },
-          ],
-        });
-        plan = parsePlan(repaired.content, "single");
-        await this.store.updateCompanyAgentRun(ctx, companyId, created.run.id, { omnirouteTaskId: repaired.taskId });
+      if (pendingState) {
+        plan = pendingState.plan;
+      } else {
+        const planningCandidates = [...planningModels];
+        if (!this.strictInferenceRouting) {
+          if (!planningCandidates.includes("auto")) planningCandidates.push("auto");
+          if (!planningCandidates.includes("auto/smart")) planningCandidates.push("auto/smart");
+        }
+        let plannedModel = planningRequest.model;
+        const planned = await (async () => {
+          let lastError: unknown;
+          for (const model of planningCandidates.length ? planningCandidates : [planningRequest.model, "auto"]) {
+            try { const result = await this.ai.a2aSend!({ ...planningRequest, model }); plannedModel = model; return result; }
+            catch (error) { lastError = error; if (!isUnavailableInferenceError(error)) throw error; }
+          }
+          throw new CompanyRuntimeError("model_routing_failed", `All chat-compatible models failed: ${String(lastError)}`, 503);
+        })();
+        await this.store.updateCompanyAgentRun(ctx, companyId, created.run.id, { omnirouteTaskId: planned.taskId });
+        try {
+          plan = parsePlan(planned.content, input.mode ?? "auto");
+        } catch (error) {
+          if (!(error instanceof CompanyRuntimeError) || error.code !== "INVALID_DELEGATION_PLAN" ||
+            !existing.run.projectId || !options.preferredAgentId) throw error;
+          if (options.callBudget && --options.callBudget.remaining < 0)
+            throw new CompanyRuntimeError("MODEL_CALL_BUDGET_EXCEEDED", "Project model call limit reached", 429);
+          const preferred = candidates.find((agent) => agent.id === options.preferredAgentId);
+          if (!preferred) throw new CompanyRuntimeError("BOUND_AGENT_UNAVAILABLE", "The bound Company Agent is inactive or unavailable", 409);
+          const repaired = await this.ai.a2aSend!({
+            ...planningRequest, model: plannedModel,
+            idempotencyKey: `${created.run.id}:plan-repair`,
+            messages: [
+              { role: "system", content: "Return exactly one valid JSON object. No markdown or explanation. Keys: mode, agentIds, toolRequests. mode must be single. Use only the provided agent ID and permitted tools." },
+              { role: "user", content: [
+                `Project ID: ${existing.run.projectId}`,
+                `Agent ID: ${preferred.id}`,
+                `Permitted tools: ${preferred.tools.map(toolName).join(", ")}`,
+                `Task: ${protectedTask.slice(0, 3000)}`,
+                `Previous response to repair: ${planned.content.slice(0, 3000)}`,
+                `Required shape: {"mode":"single","agentIds":["${preferred.id}"],"toolRequests":[]}`,
+              ].join("\n") },
+            ],
+          });
+          plan = parsePlan(repaired.content, "single");
+          await this.store.updateCompanyAgentRun(ctx, companyId, created.run.id, { omnirouteTaskId: repaired.taskId });
+        }
       }
       const byId = new Map(candidates.map((agent) => [agent.id, agent]));
       if (options.preferredAgentId) {

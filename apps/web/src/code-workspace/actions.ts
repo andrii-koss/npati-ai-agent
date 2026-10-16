@@ -182,7 +182,7 @@ export function modeLabel(mode: CodeSessionMode, isUk: boolean): string {
  * still appear on sessions created before C5. Returns null for anything unrecognised rather than inventing a
  * label for a value the server would not accept.
  */
-export function persistedModeLabel(mode: string | null | undefined, isUk: boolean): string | null {
+export function canonicalSessionMode(mode: string | null | undefined): CodeSessionMode | null {
   if (!mode) return null;
   const canonical: Record<string, CodeSessionMode> = {
     plan: "plan",
@@ -193,7 +193,18 @@ export function persistedModeLabel(mode: string | null | undefined, isUk: boolea
     full_auto: "full_auto_sandbox",
     full_auto_sandbox: "full_auto_sandbox",
   };
-  const resolved = canonical[mode];
+  return Object.hasOwn(canonical, mode) ? canonical[mode]! : null;
+}
+
+/** Session creation still accepts the stored C1 spellings. Mode changes accept C5 aliases. */
+export function persistedSessionMode(mode: CodeSessionMode): import("@npati/workspace").CodeSessionMode {
+  const stored = { plan: "plan", ask: "edit", auto_edit: "auto", full_auto_sandbox: "full_auto" } as const;
+  if (!Object.hasOwn(stored, mode)) throw new Error("Unsupported session mode");
+  return stored[mode];
+}
+
+export function persistedModeLabel(mode: string | null | undefined, isUk: boolean): string | null {
+  const resolved = canonicalSessionMode(mode);
   return resolved ? modeLabel(resolved, isUk) : null;
 }
 

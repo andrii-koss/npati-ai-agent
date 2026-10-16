@@ -35,7 +35,16 @@ try {
       return route.continue();
     });
     const page = await context.newPage();
-    await page.routeWebSocket("**/*", socket => socket.close());
+    await page.routeWebSocket("**/*", socket => {
+      try {
+        const url = new URL(socket.url());
+        if (url.origin === origin.replace(/^http:/, "ws:") && !url.username && !url.password) {
+          socket.connectToServer();
+          return;
+        }
+      } catch { /* Invalid destinations stay blocked. */ }
+      socket.close();
+    });
     let consoleErrorCount = 0;
     page.on("console", message => { if (message.type() === "error") consoleErrorCount++; });
     page.on("pageerror", () => { consoleErrorCount++; });

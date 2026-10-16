@@ -42,11 +42,12 @@ export function registerProjectFileRoutes(app: FastifyInstance, workspace: Proje
         return reply.code(400).send({ error: { code: "invalid_path", message: "File path is required" } });
       }
       try {
-        const existing = await workspace.readFile(context, companyId, projectId, filePath);
-        const res = await workspace.writeFile(context, companyId, projectId, filePath, content ?? "", expectedRevision || existing.revision);
+        await workspace.readFile(context, companyId, projectId, filePath);
+        if (!expectedRevision) return reply.code(409).send({ error: { code: "revision_required", message: "Read the file and provide its expected revision before replacing it." } });
+        const res = await workspace.writeFile(context, companyId, projectId, filePath, content ?? "", expectedRevision);
         return reply.code(200).send(res);
       } catch (err: any) {
-        if (err?.code === "file_not_found" || err?.status === 404) {
+        if (!expectedRevision && (err?.code === "file_not_found" || err?.status === 404)) {
           const res = await workspace.createFile(context, companyId, projectId, filePath, content ?? "");
           return reply.code(201).send(res);
         }

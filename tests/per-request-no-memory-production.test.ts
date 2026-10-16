@@ -121,6 +121,7 @@ describe("Per-request no-memory production wiring", () => {
     expect(neutral.json().conversationId).toBeUndefined();
     expect(await store.listNeutralConversations(context)).toEqual([]);
 
+    await store.setUserSetting(context, "ai.preferences", { addedModels: [{ id: "test/chat", upstreamId: "chat", providerId: "test", providerName: "Test", name: "Test Chat", capabilities: ["chat"], added: true, local: false, freeStatus: "free" }], routing: { mode: "manual", defaultModelId: "test/chat" } }, 0);
     const company = await store.createCompany(context, {
       name: "Private Company",
       memory: { secret: "COMPANY-SECRET-4455" },
@@ -148,7 +149,7 @@ describe("Per-request no-memory production wiring", () => {
     });
     expect(companyResponse.statusCode).toBe(200);
     const details = await store.getCompanyAgentRun(context, company.id, companyResponse.json().companyRunId);
-    expect(details.run).toMatchObject({ status: "failed", errorCode: "NO_MEMORY_TOOL_FORBIDDEN" });
+    expect(details.run, JSON.stringify(details.run)).toMatchObject({ status: "failed", errorCode: "NO_MEMORY_TOOL_FORBIDDEN" });
     expect(details.toolAudit).toEqual([
       expect.objectContaining({ toolName: "storage.company_memory", decision: "denied", reasonCode: "no_memory", status: "blocked" }),
     ]);

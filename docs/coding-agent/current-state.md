@@ -2,6 +2,30 @@
 
 Update this file after every completed step.
 
+Final 2026-10-16 checkpoint: backend 421 files / 4836 passed / 0 failed / 17 conditional skips;
+frontend 24 files / 174 passed; fixed gate 176 suites / 2533 passed with no skips.
+Separate real PostgreSQL follow-up: 5 suites / 13 passed, no failures/skips, owned DB container cleaned.
+F40 repairs DB-only fixture prerequisites and scripted classifier/tool separation; production inbox
+ownership/cleanup fences are preserved. Four-stack shared-runtime Browser QA passes 40/40.
+The full 431-entry audit and autonomous A-L acceptance remain incomplete.
+
+2026-10-16 architecture requirement: all sites in this installation run in ONE shared sandbox,
+with separate /projects/<projectId> folders, scoped processes and assigned ports. The running
+sandbox-runner confirms NPATI_PROJECT_RUNTIME_MODE=shared. Logical project sandbox IDs are not
+containers. F39 repairs Browser QA WebSocket routing to allow only the inspected project's origin;
+real Vite install/build/Preview/browser verification passed 11/11 with zero console errors.
+Sequential Node/Python/Vite/Next verification passed 40/40 in ONE shared audit runtime, with all
+project/container/volume cleanups passing. These are authored fixtures, not autonomous model E2E.
+
+
+2026-10-16 continuation: F25-F38 repair localized long-input scanning, imported migration registry checks,
+early chat stream cancellation/deduplication, onboarding/spreadsheet routing, native protocol prefix dispatch,
+approval resume without replanning, independent keyed Business Profile creation, complete bounded Activity
+payload validation and typed Company runtime HTTP errors. Actual Workspace approval decisions, mode revisions,
+file read/write races and source-size compliance are repaired with API/filesystem and DOM regressions.
+Focused evidence and its boundaries are in the full audit. These repairs do not certify all PLAN entries.
+
+
 2026-10-16: Audit continuation repairs primary Company intent, preserves native settings routes, redacts
 semantic-router prompt/history, closes completed-provider accounting after cancellation, and avoids repeated
 long-prompt management scans. See F16–F20 and the latest [verification results](2026-10-15-verification-results.md).

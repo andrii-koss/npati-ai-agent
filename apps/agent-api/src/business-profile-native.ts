@@ -79,14 +79,13 @@ export async function executeBusinessProfileTool(input: {
   const owned = await store.listUserBusinesses(auth);
   if (args.action === "create") {
     if (!profile.name) throw new Error("Business name is required");
-    const existing = owned.filter((item) => item.name.toLocaleLowerCase() === profile.name!.toLocaleLowerCase());
-    if (existing.length > 1) throw new Error("Business name is ambiguous");
-    alreadyExisted = Boolean(existing[0]);
     if (input.createRequestKey) {
-      business = existing[0]
-        ? await store.updateUserBusiness(auth, existing[0].id, profile as Partial<BusinessInput>)
-        : await store.createBusiness(auth, profile as BusinessInput, input.createRequestKey);
+      business = await store.createBusiness(auth, profile as BusinessInput, input.createRequestKey);
+      alreadyExisted = owned.some((item) => item.id === business.id);
     } else {
+      const existing = owned.filter((item) => item.name.toLocaleLowerCase() === profile.name!.toLocaleLowerCase());
+      if (existing.length > 1) throw new Error("Business name is ambiguous");
+      alreadyExisted = Boolean(existing[0]);
       business = existing[0]
         ? await store.updateUserBusiness(auth, existing[0].id, profile as Partial<BusinessInput>)
         : await store.createBusiness(auth, profile as BusinessInput);

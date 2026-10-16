@@ -31,6 +31,14 @@ for (const [name, args] of steps) {
   if (exit !== 0) process.exit(1);
 }
 const sourceFiles = [
+  "apps/agent-api/src/chat-turn.ts",
+  "apps/agent-api/src/project-file-routes.ts", "apps/web/src/CodeWorkspacePage.tsx", "apps/web/src/code-workspace/actions.ts",
+  "apps/web/src/code-workspace-page-types.ts", "apps/web/src/code-workspace/CodeWorkspaceHeader.tsx",
+  "apps/web/src/code-workspace/CodeWorkspaceExecutionPanel.tsx", "apps/web/src/code-workspace/CodeWorkspaceFilePanel.tsx",
+  "apps/agent-api/src/code-run-activity-sink.ts", "apps/agent-api/src/company-runtime-routes.ts",
+  "apps/agent-api/src/business-profile-native.ts",
+  "apps/agent-api/src/chat-routes.ts", "apps/agent-api/src/company-runtime.ts", "apps/agent-api/src/runtime-compat-routes.ts",
+  "apps/agent-api/src/web-frontend.ts", "apps/agent-api/src/app-routes-and-lifecycle.ts",
   "apps/agent-api/src/chat-project-intent.ts", "apps/agent-api/src/chat-stream-routes.ts", "apps/agent-api/src/chat-stream-lease.ts",
   "apps/agent-api/src/company-chat-i18n.ts", "apps/agent-api/src/code-patch-transaction.ts", "apps/agent-api/src/code-tools-patch.ts",
   "apps/agent-api/src/code-tool-runtime.ts", "apps/agent-api/src/code-tool-runtime-write-guard.ts", "apps/agent-api/src/code-tool-executors-write.ts",

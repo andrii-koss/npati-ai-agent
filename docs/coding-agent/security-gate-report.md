@@ -450,9 +450,9 @@ npm run mutation:branch -- --json          # той самий вердикт м
 | `npm run lint` (`lint-guard` + `[web-xss]`) | **exit 0** (self-test 19/19, 994 файли, allowances 7/7, ratchet `as any` не зростав) |
 | `node --check scripts/run-security-gate.mjs` | **exit 0** |
 | `node --check scripts/attack-catalogue-check.mjs` | **exit 0** |
-| `node scripts/run-security-gate.mjs --list` | **171** рядків |
-| Фіксований список гейта | `suites=171 present=171 missing=0 duplicates=0` (було 131; 138 у зрізі C14; 145 після очищення C14; 146 після набору C15 «CLI / run-start»; 148 після двох наборів C15 «mounted folder»; 149 після набору C1a, див. § 7.4; 150 після guard-набору матриці мутацій, див. § 5.1; 151 після набору «clean clone → передумови гейта» кроком G1, див. § 5.2; 152 після набору «production CrashLoop: ключ перевіряється на використанні, не на імпорті» кроком G1; 153 після набору R1-C «data lifecycle: retention, erasure, export diff»; 155 після двох наборів R1-A «ліміти і квоти» — `coding-agent-r1a-limits-and-quotas` і `coding-agent-r1a-sandbox-quotas`, див. § R1-A; 158 → 160 після двох наборів async-track Step 5/N1 `coding-agent-async-subagents-detached` і `coding-agent-async-inbox-pause-fence`) |
-| Поточний розмір фіксованого списку гейта (єдине джерело істини — `SECURITY_GATE_TESTS` у `scripts/lib/run-security-gate.mjs`) | **171** наборів; саме це число guard-набір `tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts` читає з документа і порівнює зі списком. 158 → 160 після двох наборів async-track Step 5/N1, 153 було до реєстрації двох наборів R1-A «ліміти і квоти» (§ R1-A), 152 було до реєстрації набору R1-C «data lifecycle: retention, erasure, export diff», 151 — до реєстрації набору «production CrashLoop: ключ перевіряється на використанні, не на імпорті» кроком G1, 150 — до реєстрації набору «clean clone → передумови гейта» кроком G1 (§ 5.2), 149 — до реєстрації guard-набору матриці мутацій кроком G1 (§ 5.1), 148 — до реєстрації набору C1a «dark launch / kill switch» кроком G1 (§ 7.4), 146 — до реєстрації двох наборів C15 «mounted folder» (див. § 7.2), 145 — до реєстрації набору C15 «CLI / run-start», 144 — до реєстрації цього guard-набору (тоді документ ще казав 138) |
+| `node scripts/run-security-gate.mjs --list` | **176** рядків |
+| Фіксований список гейта | `suites=176 present=176 missing=0 duplicates=0` (було 131; 138 у зрізі C14; 145 після очищення C14; 146 після набору C15 «CLI / run-start»; 148 після двох наборів C15 «mounted folder»; 149 після набору C1a, див. § 7.4; 150 після guard-набору матриці мутацій, див. § 5.1; 151 після набору «clean clone → передумови гейта» кроком G1, див. § 5.2; 152 після набору «production CrashLoop: ключ перевіряється на використанні, не на імпорті» кроком G1; 153 після набору R1-C «data lifecycle: retention, erasure, export diff»; 155 після двох наборів R1-A «ліміти і квоти» — `coding-agent-r1a-limits-and-quotas` і `coding-agent-r1a-sandbox-quotas`, див. § R1-A; 158 → 160 після двох наборів async-track Step 5/N1 `coding-agent-async-subagents-detached` і `coding-agent-async-inbox-pause-fence`) |
+| Поточний розмір фіксованого списку гейта (єдине джерело істини — `SECURITY_GATE_TESTS` у `scripts/lib/run-security-gate.mjs`) | **176** наборів; саме це число guard-набір `tests/coding-agent-c14-policy-phase-and-gate-size-guard.test.ts` читає з документа і порівнює зі списком. 158 → 160 після двох наборів async-track Step 5/N1, 153 було до реєстрації двох наборів R1-A «ліміти і квоти» (§ R1-A), 152 було до реєстрації набору R1-C «data lifecycle: retention, erasure, export diff», 151 — до реєстрації набору «production CrashLoop: ключ перевіряється на використанні, не на імпорті» кроком G1, 150 — до реєстрації набору «clean clone → передумови гейта» кроком G1 (§ 5.2), 149 — до реєстрації guard-набору матриці мутацій кроком G1 (§ 5.1), 148 — до реєстрації набору C1a «dark launch / kill switch» кроком G1 (§ 7.4), 146 — до реєстрації двох наборів C15 «mounted folder» (див. § 7.2), 145 — до реєстрації набору C15 «CLI / run-start», 144 — до реєстрації цього guard-набору (тоді документ ще казав 138) |
 | Харнес (кожен набір окремо) | `fork-bomb 5/5` · `command-output-injection 2/2` · `resource-exhaustion 5/5` · `path-and-zip-slip 7/7` · `new-channels 4/4` (2 describe) · `attack-catalogue 5/5` · `gate-mutation-sensitivity 6/6` — **разом 34 тести, failed=0** |
 | Статична перевірка каталогу | `rows=24 ok=true issues=0` |
 | Фабрикації (5 видів) | усі `ok=false` зі своїми кодами (див. § 3) |
@@ -1599,3 +1599,24 @@ at every phase, with no per-project sandbox/proxy containers. Earlier live chat 
 the two-container difference is documented diagnostic cleanup. Global async rollout defaults remain
 unchanged. Full repository tests were not rerun; the unrelated business-chat baseline failure remains
 documented separately.
+
+
+2026-10-16 full-audit continuation: the local fixed gate passed **175 suites / 2528 tests**, with zero
+failures, skips or TODOs (artifacts/coding-agent-audit-2026-10-15/security-gate-current.json).
+New suites cover native protocol routing/permissions, durable Business creation identity, Company approval
+resume/replay and revision-bound project file writes. The existing Activity suite also rejects previously
+uninspected nested/array content. Frontend interaction evidence is recorded separately in the full audit.
+This local checkpoint does not change the manual-only CI decision or certify G1/R1 production acceptance.
+
+2026-10-16 F39 follow-up: sequential fixed gate passed **176 suites / 2533 tests**, with zero
+failures, skips or TODOs. The runner-executed WebSocket regression admits only the inspected project's
+exact origin, including checks against foreign ports/hosts, credentials and protocol changes.
+The overlapping heavyweight execution failed three assertions and remains archived as
+security-gate-concurrent-failed.json; eight affected suites passed 90/90 unchanged when reproduced
+separately, and the fresh fixed gate passed. No timeout limits, baselines or security checks were relaxed.
+Actual Node/Python/Vite/Next backend/browser verification passed 40/40 in ONE shared runtime with separate
+project folders and complete project/container/volume cleanup. This does not certify autonomous E2E or rollout.
+
+Separate real PostgreSQL follow-up passed 5 suites / 13 tests with zero failures/skips; its audit-owned
+container cleanup passed. DB-only website fixture prerequisites and classifier/tool sequencing were repaired
+without weakening production inbox fences. Full hermetic backend: 4836 passed, 0 failed, 17 conditional skips.

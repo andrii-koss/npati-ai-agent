@@ -66,7 +66,6 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
     };
   }>("/chat/compact", async (request, reply) => {
     try {
-      if (deps.ollamaChat && isOllamaChatPayload(request.body)) return deps.ollamaChat(request as Parameters<NonNullable<typeof deps.ollamaChat>>[0], reply);
       const auth = await authProvider.authenticate(request);
       let messages = request.body?.messages;
       if ((!messages || !messages.length) && request.body?.conversationId) {
@@ -106,6 +105,9 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
   });
 
   app.post<{ Body: {
+    model?: string;
+    messages?: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+    stream?: boolean;
     message?: string;
     conversationId?: string;
     attachments?: ChatAttachmentInput[];
@@ -124,6 +126,9 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
         type: "object",
         additionalProperties: false,
         properties: {
+          model: { type: "string", minLength: 1, maxLength: 200 },
+          messages: { type: "array", maxItems: 1000, items: { type: "object", additionalProperties: false, required: ["role", "content"], properties: { role: { type: "string", enum: ["system", "user", "assistant"] }, content: { type: "string", maxLength: 100_000 } } } },
+          stream: { type: "boolean" },
           message: { type: "string", minLength: 1, maxLength: 100_000 },
           conversationId: { type: "string", minLength: 1, maxLength: 100 },
           attachments: {
@@ -154,6 +159,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
   }, async (request, reply): Promise<AgentReply | unknown> => {
     let authForError: AuthContext | undefined;
     try {
+      if (deps.ollamaChat && isOllamaChatPayload(request.body)) return deps.ollamaChat(request as Parameters<NonNullable<typeof deps.ollamaChat>>[0], reply);
       const auth = await authProvider.authenticate(request);
       authForError = auth;
       const memoryPolicy = PerRequestNoMemoryGate.evaluate(request.headers, request.body);

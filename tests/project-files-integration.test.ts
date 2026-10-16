@@ -97,6 +97,31 @@ describe("Project file capabilities", () => {
     expect((await app.inject({ method: "GET", url: own + "?workspaceId=forged" })).statusCode).toBe(403);
     await app.close();
   });
+  it("requires the observed revision and never recreates a deleted edit target", async () => {
+    const { company, project, workspace } = await fixture();
+    const app = Fastify();
+    registerProjectFileRoutes(app, workspace, { authenticate: async () => owner });
+    const url = `/companies/${company.id}/projects/${project.id}/files/write`;
+    try {
+      const created = await app.inject({ method: "POST", url, payload: { path: "index.ts", content: "original" } });
+      expect(created.statusCode).toBe(201);
+      const revision = created.json().revision;
+      const blind = await app.inject({ method: "POST", url, payload: { path: "index.ts", content: "blind overwrite" } });
+      expect(blind.statusCode).toBe(409);
+      expect(blind.json()).toMatchObject({ error: { code: "revision_required" } });
+      await workspace.writeFile(owner, company.id, project.id, "index.ts", "agent change", revision);
+      const stale = await app.inject({ method: "POST", url, payload: { path: "index.ts", content: "stale edit", expectedRevision: revision } });
+      expect(stale.statusCode).toBe(409);
+      const latest = await workspace.readFile(owner, company.id, project.id, "index.ts");
+      expect(latest.content).toBe("agent change");
+      const saved = await app.inject({ method: "POST", url, payload: { path: "index.ts", content: "valid edit", expectedRevision: latest.revision } });
+      expect(saved.statusCode).toBe(200);
+      await workspace.deleteFile(owner, company.id, project.id, "index.ts");
+      const deleted = await app.inject({ method: "POST", url, payload: { path: "index.ts", content: "resurrection", expectedRevision: saved.json().revision } });
+      expect(deleted.statusCode).toBe(404);
+      expect(await workspace.listFiles(owner, company.id, project.id)).toEqual([]);
+    } finally { await app.close(); }
+  });
   it("registers all file capabilities in the canonical registry and inspector", () => {
     const actions = ["list", "read", "search", "create", "write", "edit", "move", "delete"];
     const report = new CapabilityInspectorService().inspect("all");

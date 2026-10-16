@@ -81,3 +81,10 @@ Validation and local deployment:
   and HTML navigation to Activity return 200. Both new monitor endpoints return
   401 without authentication. The monitor route and model event instrumentation
   are present in the running bundle. No account token was obtained or bypassed.
+
+2026-10-16 audit continuation: the shared Activity metadata validator now checks all admitted array
+entries/nesting and refuses excessive complexity/cycles before persistence or logging (F33 in the
+[full audit](2026-10-15-full-system-audit.md)). Workspace decisions also no longer approve similar
+pending requests automatically; actual-page DOM tests exercise each approval ID, revision-aware
+mode changes and stale file responses (F35-F37). These mocked HTTP tests do not replace the earlier
+real PostgreSQL projection evidence or certify a new deployed browser/worker restart scenario.
