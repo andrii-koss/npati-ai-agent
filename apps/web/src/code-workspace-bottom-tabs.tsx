@@ -1,5 +1,5 @@
 import { CodeSnapshotPanel } from "./CodeSnapshotPanel";
-import { type BottomTab, type Change } from "./code-workspace-page-types";
+import { type BottomTab, type Change, type RunEvent } from "./code-workspace-page-types";
 
 export interface CodeWorkspaceBottomTabsProps {
   tab: BottomTab;
@@ -10,6 +10,7 @@ export interface CodeWorkspaceBottomTabsProps {
   companyId: string;
   changesError: string | null;
   changedFiles: Change[];
+  events?: RunEvent[];
 }
 
 export function CodeWorkspaceBottomTabs({
@@ -21,7 +22,47 @@ export function CodeWorkspaceBottomTabs({
   companyId,
   changesError,
   changedFiles,
+  events = [],
 }: CodeWorkspaceBottomTabsProps) {
+  const terminalCommands = events
+    .filter((e) => {
+      const p = e.payload ?? {};
+      return (
+        typeof p.command === "string" ||
+        p.tool === "code.shell.exec" ||
+        typeof p.stdout === "string" ||
+        typeof p.stderr === "string"
+      );
+    })
+    .map((e) => {
+      const p = e.payload ?? {};
+      return {
+        command: typeof p.command === "string" ? p.command : String(p.tool ?? "code.shell.exec"),
+        stdout: typeof p.stdout === "string" ? p.stdout : undefined,
+        stderr: typeof p.stderr === "string" ? p.stderr : undefined,
+        exitCode: typeof p.exitCode === "number" ? p.exitCode : undefined,
+        cwd: typeof p.cwd === "string" ? p.cwd : undefined,
+        at: e.createdAt,
+      };
+    });
+
+  const logs = events.map((e) => {
+    const p = e.payload ?? {};
+    const text =
+      typeof p.message === "string"
+        ? p.message
+        : typeof p.summary === "string"
+          ? p.summary
+          : typeof p.tool === "string"
+            ? `Tool call: ${p.tool}`
+            : JSON.stringify(p);
+    return {
+      time: e.createdAt ? new Date(e.createdAt).toLocaleTimeString() : "—",
+      kind: e.kind ?? "event",
+      message: text.length > 300 ? text.slice(0, 300) + "…" : text,
+    };
+  });
+
   return (
     <section className="bottom-tabs">
       <div className="bottom-tabs-nav" role="tablist">
@@ -51,7 +92,9 @@ export function CodeWorkspaceBottomTabs({
             {!sessionId && <p className="ds-muted">{isUk ? "Сесію не вибрано." : "No session selected."}</p>}
             {sessionId && changesError && <p className="ds-hint-error">{changesError}</p>}
             {sessionId && !changesError && changedFiles.length === 0 && (
-              <p className="ds-muted">{isUk ? "Змін немає." : "No changes."}</p>
+              <p className="ds-muted" style={{ padding: "16px 0", textAlign: "center" }}>
+                {isUk ? "Змін немає." : "No changes."}
+              </p>
             )}
             <ul className="code-changes-list">
               {changedFiles.map((change) => (
@@ -72,26 +115,91 @@ export function CodeWorkspaceBottomTabs({
         )}
 
         {tab === "terminal" && (
-          <p className="ds-muted">
-            {isUk
-              ? "Вивід команд відображається в стрімі агента як результат tool call; окремий термінал — у Website Builder."
-              : "Use Process output in the async work panel for the current process output. Tool-call results also appear in the agent stream."}
-          </p>
+          <div>
+            {terminalCommands.length === 0 ? (
+              <p className="ds-muted" style={{ padding: "16px 0", textAlign: "center" }}>
+                {isUk
+                  ? "Термінал очікує виконання команд агентом у поточній сесії."
+                  : "Terminal idle. Commands will appear when executed by the agent in this session."}
+              </p>
+            ) : (
+              <div
+                className="terminal-log-container"
+                style={{
+                  background: "#0f172a",
+                  color: "#f8fafc",
+                  borderRadius: 8,
+                  padding: 14,
+                  fontFamily: "monospace",
+                  fontSize: "12.5px",
+                }}
+              >
+                {terminalCommands.map((item, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      marginBottom: 12,
+                      borderBottom: idx < terminalCommands.length - 1 ? "1px solid #1e293b" : "none",
+                      paddingBottom: 8,
+                    }}
+                  >
+                    <div style={{ color: "#38bdf8", fontWeight: 600 }}>$ {item.command}</div>
+                    {item.cwd && <div style={{ color: "#64748b", fontSize: "11px" }}>cwd: {item.cwd}</div>}
+                    {item.stdout && <pre style={{ margin: "4px 0", color: "#f1f5f9", whiteSpace: "pre-wrap" }}>{item.stdout}</pre>}
+                    {item.stderr && <pre style={{ margin: "4px 0", color: "#f87171", whiteSpace: "pre-wrap" }}>{item.stderr}</pre>}
+                    {item.exitCode !== undefined && (
+                      <div style={{ color: item.exitCode === 0 ? "#4ade80" : "#f87171", fontSize: "11px" }}>
+                        exit code: {item.exitCode}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         )}
 
         {tab === "logs" && (
-          <p className="ds-muted">
-            {isUk
-              ? "Логи run-у доступні в Activity (метадані) та в AuditLog для привілейованих дій."
-              : "Run logs are available in Activity (metadata) and in the AuditLog for privileged actions."}
-          </p>
+          <div>
+            {logs.length === 0 ? (
+              <p className="ds-muted" style={{ padding: "16px 0", textAlign: "center" }}>
+                {isUk ? "Логи виконання відсутні." : "No execution logs recorded yet."}
+              </p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 380, overflowY: "auto" }}>
+                {logs.map((log, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      display: "flex",
+                      gap: 10,
+                      fontSize: "12px",
+                      padding: "6px 10px",
+                      background: "#f8fafc",
+                      borderRadius: 6,
+                      border: "1px solid #e2e8f0",
+                      alignItems: "baseline",
+                    }}
+                  >
+                    <span style={{ color: "#64748b", fontFamily: "monospace", fontSize: "11px", whiteSpace: "nowrap" }}>
+                      {log.time}
+                    </span>
+                    <span style={{ fontWeight: 600, color: "#2563eb", textTransform: "uppercase", fontSize: "11px" }}>
+                      {log.kind}
+                    </span>
+                    <span style={{ color: "#334155", wordBreak: "break-all" }}>{log.message}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         )}
 
         {tab === "activity" && (
           runId ? (
             <CodeSnapshotPanel companyId={companyId} runId={runId} isUk={isUk} />
           ) : (
-            <p className="ds-muted">
+            <p className="ds-muted" style={{ padding: "16px 0", textAlign: "center" }}>
               {isUk ? "Activity з'явиться, коли сесія почне run." : "Activity appears once the session starts a run."}
             </p>
           )
