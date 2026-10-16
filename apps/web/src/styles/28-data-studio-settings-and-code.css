@@ -370,40 +370,607 @@
   }
 }
 
-/* --- C7 Code Workspace (additive; every rule is scoped to .code-workspace) --- */
-.code-workspace .mobile-view-switch { display: none; gap: 6px; margin: 8px 0 12px; flex-wrap: wrap; }
-.code-workspace .mobile-view-button { border: 1px solid #eef2f6; background: transparent; color: inherit; padding: 6px 10px; border-radius: 8px; cursor: pointer; font-size: 12px; }
-.code-workspace .mobile-view-button.active { border-color: currentColor; }
-.code-workspace .code-file-tree { list-style: none; margin: 0; padding: 0; max-height: 60vh; overflow: auto; }
-.code-workspace .code-file-tree-item { display: block; width: 100%; text-align: left; background: transparent; border: 0; color: inherit; padding: 4px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; overflow-wrap: anywhere; }
-.code-workspace .code-file-tree-item.active { background: rgba(110, 168, 254, 0.12); }
-.code-workspace .code-stream { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.code-workspace .code-stream-toggle { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: transparent; border: 0; color: inherit; cursor: pointer; padding: 6px 4px; }
-.code-workspace .code-stream-kind { font-size: 13px; overflow-wrap: anywhere; }
-.code-workspace .code-stream-body { border-left: 2px solid #eef2f6; margin-left: 6px; padding-left: 10px; }
-.code-workspace .code-approvals { margin-top: 16px; }
-.code-workspace .code-approval-card { border: 1px solid #eef2f6; border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
-.code-workspace .code-approval-body { max-height: 240px; overflow: auto; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.code-workspace .code-approval-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-.code-workspace .code-approval-deny { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
-.code-workspace .code-approval-deny textarea { min-height: 64px; width: 100%; }
-.code-workspace .code-changes-list { list-style: none; margin: 0; padding: 0; }
-.code-workspace .code-change-header { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; overflow-wrap: anywhere; }
-.code-workspace .code-diff { max-height: 320px; overflow: auto; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.code-workspace .code-workspace-controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
-.code-workspace .code-workspace-usage { font-size: 12px; }
-.code-workspace .code-workspace-sessions { display: flex; gap: 8px; margin-top: 12px; }
-.code-workspace .project-preview-frame iframe { width: 100%; min-height: 420px; border: 1px solid #eef2f6; border-radius: 10px; }
-.onboarding-live-composer .code-pending-messages { display: block; max-height: 240px; overflow: auto; padding: 8px 12px; border: 1px solid #bcc7d4; border-radius: 8px; font-size: 12px; }
-.code-pending-messages .code-pending-row { display: block; border-top: 1px solid #bcc7d4; padding: 6px 0; }
-.code-pending-messages .code-pending-row p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; }
-.code-pending-messages .code-pending-row textarea { width: 100%; min-height: 64px; }
-.code-pending-messages .code-pending-row button { margin-right: 8px; }
-.onboarding-live-composer .composer-inbox-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.onboarding-live-composer .code-pending-row textarea { padding: 6px; font-size: 13px; overflow-y: auto; border: 1px solid #bcc7d4; border-radius: 6px; }
-@media (max-width: 900px) {
+/* --- C7 Code Workspace (additive; modern cards & layout) --- */
+.npati-fullscreen-editor-shell:has(.code-workspace) {
+  overflow-y: auto !important;
+  height: 100vh !important;
+}
+
+.code-workspace {
+  max-width: 1180px;
+  width: 100%;
+  margin: 0;
+  padding: 0 0 60px;
+}
+
+.code-workspace-status-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  margin-bottom: 18px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.code-workspace-session-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 4px 10px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.code-workspace-session-bar select {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 12px;
+  background: #ffffff;
+  color: #1e293b;
+  cursor: pointer;
+}
+
+/* AI Task Composer Card */
+.code-workspace .code-task-composer {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
+  padding: 16px 20px;
+  margin-bottom: 18px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.code-workspace .code-task-composer:focus-within {
+  border-color: #cbd5e1;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+}
+
+.code-workspace .composer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.code-workspace .composer-title {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.code-workspace .composer-textarea {
+  width: 100%;
+  min-height: 72px;
+  box-sizing: border-box;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  resize: vertical;
+  background: #fdfdfe;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  font-family: inherit;
+}
+
+.code-workspace .composer-textarea:focus {
+  background: #ffffff;
+  border-color: #d83438;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(216, 52, 56, 0.12);
+}
+
+.code-workspace .composer-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 10px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.code-workspace .composer-options {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: #64748b;
+}
+
+.code-workspace .composer-options select {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 5px 9px;
+  font-size: 12px;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.code-workspace .composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 2-Column IDE Grid (Files + Code Reader) */
+.code-workspace .project-grid-2col {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 16px;
+  min-height: 480px;
+  margin-bottom: 20px;
+}
+
+@media (max-width: 960px) {
+  .code-workspace .project-grid-2col {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 3-Column Working Grid */
+.code-workspace .project-grid {
+  display: grid;
+  grid-template-columns: 260px minmax(320px, 1fr) minmax(360px, 1.3fr);
+  gap: 14px;
+  min-height: 440px;
+  margin-bottom: 20px;
+}
+
+.code-workspace .project-col {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+  overflow: hidden;
+}
+
+.code-workspace .col-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.code-workspace .col-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #1e293b;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.code-workspace .file-count {
+  font-size: 11px;
+  font-weight: 600;
+  background: #e2e8f0;
+  color: #475569;
+  padding: 2px 8px;
+  border-radius: 9999px;
+}
+
+/* Files Column */
+.code-workspace .file-search-form {
+  padding: 10px 14px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #ffffff;
+}
+
+.code-workspace .file-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 11px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  font-size: 13px;
+  transition: border-color 0.15s ease;
+}
+
+.code-workspace .file-search-input:focus {
+  border-color: #d83438;
+  outline: none;
+}
+
+.code-workspace .file-tree-container {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 440px;
+  padding: 6px;
+}
+
+.code-workspace .code-file-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.code-workspace .code-file-tree-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: #334155;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.12s ease, color 0.12s ease;
+  overflow-wrap: anywhere;
+}
+
+.code-workspace .code-file-tree-item:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.code-workspace .code-file-tree-item.active {
+  background: #fff1f2;
+  color: #d83438;
+  font-weight: 650;
+  border-left: 3px solid #d83438;
+}
+
+.code-workspace .file-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+/* Agent Stream Column */
+.code-workspace .project-chat-body {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 440px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.code-workspace .code-empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  color: #64748b;
+}
+
+.code-workspace .code-empty-state-icon {
+  font-size: 32px;
+  margin-bottom: 12px;
+}
+
+.code-workspace .code-empty-state h4 {
+  margin: 0 0 6px;
+  color: #1e293b;
+  font-size: 15px;
+}
+
+.code-workspace .code-empty-state p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.code-workspace .code-stream {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.code-workspace .code-stream-item {
+  border: 1px solid #f1f5f9;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fafafa;
+}
+
+.code-workspace .code-stream-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  padding: 4px 2px;
+}
+
+.code-workspace .code-stream-kind {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  overflow-wrap: anywhere;
+}
+
+.code-workspace .code-stream-body {
+  border-left: 2px solid #e2e8f0;
+  margin: 6px 0 0 6px;
+  padding-left: 12px;
+}
+
+.code-workspace .code-approvals {
+  margin-top: 14px;
+  border-top: 2px dashed #fcd34d;
+  padding-top: 14px;
+}
+
+.code-workspace .code-approval-card {
+  border: 1px solid #fde68a;
+  background: #fffbeb;
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  box-shadow: 0 2px 6px rgba(245, 158, 11, 0.08);
+}
+
+.code-workspace .code-approval-card header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.code-workspace .code-approval-card header code {
+  font-size: 12px;
+  font-weight: 700;
+  background: #fef3c7;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #92400e;
+}
+
+.code-workspace .code-approval-body {
+  background: #0f172a;
+  color: #f8fafc;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  max-height: 200px;
+  overflow: auto;
+}
+
+.code-workspace .code-approval-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.code-workspace .code-approval-deny {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.code-workspace .code-approval-deny textarea {
+  min-height: 64px;
+  width: 100%;
+}
+
+/* Preview / File Viewer Column */
+.code-workspace .project-file-viewer-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: #0f172a;
+  color: #f8fafc;
+  min-height: 420px;
+  overflow: hidden;
+}
+
+.code-workspace .project-file-browser-pre {
+  flex: 1;
+  margin: 0;
+  padding: 16px;
+  font-size: 13px;
+  line-height: 1.6;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-y: auto;
+  max-height: 440px;
+  color: #e2e8f0;
+}
+
+.code-workspace .project-preview-col-footer {
+  padding: 10px 16px;
+  background: #f8fafc;
+  border-top: 1px solid #e2e8f0;
+  font-size: 12px;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Code Metrics Panel matching Email Settings Stats Cards */
+.code-workspace .code-metrics {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 18px 20px;
+  margin-top: 18px;
+  margin-bottom: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.code-workspace .code-metrics h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.code-workspace .code-metrics-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+}
+
+.code-workspace .code-metrics-row {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.code-workspace .code-metrics-row:hover {
+  border-color: #cbd5e1;
+  transform: translateY(-1px);
+}
+
+.code-workspace .code-metrics-head {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 3px;
+}
+
+.code-workspace .code-metrics-label {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.code-workspace .code-metrics-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: -0.01em;
+}
+
+.code-workspace .code-metrics-source {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 4px;
+}
+
+/* Bottom Tabs Panel */
+.code-workspace .bottom-tabs {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+  overflow: hidden;
+  margin-top: 18px;
+}
+
+.code-workspace .code-changes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.code-workspace .code-change-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.code-workspace .code-diff {
+  max-height: 320px;
+  overflow: auto;
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.code-workspace .code-workspace-controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.code-workspace .code-workspace-usage {
+  font-size: 12px;
+}
+
+.code-workspace .code-workspace-sessions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.code-workspace .project-preview-frame iframe {
+  width: 100%;
+  min-height: 420px;
+  border: 1px solid #eef2f6;
+  border-radius: 10px;
+}
+
+.code-workspace .mobile-view-switch {
+  display: none;
+  gap: 6px;
+  margin: 8px 0 14px;
+  flex-wrap: wrap;
+}
+
+.code-workspace .mobile-view-button {
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #475569;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.code-workspace .mobile-view-button.active {
+  border-color: #d83438;
+  color: #d83438;
+  background: #fff1f2;
+  font-weight: 650;
+}
+
+@media (max-width: 1024px) {
   .code-workspace .mobile-view-switch { display: flex; }
-  .code-workspace .code-workspace-controls { flex-direction: column; align-items: stretch; }
+  .code-workspace .project-grid { grid-template-columns: 1fr; }
+  .code-workspace .project-grid.mobile-focus-files .project-col-chat,
+  .code-workspace .project-grid.mobile-focus-files .project-col-preview { display: none; }
+  .code-workspace .project-grid.mobile-focus-stream .project-col-files,
+  .code-workspace .project-grid.mobile-focus-stream .project-col-preview { display: none; }
+  .code-workspace .project-grid.mobile-focus-file .project-col-files,
+  .code-workspace .project-grid.mobile-focus-file .project-col-chat { display: none; }
 }
 
 /* Code agents reuse the Integrations catalog; overrides stay scoped to Code. */
