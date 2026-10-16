@@ -107,6 +107,45 @@ function createHarness(options: HarnessOptions) {
 }
 
 describe("security-gate: C6 runner — every stop condition reports a reason and a summary", () => {
+  it("fails closed when a configured execution snapshot cannot be persisted", async () => {
+    let modelCalls = 0;
+    const runner = new CodingAgentRunner({
+      flags: { assertEnabled: async () => true }, rbac: { authorize: async () => ({ allowed: true }) },
+      toolRuntime: { listTools: () => TOOLS, invoke: async () => { throw new Error("must not execute"); } },
+      engine: { chat: async () => { modelCalls++; return { content: "done" }; } }, schemas: SCHEMAS,
+      snapshot: { create: async () => { throw new Error("store unavailable"); } },
+    });
+    const result = await runner.run({ ctx, session: session(), prompt: "fix" });
+    expect(result).toMatchObject({ status: "failed", reason: "refused", code: "snapshot_unavailable" });
+    expect(modelCalls).toBe(0);
+  });
+
+  it("does not execute model tool calls that resolve after cancellation", async () => {
+    const controller = new AbortController();
+    const events: Array<import("@npati/shared").DevelopmentProcessProgressItem> = [];
+    const harness = createHarness({ script: [{ content: "", usage: { promptTokens: 11, completionTokens: 7, totalTokens: 18 }, toolCalls: [nativeCall("code.fs.read", { path: "a.ts" }, "late-call")] }], onFirstModelCall: () => controller.abort() });
+    const result = await harness.run({ signal: controller.signal, onActivity: async event => { events.push(event); } });
+    expect(result.summary.tokens).toBe(18);
+    expect(harness.activity.some(event => event.kind === "model_call" && event.phase === "completed")).toBe(true);
+    expect(events.some(event => event.stage === "planning" && event.status === "completed")).toBe(true);
+    expect(events.some(event => event.stage === "model_usage" && event.modelUsage?.totalTokens === 18)).toBe(true);
+    expect(result.status).toBe("cancelled");
+    expect(result.reason).toBe("cancelled");
+    expect(result.summary.toolCalls).toBe(0);
+  });
+
+  it("classifies cancellation during a rejected provider call as cancelled", async () => {
+    const controller = new AbortController();
+    const runner = new CodingAgentRunner({
+      flags: { assertEnabled: async () => true }, rbac: { authorize: async () => ({ allowed: true }) },
+      toolRuntime: { listTools: () => TOOLS, invoke: async () => { throw new Error("must not execute"); } },
+      engine: { chat: async () => { controller.abort(); throw new Error("request aborted"); } }, schemas: SCHEMAS,
+    });
+    const result = await runner.run({ ctx, session: session(), prompt: "fix", signal: controller.signal });
+    expect(result.status).toBe("cancelled");
+    expect(result.reason).toBe("cancelled");
+  });
+
   it("stops with completed when the model makes no tool call", async () => {
     const harness = createHarness({ script: [{ content: "nothing to do" }] });
     const result = await harness.run();

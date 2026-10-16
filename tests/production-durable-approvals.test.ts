@@ -45,8 +45,9 @@ describe("Production durable approvals and route tiers",()=>{
     expect(first.run.errorCode).toBe("APPROVAL_REQUIRED");expect(remove).not.toHaveBeenCalled();
     const resumed=await runtime.process(auth,company.id,first.run.id,{approvalId});
     expect(resumed.run.status).toBe("completed");expect(remove).toHaveBeenCalledOnce();
-    const replay=await runtime.process(auth,company.id,first.run.id,{approvalId});
-    expect(replay.run.errorCode).toBe("APPROVAL_ALREADY_USED");expect(remove).toHaveBeenCalledOnce();
+    await expect(runtime.process(auth,company.id,first.run.id,{approvalId})).rejects.toMatchObject({code:"APPROVAL_INVALID",status:409});
+    expect(remove).toHaveBeenCalledOnce();
+    expect((await store.getCompanyAgentRun(auth,company.id,first.run.id)).run.status).toBe("completed");
   });
 
   it("enforces the configured route tier and emits standard rate-limit headers",async()=>{

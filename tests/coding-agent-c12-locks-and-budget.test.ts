@@ -297,13 +297,13 @@ describe("security-gate: C12 one shared budget for a parent run and its children
       resolveBudgetKey: (sessionId) => (sessionId === "session-child-run" ? "session-budget" : sessionId),
     });
 
-    // The parent run: two answered turns inside the budget (5 000 + 2 000 of 9 000), then the pre-flight refuses
-    // the third call, because 7 000 + the 4 000-token estimate exceeds the allowance.
+    // Include the request's context in pre-flight pressure: two 3,000-token turns fit, then the
+    // 6,000-token usage plus the next response estimate and context exceeds the 9,000 allowance.
     const parent = budgetHarness({
       quota,
       script: [
-        { content: "first", tokens: 5_000, call: true },
-        { content: "second", tokens: 2_000, call: true },
+        { content: "first", tokens: 3_000, call: true },
+        { content: "second", tokens: 3_000, call: true },
         { content: "third", tokens: 1_000 },
       ],
     });
@@ -312,9 +312,9 @@ describe("security-gate: C12 one shared budget for a parent run and its children
     expect(parentResult.summary.remaining).toContain("A2A_TOKEN_QUOTA_EXCEEDED");
     expect(parent.engineCalls).toHaveLength(2);
     expect(parent.releases).toContain("budget_exhausted");
-    expect(manager.getBudget("session-budget")!.usedTokens).toBe(7_000);
+    expect(manager.getBudget("session-budget")!.usedTokens).toBe(6_000);
 
-    // The child run, in its own session, mapped onto the same budget: 7 000 + 4 000 > 9 000, so its very first
+    // The child run, in its own session, mapped onto the same budget: 6 000 + 4 000 > 9 000, so its very first
     // pre-flight is refused and it never calls the provider. The shared budget is what stops it — there is no
     // separate allowance a child could exhaust on its own.
     const child = budgetHarness({ quota, script: [{ content: "child", tokens: 100 }] });
@@ -326,7 +326,7 @@ describe("security-gate: C12 one shared budget for a parent run and its children
     });
     expect(childResult).toMatchObject({ status: "stopped", reason: "budget_exhausted" });
     expect(child.engineCalls).toEqual([]);
-    expect(manager.getBudget("session-budget")!.usedTokens).toBe(7_000);
+    expect(manager.getBudget("session-budget")!.usedTokens).toBe(6_000);
   });
 
   it("stops at the first pre-flight when the budget is already below one call's estimate", async () => {

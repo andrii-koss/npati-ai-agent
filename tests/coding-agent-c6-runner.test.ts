@@ -398,6 +398,9 @@ describe("security-gate: C6 runner — tool execution and the model contract", (
     const secondRequest = harness.engineCalls[1];
     const feedback = secondRequest?.messages.find((message) => message.role === "tool");
     expect(feedback?.content).toContain("partial_tool_call");
+    const calls = secondRequest?.messages.filter(message => message.role === "assistant").flatMap(message => message.tool_calls ?? []) ?? [];
+    const results = secondRequest?.messages.filter(message => message.role === "tool") ?? [];
+    expect(calls.map(call => call.id)).toEqual(results.map(message => message.tool_call_id));
   });
 
   it("returns structured validation feedback and stops after the correction budget is exhausted", async () => {
@@ -413,6 +416,9 @@ describe("security-gate: C6 runner — tool execution and the model contract", (
     expect(harness.invocations).toHaveLength(0);
     const firstFeedback = harness.engineCalls[1]?.messages.find((message) => message.role === "tool");
     expect(firstFeedback?.content).toContain("unknown_tool");
+    const history = harness.engineCalls[1]!.messages;
+    const assistant = history.find((message) => message.role === "assistant");
+    expect(assistant?.tool_calls?.some((call) => call.id === firstFeedback?.tool_call_id)).toBe(true);
   });
 
   it("reminds the model once about a repeated call and stops on the next repetition", async () => {
@@ -453,9 +459,8 @@ describe("security-gate: C6 runner — tool execution and the model contract", (
         { content: "", toolCalls: [nativeCall("code.fs.read", { path: "b.ts" }, "read-2")] },
         { content: "done" },
       ],
-      cancelAfterChecks: 2,
     });
-    const result = await harness.run({ cancelRequested: harness.cancelRequested });
+    const result = await harness.run({ cancelRequested: async () => harness.invocations.length >= 1 });
     expect(result.status).toBe("cancelled");
     expect(result.reason).toBe("cancelled");
     expect(harness.releases).toEqual(["cancelled"]);

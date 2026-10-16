@@ -1,8 +1,9 @@
 import { CodeToolError } from "./code-tools-path";
 import { buildUnifiedDiff, diffLineStats, sha256, splitLines } from "./code-tools-diff";
 import { assertNoPlaceholderInWrite } from "./provider-data-guard";
+import { commitPatchMutations } from "./code-patch-transaction";
 import {
-  assertMassOperation, detectEncoding, detectEol, guardWritePath, resolveWriteLimits,
+  assertEditSize, assertMassOperation, guardWritePath, resolveWriteLimits,
   type CodeWritePort, type WriteLimits, type WriteOptions,
 } from "./code-tools-write";
 
@@ -54,6 +55,23 @@ export interface PatchFileOp {
 
 export interface ParsedPatch { files: PatchFileOp[] }
 
+/** Enumerates both supported wire formats before read, approval and child-scope checks. */
+export function patchTargets(patch: string): Array<{ path: string; action: PatchAction }> {
+  if (/^\*\*\* (?:Begin Patch|(?:Update|Add|Delete) File:)/m.test(patch)) return parsePatch(patch).files.map(({ path, action }) => ({ path, action }));
+  const targets: Array<{ path: string; action: PatchAction }> = [];
+  let previous: string | undefined;
+  for (const line of patch.replace(/\r\n/g, "\n").split("\n")) {
+    if (line.startsWith("--- ")) previous = line.slice(4).split("\t")[0]!.trim().replace(/^a\//, "");
+    if (line.startsWith("+++ ")) {
+      const next = line.slice(4).split("\t")[0]!.trim().replace(/^b\//, "");
+      const action = next === "/dev/null" ? "delete" : previous === "/dev/null" ? "add" : "update";
+      targets.push({ path: action === "delete" ? previous ?? "" : next, action });
+    }
+  }
+  if (!targets.length || targets.some((target) => !target.path || target.path === "/dev/null")) throw new CodeToolError("patch_invalid", "Patch contains no valid file targets", "code.fs.apply_patch");
+  return targets;
+}
+
 const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
 /** Parses the patch text. Throws `patch_invalid` with the offending line number. */
@@ -65,6 +83,7 @@ export function parsePatch(patch: unknown, tool = "code.fs.apply_patch"): Parsed
   const files: PatchFileOp[] = [];
   let index = 0;
   let seenBegin = false;
+  let seenEnd = false;
   let current: PatchFileOp | null = null;
   let currentHunk: PatchHunk | null = null;
   const pushHunk = () => {
@@ -78,8 +97,14 @@ export function parsePatch(patch: unknown, tool = "code.fs.apply_patch"): Parsed
   };
   for (; index < lines.length; index += 1) {
     const line = lines[index]!;
-    if (line.startsWith("*** Begin Patch")) { seenBegin = true; continue; }
-    if (line.startsWith("*** End Patch")) { pushFile(); break; }
+    if (line === "*** Begin Patch" && !seenBegin && !files.length && !current) { seenBegin = true; continue; }
+    if (!seenBegin && line.trim()) throw new CodeToolError("patch_invalid", "Patch must start with *** Begin Patch", tool);
+    if (line === "*** End Patch") {
+      pushFile();
+      seenEnd = true;
+      if (lines.slice(index + 1).some((rest) => rest.trim())) throw new CodeToolError("patch_invalid", "Unexpected content after *** End Patch", tool);
+      break;
+    }
     if (line.startsWith("*** Update File:") || line.startsWith("*** Add File:") || line.startsWith("*** Delete File:")) {
       pushFile();
       const action: PatchAction = line.startsWith("*** Update File:") ? "update" : line.startsWith("*** Add File:") ? "add" : "delete";
@@ -125,8 +150,14 @@ export function parsePatch(patch: unknown, tool = "code.fs.apply_patch"): Parsed
     throw new CodeToolError("patch_invalid", `Unrecognised hunk line on line ${index + 1}`, tool, 400, false, "patch", { line: index + 1 });
   }
   if (!seenBegin) throw new CodeToolError("patch_invalid", "Patch must start with *** Begin Patch", tool);
+  if (!seenEnd) throw new CodeToolError("patch_invalid", "Patch is incomplete: missing *** End Patch", tool);
   if (!files.length) throw new CodeToolError("patch_invalid", "Patch contains no file operations", tool);
   for (const file of files) {
+    for (const hunk of file.hunks) {
+      const before = hunk.lines.filter((line) => !line.startsWith("+")).length;
+      const after = hunk.lines.filter((line) => !line.startsWith("-")).length;
+      if (before !== hunk.beforeCount || after !== hunk.afterCount) throw new CodeToolError("patch_invalid", `Hunk counts do not match the content for "${file.path}"`, tool);
+    }
     if (file.action === "update" && !file.hunks.length) {
       throw new CodeToolError("patch_invalid", `Update for "${file.path}" has no hunks`, tool, 400, false, "patch", { path: file.path });
     }
@@ -212,6 +243,7 @@ export async function applyPatch(
   const limits: WriteLimits = { ...resolveWriteLimits(), ...options.limits };
   const dryRun = input.dryRun === true;
   const parsed = parsePatch(input.patch, tool);
+  if (!dryRun && !options.approved && parsed.files.some((file) => file.action === "delete")) throw new CodeToolError("approval_required", "Deleting files through a patch requires approval", tool, 409, false, "approval");
   assertMassOperation(parsed.files.length, tool, limits, options.approved);
   // Phase 1: resolve every target and compute every new content in memory.
   const planned: Array<{ op: PatchFileOp; before: string; after: string; guarded: ReturnType<typeof guardWritePath>; existing: boolean; mode?: number; revision?: string }> = [];
@@ -241,6 +273,7 @@ export async function applyPatch(
   // Phase 2: build the combined diff (and refuse anything oversized before writing).
   const diffParts: string[] = [];
   for (const item of planned) {
+    assertEditSize(item.after, tool, limits);
     if (item.op.action !== "add" && item.before === item.after) continue;
     diffParts.push(buildUnifiedDiff(item.before, item.after, item.guarded.path));
   }
@@ -272,24 +305,7 @@ export async function applyPatch(
       assertNoPlaceholderInWrite(item.after, { tool: "code.fs.apply_patch", path: item.guarded.path });
     }
   }
-  const written: Array<{ path: string; content: string }> = [];
-  try {
-    for (const item of planned) {
-      if (item.op.action === "delete") {
-        await port.deletePath(item.guarded.path, { expectedRevision: item.revision });
-        continue;
-      }
-      const encoding = detectEncoding(item.after);
-      const { eol } = detectEol(item.after);
-      await port.writeFile(item.guarded.path, item.after, { encoding: encoding.encoding, eol, mode: item.mode, expectedRevision: item.revision });
-      written.push({ path: item.guarded.path, content: item.before });
-    }
-  } catch (error) {
-    for (const restore of written.reverse()) {
-      await port.writeFile(restore.path, restore.content).catch(() => undefined);
-    }
-    throw error;
-  }
+  await commitPatchMutations(planned.map((item) => ({ path: item.guarded.path, before: item.before, after: item.after, existing: item.existing, delete: item.op.action === "delete", mode: item.mode, revision: item.revision })), port, options);
   return { applied, dryRun: false, diff, stats, ...(options.approved ? { approved: true } : {}) };
 }
 

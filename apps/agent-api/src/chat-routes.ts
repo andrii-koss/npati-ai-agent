@@ -1,3 +1,4 @@
+import { isOllamaChatPayload } from "./runtime-compat-routes";
 
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { AppConfig } from "./app";
@@ -25,6 +26,7 @@ import type { AgentAIContext } from "@npati/agent";
 import { readIntentHistory } from "./chat-project-intent";
 
 export interface ChatRouteDeps {
+  ollamaChat?: ReturnType<typeof import("./runtime-compat-routes").createOllamaChatHandler>;
   resolveProjectIntent?: import("./chat-project-intent").ChatProjectIntentResolver;
   config: AppConfig;
   log: FastifyBaseLogger;
@@ -64,6 +66,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
     };
   }>("/chat/compact", async (request, reply) => {
     try {
+      if (deps.ollamaChat && isOllamaChatPayload(request.body)) return deps.ollamaChat(request as Parameters<NonNullable<typeof deps.ollamaChat>>[0], reply);
       const auth = await authProvider.authenticate(request);
       let messages = request.body?.messages;
       if ((!messages || !messages.length) && request.body?.conversationId) {
@@ -177,6 +180,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
         ? await readIntentHistory(workspaceStore, auth, request.body.conversationId, requestedContext.businessId) : [];
       const semantic = await deps.resolveProjectIntent?.(auth, {
         message: prompt ?? "", activeCompanyId: requestedContext.companyId, activeProjectId: requestedContext.projectId,
+        attachmentNames: request.body.attachments?.flatMap(item => typeof item?.name === "string" ? [item.name] : []),
         conversationHistory: history,
       });
       const resolved = await activeContextResolver.resolveChat(auth, requestedContext, prompt ?? "", semantic?.decision);

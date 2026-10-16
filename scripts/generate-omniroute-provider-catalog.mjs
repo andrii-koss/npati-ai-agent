@@ -1,15 +1,18 @@
 import fs from "node:fs";
 import path from "node:path";
 import ts from "typescript";
+import { execFileSync } from "node:child_process";
 
 const root = process.cwd();
 const providerRoot = path.join(root, "vendor", "omniroute", "src", "shared", "constants", "providers");
 const providerIconFile = path.join(root, "vendor", "omniroute", "src", "shared", "components", "ProviderIcon.tsx");
 const lobeIconFile = path.join(root, "vendor", "omniroute", "src", "shared", "components", "lobeProviderIcons.ts");
 const providerAssetRoot = path.join(root, "vendor", "omniroute", "public", "providers");
-const versionFile = fs.readFileSync(path.join(root, "OMNIROUTE_VERSION"), "utf8");
-const version = versionFile.match(/^OMNIROUTE_VERSION=(.+)$/m)?.[1] ?? "unknown";
-const commit = versionFile.match(/^OMNIROUTE_COMMIT=(.+)$/m)?.[1] ?? "unknown";
+const versionPath = path.join(root, "OMNIROUTE_VERSION");
+const versionFile = fs.existsSync(versionPath) ? fs.readFileSync(versionPath, "utf8") : "";
+// Source checkouts pin OmniRoute through the git submodule; release archives may supply the version file.
+const version = versionFile.match(/^OMNIROUTE_VERSION=(.+)$/m)?.[1] ?? `v${JSON.parse(fs.readFileSync(path.join(root, "vendor", "omniroute", "package.json"), "utf8")).version}`;
+const commit = versionFile.match(/^OMNIROUTE_COMMIT=(.+)$/m)?.[1] ?? execFileSync("git", ["-C", path.join(root, "vendor", "omniroute"), "rev-parse", "HEAD"], { encoding: "utf8", windowsHide: true }).trim();
 const output = path.join(root, "packages", "omniroute-adapter", "src", "generated", "provider-catalog.json");
 
 function filesIn(directory) {

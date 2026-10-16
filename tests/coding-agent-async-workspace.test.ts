@@ -53,10 +53,10 @@ describe("Step 8 durable workspace projection and recovery drills", () => {
     await expect(h.service.read({ ...ctx, ...patch }, scope)).rejects.toMatchObject({ code: "session_not_found", httpStatus: 404 });
     expect(read).not.toHaveBeenCalled();
   });
-  it("keeps the optional surface dark in hosted and self-hosted defaults", async () => {
+  it("uses the configured self-hosted default and keeps disabled installations dark", async () => {
     for (const enabledByDefault of [true, false]) {
       const flags = new FeatureFlagService(new InMemoryWorkspaceStore(), undefined, { enabledByDefault });
-      expect(await flags.isEnabled(ctx, "code.async_workspace", { companyId: "c" })).toBe(false);
+      expect(await flags.isEnabled(ctx, "code.async_workspace", { companyId: "c" })).toBe(enabledByDefault);
     }
   });
   it("rolls back controls without discarding durable active operations", async () => {

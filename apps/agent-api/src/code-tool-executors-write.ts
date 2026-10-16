@@ -6,6 +6,7 @@ import {
 } from "./code-tools-write";
 import { applyPatch as applyCanonicalPatch } from "./code-tools-patch";
 import { buildUnifiedDiff, diffLineStats, sha256 } from "./code-tools-diff";
+import { commitPatchMutations } from "./code-patch-transaction";
 import {
   type CanonicalExecutorOptions,
   rethrowCanonical,
@@ -38,6 +39,7 @@ async function readCurrent(input: CodeToolExecutionContext, path: string): Promi
       ctx: input.ctx, companyId: input.companyId, projectId: input.projectId, path,
       maxLines: Number.MAX_SAFE_INTEGER, maxBytes: input.limits.readFileBytes,
     });
+    if (file.truncated) throw new CodeToolError("too_large", `Refusing to edit a truncated read of ${path}`, 413, "read", false, input.tool.name);
     return { content: file.content ?? "", revision: file.revision, sha256: file.sha256 };
   } catch (error) {
     const shaped = error as { code?: string; status?: number };
@@ -110,7 +112,7 @@ function patchBlocks(patch: string): Map<string, string> {
   const flush = () => { if (path) blocks.set(path, buffer.join("\n")); };
   for (const line of patch.split("\n")) {
     const target = /^\+\+\+ b\/(.+)$/.exec(line) ?? /^\+\+\+ (.+)$/.exec(line);
-    if (target) { flush(); path = (target[1] ?? "").replace(/^b\//, "").trim(); buffer = []; continue; }
+    if (target) { flush(); path = (target[1] ?? "").split("\t")[0]!.replace(/^b\//, "").trim(); buffer = []; continue; }
     if (path) buffer.push(line);
   }
   flush();
@@ -149,6 +151,7 @@ export function toEngineWritePort(input: CodeToolExecutionContext): EngineWriteP
   return {
     async readFile(path) {
       const file = await input.port.readFile({ ...base, path, maxLines: Number.MAX_SAFE_INTEGER, maxBytes: input.limits.readFileBytes });
+      if (file.truncated) throw new CodeToolError("too_large", `Refusing to edit a truncated read of ${path}`, 413, "read", false, input.tool.name);
       return { content: file.content ?? "", revision: file.revision, encoding: file.encoding };
     },
     async writeFile(path, content, opts) {
@@ -211,17 +214,6 @@ export function isCanonicalPatchFormat(patch: string): boolean {
 }
 
 export function canonicalWriteExecutors(options: CanonicalWriteExecutorOptions = {}): Record<string, (input: CodeToolExecutionContext) => Promise<unknown>> {
-  /** Writes one file (creating it when it does not exist) and returns the change record. */
-  const commit = async (input: CodeToolExecutionContext, path: string, content: string, current: WriteFileState | null) => {
-    const port = writePortOf(input);
-    const result = current
-      ? await port.writeFile({ ctx: input.ctx, companyId: input.companyId, projectId: input.projectId, path, content, expectedRevision: expectedRevisionFor(input, path, current) })
-      : await port.createFile({ ctx: input.ctx, companyId: input.companyId, projectId: input.projectId, path, content });
-    const before = current?.content ?? "";
-    const stats = diffFor(options, path, before, content);
-    return { path: result.path, sha256: result.sha256, revision: result.revision, linesAdded: stats.linesAdded, linesRemoved: stats.linesRemoved, diff: stats.diff };
-  };
-
   return {
     "code.fs.write": async (input) => {
       const path = stringArg(input.args, ["path", "file", "filePath"]);
@@ -338,11 +330,11 @@ export function canonicalWriteExecutors(options: CanonicalWriteExecutorOptions =
         additions: accumulator.additions + item.linesAdded,
         deletions: accumulator.deletions + item.linesRemoved,
       }), { files: 0, additions: 0, deletions: 0 });
+      const committed = await commitPatchMutations(planned.map((item) => ({ path: item.path, before: item.before, after: item.content, existing: item.current !== null, revision: expectedRevisionFor(input, item.path, item.current) })), toEngineWritePort(input), engineOptions(input, options), dryRun);
       if (dryRun) {
         return { applied, dryRun: true, diff, stats, files: applied, linesAdded: stats.additions, linesRemoved: stats.deletions };
       }
-      const results = [];
-      for (const item of planned) results.push(await commit(input, item.path, item.content, item.current));
+      const results = committed.map((receipt, index) => ({ ...receipt, ...diffFor(options, receipt.path, planned[index]!.before, planned[index]!.content) }));
       return {
         path: results[0]?.path ?? "",
         applied,

@@ -28,7 +28,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-/** Where the migrations and their registration live, relative to the repository root. */
+/** Where the migrations and their registration entry point live, relative to the repository root. */
 export const MIGRATIONS_DIR = "packages/workspace/src";
 export const MIGRATION_REGISTRATION_PATH = "packages/workspace/src/postgres-store.ts";
 
@@ -156,8 +156,19 @@ export function validateMigrationRegistry({ storeSource, migrationFiles }) {
 
 /** Reads both halves from the repository, so a caller can validate the real input or a mutated copy of it. */
 export function readMigrationRegistry(root) {
+  const seen = new Set();
+  function readRegistration(file) {
+    if (seen.has(file)) return "";
+    seen.add(file);
+    const source = readFileSync(file, "utf8");
+    // Follow only migration modules actually imported by this registration graph.
+    // Do not count unused migration definitions by scanning all source files.
+    const modules = [...source.matchAll(/from\s+["'](\.\/postgres-store-migrations-[a-z0-9-]+)["']/g)]
+      .map(match => readRegistration(path.resolve(path.dirname(file), match[1] + ".ts")));
+    return [source, ...modules].join("\n");
+  }
   return {
-    storeSource: readFileSync(path.join(root, MIGRATION_REGISTRATION_PATH), "utf8"),
+    storeSource: readRegistration(path.resolve(root, MIGRATION_REGISTRATION_PATH)),
     migrationFiles: readdirSync(path.join(root, MIGRATIONS_DIR)),
   };
 }

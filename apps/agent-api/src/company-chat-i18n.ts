@@ -117,21 +117,21 @@ export function detectCompanyChatLanguage(message = ""): CompanyChatLanguage {
 }
 
 const companyManagementPatterns: RegExp[] = [
-  /(?=.*(?:crée|créer|ajoute|ajouter|modifie|modifier|supprime|supprimer|configure|configurer))(?=.*(?:entreprise|société|agents?))/iu,
-  /(?=.*(?:erstelle|erstellen|füge|ändere|aktualisiere|lösche|konfiguriere))(?=.*(?:unternehmen|firma|agenten?))/iu,
-  /(?=.*(?:crea|crear|añade|agrega|modifica|actualiza|elimina|configura))(?=.*(?:empresa|compañía|agentes?))/iu,
-  /(?=.*(?:crea|creare|aggiungi|modifica|aggiorna|elimina|configura))(?=.*(?:azienda|società|agenti?))/iu,
-  /(?=.*(?:utwórz|stwórz|dodaj|zmień|zaktualizuj|usuń|skonfiguruj))(?=.*(?:firmę|firma|spółkę|agentów|agenta|agent|agenci))/iu,
-  /(?=.*(?:crie|criar|adicione|altere|atualize|exclua|configure))(?=.*(?:empresa|companhia|agentes?))/iu,
-  /(?=.*(?:maak|voeg|wijzig|werk bij|verwijder|configureer))(?=.*(?:bedrijf|onderneming|agenten?))/iu,
-  /(?=.*(?:oluştur|ekle|değiştir|güncelle|sil|yapılandır))(?=.*(?:şirket|firma|ajanlar?|ajanı))/iu,
-  /(?=.*(?:создай|создать|добавь|добавить|измени|обнови|удали|настрой))(?=.*(?:компани|агент))/iu,
-  /(?=.*(?:створи|створити|додай|додати|зміни|змінити|видали|видалити|налаштуй|налаштувати))(?=.*(?:компані|агент))/iu,
-  /(?=.*(?:创建|新建|添加|修改|更新|删除|配置))(?=.*(?:公司|企业|智能体|代理))/u,
-  /(?=.*(?:作成|追加|変更|更新|削除|設定))(?=.*(?:会社|企業|エージェント))/u,
-  /(?=.*(?:만들|생성|추가|수정|업데이트|삭제|설정))(?=.*(?:회사|기업|에이전트))/u,
-  /(?=.*(?:أنشئ|إنشاء|أضف|عدّل|حدّث|احذف|اضبط))(?=.*(?:شركة|مؤسسة|وكيل|وكلاء))/u,
-  /(?=.*(?:बनाएँ|बनाओ|बनाना|जोड़ें|बदलें|अपडेट|हटाएँ|कॉन्फ़िगर))(?=.*(?:कंपनी|व्यवसाय|एजेंट))/u,
+  /^(?=.*(?:crée|créer|ajoute|ajouter|modifie|modifier|supprime|supprimer|configure|configurer))(?=.*(?:entreprise|société|agents?))/miu,
+  /^(?=.*(?:erstelle|erstellen|füge|ändere|aktualisiere|lösche|konfiguriere))(?=.*(?:unternehmen|firma|agenten?))/miu,
+  /^(?=.*(?:crea|crear|añade|agrega|modifica|actualiza|elimina|configura))(?=.*(?:empresa|compañía|agentes?))/miu,
+  /^(?=.*(?:crea|creare|aggiungi|modifica|aggiorna|elimina|configura))(?=.*(?:azienda|società|agenti?))/miu,
+  /^(?=.*(?:utwórz|stwórz|dodaj|zmień|zaktualizuj|usuń|skonfiguruj))(?=.*(?:firmę|firma|spółkę|agentów|agenta|agent|agenci))/miu,
+  /^(?=.*(?:crie|criar|adicione|altere|atualize|exclua|configure))(?=.*(?:empresa|companhia|agentes?))/miu,
+  /^(?=.*(?:maak|voeg|wijzig|werk bij|verwijder|configureer))(?=.*(?:bedrijf|onderneming|agenten?))/miu,
+  /^(?=.*(?:oluştur|ekle|değiştir|güncelle|sil|yapılandır))(?=.*(?:şirket|firma|ajanlar?|ajanı))/miu,
+  /^(?=.*(?:создай|создать|добавь|добавить|измени|обнови|удали|настрой))(?=.*(?:компани|агент))/miu,
+  /^(?=.*(?:створи|створити|додай|додати|зміни|змінити|видали|видалити|налаштуй|налаштувати))(?=.*(?:компані|агент))/miu,
+  /^(?=.*(?:创建|新建|添加|修改|更新|删除|配置))(?=.*(?:公司|企业|智能体|代理))/mu,
+  /^(?=.*(?:作成|追加|変更|更新|削除|設定))(?=.*(?:会社|企業|エージェント))/mu,
+  /^(?=.*(?:만들|생성|추가|수정|업데이트|삭제|설정))(?=.*(?:회사|기업|에이전트))/mu,
+  /^(?=.*(?:أنشئ|إنشاء|أضف|عدّل|حدّث|احذف|اضبط))(?=.*(?:شركة|مؤسسة|وكيل|وكلاء))/mu,
+  /^(?=.*(?:बनाएँ|बनाओ|बनाना|जोड़ें|बदलें|अपडेट|हटाएँ|कॉन्फ़िगर))(?=.*(?:कंपनी|व्यवसाय|एजेंट))/mu,
 ];
 
 export function isLocalizedCompanyManagementRequest(message: string): boolean {

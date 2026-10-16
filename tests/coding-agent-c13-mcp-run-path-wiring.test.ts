@@ -57,7 +57,7 @@ function realApp() {
 describe("security-gate: C13 MCP run path wiring — one discovery system, reachable by a run", () => {
   it("hands the runner the same discovery object the Inspector route uses", () => {
     // The run path is constructed once — a second construction would be a second discovery system. (The call site is matched through its assignment so that the module's own declaration is not counted.)
-    const constructions = [...appOnly.matchAll(/createMcpRuntimeRunPath\(/g)];
+    const constructions = [...readApiSource("app-code-engine-wiring.ts").matchAll(/createMcpRuntimeRunPath\(/g)];
     expect(constructions).toHaveLength(1);
 
     // The runner receives it as its runtime provider port …
@@ -136,8 +136,8 @@ describe("security-gate: C13 MCP run path wiring — one discovery system, reach
       const runtime = combined.json().runtime as Record<string, unknown>;
       expect(runtime).toBeDefined();
       const discovery = runtime.discovery as Record<string, unknown>;
-      expect(discovery.publishedTools).toBe(0);
-      expect(Array.isArray(discovery.connections)).toBe(true);
+      // A fresh deployment has no configured integration source and must fail closed, visibly.
+      expect(discovery).toMatchObject({ error: { code: "mcp_integration_source_unavailable" } });
       expect((runtime.items as unknown[]).length).toBe(0);
       // The static numbers the combined view reports are the Inspector's own, untouched by the runtime source.
       const counts = runtime.counts as Record<string, number>;

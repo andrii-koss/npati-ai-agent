@@ -39,6 +39,29 @@ function ollamaPayload(model: string, content: string, chat: boolean) {
   };
 }
 
+export function createOllamaChatHandler(ai: AIEngine, auth: AuthProvider) {
+  return async (request: FastifyRequest<{ Body: { model?: string; messages?: OllamaMessage[]; stream?: boolean } }>, reply: FastifyReply) => {
+    try {
+      const scope = await authorize(auth, request);
+      const model = request.body.model?.trim();
+      const messages = Array.isArray(request.body.messages)
+        ? request.body.messages.filter((item) => item && ["system", "user", "assistant"].includes(item.role) && typeof item.content === "string")
+        : [];
+      if (!model || messages.length === 0) return reply.code(400).send({ error: "model and messages are required" });
+      const result = await ai.chat({ model, messages, admission: admissionFor(scope) });
+      const payload = ollamaPayload(result.model ?? model, result.content, true);
+      return request.body.stream === false ? payload : reply.type("application/x-ndjson").send(`${JSON.stringify(payload)}\n`);
+    } catch (error) { return ollamaError(reply, error); }
+  };
+}
+
+export function isOllamaChatPayload(body: unknown): boolean {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return false;
+  const value = body as Record<string, unknown>;
+  return !Object.hasOwn(value, "message") && typeof value.model === "string" && Array.isArray(value.messages)
+    && !["contextType", "companyId", "projectId", "businessId", "conversationId", "attachments", "onboardingAction", "streamId"].some(key => Object.hasOwn(value, key));
+}
+
 export function registerRuntimeCompatRoutes(app: FastifyInstance, ai: AIEngine, auth: AuthProvider) {
   app.get("/api/version", async (request, reply) => {
     try {
@@ -77,19 +100,7 @@ export function registerRuntimeCompatRoutes(app: FastifyInstance, ai: AIEngine, 
     } catch (error) { return ollamaError(reply, error); }
   });
 
-  app.post<{ Body: { model?: string; messages?: OllamaMessage[]; stream?: boolean } }>("/api/chat", async (request, reply) => {
-    try {
-      const scope = await authorize(auth, request);
-      const model = request.body.model?.trim();
-      const messages = Array.isArray(request.body.messages)
-        ? request.body.messages.filter((item) => item && ["system", "user", "assistant"].includes(item.role) && typeof item.content === "string")
-        : [];
-      if (!model || messages.length === 0) return reply.code(400).send({ error: "model and messages are required" });
-      const result = await ai.chat({ model, messages, admission: admissionFor(scope) });
-      const payload = ollamaPayload(result.model ?? model, result.content, true);
-      return request.body.stream === false ? payload : reply.type("application/x-ndjson").send(`${JSON.stringify(payload)}\n`);
-    } catch (error) { return ollamaError(reply, error); }
-  });
+  app.post("/api/chat", createOllamaChatHandler(ai, auth));
 
   app.post<{ Body: { input?: string; text?: string; model?: string; voice?: string; response_format?: SpeechAudioFormat; format?: SpeechAudioFormat; speed?: number } }>("/audio/speech", async (request, reply) => {
     try {

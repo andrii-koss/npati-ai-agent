@@ -70,8 +70,10 @@ describe("Production WebAssembly Exec sandbox", () => {
     expect(resumed.run.status).toBe("completed");
     expect(chat.mock.calls[0]?.[0].messages.at(-1)?.content).toContain("APPROVED_EXEC");
     expect(chat.mock.calls[0]?.[0].messages.at(-1)?.content).toContain('"codeMode":true');
-    const replay = await runtime.process(auth, company.id, first.run.id, { approvalId });
-    expect(replay.run.errorCode).toBe("APPROVAL_ALREADY_USED");
+    const callsBeforeReplay = chat.mock.calls.length;
+    await expect(runtime.process(auth, company.id, first.run.id, { approvalId })).rejects.toMatchObject({ code: "APPROVAL_INVALID", status: 409 });
+    expect(chat).toHaveBeenCalledTimes(callsBeforeReplay);
+    expect((await store.getCompanyAgentRun(auth, company.id, first.run.id)).run.status).toBe("completed");
   });
 
   it("blocks a host escape attempt before creating an approval", async () => {

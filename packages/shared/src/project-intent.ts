@@ -146,6 +146,13 @@ export function classifyProjectIntent(rawInput: ProjectIntentInput | string): Pr
   // steps later in a long specification must not turn it into work on an existing project.
   const opening = text.split(/\r?\n\s*\r?\n/u).slice(0, 2).join(" ")
     .replace(/[#*`]/gu, "").replace(/[,;:]/gu, " ").replace(/\s+/gu, " ").trim();
+  const openingLine = text.split(/\r?\n/u)[0]!.replace(/[#*`]/gu, "").trim();
+  // Company setup specifications can mention data models and testing in agent responsibilities.
+  // Those incidental steps must not turn the primary Company/Business request into a project mutation.
+  if (/^(?:create|make|build|створи(?:ти)?|зроби|crie|criar)(?:\s+[\p{L}\d_+-]+){0,6}\s+(?:company|business|компані\p{L}*|бізнес\p{L}*|empresa|companhia)(?!\s+(?:table|model|schema|form|page|endpoint)\b)(?=\s|[.,:;]|$)/iu.test(openingLine)
+    && !CREATE_PROJECT_REGEX.test(openingLine) && !CREATE_STORE_REGEX.test(openingLine)) {
+    return buildDecision({ intent: "CHAT", confidence: 0.95, isExecutableInStep5: false, needsClarification: false });
+  }
   const componentRequest = Boolean(input.activeProjectId) && /^(?:create|make|build|створи|зроби|додай)(?:\s+[\p{L}]+){0,2}\s+(?:form|menu|button|page|section|header|footer|component|форм\p{L}*|меню|кнопк\p{L}*|сторінк\p{L}*|секці\p{L}*|компонент\p{L}*)(?=\s|$)/iu.test(opening);
   if (/^(?:(?:завдання|task)\s+)?(?:створи(?:ти)?|зроби|розроби|згенеруй|create|build|make|generate)\s/iu.test(opening)
     && (CREATE_PROJECT_REGEX.test(opening) || CREATE_STORE_REGEX.test(opening))

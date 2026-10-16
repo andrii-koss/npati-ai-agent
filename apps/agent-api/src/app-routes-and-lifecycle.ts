@@ -1,3 +1,4 @@
+import { createOllamaChatHandler } from "./runtime-compat-routes";
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { WorkspaceStore, AuthContext } from "@npati/workspace";
 import type { AIEngine, OmniRouteMarketplace } from "@npati/omniroute-adapter";
@@ -268,6 +269,7 @@ export function registerAppRoutesAndLifecycle(deps: AppRoutesAndLifecycleDeps) {
 
   const resolveProjectIntent = createChatProjectIntentResolver({ engine: aiEngine, getAIContext, log });
   registerChatRoutes(app, {
+    ollamaChat: createOllamaChatHandler(aiEngine, authProvider),
     resolveProjectIntent,
     config,
     log,
