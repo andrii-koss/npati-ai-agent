@@ -1,5 +1,6 @@
 import React, { useContext, useEffect, useState } from "react";
 import { I18nContextRef } from "../i18n";
+import { getStoredAuthToken } from "../AuthContext";
 
 /**
  * C14 (owner decision 3): the coding-agent metrics panel.
@@ -112,7 +113,10 @@ export function CodeMetricsPanel({ companyId, fetcher, report: supplied, t: supp
       setLoading(false);
       return;
     }
-    void send(`/api/companies/${encodeURIComponent(companyId)}/code/metrics`, { headers: { accept: "application/json" } })
+    const token = getStoredAuthToken();
+    const headers: Record<string, string> = { accept: "application/json" };
+    if (token) headers.authorization = `Bearer ${token}`;
+    void send(`/api/companies/${encodeURIComponent(companyId)}/code/metrics`, { headers })
       .then(async (response) => {
         const payload = (await response.json()) as MetricsEnvelope;
         if (!active) return;

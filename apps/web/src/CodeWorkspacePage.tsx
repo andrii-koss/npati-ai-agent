@@ -79,7 +79,7 @@ function CodeWorkspaceContent() {
 
   const [tab, setTab] = useState<BottomTab>("changes");
   const [mobileView, setMobileView] = useState<MobileView>("all");
-  const [activeTab, setActiveTab] = useState<"workspace" | "files" | "changes" | "metrics" | "all">("workspace");
+  const [activeTab, setActiveTab] = useState<"all" | "workspace" | "files" | "changes" | "metrics">("all");
 
   const [changes, setChanges] = useState<ChangesResponse | null>(null);
   const [changesError, setChangesError] = useState<string | null>(null);
@@ -739,6 +739,16 @@ function CodeWorkspaceContent() {
           <button
             type="button"
             role="tab"
+            aria-selected={activeTab === "all"}
+            className={`inspector-tab ${activeTab === "all" ? "active" : ""}`}
+            onClick={() => setActiveTab("all")}
+          >
+            <span>{isUk ? "Усі панелі" : "All panels"}</span>
+          </button>
+
+          <button
+            type="button"
+            role="tab"
             aria-selected={activeTab === "workspace"}
             className={`inspector-tab ${activeTab === "workspace" ? "active" : ""}`}
             onClick={() => setActiveTab("workspace")}
@@ -777,16 +787,6 @@ function CodeWorkspaceContent() {
             onClick={() => setActiveTab("metrics")}
           >
             <span>{isUk ? "Метрики" : "Metrics"}</span>
-          </button>
-
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "all"}
-            className={`inspector-tab ${activeTab === "all" ? "active" : ""}`}
-            onClick={() => setActiveTab("all")}
-          >
-            <span>{isUk ? "Усі панелі" : "All panels"}</span>
           </button>
         </div>
       </div>
@@ -1034,13 +1034,31 @@ function CodeWorkspaceContent() {
               <span className="file-count">{tree.length}</span>
             </div>
 
-            <div className="file-search-form">
-              <input
-                className="file-search-input"
-                placeholder={isUk ? "🔍 Фільтр файлів..." : "🔍 Filter files..."}
-                value={fileFilter}
-                onChange={(e) => setFileFilter(e.target.value)}
-              />
+            <div className="file-search-form" style={{ padding: "8px 12px" }}>
+              <div className="inspector-search-box" style={{ width: "100%", height: "36px", padding: "0 10px" }}>
+                <span className="search-icon" aria-hidden="true" style={{ color: "#e11d2e", fontSize: "18px", lineHeight: 1, marginRight: "6px" }}>⌕</span>
+                <input
+                  type="text"
+                  role="searchbox"
+                  className="inspector-search-input"
+                  placeholder={isUk ? "Фільтр файлів..." : "Filter files..."}
+                  value={fileFilter}
+                  onChange={(e) => setFileFilter(e.target.value)}
+                  style={{ fontSize: "13px" }}
+                  aria-label={isUk ? "Фільтр файлів" : "Filter files"}
+                />
+                {fileFilter && (
+                  <button
+                    type="button"
+                    className="search-clear-btn"
+                    onClick={() => setFileFilter("")}
+                    aria-label={isUk ? "Очистити" : "Clear"}
+                    style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8" }}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="file-tree-container" style={{ maxHeight: 480 }}>
