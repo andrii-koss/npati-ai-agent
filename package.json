@@ -4,7 +4,10 @@
   "private": true,
   "description": "Open Source AI Business Agent",
   "type": "module",
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "catalog:generate": "node scripts/generate-omniroute-provider-catalog.mjs",
     "dev:web": "npm run dev --workspace @npati/web",
@@ -37,6 +40,12 @@
     "revalidate:306": "node scripts/revalidate-306-capabilities.mjs",
     "docker:config": "docker compose config --quiet"
   },
-  "engines": { "node": ">=22.22.2 <23 || >=24.0.0 <27" },
-  "devDependencies": { "typescript": "^5.9.2", "vitest": "^3.2.4" }
+  "engines": {
+    "node": ">=22.22.2 <23 || >=24.0.0 <27"
+  },
+  "devDependencies": {
+    "playwright": "^1.64.1",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
 }

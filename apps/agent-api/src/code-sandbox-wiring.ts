@@ -63,6 +63,24 @@ export function createCodeSandboxWiring(deps: CreateCodeSandboxWiringDeps) {
       const shaped = result as { stdout?: string; output?: string; exitCode?: number };
       return { stdout: shaped?.stdout ?? shaped?.output ?? "", exitCode: shaped?.exitCode };
     },
+    search: async (
+      ctx: AuthContext,
+      companyId: string,
+      request: {
+        projectId: string;
+        query: string;
+        path?: string;
+        maxResults?: number;
+        timeoutMs?: number;
+        glob?: string;
+        type?: string;
+        ignoreCase?: boolean;
+        fixedStrings?: boolean;
+        contextLines?: number;
+      },
+    ) => {
+      return projectSandbox!.search(ctx, companyId, request);
+    },
   } : undefined;
 
   const secretLeases = new SecretLeaseProvider({

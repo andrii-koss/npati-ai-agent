@@ -18,7 +18,7 @@ import { activitySinkForKind, createCodeRunActivitySink } from "./code-run-activ
 import { SecretLeaseProvider } from "./code-secret-lease";
 import { CodeShellRuntime } from "./code-shell-runtime";
 import { CodeVerifyRunnerPort } from "./code-tool-executors";
-import { CodeToolError } from "./code-tool-runtime";
+import { CodeToolError, type SandboxExecPort } from "./code-tool-runtime";
 import { detectVerifyTool, parseVerifyOutput } from "./code-verify-parser";
 import { FeatureFlagService } from "./feature-flags";
 import { mcpApprovalRunIdOf } from "./mcp-approval";
@@ -39,7 +39,7 @@ export interface CreateCodePortsWiringDeps {
   codeDataRetention: CodeDataRetention;
   codeProcessManager: CodeProcessManager;
   codeProjectTrust: CodeProjectTrustService;
-  codeSandboxExecPort: { execute: (ctx: AuthContext, companyId: string, request: { projectId: string; command: string; cwd?: string | undefined; timeoutMs?: number | undefined }) => Promise<{ stdout: string; exitCode: number | undefined }> } | undefined;
+  codeSandboxExecPort: SandboxExecPort | undefined;
   codeShellRuntime: CodeShellRuntime;
   codeUserQuestionReaperPort: ReturnType<typeof createCodeUserQuestionReaperPort> | null;
   featureFlagService: FeatureFlagService;

@@ -88,9 +88,11 @@ function positive(value: unknown, fallback: number): number {
 /** Reads the budget from the environment, clamping every value. */
 export function resolveCodeRunBudget(env: NodeJS.ProcessEnv = process.env): CodeRunBudgetLimits {
   // Total tokens include the input context on every tool round trip. A website
-  // build needs more than the legacy 100k allowance; retain explicit operator caps.
+  // build needs more than the legacy 100k allowance, and multi-turn continuations
+  // in the same conversation require budget across both turns. Align self_hosted/local
+  // default with the daily user allowance (2M tokens).
   const defaultTokens = env.NPATI_DEPLOYMENT_TYPE === "self_hosted" || env.NPATI_SANDBOX_RUNNER_MODE === "local"
-    ? 500_000 : DEFAULT_CODE_RUN_BUDGET.maxTokens;
+    ? 2_000_000 : DEFAULT_CODE_RUN_BUDGET.maxTokens;
   return {
     maxTokens: Math.min(positive(env.NPATI_CODE_RUN_MAX_TOKENS, defaultTokens), CODE_RUN_BUDGET_MAX_TOKENS),
     maxCostUsd: Math.min(positive(env.NPATI_CODE_RUN_MAX_COST_USD, DEFAULT_CODE_RUN_BUDGET.maxCostUsd), CODE_RUN_BUDGET_MAX_COST_USD),

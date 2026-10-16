@@ -79,13 +79,18 @@ export function applyUnifiedDiffToFile(path: string, before: string, patch: stri
   let current: { start: number; removed: string[]; added: string[] } | null = null;
   for (const line of patch.split("\n")) {
     const header = /^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@/.exec(line);
+    const bareHeader = !header && /^@@(?:.*@@)?\s*$/.test(line.trim());
     if (header) {
       current = { start: Math.max(0, Number.parseInt(header[1] ?? "1", 10) - 1), removed: [], added: [] };
       hunks.push(current);
       continue;
+    } else if (bareHeader) {
+      current = { start: -1, removed: [], added: [] };
+      hunks.push(current);
+      continue;
     }
     if (!current) continue;
-    if (line.startsWith("+++") || line.startsWith("---")) continue;
+    if (line.startsWith("+++") || line.startsWith("---") || line.startsWith("***")) continue;
     if (line.startsWith("-")) current.removed.push(line.slice(1));
     else if (line.startsWith("+")) current.added.push(line.slice(1));
     else if (line.startsWith(" ")) { current.removed.push(line.slice(1)); current.added.push(line.slice(1)); }
@@ -94,6 +99,32 @@ export function applyUnifiedDiffToFile(path: string, before: string, patch: stri
     throw new CodeToolError("invalid_arguments", `Patch for ${path} contains no hunks`, 400, "validate_arguments", false, "code.fs.apply_patch");
   }
   let result = [...lines];
+  // Resolve start indices for hunks without line numbers by content matching
+  for (const hunk of hunks) {
+    if (hunk.start === -1) {
+      if (hunk.removed.length > 0) {
+        for (let i = 0; i <= result.length - hunk.removed.length; i++) {
+          let match = true;
+          for (let j = 0; j < hunk.removed.length; j++) {
+            if (result[i + j] !== hunk.removed[j]) {
+              match = false;
+              break;
+            }
+          }
+          if (match) {
+            hunk.start = i;
+            break;
+          }
+        }
+      } else {
+        hunk.start = result.length;
+      }
+      if (hunk.start === -1) {
+        throw new CodeToolError("patch_conflict", `Patch for ${path} does not match the current content`, 409, "execute", false, "code.fs.apply_patch", { path });
+      }
+    }
+  }
+
   // Apply from the bottom so earlier line numbers stay valid.
   for (const hunk of [...hunks].sort((a, b) => b.start - a.start)) {
     const existing = result.slice(hunk.start, hunk.start + hunk.removed.length);

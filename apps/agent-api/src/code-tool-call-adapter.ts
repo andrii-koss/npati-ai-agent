@@ -73,7 +73,7 @@ export interface NormalizeToolCallsInput {
    * Canonical JSON-schema validator (`validateArguments` in `code-tool-runtime`). Required for text-mode
    * calls: without it a prose-parsed call is refused rather than executed unvalidated.
    */
-  validate?: (schema: Record<string, unknown>, args: unknown) => Record<string, unknown>;
+  validate?: (schema: Record<string, unknown>, args: unknown, toolName?: string) => Record<string, unknown>;
 }
 
 export interface NormalizedToolCall {
@@ -132,20 +132,52 @@ function truncateFragment(value: string, limit = 512): string {
   return text.length > limit ? `${text.slice(0, limit)}…` : text;
 }
 
-function toolSchemaFor(knownTools: readonly KnownTool[], name: string): Record<string, unknown> | undefined {
-  const wanted = name.trim().toLowerCase();
+export function resolveKnownTool(
+  knownTools: readonly KnownTool[],
+  candidateName: string,
+): { name: string; schema: Record<string, unknown> } | undefined {
+  const wanted = candidateName.trim().toLowerCase();
+  // 1. Direct match
   for (const tool of knownTools) {
-    if (typeof tool === "string") {
-      if (tool.trim().toLowerCase() === wanted) return {};
-      continue;
+    const tName = typeof tool === "string" ? tool : tool.name;
+    if (tName.trim().toLowerCase() === wanted) {
+      return { name: tName, schema: typeof tool === "string" ? {} : tool.inputSchema };
     }
-    if (tool.name.trim().toLowerCase() === wanted) return tool.inputSchema;
+  }
+  // 2. Normalized match (strip hex suffixes, npati prefixes, and handle underscore/missing fs)
+  let cleaned = wanted
+    .replace(/_[0-9a-f]{7,32}$/i, "")
+    .replace(/^npati[._]/i, "")
+    .replace(/_/g, ".");
+
+  const shorthands: Record<string, string> = {
+    "code.write": "code.fs.write",
+    "code.edit": "code.fs.edit",
+    "code.read": "code.fs.read",
+    "code.tree": "code.fs.tree",
+    "code.list": "code.fs.list",
+    "code.grep": "code.fs.grep",
+  };
+  if (shorthands[cleaned]) {
+    cleaned = shorthands[cleaned];
+  }
+
+  for (const tool of knownTools) {
+    const tName = typeof tool === "string" ? tool : tool.name;
+    const tNormalized = tName.trim().toLowerCase().replace(/_/g, ".");
+    if (tNormalized === cleaned) {
+      return { name: tName, schema: typeof tool === "string" ? {} : tool.inputSchema };
+    }
   }
   return undefined;
 }
 
+function toolSchemaFor(knownTools: readonly KnownTool[], name: string): Record<string, unknown> | undefined {
+  return resolveKnownTool(knownTools, name)?.schema;
+}
+
 function isKnownTool(knownTools: readonly KnownTool[], name: string): boolean {
-  return toolSchemaFor(knownTools, name) !== undefined;
+  return resolveKnownTool(knownTools, name) !== undefined;
 }
 
 /**
@@ -359,9 +391,9 @@ export function normalizeToolCalls(input: NormalizeToolCallsInput): NormalizeToo
   if (mode === "native") {
     for (const raw of nativeRaw) {
       const fn = raw.function && typeof raw.function === "object" && !Array.isArray(raw.function) ? raw.function : undefined;
-      const name = stringField(fn?.name) ?? stringField(raw.name) ?? stringField(raw.tool);
+      const rawName = stringField(fn?.name) ?? stringField(raw.name) ?? stringField(raw.tool);
       const id = stringField(raw.id);
-      if (!name) {
+      if (!rawName) {
         rejected.push(
           rejection("malformed_native_tool_call", "Tool call has no function name and was not executed", "native", {
             id,
@@ -370,16 +402,18 @@ export function normalizeToolCalls(input: NormalizeToolCallsInput): NormalizeToo
         );
         continue;
       }
-      if (!isKnownTool(input.knownTools, name)) {
+      const resolved = resolveKnownTool(input.knownTools, rawName);
+      if (!resolved) {
         rejected.push(
-          rejection("unknown_tool", `Unknown tool: ${name}`, "native", {
-            name,
+          rejection("unknown_tool", `Unknown tool: ${rawName}`, "native", {
+            name: rawName,
             id,
             rawFragment: truncateFragment(JSON.stringify(raw)),
           }),
         );
         continue;
       }
+      const name = resolved.name;
       const read = readNativeArguments(fn?.arguments ?? raw.arguments, name, id ?? name);
       if (read.rejection) {
         rejected.push(read.rejection);
@@ -405,10 +439,10 @@ export function normalizeToolCalls(input: NormalizeToolCallsInput): NormalizeToo
         warnings.push(`partial_arguments:${name}`);
         continue;
       }
-      const args = read.args ?? {};
+      let args = read.args ?? {};
       if (input.validate) {
         try {
-          input.validate(toolSchemaFor(input.knownTools, name) ?? {}, args);
+          args = input.validate(toolSchemaFor(input.knownTools, name) ?? {}, args, name);
         } catch (error) {
           rejected.push(
             rejection("invalid_tool_arguments", (error as Error).message, "native", {
@@ -442,8 +476,8 @@ export function normalizeToolCalls(input: NormalizeToolCallsInput): NormalizeToo
       );
     }
     for (const candidate of candidates) {
-      const name = readTextCallName(candidate);
-      if (!name) {
+      const rawName = readTextCallName(candidate);
+      if (!rawName) {
         rejected.push(
           rejection("invalid_text_tool_call", "Text tool call has no tool name and was not executed", "text", {
             rawFragment: truncateFragment(JSON.stringify(candidate)),
@@ -451,15 +485,17 @@ export function normalizeToolCalls(input: NormalizeToolCallsInput): NormalizeToo
         );
         continue;
       }
-      if (!isKnownTool(input.knownTools, name)) {
+      const resolved = resolveKnownTool(input.knownTools, rawName);
+      if (!resolved) {
         rejected.push(
-          rejection("unknown_tool", `Unknown tool: ${name}`, "text", {
-            name,
+          rejection("unknown_tool", `Unknown tool: ${rawName}`, "text", {
+            name: rawName,
             rawFragment: truncateFragment(JSON.stringify(candidate)),
           }),
         );
         continue;
       }
+      const name = resolved.name;
       if (!input.validate) {
         // Text tool calls come from model prose, so schema validation is mandatory: without the canonical
         // validator nothing is executed rather than executed unchecked.
@@ -514,7 +550,7 @@ export function normalizeToolCalls(input: NormalizeToolCallsInput): NormalizeToo
         continue;
       }
       try {
-        input.validate(toolSchemaFor(input.knownTools, name) ?? {}, args);
+        args = input.validate(toolSchemaFor(input.knownTools, name) ?? {}, args, name);
       } catch (error) {
         rejected.push(
           rejection("invalid_tool_arguments", (error as Error).message, "text", {

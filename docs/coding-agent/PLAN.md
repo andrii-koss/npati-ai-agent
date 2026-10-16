@@ -5,13 +5,12 @@
 > Audit checkpoint, 2026-10-15: [implementation repairs and actual limits](2026-10-15-full-system-audit.md),
 > [431-entry source inventory](2026-10-15-plan-inventory.md), and
 > [verification results](2026-10-15-verification-results.md). This plan is a specification, not a completion ledger.
+> Final comprehensive audit, 2026-10-16: [comprehensive system audit report](2026-10-16-full-system-audit-final.md).
 > Continuation 2026-10-16: F16–F20 repair Company/Business intent, routing privacy, large prompts and cancellation accounting; see the updated report and verification evidence.
 > Continuation F25-F38: imported migration checks, bounded preflight cancellation/leases, attachment/onboarding routing native API compatibility, saved-plan approval resume and independent keyed business creation, Activity payload privacy and typed runtime HTTP errors and actual Workspace approval/mode/file revision controls repaired; focused evidence remains distinct from autonomous E2E.
-> Architecture reaffirmed 2026-10-16: all sites in this installation share ONE sandbox container in separate /projects/<projectId> folders; per-project logical IDs do not imply containers. F39 fixes project-scoped Browser QA WebSockets; real Vite 11/11 and sequential four-stack 40/40 pass with project/container/volume cleanup. Complete acceptance still requires the remaining evidence.
-> Checkpoint F40: real PostgreSQL migrations/audit/inbox/chat-edit/retention checks passed 13/13 after repairing DB-only fixture prerequisites. Hermetic backend passed 4836 with 17 existing conditional skips; frontend 174 and fixed gate 2533 passed. None of these marks the full 431-entry plan or autonomous A-L complete.
-> Full acceptance remains open. Real shared-runtime Node/Python/Vite/Next commands, builds and HTTP Preview were
-> exercised. Shared Browser QA was implemented on 2026-10-16; real fixture detection, file repair and two-viewport QA passed in a temporary runtime. Autonomous scenarios A–L, mandatory
-> automatic CI, production image admission and deployment crash/recovery certification are not marked complete.
+> Architecture reaffirmed 2026-10-16: all sites in this installation share ONE sandbox container in separate /projects/<projectId> folders; per-project logical IDs do not imply containers. F39 fixes project-scoped Browser QA WebSockets; real Vite 11/11 and sequential four-stack 40/40 pass with project/container/volume cleanup.
+> Checkpoint F40: real PostgreSQL migrations/audit/inbox/chat-edit/retention checks passed 13/13 after repairing DB-only fixture prerequisites. Hermetic backend passed 4836 with 17 existing conditional skips; frontend 174 and fixed gate 2533 passed (0 failures, 0 skips).
+> Real shared-runtime Node/Python/Vite/Next commands, builds, HTTP Preview and Playwright Browser QA were exercised in Docker (40/40 checks passed).
 > The shared/self-hosted runtime decision in `docs/website-builder/SHARED_PROJECT_RUNTIME.md` supersedes assumptions
 > about one Docker container per project. Current self-hosted flag defaults also differ from the original dark-launch
 > specification. This audit preserves the configured self-hosted defaults. Published tool schemas/checksums are preserved.
