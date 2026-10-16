@@ -121,6 +121,29 @@ describe("security-gate: C6b activity payloads are metadata only", () => {
     });
   }
 
+  it("rejects content beyond the former array and nesting inspection limits before storage or logging", async () => {
+    const { store, sink, log } = makeSink();
+    const items: Record<string, unknown>[] = Array.from({ length: 101 }, () => ({ ok: true }));
+    items.push({ prompt: "Private user instruction" });
+    let nested: Record<string, unknown> = { stdout: "Private terminal output" };
+    for (let index = 0; index < 10; index++) nested = { nested };
+    for (const payload of [{ items }, nested]) {
+      await expect(sink.record({ kind: "run_activity", companyId: COMPANY }, payload)).rejects.toBeInstanceOf(ActivityContentRejectedError);
+    }
+    expect(await store.listCodeActivityEvents({ companyId: COMPANY })).toEqual([]);
+    expect(log).not.toHaveBeenCalled();
+    expect(() => assertMetadataOnlyActivityPayload({ paths: Array.from({ length: 150 }, (_, index) => `src/file-${index}.ts`) })).not.toThrow();
+  });
+
+  it("fails closed on excessive complexity and cycles instead of accepting uninspected fields", () => {
+    let nested: Record<string, unknown> = { ok: true };
+    for (let index = 0; index < 40; index++) nested = { nested };
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    expect(() => assertMetadataOnlyActivityPayload(nested)).toThrow(ActivityContentRejectedError);
+    expect(() => assertMetadataOnlyActivityPayload(cyclic)).toThrow(ActivityContentRejectedError);
+    expect(() => assertMetadataOnlyActivityPayload({ items: Array(10_001).fill(null) })).toThrow(ActivityContentRejectedError);
+  });
   it("rejects a secret hidden in an innocuous key", async () => {
     const { store, sink } = makeSink();
     await expect(

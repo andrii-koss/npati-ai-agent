@@ -82,3 +82,46 @@ describe("security-gate: shared Browser QA", () => {
     expect(server).toContain('case "inspectBrowser": result = await provider.inspectBrowser(scope, id,');
   });
 });
+
+describe("Browser QA WebSocket destination isolation", () => {
+  it("executes the runner and admits only the current project's WebSocket origin", async () => {
+    const source = readFileSync(new URL("../apps/agent-api/browser-qa-runner.mjs", import.meta.url), "utf8")
+      .replace('import { chromium } from "playwright";', "");
+    let handler: ((socket: { url(): string; connectToServer(): void; close(): void }) => void) | undefined;
+    const page = {
+      routeWebSocket: vi.fn(async (_pattern: string, callback: typeof handler) => { handler = callback; }),
+      on: vi.fn(),
+      goto: vi.fn(async () => { throw new Error("Stop after route installation"); }),
+    };
+    const context = { route: vi.fn(), newPage: vi.fn(async () => page) };
+    const close = vi.fn();
+    const chromium = { launch: vi.fn(async () => ({ newContext: vi.fn(async () => context), close })) };
+    const input = JSON.stringify({ ...options, host: "10.0.2.2" });
+    const output = vi.fn();
+    const processMock = {
+      argv: ["node", "runner", "--shared-runtime"], env: {},
+      stdin: (async function* () { yield Buffer.from(input); })(),
+      stdout: { write: output }, exitCode: 0,
+    };
+    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+    await new AsyncFunction("chromium", "process", source)(chromium, processMock);
+    expect(handler).toBeTypeOf("function");
+    for (const [url, allowed] of [
+      ["ws://10.0.2.2:3002/?token=fixture", true],
+      ["ws://10.0.2.2:3003/", false],
+      ["ws://10.0.2.2/", false],
+      ["wss://10.0.2.2:3002/", false],
+      ["ws://other-project:3002/", false],
+      ["ws://user:secret@10.0.2.2:3002/", false],
+      ["ws://10.0.2.2.evil.example:3002/", false],
+      ["invalid", false],
+    ] as const) {
+      const socket = { url: () => url, connectToServer: vi.fn(), close: vi.fn() };
+      handler!(socket);
+      expect(socket.connectToServer).toHaveBeenCalledTimes(allowed ? 1 : 0);
+      expect(socket.close).toHaveBeenCalledTimes(allowed ? 0 : 1);
+    }
+    expect(close).toHaveBeenCalledOnce();
+    expect(output).toHaveBeenCalledWith(JSON.stringify({ error: "browser_qa_failed", stage: "navigation" }));
+  });
+});

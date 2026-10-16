@@ -1,3 +1,4 @@
+import { canonicalSessionMode } from "./code-workspace/actions";
 import { getStoredAuthToken } from "./AuthContext";
 
 export type FileEntry = {
@@ -157,4 +158,11 @@ export function eventFacts(event: RunEvent): Array<[string, string]> {
     if (facts.length >= 12) break;
   }
   return facts;
+}
+
+/** Translate the stored API mode to the existing browser control vocabulary. */
+export function normalizeWorkspaceMode(value: string): SessionMode {
+  const resolved = canonicalSessionMode(value);
+  if (resolved) return resolved;
+  throw new Error("Unsupported session mode");
 }

@@ -294,6 +294,7 @@ describe("Manual Product E2E: Full Web User Flow", () => {
     // -------------------------------------------------------------
     // 10. Run Execution & Run Trace Inspection
     // -------------------------------------------------------------
+    await store.setUserSetting(authContext, "ai.preferences", { addedModels: [{ id: "test/chat", upstreamId: "chat", providerId: "test", providerName: "Test", name: "Test Chat", capabilities: ["chat"], added: true, local: false, freeStatus: "free" }], routing: { mode: "manual", defaultModelId: "test/chat" } }, 0);
     const runRes = await app.inject({
       method: "POST",
       url: `/companies/${company.id}/runs`,
@@ -309,7 +310,7 @@ describe("Manual Product E2E: Full Web User Flow", () => {
     expect([200, 201, 202]).toContain(runRes.statusCode);
     const runBody = runRes.json();
     expect(runBody.run.id).toBeDefined();
-    expect(["completed", "queued", "running"]).toContain(runBody.run.status);
+    expect(["completed", "queued", "running"], JSON.stringify(runBody.run)).toContain(runBody.run.status);
 
     // Inspect capabilities & run via Inspector endpoint
     const inspectRes = await app.inject({

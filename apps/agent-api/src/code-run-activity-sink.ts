@@ -67,21 +67,22 @@ export class ActivitySecretRejectedError extends Error {
  * a list of changed files is exactly the shape a caller is most likely to pass by accident.
  */
 export function assertMetadataOnlyActivityPayload(payload: unknown, depth = 0, trail: string[] = []): void {
-  if (payload === null || payload === undefined) return;
-  if (depth > 6) return;
-  if (Array.isArray(payload)) {
-    payload.slice(0, 100).forEach((item, index) => assertMetadataOnlyActivityPayload(item, depth + 1, [...trail, String(index)]));
-    return;
-  }
-  if (typeof payload !== "object") return;
-  for (const [key, value] of Object.entries(payload as Record<string, unknown>)) {
-    if (FORBIDDEN_SET.has(key.toLowerCase())) {
-      throw new ActivityContentRejectedError([...trail, key].join("."));
+  let visited = 0;
+  const ancestors = new WeakSet<object>();
+  const walk = (value: unknown, level: number, path: string[]): void => {
+    if (++visited > 10_000 || level > 32) throw new ActivityContentRejectedError("payload_complexity_limit");
+    if (value === null || typeof value !== "object") return;
+    if (ancestors.has(value)) throw new ActivityContentRejectedError("payload_cycle");
+    if (Array.isArray(value) && value.length > 10_000) throw new ActivityContentRejectedError("payload_complexity_limit");
+    ancestors.add(value);
+    for (const [key, child] of Object.entries(value)) {
+      if (FORBIDDEN_SET.has(key.toLowerCase())) throw new ActivityContentRejectedError([...path, key].join("."));
+      walk(child, level + 1, [...path, key]);
     }
-    assertMetadataOnlyActivityPayload(value, depth + 1, [...trail, key]);
-  }
+    ancestors.delete(value);
+  };
+  walk(payload, depth, trail);
 }
-
 /** Rejects secrets by value; returns nothing because a finding is never "redacted into" the payload. */
 export function assertNoSecretsInActivityPayload(payload: unknown): void {
   const serialised = JSON.stringify(payload ?? {});

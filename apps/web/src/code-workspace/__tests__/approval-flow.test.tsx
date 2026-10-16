@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import React from "react";
 import { ApprovalCard } from "../ApprovalCard";
-import { approvalDecisionPayload, approvalDecisionPlan, approvalScopeLabel } from "../actions";
+import { approvalDecisionPayload, approvalDecisionPlan, approvalScopeLabel, persistedSessionMode } from "../actions";
 import type { ApprovalCardData } from "../types";
 
 /**
@@ -27,6 +27,10 @@ const card: ApprovalCardData = {
 };
 
 describe("[C7-web] [security-gate] approval card and decision mapping", () => {
+  it("preserves the creation API spellings for every visible permission mode", () => {
+    expect(["plan", "ask", "auto_edit", "full_auto_sandbox"].map(mode => persistedSessionMode(mode as never))).toEqual(["plan", "edit", "auto", "full_auto"]);
+  });
+
   it("offers exactly the four scopes with their labels", () => {
     const markup = renderToStaticMarkup(React.createElement(ApprovalCard, { data: card, onDecision: () => {} }));
     for (const scope of ["once", "session", "project", "deny"]) {

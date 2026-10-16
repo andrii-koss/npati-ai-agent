@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 
 import { BusinessActionHandler } from "./business-action-handler";
 import { summarizeBusinessProfileChat } from "./business-profile-response";
@@ -386,13 +387,19 @@ export function createChatTurn(deps: ChatTurnDeps) {
     let nativeCompanyPrimary = false;
     let nativeBusinessMessage = "";
     let nativeBusinessAction: { action: "create" | "update"; business: import("@npati/workspace").Business; businessId: string } | undefined;
-    const businessCreateRequestKey = crypto.randomUUID();
+    let businessCreateRequestKey: string = crypto.randomUUID();
     if (nativeToolCalling) {
       try {
         const tools = availableCoreChatTools(auth);
         const plan = await planStructuredChatRequest(aiEngine, chatRequest, safeUserRequest);
         const routing = coreChatRoutingDecision(safeUserRequest, tools, hasAttachedEvidence);
         const businessPrimary = plan?.primary_action === "create_business_profile";
+        if (businessPrimary) {
+          // Retrying the same structured setup must retain its durable creation identity.
+          const identity = [auth.workspaceId, auth.userId, message.trim().replace(/\r\n/g, "\n"),
+            media.decoded.map(item => [item.name, item.mimeType, createHash("sha256").update(item.data).digest("hex")])];
+          businessCreateRequestKey = "chat-business:" + createHash("sha256").update(JSON.stringify(identity)).digest("hex");
+        }
         const companyPrimary = plan?.primary_action === "create_company";
         nativeCompanyPrimary = companyPrimary;
         const needsResearch = plan?.requires_external_research === true;

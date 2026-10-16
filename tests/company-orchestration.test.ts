@@ -44,6 +44,7 @@ async function setup(ai: AIEngine, active: { value: AuthContext }, companyRunTim
     headers: { "idempotency-key": `comp-${Date.now()}-${Math.random()}` },
     payload: { name: "Orchestration Co" },
   });
+  await store.setUserSetting(active.value, "ai.preferences", { addedModels: [{ id: "test/chat", upstreamId: "chat", providerId: "test", providerName: "Test", name: "Test Chat", capabilities: ["chat"], added: true, local: false, freeStatus: "free" }], routing: { mode: "manual", defaultModelId: "test/chat" } }, 0);
   return { app, store, companyId: (company.json() as { id: string }).id };
 }
 
@@ -86,11 +87,13 @@ describe("PHASE 5: Company Main Agent + Specialist Agent Orchestration", () => {
     expect(resRes.statusCode).toBe(201);
     const researcherId = resRes.json().id;
 
-    await app.inject({
+    const mainAgentResponse = await app.inject({
       method: "PUT",
       url: `/companies/${companyId}/main-agent`,
       payload: { agentId: managerId, expectedRevision: 1 },
     });
+
+    expect(mainAgentResponse.statusCode, mainAgentResponse.body).toBe(200);
 
     plan = JSON.stringify({
       mode: "single",
@@ -109,7 +112,7 @@ describe("PHASE 5: Company Main Agent + Specialist Agent Orchestration", () => {
     const runId = res.json().run.id;
 
     const details = await app.inject({ method: "GET", url: `/companies/${companyId}/runs/${runId}` });
-    expect(details.json().run.status).toBe("completed");
+    expect(details.json().run.status, JSON.stringify(details.json().run)).toBe("completed");
     expect(executeTool).toHaveBeenCalledWith("web.search", { query: "AI statistics" });
     expect(details.json().steps).toHaveLength(2); // Main + Specialist
   });
@@ -341,11 +344,13 @@ describe("PHASE 5: Company Main Agent + Specialist Agent Orchestration", () => {
     });
     const managerId = mgrRes.json().id;
 
-    await app.inject({
+    const mainAgentResponse = await app.inject({
       method: "PUT",
       url: `/companies/${companyId}/main-agent`,
       payload: { agentId: managerId, expectedRevision: 1 },
     });
+
+    expect(mainAgentResponse.statusCode, mainAgentResponse.body).toBe(200);
 
     const request = {
       method: "POST" as const,

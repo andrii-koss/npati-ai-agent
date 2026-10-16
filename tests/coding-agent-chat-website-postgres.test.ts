@@ -24,6 +24,10 @@ describe.skipIf(!databaseUrl || process.env.NPATI_SECURITY_GATE_DB !== "1")("web
     let nextInstalled = false;
     const childCalls = new Map<string, number>();
     const engine: AIEngine = { chat: async request => {
+      // Intent classification shares this engine but must not consume scripted coding tool steps.
+      if (String(request.messages[0]?.content ?? "").startsWith("Classify the user\u0027s primary intent")) {
+        return { content: "Website updated." };
+      }
       const task = request.messages.filter(message => message.role === "user").map(message => message.content ?? "").join("\n").match(/shared-runtime-child-[AB]/)?.[0];
       if (task) {
         const turns = childCalls.get(task) ?? 0; childCalls.set(task, turns + 1);
@@ -54,6 +58,10 @@ describe.skipIf(!databaseUrl || process.env.NPATI_SECURITY_GATE_DB !== "1")("web
     await runWithCleanup(async () => {
       await admin.query(`CREATE DATABASE "${name}"`); await store.initialize(ctx);
       const company = await store.createCompany(ctx, { name: "Audited shop" }, "audited-chat-company");
+      // The DB-only fixture has no tracked-process provider or completion collector.
+      // The separate live variant exercises the collect barrier with its real runtime prerequisites.
+      if (!liveSandbox) await store.setFeatureFlag(ctx, { scope: "company", scopeId: company.id,
+        flagKey: "code.async_collect_barrier", stage: "internal", enabled: false });
       if (liveSandbox) for (const flagKey of ["code.subagents", "code.async_inbox", "code.async_processes", "code.async_subagents"]) {
         await store.setFeatureFlag(ctx, { scope: "company", scopeId: company.id, flagKey, stage: "internal", enabled: true });
       }
@@ -62,6 +70,7 @@ describe.skipIf(!databaseUrl || process.env.NPATI_SECURITY_GATE_DB !== "1")("web
       expect(first.statusCode, first.body).toBe(200);
       const created = finalResult(first.body);
       expect(created, first.body).toMatchObject({ routed: "code_runner", projectCard: { kind: "code_project", framework: "HTML/CSS" } });
+      expect(created.run?.reason, first.body).not.toBe("async_collect_unsettled");
       count("create website through Coding Agent");
       script = [call("code.fs.read", { path: "index.html" }), call("code.fs.edit", { path: "index.html", old_string: "</body>", new_string: '<button style="color:green">Updated in chat</button></body>' })];
       const second = await app.inject({ method: "POST", url: "/chat/stream", payload: { conversationId: created.conversationId, contextType: "none", message: "Зроби кнопку зеленою" } });

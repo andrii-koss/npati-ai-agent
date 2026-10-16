@@ -2,7 +2,7 @@ import Fastify from "fastify";
 import {describe,expect,it,vi} from "vitest";
 import {InMemoryWorkspaceStore} from "@npati/workspace";
 import type {AIEngine} from "@npati/omniroute-adapter";
-import {CompanyDelegationRuntime,type DurableApprovalGateway} from "../apps/agent-api/src/company-runtime";
+import {CompanyDelegationRuntime,CompanyRuntimeError,type DurableApprovalGateway} from "../apps/agent-api/src/company-runtime";
 import {CompanyToolRuntime} from "../apps/agent-api/src/company-tool-runtime";
 import {registerCompanyRuntimeRoutes} from "../apps/agent-api/src/company-runtime-routes";
 import {RouteGuardTiers} from "../apps/agent-api/src/route-guard-tiers";
@@ -43,13 +43,52 @@ describe("Production durable approvals and route tiers",()=>{
     const runtime=new CompanyDelegationRuntime(store,ai,10_000,toolRuntime,undefined,undefined,undefined,undefined,approvals);
     const first=await runtime.execute(auth,company.id,{task:"Delete memory one"},"approval-run");
     expect(first.run.errorCode).toBe("APPROVAL_REQUIRED");expect(remove).not.toHaveBeenCalled();
+    expect((await runtime.process(auth,company.id,first.run.id)).run.status).toBe("awaiting_approval");
+    expect(ai.a2aSend).toHaveBeenCalledOnce();
+    vi.mocked(ai.a2aSend!).mockRejectedValueOnce(new Error("Approval resume must not replan"));
     const resumed=await runtime.process(auth,company.id,first.run.id,{approvalId});
     expect(resumed.run.status).toBe("completed");expect(remove).toHaveBeenCalledOnce();
     await expect(runtime.process(auth,company.id,first.run.id,{approvalId})).rejects.toMatchObject({code:"APPROVAL_INVALID",status:409});
     expect(remove).toHaveBeenCalledOnce();
+    expect((await runtime.process(auth,company.id,first.run.id)).run.status).toBe("completed");
+    expect(ai.a2aSend).toHaveBeenCalledOnce();
+    expect(remove).toHaveBeenCalledOnce();
     expect((await store.getCompanyAgentRun(auth,company.id,first.run.id)).run.status).toBe("completed");
   });
 
+  it.each(["cancelled", "failed"] as const)("does not replay a %s run", async (status) => {
+    const { store, company } = await fixture();
+    const ai = { a2aSend: vi.fn(), chat: vi.fn(), executeTool: vi.fn() } as unknown as AIEngine;
+    const runtime = new CompanyDelegationRuntime(store, ai);
+    const created = await runtime.create(auth, company.id, { task: "A terminal task" }, "terminal-" + status);
+    await store.updateCompanyAgentRun(auth, company.id, created.run.id, { status, errorCode: "ORIGINAL_REASON" });
+    expect((await runtime.process(auth, company.id, created.run.id)).run).toMatchObject({ status, errorCode: "ORIGINAL_REASON" });
+    expect(ai.a2aSend).not.toHaveBeenCalled();
+    expect(ai.chat).not.toHaveBeenCalled();
+    expect(ai.executeTool).not.toHaveBeenCalled();
+  });
+  it("preserves typed approval conflicts through the HTTP resume route", async () => {
+    const app = Fastify();
+    const process = vi.fn(async () => { throw new CompanyRuntimeError("APPROVAL_INVALID", "Run is not awaiting approval", 409); });
+    registerCompanyRuntimeRoutes(app, { process } as unknown as CompanyDelegationRuntime, { authenticate: async () => auth });
+    try {
+      const response = await app.inject({ method: "POST", url: "/companies/company-1/runs/run-1/resume", payload: { approvalId: "11111111-1111-4111-8111-111111111111" } });
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({ error: { code: "APPROVAL_INVALID" } });
+      expect(process).toHaveBeenCalledOnce();
+    } finally { await app.close(); }
+  });
+
+  it.each(["model_unavailable", "model_routing_failed"])("returns HTTP 503 for %s rather than reporting successful admission", async (code) => {
+    const app = Fastify();
+    const execute = vi.fn(async () => ({ run: { id: "run-1", status: "failed", errorCode: code }, toolAudit: [] }));
+    registerCompanyRuntimeRoutes(app, { execute } as unknown as CompanyDelegationRuntime, { authenticate: async () => auth });
+    try {
+      const response = await app.inject({ method: "POST", url: "/companies/company-1/runs", headers: { "idempotency-key": "model-failure-01" }, payload: { task: "A task" } });
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toMatchObject({ run: { status: "failed", errorCode: code } });
+    } finally { await app.close(); }
+  });
   it("enforces the configured route tier and emits standard rate-limit headers",async()=>{
     const app=Fastify();
     const runtime={list:vi.fn(async()=>[])} as unknown as CompanyDelegationRuntime;

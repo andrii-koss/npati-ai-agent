@@ -1,5 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { CodeWorkspaceHeader } from "./code-workspace/CodeWorkspaceHeader";
+import { CodeWorkspaceExecutionPanel } from "./code-workspace/CodeWorkspaceExecutionPanel";
+import { CodeWorkspaceFilePanel } from "./code-workspace/CodeWorkspaceFilePanel";
+import { approvalDecisionPlan, modeChangeRequest, persistedSessionMode } from "./code-workspace/actions";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "./i18n";
 import { AsyncWorkspacePanel } from "./code-workspace/AsyncWorkspacePanel";
 // C14 (owner decision 3): the aggregated metrics of the company this project belongs to. It is a read-only
@@ -20,14 +24,12 @@ import {
   type ApprovalScope,
   type BottomTab,
   type MobileView,
-  SESSION_MODES,
   type SessionMode,
+  normalizeWorkspaceMode,
   apiGet,
   apiSend,
   safeExternalUrl,
   flattenFiles,
-  eventTitle,
-  eventFacts,
 } from "./code-workspace-page-types";
 import { CodeWorkspaceBottomTabs } from "./code-workspace-bottom-tabs";
 
@@ -96,6 +98,9 @@ function CodeWorkspaceContent() {
   useEffect(() => { setAsyncInboxEnabled(null); }, [asyncBinding]);
   const [modeBusy, setModeBusy] = useState(false);
   const [modeError, setModeError] = useState<string | null>(null);
+  const [sessionRevision, setSessionRevision] = useState<number | null>(null);
+  const fileRequest = useRef(0);
+  const [fileRevision, setFileRevision] = useState<string | undefined>(undefined);
 
   const [stopBusy, setStopBusy] = useState(false);
   const [stopNotice, setStopNotice] = useState<string | null>(null);
@@ -228,7 +233,7 @@ function CodeWorkspaceContent() {
     setTaskError(null);
     try {
       const created = await apiSend<{ id: string }>("POST", `/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/code/sessions`, {
-        mode,
+        mode: persistedSessionMode(mode),
       });
       if (created?.id) {
         selectSession(created.id);
@@ -277,11 +282,13 @@ function CodeWorkspaceContent() {
   useEffect(() => {
     let cancelled = false;
     setContextReady(false);
+    setSessionRevision(null);
     if (!sessionId) return;
-    void apiGet<{ mode: SessionMode; status: string }>(`${codeBase}/sessions/${encodeURIComponent(sessionId)}`)
+    void apiGet<{ mode: string; status: string; revision: number }>(`${codeBase}/sessions/${encodeURIComponent(sessionId)}`)
       .then(async (session) => {
         if (cancelled) return;
-        setMode(session.mode);
+        setMode(normalizeWorkspaceMode(session.mode));
+        setSessionRevision(session.revision);
         if (session.status === "archived") return;
         const stored = await apiSend<{ persisted: boolean }>("PUT", `${codeBase}/active-context`, { contextType: "project", projectId, sessionId });
         if (!cancelled) {
@@ -303,7 +310,7 @@ function CodeWorkspaceContent() {
       let activeSessionId = sessionId;
       if (!activeSessionId) {
         const created = await apiSend<{ id: string }>("POST", `/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/code/sessions`, {
-          mode,
+          mode: persistedSessionMode(mode),
           summary: task.trim().slice(0, 100),
         });
         activeSessionId = created.id;
@@ -426,15 +433,20 @@ function CodeWorkspaceContent() {
 
   const openFile = useCallback(
     async (path: string) => {
+      const requestId = ++fileRequest.current;
       setSelectedPath(path);
+      setFileRevision(undefined);
+      setSaveSuccess(false);
       setFileContent(null);
       setFileError(null);
       try {
         const data = await readProjectFile({ companyId, projectId }, path);
+        if (requestId !== fileRequest.current) return;
         setFileContent(data.content ?? "");
+        setFileRevision(data.revision);
         setIsEditingFile(false);
       } catch (cause) {
-        setFileError(cause instanceof Error ? cause.message : String(cause));
+        if (requestId === fileRequest.current) setFileError(cause instanceof Error ? cause.message : String(cause));
       }
     },
     [companyId, projectId],
@@ -442,15 +454,19 @@ function CodeWorkspaceContent() {
 
   const saveFile = async () => {
     if (!companyId || !projectId || !selectedPath || fileContent === null || savingFile) return;
+    if (!fileRevision) { setFileError("Reload the file before saving: its revision is unavailable."); return; }
+    const requestId = fileRequest.current;
     setSavingFile(true);
     setFileError(null);
     try {
-      await writeProjectFile({ companyId, projectId }, selectedPath, fileContent);
+      const saved = await writeProjectFile({ companyId, projectId }, selectedPath, fileContent, fileRevision);
+      if (requestId !== fileRequest.current) return;
+      setFileRevision(saved.revision);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2500);
       void loadFiles();
     } catch (cause) {
-      setFileError(cause instanceof Error ? cause.message : String(cause));
+      if (requestId === fileRequest.current) setFileError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setSavingFile(false);
     }
@@ -458,19 +474,22 @@ function CodeWorkspaceContent() {
 
   const applyMode = useCallback(
     async (next: SessionMode) => {
-      if (!sessionId) return;
+      if (!sessionId) { setMode(next); return; }
       setModeBusy(true);
       setModeError(null);
       try {
-        await apiSend("PUT", `${codeBase}/sessions/${sessionId}/mode`, { mode: next });
-        setMode(next);
+        if (sessionRevision === null) throw new Error("Reload the session before changing its mode.");
+        const request = modeChangeRequest({ companyId, sessionId, mode: next, expectedRevision: sessionRevision });
+        const result = await apiSend<{ session: { mode: string; revision: number } }>("PUT", "/api" + request.path, request.body);
+        setMode(normalizeWorkspaceMode(result.session.mode));
+        setSessionRevision(result.session.revision);
       } catch (cause) {
         setModeError(cause instanceof Error ? cause.message : String(cause));
       } finally {
         setModeBusy(false);
       }
     },
-    [codeBase, sessionId],
+    [companyId, sessionId, sessionRevision],
   );
 
   const stopRun = useCallback(async () => {
@@ -496,216 +515,27 @@ function CodeWorkspaceContent() {
       setApprovalError(null);
       const comment = (denyComment[approval.id] ?? "").slice(0, 500);
       try {
-        // The decide route's schema accepts exactly `decision: "approved" | "rejected"` plus an optional
-        // `notes`. Sending `approve`/`deny`/`comment`/`scope` failed schema validation (400), which made both
-        // buttons dead rather than merely wrong. Scope is expressed by creating a standing rule below — the
-        // decision itself carries no scope, and the server refuses privileged actions for session/project.
-        if (decision === "deny") {
-          await apiSend("POST", `/api/companies/${companyId}/approvals/${approval.id}/decide`, {
-            decision: "rejected",
-            notes: comment || undefined,
-          });
-        } else if (scope === "once") {
-          await apiSend("POST", `/api/companies/${companyId}/approvals/${approval.id}/decide`, {
-            decision: "approved",
-          });
-        } else {
-          // `session`/`project` create a standing rule (C5); privileged actions are refused
-          // by the server for these scopes, and the error is surfaced verbatim.
-          await apiSend("POST", `${codeBase}/approval-rules`, {
-            action: approval.toolName ?? "code.shell.exec",
-            scope,
-            command: approval.command,
-            reason: isUk ? "Схвалено з Code Workspace" : "Approved from Code Workspace",
-          });
-          await apiSend("POST", `/api/companies/${companyId}/approvals/${approval.id}/decide`, {
-            decision: "approved",
-            notes: comment || undefined,
-          });
-        }
-        // If there are duplicate pending approval items matching the same command/toolName, resolve them as well
-        const duplicates = approvals.filter(
-          (item) => item.id !== approval.id && item.toolName === approval.toolName && item.command === approval.command
-        );
-        for (const dup of duplicates) {
-          try {
-            await apiSend("POST", `/api/companies/${companyId}/approvals/${dup.id}/decide`, {
-              decision: decision === "deny" ? "rejected" : "approved",
-              notes: comment || undefined,
-            });
-          } catch {
-            // Ignore error for duplicate items
-          }
-        }
-        setApprovals((current) => current.filter((item) => item.id !== approval.id && !(item.toolName === approval.toolName && item.command === approval.command)));
+        const plan = approvalDecisionPlan({ companyId, sessionId, projectId,
+          approval: { approvalId: approval.id, action: approval.toolName ?? "code.shell.exec", command: approval.command },
+          scope: decision === "deny" ? "deny" : scope, comment });
+        if (plan.rule) await apiSend("POST", "/api" + plan.rule.path, plan.rule.body);
+        await apiSend("POST", "/api" + plan.decide.path, plan.decide.body);
+        setApprovals(current => current.filter(item => item.id !== approval.id));
       } catch (cause) {
         setApprovalError(cause instanceof Error ? cause.message : String(cause));
       } finally {
         setApprovalBusy(null);
       }
     },
-    [approvals, codeBase, companyId, denyComment, isUk],
+    [companyId, projectId, sessionId, denyComment],
   );
-
-  const uniqueApprovals = useMemo(() => {
-    const seen = new Set<string>();
-    return approvals.filter((a) => {
-      const key = `${a.toolName ?? "code.shell.exec"}::${a.command ?? ""}::${a.diff ?? ""}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  }, [approvals]);
-
-
 
   const changedFiles = changes?.files ?? changes?.changes ?? [];
   const previewUrl = preview?.url ? safeExternalUrl(preview.url) : null;
 
   return (
     <main className="goals-container automations-container code-workspace" data-project-id={projectId} style={{ maxWidth: 1180, margin: "0 auto", paddingBottom: 60 }}>
-      {/* Hero Header matching /settings/email and /settings/automations */}
-      <header className="inspector-header automations-header">
-        <div className="automations-header-top">
-          <div>
-            <p className="eyebrow">{isUk ? "Кодовий агент та розробка" : "Code Agent & Workspace"}</p>
-            <h1>
-              <Link
-                to="/settings/websites"
-                className="marketplace-back-button"
-                aria-label={isUk ? "Назад" : "Back"}
-                title={isUk ? "Повернутися назад" : "Go back"}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M19 12H5M12 19l-7-7 7-7" />
-                </svg>
-              </Link>
-              <span>{isUk ? "Робочий простір кодового агента" : "Coding agent workspace"}</span>
-            </h1>
-            <p className="hero-copy">
-              {isUk
-                ? "Автономне середовище AI-розробника для аналізу вихідних файлів, внесення правок та виконання завдань вашого сайту чи проєкту."
-                : "Autonomous AI developer environment to inspect, edit, and test website or project source code."}
-            </p>
-          </div>
-        </div>
-      </header>
-
-      {/* Scope & Status Toolbar Card matching EmailSettingsOverviewBlock */}
-      <div className="email-scope-toolbar">
-        <div className="email-scope-left">
-          <div className="email-scope-pill">
-            <span className="email-scope-badge">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="16 18 22 12 16 6" />
-                <polyline points="8 6 2 12 8 18" />
-              </svg>
-              <span>{isUk ? "Сесія:" : "Session:"}</span>
-            </span>
-            <div className="email-scope-select-wrap">
-              <select
-                className="email-scope-select"
-                value={sessionId}
-                onChange={(e) => selectSession(e.target.value)}
-                aria-label={isUk ? "Вибрати сесію" : "Select session"}
-              >
-                {sessions.length > 0 ? (
-                  sessions.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      #{s.id.slice(0, 8)} ({s.mode})
-                    </option>
-                  ))
-                ) : (
-                  <option value="">{isUk ? "Нова сесія" : "New session"}</option>
-                )}
-              </select>
-              <span className="email-scope-select-arrow" aria-hidden="true">▾</span>
-            </div>
-            {sessionId && (
-              <button
-                type="button"
-                className="email-scope-delete-btn"
-                onClick={() => void deleteCurrentSession()}
-                disabled={taskBusy}
-                title={isUk ? "Видалити поточну сесію" : "Delete current session"}
-                aria-label={isUk ? "Видалити сесію" : "Delete session"}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  padding: "4px 6px",
-                  borderRadius: "6px",
-                  color: "#94a3b8",
-                  transition: "color 0.15s, background 0.15s",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.color = "#dc2626";
-                  e.currentTarget.style.background = "#fee2e2";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.color = "#94a3b8";
-                  e.currentTarget.style.background = "transparent";
-                }}
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="3 6 5 6 21 6" />
-                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                  <line x1="10" y1="11" x2="10" y2="17" />
-                  <line x1="14" y1="11" x2="14" y2="17" />
-                </svg>
-              </button>
-            )}
-          </div>
-
-          <span className="data-studio-badge info" style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontWeight: 700, fontSize: "11px", letterSpacing: "0.06em" }}>
-            <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#16a34a", display: "inline-block" }} />
-            CODE WORKSPACE
-          </span>
-          <span className="data-studio-badge" style={{ background: "#f1f5f9", color: "#475569" }}>
-            {isUk ? `Режим: ${mode}` : `Mode: ${mode}`}
-          </span>
-        </div>
-
-        <div className="email-scope-right">
-          <button
-            type="button"
-            className="button-primary automations-action-primary"
-            onClick={() => void createNewSession()}
-            disabled={taskBusy}
-            title={isUk ? "Створити нову сесію розробки" : "Create new coding session"}
-            style={{ padding: "7px 16px", fontSize: "13px" }}
-          >
-            + {isUk ? "Нова сесія" : "New session"}
-          </button>
-        </div>
-      </div>
-
-      {/* 4 Stat Overview Cards matching EmailSettingsStatsCards */}
-      <section className="overview-grid inspector-stats-grid automations-stats-grid" style={{ marginBottom: 20 }}>
-        <div>
-          <strong>{tree.length}</strong>
-          <span>{isUk ? "Файлів проєкту" : "Project files"}</span>
-          <small>{isUk ? "Вихідний код сайту" : "Source code files"}</small>
-        </div>
-        <div>
-          <strong>{events.length}</strong>
-          <span>{isUk ? "Подій у стрімі" : "Stream events"}</span>
-          <small>{isUk ? (runId ? `Активний run #${runId.slice(0, 6)}` : "Очікування запуску") : (runId ? `Active run #${runId.slice(0, 6)}` : "Idle")}</small>
-        </div>
-        <div>
-          <strong>{changedFiles.length}</strong>
-          <span>{isUk ? "Змінених файлів" : "Changed files"}</span>
-          <small>{isUk ? "Внесено правки" : "Modified by agent"}</small>
-        </div>
-        <div>
-          <strong>{typeof usage?.usage?.costUsd === "number" ? `$${usage.usage.costUsd.toFixed(4)}` : "$0.00"}</strong>
-          <span>{isUk ? "Витрати токенів" : "Token cost"}</span>
-          <small>{usage?.usage?.totalTokens ? `${usage.usage.totalTokens} tokens` : (isUk ? "0 токенів" : "0 tokens")}</small>
-        </div>
-      </section>
+      <CodeWorkspaceHeader isUk={isUk} sessionId={sessionId} runId={runId} selectSession={selectSession} sessions={sessions} deleteCurrentSession={deleteCurrentSession} createNewSession={createNewSession} taskBusy={taskBusy} mode={mode} tree={tree} events={events} changedFiles={changedFiles} usage={usage} />
 
       {/* Dismissible Notices */}
       {taskError && (
@@ -791,506 +621,9 @@ function CodeWorkspaceContent() {
         </div>
       </div>
 
-      {/* TAB 1: WORKSPACE (AI Task Composer + Agent Stream) */}
-      {(activeTab === "workspace" || activeTab === "all") && (
-        <>
-          {/* Modern AI Task Composer */}
-          {asyncInboxEnabled !== true && (
-            <form className="code-task-composer" onSubmit={startTask}>
-              <div className="composer-header">
-                <h2 className="composer-title">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d83438" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-                  </svg>
-                  {isUk ? "Завдання для Coding Agent" : "Task for Coding Agent"}
-                </h2>
-                <div className="composer-options">
-                  <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
-                    <span style={{ fontSize: "12.5px", fontWeight: 600, color: "#475569" }}>
-                      {isUk ? "Режим роботи:" : "Permission mode:"}
-                    </span>
-                    <select
-                      value={mode}
-                      disabled={modeBusy || taskBusy}
-                      onChange={(event) => void applyMode(event.target.value as SessionMode)}
-                    >
-                      <option value="plan">{isUk ? "Plan (лише планування)" : "Plan (plan only)"}</option>
-                      <option value="edit">{isUk ? "Edit (з підтвердженням)" : "Edit (with approval)"}</option>
-                      <option value="auto">{isUk ? "Auto (автономний)" : "Auto (autonomous)"}</option>
-                      <option value="full_auto">{isUk ? "Full Auto (без обмежень)" : "Full Auto (full autonomous)"}</option>
-                    </select>
-                  </label>
-                </div>
-              </div>
+      <CodeWorkspaceExecutionPanel isUk={isUk} asyncInboxEnabled={asyncInboxEnabled} startTask={startTask} mode={mode} modeError={modeError} modeBusy={modeBusy} taskBusy={taskBusy} applyMode={applyMode} task={task} setTask={setTask} usageError={usageError} usage={usage} sessionId={sessionId} stopBusy={stopBusy} stopRun={stopRun} activeTab={activeTab} runId={runId} streamError={streamError} events={events} expanded={expanded} setExpanded={setExpanded} approvals={approvals} approvalError={approvalError} approvalBusy={approvalBusy} decide={decide} denyOpen={denyOpen} setDenyOpen={setDenyOpen} denyComment={denyComment} setDenyComment={setDenyComment} />
 
-              <textarea
-                className="composer-textarea"
-                value={task}
-                onChange={(event) => setTask(event.target.value)}
-                disabled={taskBusy}
-                rows={3}
-                placeholder={
-                  isUk
-                    ? "Опишіть завдання або зміни: наприклад, «Зміни головний колір кнопок на сайті», «Виправ верстку на сторінці checkout», або «Додай скрипт аналітики»…"
-                    : "Describe what needs to be done: e.g., 'Change button styles on the landing page', 'Fix checkout layout', or 'Add a new section'…"
-                }
-              />
-
-              <div className="composer-footer">
-                <div className="code-workspace-usage">
-                  {usageError && <span className="ds-hint-error">{usageError}</span>}
-                  {!usageError && usage?.status === "ok" && usage.usage && (
-                    <span className="ds-muted">
-                      {isUk ? "Токени" : "Tokens"}: {usage.usage.totalTokens ?? "—"}
-                      {usage.usage.estimated ? ` (${isUk ? "оцінка" : "estimate"})` : ""} ·{" "}
-                      {isUk ? "вартість" : "cost"}:{" "}
-                      {typeof usage.usage.costUsd === "number" ? `$${usage.usage.costUsd.toFixed(4)}` : "—"}
-                    </span>
-                  )}
-                  {!usageError && (!usage || usage.status !== "ok") && (
-                    <span className="ds-muted" style={{ fontSize: "12px" }}>
-                      {isUk ? "Агент самостійно знайде потрібний файл, внесе правки та виконає перевірку." : "The agent will locate the files, apply edits, and verify changes."}
-                    </span>
-                  )}
-                </div>
-
-                <div className="composer-actions">
-                  <button
-                    type="submit"
-                    className="button-primary automations-action-primary"
-                    disabled={taskBusy || !task.trim()}
-                    style={{ display: "inline-flex", alignItems: "center", gap: "8px", padding: "9px 18px", fontWeight: 700 }}
-                  >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <polygon points="5 3 19 12 5 21 5 3" />
-                    </svg>
-                    {taskBusy
-                      ? isUk ? "Запуск агента…" : "Starting agent…"
-                      : isUk ? "Запустити агента" : "Run agent"}
-                  </button>
-
-                  <Link
-                    className="button-secondary"
-                    to="/chat"
-                    style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12.5px" }}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                    </svg>
-                    {isUk ? "Продовжити в чаті" : "Continue in chat"}
-                  </Link>
-
-                  {sessionId && (
-                    <button
-                      type="button"
-                      className="button-secondary"
-                      disabled={stopBusy}
-                      onClick={() => void stopRun()}
-                      style={{ fontSize: "12.5px", color: "#b91c1c" }}
-                      title={isUk ? "Зупинити активний запуск" : "Stop active run"}
-                    >
-                      {stopBusy ? "…" : isUk ? "Зупинити" : "Stop"}
-                    </button>
-                  )}
-                </div>
-              </div>
-            </form>
-          )}
-
-          {/* Agent Stream Card in workspace tab */}
-          {activeTab === "workspace" && (
-            <div className="project-col" style={{ borderRadius: 12, border: "1px solid #e2e8f0", background: "#ffffff", boxShadow: "0 1px 4px rgba(0,0,0,0.03)", overflow: "hidden", marginBottom: 20 }}>
-              <div className="col-header">
-                <h3>
-                  {isUk ? "Стрім агента" : "Agent stream"}
-                </h3>
-                {runId ? (
-                  <span className="data-studio-badge info" style={{ fontSize: "11px" }}>
-                    run #{runId.slice(0, 6)}
-                  </span>
-                ) : (
-                  <span className="ds-muted" style={{ fontSize: "12px" }}>{isUk ? "Очікування" : "Idle"}</span>
-                )}
-              </div>
-
-              <div className="project-chat-body" style={{ maxHeight: 480 }}>
-                {!runId && (
-                  <div className="code-empty-state">
-                    <div className="code-empty-state-icon">🤖</div>
-                    <h4>{isUk ? "Немає активного запуску" : "No active run"}</h4>
-                    <p>
-                      {isUk
-                        ? "Введіть завдання для Coding Agent у полі вище та натисніть «Запустити агента», щоб спостерігати за його кроками тут."
-                        : "Enter a task above and click 'Run agent' to observe its real-time actions here."}
-                    </p>
-                  </div>
-                )}
-
-                {runId && streamError && <p className="ds-hint-error">{streamError}</p>}
-                {runId && !streamError && events.length === 0 && (
-                  <p className="ds-muted" style={{ textAlign: "center", padding: "20px 0" }}>
-                    {isUk ? "Ініціалізація та очікування перших подій…" : "Initializing and waiting for first events…"}
-                  </p>
-                )}
-
-                <ol className="code-stream">
-                  {events.map((event, index) => {
-                    const key = event.id ?? `${event.kind ?? "event"}-${index}`;
-                    const isOpen = expanded[key] ?? false;
-                    return (
-                      <li key={key} className="code-stream-item">
-                        <button
-                          type="button"
-                          className="code-stream-toggle"
-                          aria-expanded={isOpen}
-                          onClick={() => setExpanded((current) => ({ ...current, [key]: !isOpen }))}
-                        >
-                          <span className="code-stream-kind">{eventTitle(event, isUk)}</span>
-                          {event.snapshotId && <span className="data-studio-badge info">snapshot</span>}
-                        </button>
-                        {isOpen && (
-                          <div className="code-stream-body">
-                            {eventFacts(event).length === 0 && (
-                              <p className="ds-muted">{isUk ? "Лише метадані." : "Metadata only."}</p>
-                            )}
-                            {eventFacts(event).map(([label, value]) => (
-                              <div className="code-detail-row" key={`${key}-${label}`} style={{ display: "flex", justifyContent: "space-between", gap: "10px", fontSize: "12px", padding: "2px 0" }}>
-                                <span style={{ color: "#64748b" }}>{label}</span>
-                                <code style={{ fontSize: "11.5px", background: "#f1f5f9", padding: "1px 5px", borderRadius: "4px" }}>{value}</code>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ol>
-
-                {uniqueApprovals.length > 0 && (
-                  <div className="code-approvals">
-                    <h4 style={{ margin: "0 0 10px", fontSize: "13.5px", fontWeight: 700, color: "#b45309", display: "flex", alignItems: "center", gap: "6px" }}>
-                      {isUk ? "Очікують вашого підтвердження" : "Awaiting your approval"}
-                    </h4>
-                    {approvalError && <p className="ds-hint-error">{approvalError}</p>}
-                    {uniqueApprovals.map((approval) => (
-                      <article className="code-approval-card" key={approval.id}>
-                        <header>
-                          <code>{approval.toolName ?? "code.shell.exec"}</code>
-                          {approval.cwd && <span className="ds-muted" style={{ fontSize: "11.5px" }}> cwd: {approval.cwd}</span>}
-                        </header>
-                        {approval.command && <pre className="code-approval-body">{approval.command}</pre>}
-                        {approval.diff && <pre className="code-approval-body">{approval.diff}</pre>}
-                        {approval.reason && <p className="ds-muted" style={{ fontSize: "12px", margin: "6px 0" }}>{approval.reason}</p>}
-                        <div className="code-approval-actions">
-                          <button type="button" className="button-primary" style={{ padding: "6px 12px", fontSize: "12px" }} disabled={approvalBusy === approval.id} onClick={() => void decide(approval, "approve", "once")}>
-                            {isUk ? "Одноразово" : "Approve once"}
-                          </button>
-                          <button type="button" className="button-secondary" style={{ padding: "6px 12px", fontSize: "12px" }} disabled={approvalBusy === approval.id} onClick={() => void decide(approval, "approve", "session")}>
-                            {isUk ? "На сесію" : "For session"}
-                          </button>
-                          <button type="button" className="button-secondary" style={{ padding: "6px 12px", fontSize: "12px" }} disabled={approvalBusy === approval.id} onClick={() => void decide(approval, "approve", "project")}>
-                            {isUk ? "На проєкт" : "For project"}
-                          </button>
-                          <button type="button" className="button-secondary" style={{ padding: "6px 12px", fontSize: "12px", color: "#dc2626" }} disabled={approvalBusy === approval.id} onClick={() => setDenyOpen((current) => ({ ...current, [approval.id]: !current[approval.id] }))}>
-                            {isUk ? "Відхилити" : "Deny"}
-                          </button>
-                        </div>
-                        {denyOpen[approval.id] && (
-                          <div className="code-approval-deny">
-                            <textarea
-                              maxLength={500}
-                              value={denyComment[approval.id] ?? ""}
-                              placeholder={isUk ? "Причина відхилення (повернеться моделі)" : "Reason for rejection (returned to model)"}
-                              onChange={(event) => setDenyComment((current) => ({ ...current, [approval.id]: event.target.value }))}
-                              style={{ padding: "8px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
-                            />
-                            <button type="button" className="button-secondary" disabled={approvalBusy === approval.id} onClick={() => void decide(approval, "deny", "once")} style={{ alignSelf: "flex-start", fontSize: "12px" }}>
-                              {isUk ? "Підтвердити відхилення" : "Confirm deny"}
-                            </button>
-                          </div>
-                        )}
-                      </article>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </>
-      )}
-
-      {/* TAB 2: FILES & CODE (2-Column IDE) */}
-      {(activeTab === "files" || activeTab === "all") && (
-        <div className="project-grid-2col" style={{ display: "grid", gridTemplateColumns: activeTab === "all" ? undefined : "280px 1fr", gap: 16, marginBottom: 20 }}>
-          {/* Files column */}
-          <section className="project-col project-col-files" aria-label={isUk ? "Файли" : "Files"} style={{ border: "1px solid #e2e8f0", borderRadius: 12, background: "#fff", overflow: "hidden" }}>
-            <div className="col-header">
-              <h3 style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                </svg>
-                <span>{isUk ? "Файли проєкту" : "Project files"}</span>
-              </h3>
-              <span className="file-count">{tree.length}</span>
-            </div>
-
-            <div className="file-search-form" style={{ padding: "8px 12px" }}>
-              <div className="inspector-search-box" style={{ width: "100%", height: "36px", padding: "0 10px" }}>
-                <span className="search-icon" aria-hidden="true" style={{ color: "#e11d2e", fontSize: "18px", lineHeight: 1, marginRight: "6px" }}>⌕</span>
-                <input
-                  type="text"
-                  role="searchbox"
-                  className="inspector-search-input"
-                  placeholder={isUk ? "Фільтр файлів..." : "Filter files..."}
-                  value={fileFilter}
-                  onChange={(e) => setFileFilter(e.target.value)}
-                  style={{ fontSize: "13px" }}
-                  aria-label={isUk ? "Фільтр файлів" : "Filter files"}
-                />
-                {fileFilter && (
-                  <button
-                    type="button"
-                    className="search-clear-btn"
-                    onClick={() => setFileFilter("")}
-                    aria-label={isUk ? "Очистити" : "Clear"}
-                    style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8" }}
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="file-tree-container" style={{ maxHeight: 480 }}>
-              {filesError && <p className="ds-hint-error" style={{ padding: "8px 12px" }}>{filesError}</p>}
-              {!filesError && filteredTree.length === 0 && (
-                <p className="ds-muted" style={{ padding: "16px 12px", textAlign: "center", fontSize: "13px" }}>
-                  {tree.length === 0
-                    ? isUk ? "Файли ще не завантажено." : "No files loaded yet."
-                    : isUk ? "Файлів за фільтром не знайдено." : "No files match the filter."}
-                </p>
-              )}
-              <ul className="code-file-tree">
-                {filteredTree.map((file) => (
-                  <li key={file.path}>
-                    <button
-                      type="button"
-                      className={`code-file-tree-item ${selectedPath === file.path ? "active" : ""}`}
-                      style={{ paddingLeft: `${10 + file.depth * 14}px` }}
-                      onClick={() => void openFile(file.path)}
-                    >
-                      <span className="file-icon">{renderFileIcon(file.label)}</span>
-                      <span style={{ flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {file.label}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </section>
-
-          {/* File viewer column */}
-          <section
-            className="project-col project-col-preview"
-            aria-label={isUk ? "Файл" : "File"}
-            style={
-              isFullscreenFile
-                ? {
-                    position: "fixed",
-                    top: 0,
-                    left: 0,
-                    width: "100vw",
-                    height: "100vh",
-                    zIndex: 99999,
-                    background: "#fff",
-                    borderRadius: 0,
-                    border: "none",
-                    margin: 0,
-                    padding: "20px",
-                    boxSizing: "border-box",
-                    display: "flex",
-                    flexDirection: "column",
-                  }
-                : {
-                    border: "1px solid #e2e8f0",
-                    borderRadius: 12,
-                    background: "#fff",
-                    overflow: "hidden",
-                  }
-            }
-          >
-            <div className="col-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <h3 style={{ display: "inline-flex", alignItems: "center", gap: "6px", margin: 0 }}>
-                {renderFileIcon(selectedPath || "")}
-                <span>{selectedPath || (isUk ? "Виберіть файл" : "Select a file")}</span>
-              </h3>
-              {fileContent !== null && (
-                <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-                  {/* Edit mode toggle */}
-                  <button
-                    type="button"
-                    className={`button-secondary ${isEditingFile ? "active" : ""}`}
-                    onClick={() => setIsEditingFile((prev) => !prev)}
-                    style={{ padding: "4px 8px", fontSize: "11.5px", display: "inline-flex", alignItems: "center", gap: "4px" }}
-                    title={isUk ? (isEditingFile ? "Перейти в режим читання" : "Редагувати файл вручну") : (isEditingFile ? "Read-only mode" : "Edit file manually")}
-                    aria-label={isUk ? "Редагувати файл" : "Edit file"}
-                  >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                    </svg>
-                    <span>{isUk ? (isEditingFile ? "Читання" : "Редагувати") : (isEditingFile ? "View" : "Edit")}</span>
-                  </button>
-
-                  {/* Save button */}
-                  {isEditingFile && (
-                    <button
-                      type="button"
-                      className="button-primary"
-                      onClick={() => void saveFile()}
-                      disabled={savingFile}
-                      style={{ padding: "4px 10px", fontSize: "11.5px", display: "inline-flex", alignItems: "center", gap: "4px" }}
-                      title={isUk ? "Зберегти файл" : "Save file"}
-                      aria-label={isUk ? "Зберегти" : "Save"}
-                    >
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
-                        <polyline points="17 21 17 13 7 13 7 21" />
-                        <polyline points="7 3 7 8 15 8" />
-                      </svg>
-                      <span>{savingFile ? "…" : isUk ? "Зберегти" : "Save"}</span>
-                    </button>
-                  )}
-
-                  {/* Fullscreen toggle button */}
-                  <button
-                    type="button"
-                    className="button-secondary"
-                    onClick={() => setIsFullscreenFile((prev) => !prev)}
-                    style={{ padding: "4px 8px", fontSize: "11.5px", display: "inline-flex", alignItems: "center" }}
-                    title={isUk ? (isFullscreenFile ? "Згорнути екран" : "Розгорнути на весь екран") : (isFullscreenFile ? "Exit fullscreen" : "Fullscreen")}
-                    aria-label={isUk ? "На весь екран" : "Fullscreen"}
-                  >
-                    {isFullscreenFile ? (
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="4 14 10 14 10 20" />
-                        <polyline points="20 10 14 10 14 4" />
-                        <line x1="14" y1="10" x2="21" y2="3" />
-                        <line x1="3" y1="21" x2="10" y2="14" />
-                      </svg>
-                    ) : (
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="15 3 21 3 21 9" />
-                        <polyline points="9 21 3 21 3 15" />
-                        <line x1="21" y1="3" x2="14" y2="10" />
-                        <line x1="3" y1="21" x2="10" y2="14" />
-                      </svg>
-                    )}
-                  </button>
-
-                  {/* Copy button */}
-                  <button
-                    type="button"
-                    className="button-secondary"
-                    onClick={copyFileContent}
-                    style={{ padding: "4px 8px", fontSize: "11.5px", display: "inline-flex", alignItems: "center" }}
-                    title={isUk ? "Скопіювати код у буфер" : "Copy code to clipboard"}
-                    aria-label={isUk ? "Копіювати код" : "Copy code"}
-                  >
-                    {copied ? (
-                      <span style={{ color: "#16a34a" }}>✓</span>
-                    ) : (
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                      </svg>
-                    )}
-                  </button>
-                </div>
-              )}
-            </div>
-
-            <div className="project-file-viewer-body" style={{ minHeight: isFullscreenFile ? "calc(100vh - 140px)" : 420, flex: isFullscreenFile ? 1 : undefined, display: "flex", flexDirection: "column" }}>
-              {fileError && <p className="ds-hint-error" style={{ margin: "16px" }}>{fileError}</p>}
-              {!fileError && fileContent === null && selectedPath && (
-                <div className="code-empty-state" style={{ color: "#94a3b8" }}>
-                  <p>{isUk ? "Завантаження вмісту файлу…" : "Loading file content…"}</p>
-                </div>
-              )}
-              {!selectedPath && (
-                <div className="code-empty-state" style={{ color: "#94a3b8" }}>
-                  <div className="code-empty-state-icon">
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
-                      <polyline points="13 2 13 9 20 9" />
-                    </svg>
-                  </div>
-                  <h4 style={{ color: "#1e293b" }}>{isUk ? "Файл не вибрано" : "No file selected"}</h4>
-                  <p>
-                    {isUk
-                      ? "Виберіть будь-який файл з лівої колонки, щоб переглянути його повний вміст."
-                      : "Select any file from the left column to view its source code."}
-                  </p>
-                </div>
-              )}
-              {fileContent !== null && (
-                isEditingFile ? (
-                  <textarea
-                    className="project-file-browser-textarea"
-                    value={fileContent}
-                    onChange={(e) => setFileContent(e.target.value)}
-                    spellCheck={false}
-                    style={{
-                      width: "100%",
-                      height: isFullscreenFile ? "calc(100vh - 160px)" : "480px",
-                      flex: isFullscreenFile ? 1 : undefined,
-                      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                      fontSize: "13px",
-                      lineHeight: "1.5",
-                      border: "1px solid #cbd5e1",
-                      outline: "none",
-                      resize: "none",
-                      padding: "16px",
-                      background: "#0f172a",
-                      color: "#f8fafc",
-                      borderRadius: 8,
-                      boxSizing: "border-box",
-                    }}
-                  />
-                ) : (
-                  <pre
-                    className="project-file-browser-pre"
-                    style={{
-                      maxHeight: isFullscreenFile ? "calc(100vh - 160px)" : 480,
-                      height: isFullscreenFile ? "calc(100vh - 160px)" : undefined,
-                      flex: isFullscreenFile ? 1 : undefined,
-                    }}
-                  >
-                    {fileContent}
-                  </pre>
-                )
-              )}
-            </div>
-
-            <div className="project-preview-col-footer" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <span>{isEditingFile ? "✏️ " + (isUk ? "Режим редагування" : "Manual edit mode") : "🔒 " + (isUk ? "Режим читання (Read-only)" : "Read-only mode")}</span>
-                <span style={{ marginLeft: "12px", color: isEditingFile ? "#0284c7" : undefined }}>
-                  {isEditingFile
-                    ? (isUk ? "Внесіть зміни та збережіть файл" : "Modify code and click Save")
-                    : (isUk ? "Правки вносить AI-агент" : "Edits executed via agent")}
-                </span>
-              </div>
-              {saveSuccess && (
-                <span style={{ color: "#16a34a", fontWeight: 600, fontSize: "12px" }}>
-                  ✓ {isUk ? "Файл збережено!" : "File saved!"}
-                </span>
-              )}
-            </div>
-          </section>
-        </div>
-      )}
+      <CodeWorkspaceFilePanel isUk={isUk} activeTab={activeTab} tree={tree} filteredTree={filteredTree} filesError={filesError} fileFilter={fileFilter} setFileFilter={setFileFilter} selectedPath={selectedPath} openFile={openFile} renderFileIcon={renderFileIcon} isFullscreenFile={isFullscreenFile} setIsFullscreenFile={setIsFullscreenFile} fileContent={fileContent} isEditingFile={isEditingFile} setIsEditingFile={setIsEditingFile} savingFile={savingFile} saveFile={saveFile} copied={copied} copyFileContent={copyFileContent} fileError={fileError} setFileContent={setFileContent} saveSuccess={saveSuccess} />
 
       {/* TAB 3: CHANGES */}
       {(activeTab === "changes" || activeTab === "all") && (

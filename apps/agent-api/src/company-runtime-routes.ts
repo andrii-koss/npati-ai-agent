@@ -1,7 +1,7 @@
 import { WorkspaceAccessError, type CompanyRunMode } from "@npati/workspace";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AuthProvider } from "./auth";
-import { CompanyDelegationRuntime, companyRunTelemetryHeaders } from "./company-runtime";
+import { CompanyDelegationRuntime, CompanyRuntimeError, companyRunTelemetryHeaders } from "./company-runtime";
 import type { CompanyRunQueueProducer } from "./company-run-queue";
 import {RouteGuardTiers} from "./route-guard-tiers";
 
@@ -16,6 +16,7 @@ function key(request: FastifyRequest) {
   return value;
 }
 function failure(reply: FastifyReply, error: unknown) {
+  if (error instanceof CompanyRuntimeError) return reply.code(error.status).send({ error: { code: error.code, message: error.message } });
   if (error instanceof WorkspaceAccessError) return reply.code(403).send({ error: { code: error.code, message: error.message } });
   const message = error instanceof Error ? error.message : "Company runtime request failed";
   const status = /required|invalid|must/i.test(message) ? 400 : 500;
@@ -29,6 +30,7 @@ function runtimeStatus(code?: string) {
   if (code === "CIRCULAR_DELEGATION" || code === "TOOL_LOOP_DETECTED") return 400;
   if (code === "RUN_TIMEOUT") return 504;
   if (code === "RUN_FAILED") return 502;
+  if (code === "model_unavailable" || code === "model_routing_failed") return 503;
   if (code === "OMNIROUTE_ORCHESTRATION_UNAVAILABLE" || code === "OMNIROUTE_COMBOS_UNAVAILABLE") return 503;
   return 200;
 }
