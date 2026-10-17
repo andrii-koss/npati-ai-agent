@@ -93,6 +93,7 @@ export interface AppRoutesAndLifecycleDeps {
   codeReaper: CodeReaper;
   sandboxIdleTimer?: NodeJS.Timeout;
   sandboxRetentionTimer?: NodeJS.Timeout;
+  lifecycleRetentionTimer?: NodeJS.Timeout;
   backupTimer?: NodeJS.Timeout;
   auditVerifyTimer?: NodeJS.Timeout;
   auditAnchorTimer?: NodeJS.Timeout;
@@ -161,6 +162,7 @@ export function registerAppRoutesAndLifecycle(deps: AppRoutesAndLifecycleDeps) {
     codeReaper,
     sandboxIdleTimer,
     sandboxRetentionTimer,
+    lifecycleRetentionTimer,
     backupTimer,
     auditVerifyTimer,
     auditAnchorTimer,
@@ -188,6 +190,7 @@ export function registerAppRoutesAndLifecycle(deps: AppRoutesAndLifecycleDeps) {
     codeReaper.stop();
     if (sandboxIdleTimer) clearInterval(sandboxIdleTimer);
     if (sandboxRetentionTimer) clearInterval(sandboxRetentionTimer);
+    if (lifecycleRetentionTimer) clearInterval(lifecycleRetentionTimer);
     if (backupTimer) clearInterval(backupTimer);
     if (auditVerifyTimer) clearInterval(auditVerifyTimer);
     if (auditAnchorTimer) clearInterval(auditAnchorTimer);

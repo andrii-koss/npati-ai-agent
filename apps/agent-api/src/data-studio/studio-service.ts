@@ -309,11 +309,35 @@ export class DataStudioUiService {
     const updatedConfig = {
       ...env.providerConfig,
       corsOriginsByProject: { ...byProject, [projectId]: sanitized },
+      corsAllowedOrigins: sanitized,
     };
     await this.repository.setEnvironment(ctx, companyId, backend.id, environment, {
       providerConfig: updatedConfig,
     });
     return { corsAllowedOrigins: sanitized };
+  }
+
+  async registerPreviewCorsOrigin(
+    ctx: AuthContext,
+    companyId: string,
+    projectId: string,
+    environment: DataEnvironmentName,
+    origin: string,
+  ): Promise<void> {
+    const { backend, env } = await this.context(ctx, companyId, projectId, environment);
+    const byProject = (env.providerConfig.corsOriginsByProject ?? {}) as Record<string, string[]>;
+    const existing = byProject[projectId] ?? (Array.isArray(env.providerConfig.corsAllowedOrigins) ? (env.providerConfig.corsAllowedOrigins as string[]) : []);
+    if (!existing.includes(origin)) {
+      const nextOrigins = [...existing, origin];
+      const updatedConfig = {
+        ...env.providerConfig,
+        corsOriginsByProject: { ...byProject, [projectId]: nextOrigins },
+        corsAllowedOrigins: nextOrigins,
+      };
+      await this.repository.setEnvironment(ctx, companyId, backend.id, environment, {
+        providerConfig: updatedConfig,
+      });
+    }
   }
 
   /** OpenAPI document for the Data Studio UI (owner-authenticated, no public key needed). */

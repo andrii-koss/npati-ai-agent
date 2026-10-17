@@ -176,6 +176,83 @@ export function extractPortFromCommand(command: string, fallbackPort: number): n
   return fallbackPort;
 }
 
+export type PreviewOriginRegistrar = (ctx: AuthContext, companyId: string, projectId: string, origin: string) => Promise<void>;
+
+export function parseExactHttpOrigin(raw?: string | null): string | null {
+  if (!raw || typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.includes("*")) return null;
+  try {
+    const url = new URL(trimmed);
+    if (!["http:", "https:"].includes(url.protocol)) return null;
+    if (url.origin !== trimmed) return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
+export function rewriteSetCookieHeader(
+  cookieStr: string,
+  projectPrefix: string,
+  proxyPath: string,
+): string {
+  const parts = cookieStr.split(";").map((p) => p.trim());
+  if (parts.length === 0 || !parts[0] || !parts[0].includes("=")) return cookieStr;
+  const eqIdx = parts[0].indexOf("=");
+  const name = parts[0].slice(0, eqIdx);
+  const val = parts[0].slice(eqIdx + 1);
+  const newName = `${projectPrefix}${name}`;
+  const attributes: string[] = [`${newName}=${val}`];
+  let pathSet = false;
+  let sameSiteSet = false;
+
+  for (let i = 1; i < parts.length; i++) {
+    const part = parts[i];
+    if (!part) continue;
+    const lower = part.toLowerCase();
+    if (lower.startsWith("domain=")) {
+      continue;
+    }
+    if (lower.startsWith("path=")) {
+      attributes.push(`Path=${proxyPath}`);
+      pathSet = true;
+      continue;
+    }
+    if (lower.startsWith("samesite=")) {
+      attributes.push("SameSite=Lax");
+      sameSiteSet = true;
+      continue;
+    }
+    attributes.push(part);
+  }
+
+  if (!pathSet) {
+    attributes.push(`Path=${proxyPath}`);
+  }
+  if (!sameSiteSet) {
+    attributes.push("SameSite=Lax");
+  }
+
+  return attributes.join("; ");
+}
+
+export function filterIncomingCookies(
+  rawCookieHeader: string | undefined,
+  projectPrefix: string,
+): string | undefined {
+  if (!rawCookieHeader || typeof rawCookieHeader !== "string") return undefined;
+  const parts = rawCookieHeader.split(";");
+  const upstreamCookies: string[] = [];
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (trimmed.startsWith(projectPrefix)) {
+      upstreamCookies.push(trimmed.slice(projectPrefix.length));
+    }
+  }
+  return upstreamCookies.length > 0 ? upstreamCookies.join("; ") : undefined;
+}
+
 export class ProjectPreviewService {
   private readonly secret: string;
   private readonly sessions = new Map<string, ActivePreviewSession>();
@@ -186,6 +263,7 @@ export class ProjectPreviewService {
     private readonly workspace: ProjectWorkspace,
     private readonly sandbox: ProjectSandboxService | undefined,
     secret?: string,
+    private readonly onPreviewStart?: PreviewOriginRegistrar,
   ) {
     this.secret = secret || process.env.NPATI_PREVIEW_SECRET || randomBytes(32).toString("hex");
   }
@@ -270,7 +348,7 @@ export class ProjectPreviewService {
     ctx: AuthContext,
     companyId: string,
     projectId: string,
-    options: { command?: string; port?: number; agentId?: string; signal?: AbortSignal } = {},
+    options: { command?: string; port?: number; agentId?: string; signal?: AbortSignal; callerOrigin?: string } = {},
   ): Promise<{
     status: string;
     previewUrl: string;
@@ -281,8 +359,17 @@ export class ProjectPreviewService {
   }> {
     if (!this.sandbox) throw new PreviewError("sandbox_unavailable", "Sandbox runner is not configured", 503);
     options.signal?.throwIfAborted();
+    const validOrigin = parseExactHttpOrigin(options.callerOrigin);
+    if (validOrigin && this.onPreviewStart) {
+      await this.onPreviewStart(ctx, companyId, projectId, validOrigin).catch((err) => {
+        console.warn(`[startPreview] Failed to auto-register preview CORS origin:`, err);
+      });
+    }
     const project = await this.projects.get(ctx, companyId, projectId);
     if (project.status === "archived") throw new PreviewError("project_archived", "Archived project cannot run preview", 409);
+    if (project.status === "soft_deleted" || project.status === "purging" || project.status === "deleted") {
+      throw new PreviewError("project_deleted", "Deleted project cannot run preview", 409);
+    }
 
     // Detect stack & dev command
     const files = await this.workspace.listFiles(ctx, companyId, projectId);
@@ -607,10 +694,40 @@ export class ProjectPreviewService {
     query.delete("token");
     const path = subpath + (query.size ? "?" + query.toString() : "");
     const headers: Record<string, string> = {};
-    for (const name of ["accept", "accept-language", "content-type", "user-agent"]) {
+    const forwardedHeaderNames = [
+      "accept",
+      "accept-language",
+      "content-type",
+      "user-agent",
+      "cache-control",
+      "pragma",
+      "if-match",
+      "if-none-match",
+      "if-modified-since",
+      "if-unmodified-since",
+      "x-requested-with",
+      "x-user-token",
+    ];
+    for (const name of forwardedHeaderNames) {
       const value = request.headers[name];
       if (typeof value === "string") headers[name] = value;
     }
+
+    const authHeader = request.headers.authorization;
+    if (typeof authHeader === "string" && authHeader.trim()) {
+      const bearer = authHeader.replace(/^Bearer\s+/i, "").trim();
+      const isPlatformToken = bearer === token || bearer.startsWith("npati_");
+      if (!isPlatformToken) {
+        headers["authorization"] = authHeader;
+      }
+    }
+
+    const projectPrefix = `_npati_p_${projectId.slice(0, 8)}_`;
+    const filteredCookies = filterIncomingCookies(request.headers.cookie, projectPrefix);
+    if (filteredCookies) {
+      headers["cookie"] = filteredCookies;
+    }
+
     const payload = request.body === undefined ? undefined
       : Buffer.from(typeof request.body === "string" ? request.body : JSON.stringify(request.body)).toString("base64");
     try {
@@ -622,7 +739,20 @@ export class ProjectPreviewService {
       const routed = (target: string) => `${prefix}${target}${target.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;
       for (const [name, value] of Object.entries(result.headers)) {
         if (["connection", "transfer-encoding", "content-length", "content-encoding", "set-cookie"].includes(name.toLowerCase())) continue;
-        reply.header(name, name.toLowerCase() === "location" && value.startsWith("/") && !value.startsWith("//") ? routed(value) : value);
+        if (typeof value === "string") {
+          reply.header(name, name.toLowerCase() === "location" && value.startsWith("/") && !value.startsWith("//") ? routed(value) : value);
+        }
+      }
+
+      const setCookieRaw = result.headers["set-cookie"] || result.headers["Set-Cookie"];
+      if (setCookieRaw) {
+        const cookieList: string[] = Array.isArray(setCookieRaw)
+          ? setCookieRaw
+          : typeof setCookieRaw === "string" && setCookieRaw.includes("\n")
+            ? setCookieRaw.split("\n")
+            : [String(setCookieRaw)];
+        const rewritten = cookieList.map((c) => rewriteSetCookieHeader(c, projectPrefix, prefix));
+        reply.header("set-cookie", rewritten);
       }
       let body = Buffer.from(result.body, "base64");
       if (String(result.headers["content-type"] ?? "").includes("text/html")) {

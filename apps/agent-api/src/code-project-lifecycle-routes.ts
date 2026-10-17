@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type {
   AuthContext,
   CodeSession,
@@ -10,6 +10,7 @@ import { withApiVersion } from "./api-versioning";
 import { AuthenticationError } from "./auth";
 import { CodeRbacError, requiredPermissionForAction, type AuthorizeCodeActionInput } from "./code-rbac";
 import type { CodeAuditPort } from "./code-project-trust";
+import type { ProjectLifecycleService } from "./project-lifecycle-service";
 
 /**
  * C7 — the server side of the code project lifecycle the UI needs: list, create, rename, archive,
@@ -64,6 +65,10 @@ export const CODE_PROJECT_ACTIONS = Object.freeze({
   archive: "code.project.archive",
   unarchive: "code.project.unarchive",
   delete: "code.project.delete",
+  deletePlan: "code.project.delete_plan",
+  softDelete: "code.project.soft_delete",
+  restore: "code.project.restore",
+  hardPurge: "code.project.hard_purge",
 });
 
 const ROUTE_ERROR_STATUS: Record<string, number> = {
@@ -112,6 +117,7 @@ export interface CodeProjectLifecycleDeps {
    * that just happened, without changing the meaning of `removed`.
    */
   removeWorkspace?: (ctx: AuthContext, companyId: string, projectId: string) => Promise<{ removed: boolean; reason?: string; alreadyAbsent?: boolean; outstanding?: string[] }>;
+  lifecycleService?: ProjectLifecycleService;
   audit?: CodeAuditPort;
   authorize(ctx: AuthContext, companyId: string, input: AuthorizeCodeActionInput): Promise<unknown>;
   getAuthContext(request: unknown): AuthContext | null;
@@ -255,6 +261,7 @@ export async function registerCodeProjectLifecycleRoutes(instance: FastifyInstan
       await deps.audit.record({
         action: input.action,
         actor: input.ctx.userId,
+        workspaceId: input.ctx.workspaceId,
         companyId: input.companyId,
         resourceType: "code_project",
         resourceId: input.resourceId,
@@ -382,11 +389,99 @@ export async function registerCodeProjectLifecycleRoutes(instance: FastifyInstan
   };
 
   /**
-   * Delete. Removal happens through the existing service (its hook destroys the sandbox and detaches
-   * DataBackend artifacts). The on-disk workspace is reported honestly: when there is no removal mechanism
-   * the answer is `partial` with the exact outstanding target, never a success.
+   * Delete Plan (Dry Run): Returns exact resource breakdown, shared/dedicated status,
+   * retention policy, and planned actions without performing any deletions.
    */
-  instance.delete<{ Params: ProjectParams; Body: { confirm?: boolean } }>(
+  const handleDeletePlan = async (request: FastifyRequest<{ Params: ProjectParams }>, reply: FastifyReply) => {
+    try {
+      const { companyId, projectId } = request.params;
+      const ctx = await authorizeAction(request, companyId, CODE_PROJECT_ACTIONS.deletePlan);
+      if (!deps.lifecycleService) {
+        throw new CodeProjectRouteError("lifecycle_unavailable", "Project lifecycle service is not configured", 503);
+      }
+      const plan = await deps.lifecycleService.getDeletePlan(ctx, companyId, projectId);
+      return reply.send(withApiVersion({ ...plan }));
+    } catch (error) {
+      return fail(reply, error);
+    }
+  };
+  instance.get<{ Params: ProjectParams }>("/companies/:companyId/code/projects/:projectId/delete-plan", handleDeletePlan);
+  instance.get<{ Params: ProjectParams }>("/companies/:companyId/projects/:projectId/delete-plan", handleDeletePlan);
+
+  /**
+   * Soft Delete: Stops live preview and sandbox processes, revokes CORS, retains files and media for 30 days.
+   */
+  const handleSoftDelete = async (request: FastifyRequest<{ Params: ProjectParams; Body: { reason?: string; confirm?: boolean } }>, reply: FastifyReply) => {
+    try {
+      const { companyId, projectId } = request.params;
+      const ctx = await authorizeAction(request, companyId, CODE_PROJECT_ACTIONS.softDelete);
+      assertDeleteConfirmed(request.body);
+      if (!deps.lifecycleService) {
+        throw new CodeProjectRouteError("lifecycle_unavailable", "Project lifecycle service is not configured", 503);
+      }
+      await auditOrFail({ ctx, companyId, action: "code.project.soft_delete", resourceId: projectId, metadata: { reason: request.body?.reason } });
+      const result = await deps.lifecycleService.softDelete(ctx, companyId, projectId, { reason: request.body?.reason });
+      return reply.send(withApiVersion(result));
+    } catch (error) {
+      return fail(reply, error);
+    }
+  };
+  instance.post<{ Params: ProjectParams; Body: { reason?: string; confirm?: boolean } }>("/companies/:companyId/code/projects/:projectId/soft-delete", handleSoftDelete);
+  instance.post<{ Params: ProjectParams; Body: { reason?: string; confirm?: boolean } }>("/companies/:companyId/projects/:projectId/soft-delete", handleSoftDelete);
+
+  /**
+   * Restore: Safely restores soft-deleted project, re-attaches DataBackend, restores status to ready.
+   */
+  const handleRestore = async (request: FastifyRequest<{ Params: ProjectParams }>, reply: FastifyReply) => {
+    try {
+      const { companyId, projectId } = request.params;
+      const ctx = await authorizeAction(request, companyId, CODE_PROJECT_ACTIONS.restore);
+      if (!deps.lifecycleService) {
+        throw new CodeProjectRouteError("lifecycle_unavailable", "Project lifecycle service is not configured", 503);
+      }
+      await auditOrFail({ ctx, companyId, action: "code.project.restore", resourceId: projectId });
+      const result = await deps.lifecycleService.restore(ctx, companyId, projectId);
+      return reply.send(withApiVersion(result));
+    } catch (error) {
+      return fail(reply, error);
+    }
+  };
+  instance.post<{ Params: ProjectParams }>("/companies/:companyId/code/projects/:projectId/restore", handleRestore);
+  instance.post<{ Params: ProjectParams }>("/companies/:companyId/projects/:projectId/restore", handleRestore);
+
+  /**
+   * Hard Purge: Purges dedicated files, media and database records. Enforces retention unless force: true.
+   */
+  const handleHardPurge = async (request: FastifyRequest<{ Params: ProjectParams; Body: { confirm?: boolean; force?: boolean } }>, reply: FastifyReply) => {
+    try {
+      const { companyId, projectId } = request.params;
+      const ctx = await authorizeAction(request, companyId, CODE_PROJECT_ACTIONS.hardPurge);
+      assertDeleteConfirmed(request.body);
+      if (!deps.lifecycleService) {
+        throw new CodeProjectRouteError("lifecycle_unavailable", "Project lifecycle service is not configured", 503);
+      }
+      if (request.body?.force === true && ctx.role !== "owner" && ctx.role !== "admin") {
+        throw new CodeProjectRouteError(
+          "force_purge_not_permitted",
+          "Immediate hard purge bypassing retention is restricted to company owners and administrators",
+          403,
+          { role: ctx.role },
+        );
+      }
+      await auditOrFail({ ctx, companyId, action: "code.project.hard_purge", resourceId: projectId, metadata: { force: request.body?.force } });
+      const result = await deps.lifecycleService.hardPurge(ctx, companyId, projectId, { force: request.body?.force });
+      return reply.send(withApiVersion(result));
+    } catch (error) {
+      return fail(reply, error);
+    }
+  };
+  instance.post<{ Params: ProjectParams; Body: { confirm?: boolean; force?: boolean } }>("/companies/:companyId/code/projects/:projectId/hard-purge", handleHardPurge);
+  instance.post<{ Params: ProjectParams; Body: { confirm?: boolean; force?: boolean } }>("/companies/:companyId/projects/:projectId/hard-purge", handleHardPurge);
+
+  /**
+   * Delete. If lifecycleService is configured, migrates delete to Soft Delete (Requirement 12).
+   */
+  instance.delete<{ Params: ProjectParams; Body: { confirm?: boolean; force?: boolean } }>(
     "/companies/:companyId/code/projects/:projectId",
     async (request, reply) => {
       try {
@@ -395,16 +490,51 @@ export async function registerCodeProjectLifecycleRoutes(instance: FastifyInstan
         assertDeleteConfirmed(request.body);
         await auditOrFail({ ctx, companyId, action: "code.project.delete", resourceId: projectId, metadata: { confirmed: true } });
 
+        // If lifecycleService is configured, route delete through the new lifecycle (Requirement 12)
+        if (deps.lifecycleService) {
+          if (request.body?.force === true) {
+            if (ctx.role !== "owner" && ctx.role !== "admin") {
+              throw new CodeProjectRouteError(
+                "force_purge_not_permitted",
+                "Immediate hard purge bypassing retention is restricted to company owners and administrators",
+                403,
+                { role: ctx.role },
+              );
+            }
+            const purge = await deps.lifecycleService.hardPurge(ctx, companyId, projectId, { force: true });
+            return reply.send(withApiVersion({
+              status: "deleted",
+              purged: purge.purged,
+              removed: { project: true, sandbox: purge.purged.sandboxDestroyed, dataBackendArtifacts: true, workspace: purge.purged.workspaceRemoved, workspaceAlreadyAbsent: false },
+              failures: [],
+            }));
+          }
+          try {
+            const soft = await deps.lifecycleService.softDelete(ctx, companyId, projectId, { reason: "website_delete_api" });
+            return reply.send(withApiVersion({
+              status: "soft_deleted",
+              retentionDays: soft.retentionDays,
+              purgeAfter: soft.purgeAfter,
+              actions: soft.actions,
+              removed: { project: true, sandbox: true, dataBackendArtifacts: true, workspace: "retained_for_soft_delete", workspaceAlreadyAbsent: false },
+              failures: [],
+            }));
+          } catch (error) {
+            if (resolveErrorCode(error) === "project_not_found") {
+              return reply.send(withApiVersion({
+                status: "already_deleted",
+                removed: { project: true, sandbox: true, dataBackendArtifacts: true, workspace: true, workspaceAlreadyAbsent: true },
+                failures: [],
+              }));
+            }
+            throw error;
+          }
+        }
+
         try {
           await deps.projects.delete(ctx, companyId, projectId);
         } catch (error) {
           if (resolveErrorCode(error) === "project_not_found") {
-            // Same answer for a project that never existed and for one belonging to another tenant, so a repeated
-            // delete is safe and this route cannot be used to probe for foreign projects.
-            //
-            // The workspace is still attended to here: the row is gone, but bytes may remain, and removal is keyed
-            // by the caller's own company id — so a repeat delete actually cleans up instead of reporting a state
-            // it never checked.
             const repeat = await attemptWorkspaceRemoval(ctx, companyId, projectId);
             return reply.send(withApiVersion({
               status: "already_deleted",

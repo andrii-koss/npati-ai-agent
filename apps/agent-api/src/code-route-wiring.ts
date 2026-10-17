@@ -43,6 +43,7 @@ import { CodeRunStateLog, readRunEstimate } from "./code-run-state";
 import { CodeService } from "./code-service";
 import { registerCodeSessionControlRoutes } from "./code-session-control-routes";
 import { registerCodeSessionDurabilityRoutes } from "./code-session-durability-routes";
+import type { ProjectLifecycleService } from "./project-lifecycle-service";
 import { registerCodeSessionExportRoutes } from "./code-session-export-routes";
 import { CodeSessionForkService } from "./code-session-fork";
 import { CodeSessionInboxService } from "./code-session-inbox";
@@ -125,6 +126,7 @@ export interface CodeRouteDeps {
   sandboxImagePolicy: SandboxImagePolicy;
   trackedProcesses: CodeAsyncProcessService | undefined;
   workspaceStore: ReturnType<typeof createCoreServices>["workspaceStore"];
+  lifecycleService?: ProjectLifecycleService;
 }
 
 export interface CodeRouteOutputs {

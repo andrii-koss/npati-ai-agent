@@ -655,6 +655,18 @@ export class ProjectSandboxService {
     this.touch(ctx, current);
     return true;
   }
+  /** Soft Delete: stops all running processes of the sandbox without deleting files on disk. */
+  async stop(ctx: AuthContext, project: Project): Promise<boolean> {
+    if (!project.sandboxId) return false;
+    const release = this.processCleanupGuard ? await this.processCleanupGuard.acquire(ctx, project) : async () => {};
+    if (!release) return false;
+    try {
+      try { await this.provider.stopSandbox(scopeOf(ctx, project), project.sandboxId); }
+      catch (error) { if (!(error instanceof SandboxProviderError && error.status === 404)) throw error; }
+      this.lastUse.delete(project.id);
+      return true;
+    } finally { await release(); }
+  }
   async destroy(ctx: AuthContext, project: Project) {
     if (!project.sandboxId) return false;
     const release = this.processCleanupGuard ? await this.processCleanupGuard.acquire(ctx, project) : async () => {};

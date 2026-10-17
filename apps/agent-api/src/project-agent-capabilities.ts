@@ -5,6 +5,11 @@ export const WEBSITE_FILE_TOOLS = [
   "project.files.create", "project.files.write", "project.files.edit",
 ] as const;
 
+/** Media tools for uploading and managing website assets via MinIO (Stage 4). */
+export const PROJECT_MEDIA_TOOLS = [
+  "project.media.upload", "project.media.list", "project.media.get", "project.media.delete",
+] as const;
+
 /** Live Preview + terminal tools a generated app needs while it is being built (D6). */
 export const PROJECT_PREVIEW_TOOLS = [
   "project.terminal.exec", "project.terminal.process", "project.preview.start", "project.preview.status",

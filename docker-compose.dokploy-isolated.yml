@@ -200,7 +200,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
-    networks: [npati-agent, npati-sandbox-control]
+    networks: [npati-sandbox-control, npati-sandbox-egress]
 
   crawler:
     build:
@@ -378,6 +378,7 @@ networks:
   npati-agent:
   npati-sandbox-control:
     internal: true
+  npati-sandbox-egress:
 
 volumes:
   project-runtime-workspaces:

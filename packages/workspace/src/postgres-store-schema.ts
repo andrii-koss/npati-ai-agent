@@ -194,7 +194,8 @@ export const projectColumns = `id, workspace_id AS "workspaceId", company_id AS 
   last_build_status AS "lastBuildStatus", deployment_url AS "deploymentUrl", deployment_status AS "deploymentStatus",
   last_deployed_at AS "lastDeployedAt", data_backend_id AS "dataBackendId", app_scheme AS "appScheme",
   toolchain, default_branch AS "defaultBranch", data_classification AS "dataClassification",
-  retention_class AS "retentionClass", revision, created_at AS "createdAt", updated_at AS "updatedAt"`;
+  retention_class AS "retentionClass", deleted_at AS "deletedAt", purge_after AS "purgeAfter",
+  deletion_reason AS "deletionReason", restored_at AS "restoredAt", revision, created_at AS "createdAt", updated_at AS "updatedAt"`;
 export const codeSessionColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", project_id AS "projectId",
   user_id AS "userId", agent_id AS "agentId", mode, model_profile AS "modelProfile", status,
   parent_session_id AS "parentSessionId", run_id AS "runId", summary,

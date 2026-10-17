@@ -234,4 +234,28 @@ export class DataBackendService {
     await this.repository.attach(ctx, companyId, projectId, null).catch(() => undefined);
     return { detached: true, cleanedOrigins, cleanedRedirects: redirects?.rowCount ?? 0 };
   }
+
+  /**
+   * Soft Delete CORS revocation: removes CORS origins for this project immediately
+   * without dropping the backend, wiping the database, or breaking attachments.
+   */
+  async detachProjectCors(ctx: AuthContext, companyId: string, projectId: string): Promise<{ cleanedOrigins: number }> {
+    const project = await this.store.getProject(ctx, companyId, projectId).catch(() => null);
+    const backendId = project?.dataBackendId;
+    if (!backendId) return { cleanedOrigins: 0 };
+    let cleanedOrigins = 0;
+    for (const environment of ["dev", "prod"] as const) {
+      const env = await this.repository.environment(ctx, companyId, backendId, environment).catch(() => null);
+      if (!env) continue;
+      const byProject = (env.providerConfig?.corsOriginsByProject ?? {}) as Record<string, string[]>;
+      if (!(projectId in byProject)) continue;
+      const next = { ...byProject };
+      delete next[projectId];
+      await this.repository.setEnvironment(ctx, companyId, backendId, environment, {
+        providerConfig: { ...env.providerConfig, corsOriginsByProject: next },
+      }).catch(() => undefined);
+      cleanedOrigins += 1;
+    }
+    return { cleanedOrigins };
+  }
 }

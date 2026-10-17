@@ -2,7 +2,7 @@ import type { DataClassification, RetentionClass } from "./retention";
 
 export type ProjectType = "website" | "web_app" | "landing_page" | "mobile_app" | "code_project";
 export const PROJECT_TYPES: readonly ProjectType[] = ["website", "web_app", "landing_page", "mobile_app", "code_project"] as const;
-export type ProjectStatus = "creating" | "ready" | "working" | "building" | "previewing" | "failed" | "archived";
+export type ProjectStatus = "creating" | "ready" | "working" | "building" | "previewing" | "failed" | "archived" | "soft_deleted" | "purging" | "deleted";
 
 
 /** Toolchain metadata detected from the workspace and editable by the owner (C1). */
@@ -38,6 +38,10 @@ export interface Project {
   defaultBranch?: string | null;
   dataClassification: DataClassification;
   retentionClass: RetentionClass;
+  deletedAt?: string | null;
+  purgeAfter?: string | null;
+  deletionReason?: string | null;
+  restoredAt?: string | null;
   revision: number; createdAt: string; updatedAt: string;
 }
 export interface ProjectInput {

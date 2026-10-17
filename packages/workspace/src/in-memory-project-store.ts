@@ -142,6 +142,76 @@ export async function deleteProject(host: InMemoryProjectState, context: AuthCon
     return host.projects.delete(projectId);
   }
 
+export async function softDeleteProject(host: InMemoryProjectState, context: AuthContext, companyId: string, projectId: string, reason?: string, purgeAfter?: string): Promise<Project> {
+    const project = await getProject(host, context, companyId, projectId);
+    if (project.status === "purging" || project.status === "deleted") {
+      throw new Error("Project could not be soft-deleted or is already purging");
+    }
+    const purgeDate = purgeAfter ? new Date(purgeAfter) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const next: Project = {
+      ...project,
+      status: "soft_deleted",
+      deletedAt: now(),
+      purgeAfter: purgeDate.toISOString(),
+      deletionReason: reason ?? "user_requested",
+      revision: project.revision + 1,
+      updatedAt: now(),
+    };
+    host.projects.set(projectId, next);
+    return structuredClone(next);
+  }
+
+export async function restoreProject(host: InMemoryProjectState, context: AuthContext, companyId: string, projectId: string): Promise<Project> {
+    const project = await getProject(host, context, companyId, projectId);
+    if (project.status !== "soft_deleted") {
+      throw new Error(`Cannot restore project with status '${project.status}' (expected 'soft_deleted')`);
+    }
+    const next: Project = {
+      ...project,
+      status: "ready",
+      deletedAt: null,
+      purgeAfter: null,
+      deletionReason: null,
+      restoredAt: now(),
+      revision: project.revision + 1,
+      updatedAt: now(),
+    };
+    host.projects.set(projectId, next);
+    return structuredClone(next);
+  }
+
+export async function transitionProjectToPurging(host: InMemoryProjectState, context: AuthContext, companyId: string, projectId: string): Promise<Project> {
+    const project = await getProject(host, context, companyId, projectId);
+    if (project.status !== "soft_deleted") {
+      throw new Error("Project is not in soft_deleted state");
+    }
+    const next: Project = { ...project, status: "purging", revision: project.revision + 1, updatedAt: now() };
+    host.projects.set(projectId, next);
+    return structuredClone(next);
+  }
+
+export async function recordProjectLifecycleRecord(_host: InMemoryProjectState, _record: unknown): Promise<void> {
+    // In-memory noop or stored
+  }
+
+export async function listExpiredSoftDeletedProjects(host: InMemoryProjectState, limit = 50): Promise<Array<{ id: string; companyId: string; workspaceId: string; createdBy: string; purgeAfter: string }>> {
+    const nowTs = Date.now();
+    const result: Array<{ id: string; companyId: string; workspaceId: string; createdBy: string; purgeAfter: string }> = [];
+    for (const project of host.projects.values()) {
+      if (project.status === "soft_deleted" && project.purgeAfter && new Date(project.purgeAfter).getTime() <= nowTs) {
+        result.push({
+          id: project.id,
+          companyId: project.companyId,
+          workspaceId: project.workspaceId,
+          createdBy: project.createdBy,
+          purgeAfter: project.purgeAfter,
+        });
+        if (result.length >= limit) break;
+      }
+    }
+    return result;
+  }
+
 export async function createProjectCheckpoint(host: InMemoryProjectState, context: AuthContext, companyId: string, projectId: string, input: CreateCheckpointInput): Promise<ProjectCheckpoint> {
     await getProject(host, context, companyId, projectId);
     const checkpoint: ProjectCheckpoint = {

@@ -792,3 +792,82 @@
   color: #94a3b8;
   padding: 6px 8px 4px 8px;
 }
+
+/* ==========================================================================
+   Website Studio Project Cards (2 per row with Live Sandbox Preview)
+   ========================================================================== */
+.website-studio-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+
+@media (max-width: 860px) {
+  .website-studio-grid {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+}
+
+.website-project-card {
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.website-project-card:hover {
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.06) !important;
+  border-color: #d1d5db !important;
+}
+
+.website-action-btn-primary:hover {
+  background: #b91c1c !important;
+  box-shadow: 0 2px 6px rgba(185, 28, 28, 0.3) !important;
+}
+
+.website-action-btn-primary:active {
+  transform: scale(0.97);
+}
+
+.website-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: #ffffff;
+  border: 1px solid #e4e4e7;
+  color: #374151;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  padding: 0;
+}
+
+.website-icon-btn:hover {
+  background: #f8fafc;
+  border-color: #d1d5db;
+  color: #111827;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.website-icon-btn:active {
+  transform: scale(0.95);
+}
+
+.website-icon-btn.website-delete-btn:hover {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
+@keyframes website-preview-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+

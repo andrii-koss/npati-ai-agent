@@ -602,5 +602,17 @@ export async function runPostgresMigrationsPost086(pool: Pool): Promise<void> {
         await client.query("COMMIT");
       } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
     }
+    const projectLifecycleMigration = await pool.query("SELECT 1 FROM schema_migrations WHERE version='092_project_lifecycle_soft_delete'");
+    if (!projectLifecycleMigration.rowCount) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT pg_advisory_xact_lock(hashtext('092_project_lifecycle_soft_delete'))");
+        const { runMigration092 } = await import("./migration-092");
+        await runMigration092(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('092_project_lifecycle_soft_delete') ON CONFLICT DO NOTHING");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
+    }
 
 }

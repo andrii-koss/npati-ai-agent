@@ -8,6 +8,7 @@
  */
 import type { AppConfig } from "./app";
 import { ProjectAuthService } from "./data-studio/auth-service";
+import { MockEmailProvider, UnconfiguredEmailProvider } from "./data-studio/email-provider";
 import { BackupService } from "./data-studio/backup-service";
 import { PostgresDataProvider } from "./data-studio/data-provider";
 import { ExternalPostgresProvisioner } from "./data-studio/external-provisioner";
@@ -77,12 +78,16 @@ export function createDataBackendServices(input: DataBackendServicesInput) {
     ? new BackupService(dataBackendRepository, databaseProvisioner, dataProvider)
     : undefined;
   const projectRedirectRepository = new ProjectRedirectRepository({ get: getProject }, config.databaseUrl ? (store as any)?.pool : undefined);
+  const emailProvider = process.env.NODE_ENV === "production"
+    ? new UnconfiguredEmailProvider()
+    : new MockEmailProvider();
   const projectAuthService = dataBackendRepository && databaseProvisioner
     ? new ProjectAuthService({
         store: store,
         repository: dataBackendRepository,
         provisioner: databaseProvisioner,
         redirects: projectRedirectRepository,
+        emailProvider,
       })
     : undefined;
 

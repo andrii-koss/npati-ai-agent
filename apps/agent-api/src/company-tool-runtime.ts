@@ -22,6 +22,7 @@ import type { ProjectBrowserQaService } from "./project-browser-qa-service";
 import { isDataCapabilityPermitted } from "@npati/shared";
 import type { AgentDataStudioService } from "./data-studio/agent-data-service";
 import type { ProjectApiGatewayService } from "./data-studio/gateway-service";
+import type { ProjectMediaService } from "./project-media-service";
 
 export interface CompanyToolExecutor {
   canAutoApproveSandboxTerminal?(context: AuthContext, company: Company, runProjectId: string, agentId: string, tool: "project.terminal.exec" | "project.terminal.process", input: Record<string, unknown>): Promise<boolean>;
@@ -109,6 +110,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
     private readonly projectQa?: ProjectBrowserQaService,
     private readonly projectData?: AgentDataStudioService,
     private readonly projectApi?: ProjectApiGatewayService,
+    private readonly projectMedia?: ProjectMediaService,
   ) {}
 
   async execute(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>, signal: AbortSignal) {
@@ -182,6 +184,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
       return this.ai.mcpCall({ name, arguments: mcpArguments, signal, timeoutMs: 30_000 });
     }
     if (tool.startsWith("project.files.")) return this.projectFiles(context, company, tool, input);
+    if (tool.startsWith("project.media.")) return this.projectMediaTool(context, company, tool, input);
     if (tool === "project.terminal.exec" || tool === "project.terminal.process") {
       if (!this.projectSandbox) throw new Error("Project sandbox runner is not configured");
       const request = {
@@ -361,6 +364,49 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
         return { deleted: paths.length };
       }
       default: throw new Error("Unknown Project file capability");
+    }
+  }
+
+  private async projectMediaTool(context: AuthContext, company: Company, tool: string, input: Record<string, unknown>) {
+    if (!this.projectMedia) throw new Error("Project media service is not configured");
+    const projectId = typeof input.projectId === "string" ? input.projectId : "";
+    if (!projectId) throw new Error("projectId is required for project media operations");
+    const mediaPath = typeof input.path === "string" ? input.path : "";
+
+    switch (tool) {
+      case "project.media.upload": {
+        const name = typeof input.name === "string" ? input.name : path.basename(mediaPath) || "asset";
+        const base64Data = typeof input.base64Data === "string" ? input.base64Data : typeof input.data === "string" ? input.data : "";
+        if (!base64Data) throw new Error("base64Data is required for media upload");
+        const rawBase64 = base64Data.replace(/^data:[^;]+;base64,/, "");
+        const data = Buffer.from(rawBase64, "base64");
+        const mimeType = typeof input.mimeType === "string" ? input.mimeType : undefined;
+        const targetDir = typeof input.targetDir === "string" ? input.targetDir : (path.dirname(mediaPath) !== "." ? path.dirname(mediaPath) : "assets");
+        return this.projectMedia.uploadMedia(context, company.id, projectId, {
+          name,
+          data,
+          mimeType,
+          targetDir,
+          workspaceSync: true,
+        });
+      }
+      case "project.media.list": {
+        const prefix = typeof input.prefix === "string" ? input.prefix : "";
+        return this.projectMedia.listMedia(company.id, projectId, prefix);
+      }
+      case "project.media.get": {
+        if (!mediaPath) throw new Error("path is required for project.media.get");
+        const list = await this.projectMedia.listMedia(company.id, projectId);
+        const item = list.items.find((i) => i.path === mediaPath || i.name === mediaPath);
+        if (!item) throw new Error(`Media object not found: ${mediaPath}`);
+        return item;
+      }
+      case "project.media.delete": {
+        if (!mediaPath) throw new Error("path is required for project.media.delete");
+        return this.projectMedia.deleteMedia(context, company.id, projectId, mediaPath);
+      }
+      default:
+        throw new Error(`Unknown project media capability: ${tool}`);
     }
   }
   private async files(context: AuthContext, company: Company, input: Record<string, unknown>) {
