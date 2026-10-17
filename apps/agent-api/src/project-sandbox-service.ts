@@ -518,7 +518,7 @@ export class ProjectSandboxService {
       flags.push(`--type '${request.type}'`);
     }
 
-    const command = `QUERY="$(printf '%s' "${b64Query}" | base64 -d)" && rg ${flags.join(" ")} -e "$QUERY" ${target}`;
+    const command = `QUERY="$(printf '%s' "${b64Query}" | base64 -d)" && rg ${flags.join(" ")} -e "$QUERY" -- ${target}`;
 
     const ready = await this.ensure(ctx, project);
     await this.upload(ctx, ready.project, ready.scope, ready.sandboxId, ready.mount);

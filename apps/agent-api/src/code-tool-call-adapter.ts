@@ -158,8 +158,9 @@ export function resolveKnownTool(
     "code.list": "code.fs.list",
     "code.grep": "code.fs.grep",
   };
-  if (shorthands[cleaned]) {
-    cleaned = shorthands[cleaned];
+  const targetShorthand = shorthands[cleaned];
+  if (targetShorthand) {
+    cleaned = targetShorthand;
   }
 
   for (const tool of knownTools) {

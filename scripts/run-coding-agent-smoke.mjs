@@ -547,7 +547,7 @@ const SCENARIOS = [
       "End-to-end autonomous website generation via real Chat prompt: Chat -> AI Provider -> Coding Runtime -> Tool Calls -> Sandbox -> Live Preview -> Playwright DOM",
     run: async (state) => {
       const prompt =
-        "Створи простий адаптивний сайт на HTML, CSS і JavaScript. Додай заголовок NPATI Test, кнопку Click Me та лічильник натискань. Створи всі файли у Sandbox, перевір код і запусти Live Preview.";
+        "Створи простий адаптивний сайт на HTML, CSS і JavaScript. Додай заголовок NPATI Test, кнопку Click Me (елемент button з id='clickMe') та лічильник натискань (елемент span з id='counter', початково 0). Створи всі файли у Sandbox, перевір код і запусти Live Preview.";
 
       // 1. Send real Chat stream to initiate autonomous agent workflow
       const chatRes = await sendChatStream({
@@ -576,8 +576,8 @@ const SCENARIOS = [
       const capturedProjectId = autonomousProjectId || toolCalls[toolCalls.length - 1]?.projId || state.apiProjectId;
       state.e2eProjectId = capturedProjectId;
 
-      // Find mutating tool calls (code.fs.edit / code.fs.write) and read tool calls
-      const mutatingCalls = toolCalls.filter((t) => ["code.fs.edit", "code.fs.write"].includes(t.tool));
+      // Find mutating tool calls (code.fs.edit / code.fs.write / code.fs.apply_patch) and read tool calls
+      const mutatingCalls = toolCalls.filter((t) => ["code.fs.edit", "code.fs.write", "code.fs.apply_patch"].includes(t.tool));
       const readCalls = toolCalls.filter((t) => t.tool === "code.fs.read");
 
       // Verify code.fs.read succeeded (offset: 0 bug resolved)
@@ -616,13 +616,13 @@ const SCENARIOS = [
         // Find button
         const clickBtn =
           (await page.$("button:has-text('Click Me')")) ||
-          (await page.$("#clickMe, #click-me, button"));
+          (await page.$("#clickMe, #click-me, button, .button:not(#reset), a.button:not(#reset)"));
         const buttonFound = Boolean(clickBtn);
 
         // Find counter
         const counterEl =
-          (await page.$("#count, #counter, .counter, .count, p:has-text('0'), span:has-text('0')")) ||
-          (await page.$("p, span"));
+          (await page.$("#count, #counter, .counter, .count, [data-counter], [id*='count'], [class*='count']")) ||
+          (await page.$("span:has-text('0'), p:has-text('0'), span:has-text('Pressed'), p:has-text('Pressed')"));
         const initialCount = counterEl ? (await counterEl.innerText()).trim() : "";
 
         if (clickBtn) {
@@ -687,7 +687,8 @@ const SCENARIOS = [
       }
       if (!convId || !projectId) throw new Error("Prerequisite failed: missing e2eConversationId or e2eProjectId");
 
-      const prompt2 = "Зміни колір кнопки на червоний, додай кнопку Reset та перевір, що лічильник працює правильно.";
+      const prompt2 =
+        "Зміни колір кнопки Click Me на червоний (style='background-color:red;'), додай кнопку Reset (id='reset') з обробником кліку (document.getElementById('reset').onclick = () => { count = 0; counter.textContent = '0'; }), щоб лічильник скидався у 0 при натисканні. Перевір працездатність.";
       const turn2StartTime = new Date(Date.now() - 1000).toISOString();
 
       // 1. Send second turn in same conversation
@@ -718,7 +719,7 @@ const SCENARIOS = [
         .filter((t) => t.tool || t.termStatus);
 
       const grepCalls = toolCalls.filter((t) => t.tool === "code.fs.grep");
-      const mutatingCalls = toolCalls.filter((t) => ["code.fs.edit", "code.fs.write"].includes(t.tool));
+      const mutatingCalls = toolCalls.filter((t) => ["code.fs.edit", "code.fs.write", "code.fs.apply_patch"].includes(t.tool));
       const hasMutatingCall = mutatingCalls.length > 0;
       const grepSucceeded = grepCalls.some((c) => c.ok);
 
@@ -748,9 +749,18 @@ const SCENARIOS = [
           const page = await browser.newPage();
           await page.goto(previewProxyUrl, { waitUntil: "networkidle", timeout: 15_000 });
 
-          const mainBtn = (await page.$("button:has-text('Click Me')")) || (await page.$("#clickMe, #click-me, button:not(#reset):not(:has-text('Reset'))"));
-          const resetBtn = (await page.$("button:has-text('Reset')")) || (await page.$("#reset, #resetBtn, #reset-btn, button:has-text('Скинути'), button:has-text('Скидання')"));
-          const counterEl = (await page.$("#count, #counter, .counter, .count")) || (await page.$("p, span"));
+          const mainBtn =
+            (await page.$("#clickMe")) ||
+            (await page.$("button:has-text('Click Me')")) ||
+            (await page.$("#click-me, button:not(#reset):not(:has-text('Reset')), .button:not(#reset):not(:has-text('Reset')), a.button:not(#reset):not(:has-text('Reset'))"));
+          const resetBtn =
+            (await page.$("#reset, #resetBtn")) ||
+            (await page.$("button:has-text('Reset')")) ||
+            (await page.$("#reset-btn, button:has-text('Скинути'), button:has-text('Скидання'), .button:has-text('Reset'), a.button:has-text('Reset')"));
+          const counterEl =
+            (await page.$("#counter")) ||
+            (await page.$("#count, .counter, .count, [data-counter], [id*='count'], [class*='count']")) ||
+            (await page.$("span:has-text('0'), p:has-text('0')"));
 
           let buttonBg = "";
           let buttonColor = "";

@@ -5,6 +5,15 @@ import { CodingAgentToolWaves, type ToolWavesExecutionHost } from "../apps/agent
 import { SandboxProviderError } from "../apps/agent-api/src/sandbox-provider";
 import { resolveKnownTool, normalizeToolCalls } from "../apps/agent-api/src/code-tool-call-adapter";
 import { applyUnifiedDiffToFile } from "../apps/agent-api/src/code-tool-executors-write";
+import { safeProjectPath } from "../apps/agent-api/src/project-workspace";
+import {
+  resolveCodeRunBudget,
+  resolveCodeRunDailyBudget,
+  DEFAULT_CODE_RUN_BUDGET,
+  DEFAULT_CODE_RUN_DAILY_BUDGET,
+  CodeRunSharedQuota,
+} from "../apps/agent-api/src/code-run-quota";
+import { A2AQuotaManager } from "../apps/agent-api/src/a2a-protocol-extensions";
 import type { AuthContext } from "@npati/workspace";
 
 const mockCtx: AuthContext = {
@@ -82,7 +91,7 @@ describe("code.fs.grep secure execution & terminal approval isolation", () => {
     });
     expect(executedCommands).toHaveLength(1);
     expect(executedCommands[0]).toContain("QUERY=");
-    expect(executedCommands[0]).toContain("rg --line-number --no-heading --color=never --max-count 10 -e \"$QUERY\" ./index.html");
+    expect(executedCommands[0]).toContain("rg --line-number --no-heading --color=never --max-count 10 -e \"$QUERY\" -- ./index.html");
   });
 
   it("safely encodes complex patterns with quotes and shell characters without shell injection", async () => {
@@ -484,5 +493,230 @@ describe("CodingAgentToolWaves argument error recovery semantics", () => {
     expect(after).toContain("<p>New content</p>");
     expect(after).toContain("<button id=\"clickBtn\">Click Me</button>");
     expect(after).not.toContain("Old content");
+  });
+
+  it("safeProjectPath strictly rejects path traversal, alternative encodings, and protected paths", () => {
+    // 1. Path traversal attempts
+    expect(() => safeProjectPath("../etc/passwd")).toThrow();
+    expect(() => safeProjectPath("../../secret")).toThrow();
+    expect(() => safeProjectPath("sub/../../escape")).toThrow();
+    expect(() => safeProjectPath("./../escape")).toThrow();
+
+    // 2. Windows drive letters and absolute paths
+    expect(() => safeProjectPath("C:/Windows/System32")).toThrow();
+    expect(() => safeProjectPath("/etc/hosts")).toThrow();
+    expect(() => safeProjectPath("\\windows\\system32")).toThrow();
+
+    // 3. Null bytes and special characters rejected by safeProjectPath
+    expect(() => safeProjectPath("file\0.txt")).toThrow();
+    expect(() => safeProjectPath("file|pipe.txt")).toThrow();
+    expect(() => safeProjectPath("file?glob.txt")).toThrow();
+    expect(() => safeProjectPath("file*glob.txt")).toThrow();
+    expect(() => safeProjectPath("file>redirect.txt")).toThrow();
+    expect(() => safeProjectPath("file<in.txt")).toThrow();
+    expect(() => safeProjectPath("file\"quote.txt")).toThrow();
+
+    // 4. Protected secret paths
+    expect(() => safeProjectPath(".env")).toThrow();
+    expect(() => safeProjectPath(".env.local")).toThrow();
+    expect(() => safeProjectPath(".git/config")).toThrow();
+    expect(() => safeProjectPath(".ssh/id_rsa")).toThrow();
+    expect(() => safeProjectPath(".npati-runtime")).toThrow();
+
+    // 5. Valid paths pass cleanly
+    expect(safeProjectPath("src/App.tsx")).toBe("src/App.tsx");
+    expect(safeProjectPath("index.html")).toBe("index.html");
+    expect(safeProjectPath("components/Button.vue")).toBe("components/Button.vue");
+  });
+
+  it("ProjectSandboxService.search includes '--' and does NOT follow symlinks", async () => {
+    let capturedCmd = "";
+    const mockProvider = {
+      getStatus: vi.fn().mockResolvedValue({ state: "running" }),
+      uploadFiles: vi.fn().mockResolvedValue(undefined),
+      executeCommand: vi.fn().mockImplementation(async (_s, _id, cmd) => {
+        capturedCmd = cmd;
+        return { status: "completed", stdout: "", stderr: "", exitCode: 0, durationMs: 2 };
+      }),
+    };
+    const mockProjects = { get: vi.fn().mockResolvedValue({ id: "p1", companyId: "c1", sandboxId: "s1" }) };
+    const mockStore = { getCompanyAgent: vi.fn().mockResolvedValue({ id: "a1", isActive: true, tools: ["project.terminal.exec"] }), setProjectSandbox: vi.fn() };
+    const mockWorkspace = { listFiles: vi.fn().mockResolvedValue([]) };
+    const service = new ProjectSandboxService(mockProjects as any, mockStore as any, mockWorkspace as any, mockProvider as any, {} as any);
+
+    await service.search(mockCtx, "c1", {
+      projectId: "p1",
+      query: "hello",
+      path: "src/main.js",
+    });
+
+    // Explicit '--' delimiter must separate options from target
+    expect(capturedCmd).toContain("-e \"$QUERY\" -- ./src/main.js");
+
+    // ripgrep command must NOT have -L or --follow
+    expect(capturedCmd).not.toContain("-L");
+    expect(capturedCmd).not.toContain("--follow");
+  });
+
+  it("token budget semantics: independent local session cap (1M) vs daily user limit (2M)", () => {
+    // 1. In local / self-hosted mode: session limit is 1,000,000 (50% of user daily budget)
+    const localSessionBudget = resolveCodeRunBudget({ NPATI_SANDBOX_RUNNER_MODE: "local" } as any);
+    expect(localSessionBudget.maxTokens).toBe(1_000_000);
+
+    const selfHostedSessionBudget = resolveCodeRunBudget({ NPATI_DEPLOYMENT_TYPE: "self_hosted" } as any);
+    expect(selfHostedSessionBudget.maxTokens).toBe(1_000_000);
+
+    // 2. In production (default): session limit is strictly 100,000 (DEFAULT_CODE_RUN_BUDGET)
+    const prodSessionBudget = resolveCodeRunBudget({});
+    expect(prodSessionBudget.maxTokens).toBe(100_000);
+    expect(DEFAULT_CODE_RUN_BUDGET.maxTokens).toBe(100_000);
+
+    // 3. Daily user limit remains 2,000,000 across all environments
+    const dailyBudget = resolveCodeRunDailyBudget({});
+    expect(dailyBudget.maxTokensPerUserPerDay).toBe(2_000_000);
+    expect(DEFAULT_CODE_RUN_DAILY_BUDGET.maxTokensPerUserPerDay).toBe(2_000_000);
+
+    // 4. Enforce quota: CodeRunSharedQuota checkQuota rejects when session token limit exceeded
+    const quotaManager = new A2AQuotaManager();
+    const quota = new CodeRunSharedQuota(quotaManager, {
+      limits: { maxTokens: 10_000, maxCostUsd: 1, maxDepth: 1 },
+    });
+
+    // Within budget -> allowed
+    const pass = quota.checkQuota("sess-1", 5_000, 0.05, 1);
+    expect(pass.allowed).toBe(true);
+
+    // Record usage
+    quota.recordUsage("sess-1", 9_000, 0.09);
+
+    // Exceeds remaining budget (9000 + 2000 > 10000) -> rejected
+    const fail = quota.checkQuota("sess-1", 2_000, 0.02, 1);
+    expect(fail.allowed).toBe(false);
+    expect(fail.error).toContain("A2A_TOKEN_QUOTA_EXCEEDED");
+  });
+
+  it("argument recovery alternation: alternating invalid -> valid -> invalid cannot loop indefinitely", async () => {
+    let stoppedResult: any = null;
+    const host = createMockHost();
+    host.stop = vi.fn().mockImplementation(async (status, reason, message) => {
+      stoppedResult = { status, reason, message };
+      return { status, reason, message, summary: {} as any };
+    });
+
+    const waves = new CodingAgentToolWaves(host);
+    const profile = { maxParallelToolCalls: 4 } as any;
+
+    // Simulation: Turn 1: Invalid A
+    const t1 = await waves.executeTurnTools({
+      steps: 1,
+      normalized: {
+        calls: [],
+        rejected: [{ name: "code.fs.read", code: "invalid_arguments", message: "Bad args", source: "native" }],
+        warnings: [],
+      },
+      callsToRun: [],
+      profile,
+    });
+    expect(t1.action).toBe("continue"); // Attempt 1
+
+    // Turn 2: Valid A (success -> clears code.fs.read error counter)
+    const t2 = await waves.executeTurnTools({
+      steps: 2,
+      normalized: { calls: [{ id: "c1", name: "code.fs.read", arguments: { path: "index.html" }, source: "native" }], rejected: [], warnings: [] },
+      callsToRun: [{ id: "c1", name: "code.fs.read", arguments: { path: "index.html" }, source: "native" }],
+      profile,
+    });
+    expect(t2.action).toBe("continue");
+    expect(host.ports.toolRuntime.invoke).toHaveBeenCalled();
+
+    // Turn 3: Invalid A again
+    const t3 = await waves.executeTurnTools({
+      steps: 3,
+      normalized: {
+        calls: [],
+        rejected: [{ name: "code.fs.read", code: "invalid_arguments", message: "Bad args again", source: "native" }],
+        warnings: [],
+      },
+      callsToRun: [],
+      profile,
+    });
+    expect(t3.action).toBe("continue"); // Attempt 1 after reset
+
+    // Turn 4: Consecutive Invalid A without valid success (Attempt 2 of 2)
+    const t4 = await waves.executeTurnTools({
+      steps: 4,
+      normalized: {
+        calls: [],
+        rejected: [{ name: "code.fs.read", code: "invalid_arguments", message: "Bad args 2", source: "native" }],
+        warnings: [],
+      },
+      callsToRun: [],
+      profile,
+    });
+    expect(t4.action).toBe("continue"); // Attempt 2 of 2
+
+    // Turn 5: 3rd Consecutive Invalid A (count = 3 > MAX_ARGUMENT_CORRECTIONS(2) -> stops the run)
+    const t5 = await waves.executeTurnTools({
+      steps: 5,
+      normalized: {
+        calls: [],
+        rejected: [{ name: "code.fs.read", code: "invalid_arguments", message: "Bad args 3", source: "native" }],
+        warnings: [],
+      },
+      callsToRun: [],
+      profile,
+    });
+    expect(t5.action).toBe("stopped");
+    expect(stoppedResult?.reason).toBe("invalid_arguments_exhausted");
+  });
+
+  it("tool name canonicalization negative tests: spoofing, aliases, collisions, forbidden tools", () => {
+    // Restricted toolset (e.g. read-only subagent)
+    const readOnlyKnownTools = [
+      { name: "code.fs.read", inputSchema: { type: "object" } },
+      { name: "code.fs.tree", inputSchema: { type: "object" } },
+    ];
+
+    // 1. Truly unknown tool
+    expect(resolveKnownTool(readOnlyKnownTools, "completely_unknown_tool")).toBeUndefined();
+    expect(resolveKnownTool(readOnlyKnownTools, "exec_bash")).toBeUndefined();
+
+    // 2. Namespace spoofing
+    expect(resolveKnownTool(readOnlyKnownTools, "npati_system_admin_exec")).toBeUndefined();
+    expect(resolveKnownTool(readOnlyKnownTools, "npati.admin.delete_all")).toBeUndefined();
+
+    // 3. Ambiguous or nonexistent tool alias with hash suffix
+    expect(resolveKnownTool(readOnlyKnownTools, "code_fake_9c1e2c01607a8380")).toBeUndefined();
+    expect(resolveKnownTool(readOnlyKnownTools, "unknown_tool_6436360368b7e6bb")).toBeUndefined();
+
+    // 4. Forbidden write tool passed via alternative name (must NOT grant access)
+    expect(resolveKnownTool(readOnlyKnownTools, "code.fs.write")).toBeUndefined();
+    expect(resolveKnownTool(readOnlyKnownTools, "code_fs_write")).toBeUndefined();
+    expect(resolveKnownTool(readOnlyKnownTools, "code_write")).toBeUndefined();
+    expect(resolveKnownTool(readOnlyKnownTools, "npati_code_write_7ff42833bd2b557")).toBeUndefined();
+    expect(resolveKnownTool(readOnlyKnownTools, "code.fs.edit")).toBeUndefined();
+    expect(resolveKnownTool(readOnlyKnownTools, "code_edit")).toBeUndefined();
+
+    // 5. normalizeToolCalls rejects unauthorized/spoofed tools with unknown_tool
+    const normalized = normalizeToolCalls({
+      payload: {
+        toolCalls: [
+          {
+            id: "call-spoof",
+            type: "function",
+            function: {
+              name: "npati_code_write_7ff42833bd2b557",
+              arguments: JSON.stringify({ path: "test.txt", content: "hacked" }),
+            },
+          },
+        ],
+      },
+      profile: { toolCallingMode: "native" } as any,
+      knownTools: readOnlyKnownTools,
+    });
+
+    expect(normalized.calls).toHaveLength(0);
+    expect(normalized.rejected).toHaveLength(1);
+    expect(normalized.rejected[0].code).toBe("unknown_tool");
   });
 });
