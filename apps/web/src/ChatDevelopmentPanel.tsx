@@ -1,6 +1,7 @@
 import React from "react";
 import { developmentIsActive, type DevelopmentProcess } from "@npati/shared";
 const labels = {
+  suspended_by_flag: ["Paused: Coding Agent disabled", "Призупинено: Coding Agent вимкнено"],
   stopping: ["Stopping", "Зупиняється"],
   idle: ["Ready to edit", "Можна редагувати"],
   queued: ["Queued", "У черзі"], preparing: ["Preparing sandbox", "Підготовка sandbox"], running: ["Coding ? build ? preview", "Розробка ? build ? preview"],

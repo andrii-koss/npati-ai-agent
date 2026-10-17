@@ -55,7 +55,7 @@ export const CODE_SESSION_DURABILITY_FLAGS = Object.freeze({
 });
 
 /** The statuses a resume may start from, and the ones it must refuse (with the reason it reports). */
-export const RESUMABLE_RUN_STATUSES: readonly string[] = ["running", "interrupted"];
+export const RESUMABLE_RUN_STATUSES: readonly string[] = ["running", "interrupted", "suspended_by_flag"];
 
 /**
  * The deterministic default operation key. Two calls with the same target and the same body therefore share one

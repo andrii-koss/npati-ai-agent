@@ -9,6 +9,7 @@ import { assertProjectRuntimeProvider, SandboxProviderError, type SandboxCreateO
 import { InMemoryWorkspaceStore, PostgresWorkspaceStore } from "@npati/workspace";
 import { resolveRunnerStore } from "./sandbox-runner-store";
 import { SandboxImagePolicy, sandboxImagePolicyConfig, type SandboxImageAdmission } from "./sandbox-image-policy";
+import { FeatureFlagService } from "./feature-flags";
 import { dockerEgressProbe, resolveEgressEnforcement } from "./sandbox-egress-enforcement";
 import { resolveEgressAllowlist, toProxyAllowedHosts } from "./egress-allowlist";
 import { RunnerMountGate, type MountedFolderAllowlistPort } from "./mounted-folder-gate";
@@ -61,6 +62,7 @@ async function createRunnerImagePolicy(): Promise<SandboxImagePolicy> {
   const { store } = await runnerStore;
   return new SandboxImagePolicy(store, {
     ...config,
+    flags: new FeatureFlagService(store),
     verifier: config.signer?.identity && config.signer?.issuer ? new CosignImageSignatureVerifier() : undefined,
   });
 }

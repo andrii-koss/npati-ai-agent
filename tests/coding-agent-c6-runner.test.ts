@@ -156,7 +156,7 @@ function createHarness(options: HarnessOptions = {}) {
         tool: input.tool,
         toolVersion: 1,
         schemaVersion: 1,
-        result: input.tool === "code.verify.run" ? {results: (Array.isArray(input.args.tools) ? input.args.tools : []).map(tool=>({tool,ok:true}))} : { ok: true, tool: input.tool },
+        result: input.tool === "code.verify.run" ? {results: (input.args && typeof input.args === "object" && "tools" in input.args && Array.isArray(input.args.tools) ? input.args.tools : []).map(tool=>({tool,ok:true}))} : { ok: true, tool: input.tool },
         truncated: false,
         durationMs: 1,
       } satisfies CodeToolInvokeResult;
@@ -428,7 +428,7 @@ describe("security-gate: C6 runner — tool execution and the model contract", (
     const result = await harness.run();
     expect(result.reason).toBe("loop_detected");
     const reminded = harness.engineCalls.some((call) =>
-      call.messages.some((message) => message.role === "system" && message.content.includes("Change your approach")),
+      call.messages.some((message) => message.role === "system" && typeof message.content === "string" && message.content.includes("Change your approach")),
     );
     expect(reminded).toBe(true);
     expect(harness.activity.some((event) => event.kind === "reminder" && event.reason === "repeated_call")).toBe(true);
@@ -441,7 +441,7 @@ describe("security-gate: C6 runner — tool execution and the model contract", (
     });
     const failure: CodeToolInvokeFailure = {
       ok: false,
-      error: { code: "sandbox_exec_failed", status: 500, message: "boom", tool: "code.shell.exec", step: "execute", retryable: true },
+      error: { code: "tool_failed", status: 500, message: "boom", tool: "code.shell.exec", step: "execute", retryable: true },
     };
     const harness = createHarness({
       script: [failing(1), failing(2), failing(3), failing(4)],

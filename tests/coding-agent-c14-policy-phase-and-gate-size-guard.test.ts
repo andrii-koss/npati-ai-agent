@@ -414,3 +414,15 @@ describe("security-gate: C14 cleanup — the report's suite count is read, not r
     expect(numbers.filter((number) => number === String(GATE_SIZE))).toEqual([]);
   });
 });
+
+it("retains exact gate assertion evidence without retaining secret-bearing failure payloads", async () => {
+  const { testExecutionEvidence } = await import("../scripts/lib/run-security-gate.mjs");
+  const report = testExecutionEvidence({ success: false, numPassedTests: 0, numFailedTests: 1, numPendingTests: 0,
+    testResults: [{ name: "fixture.test.ts", status: "failed", message: "password=should-not-be-retained",
+      assertionResults: [{ fullName: "fixture timeout", title: "timeout", status: "failed", duration: 40_010,
+        failureMessages: ["Test timed out in 40000ms; password=should-not-be-retained"], actual: "private payload" }] }] });
+  expect(report.testResults[0]?.assertionResults[0]).toMatchObject({ fullName: "fixture timeout", status: "failed", duration: 40_010, failureKind: "timeout" });
+  expect(JSON.stringify(report)).not.toContain("should-not-be-retained");
+  expect(JSON.stringify(report)).not.toContain("private payload");
+  expect(testExecutionEvidence(null)).toMatchObject({ success: false, testResults: [] });
+});

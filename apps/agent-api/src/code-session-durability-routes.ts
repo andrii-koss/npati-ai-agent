@@ -1,3 +1,4 @@
+import { FeatureDisabledError } from "./feature-flags";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { AuthContext } from "@npati/workspace";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
@@ -42,6 +43,7 @@ import type { CodeSessionForkRequest, CodeSessionForkService } from "./code-sess
 
 const ROUTE_ERROR_STATUS: Record<string, number> = {
   unauthorized: 401,
+  feature_disabled: 403,
   invalid_arguments: 400,
   permission_denied: 403,
   permission_action_mismatch: 403,
@@ -94,6 +96,7 @@ export interface CodeSessionDurabilityRouteDeps {
 }
 
 function resolveErrorCode(error: unknown): string {
+  if (error instanceof FeatureDisabledError) return "feature_disabled";
   if (error instanceof CodeSessionDurabilityError) return error.code;
   if (error instanceof CodeRbacError) return error.code;
   if (error instanceof WorkspaceNotFoundError) return "session_not_found";

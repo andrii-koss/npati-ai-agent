@@ -9,6 +9,9 @@ import {
   CATALOG_PATH, commandExists, error, isoNow, log, parseArgs, readCatalog, requireTool, runTool, warn, writeCatalog,
 } from "./sandbox-image-lib.mjs";
 
+import { parseScanJson, imageScanPolicyErrors } from "./lib/sandbox-image-scan-policy.mjs";
+export { parseScanJson } from "./lib/sandbox-image-scan-policy.mjs";
+
 const { flags, values } = parseArgs();
 const dryRun = flags.has("dry-run");
 const only = values.get("variant");
@@ -24,30 +27,6 @@ if (!targets.length) { error(`no catalog entry matches variant ${JSON.stringify(
 // break `--dry-run`, which only prints the plan.
 if (!requireTool(tool, { dryRun, purpose: "scan images for vulnerabilities" }) && !dryRun) process.exit(1);
 
-/** Extracts severity counts from trivy or grype JSON output. */
-export function parseScanJson(toolName, raw) {
-  const report = JSON.parse(raw);
-  if (toolName === "trivy") {
-    const counts = { critical: 0, high: 0 };
-    const results = Array.isArray(report.Results) ? report.Results : [];
-    for (const result of results) {
-      for (const vulnerability of result.Vulnerabilities ?? []) {
-        const severity = String(vulnerability.Severity ?? "").toUpperCase();
-        if (severity === "CRITICAL") counts.critical += 1;
-        if (severity === "HIGH") counts.high += 1;
-      }
-    }
-    return counts;
-  }
-  const counts = { critical: 0, high: 0 };
-  for (const match of report.matches ?? []) {
-    const severity = String(match.vulnerability?.severity ?? "").toUpperCase();
-    if (severity === "CRITICAL") counts.critical += 1;
-    if (severity === "HIGH") counts.high += 1;
-  }
-  return counts;
-}
-
 let blocking = 0;
 let updated = 0;
 
@@ -61,7 +40,7 @@ for (const entry of targets) {
     : ["image", entry.reference, "-o", "json", "-q"];
   log(`${tool} ${entry.reference}`);
   const result = runTool(tool, args, { allowFailure: true });
-  if (result.unavailable) { error(`${tool} could not run for ${entry.id}: ${result.stderr.trim()}`); blocking += 1; continue; }
+  if (!result.ok) { error(`${tool} could not run for ${entry.id}: ${result.stderr.trim()}`); blocking += 1; continue; }
 
   let counts;
   try { counts = parseScanJson(tool, result.stdout); }
@@ -73,13 +52,9 @@ for (const entry of targets) {
 
   entry.scan = { tool, at: isoNow(), critical: counts.critical, high: counts.high };
   updated += 1;
-  if (counts.critical > 0) {
-    error(`${entry.id}: ${counts.critical} CRITICAL finding(s) — publishing is blocked`);
-    blocking += 1;
-    continue;
-  }
-  if (counts.high > 0 && !entry.waiver) {
-    error(`${entry.id}: ${counts.high} HIGH finding(s) without a waiver — add waiver {owner, reason, expiresAt}`);
+  const policyErrors = imageScanPolicyErrors(entry.scan, entry.waiver);
+  if (policyErrors.length) {
+    error(entry.id + ": scan policy refused publication (" + policyErrors.join(", ") + ")");
     blocking += 1;
     continue;
   }

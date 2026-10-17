@@ -207,3 +207,24 @@ describe("security-gate: C1b sandbox image API", () => {
     expect(validateImageReference(undefined)).toMatchObject({ ok: false });
   });
 });
+
+describe("security-gate: C1b independent company authorization", () => {
+  it.each(["allow", "revoke", "scan", "admit"] as const)("refuses foreign-company %s before calling the policy", async (operation) => {
+    let dispatched = 0;
+    const unexpected = async () => { dispatched++; throw new Error("Policy must not be reached"); };
+    const app = build(admin, stubPolicy({ allow: unexpected, revoke: unexpected, recordScan: unexpected, admit: unexpected }),
+      stubStore({ getCompany: async () => { throw new Error("Foreign company"); } }));
+    try {
+      const base = "/companies/foreign/code/sandbox-images";
+      const requests = {
+        allow: { url: base, payload: { variant: "node", reference: REFERENCE } },
+        revoke: { url: base + "/revoke", payload: { reference: REFERENCE, reason: "CVE" } },
+        scan: { url: base + "/img-1/scan", payload: { tool: "trivy", critical: 0, high: 0 } },
+        admit: { url: base + "/admission-check", payload: { reference: REFERENCE } },
+      };
+      const response = await app.inject({ method: "POST", ...requests[operation] });
+      expect(response.statusCode).toBe(403);
+      expect(dispatched).toBe(0);
+    } finally { await app.close(); }
+  });
+});

@@ -178,6 +178,7 @@ export class CodeRunStateLog {
       companyId: input.companyId,
       runId: input.runId,
       status: "running",
+      finishedAt: null,
       heartbeatAt: new Date(this.now()),
     });
     return { held: state.leaseOwner === input.owner, state, refused: null };

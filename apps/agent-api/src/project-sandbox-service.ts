@@ -1,3 +1,5 @@
+import { parseCodeSearchOutput } from "./code-search-output";
+import { normalizeWorkspacePath } from "./code-tools-path";
 import { createHash, randomUUID } from "node:crypto";
 import type { AuthContext, Project, WorkspaceStore } from "@npati/workspace";
 import { ProjectFileError, safeProjectPath, type ProjectMountRequest, type ProjectWorkspace } from "./project-workspace";
@@ -487,7 +489,7 @@ export class ProjectSandboxService {
       fixedStrings?: boolean;
       contextLines?: number;
     },
-  ): Promise<{ matches: Array<{ path: string; line: number; text: string }>; truncated: boolean }> {
+  ): Promise<{ matches: Array<{ path: string; line: number; text: string; context?: Array<{ line: number; text: string }> }>; truncated: boolean; engine?: "ripgrep" }> {
     await this.agent(ctx, companyId, "system", "project.terminal.exec");
     const project = await this.project(ctx, companyId, request.projectId);
     this.touch(ctx, project);
@@ -505,20 +507,23 @@ export class ProjectSandboxService {
     }
 
     const b64Query = Buffer.from(request.query, "utf8").toString("base64");
-    const flags: string[] = ["--line-number", "--no-heading", "--color=never", `--max-count ${maxResults}`];
+    const flags: string[] = ["--json", "--line-number", "--no-heading", "--color=never", `--max-count ${maxResults}`];
     if (request.ignoreCase) flags.push("-i");
     if (request.fixedStrings) flags.push("-F");
     if (request.contextLines && request.contextLines > 0) {
       flags.push(`-C ${Math.max(0, Math.min(10, request.contextLines))}`);
     }
-    if (request.glob && /^[a-zA-Z0-9_*.-]+$/.test(request.glob)) {
-      flags.push(`--glob '${request.glob}'`);
+    if (request.glob !== undefined) {
+      const glob = normalizeWorkspacePath(request.glob, { tool: "code.fs.grep", allowGlob: true, maxLength: 256 });
+      flags.push("--glob '" + glob.replace(/'/g, "'\\''") + "'");
     }
-    if (request.type && /^[a-zA-Z0-9_-]+$/.test(request.type)) {
-      flags.push(`--type '${request.type}'`);
+    if (request.type !== undefined) {
+      if (!/^[a-zA-Z0-9_-]+$/.test(request.type)) throw new SandboxProviderError("invalid_search_options", "Invalid file type filter", 400);
+      flags.push("--type '" + request.type + "'");
     }
 
-    const command = `QUERY="$(printf '%s' "${b64Query}" | base64 -d)" && rg ${flags.join(" ")} -e "$QUERY" -- ${target}`;
+    const quotedTarget = "'" + target.replace(/'/g, "'\\''") + "'";
+    const command = `QUERY="$(printf '%s' "${b64Query}" | base64 -d)" && rg ${flags.join(" ")} -e "$QUERY" -- ${quotedTarget}`;
 
     const ready = await this.ensure(ctx, project);
     await this.upload(ctx, ready.project, ready.scope, ready.sandboxId, ready.mount);
@@ -527,22 +532,9 @@ export class ProjectSandboxService {
       outputLimitBytes: this.limits.outputLimitBytes,
     });
 
-    const stdout = raw.stdout ?? "";
-    const matches: Array<{ path: string; line: number; text: string }> = [];
-    for (const line of stdout.split("\n")) {
-      if (!line.trim()) continue;
-      const firstColon = line.indexOf(":");
-      if (firstColon === -1) continue;
-      const secondColon = line.indexOf(":", firstColon + 1);
-      if (secondColon === -1) continue;
-      const filePath = line.slice(0, firstColon).replace(/^\.\//, "");
-      const lineNum = Number.parseInt(line.slice(firstColon + 1, secondColon), 10);
-      const text = line.slice(secondColon + 1).slice(0, 500);
-      if (filePath.startsWith("../") || filePath.startsWith("/workspace/.npati-runtime")) continue;
-      matches.push({ path: filePath, line: Number.isFinite(lineNum) ? lineNum : 0, text });
-      if (matches.length >= maxResults) break;
-    }
-    return { matches, truncated: matches.length >= maxResults || raw.status === "timed_out" };
+    if (raw.status === "timed_out") throw new SandboxProviderError("search_timeout", "Sandbox search timed out", 503);
+    if (raw.exitCode !== 0 && raw.exitCode !== 1) throw new SandboxProviderError("search_failed", "Sandbox search failed: " + redactTerminalText(raw.stderr ?? "").slice(0, 500), 400);
+    return parseCodeSearchOutput(raw.stdout ?? "", maxResults, request.contextLines ?? 0);
   }
   async startTrackedProcess(ctx: AuthContext, companyId: string, request: TerminalRequest, beforeStart: (snapshot: ProcessWorkspaceSnapshot) => Promise<void>, captureMountedBaseline = false) {
     if (!await this.supportsTrackedProcesses(ctx, companyId, request.projectId)) throw new SandboxProviderError("process_promotion_unavailable", "Provider has no durable process identity capability", 503);

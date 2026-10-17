@@ -25,7 +25,7 @@
  * finished.
  */
 
-export type CodeBackgroundRunStatus = "running" | "completed" | "failed" | "cancelled" | "interrupted";
+export type CodeBackgroundRunStatus = "running" | "completed" | "failed" | "cancelled" | "interrupted" | "suspended_by_flag";
 
 export interface CodeBackgroundRunEvent {
   /** Monotonic within one run, starting at 1. A subscriber's `fromSeq` filters on it. */

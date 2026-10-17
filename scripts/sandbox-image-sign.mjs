@@ -9,6 +9,8 @@ import {
   CATALOG_PATH, commandExists, error, log, parseArgs, readCatalog, requireTool, runTool, warn, writeCatalog,
 } from "./sandbox-image-lib.mjs";
 
+import { imageScanPolicyErrors } from "./lib/sandbox-image-scan-policy.mjs";
+
 const { flags, values } = parseArgs();
 const dryRun = flags.has("dry-run");
 const verifyOnly = flags.has("verify-only");
@@ -37,6 +39,12 @@ for (const entry of targets) {
     continue;
   }
 
+  const policyErrors = imageScanPolicyErrors(entry.scan, entry.waiver);
+  if (entry.status === "revoked" || !entry.sbomPath || policyErrors.length) {
+    error(entry.id + ": image is revoked or lacks valid SBOM/scan evidence (" + policyErrors.join(", ") + ")");
+    failures += 1;
+    continue;
+  }
   let verified = runTool("cosign", verifyArgs, { allowFailure: true });
   if (!verified.ok && !verifyOnly) {
     log(`cosign sign --yes ${entry.reference}`);

@@ -6,7 +6,7 @@ import { CODE_AGENT_MASTER_FLAG } from "./feature-flags";
 import { ReadTracker, resolveReadTrackerOptions, type ReadRecord } from "./code-read-tracker";
 import { normalizeWorkspacePath } from "./code-tools-path";
 import { decideSensitiveRead, resolveSensitivePolicy } from "./code-tools-sensitive";
-import { wrapToolResult } from "./code-tools-fs";
+import { enforceOutputBudget, wrapToolResult } from "./code-tools-fs";
 import {
   CODE_WRITE_TOOLS, resolveApprovalPolicy, type CodeApprovalPolicy,
 } from "./code-edit-approval";
@@ -467,8 +467,9 @@ export class CodeToolRuntime {
 
       // (8b) Wrapping
       const serialized = JSON.stringify(raw ?? null);
-      const truncated = serialized.length > this.limits.toolOutputChars;
-      const payload = truncated ? serialized.slice(0, this.limits.toolOutputChars) : raw;
+      const budgeted = enforceOutputBudget(raw, this.limits.toolOutputChars);
+      const truncated = budgeted.truncated;
+      const payload = budgeted.data;
       const allWarnings = [...warnings, ...hookWarnings];
       const wrapped = this.wrap(tool.name, allWarnings.length || hookContext.length
         ? {

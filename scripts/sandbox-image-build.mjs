@@ -60,7 +60,8 @@ if (!noPush) {
   const basePush = runTool("docker", ["push", baseTag], { allowFailure: true });
   if (!basePush.ok) { error("base image push failed"); process.exit(1); }
 }
-const baseDigest = resolveDigest(baseTag) ?? upstreamDigest;
+const baseDigest = resolveDigest(baseTag);
+if (!baseDigest) { error("cannot resolve the built base image digest; refusing to substitute the upstream image"); process.exit(1); }
 if (PLACEHOLDER_PATTERN.test(baseDigest)) { error("resolved base digest is a placeholder; refusing to continue"); process.exit(1); }
 log(`base ${baseTag} -> ${baseDigest}`);
 
@@ -80,7 +81,9 @@ for (const entry of targets) {
   entry.digest = digest;
   entry.createdAt = isoNow();
   entry.status = "unverified";
-  entry.scan = { tool: entry.scan?.tool ?? "trivy", at: entry.scan?.at ?? isoNow(), critical: entry.scan?.critical ?? 0, high: entry.scan?.high ?? 0 };
+  // A newly built digest has no scan or SBOM yet; evidence from its predecessor must never be reused.
+  entry.scan = { tool: "pending", at: null, critical: null, high: null };
+  entry.sbomPath = null;
   updatedCount += 1;
   log(`${entry.id}: ${entry.reference}`);
 }

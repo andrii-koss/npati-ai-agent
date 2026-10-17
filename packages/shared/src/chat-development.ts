@@ -41,7 +41,7 @@ export type DevelopmentProcessProgressItem = {
 export type DevelopmentProcess = {
   id: string; companyId: string; parentConversationId: string; conversationId?: string;
   projectId?: string; sessionId?: string; runId?: string; name: string; framework: string;
-  status: "idle" | "queued" | "preparing" | "running" | "stopping" | "completed" | "failed" | "cancelled" | "interrupted" | "awaiting_approval";
+  status: "idle" | "queued" | "preparing" | "running" | "stopping" | "completed" | "failed" | "cancelled" | "interrupted" | "suspended_by_flag" | "awaiting_approval";
   conversationMessages?: { id: string; role: "user" | "assistant"; content: string; createdAt: string }[];
   initialRunId?: string; responseLanguage?: string; runStatuses?: Record<string, string>; runStartedAts?: Record<string,string>; runLanguages?: Record<string,string>;
   progress?: DevelopmentProcessProgressItem[];

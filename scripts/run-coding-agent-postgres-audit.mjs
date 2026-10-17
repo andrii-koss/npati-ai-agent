@@ -39,6 +39,7 @@ try {
     NPATI_SECURITY_GATE_DB: "1", NPATI_CHAT_WEBSITE_LIVE_SANDBOX: "0" };
   const suites = (process.env.NPATI_AUDIT_POSTGRES_C1_ONLY === "1" ? ["coding-agent-c1-postgres"] : process.env.NPATI_AUDIT_POSTGRES_WEBSITE_ONLY === "1" ? ["coding-agent-chat-website-postgres"] : ["coding-agent-async-inbox-postgres", "coding-agent-chat-website-postgres",
     "coding-agent-c1c-audit-postgres", "coding-agent-g1-migrations-postgres", "coding-agent-r1c-data-lifecycle-postgres"]);
+  if (process.env.NPATI_AUDIT_POSTGRES_INCLUDE_C1 === "1" && !suites.includes("coding-agent-c1-postgres")) suites.unshift("coding-agent-c1-postgres");
   evidence.suites = suites;
   let output = "";
   try {

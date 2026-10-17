@@ -177,6 +177,7 @@ export function registerSandboxImageRoutes(app: FastifyInstance, auth: AuthProvi
     async (request, reply) => {
       try {
         const ctx = await authorizeAdmin(request);
+        await assertOwnership(ctx, request.params.companyId);
         const body = request.body ?? {};
         const reference = validateImageReference(body.reference);
         if (!reference.ok) return imageError(reply, "image_not_pinned", reference.message);
@@ -208,6 +209,7 @@ export function registerSandboxImageRoutes(app: FastifyInstance, auth: AuthProvi
     async (request, reply) => {
       try {
         const ctx = await authorizeAdmin(request);
+        await assertOwnership(ctx, request.params.companyId);
         const reference = validateImageReference(request.body?.reference);
         if (!reference.ok) return imageError(reply, "image_not_pinned", reference.message);
         if (typeof request.body?.reason !== "string" || !request.body.reason.trim()) return imageError(reply, "image_not_allowed", "reason is required");
@@ -222,6 +224,7 @@ export function registerSandboxImageRoutes(app: FastifyInstance, auth: AuthProvi
     async (request, reply) => {
       try {
         const ctx = await authorizeAdmin(request);
+        await assertOwnership(ctx, request.params.companyId);
         const body = request.body ?? {};
         if (typeof body.tool !== "string" || !body.tool.trim()) return imageError(reply, "image_scan_failed", "tool is required");
         const critical = nonNegativeInteger(body.critical, "critical");
@@ -245,6 +248,7 @@ export function registerSandboxImageRoutes(app: FastifyInstance, auth: AuthProvi
     async (request, reply) => {
       try {
         const ctx = await authorize(request, "business:manage");
+        await assertOwnership(ctx, request.params.companyId);
         const body = request.body ?? {};
         const reference = validateImageReference(body.reference);
         if (!reference.ok) return imageError(reply, "image_not_pinned", reference.message);

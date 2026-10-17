@@ -1,3 +1,4 @@
+import { runImageScriptFixture } from "./support/sandbox-image-script-fixture";
 import { describe, expect, it, vi } from "vitest";
 import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
 import { SandboxImagePolicy, SandboxImageError, type AuditRecorder } from "../apps/agent-api/src/sandbox-image-policy";
@@ -66,9 +67,7 @@ async function harness(options: {
     allowUnverifiedImages: options.allowUnverifiedImages ?? false,
     environment: options.environment ?? "production",
     catalog: { images: [] },
-    flags: options.flagsEnabled
-      ? { isEnabled: async (_ctx, key) => options.flagsEnabled!.includes(key) }
-      : undefined,
+    flags: { isEnabled: async (_ctx, key) => (options.flagsEnabled ?? []).includes(key) },
   });
   return { store, policy, audit };
 }
@@ -86,7 +85,7 @@ const verified = {
   scanTool: "trivy",
   scanAt: "2026-02-09T00:00:00.000Z",
   scanCritical: 0,
-  scanHigh: 2,
+  scanHigh: 0,
 };
 
 describe("security-gate: C1b image admission", () => {
@@ -135,19 +134,19 @@ describe("security-gate: C1b image admission", () => {
     await expect(missing.policy.admit(admin, { companyId: COMPANY, reference: NODE_IMAGE })).rejects.toMatchObject({ code: "image_scan_failed", details: { reason: "scan_missing" } });
   });
 
-  it("refuses critical findings without a waiver, and an expired waiver", async () => {
-    const noWaiver = await harness();
-    await noWaiver.store.upsertSandboxImage(admin, { ...verified, scanCritical: 3 });
-    await expect(noWaiver.policy.admit(admin, { companyId: COMPANY, reference: NODE_IMAGE })).rejects.toMatchObject({ code: "image_scan_failed", details: { scanCritical: 3 } });
-
-    const expired = await harness({ now: fixedClock("2026-02-10T00:00:00.000Z") });
-    await expired.store.upsertSandboxImage(admin, { ...verified, scanCritical: 3, waiverOwner: "ciso@npati.dev", waiverExpiresAt: "2026-02-01T00:00:00.000Z" });
-    await expect(expired.policy.admit(admin, { companyId: COMPANY, reference: NODE_IMAGE })).rejects.toMatchObject({ code: "image_waiver_expired", status: 409 });
-
-    const valid = await harness();
-    await valid.store.upsertSandboxImage(admin, { ...verified, scanCritical: 3, waiverOwner: "ciso@npati.dev", waiverExpiresAt: "2026-03-01T00:00:00.000Z", waiverReason: "no upstream fix" });
-    await expect(valid.policy.admit(admin, { companyId: COMPANY, reference: NODE_IMAGE })).resolves.toMatchObject({ allowed: true });
-    expect(valid.audit).toBeDefined();
+  it("refuses critical findings regardless of waiver and refuses expired HIGH waivers", async () => {
+    const { store, policy } = await harness();
+    await store.upsertSandboxImage(admin, { ...verified, scanCritical: 3 });
+    await expect(policy.admit(admin, { companyId: COMPANY, reference: NODE_IMAGE }))
+      .rejects.toMatchObject({ code: "image_scan_failed", details: { scanCritical: 3 } });
+    await store.upsertSandboxImage(admin, { ...verified, scanCritical: 3, waiverOwner: "security",
+      waiverExpiresAt: "2026-03-01T00:00:00.000Z", waiverReason: "No upstream fix" });
+    await expect(policy.admit(admin, { companyId: COMPANY, reference: NODE_IMAGE }))
+      .rejects.toMatchObject({ code: "image_scan_failed" });
+    await store.upsertSandboxImage(admin, { ...verified, scanHigh: 1, waiverOwner: "security",
+      waiverExpiresAt: "2026-02-01T00:00:00.000Z", waiverReason: "Mitigation" });
+    await expect(policy.admit(admin, { companyId: COMPANY, reference: NODE_IMAGE }))
+      .rejects.toMatchObject({ code: "image_waiver_expired" });
   });
 
   it("denies by default when no signature verifier is configured, and when the signature does not verify", async () => {
@@ -242,8 +241,11 @@ describe("security-gate: C1b image administration and audit", () => {
     const rollout = await harness({ flagsEnabled: [`code.sandbox_image.${digest("b").slice(0, 8)}`] });
     await rollout.store.upsertSandboxImage(admin, verified);
     await rollout.store.upsertSandboxImage(admin, { ...verified, reference: NEW_NODE_IMAGE, digest: `sha256:${digest("b")}`, scanAt: "2026-02-09T12:00:00.000Z" });
-    await expect(rollout.policy.selectForRollout(admin, { companyId: COMPANY, variant: "node", currentReference: NODE_IMAGE }))
+    await expect(rollout.policy.selectForRollout(admin, { companyId: COMPANY, variant: "node", currentReference: NODE_IMAGE, pinned: false }))
       .resolves.toMatchObject({ reference: NEW_NODE_IMAGE, reason: "rollout_flag_enabled" });
+
+    await expect(rollout.policy.selectForRollout(admin, { companyId: COMPANY, variant: "node", currentReference: NODE_IMAGE }))
+      .resolves.toMatchObject({ reference: NODE_IMAGE, forcedUpgrade: false, reason: "session_pinned_digest" });
 
     // Revoked pinned digest: the caller is told to upgrade.
     await store.revokeSandboxImage(admin, NODE_IMAGE, { actor: admin.userId, reason: "CVE" });
@@ -317,5 +319,112 @@ describe("security-gate: C1b image catalogue and container hardening", () => {
     const withoutSeccomp = buildSandboxCreateArgs({ sandboxName: "npati-sb-x", sandboxId: "x", network: "npati-net-x", scope: { workspaceId: "ws", userId: "u", companyId: "c", projectId: "p" }, image: NODE_IMAGE, cpus: "1", memory: "1536m", pids: 128, diskBytes: 1 });
     expect(withoutSeccomp.join(" ")).not.toContain("seccomp=");
     expect(withoutSeccomp.join(" ")).toContain("--cap-drop ALL");
+  });
+});
+
+describe("security-gate: C1b independent policy regression", () => {
+  it("refuses CRITICAL findings even with an unexpired waiver", async () => {
+    const { store, policy } = await harness();
+    await store.upsertSandboxImage(admin, { ...verified, scanCritical: 1, scanHigh: 0,
+      waiverOwner: "security", waiverReason: "No upstream fix", waiverExpiresAt: "2026-03-01T00:00:00.000Z" });
+    await expect(policy.admit(admin, { companyId: COMPANY, reference: NODE_IMAGE })).rejects.toMatchObject({ code: "image_scan_failed" });
+  });
+  it.each([
+    { waiverOwner: null, waiverExpiresAt: null, waiverReason: null },
+    { waiverOwner: "security", waiverExpiresAt: "2026-02-01T00:00:00.000Z", waiverReason: "Expired" },
+    { waiverOwner: "security", waiverExpiresAt: "2026-03-01T00:00:00.000Z", waiverReason: "" },
+  ])("refuses HIGH findings without a complete current waiver: %j", async (waiver) => {
+    const { store, policy } = await harness();
+    await store.upsertSandboxImage(admin, { ...verified, scanCritical: 0, scanHigh: 1, ...waiver });
+    await expect(policy.admit(admin, { companyId: COMPANY, reference: NODE_IMAGE })).rejects.toMatchObject({ code: expect.stringMatching(/^image_(scan_failed|waiver_expired)$/) });
+  });
+  it("admits HIGH findings with an accountable, unexpired waiver", async () => {
+    const { store, policy } = await harness();
+    await store.upsertSandboxImage(admin, { ...verified, scanHigh: 1, waiverOwner: "security",
+      waiverReason: "Temporary mitigation", waiverExpiresAt: "2026-03-01T00:00:00.000Z" });
+    await expect(policy.admit(admin, { companyId: COMPANY, reference: NODE_IMAGE })).resolves.toMatchObject({ allowed: true });
+  });
+  it("refuses scan evidence dated in the future", async () => {
+    const { store, policy } = await harness();
+    await store.upsertSandboxImage(admin, { ...verified, scanHigh: 0, scanAt: "2027-01-01T00:00:00.000Z" });
+    await expect(policy.admit(admin, { companyId: COMPANY, reference: NODE_IMAGE })).rejects.toMatchObject({ code: "image_scan_stale" });
+  });
+  it.each([-1, 0.5, Number.NaN])("refuses invalid vulnerability counters %s", async (count) => {
+    const { store, policy } = await harness();
+    await store.upsertSandboxImage(admin, { ...verified, scanHigh: count, scanCritical: 0 });
+    await expect(policy.admit(admin, { companyId: COMPANY, reference: NODE_IMAGE })).rejects.toMatchObject({ code: "image_scan_failed" });
+  });
+  it("refuses verified rows without SBOM evidence", async () => {
+    const { store, policy } = await harness();
+    await store.upsertSandboxImage(admin, { ...verified, scanHigh: 0, sbomPath: null });
+    await expect(policy.admit(admin, { companyId: COMPANY, reference: NODE_IMAGE })).rejects.toMatchObject({ code: "image_sbom_missing" });
+  });
+});
+
+describe("security-gate: C1b publication scan policy", () => {
+  it("rejects malformed and unsupported scanner reports instead of certifying zero findings", async () => {
+    const { parseScanJson } = await import("../scripts/lib/sandbox-image-scan-policy.mjs");
+    for (const [tool, report] of [["trivy", {}], ["grype", {}], ["trivy", { Results: [null] }],
+      ["grype", { matches: [{}] }], ["unknown", { Results: [] }]] as const) {
+      expect(() => parseScanJson(tool, JSON.stringify(report))).toThrow();
+    }
+    expect(parseScanJson("trivy", JSON.stringify({ Results: [{ Vulnerabilities: [{ Severity: "CRITICAL" }, { Severity: "HIGH" }] }] })))
+      .toEqual({ critical: 1, high: 1 });
+    expect(parseScanJson("grype", JSON.stringify({ matches: [] }))).toEqual({ critical: 0, high: 0 });
+  });
+  it("requires current complete evidence before signing or publishing an image", async () => {
+    const { imageScanPolicyErrors } = await import("../scripts/lib/sandbox-image-scan-policy.mjs");
+    const now = Date.parse("2026-02-10T00:00:00.000Z");
+    const scan = { tool: "trivy", critical: 0, high: 1, at: "2026-02-09T00:00:00.000Z" };
+    const waiver = { owner: "security", reason: "Mitigation", expiresAt: "2026-03-01T00:00:00.000Z" };
+    expect(imageScanPolicyErrors(scan, waiver, now)).toEqual([]);
+    for (const input of [null, {}, { ...waiver, expiresAt: "bad" }, { ...waiver, reason: "" }, { ...waiver, expiresAt: new Date(now).toISOString() }])
+      expect(imageScanPolicyErrors(scan, input, now).length).toBeGreaterThan(0);
+    expect(imageScanPolicyErrors({ ...scan, critical: 1 }, waiver, now)).toContain("critical_findings");
+    expect(imageScanPolicyErrors({ ...scan, at: "2027-01-01T00:00:00.000Z" }, waiver, now)).toContain("invalid_scan_age");
+  });
+});
+
+describe("security-gate: C1b publication CLI control flow with simulated tool ports", () => {
+  it.each(["scan-exit", "scan-malformed"])("refuses %s and does not replace previous scan evidence", (scenario) => {
+    const result = runImageScriptFixture("sandbox-image-scan.mjs", scenario);
+    expect(result.code).toBe(1);
+    expect(result.entry.scan.critical).toBe(0);
+    expect(result.calls).toHaveLength(1);
+    expect(result.output).toMatch(/could not run|cannot parse/);
+  });
+  it("refuses signing HIGH findings without a waiver before any cosign invocation", () => {
+    const result = runImageScriptFixture("sandbox-image-sign.mjs", "sign", {
+      scan: { tool: "trivy", critical: 0, high: 1, at: new Date().toISOString() },
+    });
+    expect(result.code).toBe(1);
+    expect(result.entry.status).toBe("unverified");
+    expect(result.calls).toHaveLength(0);
+  });
+  it("never resurrects a revoked image during signing", () => {
+    const result = runImageScriptFixture("sandbox-image-sign.mjs", "sign", { status: "revoked" });
+    expect(result.code).toBe(1);
+    expect(result.entry.status).toBe("revoked");
+    expect(result.calls).toHaveLength(0);
+  });
+  it("refuses an unresolved built base digest rather than substituting the upstream digest", () => {
+    const result = runImageScriptFixture("sandbox-image-build.mjs", "build-base-missing");
+    expect(result.code).toBe(1);
+    expect(result.output).toContain("cannot resolve the built base image digest");
+    expect(result.calls.filter(call => call[0] === "docker" && call[1] === "build")).toHaveLength(1);
+  });
+});
+
+describe("security-gate: C1b development exception failure boundaries", () => {
+  it("refuses a development exception when production flags cannot be resolved", async () => {
+    const { store } = await harness();
+    const policy = new SandboxImagePolicy(store, { catalog: { images: [] }, allowUnverifiedImages: true,
+      environment: "development", verifier: allowVerifier });
+    await expect(policy.admit(admin, { companyId: COMPANY, reference: NODE_IMAGE })).rejects.toMatchObject({ code: "image_not_allowed" });
+  });
+  it("does not admit a development image when recording unverified status fails", async () => {
+    const { store, policy } = await harness({ allowUnverifiedImages: true, environment: "development", flagsEnabled: [] });
+    vi.spyOn(store, "upsertSandboxImage").mockRejectedValue(new Error("Store unavailable"));
+    await expect(policy.admit(admin, { companyId: COMPANY, reference: NODE_IMAGE })).rejects.toThrow("Store unavailable");
   });
 });

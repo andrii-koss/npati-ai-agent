@@ -1,3 +1,4 @@
+import { detectFileKind } from "./code-file-kind";
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, readdir, readFile, realpath, rename, rm, rmdir, stat, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -21,9 +22,13 @@ export interface ProjectFileEntry {
   type: "file" | "directory";
   size?: number;
   revision?: string;
+  mtimeMs?: number;
 }
 
 export interface ProjectFileContent {
+  binary?: boolean;
+  encoding?: string;
+  mimeGuess?: string | null;
   path: string;
   content: string;
   size: number;
@@ -404,7 +409,14 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
     if (entry.size > this.maxFileBytes) throw new ProjectFileError("file_too_large", "Project file size limit exceeded", 413);
     return readFile(absolute);
   }
-  private content(clean: string, bytes: Buffer): ProjectFileContent { return { path: clean, content: bytes.toString("utf8"), size: bytes.length, revision: revision(bytes) }; }
+  private content(clean: string, bytes: Buffer): ProjectFileContent {
+    // Inspect raw bytes before UTF-8 decoding replaces image magic or invalid sequences.
+    const kind = detectFileKind(bytes.toString("latin1"));
+    let binary = kind.binary;
+    try { new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch { binary = true; }
+    return { path: clean, content: bytes.toString("utf8"), size: bytes.length, revision: revision(bytes),
+      ...(binary ? { binary: true, encoding: "binary", mimeGuess: kind.mimeGuess } : {}) };
+  }
   private async tree(base: string): Promise<ProjectFileEntry[]> {
     const items: ProjectFileEntry[] = [];
     const walk = async (relative: string): Promise<void> => {
@@ -412,11 +424,11 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
         const child = relative ? relative + "/" + entry.name : entry.name;
         if (entry.isSymbolicLink() || entry.name.startsWith(".npati-") || entry.name === ".worktrees") continue;
         try { safeProjectPath(child); } catch { continue; }
-        if (entry.isDirectory()) { items.push({ path: child, name: entry.name, type: "directory" }); await walk(child); }
+        if (entry.isDirectory()) { const info = await stat(path.join(base, child)); items.push({ path: child, name: entry.name, type: "directory", mtimeMs: info.mtimeMs }); await walk(child); }
         else if (entry.isFile()) {
           const full = path.join(base, child);
           const info = await stat(full);
-          items.push({ path: child, name: entry.name, type: "file", size: info.size, revision: info.size <= this.maxFileBytes ? revision(await readFile(full)) : undefined });
+          items.push({ path: child, name: entry.name, type: "file", size: info.size, mtimeMs: info.mtimeMs, revision: info.size <= this.maxFileBytes ? revision(await readFile(full)) : undefined });
         }
         if (items.length > this.maxFiles * 2) throw new ProjectFileError("file_limit", "Project file count limit exceeded", 409);
       }
@@ -427,7 +439,7 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
   async info(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string) {
     const { project, base } = await this.access(ctx, companyId, projectId, "read", workspaceId, agentId);
     const entries = await this.tree(base);
-    return { companyId, projectId, workspaceId: project.workspaceId, logicalPath: `/workspaces/${companyId}/${projectId}`, currentBranch: project.repositoryBranch ?? "main", activeSandboxId: project.sandboxId, currentRevision: revision(JSON.stringify(entries)) };
+    return { companyId, projectId, workspaceId: project.workspaceId, logicalPath: `/workspaces/${companyId}/${projectId}`, currentBranch: project.repositoryBranch ?? "main", activeSandboxId: project.sandboxId, currentRevision: revision(JSON.stringify(entries.map(({ mtimeMs: _mtimeMs, ...entry }) => entry))) };
   }
   async getFileTree(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string) { const { base } = await this.access(ctx, companyId, projectId, "read", workspaceId, agentId); return this.tree(base); }
   async listFiles(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string) { return (await this.getFileTree(ctx, companyId, projectId, workspaceId, agentId)).filter((entry) => entry.type === "file"); }

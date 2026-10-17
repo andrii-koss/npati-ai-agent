@@ -79,12 +79,13 @@ export function decideSensitiveRead(path: string, policy: SensitivePolicy, tool:
 }
 
 /** Redacts secret-shaped values: `KEY=value` pairs, inline tokens and private-key blocks. */
-export function redactSecrets(content: string): string {
+export function redactSecrets(content: string, options: { preserveLines?: boolean } = {}): string {
   if (!content) return content;
   let output = content;
+  const maskBlock = (block: string, marker: string) => marker + (options.preserveLines ? "\n".repeat((block.match(/\n/g) ?? []).length) : "");
   // Private key blocks first: masking them line by line would leak the body.
-  output = output.replace(/-----BEGIN[^-]*PRIVATE KEY-----[\s\S]*?-----END[^-]*PRIVATE KEY-----/g, "[REDACTED_PRIVATE_KEY]");
-  output = output.replace(/-----BEGIN[^-]*(CERTIFICATE|OPENSSH PRIVATE KEY)-----[\s\S]*?-----END[^-]*\1-----/g, "[REDACTED_KEY_MATERIAL]");
+  output = output.replace(/-----BEGIN[^-]*PRIVATE KEY-----[\s\S]*?(?:-----END[^-]*PRIVATE KEY-----|$)/g, block => maskBlock(block, "[REDACTED_PRIVATE_KEY]"));
+  output = output.replace(/-----BEGIN[^-]*(CERTIFICATE|OPENSSH PRIVATE KEY)-----[\s\S]*?(?:-----END[^-]*\1-----|$)/g, block => maskBlock(block, "[REDACTED_KEY_MATERIAL]"));
   // KEY=value / "KEY": "value" forms where the key name looks secret-ish.
   output = output.replace(
     /^([ \t]*(?:export[ \t]+)?["']?[A-Za-z0-9_.-]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API[_-]?KEY|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|CLIENT[_-]?SECRET|CREDENTIAL|AUTH)[A-Za-z0-9_.-]*["']?[ \t]*[:=][ \t]*)(.+)$/gim,

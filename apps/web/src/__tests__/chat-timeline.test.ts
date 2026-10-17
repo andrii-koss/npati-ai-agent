@@ -73,3 +73,13 @@ it("orders commentary before its phase when the events share a timestamp",()=>{
  const rows=[{...event("comment",2),runId:"r",kind:"assistant_message" as const,sequence:1000,title:"Reading next"},{...event("read",2),runId:"r",sequence:1001}];
  const entries=chatTimeline([],rows,"chat",process);expect(entries.map(entry=>entry.kind==="activity"?entry.run?"phase":"comment":"message")).toEqual(["comment","phase"]);
 });
+
+it("preserves flag-suspended run state after reload instead of inferring running from old events", () => {
+  const process: import("@npati/shared").DevelopmentProcess = {
+    id: "p", companyId: "c", parentConversationId: "chat", name: "Site", framework: "Next.js", hidden: false,
+    createdAt: at(1), updatedAt: at(3), runId: "r", initialRunId: "r", status: "suspended_by_flag",
+    runStatuses: { r: "suspended_by_flag" },
+  };
+  const groups = codingActivityRuns([{ ...event("tool", 2), runId: "r" }], JSON.parse(JSON.stringify(process)));
+  expect(groups[0]?.status).toBe("suspended_by_flag");
+});

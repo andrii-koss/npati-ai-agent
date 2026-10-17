@@ -140,7 +140,7 @@ async function canonicalHarness(options: { files?: Record<string, string>; track
       executors: canonicalExecutors({ projectLoader: async () => project as never }),
     }),
   });
-  return { runtime, company, workspace, calls, project };
+  return { runtime, company, workspace, calls, project, port };
 }
 
 describe("security-gate: C2 tool runtime gates", () => {
@@ -426,7 +426,42 @@ describe("security-gate: C2 sandbox port wiring", () => {
     const port = createProjectWorkspaceReadPort(workspace as never, sandbox);
     const result = await port.runSearch({ ctx: owner, companyId: "c", projectId: "p", query: "createOrder", maxResults: 10, timeoutMs: 1000 });
     expect(result.matches[0]).toMatchObject({ path: "src/orders.ts", line: 1 });
-    expect(calls[0]).toContain("rg --line-number");
+    expect(calls[0]).toContain("rg --json --line-number");
     expect(calls[0]).toContain("createOrder");
+  });
+});
+
+describe("security-gate: C2 independent canonical adapter", () => {
+  it("forwards grep filters and context through the real runtime and canonical executor", async () => {
+    const h = await canonicalHarness();
+    const search = vi.spyOn(h.port, "runSearch").mockResolvedValue({ matches: [], truncated: false, engine: "ripgrep" });
+    const result = await h.runtime.invoke(owner, { companyId: h.company.id, projectId: "p", sessionId: "s",
+      tool: "code.fs.grep", toolCallId: "grep-filters", args: { pattern: "order", glob: "src/**/*.ts",
+        type: "ts", ignoreCase: true, fixedStrings: true, contextLines: 2 } });
+    expect(result.ok).toBe(true);
+    expect(search).toHaveBeenCalledWith(expect.objectContaining({ glob: "src/**/*.ts", type: "ts",
+      ignoreCase: true, fixedStrings: true, contextLines: 2 }));
+  });
+  it("retains the canonical full-file hash and revision when a read is byte-truncated", async () => {
+    const h = await canonicalHarness();
+    const digest = sha256Hex("full file content");
+    vi.spyOn(h.port, "readFile").mockResolvedValue({ path: "src/file.ts", content: "full",
+      revision: "canonical-r7", sha256: digest, totalLines: 1, truncated: true });
+    const result = await h.runtime.invoke(owner, { companyId: h.company.id, projectId: "p", sessionId: "s",
+      tool: "code.fs.read", toolCallId: "truncated-read", args: { path: "src/file.ts" } });
+    expect(result.ok).toBe(true);
+    expect(h.runtime.readTracker.get("s", "src/file.ts")).toMatchObject({ revision: "canonical-r7", sha256: digest });
+  });
+});
+
+describe("security-gate: C2 canonical output budget", () => {
+  it("retains the tail and refinement hint when the runtime truncates a read", async () => {
+    const content = Array.from({ length: 70 }, (_, i) => "line-" + i + "-" + "x".repeat(100)).join("\n") + "\nEND_MARKER";
+    const h = await canonicalHarness({ files: { "src/large.ts": content } });
+    const result = await h.runtime.invoke(owner, { companyId: h.company.id, projectId: "p", sessionId: "s",
+      tool: "code.fs.read", toolCallId: "large-envelope", args: { path: "src/large.ts" } });
+    expect(result).toMatchObject({ ok: true, truncated: true });
+    expect(JSON.stringify(result)).toContain("END_MARKER");
+    expect(JSON.stringify(result)).toContain("Narrow the request");
   });
 });

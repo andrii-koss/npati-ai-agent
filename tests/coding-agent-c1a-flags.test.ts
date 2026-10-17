@@ -1,3 +1,7 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { buildApp } from "../apps/agent-api/src/app";
 import { describe, expect, it, vi } from "vitest";
 import Fastify from "fastify";
 import { InMemoryWorkspaceStore, type AuthContext, type FeatureFlag } from "@npati/workspace";
@@ -358,17 +362,18 @@ describe("security-gate: C1a HTTP and inspector contracts", () => {
 
 describe("security-gate: C1a History export through real application wiring", () => {
   it("exports an owned run after the master flag is disabled without starting the model or sandbox", async () => {
-    const { buildApp } = await import("../apps/agent-api/src/app");
     const { CodeRunStateLog } = await import("../apps/agent-api/src/code-run-state");
     const h = await harness(); await enableForCompany(h, h.companyA.id);
     const project = await h.codeService.createProject(admin, h.companyA.id, { name: "Export History" });
     const session = await h.codeService.createSession(admin, h.companyA.id, project.id);
-    const run = await new CodeRunStateLog({ store: h.store }).startRun({ ctx: admin, companyId: h.companyA.id,
+    const runLog = new CodeRunStateLog({ store: h.store });
+    const run = await runLog.startRun({ ctx: admin, companyId: h.companyA.id,
       projectId: project.id, sessionId: session.id, owner: "test-owner" });
     const { CodeRunCancellationRegistry } = await import("../apps/agent-api/src/code-run-cancellation");
     const abort = vi.spyOn(CodeRunCancellationRegistry.prototype, "abortLiveRuns");
     const ai = { healthCheck: async () => ({ status: "ok" }), chat: async () => { throw new Error("Model must not run for export"); } };
-    const app = buildApp({ databaseUrl: "", workspaceStore: h.store, auditLogService: h.audit,
+    const directory = await mkdtemp(path.join(tmpdir(), "npati-flag-resume-"));
+    const app = buildApp({ databaseUrl: "", dataDirectory: directory, projectWorkspaceRoot: path.join(directory, "projects"), workspaceStore: h.store, auditLogService: h.audit,
       authProvider: { authenticate: async () => admin } as never,
       aiEngine: ai as unknown as NonNullable<Parameters<typeof buildApp>[0]>["aiEngine"] });
     try {
@@ -380,6 +385,23 @@ describe("security-gate: C1a History export through real application wiring", ()
         url: "/companies/" + h.companyA.id + "/code/runs/" + run.runId + "/export" });
       expect(response.statusCode, response.body).toBe(200);
       expect(response.body).toContain("# Code session export");
-    } finally { abort.mockRestore(); await app.close(); }
+      await runLog.markFinished({ companyId: h.companyA.id, runId: run.runId, status: "suspended_by_flag", reason: "feature_disabled" });
+      await runLog.releaseLease({ companyId: h.companyA.id, runId: run.runId, owner: "test-owner" });
+      for (const flagKey of [CODE_AGENT_MASTER_FLAG, "code.session_resume"]) {
+        const enabled = await app.inject({ method: "PUT", url: "/companies/" + h.companyA.id + "/code/flags",
+          payload: { scope: "company", scopeId: h.companyA.id, flagKey, stage: "internal", enabled: true } });
+        expect(enabled.statusCode, enabled.body).toBe(200);
+        if (flagKey === CODE_AGENT_MASTER_FLAG) {
+          const disabledResume = await app.inject({ method: "POST", url: "/companies/" + h.companyA.id + "/code/sessions/" + session.id + "/resume", payload: { runId: run.runId } });
+          expect(disabledResume.statusCode, disabledResume.body).toBe(403);
+          expect(disabledResume.json().error.code).toBe("feature_disabled");
+          expect(await h.store.getCodeRunState(h.companyA.id, run.runId)).toMatchObject({ status: "suspended_by_flag", leaseOwner: null });
+        }
+      }
+      const resumed = await app.inject({ method: "POST",
+        url: "/companies/" + h.companyA.id + "/code/sessions/" + session.id + "/resume", payload: { runId: run.runId } });
+      expect(resumed.statusCode, resumed.body).toBe(200);
+      expect(await h.store.getCodeSession(admin, h.companyA.id, session.id)).toMatchObject({ status: "active", runId: run.runId });
+    } finally { abort.mockRestore(); await app.close(); await rm(directory, { recursive: true, force: true }); }
   }, 40_000);
 });

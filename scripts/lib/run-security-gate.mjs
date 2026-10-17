@@ -70,6 +70,7 @@ export function writeGateArtifact(root, summary) {
 /** The suites that make up the gate. Adding a security-gate suite means adding it here. */
 export const SECURITY_GATE_TESTS = [
   "tests/coding-agent-c1-contract-audit.test.ts",
+  "tests/project-terminal-integration.test.ts",
   "tests/coding-agent-c1c-audit-log.test.ts",
   "tests/coding-agent-c1b-images.test.ts",
   "tests/coding-agent-c1b-image-api.test.ts",
@@ -1431,6 +1432,15 @@ export function main(argv = process.argv.slice(2)) {
         ok = false;
       }
       if (report) {
+        try {
+          const evidencePath = path.join(ROOT, "artifacts", "security-gate-test-evidence.json");
+          mkdirSync(path.dirname(evidencePath), { recursive: true });
+          writeFileSync(evidencePath, JSON.stringify(testExecutionEvidence(report), null, 2) + "\n");
+          summary.testEvidence = "artifacts/security-gate-test-evidence.json";
+        } catch (error) {
+          ok = false;
+          process.stdout.write("[security-gate] FAILED to retain test execution evidence\n");
+        }
         const verdict = evaluateVitestReport(report);
         for (const line of formatFailedTests(report)) process.stdout.write(`${line}\n`);
         for (const failure of verdict.failures) process.stdout.write(`[security-gate] ${failure}\n`);
@@ -1527,6 +1537,21 @@ export function main(argv = process.argv.slice(2)) {
  * `import.meta.url`. The comparison is case- and separator-insensitive because Windows paths differ in both,
  * and a mistaken match would recursively run the whole gate from a test.
  */
+/** Retain exact execution identities/statuses without test payloads, stdout or error bodies. */
+export function testExecutionEvidence(report) {
+  return { success: report?.success === true,
+    numPassedTests: typeof report?.numPassedTests === "number" ? report.numPassedTests : 0,
+    numFailedTests: typeof report?.numFailedTests === "number" ? report.numFailedTests : 0,
+    numPendingTests: typeof report?.numPendingTests === "number" ? report.numPendingTests : 0,
+    testResults: (Array.isArray(report?.testResults) ? report.testResults : []).map(suite => ({
+      name: String(suite?.name ?? ""), status: String(suite?.status ?? "unknown"),
+      assertionResults: (Array.isArray(suite?.assertionResults) ? suite.assertionResults : []).map(test => ({
+        fullName: String(test?.fullName ?? ""), title: String(test?.title ?? ""), status: String(test?.status ?? "unknown"),
+        ...(typeof test?.duration === "number" ? { duration: test.duration } : {}),
+        ...(test?.status === "failed" ? { failureKind: (Array.isArray(test.failureMessages) ? test.failureMessages : []).some(message => /(?:Test|Hook) timed out/i.test(String(message))) ? "timeout" : "assertion_or_execution_failure" } : {})
+      }))
+    })) };
+}
 export function isEntryPoint(argv = process.argv, moduleUrl = import.meta.url) {
   const invoked = argv?.[1];
   if (!invoked) return false;

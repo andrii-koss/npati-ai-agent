@@ -354,14 +354,14 @@ describe("security-gate: C2 read-only tools", () => {
 
   it("returns project facts as data without leaking toolchain internals", () => {
     const info = projectInfo({ project: {
-      id: "p1", name: "Repo", type: "code_project", description: "d", status: "active",
+      id: "p1", name: "Repo", type: "code_project", description: "d", status: "ready",
       repositoryUrl: "https://github.com/example/repo", defaultBranch: "main",
       dataClassification: "confidential", retentionClass: "standard",
       toolchain: { languages: ["node"], packageManagers: ["pnpm"], verifyCommands: { test: "pnpm test", lint: "" }, source: "detected", detectedAt: "2025-01-01T00:00:00.000Z", evidence: ["package.json"] },
     } });
     expect(info).toMatchObject({ projectId: "p1", type: "code_project", languages: ["node"], packageManagers: ["pnpm"], toolchainSource: "detected" });
     expect(info.verifyCommands).toEqual({ test: "pnpm test" });
-    const withoutToolchain = projectInfo({ project: { id: "p1", name: "Repo", type: "code_project" }, includeToolchain: false });
+    const withoutToolchain = projectInfo({ project: { id: "p1", name: "Repo", type: "code_project", status: "ready", dataClassification: "confidential", retentionClass: "standard" }, includeToolchain: false });
     expect(withoutToolchain.languages).toEqual([]);
   });
 });
@@ -467,5 +467,48 @@ describe("security-gate: C2 tool schema registry", () => {
       ? { ...tool, description: `${tool.description} (silently edited)` }
       : tool);
     expect(() => assertManifestConsistent(drifted)).toThrow(/without bumping CODE_TOOL_MANIFEST_VERSION/);
+  });
+});
+
+describe("security-gate: C2 independent sensitive read boundaries", () => {
+  it.each([{ offset: 1, limit: 10 }, { offset: 2, limit: 1 }])("redacts a complete private-key block before slicing lines: %j", async (range) => {
+    const body = "MIIEowIBAAKCAQEA-private-fixture-body";
+    const port = makePort({ files: { "server.pem": "-----BEGIN RSA PRIVATE KEY-----\n" + body + "\n-----END RSA PRIVATE KEY-----\nSAFE=visible\n" } });
+    const result = await readFileLines({ port, path: "server.pem", sensitivePolicy: "redact", limits: LIMITS, ...range });
+    expect(JSON.stringify(result.lines)).not.toContain(body);
+    expect(result.totalLines).toBe(4);
+    if (range.offset === 2) expect(result.lines[0]!.n).toBe(2);
+  });
+  it("redacts private-key material whose closing marker is beyond the byte cap", async () => {
+    const body = "MIIEowIBAAKCAQEA-private-fixture-body";
+    const port = makePort({ files: { "server.pem": "-----BEGIN RSA PRIVATE KEY-----\n" + body + "\n" + "x".repeat(200) + "\n-----END RSA PRIVATE KEY-----" } });
+    const result = await readFileLines({ port, path: "server.pem", sensitivePolicy: "redact", limits: { ...LIMITS, readFileBytes: 100 } });
+    expect(JSON.stringify(result.lines)).not.toContain(body);
+  });
+});
+
+describe("security-gate: C2 independent search secret boundaries", () => {
+  it("omits sensitive-file matches and masks provider-shaped secrets in ordinary source matches", async () => {
+    const token = "ghp_0123456789abcdefghijklmnopqrstuvwxyz";
+    const port = makePort({ files: {}, search: () => ({ engine: "ripgrep", truncated: false, matches: [
+      { path: ".env", line: 1, text: "PASSWORD=plain-secret" },
+      { path: "src/config.ts", line: 2, text: "const token = " + token },
+    ] }) });
+    const result = await grepFiles({ port, pattern: "token|PASSWORD", limits: LIMITS });
+    expect(result.matches.map(match => match.path)).toEqual(["src/config.ts"]);
+    expect(JSON.stringify(result)).not.toContain(token);
+    expect(JSON.stringify(result)).not.toContain("plain-secret");
+  });
+});
+
+describe("security-gate: C2 rooted ignore rules", () => {
+  it("applies root-anchored patterns only at the repository root", () => {
+    const rules = parseGitignore("/dist/\n");
+    expect(isIgnoredByGitignore("dist/index.js", rules)).toBe(true);
+    expect(isIgnoredByGitignore("packages/dist/index.js", rules)).toBe(false);
+  });
+  it("does not treat a nested ordinary file as an ignored directory", () => {
+    expect(isIgnoredByGitignore("src/cache", parseGitignore("cache/\n"), false)).toBe(false);
+    expect(isIgnoredByGitignore("src/cache/item.js", parseGitignore("cache/\n"), false)).toBe(true);
   });
 });
