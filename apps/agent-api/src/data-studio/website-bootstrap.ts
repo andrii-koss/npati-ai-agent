@@ -86,10 +86,18 @@ export async function bootstrapWebsiteData(ctx: AuthContext, project: Project, p
     // Only adapt our generated homepage, never overwrite a custom agent/user page.
     if ((existing.content.includes("BlockRenderer") && existing.content.includes("websiteConfig") && !existing.content.includes("ProjectStore")) || /^import \{ ProjectStore \}[^]*return <ProjectStore \/>/.test(existing.content)) await workspace.writeFile(ctx, companyId, project.id, "app/page.tsx", files["app/page.tsx"]!, existing.revision);
     const products = await migrations.listOwnerRows(ctx, backend, "dev", "products", { limit: 1 });
-    if (!products.length && /тест|test|demo|демо/iu.test(prompt)) {
-      const product = await migrations.createOwnerRow(ctx, backend, "dev", "products", { title: "Тестовий товар", slug: "test-product", description: "Демонстраційний товар магазину", price: 199, is_active: true });
-      if (!product) throw new DataStudioError(500, "website_bootstrap", "Demo product could not be created", true, "SEED_FAILED");
-      await migrations.createOwnerRow(ctx, backend, "dev", "product_variants", { product_id: product.id, sku: "TEST-001", title: "Стандартний", price: 199, inventory_count: 100 });
+    if (!products.length) {
+      const initialProducts = [
+        { title: "Механічна клавіатура", slug: "mechanical-keyboard", description: "RGB геймерська клавіатура з тактильними перемикачами", price: 2499, is_active: true, image_url: `/api/projects/${project.id}/media/assets/keyboard.svg` },
+        { title: "Бездротова миша", slug: "wireless-mouse", description: "Ергономічна бездротова миша з високою точністю", price: 1299, is_active: true, image_url: `/api/projects/${project.id}/media/assets/mouse.svg` },
+        { title: "Ігрова гарнітура", slug: "gaming-headset", description: "Звукова гарнітура з просторовим аудіо", price: 3199, is_active: true, image_url: `/api/projects/${project.id}/media/assets/headset.svg` },
+      ];
+      for (const item of initialProducts) {
+        const product = await migrations.createOwnerRow(ctx, backend, "dev", "products", item);
+        if (product) {
+          await migrations.createOwnerRow(ctx, backend, "dev", "product_variants", { product_id: product.id, sku: `SKU-${item.slug.toUpperCase()}`, title: "Стандарт", price: item.price, inventory_count: 50 });
+        }
+      }
     }
   }
   const renderer = await workspace.readFile(ctx, companyId, project.id, "components/BlockRenderer.tsx");

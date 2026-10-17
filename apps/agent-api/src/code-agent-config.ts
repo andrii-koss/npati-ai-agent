@@ -62,7 +62,7 @@ export interface CodeAgentLimits {
 }
 
 export const DEFAULT_CODE_AGENT_LIMITS: CodeAgentLimits = {
-  maxStepsPerRun: 40,
+  maxStepsPerRun: 60,
   maxRunMinutes: 30,
   toolOutputChars: 30_000,
   readFileLines: 2_000,

@@ -119,6 +119,7 @@ export const TEMPLATE_CATALOG: DataSchemaTemplate[] = [
           { name: "price", type: "decimal", required: true },
           { name: "category_id", type: "uuid" },
           { name: "is_active", type: "boolean", default: true },
+          { name: "image_url", type: "string" },
         ],
       },
       {

@@ -201,6 +201,18 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
       const commands = project?.toolchain?.verifyCommands ?? {};
       const startedAll = Date.now();
       const results: Array<{ tool: "lint" | "typecheck" | "test" | "build"; ok: boolean; summary: string; findings: string[]; raw?: string }> = [];
+      if (input.tools.some((t) => t === "build" || t === "typecheck")) {
+        try {
+          await projectSandbox!.execute(input.ctx, input.companyId, {
+            projectId: input.projectId,
+            command: "npm install",
+            agentId: "system",
+            approved: true,
+          });
+        } catch {
+          // If npm install encounters an issue or not a Node project, proceed to verification commands
+        }
+      }
       for (const tool of input.tools) {
         const command = commands[tool];
         if (!command) {
@@ -220,9 +232,17 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
         const output = `${result?.stdout ?? result?.output ?? ""}${result?.stderr ? `\n${result.stderr}` : ""}`.trim();
         const exitCode = typeof result?.exitCode === "number" ? result.exitCode : 1;
         const parsed = parseVerifyOutput(detectVerifyTool(output, command), output, exitCode);
-        const findings = parsed.findings
+        let findings = parsed.findings
           .slice(0, 50)
           .map((finding) => `${finding.file ?? ""}${finding.line ? `:${finding.line}` : ""}${finding.column ? `:${finding.column}` : ""} ${finding.severity}: ${finding.message}`.trim());
+        if (!findings.length && exitCode !== 0 && output) {
+          const rawLines = output.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+          const errorLines = rawLines.filter((l) =>
+            l.startsWith("./") || l.startsWith("Error:") || l.includes("Failed to compile") ||
+            l.includes("error") || l.includes("Error") || l.includes("syntax error") || l.includes("webpack")
+          );
+          findings = (errorLines.length > 0 ? errorLines : rawLines).slice(0, 20);
+        }
         const summary = parsed.ok
           ? `${tool} passed${parsed.summary.tests ? ` (${parsed.summary.passed}/${parsed.summary.tests} tests)` : ""}`
           : `${tool} failed with exit code ${exitCode}`
