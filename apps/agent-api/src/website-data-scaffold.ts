@@ -5,6 +5,8 @@ export function createWebsiteDataFiles(apiUrl: string, publishableKey: string, p
     "lib/project-client.ts": `"use client";
 import { createProjectClient } from "../npati-client";
 export const projectClient = createProjectClient(${JSON.stringify({ apiUrl, publishableKey, projectId })});
+export const client = projectClient;
+export default projectClient;
 `,
     "components/ProjectAccount.tsx": `"use client";
 import { useEffect, useState, type FormEvent } from "react";
@@ -53,7 +55,7 @@ export function ProjectForm({ collection="form_submissions", fields=[{name:"name
     files["components/ProjectStore.tsx"] = `"use client";
 import { useEffect,useState } from "react";
 import { projectClient } from "../lib/project-client";
-type Product={id:string;title:string;price:string;description?:string}; type Variant={id:string;product_id:string;price:string}; type CartItem={id:string;variant_id:string;quantity:number};type Cart={id:string;owner_id:string;status:string;currency:string};
+type Product={id:string;title:string;price:string;description?:string;image_url?:string}; type Variant={id:string;product_id:string;price:string}; type CartItem={id:string;variant_id:string;quantity:number};type Cart={id:string;owner_id:string;status:string;currency:string};
 export function ProjectStore({ embedded=false }: {embedded?:boolean}) {
   const [search,setSearch]=useState("");const [loading,setLoading]=useState(true);
   const [products,setProducts]=useState<Product[]>([]);const [variants,setVariants]=useState<Variant[]>([]);const [items,setItems]=useState<CartItem[]>([]);const [cartId,setCartId]=useState("");const [message,setMessage]=useState("");const [busy,setBusy]=useState(false);

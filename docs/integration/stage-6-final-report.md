@@ -1,116 +1,138 @@
-# Підсумковий звіт Етапу 6: Наскрізне E2E-тестування, інтеграції та безпека
+# Фінальний звіт верифікації Етапу 6 та готовності до Dark Launch
 
-**Дата виконання:** 17 жовтня 2026 р.  
-**Контур тестування:** Реальна Docker-інфраструктура NPATI (`npati-isolated-source-20261011`), MinIO S3 (`npati-project-media`), PostgreSQL Core (`npati_agent`), PostgreSQL Projects (`postgres-projects:5432`), Agent API (`port 13001`), Sandbox Runner (`port 7865`), Playwright Chromium headless.
-
----
-
-## 1. Закриття залишкових ризиків Етапу 5
-
-| Залишковий ризик Етапу 5 | Механізм захисту та реалізації | Результат перевірки |
-| :--- | :--- | :--- |
-| **1. Безпека `{ force: true }` у Hard Purge** | Виклик `/hard-purge` із параметром `{ force: true }` дозволено виключно ролям `owner` та `admin`. Звичайні користувачі (`developer`, `reviewer`) та агент (`service`) отримують відмову. | **ПІДТВЕРДЖЕНО (HTTP 403 `force_purge_not_permitted`).** Подія фіксується в `AuditLog` із зазначенням ролі і причини відмови. |
-| **2. Ізоляція тестового середовища** | Усі тести Етапу 6 проводилися виключно на одноразових проектах (`b1f83160-...`, `cced4bbd-...`) та виділених базах `db_13d374a81dff4b918bbc7fe75c4b94d7_dev/prod`. | **ПІДТВЕРДЖЕНО.** Робочий інтернет-магазин (`715009ee-a7bf-4999-bce2-053d207b7af5`) та його база `db_b5533f4c...` залишилися 100% недоторканими (`status: previewing`). |
-| **3. Автоматичний Retention Worker** | Реалізовано сканування прострочених проектів (`status = 'soft_deleted' AND purge_after <= NOW()`). Видалення об'єктів MinIO, записів бази та очищення ресурсів. | **ПІДТВЕРДЖЕНО.** Прострочені проекти знаходяться, вичищаються з MinIO та DB. Повторний прохід ідемпотентний (0 помилок). |
-| **4. Повноцінний Restore** | Відновлення з `soft_deleted` повертає статус `ready`, обнуляє `deleted_at` та `purge_after`, відновлює файли робочого простору, процеси Sandbox, Live Preview URL, медіафайли у MinIO та доступ до Data Studio. | **ПІДТВЕРДЖЕНО.** Повне відновлення ресурсів і перевірка стрімінгу медіа після Restore. |
+**Дата аудиту:** 17 жовтня 2026 р.  
+**Контур тестування:** Реальна Docker-інфраструктура NPATI (`npati-isolated-source-20261011`), MinIO S3 (`npati-project-media`), PostgreSQL Core (`npati_agent`), PostgreSQL Projects (`postgres-projects:5432`), Agent API (`port 13001`), Sandbox Runner (`port 7865`), Playwright Chromium.  
+**Регламент:** Production deployment не запускався, робочі бази не модифікувалися, платні CI workflows не викликалися.
 
 ---
 
-## 2. Реалізовані функції та архітектурні складові (Етап 6)
+## 1. Точкова перевірка 8 обов'язкових пунктів
 
-1. **Реальний Coding Runtime & Project Workspace:**
-   - Генерація кодової бази інтернет-магазину (Node.js/Next.js) через дозволені файлові інструменти.
-   - Створення `package.json`, `server.js`, структури директорій та обробників маршрутів.
-2. **Data Studio Project Database Provisioning:**
-   - Автоматичне виділення баз даних `db_<backendId>_dev` та `db_<backendId>_prod` на окремому контейнері `postgres-projects:5432`.
-   - Ініціалізація схеми таблиць: `products` (товари, ціни, залишки, бейджі), `users` (покупці, паролі/хеші), `orders` (замовлення, суми, статуси), `order_items` (позиції замовлень).
-3. **Підписаний Live Preview Proxy з ізоляцією Cookie та CSP:**
-   - Створення криптографічно підписаного токена сесії перегляду (`previewToken`).
-   - Маршрутизація трафіку через зворотний проксі `/api/companies/:companyId/projects/:projectId/preview/proxy/`.
-   - Ін'єкція клієнтського мосту `previewBrowserBridge` для безшовного клікабельного перегляду без витоку платформних авторизаційних токенів.
-4. **MinIO Object Storage для медіа створених сайтів:**
-   - Ізольований простір зберігання у бакеті `npati-project-media` за шляхом `${companyId}/${projectId}/assets/*`.
-   - Публічний стрімінг із санітизацією SVG, заголовками `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'` та `Content-Disposition: inline`.
-5. **Континуація (In-Place Modifications):**
-   - Можливість повторного звернення до агента в межах тієї ж розмови для зміни дизайну/функціоналу.
-   - Інкремент ревізії проекту зі збереженням незмінного `projectId` та раніше створених замовлень у PostgreSQL.
+### Пункт 1: Створення та редагування сайту реальною AI-моделлю
+- **Статус:** **VERIFIED (для HTML/CSS/JS)** / **BLOCKED (для автономного Next.js)**
+- **Конкретні докази:**
+  - **Run ID:** `55090487-a8df-492c-a704-f79df7573e44`
+  - **Session ID:** `45e990ae-c090-4168-969e-254723887922`
+  - **Project ID:** `715009ee-a7bf-4999-bce2-053d207b7af5` (назва: «сучасний інтернет-магазин»)
+  - **Статус Run:** `completed` (кількість кроків: 13 turns, 12 tool calls, 234,554 токенів, 6 змінених файлів).
+  - **Текст вихідного запиту:** `User request: Створити сучасний інтернет-магазин на HTML / CSS / JavaScript`.
+  - **Виклики інструментів:** `code.fs.write`, `code.fs.read` (створено `index.html`, `products.html`, `cart.html`, `checkout.html`, `script.js`, `style.css`).
+  - **Обмеження:** Реальний запуск створив магазин на стеку **HTML/CSS/JS**. Автономна генерація проєкту саме на Next.js із проходженням `next build` моделлю не виконувалася через ізоляцію пісочниці.
 
 ---
 
-## 3. Реально перевірені інтеграції (Evidence Log)
-
-### A. Браузерний E2E тест через Playwright Chromium
-- **Сценарій:** Повний наскрізний цикл покупця на згенерованому сайті через реальний браузер.
-- **Хід виконання:**
-  1. `Navigating to Live Preview: http://127.0.0.1:13001/api/companies/.../preview/proxy/?token=...` -> HTTP 200.
-  2. Перевірка заголовка сторінки (`NPATI TechStore`) та завантаження списку товарів (`Mechanical Pro Keyboard`, `Wireless Precision Mouse`, `Studio Gaming Headset`).
-  3. **Signup:** Реєстрація покупця `Olena Test` (`olena@test.ai`). Підтверджено повідомленням `Успішно зареєстровано!`.
-  4. **Login:** Вхід під створеним користувачем. Заголовок оновлено на `Користувач: olena@test.ai`, кнопки перемкнулися на `Вийти`.
-  5. **Refresh:** Перезавантаження сторінки (`page.reload()`). Сесія та стан збереглися.
-  6. **Add to Cart:** Додано 2 товари (Keyboard $89.99 + Mouse $49.99). Лічильник кошика оновлено на `2`, сума = `$139.98`.
-  7. **Checkout / Create Order:** Оформлення замовлення. Підтверджено створення замовлення `ord-ee65e345` (статус `confirmed`), кошик скинуто на 0.
-  8. **Logout:** Натискання кнопки виходу. Статус повернувся на `Not logged in`.
-- **Артефакти скріншотів:**
-  - `preview-initial-load.png`
-  - `preview-signup-success.png`
-  - `preview-logged-in.png`
-  - `preview-cart-items.png`
-  - `preview-order-success.png`
-  - `preview-logged-out.png`
-
-### B. Збереження записів у Project PostgreSQL (`postgres-projects:5432`)
-- Перевірено прямим запитом до бази `db_13d374a81dff4b918bbc7fe75c4b94d7_dev`:
-  - `users`: підтверджено наявність запису `Olena Test` (`olena@test.ai`).
-  - `orders`: підтверджено замовлення `ord-6d936529` на суму `$139.98`.
-  - `order_items`: підтверджено 2 позиції (Mechanical Pro Keyboard, Wireless Precision Mouse).
-
-### C. Стійкість MinIO медіа до перезапуску Sandbox
-- Завантажено `keyboard.svg` (237 байт) у MinIO.
-- Перевірено стрімінг: HTTP 200, Content-Type: `image/svg+xml`.
-- Виконано зупинку Sandbox процесу (`/preview/stop`) -> статус `ready`.
-- Виконано повторний запуск Sandbox процесу (`/preview/start`) -> статус `previewing`.
-- Повторний запит до медіа-файлу повернув HTTP 200 (медіа збережено без втрат).
-
-### D. Континуація та редагування існуючого сайту (Requirement 10)
-- Надіслано зміни: оновлення заголовка на `NPATI TechStore Pro Edition` та додавання бейджа `🔥 HOT DEAL` до клавіатури.
-- Перевірено:
-  - Ревізію проекту оновлено (Revision 15).
-  - Ідентифікатор проекту залишився незмінним (`b1f83160-3f40-448d-9b56-b7ce8baf7ded`).
-  - Раніше створені замовлення в базі даних повністю збереглися.
-
-### E. Негативні тести безпеки (Requirement 11)
-- **Міжпроєктна файлова ізоляція:** Запит користувача іншої компанії до файлів проекту A відхилено з HTTP 403 Forbidden.
-- **SQL-ізоляція:** Спроба виконати `SELECT * FROM audit_logs` з бази проекту на `postgres-projects` заблокована на рівні сервера БД (`relation "audit_logs" does not exist`).
-- **Data Studio Admin захист:** Неавторизований виклик Data Studio schema migration API відхилено з HTTP 401 Access Denied.
-- **Захист від несанкціонованого Force Purge:** Спроба користувача з роллю `developer` виконати `force: true` відхилена з HTTP 403 `force_purge_not_permitted`.
+### Пункт 2: Точний технологічний стек створеного сайту
+- **Статус:** **VERIFIED (як HTML / CSS / JavaScript / Node.js runtime)** / **BLOCKED (як Next.js `next build`)**
+- **Конкретні докази:**
+  - Фактичний робочий проєкт у каталозі `/app/data/project-workspaces/.../715009ee-a7bf-4999-bce2-053d207b7af5` містить:
+    `index.html`, `products.html`, `cart.html`, `checkout.html`, `script.js`, `style.css`, `website.config.json`, `npati-client.ts`.
+  - У середовищі Sandbox pre-cached тулчейн для Next.js існує за адресою `/opt/npati-project-toolchain/next` (Next.js 14.2.14, React 18.3.1), проте в тестових прогонах Live Preview запускався через легковаговий Node.js HTTP runtime, а не через компіляцію `next build`.
+  - **Висновок:** Стек класифікується як **Vanilla HTML/CSS/JS + Node.js HTTP runtime**. Зарахування його як Next.js суворо відхилено відповідно до інструкції.
 
 ---
 
-## 4. Виявлені дефекти та їх вирішення під час тестування
-
-1. **Маршрутизація внутрішніх API через Live Preview Proxy:**
-   - *Дефект:* `previewBrowserBridge` за замовчуванням виключає шляхи, що починаються з `/api/` (щоб не блокувати виклики до платформеного API агентів). Спроба сайту робити `fetch('/api/products')` призводила до запиту на хост-сервер замість проксі.
-   - *Виправлення:* Внутрішні API сайту переведені на `/store/*` або `/v1/projects/:projectId/*`. `previewBrowserBridge` коректно перенаправляє такі запити на Sandbox dev-сервер.
-2. **Мережева ізоляція Bubblewrap Sandbox:**
-   - *Дефект:* Sandbox працює з прапорцем `--unshare-net` і не має прямого TCP-доступу до порту 5432 бази даних `postgres-projects`. Пряме підключення `pg.Pool` з коду, що виконується всередині пісочниці, завершувалося таймаутом або збоєм.
-   - *Виправлення:* Сайт взаємодіє з базою даних через Project API Gateway (`/v1/projects/:projectId/...`) або внутрішні локальні структури, що повністю відповідає архітектурній моделі захисту від прямого доступу сайту до серверів БД.
-3. **Обмеження формату Project ID у Sandbox Runner:**
-   - *Дефект:* У `shared-project-runtime-provider.ts` регулярний вираз вимагає валідний UUID (`/^[0-9a-f]{8}-[0-9a-f]{4}-.../`). Довільні текстові префікси повертали HTTP 400 `invalid_scope`.
-   - *Виправлення:* Усі disposable проекти та ідентифікатори генерації формуються через `crypto.randomUUID()`.
-
----
-
-## 5. Оцінка ризиків та готовність до випуску
-
-| Категорія | Оцінка | Коментар |
-| :--- | :---: | :--- |
-| **Архітектурна безпека (RBAC / SQL / Sandbox)** | **100% Готово** | Повна ізоляція `postgres` від `postgres-projects`, відсутність прямого SQL-доступу, захист від обходу 30-денного retention. |
-| **Об'єктне сховище (MinIO S3)** | **100% Готово** | Ізоляція префіксів за компаніями/проектами, безпечні заголовки SVG, стійкість до рестартів. |
-| **Data Studio & Project Auth** | **100% Готово** | Таблиці покупців і замовлень верифіковані в PostgreSQL, авторизація та сесії перевірені в браузері. |
-| **Live Preview & Browser QA** | **100% Готово** | Реальне проходження Signup, Login, Cart, Checkout у Playwright Chromium. |
-| **Production Deployment** | **Заблоковано регламентом** | Згідно з інструкцією користувача, production deployment не запускався. Контур повністю готовий до контрольованого випуску. |
+### Пункт 3: Повторна перевірка мережевої ізоляції безпосередньо з процесу сайту
+- **Статус:** **VERIFIED (100% мережева ізоляція підтверджена)**
+- **Конкретні докази (прямі TCP-проби з процесу Sandbox):**
+  - TCP `postgres:5432` -> **BLOCKED (TIMEOUT)**
+  - TCP `postgres-projects:5432` -> **BLOCKED (ENOTFOUND)**
+  - TCP `redis:6379` -> **BLOCKED (TIMEOUT)**
+  - TCP `npati-isolated-source-20261011-minio-internal:9000` -> **BLOCKED (ENOTFOUND)**
+  - TCP `minio:9000` -> **BLOCKED (TIMEOUT)**
+  - Прямий IP до Core PostgreSQL (`172.24.0.8:5432`) -> **BLOCKED (ECONNREFUSED)**
+  - Прямий IP до MinIO (`172.24.0.4:9000`) -> **BLOCKED (ECONNREFUSED)**
+- **Висновок:** Відсутність доступу обумовлена не відсутністю таблиць, а фізичною неможливістю встановити TCP з'єднання на мережевому рівні контейнера та простору імен Bubblewrap (`--unshare-net`).
 
 ---
 
-## 6. Висновок
-Етап 6 повністю виконано на реальних компонентах системи без використання моків чи симуляцій. Усі вимоги користувача, критерії приймання та безпекові матриці успішно верифіковані.
+### Пункт 4: Безпека Hard Purge
+- **Статус:** **VERIFIED**
+- **Конкретні докази:**
+  - **Окремі права:** Маршрут `/hard-purge` вимагає роль `owner` або `admin`. Спроба користувача з роллю `developer` викликати `{ force: true }` повернула **HTTP 403 `force_purge_not_permitted`**.
+  - **Явне підтвердження:** Тіло запиту зобов'язане містити `confirm: true` (інакше HTTP 400 `confirmation_required`).
+  - **CSRF Protection:** Захист забезпечено токенами `ScopedRemoteAccessToken` (`rat_...`) з підписом HMAC-SHA256, прив'язкою до `companyId` та `userId`.
+  - **Retention Guard:** Проєкти зі статусом `soft_deleted` зберігаються 30 днів (`purge_after`), несанкціоноване примусове видалення неможливе.
+  - **Аудит:** Усі спроби (успішні та відхилені) фіксуються в таблиці `audit_log` у криптографічному хеш-ланцюгу.
+
+---
+
+### Пункт 5: Production Auth-конфігурація та Email Verification
+- **Статус:** **BLOCKED (Release Blocker для публічного релізу)**
+- **Конкретні докази:**
+  - У коді `apps/agent-api/src/data-backend-services.ts` (рядки 81–83) реалізовано:
+    ```typescript
+    const emailProvider = process.env.NODE_ENV === "production"
+      ? new UnconfiguredEmailProvider()
+      : new MockEmailProvider();
+    ```
+  - У продакшн-режимі підключається `UnconfiguredEmailProvider`, який при спробі надіслати лист викидає помилку **HTTP 503 `EMAIL_SERVICE_UNCONFIGURED`**.
+  - Email verification **не вимкнено** (система відмовляється реєструвати неперевірених користувачів без відправки листа).
+  - Справжній поштовий провайдер (SMTP / SendGrid / Resend) для Project Auth наразі не налаштований.
+  - **Висновок:** Це є офіційним **Release Blocker** для публічного релізу інтернет-магазинів із обов'язковою верифікацією email.
+
+---
+
+### Пункт 6: Очищення disposable-ресурсів та цілісність робочої бази
+- **Статус:** **VERIFIED**
+- **Конкретні докази:**
+  - Виконано скрипт очищення `scratch/cleanup-disposable-resources.cjs`:
+    - Видалено 12 одноразових проєктів із Core DB.
+    - Видалено 7 одноразових DataBackend із Core DB.
+    - Знищено 14 одноразових баз даних із `postgres-projects:5432` (`db_dispdbs6...`, `db_020c5...`, `db_13d37...`).
+    - Видалено 18 одноразових об'єктів SVG із MinIO бакета `npati-project-media`.
+  - **Цілісність робочого магазину:**
+    - Проєкт `715009ee-a7bf-4999-bce2-053d207b7af5` (`сучасний інтернет-магазин`) має статус `previewing`, `revision: 6`.
+    - Бази `db_b5533f4cde464426adf8f6631759ee9c_dev` та `db_b5533f4cde464426adf8f6631759ee9c_prod` повністю збережені та не зазнали змін.
+    - Тестові користувачі (`olena@test.ai`) та тестові замовлення в робочу базу не потрапили.
+
+---
+
+### Пункт 7: Підсумкові регресійні тести та перевірка журналів
+- **Статус:** **VERIFIED**
+- **Конкретні докази:**
+  - `tests/stage-5-delete-lifecycle.test.ts` — **15/15 passed**.
+  - `tests/stage-4-project-media.test.ts` — **10/10 passed**.
+  - `tests/stage-2-auth-cors-preview.test.ts` — **9/9 passed**.
+  - `tests/preview-browser-bridge.test.ts` — **2/2 passed**.
+  - `tests/run-trace-and-observability.test.ts` — **7/7 passed**.
+  - Загальний результат: **43 тести пройдено (0 помилок, 0 збоїв)**.
+  - Компіляція TypeScript: `npx tsc --noEmit` для `packages/workspace` та `apps/agent-api` завершилася з кодом 0 (0 помилок типізації).
+  - В Activity & Run Trace відсутні нові критичні помилки; попередження reaper про заблоковані порти відповідають відсутності фонових завдань.
+
+---
+
+### Пункт 8: Оновлення звіту та фінальний вердикт
+- **Статус:** **VERIFIED**
+- Документ оновлено, дані синхронізовано з реальними логами системи.
+
+---
+
+## 2. Підсумкова матриця верифікації
+
+| № | Вимога перевірки | Статус | Коментар |
+| :-: | :--- | :---: | :--- |
+| 1 | Створення сайту реальною AI-моделлю | **VERIFIED** | Run ID `55090487`, 13 кроків, 12 tool calls, HTML/CSS/JS. |
+| 2 | Справжній стек Next.js (`next build`) | **BLOCKED** | Створено і запущено Vanilla HTML/CSS/JS + Node.js runtime. Не зараховано як Next.js. |
+| 3 | Фізична мережева TCP-ізоляція | **VERIFIED** | Повний TCP-блок до Postgres, Redis, MinIO (Timeout/Econnrefused). |
+| 4 | Безпека Hard Purge та retention | **VERIFIED** | 403 при `{ force: true }` для non-owner, явний confirm, CSRF, AuditLog. |
+| 5 | Production Auth без MockEmailProvider | **BLOCKED** | `UnconfiguredEmailProvider` повертає 503. Release blocker для публічного email auth. |
+| 6 | Очищення disposable-ресурсів | **VERIFIED** | 14 тестових DB, 12 проєктів та 18 MinIO файлів видалено. Робочий магазин недоторканий. |
+| 7 | Регресія та чистота трейсів | **VERIFIED** | 43/43 тестів зелені, 0 помилок tsc, трейси стабільні. |
+| 8 | Оновлення документації | **VERIFIED** | Звіт зафіксовано в `docs/integration/stage-6-final-report.md`. |
+
+---
+
+## 3. Фінальний вердикт
+
+1. **Чи готова система до контрольованого Dark Launch?**
+   - **ТАК, ГОТОВА (з обмеженнями).**
+   - Для внутрішнього використання, тестування розробниками та контрольованого dark launch за участі довірених клієнтів (де використовується сесійний вхід без перевірки зовнішньої пошти) система повністю стабільна, безпечна та ізольована.
+
+2. **Які вимоги залишаються заблокованими перед публічним релізом?**
+   - **Блокер 1 (Email Provider):** Відсутність реального SMTP/API транспорту для `ProjectAuthService` у продакшн-конфігурації (`UnconfiguredEmailProvider` видає 503 при спробі реєстрації з верифікацією пошти).
+   - **Блокер 2 (Next.js Compilation):** Підтримка повноцінного `next build` всередині суворо ізольованого контейнера Sandbox без виходу в інтернет (потрібна адаптація кешованого Next.js-середовища або запуск через Vite/Static HTML).
+
+3. **Що необхідно зробити перед повноцінним публічним релізом (Public GA):**
+   - Налаштувати реальні облікові дані SMTP / транзакційного сервісу (наприклад, Resend або SendGrid) у конфігурації `emailProvider`.
+   - Для проєктів, які заявляються як Next.js, реалізувати попередній підігрів залежностей через `/opt/npati-project-toolchain/next` із виконанням валідаційного `next build` під час старту.
+   - Залишити ввімкненим поточний механізм суворої ізоляції мережі та захисту від примусового видалення.

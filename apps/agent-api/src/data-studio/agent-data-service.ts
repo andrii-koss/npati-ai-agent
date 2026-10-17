@@ -40,7 +40,7 @@ export function formatSchemaForProjectContext(backendName: string, schema: Schem
     "- Project API: /v1/projects/<projectId> (use the configured PROJECT_API_URL and PROJECT_PUBLISHABLE_KEY).",
     `- Client SDK: import { createProjectClient } from "${PROJECT_SDK_IMPORT_PATH}" — generated file ${PROJECT_SDK_FILE_NAME} sits in the project root, no package install is required.`,
     "- Usage: createProjectClient({ apiUrl: PROJECT_API_URL, publishableKey: PROJECT_PUBLISHABLE_KEY }).",
-    "- Auth: client.auth.signUp(credentials), signIn, signOut, getUser; data: client.from(\"products\").list(), get(id), create(row), update(id, row), delete(id).",
+    "- Auth: client.auth.signUp(credentials), signIn, signOut, getUser; Data queries: client.from(\"table\").list() returns Promise<{ data: Row[], meta: { total: number } }> (access rows via res.data), get(id) returns Promise<Row>, create(row), update(id, row), delete(id).",
     "- Never put PROJECT_SECRET_KEY, DATABASE_URL or any database credential into generated client code.",
     "- Send the user access token through the SDK. Access policies and row level security apply to every request.",
   ];
