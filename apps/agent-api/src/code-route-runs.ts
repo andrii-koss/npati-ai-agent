@@ -213,7 +213,7 @@ export function registerCodeRunRoutes(app: FastifyInstance, input: RegisterCodeR
     },
     linkRun: async ({ ctx, companyId, sessionId, runId }) => {
       try {
-        await workspaceStore.updateCodeSession(ctx, companyId, sessionId, { runId });
+        await workspaceStore.updateCodeSession(ctx, companyId, sessionId, { runId, status: "active" });
         return { linked: true };
       } catch (error) {
         return { linked: false, reason: error instanceof Error ? error.message : "session_run_link_failed" };

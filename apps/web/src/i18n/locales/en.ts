@@ -2,6 +2,7 @@ import type { TranslationSchema } from "../types";
 
 export const en: TranslationSchema = {
   executionTrace: {
+    suspended_by_flag: "Paused: Coding Agent disabled",
 "usage": "Model tokens",
 "inputTokens": "Input",
 "outputTokens": "Output",

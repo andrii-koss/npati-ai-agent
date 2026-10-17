@@ -40,9 +40,7 @@ export function rethrowCanonical(error: unknown): never {
  */
 export function toCanonicalPort(input: CodeToolExecutionContext, options: CanonicalExecutorOptions): FsReadPort {
   const { ctx, companyId, projectId, port, limits } = input;
-  const port2 = port as CodeReadPort & {
-    runSearch(input: { ctx: CodeToolExecutionContext["ctx"]; companyId: string; projectId: string; query: string; path?: string; maxResults: number; timeoutMs: number }): Promise<{ matches: Array<{ path: string; line: number; text: string }>; truncated: boolean; engine?: "ripgrep" | "fallback" }>;
-  };
+  const port2 = port;
   const canonical: FsReadPort = {
     async listDir(dir: string): Promise<CodeDirEntry[]> {
       const result = await port2.listDir({ ctx, companyId, projectId, path: dir, limit: 5000 });
@@ -64,20 +62,26 @@ export function toCanonicalPort(input: CodeToolExecutionContext, options: Canoni
       });
       return {
         content: file.content,
+        sha256: file.sha256,
+        revision: file.revision,
+        ...(file.binary !== undefined ? { binary: file.binary } : {}),
+        ...(file.mimeGuess !== undefined ? { mimeGuess: file.mimeGuess } : {}),
         bytes: Buffer.byteLength(file.content, "utf8"),
         truncated: file.truncated === true,
-        encoding: "utf-8",
+        encoding: file.encoding ?? "utf-8",
       };
     },
     async runSearch(request: CodeSearchRequest): Promise<CodeSearchResponse> {
       const result = await port2.runSearch({
         ctx, companyId, projectId,
         query: request.pattern,
+        glob: request.glob, type: request.type, ignoreCase: request.ignoreCase,
+        fixedStrings: request.fixedStrings, contextLines: request.contextLines,
         ...(request.path ? { path: request.path } : {}),
         maxResults: Math.max(1, Math.min(request.maxResults ?? 200, 1000)),
         timeoutMs: limits.commandTimeoutMs,
       });
-      const lines = (result.matches ?? []).map((match) => ({ path: match.path, line: match.line, text: match.text }));
+      const lines = (result.matches ?? []).map((match) => ({ path: match.path, line: match.line, text: match.text, ...(match.context ? { context: match.context } : {}) }));
       const mode = request.mode ?? "content";
       if (mode === "files_with_matches") {
         const paths = [...new Set(lines.map((line) => line.path))];

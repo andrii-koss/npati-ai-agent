@@ -1,85 +1,121 @@
 # Individual PLAN verification checkpoint — 2026-10-17
 
-The full requested audit is incomplete. The source requirement document was read in full before implementation inspection. Current stage progress must not be confused with certification of runtime acceptance.
+The requested full audit is incomplete. PLAN.md was read in full. This continuation independently reassessed C1a, C1b and C2, repaired confirmed defects, and preserved the earlier assessment records without treating a broad green gate as proof of every requirement.
 
-Source: [PLAN.md](PLAN.md). Complete addressable ledger: [verification matrix](plan-verification-matrix.md), [machine-readable matrix](plan-verification-matrix.json), [individual evidence](plan-verification-evidence.json).
+Source: [PLAN.md](PLAN.md). Full ledger: [matrix](plan-verification-matrix.md), [JSON matrix](plan-verification-matrix.json), [evidence](plan-verification-evidence.json).
 
-## Counting and coverage
+## Coverage and provenance
 
-The inventory identifies27 stages,660 source statements and37 acceptance statements. The2811 addressable checks are source occurrences split at top-level independent clauses; repeated requirements remain separate. This is a transparent counting rule, not2811 independent E2E scenarios. Every leaf retains its complete original statement and source line. Unassessed entries remain Not Verified.
+The inventory contains 27 stages, 660 source statements, 37 acceptance statements and 2811 addressable source-clause checks. These are source occurrences with their full original context, not 2811 separate E2E cases. Repeated requirements remain individually addressable.
 
-| Stage | Individually assessed | Verified | Partial | Broken | Missing | Not Verified | Blocked |
+There are 2261 recorded assessments, including earlier work; 550 global requirements still have no individual assessment. This continuation independently reassessed 278 entries. Inherited assessments are not a claim of a fresh independent review. Changed Verified source fingerprints are left Not Verified until their exact contract is checked again.
+
+| Status | Count |
+| --- | ---: |
+| Verified | 1840 |
+| Partial | 140 |
+| Broken | 2 |
+| Missing | 12 |
+| Not Verified | 813 |
+| Blocked | 4 |
+| Total | 2811 |
+
+| Independently reassessed stage | Entries | Verified | Partial | Broken | Missing | Not Verified | Blocked |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| C0 |188|32|151|0|0|5|0|
-| C1 |100|66|23|0|0|1|10|
-| C1c |82|38|35|0|1|0|8|
-| C1a |150|57|86|1|2|4|0|
-| All other requirements |0|0|0|0|0|2291|0|
-| Total |520|193|295|1|3|2301|18|
+| C1a | 150 | 58 | 86 | 0 | 2 | 4 | 0 |
+| C1b | 70 | 26 | 35 | 2 | 1 | 2 | 4 |
+| C2 | 58 | 36 | 19 | 0 | 0 | 3 | 0 |
+| Total | 278 | 120 | 140 | 2 | 3 | 9 | 4 |
 
-C0 assessments distinguish historical research coverage from present runtime behavior. No entire C0 topic is certified from an old report. C1/C1c/C1a Partial entries explicitly identify their unproven downstream integration boundaries.
+No whole stage is certified complete. C1 and C1c have additional fresh PostgreSQL regression evidence, but their entire earlier ledgers were not recertified by one DB run.
 
-## Real changes and regression evidence
+## Confirmed repairs in this continuation
 
-C1 fixes:
-1. Forward classification, retention, branch and toolchain through ProjectService instead of silently dropping metadata.
-2. Record the project audit decision before creating project/backend state.
-3. Pin the session manifest in its original insert, avoiding a fallible second update.
-4. Reject a real foreign-company agent in the in-memory session store.
-5. Detect Makefile typecheck targets.
-6. Load the Python test-package marker through the actual manifest reader.
-7. Do not mistake unrelated setup.cfg content for pytest configuration.
-8. Redact credential-bearing repository import errors before HTTP output.
-9. Honor empty but valid Python package markers and requirements manifests.
-10. Preserve prior manual verification metadata on manifest I/O failures.
-11. Select the available company in Settings when no prior choice is saved.
+### C1a: interruption, durable state and continuation
 
-The inventory of12 individual defects separates the two empty-manifest cases. Exact cases and files are in C1-inspection.json and the ledger. Regression evidence includes C1-regressions-before.json, C1-detection-edge-before.json, C1-read-error-before.json, C1-ui-before.json and their passing follow-ups.
+| Problem | Change | Evidence |
+| --- | --- | --- |
+| Kill-switch abort during a resolving/rejecting provider call became user cancellation | Route both signal paths through suspendByFlag; do not dispatch returned calls | C1a-signal-before.json; C1a-session-resume-fixed.json |
+| PostgreSQL release retained lease_owner | Clear the owner only when the releasing owner matches, in both existing SQL repositories | independent-C1-postgres/postgres-current.json (red); independent-postgres-regression/postgres-current.json (green) |
+| Resume retained finishedAt | Clear the finish timestamp when the run becomes running | C1a-resume-before.json; real SQL suspension/resume case |
+| HTTP resume left the session suspended after the run resumed | Relink the existing run and activate the owned session | C1a-session-resume-before.json; C1a-session-resume-fixed.json |
+| Disabled resume flag produced generic500 | Preserve typed feature_disabled as403, before taking a lease | Same real-application HTTP regression |
+| Shared/UI status types could not represent flag suspension | Carry suspended_by_flag through background/shared types and display a settled pause | Backend regressions and the targeted frontend suspension report |
 
-C1c fixes:
-- Compare anchors with their own prefix rather than a later current head.
-- Verify non-genesis ranges through their predecessor prefix.
-- Never clear a known full-chain block from a clean selected range.
-- Preserve the first daily external anchor.
-- Verify external signed files in API and background checks.
-- Verify database anchors in background checks.
-- Report configured external-anchor write failures.
-- Detect anchored companies whose entire journal has been deleted.
-- Reject a rewritten chain with no genesis sequence1.
-- Preserve an already canonical approval payload hash instead of hashing it twice.
-- Resolve actual membership/principal roles in privileged adapters instead of recording everyone as owner.
-- Preserve safe exclusive file writes while supporting identical signed-file retry after a DB insert failure.
-- Normalize PostgreSQL bigint anchor fields to numbers; this last SQL change has a new DB test but remains blocked from real execution.
+Migration091 is additive and was exercised on fresh disposable PostgreSQL. It was not applied to production. Earlier initial-insert manifest and audit-chain fixes remain documented in the preceding audit artifacts.
 
-C1a fixes so far:
-- Include actual allowlist values in the action hash.
-- Immediately refuse effective cached access after a known audit-chain break.
-- Audit global kill against a real company and suspend/clean up affected accessible companies.
-- Recheck flags around model exchanges and reject returned calls after disablement.
-- Reject malformed persisted schema versions and inherited format names.
-- Return structured400 for unsupported API versions instead of generic500.
-- Resolve all Inspector sub-flags and expose canonical tool versions with the existing UI badge style.
-- Allow History export after master shutdown while retaining authorization and secret scanning.
-- Honor pinned manifest schemas/tool sets and pass the pinned toolVersion to execution.
-- Request local controller cancellation and lease revocation from kill cleanup.
+### C1b: image admission and publication controls
 
-The durable Run suspended_by_flag state is the current open defect and active implementation item. Deprecated executor coexistence, distributed kill timing, exact global event coverage and real browser behavior remain Partial where appropriate.
+- Refuse CRITICAL findings even with a waiver; require a complete unexpired HIGH waiver.
+- Reject future scan timestamps, invalid vulnerability counters and absent SBOM metadata.
+- Enforce company ownership before allow/revoke/scan/admission-check dispatch.
+- Fail closed when development flag resolution is absent or unverified status cannot be stored.
+- Refuse nonzero scanner exits and malformed/unknown scan reports instead of deriving zero findings.
+- Apply the scan policy before signing; do not resurrect revoked images.
+- Refuse a missing built-base digest instead of substituting the upstream digest.
+- Clear predecessor scan/SBOM metadata on a new build.
+- Keep an existing pin when rollout is enabled; distinguish explicit new-session selection.
 
-## Validation boundary
+Evidence: C1b-independent-before.json, C1b-pin-before.json, C1b-dev-before.json and C1b-independent-final.json. The final targeted report has 51 passed, no failures/skips. Publication CLI tests execute real script control flow with explicitly simulated external-tool ports; they do not claim a real Trivy, cosign or registry publication.
 
-Artifacts: [current verification directory](../../artifacts/coding-agent-plan-verification-2026-10-17/).
+### C2: canonical adapters, secrets and real filesystem behavior
 
-- Targeted service/store/HTTP tests and the Settings React DOM regression have passing artifacts.
-- The new exact requirement matrix has integrity tests and refuses stale Verified source hashes or unmatched test assertions.
-- First full security gate:177 suites,2565 passed,1 failed,0 skipped. The failure was an existing forbidden any-cast in terminal wiring; the cast was repaired without changing behavior.
-- The fixed gate now also includes both published-schema/versioning suites, making179 suites. The final repeat is still pending.
-- An earlier complete workspace typecheck passed. Newly modified paths and test types require their final repeat after the active changes.
-- The attempted isolated PostgreSQL check could not start: Docker Desktop Linux engine pipe is missing. This is not a passed or simulated DB check.
-- New PostgreSQL tests cover original-insert manifest pinning and numeric anchor/range round trips; they remain unexecuted.
-- No broad standalone E2E campaign has been started.
-- Production infrastructure, secrets, working data and existing services were not changed.
-- This installation retains ONE shared sandbox with separate project folders/processes/ports.
+- Forward grep glob/type/case/fixed/context options across the canonical adapter.
+- Preserve full-file hash and revision after a byte-truncated read.
+- Redact complete and byte-truncated private-key blocks before slicing lines, preserving line numbers.
+- Omit sensitive grep paths and redact known provider-shaped secrets in ordinary matches.
+- Quote the search target as one shell argument in both execution paths.
+- Parse rg JSON context records, preserve nested globs and reject execution failures.
+- Use structured runtime output budgets with head/tail data, refinement hints and envelope overhead.
+- Fix root-anchored and directory-only ignore rules.
+- Carry actual filesystem mtimes through the read port while keeping content revisions independent of touch.
+- Detect binary/image magic before lossy UTF-8 decoding, and carry metadata through the actual Workspace and runtime.
+
+Red artifacts: C2-independent-before.json, C2-search-secret-before.json, C2-runtime-budget-before.json, C2-ignore-before.json, C2-mtime-before.json, C2-binary-before.json. Passing evidence: C2-C3-independent-final.json. The latest combined targeted report has 178 passed across10 suites, including adjacent write and evidence-retention regressions. Its History export case is additionally rerun with HTTP kill/re-enable/resume in the64-test C1a follow-up.
+
+## Actual environment and open high-priority gaps
+
+Docker is now available. The old missing-engine blocker is historical and must not be repeated as the current state.
+
+A new disposable PostgreSQL run executed6 suites: 19 passed,0 failed,0 skipped. Migration checks include populated-schema coverage, audit application-role restrictions, async inbox/lifecycle regressions and the new owner-checked suspension/resume round trip. Every owned DB container was removed; no existing service/data was changed.
+
+Read-only inspection of the existing shared supervisor confirms a read-only rootfs, no Docker socket mount, Privileged=false, resource limits and a seccomp filter. The supervisor itself runs root with management capabilities. That does not prove the effective UID/capabilities of each project process.
+
+The installation still uses ONE shared sandbox, with separate /projects/<projectId> folders, process identities and ports. It was not converted to per-project containers or redeployed.
+
+Open mandatory C1b gaps:
+
+- C1b.L0351.01 and C1b.L0366.01 remain Broken: the shared supervisor is locally named, and its startup does not use equivalent signed-image/scan admission.
+- C1b.L0351.04 remains Missing: no durable admitted image digest is stored on CodeSession.
+- The catalog/SBOM files are explicit placeholders, not evidence of a real signed/scanned production release.
+- Existing owner-disabled remote Actions schedules/build publication remain Blocked. No paid workflow or production rollout was started.
+
+C2 remains Partial for nested ignore semantics, recursive glob discovery, complete count-mode semantics, charset support, actual ctags execution, all tenancy/race boundaries and normal-Run acceptance with a real sandbox search. These are named per leaf rather than concealed behind helper tests.
+
+## Validation
+
+Artifacts: [continuation directory](../../artifacts/coding-agent-plan-verification-2026-10-17/).
+
+| Check | Result |
+| --- | --- |
+| Fixed security gate | 180 suites; 2667 passed,0 failed,0 skipped,0 todo |
+| Real disposable PostgreSQL regression | 6 suites;19 passed,0 failed,0 skipped; owned container cleanup passed |
+| C1a resume/stop regressions | 4 suites;64 passed |
+| C1b admission/publication regressions | 2 suites;51 passed; scanner/signature ports explicitly simulated |
+| C2 and adjacent regressions | 10 suites;178 passed |
+| Workspace typecheck | Passed across14 workspaces |
+| Expanded test typecheck | Final repeat pending after adding the evidence helper declaration |
+| Targeted UI suspension/reload checks | Pending |
+| Root build and lint | Pending |
+| Diff whitespace check | Passed |
+| New broad autonomous E2E | Not run; main-plan individual verification remains the priority |
+
+One earlier expanded gate failed its cold dynamic application import path. The isolated repeat passed in11.8s; the application import was moved to collection without changing the40s test timeout or its assertions, and the full180-suite repeat passed. The gate now preserves exact assertion names/statuses/durations without payload/error contents. A subsequent type declaration/null-input hardening of this evidence helper is validated by its targeted checks.
+
+The requirement generator caches repeated evidence reads only within one generation and checks file stamps before/after verification. Default standalone validation still rejects stale hashes. The informational PLAN footer was rebased with unchanged requirement IDs, source clauses and total2811; no requirement was marked complete by changing PLAN text.
+
+Host Node22.13.1 remains below package.json's declared22.22.2 floor. Successful checks on this host are recorded without claiming the supported-version release gate.
 
 ## Resume point
 
-Finish the durable flag-suspension state, rerun affected tests/typechecks/lint/security gate, refresh evidence hashes, then continue to C1b in PLAN source order. Do not mark the remaining2291 unassessed requirements as reviewed merely because the generic test gate passes.
+Finish the pending verification commands and refresh their evidence. Then continue the independent audit at C3 in PLAN source order. Retain prior assessment artifacts; recheck exact source/test correspondence rather than automatically restoring changed Verified hashes. Continue through every remaining stage and the550 unassessed global clauses before the separate broad E2E campaign.

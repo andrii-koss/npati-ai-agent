@@ -1,3 +1,5 @@
+import { detectFileKind } from "./code-file-kind";
+export { detectFileKind } from "./code-file-kind";
 /**
  * C2: pure logic of the read-only code tools.
  *
@@ -13,7 +15,7 @@
 import { createHash } from "node:crypto";
 import { resolveCodeAgentLimits, type CodeAgentLimits } from "./code-agent-config";
 import { CodeToolError, assertSafeSymlink, matchGlob, normalizeWorkspacePath } from "./code-tools-path";
-import { decideSensitiveRead, isSensitiveDirectory, redactSecrets, resolveSensitivePolicy, type SensitivePolicy } from "./code-tools-sensitive";
+import { decideSensitiveRead, isSensitiveDirectory, isSensitivePath, redactSecrets, resolveSensitivePolicy, type SensitivePolicy } from "./code-tools-sensitive";
 
 /** Schema version of the tool-result envelope (C1a rule 13: persisted/emitted formats are versioned). */
 export const CODE_TOOL_RESULT_SCHEMA_VERSION = 1;
@@ -30,6 +32,8 @@ export interface CodeDirEntry {
 
 export interface CodeFileReadResult {
   content: string;
+  sha256?: string;
+  revision?: string;
   bytes: number;
   truncated: boolean;
   encoding?: string;
@@ -98,26 +102,6 @@ function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
-/** Binary/image sniffing: NUL bytes plus the magic numbers that matter for source repositories. */
-export function detectFileKind(content: string): { binary: boolean; image: boolean; mimeGuess: string | null } {
-  const head = content.slice(0, 16);
-  const magic: Array<{ test: (value: string) => boolean; mime: string; image: boolean }> = [
-    { test: (value) => value.startsWith("\u0089PNG"), mime: "image/png", image: true },
-    { test: (value) => value.startsWith("\u00ff\u00d8\u00ff"), mime: "image/jpeg", image: true },
-    { test: (value) => value.startsWith("GIF8"), mime: "image/gif", image: true },
-    { test: (value) => value.startsWith("RIFF") && value.slice(8, 12) === "WEBP", mime: "image/webp", image: true },
-    { test: (value) => value.startsWith("%PDF"), mime: "application/pdf", image: false },
-    { test: (value) => value.startsWith("PK\u0003\u0004"), mime: "application/zip", image: false },
-    { test: (value) => value.startsWith("\u001f\u008b"), mime: "application/gzip", image: false },
-    { test: (value) => value.startsWith("\u007fELF"), mime: "application/x-elf", image: false },
-  ];
-  const hit = magic.find((entry) => entry.test(head));
-  const hasNullByte = content.includes("\u0000");
-  if (hit) return { binary: true, image: hit.image, mimeGuess: hit.mime };
-  if (hasNullByte) return { binary: true, image: false, mimeGuess: null };
-  return { binary: false, image: false, mimeGuess: null };
-}
-
 /**
  * Wraps any tool payload in the untrusted-data envelope (prompt-injection defence) and enforces the
  * total output budget: arrays are trimmed first, and only if that is not enough is the payload
@@ -129,17 +113,17 @@ export function wrapToolResult(
   options: { toolVersion?: number; maxChars?: number } = {},
 ): Record<string, unknown> {
   const maxChars = options.maxChars ?? resolveCodeAgentLimits().toolOutputChars;
-  const budgeted = enforceOutputBudget(payload, maxChars);
-  return {
-    kind: "code_tool_result",
-    tool,
-    toolVersion: options.toolVersion ?? 1,
-    schemaVersion: CODE_TOOL_RESULT_SCHEMA_VERSION,
-    trust: "untrusted_data",
-    note: CODE_TOOL_NOTE,
-    ...(budgeted.truncated ? { truncated: true, truncation: budgeted.truncation } : {}),
-    data: budgeted.data,
-  };
+  const envelope = { kind: "code_tool_result", tool, toolVersion: options.toolVersion ?? 1,
+    schemaVersion: CODE_TOOL_RESULT_SCHEMA_VERSION, trust: "untrusted_data", note: CODE_TOOL_NOTE };
+  let dataBudget = Math.max(0, maxChars - safeStringify({ ...envelope, data: null }).length);
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const budgeted = enforceOutputBudget(payload, dataBudget);
+    const result = { ...envelope, ...(budgeted.truncated ? { truncated: true, truncation: budgeted.truncation } : {}), data: budgeted.data };
+    const excess = safeStringify(result).length - maxChars;
+    if (excess <= 0) return result;
+    dataBudget = Math.max(0, dataBudget - excess);
+  }
+  throw new RangeError("Tool output budget is too small for the required data envelope");
 }
 
 interface BudgetResult { data: unknown; truncated: boolean; truncation?: Record<string, unknown> }
@@ -175,7 +159,9 @@ export function enforceOutputBudget(payload: unknown, maxChars: number): BudgetR
         },
       });
       while (items.length > 1 && safeStringify(candidate(items)).length > maxChars) {
-        items = items.slice(0, Math.floor(items.length * 0.8));
+        const kept = Math.floor(items.length * 0.8);
+        const head = Math.ceil(kept * 0.6), tail = kept - head;
+        items = [...items.slice(0, head), ...(tail ? items.slice(-tail) : [])];
       }
       const trimmed = candidate(items);
       if (safeStringify(trimmed).length <= maxChars) {
@@ -186,14 +172,18 @@ export function enforceOutputBudget(payload: unknown, maxChars: number): BudgetR
     }
   }
 
-  const headChars = Math.max(0, Math.floor(maxChars * 0.6));
-  const tailChars = Math.max(0, Math.floor(maxChars * 0.3));
-  const preview = `${serialized.slice(0, headChars)}\n[truncated ${serialized.length - headChars - tailChars} chars]\n${serialized.slice(-tailChars)}`;
-  return {
-    data: { truncatedPreview: preview, hint: "Narrow the request (offset/limit/glob/path) to see the rest." },
-    truncated: true,
-    truncation: { reason: "output_budget", originalChars: serialized.length, keptChars: preview.length },
+  const hint = "Narrow the request (offset/limit/glob/path) to see the rest.";
+  const previewFor = (kept: number) => {
+    const head = Math.ceil(kept * 0.6), tail = kept - head;
+    return serialized.slice(0, head) + "\n[truncated " + (serialized.length - kept) + " chars]\n" + (tail ? serialized.slice(-tail) : "");
   };
+  let low = 0, high = Math.max(0, Math.floor(maxChars)), best: { truncatedPreview: string; hint: string } | null = null;
+  while (low <= high) {
+    const kept = Math.floor((low + high) / 2), candidate = { truncatedPreview: previewFor(kept), hint };
+    if (safeStringify(candidate).length <= maxChars) { best = candidate; low = kept + 1; }
+    else high = kept - 1;
+  }
+  return { data: best, truncated: true, truncation: { reason: "output_budget", originalChars: serialized.length, keptChars: best?.truncatedPreview.length ?? 0 } };
 }
 
 function safeStringify(value: unknown): string {
@@ -206,7 +196,7 @@ function safeStringify(value: unknown): string {
 
 // --- .gitignore -------------------------------------------------------------------------------
 
-export interface GitignoreRule { pattern: string; negated: boolean; dirOnly: boolean }
+export interface GitignoreRule { pattern: string; negated: boolean; dirOnly: boolean; anchored?: boolean }
 
 export function parseGitignore(content: string): GitignoreRule[] {
   const rules: GitignoreRule[] = [];
@@ -216,7 +206,7 @@ export function parseGitignore(content: string): GitignoreRule[] {
     const negated = line.startsWith("!");
     const body = negated ? line.slice(1).trim() : line;
     if (!body) continue;
-    rules.push({ pattern: body.replace(/\/+$/, ""), negated, dirOnly: body.endsWith("/") });
+    rules.push({ pattern: body.replace(/^\/+|\/+$/g, ""), negated, dirOnly: body.endsWith("/"), ...(body.startsWith("/") ? { anchored: true } : {}) });
   }
   return rules;
 }
@@ -226,8 +216,8 @@ export function isIgnoredByGitignore(path: string, rules: readonly GitignoreRule
   let ignored = false;
   for (const rule of rules) {
     if (rule.dirOnly && !isDir && !normalized.includes("/")) continue;
-    const candidates = [normalized, ...parentPaths(normalized)];
-    const matches = candidates.some((candidate) => matchGlob(rule.pattern, candidate) || candidate.startsWith(`${rule.pattern}/`));
+    const candidates = [normalized, ...parentPaths(normalized)].filter(candidate => !rule.dirOnly || candidate !== normalized || isDir);
+    const matches = candidates.some(candidate => (rule.anchored ? matchGlob("./" + rule.pattern, "./" + candidate) : matchGlob(rule.pattern, candidate)) || candidate.startsWith(rule.pattern + "/"));
     if (matches) ignored = !rule.negated;
   }
   return ignored;
@@ -325,6 +315,7 @@ export interface ReadFileLinesResult {
   mimeGuess: string | null;
   bytes: number;
   sha256: string;
+  revision?: string;
   redacted?: boolean;
 }
 
@@ -346,29 +337,32 @@ export async function readFileLines(input: ReadFileLinesInput): Promise<ReadFile
 
   const kind = detectFileKind(file.content);
   const binary = file.binary === true || kind.binary;
-  const image = kind.image;
+  const image = kind.image || file.mimeGuess?.startsWith("image/") === true;
   const mimeGuess = file.mimeGuess ?? kind.mimeGuess;
-  const digest = sha256(file.content);
+  const digest = file.sha256 ?? sha256(file.content);
   if (binary) {
     // Binary and image payloads are reported, never inlined: content is useless to the model and can
     // hide injected text.
     return {
       path, encoding: file.encoding ?? "binary", totalLines: 0, lines: [], truncated: false,
       binary: true, image, mimeGuess, bytes: file.bytes, sha256: digest,
+      ...(file.revision !== undefined ? { revision: file.revision } : {}),
     };
   }
 
   const maxLineLength = clamp(input.maxLineLength, 500, 1, 2000);
   const offset = clamp(input.offset, 1, 1, Number.MAX_SAFE_INTEGER);
   const limit = clamp(input.limit, limits.readFileLines, 1, limits.readFileLines);
-  const rawLines = file.content.split(/\r?\n/);
+  // Redact complete blocks before offset/limit/line clipping; retain original source line numbers.
+  const safeContent = redactSecrets(file.content, { preserveLines: true });
+  const rawLines = safeContent.split(/\r?\n/);
   if (rawLines.length > 1 && rawLines[rawLines.length - 1] === "") rawLines.pop();
   const slice = rawLines.slice(offset - 1, offset - 1 + limit);
   const lines = slice.map((text, index) => ({
     n: offset + index,
     text: text.length > maxLineLength ? `${text.slice(0, maxLineLength)}…(truncated)` : text,
   }));
-  const finalLines = decision.action === "redact" ? lines.map((line) => ({ ...line, text: redactSecrets(line.text) })) : lines;
+  const finalLines = lines;
   return {
     path,
     encoding: file.encoding ?? "utf-8",
@@ -380,7 +374,8 @@ export async function readFileLines(input: ReadFileLinesInput): Promise<ReadFile
     mimeGuess,
     bytes: file.bytes,
     sha256: digest,
-    ...(decision.action === "redact" ? { redacted: true } : {}),
+    ...(file.revision !== undefined ? { revision: file.revision } : {}),
+    ...(decision.action === "redact" || safeContent !== file.content ? { redacted: true } : {}),
   };
 }
 
@@ -441,7 +436,12 @@ export async function grepFiles(input: GrepFilesInput): Promise<GrepFilesResult>
   }
   const seen = new Set<string>();
   const deduped: Array<Record<string, unknown>> = [];
-  for (const match of Array.isArray(response.matches) ? response.matches : []) {
+  for (const original of Array.isArray(response.matches) ? response.matches : []) {
+    if (typeof original.path !== "string") continue;
+    const matchPath = normalizeWorkspacePath(original.path, { tool, allowEmpty: false });
+    // Search must not bypass the read policy through content or context snippets.
+    if (isSensitivePath(matchPath)) continue;
+    const match = redactSearchFields({ ...original, path: matchPath }) as Record<string, unknown>;
     const key = `${String(match.path ?? "")}:${String(match.line ?? "")}:${String(match.match ?? match.text ?? "")}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -456,6 +456,14 @@ export async function grepFiles(input: GrepFilesInput): Promise<GrepFilesResult>
     truncated: response.truncated === true || (response.matches?.length ?? 0) > deduped.length,
     path: searchPath,
   };
+}
+
+function redactSearchFields(value: unknown, depth = 0): unknown {
+  if (typeof value === "string") return redactSecrets(value);
+  if (depth >= 8) return "[REDACTED_NESTED_DATA]";
+  if (Array.isArray(value)) return value.map(item => redactSearchFields(item, depth + 1));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactSearchFields(item, depth + 1)]));
+  return value;
 }
 
 // --- code.fs.tree ------------------------------------------------------------------------------

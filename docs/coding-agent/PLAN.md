@@ -1070,3 +1070,5 @@ C. Data lifecycle і privacy
 - Ліміти, квоти і retention Coding Agent не впливають на інші функції
 - AuditLog append-only, ланцюг верифікується, привілейовані дії fail closed
 - typecheck, lint, tests, build
+
+> Independent verification checkpoint (2026-10-17): the audit is incomplete. See [individual results and open defects](2026-10-17-plan-verification.md) and the [complete requirement matrix](plan-verification-matrix.md). Historical stage summaries and general test passes do not certify every requirement.

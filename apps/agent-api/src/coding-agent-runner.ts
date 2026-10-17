@@ -361,14 +361,20 @@ export class CodingAgentRunner {
       try { return await input.cancelRequested(); } catch { return false; }
     };
 
+    const suspendByFlag = async (): Promise<CodingAgentRunResult> => {
+      await release("feature_disabled");
+      return { ...await stop("suspended_by_flag", "feature_disabled", "The run was suspended by the Coding Agent kill switch."), code: "feature_disabled" };
+    };
+
     const stopIfFlagDisabled = async (): Promise<CodingAgentRunResult | null> => {
       try {
         await this.ports.flags.assertEnabled(ctx, CODE_AGENT_MASTER_FLAG, { companyId, userId: ctx.userId });
         return null;
       } catch (error) {
         const code = (error as { code?: string }).code === "feature_disabled" ? "feature_disabled" : "feature_gate_unavailable";
+        if (code === "feature_disabled") return suspendByFlag();
         await release(code);
-        const result = await stop(code === "feature_disabled" ? "suspended_by_flag" : "interrupted", code === "feature_disabled" ? "feature_disabled" : "refused", "The Coding Agent flag no longer permits this run. No further model or tool call was dispatched.");
+        const result = await stop("interrupted", "refused", "The Coding Agent flag no longer permits this run. No further model or tool call was dispatched.");
         return { ...result, code };
       }
     };
@@ -386,7 +392,7 @@ export class CodingAgentRunner {
         return stop("interrupted", "interrupted", "Stopped: this process lost the run lease (another worker took over). No further changes were made.");
       }
       if (await cancelled()) {
-        if ((input.signal?.reason as { code?: string } | undefined)?.code === "feature_disabled") return { ...await stop("suspended_by_flag", "feature_disabled", "The run was suspended by the Coding Agent kill switch."), code: "feature_disabled" };
+        if ((input.signal?.reason as { code?: string } | undefined)?.code === "feature_disabled") return suspendByFlag();
         if (input.detachedChildInbox && (input.signal?.reason as { code?: string } | undefined)?.code === "subagent_interrupt") {
           return stop("interrupted", "interrupted", "The child was interrupted at a safe boundary and can be continued.");
         }
@@ -486,6 +492,7 @@ export class CodingAgentRunner {
           return stop("interrupted", "interrupted", "The child was interrupted during its model request and can be continued.");
         }
         if (input.signal?.aborted || await cancelled()) {
+          if ((input.signal?.reason as { code?: string } | undefined)?.code === "feature_disabled") return suspendByFlag();
           await release("cancelled");
           await this.ports.runEvents?.append({ eventKey: `code-run-cancelled:${turnId}`, eventType: "cancelled", runStatus: "cancelled", message: "Coding Agent run cancelled during model request" });
           return stop("cancelled", "cancelled", "The run was cancelled during its model request.");
@@ -529,6 +536,7 @@ export class CodingAgentRunner {
 
       // Account for a completed provider response even when cancellation arrived in flight. Never execute its calls.
       if (await cancelled()) {
+        if ((input.signal?.reason as { code?: string } | undefined)?.code === "feature_disabled") return suspendByFlag();
         if (input.detachedChildInbox && (input.signal?.reason as { code?: string } | undefined)?.code === "subagent_interrupt") return stop("interrupted", "interrupted", "The child was interrupted after its model request and can be continued.");
         await release("cancelled");
         await this.ports.runEvents?.append({ eventKey: `code-run-cancelled:${turnId}`, eventType: "cancelled", runStatus: "cancelled", message: "Coding Agent run cancelled after model request" });

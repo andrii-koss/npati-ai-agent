@@ -94,3 +94,13 @@ export declare function prepareTyposquatDataset(options?: { root?: string }): {
 
 /** The gate's own entry point: `--list`, `--db`, `--list --db`, and the hermetic run. Returns the exit code. */
 export declare function main(argv?: readonly string[]): number;
+
+/** Exact per-assertion evidence without tool output, assertion payloads or error bodies. */
+export interface GateTestExecutionEvidence {
+  success: boolean; numPassedTests: number; numFailedTests: number; numPendingTests: number;
+  testResults: Array<{ name: string; status: string; assertionResults: Array<{
+    fullName: string; title: string; status: string; duration?: number;
+    failureKind?: "timeout" | "assertion_or_execution_failure";
+  }> }>;
+}
+export declare function testExecutionEvidence(report: unknown): GateTestExecutionEvidence;

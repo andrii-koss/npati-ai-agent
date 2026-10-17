@@ -312,7 +312,7 @@ export async function applyCodeRunStateEvent(pool: Pool, input: ApplyCodeRunStat
          finished_at = CASE WHEN $9::boolean THEN $10 ELSE finished_at END,
          details = COALESCE($11::jsonb, details),
          last_event_seq = $3,
-         lease_owner = CASE WHEN $12::boolean AND ${leasePredicate} THEN $7 ELSE lease_owner END,
+         lease_owner = CASE WHEN $12::boolean AND ${leasePredicate} THEN ${input.lease?.mode === "release" ? "NULL" : "$7"} ELSE lease_owner END,
          lease_expires_at = CASE WHEN $12::boolean AND ${leasePredicate} THEN $13 ELSE lease_expires_at END,
          revision = revision + 1,
          updated_at = $6

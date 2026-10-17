@@ -29,3 +29,10 @@ describe("chat development panel", () => {
     expect(markup).not.toContain("<img");
   });
 });
+
+it("shows flag suspension as a settled pause with no running indicator", () => {
+  const markup = renderToStaticMarkup(<ChatDevelopmentPanel {...props} isUk processes={[process(1, "suspended_by_flag")]} />);
+  expect(markup).toContain("Призупинено: Coding Agent вимкнено");
+  expect(markup).toContain('data-status="suspended_by_flag"');
+  expect(markup).not.toContain("research-active-text");
+});

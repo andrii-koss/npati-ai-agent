@@ -77,7 +77,7 @@ export function codingActivityRuns(value: unknown, process?: DevelopmentProcess)
     const persisted = group.runId ? process?.runStatuses?.[group.runId] : undefined;
     const current = group.runId === process?.runId || !group.runId && !process?.initialRunId;
     const rawState = (current ? process?.status : undefined) ?? persisted;
-    const state = typeof rawState === "string" && ["running","active","pending","queued","preparing","completed","failed","cancelled","waiting_for_user","waiting_for_approval","awaiting_approval","stopping","interrupted"].includes(rawState) ? rawState : undefined;
+    const state = typeof rawState === "string" && ["running","active","pending","queued","preparing","completed","failed","cancelled","waiting_for_user","waiting_for_approval","awaiting_approval","stopping","interrupted","suspended_by_flag"].includes(rawState) ? rawState : undefined;
     group.status = state === "waiting_for_user" || state === "awaiting_approval" ? "waiting_for_approval" : state === "queued" || state === "preparing" ? "pending" : state === "stopping" ? "running" : state === "interrupted" ? "failed" : state ?? (group.items.some(item=>["running","active"].includes(item.status??"")) ? "running" : group.items.some(item=>["awaiting_approval","waiting_for_approval"].includes(item.status??"")) ? "waiting_for_approval" : group.items.at(-1)?.status ?? "unknown");
     if (group.status === "active") group.status = "running";
   }

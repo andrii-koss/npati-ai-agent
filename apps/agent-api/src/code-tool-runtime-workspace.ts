@@ -1,3 +1,5 @@
+import { parseCodeSearchOutput } from "./code-search-output";
+import { normalizeWorkspacePath } from "./code-tools-path";
 import type { AuthContext } from "@npati/workspace";
 import type { CodeReadPort, CodeWritePort, SandboxExecPort } from "./code-tool-runtime-ports";
 import { sha256Hex } from "./code-tool-runtime-guards";
@@ -9,8 +11,8 @@ import { CodeToolError } from "./code-tool-runtime-errors";
  */
 export function createProjectWorkspaceReadPort(
   workspace: {
-    getFileTree(ctx: AuthContext, companyId: string, projectId: string): Promise<Array<{ path: string; type: string; size?: number }>>;
-    readFile(ctx: AuthContext, companyId: string, projectId: string, path: string): Promise<{ path: string; content: string; size: number; revision: string }>;
+    getFileTree(ctx: AuthContext, companyId: string, projectId: string): Promise<Array<{ path: string; type: string; size?: number; mtimeMs?: number }>>;
+    readFile(ctx: AuthContext, companyId: string, projectId: string, path: string): Promise<{ path: string; content: string; size: number; revision: string; binary?: boolean; encoding?: string; mimeGuess?: string | null }>;
   },
   sandbox?: SandboxExecPort,
 ): CodeReadPort {
@@ -24,7 +26,7 @@ export function createProjectWorkspaceReadPort(
           const rest = entry.path.slice(prefix.length);
           return rest.length > 0 && !rest.includes("/");
         })
-        .map((entry) => ({ path: entry.path, type: entry.type === "directory" ? "directory" as const : "file" as const, size: entry.size }));
+        .map((entry) => ({ path: entry.path, type: entry.type === "directory" ? "directory" as const : "file" as const, size: entry.size, mtimeMs: entry.mtimeMs }));
       return { entries: typeof limit === "number" ? filtered.slice(0, limit) : filtered };
     },
     async readFile({ ctx, companyId, projectId, path, startLine, endLine, maxLines, maxBytes }) {
@@ -41,7 +43,10 @@ export function createProjectWorkspaceReadPort(
         text = Buffer.from(text, "utf8").subarray(0, maxBytes).toString("utf8");
         truncated = true;
       }
-      return { path: file.path, content: text, revision: file.revision, sha256: sha256Hex(content), totalLines: lines.length, truncated };
+      return { path: file.path, content: text, revision: file.revision, sha256: file.binary ? file.revision : sha256Hex(content), totalLines: lines.length, truncated,
+        ...(file.binary !== undefined ? { binary: file.binary } : {}),
+        ...(file.encoding !== undefined ? { encoding: file.encoding } : {}),
+        ...(file.mimeGuess !== undefined ? { mimeGuess: file.mimeGuess } : {}) };
     },
     async runSearch({ ctx, companyId, projectId, query, path, maxResults, timeoutMs, glob, type, ignoreCase, fixedStrings, contextLines }) {
       if (!sandbox) {
@@ -50,19 +55,21 @@ export function createProjectWorkspaceReadPort(
       if (typeof sandbox.search === "function") {
         return sandbox.search(ctx, companyId, { projectId, query, path, maxResults, timeoutMs, glob, type, ignoreCase, fixedStrings, contextLines });
       }
-      const target = path && path !== "." ? `./${path}` : ".";
-      const escaped = query.replace(/'/g, "'\\''");
-      const result = await sandbox.execute(ctx, companyId, {
-        projectId,
-        command: `rg --line-number --no-heading --color=never --max-count ${maxResults} -e '${escaped}' -- ${target}`,
-        timeoutMs,
-      });
-      const stdout = result.stdout ?? result.output ?? "";
-      const matches = stdout.split("\n").filter(Boolean).slice(0, maxResults).map((line) => {
-        const [file, lineNumber, ...rest] = line.split(":");
-        return { path: file ?? "", line: Number.parseInt(lineNumber ?? "0", 10) || 0, text: rest.join(":").slice(0, 500) };
-      });
-      return { matches, truncated: matches.length >= maxResults };
+      const target = path && path !== "." ? "./" + normalizeWorkspacePath(path, { tool: "code.fs.grep" }) : ".";
+      const quote = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'";
+      const args = ["rg", "--json", "--line-number", "--no-heading", "--color=never", "--max-count", String(maxResults)];
+      if (ignoreCase) args.push("-i");
+      if (fixedStrings) args.push("-F");
+      if (contextLines) args.push("-C", String(Math.min(10, Math.max(0, contextLines))));
+      if (glob !== undefined) args.push("--glob", quote(normalizeWorkspacePath(glob, { tool: "code.fs.grep", allowGlob: true })));
+      if (type !== undefined) {
+        if (!/^[a-zA-Z0-9_-]+$/.test(type)) throw new CodeToolError("invalid_arguments", "Invalid file type filter", 400);
+        args.push("--type", quote(type));
+      }
+      args.push("-e", quote(query), "--", quote(target));
+      const result = await sandbox.execute(ctx, companyId, { projectId, command: args.join(" "), timeoutMs });
+      if (result.exitCode !== 0 && result.exitCode !== 1) throw new CodeToolError("search_failed", "Sandbox search did not complete successfully", 503, "execute", true);
+      return parseCodeSearchOutput(result.stdout ?? result.output ?? "", maxResults, contextLines ?? 0);
     },
   };
 }

@@ -13,6 +13,8 @@ import {
   ageDays, digestOf, dockerfileFor, error, log, parseArgs, readCatalog, warn,
 } from "./sandbox-image-lib.mjs";
 
+import { imageScanPolicyErrors } from "./lib/sandbox-image-scan-policy.mjs";
+
 const { flags, values } = parseArgs();
 const asJson = flags.has("json");
 const requireVerified = flags.has("require-verified");
@@ -114,6 +116,7 @@ function verifyCatalog() {
     }
 
     if (entry.status === "verified" || entry.status === "deprecated") {
+      for (const problem of imageScanPolicyErrors(scan, entry.waiver, Date.now(), MAX_IMAGE_AGE_DAYS)) fail(label + ": " + problem);
       const age = ageDays(scan.at);
       if (!Number.isFinite(age)) fail(`${label}: scan.at is not a valid date`);
       else if (age > MAX_IMAGE_AGE_DAYS) fail(`${label}: last scan is ${Math.floor(age)} days old, older than the ${MAX_IMAGE_AGE_DAYS}-day policy (rescan required)`);

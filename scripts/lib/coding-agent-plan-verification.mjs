@@ -86,21 +86,32 @@ export function extractPlan(text) {
     entries, coverage };
 }
 
-export function validateReview(entry, review) {
+const reviewCache = () => ({ hashes: new Map(), reports: new Map(), stamps: new Map() });
+const fileStamp = file => { const stat = fs.statSync(file); return [stat.size, stat.mtimeMs, stat.ctimeMs].join(":"); };
+function readStableEvidence(file, cache) {
+  const before = fileStamp(file), bytes = fs.readFileSync(file);
+  if (fileStamp(file) !== before) throw new Error("Evidence changed during verification: " + file);
+  cache.stamps.set(file, before);
+  return bytes;
+}
+
+export function validateReview(entry, review, cache = reviewCache()) {
   if (!STATUSES.includes(review.status)) throw new Error(entry.id + ": invalid status");
   if (!review.observation || !Array.isArray(review.implementation) || !Array.isArray(review.checks))
     throw new Error(entry.id + ": incomplete individual assessment");
   for (const file of review.implementation) if (!fs.existsSync(file.path)) throw new Error(entry.id + ": missing implementation " + file.path);
   if (review.status === "Blocked" && !review.blocker) throw new Error(entry.id + ": missing concrete blocker");
   if (review.status === "Verified") for (const file of review.implementation) {
-    if (!file.sha256 || file.sha256 !== sha(fs.readFileSync(file.path))) throw new Error(entry.id + ": implementation changed or hash missing");
+    if (!cache.hashes.has(file.path)) cache.hashes.set(file.path, sha(readStableEvidence(file.path, cache)));
+    if (!file.sha256 || file.sha256 !== cache.hashes.get(file.path)) throw new Error(entry.id + ": implementation changed or hash missing");
   }
   if (review.status === "Verified" && (!review.implementation.length || !review.checks.length || review.remaining?.length))
     throw new Error(entry.id + ": Verified needs exact source/check evidence and no remaining obligations");
   for (const check of review.checks) {
     if (!check.path || !fs.existsSync(check.path)) throw new Error(entry.id + ": missing check artifact");
     if (check.assertion) {
-      const result = JSON.parse(fs.readFileSync(check.path, "utf8").replace(/^\uFEFF/, ""));
+      if (!cache.reports.has(check.path)) cache.reports.set(check.path, JSON.parse(readStableEvidence(check.path, cache).toString("utf8").replace(/^\uFEFF/, "")));
+      const result = cache.reports.get(check.path);
       const matches = result.testResults?.flatMap(suite => suite.assertionResults).filter(a => a.fullName === check.assertion);
       if (matches?.length !== 1 || matches[0].status !== "passed") throw new Error(entry.id + ": assertion is not uniquely passed");
     } else if (review.status === "Verified" && check.kind !== "inspection") throw new Error(entry.id + ": exact passed assertion required");
@@ -114,23 +125,26 @@ export function generatePlanVerification() {
     { schemaVersion: 1, planSha256: extracted.planSha256, assessments: {} };
   if (review.planSha256 !== extracted.planSha256) throw new Error("PLAN changed: rebase source anchors explicitly before carrying assessments forward");
   const byId = new Map(extracted.entries.map(e => [e.id, e]));
+  const cache = reviewCache();
   for (const [id, assessment] of Object.entries(review.assessments)) {
     const entry = byId.get(id); if (!entry) throw new Error("Unknown assessment " + id);
-    validateReview(entry, assessment);
+    validateReview(entry, assessment, cache);
   }
+  for (const [file, stamp] of cache.stamps) if (fileStamp(file) !== stamp) throw new Error("Evidence changed during verification: " + file);
   const entries = extracted.entries.map(entry => ({ ...entry,
     status: review.assessments[entry.id]?.status ?? "Not Verified",
     reviewed: !!review.assessments[entry.id],
     assessment: review.assessments[entry.id] ?? null }));
   const totals = Object.fromEntries(STATUSES.map(s => [s, entries.filter(e => e.status === s).length]));
   if (Object.values(totals).reduce((a, b) => a + b, 0) !== entries.length) throw new Error("Status conservation failure");
-  const result = { ...extracted, sourceStatements: new Set(entries.map(e => e.line)).size, acceptanceStatements: new Set(entries.filter(e => e.kind === "acceptance").map(e => e.line)).size, countsByStage: Object.fromEntries(["GLOBAL", ...extracted.stages].map(stage => [stage, entries.filter(e => e.stage === stage).length])), entries, totals, reviewed: entries.filter(e => e.reviewed).length, generatedAt: new Date().toISOString() };
+  const result = { ...extracted, sourceStatements: new Set(entries.map(e => e.line)).size, acceptanceStatements: new Set(entries.filter(e => e.kind === "acceptance").map(e => e.line)).size, countsByStage: Object.fromEntries(["GLOBAL", ...extracted.stages].map(stage => [stage, entries.filter(e => e.stage === stage).length])), entries, totals, reviewed: entries.filter(e => e.reviewed).length, independentlyReviewed: entries.filter(e => e.assessment?.independentReview === true).length, generatedAt: new Date().toISOString() };
   fs.writeFileSync(REVIEW, JSON.stringify(review, null, 2) + "\n");
   fs.writeFileSync(MATRIX + ".json", JSON.stringify(result, null, 2) + "\n");
   const out = ["# Individual PLAN verification matrix", "",
     "Source of requirements: [PLAN.md](PLAN.md). This continues the existing audit. Prior stage labels, file presence and whole-suite passes do not certify individual requirements.", "",
     "Plan SHA-256: " + extracted.planSha256, "", extracted.countingRule, "",
-    "Total: **" + entries.length + "**; individually assessed: **" + result.reviewed + "**; stages: **" + extracted.stages.length + "**.", "",
+    "Total: **" + entries.length + "**; individually assessed records: **" + result.reviewed + "**; independently reassessed in this continuation: **" + result.independentlyReviewed + "**; stages: **" + extracted.stages.length + "**.", "",
+    "Earlier assessments are retained as evidence history. Their presence is not a claim that this continuation independently rechecked them. The independentReview field identifies current reassessments; changed Verified implementation fingerprints are not carried forward automatically.", "",
     "| Status | Count |", "| --- | ---: |", ...STATUSES.map(s => "| " + s + " | " + totals[s] + " |"), "",
     "Every unassessed entry remains Not Verified. Optional requirements remain in the denominator. Repeated requirements remain separately addressable; shared evidence is cited explicitly. Stage-local implementation restrictions are not interpreted as bans on later stages.", "",
     "| ID / PLAN | Requirement / source context | Implementation | Observed state | Tests / executed check | Result | Problem | Required fix / remaining | Final status |",

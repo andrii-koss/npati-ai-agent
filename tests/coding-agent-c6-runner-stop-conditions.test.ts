@@ -318,6 +318,27 @@ describe("security-gate: C1a flags during an active model exchange", () => {
   });
 });
 
+describe("security-gate: C1a signal suspension", () => {
+  it.each(["resolve", "reject"] as const)("preserves kill-switch suspension after an in-flight provider %s", async (outcome) => {
+    const controller = new AbortController();
+    let invoked = 0;
+    const runner = new CodingAgentRunner({
+      flags: { assertEnabled: async () => true }, rbac: { authorize: async () => ({ allowed: true }) },
+      toolRuntime: { listTools: () => TOOLS, invoke: async () => { invoked++; throw new Error("Must not execute"); } },
+      engine: { chat: async () => {
+        controller.abort({ code: "feature_disabled" });
+        if (outcome === "reject") throw new Error("Provider aborted");
+        return { content: "", usage: { promptTokens: 5, completionTokens: 3, totalTokens: 8 },
+          toolCalls: [nativeCall("code.fs.read", { path: "late.ts" }, "flag-abort")] };
+      } }, schemas: SCHEMAS,
+    });
+    const result = await runner.run({ ctx, session: session(), prompt: "Read", signal: controller.signal });
+    expect(result).toMatchObject({ status: "suspended_by_flag", reason: "feature_disabled", code: "feature_disabled" });
+    expect(invoked).toBe(0);
+    if (outcome === "resolve") expect(result.summary.tokens).toBe(8);
+  });
+});
+
 describe("security-gate: C1a durable flag suspension", () => {
   it("persists a resumable suspended_by_flag run rather than recording failure or user cancellation", async () => {
     const { InMemoryWorkspaceStore } = await import("@npati/workspace");
@@ -341,5 +362,8 @@ describe("security-gate: C1a durable flag suspension", () => {
     expect(state).toMatchObject({ status: "suspended_by_flag", details: { stopReason: "feature_disabled" } });
     expect(state!.leaseOwner).toBeNull();
     expect(refuseResume(state!.status)).toBeNull();
+    const resumed = await new CodeRunStateLog({ store }).resumeRun({ companyId: company.id, runId: "durable-flag-run", owner: "resumed-worker" });
+    expect(resumed.held).toBe(true);
+    expect(resumed.state).toMatchObject({ status: "running", finishedAt: null, leaseOwner: "resumed-worker" });
   });
 });

@@ -189,7 +189,7 @@ export interface CodeRunStatePort {
   markFinished(input: {
     companyId: string;
     runId: string;
-    status: "completed" | "failed" | "cancelled" | "interrupted";
+    status: "completed" | "failed" | "cancelled" | "interrupted" | "suspended_by_flag";
     reason?: string;
 
     estimate?: {

@@ -55,7 +55,7 @@ async function fixture() {
   const provider = new FakeSandbox();
   const events = new ProjectTerminalEventsRepository(projects);
   const sandbox = new ProjectSandboxService(projects, store, workspace, provider, events);
-  return { store, company, otherCompany, project, projects, workspace, provider, events, sandbox };
+  return { root, store, company, otherCompany, project, projects, workspace, provider, events, sandbox };
 }
 describe("Project terminal integration", () => {
   it("syncs unchanged production SDK and new typed account fields after dependency installation", async () => {
@@ -247,7 +247,7 @@ describe("Project terminal integration", () => {
     const { store, company, project, provider, sandbox } = await fixture();
     const agent = await store.createCompanyAgent(owner, company.id, { name: "Builder", role: "Developer", tools: ["project.terminal.exec"] }, "terminal-lifecycle-agent");
     await sandbox.execute(owner, company.id, { projectId: project.id, command: "pwd", agentId: agent.id });
-    const hooked = new ProjectService(store, (context, current) => sandbox.destroy(context, current));
+    const hooked = new ProjectService(store, async (context, current) => { await sandbox.destroy(context, current); });
     const current = await hooked.get(owner, company.id, project.id);
     const archived = await hooked.archive(owner, company.id, project.id, current.revision);
     expect(archived.status).toBe("archived");
@@ -265,5 +265,80 @@ describe("Project terminal integration", () => {
     context = other;
     expect((await app.inject({ method: "GET", url: base + "/logs" })).statusCode).toBe(403);
     await app.close();
+  });
+});
+
+describe("C2 search target shell boundary", () => {
+  it("quotes metacharacters in the search target as one literal path", async () => {
+    const h = await fixture();
+    const command = vi.spyOn(h.provider, "executeCommand");
+    await h.sandbox.search(owner, h.company.id, { projectId: h.project.id, query: "needle", path: "src; printf INJECTED" });
+    expect(command).toHaveBeenCalled();
+    expect(command.mock.calls[0]![2]).toContain("-- './src; printf INJECTED'");
+  });
+});
+
+describe("C2 search output and failures", () => {
+  it("returns JSON context and preserves nested glob filters", async () => {
+    const h = await fixture();
+    const json = [
+      { type: "context", data: { path: { text: "src/app.ts" }, line_number: 1, lines: { text: "before\n" } } },
+      { type: "match", data: { path: { text: "src/app.ts" }, line_number: 2, lines: { text: "needle\n" } } },
+      { type: "context", data: { path: { text: "src/app.ts" }, line_number: 3, lines: { text: "after\n" } } },
+    ].map(event => JSON.stringify(event)).join("\n");
+    h.provider.commandResult = result("completed", 0, json);
+    const output = await h.sandbox.search(owner, h.company.id, { projectId: h.project.id, query: "needle",
+      glob: "src/**/*.ts", type: "ts", contextLines: 1 });
+    expect(output.matches).toEqual([{ path: "src/app.ts", line: 2, text: "needle",
+      context: [{ line: 1, text: "before" }, { line: 3, text: "after" }] }]);
+    expect(h.provider.calls.some(command => command.includes("--glob 'src/**/*.ts'"))).toBe(true);
+  });
+  it("returns a structured failure for rg errors rather than an empty successful result", async () => {
+    const h = await fixture();
+    h.provider.commandResult = { ...result("failed", 2), stderr: "regex parse error" };
+    await expect(h.sandbox.search(owner, h.company.id, { projectId: h.project.id, query: "[" }))
+      .rejects.toMatchObject({ code: "search_failed" });
+  });
+});
+
+describe("C2 filesystem modification metadata", () => {
+  it("passes real mtimes to the read port without making content revisions depend on touch", async () => {
+    const h = await fixture();
+    await h.workspace.createFile(owner, h.company.id, h.project.id, "older.ts", "export const old = 1;\n");
+    await h.workspace.createFile(owner, h.company.id, h.project.id, "newer.ts", "export const latest = 1;\n");
+    const { utimes } = await import("node:fs/promises");
+    const before = await h.workspace.info(owner, h.company.id, h.project.id);
+    await utimes(path.join(h.root, h.company.id, h.project.id, "older.ts"), new Date(1000), new Date(1000));
+    await utimes(path.join(h.root, h.company.id, h.project.id, "newer.ts"), new Date(2000), new Date(2000));
+    const { createProjectWorkspaceReadPort } = await import("../apps/agent-api/src/code-tool-runtime-workspace");
+    const port = createProjectWorkspaceReadPort(h.workspace);
+    const { entries } = await port.listDir({ ctx: owner, companyId: h.company.id, projectId: h.project.id, path: "." });
+    expect(entries.find(entry => entry.path === "older.ts")?.mtimeMs).toBe(1000);
+    expect(entries.find(entry => entry.path === "newer.ts")?.mtimeMs).toBe(2000);
+    expect((await h.workspace.info(owner, h.company.id, h.project.id)).currentRevision).toBe(before.currentRevision);
+  });
+});
+
+describe("C2 real binary metadata", () => {
+  it("identifies JPEG bytes before UTF-8 decoding loses their magic number", async () => {
+    const h = await fixture();
+    await h.workspace.createFile(owner, h.company.id, h.project.id, "image.jpg", "placeholder");
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(path.join(h.root, h.company.id, h.project.id, "image.jpg"), Buffer.from([255, 216, 255, 219]));
+    const file = await h.workspace.readFile(owner, h.company.id, h.project.id, "image.jpg");
+    expect(file).toMatchObject({ binary: true, mimeGuess: "image/jpeg", encoding: "binary", size: 4 });
+    const { createProjectWorkspaceReadPort } = await import("../apps/agent-api/src/code-tool-runtime-workspace");
+    const result = await createProjectWorkspaceReadPort(h.workspace).readFile({ ctx: owner, companyId: h.company.id,
+      projectId: h.project.id, path: "image.jpg", maxLines: 2000, maxBytes: 1_000_000 });
+    expect(result).toMatchObject({ binary: true, mimeGuess: "image/jpeg", encoding: "binary", sha256: file.revision });
+    const { CodeToolRuntime } = await import("../apps/agent-api/src/code-tool-runtime");
+    const { canonicalExecutors } = await import("../apps/agent-api/src/code-tool-executors");
+    const { FeatureFlagService } = await import("../apps/agent-api/src/feature-flags");
+    const runtime = new CodeToolRuntime({ store: h.store,
+      flags: new FeatureFlagService(h.store, undefined, { enabledByDefault: true, allowPreGateRollout: true }),
+      executors: canonicalExecutors(), toPort: () => createProjectWorkspaceReadPort(h.workspace) });
+    const invoked = await runtime.invoke(owner, { companyId: h.company.id, projectId: h.project.id,
+      tool: "code.fs.read", toolCallId: "real-jpeg", args: { path: "image.jpg" } });
+    expect(invoked).toMatchObject({ ok: true, result: { data: { binary: true, image: true, mimeGuess: "image/jpeg", lines: [] } } });
   });
 });

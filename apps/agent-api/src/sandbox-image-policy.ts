@@ -121,7 +121,7 @@ function hexDigest(digest: string): string {
  * - an image must be digest-pinned (a tag is not an identity);
  * - it must be present in the reviewed catalogue or the database with status `verified`;
  * - its signature must verify against the expected signer;
- * - its scan must be recent, and critical findings need a signed-off, unexpired waiver;
+ * - its scan must be recent, CRITICAL findings are refused, and HIGH findings need a current waiver;
  * - a revoked digest is refused and the caller is told to upgrade.
  *
  * Every allow/revoke/waiver decision is written to the tamper-evident journal **before** it is
@@ -221,21 +221,30 @@ export class SandboxImagePolicy implements SandboxImageAdmission {
     }
     const scannedAt = Date.parse(image.scanAt);
     const ageDays = (this.now().getTime() - scannedAt) / 86_400_000;
-    if (!Number.isFinite(ageDays) || ageDays > this.maxImageAgeDays) {
+    if (!Number.isFinite(ageDays) || ageDays < 0 || ageDays > this.maxImageAgeDays) {
       this.log("sandbox_image_admission_denied", { code: "image_scan_stale", reference, ageDays: Math.round(ageDays) });
       throw new SandboxImageError("image_scan_stale", `Sandbox image scan is older than ${this.maxImageAgeDays} day(s); rebuild and rescan`, 409, { reference, scanAt: image.scanAt, maxImageAgeDays: this.maxImageAgeDays });
     }
+    if (!Number.isSafeInteger(image.scanCritical) || image.scanCritical < 0 ||
+        !Number.isSafeInteger(image.scanHigh) || image.scanHigh < 0) {
+      throw new SandboxImageError("image_scan_failed", "Image vulnerability counters must be non-negative integers", 403, { reference });
+    }
+    if (!image.sbomPath?.trim()) {
+      throw new SandboxImageError("image_sbom_missing", "Sandbox image has no SBOM evidence", 403, { reference });
+    }
     if (image.scanCritical > 0) {
+      this.log("sandbox_image_admission_denied", { code: "image_scan_failed", reference, critical: image.scanCritical });
+      throw new SandboxImageError("image_scan_failed", "CRITICAL findings block image admission and cannot be waived", 403, { reference, scanCritical: image.scanCritical });
+    }
+    if (image.scanHigh > 0) {
       const waiverExpiry = image.waiverExpiresAt ? Date.parse(image.waiverExpiresAt) : NaN;
-      if (!image.waiverOwner || !Number.isFinite(waiverExpiry)) {
-        this.log("sandbox_image_admission_denied", { code: "image_scan_failed", reference, critical: image.scanCritical });
-        throw new SandboxImageError("image_scan_failed", "Sandbox image has unresolved critical findings and no waiver", 403, { reference, scanCritical: image.scanCritical, scanHigh: image.scanHigh });
+      if (!image.waiverOwner?.trim() || !image.waiverReason?.trim() || !Number.isFinite(waiverExpiry)) {
+        throw new SandboxImageError("image_scan_failed", "HIGH findings require a waiver with an owner, reason and expiry", 403, { reference, scanHigh: image.scanHigh });
       }
-      if (waiverExpiry < this.now().getTime()) {
-        this.log("sandbox_image_admission_denied", { code: "image_waiver_expired", reference });
-        throw new SandboxImageError("image_waiver_expired", "The critical-finding waiver for this image has expired", 409, { reference, waiverOwner: image.waiverOwner, waiverExpiresAt: image.waiverExpiresAt });
+      if (waiverExpiry <= this.now().getTime()) {
+        throw new SandboxImageError("image_waiver_expired", "The HIGH-finding waiver has expired", 409, { reference, waiverExpiresAt: image.waiverExpiresAt });
       }
-      this.log("sandbox_image_admission_waived", { reference, waiverOwner: image.waiverOwner, scanCritical: image.scanCritical });
+      this.log("sandbox_image_admission_waived", { reference, waiverOwner: image.waiverOwner, scanHigh: image.scanHigh });
     }
 
     const signature = await this.verifier.verify(reference, this.options.signer ?? { identity: "", issuer: "" });
@@ -263,7 +272,7 @@ export class SandboxImagePolicy implements SandboxImageAdmission {
       return null;
     }
     // A production-capable flag means this company is not a development sandbox any more.
-    if (this.options.flags && await this.options.flags.isEnabled(context, "code.full_auto_sandbox", { companyId: input.companyId }).catch(() => true)) {
+    if (!this.options.flags || await this.options.flags.isEnabled(context, "code.full_auto_sandbox", { companyId: input.companyId }).catch(() => true)) {
       this.log("sandbox_image_dev_escape_denied", { reference: input.reference, reason: "production_flag_enabled" });
       return null;
     }
@@ -273,7 +282,7 @@ export class SandboxImagePolicy implements SandboxImageAdmission {
       variant, reference: input.reference, digest, status: "unverified",
       sbomPath: entry?.sbomPath ?? null, scanAt: entry?.scanAt ?? null, scanTool: entry?.scanTool ?? "dev-local",
       previousReference: null,
-    }).catch(() => undefined);
+    });
     this.log("sandbox_image_admission_dev_allowed", { reference: input.reference, variant, reason });
     return { allowed: true, reference: input.reference, digest, variant, dev: true };
   }
@@ -367,7 +376,7 @@ export class SandboxImagePolicy implements SandboxImageAdmission {
    * (`code.sandbox_image.<digest prefix>`) is enabled for the company. A revoked digest is never
    * reused: the result asks the caller to upgrade.
    */
-  async selectForRollout(context: AuthContext, input: { companyId: string; variant: SandboxImageVariant; currentReference?: string | null }): Promise<{ reference: string | null; digest: string | null; forcedUpgrade: boolean; reason: string }> {
+  async selectForRollout(context: AuthContext, input: { companyId: string; variant: SandboxImageVariant; currentReference?: string | null; pinned?: boolean }): Promise<{ reference: string | null; digest: string | null; forcedUpgrade: boolean; reason: string }> {
     const current = input.currentReference ?? null;
     if (current) {
       const existing = await this.store.getSandboxImage(context, current).catch(() => null);
@@ -375,8 +384,11 @@ export class SandboxImagePolicy implements SandboxImageAdmission {
         const replacement = await this.replacementFor(context, input.variant, current);
         return { reference: replacement, digest: replacement ? digestOf(replacement) : null, forcedUpgrade: true, reason: "current_digest_revoked" };
       }
-      const adopted = await this.newDigestAdopted(context, input.companyId, input.variant, current);
-      if (adopted) return adopted;
+      // Existing sessions retain their identity; rollout only selects an image for an explicitly new session.
+      if (input.pinned === false) {
+        const adopted = await this.newDigestAdopted(context, input.companyId, input.variant, current);
+        if (adopted) return adopted;
+      }
       return { reference: current, digest: digestOf(current), forcedUpgrade: false, reason: "session_pinned_digest" };
     }
     const latest = await this.store.latestVerifiedSandboxImage(context, input.variant).catch(() => null);

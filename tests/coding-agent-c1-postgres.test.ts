@@ -32,6 +32,18 @@ database("individual PLAN C1 PostgreSQL persistence", () => {
       expect(session).toMatchObject({ dataClassification: "restricted", retentionClass: "extended",
         projectId: project.id, companyId: company.id, userId: ctx.userId });
       expect(update).not.toHaveBeenCalled();
+      const { CodeRunStateLog } = await import("../apps/agent-api/src/code-run-state");
+      const runs = new CodeRunStateLog({ store });
+      const runId = "c1a-sql-" + randomUUID();
+      await runs.startRun({ ctx, companyId: company.id, projectId: project.id, sessionId: session.id, runId, owner: "first" });
+      await runs.markFinished({ companyId: company.id, runId, status: "suspended_by_flag", reason: "feature_disabled" });
+      await runs.releaseLease({ companyId: company.id, runId, owner: "foreign" });
+      expect(await store.getCodeRunState(company.id, runId)).toMatchObject({ leaseOwner: "first" });
+      await runs.releaseLease({ companyId: company.id, runId, owner: "first" });
+      expect(await store.getCodeRunState(company.id, runId)).toMatchObject({ status: "suspended_by_flag", leaseOwner: null });
+      const resumed = await runs.resumeRun({ companyId: company.id, runId, owner: "second" });
+      expect(resumed).toMatchObject({ held: true, state: { status: "running", finishedAt: null, leaseOwner: "second" } });
+
       await expect(service.createSession({ ...ctx, workspaceId: "foreign-workspace" }, company.id, project.id)).rejects.toThrow();
     } finally { await store.close(); }
   }, 60_000);

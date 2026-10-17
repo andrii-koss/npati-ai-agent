@@ -91,7 +91,7 @@ describe("code.fs.grep secure execution & terminal approval isolation", () => {
     });
     expect(executedCommands).toHaveLength(1);
     expect(executedCommands[0]).toContain("QUERY=");
-    expect(executedCommands[0]).toContain("rg --line-number --no-heading --color=never --max-count 10 -e \"$QUERY\" -- ./index.html");
+    expect(executedCommands[0]).toContain("rg --json --line-number --no-heading --color=never --max-count 10 -e \"$QUERY\" -- './index.html'");
   });
 
   it("safely encodes complex patterns with quotes and shell characters without shell injection", async () => {
@@ -551,7 +551,7 @@ describe("CodingAgentToolWaves argument error recovery semantics", () => {
     });
 
     // Explicit '--' delimiter must separate options from target
-    expect(capturedCmd).toContain("-e \"$QUERY\" -- ./src/main.js");
+    expect(capturedCmd).toContain("-e \"$QUERY\" -- './src/main.js'");
 
     // ripgrep command must NOT have -L or --follow
     expect(capturedCmd).not.toContain("-L");
