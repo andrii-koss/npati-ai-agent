@@ -35,8 +35,9 @@ export function registerProjectPreviewRoutes(
       if (!ctx) return;
       const { companyId, projectId } = request.params;
       const { command, port } = request.body ?? {};
+      const callerOrigin = typeof request.headers.origin === "string" ? request.headers.origin : undefined;
       try {
-        const result = await previewService.startPreview(ctx, companyId, projectId, { command, port });
+        const result = await previewService.startPreview(ctx, companyId, projectId, { command, port, callerOrigin });
         return reply.code(200).send(result);
       } catch (error) {
         const known = error instanceof PreviewError ? error : new PreviewError("preview_start_failed", error instanceof Error ? error.message : "Failed to start preview", 500);

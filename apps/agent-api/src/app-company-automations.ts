@@ -26,6 +26,7 @@ import type { DataStudioUiService } from "./data-studio/studio-service";
 import type { resolveAutomationAllowedPermissions } from "./code-service-identity";
 import { ProjectDeployService } from "./project-deploy-service";
 import { ProjectBrowserQaService } from "./project-browser-qa-service";
+import { ProjectMediaService } from "./project-media-service";
 import { CompanyToolRuntime } from "./company-tool-runtime";
 import { WasmExecSandbox } from "./wasm-exec-sandbox";
 import { CompanyKnowledgeProcessor, CompanyKnowledgeRepository } from "./company-knowledge";
@@ -154,6 +155,10 @@ export function createAppCompanyAutomationsWiring(deps: AppCompanyAutomationsDep
     projectSandbox,
   );
 
+  const projectMediaService = objectStorage
+    ? new ProjectMediaService(objectStorage, projectWorkspace)
+    : undefined;
+
   const companyToolRuntime = new CompanyToolRuntime(
     aiEngine,
     researchBundle?.provider,
@@ -173,6 +178,7 @@ export function createAppCompanyAutomationsWiring(deps: AppCompanyAutomationsDep
     projectBrowserQaService,
     agentDataStudioService,
     projectApiGatewayService,
+    projectMediaService,
   );
 
   const knowledgeProcessor =
@@ -332,6 +338,7 @@ export function createAppCompanyAutomationsWiring(deps: AppCompanyAutomationsDep
   return {
     projectDeployService,
     projectBrowserQaService,
+    projectMediaService,
     companyToolRuntime,
     knowledgeProcessor,
     companyRuntime,

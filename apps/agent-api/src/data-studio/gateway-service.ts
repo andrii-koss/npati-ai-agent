@@ -92,8 +92,8 @@ export class ProjectApiGatewayService {
       }
     }
 
-    if (!project || project.status === "archived") {
-      throw new DataStudioError(404, "gateway", "Project not found or archived", false, "PROJECT_NOT_FOUND");
+    if (!project || project.status === "archived" || project.status === "soft_deleted" || project.status === "purging" || project.status === "deleted") {
+      throw new DataStudioError(404, "gateway", "Project not found, deleted or archived", false, "PROJECT_NOT_FOUND");
     }
     if (!project.dataBackendId) {
       throw new DataStudioError(404, "gateway", "Project has no attached DataBackend", false, "DATA_BACKEND_NOT_ATTACHED");
@@ -212,8 +212,7 @@ export class ProjectApiGatewayService {
     const keyType = keyValidation.keyType;
 
     // 2. CORS check
-    const byProject = envRecord.providerConfig.corsOriginsByProject as Record<string, string[]> | undefined;
-    const allowedOrigins = byProject?.[projectId] ?? [];
+    const allowedOrigins = this.resolveAllowedOrigins(envRecord.providerConfig, projectId);
 
     if (origin) {
       const isAllowed = this.isOriginAllowed(origin, allowedOrigins, projectId);
@@ -280,6 +279,28 @@ export class ProjectApiGatewayService {
     };
   }
 
+  resolveAllowedOrigins(providerConfig: Record<string, unknown>, projectId: string): string[] {
+    const byProject = providerConfig.corsOriginsByProject as Record<string, string[]> | undefined;
+    const projectOrigins = byProject?.[projectId];
+    if (Array.isArray(projectOrigins) && projectOrigins.length > 0) {
+      return projectOrigins.filter((origin) => {
+        try {
+          const parsed = new URL(origin);
+          return ["http:", "https:"].includes(parsed.protocol) && parsed.origin === origin && !origin.includes("*");
+        } catch { return false; }
+      });
+    }
+    const backendOrigins = Array.isArray(providerConfig.corsAllowedOrigins)
+      ? (providerConfig.corsAllowedOrigins as string[])
+      : [];
+    return backendOrigins.filter((origin) => {
+      try {
+        const parsed = new URL(origin);
+        return ["http:", "https:"].includes(parsed.protocol) && parsed.origin === origin && !origin.includes("*");
+      } catch { return false; }
+    });
+  }
+
   async isPreflightOriginAllowed(projectId: string, origin: string): Promise<boolean> {
     const { project, backend } = await this.resolveProject(projectId);
     for (const environment of ["dev", "prod"] as const) {
@@ -287,8 +308,8 @@ export class ProjectApiGatewayService {
         { workspaceId: project.workspaceId, userId: project.createdBy, permissions: ["*"] },
         project.companyId, backend.id, environment,
       );
-      const byProject = record.providerConfig.corsOriginsByProject as Record<string, string[]> | undefined;
-      if (this.isOriginAllowed(origin, byProject?.[projectId] ?? [], projectId)) return true;
+      const allowedOrigins = this.resolveAllowedOrigins(record.providerConfig, projectId);
+      if (this.isOriginAllowed(origin, allowedOrigins, projectId)) return true;
     }
     return false;
   }
@@ -296,7 +317,10 @@ export class ProjectApiGatewayService {
   isOriginAllowed(origin: string, allowedOrigins: string[], _projectId: string): boolean {
     try {
       const parsed = new URL(origin);
-      return ["http:", "https:"].includes(parsed.protocol) && parsed.origin === origin && allowedOrigins.includes(origin);
+      if (!["http:", "https:"].includes(parsed.protocol) || parsed.origin !== origin || origin.includes("*")) {
+        return false;
+      }
+      return allowedOrigins.includes(origin);
     } catch { return false; }
   }
   /**

@@ -33,16 +33,12 @@ import {
 } from "./website-builder-constants";
 import { CreateWebsiteDrawer } from "./website-builder-drawer";
 import { WebsiteFiltersBar } from "./website-builder-filters";
+import { WebsiteProjectCard } from "./website-builder-card";
 
 export function WebsiteBuilderDashboard() {
   const navigate = useNavigate();
   const { language } = useTranslation();
   const t = language === "uk" ? copy.uk : copy.en;
-  const projectTypeLabel = (value: WebsiteProject["type"]) =>
-    value === "landing_page" ? t.typeLanding
-      : value === "web_app" ? t.typeWebApp
-        : value === "mobile_app" ? t.typeMobileApp
-          : t.typeWebsite;
 
   const initialCompanyId = useMemo(() => {
     const cached = readCachedCompanies();
@@ -488,238 +484,19 @@ export function WebsiteBuilderDashboard() {
           </button>
         </div>
       ) : (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(350px, 1fr))",
-            gap: "20px",
-          }}
-        >
-          {filteredWebsites.map((site) => {
-            const editorUrl = `/chat?company=${encodeURIComponent(companyId)}&project=${encodeURIComponent(site.id)}`;
-            const isNext = (site.framework || "").toLowerCase().includes("next");
-            const isPreviewing = site.status === "previewing" || Boolean(site.previewUrl);
-
-            return (
-              <article
-                key={site.id}
-                className="company-run-card"
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "space-between",
-                  background: "#ffffff",
-                  borderRadius: "16px",
-                  padding: "20px 22px",
-                  border: "1px solid #e4e4e7",
-                  boxShadow: "0 2px 10px rgba(0,0,0,0.03)",
-                  transition: "all 0.18s ease",
-                  margin: 0,
-                }}
-              >
-                <div>
-                  {/* Top Bar with Icon & Status Badges */}
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "14px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                      <div
-                        style={{
-                          width: "42px",
-                          height: "42px",
-                          borderRadius: "12px",
-                          background: "#eff6ff",
-                          border: "1px solid #dbeafe",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: "20px",
-                          flexShrink: 0,
-                        }}
-                      >
-                        🌐
-                      </div>
-                      <div>
-                        <h3 style={{ fontSize: "17px", fontWeight: 700, margin: 0, color: "#111111", lineHeight: 1.3 }}>
-                          <Link to={editorUrl} style={{ color: "inherit", textDecoration: "none" }}>
-                            {site.name}
-                          </Link>
-                        </h3>
-                        <div style={{ display: "flex", gap: "6px", alignItems: "center", marginTop: "4px" }}>
-                          <span
-                            style={{
-                              fontSize: "11px",
-                              fontWeight: 700,
-                              textTransform: "uppercase",
-                              padding: "2px 8px",
-                              borderRadius: "6px",
-                              background: isNext ? "#f3e8ff" : "#e0f2fe",
-                              color: isNext ? "#7e22ce" : "#0369a1",
-                              border: `1px solid ${isNext ? "#e9d5ff" : "#bae6fd"}`,
-                            }}
-                          >
-                            {isNext ? "Next.js" : "Vite"}
-                          </span>
-
-                          <span
-                            style={{
-                              fontSize: "11px",
-                              fontWeight: 700,
-                              textTransform: "uppercase",
-                              padding: "2px 8px",
-                              borderRadius: "6px",
-                              background: isPreviewing ? "#ecfdf5" : "#f1f5f9",
-                              color: isPreviewing ? "#047857" : "#475569",
-                              border: `1px solid ${isPreviewing ? "#a7f3d0" : "#e2e8f0"}`,
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: "4px",
-                            }}
-                          >
-                            <span
-                              style={{
-                                width: "6px",
-                                height: "6px",
-                                borderRadius: "50%",
-                                background: isPreviewing ? "#10b981" : "#94a3b8",
-                              }}
-                            />
-                            {isPreviewing ? t.liveStatus : t.readyStatus}
-                          </span>
-
-                          {(site.deploymentUrl || site.previewUrl) && (
-                            <span
-                              style={{
-                                fontSize: "11px",
-                                fontWeight: 600,
-                                padding: "2px 8px",
-                                borderRadius: "6px",
-                                background: "#f8fafc",
-                                color: "#0f172a",
-                                border: "1px solid #e2e8f0",
-                              }}
-                              title="Domain"
-                            >
-                              🌐 {(site.deploymentUrl || site.previewUrl || "").replace(/^https?:\/\//, "")}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Description */}
-                  <p
-                    style={{
-                      fontSize: "13.5px",
-                      color: "#52525b",
-                      margin: "0 0 16px 0",
-                      lineHeight: 1.5,
-                      display: "-webkit-box",
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: "vertical",
-                      overflow: "hidden",
-                    }}
-                  >
-                    {site.description || "Responsive Next.js website with visual block layout."}
-                  </p>
-
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "12px", color: "#71717a", borderTop: "1px solid #f4f4f5", paddingTop: "12px", marginBottom: "16px" }}>
-                    <span>{t.updated}: {new Date(site.updatedAt).toLocaleDateString(language)}</span>
-                    <span style={{ fontWeight: 600, color: "#3f3f46" }}>
-                      {projectTypeLabel(site.type)}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Actions Toolbar */}
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                  <Link
-                    to={editorUrl}
-                    className="button-primary"
-                    style={{
-                      flex: "1 1 auto",
-                      textAlign: "center",
-                      textDecoration: "none",
-                      padding: "8px 14px",
-                      fontSize: "13px",
-                      fontWeight: 600,
-                    }}
-                  >
-                    {t.openBuilder} →
-                  </Link>
-
-                  {site.previewUrl && (
-                    <a
-                      href={site.previewUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="button-secondary"
-                      style={{
-                        padding: "8px 12px",
-                        fontSize: "13px",
-                        textDecoration: "none",
-                        color: "#047857",
-                      }}
-                      title="Open Live Preview in new tab"
-                    >
-                      {t.preview} ↗
-                    </a>
-                  )}
-
-                  {/* C7: the same project, opened in the code workspace. One link, no second service. */}
-                  <Link
-                    to={`/settings/code/${encodeURIComponent(companyId)}/${encodeURIComponent(site.id)}`}
-                    className="button-secondary"
-                    style={{ padding: "8px 12px", fontSize: "13px", textDecoration: "none" }}
-                    title={language === "uk" ? "Відкрити цей самий проєкт у Code Workspace" : "Open this same project in Code Workspace"}
-                  >
-                    {"</>"} {language === "uk" ? "Код" : "Code"}
-                  </Link>
-
-                  <button
-                    type="button"
-                    className="button-secondary"
-                    style={{ padding: "8px 10px", fontSize: "13px" }}
-                    onClick={() => void handleDuplicate(site)}
-                    title={t.duplicate}
-                  >
-                    📋
-                  </button>
-
-                  <button
-                    type="button"
-                    className="button-secondary"
-                    style={{ padding: "8px 10px", fontSize: "13px" }}
-                    onClick={() => void handleRename(site)}
-                    title={t.rename}
-                  >
-                    ✏️
-                  </button>
-
-                  {site.status !== "archived" && (
-                    <button
-                      type="button"
-                      className="button-secondary"
-                      style={{ padding: "8px 10px", fontSize: "13px" }}
-                      onClick={() => void handleArchive(site)}
-                      title={t.archive}
-                    >
-                      📦
-                    </button>
-                  )}
-
-                  <button
-                    type="button"
-                    className="danger-button"
-                    style={{ padding: "8px 10px", fontSize: "13px" }}
-                    onClick={() => void handleDelete(site)}
-                    title={t.delete}
-                  >
-                    🗑️
-                  </button>
-                </div>
-              </article>
-            );
-          })}
+        <div className="website-studio-grid">
+          {filteredWebsites.map((site) => (
+            <WebsiteProjectCard
+              key={site.id}
+              site={site}
+              companyId={companyId}
+              language={language}
+              t={t}
+              handleDuplicate={handleDuplicate}
+              handleRename={handleRename}
+              handleDelete={handleDelete}
+            />
+          ))}
         </div>
       )}
 

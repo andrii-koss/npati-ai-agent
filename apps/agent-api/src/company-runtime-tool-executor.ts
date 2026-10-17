@@ -91,10 +91,13 @@ export async function executeCompanyRunTools(params: CompanyRunToolsParams): Pro
       continue;
     }
     if (allowedProjectPaths?.length && (tool.startsWith("project.") || tool === "code.agent.spawn")) {
-      const mutation = tool.startsWith("project.files.") && !["project.files.read", "project.files.list", "project.files.search"].includes(tool);
-      const paths = mutation ? (tool === "project.files.delete" && Array.isArray(plan.input.paths) ? plan.input.paths : [plan.input.path, ...(tool === "project.files.move" ? [plan.input.to] : [])]) : [];
+      const isMedia = tool.startsWith("project.media.");
+      const isFiles = tool.startsWith("project.files.");
+      const mutation = (isFiles && !["project.files.read", "project.files.list", "project.files.search"].includes(tool)) ||
+        (isMedia && !["project.media.list", "project.media.get"].includes(tool));
+      const paths = isMedia ? (plan.input.path ? [plan.input.path] : []) : mutation ? (tool === "project.files.delete" && Array.isArray(plan.input.paths) ? plan.input.paths : [plan.input.path, ...(tool === "project.files.move" ? [plan.input.to] : [])]) : [];
       const inScope = (value: unknown) => typeof value === "string" && allowedProjectPaths.some((scope) => value === scope || value.startsWith(scope + "/"));
-      if ((!tool.startsWith("project.files.") || mutation && !paths.every(inScope))) {
+      if (((!isFiles && !isMedia) || (mutation && paths.length > 0 && !paths.every(inScope)))) {
         await store.appendCompanyAgentToolAudit(ctx, company.id, runId, { agentId: agent.id, toolName: tool, decision: "denied", status: "blocked", inputSummary: { path: plan.input.path }, errorMessage: "Tool is outside the assigned project file scope", reasonCode: "project_task_scope", sequenceNumber: sequenceNumber++ });
         evidence.push("Project task scope denied " + tool);
         continue;
@@ -174,7 +177,7 @@ export async function executeCompanyRunTools(params: CompanyRunToolsParams): Pro
     }
     const sandboxAutoApproval = isTerminal && !terminalNeedsApproval && sandboxEvaluation.allowed;
     if (isTerminal) logTerminalPolicy({ rawCommand: normalizedTerminal?.rawCommand ?? String(plan.input.command ?? plan.input.executable ?? ""), normalizedCommand: normalizedTerminal?.command ?? "", sandboxId: sandboxEvaluation.sandboxId ?? (typeof plan.input.sandboxId === "string" ? plan.input.sandboxId : undefined), projectId: String(plan.input.projectId ?? ""), decision: sandboxAutoApproval ? "allow" : "approval", reason: terminalDecision?.requiresApproval ? terminalDecision.reason : hasSecretReferences ? "Secret references require approval" : sandboxEvaluation.reason, policyRule: terminalDecision?.requiresApproval ? terminalDecision.policyRule : hasSecretReferences ? "secret_references" : sandboxEvaluation.reason, toolName: tool, executionContext: runProjectId ? "project_agent" : "company_generic", runId, agentId: agent.id, runType, cwd: normalizedTerminal?.cwd, rawArgs: normalizedTerminal?.args, commandPolicyRule: terminalDecision?.policyRule });
-    const projectFileRisk = tool.startsWith("project.files.") ? (tool === "project.files.delete" ? "high" : "medium") : tool.startsWith("project.terminal.") ? sandboxAutoApproval ? "low" : "high" : tool.startsWith("project.preview.") ? "low" : tool.startsWith("project.deploy.") ? (tool === "project.deploy.publish" ? "high" : "low") : tool.startsWith("project.data.") ? (tool === "project.data.schema.inspect" || tool === "project.data.rows.list" || tool === "project.data.rows.read" || tool === "project.data.migrations.list" || tool === "project.data.templates.list" ? "low" : tool === "project.data.rows.create" || tool === "project.data.rows.update" ? "medium" : "high") : tool === "project.git.push" || tool === "project.git.pr" ? "high" : undefined;
+    const projectFileRisk = tool.startsWith("project.files.") ? (tool === "project.files.delete" ? "high" : "medium") : tool.startsWith("project.media.") ? (tool === "project.media.delete" ? "high" : "medium") : tool.startsWith("project.terminal.") ? sandboxAutoApproval ? "low" : "high" : tool.startsWith("project.preview.") ? "low" : tool.startsWith("project.deploy.") ? (tool === "project.deploy.publish" ? "high" : "low") : tool.startsWith("project.data.") ? (tool === "project.data.schema.inspect" || tool === "project.data.rows.list" || tool === "project.data.rows.read" || tool === "project.data.migrations.list" || tool === "project.data.templates.list" ? "low" : tool === "project.data.rows.create" || tool === "project.data.rows.update" ? "medium" : "high") : tool === "project.git.push" || tool === "project.git.pr" ? "high" : undefined;
 
     const gitWriteIntent = isGitWriteTool(tool) ? gitWriteIntentFromToolInput(tool, plan.input as Record<string, unknown>) : null;
     if (isGitWriteTool(tool) && !gitWriteIntent) {

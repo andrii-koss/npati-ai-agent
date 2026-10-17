@@ -25,6 +25,7 @@ export interface CodeAuditPort {
     companyId: string;
     resourceType: string;
     resourceId: string;
+    workspaceId?: string;
     /** C5a (D7): a refusal is journalled with `decision: "deny"` (the adapter records it as denied). */
     decision?: "allow" | "deny";
     metadata?: Record<string, unknown>;

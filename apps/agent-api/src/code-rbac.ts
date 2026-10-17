@@ -414,6 +414,10 @@ export const CODE_ACTION_PERMISSIONS: Readonly<Record<string, string>> = Object.
   "code.active_context.write": "workspace:write",
   "code.project.archive": "business:manage",
   "code.project.delete": "business:manage",
+  "code.project.delete_plan": "workspace:read",
+  "code.project.soft_delete": "business:manage",
+  "code.project.restore": "business:manage",
+  "code.project.hard_purge": "business:manage",
   // R1-C (item 13): erasing a session's or a project's code data is the right to be forgotten, and it is
   // destructive in the same way deleting the project is — the rows are gone and no approval can bring them
   // back. It therefore carries the same administrative permission, and it is a **separate action name** so a

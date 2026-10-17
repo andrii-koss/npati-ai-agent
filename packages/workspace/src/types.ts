@@ -286,6 +286,19 @@ export interface WorkspaceStore {
   updateProjectRepository(context: AuthContext, companyId: string, projectId: string, input: { provider: string; url: string; branch: string }): Promise<Project>;
   updateProjectPreview(context: AuthContext, companyId: string, projectId: string, patch: { status?: ProjectStatus; previewUrl?: string | null; previewPort?: number | null; framework?: string | null; runtime?: string | null; lastBuildStatus?: string | null; deploymentUrl?: string | null; deploymentStatus?: string | null; lastDeploymentStatus?: string | null; lastDeployedAt?: string | null }): Promise<Project>;
   deleteProject(context: AuthContext, companyId: string, projectId: string): Promise<boolean>;
+  softDeleteProject(context: AuthContext, companyId: string, projectId: string, reason?: string, purgeAfter?: string): Promise<Project>;
+  restoreProject(context: AuthContext, companyId: string, projectId: string): Promise<Project>;
+  transitionProjectToPurging(context: AuthContext, companyId: string, projectId: string): Promise<Project>;
+  recordProjectLifecycleRecord(record: {
+    workspaceId: string;
+    companyId: string;
+    projectId: string;
+    operation: "soft_delete" | "restore" | "hard_purge";
+    status: "pending" | "in_progress" | "completed" | "failed";
+    details?: Record<string, unknown>;
+    lastError?: string;
+  }): Promise<void>;
+  listExpiredSoftDeletedProjects(limit?: number): Promise<Array<{ id: string; companyId: string; workspaceId: string; createdBy: string; purgeAfter: string }>>;
 
 
   /** C1a: feature flags (resolution is user -> company -> global) and their change history. */

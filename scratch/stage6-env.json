@@ -1,0 +1,8 @@
+{
+  "projA": "b1f83160-3f40-448d-9b56-b7ce8baf7ded",
+  "projB": "cced4bbd-641d-44d6-87c6-d2a251932e6d",
+  "backendId": "13d374a8-1dff-4b91-8bbc-7fe75c4b94d7",
+  "devDbName": "db_13d374a81dff4b918bbc7fe75c4b94d7_dev",
+  "prodDbName": "db_13d374a81dff4b918bbc7fe75c4b94d7_prod",
+  "previewUrl": "/api/companies/e8fb3cc1-4809-4c95-a10a-1c7e2a57913b/projects/b1f83160-3f40-448d-9b56-b7ce8baf7ded/preview/proxy/?token=eyJ1c2VySWQiOiI1OTk0MDJiOC1iOWQ1LTQ2NzYtYTM5MS03YjlkYjFhNzcwMjYiLCJjb21wYW55SWQiOiJlOGZiM2NjMS00ODA5LTRjOTUtYTEwYS0xYzdlMmE1NzkxM2IiLCJwcm9qZWN0SWQiOiJiMWY4MzE2MC0zZjQwLTQ0OGQtOWI1Ni1iN2NlOGJhZjdkZWQiLCJzYW5kYm94SWQiOiIxOTUzNjRlNi0yODYwLTQ4NmEtYmRkNi0wNzZhMTcxMDljMTUiLCJleHBpcmVzQXQiOjE3OTIyNjAzNTM5MTF9.wJvrjKZHPncjkIdvkLdqrbw1GX0VaKHNVxSYRYX_gdo"
+}

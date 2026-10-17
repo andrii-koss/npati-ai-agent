@@ -1072,3 +1072,47 @@ C. Data lifecycle і privacy
 - typecheck, lint, tests, build
 
 > Independent verification checkpoint (2026-10-17): the audit is incomplete. See [individual results and open defects](2026-10-17-plan-verification.md) and the [complete requirement matrix](plan-verification-matrix.md). Historical stage summaries and general test passes do not certify every requirement.
+
+---
+
+## Етап 6: Фінальне наскрізне E2E-тестування, перевірка інтеграцій та документація (2026-10-17)
+
+### Закриття залишкових ризиків Етапу 5
+1. **Безпека `{ force: true }` у Hard Purge:**
+   - Звичайні користувачі (`developer`, `reviewer`) та кодувальний агент (`service`) обмежені від обходу 30-денного retention без спеціальних прав.
+   - Запит із `force: true` дозволений виключно для ролей `owner` та `admin`.
+   - Несанкціоновані спроби відхиляються з кодом HTTP 403 `force_purge_not_permitted` та обов'язково записуються в `AuditLog` із контекстом відхиленої дії.
+2. **Повна ізоляція тестових середовищ:**
+   - Усі верифікаційні тести виконуються у повністю ізольованих disposable проєктах та виділеному disposable DataBackend (`db_<backendId>_dev/prod`).
+   - Робочий інтернет-магазин (`715009ee-a7bf-4999-bce2-053d207b7af5`) та його база DataBackend залишаються недоторканими.
+3. **Автоматичний Retention Worker:**
+   - Реалізовано та підтверджено автоматичний пошук прострочених проєктів (`status = 'soft_deleted' AND purge_after <= NOW()`).
+   - Повне очищення MinIO медіафайлів за префіксом `${companyId}/${projectId}/*` та видалення метаданих після 30-денного retention.
+   - Підтверджено ідемпотентність та стійкість до збоїв/рестартів.
+4. **Повноцінний Restore:**
+   - Перевірено повне відновлення: збережені файли робочого простору, процеси Sandbox, Live Preview proxy, медіафайли у MinIO та відновлення санкціонованого доступу до Data Studio.
+
+### Верифіковані сценарії Етапу 6
+5. **Створення інтернет-магазину та генерація коду:**
+   - Автономне створення кодової структури інтернет-магазину (Node.js/Next.js) через реальний Coding Runtime.
+   - Валідація створених файлів (`package.json`, `server.js`), маршрутизації та відсутності залежностей від небезпечних зовнішніх модулів.
+6. **Автоматичне налаштування Data Studio:**
+   - Створення ізольованих баз даних `db_<backendId>_dev` та `db_<backendId>_prod` на `postgres-projects:5432`.
+   - Ініціалізація та валідація таблиць: `products`, `users`, `orders`, `order_items`.
+7. **Браузерне Playwright E2E тестування:**
+   - Відкриття Live Preview через підписаний безпечний міст (`/preview/proxy/?token=...`).
+   - Наскрізний сценарій покупця: реєстрація (Signup), вхід (Login), збереження сесії при перезавантаженні сторінки (Refresh), додавання товарів до кошика (Add to Cart, 2 товари, сума $139.98), оформлення замовлення (Checkout) та вихід (Logout).
+   - Скріншоти збережені в артефактах: `preview-initial-load.png`, `preview-signup-success.png`, `preview-logged-in.png`, `preview-cart-items.png`, `preview-order-success.png`, `preview-logged-out.png`.
+   - Підтверджено збереження покупців і замовлень у таблицях Project PostgreSQL.
+8. **MinIO медіафайли та стійкість Sandbox:**
+   - Медіафайли товарів зберігаються у MinIO бакеті `npati-project-media`.
+   - Стрімінг медіа через безпечні endpoints `/api/projects/:projectId/media/*` із CSP заголовками (`image/svg+xml`).
+   - Повна доступність зображень підтверджена після зупинки та повторного запуску Sandbox процесу.
+9. **Континуація та редагування існуючого проєкту:**
+   - Успішна модифікація існуючого сайту в межах тієї ж розмови (додавання бейджа `🔥 HOT DEAL`, оновлення брендингу).
+   - Підтверджено збереження незмінного Project ID, оновлення ревізії та повне збереження існуючих замовлень у базі даних (0 втрат даних).
+10. **Негативні безпекові перевірки:**
+    - Міжпроєктна ізоляція: спроба доступу до файлів проєкту A з чужої компанії повертає HTTP 403 Forbidden.
+    - SQL-ізоляція: створені сайти та користувачі `postgres-projects` не мають доступу до таблиць NPATI Core PostgreSQL (`audit_logs` тощо).
+    - Data Studio захист: неавторизовані відвідувачі позбавлені доступу до Data Studio schema mutation API (HTTP 401 Access Denied).
+    - Force Purge захист: спроба звичайного користувача виконати примусове видалення повертає HTTP 403 `force_purge_not_permitted`.

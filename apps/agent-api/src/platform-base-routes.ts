@@ -18,6 +18,7 @@ import { registerInstallationAuthRoutes } from "./installation-auth-routes";
 import { MountedWorkspaceProvider } from "./mounted-workspace-provider";
 import { createProductionResilientAIEngine } from "./production-resilient-ai-engine";
 import { registerProjectFileRoutes } from "./project-file-routes";
+import { ProjectMediaService } from "./project-media-service";
 import { registerProjectGitRoutes } from "./project-git-routes";
 import { ProjectGitService } from "./project-git-service";
 import { registerProjectImportRoutes } from "./project-import-routes";
@@ -68,6 +69,7 @@ export interface PlatformBaseRouteDeps {
   projectGitService: ProjectGitService;
   projectImportService: ProjectImportService;
   projectPreviewService: ProjectPreviewService;
+  projectMediaService?: ProjectMediaService;
   projectSandbox: ProjectSandboxService | undefined;
   projectService: ProjectService;
   projectTerminalEvents: ProjectTerminalEventsRepository;
@@ -79,7 +81,7 @@ export interface PlatformBaseRouteDeps {
 }
 
 export function registerPlatformBaseRoutes(app: FastifyInstance, deps: PlatformBaseRouteDeps): void {
-  const { activeSessionRegistry, agentDataStudioService, aiEngine, aiPreferences, authClient, authProvider, backupService, beforeDeleteCompany, chatFiles, codeService, codeToolRuntime, config, dataBackendRepository, dataBackendService, dataProvider, dataStudioService, databaseProvisioner, featureFlagService, installationAuthStore, marketplace, npatiJwtSecret, projectApiGatewayService, projectAuthService, projectGitService, projectImportService, projectPreviewService, projectSandbox, projectService, projectTerminalEvents, projectWorkspace, promoteService, quotaService, sandboxImagePolicy, workspaceStore } = deps;
+  const { activeSessionRegistry, agentDataStudioService, aiEngine, aiPreferences, authClient, authProvider, backupService, beforeDeleteCompany, chatFiles, codeService, codeToolRuntime, config, dataBackendRepository, dataBackendService, dataProvider, dataStudioService, databaseProvisioner, featureFlagService, installationAuthStore, marketplace, npatiJwtSecret, projectApiGatewayService, projectAuthService, projectGitService, projectImportService, projectMediaService, projectPreviewService, projectSandbox, projectService, projectTerminalEvents, projectWorkspace, promoteService, quotaService, sandboxImagePolicy, workspaceStore } = deps;
   registerAuthRoutes(app, {
     authClient,
     workspaceStore,
@@ -115,7 +117,7 @@ export function registerPlatformBaseRoutes(app: FastifyInstance, deps: PlatformB
     await databaseProvisioner?.close();
     await dataBackendRepository?.close();
   });
-  registerProjectFileRoutes(app, projectWorkspace, authProvider);
+  registerProjectFileRoutes(app, projectWorkspace, authProvider, projectMediaService, projectService);
   registerProjectTerminalRoutes(app, authProvider, projectTerminalEvents, projectSandbox);
   registerProjectPreviewRoutes(app, projectPreviewService, projectWorkspace, authProvider, workspaceStore);
   registerProjectGitRoutes(app, projectGitService, authProvider);

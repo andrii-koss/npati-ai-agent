@@ -4,7 +4,13 @@ import { Agent as HttpAgent } from "node:http";
 import { Agent as HttpsAgent } from "node:https";
 import { Client } from "minio";
 
-export const NPATI_BUCKETS={chat:"npati-chat-files",knowledge:"npati-company-knowledge",generated:"npati-generated-media",exports:"npati-exports"} as const;
+export const NPATI_BUCKETS = {
+  chat: "npati-chat-files",
+  knowledge: "npati-company-knowledge",
+  generated: "npati-generated-media",
+  exports: "npati-exports",
+  projectMedia: "npati-project-media",
+} as const;
 export type StoredObjectInfo={key:string;size:number;lastModified:Date;etag?:string};
 export interface ObjectStorage {
   initialize():Promise<void>; health():Promise<"ok"|"unavailable">;

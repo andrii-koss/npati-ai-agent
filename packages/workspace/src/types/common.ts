@@ -5,6 +5,7 @@ export interface AuthContext {
   permissions: string[];
   apiKeyId?: string;
   companyId?: string;
+  role?: string;
 }
 
 export type BusinessStage = "idea" | "starting" | "operating" | "growing" | "scaling";

@@ -328,7 +328,8 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
   const codeLifecycleContexts = new WeakMap<object, AuthContext>();
   app.addHook("preHandler", async (request) => {
     const path = request.url.split("?")[0] ?? "";
-    const isProjectLifecycle = /\/code\/projects\/[^/]+(?:\/(?:archive|unarchive))?$/.test(path);
+    const isProjectLifecycle = /\/code\/projects\/[^/]+(?:\/(?:archive|unarchive|delete-plan|soft-delete|restore|hard-purge))?$/.test(path)
+      || /\/companies\/[^/]+\/projects\/[^/]+\/(?:delete-plan|soft-delete|restore|hard-purge)$/.test(path);
     const isSessionControl = /\/code\/(?:active-context|sessions\/[^/]+\/(?:stop|usage|changes|changes\/revert))$/.test(path)
       || /\/projects\/[^/]+\/code\/sessions$/.test(path);
     if (!isProjectLifecycle && !isSessionControl) return;
@@ -346,9 +347,10 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
     sessions: { list: async (ctx, companyId, projectId, options) => codeService.listSessions(ctx, companyId, projectId, options) },
 
     removeWorkspace: async (ctx, companyId, projectId) => projectWorkspace.removeProjectWorkspace(ctx, companyId, projectId),
+    lifecycleService: input.lifecycleService,
 
     ...(codePrivilegedAudit ? { audit: codePrivilegedAudit } : {}),
-    authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input),
+    authorize: async (ctx, companyId, inputAction) => codeRbacForRun.authorize(ctx, companyId, inputAction),
     getAuthContext: (request) => codeLifecycleContexts.get(request as object) ?? null,
     logger: log,
   });

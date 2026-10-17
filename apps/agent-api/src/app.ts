@@ -50,6 +50,7 @@ import { createDataBackendServices } from "./data-backend-services";
 import { registerPlatformRoutes } from "./platform-routes";
 import { registerPlatformBaseRoutes } from "./platform-base-routes";
 import { registerCodeRouteWiring } from "./code-route-wiring";
+import { ProjectLifecycleService } from "./project-lifecycle-service";
 import { createCompanyCodingDelegation } from "./code-company-delegation";
 import { createRedisHealthWiring } from "./redis-health-wiring";
 import { registerWebFrontend, rewriteBrowserApiUrl } from "./web-frontend";
@@ -318,7 +319,20 @@ export function buildApp(config: AppConfig = {}) {
     sandboxRetentionTimer,
   } = sandboxServices;
   projectSandbox = sandboxServices.projectSandbox;
-  const projectPreviewService = new ProjectPreviewService(projectService, workspaceStore, projectWorkspace, projectSandbox, process.env.NPATI_PREVIEW_SECRET);
+  const projectPreviewService = new ProjectPreviewService(
+    projectService,
+    workspaceStore,
+    projectWorkspace,
+    projectSandbox,
+    process.env.NPATI_PREVIEW_SECRET,
+    async (ctx, companyId, projectId, origin) => {
+      try {
+        await dataStudioService?.registerPreviewCorsOrigin(ctx, companyId, projectId, "dev", origin);
+      } catch (err) {
+        console.warn(`[onPreviewStart] Failed to register preview CORS origin ${origin} for project ${projectId}:`, err);
+      }
+    },
+  );
 
   const codeWorkspaceRevisions = new CodeWorkspaceRevisionGuard({
     read: async ({ ctx, companyId, projectId }) => {
@@ -593,6 +607,7 @@ export function buildApp(config: AppConfig = {}) {
   const {
     projectDeployService,
     projectBrowserQaService,
+    projectMediaService,
     companyToolRuntime,
     knowledgeProcessor,
     companyRuntime,
@@ -675,9 +690,44 @@ export function buildApp(config: AppConfig = {}) {
     dataBackendRepository, dataBackendService, dataProvider, dataStudioService,
     databaseProvisioner, featureFlagService, installationAuthStore, marketplace, npatiJwtSecret,
     projectApiGatewayService, projectAuthService, projectGitService, projectImportService,
+    projectMediaService,
     projectPreviewService, projectSandbox, projectService, projectTerminalEvents, projectWorkspace,
     promoteService, quotaService, sandboxImagePolicy, workspaceStore,
   });
+
+  const projectLifecycleService = new ProjectLifecycleService({
+    store: workspaceStore,
+    projects: projectService,
+    previewService: projectPreviewService,
+    sandboxService: projectSandbox,
+    mediaService: projectMediaService,
+    dataBackendService,
+    removeWorkspace: async (ctx, companyId, projectId) => projectWorkspace.removeProjectWorkspace(ctx, companyId, projectId),
+    auditLog: codePrivilegedAudit ? async (entry) => {
+      await codePrivilegedAudit.record({
+        action: entry.action,
+        actor: entry.ctx.userId ?? "system",
+        companyId: entry.companyId,
+        resourceType: "project",
+        resourceId: entry.resourceId,
+        metadata: entry.metadata,
+      }).catch(() => undefined);
+    } : undefined,
+    logger: app.log,
+  });
+
+  const lifecycleRetentionTimer = setInterval(() => {
+    void projectLifecycleService.purgeExpiredProjects({
+      workspaceId: AUDIT_SYSTEM_WORKSPACE,
+      userId: "system-retention-worker",
+      companyId: "",
+      role: "admin",
+      permissions: ["code.project.hard_purge", "business:manage"],
+    }).catch((err) => {
+      app.log.warn({ err }, "project_lifecycle_retention_sweep_failed");
+    });
+  }, Math.max(30_000, (Number(process.env.NPATI_PROJECT_RETENTION_TICK_SECONDS) || 3600) * 1000));
+  lifecycleRetentionTimer.unref?.();
 
   const codeRoutes = registerCodeRouteWiring(app, {
     config, log: app.log, systemWorkspaceId: AUDIT_SYSTEM_WORKSPACE, activeContextResolver, agent,
@@ -687,7 +737,7 @@ export function buildApp(config: AppConfig = {}) {
     codeService, codeSkillsService, codeToolRuntime, codeTurnTracker, featureFlagService,
     mcpRunPath, notifyMessagingConnections, projectGitService, projectPreviewService, projectSandbox,
     projectService, projectWorkspace, providerDataGuardInstance, readRuntimeMcpManifest,
-    sandboxImagePolicy, trackedProcesses, workspaceStore,
+    sandboxImagePolicy, trackedProcesses, workspaceStore, lifecycleService: projectLifecycleService,
   });
 
   const {
@@ -730,7 +780,7 @@ export function buildApp(config: AppConfig = {}) {
     codeService, projectService, projectTerminalEvents, codeSessionRunExecutor, codeRunAdmission,
     codeBackgroundRuns, codeSessionInbox, projectSandbox, projectPreviewService, codeRunCancellation,
     activeSessionRegistry, aiPreferences, codeRunQueueLimits, notifyMessagingConnections,
-    automationScheduler, codeReaper, sandboxIdleTimer, sandboxRetentionTimer, backupTimer,
+    automationScheduler, codeReaper, sandboxIdleTimer, sandboxRetentionTimer, lifecycleRetentionTimer, backupTimer,
     auditVerifyTimer, auditAnchorTimer, runnerReadinessTimer, storageReconciler,
     whatsappMessagingAdapter, discordMessagingAdapter, slackMessagingAdapter, emailInboxWorker,
     emailInboxRepo, browserCredentials, companyRunQueue, knowledgeQueue, knowledgeRepo,
