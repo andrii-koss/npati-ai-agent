@@ -476,23 +476,129 @@ describeDatabase(`security-gate: C1c database-level audit guarantees${databaseNo
   }, 60_000);
   it("round trips numeric anchor fields, accepts later appends and verifies a selected range", async () => {
     const store = new PostgresWorkspaceStore(String(databaseUrl));
+    const testContext: AuthContext = { ...context, workspaceId: uniqueKey("ws-c1c-anchor") };
     try {
-      await store.initialize(context);
-      const company = await store.createCompany(context, { name: "C1c Anchor Round Trip" }, uniqueKey("anchor"));
+      await store.initialize(testContext);
+      const company = await store.createCompany(testContext, { name: "C1c Anchor Round Trip" }, uniqueKey("anchor"));
       const service = new AuditLogService(store, auditConfig);
-      const input = { companyId: company.id, actor: context.userId, actorRole: "admin", action: "first", resourceType: "test", decision: "allowed" as const };
-      await service.record(context, input);
-      const anchors = await service.writeDailyAnchors(context.workspaceId);
+      const input = { companyId: company.id, actor: testContext.userId, actorRole: "admin", action: "first", resourceType: "test", decision: "allowed" as const };
+      await service.record(testContext, input);
+      const anchors = await service.writeDailyAnchors(testContext.workspaceId);
       const anchor = anchors.find(value => value.companyId === company.id)!;
       expect(typeof anchor.sequence).toBe("number");
       expect(typeof anchor.entryCount).toBe("number");
-      expect(await store.latestAuditAnchor(context, company.id)).toEqual(anchor);
-      const last = await service.record(context, { ...input, action: "second" });
-      expect(await service.verify(context, company.id)).toMatchObject({ ok: true, anchorMismatch: false });
-      expect(await service.verify(context, company.id, { fromSequence: 2, toSequence: 2 }))
+      expect(await store.latestAuditAnchor(testContext, company.id)).toEqual(anchor);
+      const last = await service.record(testContext, { ...input, action: "second" });
+      expect(await service.verify(testContext, company.id)).toMatchObject({ ok: true, anchorMismatch: false });
+      expect(await service.verify(testContext, company.id, { fromSequence: 2, toSequence: 2 }))
         .toMatchObject({ ok: true, entryCount: 1, headHash: last.entryHash });
-      expect(await service.verifyAll(context.workspaceId)).toEqual([]);
+      expect(await service.verifyAll(testContext.workspaceId)).toEqual([]);
     } finally { await store.close(); }
   }, 60_000);
 
+  it("serializes concurrent multi-worker appends without chain forks using advisory locks", async () => {
+    const store = new PostgresWorkspaceStore(String(databaseUrl));
+    const testContext: AuthContext = { ...context, workspaceId: uniqueKey("ws-c1c-conc") };
+    try {
+      await store.initialize(testContext);
+      const company = await store.createCompany(testContext, { name: "C1c Concurrency Co" }, uniqueKey("concurrency"));
+      const service = new AuditLogService(store, auditConfig);
+
+      const actions = Array.from({ length: 10 }, (_, i) => `concurrent.action.${i}`);
+      const entries = await Promise.all(
+        actions.map((act) =>
+          service.record(testContext, {
+            companyId: company.id, actor: testContext.userId, actorRole: "admin",
+            action: act, resourceType: "test", decision: "allowed"
+          })
+        )
+      );
+
+      expect(entries).toHaveLength(10);
+      const listed = await store.listAuditEntries(testContext, company.id, { limit: 100 });
+      expect(listed).toHaveLength(10);
+      expect(listed.map((e) => e.sequence)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+
+      const verified = await service.verify(testContext, company.id);
+      expect(verified.ok).toBe(true);
+      expect(verified.entryCount).toBe(10);
+      expect(verified.brokenAtSequence).toBeUndefined();
+    } finally {
+      await store.close();
+    }
+  }, 60_000);
+
+  it("preserves audit log records when an associated disposable project is physically deleted", async () => {
+    const store = new PostgresWorkspaceStore(String(databaseUrl));
+    const adminPool = new Pool({ connectionString: String(databaseUrl) });
+    const testContext: AuthContext = { ...context, workspaceId: uniqueKey("ws-c1c-ret") };
+    try {
+      await store.initialize(testContext);
+      const company = await store.createCompany(testContext, { name: "C1c Retention Co" }, uniqueKey("retention"));
+      const service = new AuditLogService(store, auditConfig);
+
+      const projectId = uniqueKey("proj");
+      await adminPool.query(
+        "INSERT INTO projects (id, workspace_id, company_id, name, type, created_by, create_request_key) VALUES ($1, $2, $3, $4, 'code_project', $5, $6)",
+        [projectId, testContext.workspaceId, company.id, "Disposable Project", testContext.userId, uniqueKey("req")]
+      );
+
+      const entry = await service.record(testContext, {
+        companyId: company.id, actor: testContext.userId, actorRole: "admin",
+        action: "project.created", resourceType: "code_project", resourceId: projectId,
+        projectId: projectId, decision: "allowed"
+      });
+
+      // Physically delete the project row from projects
+      await adminPool.query("DELETE FROM projects WHERE id=$1", [projectId]);
+
+      // Verify the audit entry survived and chain is valid
+      const listed = await store.listAuditEntries(testContext, company.id);
+      expect(listed.some((e) => e.id === entry.id && e.projectId === projectId)).toBe(true);
+      const verification = await service.verify(testContext, company.id);
+      expect(verification.ok).toBe(true);
+    } finally {
+      await adminPool.end();
+      await store.close();
+    }
+  }, 60_000);
+
+  it("allows privileged writes when blockOnBreak is explicitly false even after tampering is detected", async () => {
+    const store = new PostgresWorkspaceStore(String(databaseUrl));
+    const adminPool = new Pool({ connectionString: String(databaseUrl) });
+    const testContext: AuthContext = { ...context, workspaceId: uniqueKey("ws-c1c-nb") };
+    try {
+      await store.initialize(testContext);
+      const company = await store.createCompany(testContext, { name: "C1c NonBlocking Co" }, uniqueKey("nonblocking"));
+      const nonBlockingConfig = { ...auditConfig, blockOnBreak: false };
+      const service = new AuditLogService(store, nonBlockingConfig);
+
+      const first = await service.record(testContext, {
+        companyId: company.id, actor: testContext.userId, actorRole: "admin",
+        action: "first", resourceType: "test", decision: "allowed"
+      });
+
+      await withoutTriggers(adminPool, async () => {
+        await adminPool.query("UPDATE audit_log SET metadata='{\"injected\":true}'::jsonb WHERE id=$1", [first.id]);
+      });
+
+      const report = await service.verify(testContext, company.id);
+      expect(report.ok).toBe(false);
+      expect(report.brokenAtSequence).toBe(1);
+
+      // Even though the chain is broken, blockOnBreak=false allows privileged writes without throwing AuditUnavailableError
+      const next = await service.record(testContext, {
+        companyId: company.id, actor: testContext.userId, actorRole: "admin",
+        action: "second", resourceType: "test", decision: "allowed"
+      });
+      expect(next.action).toBe("second");
+
+      await withoutTriggers(adminPool, async () => {
+        await adminPool.query("DELETE FROM audit_log WHERE company_id=$1", [company.id]);
+      });
+    } finally {
+      await adminPool.end();
+      await store.close();
+    }
+  }, 60_000);
 });

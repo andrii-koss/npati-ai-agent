@@ -530,13 +530,13 @@ export async function createCodeSession(pool: Pool, context: AuthContext, compan
       ? codeChildSessionId(context, companyId, projectId, input.parentSessionId, input.childKey) : randomUUID();
     const session = await pool.query<CodeSession>(`INSERT INTO code_sessions
       (id, workspace_id, company_id, project_id, user_id, agent_id, mode, model_profile, status, parent_session_id,
-       summary, data_classification, retention_class)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,'active',$9,$10,$11,$12)
+       summary, data_classification, retention_class, tool_manifest_version)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,'active',$9,$10,$11,$12,$13)
       ON CONFLICT (id) DO NOTHING
       RETURNING ${codeSessionColumns}`,
       [id, context.workspaceId, companyId, projectId, context.userId, input.agentId ?? null,
         input.mode ?? "edit", input.modelProfile ?? null, input.parentSessionId ?? null, input.summary ?? null,
-        requested, input.retentionClass ?? project.retentionClass]);
+        requested, input.retentionClass ?? project.retentionClass, input.toolManifestVersion ?? null]);
     return session.rows[0] ?? getCodeSession(pool, context, companyId, id);
   }
 export async function getCodeSession(pool: Pool, context: AuthContext, companyId: string, sessionId: string): Promise<CodeSession> {

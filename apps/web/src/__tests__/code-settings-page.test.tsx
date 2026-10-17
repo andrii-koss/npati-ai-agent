@@ -10,6 +10,7 @@ vi.mock("../CodeFlagsPanel", () => ({ CodeFlagsPanel: () => null }));
 vi.mock("../CodeSandboxImagesPanel", () => ({ CodeSandboxImagesPanel: () => null }));
 vi.mock("../CodeDataPolicyPanel", () => ({ CodeDataPolicyPanel: () => null }));
 vi.mock("../CodeQueuePanel", () => ({ CodeQueuePanel: () => null }));
+vi.mock("../CodeMembershipPanel", () => ({ CodeMembershipPanel: () => null }));
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); document.body.innerHTML = ""; });
 function Location() { return <output data-route>{useLocation().pathname + useLocation().search}</output>; }
 const json = (body: unknown) => new Response(JSON.stringify(body));
