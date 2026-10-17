@@ -3,9 +3,10 @@ import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { AppConfig } from "./app";
 import { DEFAULT_CODE_MODEL_PROFILES, resolveEnabledModelProfileIds } from "./code-model-profiles";
 import { createCoreServices } from "./core-services";
-import { FeatureFlagService } from "./feature-flags";
+import { currentToolManifest } from "./code-tool-registry";
+import { FeatureFlagService, CODE_AGENT_MASTER_FLAG, CODE_AGENT_SUB_FLAGS } from "./feature-flags";
 import { McpRuntimeCapabilityStore } from "./mcp-runtime-capabilities";
-import { CODE_READ_FLAG, CODE_WRITE_FLAG, CapabilityInspectorService, buildCombinedCapabilityView, defaultCapabilityRegistry, defaultEffectiveCapabilityResolver, validateActiveContext } from "@npati/shared";
+import { CapabilityInspectorService, buildCombinedCapabilityView, defaultCapabilityRegistry, defaultEffectiveCapabilityResolver, validateActiveContext } from "@npati/shared";
 import type { AuthContext } from "@npati/workspace";
 import { createMcpRuntimeRunPath } from "./mcp-run-path";
 
@@ -51,12 +52,9 @@ export function registerCapabilityRoutes(app: FastifyInstance, deps: CapabilityR
     if (featureFlagService) {
       try {
         const options = { companyId: request.query.companyId, userId: auth.userId };
-        flagStates = {
-          [CODE_READ_FLAG]: await featureFlagService.isEnabled(auth, CODE_READ_FLAG, options),
-          [CODE_WRITE_FLAG]: await featureFlagService.isEnabled(auth, CODE_WRITE_FLAG, options),
-
-          ["code.shell"]: await featureFlagService.isEnabled(auth, "code.shell", options),
-        };
+        const keys = [CODE_AGENT_MASTER_FLAG, ...CODE_AGENT_SUB_FLAGS];
+        flagStates = Object.fromEntries(await Promise.all(keys.map(async key =>
+          [key, await featureFlagService.isEnabled(auth, key, options)] as const)));
         flagSourceAvailable = true;
       } catch {
         flagStates = undefined;
@@ -64,6 +62,14 @@ export function registerCapabilityRoutes(app: FastifyInstance, deps: CapabilityR
       }
     }
     const report = capabilityInspector.inspect((request.query.slice as any) || "all", resolutionContext, { flagStates, flagSourceAvailable });
+
+    const versions = new Map<string, number>();
+    for (const tool of currentToolManifest().tools) {
+      if (tool.version > (versions.get(tool.name) ?? 0)) versions.set(tool.name, tool.version);
+    }
+    const versionedReport = { ...report, items: report.items.map(item => ({
+      ...item, ...(versions.has(item.capabilityId) ? { toolVersion: versions.get(item.capabilityId) } : {}),
+    })) };
 
     const registryProfileIds = DEFAULT_CODE_MODEL_PROFILES.map((profile) => profile.id);
     let modelProfiles: {
@@ -119,6 +125,6 @@ export function registerCapabilityRoutes(app: FastifyInstance, deps: CapabilityR
         },
       };
     }
-    return { ...report, modelProfiles };
+    return { ...versionedReport, modelProfiles };
   });
 }

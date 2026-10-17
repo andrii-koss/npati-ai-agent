@@ -328,7 +328,7 @@ export interface WorkspaceStore {
    * System path for the background verifier and anchor job: it runs without a user context, so it is
    * scoped by workspace only and never exposes entry contents (states, counts and hashes only).
    */
-  systemAuditChains(workspaceId: string): Promise<Array<{ companyId: string; state: AuditChainState; verification: AuditChainVerification }>>;
+  systemAuditChains(workspaceId: string): Promise<Array<{ companyId: string; state: AuditChainState; verification: AuditChainVerification; anchor?: AuditAnchor | null; anchorVerification?: AuditChainVerification }>>;
   systemRecordAuditAnchor(workspaceId: string, companyId: string, anchor: { day: string; sequence: number; entryCount: number; headHash: string; anchorPath?: string | null; signature?: string | null }): Promise<AuditAnchor>;
 
   /** C1: code sessions. Scoped by workspace + company + project + owner. */  createCodeSession(context: AuthContext, companyId: string, projectId: string, input: CodeSessionInput): Promise<CodeSession>;

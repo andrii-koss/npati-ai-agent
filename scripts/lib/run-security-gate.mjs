@@ -69,6 +69,7 @@ export function writeGateArtifact(root, summary) {
 
 /** The suites that make up the gate. Adding a security-gate suite means adding it here. */
 export const SECURITY_GATE_TESTS = [
+  "tests/coding-agent-c1-contract-audit.test.ts",
   "tests/coding-agent-c1c-audit-log.test.ts",
   "tests/coding-agent-c1b-images.test.ts",
   "tests/coding-agent-c1b-image-api.test.ts",
@@ -78,6 +79,8 @@ export const SECURITY_GATE_TESTS = [
   // starts from ran in no gate at all; it is hermetic (an in-memory store plus `Fastify.inject`, no port, no
   // Docker, no network) and carries no `.skip`/`.only`/`.todo`, which is what a gate suite must be.
   "tests/coding-agent-c1a-flags.test.ts",
+  "tests/coding-agent-c1a-versioning.test.ts",
+  "tests/coding-agent-c1a-tool-schema-artifact.test.ts",
   "tests/coding-agent-c2-read-tools.test.ts",
   "tests/coding-agent-c2-tool-runtime.test.ts",
   "tests/coding-agent-c2-schema-parity.test.ts",

@@ -2,6 +2,7 @@ import type { CodingAgentRunnerPorts } from "./coding-agent-runner-contracts";
 import type { CodeAgentLimits } from "./code-agent-config";
 import type { AuthContext, CodeSession } from "@npati/workspace";
 import type { ModelRequestPressure } from "./code-context-budget";
+import { schemasForToolManifest } from "./code-tool-registry";
 import { CODE_AGENT_MASTER_FLAG } from "./feature-flags";
 import { toPersistedSelfReview, type SelfReviewVerdict } from "./code-self-review";
 import { CodingAgentStopReason, CodingAgentRunStatus, CodeRunReplayRecorderPort, CodingAgentRunInput, CodingAgentPendingApproval, CodingAgentRunSummary, CodingAgentRunResult, CODE_RUN_START_ACTION, CODE_RUN_START_PERMISSION, createCodeRunPolicyComposition } from "./coding-agent-runner-contracts";
@@ -36,6 +37,7 @@ export class CodingAgentRunPhases {
     try {
       await this.ports.flags.executionModes?.assertToolAllowed(ctx, companyId, projectId, "code.project.info");
       await this.ports.flags.assertEnabled(ctx, CODE_AGENT_MASTER_FLAG, { companyId, userId: ctx.userId });
+      if (session.toolManifestVersion != null) schemasForToolManifest(session.toolManifestVersion);
 
       await this.ports.rbac.authorize(ctx, companyId, {
         action: CODE_RUN_START_ACTION,
@@ -134,6 +136,7 @@ export class CodingAgentRunPhases {
         admitted: false,
         status: "failed",
         reason: "refused",
+        code: failure.code,
         message: failure.message ?? `The run was refused (${failure.code ?? "refused"}).`,
       };
     }
@@ -468,7 +471,7 @@ export class CodingAgentRunPhases {
     }
     if (stateRunId && this.ports.runState) {
 
-      const stateStatus = status === "cancelled"
+      const stateStatus = status === "suspended_by_flag" ? "suspended_by_flag" : status === "cancelled"
         ? "cancelled"
         : status === "failed" || status === "stopped" ? "failed" : status === "interrupted" ? "interrupted" : "completed";
       if (status === "interrupted" && (input.detachedChildInbox || unsettledChildren || reason === "async_collect_unsettled")) {
@@ -492,6 +495,7 @@ export class CodingAgentRunPhases {
           ...(selfReviewVerdict ? { selfReview: toPersistedSelfReview(selfReviewVerdict) } : {}),
         },
       }));
+      if (status === "suspended_by_flag") await writeState(() => this.ports.runState!.releaseLease?.({ companyId, runId: stateRunId!, owner: stateOwner }) ?? Promise.resolve());
     }
 
     try {

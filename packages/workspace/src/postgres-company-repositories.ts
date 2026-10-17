@@ -68,11 +68,11 @@ export async function verifyAuditChain(pool: Pool, context: AuthContext, company
     await assertCompany(pool, context, companyId);
     const result = await pool.query<AuditEntry>(`SELECT ${auditEntryColumns} FROM audit_log
       WHERE workspace_id=$1 AND company_id=$2
-        AND ($3::bigint IS NULL OR sequence >= $3)
-        AND ($4::bigint IS NULL OR sequence <= $4)
+        AND ($3::bigint IS NULL OR sequence <= $3)
       ORDER BY sequence ASC`,
-      [context.workspaceId, companyId, range.fromSequence ?? null, range.toSequence ?? null]);
-    return verifyAuditEntries(result.rows);
+      [context.workspaceId, companyId, range.toSequence ?? null]);
+    return { ...verifyAuditEntries(result.rows), companyId,
+      entryCount: result.rows.filter(entry => range.fromSequence === undefined || entry.sequence >= range.fromSequence).length };
   }
 
 export async function auditChainState(pool: Pool, context: AuthContext, companyId: string): Promise<AuditChainState> {
@@ -105,17 +105,21 @@ export async function auditCompanies(pool: Pool, context: AuthContext): Promise<
 
 export async function systemAuditChains(pool: Pool, workspaceId: string) {
     const companies = await pool.query<{ company_id: string }>(
-      "SELECT DISTINCT company_id FROM audit_log WHERE workspace_id=$1 ORDER BY company_id", [workspaceId]);
-    const result: Array<{ companyId: string; state: AuditChainState; verification: AuditChainVerification }> = [];
+      "SELECT company_id FROM audit_log WHERE workspace_id=$1 UNION SELECT company_id FROM audit_anchors WHERE workspace_id=$1 ORDER BY company_id", [workspaceId]);
+    const result: Array<{ companyId: string; state: AuditChainState; verification: AuditChainVerification; anchor: AuditAnchor | null; anchorVerification?: AuditChainVerification }> = [];
     for (const row of companies.rows) {
       const entries = await pool.query<AuditEntry>(`SELECT ${auditEntryColumns} FROM audit_log
         WHERE workspace_id=$1 AND company_id=$2 ORDER BY sequence ASC`, [workspaceId, row.company_id]);
       const verification = verifyAuditEntries(entries.rows);
       const last = entries.rows[entries.rows.length - 1];
+      const anchors = await pool.query<AuditAnchor>(
+        `SELECT ${auditAnchorColumns} FROM audit_anchors WHERE workspace_id=$1 AND company_id=$2 ORDER BY day DESC LIMIT 1`, [workspaceId, row.company_id]);
+      const anchor = anchors.rows[0] ?? null;
       result.push({
         companyId: row.company_id,
         state: { companyId: row.company_id, entryCount: entries.rows.length, headSequence: last?.sequence ?? 0, headHash: last?.entryHash ?? null },
-        verification: { ...verification, companyId: row.company_id },
+        verification: { ...verification, companyId: row.company_id }, anchor,
+        anchorVerification: anchor ? { ...verifyAuditEntries(entries.rows.filter(entry => entry.sequence <= anchor.sequence)), companyId: row.company_id } : undefined,
       });
     }
     return result;

@@ -111,7 +111,7 @@ export interface FlagResolution {
   scopeId: string;
   stage: FeatureFlagStage;
   /** Why the flag resolved this way: `no_row` means nothing was configured (dark launch). */
-  source: "user" | "company" | "global" | "no_row" | "self_hosted_default" | "company_default";
+  source: "user" | "company" | "global" | "no_row" | "self_hosted_default" | "company_default" | "audit_chain_broken";
 }
 
 export interface FeatureFlagServiceConfig {
@@ -222,6 +222,12 @@ export class FeatureFlagService {
    * The resolved descriptor is cached, so `describe` and `assertEnabled` agree on scope and stage.
    */
   async resolve(ctx: AuthContext, flagKey: string, options: FlagEvaluationContext = {}): Promise<FlagResolution> {
+    const companyId = options.companyId ?? ctx.companyId;
+    // A known integrity break revokes effective access even while a previous enabled value is cached.
+    // This is a fail-closed read decision, not an unaudited privileged flag mutation.
+    if (this.autoDisableOnAuditBreak && companyId && this.audit?.isBlocked?.(companyId)) {
+      return { key: flagKey, enabled: false, scope: "company", scopeId: companyId, stage: "off", source: "audit_chain_broken" };
+    }
     const key = this.cacheKey(ctx, flagKey, options);
     const cached = this.cache.get(key);
     if (cached && cached.expiresAt > Date.now()) return cached.resolution;
@@ -355,7 +361,7 @@ export class FeatureFlagService {
         resourceType: "feature_flag",
         resourceId: input.flagKey,
         decision: "allowed",
-        payload: { flagKey: input.flagKey, scope: input.scope, scopeId: input.scope === "global" ? "" : (input.scopeId ?? null), stage: stage ?? before?.stage ?? "off", enabled: input.enabled ?? before?.enabled ?? false, rolloutPercent: input.rolloutPercent ?? before?.rolloutPercent ?? 0, allowlistSize: (input.allowlist ?? before?.allowlist ?? []).length, expectedRevision: input.expectedRevision ?? null },
+        payload: { flagKey: input.flagKey, scope: input.scope, scopeId: input.scope === "global" ? "" : (input.scopeId ?? null), stage: stage ?? before?.stage ?? "off", enabled: input.enabled ?? before?.enabled ?? false, rolloutPercent: input.rolloutPercent ?? before?.rolloutPercent ?? 0, allowlist: input.allowlist ?? before?.allowlist ?? [], expectedRevision: input.expectedRevision ?? null },
         metadata: { previous: before ? { stage: before.stage, enabled: before.enabled, revision: before.revision } : null },
       });
     }
@@ -370,18 +376,30 @@ export class FeatureFlagService {
    * same call), suspends the company's active code sessions and asks the injected sandbox stopper to
    * clean up the projects best-effort. Secret-lease revocation and full sandbox teardown are C4/C6.
    */
-  async killSwitch(ctx: AuthContext, options: { companyId?: string; reason?: string } = {}): Promise<{ flag: FeatureFlag; suspendedSessions: number; stoppedSandboxes: number }> {
+  async killSwitch(ctx: AuthContext, options: { companyId?: string; auditCompanyId?: string; reason?: string } = {}): Promise<{ flag: FeatureFlag; suspendedSessions: number; stoppedSandboxes: number }> {
     await this.assertAdmin(ctx, "Using the kill switch", options.companyId);
     const scope: FeatureFlagScope = options.companyId ? "company" : "global";
     const scopeId = options.companyId ?? "";
-    const sessions = options.companyId
-      ? (await this.store.listCodeSessions(ctx, options.companyId, undefined, { includeArchived: true }))
-      : [];
+    const companyIds: string[] = [];
+    if (options.companyId) companyIds.push(options.companyId);
+    else {
+      let cursor: string | undefined;
+      do {
+        const page = await this.store.listCompanies(ctx, 100, cursor);
+        companyIds.push(...page.items.map(company => company.id));
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor);
+    }
+    const sessions = (await Promise.all(companyIds.map(companyId =>
+      this.store.listCodeSessions(ctx, companyId, undefined, { includeArchived: true })))).flat();
     const targets = sessions.filter((session: CodeSession) => ["active", "paused", "awaiting_approval"].includes(session.status));
 
     if (this.audit) {
+      const auditCompanyId = options.companyId ?? options.auditCompanyId ?? companyIds[0];
+      if (!auditCompanyId) throw new FeatureFlagError("flag_admin_required", "A real audit company context is required for the kill switch", 403);
+      await this.store.getCompany(ctx, auditCompanyId);
       await this.audit.record(ctx, {
-        companyId: options.companyId ?? ctx.workspaceId,
+        companyId: auditCompanyId,
         actor: ctx.userId,
         actorRole: this.auditRole(ctx),
         action: "flag.kill_switch",
@@ -399,16 +417,16 @@ export class FeatureFlagService {
     let suspendedSessions = 0;
     for (const session of targets) {
       try {
-        if (options.companyId) {
-          await this.store.updateCodeSession(ctx, options.companyId, session.id, { status: "suspended_by_flag", summary: `Suspended by kill switch${options.reason ? `: ${options.reason}` : ""}` });
+        {
+          await this.store.updateCodeSession(ctx, session.companyId, session.id, { status: "suspended_by_flag", summary: `Suspended by kill switch${options.reason ? `: ${options.reason}` : ""}` });
           suspendedSessions += 1;
         }
       } catch { /* a session that cannot be suspended must not block the kill switch */ }
     }
 
     let stoppedSandboxes = 0;
-    if (options.companyId && this.stopSandboxes) {
-      try { stoppedSandboxes = await this.stopSandboxes(ctx, options.companyId); } catch { stoppedSandboxes = 0; }
+    if (this.stopSandboxes) for (const companyId of companyIds) {
+      try { stoppedSandboxes += await this.stopSandboxes(ctx, companyId); } catch { /* Other companies still need cleanup. */ }
     }
     return { flag, suspendedSessions, stoppedSandboxes };
   }

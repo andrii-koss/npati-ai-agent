@@ -1,7 +1,7 @@
 import { WorkspaceAccessError } from "./errors";
 import type { DataClassification, RetentionClass } from "./retention";
 
-export type CodeRunStateStatus = "running" | "waiting_for_user" | "interrupted" | "completed" | "failed" | "cancelled";
+export type CodeRunStateStatus = "running" | "waiting_for_user" | "interrupted" | "suspended_by_flag" | "completed" | "failed" | "cancelled";
 
 /**
  * Turn status. A turn that was mid-flight when its process died stays `running` in storage — the reconciler

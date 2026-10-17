@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import Fastify from "fastify";
 import { InMemoryWorkspaceStore, type AuthContext, type FeatureFlag } from "@npati/workspace";
 import { AuditLogService, type AuditLogService as AuditLogServiceType } from "../apps/agent-api/src/audit-log";
@@ -271,4 +271,115 @@ describe("security-gate: C1a flag API", () => {
     expect((await app.inject({ method: "GET", url: `/companies/${h.companyA.id}/code/flags` })).statusCode).toBe(503);
     await app.close();
   });
+});
+
+describe("security-gate: C1a individual audit and incident contracts", () => {
+  it("distinguishes equal-size allowlists in the exact persisted audit payload hash", async () => {
+    const h = await harness({ allowPreGateRollout: true });
+    const input = { scope: "company" as const, scopeId: h.companyA.id, flagKey: CODE_AGENT_MASTER_FLAG,
+      stage: "allowlist" as const, enabled: true };
+    await h.flags.setFlag(admin, { ...input, allowlist: ["first-user"] });
+    await h.flags.setFlag(admin, { ...input, allowlist: ["different-user"] });
+    const entries = (await h.audit.list(admin, h.companyA.id)).filter(entry => entry.action === "flag.change");
+    expect(entries).toHaveLength(2);
+    expect(entries[0]!.payloadHash).not.toBe(entries[1]!.payloadHash);
+  });
+  it("refuses cached enabled flags immediately after a real audit chain break without unaudited flag writes", async () => {
+    const h = await harness();
+    await enableForCompany(h, h.companyA.id);
+    expect(await h.flags.isEnabled(admin, CODE_AGENT_MASTER_FLAG, { companyId: h.companyA.id })).toBe(true);
+    const entries = await h.audit.list(admin, h.companyA.id);
+    entries[0]!.entryHash = "f".repeat(64);
+    (h.store as unknown as { auditLog: Map<string, typeof entries> }).auditLog.set(h.companyA.id, entries);
+    expect((await h.audit.verify(admin, h.companyA.id)).ok).toBe(false);
+    expect(await h.flags.isEnabled(admin, CODE_AGENT_MASTER_FLAG, { companyId: h.companyA.id })).toBe(false);
+    expect(await h.flags.isEnabled(admin, "code.write", { companyId: h.companyA.id })).toBe(false);
+    await expect(h.flags.assertEnabled(admin, "code.write", { companyId: h.companyA.id }))
+      .rejects.toMatchObject({ code: "feature_disabled" });
+    // No privileged flag change is applied while the broken journal cannot record it.
+    expect((await h.store.listFeatureFlags(admin)).find(flag => flag.flagKey === CODE_AGENT_MASTER_FLAG)!.enabled).toBe(true);
+  });
+});
+
+describe("security-gate: C1a global kill switch audit scope", () => {
+  it("audits a real company and suspends sessions across the administrator's companies", async () => {
+    const stopped: string[] = [];
+    const h = await harness({ stopSandboxes: async (_ctx, companyId) => { stopped.push(companyId); return 1; } });
+    await enableForCompany(h, h.companyA.id);
+    await enableForCompany(h, h.companyB.id);
+    const a = await h.codeService.createProject(admin, h.companyA.id, { name: "A" });
+    const b = await h.codeService.createProject(admin, h.companyB.id, { name: "B" });
+    const sa = await h.codeService.createSession(admin, h.companyA.id, a.id);
+    const sb = await h.codeService.createSession(admin, h.companyB.id, b.id);
+    const result = await h.flags.killSwitch(admin, { reason: "global stop" });
+    expect(result).toMatchObject({ suspendedSessions: 2, stoppedSandboxes: 2 });
+    expect((await h.codeService.getSession(admin, h.companyA.id, sa.id)).status).toBe("suspended_by_flag");
+    expect((await h.codeService.getSession(admin, h.companyB.id, sb.id)).status).toBe("suspended_by_flag");
+    expect(stopped.sort()).toEqual([h.companyA.id, h.companyB.id].sort());
+    const journals = [...await h.audit.list(admin, h.companyA.id), ...await h.audit.list(admin, h.companyB.id)];
+    expect(journals.filter(entry => entry.action === "flag.kill_switch")).toHaveLength(1);
+    expect(await h.flags.isEnabled(admin, CODE_AGENT_MASTER_FLAG, { companyId: h.companyB.id })).toBe(false);
+  });
+});
+
+describe("security-gate: C1a HTTP and inspector contracts", () => {
+  it("returns the structured API-version error rather than a generic server failure", async () => {
+    const h = await harness(); const app = Fastify();
+    registerCodeRoutes(app, { authenticate: async () => admin } as never, h.codeService, h.flags);
+    try {
+      const response = await app.inject({ method: "GET", url: "/companies/" + h.companyA.id + "/code/sessions",
+        headers: { "x-npati-api-version": "v2" } });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error.code).toBe("unsupported_api_version");
+      expect(response.headers["x-npati-api-version"]).toBe("v1");
+    } finally { await app.close(); }
+  });
+  it("reports an actual flag state for every published code capability", async () => {
+    const { registerCapabilityRoutes } = await import("../apps/agent-api/src/capability-routes");
+    type Deps = Parameters<typeof registerCapabilityRoutes>[1];
+    const h = await harness(); await enableForCompany(h, h.companyA.id);
+    const app = Fastify();
+    registerCapabilityRoutes(app, { config: {} as Deps["config"], log: app.log,
+      agent: {} as Deps["agent"], authProvider: { authenticate: async () => admin } as Deps["authProvider"],
+      discoverRuntimeMcpCapabilities: async () => { throw new Error("Runtime discovery must not execute"); },
+      featureFlagService: h.flags, workspaceStore: h.store, mcpRuntimeCapabilities: {} as Deps["mcpRuntimeCapabilities"] });
+    try {
+      const response = await app.inject({ method: "GET", url: "/capabilities/inspect?companyId=" + h.companyA.id });
+      expect(response.statusCode).toBe(200);
+      const rows = (response.json().items as Array<{ capabilityId: string; flagKey: string; flagState: string; toolVersion?: number }>)
+        .filter(row => row.capabilityId.startsWith("code."));
+      expect(rows.length).toBeGreaterThan(40);
+      expect(rows.filter(row => row.flagState !== "on" && row.flagState !== "off")).toEqual([]);
+      expect(rows.every(row => Number.isSafeInteger(row.toolVersion) && Number(row.toolVersion) > 0)).toBe(true);
+      expect(rows.find(row => row.capabilityId === "code.agent.spawn")).toMatchObject({ flagKey: "code.subagents", flagState: "off" });
+    } finally { await app.close(); }
+  });
+});
+
+describe("security-gate: C1a History export through real application wiring", () => {
+  it("exports an owned run after the master flag is disabled without starting the model or sandbox", async () => {
+    const { buildApp } = await import("../apps/agent-api/src/app");
+    const { CodeRunStateLog } = await import("../apps/agent-api/src/code-run-state");
+    const h = await harness(); await enableForCompany(h, h.companyA.id);
+    const project = await h.codeService.createProject(admin, h.companyA.id, { name: "Export History" });
+    const session = await h.codeService.createSession(admin, h.companyA.id, project.id);
+    const run = await new CodeRunStateLog({ store: h.store }).startRun({ ctx: admin, companyId: h.companyA.id,
+      projectId: project.id, sessionId: session.id, owner: "test-owner" });
+    const { CodeRunCancellationRegistry } = await import("../apps/agent-api/src/code-run-cancellation");
+    const abort = vi.spyOn(CodeRunCancellationRegistry.prototype, "abortLiveRuns");
+    const ai = { healthCheck: async () => ({ status: "ok" }), chat: async () => { throw new Error("Model must not run for export"); } };
+    const app = buildApp({ databaseUrl: "", workspaceStore: h.store, auditLogService: h.audit,
+      authProvider: { authenticate: async () => admin } as never,
+      aiEngine: ai as unknown as NonNullable<Parameters<typeof buildApp>[0]>["aiEngine"] });
+    try {
+      const killed = await app.inject({ method: "POST", url: "/companies/" + h.companyA.id + "/code/flags/kill-switch",
+        payload: { reason: "History export contract" } });
+      expect(killed.statusCode, killed.body).toBe(200);
+      expect(abort).toHaveBeenCalledWith(session.id, { code: "feature_disabled" });
+      const response = await app.inject({ method: "GET",
+        url: "/companies/" + h.companyA.id + "/code/runs/" + run.runId + "/export" });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(response.body).toContain("# Code session export");
+    } finally { abort.mockRestore(); await app.close(); }
+  }, 40_000);
 });

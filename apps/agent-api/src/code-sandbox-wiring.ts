@@ -178,7 +178,7 @@ export function createCodeSandboxWiring(deps: CreateCodeSandboxWiringDeps) {
             await auditLogService.record(
               { workspaceId: systemWorkspaceId, userId: input.actor, permissions: [] } as AuthContext,
               {
-                companyId: input.companyId, actor: input.actor, actorRole: "owner", action: input.action,
+                companyId: input.companyId, actor: input.actor, actorRole: await auditLogService.resolveActorRole(input.companyId, input.actor), action: input.action,
                 resourceType: "code_approval_rule", resourceId: input.target, decision: "allowed",
                 payload: { action: input.action, target: input.target },
                 metadata: input.metadata ?? {},
@@ -202,12 +202,12 @@ export function createCodeSandboxWiring(deps: CreateCodeSandboxWiringDeps) {
             {
               companyId: input.companyId,
               actor: input.actor,
-              actorRole: "owner",
+              actorRole: await auditLogService.resolveActorRole(input.companyId, input.actor),
               action: input.action,
               resourceType: input.resourceType,
               resourceId: input.resourceId,
               decision: input.decision === "deny" ? "denied" : "allowed",
-              ...(input.payloadHash ? { payload: { payload_hash: input.payloadHash } } : {}),
+              ...(input.payloadHash ? { payloadHash: input.payloadHash } : {}),
               metadata: input.metadata ?? {},
             },
           );

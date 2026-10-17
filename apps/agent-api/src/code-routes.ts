@@ -4,7 +4,7 @@ import { AuthenticationError, type AuthProvider } from "./auth";
 import { CodeError, type CodeService } from "./code-service";
 import { hasAdminPermission } from "./code-rbac";
 import { CODE_AGENT_MASTER_FLAG, FeatureDisabledError, FeatureFlagError, isValidCodeFlagKey, type FeatureFlagService } from "./feature-flags";
-import { API_VERSION, resolveApiVersion } from "./api-versioning";
+import { API_VERSION, ApiVersionError, resolveApiVersion } from "./api-versioning";
 import { CodeProjectRouteError, resolveCreateKind } from "./code-project-lifecycle-routes";
 
 type CompanyParams = { companyId: string };
@@ -12,6 +12,7 @@ type ProjectParams = { companyId: string; projectId: string };
 type SessionParams = { companyId: string; sessionId: string };
 
 function fail(reply: FastifyReply, error: unknown) {
+  if (error instanceof ApiVersionError) return reply.code(error.status).send({ error: { code: error.code, message: error.message, retryable: false } });
   if (error instanceof AuthenticationError) return reply.code(error.status).send({ error: { code: error.code, message: error.message, retryable: false } });
   if (error instanceof FeatureDisabledError) return reply.code(error.status).send({ error: { code: error.code, message: error.message, flagKey: error.flagKey, retryable: false } });
   if (error instanceof FeatureFlagError) return reply.code(error.status).send({ error: { code: error.code, message: error.message, retryable: false } });
@@ -279,6 +280,7 @@ export function registerCodeRoutes(app: FastifyInstance, auth: AuthProvider, ser
         await service.listProjects(ctx, request.params.companyId, true);
         const result = await flags.killSwitch(ctx, {
           companyId: request.body?.scope === "global" ? undefined : request.params.companyId,
+          auditCompanyId: request.params.companyId,
           reason: request.body?.reason,
         });
         return reply.send({ flag: result.flag, suspendedSessions: result.suspendedSessions, stoppedSandboxes: result.stoppedSandboxes });

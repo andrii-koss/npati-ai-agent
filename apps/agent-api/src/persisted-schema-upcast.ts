@@ -43,10 +43,11 @@ export const UPCASTERS: Record<string, Record<number, Upcaster>> = {
 
 function currentVersion(kind: string, versions?: Record<string, number>): number {
   const table = versions ?? (PERSISTED_SCHEMA_VERSIONS as Record<string, number>);
-  const version = table[kind];
+  const version = Object.hasOwn(table, kind) ? table[kind] : undefined;
   if (version === undefined) {
     throw new PersistedSchemaError("unknown_persisted_kind", `Unknown persisted schema kind: ${kind}`, 400);
   }
+  if (!Number.isSafeInteger(version) || version < 1) throw new PersistedSchemaError("invalid_schema_version", "Invalid target schema version", 500);
   return version;
 }
 
@@ -56,8 +57,8 @@ function readVersion(payload: unknown): number {
   }
   const raw = (payload as Record<string, unknown>).schemaVersion;
   if (raw === undefined || raw === null) return 1; // records written before versioning are v1
-  const version = typeof raw === "number" ? raw : Number.parseInt(String(raw), 10);
-  if (!Number.isInteger(version) || version < 1) {
+  const version = typeof raw === "number" ? raw : typeof raw === "string" && /^[1-9][0-9]*$/.test(raw) ? Number(raw) : Number.NaN;
+  if (!Number.isSafeInteger(version) || version < 1) {
     throw new PersistedSchemaError("invalid_schema_version", `Invalid persisted schemaVersion: ${String(raw)}`, 400);
   }
   return version;

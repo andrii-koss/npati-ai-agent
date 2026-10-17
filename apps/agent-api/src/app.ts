@@ -43,6 +43,7 @@ import { type StorageReconcilerOptions } from "./storage-reconciler";
 import { SecurityPolicyViolation } from "./security-guardrails";
 import { type ActiveSessionRegistry } from "./distributed-session-registry";
 import { isSpreadsheetEditRequest, mapColumnDirectiveFromProposal } from "./chat-text-directives";
+import type { AuditLogService } from "./audit-log";
 import { createAuditServices } from "./audit-services";
 import { createCoreServices } from "./core-services";
 import { createDataBackendServices } from "./data-backend-services";
@@ -92,6 +93,7 @@ export interface AppConfig {
   hubApiKey?: string;
   databaseUrl?: string;
   workspaceStore?: WorkspaceStore;
+  auditLogService?: AuditLogService;
   authProvider?: AuthProvider;
   authClient?: NpatiAuthClient;
   npatiBackendUrl?: string;
@@ -215,6 +217,7 @@ export function buildApp(config: AppConfig = {}) {
     verifyTimer: auditVerifyTimer,
     anchorTimer: auditAnchorTimer,
   } = createAuditServices({
+    auditLogService: config.auditLogService,
     databaseUrl: config.databaseUrl,
     dataDirectory: config.dataDirectory,
     store: workspaceStore,
@@ -370,6 +373,20 @@ export function buildApp(config: AppConfig = {}) {
   const featureFlagService = new FeatureFlagService(workspaceStore, auditLogService, { enabledByDefault: config.deploymentType !== undefined, allowPreGateRollout: selfHosted }, async (ctx, companyId) => {
 
     let stopped = 0;
+    try {
+      const sessions = await workspaceStore.listCodeSessions(ctx, companyId, undefined, { includeArchived: true });
+      for (const session of sessions) {
+        if (!["active", "paused", "awaiting_approval", "suspended_by_flag"].includes(session.status)) continue;
+        codeRunCancellation.requestSessionCancel({ sessionId: session.id, companyId, projectId: session.projectId,
+          runId: session.runId, requestedBy: ctx.userId, reason: "feature_disabled" });
+        codeRunCancellation.abortLiveRuns(session.id, { code: "feature_disabled" });
+      }
+    } catch { app.log.warn({ companyId }, "code_flag_run_cancellation_incomplete"); }
+    for (const lease of secretLeases.list({ state: "active" }).filter(lease => lease.companyId === companyId)) {
+      await secretLeases.revoke(lease.leaseId, "feature_disabled").catch(() => {
+        app.log.warn({ companyId, leaseId: lease.leaseId }, "code_flag_secret_lease_audit_failed");
+      });
+    }
     try {
       const projects = await projectService.list(ctx, companyId, true);
       for (const project of projects) {

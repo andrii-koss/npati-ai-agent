@@ -73,12 +73,12 @@ function detectPython(files: Record<string, string | undefined>, evidence: strin
   const commands: CodeVerifyCommands = {};
   if (files["uv.lock"] || /\[tool\.uv\]/.test(files["pyproject.toml"] ?? "")) { managers.push("uv"); evidence.push(files["uv.lock"] ? "uv.lock" : "pyproject.toml"); }
   if (/\[tool\.poetry\]/.test(files["pyproject.toml"] ?? "") || files["poetry.lock"]) { managers.push("poetry"); evidence.push(files["poetry.lock"] ? "poetry.lock" : "pyproject.toml"); }
-  if (!managers.length && (files["pyproject.toml"] || files["requirements.txt"])) {
+  if (!managers.length && (files["pyproject.toml"] !== undefined || files["requirements.txt"] !== undefined)) {
     managers.push("pip");
     evidence.push(files["pyproject.toml"] ? "pyproject.toml" : "requirements.txt");
   }
   if (!managers.length) return {};
-  const hasPytest = Boolean(files["pytest.ini"] || files["tests/__init__.py"] || /pytest/.test(files["pyproject.toml"] ?? "") || /pytest/.test(files["requirements.txt"] ?? "") || files["setup.cfg"]);
+  const hasPytest = Boolean(files["pytest.ini"] !== undefined || files["tests/__init__.py"] !== undefined || /pytest/.test(files["pyproject.toml"] ?? "") || /pytest/.test(files["requirements.txt"] ?? "") || /\[tool:pytest\]/.test(files["setup.cfg"] ?? ""));
   if (hasPytest) commands.test = "python -m pytest";
   if (/\[tool\.ruff\]/.test(files["pyproject.toml"] ?? "") || files["ruff.toml"] || files[".ruff.toml"]) { commands.lint = "python -m ruff check ."; evidence.push("ruff.toml"); }
   if (/\[tool\.mypy\]/.test(files["pyproject.toml"] ?? "") || files["mypy.ini"]) { commands.typecheck = "python -m mypy ."; evidence.push("mypy.ini"); }
@@ -155,6 +155,7 @@ export function detectToolchain(input: ToolchainDetectionInput): ToolchainDetect
     if (!verifyCommands.test && hasTarget(makefile, "test")) verifyCommands.test = "make test";
     if (!verifyCommands.lint && hasTarget(makefile, "lint")) verifyCommands.lint = "make lint";
     if (!verifyCommands.build && hasTarget(makefile, "build")) verifyCommands.build = "make build";
+    if (!verifyCommands.typecheck && hasTarget(makefile, "typecheck")) verifyCommands.typecheck = "make typecheck";
   }
 
   return {
@@ -168,7 +169,7 @@ export function detectToolchain(input: ToolchainDetectionInput): ToolchainDetect
 /** Manifest files the workspace reader should load before calling `detectToolchain`. */
 export const TOOLCHAIN_MANIFEST_FILES: readonly string[] = [
   "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "tsconfig.json",
-  "pyproject.toml", "requirements.txt", "poetry.lock", "uv.lock", "pytest.ini", "setup.cfg", "ruff.toml", ".ruff.toml", "mypy.ini",
+  "pyproject.toml", "requirements.txt", "poetry.lock", "uv.lock", "pytest.ini", "tests/__init__.py", "setup.cfg", "ruff.toml", ".ruff.toml", "mypy.ini",
   "go.mod", ".golangci.yml", ".golangci.yaml",
   "Cargo.toml",
   "pom.xml", "build.gradle", "build.gradle.kts", "gradlew",

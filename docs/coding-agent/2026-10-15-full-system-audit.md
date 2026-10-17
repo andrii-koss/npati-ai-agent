@@ -1,5 +1,7 @@
 # Coding Agent audit and repairs — 2026-10-15
 
+> Current individual coverage checkpoint (2026-10-17): [PLAN verification](2026-10-17-plan-verification.md) and [complete requirement ledger](plan-verification-matrix.md). The audit is incomplete; historical stage-level test totals do not certify individual requirements.
+
 ## Verdict and evidence boundary
 
 **The requested full acceptance is not complete. Production readiness and parity with other coding agents are not certified.** This audit includes actual implementation changes, regression executions, and real execution through the existing shared Docker runner. It does not label scripted providers or direct runner acceptance as autonomous agent E2E.

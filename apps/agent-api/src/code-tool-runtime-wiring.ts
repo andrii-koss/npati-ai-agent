@@ -132,7 +132,7 @@ export function createCodeToolRuntimeWiring(deps: CodeToolRuntimeWiringDeps) {
               projectId: input.projectId,
               command,
             });
-            const stdout = result.stdout ?? (result as any).output ?? "";
+            const stdout = result.stdout ?? result.output ?? "";
             if (result.exitCode === 0 && stdout.trim().length > 0) return stdout;
           } catch {
 

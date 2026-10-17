@@ -23,7 +23,12 @@ export interface InMemoryCodeState {
 
 export async function createCodeSession(host: InMemoryCodeState, context: AuthContext, companyId: string, projectId: string, input: CodeSessionInput): Promise<CodeSession> {
     const project = await host.getProject(context, companyId, projectId);
-    if (input.agentId && !host.companyAgents.has(input.agentId)) throw new WorkspaceAccessError("Agent does not belong to this company");
+    if (input.agentId) {
+      const agent = host.companyAgents.get(input.agentId);
+      if (!agent || agent.companyId !== companyId || agent.workspaceId !== context.workspaceId) {
+        throw new WorkspaceAccessError("Agent does not belong to this company");
+      }
+    }
     if (input.parentSessionId) {
       const parent = await getCodeSession(host, context, companyId, input.parentSessionId);
       if (parent.projectId !== projectId) throw new WorkspaceAccessError("Parent session belongs to another project");
@@ -41,7 +46,7 @@ export async function createCodeSession(host: InMemoryCodeState, context: AuthCo
       agentId: input.agentId ?? null, mode: input.mode ?? "edit", modelProfile: input.modelProfile ?? null,
       status: "active", parentSessionId: input.parentSessionId ?? null, runId: null,
       summary: input.summary ?? null, dataClassification: requested,
-      retentionClass: input.retentionClass ?? project.retentionClass, toolManifestVersion: null,
+      retentionClass: input.retentionClass ?? project.retentionClass, toolManifestVersion: input.toolManifestVersion ?? null,
       revision: 1,
       createdAt: timestamp, updatedAt: timestamp,
     };

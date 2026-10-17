@@ -2,6 +2,12 @@
 import fs from "node:fs";
 import path from "node:path";
 
+if (process.argv.includes("--requirements")) {
+  const { generatePlanVerification } = await import("./lib/coding-agent-plan-verification.mjs");
+  generatePlanVerification();
+  process.exit(0);
+}
+
 const sources = {
   C0: ["docs/coding-agent/00-audit.md", "docs/coding-agent/architecture.md"],
   C1: ["apps/agent-api/src/code-service.ts", "apps/agent-api/src/code-toolchain-detector.ts", "packages/workspace/src/types/code-session.ts"],

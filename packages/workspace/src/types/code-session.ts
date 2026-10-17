@@ -109,6 +109,8 @@ export interface ProjectMountedFolderInput {
 }
 
 export interface CodeSessionInput {
+  /** Internal server-selected manifest; never accepted from public session creation input. */
+  toolManifestVersion?: number;
   /** Internal deterministic child-session identity; never accepted by public session routes. */
   childKey?: string;
   mode?: CodeSessionMode;

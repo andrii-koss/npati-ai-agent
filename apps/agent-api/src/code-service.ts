@@ -6,6 +6,7 @@ import { TOOLCHAIN_MANIFEST_FILES, detectToolchain } from "./code-toolchain-dete
 import { resolveCodeAgentLimits, type CodeAgentLimits } from "./code-agent-config";
 import { currentToolManifest } from "./code-tool-registry";
 import { hasAdminPermission } from "./code-rbac";
+import { redactTerminalText } from "./terminal-command-policy";
 import { CODE_AGENT_MASTER_FLAG, FeatureDisabledError } from "./feature-flags";
 
 /** Structured error so every code entry point fails predictably (rule 9). */
@@ -122,7 +123,12 @@ export class CodeService {
       try {
         const file = await this.workspace.readFile(ctx, companyId, projectId, path);
         files[path] = file.content;
-      } catch { /* manifest not present */ }
+      } catch (error) {
+        const failure = error as { code?: string; status?: number; message?: string } | null;
+        if (failure?.code === "ENOENT" || failure?.code === "file_not_found" || failure?.status === 404
+          || (error instanceof Error && /^(?:not found|ENOENT)$/i.test(error.message))) continue;
+        throw new CodeError("toolchain_detection_failed", "Cannot read project manifests. Check workspace access and retry detection.", 503, true);
+      }
     }
     return files;
   }
@@ -153,14 +159,16 @@ export class CodeService {
       throw new CodeError("invalid_repository_url", "Repository URL must be an https:// or git@ URL", 400);
     }
 
+    // Authorize the Company and persist the audit decision before creating project/backend state.
+    await this.store.getCompany(ctx, companyId);
+    await this.auditCodeAction(ctx, companyId, "code.project.create", "code_project", undefined, undefined,
+      { name, type: "code_project", repositoryUrl: repositoryUrl || null, branch: input.branch?.trim() || null, dataClassification, retentionClass },
+      { phase: "before_create" });
+
     const created = await this.projects.create(ctx, companyId, {
       name, type: "code_project", description: input.description?.trim() || undefined,
       dataClassification, retentionClass, defaultBranch: input.branch?.trim() || undefined,
     }, idempotencyKey ?? `code-${ctx.userId}-${name}-${repositoryUrl || "empty"}`);
-
-    await this.auditCodeAction(ctx, companyId, "code.project.create", "code_project", created.project.id, created.project.id,
-      { name, type: "code_project", repositoryUrl: repositoryUrl || null, branch: input.branch?.trim() || null, dataClassification, retentionClass },
-      { created: created.created });
 
     if (repositoryUrl) {
       if (!this.importer) throw new CodeError("project_import_unavailable", "Repository import is unavailable", 503, true);
@@ -171,7 +179,7 @@ export class CodeService {
       } catch (error) {
         // The project stays (the owner can retry the import), but the failure is structured and
         // never carries credentials: import services already redact git output.
-        throw new CodeError("repository_import_failed", error instanceof Error ? error.message : "Repository import failed", 502, true);
+        throw new CodeError("repository_import_failed", error instanceof Error ? redactTerminalText(error.message) : "Repository import failed", 502, true);
       }
     }
 
@@ -237,14 +245,10 @@ export class CodeService {
     if (input.dataClassification !== undefined) this.assertClassification(input.dataClassification);
     await this.auditCodeAction(ctx, companyId, "code.session.create", "code_session", undefined, projectId,
       { projectId, mode: input.mode ?? "edit", modelProfile: input.modelProfile ?? null, dataClassification: input.dataClassification ?? project.dataClassification });
-    const session = await this.store.createCodeSession(ctx, companyId, projectId, input);
-    // C1a (rule 12): the session pins the tool-schema manifest version it was created with, so a
-    // later tool release cannot change how this session is read or replayed.
-    try {
-      return await this.store.updateCodeSession(ctx, companyId, session.id, { toolManifestVersion: currentToolManifest().version });
-    } catch {
-      return session;
-    }
+    // Pin in the original insert: an independent failed update must never expose an unpinned session.
+    return this.store.createCodeSession(ctx, companyId, projectId, {
+      ...input, toolManifestVersion: currentToolManifest().version,
+    });
   }
 
   async getSession(ctx: AuthContext, companyId: string, sessionId: string): Promise<CodeSession> {

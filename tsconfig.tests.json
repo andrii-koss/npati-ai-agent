@@ -23,6 +23,12 @@
   },
   "include": [
     "scripts/verify-coding-agent-data.ts",
+    "tests/coding-agent-c1-contract-audit.test.ts",
+    "tests/coding-agent-c1-postgres.test.ts",
+    "tests/coding-agent-c1c-audit-log.test.ts",
+    "tests/coding-agent-c1a-flags.test.ts",
+    "tests/coding-agent-c1a-versioning.test.ts",
+    "tests/coding-agent-plan-verification.test.ts",
     "tests/coding-agent-c1b-images.test.ts",
     "tests/minio-startup-diagnostics.test.ts",
     "tests/web-frontend.test.ts",

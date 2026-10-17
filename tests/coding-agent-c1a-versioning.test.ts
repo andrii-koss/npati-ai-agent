@@ -219,3 +219,12 @@ describe("security-gate: C1a tool schema CI guard", () => {
     expect(stableJson({ b: 1, a: { d: 2, c: 3 } })).toBe('{"a":{"c":3,"d":2},"b":1}');
   });
 });
+
+describe("security-gate: C1a persisted version parsing boundaries", () => {
+  it.each(["1garbage", "1.5", true, {}, [], "1e2"])("rejects malformed persisted schemaVersion %j", schemaVersion => {
+    expect(() => upcastPersisted("toolResult", { schemaVersion, result: "old" })).toThrow(PersistedSchemaError);
+  });
+  it.each(["__proto__", "constructor", "toString"])("rejects inherited persisted format name %s", kind => {
+    expect(() => upcastPersisted(kind, {})).toThrow(PersistedSchemaError);
+  });
+});

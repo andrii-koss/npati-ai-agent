@@ -1,5 +1,8 @@
 # NPATI Coding Agent — Current State
 
+Current individual audit —2026-10-17:520/2811 assessed;193 Verified,295 Partial,1 Broken,3 Missing,2301 Not Verified,18 Blocked. See2026-10-17-plan-verification.md and plan-verification-matrix.md. Active: durable Run suspended_by_flag status. Docker Desktop Linux engine unavailable; no new real DB/Sandbox pass is claimed. Previous checkpoints below are historical.
+
+
 Update this file after every completed step.
 
 Final 2026-10-16 checkpoint: backend 421 files / 4836 passed / 0 failed / 17 conditional skips;

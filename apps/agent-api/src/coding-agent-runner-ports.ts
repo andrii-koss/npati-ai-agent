@@ -98,6 +98,7 @@ export interface CodeRunToolRuntimePort {
       projectId: string;
       sessionId?: string;
       tool: string;
+      toolVersion?: number;
       args?: unknown;
       toolCallId: string;
       leaseOwner?: string;
