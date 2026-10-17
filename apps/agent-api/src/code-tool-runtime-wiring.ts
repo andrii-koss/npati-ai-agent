@@ -118,7 +118,7 @@ export function createCodeToolRuntimeWiring(deps: CodeToolRuntimeWiringDeps) {
         },
       },
 
-      runCtags: async (input, path) => {
+      runCtags: async (input, path): Promise<string | null> => {
         if (!codeSandboxExecPort) return null;
         const quoted = `'${String(path).replace(/'/g, "'\\''")}'`;
         const attempts = [
@@ -132,7 +132,8 @@ export function createCodeToolRuntimeWiring(deps: CodeToolRuntimeWiringDeps) {
               projectId: input.projectId,
               command,
             });
-            if (result.exitCode === 0 && result.stdout.trim().length > 0) return result.stdout;
+            const stdout = result.stdout ?? (result as any).output ?? "";
+            if (result.exitCode === 0 && stdout.trim().length > 0) return stdout;
           } catch {
 
           }

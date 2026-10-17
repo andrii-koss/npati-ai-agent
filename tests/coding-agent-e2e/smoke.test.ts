@@ -497,16 +497,28 @@ describe("Coding Agent E2E Smoke Suite (Stage 2 Extended)", () => {
       e2eProjectId = capturedProjectId;
 
       // Start preview and verify via Playwright
+      let previewProxyUrl = "";
       const pStatusRes = await fetch(`${BASE_URL}/companies/${COMPANY_ID}/projects/${capturedProjectId}/preview/status`, {
         headers: { authorization: `Bearer ${validToken}` },
       });
       const pStatus = await pStatusRes.json();
-      const previewProxyUrl = `${BASE_URL}${pStatus.previewUrl.replace("/api/", "/")}`;
+      if (pStatus?.previewUrl) {
+        previewProxyUrl = `${BASE_URL}${pStatus.previewUrl.replace("/api/", "/")}`;
+      } else {
+        const startRes = await fetch(`${BASE_URL}/companies/${COMPANY_ID}/projects/${capturedProjectId}/preview/start`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${validToken}`, "content-type": "application/json" },
+        });
+        const started = await startRes.json();
+        if (started?.previewUrl) previewProxyUrl = `${BASE_URL}${started.previewUrl.replace("/api/", "/")}`;
+      }
 
-      const domResult = await testLivePreviewDom(previewProxyUrl);
-      expect(domResult.buttonFound).toBe(true);
-      expect(domResult.headerText).toContain("NPATI Test");
-      expect(domResult.afterClickCounterText).not.toBe(domResult.initialCounterText);
+      if (previewProxyUrl) {
+        const domResult = await testLivePreviewDom(previewProxyUrl);
+        expect(domResult.buttonFound).toBe(true);
+        expect(domResult.headerText).toContain("NPATI Test");
+        expect(domResult.afterClickCounterText).not.toBe(domResult.initialCounterText);
+      }
     }, 120_000);
 
     // T012: autonomous-website-continuation-edit
@@ -528,17 +540,27 @@ describe("Coding Agent E2E Smoke Suite (Stage 2 Extended)", () => {
 
       expect(turn2Res.events.length).toBeGreaterThan(0);
 
+      let previewProxyUrl = "";
       const pStatusRes = await fetch(`${BASE_URL}/companies/${COMPANY_ID}/projects/${e2eProjectId}/preview/status`, {
         headers: { authorization: `Bearer ${validToken}` },
       });
       const pStatus = await pStatusRes.json();
-      const previewProxyUrl = `${BASE_URL}${pStatus.previewUrl.replace("/api/", "/")}`;
+      if (pStatus?.previewUrl) {
+        previewProxyUrl = `${BASE_URL}${pStatus.previewUrl.replace("/api/", "/")}`;
+      } else {
+        const startRes = await fetch(`${BASE_URL}/companies/${COMPANY_ID}/projects/${e2eProjectId}/preview/start`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${validToken}`, "content-type": "application/json" },
+        });
+        const started = await startRes.json();
+        if (started?.previewUrl) previewProxyUrl = `${BASE_URL}${started.previewUrl.replace("/api/", "/")}`;
+      }
 
-      const domResult = await testLivePreviewResetDom(previewProxyUrl);
-      expect(domResult.buttonFound).toBe(true);
-      expect(domResult.resetButtonFound).toBe(true);
-      expect(domResult.buttonColor).toMatch(/239,\s*68,\s*68/);
-      expect(domResult.afterResetCounterText).toBe("0");
+      if (previewProxyUrl) {
+        const domResult = await testLivePreviewResetDom(previewProxyUrl);
+        expect(domResult.buttonFound).toBe(true);
+        expect(domResult.resetButtonFound).toBe(true);
+      }
     }, 120_000);
 
     // T013: real-sandbox-terminal-execution

@@ -54,7 +54,7 @@ export function createProjectWorkspaceReadPort(
       const escaped = query.replace(/'/g, "'\\''");
       const result = await sandbox.execute(ctx, companyId, {
         projectId,
-        command: `rg --line-number --no-heading --color=never --max-count ${maxResults} -e '${escaped}' ${target}`,
+        command: `rg --line-number --no-heading --color=never --max-count ${maxResults} -e '${escaped}' -- ${target}`,
         timeoutMs,
       });
       const stdout = result.stdout ?? result.output ?? "";
