@@ -61,15 +61,22 @@ export function registerCapabilityRoutes(app: FastifyInstance, deps: CapabilityR
         flagSourceAvailable = false;
       }
     }
-    const report = capabilityInspector.inspect((request.query.slice as any) || "all", resolutionContext, { flagStates, flagSourceAvailable });
+    const rawReport = capabilityInspector.inspect((request.query.slice as any) || "all", resolutionContext, { flagStates, flagSourceAvailable });
 
     const versions = new Map<string, number>();
     for (const tool of currentToolManifest().tools) {
       if (tool.version > (versions.get(tool.name) ?? 0)) versions.set(tool.name, tool.version);
     }
-    const versionedReport = { ...report, items: report.items.map(item => ({
-      ...item, ...(versions.has(item.capabilityId) ? { toolVersion: versions.get(item.capabilityId) } : {}),
-    })) };
+    const report = {
+      ...rawReport,
+      items: rawReport.items.map(item => {
+        const toolVersion = versions.get(item.capabilityId) ?? (item.capabilityId.startsWith("code.") ? currentToolManifest().version : undefined);
+        return {
+          ...item,
+          ...(toolVersion !== undefined ? { toolVersion } : {}),
+        };
+      }),
+    };
 
     const registryProfileIds = DEFAULT_CODE_MODEL_PROFILES.map((profile) => profile.id);
     let modelProfiles: {
@@ -125,6 +132,6 @@ export function registerCapabilityRoutes(app: FastifyInstance, deps: CapabilityR
         },
       };
     }
-    return { ...versionedReport, modelProfiles };
+    return { ...report, modelProfiles };
   });
 }

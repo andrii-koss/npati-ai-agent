@@ -15,7 +15,8 @@ async function fixture() {
   const store = new InMemoryWorkspaceStore();
   const company = await store.createCompany(creator, { name: "Owner company" }, "create");
   const flags = new FeatureFlagService(store);
-  const service = new CodeService(store, new ProjectService(store), {} as never, undefined, undefined, undefined, flags);
+  const workspace = { readFile: async () => { throw { code: "ENOENT" }; } } as never;
+  const service = new CodeService(store, new ProjectService(store), workspace, undefined, undefined, undefined, flags);
   const app = Fastify();
   registerCodeRoutes(app, { authenticate: async () => creator } as never, service, flags);
   return { store, company, flags, service, app };

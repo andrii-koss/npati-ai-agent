@@ -35,4 +35,58 @@ database("individual PLAN C1 PostgreSQL persistence", () => {
       await expect(service.createSession({ ...ctx, workspaceId: "foreign-workspace" }, company.id, project.id)).rejects.toThrow();
     } finally { await store.close(); }
   }, 60_000);
+
+  it("persists feature flags across global, company, and user scopes and records complete before/after audit history", async () => {
+    const ctx: AuthContext = { workspaceId: "c1a-" + randomUUID(), userId: "c1a-user-" + randomUUID(),
+      permissions: ["workspace:read", "workspace:write", "business:manage", "admin:all"] };
+    const store = new PostgresWorkspaceStore(String(url));
+    try {
+      await store.initialize(ctx);
+      const companyId = "c1a-comp-" + randomUUID();
+      const userId = "c1a-target-" + randomUUID();
+
+      // 1. Global scope
+      const globalFlag = await store.setFeatureFlag(ctx, {
+        scope: "global", flagKey: "coding.master", stage: "internal", enabled: true
+      });
+      expect(globalFlag.scope).toBe("global");
+      expect(globalFlag.enabled).toBe(true);
+      expect(globalFlag.stage).toBe("internal");
+      expect(globalFlag.revision).toBe(1);
+
+      // 2. Company scope
+      const companyFlag = await store.setFeatureFlag(ctx, {
+        scope: "company", scopeId: companyId, flagKey: "coding.master", stage: "allowlist", enabled: true, allowlist: [userId]
+      });
+      expect(companyFlag.scope).toBe("company");
+      expect(companyFlag.scopeId).toBe(companyId);
+      expect(companyFlag.allowlist).toEqual([userId]);
+
+      // 3. User scope
+      const userFlag = await store.setFeatureFlag(ctx, {
+        scope: "user", scopeId: userId, flagKey: "coding.master", stage: "percent", rolloutPercent: 50, enabled: true
+      });
+      expect(userFlag.scope).toBe("user");
+      expect(userFlag.scopeId).toBe(userId);
+      expect(userFlag.enabled).toBe(true);
+
+      // 4. Update flag and check revision + history
+      const updatedGlobal = await store.setFeatureFlag(ctx, {
+        scope: "global", flagKey: "coding.master", stage: "ga", enabled: true, expectedRevision: 1
+      });
+      expect(updatedGlobal.revision).toBe(2);
+      expect(updatedGlobal.stage).toBe("ga");
+
+      // Verify history
+      const history = await store.listFeatureFlagHistory(ctx, "coding.master");
+      expect(history.length).toBeGreaterThanOrEqual(2);
+      const latest = history[0]!;
+      expect(latest.flagKey).toBe("coding.master");
+      expect(latest.actor).toBe(ctx.userId);
+      expect(latest.nextValue).toMatchObject({ stage: "ga", revision: 2 });
+      expect(latest.previousValue).toMatchObject({ stage: "internal", revision: 1 });
+    } finally {
+      await store.close();
+    }
+  }, 60_000);
 });

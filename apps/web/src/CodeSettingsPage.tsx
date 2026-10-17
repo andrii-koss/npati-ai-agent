@@ -8,6 +8,7 @@ import { CodeFlagsPanel } from "./CodeFlagsPanel";
 import { CodeSandboxImagesPanel } from "./CodeSandboxImagesPanel";
 import { CodeDataPolicyPanel } from "./CodeDataPolicyPanel";
 import { CodeQueuePanel } from "./CodeQueuePanel";
+import { CodeMembershipPanel } from "./CodeMembershipPanel";
 import {
   type CompanySummary,
   type CodeProject,
@@ -602,6 +603,9 @@ export function CodeSettingsPage() {
 
           {/* R1 (section A, item 3): the queue's state is visible instead of being inferable only from a refusal. */}
           {companyId && <CodeQueuePanel companyId={companyId} isUk={isUk} />}
+
+          {/* C5a: Code membership, roles, and denial reasoning */}
+          {companyId && <CodeMembershipPanel companyId={companyId} isUk={isUk} />}
 
           <section className="browser-campaign-card code-limits-panel" aria-label={isUk ? "Ліміти (конфігурація)" : "Limits (configuration)"}>
             <div className="browser-campaign-card-header">
