@@ -58,7 +58,7 @@ export function createAppCodePolicyWiring(deps: AppCodePolicyWiringDeps) {
               {
                 companyId: input.companyId,
                 actor: input.actor,
-                actorRole: "owner",
+                actorRole: await auditLogService.resolveActorRole(input.companyId, input.actor),
                 action: input.action,
                 resourceType: "code_project_trust",
                 resourceId: input.resourceId,
@@ -82,7 +82,7 @@ export function createAppCodePolicyWiring(deps: AppCodePolicyWiringDeps) {
               {
                 companyId: input.companyId,
                 actor: input.actor,
-                actorRole: "owner",
+                actorRole: await auditLogService.resolveActorRole(input.companyId, input.actor),
                 action: input.action,
                 resourceType: "code_session",
                 resourceId: input.resourceId,

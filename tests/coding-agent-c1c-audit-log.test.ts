@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import Fastify from "fastify";
-import { InMemoryWorkspaceStore, canonicalPayloadHash, verifyAuditEntries, type AuditEntry, type AuthContext, type WorkspaceStore } from "@npati/workspace";
+import { InMemoryWorkspaceStore, auditEntryHash, canonicalPayloadHash, verifyAuditEntries, type AuditEntry, type AuthContext, type WorkspaceStore } from "@npati/workspace";
 import { AuditLogService, AuditUnavailableError, redactAuditMetadata } from "../apps/agent-api/src/audit-log";
 import { registerAuditRoutes } from "../apps/agent-api/src/audit-routes";
 import { AuthenticationError } from "../apps/agent-api/src/auth";
@@ -227,5 +227,187 @@ describe("security-gate: C1c audit API access control", () => {
     expect(response.statusCode).toBe(503);
     expect(response.json().error.code).toBe("audit_unavailable");
     await instance.close();
+  });
+});
+
+describe("security-gate: C1c individual anchor and range regressions", () => {
+  it("accepts normal appends after a daily anchor without blocking privileged operations", async () => {
+    const { service, company } = await harness();
+    await record(service, company.id, "first");
+    await service.writeDailyAnchors(admin.workspaceId);
+    await record(service, company.id, "second");
+    expect(await service.verify(admin, company.id)).toMatchObject({ ok: true, entryCount: 2, anchorMismatch: false });
+    await expect(record(service, company.id, "third")).resolves.toMatchObject({ sequence: 3 });
+  });
+  it("verifies a non-genesis range without treating its predecessor as a broken chain", async () => {
+    const { service, company } = await harness();
+    await record(service, company.id, "first");
+    await record(service, company.id, "second");
+    const last = await record(service, company.id, "third");
+    expect(await service.verify(admin, company.id, { fromSequence: 2, toSequence: 3 }))
+      .toMatchObject({ ok: true, entryCount: 2, headHash: last.entryHash });
+  });
+  it("does not clear a known company block after verifying only a clean prefix", async () => {
+    const { service, store, company } = await harness();
+    await record(service, company.id, "first");
+    await record(service, company.id, "second");
+    const rows = await service.list(admin, company.id);
+    rows[1]!.entryHash = "f".repeat(64);
+    (store as unknown as { auditLog: Map<string, AuditEntry[]> }).auditLog.set(company.id, rows);
+    expect((await service.verify(admin, company.id)).ok).toBe(false);
+    expect((await service.verify(admin, company.id, { toSequence: 1 })).ok).toBe(true);
+    expect(service.isBlocked(company.id)).toBe(true);
+    await expect(record(service, company.id, "third")).rejects.toBeInstanceOf(AuditUnavailableError);
+  });
+  it("retains the first daily anchor instead of overwriting it after subsequent appends", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "npati-anchor-stable-"));
+    try {
+      const { service, company } = await harness({ anchorDirectory: directory });
+      await record(service, company.id, "first");
+      const first = (await service.writeDailyAnchors(admin.workspaceId))[0]!;
+      const bytes = await readFile(first.anchorPath!, "utf8");
+      await record(service, company.id, "second");
+      const again = (await service.writeDailyAnchors(admin.workspaceId))[0]!;
+      expect(again).toEqual(first);
+      expect(await readFile(first.anchorPath!, "utf8")).toBe(bytes);
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+  it("automatically detects external anchor tampering in both API and background verification", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "npati-anchor-tamper-"));
+    try {
+      const { service, company } = await harness({ anchorDirectory: directory });
+      await record(service, company.id, "first");
+      const anchor = (await service.writeDailyAnchors(admin.workspaceId))[0]!;
+      const data = JSON.parse(await readFile(anchor.anchorPath!, "utf8"));
+      data.headHash = "f".repeat(64);
+      await writeFile(anchor.anchorPath!, JSON.stringify(data), "utf8");
+      expect(await service.verify(admin, company.id)).toMatchObject({ ok: false, anchorMismatch: true });
+      const failures = await service.verifyAll(admin.workspaceId);
+      expect(failures).toHaveLength(1);
+      expect(failures[0]).toMatchObject({ companyId: company.id, ok: false, anchorMismatch: true });
+      expect(service.isBlocked(company.id)).toBe(true);
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+  it("detects a rewritten database anchor even when the internal chain still verifies", async () => {
+    const { service, store, company } = await harness();
+    await record(service, company.id, "first");
+    const anchor = (await service.writeDailyAnchors(admin.workspaceId))[0]!;
+    await store.recordAuditAnchor(admin, company.id, { ...anchor, headHash: "f".repeat(64) });
+    const failures = await service.verifyAll(admin.workspaceId);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toMatchObject({ ok: false, anchorMismatch: true });
+    expect(service.isBlocked(company.id)).toBe(true);
+  });
+  it("fails explicitly when a configured external anchor cannot be persisted", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "npati-anchor-io-"));
+    try {
+      const occupied = path.join(directory, "not-a-directory");
+      await writeFile(occupied, "occupied");
+      const { service, company } = await harness({ anchorDirectory: occupied });
+      await record(service, company.id, "first");
+      await expect(service.writeDailyAnchors(admin.workspaceId)).rejects.toThrow(/anchor/i);
+      expect(await service.anchors(admin, company.id)).toEqual([]);
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+});
+
+describe("security-gate: C1c anchored deletion recovery", () => {
+  it("detects deletion of every database entry when an anchor remains", async () => {
+    const { service, store, company } = await harness();
+    await record(service, company.id, "first");
+    await service.writeDailyAnchors(admin.workspaceId);
+    (store as unknown as { auditLog: Map<string, AuditEntry[]> }).auditLog.delete(company.id);
+    const failures = await service.verifyAll(admin.workspaceId);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toMatchObject({ companyId: company.id, ok: false, anchorMismatch: true });
+    expect(service.isBlocked(company.id)).toBe(true);
+  });
+  it("rejects a rehashed chain that starts after the missing genesis entry", async () => {
+    const { service, company } = await harness();
+    const original = await record(service, company.id, "first");
+    const changed = { ...original, sequence: 2 };
+    changed.entryHash = auditEntryHash(null, {
+      id: changed.id, companyId: changed.companyId, sequence: changed.sequence, createdAt: changed.createdAt,
+      actor: changed.actor, actorRole: changed.actorRole, requestId: changed.requestId ?? null,
+      correlationId: changed.correlationId ?? null, snapshotId: changed.snapshotId ?? null, action: changed.action,
+      resourceType: changed.resourceType, resourceId: changed.resourceId ?? null, projectId: changed.projectId ?? null,
+      decision: changed.decision, payloadHash: changed.payloadHash, metadata: changed.metadata,
+    });
+    expect(verifyAuditEntries([changed])).toMatchObject({ ok: false, brokenAtSequence: 2 });
+  });
+});
+
+describe("security-gate: C1c privileged audit adapter payload binding", () => {
+  it("keeps the exact approved action hash through the production approval audit adapter", async () => {
+    const { createAuditServices } = await import("../apps/agent-api/src/audit-services");
+    const { store, company } = await harness();
+    const invite = await store.createCompanyInvite({ id: "audit-owner-invite", companyId: company.id,
+      email: "owner@example.test", role: "owner", tokenHash: "a".repeat(64), expiresAt: new Date(Date.now() + 60_000), createdBy: admin.userId });
+    await store.acceptCompanyInvite({ invite, userId: "second-owner", acceptedAt: new Date() });
+    const member = await store.getCompanyMembership(company.id, admin.userId);
+    await store.updateCompanyMemberRole({ companyId: company.id, userId: admin.userId, role: "admin",
+      expectedRevision: member!.revision, updatedAt: new Date() });
+    const services = createAuditServices({ databaseUrl: "postgres://unused:unused@127.0.0.1:1/unused",
+      store, systemWorkspaceId: admin.workspaceId, log: { info() {}, warn() {}, error() {} } });
+    try {
+      const payloadHash = canonicalPayloadHash({ command: "npm test", cwd: "/projects/approved" });
+      await services.approvalDecisionAudit!.record({ companyId: company.id, actor: admin.userId,
+        action: "company.approval.decided", resourceType: "company_approval", resourceId: "approved-one",
+        decision: "allow", payloadHash });
+      expect((await services.auditLogService!.list(admin, company.id))[0]).toMatchObject({ payloadHash, actorRole: "admin" });
+    } finally {
+      clearInterval(services.verifyTimer);
+      clearInterval(services.anchorTimer);
+    }
+  });
+});
+
+describe("security-gate: C1c exact audit record fields", () => {
+  it("round trips every correlation field and filters each index independently", async () => {
+    const { service, company } = await harness();
+    const expected = canonicalPayloadHash({ command: "npm test" });
+    const entry = await service.record(admin, { companyId: company.id, actor: admin.userId,
+      actorRole: "admin", action: "approval.execute", resourceType: "command", resourceId: "command-one",
+      projectId: "project-one", decision: "approved", requestId: "request-one", correlationId: "run-one",
+      snapshotId: "snapshot-one", payload: { command: "npm test" }, metadata: { safe: "metadata" } });
+    await record(service, company.id, "unrelated");
+    expect(entry).toMatchObject({ companyId: company.id, actor: admin.userId, actorRole: "admin",
+      action: "approval.execute", resourceType: "command", resourceId: "command-one", projectId: "project-one",
+      decision: "approved", requestId: "request-one", correlationId: "run-one", snapshotId: "snapshot-one",
+      payloadHash: expected, prevHash: null, metadata: { safe: "metadata" } });
+    expect(entry.id).toBeTruthy();
+    expect(Number.isFinite(Date.parse(entry.createdAt))).toBe(true);
+    expect(entry.entryHash).toMatch(/^[a-f0-9]{64}$/);
+    for (const filter of [{ actor: "absent" }, { requestId: "absent" }, { correlationId: "absent" }, { action: "absent" }])
+      expect(await service.list(admin, company.id, filter)).toEqual([]);
+    for (const filter of [{ requestId: "request-one" }, { correlationId: "run-one" }, { action: "approval.execute" }])
+      expect(await service.list(admin, company.id, filter)).toEqual([entry]);
+  });
+  it("rejects malformed or inconsistent precomputed action hashes before any journal mutation", async () => {
+    const { service, company } = await harness();
+    const input = { companyId: company.id, actor: admin.userId, actorRole: "admin",
+      action: "approval", resourceType: "approval", decision: "approved" as const };
+    await expect(service.record(admin, { ...input, payloadHash: "not-a-hash" })).rejects.toBeInstanceOf(AuditUnavailableError);
+    await expect(service.record(admin, { ...input, payload: { command: "changed" },
+      payloadHash: canonicalPayloadHash({ command: "approved" }) })).rejects.toBeInstanceOf(AuditUnavailableError);
+    expect(await service.list(admin, company.id)).toEqual([]);
+  });
+});
+
+describe("security-gate: C1c anchor persistence retry", () => {
+  it("recovers an already signed file after a failed database anchor insert without overwriting it", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "npati-anchor-retry-"));
+    try {
+      const { service, store, company } = await harness({ anchorDirectory: directory });
+      await record(service, company.id, "first");
+      const insert = store.systemRecordAuditAnchor.bind(store);
+      let fail = true;
+      store.systemRecordAuditAnchor = async (...args) => { if (fail) throw new Error("Database unavailable"); return insert(...args); };
+      await expect(service.writeDailyAnchors(admin.workspaceId)).rejects.toThrow("Database unavailable");
+      fail = false;
+      const anchors = await service.writeDailyAnchors(admin.workspaceId);
+      expect(anchors).toHaveLength(1);
+      expect(await service.verify(admin, company.id)).toMatchObject({ ok: true, anchorMismatch: false });
+    } finally { await rm(directory, { recursive: true, force: true }); }
   });
 });

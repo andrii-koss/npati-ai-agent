@@ -284,3 +284,62 @@ describe("security-gate: C6 runner — every stop condition reports a reason and
     expect(harness.engineCalls).toHaveLength(0);
   });
 });
+
+describe("security-gate: C1a flags during an active model exchange", () => {
+  it("stops before dispatching tools returned after the flag was disabled in flight", async () => {
+    const options: HarnessOptions = { script: [{ content: "", usage: { promptTokens: 5, completionTokens: 3, totalTokens: 8 },
+      toolCalls: [nativeCall("code.fs.read", { path: "should-not-read.ts" }, "late-flag-call")] }] };
+    options.onFirstModelCall = () => { options.flagsThrow = true; };
+    const harness = createHarness(options);
+    const result = await harness.run();
+    expect(result).toMatchObject({ status: "suspended_by_flag", reason: "feature_disabled", code: "feature_disabled" });
+    expect(result.summary.toolCalls).toBe(0);
+    expect(result.summary.tokens).toBe(8);
+    expect(harness.engineCalls).toHaveLength(1);
+  });
+  it("does not call the model again when a completed tool is followed by flag disablement", async () => {
+    let enabled = true, modelCalls = 0, toolCalls = 0;
+    const runner = new CodingAgentRunner({
+      flags: { assertEnabled: async () => { if (!enabled) throw Object.assign(new Error("Disabled"), { code: "feature_disabled" }); return true; } },
+      rbac: { authorize: async () => ({ allowed: true }) },
+      toolRuntime: { listTools: () => TOOLS, invoke: async (_ctx, input) => {
+        toolCalls++; enabled = false;
+        return { ok: true, tool: input.tool, toolVersion: 1, schemaVersion: 1, result: { ok: true }, truncated: false, durationMs: 1 };
+      } },
+      engine: { chat: async () => { modelCalls++; return modelCalls === 1
+        ? { content: "", toolCalls: [nativeCall("code.fs.read", { path: "first.ts" }, "first")] }
+        : { content: "Must not call again" }; } },
+      schemas: SCHEMAS,
+    });
+    const result = await runner.run({ ctx, session: session(), prompt: "Read a file" });
+    expect(result).toMatchObject({ status: "suspended_by_flag", reason: "feature_disabled", code: "feature_disabled" });
+    expect(modelCalls).toBe(1);
+    expect(toolCalls).toBe(1);
+  });
+});
+
+describe("security-gate: C1a durable flag suspension", () => {
+  it("persists a resumable suspended_by_flag run rather than recording failure or user cancellation", async () => {
+    const { InMemoryWorkspaceStore } = await import("@npati/workspace");
+    const { CodeRunStateLog, refuseResume } = await import("../apps/agent-api/src/code-run-state");
+    const owner = { ...ctx, permissions: ["*", "owner"] };
+    const store = new InMemoryWorkspaceStore(); await store.initialize(owner);
+    const company = await store.createCompany(owner, { name: "Flag Suspension" }, "flag-suspension");
+    const { project } = await store.createProject(owner, company.id, { name: "Owned", type: "code_project" }, "flag-project");
+    const saved = await store.createCodeSession(owner, company.id, project.id, {});
+    let enabled = true;
+    const runner = new CodingAgentRunner({
+      flags: { assertEnabled: async () => { if (!enabled) throw Object.assign(new Error("Disabled"), { code: "feature_disabled" }); return true; } },
+      rbac: { authorize: async () => ({ allowed: true }) },
+      toolRuntime: { listTools: () => TOOLS, invoke: async () => { throw new Error("No tool should execute"); } },
+      engine: { chat: async () => { enabled = false; return { content: "Interrupted by kill switch" }; } },
+      schemas: SCHEMAS, runState: new CodeRunStateLog({ store }),
+    });
+    const result = await runner.run({ ctx: owner, session: saved, prompt: "Read", runId: "durable-flag-run" });
+    expect(result).toMatchObject({ status: "suspended_by_flag", reason: "feature_disabled", code: "feature_disabled" });
+    const state = await store.getCodeRunState(company.id, "durable-flag-run");
+    expect(state).toMatchObject({ status: "suspended_by_flag", details: { stopReason: "feature_disabled" } });
+    expect(state!.leaseOwner).toBeNull();
+    expect(refuseResume(state!.status)).toBeNull();
+  });
+});

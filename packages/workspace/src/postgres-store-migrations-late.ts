@@ -590,4 +590,17 @@ export async function runPostgresMigrationsPost086(pool: Pool): Promise<void> {
         await client.query("COMMIT");
       } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
     }
+    const flagSuspensionMigration = await pool.query("SELECT 1 FROM schema_migrations WHERE version='091_code_flag_suspension'");
+    if (!flagSuspensionMigration.rowCount) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT pg_advisory_xact_lock(hashtext('091_code_flag_suspension'))");
+        const { runMigration091 } = await import("./migration-091");
+        await runMigration091(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('091_code_flag_suspension') ON CONFLICT DO NOTHING");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
+    }
+
 }

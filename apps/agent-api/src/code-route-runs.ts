@@ -512,6 +512,8 @@ export function registerCodeRunRoutes(app: FastifyInstance, input: RegisterCodeR
     getAuthContext: (request) => codeExportContexts.get(request as object) ?? null,
     isExportEnabled: async (ctx, companyId) => {
       try {
+        // History export remains available after rollout disablement; ownership/RBAC and secret scanning still apply.
+        if (!await featureFlagService.isEnabled(ctx, "coding_agent.enabled", { companyId, userId: ctx.userId })) return true;
         await featureFlagService.assertEnabled(ctx, "code.export", { companyId, userId: ctx.userId });
         return true;
       } catch {

@@ -64,10 +64,10 @@ export async function verifyAuditChain(
 ): Promise<AuditChainVerification> {
   host.assertCompany(context, companyId);
   const entries = (host.auditLog.get(companyId) ?? []).filter((entry) =>
-    (range.fromSequence === undefined || entry.sequence >= range.fromSequence)
-    && (range.toSequence === undefined || entry.sequence <= range.toSequence));
+    range.toSequence === undefined || entry.sequence <= range.toSequence);
+  // Verify the prefix too: a selected range still depends on its predecessor hash.
   const verification = verifyAuditEntries(entries);
-  return { ...verification, companyId };
+  return { ...verification, companyId, entryCount: entries.filter(entry => range.fromSequence === undefined || entry.sequence >= range.fromSequence).length };
 }
 
 export async function auditChainState(host: InMemoryAuditState, context: AuthContext, companyId: string): Promise<AuditChainState> {
@@ -112,14 +112,20 @@ export async function auditCompanies(host: InMemoryAuditState, context: AuthCont
 }
 
 export async function systemAuditChains(host: InMemoryAuditState, workspaceId: string) {
-  return [...host.auditLog.entries()]
-    .filter(([, entries]) => entries.length > 0 && entries[0]!.workspaceId === workspaceId)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([companyId, entries]) => ({
+  const companies = new Set([
+    ...[...host.auditLog].filter(([, entries]) => entries[0]?.workspaceId === workspaceId).map(([id]) => id),
+    ...[...host.auditAnchors].filter(([, anchors]) => anchors[0]?.workspaceId === workspaceId).map(([id]) => id),
+  ]);
+  return [...companies].sort().map(companyId => {
+    const entries = host.auditLog.get(companyId) ?? [];
+    const anchor = (host.auditAnchors.get(companyId) ?? []).slice().sort((a, b) => b.day.localeCompare(a.day))[0] ?? null;
+    return {
       companyId,
-      state: { companyId, entryCount: entries.length, headSequence: entries.length, headHash: entries[entries.length - 1]!.entryHash },
-      verification: { ...verifyAuditEntries(entries), companyId },
-    }));
+      state: { companyId, entryCount: entries.length, headSequence: entries.at(-1)?.sequence ?? 0, headHash: entries.at(-1)?.entryHash ?? null },
+      verification: { ...verifyAuditEntries(entries), companyId }, anchor,
+      anchorVerification: anchor ? { ...verifyAuditEntries(entries.filter(entry => entry.sequence <= anchor.sequence)), companyId } : undefined,
+    };
+  });
 }
 
 export async function systemRecordAuditAnchor(

@@ -22,6 +22,7 @@ export interface AuditServicesInput {
   databaseUrl?: string;
   dataDirectory?: string;
   store: WorkspaceStore;
+  auditLogService?: AuditLogService;
   systemWorkspaceId: string;
   log: AuditLogger;
 }
@@ -40,7 +41,7 @@ export function createAuditServices(input: AuditServicesInput): AuditServices {
   const auditRepo = databaseUrl ? new AuditRepository(databaseUrl) : undefined;
   // C1c: tamper-evident journal for privileged decisions (append-only, hash-chained, anchored daily).
   const auditConfig = resolveAuditConfig(process.env, dataDirectory);
-  const auditLogService = databaseUrl ? new AuditLogService(store, auditConfig) : undefined;
+  const auditLogService = input.auditLogService ?? (databaseUrl ? new AuditLogService(store, auditConfig) : undefined);
   /**
    * C5a: approval decisions are journalled **before** they are applied, closing the C5 audit finding that
    * decisions never reached `company_audit_logs`. When the journal is absent the port is absent too and the
@@ -54,12 +55,12 @@ export function createAuditServices(input: AuditServicesInput): AuditServices {
             {
               companyId: input.companyId,
               actor: input.actor,
-              actorRole: "owner",
+              actorRole: await auditLogService.resolveActorRole(input.companyId, input.actor),
               action: input.action,
               resourceType: input.resourceType,
               resourceId: input.resourceId,
               decision: input.decision === "allow" ? "approved" : "rejected",
-              ...(input.payloadHash ? { payload: { payload_hash: input.payloadHash } } : {}),
+              ...(input.payloadHash ? { payloadHash: input.payloadHash } : {}),
               metadata: input.metadata ?? {},
             },
           );

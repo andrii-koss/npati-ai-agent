@@ -401,3 +401,15 @@ export function currentToolManifest(): CodeToolManifest {
   assertManifestConsistent();
   return toolManifest();
 }
+
+/** Resolve the exact published schemas named by a session manifest; never substitute the latest version. */
+export function schemasForToolManifest(manifestVersion: number): readonly CodeToolSchema[] {
+  const manifest = resolveManifestForSession(manifestVersion);
+  return manifest.tools.map(published => {
+    const schema = CODE_TOOL_SCHEMAS.find(candidate => candidate.name === published.name && candidate.version === published.version);
+    if (!schema || sha256(canonicalToolSchema(schema)) !== published.checksum) {
+      throw new CodeToolSchemaError("pinned_tool_schema_unavailable", "The session pinned a tool schema this build cannot serve: " + published.key, 409);
+    }
+    return schema;
+  });
+}

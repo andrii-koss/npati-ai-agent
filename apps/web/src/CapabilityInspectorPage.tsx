@@ -42,6 +42,7 @@ interface CapabilityItem {
   /** C2: feature flag gating this capability, when the backend reports one. */
   flagKey?: string | null;
   flagState?: "on" | "off" | "unknown" | null;
+  toolVersion?: number;
   reasonCode?: string;
 }
 
@@ -693,6 +694,9 @@ export function CapabilityInspectorPage() {
                             </span>
                           ) : (
                             <span style={{ color: "var(--npati-gray-400)" }}>—</span>
+                          )}
+                          {item.toolVersion !== undefined && (
+                            <span className="status-pill" style={{ marginLeft: "0.4rem" }}>v{item.toolVersion}</span>
                           )}
                         </td>
                       </tr>

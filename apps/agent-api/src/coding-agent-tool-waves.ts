@@ -252,6 +252,7 @@ export class CodingAgentToolWaves {
         projectId,
         sessionId,
         tool: call.name,
+        toolVersion: toolVersionByName.get(call.name),
         args: call.arguments,
         toolCallId: call.id,
         turnId: this.host.stepTurnKey(steps),

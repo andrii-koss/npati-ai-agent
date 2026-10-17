@@ -9,7 +9,7 @@ import {
   type ResolvedCodeSubagentLimits,
 } from "./code-subagent-limits";
 import { isPlanSafeTool } from "./code-policy-engine";
-import { CODE_TOOL_SCHEMAS } from "./code-tool-registry";
+import { CODE_TOOL_SCHEMAS, resolveManifestForSession, schemasForToolManifest } from "./code-tool-registry";
 import {
   isReadOnlyRunTool,
   REVIEW_SAFE_RUN_GIT_TOOLS,
@@ -49,7 +49,9 @@ export class CodingAgentToolCatalog {
   ): CodeRunToolDescriptor[] {
     const scope = options.capabilityScope;
     const mayDelegate = scope ? scope.mayDelegate : this.subagentLimits.delegationAllowed;
-    const staticTools = this.publishedTools();
+    const pinned = session.toolManifestVersion == null ? null : resolveManifestForSession(session.toolManifestVersion);
+    const staticTools = this.publishedTools().filter(tool => !pinned
+      || pinned.tools.some(candidate => candidate.name === tool.name && candidate.version === tool.version));
     const staticNames = new Set(staticTools.map((tool) => tool.name.toLowerCase()));
 
     const runtimeTools = [...(options.runtimeTools ?? [])]
@@ -94,8 +96,9 @@ export class CodingAgentToolCatalog {
   chatToolDefinitions(
     tools: readonly CodeRunToolDescriptor[],
     runtimeTools: readonly CodeRunRuntimeToolDescriptor[] = [],
+    session?: CodeSession,
   ): ChatToolDefinition[] {
-    const byName = this.toolSchemaByName(runtimeTools);
+    const byName = this.toolSchemaByName(runtimeTools, session);
     const definitions: ChatToolDefinition[] = [];
     for (const tool of tools) {
       const schema = byName.get(tool.name);
@@ -110,8 +113,10 @@ export class CodingAgentToolCatalog {
 
   toolSchemaByName(
     runtimeTools: readonly CodeRunRuntimeToolDescriptor[] = [],
+    session?: CodeSession,
   ): Map<string, CodeRunToolSchemaLike> {
-    const byName = new Map(this.schemas.map((schema) => [schema.name, schema]));
+    const schemas = session?.toolManifestVersion == null ? this.schemas : schemasForToolManifest(session.toolManifestVersion);
+    const byName = new Map<string, CodeRunToolSchemaLike>(schemas.map((schema) => [schema.name, schema]));
     for (const tool of runtimeTools) {
       if (byName.has(tool.name)) continue;
       byName.set(tool.name, {

@@ -474,4 +474,25 @@ describeDatabase(`security-gate: C1c database-level audit guarantees${databaseNo
       expect(finalReport.headHash).toBe(second.entryHash);
     }, () => closeFixture(fixture));
   }, 60_000);
+  it("round trips numeric anchor fields, accepts later appends and verifies a selected range", async () => {
+    const store = new PostgresWorkspaceStore(String(databaseUrl));
+    try {
+      await store.initialize(context);
+      const company = await store.createCompany(context, { name: "C1c Anchor Round Trip" }, uniqueKey("anchor"));
+      const service = new AuditLogService(store, auditConfig);
+      const input = { companyId: company.id, actor: context.userId, actorRole: "admin", action: "first", resourceType: "test", decision: "allowed" as const };
+      await service.record(context, input);
+      const anchors = await service.writeDailyAnchors(context.workspaceId);
+      const anchor = anchors.find(value => value.companyId === company.id)!;
+      expect(typeof anchor.sequence).toBe("number");
+      expect(typeof anchor.entryCount).toBe("number");
+      expect(await store.latestAuditAnchor(context, company.id)).toEqual(anchor);
+      const last = await service.record(context, { ...input, action: "second" });
+      expect(await service.verify(context, company.id)).toMatchObject({ ok: true, anchorMismatch: false });
+      expect(await service.verify(context, company.id, { fromSequence: 2, toSequence: 2 }))
+        .toMatchObject({ ok: true, entryCount: 1, headHash: last.entryHash });
+      expect(await service.verifyAll(context.workspaceId)).toEqual([]);
+    } finally { await store.close(); }
+  }, 60_000);
+
 });

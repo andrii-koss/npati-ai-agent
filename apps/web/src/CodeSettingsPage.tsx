@@ -119,7 +119,7 @@ export function CodeSettingsPage() {
         if (cancelled) return;
         const list = body.companies ?? [];
         setCompanies(list);
-        setCompanyId((current) => current || chooseAvailableCompanyId(list, { fallback: "" }));
+        setCompanyId((current) => current || chooseAvailableCompanyId(list));
       })
       .catch(() => {
         if (!cancelled) setCompanyId((current) => current || chooseAvailableCompanyId([], { fallback: "" }));

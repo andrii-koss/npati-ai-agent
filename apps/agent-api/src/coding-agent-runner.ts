@@ -1,3 +1,4 @@
+import { CODE_AGENT_MASTER_FLAG } from "./feature-flags";
 import { emitCodingActivity } from "./coding-agent-runner-contracts";
 import { providerContinuationFor } from "@npati/omniroute-adapter";
 import type {
@@ -282,10 +283,10 @@ export class CodingAgentRunner {
     const resolvedProfileTrace = modelProfileFallbackTrace(profileResolution, { enabledProfileIds: enabledProfileIds ?? null });
     modelProfileFallbackReason = resolvedProfileTrace.fallbackReason;
     this.ports.environment?.setModelProfileTrace(resolvedProfileTrace);
-    const schemaByName = this.toolCatalog.toolSchemaByName(runtimeToolDescriptors);
+    const schemaByName = this.toolCatalog.toolSchemaByName(runtimeToolDescriptors, session);
 
     const knownTools: KnownTool[] = tools.map((tool) => ({ name: tool.name, inputSchema: schemaByName.get(tool.name)?.inputSchema ?? {} }));
-    const definitions = this.toolCatalog.chatToolDefinitions(tools, runtimeToolDescriptors);
+    const definitions = this.toolCatalog.chatToolDefinitions(tools, runtimeToolDescriptors, session);
 
     let engineSupportsNativeTools = false;
     if (this.ports.engine.supportsNativeTools) {
@@ -360,6 +361,18 @@ export class CodingAgentRunner {
       try { return await input.cancelRequested(); } catch { return false; }
     };
 
+    const stopIfFlagDisabled = async (): Promise<CodingAgentRunResult | null> => {
+      try {
+        await this.ports.flags.assertEnabled(ctx, CODE_AGENT_MASTER_FLAG, { companyId, userId: ctx.userId });
+        return null;
+      } catch (error) {
+        const code = (error as { code?: string }).code === "feature_disabled" ? "feature_disabled" : "feature_gate_unavailable";
+        await release(code);
+        const result = await stop(code === "feature_disabled" ? "suspended_by_flag" : "interrupted", code === "feature_disabled" ? "feature_disabled" : "refused", "The Coding Agent flag no longer permits this run. No further model or tool call was dispatched.");
+        return { ...result, code };
+      }
+    };
+
     await this.reviewPhases.replayApprovedToolCalls({
       ctx, input, companyId, projectId, sessionId, stateRunId, steps,
       runtimeToolByName, toolVersionByName, messages, summary, replayRecorder, writeState, record,
@@ -373,6 +386,7 @@ export class CodingAgentRunner {
         return stop("interrupted", "interrupted", "Stopped: this process lost the run lease (another worker took over). No further changes were made.");
       }
       if (await cancelled()) {
+        if ((input.signal?.reason as { code?: string } | undefined)?.code === "feature_disabled") return { ...await stop("suspended_by_flag", "feature_disabled", "The run was suspended by the Coding Agent kill switch."), code: "feature_disabled" };
         if (input.detachedChildInbox && (input.signal?.reason as { code?: string } | undefined)?.code === "subagent_interrupt") {
           return stop("interrupted", "interrupted", "The child was interrupted at a safe boundary and can be continued.");
         }
@@ -380,6 +394,8 @@ export class CodingAgentRunner {
         await this.ports.runEvents?.append({ eventKey: `code-run-cancelled:${turnId}`, eventType: "cancelled", runStatus: "cancelled", message: "Coding Agent run cancelled by the user" });
         return stop("cancelled", "cancelled", "The run was cancelled. Any running processes were stopped and the sandbox was released.");
       }
+      const flagStop = await stopIfFlagDisabled();
+      if (flagStop) return flagStop;
       for (const content of this.ports.engine.recordedCompletionInputs?.(steps + 1) ?? []) messages.push({ role: "user", content });
 
       if (inboxManager.isOpened) {
@@ -435,6 +451,8 @@ export class CodingAgentRunner {
         }
       }
 
+      const beforeModelStop = await stopIfFlagDisabled();
+      if (beforeModelStop) return beforeModelStop;
       let result: ChatResult;
       let modelStarted = this.now();
       const thinking = {
@@ -517,6 +535,9 @@ export class CodingAgentRunner {
         return stop("cancelled", "cancelled", "The run was cancelled after its model request. No returned tool calls were executed.");
       }
 
+
+      const afterModelStop = await stopIfFlagDisabled();
+      if (afterModelStop) return afterModelStop;
 
       if (result.toolCalls?.length) sawNativeToolCalls = true;
 

@@ -60,7 +60,7 @@ export function verifyAuditEntries(entries: AuditEntry[]): AuditChainVerificatio
   if (!ordered.length) return { companyId: "", ok: true, entryCount: 0, headHash: null };
   const companyId = ordered[0]!.companyId;
   let prevHash: string | null = null;
-  let expectedSequence = ordered[0]!.sequence;
+  let expectedSequence = 1;
   for (const entry of ordered) {
     if (entry.companyId !== companyId) return { companyId, ok: false, entryCount: ordered.length, brokenAtSequence: entry.sequence, reason: "entry belongs to another company", headHash: prevHash };
     if (expectedSequence === ordered[0]!.sequence && entry.sequence === 1 && entry.prevHash !== null) {

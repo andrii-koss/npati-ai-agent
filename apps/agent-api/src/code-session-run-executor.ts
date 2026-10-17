@@ -69,7 +69,7 @@ export interface CodeRunEventSink {
   emitTerminal(status: CodeRunTerminalStatus, reason: string | null): void;
 }
 
-export type CodeRunTerminalStatus = "completed" | "failed" | "cancelled";
+export type CodeRunTerminalStatus = "completed" | "failed" | "cancelled" | "suspended_by_flag";
 
 export interface CodeSessionRunInput {
   onActivity?: (event: DevelopmentProcessProgressItem) => Promise<void>;
@@ -198,7 +198,7 @@ export class CodeSessionRunExecutor {
     }
 
     const view = result && typeof result === "object" ? (result as RunnerResultView) : null;
-    const terminalStatus: CodeRunTerminalStatus = view?.status === "cancelled"
+    const terminalStatus: CodeRunTerminalStatus = view?.status === "suspended_by_flag" ? "suspended_by_flag" : view?.status === "cancelled"
       ? "cancelled"
       : view?.status === "completed"
         ? "completed"

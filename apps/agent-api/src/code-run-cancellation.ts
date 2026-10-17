@@ -80,13 +80,13 @@ export class CodeRunCancellationRegistry {
    * Aborts every live controller for the session. Returns how many were aborted so the route can tell the
    * caller whether a run owned by this process was actually reached, instead of implying it always was.
    */
-  abortLiveRuns(sessionId: string): number {
+  abortLiveRuns(sessionId: string, reason?: unknown): number {
     const set = this.controllers.get(sessionId);
     if (!set || set.size === 0) return 0;
     let aborted = 0;
     for (const controller of [...set]) {
       try {
-        controller.abort();
+        controller.abort(reason);
         aborted += 1;
       } catch {
         // An already-aborted controller must not make Stop fail.

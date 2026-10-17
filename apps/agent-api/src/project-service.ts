@@ -38,6 +38,8 @@ export class ProjectService {
     const created = await this.store.createProject(context, companyId, {
       name, type: input.type, description: input.description?.trim() || undefined,
       dataBackendId: input.dataBackendId, appScheme,
+      toolchain: input.toolchain, defaultBranch: input.defaultBranch,
+      dataClassification: input.dataClassification, retentionClass: input.retentionClass,
     }, idempotencyKey);
     // Data Studio: a website created without an explicit database is attached to the company's
     // DataBackend automatically (created on demand the first time). Failures never block creation.

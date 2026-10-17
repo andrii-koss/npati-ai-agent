@@ -240,7 +240,7 @@ export const replayBundleStepColumns = `id, bundle_id AS "bundleId", company_id 
   turn_index AS "turnIndex", tool_call_id AS "toolCallId", payload, payload_hash AS "payloadHash",
   created_at AS "createdAt"`;
 export const auditAnchorColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", day::text AS day,
-  sequence, entry_count AS "entryCount", head_hash AS "headHash", anchor_path AS "anchorPath",
+  sequence::float8 AS "sequence", entry_count::float8 AS "entryCount", head_hash AS "headHash", anchor_path AS "anchorPath",
   signature, created_at AS "createdAt"`;
 export const featureFlagColumns = `id, workspace_id AS "workspaceId", scope, scope_id AS "scopeId", flag_key AS "flagKey",
   stage, enabled, rollout_percent AS "rolloutPercent", allowlist, revision, updated_by AS "updatedBy", updated_at AS "updatedAt"`;

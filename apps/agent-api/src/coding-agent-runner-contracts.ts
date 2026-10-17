@@ -75,6 +75,7 @@ export type CodingAgentStopReason =
   | "cancelled"
   | "loop_detected"
   | "invalid_arguments_exhausted"
+  | "feature_disabled"
   | "provider_error"
   | "tool_failure"
 
@@ -92,7 +93,7 @@ export type CodingAgentStopReason =
   | "async_collect_unsettled"
   | "refused";
 
-export type CodingAgentRunStatus = "completed" | "stopped" | "failed" | "cancelled" | "interrupted" | "waiting_for_user";
+export type CodingAgentRunStatus = "suspended_by_flag" | "completed" | "stopped" | "failed" | "cancelled" | "interrupted" | "waiting_for_user";
 
 export const CODE_ASK_USER_TOOL = "code.ask_user";
 
