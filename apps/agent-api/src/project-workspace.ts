@@ -97,8 +97,8 @@ export interface ProjectWorkspace {
   getFileTree(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string): Promise<ProjectFileEntry[]>;
   searchFiles(ctx: AuthContext, companyId: string, projectId: string, query: string, workspaceId?: string, agentId?: string): Promise<ProjectFileEntry[]>;
   readFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, workspaceId?: string, agentId?: string): Promise<ProjectFileContent>;
-  createFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, content: string, workspaceId?: string, agentId?: string, restoredMode?: number): Promise<ProjectFileContent>;
-  writeFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, content: string, expectedRevision: string, workspaceId?: string, agentId?: string): Promise<ProjectFileContent>;
+  createFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, content: string | Buffer, workspaceId?: string, agentId?: string, restoredMode?: number): Promise<ProjectFileContent>;
+  writeFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, content: string | Buffer, expectedRevision: string, workspaceId?: string, agentId?: string): Promise<ProjectFileContent>;
   editFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, find: string, replacement: string, expectedRevision: string, workspaceId?: string, agentId?: string): Promise<ProjectFileContent>;
   deleteFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, workspaceId?: string, agentId?: string, expectedRevision?: string): Promise<void>;
   moveFile(ctx: AuthContext, companyId: string, projectId: string, from: string, to: string, expectedRevision: string, workspaceId?: string, agentId?: string): Promise<ProjectFileContent>;
@@ -457,9 +457,15 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
     if (!isManifestOrLockfile && (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{20,})\b|(?<![-A-Za-z0-9_])(?:[A-Za-z0-9_]*(?:api[_-]?key|password|secret|token)(?![sS]\b)[A-Za-z0-9_]*)["']?\s*[:=]\s*["'][^"']{8,}["']/i.test(bytes.toString("utf8")))) throw new ProjectFileError("secret_content", "Protected file content", 403);
     return { ...this.content(clean, bytes), mode: (await lstat(absolute)).mode & 0o777 };
   }
-  private async save(absolute: string, content: string, restoredMode?: number) {
-    if (typeof content !== "string") throw new ProjectFileError("invalid_content", "Content must be text");
-    const bytes = Buffer.from(content, "utf8");
+  private async save(absolute: string, content: string | Buffer, restoredMode?: number) {
+    let bytes: Buffer;
+    if (Buffer.isBuffer(content)) {
+      bytes = content;
+    } else if (typeof content === "string") {
+      bytes = Buffer.from(content, "utf8");
+    } else {
+      throw new ProjectFileError("invalid_content", "Content must be text or binary buffer");
+    }
     if (bytes.length > this.maxFileBytes) throw new ProjectFileError("file_too_large", "Project file size limit exceeded", 413);
     await mkdir(path.dirname(absolute), { recursive: true });
     const temporary = path.join(path.dirname(absolute), `.npati-${randomUUID()}.tmp`);
@@ -476,7 +482,7 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
     finally { await rm(temporary, { force: true }); }
     return bytes;
   }
-  async createFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, content: string, workspaceId?: string, agentId?: string, restoredMode?: number) {
+  async createFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, content: string | Buffer, workspaceId?: string, agentId?: string, restoredMode?: number) {
     const { base } = await this.access(ctx, companyId, projectId, "write", workspaceId, agentId);
     return this.lock(base, async () => {
       const { clean, absolute } = await this.target(base, filePath);
@@ -486,7 +492,7 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
       return this.content(clean, bytes);
     });
   }
-  async writeFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, content: string, expectedRevision: string, workspaceId?: string, agentId?: string) {
+  async writeFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, content: string | Buffer, expectedRevision: string, workspaceId?: string, agentId?: string) {
     const { base } = await this.access(ctx, companyId, projectId, "write", workspaceId, agentId);
     return this.lock(base, async () => {
       const { clean, absolute } = await this.target(base, filePath);

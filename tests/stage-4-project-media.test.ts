@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Readable } from "node:stream";
+import crypto from "node:crypto";
 import {
   ProjectMediaService,
   ProjectMediaError,
@@ -290,6 +291,51 @@ describe("Stage 4: MinIO Integration for Website Media Files", () => {
       expect(PROJECT_MEDIA_TOOLS).toContain("project.media.get");
       expect(PROJECT_MEDIA_TOOLS).toContain("project.media.delete");
       expect(PROJECT_MEDIA_TOOLS.length).toBe(4);
+    });
+  });
+
+  describe("6. Media Integrity & Exact Binary Mirroring", () => {
+    it("mirrors raw binary buffer to workspace without UTF-8 expansion or corruption", async () => {
+      const { storage } = createMockObjectStorage();
+      const files = new Map<string, { buffer: Buffer; revision: string }>();
+      const mockWs = {
+        async readFile(_ctx: any, cId: string, pId: string, fPath: string) {
+          const item = files.get(`${cId}/${pId}/${fPath}`);
+          if (!item) throw new Error("not found");
+          return { content: item.buffer.toString("binary"), revision: item.revision };
+        },
+        async createFile(_ctx: any, cId: string, pId: string, fPath: string, content: string | Buffer) {
+          const buf = Buffer.isBuffer(content) ? content : Buffer.from(content, "utf8");
+          files.set(`${cId}/${pId}/${fPath}`, { buffer: buf, revision: "rev-1" });
+          return { path: fPath, size: buf.length, revision: "rev-1" };
+        },
+        async writeFile(_ctx: any, cId: string, pId: string, fPath: string, content: string | Buffer) {
+          const buf = Buffer.isBuffer(content) ? content : Buffer.from(content, "utf8");
+          files.set(`${cId}/${pId}/${fPath}`, { buffer: buf, revision: "rev-2" });
+          return { path: fPath, size: buf.length, revision: "rev-2" };
+        },
+      } as unknown as ProjectWorkspace;
+
+      const service = new ProjectMediaService(storage, mockWs);
+      const binaryPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+      const shaOriginal = crypto.createHash("sha256").update(binaryPng).digest("hex");
+
+      const res = await service.uploadMedia(context, companyId, projectId, {
+        name: "hero-integrity.png",
+        data: binaryPng,
+        mimeType: "image/png",
+        workspaceSync: true,
+      });
+
+      expect(res.size).toBe(binaryPng.length);
+      expect(res.etag).toBe(shaOriginal);
+
+      // Verify workspace copy has exact same byte length and SHA-256
+      const wsCopy = files.get(`${companyId}/${projectId}/public/assets/hero-integrity.png`);
+      expect(wsCopy).toBeDefined();
+      expect(wsCopy!.buffer.length).toBe(binaryPng.length);
+      const shaWorkspace = crypto.createHash("sha256").update(wsCopy!.buffer).digest("hex");
+      expect(shaWorkspace).toBe(shaOriginal);
     });
   });
 });

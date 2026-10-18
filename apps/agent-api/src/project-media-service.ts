@@ -209,13 +209,12 @@ export class ProjectMediaService {
     // Mirror to workspace filesystem if workspaceSync is requested and workspace is available
     if (input.workspaceSync !== false && this.workspace && ctx) {
       const workspacePath = `public/${relativeMediaPath}`;
-      const content = uploadData.toString("binary");
-      try {
-        const existing = await this.workspace.readFile(ctx, companyId, projectId, workspacePath);
-        await this.workspace.writeFile(ctx, companyId, projectId, workspacePath, content, existing.revision);
-      } catch {
-        await this.workspace.createFile(ctx, companyId, projectId, workspacePath, content).catch(() => undefined);
-      }
+        try {
+          const existing = await this.workspace.readFile(ctx, companyId, projectId, workspacePath);
+          await this.workspace.writeFile(ctx, companyId, projectId, workspacePath, uploadData, existing.revision);
+        } catch {
+          await this.workspace.createFile(ctx, companyId, projectId, workspacePath, uploadData).catch(() => undefined);
+        }
     }
 
     const publicUrl = `/api/projects/${encodeURIComponent(projectId)}/media/${relativeMediaPath}`;

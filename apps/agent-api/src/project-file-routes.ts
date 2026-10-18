@@ -16,9 +16,26 @@ function fail(reply: FastifyReply, error: unknown) {
   return reply.code(500).send({ error: { code: "project_files_error", message: error instanceof Error ? error.message : "Project file request failed" } });
 }
 
-async function authorize(auth: AuthProvider, request: FastifyRequest) {
+async function authorize(
+  auth: AuthProvider,
+  request: FastifyRequest,
+  requiredCompanyId?: string,
+  requiredProjectId?: string,
+  projectService?: ProjectService,
+) {
   const context = await auth.authenticate(request);
-  if (!context.permissions.some((permission) => ["workspace:read", "business:manage", "owner", "*"].includes(permission))) throw new WorkspaceAccessError("Missing workspace read permission");
+  if (!context.permissions.some((permission) => ["workspace:read", "business:manage", "owner", "*"].includes(permission))) {
+    throw new WorkspaceAccessError("Missing workspace read permission");
+  }
+  if (requiredCompanyId && context.companyId && context.companyId !== requiredCompanyId && !context.permissions.includes("*")) {
+    throw new WorkspaceAccessError("Cross-tenant access forbidden: company mismatch");
+  }
+  if (requiredProjectId && context.projectId && context.projectId !== requiredProjectId && !context.permissions.includes("*")) {
+    throw new WorkspaceAccessError("Cross-project access forbidden: project mismatch");
+  }
+  if (projectService && requiredCompanyId && requiredProjectId) {
+    await projectService.get(context, requiredCompanyId, requiredProjectId);
+  }
   return context;
 }
 
@@ -131,8 +148,8 @@ export function registerProjectFileRoutes(
   if (mediaService) {
     app.post<{ Params: Params; Body: { name: string; base64Data: string; mimeType?: string; targetDir?: string } }>("/companies/:companyId/projects/:projectId/media/upload", async (request, reply) => {
       try {
-        const context = await authorize(auth, request);
         const { companyId, projectId } = request.params;
+        const context = await authorize(auth, request, companyId, projectId, projectService);
         const { name, base64Data, mimeType, targetDir } = request.body || {};
         if (!name || !base64Data) {
           return reply.code(400).send({ error: { code: "invalid_upload", message: "Name and base64Data are required" } });
@@ -152,8 +169,8 @@ export function registerProjectFileRoutes(
 
     app.get<{ Params: Params; Querystring: { prefix?: string } }>("/companies/:companyId/projects/:projectId/media", async (request, reply) => {
       try {
-        await authorize(auth, request);
         const { companyId, projectId } = request.params;
+        const context = await authorize(auth, request, companyId, projectId, projectService);
         const list = await mediaService.listMedia(companyId, projectId, request.query?.prefix);
         return reply.code(200).send(list);
       } catch (error) { return fail(reply, error); }
@@ -161,8 +178,8 @@ export function registerProjectFileRoutes(
 
     app.delete<{ Params: Params; Querystring: { path: string } }>("/companies/:companyId/projects/:projectId/media", async (request, reply) => {
       try {
-        const context = await authorize(auth, request);
         const { companyId, projectId } = request.params;
+        const context = await authorize(auth, request, companyId, projectId, projectService);
         const mediaPath = request.query?.path;
         if (!mediaPath || typeof mediaPath !== "string") {
           return reply.code(400).send({ error: { code: "invalid_path", message: "Media path query parameter is required" } });
