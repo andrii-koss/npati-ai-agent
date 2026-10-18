@@ -119,8 +119,14 @@ export class CodingAgentToolWaves {
   private readonly repeatedSignatures: string[] = [];
   private readonly repeatedErrors: string[] = [];
   private readonly argumentCorrections = new Map<string, number>();
+  private readonly zeroDiffEdits: string[] = [];
+  private readonly verificationFailures: string[] = [];
+  private readonly turnPatterns: string[] = [];
   private loopReminded = false;
   private errorReminded = false;
+  private cycleReminded = false;
+  private zeroDiffReminded = false;
+  private verificationLoopReminded = false;
 
   constructor(private readonly host: ToolWavesExecutionHost) {}
 
@@ -214,6 +220,34 @@ export class CodingAgentToolWaves {
       this.loopReminded = true;
       messages.push({ role: "system", content: REMINDER_MESSAGE });
       await record({ kind: "reminder", companyId, projectId, sessionId, runId: input.runId, turn: steps, reason: "repeated_call" });
+    }
+
+    const turnSig = callsToRun.map((c) => {
+      const p = (c.arguments as Record<string, unknown>)?.path;
+      return p && typeof p === "string" ? `${c.name}:${p}` : c.name;
+    }).join(";");
+    this.turnPatterns.push(turnSig);
+    while (this.turnPatterns.length > 12) this.turnPatterns.shift();
+    for (const period of [2, 3]) {
+      if (this.turnPatterns.length >= period * 3) {
+        const c1 = this.turnPatterns.slice(-period).join("->");
+        const c2 = this.turnPatterns.slice(-period * 2, -period).join("->");
+        const c3 = this.turnPatterns.slice(-period * 3, -period * 2).join("->");
+        if (c1 === c2 && c2 === c3) {
+          if (this.cycleReminded) {
+            await release("loop_detected");
+            const res = await stop("stopped", "loop_detected", `Stopped: repeating cycle of tool calls [${c1}] was detected without progress.`);
+            return { action: "stopped", result: res };
+          }
+          this.cycleReminded = true;
+          messages.push({
+            role: "system",
+            content: `Warning: A repeating pattern of tool calls [${c1}] was repeated 3 times without progress. Change your approach or step back.`,
+          });
+          await record({ kind: "reminder", companyId, projectId, sessionId, runId: input.runId, turn: steps, reason: "cycle_detected" });
+          break;
+        }
+      }
     }
 
     const publishActivity = async (event: import("@npati/shared").DevelopmentProcessProgressItem) => {
@@ -310,6 +344,29 @@ export class CodingAgentToolWaves {
 
       if (call.name === "code.verify.run" && result.ok) {
         await reviewCoordinator.onVerifyToolExecuted(beforeVerification, result);
+        const envelope = (result.result as Record<string, unknown>)?.data ?? (result.result as Record<string, unknown>);
+        const results = Array.isArray((envelope as Record<string, unknown>)?.results)
+          ? ((envelope as Record<string, unknown>).results as Array<{ tool: string; ok: boolean; summary?: string }>)
+          : [];
+        const failed = results.filter((r) => !r.ok);
+        if (failed.length > 0) {
+          const findingsKey = failed.map((f) => `${f.tool}:${f.summary ?? ""}`).sort().join(" | ");
+          this.verificationFailures.push(findingsKey);
+          while (this.verificationFailures.length > 4) this.verificationFailures.shift();
+          if (this.verificationFailures.length >= 3 && this.verificationFailures.slice(-3).every((k) => k === findingsKey)) {
+            if (!this.verificationLoopReminded) {
+              this.verificationLoopReminded = true;
+              messages.push({
+                role: "system",
+                content: `Warning: Verification checks failed with the exact same error 3 times in a row (${failed[0]?.tool}: ${failed[0]?.summary?.slice(0, 160)}). Your previous edits did not fix the problem. Stop repeating similar edits and diagnose the underlying cause.`,
+              });
+              await record({ kind: "reminder", companyId, projectId, sessionId, runId: input.runId, turn: steps, reason: "repeated_verify_failure" });
+            }
+          }
+        } else {
+          this.verificationFailures.length = 0;
+          this.verificationLoopReminded = false;
+        }
       }
 
       await publishActivity({
@@ -320,7 +377,31 @@ export class CodingAgentToolWaves {
         ...(result.ok ? { resultTruncated: result.truncated } : { error: result.error.message, errorCode: result.error.code }),
       });
       summary.toolCalls += 1;
-      if (result.ok && call.arguments.dryRun !== true) recordWrittenFiles(summary, call.name, result.result);
+      if (result.ok && call.arguments.dryRun !== true) {
+        recordWrittenFiles(summary, call.name, result.result);
+        if (["code.fs.write", "code.fs.edit", "code.fs.apply_patch"].includes(call.name)) {
+          const envelope = ((result.result as Record<string, unknown>)?.data ?? (result.result as Record<string, unknown>)?.result ?? result.result) as Record<string, unknown> | undefined;
+          const writePath = typeof envelope?.path === "string" ? envelope.path : String(call.arguments.path ?? "");
+          const isZeroDiff = envelope?.linesAdded === 0 && envelope?.linesRemoved === 0 && envelope?.created === false;
+          if (isZeroDiff && writePath) {
+            this.zeroDiffEdits.push(writePath);
+            while (this.zeroDiffEdits.length > 3) this.zeroDiffEdits.shift();
+            if (this.zeroDiffEdits.length >= 2 && this.zeroDiffEdits.slice(-2).every((p) => p === writePath)) {
+              if (!this.zeroDiffReminded) {
+                this.zeroDiffReminded = true;
+                messages.push({
+                  role: "system",
+                  content: `Warning: Writing to "${writePath}" produced 0 line changes (diff was empty). Do not write the exact same file content again without modifications.`,
+                });
+                await record({ kind: "reminder", companyId, projectId, sessionId, runId: input.runId, turn: steps, reason: "zero_diff_write" });
+              }
+            }
+          } else {
+            this.zeroDiffEdits.length = 0;
+            this.zeroDiffReminded = false;
+          }
+        }
+      }
       if (CHECK_TOOL_PREFIXES.some((prefix) => call.name.startsWith(prefix)) && result.ok) {
         if (!summary.checksRun.includes(call.name)) summary.checksRun.push(call.name);
       }
@@ -494,6 +575,18 @@ export class CodingAgentToolWaves {
         this.errorReminded = true;
         messages.push({ role: "system", content: REMINDER_MESSAGE });
         await record({ kind: "reminder", companyId, projectId, sessionId, runId: input.runId, turn: steps, reason: "repeated_error" });
+      }
+
+      if (this.verificationFailures.length >= 4 && this.verificationFailures.slice(-4).every((k) => k === this.verificationFailures[this.verificationFailures.length - 1])) {
+        await release("loop_detected");
+        const res = await stop("stopped", "loop_detected", `Stopped: the same verification failure (${this.verificationFailures[0]?.split(":")[0] ?? "check"}) kept repeating across 4 attempts without progress.`);
+        return { action: "stopped", result: res };
+      }
+
+      if (this.zeroDiffEdits.length >= 3 && this.zeroDiffEdits.slice(-3).every((p) => p === this.zeroDiffEdits[this.zeroDiffEdits.length - 1])) {
+        await release("loop_detected");
+        const res = await stop("stopped", "loop_detected", `Stopped: repeated zero-diff edits on "${this.zeroDiffEdits[0]}" without progress.`);
+        return { action: "stopped", result: res };
       }
     }
 

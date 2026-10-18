@@ -121,7 +121,7 @@ export interface QueryOptions {
   include?: string[];
 }
 
-export interface QueryResult<T> {
+export type QueryResult<T> = Array<T> & {
   data: T[];
   meta: {
     total: number;
@@ -129,7 +129,7 @@ export interface QueryResult<T> {
     limit: number;
     hasMore: boolean;
   };
-}
+};
 
 export class ProjectApiError extends Error {
   readonly status: number;
@@ -155,8 +155,8 @@ export interface ProjectClientOptions {
 }
 
 export interface ProjectAuthClient {
-  signUp(input: { email: string; password: string; name?: string; redirectTo?: string }): Promise<{ user: ProjectUser; session: ProjectSession | null }>;
-  signIn(input: { email: string; password: string }): Promise<{ user: ProjectUser; session: ProjectSession }>;
+  signUp(input: { email: string; password: string; name?: string; redirectTo?: string }): Promise<{ user: ProjectUser; session: ProjectSession | null; success: boolean }>;
+  signIn(input: { email: string; password: string }): Promise<{ user: ProjectUser; session: ProjectSession; success: boolean }>;
   signOut(): Promise<void>;
   getUser(): Promise<ProjectUser | null>;
   getSession(): Promise<ProjectSession | null>;
@@ -168,7 +168,7 @@ export interface ProjectAuthClient {
   onAuthStateChange(callback: AuthChangeCallback): () => void;
 }
 
-export interface ProjectDataCollection<T = Record<string, unknown>> {
+export interface ProjectDataCollection<T = any> {
   list(options?: QueryOptions): Promise<QueryResult<T>>;
   get(id: string, options?: { fields?: string[]; include?: string[] }): Promise<T>;
   create(values: Partial<T>): Promise<T>;
@@ -178,7 +178,7 @@ export interface ProjectDataCollection<T = Record<string, unknown>> {
 
 export interface ProjectClient {
   readonly auth: ProjectAuthClient;
-  from<T = Record<string, unknown>>(collection: string): ProjectDataCollection<T>;
+  from<T = any>(collection: string): ProjectDataCollection<T>;
   fetchRaw(endpoint: string, init?: RequestInit): Promise<Response>;
 }
 
@@ -328,7 +328,7 @@ export function createProjectClient(options: ProjectClientOptions): ProjectClien
         await saveSession(session);
         notifyListeners("SIGNED_IN", session);
       }
-      return { user: res.user, session };
+      return { user: res.user, session, success: true };
     },
 
     async signIn(input) {
@@ -344,7 +344,7 @@ export function createProjectClient(options: ProjectClientOptions): ProjectClien
       };
       await saveSession(session);
       notifyListeners("SIGNED_IN", session);
-      return { user: res.user, session };
+      return { user: res.user, session, success: true };
     },
 
     async signOut() {
@@ -443,7 +443,7 @@ export function createProjectClient(options: ProjectClientOptions): ProjectClien
     },
   };
 
-  const from = <T = Record<string, unknown>>(collection: string): ProjectDataCollection<T> => {
+  const from = <T = any>(collection: string): ProjectDataCollection<T> => {
     const encodedCol = encodeURIComponent(collection);
 
     return {
@@ -489,10 +489,12 @@ export function createProjectClient(options: ProjectClientOptions): ProjectClien
           limit: query.limit ?? res.data?.length ?? 20,
           hasMore: false,
         };
-        return {
-          data: res.data ?? [],
-          meta: res.meta ?? defaultMeta,
-        };
+        const items = res.data ?? [];
+        const meta = res.meta ?? defaultMeta;
+        return Object.assign([...items], {
+          data: items,
+          meta,
+        }) as QueryResult<T>;
       },
 
       async get(id, getOptions = {}) {

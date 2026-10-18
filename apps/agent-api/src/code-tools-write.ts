@@ -242,8 +242,8 @@ export async function applyEdit(
     throw new CodeToolError(
       "edit_no_match",
       tolerant
-        ? `old_string was not found verbatim, but a similar block exists at line ${tolerant.line}; match the existing indentation exactly`
-        : "old_string was not found in the file",
+        ? `old_string was not found verbatim, but a similar block exists at line ${tolerant.line}; match the existing indentation exactly or use code.fs.write to update the file`
+        : "old_string was not found in the file; check indentation or use code.fs.write",
       tool, 409, false, "edit",
       tolerant ? { hint: tolerant.snippet, line: tolerant.line } : {},
     );

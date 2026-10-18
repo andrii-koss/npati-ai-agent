@@ -33,6 +33,7 @@ export function ProjectAccount() {
     : <form onSubmit={submit}><label>Email<input name="email" type="email" required autoComplete="email" /></label><label>Пароль<input name="password" type="password" required minLength={8} autoComplete="current-password" /></label><button name="action" value="login" disabled={busy}>Увійти</button><button name="action" value="register" disabled={busy}>Зареєструватися</button></form>}
     <p role="status">{message}</p><a href="/">На головну</a>${commerce ? '<a href="/shop">Магазин</a>' : ""}</section>;
 }
+export default ProjectAccount;
 `,
     "app/auth/page.tsx": `import { ProjectAccount } from "../../components/ProjectAccount";\nexport default function AccountPage() { return <ProjectAccount />; }\n`,
     "components/ProjectForm.tsx": `"use client";
@@ -48,6 +49,7 @@ export function ProjectForm({ collection="form_submissions", fields=[{name:"name
   }
   return <form className="card npati-form" onSubmit={submit}><style>{${JSON.stringify(commerceFormStyles)}}</style><h3>{title}</h3>{fields.map((field,index) => <label key={index} style={{display:"block",marginBottom:12}}>{field.label || field.name}{field.type === "textarea" ? <textarea name={field.name || "field_"+index} required={field.required} maxLength={4000} /> : <input name={field.name || "field_"+index} type={field.type === "email" ? "email" : field.type === "number" ? "number" : "text"} required={field.required} maxLength={1000} />}</label>)}<button type="submit" disabled={busy}>Надіслати</button><p role="status">{message}</p></form>;
 }
+export default ProjectForm;
 `,
   };
   if (commerce) {
@@ -65,6 +67,7 @@ export function ProjectStore({ embedded=false }: {embedded?:boolean}) {
   async function checkout(){setBusy(true);try{const response=await projectClient.fetchRaw("/commerce/checkout",{method:"POST",body:JSON.stringify({cartId})});const result=await response.json();if(!response.ok)throw new Error(result.error?.message || "Помилка замовлення.");setItems([]);setCartId("");setMessage("Замовлення "+result.order.order_number+" створено. Сума: "+result.order.total_amount+" UAH");}catch(error){setMessage(error instanceof Error ? error.message : String(error));}finally{setBusy(false);}}
   ${commerceStoreMarkup}
 }
+export default ProjectStore;
 `;
     files["app/shop/page.tsx"] = `import { ProjectStore } from "../../components/ProjectStore";\nexport default function ShopPage() { return <ProjectStore />; }\n`;
     files["app/page.tsx"] = commerceHomePage;
