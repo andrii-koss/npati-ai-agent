@@ -349,6 +349,7 @@ export interface MarketplaceQuery {
   auth?: ProviderAuthType;
   cost?: ProviderFreeStatus;
   capability?: string;
+  scope?: "all" | "ai" | "code";
   connectableOnly?: boolean;
   offset?: number;
   limit?: number;

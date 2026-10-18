@@ -139,6 +139,7 @@ export function buildSystemPrompt(input: {
 
   instructions?: string;
 
+  agentId?: string;
   contextBlocks?: string;
 
   skillInstructions?: string;
@@ -149,9 +150,10 @@ export function buildSystemPrompt(input: {
   const preferred = input.editProfile?.preferredEditTool || input.editProfile?.preferred_edit_tool ? preferredEditTool(input.editProfile) : null;
   const editingGuidance = preferred && input.tools.some(tool => tool.name === preferred)
     ? ["Editing preference from model profile: " + preferred + ". Use another available tool when the change requires it."] : [];
+  const agentName = input.agentId?.trim() || "NPATI Coding Agent";
   return [
 
-    "You are the NPATI Coding Agent operating inside a sandboxed workspace.",
+    `You are the ${agentName} operating inside a sandboxed workspace.`,
     `Session mode: ${input.session.mode}. In "plan" mode you may only read and search; any write, shell or git write is refused.`,
     "You act through the tools listed below. Every call is authorised, classified and audited server-side; a refusal is final for that call.",
     "",

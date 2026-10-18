@@ -9,6 +9,7 @@ import { CodeSandboxImagesPanel } from "./CodeSandboxImagesPanel";
 import { CodeDataPolicyPanel } from "./CodeDataPolicyPanel";
 import { CodeQueuePanel } from "./CodeQueuePanel";
 import { CodeMembershipPanel } from "./CodeMembershipPanel";
+import { ErrorBoundary } from "./ErrorBoundary";
 import {
   type CompanySummary,
   type CodeProject,
@@ -54,7 +55,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return result as T;
 }
 
-export function CodeSettingsPage() {
+function CodeSettingsPageContent() {
   const navigate = useNavigate();
   const { language } = useTranslation();
   const isUk = language === "uk";
@@ -160,27 +161,31 @@ export function CodeSettingsPage() {
     return () => { cancelled = true; };
   }, [companyId, reloadToken, isUk]);
 
-  const companyName = companies.find((company) => company.id === companyId)?.name ?? "";
+  const companyList = Array.isArray(companies) ? companies : [];
+  const projectList = Array.isArray(projects) ? projects : [];
+  const sessionList = Array.isArray(sessions) ? sessions : [];
+
+  const companyName = companyList.find((company) => company.id === companyId)?.name ?? "";
 
   const visibleProjects = useMemo(() => {
     const needle = searchQuery.trim().toLowerCase();
-    return projects
+    return projectList
       .filter((project) => (showArchived ? true : project.status !== "archived"))
       .filter((project) => {
         if (!needle) return true;
-        return project.name.toLowerCase().includes(needle)
+        return (project.name ?? "").toLowerCase().includes(needle)
           || (project.repositoryUrl ?? "").toLowerCase().includes(needle);
       });
-  }, [projects, searchQuery, showArchived]);
+  }, [projectList, searchQuery, showArchived]);
 
-  const detailProject = detailId ? projects.find((project) => project.id === detailId) ?? null : null;
+  const detailProject = detailId ? projectList.find((project) => project.id === detailId) ?? null : null;
 
   const stats = useMemo(() => ({
-    projects: projects.filter((project) => project.status !== "archived").length,
-    activeSessions: sessions.filter((session) => session.status === "active" || session.status === "awaiting_approval").length,
-    repositories: projects.filter((project) => Boolean(project.repositoryUrl)).length,
-    toolchains: projects.filter((project) => Boolean(project.toolchain)).length,
-  }), [projects, sessions]);
+    projects: projectList.filter((project) => project.status !== "archived").length,
+    activeSessions: sessionList.filter((session) => session.status === "active" || session.status === "awaiting_approval").length,
+    repositories: projectList.filter((project) => Boolean(project.repositoryUrl)).length,
+    toolchains: projectList.filter((project) => Boolean(project.toolchain)).length,
+  }), [projectList, sessionList]);
 
   const createProject = useCallback(async (input: {
     name: string;
@@ -343,7 +348,7 @@ export function CodeSettingsPage() {
                   <path d="M19 12H5M12 19l-7-7 7-7" />
                 </svg>
               </Link>
-              <span>NPATI Coding Agent</span>
+              <span>Npati Code</span>
             </h1>
             <p className="hero-copy">
               {isUk
@@ -576,36 +581,50 @@ export function CodeSettingsPage() {
           )}
 
           {companyId && (
-            <CodeFlagsPanel
-              companyId={companyId}
-              isUk={isUk}
-              notify={(type, message) => setFeedback({ type, message })}
-              onMasterEnabledChange={setMasterEnabled}
-              onSessionsSuspended={() => reload()}
-            />
+            <ErrorBoundary title={isUk ? "Панель Feature Flags" : "Feature Flags panel"}>
+              <CodeFlagsPanel
+                companyId={companyId}
+                isUk={isUk}
+                notify={(type, message) => setFeedback({ type, message })}
+                onMasterEnabledChange={setMasterEnabled}
+                onSessionsSuspended={() => reload()}
+              />
+            </ErrorBoundary>
           )}
 
           {companyId && (
-            <CodeSandboxImagesPanel
-              companyId={companyId}
-              isUk={isUk}
-              notify={(type, message) => setFeedback({ type, message })}
-            />
+            <ErrorBoundary title={isUk ? "Панель Sandbox Images" : "Sandbox Images panel"}>
+              <CodeSandboxImagesPanel
+                companyId={companyId}
+                isUk={isUk}
+                notify={(type, message) => setFeedback({ type, message })}
+              />
+            </ErrorBoundary>
           )}
 
           {companyId && (
-            <CodeDataPolicyPanel
-              companyId={companyId}
-              isUk={isUk}
-              notify={(type, message) => setFeedback({ type, message })}
-            />
+            <ErrorBoundary title={isUk ? "Панель Data Policy" : "Data Policy panel"}>
+              <CodeDataPolicyPanel
+                companyId={companyId}
+                isUk={isUk}
+                notify={(type, message) => setFeedback({ type, message })}
+              />
+            </ErrorBoundary>
           )}
 
           {/* R1 (section A, item 3): the queue's state is visible instead of being inferable only from a refusal. */}
-          {companyId && <CodeQueuePanel companyId={companyId} isUk={isUk} />}
+          {companyId && (
+            <ErrorBoundary title={isUk ? "Панель черги" : "Queue panel"}>
+              <CodeQueuePanel companyId={companyId} isUk={isUk} />
+            </ErrorBoundary>
+          )}
 
           {/* C5a: Code membership, roles, and denial reasoning */}
-          {companyId && <CodeMembershipPanel companyId={companyId} isUk={isUk} />}
+          {companyId && (
+            <ErrorBoundary title={isUk ? "Панель учасників" : "Membership panel"}>
+              <CodeMembershipPanel companyId={companyId} isUk={isUk} />
+            </ErrorBoundary>
+          )}
 
           <section className="browser-campaign-card code-limits-panel" aria-label={isUk ? "Ліміти (конфігурація)" : "Limits (configuration)"}>
             <div className="browser-campaign-card-header">
@@ -715,6 +734,14 @@ export function CodeSettingsPage() {
         />
       )}
     </main>
+  );
+}
+
+export function CodeSettingsPage() {
+  return (
+    <ErrorBoundary showBackToAgents title="Помилка завантаження налаштувань кодінг-агента / Code settings error">
+      <CodeSettingsPageContent />
+    </ErrorBoundary>
   );
 }
 

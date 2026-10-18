@@ -8,6 +8,8 @@ import { readCodeActiveContext, writeCodeActiveContext } from "./code-active-con
 import { DEFAULT_CODE_AGENT_LIMITS, resolveCodeAgentLimits } from "./code-agent-config";
 import { registerCodeAgentControlRoutes } from "./code-agent-controls";
 import { CodeApprovalScopeService } from "./code-approval-scope";
+import type { CodePreferencesStore } from "./code-preferences";
+import type { OmniRouteMarketplace } from "@npati/omniroute-adapter";
 import { collectAsyncOperationChanges } from "./code-async-collect-changes";
 import { CodeAsyncWorkspaceService, registerCodeAsyncWorkspaceRoutes } from "./code-async-workspace";
 import { CodeBackgroundRunRegistry } from "./code-background-run-registry";
@@ -96,6 +98,8 @@ export interface CodeRouteDeps {
   agent: ReturnType<typeof createCoreServices>["agent"];
   aiEngine: ReturnType<typeof createProductionResilientAIEngine>;
   aiPreferences: ReturnType<typeof createCoreServices>["aiPreferences"];
+  codePreferences?: CodePreferencesStore;
+  marketplace?: OmniRouteMarketplace;
   auditLogService: ReturnType<typeof createAuditServices>["auditLogService"];
   authProvider: ReturnType<typeof createCoreServices>["authProvider"];
   codeActivitySink: ReturnType<typeof createCodeRunActivitySink>;

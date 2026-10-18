@@ -53,7 +53,7 @@ export interface RegisterCodeLifecycleRoutesOutputs {
 }
 
 export function registerCodeLifecycleRoutes(app: FastifyInstance, input: RegisterCodeLifecycleRoutesInput): RegisterCodeLifecycleRoutesOutputs {
-  const { getCodeSessionResumeService, config, log, activeContextResolver, agent, aiPreferences, authProvider, codeActivitySink, codePrivilegedAudit, codeService, featureFlagService, projectGitService, projectPreviewService, projectSandbox, projectService, projectWorkspace, readRuntimeMcpManifest, trackedProcesses, workspaceStore, codeRbacForRun, codeRunStateLog, codeSessionInbox, codeProcessCompletions, codingAgentRunner } = input;
+  const { getCodeSessionResumeService, config, log, activeContextResolver, agent, aiPreferences, codePreferences, marketplace, authProvider, codeActivitySink, codePrivilegedAudit, codeService, featureFlagService, projectGitService, projectPreviewService, projectSandbox, projectService, projectWorkspace, readRuntimeMcpManifest, trackedProcesses, workspaceStore, codeRbacForRun, codeRunStateLog, codeSessionInbox, codeProcessCompletions, codingAgentRunner } = input;
   let codingAgentRunnerRefValue: CodingAgentRunner | undefined;
   let codeSubagentOperationsRefValue: (() => CodeSubagentOperationService) | undefined;
   let subagentChildRunnerWithAckValue: CodeSubagentDetachedRunner | undefined;
@@ -313,6 +313,20 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
       markFailed: (ctx, companyId, projectId) => projectService.updatePreview(ctx, companyId, projectId, { status: "failed", lastBuildStatus: "failed" }),
     }),
     resolveModel: async (ctx) => {
+      const codePrefs = await codePreferences?.get(ctx).catch(() => null);
+      if (codePrefs && codePrefs.activeAgentId && codePrefs.activeAgentId !== "npati") {
+        const prov = await marketplace?.provider(codePrefs.activeAgentId).catch(() => null);
+        if (!prov || !prov.connected) {
+          throw new Error(
+            `The selected coding agent "${codePrefs.activeAgentName || codePrefs.activeAgentId}" is not connected. Please connect it in Settings > Code or switch to NPATI Coding Agent.`
+          );
+        }
+        if (codePrefs.activeModelId) return codePrefs.activeModelId;
+        const provModels = (await marketplace?.models(codePrefs.activeAgentId).catch(() => [])) ?? [];
+        const firstChat = provModels.find((m) => isChatCapableModel(m));
+        if (firstChat) return firstChat.id;
+        return codePrefs.activeAgentId;
+      }
       const preferences = await aiPreferences.get(ctx);
       const modelId = preferences.routing.defaultModelId;
       if (!modelId) return undefined;

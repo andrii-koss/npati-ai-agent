@@ -114,7 +114,7 @@ function freezeProfile(profile: CodeModelProfile): CodeModelProfile {
 export const DEFAULT_CODE_MODEL_PROFILES: readonly CodeModelProfile[] = Object.freeze([
   freezeProfile({
     id: "hosted-native-tools",
-    match: { providers: ["anthropic", "openai", "google", "azure", "bedrock", "vertex"] },
+    match: { providers: ["anthropic", "openai", "google", "azure", "bedrock", "vertex", "claude", "codex", "cursor", "github", "ghe-copilot", "opencode", "zed", "trae", "kiro", "antigravity", "amazon-q", "codestral"] },
     toolCallingMode: "native",
     preferredEditTool: "code.fs.apply_patch",
     maxParallelToolCalls: 4,

@@ -204,6 +204,7 @@ export function buildApp(config: AppConfig = {}) {
     selfHosted,
     authProvider,
     aiPreferences,
+    codePreferences,
     activeContextResolver,
     knowledgeRepo,
     memoryEngines,
@@ -686,6 +687,7 @@ export function buildApp(config: AppConfig = {}) {
 
   registerPlatformBaseRoutes(app, {
     config, log: app.log, activeSessionRegistry, agentDataStudioService, aiEngine, aiPreferences,
+    codePreferences,
     authClient, authProvider, backupService, beforeDeleteCompany, chatFiles, codeService, codeToolRuntime,
     dataBackendRepository, dataBackendService, dataProvider, dataStudioService,
     databaseProvisioner, featureFlagService, installationAuthStore, marketplace, npatiJwtSecret,
@@ -731,7 +733,7 @@ export function buildApp(config: AppConfig = {}) {
 
   const codeRoutes = registerCodeRouteWiring(app, {
     config, log: app.log, systemWorkspaceId: AUDIT_SYSTEM_WORKSPACE, activeContextResolver, agent,
-    aiEngine, aiPreferences, auditLogService, authProvider, codeActivitySink, codeApprovalScope,
+    aiEngine, aiPreferences, codePreferences, marketplace, auditLogService, authProvider, codeActivitySink, codeApprovalScope,
     codeCommandRegistry, codeDataPolicy, codeDataPolicyStoreService, codeHooksService,
     codeInstructionsLoader, codeMembership, codePrivilegedAudit, codeProcessManager, codeReaper,
     codeService, codeSkillsService, codeToolRuntime, codeTurnTracker, featureFlagService,
@@ -779,7 +781,7 @@ export function buildApp(config: AppConfig = {}) {
     persistAutomaticCompanyMemory, projectOrchestrator, runBusinessMessage, runNeutralMessage,
     codeService, projectService, projectTerminalEvents, codeSessionRunExecutor, codeRunAdmission,
     codeBackgroundRuns, codeSessionInbox, projectSandbox, projectPreviewService, codeRunCancellation,
-    activeSessionRegistry, aiPreferences, codeRunQueueLimits, notifyMessagingConnections,
+    activeSessionRegistry, aiPreferences, codePreferences, codeRunQueueLimits, notifyMessagingConnections,
     automationScheduler, codeReaper, sandboxIdleTimer, sandboxRetentionTimer, lifecycleRetentionTimer, backupTimer,
     auditVerifyTimer, auditAnchorTimer, runnerReadinessTimer, storageReconciler,
     whatsappMessagingAdapter, discordMessagingAdapter, slackMessagingAdapter, emailInboxWorker,

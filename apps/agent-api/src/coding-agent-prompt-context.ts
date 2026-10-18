@@ -107,6 +107,7 @@ export async function buildRunPromptContext(args: BuildPromptContextArgs): Promi
     ...(projectInstructions ? { instructions: projectInstructions.body } : {}),
     ...(contextBlocks ? { contextBlocks } : {}),
     ...(skillInstructions ? { skillInstructions } : {}),
+    ...(input.agentId ? { agentId: input.agentId } : {}),
     ...(input.extraSystemPromptLines ? { extraLines: input.extraSystemPromptLines } : {}),
   });
 

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   PINNED_PROVIDER_CATALOG,
   filterProviders,
+  isCodingAgentProvider,
   normalizeCatalog,
   normalizeModels,
 } from "./normalization";
@@ -226,11 +227,16 @@ export class OmniRouteMarketplace {
   async marketplace(query: MarketplaceQuery = {}, addedModelIds: string[] = []): Promise<MarketplaceResponse> {
     const { providers, manifest, health } = await this.getProviders(query.refresh === true);
     const allModels = manifest.reduce((sum, provider) => sum + (provider.models?.length ?? 0), 0);
+    const scopedProviders = query.scope === "code"
+      ? providers.filter((p) => isCodingAgentProvider(p))
+      : query.scope === "ai"
+        ? providers.filter((p) => !isCodingAgentProvider(p))
+        : providers;
     const visibleProviders = query.connectableOnly
-      ? providers.filter((provider) => provider.connected || (
+      ? scopedProviders.filter((provider) => provider.connected || (
           provider.connectable && provider.connectionMode !== "web_session"
         ))
-      : providers;
+      : scopedProviders;
     const counts = {
       connected: visibleProviders.filter((provider) => provider.connected).length,
       recommended: visibleProviders.filter((provider) => provider.recommended).length,

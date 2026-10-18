@@ -87,6 +87,7 @@ export interface AppRoutesAndLifecycleDeps {
   codeRunCancellation: ReturnType<typeof registerCodeRouteWiring>["codeRunCancellation"];
   activeSessionRegistry: ReturnType<typeof createRedisHealthWiring>["activeSessionRegistry"];
   aiPreferences: AIPreferencesStore;
+  codePreferences?: ReturnType<typeof createCoreServices>["codePreferences"];
   codeRunQueueLimits: ReturnType<typeof registerCodeRouteWiring>["codeRunQueueLimits"];
   notifyMessagingConnections: ReturnType<typeof createMessagingNotificationsWiring>["notifyMessagingConnections"];
   automationScheduler: AutomationScheduler;
@@ -156,6 +157,7 @@ export function registerAppRoutesAndLifecycle(deps: AppRoutesAndLifecycleDeps) {
     codeRunCancellation,
     activeSessionRegistry,
     aiPreferences,
+    codePreferences,
     codeRunQueueLimits,
     notifyMessagingConnections,
     automationScheduler,
@@ -321,6 +323,7 @@ export function registerAppRoutesAndLifecycle(deps: AppRoutesAndLifecycleDeps) {
     activeSessionRegistry,
     agent,
     aiPreferences,
+    codePreferences,
     authProvider,
     codeBackgroundRuns,
     codeRunAdmission,

@@ -74,7 +74,9 @@ export function CodeQueuePanel({ companyId, isUk }: { companyId: string; isUk: b
 
   useEffect(() => { void load(); }, [load]);
 
-  const periodMinutes = status ? Math.round(status.rateLimits.limits.periodMs / 60_000) : 0;
+  const periodMinutes = status?.rateLimits?.limits?.periodMs
+    ? Math.round(status.rateLimits.limits.periodMs / 60_000)
+    : 0;
 
   return (
     <section className="browser-campaign-card code-run-queue-panel" aria-label={isUk ? "Черга код-ранів" : "Code run queue"} data-panel="code-run-queue">
@@ -151,7 +153,7 @@ export function CodeQueuePanel({ companyId, isUk }: { companyId: string; isUk: b
                   whiteSpace: "nowrap",
                 }}
               >
-                {`${status.active} / ${status.queued}`}
+                {`${status.active ?? 0} / ${status.queued ?? 0}`}
               </span>
             </div>
 
@@ -190,7 +192,7 @@ export function CodeQueuePanel({ companyId, isUk }: { companyId: string; isUk: b
                   whiteSpace: "nowrap",
                 }}
               >
-                {`${status.userActive} / ${status.limits.maxConcurrentPerUser} · ${status.companyActive} / ${status.limits.maxConcurrentPerCompany}`}
+                {`${status.userActive ?? 0} / ${status.limits?.maxConcurrentPerUser ?? 0} · ${status.companyActive ?? 0} / ${status.limits?.maxConcurrentPerCompany ?? 0}`}
               </span>
             </div>
 
@@ -229,7 +231,7 @@ export function CodeQueuePanel({ companyId, isUk }: { companyId: string; isUk: b
                   whiteSpace: "nowrap",
                 }}
               >
-                {`${status.rateLimits.user.used}/${status.rateLimits.user.limit} · ${status.rateLimits.company.used}/${status.rateLimits.company.limit}`}
+                {`${status.rateLimits?.user?.used ?? 0}/${status.rateLimits?.user?.limit ?? 0} · ${status.rateLimits?.company?.used ?? 0}/${status.rateLimits?.company?.limit ?? 0}`}
               </span>
             </div>
 
@@ -268,12 +270,12 @@ export function CodeQueuePanel({ companyId, isUk }: { companyId: string; isUk: b
                   whiteSpace: "nowrap",
                 }}
               >
-                {status.limits.maxQueueDepth}
+                {status.limits?.maxQueueDepth ?? 0}
               </span>
             </div>
           </div>
 
-          {status.queue.length > 0 && (
+          {Array.isArray(status.queue) && status.queue.length > 0 && (
             <div className="automations-table-container">
               <table className="automations-table" data-field="queue-tickets">
                 <thead>
