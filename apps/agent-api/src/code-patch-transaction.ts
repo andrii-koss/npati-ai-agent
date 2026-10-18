@@ -23,6 +23,19 @@ export async function commitPatchMutations(plan: PatchMutation[], port: CodeWrit
   const written: Array<{ item: PatchMutation; revision?: string }> = [];
   const results: Array<{ path: string; sha256?: string; revision?: string }> = [];
   if (dryRun) return results;
+  // Recheck the whole read set before the first side effect.
+  for (const item of plan) {
+    if (!item.existing) {
+      if ((await port.stat(item.path)).exists) throw new CodeToolError("revision_conflict", "Patch target was created by another writer", tool, 409, false, "preflight", { path: item.path });
+      continue;
+    }
+    const current = await port.readFile(item.path);
+    if (current.content !== item.before || (item.revision !== undefined && current.revision !== item.revision)) {
+      throw new CodeToolError("revision_conflict", "Patch target changed before commit", tool, 409, false, "preflight", { path: item.path });
+    }
+  }
+
+  if (port.applyPatchTransaction) return port.applyPatchTransaction(plan);
   try {
     for (const item of plan) {
       if (item.delete) {

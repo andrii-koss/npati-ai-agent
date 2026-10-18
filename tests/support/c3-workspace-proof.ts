@@ -1,3 +1,7 @@
+import { C3_TRANSACTION_CASES } from "./c3-transaction-proof";
+import { DEFAULT_CODE_AGENT_LIMITS } from "../../apps/agent-api/src/code-agent-config";
+import { toEngineWritePort } from "../../apps/agent-api/src/code-tool-executors-write";
+import { commitPatchMutations } from "../../apps/agent-api/src/code-patch-transaction";
 import { AuditLogService } from "../../apps/agent-api/src/audit-log";
 import { createCodeRunActivitySink, activitySinkForKind } from "../../apps/agent-api/src/code-run-activity-sink";
 import assert from "node:assert/strict";
@@ -112,11 +116,31 @@ export const C3_PROOF_CASES: Record<string, (h: C3ProofFixture) => Promise<void>
 
 export async function checkPosixModes(h: C3ProofFixture) {
   assert.notEqual(process.platform, "win32", "POSIX permissions require the Linux fixture");
-  await h.workspace.createFile(h.ctx, h.company.id, h.project.id, "exec.sh", "echo one\n");
-  await chmod(h.absolute("exec.sh"), 0o755);
-  await h.ok("code.fs.read", { path: "exec.sh" });
-  await h.ok("code.fs.edit", { path: "exec.sh", old_string: "one", new_string: "two" });
-  assert.equal((await stat(h.absolute("exec.sh"))).mode & 0o777, 0o755);
+  const tool = CODE_TOOL_SCHEMAS.find(schema => schema.name === "code.fs.apply_patch");
+  assert.ok(tool);
+  const port = toEngineWritePort({ ctx: h.ctx, companyId: h.company.id, projectId: h.project.id,
+    tool, args: {}, port: h.read, writePort: h.write, limits: DEFAULT_CODE_AGENT_LIMITS });
+  for (const mode of [0o755, 0o640]) {
+    const file = "mode-" + mode + ".sh", failedFile = "fail-" + mode + ".ts";
+    await h.workspace.createFile(h.ctx, h.company.id, h.project.id, file, "echo original\n");
+    await chmod(h.absolute(file), mode);
+    await h.ok("code.fs.read", { path: file });
+    await h.ok("code.fs.edit", { path: file, old_string: "original", new_string: "updated" });
+    assert.equal((await stat(h.absolute(file))).mode & 0o777, mode);
+    const before = await port.readFile(file);
+    assert.equal(before.mode, mode);
+    const failingPort = { ...port, applyPatchTransaction: undefined, writeFile: async (...args: Parameters<typeof port.writeFile>) => {
+      if (args[0] === failedFile) throw new Error("injected second-file I/O failure");
+      return port.writeFile(...args);
+    } };
+    // Explicit fixture approval exercises the existing commit primitive; runtime approval guards stay intact.
+    await assert.rejects(commitPatchMutations([
+      { path: file, before: before.content, after: "", existing: true, delete: true, mode: before.mode, revision: before.revision },
+      { path: failedFile, before: "", after: "unreached", existing: false },
+    ], failingPort, { approved: true }), /injected second-file/);
+    assert.equal(await readFile(h.absolute(file), "utf8"), before.content);
+    assert.equal((await stat(h.absolute(file))).mode & 0o777, mode);
+  }
 }
 
 C3_PROOF_CASES["turn diff is net state after repeated edits and a revert"] = async h => {
@@ -199,6 +223,8 @@ C3_PROOF_CASES["actual persisted Activity correlates tool calls with their turn 
 };
 
 C3_PROOF_CASES["a real failed patch reports incomplete rollback instead of overwriting a concurrent writer"] = async h => {
+  // Exercise legacy adapters without the authoritative transaction capability.
+  h.write.applyPatchTransaction = undefined;
   await h.workspace.createFile(h.ctx, h.company.id, h.project.id, "a.ts", "old-a\n");
   await h.workspace.createFile(h.ctx, h.company.id, h.project.id, "b.ts", "old-b\n");
   await h.ok("code.fs.read", { path: "a.ts" });
@@ -319,3 +345,5 @@ C3_PROOF_CASES["stateless runner scope also bounds retries across model turns"] 
   h.runtime.invoke = (ctx, input) => invoke(ctx, { ...input, runId: undefined, runScopeId: input.runId });
   await C3_PROOF_CASES["revision retry budget survives changing model turns inside one run"]!(h);
 };
+
+Object.assign(C3_PROOF_CASES, C3_TRANSACTION_CASES);

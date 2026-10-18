@@ -39,11 +39,11 @@ it("distinguishes Unassessed from reviewed Not Verified without double counting"
   expect(() => validateReview({ id: "example" }, { status: "Unassessed" })).toThrow("invalid status");
 });
 
-it("keeps the saved2884-clause matrix complete and its seven statuses disjoint", () => {
+it("keeps the saved2960-clause matrix complete and its seven statuses disjoint", () => {
   const matrix = JSON.parse(readFileSync(new URL("../docs/coding-agent/plan-verification-matrix.json", import.meta.url), "utf8"));
   const ledger = JSON.parse(readFileSync(new URL("../docs/coding-agent/plan-verification-evidence.json", import.meta.url), "utf8"));
   const source = extractPlan(readFileSync(new URL("../docs/coding-agent/PLAN.md", import.meta.url), "utf8"));
-  expect(source.entries).toHaveLength(2884);
+  expect(source.entries).toHaveLength(2960);
   expect(matrix.entries.map((entry: { id: string }) => entry.id)).toEqual(source.entries.map(entry => entry.id));
   expect(matrix.planSha256).toBe(source.planSha256);
   expect(ledger.planSha256).toBe(source.planSha256);
@@ -59,7 +59,7 @@ it("keeps the saved2884-clause matrix complete and its seven statuses disjoint",
   for (const status of STATUSES) {
     expect(matrix.totals[status]).toBe(matrix.entries.filter((entry: { status: string }) => entry.status === status).length);
   }
-  expect(Object.values(matrix.totals).reduce((sum: number, count) => sum + Number(count), 0)).toBe(2884);
+  expect(Object.values(matrix.totals).reduce((sum: number, count) => sum + Number(count), 0)).toBe(2960);
   expect(matrix.reviewed).toBe(reviewed);
-  expect(matrix.totals.Unassessed).toBe(2884 - reviewed);
+  expect(matrix.totals.Unassessed).toBe(2960 - reviewed);
 });

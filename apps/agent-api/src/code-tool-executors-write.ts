@@ -181,6 +181,7 @@ export function toEngineWritePort(input: CodeToolExecutionContext): EngineWriteP
     }
   };
   return {
+    ...(input.writePort?.applyPatchTransaction ? { applyPatchTransaction: (plan: readonly import("./code-patch-transaction").PatchMutation[]) => input.writePort!.applyPatchTransaction!({ ...base, plan }) } : {}),
     async readFile(path) {
       const file = await input.port.readFile({ ...base, path, maxLines: Number.MAX_SAFE_INTEGER, maxBytes: input.limits.readFileBytes });
       if (file.truncated) throw new CodeToolError("too_large", `Refusing to edit a truncated read of ${path}`, 413, "read", false, input.tool.name);

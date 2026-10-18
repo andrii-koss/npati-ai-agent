@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
+import { WorkspaceAccessError, WorkspaceNotFoundError, type WorkspaceStore } from "@npati/workspace";
 import { AuthenticationError, type AuthProvider } from "./auth";
 import { ProjectFileError, type ProjectWorkspace } from "./project-workspace";
 import { ProjectMediaError, type ProjectMediaService } from "./project-media-service";
@@ -30,7 +30,7 @@ async function authorize(
   if (requiredCompanyId && context.companyId && context.companyId !== requiredCompanyId && !context.permissions.includes("*")) {
     throw new WorkspaceAccessError("Cross-tenant access forbidden: company mismatch");
   }
-  if (requiredProjectId && context.projectId && context.projectId !== requiredProjectId && !context.permissions.includes("*")) {
+  if (requiredProjectId && "projectId" in context && typeof context.projectId === "string" && context.projectId && context.projectId !== requiredProjectId && !context.permissions.includes("*")) {
     throw new WorkspaceAccessError("Cross-project access forbidden: project mismatch");
   }
   if (projectService && requiredCompanyId && requiredProjectId) {
@@ -271,6 +271,21 @@ export function registerProjectFileRoutes(
           return reply.code(404).send({ error: { code: "project_not_found", message: "Project not found" } });
         }
 
+        // A retained directory proves file location, never project visibility.
+        const stateStore = (projectService as unknown as { store?: Pick<WorkspaceStore, "getProjectForSystem"> } | undefined)?.store;
+        if (stateStore?.getProjectForSystem) {
+          try {
+            const project = await stateStore.getProjectForSystem(companyId, projectId);
+            if (!project) return reply.code(404).send({ error: { code: "project_not_found", message: "Project not found" } });
+            projectStatus = project.status;
+          } catch {
+            return reply.code(503).send({ error: { code: "project_state_unavailable", message: "Project visibility cannot be verified" } });
+          }
+        }
+        if (!projectStatus) {
+          return reply.code(503).send({ error: { code: "project_state_unavailable", message: "Project visibility cannot be verified" } });
+        }
+
         // Immediate Access Denial if project is soft-deleted, purging or deleted
         if (projectStatus === "soft_deleted" || projectStatus === "purging" || projectStatus === "deleted") {
           return reply.code(404).send({ error: { code: "project_deleted", message: "Project media is unavailable because the project is deleted" } });
@@ -279,7 +294,7 @@ export function registerProjectFileRoutes(
         const { stream, mimeType } = await mediaService.getMedia(companyId, projectId, relativePath);
         const res = reply
           .header("Content-Type", mimeType)
-          .header("Cache-Control", "public, max-age=3600")
+          .header("Cache-Control", "no-store")
           .header("X-Content-Type-Options", "nosniff");
 
         if (mimeType === "image/svg+xml") {

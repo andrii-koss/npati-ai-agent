@@ -198,7 +198,7 @@ export async function listExpiredSoftDeletedProjects(host: InMemoryProjectState,
     const nowTs = Date.now();
     const result: Array<{ id: string; companyId: string; workspaceId: string; createdBy: string; purgeAfter: string }> = [];
     for (const project of host.projects.values()) {
-      if (project.status === "soft_deleted" && project.purgeAfter && new Date(project.purgeAfter).getTime() <= nowTs) {
+      if ((project.status === "soft_deleted" || project.status === "purging") && project.purgeAfter && new Date(project.purgeAfter).getTime() <= nowTs) {
         result.push({
           id: project.id,
           companyId: project.companyId,

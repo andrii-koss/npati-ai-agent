@@ -1,3 +1,5 @@
+import { commitSandboxWrites } from "./project-sandbox-write-commit";
+import type { PatchMutation } from "./code-patch-transaction";
 import { parseCodeSearchOutput } from "./code-search-output";
 import { normalizeWorkspacePath } from "./code-tools-path";
 import { createHash, randomUUID } from "node:crypto";
@@ -293,6 +295,7 @@ export class ProjectSandboxService {
      * written at all (which is the correct outcome, not an error to work around).
      */
     if (mount) return new Map<string, SandboxFile>();
+    const capture = async () => {
     const entries = await this.workspace.listFiles(ctx, project.companyId, project.id);
     const files: SandboxFile[] = [];
     let total = 0;
@@ -307,6 +310,9 @@ export class ProjectSandboxService {
         files.push({ path: file.path, content: file.content, revision: file.revision });
       }
     }
+      return files;
+    };
+    const files = this.workspace.withFileLease ? await this.workspace.withFileLease(ctx, project.companyId, project.id, capture) : await capture();
     await this.provider.uploadFiles(scope, sandboxId, files);
     return new Map(files.map((file) => [file.path, file]));
   }
@@ -314,6 +320,7 @@ export class ProjectSandboxService {
     const files = await this.provider.downloadFiles(scope, sandboxId);
     if (files.length > this.limits.syncMaxFiles) throw new SandboxProviderError("workspace_sync_limit", "Sandbox returned too many files", 413, "download");
     let total = 0;
+    const plan: PatchMutation[] = [];
     for (const file of files) {
       if (artifact(file.path)) continue;
       safeProjectPath(file.path);
@@ -329,9 +336,9 @@ export class ProjectSandboxService {
         (changed && !isLockfile && (!scanTextForSecrets(file.content).clean || quotedCredential.test(file.content)))) {
         throw new SandboxProviderError("secret_content", "Sandbox produced protected file content", 403, "download");
       }
-      if (!original) await this.workspace.createFile(ctx, project.companyId, project.id, file.path, file.content);
-      else if (original.content !== file.content) await this.workspace.writeFile(ctx, project.companyId, project.id, file.path, file.content, original.revision!);
+      if (changed) plan.push({ path: file.path, before: original?.content ?? "", after: file.content, existing: !!original, revision: original?.revision });
     }
+    await commitSandboxWrites(this.workspace, ctx, project.companyId, project.id, plan);
   }
   private async run(ctx: AuthContext, companyId: string, request: TerminalRequest, tool: "project.terminal.exec" | "project.terminal.process", startProcess = false,
     beforeStart?: (snapshot: ProcessWorkspaceSnapshot) => Promise<void>) {
@@ -579,6 +586,7 @@ export class ProjectSandboxService {
     if (project.sandboxId !== snapshot.sandboxId) throw new SandboxProviderError("sandbox_mismatch", "Tracked workspace changed sandbox", 409);
     const files = await this.provider.downloadFiles(scopeOf(ctx, project), snapshot.sandboxId);
     if (files.length > this.limits.syncMaxFiles || files.reduce((n, f) => n + Buffer.byteLength(f.content, "utf8"), 0) > this.limits.syncMaxBytes) throw new SandboxProviderError("workspace_sync_limit", "Tracked process exceeded workspace limits", 413);
+    const plan: PatchMutation[] = [];
     for (const file of files) {
       if (artifact(file.path)) continue;
       safeProjectPath(file.path);
@@ -588,9 +596,11 @@ export class ProjectSandboxService {
       // A repeated sync may see the exact result already committed by this operation.
       const existing = await this.workspace.readFile(ctx, op.companyId, op.projectId, file.path).catch((error) => { if ((error as { status?: number }).status === 404) return null; throw error; });
       if (existing?.content === file.content) continue;
-      if (original) await this.workspace.writeFile(ctx, op.companyId, op.projectId, file.path, file.content, original.revision);
-      else await this.workspace.createFile(ctx, op.companyId, op.projectId, file.path, file.content);
+      if (original && (!existing || existing.revision !== original.revision)) throw new ProjectFileError("revision_conflict", "Process base revision changed", 409);
+      if (!original && existing) throw new ProjectFileError("revision_conflict", "Process target was created by another writer", 409);
+      plan.push({ path: file.path, before: existing?.content ?? "", after: file.content, existing: !!existing, revision: original?.revision, mode: existing?.mode });
     }
+    await commitSandboxWrites(this.workspace, ctx, op.companyId, op.projectId, plan);
   }
   async process(ctx: AuthContext, companyId: string, request: TerminalRequest) {
     const tool = "project.terminal.process" as const;
