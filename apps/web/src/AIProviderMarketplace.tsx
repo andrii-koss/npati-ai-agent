@@ -44,7 +44,7 @@ function sortSearchResults(list: Provider[], needle: string): Provider[] {
   });
 }
 
-function getLabel(key: string, t: (k: any) => string): string {
+export function getLabel(key: string, t: (k: any) => string): string {
   switch (key) {
     case "api_key": return t("aiMarketplace.labels.apiKey");
     case "oauth": return t("aiMarketplace.labels.oauth");
@@ -62,7 +62,7 @@ function getLabel(key: string, t: (k: any) => string): string {
   }
 }
 
-function getCapabilityLabel(cap: string, t: (k: any) => string): string {
+export function getCapabilityLabel(cap: string, t: (k: any) => string): string {
   const capMap: Record<string, string> = {
     text: "aiMarketplace.capabilities.text",
     imageToText: "aiMarketplace.capabilities.imageToText",
@@ -88,7 +88,7 @@ function getCapabilityLabel(cap: string, t: (k: any) => string): string {
   return cap;
 }
 
-function getCategoryLabel(category: string, t: (k: any) => string): string {
+export function getCategoryLabel(category: string, t: (k: any) => string): string {
   const catMap: Record<string, string> = {
     "api-key": "aiMarketplace.categories.apiKey",
     api_key: "aiMarketplace.categories.apiKey",
@@ -115,7 +115,7 @@ function getCategoryLabel(category: string, t: (k: any) => string): string {
 
 
 
-function getConnectionModeLabel(mode: Provider["connectionMode"] | string, t: (k: any) => string): string {
+export function getConnectionModeLabel(mode: Provider["connectionMode"] | string, t: (k: any) => string): string {
   switch (mode) {
     case "api_key": return t("aiMarketplace.labels.apiKey");
     case "oauth": return t("aiMarketplace.labels.oauth");
@@ -130,7 +130,7 @@ function getConnectionModeLabel(mode: Provider["connectionMode"] | string, t: (k
   }
 }
 
-function getAvailabilityLabel(availability: Provider["availability"] | string, t: (k: any) => string): string {
+export function getAvailabilityLabel(availability: Provider["availability"] | string, t: (k: any) => string): string {
   switch (availability) {
     case "connected": return t("aiMarketplace.tabs.connected");
     case "ready": return t("aiMarketplace.drawer.readyToConnect");
@@ -144,7 +144,7 @@ function getAvailabilityLabel(availability: Provider["availability"] | string, t
   }
 }
 
-function providerActionLabel(provider: Provider, t: (k: any) => string) {
+export function providerActionLabel(provider: Provider, t: (k: any) => string) {
   if (provider.connected) return t("aiMarketplace.actions.manage");
   if (!provider.connectable) return t("aiMarketplace.actions.viewSetup");
   if (provider.connectionMode === "oauth") return t("aiMarketplace.actions.signIn");
@@ -153,7 +153,7 @@ function providerActionLabel(provider: Provider, t: (k: any) => string) {
   return t("aiMarketplace.actions.connect");
 }
 
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
+export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getStoredAuthToken();
   const headers: Record<string, string> = {
     ...(init?.body ? { "content-type": "application/json" } : {}),
@@ -166,11 +166,11 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
-function initials(name: string) {
+export function initials(name: string) {
   return name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
 }
 
-function ProviderIcon({ providerId, name, size }: { providerId: string; name: string; size?: "small" | "large" }) {
+export function ProviderIcon({ providerId, name, size }: { providerId: string; name: string; size?: "small" | "large" }) {
   const [failed, setFailed] = useState(false);
   const isDarkBg = ["llmgateway", "kimi", "kimi-coding-apikey"].includes(providerId.toLowerCase());
   return <span className={`provider-avatar${size ? ` ${size}` : ""}${isDarkBg ? " dark-bg" : ""}`} data-provider-id={providerId} aria-hidden="true">
@@ -179,13 +179,13 @@ function ProviderIcon({ providerId, name, size }: { providerId: string; name: st
   </span>;
 }
 
-function formatNumber(value: number) { return new Intl.NumberFormat("en-US").format(value); }
+export function formatNumber(value: number) { return new Intl.NumberFormat("en-US").format(value); }
 
-function Badge({ children, tone = "neutral" }: { children: React.ReactNode; tone?: string }) {
+export function Badge({ children, tone = "neutral" }: { children: React.ReactNode; tone?: string }) {
   return <span className={`ai-badge ${tone}`}>{children}</span>;
 }
 
-function ProviderBadges({ provider }: { provider: Provider }) {
+export function ProviderBadges({ provider }: { provider: Provider }) {
   const { t } = useTranslation();
   return <div className="provider-badges">
     {provider.freeStatus === "free" && <Badge tone="free">{t("aiMarketplace.labels.free").toUpperCase()}</Badge>}
@@ -200,7 +200,7 @@ function ProviderBadges({ provider }: { provider: Provider }) {
   </div>;
 }
 
-function ProviderCard({ provider, busy, onOpen, onConnect }: { provider: Provider; busy?: string; onOpen: () => void; onConnect: () => void }) {
+export function ProviderCard({ provider, busy, onOpen, onConnect, actionLabel }: { provider: Provider; busy?: string; onOpen: () => void; onConnect: () => void; actionLabel?: string }) {
   const { t, language } = useTranslation();
   return <article className={`provider-card ${provider.connected ? "is-connected" : ""}`}>
     <button className="provider-card-main" onClick={onOpen}>
@@ -214,7 +214,7 @@ function ProviderCard({ provider, busy, onOpen, onConnect }: { provider: Provide
     <div className="provider-card-footer">
       <span><strong>{formatNumber(provider.modelCount)}</strong> {t("aiMarketplace.cards.registryModels")}</span>
       <button className={provider.connected ? "button-secondary" : "button-primary"} disabled={!!busy} onClick={onConnect}>
-        {busy || providerActionLabel(provider, t)}
+        {busy || actionLabel || providerActionLabel(provider, t)}
       </button>
     </div>
   </article>;
@@ -344,7 +344,7 @@ function MyModels({ models, routing, onChanged }: { models: Model[]; routing: Ro
   </section>;
 }
 
-function ProviderDrawer({ provider, addedIds, onClose, onChanged, onReady }: { provider: Provider; addedIds: Set<string>; onClose: () => void; onChanged: () => void; onReady: () => void }) {
+export function ProviderDrawer({ provider, addedIds = new Set(), onClose, onChanged, onReady = () => {} }: { provider: Provider; addedIds?: Set<string>; onClose: () => void; onChanged: () => void; onReady?: () => void }) {
   const { t } = useTranslation();
   const [mode, setMode] = useState<"details" | "models" | "connect">(provider.connected ? "details" : "connect");
   const [models, setModels] = useState<Model[]>([]);

@@ -177,6 +177,7 @@ export function registerAIRoutes(app: FastifyInstance, marketplace: OmniRouteMar
       const scope = await authorize(auth, request, "workspace:read");
       const stored = await preferences.get(scope);
       const query: MarketplaceQuery = {
+        scope: (request.query.scope as MarketplaceQuery["scope"]) || "ai",
         tab: request.query.tab as MarketplaceQuery["tab"],
         search: request.query.search,
         type: request.query.type as MarketplaceQuery["type"],
@@ -192,8 +193,11 @@ export function registerAIRoutes(app: FastifyInstance, marketplace: OmniRouteMar
     } catch (error) { return sendError(reply, error); }
   });
 
-  app.get("/ai/providers", async (_request, reply) => {
-    try { return (await marketplace.marketplace({ limit: 400 })).providers; }
+  app.get<{ Querystring: Record<string, string | undefined> }>("/ai/providers", async (request, reply) => {
+    try {
+      const scope = (request.query.scope as MarketplaceQuery["scope"]) || "ai";
+      return (await marketplace.marketplace({ limit: 400, scope })).providers;
+    }
     catch (error) { return sendError(reply, error); }
   });
 

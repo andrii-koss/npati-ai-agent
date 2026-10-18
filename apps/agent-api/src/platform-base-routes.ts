@@ -2,6 +2,7 @@
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { AppConfig } from "./app";
 import { registerAIRoutes } from "./ai-routes";
+import { registerCodeAgentRoutes } from "./code-agent-routes";
 import { registerAuthRoutes } from "./auth-routes";
 import { registerCodeRoutes } from "./code-routes";
 import { CodeService } from "./code-service";
@@ -48,6 +49,7 @@ export interface PlatformBaseRouteDeps {
   agentDataStudioService: AgentDataStudioService | undefined;
   aiEngine: ReturnType<typeof createProductionResilientAIEngine>;
   aiPreferences: ReturnType<typeof createCoreServices>["aiPreferences"];
+  codePreferences: ReturnType<typeof createCoreServices>["codePreferences"];
   authClient: ReturnType<typeof createCoreServices>["authClient"];
   authProvider: ReturnType<typeof createCoreServices>["authProvider"];
   backupService: ReturnType<typeof createDataBackendServices>["backupService"];
@@ -81,7 +83,7 @@ export interface PlatformBaseRouteDeps {
 }
 
 export function registerPlatformBaseRoutes(app: FastifyInstance, deps: PlatformBaseRouteDeps): void {
-  const { activeSessionRegistry, agentDataStudioService, aiEngine, aiPreferences, authClient, authProvider, backupService, beforeDeleteCompany, chatFiles, codeService, codeToolRuntime, config, dataBackendRepository, dataBackendService, dataProvider, dataStudioService, databaseProvisioner, featureFlagService, installationAuthStore, marketplace, npatiJwtSecret, projectApiGatewayService, projectAuthService, projectGitService, projectImportService, projectMediaService, projectPreviewService, projectSandbox, projectService, projectTerminalEvents, projectWorkspace, promoteService, quotaService, sandboxImagePolicy, workspaceStore } = deps;
+  const { activeSessionRegistry, agentDataStudioService, aiEngine, aiPreferences, codePreferences, authClient, authProvider, backupService, beforeDeleteCompany, chatFiles, codeService, codeToolRuntime, config, dataBackendRepository, dataBackendService, dataProvider, dataStudioService, databaseProvisioner, featureFlagService, installationAuthStore, marketplace, npatiJwtSecret, projectApiGatewayService, projectAuthService, projectGitService, projectImportService, projectMediaService, projectPreviewService, projectSandbox, projectService, projectTerminalEvents, projectWorkspace, promoteService, quotaService, sandboxImagePolicy, workspaceStore } = deps;
   registerAuthRoutes(app, {
     authClient,
     workspaceStore,
@@ -99,6 +101,7 @@ export function registerPlatformBaseRoutes(app: FastifyInstance, deps: PlatformB
   });
   registerSessionStreamRoutes(app, authProvider, activeSessionRegistry);
   registerAIRoutes(app, marketplace, aiPreferences, authProvider, aiEngine);
+  registerCodeAgentRoutes(app, marketplace, codePreferences, aiPreferences, authProvider);
   registerRuntimeCompatRoutes(app, aiEngine, authProvider);
   registerWorkspaceRoutes(app, workspaceStore, authProvider, aiPreferences, {
     beforeDeleteBusiness: async (context,businessId) => { await chatFiles?.deleteBusiness(context,businessId); },

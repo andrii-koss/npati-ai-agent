@@ -78,6 +78,7 @@ export interface CodeSessionRunInput {
   session: CodeSession;
   prompt: string;
   runId?: string;
+  agentId?: string;
   initialInboxMessageId?: string;
   /** `codeIntentIsReadOnly(intent)` of the resolved intent — never a model argument and never a guess. */
   readOnlyIntent?: boolean;
@@ -171,6 +172,7 @@ export class CodeSessionRunExecutor {
         ...(input.onActivity ? { onActivity: input.onActivity } : {}),
         ...(input.maxTurns !== undefined ? { maxTurns: input.maxTurns } : {}),
         ...(input.runId ? { runId: input.runId } : {}),
+        ...(input.agentId ? { agentId: input.agentId } : {}),
         ...(input.initialInboxMessageId ? { initialInboxMessageId: input.initialInboxMessageId } : {}),
         ...(model ? { model } : {}),
         ...(verificationTools ? { verificationTools } : {}),

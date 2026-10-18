@@ -29,6 +29,86 @@ export const RECOMMENDED_PROVIDER_IDS = [
   "openai", "gemini", "groq", "mistral", "ollama-local", "anthropic", "opencode", "openrouter",
 ] as const;
 
+export const RECOMMENDED_CODING_AGENT_IDS = [
+  "codex", "claude", "cursor", "github", "opencode", "zed", "kiro", "trae", "antigravity",
+] as const;
+
+export const EXCLUDED_GENERAL_AI_PROVIDER_IDS = new Set([
+  "openai",
+  "anthropic",
+  "gemini",
+  "groq",
+  "mistral",
+  "deepseek",
+  "openrouter",
+  "ollama-local",
+  "ollama-cloud",
+  "xai",
+  "cohere",
+  "perplexity",
+  "together",
+  "fireworks",
+  "nvidia",
+  "huggingface",
+  "ai21",
+  "bedrock",
+  "vertex",
+  "azure-openai",
+  "stability-ai",
+  "elevenlabs",
+  "assemblyai",
+  "cerebras",
+]);
+
+export const KNOWN_CODING_AGENT_PROVIDER_IDS = new Set([
+  "claude",
+  "claude-code",
+  "codex",
+  "codex-app-server",
+  "codex-cloud",
+  "chatgpt-web-codex",
+  "cursor",
+  "cursor-api",
+  "github",
+  "ghe-copilot",
+  "copilot-m365-web",
+  "copilot-web",
+  "zed",
+  "zed-hosted",
+  "opencode",
+  "opencode-go",
+  "opencode-zen",
+  "trae",
+  "kiro",
+  "antigravity",
+  "agy",
+  "amazon-q",
+  "command-code",
+  "kilocode",
+  "kimi-coding",
+  "kimi-coding-apikey",
+  "codebuddy-cn",
+  "codestral",
+  "cloudcode-one",
+  "gitlab",
+  "jules",
+  "clinepass",
+  "zcode",
+  "bailian-coding-plan",
+  "volcengine-coding-plan",
+  "glm",
+  "glm-cn",
+  "minimax",
+  "v0-vercel-web",
+]);
+
+export function isCodingAgentProvider(provider: { id: string; name?: string; alias?: string; category?: string; authHint?: string }): boolean {
+  if (EXCLUDED_GENERAL_AI_PROVIDER_IDS.has(provider.id)) return false;
+  if (KNOWN_CODING_AGENT_PROVIDER_IDS.has(provider.id)) return true;
+  const s = `${provider.id} ${provider.name ?? ""} ${provider.alias ?? ""}`.toLowerCase();
+  return /\b(coding|codex|claude-code|copilot|cursor|zed|kiro|trae|opencode)\b/i.test(s);
+}
+
 const POPULAR_PROVIDER_IDS = [
   "openai", "anthropic", "gemini", "xai", "openrouter", "groq", "mistral", "deepseek",
   "cohere", "perplexity", "cerebras", "together", "fireworks", "nvidia", "huggingface", "ai21",
@@ -335,6 +415,8 @@ export function filterProviders(
   const manifest = new Map(manifestProviders.map((provider) => [provider.id, provider]));
   const needle = query.search?.trim().toLowerCase();
   const filtered = providers.filter((provider) => {
+    if (query.scope === "code" && !isCodingAgentProvider(provider)) return false;
+    if (query.scope === "ai" && isCodingAgentProvider(provider)) return false;
     if (query.connectableOnly && !provider.connected && (
       !provider.connectable || provider.connectionMode === "web_session"
     )) return false;
@@ -371,7 +453,8 @@ export function filterProviders(
   }
 
   if (query.tab === "recommended") {
-    const order = new Map((RECOMMENDED_PROVIDER_IDS as readonly string[]).map((id, index) => [id, index]));
+    const list = query.scope === "code" ? RECOMMENDED_CODING_AGENT_IDS : RECOMMENDED_PROVIDER_IDS;
+    const order = new Map((list as readonly string[]).map((id, index) => [id, index]));
     return [...filtered].sort((a, b) => {
       const aIdx = order.get(a.id) ?? 999;
       const bIdx = order.get(b.id) ?? 999;
@@ -380,7 +463,8 @@ export function filterProviders(
   }
 
   if (query.tab === "all" || query.tab === undefined) {
-    const order = new Map((POPULAR_PROVIDER_IDS as readonly string[]).map((id, index) => [id, index]));
+    const list = query.scope === "code" ? RECOMMENDED_CODING_AGENT_IDS : POPULAR_PROVIDER_IDS;
+    const order = new Map((list as readonly string[]).map((id, index) => [id, index]));
     return [...filtered].sort((a, b) => {
       const aIdx = order.get(a.id) ?? Number.MAX_SAFE_INTEGER;
       const bIdx = order.get(b.id) ?? Number.MAX_SAFE_INTEGER;

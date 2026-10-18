@@ -50,6 +50,7 @@ export interface ChatStreamRouteDeps {
   activeSessionRegistry: ActiveSessionRegistry;
   agent: ReturnType<typeof createCoreServices>["agent"];
   aiPreferences: ReturnType<typeof createCoreServices>["aiPreferences"];
+  codePreferences?: ReturnType<typeof createCoreServices>["codePreferences"];
   authProvider: ReturnType<typeof createCoreServices>["authProvider"];
   codeBackgroundRuns: CodeBackgroundRunRegistry;
   codeRunAdmission: ReturnType<typeof createCodeRunAdmission>;
@@ -76,7 +77,7 @@ export interface ChatStreamRouteDeps {
 }
 
 export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamRouteDeps): void {
-  const { activeChatStreams, activeContextResolver, activeSessionRegistry, agent, aiPreferences, authProvider, codeBackgroundRuns, codeRunAdmission, codeRunCancellation, codeRunQueueLimits, codeService, codeSessionInbox, codeSessionRunExecutor, companyRuntime, featureFlagService, getAIContext, marketplace, notifyMessagingConnections, persistAutomaticCompanyMemory, projectOrchestrator, projectPreviewService, projectSandbox, projectService, runBusinessMessage, runNeutralMessage, workspaceStore, boundedResponseChunks } = deps;
+  const { activeChatStreams, activeContextResolver, activeSessionRegistry, agent, aiPreferences, codePreferences, authProvider, codeBackgroundRuns, codeRunAdmission, codeRunCancellation, codeRunQueueLimits, codeService, codeSessionInbox, codeSessionRunExecutor, companyRuntime, featureFlagService, getAIContext, marketplace, notifyMessagingConnections, persistAutomaticCompanyMemory, projectOrchestrator, projectPreviewService, projectSandbox, projectService, runBusinessMessage, runNeutralMessage, workspaceStore, boundedResponseChunks } = deps;
   app.post<{ Body: {
     message?: string;
     streamId?:string;
@@ -362,7 +363,20 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
               : null;
             const isBackground = backgroundSink !== null;
             if (isBackground) codeBackgroundRunId = runKey;
-            send("progress", { routed: "code_runner", intent: codeDecision.intent, projectId: effectiveProjectId, background: isBackground, runId: isBackground ? runKey : null });
+            const codePrefs = await codePreferences?.get(auth).catch(() => null);
+            const activeAgentId = codePrefs?.activeAgentId ?? "npati";
+            const activeAgentName = codePrefs && codePrefs.activeAgentId && codePrefs.activeAgentId !== "npati"
+              ? codePrefs.activeAgentName
+              : "NPATI Coding Agent";
+            send("progress", {
+              routed: "code_runner",
+              intent: codeDecision.intent,
+              projectId: effectiveProjectId,
+              background: isBackground,
+              runId: isBackground ? runKey : null,
+              agentId: activeAgentId,
+              agentName: activeAgentName,
+            });
             const chatInboxEnabled = !memoryPolicy.noMemoryActive && await codeSessionInbox.isEnabled(auth, activeCompanyId!).catch(() => false);
             if (chatInboxEnabled) send("code_session", { companyId: activeCompanyId, projectId: effectiveProjectId,
               sessionId: codeSession.id, inboxEnabled: true });
@@ -374,7 +388,8 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
             const executed = await codeSessionRunExecutor.execute({
               ctx: auth,
               session: codeSession,
-              onActivity: memoryPolicy.writeAllowed ? event => deps.chatDevelopment?.recordActivity(auth, activeCompanyId!, codeSession.id, cardConversationId, { ...event, language: responseLanguage }) ?? Promise.resolve() : undefined,
+              agentId: activeAgentName,
+              onActivity: memoryPolicy.writeAllowed ? event => deps.chatDevelopment?.recordActivity(auth, activeCompanyId!, codeSession.id, cardConversationId, { ...event, agentId: activeAgentName, language: responseLanguage }) ?? Promise.resolve() : undefined,
               prompt: (isCodeChatWebsite(codeProject)
                 ? `${message}\n\nWork in this existing website workspace. Framework: ${codeProject.framework || "Next.js"}. Start with package.json and ${codeProject.framework === "HTML/CSS" ? "index.html" : "app/page.tsx"}; implement the requested visible website before exploring unrelated files. Read files before editing; preserve working pages, existing pre-built components (components/ProjectStore.tsx, components/ProjectAccount.tsx) and the attached database/auth SDK (lib/project-client.ts). Do not re-scaffold or run create-next-app. For Next.js App Router, every page and component that uses React hooks (useState, useEffect, etc.), client event handlers (onClick, onSubmit), or browser APIs MUST have "use client"; as the very first line of the file. Use Tailwind CSS utility classes; do not use styled-jsx. In database queries with projectClient, client.from("table").list() returns Promise<{ data: Row[], meta: any }>, so access rows via res.data (e.g. const res = await projectClient.from("products").list(); const items = res.data;). Keep the implementation clean and focused. Use the available code.deps.add tool when adding a dependency. Initial template installation and build are managed by the system; do not invent a code.deps.install tool or use compound shell setup commands. Do not start a dev server yourself. Once the requested edits are made, run code.verify.run to confirm the build passes, then finish your response: the system runs the production build and starts Live Preview.`
                 : message) + chatLanguageInstruction(message, languageHistory, responseLanguage) + codingChatResponseInstruction(),

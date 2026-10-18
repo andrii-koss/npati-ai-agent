@@ -10,6 +10,7 @@
 import type { AppConfig } from "./app";
 import { ActiveContextResolver } from "./active-context-resolver";
 import { AIPreferencesStore } from "./ai-preferences";
+import { CodePreferencesStore } from "./code-preferences";
 import { ApiKeysRepository } from "./api-keys-repository";
 import { NpatiBackendAuthProvider } from "./auth";
 import { defaultCoreBackendHealthCheck } from "./backend-health-probe";
@@ -153,6 +154,7 @@ export function createCoreServices(input: CoreServicesInput) {
     } } : {}),
   });
   const aiPreferences = new AIPreferencesStore(workspaceStore, config.dataDirectory);
+  const codePreferences = new CodePreferencesStore(workspaceStore);
   const activeContextResolver = new ActiveContextResolver(workspaceStore);
   const knowledgeRepo = config.databaseUrl && objectStorage ? new CompanyKnowledgeRepository(config.databaseUrl) : undefined;
   const qdrant = process.env.QDRANT_URL ? new ProductionQdrantClient(process.env.QDRANT_URL, "npati_company_knowledge", process.env.QDRANT_INT8_ENABLED !== "false") : undefined;
@@ -189,6 +191,7 @@ export function createCoreServices(input: CoreServicesInput) {
     selfHosted,
     authProvider,
     aiPreferences,
+    codePreferences,
     activeContextResolver,
     knowledgeRepo,
     qdrant,

@@ -1055,14 +1055,32 @@
   text-decoration: none;
   color: inherit;
 }
-.code-agents-catalog .code-agent-avatar {
-  background: var(--npati-black);
-  color: white;
-  font-family: monospace;
-  font-size: 15px;
+.code-agents-catalog .code-agent-avatar,
+.code-builtin-drawer .code-agent-avatar {
+  background: #ffffff;
+  border: 1px solid var(--npati-gray-200);
+  box-shadow: 0 3px 9px rgba(17, 17, 17, 0.1), 0 1px 2px rgba(17, 17, 17, 0.06);
+}
+.code-agents-catalog .code-agent-avatar img,
+.code-builtin-drawer .code-agent-avatar img {
+  width: 100%;
+  height: 100%;
+  padding: 3px;
+  border-radius: inherit;
+  box-sizing: border-box;
+  object-fit: contain;
+  background: #ffffff;
+}
+.code-agents-catalog .code-agent-avatar.small img,
+.code-builtin-drawer .code-agent-avatar.small img {
+  padding: 2px;
+}
+.code-agents-catalog .code-agent-avatar.large img,
+.code-builtin-drawer .code-agent-avatar.large img {
+  padding: 4px;
 }
 .code-agents-catalog .my-model-row {
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(160px, 1fr) auto auto auto;
 }
 .code-agents-catalog .code-agent-manage {
   display: inline-flex;
