@@ -1116,3 +1116,72 @@ C. Data lifecycle і privacy
     - SQL-ізоляція: створені сайти та користувачі `postgres-projects` не мають доступу до таблиць NPATI Core PostgreSQL (`audit_logs` тощо).
     - Data Studio захист: неавторизовані відвідувачі позбавлені доступу до Data Studio schema mutation API (HTTP 401 Access Denied).
     - Force Purge захист: спроба звичайного користувача виконати примусове видалення повертає HTTP 403 `force_purge_not_permitted`.
+
+---
+
+## Доповнення: Специфікація інтеграції Website Builder, Data Studio та MinIO (2026-10-18)
+
+Усі нові вимоги додано як окремі нормативні доповнення з унікальними ідентифікаторами та перехресними посиланнями на план Data Studio (`docs/data-studio/PLAN.md` -> `REQ-DS-*`):
+
+### [REQ-INT-01] Доступ до файлів проєкту через Sandbox Provider
+- Доступ агента до файлів коду сайтів здійснюється виключно через `ProjectWorkspace` та `ProjectSandboxService` (`apps/agent-api/src/project-workspace.ts`, `apps/agent-api/src/shared-project-runtime-provider.ts`).
+- Шляхи монтування обмежені директорією `/projects/:projectId` всередині `sandbox-runner-1`.
+- Права доступу на диску: `0700` (`drwx------`) з окремим UID/GID на проект. Прямий доступ агента до хостової файлової системи за межами робочої директорії суворо заблоковано.
+- Зв'язок: [REQ-DS-01].
+
+### [REQ-INT-02] Керування медіафайлами через MinIO
+- Усі статичні та завантажені медіафайли зберігаються в об'єктному сховищі MinIO у бакеті `npati-project-media` (`apps/agent-api/src/project-media-service.ts`).
+- Префікс ключів: `websites/${companyId}/${projectId}/*`.
+- Забезпечено абсолютну бінарну точність без Latin-1/UTF-8 спотворення: передача сирого `Buffer` між MinIO, Workspace mirror та HTTP стрімом (SHA-256 ідентичність).
+- Безпека SVG: обов'язкова санітизація шкідливих скриптів/зовнішніх сутностей та віддача із заголовком `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'`.
+- Зв'язок: [REQ-DS-02].
+
+### [REQ-INT-03] Ізольований Project Data Studio
+- Дані сайтів зберігаються в окремому контейнері `postgres-projects:5432`, повністю відокремленому від ядра системи.
+- Для кожного DataBackend автоматично створюються ізольовані бази: `db_<backendId>_dev` та `db_<backendId>_prod`.
+- Зв'язок: [REQ-DS-03].
+
+### [REQ-INT-04] Заборона прямого доступу до NPATI Core PostgreSQL
+- Контейнер `sandbox-runner-1` та процеси згенерованих сайтів не мають мережевого маршруту (Zero Route, `nc -zv` ECONNREFUSED/timeout) до основної бази `postgres:5432` (`npati_agent`).
+- Сервісні ролі сайтів у `postgres-projects` не мають прав та видимості бази ядра `npati_agent`.
+- Агент позбавлений можливості виконання довільного сирого SQL — усі операції виконуються через структуровані DDL/DML контракти.
+- Зв'язок: [REQ-DS-04].
+
+### [REQ-INT-05] Project-Scoped Permissions та захист Preview
+- Live Preview захищено криптографічно підписаним токеном (`/preview/proxy/?token=...`).
+- Токен проєкту A, застосований до проєкту B, суворо відхиляється з кодом `HTTP 403 token_scope_denied` незалежно від валідності підпису.
+- Ендпоінти Project API Gateway вимагають валідний `X-Project-Key` (PUBLISHABLE або SECRET). Запити без ключа відхиляються з `HTTP 401 MISSING_API_KEY`.
+- Зв'язок: [REQ-DS-05].
+
+### [REQ-INT-06] Життєвий цикл (Lifecycle) та Cleanup
+- Soft Delete виконує зупинку процесів (`stopSandbox`), відкликання CORS та блокування Preview/API з `HTTP 404/409`, зберігаючи вихідний код, медіа та БД на 30 днів.
+- Ендпоінт `GET /delete-plan` надає повний dry-run звіт без жодних мутацій.
+- Restoring повертає проєкт у робочий стан `ready` із відновленням усіх точок доступу.
+- Hard Purge очищає виключно виділені ресурси проєкту (каталог `/projects/:projectId` та префікс MinIO), гарантуючи збереження спільних баз даних DataBackend.
+- Примусове видалення (`force: true`) дозволено виключно ролям `owner` та `admin`. Спроби відхиляються з `HTTP 403 force_purge_not_permitted` та аудитом.
+- Зв'язок: [REQ-DS-06].
+
+### [REQ-INT-07] Auth кінцевих користувачів створених сайтів (Project Auth)
+- Клієнти сайту (покупці) реєструються через вбудований Project Auth (`/api/auth/register`, `/api/auth/login`).
+- Дані зберігаються виключно в таблиці `_npati_auth_users` проєктної бази даних із хешуванням паролів (Argon2id/Bcrypt).
+- Облікові записи покупців сайтів ніколи не змішуються з користувачами платформи NPATI.
+- Зв'язок: [REQ-DS-07].
+
+### [REQ-INT-08] Прив'язка бази даних до проєкту (DataBackend Association)
+- Проєкти прив'язуються до БД через сутність `DataBackend` (`data_backend_id`).
+- Один DataBackend може одночасно обслуговувати Web-сайт та Мобільний додаток.
+- Видалення окремого сайту відв'язує його CORS та артефакти, але не знищує спільний DataBackend.
+- Зв'язок: [REQ-DS-03], [REQ-DS-06].
+
+### [REQ-INT-09] Контракти доступу до таблиць та схема
+- Усі DDL мутації схемы виконуються через версійні міграції NPATI Data Studio.
+- Заборонено неавторизовані DDL виклики (відвідувачі сайту отримують `HTTP 401/403 BUSINESS_ACCESS_DENIED`).
+- Таблиці захищаються Row-Level Security (RLS) з обов'язковими політиками `USING` та `WITH CHECK`.
+- Зв'язок: [REQ-DS-05].
+
+### [REQ-INT-10] Acceptance Criteria & Playwright Verification
+- Сценарій B: сайт успішно взаємодіє з ізольованими таблицями Data Studio (`products`, `orders`, `_npati_auth_users`).
+- Сценарій D: автономний агент через чат генерує сайт, налаштовує БД, збирає проєкт, проводить успішну реєстрацію та замовлення через Playwright у Live Preview, і друге повідомлення оновлює сайт без втрати існуючих даних.
+- Усі 10/10 контрольних перевірок автоматизованого тесту `scratch/run-stage-6-consolidated-suite.cjs` мають статус PASS.
+- Зв'язок: [REQ-DS-01] - [REQ-DS-07].
+
