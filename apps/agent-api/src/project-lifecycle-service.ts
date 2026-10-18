@@ -141,7 +141,7 @@ export class ProjectLifecycleService {
     let activityEventsCount = 0;
     let contextSummariesCount = 0;
 
-    const pool = (this.deps.store as any).pool;
+    const pool = (this.deps.store as unknown as { pool?: Pick<import("pg").Pool, "query"> }).pool;
     if (pool && typeof pool.query === "function") {
       try {
         const chkRes = await pool.query("SELECT count(*)::int AS count FROM project_checkpoints WHERE project_id=$1", [projectId]);
@@ -546,7 +546,7 @@ export class ProjectLifecycleService {
 
     // 5. Clean up dedicated records & orphaned events
     let orphanedCleaned = 0;
-    const pool = (this.deps.store as any).pool;
+    const pool = (this.deps.store as unknown as { pool?: Pick<import("pg").Pool, "query"> }).pool;
     if (pool && typeof pool.query === "function") {
       try {
         const delAct = await pool.query("DELETE FROM code_activity_events WHERE project_id=$1", [projectId]);

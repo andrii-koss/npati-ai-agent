@@ -342,3 +342,34 @@ describe("C2 real binary metadata", () => {
     expect(invoked).toMatchObject({ ok: true, result: { data: { binary: true, image: true, mimeGuess: "image/jpeg", lines: [] } } });
   });
 });
+
+describe("Workspace literal editing regression", () => {
+  it.each(["$&", "$$", "$" + String.fromCharCode(96), "$'"])("persists literal replacement %s in real files", async (replacement) => {
+    const { company, project, workspace } = await fixture();
+    const file = await workspace.createFile(owner, company.id, project.id, "literal.txt", "before TARGET after\n");
+    const edited = await workspace.editFile(owner, company.id, project.id, "literal.txt", "TARGET", replacement, file.revision);
+    expect(edited.content).toBe("before " + replacement + " after\n");
+    expect((await workspace.readFile(owner, company.id, project.id, "literal.txt")).content).toBe(edited.content);
+  });
+  it("preserves BOM and CRLF when replacement contains LF", async () => {
+    const { company, project, workspace } = await fixture();
+    const file = await workspace.createFile(owner, company.id, project.id, "lines.txt", "\uFEFFfirst\r\nTARGET\r\nlast\r\n");
+    const edited = await workspace.editFile(owner, company.id, project.id, "lines.txt", "TARGET", "two\nlines", file.revision);
+    expect(edited.content).toBe("\uFEFFfirst\r\ntwo\r\nlines\r\nlast\r\n");
+  });
+});
+
+describe("Workspace delete revision regression", () => {
+  it("refuses a stale delete through the real canonical adapter", async () => {
+    const { createProjectWorkspaceWritePort } = await import("../apps/agent-api/src/code-tool-runtime-workspace");
+    const { company, project, workspace } = await fixture();
+    const file = await workspace.createFile(owner, company.id, project.id, "retained.txt", "original\n");
+    const changed = await workspace.writeFile(owner, company.id, project.id, "retained.txt", "concurrent\n", file.revision);
+    const port = createProjectWorkspaceWritePort(workspace);
+    const scope = { ctx: owner, companyId: company.id, projectId: project.id, path: "retained.txt" };
+    await expect(port.deleteFile({ ...scope, expectedRevision: file.revision })).rejects.toMatchObject({ code: "revision_conflict" });
+    expect((await workspace.readFile(owner, company.id, project.id, "retained.txt")).content).toBe("concurrent\n");
+    await port.deleteFile({ ...scope, expectedRevision: changed.revision });
+    await expect(workspace.readFile(owner, company.id, project.id, "retained.txt")).rejects.toMatchObject({ code: "file_not_found" });
+  });
+});

@@ -24,6 +24,12 @@
   "include": [
     "scripts/verify-coding-agent-data.ts",
     "tests/coding-agent-c1-contract-audit.test.ts",
+    "tests/coding-agent-c3-runtime.test.ts",
+    "tests/coding-agent-c3-real-workspace.test.ts",
+    "tests/coding-agent-c3-write-engine.test.ts",
+    "tests/coding-agent-c3-schema-executor-parity.test.ts",
+    "tests/coding-agent-c3-capabilities.test.ts",
+    "tests/support/c3-workspace-proof-entry.ts",
     "tests/coding-agent-c1-postgres.test.ts",
     "tests/coding-agent-c1c-audit-log.test.ts",
     "tests/coding-agent-c1a-flags.test.ts",

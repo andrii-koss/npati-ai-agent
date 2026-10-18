@@ -12,7 +12,7 @@ import { CodeToolError } from "./code-tool-runtime-errors";
 export function createProjectWorkspaceReadPort(
   workspace: {
     getFileTree(ctx: AuthContext, companyId: string, projectId: string): Promise<Array<{ path: string; type: string; size?: number; mtimeMs?: number }>>;
-    readFile(ctx: AuthContext, companyId: string, projectId: string, path: string): Promise<{ path: string; content: string; size: number; revision: string; binary?: boolean; encoding?: string; mimeGuess?: string | null }>;
+    readFile(ctx: AuthContext, companyId: string, projectId: string, path: string): Promise<{ path: string; content: string; size: number; revision: string; mode?: number; binary?: boolean; encoding?: string; mimeGuess?: string | null }>;
   },
   sandbox?: SandboxExecPort,
 ): CodeReadPort {
@@ -44,6 +44,7 @@ export function createProjectWorkspaceReadPort(
         truncated = true;
       }
       return { path: file.path, content: text, revision: file.revision, sha256: file.binary ? file.revision : sha256Hex(content), totalLines: lines.length, truncated,
+        ...(file.mode !== undefined ? { mode: file.mode } : {}),
         ...(file.binary !== undefined ? { binary: file.binary } : {}),
         ...(file.encoding !== undefined ? { encoding: file.encoding } : {}),
         ...(file.mimeGuess !== undefined ? { mimeGuess: file.mimeGuess } : {}) };
@@ -80,10 +81,10 @@ export function createProjectWorkspaceReadPort(
 export function createProjectWorkspaceWritePort(
   workspace: {
     writeFile(ctx: AuthContext, companyId: string, projectId: string, path: string, content: string, expectedRevision: string): Promise<{ path: string; revision: string }>;
-    createFile(ctx: AuthContext, companyId: string, projectId: string, path: string, content: string): Promise<{ path: string; revision: string }>;
+    createFile(ctx: AuthContext, companyId: string, projectId: string, path: string, content: string, workspaceId?: string, agentId?: string, mode?: number): Promise<{ path: string; revision: string }>;
     editFile(ctx: AuthContext, companyId: string, projectId: string, path: string, find: string, replacement: string, expectedRevision: string): Promise<{ path: string; revision: string }>;
     moveFile(ctx: AuthContext, companyId: string, projectId: string, from: string, to: string, expectedRevision: string): Promise<{ path: string; revision: string }>;
-    deleteFile(ctx: AuthContext, companyId: string, projectId: string, path: string): Promise<void>;
+    deleteFile(ctx: AuthContext, companyId: string, projectId: string, path: string, workspaceId?: string, agentId?: string, expectedRevision?: string): Promise<void>;
   },
 ): CodeWritePort {
   const hashed = (file: { path: string; revision: string }) => ({ path: file.path, revision: file.revision, sha256: file.revision });
@@ -92,7 +93,7 @@ export function createProjectWorkspaceWritePort(
       return hashed(await workspace.writeFile(input.ctx, input.companyId, input.projectId, input.path, input.content, input.expectedRevision));
     },
     async createFile(input) {
-      return hashed(await workspace.createFile(input.ctx, input.companyId, input.projectId, input.path, input.content));
+      return hashed(await workspace.createFile(input.ctx, input.companyId, input.projectId, input.path, input.content, undefined, undefined, input.mode));
     },
     async editFile(input) {
       return hashed(await workspace.editFile(input.ctx, input.companyId, input.projectId, input.path, input.find, input.replacement, input.expectedRevision));
@@ -101,7 +102,7 @@ export function createProjectWorkspaceWritePort(
       return hashed(await workspace.moveFile(input.ctx, input.companyId, input.projectId, input.from, input.to, input.expectedRevision));
     },
     async deleteFile(input) {
-      await workspace.deleteFile(input.ctx, input.companyId, input.projectId, input.path);
+      await workspace.deleteFile(input.ctx, input.companyId, input.projectId, input.path, undefined, undefined, input.expectedRevision);
     },
   };
 }

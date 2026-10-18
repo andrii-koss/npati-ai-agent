@@ -76,6 +76,8 @@ export function createAppCodeEngineWiring(deps: AppCodeEngineWiringDeps) {
   const codeTurnTracker = new CodeTurnTracker(resolveTurnTrackingOptions());
 
   const codeCheckpointPort = codeCheckpointPortFromGit({
+    readCheckpointFile: (ctx, companyId, projectId, checkpointId, path) =>
+      projectGitService.readCheckpointFile(ctx, companyId, projectId, checkpointId, path),
     createCheckpoint: (ctx, companyId, projectId, input) =>
       projectGitService.createCheckpoint(ctx, companyId, projectId, input),
     restoreCheckpoint: (ctx, companyId, projectId, checkpointId, restoreOptions) =>
@@ -93,14 +95,14 @@ export function createAppCodeEngineWiring(deps: AppCodeEngineWiringDeps) {
   const codeProjectWorkspaceWritePort = createProjectWorkspaceWritePort({
     writeFile: (ctx, companyId, projectId, filePath, content, expectedRevision) =>
       projectWorkspace.writeFile(ctx, companyId, projectId, filePath, content, expectedRevision),
-    createFile: (ctx, companyId, projectId, filePath, content) =>
-      projectWorkspace.createFile(ctx, companyId, projectId, filePath, content),
+    createFile: (ctx, companyId, projectId, filePath, content, workspaceId, agentId, mode) =>
+      projectWorkspace.createFile(ctx, companyId, projectId, filePath, content, workspaceId, agentId, mode),
     editFile: (ctx, companyId, projectId, filePath, find, replacement, expectedRevision) =>
       projectWorkspace.editFile(ctx, companyId, projectId, filePath, find, replacement, expectedRevision),
     moveFile: (ctx, companyId, projectId, from, to, expectedRevision) =>
       projectWorkspace.moveFile(ctx, companyId, projectId, from, to, expectedRevision),
-    deleteFile: (ctx, companyId, projectId, filePath) =>
-      projectWorkspace.deleteFile(ctx, companyId, projectId, filePath),
+    deleteFile: (ctx, companyId, projectId, filePath, workspaceId, agentId, expectedRevision) =>
+      projectWorkspace.deleteFile(ctx, companyId, projectId, filePath, workspaceId, agentId, expectedRevision),
   });
 
   const sandboxWiring = createCodeSandboxWiring({

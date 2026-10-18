@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 
-export const STATUSES = ["Verified", "Partial", "Broken", "Missing", "Not Verified", "Blocked"];
+export const STATUSES = ["Verified", "Partial", "Broken", "Missing", "Not Verified", "Blocked", "Unassessed"];
 const ROOT = "docs/coding-agent";
 const PLAN = ROOT + "/PLAN.md";
 const REVIEW = ROOT + "/plan-verification-evidence.json";
@@ -96,7 +96,7 @@ function readStableEvidence(file, cache) {
 }
 
 export function validateReview(entry, review, cache = reviewCache()) {
-  if (!STATUSES.includes(review.status)) throw new Error(entry.id + ": invalid status");
+  if (!STATUSES.includes(review.status) || review.status === "Unassessed") throw new Error(entry.id + ": invalid status");
   if (!review.observation || !Array.isArray(review.implementation) || !Array.isArray(review.checks))
     throw new Error(entry.id + ": incomplete individual assessment");
   for (const file of review.implementation) if (!fs.existsSync(file.path)) throw new Error(entry.id + ": missing implementation " + file.path);
@@ -132,7 +132,7 @@ export function generatePlanVerification() {
   }
   for (const [file, stamp] of cache.stamps) if (fileStamp(file) !== stamp) throw new Error("Evidence changed during verification: " + file);
   const entries = extracted.entries.map(entry => ({ ...entry,
-    status: review.assessments[entry.id]?.status ?? "Not Verified",
+    status: review.assessments[entry.id]?.status ?? "Unassessed",
     reviewed: !!review.assessments[entry.id],
     assessment: review.assessments[entry.id] ?? null }));
   const totals = Object.fromEntries(STATUSES.map(s => [s, entries.filter(e => e.status === s).length]));
@@ -146,7 +146,7 @@ export function generatePlanVerification() {
     "Total: **" + entries.length + "**; individually assessed records: **" + result.reviewed + "**; independently reassessed in this continuation: **" + result.independentlyReviewed + "**; stages: **" + extracted.stages.length + "**.", "",
     "Earlier assessments are retained as evidence history. Their presence is not a claim that this continuation independently rechecked them. The independentReview field identifies current reassessments; changed Verified implementation fingerprints are not carried forward automatically.", "",
     "| Status | Count |", "| --- | ---: |", ...STATUSES.map(s => "| " + s + " | " + totals[s] + " |"), "",
-    "Every unassessed entry remains Not Verified. Optional requirements remain in the denominator. Repeated requirements remain separately addressable; shared evidence is cited explicitly. Stage-local implementation restrictions are not interpreted as bans on later stages.", "",
+    "Unassessed means no individual assessment; Not Verified means assessed with insufficient proof. The statuses are disjoint. Optional requirements remain in the denominator. Repeated requirements remain separately addressable; shared evidence is cited explicitly. Stage-local implementation restrictions are not interpreted as bans on later stages.", "",
     "| ID / PLAN | Requirement / source context | Implementation | Observed state | Tests / executed check | Result | Problem | Required fix / remaining | Final status |",
     "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"];
   for (const entry of entries) {

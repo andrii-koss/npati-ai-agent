@@ -19,12 +19,12 @@ export async function createCheckpoint(host: ProjectGitCheckpointWriteHost, ctx:
     const dir = await host.ensureRepository(ctx, companyId, projectId);
     const trigger = input.trigger ?? "manual";
 
-    // Commit any uncommitted changes to create a valid git snapshot
-    const st = await host.status(ctx, companyId, projectId);
-    if (!st.clean) {
-      await host.runGit(dir, ["add", "-A"]);
-      await host.assertSafeIndex(dir);
-      await host.runGit(dir, ["commit", "-m", `Checkpoint: ${input.name}`]);
+    // Snapshot bytes must not depend on the operator's global newline conversion.
+    await host.runGit(dir, ["-c", "core.autocrlf=false", "add", "-A"]);
+    await host.assertSafeIndex(dir);
+    const staged = await host.runGit(dir, ["diff", "--cached", "--name-only", "-z"]);
+    if (staged.stdout) {
+      await host.runGit(dir, ["-c", "core.autocrlf=false", "commit", "-m", `Checkpoint: ${input.name}`]);
     }
 
     const { stdout } = await host.runGit(dir, ["rev-parse", "HEAD"]);

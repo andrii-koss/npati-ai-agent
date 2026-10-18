@@ -96,6 +96,7 @@ export async function buildRunPromptContext(args: BuildPromptContextArgs): Promi
 
   const systemPrompt = buildSystemPrompt({
     session,
+    editProfile: profile,
     tools,
     environment: {
       os: process.platform,

@@ -95,7 +95,7 @@ export interface CodeToolExecutionContext {
  */
 export interface CodeReadPort {
   listDir(input: { ctx: AuthContext; companyId: string; projectId: string; path: string; depth?: number; limit?: number }): Promise<{ entries: Array<{ path: string; type: "file" | "directory"; size?: number; mtimeMs?: number | null; target?: string | null }> }>;
-  readFile(input: { ctx: AuthContext; companyId: string; projectId: string; path: string; startLine?: number; endLine?: number; maxLines: number; maxBytes: number }): Promise<{ path: string; content: string; revision: string; sha256: string; totalLines: number; truncated: boolean; encoding?: string; binary?: boolean; mimeGuess?: string | null }>;
+  readFile(input: { ctx: AuthContext; companyId: string; projectId: string; path: string; startLine?: number; endLine?: number; maxLines: number; maxBytes: number }): Promise<{ path: string; content: string; revision: string; sha256: string; totalLines: number; truncated: boolean; mode?: number; encoding?: string; binary?: boolean; mimeGuess?: string | null }>;
   runSearch(input: { ctx: AuthContext; companyId: string; projectId: string; query: string; path?: string; maxResults: number; timeoutMs: number; glob?: string; type?: string; ignoreCase?: boolean; fixedStrings?: boolean; contextLines?: number }): Promise<{ matches: Array<{ path: string; line: number; text: string; context?: Array<{ line: number; text: string }> }>; truncated: boolean; engine?: "ripgrep" | "fallback" }>;
 }
 
@@ -125,13 +125,15 @@ export interface SandboxExecPort {
  */
 export interface CodeWritePort {
   writeFile(input: { ctx: AuthContext; companyId: string; projectId: string; path: string; content: string; expectedRevision: string }): Promise<{ path: string; revision: string; sha256: string }>;
-  createFile(input: { ctx: AuthContext; companyId: string; projectId: string; path: string; content: string }): Promise<{ path: string; revision: string; sha256: string }>;
+  createFile(input: { ctx: AuthContext; companyId: string; projectId: string; path: string; content: string; mode?: number }): Promise<{ path: string; revision: string; sha256: string }>;
   editFile(input: { ctx: AuthContext; companyId: string; projectId: string; path: string; find: string; replacement: string; expectedRevision: string }): Promise<{ path: string; revision: string; sha256: string }>;
   moveFile(input: { ctx: AuthContext; companyId: string; projectId: string; from: string; to: string; expectedRevision: string }): Promise<{ path: string; revision: string; sha256: string }>;
-  deleteFile(input: { ctx: AuthContext; companyId: string; projectId: string; path: string }): Promise<void>;
+  deleteFile(input: { ctx: AuthContext; companyId: string; projectId: string; path: string; expectedRevision?: string }): Promise<void>;
 }
 
 export interface CodeToolActivityEvent {
+  toolCallId?: string;
+  turnId?: string;
   companyId: string;
   projectId: string;
   sessionId?: string;

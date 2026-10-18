@@ -98,6 +98,7 @@ export const SECURITY_GATE_TESTS = [
   "tests/shared-project-browser-qa.test.ts",
   "tests/production-security-guardrails.test.ts",
   "tests/coding-agent-c3-runtime.test.ts",
+  "tests/coding-agent-c3-real-workspace.test.ts",
   "tests/coding-agent-c3-schema-executor-parity.test.ts",
   "tests/coding-agent-c4-classifier.test.ts",
   "tests/coding-agent-c4-shell.test.ts",

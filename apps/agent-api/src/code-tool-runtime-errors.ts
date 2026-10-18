@@ -49,6 +49,8 @@ export type CodeToolErrorCode =
   | "delete_failed"
   | "move_failed"
   | "write_unavailable"
+  | "unsupported_encoding"
+  | "diff_unavailable"
   | "edit_no_match"
   | "edit_ambiguous"
   | "patch_conflict"

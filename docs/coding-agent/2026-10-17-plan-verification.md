@@ -1,5 +1,7 @@
 # Individual PLAN verification checkpoint — 2026-10-17
 
+Latest continuation: [C3 repairs and current PLAN coverage](2026-10-17-c3-verification.md). The current denominator is2884 after73 appended requirements; counts below describe the preceding checkpoint.
+
 The requested full audit is incomplete. PLAN.md was read in full. This continuation independently reassessed C1a, C1b and C2, repaired confirmed defects, and preserved the earlier assessment records without treating a broad green gate as proof of every requirement.
 
 Source: [PLAN.md](PLAN.md). Full ledger: [matrix](plan-verification-matrix.md), [JSON matrix](plan-verification-matrix.json), [evidence](plan-verification-evidence.json).
@@ -104,9 +106,9 @@ Artifacts: [continuation directory](../../artifacts/coding-agent-plan-verificati
 | C1b admission/publication regressions | 2 suites;51 passed; scanner/signature ports explicitly simulated |
 | C2 and adjacent regressions | 10 suites;178 passed |
 | Workspace typecheck | Passed across14 workspaces |
-| Expanded test typecheck | Final repeat pending after adding the evidence helper declaration |
-| Targeted UI suspension/reload checks | Pending |
-| Root build and lint | Pending |
+| Expanded test typecheck | Passed after adding the evidence helper declaration |
+| Targeted UI suspension/reload checks | Passed; 46 tests |
+| Root build and lint | Passed; existing bundle-size/browser-external warnings retained |
 | Diff whitespace check | Passed |
 | New broad autonomous E2E | Not run; main-plan individual verification remains the priority |
 
@@ -118,4 +120,4 @@ Host Node22.13.1 remains below package.json's declared22.22.2 floor. Successful 
 
 ## Resume point
 
-Finish the pending verification commands and refresh their evidence. Then continue the independent audit at C3 in PLAN source order. Retain prior assessment artifacts; recheck exact source/test correspondence rather than automatically restoring changed Verified hashes. Continue through every remaining stage and the550 unassessed global clauses before the separate broad E2E campaign.
+Prior checkpoint verification commands passed. Continue the independent audit at C3 in PLAN source order; current C3 repairs and evidence are recorded in the 2026-10-17 C3 continuation report. Retain prior assessment artifacts; recheck exact source/test correspondence rather than automatically restoring changed Verified hashes. Continue through every remaining stage and the550 unassessed global clauses before the separate broad E2E campaign.

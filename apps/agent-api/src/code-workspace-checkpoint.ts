@@ -20,6 +20,7 @@ import type { ProjectFileError } from "./project-workspace";
 
 /** The subset of `ProjectGitService` the write runtime needs (structural, so tests can fake it). */
 export interface CodeCheckpointGitPort {
+  readCheckpointFile?(ctx: AuthContext, companyId: string, projectId: string, checkpointId: string, path: string): Promise<{ content: string | null }>;
   createCheckpoint(
     ctx: AuthContext,
     companyId: string,
@@ -224,6 +225,7 @@ export class CodeTurnTracker {
 
 /** What the write runtime needs from the existing checkpoint mechanism. */
 export interface CodeCheckpointPort {
+  readFile?(input: { ctx: AuthContext; companyId: string; projectId: string; checkpointId: string; path: string }): Promise<{ content: string | null }>;
   /** Creates a turn checkpoint before the first write of a turn (git-backed, commits dirty state). */
   create(input: {
     ctx: AuthContext;
@@ -250,6 +252,7 @@ export interface CodeCheckpointPort {
 /** Checkpoint port backed by the existing `ProjectGitService` (no new storage format). */
 export function codeCheckpointPortFromGit(git: CodeCheckpointGitPort): CodeCheckpointPort {
   return {
+    ...(git.readCheckpointFile ? { readFile: (input: { ctx: AuthContext; companyId: string; projectId: string; checkpointId: string; path: string }) => git.readCheckpointFile!(input.ctx, input.companyId, input.projectId, input.checkpointId, input.path) } : {}),
     async create(input) {
       const label = input.label ?? `Code agent turn ${input.turnId}`;
       const checkpoint = await git.createCheckpoint(input.ctx, input.companyId, input.projectId, {

@@ -40,9 +40,10 @@ interface Harness {
   storeThrows: { value: boolean };
   breakRevision: { value: boolean };
   writes: string[];
+  attempts: string[];
 }
 
-function harness(options: { withCheckpoints?: boolean; withApprovals?: boolean; turnTracker?: CodeTurnTracker } = {}): Harness {
+function harness(options: { auditFailure?: { value: boolean }; withCheckpoints?: boolean; withApprovals?: boolean; turnTracker?: CodeTurnTracker; beforeCheckpoint?: (files: Map<string, string>) => void } = {}): Harness {
   const files = new Map<string, string>([["src/orders.ts", "export function createOrder() {\n  return 1;\n}\n"]]);
   const checkpoints: Harness["checkpoints"] = [];
   const approvals: Harness["approvals"] = [];
@@ -52,6 +53,7 @@ function harness(options: { withCheckpoints?: boolean; withApprovals?: boolean; 
   const storeThrows = { value: false };
   const breakRevision = { value: false };
   const writes: string[] = [];
+  const attempts: string[] = [];
 
   const readPort: CodeReadPort = {
     async listDir() { return { entries: [...files.keys()].map((path) => ({ path, type: "file" as const })) }; },
@@ -65,6 +67,7 @@ function harness(options: { withCheckpoints?: boolean; withApprovals?: boolean; 
 
   const writePort: CodeWritePort = {
     async writeFile({ path, content, expectedRevision }) {
+      attempts.push(path);
       const current = files.get(path);
       if (current === undefined) throw Object.assign(new Error("not a file"), { code: "not_a_file", status: 404 });
       if (breakRevision.value || expectedRevision !== revision(current)) {
@@ -89,19 +92,25 @@ function harness(options: { withCheckpoints?: boolean; withApprovals?: boolean; 
       writes.push(path);
       return { path, revision: revision(next), sha256: sha256Hex(next) };
     },
-    async moveFile({ from, to }) {
+    async moveFile({ from, to, expectedRevision }) {
       const current = files.get(from);
       if (current === undefined) throw Object.assign(new Error("not a file"), { code: "not_a_file", status: 404 });
+      if (expectedRevision !== revision(current)) throw Object.assign(new Error("Project file revision changed"), { code: "revision_conflict", status: 409, currentRevision: revision(current) });
       files.delete(from);
       files.set(to, current);
       writes.push(to);
       return { path: to, revision: revision(current), sha256: sha256Hex(current) };
     },
-    async deleteFile({ path }) { files.delete(path); writes.push(path); },
+    async deleteFile({ path, expectedRevision }) {
+      const current = files.get(path);
+      if (expectedRevision !== undefined && (current === undefined || expectedRevision !== revision(current))) throw Object.assign(new Error("Project file revision changed"), { code: "revision_conflict", status: 409, currentRevision: current === undefined ? null : revision(current) });
+      files.delete(path); writes.push(path);
+    },
   };
 
   const checkpointPort: CodeCheckpointPort | undefined = options.withCheckpoints === false ? undefined : {
     async create({ turnId }) {
+      options.beforeCheckpoint?.(files);
       const id = `cp-${turnId}-${checkpoints.length + 1}`;
       checkpoints.push({ id, snapshot: new Map(files) });
       return { checkpointId: id, commitHash: "deadbeef" };
@@ -144,8 +153,8 @@ function harness(options: { withCheckpoints?: boolean; withApprovals?: boolean; 
     store: {
       async getCompany() { if (storeThrows.value) throw new Error("Company is not available to this user"); return {}; },
     },
-    audit: { async record(_ctx: AuthContext, entry: Record<string, unknown>) { audits.push(entry as Record<string, unknown>); } } as never,
-    activity: { async record(event: Record<string, unknown>) { activities.push(event); } },
+    audit: { async record(_ctx: AuthContext, entry: Record<string, unknown>) { if (options.auditFailure?.value) throw new Error("Audit journal unavailable"); audits.push(entry as Record<string, unknown>); } } as never,
+    activity: { async record(event) { activities.push({ ...event }); } },
     tracker: undefined,
     turns: options.turnTracker ?? new CodeTurnTracker(),
     executors: allCanonicalExecutors(),
@@ -156,7 +165,7 @@ function harness(options: { withCheckpoints?: boolean; withApprovals?: boolean; 
     maxRevisionRetries: 2,
   });
 
-  return { runtime, files, checkpoints, approvals, audits, activities, allowedFlags, storeThrows, breakRevision, writes };
+  return { runtime, files, checkpoints, approvals, audits, activities, allowedFlags, storeThrows, breakRevision, writes, attempts };
 }
 
 const invoke = (h: Harness, tool: string, args: Record<string, unknown>, extra: Record<string, unknown> = {}, ctx: AuthContext = owner) =>
@@ -268,7 +277,7 @@ describe("security-gate: C3 revision control and retries", () => {
       "revision_conflict", "revision_conflict", "revision_conflict_exhausted",
     ]);
     const first = conflicts[0];
-    if (!first.ok) expect(first.error.details).toMatchObject({ currentRevision: revision(h.files.get("src/orders.ts")!) });
+    if (first && !first.ok) expect(first.error.details).toMatchObject({ currentRevision: revision(h.files.get("src/orders.ts")!) });
     expect(h.writes).toHaveLength(0);
   });
 });
@@ -437,5 +446,105 @@ describe("security-gate: C3 acceptance path", () => {
     expect(undone.ok).toBe(true);
     expect(h.files.get("src/orders.ts")).toBe(originalOrders);
     expect(h.files.get("src/cart.ts")).toBe(originalCart);
+  });
+});
+
+describe("security-gate: C3 checkpoint-time concurrency regression", () => {
+  it.each(["code.fs.move", "code.fs.delete", "code.fs.apply_patch"])("refuses stale %s after checkpoint creation", async (tool) => {
+    const original = "export function createOrder() {\n  return 1;\n}\n";
+    const external = original + "// concurrent change\n";
+    const h = harness({ beforeCheckpoint: files => files.set("src/orders.ts", external) });
+    await readFile(h, "src/orders.ts");
+    const args = tool === "code.fs.move" ? { from: "src/orders.ts", to: "src/moved.ts" }
+      : tool === "code.fs.delete" ? { path: "src/orders.ts" }
+      : { patch: "*** Begin Patch\n*** Update File: src/orders.ts\n@@ -1,3 +1,3 @@\n export function createOrder() {\n-  return 1;\n+  return 2;\n }\n*** End Patch" };
+    let result = await invoke(h, tool, args);
+    if (!result.ok && result.error.code === "approval_required") {
+      result = await invoke(h, tool, args, { approvalId: h.approvals[0]!.id });
+    }
+    expect(result).toMatchObject({ ok: false, error: { code: "revision_conflict" } });
+    expect(h.files.get("src/orders.ts")).toBe(external);
+    expect(h.files.has("src/moved.ts")).toBe(false);
+    expect(h.writes).toEqual([]);
+  });
+  it.each(["$&", "$$", "$" + String.fromCharCode(96), "$'"])("keeps legacy patch replacement %s literal", async replacement => {
+    const h = harness();
+    await readFile(h, "src/orders.ts");
+    const result = await invoke(h, "code.fs.apply_patch", { edits: [{ path: "src/orders.ts", find: "return 1", replacement }] });
+    expect(result.ok).toBe(true);
+    expect(h.files.get("src/orders.ts")).toBe("export function createOrder() {\n  " + replacement + ";\n}\n");
+  });
+});
+
+describe("security-gate: C3 revision retry accounting regression", () => {
+  it("keeps retry budgets independent for separate file paths", async () => {
+    const h = harness();
+    h.files.set("src/other.ts", "old\n");
+    await readFile(h, "src/orders.ts");
+    await readFile(h, "src/other.ts");
+    h.breakRevision.value = true;
+    for (let attempt = 0; attempt < 3; attempt++) await invoke(h, "code.fs.write", { path: "src/orders.ts", content: "new\n" });
+    const result = await invoke(h, "code.fs.write", { path: "src/other.ts", content: "new\n" });
+    expect(result).toMatchObject({ ok: false, error: { code: "revision_conflict", details: { attempts: 1 } } });
+  });
+  it("resets the file conflict budget after a successful write", async () => {
+    const h = harness();
+    await readFile(h, "src/orders.ts");
+    h.breakRevision.value = true;
+    await invoke(h, "code.fs.write", { path: "src/orders.ts", content: "new\n" });
+    h.breakRevision.value = false;
+    expect((await invoke(h, "code.fs.write", { path: "src/orders.ts", content: "new\n" })).ok).toBe(true);
+    h.breakRevision.value = true;
+    const result = await invoke(h, "code.fs.write", { path: "src/orders.ts", content: "other\n" });
+    expect(result).toMatchObject({ ok: false, error: { code: "revision_conflict", details: { attempts: 1 } } });
+  });
+});
+
+describe("security-gate: C3 retry exhaustion is enforced before dispatch", () => {
+  it("does not dispatch a fourth single-file write after the retry budget is exhausted", async () => {
+    const h = harness();
+    await readFile(h, "src/orders.ts");
+    h.breakRevision.value = true;
+    for (let index = 0; index < 3; index++) await invoke(h, "code.fs.write", { path: "src/orders.ts", content: "changed\n" });
+    assertExhausted(await invoke(h, "code.fs.write", { path: "src/orders.ts", content: "changed\n" }));
+    expect(h.attempts).toHaveLength(3);
+    h.breakRevision.value = false;
+    const next = await invoke(h, "code.fs.write", { path: "src/orders.ts", content: "next turn\n" }, { turnId: "next-turn" });
+    expect(next.ok).toBe(true);
+  });
+  it("bounds retries for a multi-file patch before another partial commit is attempted", async () => {
+    const h = harness();
+    h.files.set("other.ts", "old\n");
+    await readFile(h, "src/orders.ts");
+    await readFile(h, "other.ts");
+    const patch = "*** Begin Patch\n*** Update File: src/orders.ts\n@@ -1,3 +1,3 @@\n export function createOrder() {\n-  return 1;\n+  return 2;\n }\n*** Update File: other.ts\n@@ -1 +1 @@\n-old\n+new\n*** End Patch";
+    h.breakRevision.value = true;
+    for (let index = 0; index < 3; index++) await invoke(h, "code.fs.apply_patch", { patch });
+    assertExhausted(await invoke(h, "code.fs.apply_patch", { patch }));
+    expect(h.attempts).toHaveLength(3);
+  });
+});
+function assertExhausted(result: Awaited<ReturnType<typeof invoke>>) {
+  expect(result).toMatchObject({ ok: false, error: { code: "revision_conflict_exhausted" } });
+}
+
+describe("security-gate: C3 undo audit failure is fail closed", () => {
+  it.each(["canonical tool", "public undo"] as const)("keeps files and checkpoint intact when the journal fails through %s", async entry => {
+    const failure = { value: false };
+    const h = harness({ auditFailure: failure });
+    const original = h.files.get("src/orders.ts");
+    await readFile(h, "src/orders.ts");
+    expect((await invoke(h, "code.fs.edit", { path: "src/orders.ts", old_string: "return 1;", new_string: "return 2;" })).ok).toBe(true);
+    const changed = h.files.get("src/orders.ts");
+    failure.value = true;
+    const undo = () => entry === "canonical tool"
+      ? invoke(h, "code.fs.undo_last_turn", { confirm: true })
+      : h.runtime.undoTurn(owner, { companyId: "company-c3", projectId: "project-c3", sessionId: "session-c3", turnId: "turn-1", toolCallId: "public-undo" });
+    expect((await undo()).ok).toBe(false);
+    expect(h.files.get("src/orders.ts")).toBe(changed);
+    expect(h.runtime.turnSummary("session-c3", "turn-1").checkpointId).toBeTruthy();
+    failure.value = false;
+    expect((await undo()).ok).toBe(true);
+    expect(h.files.get("src/orders.ts")).toBe(original);
   });
 });

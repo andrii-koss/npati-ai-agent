@@ -28,6 +28,7 @@ import {
 } from "./code-tool-runtime-errors";
 import type {
   CodeReadPort,
+  CodeWritePort,
   CodeToolExecutionContext,
   CodeToolInvokeFailure,
   CodeToolInvokeResult,
@@ -130,6 +131,9 @@ export class CodeToolRuntime {
       await this.options.flags.assertEnabled(ctx, CODE_AGENT_MASTER_FLAG, { companyId: input.companyId, userId: ctx.userId });
       await this.options.flags.assertEnabled(ctx, "code.write", { companyId: input.companyId, userId: ctx.userId });
       await this.options.flags.executionModes?.assertToolAllowed(ctx, input.companyId, input.projectId, "code.fs.undo_last_turn");
+      await this.hooksCoordinator.recordAudit(ctx, { ...input, sessionId, tool: "code.fs.undo_last_turn", toolCallId: input.toolCallId ?? "undo-" + turnId }, undefined, "allowed", undefined, {
+        turnId, action: "pre_undo_last_turn", strict: true,
+      });
       const checkpointId = await this.writeGuard.restoreTurn(ctx, { companyId: input.companyId, projectId: input.projectId, sessionId, turnId, tool: "code.fs.undo_last_turn" });
       const result: CodeToolInvokeResult = {
         ok: true, tool: "code.fs.undo_last_turn", toolVersion: 1, schemaVersion: 1,
@@ -163,6 +167,8 @@ export class CodeToolRuntime {
     companyId: string; projectId: string; sessionId?: string; tool: string; toolVersion?: number;
     args?: unknown; toolCallId: string;
     turnId?: string;
+    /** Stable server-side identity when the runner has no durable run row. */
+    runScopeId?: string;
     approvalId?: string;
     runId?: string; agentId?: string; leaseOwner?: string;
     snapshotId?: string;
@@ -174,6 +180,8 @@ export class CodeToolRuntime {
     const started = Date.now();
     const sessionId = input.sessionId ?? `project:${input.projectId}`;
     const turnId = input.turnId ?? `auto-${new Date().toISOString().slice(0, 13)}`;
+    // Model turns change within one run; retry and replay identity must stay run-scoped.
+    const operationScope = canonicalJson([ctx.workspaceId, ctx.userId, input.companyId, input.projectId, sessionId, input.runId ? ["run", input.runId] : input.runScopeId ? ["stateless", input.runScopeId] : ["turn", turnId]]);
     let turnChanges: CodeWriteChange[] = [];
     try {
       // (1) Tenant isolation: the company must belong to the caller's workspace and user.
@@ -284,7 +292,7 @@ export class CodeToolRuntime {
       }
 
       // (6) Idempotency
-      const cacheKey = canonicalJson([ctx.workspaceId, ctx.userId, input.companyId, input.projectId, sessionId, input.toolCallId]);
+      const cacheKey = canonicalJson([operationScope, input.toolCallId]);
       const signature = sha256Hex(canonicalJson({ tool: tool.name, version: tool.version, args }));
       for (const [key, entry] of this.idempotency) if (Date.now() - entry.at > this.idempotencyTtlMs) this.idempotency.delete(key);
       const cached = this.idempotency.get(cacheKey);
@@ -323,6 +331,9 @@ export class CodeToolRuntime {
         });
       } else if (write) {
         if (tool.name === "code.fs.undo_last_turn") {
+          await this.hooksCoordinator.recordAudit(ctx, { ...input, sessionId, tool: tool.name }, tool, "allowed", undefined, {
+            turnId, action: "pre_undo_last_turn", strict: true,
+          });
           const restoredCheckpointId = await this.writeGuard.restoreTurn(ctx, { companyId: input.companyId, projectId: input.projectId, sessionId, turnId, tool: tool.name });
           const payload = { restored: true, checkpointId: restoredCheckpointId, turnId };
           const result: CodeToolInvokeResult = {
@@ -330,7 +341,7 @@ export class CodeToolRuntime {
             result: this.wrap(tool.name, payload), truncated: false, durationMs: Date.now() - started,
           };
           this.idempotency.set(cacheKey, { at: Date.now(), signature, result });
-          await this.hooksCoordinator.recordActivity({ ...input, tool: tool.name, toolVersion: tool.version, durationMs: result.durationMs, bytes: 0, truncated: false, ok: true });
+          await this.hooksCoordinator.recordActivity({ ...input, turnId, tool: tool.name, toolVersion: tool.version, durationMs: result.durationMs, bytes: 0, truncated: false, ok: true });
           await this.hooksCoordinator.recordAudit(ctx, { ...input, sessionId, tool: tool.name }, tool, "allowed", undefined, { checkpointId: restoredCheckpointId, turnId, action: "undo_last_turn" });
           return result;
         }
@@ -341,12 +352,13 @@ export class CodeToolRuntime {
             result: this.wrap(tool.name, turnScoped), truncated: false, durationMs: Date.now() - started,
           };
           this.idempotency.set(cacheKey, { at: Date.now(), signature, result });
-          await this.hooksCoordinator.recordActivity({ ...input, tool: tool.name, toolVersion: tool.version, durationMs: result.durationMs, bytes: 0, truncated: false, ok: true });
+          await this.hooksCoordinator.recordActivity({ ...input, turnId, tool: tool.name, toolVersion: tool.version, durationMs: result.durationMs, bytes: 0, truncated: false, ok: true });
           await this.hooksCoordinator.recordAudit(ctx, { ...input, sessionId, tool: tool.name }, tool, "allowed");
           return result;
         }
         const targets = await this.writeGuard.collectWriteTargets(ctx, input, tool.name, args);
         writeTargets = targets;
+        this.writeGuard.assertRevisionBudget(operationScope, targets.map(target => target.path), tool.name);
         await this.writeGuard.assertReadBeforeWrite(ctx, input, sessionId, targets);
         const approval = await this.writeGuard.assertApproved(ctx, input, tool, targets, sessionId, turnId, undefined, args);
         approved = approval.approved;
@@ -369,6 +381,20 @@ export class CodeToolRuntime {
       if (!executor) throw new CodeToolError("tool_not_configured", `Tool ${tool.name} has no canonical executor configured`, 503, "configure", false, tool.name);
       const port = this.portFor(input.projectId);
       turnChanges = this.turns.listChanges(sessionId, turnId);
+      const committedRevisions = new Map<string, string>();
+      const originalWritePort = this.options.writePort;
+      const remember = async <T extends { path: string; revision: string }>(operation: Promise<T>): Promise<T> => {
+        const receipt = await operation;
+        committedRevisions.set(receipt.path, receipt.revision);
+        return receipt;
+      };
+      const writePort: CodeWritePort | undefined = originalWritePort ? {
+        writeFile: value => remember(originalWritePort.writeFile(value)),
+        createFile: value => remember(originalWritePort.createFile(value)),
+        editFile: value => remember(originalWritePort.editFile(value)),
+        moveFile: value => remember(originalWritePort.moveFile(value)),
+        deleteFile: value => originalWritePort.deleteFile(value),
+      } : undefined;
       const expectedRevisions: Record<string, string> = {};
       if (write) {
         for (const target of writeTargets) {
@@ -423,7 +449,7 @@ export class CodeToolRuntime {
           guards: { path: (value: unknown) => this.guardPath(value), sensitive: (value: string) => this.guardSensitive(value) },
           turnChanges: turnChanges.map((change) => ({ path: change.path, tool: change.tool, sha256: change.sha256, linesAdded: change.linesAdded, linesRemoved: change.linesRemoved })),
           expectedRevisions,
-          writePort: this.options.writePort,
+          writePort,
           approved,
           ...(input.approvalId ? { approvalId: input.approvalId } : {}),
           ...(input.agentId ? { agentId: input.agentId } : {}),
@@ -432,7 +458,7 @@ export class CodeToolRuntime {
         });
       } catch (error) {
         const conflict = revisionConflictDetails(error);
-        if (conflict) throw this.writeGuard.recordRevisionConflict(sessionId, conflict.currentRevision, input, tool.name);
+        if (conflict) throw this.writeGuard.recordRevisionConflict(operationScope, conflict.currentRevision, input, tool.name, writeTargets.map(target => target.path));
         throw error;
       }
 
@@ -443,9 +469,9 @@ export class CodeToolRuntime {
         for (const change of changes) {
           this.turns.recordChange(sessionId, turnId, { ...change, at: new Date().toISOString() });
           if (change.sha256) {
-            this.tracker.record(sessionId, { path: change.path, sha256: change.sha256 });
+            this.tracker.record(sessionId, { path: change.path, sha256: change.sha256, revision: committedRevisions.get(change.path) });
           }
-          this.revisionAttempts.delete(this.writeGuard.revisionKey(sessionId, change.path));
+          this.revisionAttempts.delete(this.writeGuard.revisionKey(operationScope, change.path));
         }
         warnings.push(...await this.hooksCoordinator.runPostWriteHooks(ctx, input, tool.name, raw));
       }
@@ -496,12 +522,12 @@ export class CodeToolRuntime {
         if (typeof receipt.kind === "string" && typeof receipt.processId === "string") result.processReceipt = { kind: receipt.kind, processId: receipt.processId };
       }
       this.idempotency.set(cacheKey, { at: Date.now(), signature, result });
-      await this.hooksCoordinator.recordActivity({ ...input, tool: tool.name, toolVersion: tool.version, durationMs: result.durationMs, bytes: serialized.length, truncated, ok: true });
+      await this.hooksCoordinator.recordActivity({ ...input, turnId, tool: tool.name, toolVersion: tool.version, durationMs: result.durationMs, bytes: serialized.length, truncated, ok: true });
       await this.hooksCoordinator.recordAudit(ctx, { ...input, sessionId, tool: tool.name }, tool, "allowed", undefined, { checkpointId, turnId, changes: write ? this.turns.listChanges(sessionId, turnId).length : 0, ...(input.snapshotId ? { snapshotId: input.snapshotId } : {}) });
       return result;
     } catch (error) {
       const failure = this.toFailure(error, input.tool);
-      await this.hooksCoordinator.recordActivity({ ...input, tool: input.tool, toolVersion: input.toolVersion ?? 0, durationMs: Date.now() - started, bytes: 0, truncated: false, ok: false, errorCode: failure.error.code });
+      await this.hooksCoordinator.recordActivity({ ...input, turnId, tool: input.tool, toolVersion: input.toolVersion ?? 0, durationMs: Date.now() - started, bytes: 0, truncated: false, ok: false, errorCode: failure.error.code });
       if (failure.error.code === "sandbox_unavailable" || failure.error.code.startsWith("sensitive") || failure.error.code.startsWith("path_") || failure.error.code === "invalid_path" || failure.error.code === "null_byte" || failure.error.code.startsWith("approval") || failure.error.code.startsWith("read_before") || failure.error.code.startsWith("checkpoint") || failure.error.code.startsWith("revision_")) {
         await this.hooksCoordinator.recordAudit(ctx, { ...input, sessionId, tool: input.tool }, undefined, "denied", failure.error.code);
       }

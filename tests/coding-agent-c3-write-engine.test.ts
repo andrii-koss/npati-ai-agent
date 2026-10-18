@@ -462,3 +462,34 @@ describe("security-gate: C3 edit tool preference", () => {
     spy.mockRestore();
   });
 });
+
+describe("security-gate: C3 literal replacement and inserted newline regression", () => {
+  it.each(["$&", "$$", "$" + String.fromCharCode(96), "$'"])("writes replacement token %s literally", async (replacement) => {
+    const { port, store } = memoryPort({ "literal.txt": "before TARGET after\n" });
+    await applyEdit({ path: "literal.txt", old_string: "TARGET", new_string: replacement }, port);
+    expect(store.get("literal.txt")).toBe("before " + replacement + " after\n");
+  });
+  it.each([false, true])("preserves CRLF when inserting LF text (replace_all=%s)", async (replaceAll) => {
+    const { port, store } = memoryPort({ "lines.txt": "\uFEFFfirst\r\nTARGET\r\nlast\r\n" });
+    await applyEdit({ path: "lines.txt", old_string: "TARGET", new_string: "two\nlines", replace_all: replaceAll }, port);
+    expect(store.get("lines.txt")).toBe("\uFEFFfirst\r\ntwo\r\nlines\r\nlast\r\n");
+  });
+});
+
+describe("security-gate: C3 patch commit failure regression", () => {
+  const patch = "*** Begin Patch\n*** Update File: a.txt\n@@ -1 +1 @@\n-old-a\n+new-a\n*** Update File: b.txt\n@@ -1 +1 @@\n-old-b\n+new-b\n*** End Patch";
+  it("reports incomplete rollback without overwriting a concurrent edit", async () => {
+    const { port, store } = memoryPort({ "a.txt": "old-a\n", "b.txt": "old-b\n" });
+    const write = port.writeFile.bind(port);
+    port.writeFile = async (path, content, opts) => {
+      if (path === "b.txt") {
+        store.set("a.txt", "concurrent edit\n");
+        throw new Error("simulated disk failure");
+      }
+      return write(path, content, opts);
+    };
+    await expect(applyPatch({ patch }, port)).rejects.toMatchObject({ code: "write_failed", details: { rollbackIncomplete: true, paths: ["a.txt"] } });
+    expect(store.get("a.txt")).toBe("concurrent edit\n");
+    expect(store.get("b.txt")).toBe("old-b\n");
+  });
+});

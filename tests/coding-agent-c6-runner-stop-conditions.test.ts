@@ -32,6 +32,8 @@ function session(overrides: Partial<CodeSession> = {}): CodeSession {
 }
 
 const TOOLS: CodeRunToolDescriptor[] = [
+  { name: "code.fs.edit", version: 1, status: "active", description: "edit", write: true },
+  { name: "code.fs.apply_patch", version: 1, status: "active", description: "patch", write: true },
   { name: "code.fs.read", version: 1, status: "active", description: "read a file", write: false },
 ];
 const SCHEMAS = TOOLS.map((tool) => ({ ...tool, inputSchema: { type: "object", properties: { path: { type: "string" } } } }));
@@ -45,7 +47,9 @@ interface HarnessOptions {
   limits?: Partial<CodeAgentLimits>;
   quotaAllowed?: boolean;
   onFirstModelCall?: () => void;
+  onToolInvoke?: (input: { runId?: string; runScopeId?: string; turnId?: string }) => void;
   flagsThrow?: boolean;
+  modelProfiles?: CodingAgentRunnerPorts["modelProfiles"];
   admissionGate?: CodingAgentRunnerPorts["admissionGate"];
 }
 
@@ -57,6 +61,7 @@ function createHarness(options: HarnessOptions) {
   const start = clock;
 
   const ports: CodingAgentRunnerPorts = {
+    ...(options.modelProfiles ? { modelProfiles: options.modelProfiles } : {}),
     flags: {
       assertEnabled: async () => {
         if (options.flagsThrow) throw Object.assign(new Error("disabled"), { code: "feature_disabled" });
@@ -67,8 +72,9 @@ function createHarness(options: HarnessOptions) {
     ...(options.admissionGate ? { admissionGate: options.admissionGate } : {}),
     toolRuntime: {
       listTools: () => TOOLS,
-      invoke: async (_ctx, input) =>
-        ({
+      invoke: async (_ctx, input) => {
+        options.onToolInvoke?.(input);
+        return ({
           ok: true,
           tool: input.tool,
           toolVersion: 1,
@@ -76,7 +82,8 @@ function createHarness(options: HarnessOptions) {
           result: { ok: true },
           truncated: false,
           durationMs: 1,
-        }) satisfies CodeToolInvokeResult,
+        }) satisfies CodeToolInvokeResult;
+      },
     },
     engine: {
       chat: async (request) => {
@@ -365,5 +372,45 @@ describe("security-gate: C1a durable flag suspension", () => {
     const resumed = await new CodeRunStateLog({ store }).resumeRun({ companyId: company.id, runId: "durable-flag-run", owner: "resumed-worker" });
     expect(resumed.held).toBe(true);
     expect(resumed.state).toMatchObject({ status: "running", finishedAt: null, leaseOwner: "resumed-worker" });
+  });
+});
+
+describe("security-gate: PLAN default turn budget integration", () => {
+  it.each([40, 60])("stops before dispatching model turn beyond the configured %i turn budget", async limit => {
+    const { DEFAULT_CODE_AGENT_LIMITS, resolveCodeAgentLimits } = await import("../apps/agent-api/src/code-agent-config");
+    const configured = limit === 40 ? resolveCodeAgentLimits({}) : resolveCodeAgentLimits({ NPATI_CODE_MAX_STEPS: "60" });
+    if (limit === 40) expect(DEFAULT_CODE_AGENT_LIMITS.maxStepsPerRun).toBe(40);
+    const h = createHarness({ limits: configured,
+      script: Array.from({ length: limit + 1 }, (_, index) => ({ content: "", toolCalls: [nativeCall("code.fs.read", { path: "file-" + index + ".ts" }, "budget-" + index)] })) });
+    const result = await h.run();
+    expect(result).toMatchObject({ status: "stopped", reason: "step_limit" });
+    expect(h.engineCalls).toHaveLength(limit);
+    expect(result.summary.remaining).toContain("unfinished");
+  });
+});
+
+describe("security-gate: C3 profile preference reaches the actual model request", () => {
+  it.each(["code.fs.apply_patch", "code.fs.edit", "apply_patch"])("passes configured %s without branching on the model name", async preferred => {
+    const h = createHarness({ script: [{ content: "done" }], modelProfiles: { profiles: [{
+      id: "custom-proof", match: { models: ["custom-proof-model"] }, toolCallingMode: "native",
+      ...(preferred === "apply_patch" ? { preferred_edit_tool: preferred } : { preferredEditTool: preferred }), maxParallelToolCalls: 1, contextWindow: 32768,
+    }] } });
+    await h.run({ model: "custom-proof-model" });
+    expect(h.engineCalls[0]?.messages[0]?.content).toContain("Editing preference from model profile: " + (preferred === "apply_patch" ? "code.fs.apply_patch" : preferred));
+  });
+});
+
+describe("security-gate: C3 runner operation scope", () => {
+  it.each(["durable-run", undefined])("keeps stable operation identity across model turns with runId %s", async runId => {
+    const calls: Array<{ runId?: string; runScopeId?: string; turnId?: string }> = [];
+    const harness = createHarness({
+      script: [0, 1, 2].map(index => ({ content: "", toolCalls: [nativeCall("code.fs.read", { path: "file-" + index }, "scope-" + index)] })),
+      onToolInvoke: input => calls.push({ runId: input.runId, runScopeId: input.runScopeId, turnId: input.turnId }),
+    });
+    await harness.run({ runId, turnId: "user-request" });
+    expect(calls).toHaveLength(3);
+    expect(new Set(calls.map(call => call.turnId)).size).toBe(3);
+    expect(calls.every(call => call.runId === runId)).toBe(true);
+    expect(calls.every(call => call.runScopeId === "user-request")).toBe(true);
   });
 });

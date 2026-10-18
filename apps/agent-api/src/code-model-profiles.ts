@@ -31,6 +31,8 @@ export interface CodeModelProfile {
   toolCallingMode: CodeToolCallingMode;
   /** Only set when we know the model handles that tool well; otherwise the loop decides. */
   preferredEditTool?: string;
+  /** PLAN C3 spelling, accepted alongside the existing camelCase setting. */
+  preferred_edit_tool?: string;
   maxParallelToolCalls: number;
   contextWindow: number;
   temperature?: number;
@@ -286,6 +288,9 @@ export function validateCodeModelProfile(
       "invalid_preferred_edit_tool",
       `Model profile ${profile.id}: preferredEditTool must be a non-empty tool name`,
     );
+  }
+  if (profile.preferred_edit_tool !== undefined && (typeof profile.preferred_edit_tool !== "string" || !profile.preferred_edit_tool.trim())) {
+    throw new CodeModelProfileError("invalid_preferred_edit_tool", "preferred_edit_tool must be a non-empty tool preference");
   }
   const match = profile.match;
   if (!match || typeof match !== "object") {

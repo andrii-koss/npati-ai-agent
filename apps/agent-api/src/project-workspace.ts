@@ -1,6 +1,7 @@
+import { replaceLiteralText } from "./code-text-format";
 import { detectFileKind } from "./code-file-kind";
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, readdir, readFile, realpath, rename, rm, rmdir, stat, utimes, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, readdir, readFile, realpath, rename, rm, rmdir, stat, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { AuthContext, MountedFolderMode, Project } from "@npati/workspace";
@@ -26,6 +27,7 @@ export interface ProjectFileEntry {
 }
 
 export interface ProjectFileContent {
+  mode?: number;
   binary?: boolean;
   encoding?: string;
   mimeGuess?: string | null;
@@ -95,10 +97,10 @@ export interface ProjectWorkspace {
   getFileTree(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string): Promise<ProjectFileEntry[]>;
   searchFiles(ctx: AuthContext, companyId: string, projectId: string, query: string, workspaceId?: string, agentId?: string): Promise<ProjectFileEntry[]>;
   readFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, workspaceId?: string, agentId?: string): Promise<ProjectFileContent>;
-  createFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, content: string, workspaceId?: string, agentId?: string): Promise<ProjectFileContent>;
+  createFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, content: string, workspaceId?: string, agentId?: string, restoredMode?: number): Promise<ProjectFileContent>;
   writeFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, content: string, expectedRevision: string, workspaceId?: string, agentId?: string): Promise<ProjectFileContent>;
   editFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, find: string, replacement: string, expectedRevision: string, workspaceId?: string, agentId?: string): Promise<ProjectFileContent>;
-  deleteFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, workspaceId?: string, agentId?: string): Promise<void>;
+  deleteFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, workspaceId?: string, agentId?: string, expectedRevision?: string): Promise<void>;
   moveFile(ctx: AuthContext, companyId: string, projectId: string, from: string, to: string, expectedRevision: string, workspaceId?: string, agentId?: string): Promise<ProjectFileContent>;
   setBaseline(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string): Promise<{ fileCount: number }>;
   getChanges(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string): Promise<ProjectChangesResult>;
@@ -453,25 +455,34 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
     const bytes = await this.bytes(absolute);
     const isManifestOrLockfile = /^(?:package(?:-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|composer\.(?:json|lock)|requirements\.txt|Pipfile(?:\.lock)?)$/i.test(path.basename(clean));
     if (!isManifestOrLockfile && (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{20,})\b|(?<![-A-Za-z0-9_])(?:[A-Za-z0-9_]*(?:api[_-]?key|password|secret|token)(?![sS]\b)[A-Za-z0-9_]*)["']?\s*[:=]\s*["'][^"']{8,}["']/i.test(bytes.toString("utf8")))) throw new ProjectFileError("secret_content", "Protected file content", 403);
-    return this.content(clean, bytes);
+    return { ...this.content(clean, bytes), mode: (await lstat(absolute)).mode & 0o777 };
   }
-  private async save(absolute: string, content: string) {
+  private async save(absolute: string, content: string, restoredMode?: number) {
     if (typeof content !== "string") throw new ProjectFileError("invalid_content", "Content must be text");
     const bytes = Buffer.from(content, "utf8");
     if (bytes.length > this.maxFileBytes) throw new ProjectFileError("file_too_large", "Project file size limit exceeded", 413);
     await mkdir(path.dirname(absolute), { recursive: true });
     const temporary = path.join(path.dirname(absolute), `.npati-${randomUUID()}.tmp`);
-    try { await writeFile(temporary, bytes, { flag: "wx", mode: 0o600 }); await rename(temporary, absolute); }
+    const existing = await lstat(absolute).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return undefined; throw error; });
+    if (existing && !existing.isFile()) throw new ProjectFileError("invalid_path", "Expected a regular file");
+    // Preserve ordinary permissions, including execute bits, without copying privilege bits.
+    if (restoredMode !== undefined && (!Number.isInteger(restoredMode) || restoredMode < 0 || restoredMode > 0o777)) throw new ProjectFileError("invalid_mode", "File mode must contain ordinary permission bits only");
+    const mode = existing ? existing.mode & 0o777 : restoredMode ?? 0o600;
+    try {
+      await writeFile(temporary, bytes, { flag: "wx", mode: 0o600 });
+      await chmod(temporary, mode);
+      await rename(temporary, absolute);
+    }
     finally { await rm(temporary, { force: true }); }
     return bytes;
   }
-  async createFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, content: string, workspaceId?: string, agentId?: string) {
+  async createFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, content: string, workspaceId?: string, agentId?: string, restoredMode?: number) {
     const { base } = await this.access(ctx, companyId, projectId, "write", workspaceId, agentId);
     return this.lock(base, async () => {
       const { clean, absolute } = await this.target(base, filePath);
       if (await lstat(absolute).then(() => true, () => false)) throw new ProjectFileError("file_exists", "Project file already exists", 409);
       if ((await this.listFiles(ctx, companyId, projectId, workspaceId, agentId)).length >= this.maxFiles) throw new ProjectFileError("file_limit", "Project file count limit exceeded", 409);
-      const bytes = await this.save(absolute, content);
+      const bytes = await this.save(absolute, content, restoredMode);
       return this.content(clean, bytes);
     });
   }
@@ -491,9 +502,10 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
       const { clean, absolute } = await this.target(base, filePath);
       const current = await this.bytes(absolute);
       if (!expectedRevision || expectedRevision !== revision(current)) throw new ProjectFileError("revision_conflict", "Project file revision changed", 409, revision(current));
+      if (this.content(clean, current).binary) throw new ProjectFileError("unsupported_encoding", "Text editing requires supported UTF-8 input; the file was not changed", 415);
       const source = current.toString("utf8");
       if (!source.includes(find)) throw new ProjectFileError("edit_not_found", "Find text not found", 409);
-      return this.content(clean, await this.save(absolute, source.replace(find, replacement)));
+      return this.content(clean, await this.save(absolute, replaceLiteralText(source, find, replacement)));
     });
   }
   async moveFile(ctx: AuthContext, companyId: string, projectId: string, from: string, to: string, expectedRevision: string, workspaceId?: string, agentId?: string) {
@@ -508,9 +520,14 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
       return this.content(destination.clean, current);
     });
   }
-  async deleteFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, workspaceId?: string, agentId?: string) {
+  async deleteFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, workspaceId?: string, agentId?: string, expectedRevision?: string) {
     const { base } = await this.access(ctx, companyId, projectId, "write", workspaceId, agentId);
-    await this.lock(base, async () => { const { absolute } = await this.target(base, filePath); await this.bytes(absolute); await rm(absolute); });
+    await this.lock(base, async () => {
+      const { absolute } = await this.target(base, filePath);
+      const current = await this.bytes(absolute);
+      if (expectedRevision !== undefined && expectedRevision !== revision(current)) throw new ProjectFileError("revision_conflict", "Project file revision changed", 409, revision(current));
+      await rm(absolute);
+    });
   }
 
   async setBaseline(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string): Promise<{ fileCount: number }> {
