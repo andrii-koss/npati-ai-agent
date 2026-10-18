@@ -247,3 +247,15 @@ describe("security-gate: C4 shell + secret leases", () => {
     expect(fake.calls).toHaveLength(0);
   });
 });
+
+describe("security-gate: C4 environment-name shell boundary", () => {
+  it.each(["X; printf injected #", "X$(printf injected)", "X\nY", "1INVALID", "X=Y", "X/Y"])("rejects shell syntax in environment name %s before sandbox execution", async name => {
+    const fake = sandbox();
+    const runtime = makeRuntime({ sandbox: fake.port, flags: allowAllFlags, classifier: classifierOf("safe") });
+    await expect(runtime.exec(context, { companyId: "c1", projectId: "p1", sessionId: "s1",
+      toolCallId: "environment-name", command: "pwd", env: { [name]: "value" } }))
+      .rejects.toMatchObject({ code: "invalid_environment" });
+    expect(fake.calls).toHaveLength(0);
+    expect(runtime.session("s1")?.env).toEqual({});
+  });
+});

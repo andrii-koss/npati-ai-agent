@@ -79,12 +79,12 @@ export class CodeToolHooksCoordinator {
     return warnings;
   }
 
-  async recordActivity(input: { companyId: string; projectId: string; sessionId?: string; runId?: string; snapshotId?: string; tool: string; toolVersion: number; durationMs: number; bytes: number; truncated: boolean; ok: boolean; errorCode?: string }): Promise<void> {
+  async recordActivity(input: { companyId: string; projectId: string; sessionId?: string; runId?: string; snapshotId?: string; toolCallId?: string; turnId?: string; tool: string; toolVersion: number; durationMs: number; bytes: number; truncated: boolean; ok: boolean; errorCode?: string }): Promise<void> {
     if (!this.options.activity) return;
     try {
       await this.options.activity.record({
         companyId: input.companyId, projectId: input.projectId, sessionId: input.sessionId,
-        runId: input.runId, snapshotId: input.snapshotId,
+        runId: input.runId, snapshotId: input.snapshotId, toolCallId: input.toolCallId, turnId: input.turnId,
         tool: input.tool, toolVersion: input.toolVersion, schemaVersion: input.toolVersion,
         durationMs: input.durationMs, bytes: input.bytes, truncated: input.truncated, ok: input.ok, errorCode: input.errorCode,
       });

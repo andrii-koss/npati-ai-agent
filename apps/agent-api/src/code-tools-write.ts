@@ -1,3 +1,5 @@
+import { detectEol, detectEncoding, toEol, replaceLiteralText } from "./code-text-format";
+export { detectEol, detectEncoding } from "./code-text-format";
 import {
   CodeToolError, normalizeWorkspacePath,
 } from "./code-tools-path";
@@ -67,6 +69,8 @@ export interface PostWriteHooks {
 }
 
 export interface WriteOptions {
+  /** Trusted revisions captured by the runtime read tracker. */
+  expectedRevisions?: Readonly<Record<string, string>>;
   limits?: Partial<WriteLimits>;
   hooks?: PostWriteHooks;
   /** Explicit human/runtime approval for a sensitive, `.git` or mass operation. */
@@ -126,23 +130,6 @@ export function assertMassOperation(fileCount: number, tool: string, limits: Wri
   if (fileCount > limits.massOperationThreshold && !approved) {
     throw new CodeToolError("approval_required", `A change touching ${fileCount} files needs approval`, tool, 409, false, "approval", { fileCount, threshold: limits.massOperationThreshold });
   }
-}
-
-/** Detects the dominant end-of-line style; a mixed file keeps its dominant style and reports it. */
-export function detectEol(content: string): { eol: "lf" | "crlf"; mixed: boolean } {
-  const crlf = (content.match(/\r\n/g) ?? []).length;
-  const lf = (content.match(/(?<!\r)\n/g) ?? []).length;
-  if (crlf > 0 && lf > 0) return { eol: crlf >= lf ? "crlf" : "lf", mixed: true };
-  return { eol: crlf > 0 ? "crlf" : "lf", mixed: false };
-}
-
-export function detectEncoding(content: string): { encoding: "utf8" | "utf8-bom"; bom: boolean } {
-  return content.startsWith("\uFEFF") ? { encoding: "utf8-bom", bom: true } : { encoding: "utf8", bom: false };
-}
-
-function toEol(content: string, eol: "lf" | "crlf"): string {
-  const normalized = content.replace(/\r\n/g, "\n");
-  return eol === "crlf" ? normalized.replace(/\n/g, "\r\n") : normalized;
 }
 
 function countOccurrences(haystack: string, needle: string): number {
@@ -264,7 +251,7 @@ export async function applyEdit(
   if (occurrences > 1 && !replaceAll) {
     throw new CodeToolError("edit_not_unique", `old_string matches ${occurrences} places; add surrounding context or set replace_all`, tool, 409, false, "edit", { occurrences });
   }
-  const nextBody = replaceAll ? body.split(oldString).join(newString) : body.replace(oldString, newString);
+  const nextBody = replaceLiteralText(body, oldString, newString, replaceAll);
   const nextContent = encoding.bom ? `\uFEFF${nextBody}` : nextBody;
   assertEditSize(nextContent, tool, limits);
   // C5b: a redaction placeholder is a reference to a value the model never saw, so it must never reach
@@ -425,10 +412,10 @@ export function preferredEditTool(profile: EditProfile | null | undefined, optio
     : typeof profile?.preferred_edit_tool === "string" ? profile.preferred_edit_tool : "edit";
   const preference = raw.toLowerCase();
   const smallFileBytes = typeof profile?.smallFileBytes === "number" && Number.isFinite(profile.smallFileBytes) ? profile.smallFileBytes : 4096;
-  if (preference === "write_whole_file_for_small" && typeof options.fileBytes === "number" && options.fileBytes <= smallFileBytes) {
+  if ((preference === "write_whole_file_for_small" || preference === "code.fs.write") && typeof options.fileBytes === "number" && options.fileBytes <= smallFileBytes) {
     return "code.fs.write";
   }
-  if (preference === "apply_patch") return "code.fs.apply_patch";
+  if (preference === "apply_patch" || preference === "code.fs.apply_patch") return "code.fs.apply_patch";
   return "code.fs.edit";
 }
 

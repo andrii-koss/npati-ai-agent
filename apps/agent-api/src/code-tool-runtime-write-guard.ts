@@ -1,3 +1,5 @@
+import { buildUnifiedDiff, diffLineStats } from "./code-tools-diff";
+import { redactSecrets } from "./code-tools-sensitive";
 import type { AuthContext } from "@npati/workspace";
 import type { CodeAgentLimits } from "./code-agent-config";
 import type { CodeToolSchema } from "./code-tool-registry";
@@ -302,6 +304,35 @@ export class CodeToolWriteGuard {
       : 50;
     const pathFilter = typeof args.path === "string" && args.path ? this.ctx.guardPath(args.path) : null;
     if (turnOnly) {
+      const checkpoint = this.ctx.turns.getCheckpoint(sessionId, turnId);
+      const checkpointPort = this.ctx.options.checkpoints;
+      if (checkpoint && checkpointPort?.readFile) {
+        const latest = [...new Map(summary.changes.map(change => [change.path, change])).values()]
+          .filter(change => !pathFilter || change.path === pathFilter);
+        const selected = latest.slice(0, maxFiles);
+        const files = [];
+        for (const change of selected) {
+          const before = await checkpointPort.readFile({ ctx: authCtx, ...input, checkpointId: checkpoint.checkpointId, path: change.path });
+          let after = "";
+          try {
+            const current = await this.ctx.portFor(input.projectId).readFile({ ctx: authCtx, ...input, path: change.path, maxLines: Number.MAX_SAFE_INTEGER, maxBytes: this.ctx.limits.readFileBytes });
+            if (current.truncated || current.binary) throw new CodeToolError("diff_unavailable", "Cannot produce a complete text diff for this file", 409, "diff", false, tool.name);
+            after = current.content;
+          } catch (error) {
+            const shaped = error as { status?: number; code?: string };
+            if (shaped.status !== 404 && !["file_not_found", "not_a_file", "ENOENT"].includes(shaped.code ?? "")) throw error;
+          }
+          const diff = buildUnifiedDiff(before.content ?? "", after, change.path);
+          if (!diff) continue;
+          const stats = diffLineStats(diff);
+          files.push({ ...change, diff: redactSecrets(diff, { preserveLines: true }), linesAdded: stats.additions, linesRemoved: stats.deletions });
+        }
+        const additions = files.reduce((sum, file) => sum + file.linesAdded, 0);
+        const deletions = files.reduce((sum, file) => sum + file.linesRemoved, 0);
+        return { scope: "turn" as const, aggregation: "checkpoint_net", turnId, sessionId, files,
+          stats: { files: files.length, additions, deletions, linesAdded: additions, linesRemoved: deletions },
+          truncated: selected.length < latest.length, diff: files.map(file => file.diff).join("\n") };
+      }
       const changes = summary.changes.filter((change) => !pathFilter || change.path === pathFilter);
       const selected = changes.slice(0, maxFiles);
       return {
@@ -325,14 +356,32 @@ export class CodeToolWriteGuard {
     return { scope: "workspace" as const, turnId, sessionId, files: [], stats: { files: summary.files, linesAdded: summary.linesAdded, linesRemoved: summary.linesRemoved }, diff: result.diff };
   }
 
-  /** Counts the revision conflict and refuses once the retry budget for `(session, path)` is spent. */
-  recordRevisionConflict(sessionId: string, currentRevision: string | null, input: { tool: string }, tool: string): CodeToolError {
-    const key = this.revisionKey(sessionId, input.tool);
-    const attempts = (this.ctx.revisionAttempts.get(key) ?? 0) + 1;
-    this.ctx.revisionAttempts.set(key, attempts);
-    if (attempts > this.ctx.maxRevisionRetries) {
-      return new CodeToolError("revision_conflict_exhausted", `Revision conflict retry budget spent for ${input.tool}; re-read the file`, 409, "revision", false, tool, { currentRevision, attempts });
+  /** Stop exhausted retries before approval consumption, checkpoint or executor side effects. */
+  assertRevisionBudget(operationScope: string, paths: readonly string[], tool: string): void {
+    for (const path of paths) {
+      const attempts = this.ctx.revisionAttempts.get(this.revisionKey(operationScope, path)) ?? 0;
+      if (attempts > this.ctx.maxRevisionRetries) throw new CodeToolError(
+        "revision_conflict_exhausted", "Revision retry budget exhausted for this run or turn", 409, "revision", false, tool, { path, attempts },
+      );
     }
-    return new CodeToolError("revision_conflict", `File changed on disk; re-read ${input.tool} and retry`, 409, "revision", true, tool, { currentRevision, attempts, retriesLeft: this.ctx.maxRevisionRetries - attempts + 1 });
+  }
+
+  /** A failed batch spends one attempt for each participating path, never for unrelated files. */
+  recordRevisionConflict(operationScope: string, currentRevision: string | null, input: { tool: string; args?: unknown }, tool: string, targets: readonly string[] = []): CodeToolError {
+    const args = input.args && typeof input.args === "object" && !Array.isArray(input.args) ? input.args as Record<string, unknown> : {};
+    const rawPath = args.path ?? args.file ?? args.filePath ?? args.from;
+    const paths = [...new Set(targets.length ? targets : [typeof rawPath === "string" ? this.ctx.guardPath(rawPath) : input.tool])];
+    let attempts = 0;
+    for (const path of paths) {
+      const key = this.revisionKey(operationScope, path);
+      const next = (this.ctx.revisionAttempts.get(key) ?? 0) + 1;
+      this.ctx.revisionAttempts.set(key, next);
+      attempts = Math.max(attempts, next);
+    }
+    const exhausted = attempts > this.ctx.maxRevisionRetries;
+    return new CodeToolError(exhausted ? "revision_conflict_exhausted" : "revision_conflict",
+      exhausted ? "Revision retry budget exhausted for this run or turn" : "File changed on disk; re-read it before retrying",
+      409, "revision", !exhausted, tool, { currentRevision, attempts, paths,
+        ...(exhausted ? {} : { retriesLeft: this.ctx.maxRevisionRetries - attempts + 1 }) });
   }
 }

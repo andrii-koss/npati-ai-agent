@@ -1,3 +1,4 @@
+import { readProjectFile } from "./project-files-client";
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -98,18 +99,14 @@ export function WebsiteCardPreview({
       // 2. Check for index.html in project files (instant visual view for static / web projects)
       let htmlContent = "";
       try {
-        const fileRes = await apiFetch<{ content?: string }>(
-          `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(site.id)}/files/read?path=index.html`
-        );
+        const fileRes = await readProjectFile({ companyId, projectId: site.id }, "index.html");
         if (fileRes?.content) {
           htmlContent = fileRes.content;
 
           // Attempt to inline style.css or styles.css if present for pixel-perfect static render
           for (const cssPath of ["style.css", "styles.css", "src/index.css", "src/App.css"]) {
             try {
-              const cssRes = await apiFetch<{ content?: string }>(
-                `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(site.id)}/files/read?path=${encodeURIComponent(cssPath)}`
-              );
+              const cssRes = await readProjectFile({ companyId, projectId: site.id }, cssPath);
               if (cssRes?.content && !htmlContent.includes(cssRes.content)) {
                 const styleTag = `<style>\n${cssRes.content}\n</style>`;
                 htmlContent = htmlContent.includes("</head>")
@@ -393,16 +390,12 @@ export function WebsiteProjectCard({
 
       // 4. Try reading index.html directly from project files
       try {
-        const fileRes = await apiFetch<{ content?: string }>(
-          `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(site.id)}/files/read?path=index.html`
-        );
+        const fileRes = await readProjectFile({ companyId, projectId: site.id }, "index.html");
         if (fileRes?.content) {
           let html = fileRes.content;
           for (const cssPath of ["style.css", "styles.css", "src/index.css", "src/App.css"]) {
             try {
-              const cssRes = await apiFetch<{ content?: string }>(
-                `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(site.id)}/files/read?path=${encodeURIComponent(cssPath)}`
-              );
+              const cssRes = await readProjectFile({ companyId, projectId: site.id }, cssPath);
               if (cssRes?.content && !html.includes(cssRes.content)) {
                 html = html.includes("</head>")
                   ? html.replace("</head>", `<style>\n${cssRes.content}\n</style></head>`)

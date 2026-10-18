@@ -30,6 +30,7 @@ export type CodeToolErrorCode =
   | "edit_too_large"
   | "patch_invalid"
   | "patch_conflict"
+  | "revision_conflict"
   | "patch_too_large"
   | "approval_required"
   | "git_dir_protected"

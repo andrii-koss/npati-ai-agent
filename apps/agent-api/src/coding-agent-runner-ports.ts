@@ -103,6 +103,8 @@ export interface CodeRunToolRuntimePort {
       toolCallId: string;
       leaseOwner?: string;
       turnId?: string;
+      /** Internal run identity, independent of per-model-turn checkpoint IDs. */
+      runScopeId?: string;
       runId?: string;
       agentId?: string;
     },

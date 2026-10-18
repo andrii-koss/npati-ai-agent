@@ -1,3 +1,4 @@
+import { preferredEditTool, type EditProfile } from "./code-tools-write";
 import type { ChatToolCall } from "@npati/omniroute-adapter";
 import type { AuthContext, CodeSession } from "@npati/workspace";
 import type { CodeAgentLimits } from "./code-agent-config";
@@ -130,6 +131,7 @@ export function systemPromptStablePrefix(prompt: string): string {
 
 export function buildSystemPrompt(input: {
   session: CodeSession;
+  editProfile?: EditProfile;
   tools: readonly CodeRunToolDescriptor[];
   environment: { os: string; cwd: string; gitStatus?: string; date: string };
   limits: Pick<CodeAgentLimits, "maxStepsPerRun" | "maxRunMinutes">;
@@ -144,6 +146,9 @@ export function buildSystemPrompt(input: {
   const toolLines = input.tools
     .map((tool) => `- ${tool.name} (v${tool.version}${tool.write ? ", mutating" : ", read-only"}): ${tool.description}`)
     .join("\n");
+  const preferred = input.editProfile?.preferredEditTool || input.editProfile?.preferred_edit_tool ? preferredEditTool(input.editProfile) : null;
+  const editingGuidance = preferred && input.tools.some(tool => tool.name === preferred)
+    ? ["Editing preference from model profile: " + preferred + ". Use another available tool when the change requires it."] : [];
   return [
 
     "You are the NPATI Coding Agent operating inside a sandboxed workspace.",
@@ -152,6 +157,7 @@ export function buildSystemPrompt(input: {
     "",
     "Tools:",
     toolLines || "- (no tools are available in this mode)",
+    ...editingGuidance,
     "",
     `Limits: at most ${input.limits.maxStepsPerRun} assistant turns and ${input.limits.maxRunMinutes} minutes for this run.`,
     ...(input.extraLines && input.extraLines.length > 0 ? ["", ...input.extraLines] : []),

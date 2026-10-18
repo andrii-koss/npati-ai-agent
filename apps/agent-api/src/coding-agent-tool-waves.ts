@@ -256,6 +256,7 @@ export class CodingAgentToolWaves {
         args: call.arguments,
         toolCallId: call.id,
         turnId: this.host.stepTurnKey(steps),
+        runScopeId: this.host.turnId,
         ...(input.runId ? { runId: input.runId } : {}),
         ...(stateRunId ? { runId: stateRunId } : {}),
         ...(input.agentId ? { agentId: input.agentId } : {}),

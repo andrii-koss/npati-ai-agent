@@ -340,6 +340,9 @@ export class CodeShellRuntime {
     const cwd = input.cwd?.trim() || session.cwd;
     const environment = { ...session.env, ...(input.env ?? {}) };
     for (const [name, value] of Object.entries(environment)) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || typeof value !== "string") {
+        throw new ShellRuntimeError("invalid_environment", "Environment names must be shell identifiers and values must be strings", 400);
+      }
       if (/(?:TOKEN|SECRET|PASSWORD|PASSWD|APIKEY|API_KEY|CREDENTIAL|PRIVATE_KEY)/i.test(name) || value.length > 2_000) {
         throw new ShellRuntimeError("invalid_environment", `Refusing to keep a secret-looking variable in the shell session: ${name}`, 400);
       }

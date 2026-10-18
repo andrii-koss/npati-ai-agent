@@ -185,7 +185,7 @@ export function registerProjectFileRoutes(
 
         // 1. Try resolving via workspace root directory on disk
         try {
-          const workspaceRoot = (workspace as any).root;
+          const workspaceRoot = (workspace as unknown as { root?: unknown }).root;
           if (workspaceRoot && typeof workspaceRoot === "string") {
             const companyDirs = await fs.readdir(workspaceRoot);
             for (const cDir of companyDirs) {
@@ -208,7 +208,7 @@ export function registerProjectFileRoutes(
         let projectStatus: string | undefined;
         // 2. Try resolving via Postgres DB query if available
         if (!companyId) {
-          const pool = (projectService as any)?.store?.pool;
+          const pool = (projectService as unknown as { store?: { pool?: Pick<import("pg").Pool, "query"> } })?.store?.pool;
           if (pool && typeof pool.query === "function") {
             try {
               const res = await pool.query('SELECT company_id AS "companyId", status FROM projects WHERE id = $1', [projectId]);
@@ -224,12 +224,12 @@ export function registerProjectFileRoutes(
 
         // 3. Try resolving via in-memory store if available
         if (!companyId) {
-          const storeAny = (projectService as any)?.store as any;
-          if (storeAny?.projects instanceof Map) {
-            const proj = storeAny.projects.get(projectId);
-            if (proj?.companyId) {
+          const store = (projectService as unknown as { store?: { projects?: unknown } })?.store;
+          if (store?.projects instanceof Map) {
+            const proj: unknown = store.projects.get(projectId);
+            if (proj && typeof proj === "object" && "companyId" in proj && typeof proj.companyId === "string") {
               companyId = proj.companyId;
-              projectStatus = proj.status;
+              projectStatus = "status" in proj && typeof proj.status === "string" ? proj.status : undefined;
             }
           }
         }

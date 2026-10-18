@@ -1,3 +1,4 @@
+import { detectEol, toEol } from "./code-text-format";
 import { CodeToolError } from "./code-tools-path";
 import { buildUnifiedDiff, diffLineStats, sha256, splitLines } from "./code-tools-diff";
 import { assertNoPlaceholderInWrite } from "./provider-data-guard";
@@ -172,7 +173,8 @@ interface AppliedHunk { replacements: number }
  * Throws `patch_conflict` with the hunk index, the line and the expected/actual context.
  */
 export function applyHunksToContent(input: { path: string; content: string; hunks: PatchHunk[]; tool: string }): { content: string; applied: AppliedHunk[] } {
-  const original = splitLines(input.content);
+  const bom = input.content.startsWith("\uFEFF");
+  const original = splitLines(bom ? input.content.slice(1) : input.content);
   let working = [...original.lines];
   let delta = 0;
   const applied: AppliedHunk[] = [];
@@ -208,10 +210,12 @@ export function applyHunksToContent(input: { path: string; content: string; hunk
     applied.push({ replacements: hunk.lines.filter((line) => line.startsWith("+")).length });
   }
   const body = working.join("\n");
-  return { content: original.trailingNewline && body ? `${body}\n` : body, applied };
+  const text = original.trailingNewline && body ? body + "\n" : body;
+  return { content: (bom ? "\uFEFF" : "") + toEol(text, detectEol(input.content).eol), applied };
 }
 
 export interface PatchFileResult {
+  diff?: string;
   path: string;
   action: PatchAction | "unchanged";
   linesAdded: number;
@@ -263,6 +267,10 @@ export async function applyPatch(
     }
     if (!stat.exists) throw new CodeToolError("not_a_file", `"${guarded.path}" does not exist`, tool, 404, false, "patch", { path: guarded.path });
     const current = await port.readFile(guarded.path);
+    const expected = options.expectedRevisions?.[guarded.path];
+    if (expected && current.revision !== expected) {
+      throw new CodeToolError("revision_conflict", "Patch target changed since the session read; re-read it before retrying", tool, 409, true, "revision", { path: guarded.path, currentRevision: current.revision });
+    }
     if (op.action === "delete") {
       planned.push({ op, before: current.content, after: "", guarded, existing: true, mode: current.mode, revision: current.revision });
       continue;
@@ -287,6 +295,7 @@ export async function applyPatch(
     const itemStats = diffLineStats(itemDiff);
     return {
       path: item.guarded.path,
+      diff: itemDiff,
       action: item.op.action,
       linesAdded: itemStats.additions,
       linesRemoved: itemStats.deletions,

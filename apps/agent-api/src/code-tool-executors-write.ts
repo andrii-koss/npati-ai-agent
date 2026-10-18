@@ -1,3 +1,4 @@
+import { replaceLiteralText } from "./code-text-format";
 import { CodeToolError, type CodeToolExecutionContext, type CodeWritePort } from "./code-tool-runtime";
 import { simpleUnifiedDiff } from "./code-workspace-checkpoint";
 import {
@@ -183,7 +184,10 @@ export function toEngineWritePort(input: CodeToolExecutionContext): EngineWriteP
     async readFile(path) {
       const file = await input.port.readFile({ ...base, path, maxLines: Number.MAX_SAFE_INTEGER, maxBytes: input.limits.readFileBytes });
       if (file.truncated) throw new CodeToolError("too_large", `Refusing to edit a truncated read of ${path}`, 413, "read", false, input.tool.name);
-      return { content: file.content ?? "", revision: file.revision, encoding: file.encoding };
+      if (file.binary || (file.encoding && !["utf8", "utf8-bom", "utf-8"].includes(file.encoding))) {
+        throw new CodeToolError("unsupported_encoding", "Text editing requires supported UTF-8 input; the file was not changed", 415, "read", false, input.tool.name);
+      }
+      return { content: file.content ?? "", revision: file.revision, encoding: file.encoding, mode: file.mode };
     },
     async writeFile(path, content, opts) {
       const port = writePortOf(input);
@@ -194,15 +198,15 @@ export function toEngineWritePort(input: CodeToolExecutionContext): EngineWriteP
         const result = await port.writeFile({ ...base, path, content, expectedRevision: opts?.expectedRevision ?? existing.revision ?? "" });
         return { sha256: result.sha256, revision: result.revision };
       }
-      const created = await port.createFile({ ...base, path, content });
+      const created = await port.createFile({ ...base, path, content, mode: opts?.mode });
       return { sha256: created.sha256, revision: created.revision };
     },
-    async deletePath(path) {
-      await writePortOf(input).deleteFile({ ...base, path });
+    async deletePath(path, opts) {
+      await writePortOf(input).deleteFile({ ...base, path, expectedRevision: opts?.expectedRevision ?? input.expectedRevisions?.[path] });
     },
     async movePath(from, to) {
       const source = await stat(from);
-      await writePortOf(input).moveFile({ ...base, from, to, expectedRevision: source.revision ?? "" });
+      await writePortOf(input).moveFile({ ...base, from, to, expectedRevision: input.expectedRevisions?.[from] ?? source.revision ?? "" });
     },
     stat,
     async listDir(dir) {
@@ -216,6 +220,7 @@ export function toEngineWritePort(input: CodeToolExecutionContext): EngineWriteP
 function engineOptions(input: CodeToolExecutionContext, options: CanonicalWriteExecutorOptions): EngineWriteOptions {
   return {
     tool: input.tool.name,
+    expectedRevisions: input.expectedRevisions,
     limits: resolveWriteLimits(),
     approved: input.approved === true || options.approved === true,
     hooks: options.hooks,
@@ -280,7 +285,7 @@ export function canonicalWriteExecutors(options: CanonicalWriteExecutorOptions =
       const path = stringArg(input.args, ["path", "file", "filePath"]);
       if (!path) throw new CodeToolError("invalid_arguments", "code.fs.delete requires a path", 400, "validate_arguments", false, input.tool.name);
       return deletePathSafe(
-        { path, recursive: input.args.recursive, expectedRevision: input.args.expectedRevision },
+        { path, recursive: input.args.recursive, expectedRevision: input.expectedRevisions?.[path] ?? input.args.expectedRevision },
         toEngineWritePort(input),
         engineOptions(input, options),
       );
@@ -300,7 +305,7 @@ export function canonicalWriteExecutors(options: CanonicalWriteExecutorOptions =
           sha256: item.sha256 ?? null,
           linesAdded: item.linesAdded,
           linesRemoved: item.linesRemoved,
-          diff: result.applied.length === 1 ? result.diff : "",
+          diff: item.diff ?? (result.applied.length === 1 ? result.diff : ""),
         }));
         return {
           ...result,
@@ -326,7 +331,7 @@ export function canonicalWriteExecutors(options: CanonicalWriteExecutorOptions =
           const current = await readCurrent(input, path);
           if (!current) throw new CodeToolError("not_a_file", `${path} does not exist`, 404, "execute", false, input.tool.name, { path });
           if (!current.content.includes(find)) throw new CodeToolError("patch_conflict", `Edit for ${path} does not match the current content`, 409, "execute", false, input.tool.name, { path });
-          planned.push({ path, content: current.content.replace(find, replacement), before: current.content, current });
+          planned.push({ path, content: replaceLiteralText(current.content, find, replacement), before: current.content, current });
         }
       } else if (files.length) {
         for (const entry of files) {

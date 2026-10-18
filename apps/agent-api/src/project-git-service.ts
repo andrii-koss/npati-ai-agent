@@ -284,6 +284,18 @@ export class ProjectGitService {
     return status(this.repositoryHost(), ctx, companyId, projectId);
   }
 
+  /** Read a text file from the owned turn checkpoint without checkout or working-tree filters. */
+  async readCheckpointFile(ctx: AuthContext, companyId: string, projectId: string, checkpointId: string, file: string): Promise<{ content: string | null }> {
+    const checkpoint = await this.getCheckpoint(ctx, companyId, projectId, checkpointId);
+    const commit = checkpoint.commitHash;
+    if (!commit || !/^[a-f0-9]{40,64}$/.test(commit)) throw new GitError("CHECKPOINT_NO_COMMIT", "Checkpoint has no valid commit", 409);
+    const clean = safeProjectPath(file);
+    const dir = await this.ensureRepository(ctx, companyId, projectId);
+    if (!await pathExistsInCommit(this.coreHost(), dir, commit, clean)) return { content: null };
+    const { stdout } = await this.runGit(dir, ["show", commit + ":" + clean]);
+    return { content: stdout };
+  }
+
   async diff(
     ctx: AuthContext,
     companyId: string,
