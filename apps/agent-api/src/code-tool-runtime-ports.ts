@@ -124,6 +124,7 @@ export interface SandboxExecPort {
  * C3: the write half of the workspace port. Implemented by `createProjectWorkspaceWritePort`.
  */
 export interface CodeWritePort {
+  applyPatchTransaction?(input: { ctx: AuthContext; companyId: string; projectId: string; plan: readonly import("./code-patch-transaction").PatchMutation[] }): Promise<Array<{ path: string; sha256?: string; revision?: string }>>;
   writeFile(input: { ctx: AuthContext; companyId: string; projectId: string; path: string; content: string; expectedRevision: string }): Promise<{ path: string; revision: string; sha256: string }>;
   createFile(input: { ctx: AuthContext; companyId: string; projectId: string; path: string; content: string; mode?: number }): Promise<{ path: string; revision: string; sha256: string }>;
   editFile(input: { ctx: AuthContext; companyId: string; projectId: string; path: string; find: string; replacement: string; expectedRevision: string }): Promise<{ path: string; revision: string; sha256: string }>;

@@ -389,6 +389,12 @@ export class CodeToolRuntime {
         return receipt;
       };
       const writePort: CodeWritePort | undefined = originalWritePort ? {
+        ...(originalWritePort.applyPatchTransaction ? { applyPatchTransaction: async (value: Parameters<NonNullable<CodeWritePort["applyPatchTransaction"]>>[0]) => {
+          const receipts = await originalWritePort.applyPatchTransaction!(value);
+          for (const receipt of receipts) if (receipt.revision !== undefined) committedRevisions.set(receipt.path, receipt.revision);
+          return receipts;
+        } } : {}),
+
         writeFile: value => remember(originalWritePort.writeFile(value)),
         createFile: value => remember(originalWritePort.createFile(value)),
         editFile: value => remember(originalWritePort.editFile(value)),

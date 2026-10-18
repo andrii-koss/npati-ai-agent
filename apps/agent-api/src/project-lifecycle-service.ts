@@ -1,4 +1,4 @@
-import type { AuthContext, Project, WorkspaceStore } from "@npati/workspace";
+import { WorkspaceNotFoundError, type AuthContext, type Project, type WorkspaceStore } from "@npati/workspace";
 import type { FastifyBaseLogger } from "fastify";
 import type { ProjectService } from "./project-service";
 import type { ProjectPreviewService } from "./project-preview-service";
@@ -25,7 +25,7 @@ export interface ProjectLifecycleDeps {
   sandboxService?: ProjectSandboxService;
   mediaService?: ProjectMediaService;
   dataBackendService?: DataBackendService;
-  removeWorkspace?: (ctx: AuthContext, companyId: string, projectId: string) => Promise<{ removed: boolean; reason?: string }>;
+  removeWorkspace?: (ctx: AuthContext, companyId: string, projectId: string) => Promise<{ removed: boolean; reason?: string; alreadyAbsent?: boolean }>;
   auditLog?: (entry: { ctx: AuthContext; companyId: string; action: string; resourceId: string; metadata?: Record<string, unknown> }) => Promise<void>;
   logger?: FastifyBaseLogger;
 }
@@ -453,7 +453,8 @@ export class ProjectLifecycleService {
     let project: Project;
     try {
       project = await this.deps.projects.get(ctx, companyId, projectId);
-    } catch {
+    } catch (error) {
+      if (!(error instanceof WorkspaceNotFoundError)) throw error;
       // Already absent
       return {
         status: "purged",
@@ -499,7 +500,8 @@ export class ProjectLifecycleService {
     await this.audit(ctx, companyId, "project.lifecycle.hard_purge", projectId, { force: options.force });
 
     // Transition to 'purging' state
-    await this.deps.store.transitionProjectToPurging(ctx, companyId, projectId).catch(() => undefined);
+    if (project.status !== "purging") await this.deps.store.transitionProjectToPurging(ctx, companyId, projectId);
+    const cleanupFailures: string[] = [];
 
     let mediaObjects = 0;
     let mediaBytes = 0;
@@ -509,6 +511,7 @@ export class ProjectLifecycleService {
         mediaObjects = purgeRes.deletedCount;
         mediaBytes = purgeRes.deletedBytes;
       } catch (err) {
+        cleanupFailures.push("media");
         this.deps.logger?.warn({ err, projectId }, "media_purge_partial_failure");
       }
     }
@@ -520,6 +523,7 @@ export class ProjectLifecycleService {
         await this.deps.sandboxService.destroy(ctx, project);
         sandboxDestroyed = true;
       } catch (err) {
+        cleanupFailures.push("sandbox");
         this.deps.logger?.warn({ err, projectId }, "sandbox_destroy_partial_failure");
       }
     }
@@ -529,8 +533,10 @@ export class ProjectLifecycleService {
     if (this.deps.removeWorkspace) {
       try {
         const res = await this.deps.removeWorkspace(ctx, companyId, projectId);
-        workspaceRemoved = res.removed;
+        workspaceRemoved = res.removed || res.alreadyAbsent === true;
+        if (!workspaceRemoved) cleanupFailures.push("workspace");
       } catch (err) {
+        cleanupFailures.push("workspace");
         this.deps.logger?.warn({ err, projectId }, "workspace_remove_partial_failure");
       }
     }
@@ -540,6 +546,7 @@ export class ProjectLifecycleService {
       try {
         await this.deps.dataBackendService.detachProjectArtifacts(ctx, companyId, projectId);
       } catch (err) {
+        cleanupFailures.push("data_backend_artifacts");
         this.deps.logger?.warn({ err, projectId }, "datastudio_detach_partial_failure");
       }
     }
@@ -553,14 +560,21 @@ export class ProjectLifecycleService {
         orphanedCleaned += delAct.rowCount ?? 0;
         const delCtx = await pool.query("DELETE FROM code_context_summaries WHERE project_id=$1", [projectId]);
         orphanedCleaned += delCtx.rowCount ?? 0;
-        await pool.query("DELETE FROM project_terminal_events WHERE project_id=$1", [projectId]).catch(() => undefined);
+        await pool.query("DELETE FROM project_terminal_events WHERE project_id=$1", [projectId]);
       } catch (err) {
+        cleanupFailures.push("database_records");
         this.deps.logger?.warn({ err, projectId }, "orphaned_records_cleanup_failed");
       }
     }
 
-    // 6. Delete project DB row
-    await this.deps.store.deleteProject(ctx, companyId, projectId).catch(() => undefined);
+    if (cleanupFailures.length > 0) {
+      throw new ProjectLifecycleError("cleanup_incomplete", "Project cleanup is incomplete; project metadata is retained for retry", 503, {
+        failedSteps: [...new Set(cleanupFailures)], retryable: true,
+      });
+    }
+
+    // 6. Delete metadata only after every configured cleanup step succeeded.
+    await this.deps.store.deleteProject(ctx, companyId, projectId);
 
     // 7. Record lifecycle record
     await this.deps.store.recordProjectLifecycleRecord({

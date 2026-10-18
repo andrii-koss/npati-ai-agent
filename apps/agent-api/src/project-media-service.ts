@@ -322,7 +322,7 @@ export class ProjectMediaService {
       if (!obj.key.startsWith(expectedPrefix)) {
         continue;
       }
-      await this.storage.remove(NPATI_BUCKETS.projectMedia, obj.key).catch(() => undefined);
+      await this.storage.remove(NPATI_BUCKETS.projectMedia, obj.key);
       deletedCount++;
       deletedBytes += obj.size;
     }

@@ -1,3 +1,6 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { commitWorkspacePatch, recoverWorkspacePatch, type WorkspacePatchIO } from "./project-file-transaction";
+import type { PatchMutation } from "./code-patch-transaction";
 import { replaceLiteralText } from "./code-text-format";
 import { detectFileKind } from "./code-file-kind";
 import { createHash, randomUUID } from "node:crypto";
@@ -82,6 +85,8 @@ export interface ProjectMountRequest {
 }
 
 export interface ProjectWorkspace {
+  withFileLease?<T>(ctx: AuthContext, companyId: string, projectId: string, operation: () => Promise<T>): Promise<T>;
+  applyPatchTransaction?(ctx: AuthContext, companyId: string, projectId: string, plan: readonly PatchMutation[], workspaceId?: string, agentId?: string): Promise<Array<{ path: string; sha256?: string; revision?: string }>>;
   info(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string): Promise<ProjectWorkspaceInfo>;
   /**
    * C15: the mounted folder this project's canonical workspace **is**, or `null` when the workspace is managed.
@@ -250,6 +255,7 @@ function formatHunk(hunkOps: Array<{ type: string; text: string; oldLine?: numbe
 }
 
 export class LocalProjectWorkspace implements ProjectWorkspace {
+  private readonly heldWriteLease = new AsyncLocalStorage<string>();
   private readonly locks = new Map<string, Promise<void>>();
   private readonly activeWorktrees = new Map<string, string>();
   private readonly root: string;
@@ -355,6 +361,7 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
     return { clean, absolute: candidate };
   }
   private async lock<T>(key: string, operation: () => Promise<T>): Promise<T> {
+    if (this.heldWriteLease.getStore() === key) return operation();
     const previous = this.locks.get(key) ?? Promise.resolve();
     let release!: () => void;
     const current = new Promise<void>((resolve) => { release = resolve; });
@@ -391,7 +398,10 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
       }
       heartbeat = setInterval(() => { void utimes(lockDirectory, new Date(), new Date()).catch(() => undefined); }, 5_000);
       heartbeat.unref();
-      return await operation();
+      return await this.heldWriteLease.run(key, async () => {
+        await recoverWorkspacePatch(key, this.patchIO(key));
+        return operation();
+      });
     } finally {
       try {
         if (heartbeat) clearInterval(heartbeat);
@@ -439,23 +449,26 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
     return items.sort((a, b) => a.path.localeCompare(b.path));
   }
   async info(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string) {
-    const { project, base } = await this.access(ctx, companyId, projectId, "read", workspaceId, agentId);
-    const entries = await this.tree(base);
+    const { project, base, readOnly } = await this.access(ctx, companyId, projectId, "read", workspaceId, agentId);
+    const entries = readOnly ? await this.tree(base) : await this.lock(base, () => this.tree(base));
     return { companyId, projectId, workspaceId: project.workspaceId, logicalPath: `/workspaces/${companyId}/${projectId}`, currentBranch: project.repositoryBranch ?? "main", activeSandboxId: project.sandboxId, currentRevision: revision(JSON.stringify(entries.map(({ mtimeMs: _mtimeMs, ...entry }) => entry))) };
   }
-  async getFileTree(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string) { const { base } = await this.access(ctx, companyId, projectId, "read", workspaceId, agentId); return this.tree(base); }
+  async getFileTree(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string) { const { base, readOnly } = await this.access(ctx, companyId, projectId, "read", workspaceId, agentId); return readOnly ? this.tree(base) : this.lock(base, () => this.tree(base)); }
   async listFiles(ctx: AuthContext, companyId: string, projectId: string, workspaceId?: string, agentId?: string) { return (await this.getFileTree(ctx, companyId, projectId, workspaceId, agentId)).filter((entry) => entry.type === "file"); }
   async searchFiles(ctx: AuthContext, companyId: string, projectId: string, query: string, workspaceId?: string, agentId?: string) {
     if (typeof query !== "string" || !query.trim() || query.length > 200) throw new ProjectFileError("invalid_query", "Invalid file search query");
     return (await this.listFiles(ctx, companyId, projectId, workspaceId, agentId)).filter((entry) => entry.path.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 100);
   }
   async readFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, workspaceId?: string, agentId?: string) {
-    const { base } = await this.access(ctx, companyId, projectId, "read", workspaceId, agentId);
+    const { base, readOnly } = await this.access(ctx, companyId, projectId, "read", workspaceId, agentId);
+    const operation = async () => {
     const { clean, absolute } = await this.target(base, filePath);
     const bytes = await this.bytes(absolute);
     const isManifestOrLockfile = /^(?:package(?:-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|composer\.(?:json|lock)|requirements\.txt|Pipfile(?:\.lock)?)$/i.test(path.basename(clean));
     if (!isManifestOrLockfile && (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{20,})\b|(?<![-A-Za-z0-9_])(?:[A-Za-z0-9_]*(?:api[_-]?key|password|secret|token)(?![sS]\b)[A-Za-z0-9_]*)["']?\s*[:=]\s*["'][^"']{8,}["']/i.test(bytes.toString("utf8")))) throw new ProjectFileError("secret_content", "Protected file content", 403);
     return { ...this.content(clean, bytes), mode: (await lstat(absolute)).mode & 0o777 };
+    };
+    return readOnly ? operation() : this.lock(base, operation);
   }
   private async save(absolute: string, content: string | Buffer, restoredMode?: number) {
     let bytes: Buffer;
@@ -481,6 +494,31 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
     }
     finally { await rm(temporary, { force: true }); }
     return bytes;
+  }
+  /** Short canonical snapshot/commit coordination; never hold over a managed build. */
+  async withFileLease<T>(ctx: AuthContext, companyId: string, projectId: string, operation: () => Promise<T>): Promise<T> {
+    const { base, readOnly } = await this.access(ctx, companyId, projectId, "read");
+    return readOnly ? operation() : this.lock(base, operation);
+  }
+  private patchIO(base: string): WorkspacePatchIO {
+    return { target: file => this.target(base, file), bytes: absolute => this.bytes(absolute),
+      save: (absolute, content, mode) => this.save(absolute, content, mode),
+      validate: safeProjectPath, revision,
+      error: (code, message, currentRevision) => new ProjectFileError(code, message, code === "revision_conflict" ? 409 : 500, currentRevision) };
+  }
+  async applyPatchTransaction(ctx: AuthContext, companyId: string, projectId: string, plan: readonly PatchMutation[], workspaceId?: string, agentId?: string) {
+    const { base } = await this.access(ctx, companyId, projectId, "write", workspaceId, agentId);
+    return this.lock(base, async () => {
+      if (plan.length > 500) throw new ProjectFileError("file_limit", "Patch file limit exceeded", 413);
+      for (const item of plan) {
+        safeProjectPath(item.path);
+        if (typeof item.after !== "string" || Buffer.byteLength(item.after) > this.maxFileBytes) throw new ProjectFileError("file_too_large", "Patch file size limit exceeded", 413);
+      }
+      const currentCount = (await this.tree(base)).filter(entry => entry.type === "file").length;
+      const resultingCount = currentCount + plan.filter(item => !item.existing && !item.delete).length - plan.filter(item => item.existing && item.delete).length;
+      if (resultingCount > this.maxFiles) throw new ProjectFileError("file_limit", "Project file count limit exceeded", 409);
+      return commitWorkspacePatch(base, plan, this.patchIO(base));
+    });
   }
   async createFile(ctx: AuthContext, companyId: string, projectId: string, filePath: string, content: string | Buffer, workspaceId?: string, agentId?: string, restoredMode?: number) {
     const { base } = await this.access(ctx, companyId, projectId, "write", workspaceId, agentId);

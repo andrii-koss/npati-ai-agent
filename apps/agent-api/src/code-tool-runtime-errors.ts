@@ -45,6 +45,7 @@ export type CodeToolErrorCode =
   | "approval_denied"
   /** C5: no decision arrived before the timeout — the change was not applied and is not retryable as is. */
   | "approval_timeout"
+  | "transaction_recovery_required"
   | "write_failed"
   | "delete_failed"
   | "move_failed"
@@ -112,7 +113,7 @@ export type CodeToolErrorCode =
 
 /** Codes thrown by the canonical modules; they are mapped onto the runtime's failure shape. */
 export const CANONICAL_ERROR_CODES: ReadonlySet<string> = new Set<string>([
-  "invalid_path", "path_outside_workspace", "null_byte", "symlink_escape", "sensitive_file_denied",
+  "transaction_recovery_required", "invalid_path", "path_outside_workspace", "null_byte", "symlink_escape", "sensitive_file_denied",
   "not_a_file", "not_a_directory", "too_large", "read_failed", "search_failed", "invalid_argument",
   "sandbox_unavailable", "tool_not_configured", "project_not_found",
   "read_before_write_required", "revision_conflict", "revision_conflict_exhausted",

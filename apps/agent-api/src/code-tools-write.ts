@@ -33,6 +33,8 @@ export interface CodeWriteFileRead {
 }
 
 export interface CodeWritePort {
+  /** Optional coordinated transaction supplied by the authoritative workspace. */
+  applyPatchTransaction?(plan: readonly import("./code-patch-transaction").PatchMutation[]): Promise<Array<{ path: string; sha256?: string; revision?: string }>>;
   readFile(path: string): Promise<CodeWriteFileRead>;
   writeFile(path: string, content: string, opts?: { encoding?: string; eol?: "lf" | "crlf"; mode?: number; expectedRevision?: string }): Promise<{ sha256: string; revision?: string }>;
   deletePath(path: string, opts?: { recursive?: boolean; expectedRevision?: string }): Promise<void>;

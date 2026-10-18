@@ -339,3 +339,20 @@ describe("Stage 4: MinIO Integration for Website Media Files", () => {
     });
   });
 });
+
+it("does not count a failed object deletion as purged and permits a later retry", async () => {
+  const { storage, store } = createMockObjectStorage();
+  const service = new ProjectMediaService(storage);
+  await storage.put("npati-project-media", "company/project/assets/logo.png", Buffer.from([0, 128, 255]));
+  await storage.put("npati-project-media", "company/neighbor/assets/logo.png", Buffer.from([1]));
+  const original = storage.remove.bind(storage);
+  let failed = false;
+  storage.remove = async (bucket, key) => {
+    if (!failed) { failed = true; throw new Error("storage offline"); }
+    return original(bucket, key);
+  };
+  await expect(service.purgeProjectMedia(undefined, "company", "project")).rejects.toThrow("storage offline");
+  expect(store.has("npati-project-media:company/project/assets/logo.png")).toBe(true);
+  await expect(service.purgeProjectMedia(undefined, "company", "project")).resolves.toEqual({ deletedCount: 1, deletedBytes: 3 });
+  expect(store.has("npati-project-media:company/neighbor/assets/logo.png")).toBe(true);
+});

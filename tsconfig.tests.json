@@ -22,6 +22,8 @@
     "allowJs": true
   },
   "include": [
+    "tests/project-purge-failure-recovery.test.ts",
+    "tests/project-media-route-authorization.test.ts",
     "scripts/verify-coding-agent-data.ts",
     "tests/coding-agent-c1-contract-audit.test.ts",
     "tests/coding-agent-c3-runtime.test.ts",

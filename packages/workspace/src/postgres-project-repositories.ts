@@ -175,7 +175,7 @@ export async function listExpiredSoftDeletedProjects(
   const result = await pool.query<{ id: string; companyId: string; workspaceId: string; createdBy: string; purgeAfter: string }>(
     `SELECT id, company_id AS "companyId", workspace_id AS "workspaceId", created_by AS "createdBy", purge_after AS "purgeAfter"
      FROM projects
-     WHERE status = 'soft_deleted' AND purge_after <= now()
+     WHERE status IN ('soft_deleted', 'purging') AND purge_after <= now()
      ORDER BY purge_after ASC LIMIT $1`,
     [Math.max(1, Math.min(limit, 200))],
   );

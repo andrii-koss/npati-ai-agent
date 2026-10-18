@@ -80,6 +80,7 @@ export function createProjectWorkspaceReadPort(
  */
 export function createProjectWorkspaceWritePort(
   workspace: {
+    applyPatchTransaction?(ctx: AuthContext, companyId: string, projectId: string, plan: readonly import("./code-patch-transaction").PatchMutation[]): Promise<Array<{ path: string; sha256?: string; revision?: string }>>;
     writeFile(ctx: AuthContext, companyId: string, projectId: string, path: string, content: string, expectedRevision: string): Promise<{ path: string; revision: string }>;
     createFile(ctx: AuthContext, companyId: string, projectId: string, path: string, content: string, workspaceId?: string, agentId?: string, mode?: number): Promise<{ path: string; revision: string }>;
     editFile(ctx: AuthContext, companyId: string, projectId: string, path: string, find: string, replacement: string, expectedRevision: string): Promise<{ path: string; revision: string }>;
@@ -89,6 +90,7 @@ export function createProjectWorkspaceWritePort(
 ): CodeWritePort {
   const hashed = (file: { path: string; revision: string }) => ({ path: file.path, revision: file.revision, sha256: file.revision });
   return {
+    ...(workspace.applyPatchTransaction ? { applyPatchTransaction: (input: Parameters<NonNullable<CodeWritePort["applyPatchTransaction"]>>[0]) => workspace.applyPatchTransaction!(input.ctx, input.companyId, input.projectId, input.plan) } : {}),
     async writeFile(input) {
       return hashed(await workspace.writeFile(input.ctx, input.companyId, input.projectId, input.path, input.content, input.expectedRevision));
     },

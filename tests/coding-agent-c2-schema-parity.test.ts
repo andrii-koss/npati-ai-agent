@@ -282,6 +282,7 @@ describe("security-gate: C2 tool schema parity", () => {
       expect(tool.version, `${name} registry version`).toBe(1);
       expect(tool.status).toBe("active");
       expect(capability.version, `${name} capability version must equal the tool version`).toBe(tool.version);
+      expect(capability.type, `${name} capability type`).toBe("tool");
       expect(capability.domain).toBe("code");
       expect(capability.risk, `${name} risk`).toBe(EXPECTED_RISK[name]);
       expect(capability.requiresConfirmation, `${name} approval requirement`).toBe(APPROVAL_REQUIRED_TOOLS.has(name));
