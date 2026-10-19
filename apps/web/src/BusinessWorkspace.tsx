@@ -119,10 +119,27 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const draftVersion = useRef(0);
   const selectedChatRef = useRef(selected); selectedChatRef.current = selected;
   const chatSubmissionBusy = useRef(false);
-  const [streamingResponse,setStreamingResponse]=useState(false);
+  const [streamingResponse, setStreamingResponse] = useState(false);
   const [notice, setNotice] = useState(""); const [replyMeta, setReplyMeta] = useState<AgentReply | null>(null);
-  const development = useChatDevelopment({ companyId: companyId ?? readActiveCompanyId(), conversationId: selected, businessId: business?.id, onConversation: id => { void loadConversations(id); }, onError: setNotice, onAccepted: message => setInput(current => current.trim() === message ? "" : current), busy: sending, onSession: codeInbox.accept, boundSessionId: codeInbox.session?.sessionId });
   const [loadingHistory, setLoadingHistory] = useState(() => Boolean(initialConversationId));
+  const development = useChatDevelopment({
+    companyId: companyId ?? readActiveCompanyId(),
+    conversationId: selected,
+    businessId: business?.id,
+    onConversation: (id, preserve) => { void loadConversations(id, preserve ?? true); },
+    onError: setNotice,
+    onAccepted: (message) => {
+      setInput("");
+      const userMsg: Message = { id: `opt-u-${crypto.randomUUID()}`, role: "user", content: message, createdAt: new Date().toISOString() };
+      setMessages(curr => mergeConversationMessages(curr, [userMsg]));
+      setActiveTurn(message);
+      followBottomRef.current = true;
+      window.requestAnimationFrame(() => scrollToBottom("auto"));
+    },
+    busy: sending,
+    onSession: codeInbox.accept,
+    boundSessionId: codeInbox.session?.sessionId
+  });
   const [ttsVoice, setTtsVoice] = useState(() => {
     try {
       return localStorage.getItem("npati_chat_tts_voice") || "alloy";
@@ -256,7 +273,10 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       if (loaded.length > 0) {
         // The active turn already has stable React keys and the final streamed text.
         // Replacing it with persisted message IDs remounts both bubbles and flashes.
-        if (preserveActiveTurn) return loaded;
+        if (preserveActiveTurn) {
+          setMessages(current => mergeConversationMessages(current, loaded));
+          return loaded;
+        }
         setMessages(loaded);
         if (!preserveActiveTurn && !activeTurn) {
           window.requestAnimationFrame(() => {
@@ -283,15 +303,22 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       return;
     }
 
+    if (initialConversationId && selectedRef.current === initialConversationId) {
+      return;
+    }
+
     followBottomRef.current = true;
     setSelected(initialConversationId ?? null);
     setReplyMeta(null);
     setNotice("");
-    setActiveTurn("");
-    resetProgress();
+    if (!initialConversationId || !selectedRef.current) {
+      setActiveTurn("");
+      resetProgress();
+    }
     if (initialConversationId) {
-      setLoadingHistory(true);
-      void loadConversations(initialConversationId).finally(() => setLoadingHistory(false));
+      const hasActive = messages.length > 0;
+      if (!hasActive) setLoadingHistory(true);
+      void loadConversations(initialConversationId, hasActive).finally(() => setLoadingHistory(false));
     } else {
       setMessages([]);
       setLoadingHistory(false);
@@ -707,6 +734,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           setAttachments={setAttachments}
           draftVersion={draftVersion}
           sending={sending}
+          developmentActive={development.isActive}
+          onStopDevelopment={development.stop}
           codeInbox={codeInbox}
           inboxSubmitting={inboxSubmitting}
           contextSwitcher={contextSwitcher}

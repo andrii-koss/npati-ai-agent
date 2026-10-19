@@ -12,8 +12,8 @@ export function previewBrowserBridge(prefix: string, token: string): string {
   try {
     const origSetAttribute = HTMLScriptElement.prototype.setAttribute;
     HTMLScriptElement.prototype.setAttribute = function(name, val) {
-      if (typeof name === "string" && name.toLowerCase() === "src" && typeof val === "string") {
-        val = route(val);
+      if (typeof name === "string" && name.toLowerCase() === "src" ) {
+        val = route(String(val));
       }
       return origSetAttribute.call(this, name, val);
     };
@@ -23,20 +23,25 @@ export function previewBrowserBridge(prefix: string, token: string): string {
       Object.defineProperty(HTMLScriptElement.prototype, "src", {
         get: desc.get,
         set: function(val) {
-          if (typeof val === "string") val = route(val);
+          val = route(String(val));
           return origSet.call(this, val);
         },
         configurable: true,
         enumerable: true,
       });
     }
+    const setLinkAttribute = HTMLLinkElement.prototype.setAttribute;
+    HTMLLinkElement.prototype.setAttribute = function(name, val) {
+      if (typeof name === "string" && name.toLowerCase() === "href" ) val = route(String(val));
+      return setLinkAttribute.call(this, name, val);
+    };
     const descLink = Object.getOwnPropertyDescriptor(HTMLLinkElement.prototype, "href");
     if (descLink && descLink.set) {
       const origSetLink = descLink.set;
       Object.defineProperty(HTMLLinkElement.prototype, "href", {
         get: descLink.get,
         set: function(val) {
-          if (typeof val === "string") val = route(val);
+          val = route(String(val));
           return origSetLink.call(this, val);
         },
         configurable: true,

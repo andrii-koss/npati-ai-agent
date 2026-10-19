@@ -512,3 +512,19 @@ describe("security-gate: C2 rooted ignore rules", () => {
     expect(isIgnoredByGitignore("src/cache/item.js", parseGitignore("cache/\n"), false)).toBe(true);
   });
 });
+
+describe("literal Next.js route paths",()=>{
+  it.each(["app/products/[slug]/page.tsx","app/docs/[...parts]/page.tsx","app/docs/[[...parts]]/page.tsx","app/(auth)/login/page.tsx","app/@modal/page.tsx"])("accepts the literal route %s for read and write",path=>{
+    expect(normalizeWorkspacePath(path,{tool:"code.fs.read"})).toBe(path);
+    expect(normalizeWorkspacePath(path,{tool:"code.fs.write"})).toBe(path);
+  });
+  it("reads the exact dynamic route without treating brackets as a glob",async()=>{
+    const path="app/products/[slug]/page.tsx";
+    const port=makePort({files:{[path]:"export default function Product() {}","app/products/s/page.tsx":"wrong file"}});
+    const result=await readFileLines({port,path,limits:LIMITS});
+    expect(result.lines[0]!.text).toBe("export default function Product() {}");
+  });
+  it.each(["app/[slug]/../../outside.ts","app/[s*lug]/page.tsx","app/**/page.tsx","app/(../secret)/page.tsx"])("still refuses unsafe or wildcard path %s",path=>{
+    expect(()=>normalizeWorkspacePath(path,{tool:"code.fs.write"})).toThrow(CodeToolError);
+  });
+});

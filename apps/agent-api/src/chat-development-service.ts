@@ -1,4 +1,4 @@
-import { resolveCodingConversationLanguage, codingChatResponseInstruction, chatLanguageInstruction, codingStartCopy } from "./company-chat-i18n";
+import { resolveCodingConversationLanguage, codingChatResponseInstruction, chatLanguageInstruction } from "./company-chat-i18n";
 import { randomUUID } from "node:crypto";
 import { DEVELOPMENT_PROCESS_SETTINGS_KEY, sanitizeExecutionTrace, developmentIsActive, planChatDevelopment, type DevelopmentProcess, type DevelopmentTarget } from "@npati/shared";
 import { WorkspaceNotFoundError, WorkspaceAccessError, type AuthContext, type Project, type WorkspaceStore } from "@npati/workspace";
@@ -43,6 +43,16 @@ export class ChatDevelopmentService {
   private updates = new Map<string, Promise<unknown>>();
   private closing = false;
   private readonly projections = new Map<string, Promise<DevelopmentProcess[]>>();
+  private listeners = new Set<() => void>();
+  onUpdate(fn: () => void) {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+  private notifyListeners() {
+    for (const fn of this.listeners) {
+      try { fn(); } catch {}
+    }
+  }
   constructor(private readonly d: DevelopmentPorts) { }
   private owner(ctx: AuthContext) { return ctx.workspaceId + ":" + ctx.userId; }
   private jobKey(ctx: AuthContext, id: string) { return this.owner(ctx) + ":" + id; }
@@ -74,6 +84,7 @@ export class ChatDevelopmentService {
   }
   private async patch(ctx: AuthContext, id: string, patch: Partial<Entry>) {
     await this.change(ctx, items => items.map(item => item.id === id ? { ...item, ...patch, updatedAt: new Date().toISOString() } : item));
+    this.notifyListeners();
   }
   async list(ctx: AuthContext): Promise<DevelopmentProcess[]> {
     const key = this.owner(ctx);
@@ -127,13 +138,14 @@ export class ChatDevelopmentService {
       const runLanguages = Object.fromEntries(traceRuns.roots.map(run => [run.runId, queueLanguages.get(run.runId) ?? resolveCodingConversationLanguage("",[{role:"user",content:project?.description ?? ""},...chatHistory.filter(message=>message.role==="user" && Date.parse(message.createdAt) <= (executionTimestamp(run.startedAt) ?? Infinity))]) ]));
       const merged = Array.from(new Map([...progress, ...history.flat()].map(event => [event.id, event])).values()).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
       for (const event of merged) if (event.runId && queueLanguages.has(event.runId)) event.language = queueLanguages.get(event.runId);
-      const item = { ...traceProcess, conversationMessages, initialRunId: stored.runId, runLanguages, runStartedAts: Object.fromEntries([...traceRuns.roots,...traceRuns.children].map(run=>[run.runId,new Date(executionTimestamp(run.startedAt) ?? executionTimestamp(stored.createdAt) ?? 0).toISOString()])), runStatuses: Object.fromEntries([...traceRuns.roots, ...traceRuns.children].map(run => [run.runId, run.status])), progress: merged, inboxEnabled: inboxEnabled.get(stored.companyId) ?? false };
+      const item = { ...traceProcess, previewUrl: project?.previewUrl ?? undefined, conversationMessages, initialRunId: stored.runId, runLanguages, runStartedAts: Object.fromEntries([...traceRuns.roots,...traceRuns.children].map(run=>[run.runId,new Date(executionTimestamp(run.startedAt) ?? executionTimestamp(stored.createdAt) ?? 0).toISOString()])), runStatuses: Object.fromEntries([...traceRuns.roots, ...traceRuns.children].map(run => [run.runId, run.status])), progress: merged, inboxEnabled: inboxEnabled.get(stored.companyId) ?? false };
       if (this.jobs.has(this.jobKey(ctx, item.id))) return item;
       const latest = latestRun;
       if (latest && item.projectId) {
         if (latest.runId === stored.runId && !developmentIsActive(item) && !["interrupted", "awaiting_approval"].includes(item.status)) return item;
         const live = this.d.background.isLive(latest.runId);
-        const status: DevelopmentProcess["status"] = live || latest.status === "running" ? item.status === "stopping" && item.runId === latest.runId ? "stopping" : "running" : latest.status === "waiting_for_user" ? "awaiting_approval"
+        const expired = latest.status === "running" && (executionTimestamp(latest.leaseExpiresAt) ?? Infinity) < Date.now();
+        const status: DevelopmentProcess["status"] = expired && !live ? "interrupted" : live || latest.status === "running" ? item.status === "stopping" && item.runId === latest.runId ? "stopping" : "running" : latest.status === "waiting_for_user" ? "awaiting_approval"
           : latest.status === "completed" && (!project?.previewUrl || project.lastBuildStatus !== "ready") ? "failed" : latest.status;
         return { ...item, runId: latest.runId, status, previewUrl: project?.previewUrl ?? undefined };
       }
@@ -157,7 +169,7 @@ export class ChatDevelopmentService {
     this.starts.set(owner, work);
     try { return await work; } finally { if (this.starts.get(owner) === work) this.starts.delete(owner); }
   }
-  async start(ctx: AuthContext, input: { companyId: string; message: string; conversationId?: string; businessId?: string; requestId: string }) {
+  async start(ctx: AuthContext, input: { companyId: string; message: string; targets?: DevelopmentTarget[]; conversationId?: string; businessId?: string; requestId: string }) {
     return this.serialize(ctx, () => this.startOwned(ctx, input));
   }
   async plan(ctx: AuthContext, input: { message: string; projectId?: string; companyId?: string; conversationId?: string; businessId?: string }) {
@@ -169,7 +181,7 @@ export class ChatDevelopmentService {
     return (await this.d.resolveProjectIntent(ctx, { message: input.message, activeProjectId: input.projectId,
       activeCompanyId: input.companyId, conversationHistory: history })).targets;
   }
-  private async startOwned(ctx: AuthContext, input: { companyId: string; message: string; conversationId?: string; businessId?: string; requestId: string }) {
+  private async startOwned(ctx: AuthContext, input: { companyId: string; message: string; targets?: DevelopmentTarget[]; conversationId?: string; businessId?: string; requestId: string }) {
     if (!ctx.permissions.some(p => ["*", "owner", "admin:all", "business:manage", "workspace:write"].includes(p))) throw new DevelopmentError("Coding Agent write permission denied", 403);
     await this.d.store.getCompany(ctx, input.companyId);
     await this.d.flags.assertEnabled(ctx, "coding_agent.enabled", { companyId: input.companyId });
@@ -179,10 +191,10 @@ export class ChatDevelopmentService {
     const existing = await this.entries(ctx);
     const duplicate = existing.filter(p => p.requestId === input.requestId);
     if (duplicate.length) return { conversationId: duplicate[0]!.parentConversationId, processes: duplicate };
-    const targets = await this.plan(ctx, input);
+    const targets = (input.targets && input.targets.length) ? input.targets : await this.plan(ctx, input);
     if (!targets.length) throw new DevelopmentError("Describe a website, blog, shop, mobile app or CRM to create.");
-    const currentViews = new Map((await this.list(ctx)).map(p => [p.id, p]));
-    if ([...currentViews.values()].filter(developmentIsActive).length + targets.length > 4) throw new DevelopmentError("Four development processes are already active. Stop or wait for a process before starting another.", 409);
+    const activeExisting = (await this.list(ctx)).filter(developmentIsActive);
+    if (activeExisting.length + targets.length > 4) throw new DevelopmentError("Four development processes are already active. Stop or wait for a process before starting another.", 409);
     let conversationId = input.conversationId;
     if (conversationId) {
       await this.d.store.getNeutralConversation(ctx, conversationId).catch(error => {
@@ -193,57 +205,35 @@ export class ChatDevelopmentService {
     const history = (await this.d.store.getNeutralConversation(ctx, conversationId!).catch(() => ({ messages: [] }))).messages;
     const responseLanguage = resolveCodingConversationLanguage(input.message, history);
     const now = new Date().toISOString();
-    const created: Entry[] = targets.map((target, index) => ({
-      id: randomUUID(), requestId: input.requestId, companyId: input.companyId,
-      conversationId: index === 0 ? conversationId! : undefined,
-      parentConversationId: conversationId!, responseLanguage, businessId: input.businessId, name: target.name, framework: target.framework, status: "queued", hidden: false, createdAt: now, updatedAt: now
-    }));
+    const created: Entry[] = targets.map((target, index) => {
+      const processId = randomUUID();
+      const localizedName = responseLanguage === "uk" && target.name === "Online store" ? "Інтернет-магазин"
+        : responseLanguage === "uk" && target.name === "Company website" ? "Вебсайт компанії"
+        : target.name;
+      return {
+        id: processId, requestId: input.requestId, companyId: input.companyId,
+        conversationId: index === 0 ? conversationId! : undefined,
+        parentConversationId: conversationId!, responseLanguage, businessId: input.businessId,
+        name: localizedName, framework: target.framework,
+        status: "preparing",
+        hidden: false, createdAt: now, updatedAt: now
+      };
+    });
     await this.change(ctx, items => {
-      if (items.filter(p => !!currentViews.get(p.id) && developmentIsActive(currentViews.get(p.id)!)).length + created.length > 4) throw new DevelopmentError("Four development processes are already active. Stop or wait for a process before starting another.", 409);
+      const activeIds = new Set(activeExisting.map(p => p.id));
+      if (activeIds.size + created.length > 4) throw new DevelopmentError("Four development processes are already active. Stop or wait for a process before starting another.", 409);
       // Keep four tiles visible; old projects remain in Websites and in their own chats.
       const visibleOld = created.length === 4 ? [] : items.filter(p => !p.hidden).slice(-(4 - created.length)).map(p => p.id);
-      return this.bounded(ctx, [...items.map(p => ({ ...p, hidden: !visibleOld.includes(p.id) })), ...created], new Set([...currentViews.values()].filter(developmentIsActive).map(p => p.id)));
+      return this.bounded(ctx, [...items.map(p => ({ ...p, hidden: !visibleOld.includes(p.id) })), ...created], activeIds);
     });
+    this.notifyListeners();
     const append = async (role: "user" | "assistant", text: string) => {
       try { return await this.d.store.appendNeutralMessage(ctx, conversationId!, role, text); }
       catch (error) { if (!input.businessId) throw error; return this.d.store.appendMessage(ctx, input.businessId, conversationId!, role, text); }
     };
     try {
       await append("user", input.message);
-      let assistantIntro = "";
-      if (this.d.engine && this.d.getAIContext) {
-        try {
-          const aiContext = await this.d.getAIContext(ctx);
-          const langInstruction = responseLanguage === "uk"
-            ? "Відповідай виключно українською мовою."
-            : `Respond strictly in the user's conversation language (${responseLanguage}).`;
-          const targetSummary = targets.map(t => `${t.name} (${t.framework})`).join(", ");
-          const aiResult = await this.d.engine.chat({
-            model: aiContext.model,
-            temperature: 0.7,
-            messages: [
-              {
-                role: "system",
-                content: `You are NPATI Agent, an expert AI software developer and product architect. The user requested to create/build a project: "${targetSummary}".
-Respond directly and concisely to the user (2-3 sentences max). ${langInstruction}
-Acknowledge their exact requested features (e.g. catalog, cart, auth, build, live preview, etc.), state clearly that you are starting the implementation, and that you will build and launch Live Preview.
-Do NOT use robotic template phrases like "Starting development in Sandbox: ...". Do NOT include markdown code blocks or greetings. Be professional, natural, and directly address the user's specific request.`
-              },
-              { role: "user", content: input.message }
-            ],
-            timeoutMs: 12_000,
-          });
-          if (typeof aiResult.content === "string" && aiResult.content.trim()) {
-            assistantIntro = aiResult.content.trim();
-          }
-        } catch (err) {
-          this.d.log.warn({ err }, "chat_development_ai_intro_failed");
-        }
-      }
-      if (!assistantIntro) {
-        assistantIntro = codingStartCopy(responseLanguage) + ": " + targets.map(t => t.name + " (" + t.framework + ")").join(", ") + ".";
-      }
-      await append("assistant", assistantIntro);
+      // The coding run supplies real responses; no separate intro request or canned fallback.
     } catch (error) {
       for (const process of created) await this.patch(ctx, process.id, { status: "failed", detail: "Could not save the chat." });
       throw error;
@@ -264,6 +254,7 @@ Do NOT use robotic template phrases like "Starting development in Sandbox: ...".
     const details = executionResultDetails(event.result);
     const safe = sanitizeProgress({ ...event, ...details, status: ["cancelled", "awaiting_approval", "waiting_for_approval"].includes(event.status ?? "") ? event.status : details.status ?? event.status, conversationId: owned.conversationId });
     await this.change(ctx, items => items.map(p => p.id !== owned.id ? p : { ...p, progress: [...(p.progress ?? []).filter(item => item.id !== safe.id), safe], updatedAt: new Date().toISOString() }));
+    this.notifyListeners();
   }
   private async report(ctx: AuthContext, id: string, stage: string, title: string, details?: Record<string, unknown>) {
     await this.change(ctx, items => items.map(item => {
@@ -273,6 +264,7 @@ Do NOT use robotic template phrases like "Starting development in Sandbox: ...".
       const event = sanitizeProgress({ ...previous, id: eventId, stage, title, at: previous?.at ?? new Date().toISOString(), conversationId: item.conversationId, ...Object.fromEntries(Object.entries(details ?? {}).filter(([, value]) => value !== undefined)) });
       return { ...item, progress: [...(item.progress ?? []).filter(event => event.id !== eventId), event].slice(-200), updatedAt: new Date().toISOString() };
     }));
+    this.notifyListeners();
   }
   private async settleProgress(ctx: AuthContext, id: string, status: DevelopmentProcess["status"]) {
     await this.change(ctx, items => items.map(item => item.id !== id ? item : { ...item, progress: item.progress?.map(event =>
@@ -365,6 +357,7 @@ Do NOT use robotic template phrases like "Starting development in Sandbox: ...".
             status: "running", agentId: "System", ...details, result: details?.stdout || details?.stderr ? [details.stdout, details.stderr].filter(Boolean).join("\n") : undefined,
           }));
         }, { dependenciesOnly: true }).finally(() => reports);
+        await this.report(ctx, process.id, "dependencies", "Dependencies installed", { status: "completed", agentId: "System" });
 
       }
       ensureActive();
@@ -374,9 +367,10 @@ Do NOT use robotic template phrases like "Starting development in Sandbox: ...".
         agentId: "Coding Agent",
       });
       const outcome = await this.d.executor.execute({
-        ctx, session, runId: process.runId,
+        responseLanguage: process.responseLanguage as import("./company-chat-i18n").CompanyChatLanguage,
+        ctx, session, runId: process.runId, requireImplementation: true,
         onActivity: event => this.recordActivity(ctx, process.companyId, session!.id, process.conversationId, { ...event, language: process.responseLanguage }),
-        prompt: "User request: " + message + "\nYour assigned project is " + target.name + " (" + target.kind + "). Implement ONLY this project's complete user specification, including every requested page and working interaction. Other independent requested projects have their own workspaces. The existing template has already been prepared by the system. Start with " + (target.kind === "mobile_app" ? "App.tsx" : target.framework === "HTML/CSS" ? "index.html" : "package.json and app/page.tsx") + ", then create all required files. Do not stop after the homepage or an initial visual implementation. Keep a checklist of the requested deliverables and verify them before declaring completion. Use the configured runtime budget, reserving time for verification and repairs. Batch independent file reads and related file changes; avoid reading back full files you just wrote. Read only files needed for this request. Preserve the attached database/auth SDK. Do not re-scaffold or run create-next-app. Template dependencies are already installed by the system. Only when adding a new package, use the available code.deps.add tool. Do not start a dev server. The system starts Live Preview after successful implementation and verification. If a limit prevents completion, state which deliverables remain; never claim the site is complete." + chatLanguageInstruction(message, [], process.responseLanguage as import("./company-chat-i18n").CompanyChatLanguage) + codingChatResponseInstruction(),
+        prompt: "Begin with a brief natural acknowledgement in the user's language alongside your first tool calls, then implement the request. User request: " + message + "\nYour assigned project is " + target.name + " (" + target.kind + "). Implement ONLY this project's complete user specification, including every requested page and working interaction. Other independent requested projects have their own workspaces. The existing template has already been prepared by the system. Reuse its working auth/database SDK and routes. Implement exactly the requested features; avoid unrequested sections and speculative infrastructure. Prefer a few complete pages with working interactions. Do not regenerate shared components that you have already implemented. Start with " + (target.kind === "mobile_app" ? "App.tsx" : target.framework === "HTML/CSS" ? "index.html" : "package.json and app/page.tsx") + ", then create all required files. Do not stop after the homepage or an initial visual implementation. Keep a checklist of the requested deliverables and verify them before declaring completion. Use the configured runtime budget, reserving time for verification and repairs. CRITICAL EXECUTION RULES: 1. Do NOT execute shell commands (code.shell.exec) with pipes (|), redirects (>), or bash expansions — they are blocked by security policy. Use code.fs.tree or code.fs.list for directory structure. 2. Do NOT spend multiple turns endlessly reading or listing template files. After a quick inspection of the entry point, IMMEDIATELY proceed to write and update the necessary source files using code.fs.write or code.fs.edit. 3. Batch independent file reads and related file changes; avoid reading back full files you just wrote. Read only files needed for this request. Preserve the attached database/auth SDK. Do not re-scaffold or run create-next-app. Template dependencies are already installed by the system. Only when adding a new package, use the available code.deps.add tool. Do not start a dev server. The system starts Live Preview after successful implementation and verification. If a limit prevents completion, state which deliverables remain; never claim the site is complete." + chatLanguageInstruction(message, [], process.responseLanguage as import("./company-chat-i18n").CompanyChatLanguage) + codingChatResponseInstruction(),
         cancelRequested: () => controller.signal.aborted,
         abort: () => this.d.background.abort(process.runId!, "Stopped by request"),
         sink: { signal: sink.signal, emitResult: result => sink!.emit("result", result), emitTerminal: (status, reason) => sink!.finish(status, reason) },
@@ -465,16 +459,22 @@ Do NOT use robotic template phrases like "Starting development in Sandbox: ...".
   }
   async stop(ctx: AuthContext, id: string) {
     const process = await this.owned(ctx, id);
-    if (!developmentIsActive(process)) return;
-    const local = this.jobs.has(this.jobKey(ctx, id)) || this.d.cancellation?.hasLiveRun(process.sessionId ?? "") || this.d.background.isLive(process.runId ?? "");
-    if (local) await this.patch(ctx, id, { status: "stopping", runId: process.runId, detail: "Stop requested" });
+    await this.patch(ctx, id, { status: "cancelled", runId: process.runId, detail: "Stopped by request" });
+    await this.settleProgress(ctx, id, "cancelled");
+    for (const [key, job] of this.jobs.entries()) {
+      if (key === id || key.endsWith(":" + id)) {
+        job.controller.abort();
+      }
+    }
     this.jobs.get(this.jobKey(ctx, id))?.controller.abort();
     if (process.sessionId && this.d.cancellation) {
       this.d.cancellation.requestSessionCancel({ sessionId: process.sessionId, companyId: process.companyId, projectId: process.projectId, requestedBy: ctx.userId, runId: process.runId });
       this.d.cancellation.abortLiveRuns(process.sessionId);
     }
-    if (process.runId) this.d.background.abort(process.runId, "Stopped by request");
-    if (!this.jobs.has(this.jobKey(ctx, id)) && !this.d.cancellation?.hasLiveRun(process.sessionId ?? "") && !this.d.background.isLive(process.runId ?? "")) throw new DevelopmentError("Cancellation recorded, but this API instance does not own the run. Reconnect to the instance running it.", 409);
+    if (process.runId) {
+      this.d.background.abort(process.runId, "Stopped by request");
+    }
+    this.notifyListeners();
   }
   async open(ctx: AuthContext, id: string) {
     const process = await this.owned(ctx, id);

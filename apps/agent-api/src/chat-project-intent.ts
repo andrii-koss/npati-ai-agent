@@ -69,9 +69,11 @@ export function createChatProjectIntentResolver(deps: {
       return { decision, targets, source: "deterministic" as const };
     };
     if (!message.trim()) return fallback();
-    // Existing settings handlers already recognize these requests without a provider call.
-    // Preserve explicit project actions and semantic routing for ambiguous development requests.
     const deterministic = classifyProjectIntent(input);
+    const planTargets = planChatDevelopment(message, input.activeProjectId ?? undefined);
+    if (["CREATE_WEBSITE", "CREATE_PROJECT"].includes(deterministic.intent) && planTargets.length > 0) {
+      return { decision: deterministic, targets: planTargets, source: "deterministic" as const };
+    }
     const hasSpreadsheet = (input.attachmentNames ?? []).some(name => /\.(xlsx|xlsm|xlsb|xls|csv)$/iu.test(name))
       || (input.conversationHistory ?? []).some(item => /\[\[npati-attachment:document:[0-9a-f-]{36}:[^\]]+\.(?:xlsx|xlsm|xlsb|xls|csv)\]\]/iu.test(item.content));
     if (!input.activeProjectId && hasSpreadsheet && isSpreadsheetEditRequest(message)

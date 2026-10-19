@@ -257,7 +257,7 @@ export class CodingAgentRunner {
       runtimeTools: runtimeToolDescriptors,
     };
 
-    const tools = this.toolDescriptors(session, toolOptions);
+    const tools = this.toolDescriptors(session, toolOptions).filter(tool => !input.websiteEdit || /^code\.(fs\.|deps\.|shell\.|verify\.|browser\.|web\.|data\.|plan\.|project\.info$|ask_user$)/.test(tool.name));
     const modelName = input.model ?? "auto";
     const modelProviderHint = modelName.includes("/") ? (modelName.split("/")[0] ?? modelName) : modelName;
 
@@ -286,7 +286,10 @@ export class CodingAgentRunner {
     const schemaByName = this.toolCatalog.toolSchemaByName(runtimeToolDescriptors, session);
 
     const knownTools: KnownTool[] = tools.map((tool) => ({ name: tool.name, inputSchema: schemaByName.get(tool.name)?.inputSchema ?? {} }));
-    const definitions = this.toolCatalog.chatToolDefinitions(tools, runtimeToolDescriptors, session);
+    const definitions = this.toolCatalog.chatToolDefinitions(tools, runtimeToolDescriptors, session)
+      // Keep the runtime registry intact; advertise the tools needed to implement
+      // a new project instead of repeatedly paying for unrelated admin schemas.
+      .filter(tool => !input.requireImplementation || /^code\.(fs\.|deps\.|shell\.|verify\.|browser\.|web\.|data\.|plan\.|project\.info$|ask_user$)/.test(tool.function.name));
 
     let engineSupportsNativeTools = false;
     if (this.ports.engine.supportsNativeTools) {
@@ -385,6 +388,10 @@ export class CodingAgentRunner {
     });
 
     let sawNativeToolCalls = false;
+    let inspectionTurns = 0;
+    let emptyImplementationReplies = 0;
+    let initialTokenBudget: number | undefined;
+    let budgetReminderSent = false;
 
     for (;;) {
       if (leaseState.lost) {
@@ -427,6 +434,11 @@ export class CodingAgentRunner {
       if (this.ports.quota) {
         const verdict = this.ports.quota.checkQuota(input.quotaSessionId ?? sessionId, 0, this.estimatedCostPerCallUsd, delegationDepth, { userId: ctx.userId, companyId });
         quotaRemaining = verdict.remainingTokens;
+        initialTokenBudget ??= quotaRemaining;
+        if (input.requireImplementation && !budgetReminderSent && quotaRemaining !== undefined && initialTokenBudget !== undefined && quotaRemaining < initialTokenBudget * 0.4) {
+          budgetReminderSent = true;
+          messages.push({ role: "system", content: "Less than 40% of the token budget remains. Stop broad inspection and optional refinements. Finish the requested working interactions in the next implementation steps, then provide your final response so the system can run the production build, repairs and Live Preview. State any unfinished requirements honestly; do not spend the verification reserve on repeated reads." });
+        }
         if (!verdict.allowed) {
           await release("budget_exhausted");
           summary.remaining = verdict.error ?? "Budget exhausted.";
@@ -459,6 +471,17 @@ export class CodingAgentRunner {
 
       const beforeModelStop = await stopIfFlagDisabled();
       if (beforeModelStop) return beforeModelStop;
+      // A creation run must progress from inspecting the template to changing source.
+      const currentChanges = reviewCoordinator.runChanges().map(change => change.path);
+      const needsImplementation = input.requireImplementation && !input.readOnlyIntent && session.mode !== "plan" && currentChanges.length === 0;
+      const implementNow = !input.readOnlyIntent && session.mode !== "plan" && inspectionTurns >= 3;
+      if (implementNow && inspectionTurns === 3) messages.push({ role: "system", content: currentChanges.length ? "Source changes have already been saved. If the requested edit is implemented, finish now so the system can verify and publish Preview. Do not audit unrelated styles or expand the task. Inspect only a concrete unresolved issue." : "You have spent three consecutive turns inspecting files without a source change. Use the relevant content already in context to make the requested targeted edit now. For a visual or color change, prefer editing the existing theme variables and affected selectors instead of rereading the whole stylesheet. Inspection tools remain available when necessary for a safe edit. Do not expand the scope or regenerate existing components." });
+      if (input.requireImplementation || currentChanges.length > 0 && !input.readOnlyIntent && session.mode !== "plan") {
+        const marker = "Current implementation progress (runtime facts): ";
+        const previous = messages.findIndex(message => message.role === "system" && typeof message.content === "string" && message.content.startsWith(marker));
+        if (previous >= 0) messages.splice(previous, 1);
+        messages.push({ role: "system", content: marker + JSON.stringify(currentChanges) + (input.requireImplementation ? ". These files have already been implemented by this run, even if earlier code was compacted from history. Do not regenerate equivalent providers, catalogs, shared components or scaffolding. Use targeted edits for corrections. Finish the missing user-facing pages and requested working interactions, then finalize so the system can build and start Preview." : ". These files already contain saved changes for the current edit request, even if earlier tool results were compacted. Do not repeat completed edits or broaden the task into a whole-project audit. If the requested change is implemented, finish now; mandatory verification and Live Preview follow automatically. Batch any remaining related changes in one patch.") });
+      }
       let result: ChatResult;
       let modelStarted = this.now();
       const thinking = {
@@ -578,6 +601,8 @@ export class CodingAgentRunner {
       });
 
       const callsToRun = executableToolCalls(normalized);
+      if (callsToRun.length && callsToRun.every(call => /^code\.fs\.(read|list|tree|search|glob|grep)$/.test(call.name))) inspectionTurns++;
+      else if (callsToRun.length) inspectionTurns = 0;
       const publishActivity = async (event: import("@npati/shared").DevelopmentProcessProgressItem) => {
         await emitCodingActivity(input, event);
       };
@@ -597,6 +622,14 @@ export class CodingAgentRunner {
       };
 
       if (!callsToRun.length && !normalized.rejected.length) {
+        if (needsImplementation) {
+          if (++emptyImplementationReplies >= 3) {
+            await release("refused");
+            return stop("failed", "refused", "The agent did not implement the requested project. No source files changed; build and Live Preview were not published.");
+          }
+          messages.push({ role: "assistant", content: assistantText }, { role: "system", content: "This is a creation request and no source files changed. Implement the requested features with file tools. Acknowledgement or a plan alone does not complete this task." });
+          continue;
+        }
         await openTurn();
         if (stateRunId && this.ports.runState) {
           await writeState(() => this.ports.runState!.appendTurn({

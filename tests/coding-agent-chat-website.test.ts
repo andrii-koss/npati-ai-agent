@@ -7,7 +7,7 @@ import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
 import type { AIEngine, OmniRouteMarketplace } from "@npati/omniroute-adapter";
 import { buildApp } from "../apps/agent-api/src/app";
 import { CodeSessionRunExecutor, type CodeSessionRunInput } from "../apps/agent-api/src/code-session-run-executor";
-import { finishCodeChatWebsite, hasCodeChatPreview } from "../apps/agent-api/src/code-chat-website";
+import { canUseStylePreview, finishCodeChatWebsite, hasCodeChatPreview } from "../apps/agent-api/src/code-chat-website";
 import { resolveChatCodeIntent } from "../apps/agent-api/src/code-intent-routing";
 import { getLatestChatProjectCard, saveChatProjectCard } from "../apps/agent-api/src/project-chat-cards";
 
@@ -127,4 +127,21 @@ describe("Coding Agent website chat", () => {
       expect(await store.listProjects(ctx, company.id)).toHaveLength(2);
     } finally { await app.close(); await rm(directory, { recursive: true, force: true }); }
   });
+});
+
+it("uses a development Preview for CSS-only changes without inventing a passed production build",async()=>{
+ const {input,ports}=await fixture();
+ const result={status:"completed",summary:{stylePreview:true,filesChanged:["app/store.css"]}};
+ expect(hasCodeChatPreview(await finishCodeChatWebsite({...input,allowStylePreview:true},result,ports))).toBe(true);
+ expect(ports.startPreview).toHaveBeenCalledWith(input.ctx,input.session.companyId,input.session.projectId,undefined,{development:true});
+ expect(result.summary).not.toHaveProperty("verification");
+});
+it.each([{filesChanged:["app/page.tsx"]},{filesChanged:[]},{filesChanged:["app/store.css","package.json"]}])("rejects an unverified development marker for non-CSS changes: %j",async ({filesChanged})=>{
+ const {input,ports}=await fixture();expect(await finishCodeChatWebsite({...input,allowStylePreview:true},{status:"completed",summary:{stylePreview:true,filesChanged}},ports)).toMatchObject({status:"failed"});expect(ports.startPreview).not.toHaveBeenCalled();
+});
+it("requires production verification when the user explicitly asks for build",()=>{
+ const project={framework:"Next.js",status:"previewing" as const,lastBuildStatus:"ready"};
+ expect(canUseStylePreview(project,"Change the background")).toBe(true);
+ for(const request of ["Run next build","production deploy","\u0437\u0431\u0435\u0440\u0438 \u043f\u0440\u043e\u0454\u043a\u0442"])expect(canUseStylePreview(project,request)).toBe(false);
+ expect(canUseStylePreview({...project,status:"ready",lastBuildStatus:undefined},"Change background")).toBe(false);
 });

@@ -171,9 +171,15 @@ export class CodingAgentToolWaves {
       pauseForUser,
     } = this.host;
 
+    // Finish the assistant tool-call batch before inserting ordinary conversation messages.
+    const deferredMessages: ChatMessage[] = [];
+    try {
+    const correctionKeys = new Set<string>();
     for (const rejected of normalized.rejected) {
       const key = `${rejected.name ?? "unknown"}:${rejected.code}`;
-      const count = (this.argumentCorrections.get(key) ?? 0) + 1;
+      // A batch is one opportunity to correct a class of errors on the next turn.
+      const count = (this.argumentCorrections.get(key) ?? 0) + (correctionKeys.has(key) ? 0 : 1);
+      correctionKeys.add(key);
       this.argumentCorrections.set(key, count);
       if (count > MAX_ARGUMENT_CORRECTIONS) {
         await release("invalid_arguments_exhausted");
@@ -218,7 +224,7 @@ export class CodingAgentToolWaves {
         return { action: "stopped", result: res };
       }
       this.loopReminded = true;
-      messages.push({ role: "system", content: REMINDER_MESSAGE });
+      deferredMessages.push({ role: "system", content: REMINDER_MESSAGE });
       await record({ kind: "reminder", companyId, projectId, sessionId, runId: input.runId, turn: steps, reason: "repeated_call" });
     }
 
@@ -240,7 +246,7 @@ export class CodingAgentToolWaves {
             return { action: "stopped", result: res };
           }
           this.cycleReminded = true;
-          messages.push({
+          deferredMessages.push({
             role: "system",
             content: `Warning: A repeating pattern of tool calls [${c1}] was repeated 3 times without progress. Change your approach or step back.`,
           });
@@ -356,7 +362,7 @@ export class CodingAgentToolWaves {
           if (this.verificationFailures.length >= 3 && this.verificationFailures.slice(-3).every((k) => k === findingsKey)) {
             if (!this.verificationLoopReminded) {
               this.verificationLoopReminded = true;
-              messages.push({
+              deferredMessages.push({
                 role: "system",
                 content: `Warning: Verification checks failed with the exact same error 3 times in a row (${failed[0]?.tool}: ${failed[0]?.summary?.slice(0, 160)}). Your previous edits did not fix the problem. Stop repeating similar edits and diagnose the underlying cause.`,
               });
@@ -389,7 +395,7 @@ export class CodingAgentToolWaves {
             if (this.zeroDiffEdits.length >= 2 && this.zeroDiffEdits.slice(-2).every((p) => p === writePath)) {
               if (!this.zeroDiffReminded) {
                 this.zeroDiffReminded = true;
-                messages.push({
+                deferredMessages.push({
                   role: "system",
                   content: `Warning: Writing to "${writePath}" produced 0 line changes (diff was empty). Do not write the exact same file content again without modifications.`,
                 });
@@ -465,7 +471,7 @@ export class CodingAgentToolWaves {
         );
         if (notice) {
           const metadataText = "Asynchronous result reference (metadata only): " + JSON.stringify(notice);
-          messages.push({ role: "user", content: metadataText });
+          deferredMessages.push({ role: "user", content: metadataText });
           completionArtifacts.push({ turnIndex: steps + 1, notice, source: "wait", metadataText });
         }
       }
@@ -573,7 +579,7 @@ export class CodingAgentToolWaves {
           return { action: "stopped", result: res };
         }
         this.errorReminded = true;
-        messages.push({ role: "system", content: REMINDER_MESSAGE });
+        deferredMessages.push({ role: "system", content: REMINDER_MESSAGE });
         await record({ kind: "reminder", companyId, projectId, sessionId, runId: input.runId, turn: steps, reason: "repeated_error" });
       }
 
@@ -610,5 +616,8 @@ export class CodingAgentToolWaves {
     }
 
     return { action: "continue" };
+    } finally {
+      messages.push(...deferredMessages);
+    }
   }
 }

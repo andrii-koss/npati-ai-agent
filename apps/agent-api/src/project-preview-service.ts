@@ -348,7 +348,7 @@ export class ProjectPreviewService {
     ctx: AuthContext,
     companyId: string,
     projectId: string,
-    options: { command?: string; port?: number; agentId?: string; signal?: AbortSignal; callerOrigin?: string } = {},
+    options: { command?: string; port?: number; agentId?: string; signal?: AbortSignal; callerOrigin?: string; verifiedBuild?: boolean } = {},
   ): Promise<{
     status: string;
     previewUrl: string;
@@ -375,7 +375,10 @@ export class ProjectPreviewService {
     const files = await this.workspace.listFiles(ctx, companyId, projectId);
     const detected = await detectProjectStack(files, async (p) => (await this.workspace.readFile(ctx, companyId, projectId, p)).content);
 
-    let devCommand = options.command?.trim() || detected.command;
+    const serveVerifiedBuild = (options.verifiedBuild ?? project.lastBuildStatus === "ready") && detected.framework === "nextjs";
+    const verifiedCommand = serveVerifiedBuild
+      ? "npx next start --hostname 0.0.0.0 --port 3000" : detected.command;
+    let devCommand = options.command?.trim() || verifiedCommand;
     let devPort = options.port && Number.isInteger(options.port) ? options.port : extractPortFromCommand(devCommand, detected.port);
 
     // Stop existing session process if running
@@ -400,11 +403,13 @@ export class ProjectPreviewService {
     const sandboxId = updatedProject.sandboxId;
     if (!sandboxId) throw new PreviewError("sandbox_failed", "Failed to obtain sandbox ID", 500);
 
-    // API session state is transient, but the runner may still own the old listener.
-    if (!existing) await this.sandbox.stopRecordedPreview(ctx, companyId, projectId, devCommand);
+    // API and worker session maps can disagree; stop every recorded listener before replacement.
+    const previousCommands = new Set([projectRuntimeCommandPort(detected.command, devPort), devCommand]);
+    if (detected.framework === "nextjs") previousCommands.add(projectRuntimeCommandPort("npx next start --hostname 0.0.0.0 --port 3000", devPort));
+    for (const command of previousCommands) await this.sandbox.stopRecordedPreview(ctx, companyId, projectId, command);
 
     // Ensure dependencies are installed before starting the dev server for node/framework projects
-    if (detected.framework !== "static" && files.some((f) => f.path === "package.json")) {
+    if (options.verifiedBuild !== true && options.verifiedBuild !== false && detected.framework !== "static" && files.some((f) => f.path === "package.json")) {
       const paths = new Set(files.map((f) => f.path));
       const installCmd = detected.packageManager === "pnpm" && paths.has("pnpm-lock.yaml")
         ? "pnpm install"
@@ -501,7 +506,7 @@ export class ProjectPreviewService {
       previewUrl,
       previewPort: devPort,
       framework: finalFramework,
-      lastBuildStatus: "ready",
+      lastBuildStatus: detected.framework === "nextjs" && !serveVerifiedBuild ? null : "ready",
     });
 
     return {

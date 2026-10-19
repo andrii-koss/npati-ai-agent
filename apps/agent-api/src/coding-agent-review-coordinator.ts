@@ -552,7 +552,12 @@ export class CodingAgentReviewCoordinator {
     await this.evaluateChangeSet(steps, prompt);
     const changeSet = this.runChanges();
 
-    if (this.verificationDisabled || (changeSet.length === 0 && !this.host.input.forceVerification)) {
+    const stylePreview = this.host.input.allowStylePreview && !this.host.input.requireImplementation
+      && this.host.session.mode !== "plan" && !this.host.input.readOnlyIntent
+      && this.verificationTools.length === 1 && this.verificationTools[0] === "build"
+      && changeSet.length > 0 && changeSet.every(change => /\.css$/i.test(change.path));
+    if (stylePreview) this.host.summary.stylePreview = true;
+    if (stylePreview || this.verificationDisabled || (changeSet.length === 0 && !this.host.input.forceVerification)) {
       this.selfReviewVerdict = this.beginSelfReviewState();
       this.writeSelfReviewSummary();
       await this.host.release("completed");
