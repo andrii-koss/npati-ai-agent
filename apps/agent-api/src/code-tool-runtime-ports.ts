@@ -95,7 +95,7 @@ export interface CodeToolExecutionContext {
  */
 export interface CodeReadPort {
   listDir(input: { ctx: AuthContext; companyId: string; projectId: string; path: string; depth?: number; limit?: number }): Promise<{ entries: Array<{ path: string; type: "file" | "directory"; size?: number; mtimeMs?: number | null; target?: string | null }> }>;
-  readFile(input: { ctx: AuthContext; companyId: string; projectId: string; path: string; startLine?: number; endLine?: number; maxLines: number; maxBytes: number }): Promise<{ path: string; content: string; revision: string; sha256: string; totalLines: number; truncated: boolean; mode?: number; encoding?: string; binary?: boolean; mimeGuess?: string | null }>;
+  readFile(input: { ctx: AuthContext; companyId: string; projectId: string; path: string; startLine?: number; endLine?: number; maxLines: number; maxBytes: number }): Promise<{ path: string; content: string; revision: string; sha256: string; totalLines: number; truncated: boolean; bytes?: number; mode?: number; encoding?: string; binary?: boolean; mimeGuess?: string | null }>;
   runSearch(input: { ctx: AuthContext; companyId: string; projectId: string; query: string; path?: string; maxResults: number; timeoutMs: number; glob?: string; type?: string; ignoreCase?: boolean; fixedStrings?: boolean; contextLines?: number }): Promise<{ matches: Array<{ path: string; line: number; text: string; context?: Array<{ line: number; text: string }> }>; truncated: boolean; engine?: "ripgrep" | "fallback" }>;
 }
 

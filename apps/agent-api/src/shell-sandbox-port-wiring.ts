@@ -20,6 +20,8 @@ export function createShellSandboxPortWiring(deps: CreateShellSandboxPortWiringD
       const result = await projectSandbox!.execute(input.context, input.companyId, {
         projectId: input.projectId,
         command: input.command,
+        timeoutMs: input.timeoutMs,
+        ...(input.runId ? { runId: input.runId } : {}),
 
         agentId: "system",
         ...(input.cwd ? { cwd: input.cwd } : {}),

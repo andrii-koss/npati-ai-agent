@@ -33,7 +33,7 @@ export async function restoreCheckpoint(host: ProjectGitCheckpointHost, ctx: Aut
 
     // Hard reset to the checkpoint's commit
     await host.runGit(dir, ["-c", "core.autocrlf=false", "reset", "--hard", target.commitHash]);
-    await host.runGit(dir, ["clean", "-fd"]);
+    await host.runGit(dir, ["clean", "-fd", "-e", ".npati-*", "-e", ".worktrees"]);
 
     return {
       restoredCheckpoint: target,

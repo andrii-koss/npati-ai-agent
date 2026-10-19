@@ -107,6 +107,12 @@ export class ProjectGitService {
     };
   }
 
+  private withWorkspaceLease<T>(ctx: AuthContext, companyId: string, projectId: string, operation: () => Promise<T>, write = true): Promise<T> {
+    if (write) this.requireWrite(ctx);
+    const coordinate = this.boundary?.withFileLease;
+    return coordinate ? coordinate(ctx, companyId, projectId, operation) : operation();
+  }
+
   private get hostState(): ProjectGitHostState {
     return {
       bases: this.bases,
@@ -263,7 +269,7 @@ export class ProjectGitService {
    * that binds `repositoryInitialized: false` has been consumed. A read-only path must never call it.
    */
     async ensureRepositoryInitialized(ctx: AuthContext, companyId: string, projectId: string): Promise<string> {
-    return ensureRepositoryInitialized(this.repositoryHost(), ctx, companyId, projectId);
+    return this.withWorkspaceLease(ctx, companyId, projectId, () => ensureRepositoryInitialized(this.repositoryHost(), ctx, companyId, projectId), false);
   }
 
   /**
@@ -281,7 +287,7 @@ export class ProjectGitService {
   }
 
     async status(ctx: AuthContext, companyId: string, projectId: string): Promise<GitStatusResult> {
-    return status(this.repositoryHost(), ctx, companyId, projectId);
+    return this.withWorkspaceLease(ctx, companyId, projectId, () => status(this.repositoryHost(), ctx, companyId, projectId), false);
   }
 
   /** Read a text file from the owned turn checkpoint without checkout or working-tree filters. */
@@ -302,6 +308,7 @@ export class ProjectGitService {
     projectId: string,
     options?: { file?: string; staged?: boolean },
   ): Promise<{ diff: string }> {
+    return this.withWorkspaceLease(ctx, companyId, projectId, async () => {
     const dir = await this.ensureRepository(ctx, companyId, projectId);
     const args = ["diff", "--no-ext-diff"];
     if (options?.staged) args.push("--cached");
@@ -311,6 +318,7 @@ export class ProjectGitService {
     }
     const { stdout } = await this.runGit(dir, args);
     return { diff: stdout.slice(0, 128_000) };
+    }, false);
   }
 
     async log(
@@ -328,7 +336,7 @@ export class ProjectGitService {
     projectId: string,
     options: { action: "list" | "create" | "switch"; branch?: string },
   ): Promise<GitBranchResult> {
-    return branch(this.repositoryHost(), ctx, companyId, projectId, options);
+    return this.withWorkspaceLease(ctx, companyId, projectId, () => branch(this.repositoryHost(), ctx, companyId, projectId, options), options.action !== "list");
   }
 
     async stage(
@@ -337,7 +345,7 @@ export class ProjectGitService {
     projectId: string,
     files?: string[],
   ): Promise<{ staged: string[] }> {
-    return stage(this.workspaceHost(), ctx, companyId, projectId, files);
+    return this.withWorkspaceLease(ctx, companyId, projectId, () => stage(this.workspaceHost(), ctx, companyId, projectId, files));
   }
 
     async commit(
@@ -346,7 +354,7 @@ export class ProjectGitService {
     projectId: string,
     options: { message: string; files?: string[]; stageAll?: boolean },
   ): Promise<{ commitHash: string; message: string }> {
-    return commit(this.historyHost(), ctx, companyId, projectId, options);
+    return this.withWorkspaceLease(ctx, companyId, projectId, () => commit(this.historyHost(), ctx, companyId, projectId, options));
   }
 
     async restore(
@@ -355,7 +363,7 @@ export class ProjectGitService {
     projectId: string,
     options: { files: string[] },
   ): Promise<{ restored: string[] }> {
-    return restore(this.coreHost(), ctx, companyId, projectId, options);
+    return this.withWorkspaceLease(ctx, companyId, projectId, () => restore(this.coreHost(), ctx, companyId, projectId, options));
   }
 
     async countWorkspaceFiles(dir: string): Promise<number> {
@@ -376,7 +384,7 @@ export class ProjectGitService {
     projectId: string,
     input: { name: string; description?: string; trigger?: CheckpointTrigger; runId?: string },
   ): Promise<ProjectCheckpoint> {
-    return createCheckpoint(this.checkpointWriteHost(), ctx, companyId, projectId, input);
+    return this.withWorkspaceLease(ctx, companyId, projectId, () => createCheckpoint(this.checkpointWriteHost(), ctx, companyId, projectId, input));
   }
 
     async listCheckpoints(
@@ -404,7 +412,7 @@ export class ProjectGitService {
     checkpointId: string,
     options?: { approved?: boolean },
   ): Promise<{ restoredCheckpoint: ProjectCheckpoint; backupCheckpoint: ProjectCheckpoint }> {
-    return restoreCheckpoint(this.checkpointHost(), ctx, companyId, projectId, checkpointId, options);
+    return this.withWorkspaceLease(ctx, companyId, projectId, () => restoreCheckpoint(this.checkpointHost(), ctx, companyId, projectId, checkpointId, options));
   }
 
   /**
@@ -438,7 +446,7 @@ export class ProjectGitService {
     projectId: string,
     input: { files: string[]; checkpointId?: string; commitHash?: string },
   ): Promise<{ restored: string[]; removed: string[]; failed: Array<{ path: string; reason: string }>; targetCommit: string; safetyCheckpointId: string | null }> {
-    return restorePaths(this.checkpointHost(), ctx, companyId, projectId, input);
+    return this.withWorkspaceLease(ctx, companyId, projectId, () => restorePaths(this.checkpointHost(), ctx, companyId, projectId, input));
   }
 
   /**
@@ -693,7 +701,7 @@ export class ProjectGitService {
     projectId: string,
     options: { agentSlug: string; baseBranch?: string },
   ): Promise<{ worktreePath: string; branch: string; baseBranch: string }> {
-    return createAgentWorktree(this.worktreeHost(), ctx, companyId, projectId, options);
+    return this.withWorkspaceLease(ctx, companyId, projectId, () => createAgentWorktree(this.worktreeHost(), ctx, companyId, projectId, options));
   }
 
     async commitAgentWorktree(
@@ -742,7 +750,7 @@ export class ProjectGitService {
       maxAttempts?: number;
     },
   ): Promise<{ merged: boolean; commitHash: string; targetBranch: string; sourceBranch: string; attempts: number }> {
-    return mergeAgentWorktree(this.worktreeHost(), ctx, companyId, projectId, options);
+    return this.withWorkspaceLease(ctx, companyId, projectId, () => mergeAgentWorktree(this.worktreeHost(), ctx, companyId, projectId, options));
   }
 
     async removeAgentWorktree(
@@ -751,7 +759,7 @@ export class ProjectGitService {
     projectId: string,
     options: { agentSlug: string; deleteBranch?: boolean },
   ): Promise<{ removed: boolean }> {
-    return removeAgentWorktree(this.worktreeExtraHost(), ctx, companyId, projectId, options);
+    return this.withWorkspaceLease(ctx, companyId, projectId, () => removeAgentWorktree(this.worktreeExtraHost(), ctx, companyId, projectId, options));
   }
 
     async cleanupAllWorktrees(
@@ -759,7 +767,7 @@ export class ProjectGitService {
     companyId: string,
     projectId: string,
   ): Promise<{ cleanedCount: number }> {
-    return cleanupAllWorktrees(this.cleanupHost(), ctx, companyId, projectId);
+    return this.withWorkspaceLease(ctx, companyId, projectId, () => cleanupAllWorktrees(this.cleanupHost(), ctx, companyId, projectId));
   }
 
     async listAgentWorktrees(

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { C3_TRANSACTION_CASES } from "./c3-transaction-proof";
 import { DEFAULT_CODE_AGENT_LIMITS } from "../../apps/agent-api/src/code-agent-config";
 import { toEngineWritePort } from "../../apps/agent-api/src/code-tool-executors-write";
@@ -29,7 +30,7 @@ export async function createC3ProofFixture() {
   const { project } = await store.createProject(ctx, company.id, { name: "Proof", type: "website" }, "proof-project");
   const projects = { get: (auth: AuthContext, companyId: string, projectId: string) => store.getProject(auth, companyId, projectId) };
   const workspace = new LocalProjectWorkspace(projects, { root });
-  const git = new ProjectGitService(store, projects, root);
+  const git = new ProjectGitService(store, projects, root, undefined, undefined, undefined, { withFileLease: workspace.withFileLease.bind(workspace) });
   await git.ensureRepository(ctx, company.id, project.id);
   const audit = new AuditLogService(store);
   const read = createProjectWorkspaceReadPort(workspace);
@@ -59,6 +60,33 @@ export async function createC3ProofFixture() {
 export type C3ProofFixture = Awaited<ReturnType<typeof createC3ProofFixture>>;
 
 export const C3_PROOF_CASES: Record<string, (h: C3ProofFixture) => Promise<void>> = {
+  "native binary read preserves raw byte size and refuses oversized payload without unsafe retry": async (h: C3ProofFixture) => {
+    const cases = [
+      { path: "image.png", bytes: Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 255]), image: true },
+      { path: "opaque.bin", bytes: Buffer.from([255, 254, 253, 65]), image: false },
+    ];
+    for (const item of cases) {
+      await writeFile(h.absolute(item.path), item.bytes);
+      const result = await h.ok("code.fs.read", { path: item.path });
+      const data = (result.result as { data: { binary: boolean; image: boolean; bytes: number; lines: unknown[]; sha256: string } }).data;
+      assert.equal(data.binary, true);
+      assert.equal(data.image, item.image);
+      assert.equal(data.bytes, item.bytes.length);
+      assert.equal(data.sha256, createHash("sha256").update(item.bytes).digest("hex"));
+      assert.deepEqual(data.lines, []);
+      assert.deepEqual(await readFile(h.absolute(item.path)), item.bytes);
+    }
+    const oversized = Buffer.concat([Buffer.from([137, 80, 78, 71]), Buffer.alloc(1050000, 65)]);
+    await writeFile(h.absolute("oversized.png"), oversized);
+    const refused = await h.invoke("code.fs.read", { path: "oversized.png" });
+    assert.equal(refused.ok, false);
+    if (refused.ok) throw new Error("Oversized binary was unexpectedly read");
+    assert.equal(refused.error.code, "file_too_large");
+    assert.equal(refused.error.status, 413);
+    assert.equal(refused.error.retryable, false);
+    assert.deepEqual(await readFile(h.absolute("oversized.png")), oversized);
+  },
+
   "nested directories and CRLF literal edits survive actual disk writes": async (h: C3ProofFixture) => {
     await h.ok("code.fs.write", { path: "src/deep/file.ts", content: "\uFEFFconst value = 1;\r\n// Україна\tOlá\r\n" });
     await h.ok("code.fs.read", { path: "src/deep/file.ts" });

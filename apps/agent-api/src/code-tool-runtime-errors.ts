@@ -16,7 +16,14 @@ export type CodeToolErrorCode =
   | "sensitive_file_denied"
   | "sandbox_unavailable"
   | "limit_exceeded"
+  | "file_too_large"
   | "workspace_error"
+  | "runtime_recovery_required"
+  | "runtime_state_invalid"
+  | "process_termination_unconfirmed"
+  | "process_cleanup_failed"
+  | "workspace_busy"
+  | "workspace_lock_unavailable"
   | "tool_not_configured"
   | "project_not_found"
   | "not_a_file"
@@ -113,7 +120,8 @@ export type CodeToolErrorCode =
 
 /** Codes thrown by the canonical modules; they are mapped onto the runtime's failure shape. */
 export const CANONICAL_ERROR_CODES: ReadonlySet<string> = new Set<string>([
-  "transaction_recovery_required", "invalid_path", "path_outside_workspace", "null_byte", "symlink_escape", "sensitive_file_denied",
+  "file_too_large",
+  "runtime_recovery_required", "runtime_state_invalid", "process_termination_unconfirmed", "process_cleanup_failed", "workspace_busy", "workspace_lock_unavailable", "transaction_recovery_required", "invalid_path", "path_outside_workspace", "null_byte", "symlink_escape", "sensitive_file_denied",
   "not_a_file", "not_a_directory", "too_large", "read_failed", "search_failed", "invalid_argument",
   "sandbox_unavailable", "tool_not_configured", "project_not_found",
   "read_before_write_required", "revision_conflict", "revision_conflict_exhausted",

@@ -384,7 +384,8 @@ describe("[C7] [security-gate] removal stays guarded", () => {
       await harnessed.service.restoreCheckpoint(context(), COMPANY, PROJECT, "cp-target");
       const allArgs = harnessed.calls.map((entry) => entry.join(" "));
       expect(allArgs.includes("-c core.autocrlf=false reset --hard def5678aaaa")).toBe(true);
-      expect(allArgs.includes("clean -fd")).toBe(true);
+      expect(allArgs.includes("clean -fd -e .npati-* -e .worktrees")).toBe(true);
+      expect(allArgs.includes("clean -fd")).toBe(false);
 
       harnessed.calls.length = 0;
       await harnessed.service.restorePaths(context(), COMPANY, PROJECT, { files: ["src/a.ts"], commitHash: "def5678aaaa" });

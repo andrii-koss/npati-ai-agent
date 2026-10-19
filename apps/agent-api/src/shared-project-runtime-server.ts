@@ -75,4 +75,7 @@ app.post<{ Body: string }>("/v1/sandbox", async (request, reply) => {
     return reply.code(known.status).send({ error: { code: known.code, message: known.message, retryable: known.retryable, operation } });
   }
 });
-app.listen({ host: "0.0.0.0", port: 7865 }).catch(() => process.exit(1));
+provider.checkReady().then(() => app.listen({ host: "0.0.0.0", port: 7865 })).catch(error => {
+  console.error("[project-runtime] " + JSON.stringify({ operation: "startup", errorCode: error instanceof SandboxProviderError ? error.code : "runtime_startup_failed" }));
+  process.exit(1);
+});

@@ -1,10 +1,12 @@
+import { openWorkspaceRead } from "./project-file-descriptor";
+import { acquireKernelFileLease, type KernelFileLease } from "./project-file-kernel-lease";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { commitWorkspacePatch, recoverWorkspacePatch, type WorkspacePatchIO } from "./project-file-transaction";
 import type { PatchMutation } from "./code-patch-transaction";
 import { replaceLiteralText } from "./code-text-format";
 import { detectFileKind } from "./code-file-kind";
 import { createHash, randomUUID } from "node:crypto";
-import { chmod, lstat, mkdir, readdir, readFile, realpath, rename, rm, rmdir, stat, utimes, writeFile } from "node:fs/promises";
+import { open, chmod, lstat, mkdir, readdir, readFile, realpath, rename, rm, rmdir, stat, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { AuthContext, MountedFolderMode, Project } from "@npati/workspace";
@@ -370,11 +372,13 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
     await previous;
     const lockDirectory = path.join(key, ".npati-write-lock");
     const ownerFile = path.join(lockDirectory, "owner");
-    const owner = randomUUID();
+    const owner = (process.platform === "linux" ? "kernel-v1:" : "") + randomUUID();
     const started = Date.now();
     let acquired = false;
     let heartbeat: ReturnType<typeof setInterval> | undefined;
+    let kernel: KernelFileLease | undefined;
     try {
+      kernel = await acquireKernelFileLease(key, (code, message) => new ProjectFileError(code, message, code === "workspace_busy" ? 409 : 503));
       while (!acquired) {
         try {
           await mkdir(lockDirectory);
@@ -384,7 +388,8 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
           if (acquired) throw error;
           if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
           const age = await stat(lockDirectory).then((entry) => Date.now() - entry.mtimeMs, () => 0);
-          if (age > 60_000) {
+          const prior = await readFile(ownerFile, "utf8").catch(() => "");
+          if (age > 60_000 || (kernel && prior.startsWith("kernel-v1:"))) {
             const stale = lockDirectory + ".stale-" + randomUUID();
             try {
               await rename(lockDirectory, stale);
@@ -412,14 +417,34 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
       } finally {
         release();
         if (this.locks.get(key) === tail) this.locks.delete(key);
+        await kernel?.release();
       }
     }
   }
   private async bytes(absolute: string) {
-    const entry = await lstat(absolute).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") throw new ProjectFileError("file_not_found", "Project file not found", 404); throw error; });
-    if (!entry.isFile()) throw new ProjectFileError("invalid_path", "Expected a regular file");
-    if (entry.size > this.maxFileBytes) throw new ProjectFileError("file_too_large", "Project file size limit exceeded", 413);
-    return readFile(absolute);
+    let handle: Awaited<ReturnType<typeof open>>;
+    try { handle = await openWorkspaceRead(absolute); }
+    catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") throw new ProjectFileError("file_not_found", "Project file not found", 404);
+      if (code === "ELOOP" || code === "ENOTDIR") throw new ProjectFileError("invalid_path", "File changed to an unsafe link", 409);
+      throw error;
+    }
+    try {
+      const entry = await handle.stat();
+      if (!entry.isFile() || entry.nlink !== 1) throw new ProjectFileError("invalid_path", "Expected a regular file with one link");
+      if (entry.size > this.maxFileBytes) throw new ProjectFileError("file_too_large", "Project file size limit exceeded", 413);
+      const chunks: Buffer[] = [];
+      let total = 0;
+      while (total <= this.maxFileBytes) {
+        const chunk = Buffer.alloc(Math.min(65536, this.maxFileBytes + 1 - total));
+        const { bytesRead } = await handle.read(chunk, 0, chunk.length, total);
+        if (!bytesRead) break;
+        chunks.push(chunk.subarray(0, bytesRead)); total += bytesRead;
+      }
+      if (total > this.maxFileBytes) throw new ProjectFileError("file_too_large", "Project file size limit exceeded", 413);
+      return Buffer.concat(chunks, total);
+    } finally { await handle.close(); }
   }
   private content(clean: string, bytes: Buffer): ProjectFileContent {
     // Inspect raw bytes before UTF-8 decoding replaces image magic or invalid sequences.
@@ -439,8 +464,11 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
         if (entry.isDirectory()) { const info = await stat(path.join(base, child)); items.push({ path: child, name: entry.name, type: "directory", mtimeMs: info.mtimeMs }); await walk(child); }
         else if (entry.isFile()) {
           const full = path.join(base, child);
-          const info = await stat(full);
-          items.push({ path: child, name: entry.name, type: "file", size: info.size, mtimeMs: info.mtimeMs, revision: info.size <= this.maxFileBytes ? revision(await readFile(full)) : undefined });
+          const info = await lstat(full);
+          if (!info.isFile()) continue;
+          // List multiply-linked dependencies as metadata without opening their
+          // bytes. Direct API reads still refuse unknown external provenance.
+          items.push({ path: child, name: entry.name, type: "file", size: info.size, mtimeMs: info.mtimeMs, revision: info.nlink === 1 && info.size <= this.maxFileBytes ? revision(await this.bytes(full)) : undefined });
         }
         if (items.length > this.maxFiles * 2) throw new ProjectFileError("file_limit", "Project file count limit exceeded", 409);
       }
@@ -488,8 +516,8 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
     if (restoredMode !== undefined && (!Number.isInteger(restoredMode) || restoredMode < 0 || restoredMode > 0o777)) throw new ProjectFileError("invalid_mode", "File mode must contain ordinary permission bits only");
     const mode = existing ? existing.mode & 0o777 : restoredMode ?? 0o600;
     try {
-      await writeFile(temporary, bytes, { flag: "wx", mode: 0o600 });
-      await chmod(temporary, mode);
+      const handle = await open(temporary, "wx", 0o600);
+      try { await handle.writeFile(bytes); await handle.chmod(mode); } finally { await handle.close(); }
       await rename(temporary, absolute);
     }
     finally { await rm(temporary, { force: true }); }

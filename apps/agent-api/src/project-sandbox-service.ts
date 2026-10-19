@@ -372,20 +372,26 @@ export class ProjectSandboxService {
     if (!startProcess) Object.assign(environment, gitShellHardeningEnv(resolveDepsPolicyLimits()));
 
     const ceiling = decision.timeoutClass === "install_build" ? this.limits.installBuildTimeoutMs : this.limits.commandTimeoutMs;
-    const timeoutMs = beforeStart ? Math.max(1000, Math.min(request.timeoutMs ?? ceiling, this.limits.installBuildTimeoutMs)) : ceiling;
+    if (request.timeoutMs !== undefined && (!Number.isSafeInteger(request.timeoutMs) || request.timeoutMs <= 0)) throw new SandboxProviderError("invalid_arguments", "timeoutMs must be a positive safe integer", 400);
+    const timeoutMs = Math.max(1000, Math.min(request.timeoutMs ?? ceiling, beforeStart ? this.limits.installBuildTimeoutMs : ceiling));
     let sandboxId = project.sandboxId ?? "";
     const release = !beforeStart && this.processCleanupGuard ? await (this.processCleanupGuard.prepare ?? this.processCleanupGuard.acquire)(ctx, project) : async () => {};
     if (!release) throw new SandboxProviderError("process_workspace_busy", "A tracked producer still owns the sandbox workspace", 409);
+    let commandDispatched = false, terminalEventAttempted = false, executionFailed = false;
+    let execution: SandboxCommandResult | undefined;
     try {
       const ready = await this.ensure(ctx, project);
       sandboxId = ready.sandboxId;
       if (request.sandboxId && request.sandboxId !== sandboxId) throw new SandboxProviderError("sandbox_mismatch", "Sandbox does not belong to this Project", 403, "authorization", tool);
       logTerminalPolicy({ rawCommand: normalized.rawCommand, normalizedCommand: command, sandboxId, projectId: project.id, decision: "allow", reason: request.approved && decision.requiresApproval ? "human_approved" : "sandbox_execution", policyRule: decision.policyRule, toolName: tool, executionContext: "project_sandbox", runId: request.runId ?? "direct", agentId: request.agentId, runType: "project_tool", cwd: normalized.cwd, rawArgs: normalized.args, commandPolicyRule: decision.policyRule });
+      const runPrepared = async () => {
       const originals = await this.upload(ctx, ready.project, ready.scope, sandboxId, ready.mount);
       if (beforeStart) await beforeStart({ sandboxId, mounted: !!ready.mount, files: [...originals.values()].map((file) => ({ path: file.path, revision: file.revision!, hash: createHash("sha256").update(file.content).digest("hex") })) });
+      commandDispatched = true;
       const raw = startProcess
         ? await this.provider.startProcess(ready.scope, sandboxId, command, { timeoutMs, outputLimitBytes: this.limits.outputLimitBytes, environment, cwd: normalized.cwd, ...(beforeStart ? { processId: request.processId } : {}) })
         : await this.provider.executeCommand(ready.scope, sandboxId, command, { timeoutMs, outputLimitBytes: this.limits.outputLimitBytes, environment, cwd: normalized.cwd });
+      execution = raw;
       const output = redactTerminalText(raw.stdout + (raw.stderr ? "\n" + raw.stderr : ""), secrets).slice(0, this.limits.outputLimitBytes);
       /**
        * C15: for a **mounted** project the sandbox writes into the canonical folder through the bind mount, so
@@ -402,16 +408,49 @@ export class ProjectSandboxService {
       const failureCode = raw.status === "timed_out" ? "command_timeout" : raw.exitCode === 127 ? "command_not_found" : commandKind === "install" ? "install_failed" : commandKind === "build" ? "build_failed" : commandKind === "preview" ? "preview_start_failed" : "command_failed";
       const detail = (raw.stderr || raw.stdout || "").trim();
       const failureMessage = raw.status === "timed_out" ? "Sandbox command timed out" : commandKind === "install" ? `Dependency install failed${detail ? `: ${detail.slice(-300)}` : ""}` : commandKind === "build" ? `Build command failed${detail ? `: ${detail.slice(-300)}` : ""}` : commandKind === "preview" ? `Preview server failed to start${detail ? `: ${detail.slice(-300)}` : ""}` : `Sandbox command failed${detail ? `: ${detail.slice(-300)}` : ""}`;
+      terminalEventAttempted = true;
       await this.events.append(ctx, companyId, request.projectId, { runId: request.runId, agentId: request.agentId, sandboxId, processId: raw.processId, commandSummary: decision.requiresApproval ? "Approved command (" + createHash("sha256").update(command).digest("hex").slice(0, 12) + ")" : redactTerminalText(command, secrets), riskLevel: decision.level, status: startProcess ? "running" : raw.status, exitCode: raw.exitCode, output, durationMs: raw.durationMs, errorCode: raw.status === "completed" ? undefined : failureCode });
       if (raw.status !== "completed" && !startProcess) {
-        throw new SandboxProviderError(failureCode, failureMessage, raw.status === "timed_out" ? 504 : 409, stepOf(decision), tool, raw.status === "timed_out");
+        throw new SandboxProviderError(failureCode, failureMessage, raw.status === "timed_out" ? 504 : 409, stepOf(decision), tool, false);
       }
       return { ...raw, stdout: redactTerminalText(raw.stdout, secrets).slice(0, this.limits.outputLimitBytes), stderr: redactTerminalText(raw.stderr, secrets).slice(0, this.limits.outputLimitBytes), sandboxId, riskLevel: decision.level };
+      };
+      // Writable binds require foreground serialization, not command rollback.
+      return ready.mount && !ready.mount.readOnly && !startProcess && this.workspace.withFileLease
+        ? await this.workspace.withFileLease(ctx, companyId, project.id, runPrepared)
+        : await runPrepared();
     } catch (error) {
-      if (error instanceof SandboxProviderError) throw error;
+      executionFailed = true;
+      if (commandDispatched && !terminalEventAttempted) {
+        const errorCode = error instanceof SandboxProviderError || error instanceof ProjectFileError ? error.code : "sandbox_execution_failed";
+        await this.events.append(ctx, companyId, request.projectId, { runId: request.runId, agentId: request.agentId, sandboxId,
+          processId: execution?.processId, commandSummary: "Dispatched command (" + createHash("sha256").update(command).digest("hex").slice(0, 12) + ")",
+          riskLevel: decision.level, status: "failed", exitCode: execution?.exitCode ?? null,
+          output: redactTerminalText((execution?.stdout ?? "") + "\n" + (execution?.stderr ?? ""), secrets).slice(0, this.limits.outputLimitBytes),
+          durationMs: execution?.durationMs ?? 0, errorCode }).catch(() => undefined);
+      }
+      if (error instanceof SandboxProviderError) {
+        if (commandDispatched && error.retryable) {
+          const diagnosed = new SandboxProviderError(error.code, error.message, error.status, error.step, error.tool, false, error.currentRevision);
+          diagnosed.diagnostics = error.diagnostics;
+          throw diagnosed;
+        }
+        throw error;
+      }
       if (error instanceof ProjectFileError) throw new SandboxProviderError(error.code, error.message, error.status, "workspace_sync", tool, false, error.currentRevision);
-      throw new SandboxProviderError("sandbox_execution_failed", "Sandbox execution failed", 503, "sandbox", tool, true);
-    } finally { await release(); }
+      throw new SandboxProviderError("sandbox_execution_failed", commandDispatched ? "Command was dispatched; inspect its effects before retrying" : "Sandbox execution failed", 503, "sandbox", tool, !commandDispatched);
+    } finally {
+      try { await release(); }
+      catch {
+        // Retain an unsettled durable owner; timer-based release could admit a live producer.
+        // Cleanup failure must neither mask the primary diagnosis nor advertise safe replay.
+        await this.events.append(ctx, companyId, request.projectId, { runId: request.runId, agentId: request.agentId, sandboxId,
+          processId: execution?.processId, commandSummary: "Command cleanup (" + createHash("sha256").update(command).digest("hex").slice(0, 12) + ")",
+          riskLevel: decision.level, status: "failed", exitCode: execution?.exitCode ?? null,
+          output: "", durationMs: 0, errorCode: "process_cleanup_failed" }).catch(() => undefined);
+        if (!executionFailed) throw new SandboxProviderError("process_cleanup_failed", "Command ownership could not be released; inspect its result and reconcile the durable owner before retrying", 503, "cleanup", tool, false);
+      }
+    }
   }
   async cloneRepository(
     ctx: AuthContext,
@@ -514,7 +553,7 @@ export class ProjectSandboxService {
     }
 
     const b64Query = Buffer.from(request.query, "utf8").toString("base64");
-    const flags: string[] = ["--json", "--line-number", "--no-heading", "--color=never", `--max-count ${maxResults}`];
+    const flags: string[] = ["--json", "--line-number", "--no-heading", "--color=never", "--no-require-git", `--max-count ${maxResults}`];
     if (request.ignoreCase) flags.push("-i");
     if (request.fixedStrings) flags.push("-F");
     if (request.contextLines && request.contextLines > 0) {
