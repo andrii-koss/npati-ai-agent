@@ -390,30 +390,10 @@ describe("security-gate: C15 mounted provider — one canonical workspace, one w
     }
   });
 
-  /**
-   * G1 (D9) — the hardlink case, **measured** rather than assumed.
-   *
-   * A hardlink is a second *name* for an inode, not a link that is followed, so neither half of the path
-   * guard can see it: `lstat` reports a regular file (not a symbolic link) and `realpath` resolves *inside*
-   * the workspace, which is why a component check and a resolved-path comparison both pass. This test pins
-   * both halves of the answer:
-   *
-   *  - **what the path guard cannot do** — measured: the linked name is a regular file with `nlink > 1`, and
-   *    it carries no target to compare, so a name-based protection would be a name-length away from useless;
-   *  - **what actually refuses the secret** — the workspace provider checks the **content**, not the name
-   *    (`project-workspace.ts`: `secret_content`, 403), and a private-key block is refused under the innocent
-   *    name `notes.txt`. The negative control is a second hardlink whose content is ordinary text: it is
-   *    served normally, so the refusal comes from the content rule and not from "hardlinks are blocked"
-   *    (which the guard does not even implement).
-   *
-   * Residual honest limitation (recorded, not papered over): the content rule is a pattern check with a
-   * manifest/lockfile exemption, so it recognises private-key blocks and the documented token shapes rather
-   * than "any secret". That limit is a property of the content rule and is identical for a **copied** file —
-   * a hardlink adds no capability the copy does not already have, which is why no hardlink-specific rule is
-   * added here (it would refuse the hardlinks `pnpm`/`npm` legitimately create in `node_modules` and protect
-   * nothing, and the read-side check covers both shapes).
-   */
-  it("measures the hardlink case: the path guard cannot see it, the content rule refuses the secret", async () => {
+  /** Multi-link provenance is unknown to the API; refuse bytes, retain metadata
+   * listing, and separately prove the content scanner on ordinary single links.
+   * Package-manager execution remains inside the unchanged Sandbox boundary. */
+  it("refuses unknown hardlink provenance without disabling content scanning or file listing", async () => {
     const fx = await fixture({ mode: "rw" });
     const outside = await tempDir("npati-c15-hardlink-outside-");
     try {
@@ -436,14 +416,20 @@ describe("security-gate: C15 mounted provider — one canonical workspace, one w
       expect(stats.ino).toBe(source.ino);
       expect(stats.dev).toBe(source.dev);
 
-      // What refuses it: the content rule, under a name no sensitive-path pattern matches.
-      expect(await rejection(fx.workspace.readFile(owner, fx.companyId, fx.projectId, "notes.txt")))
-        .toContain("secret_content");
+      // Both secret and ordinary external links are refused before content is read.
+      expect(await rejection(fx.workspace.readFile(owner, fx.companyId, fx.projectId, "notes.txt"))).toContain("invalid_path");
+      expect(await rejection(fx.workspace.readFile(owner, fx.companyId, fx.projectId, "notes2.txt"))).toContain("invalid_path");
+      const listed = await fx.workspace.getFileTree(owner, fx.companyId, fx.projectId);
+      expect(listed.find(entry => entry.path === "notes2.txt")).toMatchObject({ type: "file" });
+      expect(listed.find(entry => entry.path === "notes2.txt")?.revision).toBeUndefined();
 
-      // Negative control: the same link shape with ordinary content is served, so the refusal above is the
-      // content rule and not a blanket refusal of multiply-linked files.
-      const served = await fx.workspace.readFile(owner, fx.companyId, fx.projectId, "notes2.txt");
-      expect(served.content).toBe("an ordinary sentence\n");
+      // The content boundary remains independent: single-link copies still reject
+      // private keys, while ordinary API-created source remains readable.
+      await writeFile(path.join(fx.mounted, "copied-secret.txt"), await readFile(secret));
+      expect(await rejection(fx.workspace.readFile(owner, fx.companyId, fx.projectId, "copied-secret.txt"))).toContain("secret_content");
+      await fx.workspace.createFile(owner, fx.companyId, fx.projectId, "copied-ordinary.txt", "an ordinary sentence\n");
+      expect((await fx.workspace.readFile(owner, fx.companyId, fx.projectId, "copied-ordinary.txt")).content).toBe("an ordinary sentence\n");
+      expect(await readFile(ordinary, "utf8")).toBe("an ordinary sentence\n");
 
       // Containment, measured: a workspace written only through the API can never contain such a name,
       // because the API writes content and produces single-link regular files.

@@ -192,7 +192,7 @@ describe("security-gate: C4 shell sessions and output", () => {
     const fake = sandbox({ exitCode: 124, status: "timed_out", stdout: "building...\n" });
     const runtime = makeRuntime({ sandbox: fake.port, classifier: classifierOf("safe"), flags: allowAllFlags });
     await expect(runtime.exec(context, { companyId: "c1", projectId: "p1", sessionId: "s1", toolCallId: "t1", command: "make all" }))
-      .rejects.toMatchObject({ code: "command_timeout", httpStatus: 504, retryable: true });
+      .rejects.toMatchObject({ code: "command_timeout", httpStatus: 504, retryable: false });
     expect(looksInteractive("building...", 124)).toBe(false);
   });
 
@@ -257,5 +257,55 @@ describe("security-gate: C4 environment-name shell boundary", () => {
       .rejects.toMatchObject({ code: "invalid_environment" });
     expect(fake.calls).toHaveLength(0);
     expect(runtime.session("s1")?.env).toEqual({});
+  });
+});
+
+describe("security-gate: C4 authenticated shell ownership", () => {
+  it.each(["workspaceId", "userId"] as const)("rejects reuse of a shell session by another %s before dispatch", async field => {
+    const fake = sandbox();
+    const runtime = makeRuntime({ sandbox: fake.port, flags: allowAllFlags, classifier: classifierOf("safe") });
+    const input = { companyId: "c1", projectId: "p1", sessionId: "scoped-session", toolCallId: "first", command: "pwd", env: { NODE_ENV: "test" } };
+    await runtime.exec(context, input);
+    await expect(runtime.exec({ ...context, [field]: "other" }, { ...input, toolCallId: "other", env: {} }))
+      .rejects.toMatchObject({ code: "session_mismatch" });
+    expect(fake.calls).toHaveLength(1);
+    expect(runtime.session(input.sessionId)?.turnCount).toBe(1);
+    await runtime.exec(context, { ...input, toolCallId: "owner", env: {} });
+    expect(fake.calls).toHaveLength(2);
+    expect(fake.calls[1]!.command).toContain("export NODE_ENV='test'");
+  });
+
+  it.each([NaN, Infinity, -Infinity, -1, 0, 1.5])("rejects invalid timeout %s before dispatch", async timeoutMs => {
+    const fake = sandbox();
+    const runtime = makeRuntime({ sandbox: fake.port, flags: allowAllFlags, classifier: classifierOf("safe") });
+    await expect(runtime.exec(context, { companyId: "c1", projectId: "p1", sessionId: "s1", toolCallId: "t1", command: "pwd", timeoutMs }))
+      .rejects.toMatchObject({ code: "invalid_timeout" });
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it.each(["session", "project", "company"])("refuses a secret lease from another %s without consuming it", async scope => {
+    const fake = sandbox();
+    const leases = new SecretLeaseProvider({ config: { allowedLabels: ["dev-key"] } });
+    const lease = await leases.issue(context, {
+      companyId: "c1", projectId: "p1", sessionId: "s1", purpose: "test", toolCallId: "same-call",
+      variableName: "NPM_TOKEN", credentialId: "2f1a7b8c-1111-4222-8333-444455556666", field: "token",
+      credential: { id: "2f1a7b8c-1111-4222-8333-444455556666", label: "dev-key", environment: "development" },
+    });
+    const runtime = makeRuntime({ sandbox: fake.port, flags: allowAllFlags, classifier: classifierOf("safe"), leases });
+    const input = { companyId: "c1", projectId: "p1", sessionId: "s1", toolCallId: "same-call", command: "npm test", secretLeaseIds: [lease.leaseId] };
+    const foreign = { ...input, ...(scope === "session" ? { sessionId: "s2" } : scope === "project" ? { projectId: "p2" } : { companyId: "c2" }) };
+    await expect(runtime.exec(context, foreign)).rejects.toMatchObject({ code: "secret_lease_inherited" });
+    expect(fake.calls).toHaveLength(0);
+    // A refused scope cannot consume or revoke the owner's lease.
+    expect(leases.environmentReferences(lease.leaseId, "same-call", "s1")).toEqual({ NPM_TOKEN: { id: "2f1a7b8c-1111-4222-8333-444455556666", field: "token" } });
+  });
+
+  it("uses the configured default command timeout and reports real port exit code and duration", async () => {
+    const fake = sandbox({ exitCode: 7, durationMs: 43, stdout: "failed test", status: "failed" });
+    const runtime = makeRuntime({ sandbox: fake.port, flags: allowAllFlags, classifier: classifierOf("safe") });
+    const result = await runtime.exec(context, { companyId: "c1", projectId: "p1", sessionId: "s1", toolCallId: "t1", command: "npm test" });
+    expect(fake.calls[0]!.timeoutMs).toBe(120000);
+    expect(result.exitCode).toBe(7);
+    expect(result.durationMs).toBe(43);
   });
 });

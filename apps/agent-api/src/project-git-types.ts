@@ -73,6 +73,8 @@ export interface HostGitCredentialPort {
 }
 
 export interface ProjectGitBoundary {
+  /** Same canonical coordinator as File Tools; not a separate Git lock. */
+  withFileLease?: NonNullable<import("./project-workspace").ProjectWorkspace["withFileLease"]>;
   assertGitWriteAllowed?: (ctx: AuthContext, companyId: string, input: GitWriteIntent) => Promise<unknown>;
   approvals?: GitApprovalPort;
   credentials?: HostGitCredentialPort;

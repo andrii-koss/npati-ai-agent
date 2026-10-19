@@ -23,10 +23,13 @@ the historical record lives in the documents below, and this file deliberately d
 | `docs/coding-agent/adding-a-model-and-a-tool.md` | Step-by-step: add a model profile, add a `code.*` tool |
 | `docs/ARCHITECTURE.md` | **Product-level** architecture of the platform as a whole. It is not the Coding Agent's document and this file does not replace it. |
 
-Everything in this repository's code and comments is English; the C0/PLAN/current-state documents are
-English, and so is this one.
+Everything in this repository's code and comments is English; the implementation and this document use English; PLAN.md retains its original Ukrainian requirements.
 
 ---
+
+## Current shared-runtime boundary (2026-10-19)
+
+The configured shared provider uses one supervisor with separate project directories/UIDs. Its launcher combines namespace isolation, seccomp and parent-death termination. See shared-project-runtime-provider.ts, project-runtime-guard.c and the latest verification matrix. The legacy Docker provider below is an optional separate implementation; its per-container settings are not a certificate for shared runtime admission. Live human Company membership is refreshed by enriched-policy-engine-wiring.ts on every tool call and intersected with the initiating token. C3 mutation races, durable cleanup ownership and admitted-image acceptance remain open.
 
 ## 1. Component map
 
@@ -57,7 +60,7 @@ The order below is the security property, not a preference: every step that can 
 any step that can approve one.
 
 1. **Admission** — the run enters `CodeRunQueue` under per-user / per-company concurrency caps
-   (`code-run-queue.ts:47-50`: 16 per user, 64 per company, depth 5 000, timeout 15 min) and the shared
+   (`code-run-queue.ts:47-50`: defaults:4 per user,5 per company, queue depth50, timeout120s; hard ceilings:16/64/5000/15min) and the shared
    session budget (`code-run-quota.ts:41-42`: 10 000 000 tokens, 1 000 USD).
 2. **Run state** — the durable record; `refuseResume` answers whether an interrupted run may be resumed
    rather than guessing (`code-run-state.ts:156`).

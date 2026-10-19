@@ -69,3 +69,20 @@ Blocked conditions:
 These depend on the explicit owner-disabled automatic Actions decision in .github/workflows/sandbox-images.yml lines10-20 and ci.yml lines3-5. No workflow, publication, secret or production deployment was changed.
 
 Next checkpoint remains C3.L0412.02: shared-writer fencing and admitted isolated shared-runtime acceptance. The journal implementation, phase-exact validation logs and remaining counterexamples are saved; do not restart the source inventory or rerun one-shot review transformations.
+
+
+## Terminal / Workspace continuation — current saved boundary
+
+The current implementation and exact guarantees are in [Terminal/Workspace coordination](2026-10-18-terminal-workspace-coordination.md). Earlier statements that all Terminal copy-back/Git paths lack a coordinator describe the pre-fix state. Managed returned writes now reuse the existing transaction; production Git shares the existing lease; Linux adds a kernel fence and immediate crashed-owner recovery. Durable cleanup-release errors are nonretryable and retain the primary diagnosis. The real isolated Linux49/49 and current gate183 suites/2754 assertions pass; API/test types, root build and lint pass. No production changes.
+
+The complete2960 matrix remains 1910 Verified, 396 Partial, 5 Broken, 14 Missing, 631 Not Verified, 4 Blocked, 0 Unassessed. Actual admitted shared-supervisor surviving-process isolation, durable cleanup owner recovery and hostile unmanaged data-path races remain unresolved. C3 is not universally Verified and the full behavioral audit is incomplete. See [current progress](2026-10-18-plan-progress.md) and open-obligations.json for every unresolved clause.
+
+
+## Final isolation continuation — latest boundary
+
+See [current physical isolation proof and remaining work](2026-10-18-c3-final-isolation.md). Actual shared provider/launcher15/15 and Workspace Linux53/53 pass; gate2757 assertions passes. Earlier missing parent-death/observed-survivor barriers and pathname byte reads are repaired. Legacy cleanup ownership, stale API generations, hostile legacy fork races and mutation-path TOCTOU remain open; C3 status is not promoted. The full2960 matrix remains 1910 Verified, 396 Partial, 5 Broken, 14 Missing, 631 Not Verified, 4 Blocked, 0 Unassessed. No production change.
+
+
+## PLAN-wide continuation — 2026-10-19
+
+See [current report](2026-10-19-plan-wide-continuation.md).442 unique requirements across14 sections were rechecked; totals: 2057 Verified, 664 Partial, 5 Broken, 17 Missing, 210 Not Verified, 7 Blocked, 0 Unassessed. Current actual Linux55/55, shared15/15, PostgreSQL9/9 and gate2779 pass. These results supersede historical counts without claiming full audit completion or C3 universal atomicity.

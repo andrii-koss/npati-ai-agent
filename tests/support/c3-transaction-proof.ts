@@ -207,3 +207,13 @@ C3_TRANSACTION_CASES["native failed recovery returns a nonretryable diagnosis an
     assert.equal(JSON.stringify(events).includes("confidential-storage-error"), false);
   } finally { port.save = save; }
 };
+
+C3_TRANSACTION_CASES["read-only Git inspection stays available while mutating Git operations remain denied"] = async h => {
+  const reader = { ...h.ctx, permissions: ["workspace:read"] };
+  const status = await h.git.status(reader, h.company.id, h.project.id);
+  assert.equal(status.branch, "main");
+  const branches = await h.git.branch(reader, h.company.id, h.project.id, { action: "list" });
+  assert.equal(branches.current, "main");
+  await assert.rejects(h.git.branch(reader, h.company.id, h.project.id, { action: "create", branch: "reader-must-not-create" }), { code: "PROJECT_WRITE_DENIED" });
+  assert.equal((await h.git.status(reader, h.company.id, h.project.id)).branch, "main");
+};

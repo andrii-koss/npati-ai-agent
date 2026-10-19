@@ -92,3 +92,10 @@ The actual PLAN now has2960 clauses; integration-6 appended76 without changing t
 ## Current saved progress
 
 2960/2960 assessed: 1910 Verified, 396 Partial, 5 Broken, 14 Missing, 631 Not Verified, 4 Blocked, 0 Unassessed. See [per-stage progress and resume state](2026-10-18-plan-progress.md). Full audit and actual current Sandbox/autonomous acceptance remain incomplete.
+
+
+## Terminal / Workspace continuation — current saved boundary
+
+The current implementation and exact guarantees are in [Terminal/Workspace coordination](2026-10-18-terminal-workspace-coordination.md). Earlier statements that all Terminal copy-back/Git paths lack a coordinator describe the pre-fix state. Managed returned writes now reuse the existing transaction; production Git shares the existing lease; Linux adds a kernel fence and immediate crashed-owner recovery. Durable cleanup-release errors are nonretryable and retain the primary diagnosis. The real isolated Linux49/49 and current gate183 suites/2754 assertions pass; API/test types, root build and lint pass. No production changes.
+
+The complete2960 matrix remains 1910 Verified, 396 Partial, 5 Broken, 14 Missing, 631 Not Verified, 4 Blocked, 0 Unassessed. Actual admitted shared-supervisor surviving-process isolation, durable cleanup owner recovery and hostile unmanaged data-path races remain unresolved. C3 is not universally Verified and the full behavioral audit is incomplete. See [current progress](2026-10-18-plan-progress.md) and open-obligations.json for every unresolved clause.

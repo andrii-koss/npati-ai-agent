@@ -20,6 +20,7 @@ export async function ensureRepositoryInitialized(host: ProjectGitRepositoryHost
     const gitDir = path.join(dir, ".git");
     const exists = await lstat(gitDir).then((s) => s.isDirectory()).catch(() => false);
     if (!exists) {
+      host.requireWrite(ctx);
       await host.runGit(dir, ["init", "-b", "main"]);
       await host.runGit(dir, ["config", "user.name", "NPATI AI Agent"]);
       await host.runGit(dir, ["config", "user.email", "agent@npati.ai"]);

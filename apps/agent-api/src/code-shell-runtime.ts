@@ -119,6 +119,8 @@ export class ShellRuntimeError extends Error {
 
 export interface CodeShellSession {
   sessionId: string;
+  workspaceId: string;
+  userId: string;
   companyId: string;
   projectId: string;
   cwd: string;
@@ -259,6 +261,7 @@ export class CodeShellRuntime {
   private async execute(context: AuthContext, input: CodeShellExecInput, tracked?: { background?: boolean; waitTimeoutMs?: number }): Promise<CodeShellExecResult | AsyncProcessReceipt> {
     if (!input.command || !input.command.trim()) throw new ShellRuntimeError("invalid_command", "A command is required", 400);
     if (input.command.length > 8_000) throw new ShellRuntimeError("invalid_command", "Command is too long", 400);
+    if (input.timeoutMs !== undefined && (!Number.isSafeInteger(input.timeoutMs) || input.timeoutMs <= 0)) throw new ShellRuntimeError("invalid_timeout", "timeoutMs must be a positive safe integer", 400);
     if (!input.sessionId || !input.toolCallId) throw new ShellRuntimeError("invalid_command", "sessionId and toolCallId are required", 400);
     if (!this.options.sandbox) throw new ShellRuntimeError("sandbox_unavailable", "Sandbox execution is unavailable; code never runs on the application host", 503, true);
     // C4 owner decision: the server-side PolicyEngine is the single decision point for execution, so
@@ -375,7 +378,9 @@ export class CodeShellRuntime {
     if (leaseIds.length) {
       if (!leases) throw new ShellRuntimeError("secret_lease_unavailable", "Secret leases are not configured", 503, true);
       for (const leaseId of leaseIds) {
-        const reference = leases.environmentReferences(leaseId, input.toolCallId);
+        const scopedLease = leases.assertNotInherited(leaseId, input.toolCallId, input.sessionId);
+        if (scopedLease.companyId !== input.companyId || scopedLease.projectId !== input.projectId) throw new ShellRuntimeError("secret_lease_inherited", "Secret lease belongs to another project", 403);
+        const reference = leases.environmentReferences(leaseId, input.toolCallId, input.sessionId);
         Object.assign(references, reference);
       }
     }
@@ -431,7 +436,7 @@ export class CodeShellRuntime {
       throw new ShellRuntimeError("interactive_command_not_supported", "Command appears to wait for terminal input, which the sandbox does not provide", 409, false, { exitCode: raw.exitCode, risk: classification.risk });
     }
     if (raw.status === "timed_out") {
-      throw new ShellRuntimeError("command_timeout", "Sandbox command timed out", 504, true, { timeoutMs, risk: classification.risk, leaseIds });
+      throw new ShellRuntimeError("command_timeout", "Sandbox command timed out; inspect side effects before retrying", 504, false, { timeoutMs, risk: classification.risk, leaseIds });
     }
 
     return {
@@ -452,7 +457,7 @@ export class CodeShellRuntime {
   private sessionFor(context: AuthContext, input: CodeShellExecInput): CodeShellSession {
     const existing = this.sessions.get(input.sessionId);
     if (existing) {
-      if (existing.companyId !== input.companyId || existing.projectId !== input.projectId) {
+      if (existing.workspaceId !== context.workspaceId || existing.userId !== context.userId || existing.companyId !== input.companyId || existing.projectId !== input.projectId) {
         throw new ShellRuntimeError("session_mismatch", "Shell session belongs to another project", 403);
       }
       if (this.now() - existing.updatedAt > this.sessionTtlMs) this.sessions.delete(input.sessionId);
@@ -460,11 +465,10 @@ export class CodeShellRuntime {
     }
     if (this.sessions.size >= this.maxSessions) throw new ShellRuntimeError("shell_session_limit", "Too many shell sessions", 429, true);
     const created: CodeShellSession = {
-      sessionId: input.sessionId, companyId: input.companyId, projectId: input.projectId,
+      sessionId: input.sessionId, workspaceId: context.workspaceId, userId: context.userId, companyId: input.companyId, projectId: input.projectId,
       cwd: input.cwd?.trim() || "/workspace", env: {}, updatedAt: this.now(), turnCount: 0,
     };
     this.sessions.set(input.sessionId, created);
-    void context;
     return created;
   }
 

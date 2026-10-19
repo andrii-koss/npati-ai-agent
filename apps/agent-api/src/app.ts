@@ -354,6 +354,7 @@ export function buildApp(config: AppConfig = {}) {
     undefined,
     {
 
+      withFileLease: projectWorkspace.withFileLease.bind(projectWorkspace),
       assertGitWriteAllowed: (ctx, companyId, input) => {
         const boundary = codeGitPolicyBoundary;
         if (!boundary) throw new Error("The protected-branch policy is unavailable; the git write is refused");

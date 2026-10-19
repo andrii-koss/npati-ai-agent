@@ -43,7 +43,7 @@ export function createProjectWorkspaceReadPort(
         text = Buffer.from(text, "utf8").subarray(0, maxBytes).toString("utf8");
         truncated = true;
       }
-      return { path: file.path, content: text, revision: file.revision, sha256: file.binary ? file.revision : sha256Hex(content), totalLines: lines.length, truncated,
+      return { path: file.path, content: text, revision: file.revision, sha256: file.binary ? file.revision : sha256Hex(content), totalLines: lines.length, truncated, bytes: file.size,
         ...(file.mode !== undefined ? { mode: file.mode } : {}),
         ...(file.binary !== undefined ? { binary: file.binary } : {}),
         ...(file.encoding !== undefined ? { encoding: file.encoding } : {}),
@@ -58,7 +58,7 @@ export function createProjectWorkspaceReadPort(
       }
       const target = path && path !== "." ? "./" + normalizeWorkspacePath(path, { tool: "code.fs.grep" }) : ".";
       const quote = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'";
-      const args = ["rg", "--json", "--line-number", "--no-heading", "--color=never", "--max-count", String(maxResults)];
+      const args = ["rg", "--json", "--line-number", "--no-heading", "--color=never", "--no-require-git", "--max-count", String(maxResults)];
       if (ignoreCase) args.push("-i");
       if (fixedStrings) args.push("-F");
       if (contextLines) args.push("-C", String(Math.min(10, Math.max(0, contextLines))));

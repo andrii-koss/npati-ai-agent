@@ -1,3 +1,4 @@
+import { createEnrichedPolicyEngineWiring } from "../apps/agent-api/src/enriched-policy-engine-wiring";
 import { describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { AuthContext } from "@npati/workspace";
@@ -736,5 +737,54 @@ describe("security-gate: C5a escalation — protected branches and force push", 
 
     // Evaluating repository content does not mutate the policy: the next force push is still a hard deny.
     expect(classifyShellCommand("git push --force origin main").risk).toBe("hard_deny");
+  });
+});
+
+describe("security-gate: C5a production wrapper live membership", () => {
+  function wrapper(resolveRoleForUser: Parameters<typeof createEnrichedPolicyEngineWiring>[0]["codeMembership"]["resolveRoleForUser"]) {
+    const deps = {
+      policyEngine: buildEngine().engine,
+      codeMembership: { resolveRoleForUser },
+      codeGroupsForAgent: () => [],
+      workspaceStore: {},
+    } as unknown as Parameters<typeof createEnrichedPolicyEngineWiring>[0];
+    return createEnrichedPolicyEngineWiring(deps).enrichedPolicyEngine;
+  }
+
+  it("stops writes after downgrade with the same unchanged initiating context", async () => {
+    let role: CompanyRole = "owner";
+    const lookup = vi.fn(async () => role);
+    const engine = wrapper(lookup);
+    const original = context("owner", "live-user");
+    const before = [...original.permissions];
+    expect((await engine.evaluate(request(original, "code.fs.edit"))).decision).toBe("allow");
+    role = "reviewer";
+    expect(await engine.evaluate(request(original, "code.fs.edit"))).toMatchObject({ decision: "deny", code: "permission_denied" });
+    expect(await engine.evaluate(request(original, "code.shell.exec", { command: "ls" }))).toMatchObject({ decision: "deny", code: "permission_denied" });
+    expect((await engine.evaluate(request(original, "code.fs.read"))).decision).toBe("allow");
+    expect(lookup).toHaveBeenCalledTimes(4);
+    expect(original.permissions).toEqual(before);
+  });
+
+  it.each(["revoked", "unavailable"])("fails closed when Company membership is %s", async condition => {
+    const engine = wrapper(async () => { if (condition === "unavailable") throw new Error("membership unavailable"); return null; });
+    const original = context("owner", "live-user");
+    expect(await engine.evaluate(request(original, "code.fs.edit"))).toMatchObject({ decision: "deny", code: "permission_denied" });
+    expect(await engine.evaluate(request(original, "code.fs.read"))).toMatchObject({ decision: "deny", code: "permission_denied" });
+  });
+
+  it("does not widen an initiating read-only token when current Company role is owner", async () => {
+    const engine = wrapper(async () => "owner");
+    const original = { ...context("owner", "live-user"), permissions: ["workspace:read"] };
+    expect(await engine.evaluate(request(original, "code.fs.edit"))).toMatchObject({ decision: "deny", code: "permission_denied" });
+    expect((await engine.evaluate(request(original, "code.fs.read"))).decision).toBe("allow");
+  });
+
+  it("preserves service identity permissions without treating it as a human member", async () => {
+    const lookup = vi.fn(async () => null);
+    const engine = wrapper(lookup);
+    const original = context("service", "service:automation");
+    expect((await engine.evaluate(request(original, "code.fs.read"))).decision).toBe("allow");
+    expect(lookup).not.toHaveBeenCalled();
   });
 });

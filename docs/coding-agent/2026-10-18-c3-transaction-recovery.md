@@ -1,5 +1,7 @@
 # C3 coordinated transaction and worker recovery — 2026-10-18
 
+> Historical checkpoint superseded for Terminal/Git coordination by [the current writer coordination report](2026-10-18-terminal-workspace-coordination.md). The journal implementation remains in use; earlier absent-coordinator statements below describe the pre-fix state. Unconditional C3 remains Broken for the explicit current boundaries.
+
 The audit is incomplete. This extends the existing 2960-clause matrix; no previous Verified status is promoted or downgraded on file presence alone.
 
 ## Implemented boundary

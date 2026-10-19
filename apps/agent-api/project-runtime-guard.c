@@ -11,12 +11,14 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <sched.h>
+#include <signal.h>
 #include <seccomp.h>
 
 /* Only the trusted supervisor calls this launcher. Drop its capabilities before
  * setting up unprivileged namespaces or executing any project-owned code. */
 static void fail(const char *message) { perror(message); exit(126); }
 int main(int argc, char **argv) {
+  const pid_t supervisor = getppid();
   if (argc == 3 && !strcmp(argv[1], "--emit-filter")) {
     scmp_filter_ctx filter = seccomp_init(SCMP_ACT_ALLOW);
     if (!filter) fail("command seccomp");
@@ -36,6 +38,16 @@ int main(int argc, char **argv) {
     close(output); seccomp_release(filter); return 0;
   }
   int check = argc == 2 && !strcmp(argv[1], "--check");
+  if (!check) {
+    const char *expected = getenv("NPATI_RUNTIME_SUPERVISOR_PID");
+    char *end = NULL;
+    if (!expected || !*expected) return 126;
+    const long owner = strtol(expected, &end, 10);
+    if (!end || *end || owner <= 0 || owner != (long)supervisor) return 126;
+    unsetenv("NPATI_RUNTIME_SUPERVISOR_PID");
+  }
+  if (prctl(PR_SET_PDEATHSIG, SIGKILL, 0, 0, 0)) fail("early supervisor death signal");
+  if (getppid() != supervisor) raise(SIGKILL);
   if (geteuid() != 0 || (!check && argc < 6)) return 126;
   unsigned long uid = 10000;
   if (!check) {
@@ -53,6 +65,11 @@ int main(int argc, char **argv) {
         stat(project, &st) || !S_ISDIR(st.st_mode) || st.st_uid != uid) return 126;
   }
   if (setgroups(0, NULL) || setgid(uid) || setuid(uid)) fail("project uid");
+  /* setuid clears PDEATHSIG: arm it only after dropping credentials.
+   * Kernel parent tracking, not a saved PID, kills this launcher on supervisor
+   * death. Bubblewrap --die-with-parent then tears down its PID namespace. */
+  if (prctl(PR_SET_PDEATHSIG, SIGKILL, 0, 0, 0)) fail("supervisor death signal");
+  if (getppid() != supervisor) raise(SIGKILL);
   if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) fail("no_new_privs");
   struct rlimit processes = { .rlim_cur = 512, .rlim_max = 512 };
   struct rlimit files = { .rlim_cur = 4096, .rlim_max = 4096 };

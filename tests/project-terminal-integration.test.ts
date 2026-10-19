@@ -1,4 +1,6 @@
+import { createShellSandboxPortWiring } from "../apps/agent-api/src/shell-sandbox-port-wiring";
 import Fastify from "fastify";
+import { toFailure } from "../apps/agent-api/src/code-tool-runtime-hooks";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -189,7 +191,7 @@ describe("Project terminal integration", () => {
     await expect(sandbox.execute(owner, company.id, { projectId: project.id, command: "pwd", agentId: agent.id })).rejects.toMatchObject({ code: "sandbox_creation_failed" });
     provider.creationFailure = false;
     provider.commandResult = result("timed_out", 124);
-    await expect(sandbox.execute(owner, company.id, { projectId: project.id, command: "npm run build", agentId: agent.id })).rejects.toMatchObject({ code: "command_timeout", status: 504, step: "install_build", tool: "project.terminal.exec", retryable: true });
+    await expect(sandbox.execute(owner, company.id, { projectId: project.id, command: "npm run build", agentId: agent.id })).rejects.toMatchObject({ code: "command_timeout", status: 504, step: "install_build", tool: "project.terminal.exec", retryable: false });
     provider.commandResult = result("failed", 1);
     await expect(sandbox.execute(owner, company.id, { projectId: project.id, command: "npm install", agentId: agent.id })).rejects.toMatchObject({ code: "install_failed" });
     await expect(sandbox.execute(owner, company.id, { projectId: project.id, command: "npm run build", agentId: agent.id })).rejects.toMatchObject({ code: "build_failed", message: "Build command failed" });
@@ -371,5 +373,86 @@ describe("Workspace delete revision regression", () => {
     expect((await workspace.readFile(owner, company.id, project.id, "retained.txt")).content).toBe("concurrent\n");
     await port.deleteFile({ ...scope, expectedRevision: changed.revision });
     await expect(workspace.readFile(owner, company.id, project.id, "retained.txt")).rejects.toMatchObject({ code: "file_not_found" });
+  });
+
+  it("rejects a late conflicting Terminal result before committing earlier files", async () => {
+    const { company, project, workspace, provider, sandbox, events } = await fixture();
+    for (const file of ["a.ts", "b.ts"]) await workspace.createFile(owner, company.id, project.id, file, "original");
+    provider.executeCommand = async () => {
+      const b = await workspace.readFile(owner, company.id, project.id, "b.ts");
+      await workspace.writeFile(owner, company.id, project.id, "b.ts", "peer", b.revision);
+      provider.files = provider.files.map(file => ({ ...file, content: "terminal" }));
+      return result();
+    };
+    await expect(sandbox.execute(owner, company.id, { projectId: project.id, command: "npm run build", agentId: "system" })).rejects.toMatchObject({ code: "revision_conflict", retryable: false });
+    expect((await workspace.readFile(owner, company.id, project.id, "a.ts")).content).toBe("original");
+    expect((await workspace.readFile(owner, company.id, project.id, "b.ts")).content).toBe("peer");
+    expect(await events.list(owner, company.id, project.id)).toEqual(expect.arrayContaining([expect.objectContaining({ status: "failed", errorCode: "revision_conflict", exitCode: 0 })]));
+  });
+  it("validates every returned Terminal file before copying any of them", async () => {
+    const { company, project, workspace, provider, sandbox } = await fixture();
+    await workspace.createFile(owner, company.id, project.id, "a.ts", "original");
+    provider.executeCommand = async () => {
+      provider.files = [{ path: "a.ts", content: "must not commit" }, { path: "b.ts", content: 'export const password = "actual-private-password";' }];
+      return result();
+    };
+    await expect(sandbox.execute(owner, company.id, { projectId: project.id, command: "npm run build", agentId: "system" })).rejects.toMatchObject({ code: "secret_content" });
+    expect((await workspace.readFile(owner, company.id, project.id, "a.ts")).content).toBe("original");
+  });
+  it("does not advertise replay after a dispatched command loses its transport response", async () => {
+    const { company, project, workspace, provider, sandbox } = await fixture();
+    let executions = 0;
+    provider.executeCommand = async () => { executions++; throw new SandboxProviderError("runner_disconnected", "Reply lost", 503, "execute", "project.terminal.exec", true); };
+    await expect(sandbox.execute(owner, company.id, { projectId: project.id, command: "npm run build", agentId: "system" })).rejects.toMatchObject({ code: "runner_disconnected", retryable: false });
+    expect(executions).toBe(1);
+    expect(await workspace.listFiles(owner, company.id, project.id)).toHaveLength(0);
+  });
+});
+
+describe("Terminal cleanup guard release", () => {
+  it("does not replay a completed command when durable guard release fails", async () => {
+    const { sandbox, provider, events, company, project, workspace } = await fixture();
+    sandbox.setProcessCleanupGuard({ acquire: async () => async () => { throw new Error("private-store-detail"); } });
+    const failure = await sandbox.execute(owner, company.id, { projectId: project.id, command: "npm run build", agentId: "system" }).catch(error => error);
+    expect(failure).toMatchObject({ code: "process_cleanup_failed", retryable: false, step: "cleanup" });
+    expect(toFailure(failure, "code.shell.exec")).toMatchObject({ ok: false, error: { code: "process_cleanup_failed", retryable: false } });
+    expect(provider.calls.filter(call => call === "npm run build")).toHaveLength(1);
+    expect((await workspace.readFile(owner, company.id, project.id, "generated.html")).content).toBe("<h1>built</h1>");
+    const trace = await events.list(owner, company.id, project.id);
+    expect(JSON.stringify(trace)).toContain("process_cleanup_failed");
+    expect(JSON.stringify(trace)).not.toContain("private-store-detail");
+  });
+  it("preserves a diagnosed command failure when durable guard release also fails", async () => {
+    const { sandbox, provider, events, company, project } = await fixture();
+    sandbox.setProcessCleanupGuard({ acquire: async () => async () => { throw new Error("private-store-detail"); } });
+    provider.executeCommand = async () => { throw new SandboxProviderError("command_timeout", "Inspect command effects", 504, "command", "project.terminal.exec", false); };
+    await expect(sandbox.execute(owner, company.id, { projectId: project.id, command: "pwd", agentId: "system" })).rejects.toMatchObject({ code: "command_timeout", retryable: false });
+    const trace = await events.list(owner, company.id, project.id);
+    expect(JSON.stringify(trace)).toContain("process_cleanup_failed");
+    expect(JSON.stringify(trace)).toContain("command_timeout");
+    expect(JSON.stringify(trace)).not.toContain("private-store-detail");
+  });
+});
+
+it.each(["runtime_recovery_required", "runtime_state_invalid", "process_termination_unconfirmed"])("preserves fail-closed native diagnosis for %s", code => {
+  const failure = new SandboxProviderError(code, "Admission remains closed", 503, "ownership", "code.shell.exec", false);
+  expect(toFailure(failure, "code.shell.exec")).toMatchObject({ ok: false, error: { code, retryable: false, status: 503 } });
+});
+
+describe("C4 production shell adapter timeout contract", () => {
+  it.each([
+    { command: "pwd", timeoutMs: 3000, expected: 3000 },
+    { command: "pwd", timeoutMs: undefined, expected: 120000 },
+    { command: "pwd", timeoutMs: 600000, expected: 120000 },
+    { command: "npm install", timeoutMs: undefined, expected: 600000 },
+  ])("forwards and caps provider timeout for $command at $expected", async ({ command, timeoutMs, expected }) => {
+    const { company, project, provider, sandbox } = await fixture();
+    const dispatch = vi.spyOn(provider, "executeCommand");
+    const { shellSandboxPort } = createShellSandboxPortWiring({ projectSandbox: sandbox } as Parameters<typeof createShellSandboxPortWiring>[0]);
+    const raw = await shellSandboxPort!.execute({ context: owner, companyId: company.id, projectId: project.id,
+      agentId: "system", command, timeoutMs, approved: true, runId: "correlated-shell-run" });
+    expect(dispatch).toHaveBeenCalledOnce();
+    expect(dispatch).toHaveBeenCalledWith(expect.anything(), expect.anything(), command, expect.objectContaining({ timeoutMs: expected }));
+    expect(raw).toMatchObject({ exitCode: 0, status: "completed", durationMs: 4 });
   });
 });

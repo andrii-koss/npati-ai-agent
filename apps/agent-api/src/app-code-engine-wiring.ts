@@ -210,6 +210,7 @@ export function createAppCodeEngineWiring(deps: AppCodeEngineWiringDeps) {
     agent,
     codeGroupsForAgent,
     codeProjectTrust,
+    codeMembership,
     workspaceStore,
   });
   const { enrichedPolicyEngine } = enrichedPolicyEngineWiring;

@@ -21,11 +21,10 @@ Adding a profile does **not** enable it. See A.4.
 
 ## A.1 Check whether an existing profile already covers it
 
-Run the resolver against the model before writing anything:
+Run the existing resolver/conformance checks before editing the registry. They validate shipped fixtures; they do not probe a live model or automatically test a newly entered model ID:
 
 ```
-node --experimental-transform-types --no-warnings ./artifacts/c5b-policy-probe/run.mjs \
-     tests/coding-agent-c14-eval-metrics-and-profiles.test.ts tests/coding-agent-c14-model-profile-flags.test.ts
+node node_modules/vitest/vitest.mjs run tests/coding-agent-c14-eval-metrics-and-profiles.test.ts tests/coding-agent-c14-model-profile-flags.test.ts
 ```
 
 Look at `matchedBy` and `fallbackReason`. `matchedBy: "provider"` on a hosted model means

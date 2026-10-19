@@ -1,3 +1,5 @@
+import { acquireKernelFileLease, type KernelFileLease } from "./project-file-kernel-lease";
+import { assertProjectQuiescent, awaitProcessClose } from "./shared-runtime-process-fence";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
@@ -14,8 +16,8 @@ import { normalizeTerminalCommand, classifyTerminalCommand } from "./terminal-co
 import { safeProjectPath } from "./project-workspace";
 import { gitShellHardeningEnv, resolveDepsPolicyLimits } from "./code-deps-policy";
 
-type ProcessRecord = { id: string; pid?: number; status: SandboxCommandResult["status"]; exitCode: number | null; commandHash?: string };
-type Entry = SandboxStatus & { scope: SandboxScope; uid: number; port: number; processes: Record<string, ProcessRecord> };
+type ProcessRecord = { id: string; pid?: number; status: SandboxCommandResult["status"]; exitCode: number | null; commandHash?: string; generation?: number };
+type Entry = SandboxStatus & { scope: SandboxScope; uid: number; port: number; processes: Record<string, ProcessRecord>; generation?: number };
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const scopeKey = (scope: SandboxScope) => JSON.stringify([scope.workspaceId, scope.userId, scope.companyId, scope.projectId]);
 const excluded = /^(?:node_modules|\.git|\.next|\.nuxt|\.output|\.astro|\.cache|\.turbo|dist|build|coverage|\.expo|\.npati-runtime|\.worktrees)$/;
@@ -40,26 +42,50 @@ export function projectRuntimeWorkspaceCommand(command: string, directory: strin
  * so canonical file revisions, project context, approvals and audit stay in API. */
 export class SharedProjectRuntimeProvider implements SandboxProvider {
   readonly executionMode = "shared" as const;
-  async processCapabilities() { return { durableIdentity: true, terminalStatus: true }; }
+  async processCapabilities() { await this.ready; return { durableIdentity: true, terminalStatus: true }; }
   private entries: Entry[] = [];
   private ready: Promise<void>;
+  private ownerFence?: KernelFileLease;
+  private readonly closedChildren = new WeakSet<ChildProcess>();
+  async checkReady() { await this.ready; }
   private saving: Promise<void> = Promise.resolve();
   private children = new Map<string, ChildProcess>();
+  private creating = new Map<string, Promise<SandboxStatus>>();
   private jobs = new Map<string, Set<ChildProcess>>();
   private outputs = new Map<string, { output: string; earliestOffset: number; nextOffset: number }>();
   private outputSaves = new Map<string, Promise<void>>();
   constructor(private readonly root = "/projects", private readonly state = "/runtime-state", private readonly launcher = "/usr/local/bin/npati-project-exec") {
     this.ready = this.initialize();
+    void this.ready.catch(() => undefined); // Startup readiness owns the failure.
   }
   private async initialize() {
     await mkdir(this.root, { recursive: true, mode: 0o711 });
     await mkdir(this.state, { recursive: true, mode: 0o700 });
     await chmod(this.state, 0o700);
+    this.ownerFence = await acquireKernelFileLease(this.state, (code, message) => new SandboxProviderError(code, message));
+    if (!this.ownerFence) throw new SandboxProviderError("runtime_isolation_unavailable", "Shared supervisor requires Linux kernel ownership", 503);
     try { this.entries = JSON.parse(await readFile(path.join(this.state, "projects.json"), "utf8")); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-    // Container restart kills all project children. Never trust persisted PIDs.
-    for (const entry of this.entries) for (const process of Object.values(entry.processes)) if (process.status === "running") { process.status = "stopped"; process.pid = undefined; }
-    for (const entry of this.entries) await this.allowProjectPort(entry);
+    // A supervisor-only restart does NOT prove its old children exited.
+    // The protected lifetime fence excludes a second supervisor. Never kill
+    // discovered PIDs/UIDs; fail admission closed if a previous writer survives.
+    if (!Array.isArray(this.entries)) throw new SandboxProviderError("runtime_state_invalid", "Invalid runtime state", 503);
+    const uids = new Set<number>(), projects = new Set<string>();
+    for (const entry of this.entries) {
+      if (!entry?.scope || !UUID.test(entry.scope.projectId) || !UUID.test(entry.id) || uids.has(entry.uid) || projects.has(entry.scope.projectId) ||
+          !Number.isSafeInteger(entry.uid) || entry.uid < 10000 || entry.uid > 60000 ||
+          !Number.isSafeInteger(entry.generation ?? 0) || (entry.generation ?? 0) < 0 || (entry.generation ?? 0) >= Number.MAX_SAFE_INTEGER) {
+        throw new SandboxProviderError("runtime_state_invalid", "Invalid runtime ownership", 503);
+      }
+      uids.add(entry.uid); projects.add(entry.scope.projectId);
+    }
+    for (const entry of this.entries) {
+      await assertProjectQuiescent(entry.uid);
+      entry.generation = (entry.generation ?? 0) + 1;
+      for (const record of Object.values(entry.processes)) if (record.status === "running") { record.status = "stopped"; record.pid = undefined; }
+      await this.allowProjectPort(entry);
+    }
+    await this.persist();
   }
   private async allowProjectPort(entry: Entry) {
     const rule = ["NPATI_PROJECTS", "-m", "owner", "--uid-owner", String(entry.uid), "-p", "tcp", "-d", "127.0.0.1", "--dport", String(entry.port), "-j", "ACCEPT"];
@@ -67,9 +93,12 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
   }
   private persist() {
     this.saving = this.saving.catch(() => undefined).then(async () => {
-      const file = path.join(this.state, "projects.json"), temporary = `${file}.tmp`;
-      await writeFile(temporary, JSON.stringify(this.entries), { mode: 0o600 });
+      const file = path.join(this.state, "projects.json"), temporary = `${file}.${randomUUID()}.tmp`;
+      const handle = await open(temporary, "wx", 0o600);
+      try { await handle.writeFile(JSON.stringify(this.entries)); await handle.sync(); } finally { await handle.close(); }
       await rename(temporary, file);
+      const directory = await open(this.state, "r");
+      try { await directory.sync(); } finally { await directory.close(); }
     });
     return this.saving;
   }
@@ -85,6 +114,20 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
   private status(entry: Entry): SandboxStatus { return { id: entry.id, state: entry.state, createdAt: entry.createdAt, lastActivityAt: entry.lastActivityAt }; }
   async createSandbox(scope: SandboxScope, options: SandboxCreateOptions = {}) {
     await this.ready;
+    const pending = this.creating.get(scope.projectId);
+    if (pending) {
+      const result = await pending;
+      await this.entry(scope, result.id); // A concurrent caller cannot substitute its tenant.
+      if (options.mount) throw new SandboxProviderError("shared_runtime_mount_unsupported", "Shared runtime does not accept host-folder mounts", 403);
+      return result;
+    }
+    const operation = this.createSandboxOwned(scope, options);
+    this.creating.set(scope.projectId, operation);
+    try { return await operation; }
+    finally { if (this.creating.get(scope.projectId) === operation) this.creating.delete(scope.projectId); }
+  }
+  private async createSandboxOwned(scope: SandboxScope, options: SandboxCreateOptions) {
+    await this.ready;
     if (!UUID.test(scope.projectId) || !scope.workspaceId || !scope.userId || !scope.companyId) throw new SandboxProviderError("invalid_scope", "Invalid Project context", 400);
     // Host-folder mounts retain the existing isolated Docker path; they cannot be
     // expanded into this shared container by an API caller.
@@ -97,7 +140,7 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
     while (this.entries.some(item => item.port === port) || [7865, 8080, 59999].includes(port)) port++;
     if (uid > 60000 || port > 65000) throw new SandboxProviderError("runtime_capacity", "Shared runtime capacity reached", 429);
     const now = new Date().toISOString();
-    const entry: Entry = { id: randomUUID(), scope: { ...scope }, uid, port, state: "created", createdAt: now, lastActivityAt: now, processes: {} };
+    const entry: Entry = { id: randomUUID(), scope: { ...scope }, uid, port, state: "created", createdAt: now, lastActivityAt: now, processes: {}, generation: 1 };
     // Reserve identity synchronously before any I/O (concurrent requests cannot
     // assign the same UID/port).
     this.entries.push(entry);
@@ -157,8 +200,10 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
       npm_config_audit: "false", npm_config_fund: "false", NEXT_TELEMETRY_DISABLED: "1", CI: "1" };
   }
   private launch(entry: Entry, executable: string, args: string[], cwd = ".", environment?: Record<string, string>, detached = false, preview = false, offline = false) {
-    return spawn(this.launcher, [String(entry.uid), this.directory(entry), String(entry.port), path.join(this.directory(entry), cwd), ...(preview ? ["--preview"] : offline ? ["--offline"] : []), executable, ...args],
-      { env: this.environment(entry, environment), detached, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(this.launcher, [String(entry.uid), this.directory(entry), String(entry.port), path.join(this.directory(entry), cwd), ...(preview ? ["--preview"] : offline ? ["--offline"] : []), executable, ...args],
+      { env: { ...this.environment(entry, environment), NPATI_RUNTIME_SUPERVISOR_PID: String(process.pid) }, detached, stdio: ["pipe", "pipe", "pipe"] });
+    child.once("close", () => this.closedChildren.add(child));
+    return child;
   }
   private async collect(entry: Entry, executable: string, args: string[], input: string, options: SandboxCommandOptions, cwd = ".", offline = false) {
     const child = this.launch(entry, executable, args, cwd, options.environment, true, false, offline);
@@ -172,7 +217,7 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
       child.on("error", reject);
       child.stdout!.on("data", (data: Buffer) => { stdout = Buffer.concat([stdout, data]).subarray(0, limit); });
       child.stderr!.on("data", (data: Buffer) => { stderr = Buffer.concat([stderr, data]).subarray(0, limit); });
-      child.on("close", code => resolve({ status: timedOut ? "timed_out" : code === 0 ? "completed" : "failed", exitCode: code, stdout: stdout.toString(), stderr: stderr.toString(), durationMs: Date.now() - started, step: "command", tool: "project.terminal.exec", retryable: timedOut }));
+      child.on("close", code => resolve({ status: timedOut ? "timed_out" : code === 0 ? "completed" : "failed", exitCode: code, stdout: stdout.toString(), stderr: stderr.toString(), durationMs: Date.now() - started, step: "command", tool: "project.terminal.exec", retryable: false }));
     });
     child.stdin!.on("error", () => undefined); child.stdin!.end(input);
     try { return await done; } finally { clearTimeout(timer); stop(); jobs.delete(child); }
@@ -261,7 +306,7 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
       return this.processResult(existing);
     }
     if (this.entries.some(item => item !== entry && item.processes[processId])) throw new SandboxProviderError("process_identity_conflict", "Process identity belongs to another project", 409);
-    const record: ProcessRecord = { id: processId, status: "running", exitCode: null, commandHash };
+    const record: ProcessRecord = { id: processId, status: "running", exitCode: null, commandHash, generation: entry.generation };
     entry.processes[processId] = record;
     // Reserve the caller's durable identity before launching. A replay never respawns the job.
     await this.persist();
@@ -284,9 +329,10 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
     child.stdout!.setEncoding("utf8"); child.stderr!.setEncoding("utf8");
     child.stdout!.on("data", append); child.stderr!.on("data", append);
     child.on("error", () => { record.status = "failed"; record.exitCode = 126; });
+    let termination: "timed_out" | undefined;
     const timer = options.processId ? setTimeout(() => {
       if (record.status === "running") {
-        record.status = "timed_out";
+        termination = "timed_out";
         if (child.pid) try { process.kill(-child.pid, "SIGKILL"); } catch { /* exited */ }
       }
     }, Math.min(Math.max(options.timeoutMs, 1000), 600_000)) : undefined;
@@ -296,7 +342,7 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
       let outputFailed = false;
       await this.saveOutput(processId).catch(() => { outputFailed = true; });
       if (outputFailed) { record.status = "failed"; code = 126; }
-      if (record.status === "running") record.status = code === 0 ? "completed" : "failed";
+      if (record.status === "running") record.status = termination ?? (code === 0 ? "completed" : "failed");
       record.exitCode = code; this.children.delete(processId);
       await log.close().catch(() => undefined); await this.persist().catch(() => undefined);
     });
@@ -318,9 +364,11 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
       entry.processes[processId] = { id: processId, status: "stopped", exitCode: null };
     }
     const record = this.process(entry, processId), child = this.children.get(processId);
+    const cancelling = record.status === "running";
     // Never signal persisted PIDs after supervisor restart (PID reuse).
     if (child?.pid && record.status === "running") { try { process.kill(-child.pid, "SIGKILL"); } catch { /* already stopped */ } }
-    if (record.status === "running") record.status = "stopped";
+    if (child) await awaitProcessClose(child, this.closedChildren);
+    if (cancelling) record.status = "stopped";
     await this.persist(); return this.processResult(record);
   }
   async getLogs(scope: SandboxScope, id: string, processId?: string) {

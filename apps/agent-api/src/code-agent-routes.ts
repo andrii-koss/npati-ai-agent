@@ -79,10 +79,11 @@ export function registerCodeAgentRoutes(
         const scope = await authorize(auth, request, "workspace:read");
         const prefs = await codePreferences.get(scope);
         const storedAI = await aiPreferences.get(scope);
+        const tab = request.query.tab;
         const marketplaceData = await marketplace.marketplace(
           {
             scope: "code",
-            tab: request.query.tab as any,
+            tab: tab === "connected" || tab === "recommended" || tab === "free" || tab === "local" || tab === "all" ? tab : undefined,
             search: request.query.search,
             offset: Number.parseInt(request.query.offset ?? "0", 10) || 0,
             limit: Number.parseInt(request.query.limit ?? "100", 10) || 100,

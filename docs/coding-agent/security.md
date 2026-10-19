@@ -12,6 +12,10 @@ handling and workspace escape ahead of kernel escapes**, which is why the sandbo
 
 ---
 
+## Current shared-runtime boundary (2026-10-19)
+
+The containment rows below describe the legacy per-container Docker provider. The shared provider uses the separately configured supervisor capabilities and per-project UID/PID namespaces; do not infer cap_drop-only or per-run network ownership for it from this table. Current image admission is not certified. The C3 isolation report records real retained Linux tests and unresolved mutation/legacy-writer limits. Current local Docker unavailability prevents a fresh Linux acceptance run. See plan-verification-matrix.md for requirement status.
+
 ## 1. Threat surfaces and the defence for each
 
 | Surface | Threat | Defence | Code |

@@ -66,7 +66,8 @@ export function toCanonicalPort(input: CodeToolExecutionContext, options: Canoni
         revision: file.revision,
         ...(file.binary !== undefined ? { binary: file.binary } : {}),
         ...(file.mimeGuess !== undefined ? { mimeGuess: file.mimeGuess } : {}),
-        bytes: Buffer.byteLength(file.content, "utf8"),
+        // Raw byte size survives decoding and read truncation; custom ports retain the legacy fallback.
+        bytes: file.bytes ?? Buffer.byteLength(file.content, "utf8"),
         truncated: file.truncated === true,
         encoding: file.encoding ?? "utf-8",
       };
