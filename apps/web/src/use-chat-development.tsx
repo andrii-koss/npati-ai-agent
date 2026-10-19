@@ -15,7 +15,8 @@ export function useChatDevelopment(options: {
   const { language } = useTranslation();
   const queryProjectId = search.get("project") ?? undefined; const root = search.get("developmentRoot");
   const [processes, setProcesses] = useState<DevelopmentProcess[]>([]);
-  const currentProcess = processes.find(p => p.conversationId === options.conversationId && (!queryProjectId || p.projectId === queryProjectId));
+  const currentProcess = processes.find(p => p.conversationId === options.conversationId && (!queryProjectId || p.projectId === queryProjectId))
+    ?? processes.find(p => p.parentConversationId === options.conversationId && (!queryProjectId || p.projectId === queryProjectId));
   const projectId = queryProjectId ?? currentProcess?.projectId;
   const [busyId, setBusyId] = useState<string>();
   const [showAll, setShowAll] = useState(false);
@@ -147,8 +148,6 @@ export function useChatDevelopment(options: {
     finally { sending.current = false; if (alive.current) setSubmitting(false); }
   }
   const currentRoot = root ?? currentProcess?.parentConversationId ?? options.conversationId;
-  const visible = processes.filter(p => p.parentConversationId === currentRoot || p.projectId === projectId || !p.hidden && (showAll || !currentRoot));
-  return { submit, submitting, project: currentProcess, card: (messages: Parameters<typeof developmentCard>[0], index: number) => developmentCard(messages, index, processes, options.conversationId), hideMessage: (messages: Parameters<typeof hideDevelopmentMessage>[0], index: number) => hideDevelopmentMessage(messages, index, processes), preview: <ChatDevelopmentPreview process={currentProcess} />, timeline: <ChatDevelopmentProgress process={currentProcess} isUk={language === "uk"} />, panel: <ChatDevelopmentPanel processes={visible} projectId={projectId} isUk={language === "uk"} busyId={busyId}
-    onOpen={id => { void action(id, "open"); }} onStop={id => { void action(id, "stop"); }} onHide={id => { void action(id, "hide"); }}
-    onBack={() => { const parent = root ?? processes.find(p => p.projectId === projectId)?.parentConversationId; if (parent) navigate("/c/" + parent); }} /> };
+  const visible = processes.filter(p => p.conversationId !== options.conversationId && (p.parentConversationId === currentRoot || !p.hidden && (showAll || !currentRoot)));
+  return { submit, submitting, project: currentProcess, card: (messages: Parameters<typeof developmentCard>[0], index: number) => developmentCard(messages, index, processes, options.conversationId), hideMessage: (messages: Parameters<typeof hideDevelopmentMessage>[0], index: number) => hideDevelopmentMessage(messages, index, processes), preview: <ChatDevelopmentPreview process={currentProcess} />, timeline: <ChatDevelopmentProgress process={currentProcess} isUk={language === "uk"} />, panel: null };
 }

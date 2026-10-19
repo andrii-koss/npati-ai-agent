@@ -19,7 +19,7 @@ export async function acquireKernelFileLease(base: string, error: (code: string,
   catch { await handle.close(); throw error("workspace_lock_unavailable", "Workspace fence could not be inspected"); }
   if (!entry.isFile() || entry.nlink !== 1) { await handle.close(); throw error("invalid_path", "Unsafe workspace fence"); }
   // All command text is constant; no project code, shell arguments or paths are interpolated.
-  const child = spawn("/bin/sh", ["-c", "command -v flock >/dev/null 2>&1 || exit 69; flock -x -w 10 3 || exit 75; printf 'NPATI_LEASE_READY\\n'; cat >/dev/null"],
+  const child = spawn("/bin/sh", ["-c", "command -v flock >/dev/null 2>&1 || exit 69; if flock -w 0 /dev/null true >/dev/null 2>&1; then flock -x -w 10 3; else flock -x 3; fi || exit 75; printf 'NPATI_LEASE_READY\\n'; cat >/dev/null"],
     { env: { PATH: "/usr/bin:/bin", LC_ALL: "C" }, stdio: ["pipe", "pipe", "ignore", handle.fd] });
   const leaseInput = child.stdin, leaseOutput = child.stdout;
   if (!leaseInput || !leaseOutput) { child.kill("SIGKILL"); await handle.close(); throw error("workspace_lock_unavailable", "Workspace kernel lease pipes are unavailable"); }
