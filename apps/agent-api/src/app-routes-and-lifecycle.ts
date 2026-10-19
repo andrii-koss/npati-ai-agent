@@ -294,6 +294,8 @@ export function registerAppRoutesAndLifecycle(deps: AppRoutesAndLifecycleDeps) {
   });
 
   const chatDevelopment = registerChatDevelopmentRoutes(app, {
+    engine: aiEngine,
+    getAIContext: getAIContext as never,
     resolveProjectIntent,
     auth: authProvider,
     store: workspaceStore,

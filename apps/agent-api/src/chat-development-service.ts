@@ -26,6 +26,8 @@ export class DevelopmentError extends Error {
   constructor(message: string, readonly status = 400) { super(message); }
 }
 export type DevelopmentPorts = {
+  engine?: Pick<import("@npati/omniroute-adapter").AIEngine, "chat">;
+  getAIContext?: (auth: AuthContext) => Promise<{ model?: string }>;
   resolveProjectIntent?: import("./chat-project-intent").ChatProjectIntentResolver;
   store: WorkspaceStore; code: CodeService; flags: FeatureFlagService; projects: ProjectService;
   preparer: Pick<ProjectOrchestrator, "prepareCodingWebsite" | "prepareCodingMobile">;
@@ -191,8 +193,9 @@ export class ChatDevelopmentService {
     const history = (await this.d.store.getNeutralConversation(ctx, conversationId!).catch(() => ({ messages: [] }))).messages;
     const responseLanguage = resolveCodingConversationLanguage(input.message, history);
     const now = new Date().toISOString();
-    const created: Entry[] = targets.map(target => ({
+    const created: Entry[] = targets.map((target, index) => ({
       id: randomUUID(), requestId: input.requestId, companyId: input.companyId,
+      conversationId: index === 0 ? conversationId! : undefined,
       parentConversationId: conversationId!, responseLanguage, businessId: input.businessId, name: target.name, framework: target.framework, status: "queued", hidden: false, createdAt: now, updatedAt: now
     }));
     await this.change(ctx, items => {
@@ -207,7 +210,40 @@ export class ChatDevelopmentService {
     };
     try {
       await append("user", input.message);
-      await append("assistant", codingStartCopy(responseLanguage) + ": " + targets.map(t => t.name + " (" + t.framework + ")").join(", ") + ".");
+      let assistantIntro = "";
+      if (this.d.engine && this.d.getAIContext) {
+        try {
+          const aiContext = await this.d.getAIContext(ctx);
+          const langInstruction = responseLanguage === "uk"
+            ? "Відповідай виключно українською мовою."
+            : `Respond strictly in the user's conversation language (${responseLanguage}).`;
+          const targetSummary = targets.map(t => `${t.name} (${t.framework})`).join(", ");
+          const aiResult = await this.d.engine.chat({
+            model: aiContext.model,
+            temperature: 0.7,
+            messages: [
+              {
+                role: "system",
+                content: `You are NPATI Agent, an expert AI software developer and product architect. The user requested to create/build a project: "${targetSummary}".
+Respond directly and concisely to the user (2-3 sentences max). ${langInstruction}
+Acknowledge their exact requested features (e.g. catalog, cart, auth, build, live preview, etc.), state clearly that you are starting the implementation, and that you will build and launch Live Preview.
+Do NOT use robotic template phrases like "Starting development in Sandbox: ...". Do NOT include markdown code blocks or greetings. Be professional, natural, and directly address the user's specific request.`
+              },
+              { role: "user", content: input.message }
+            ],
+            timeoutMs: 12_000,
+          });
+          if (typeof aiResult.content === "string" && aiResult.content.trim()) {
+            assistantIntro = aiResult.content.trim();
+          }
+        } catch (err) {
+          this.d.log.warn({ err }, "chat_development_ai_intro_failed");
+        }
+      }
+      if (!assistantIntro) {
+        assistantIntro = codingStartCopy(responseLanguage) + ": " + targets.map(t => t.name + " (" + t.framework + ")").join(", ") + ".";
+      }
+      await append("assistant", assistantIntro);
     } catch (error) {
       for (const process of created) await this.patch(ctx, process.id, { status: "failed", detail: "Could not save the chat." });
       throw error;
@@ -234,7 +270,7 @@ export class ChatDevelopmentService {
       if (item.id !== id) return item;
       const eventId = id + ":" + stage;
       const previous = item.progress?.find(event => event.id === eventId);
-      const event = sanitizeProgress({ ...previous, id: eventId, stage, title, at: previous?.at ?? new Date().toISOString(), ...Object.fromEntries(Object.entries(details ?? {}).filter(([, value]) => value !== undefined)) });
+      const event = sanitizeProgress({ ...previous, id: eventId, stage, title, at: previous?.at ?? new Date().toISOString(), conversationId: item.conversationId, ...Object.fromEntries(Object.entries(details ?? {}).filter(([, value]) => value !== undefined)) });
       return { ...item, progress: [...(item.progress ?? []).filter(event => event.id !== eventId), event].slice(-200), updatedAt: new Date().toISOString() };
     }));
   }
@@ -246,21 +282,33 @@ export class ChatDevelopmentService {
     const current = (await this.entries(ctx)).find(p => p.id === process.id);
     if (current?.conversationId) process.conversationId = current.conversationId;
     if (!process.conversationId) return;
-    if (!await this.d.store.getNeutralConversation(ctx, process.conversationId).catch(() => null)) {
+    const hasConversation = async (convId: string) => {
+      try { await this.d.store.getNeutralConversation(ctx, convId); return true; }
+      catch { return process.businessId ? !!await this.d.store.getConversation(ctx, process.businessId, convId).catch(() => null) : false; }
+    };
+    if (!await hasConversation(process.conversationId)) {
       process.conversationId = (await this.d.store.createNeutralConversation(ctx, project.name)).id;
       await this.patch(ctx, process.id, { conversationId: process.conversationId });
     }
     let messageId = current?.conversationId === process.conversationId ? current.cardMessageId : undefined;
     if (!messageId) {
-      const chat = await this.d.store.getNeutralConversation(ctx, process.conversationId);
+      const getChat = async () => {
+        try { return await this.d.store.getNeutralConversation(ctx, process.conversationId!); }
+        catch { return process.businessId ? this.d.store.getConversation(ctx, process.businessId, process.conversationId!).catch(() => null) : null; }
+      };
+      const chat = await getChat();
       // Routing metadata belongs to the existing request, not an extra overview bubble.
-      messageId = chat.messages.find(item => item.role === "user")?.id
+      messageId = chat?.messages.find(item => item.role === "user")?.id
         ?? (await this.d.store.appendNeutralMessage(ctx, process.conversationId, "assistant", process.name)).id;
       await this.patch(ctx, process.id, { cardMessageId: messageId });
     }
     const view = (await this.entries(ctx)).find(item => item.id === process.id);
     if (view && !developmentIsActive(view) && view.status !== "idle" && !view.resultMessageId && text.trim()) {
-      const result = await this.d.store.appendNeutralMessage(ctx, process.conversationId, "assistant", text);
+      const appendAssistant = async (content: string) => {
+        try { return await this.d.store.appendNeutralMessage(ctx, process.conversationId!, "assistant", content); }
+        catch { if (!process.businessId) throw new Error("Could not append message"); return this.d.store.appendMessage(ctx, process.businessId, process.conversationId!, "assistant", content); }
+      };
+      const result = await appendAssistant(text);
       await this.patch(ctx, process.id, { resultMessageId: result.id });
     }
     await saveChatProjectCard(this.d.store, ctx, process.conversationId, messageId, {
@@ -277,8 +325,10 @@ export class ChatDevelopmentService {
     const ensureActive = () => { if (controller.signal.aborted) throw new DevelopmentError("Stopped by request"); };
     try {
       await this.patch(ctx, process.id, { status: "preparing" });
-      process.conversationId = (await this.d.store.createNeutralConversation(ctx, process.name)).id;
-      await this.d.store.appendNeutralMessage(ctx, process.conversationId, "user", message);
+      if (!process.conversationId) {
+        process.conversationId = (await this.d.store.createNeutralConversation(ctx, process.name)).id;
+        await this.d.store.appendNeutralMessage(ctx, process.conversationId, "user", message);
+      }
       await this.patch(ctx, process.id, { conversationId: process.conversationId });
       await this.report(ctx, process.id, "project", "Preparing project workspace", { tool: "code.workspace", status: "running", agentId: "System" });
       ensureActive();
@@ -431,7 +481,11 @@ export class ChatDevelopmentService {
     if (!process.projectId) throw new DevelopmentError("The project is still being prepared.", 409);
     const project = await this.d.projects.get(ctx, process.companyId, process.projectId);
     let changed = false;
-    if (!process.conversationId || !await this.d.store.getNeutralConversation(ctx, process.conversationId).catch(() => null)) {
+    const hasConversation = async (convId: string) => {
+      try { await this.d.store.getNeutralConversation(ctx, convId); return true; }
+      catch { return process.businessId ? !!await this.d.store.getConversation(ctx, process.businessId, convId).catch(() => null) : false; }
+    };
+    if (!process.conversationId || !await hasConversation(process.conversationId)) {
       process.conversationId = (await this.d.store.createNeutralConversation(ctx, project.name)).id;
       await this.patch(ctx, process.id, { conversationId: process.conversationId, cardMessageId: undefined, resultMessageId: undefined });
       await this.card(ctx, process, project, "Project development restored from Websites."); changed = true;
