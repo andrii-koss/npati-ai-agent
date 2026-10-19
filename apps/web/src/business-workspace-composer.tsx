@@ -29,6 +29,8 @@ export interface BusinessChatComposerProps {
   t: (key: string, options?: any) => string;
   setNotice: (notice: string) => void;
   streamControllerRef: React.MutableRefObject<{ controller: AbortController; streamId: string } | null>;
+  developmentActive?: boolean;
+  onStopDevelopment?: () => void | Promise<void>;
 }
 
 export function BusinessChatComposer({
@@ -55,6 +57,8 @@ export function BusinessChatComposer({
   t,
   setNotice,
   streamControllerRef,
+  developmentActive = false,
+  onStopDevelopment,
 }: BusinessChatComposerProps) {
   return (
     <form className="onboarding-live-composer" onSubmit={(event) => void submit(event)}>
@@ -105,11 +109,15 @@ export function BusinessChatComposer({
         placeholder={business ? t("chat.businessPlaceholder") : t("chat.placeholder")}
       />
       <div>
-        {sending && (!codeInbox.active || !input.trim()) ? (
+        {(sending || developmentActive) ? (
           <button
             type="button"
             className="chat-stop-btn"
             onClick={() => {
+              if (developmentActive && onStopDevelopment) {
+                void onStopDevelopment();
+                return;
+              }
               const active = streamControllerRef.current;
               if (active) {
                 void cancelChatStream(active.streamId).finally(() =>

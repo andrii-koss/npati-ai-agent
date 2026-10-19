@@ -146,7 +146,7 @@ describe("chat development lifecycle with the real store, queue and executor", (
     expect(new Set(live.map(p => p.sessionId)).size).toBe(4);
     expect(live.every(p => p.status === "running")).toBe(true);
     const parent = await f.store.getNeutralConversation(owner, result.conversationId!);
-    expect(parent.messages.map(m => m.role)).toEqual(["user", "assistant"]);
+    expect(parent.messages.map(m => m.role)).toEqual(["user"]);
     for (const run of f.controls.values()) { expect(run.input.verificationTools).toEqual(["build"]); expect(run.input.forceVerification).toBe(true); expect(run.input.prompt).toContain("ONLY this project"); }
     live.forEach((p, i) => f.finish(p.projectId!, i !== 1));
     await vi.waitFor(async () => expect((await f.service.list(owner)).map(p => p.status)).toEqual(["completed", "failed", "completed", "completed"]));
@@ -300,7 +300,7 @@ describe("chat development lifecycle with the real store, queue and executor", (
     const finishedChat = await f.store.getNeutralConversation(owner, process.conversationId!);
     expect(finishedChat.messages.map(item=>item.role)).toContain("user");
     expect(finishedChat.messages.at(-1)?.content).toBe("A2A_TOKEN_QUOTA_EXCEEDED");
-    expect((await f.store.getNeutralConversation(owner, result.conversationId!)).messages.length).toBeGreaterThanOrEqual(2);
+    expect((await f.store.getNeutralConversation(owner, result.conversationId!)).messages.length).toBeGreaterThanOrEqual(1);
   });
   it("reports a template build failure without spending model tokens", async () => {
     const f = await fixture(); f.preview.buildProject.mockRejectedValueOnce(new Error("Dependency install failed"));
@@ -345,4 +345,68 @@ describe("chat development lifecycle with the real store, queue and executor", (
     expect(hide.statusCode).toBe(200);
     expect(await f.projects.list(owner, f.company.id)).toHaveLength(1);
   });
+});
+
+
+describe("development acknowledgements and restart recovery", () => {
+  it("starts work without a separate AI intro request or a canned assistant message", async () => {
+    const f = await fixture();
+    const chat = vi.fn(() => new Promise<never>(() => {}));
+    const service = new ChatDevelopmentService({ ...f.ports, engine: { chat } as never, getAIContext: async () => ({ model: "test" }) });
+    shutdown.push(() => service.close());
+    const result = await service.start(owner, { companyId: f.company.id, message: "Create a Next.js store", requestId: "no-intro" });
+    await vi.waitFor(() => expect(f.controls.size).toBe(1));
+    expect(chat).not.toHaveBeenCalled();
+    expect((await f.store.getNeutralConversation(owner, result.conversationId)).messages.map(item => item.role)).toEqual(["user"]);
+    expect([...f.controls.values()][0]!.input.requireImplementation).toBe(true);
+    expect((await service.list(owner))[0]!.progress!.find(item => item.stage === "dependencies")?.status).toBe("completed");
+  });
+  it("marks an expired running lease as interrupted after the API restarts", async () => {
+    const f = await fixture(); await f.start("Create a Next.js website");
+    await vi.waitFor(() => expect(f.controls.size).toBe(1));
+    const process = (await f.service.list(owner))[0]!;
+    await f.store.createCodeRunState({ runId: process.runId!, workspaceId: owner.workspaceId, companyId: f.company.id, projectId: process.projectId!, sessionId: process.sessionId!, owner: "old-api", leaseMs: 1000, now: new Date(Date.now() - 10000) });
+    const reader = new ChatDevelopmentService(f.ports);
+    expect((await reader.list(owner))[0]!.status).toBe("running");
+    // A fresh API has no live registry entry for the old process.
+    const restarted = new ChatDevelopmentService({ ...f.ports, background: new CodeBackgroundRunRegistry() });
+    expect((await restarted.list(owner))[0]!.status).toBe("interrupted");
+    await reader.close(); await restarted.close();
+  });
+});
+
+it("coalesces bursts of live updates into one pending SSE snapshot",async()=>{
+ const f=await fixture(),app=Fastify();shutdown.push(()=>app.close());
+ const service=registerChatDevelopmentRoutes(app,{...f.ports,auth:{authenticate:async()=>owner}});
+ const actualList=service.list.bind(service);
+ type Snapshot=Awaited<ReturnType<ChatDevelopmentService["list"]>>;
+ let resolveSnapshot!:(value:Snapshot)=>void,calls=0;
+ const pending=new Promise<Snapshot>(resolve=>{resolveSnapshot=resolve;});
+ vi.spyOn(service,"list").mockImplementation(async()=>++calls<=2?[]:pending);
+ const base=await app.listen({port:0,host:"127.0.0.1"}),controller=new AbortController();
+ const response=await fetch(base+"/chat/development/processes/stream",{signal:controller.signal});
+ const reader=response.body!.getReader(),decode=new TextDecoder();
+ try{
+  expect(decode.decode((await reader.read()).value)).toContain("event: change");
+  const started=await service.start(owner,{companyId:f.company.id,message:"Create a Next.js website",requestId:"sse-burst"});
+  await vi.waitFor(()=>expect(f.controls.size).toBe(1));
+  const callback=[...f.controls.values()][0]!.input.onActivity!;
+  for(let n=0;n<8;n++)await callback({id:"burst-"+n,stage:"tool",title:"Operation",at:new Date().toISOString(),status:"completed"});
+  expect(calls).toBe(3);
+  resolveSnapshot(await actualList(owner));
+  const frame=decode.decode((await reader.read()).value);
+  const data=JSON.parse(frame.split("\n").find(line=>line.startsWith("data: "))!.slice(6));
+  expect(data.processes[0].id).toBe(started.processes[0]!.id);
+ }finally{resolveSnapshot([]);controller.abort();await reader.cancel().catch(()=>{});}
+});
+
+it("refreshes completed chat preview URLs from the current project after a preview restart", async () => {
+  const f = await fixture(); await f.start("Create a Next.js website");
+  await vi.waitFor(() => expect(f.controls.size).toBe(1));
+  const process = (await f.service.list(owner))[0]!; f.finish(process.projectId!);
+  await vi.waitFor(async () => expect((await f.service.list(owner))[0]?.status).toBe("completed"));
+  await f.projects.updatePreview(owner, f.company.id, process.projectId!, { previewUrl: "https://preview.test/restarted", lastBuildStatus: "ready" });
+  expect((await f.service.list(owner))[0]).toMatchObject({status:"completed",previewUrl:"https://preview.test/restarted"});
+  await f.projects.updatePreview(owner, f.company.id, process.projectId!, { previewUrl: null });
+  expect((await f.service.list(owner))[0]?.previewUrl).toBeUndefined();
 });

@@ -28,30 +28,44 @@ export function registerChatDevelopmentRoutes(app: FastifyInstance, deps: Develo
       const initial = await service.list(ctx);
       reply.hijack();
       reply.raw.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
-      let closed = false, signature = "", timer: ReturnType<typeof setTimeout>;
-      const close = () => { if (closed) return; closed = true; clearTimeout(timer); streams.delete(close); reply.raw.end(); };
-      streams.add(close); reply.raw.on("close", close);
+      let closed = false, polling = false, pending = false, signature = "", timer: ReturnType<typeof setTimeout>;
       const publish = (processes: Awaited<ReturnType<typeof service.list>>) => {
         const next = JSON.stringify(processes);
-        if (signature !== next) { signature = next; reply.raw.write("event: change\ndata: " + JSON.stringify({ processes }) + "\n\n"); }
+        if (signature !== next) { signature = next; reply.raw.write('event: change\ndata: {"processes":' + next + "}\n\n"); }
         else reply.raw.write(": heartbeat\n\n");
       };
       const poll = async () => {
         if (closed) return;
-        if (reply.raw.writableNeedDrain) { timer = setTimeout(poll, 3000); return; }
-        try { const processes = await service.list(ctx); if (!closed) publish(processes); }
-        catch { close(); return; }
-        if (!closed) timer = setTimeout(poll, 3000);
+        if (polling) { pending = true; return; }
+        clearTimeout(timer); polling = true;
+        let delayed = false;
+        try {
+          if (reply.raw.writableNeedDrain) delayed = true;
+          else { const processes = await service.list(ctx); if (!closed) publish(processes); }
+        } catch { close(); }
+        finally {
+          polling = false;
+          if (!closed) { const delay = pending && !delayed ? 0 : 3000; pending = false; timer = setTimeout(poll, delay); }
+        }
       };
+      const unsub = service.onUpdate(() => {
+        if (!closed) {
+          clearTimeout(timer);
+          void poll();
+        }
+      });
+      const close = () => { if (closed) return; closed = true; unsub(); clearTimeout(timer); streams.delete(close); reply.raw.end(); };
+      streams.add(close); reply.raw.on("close", close);
       publish(initial); timer = setTimeout(poll, 3000);
     } catch (error) { return fail(reply, error); }
   });
   app.get("/chat/development/processes", async (request, reply) => {
     try { return { processes: await service.list(await deps.auth.authenticate(request)) }; } catch (error) { return fail(reply, error); }
   });
-  app.post<{ Body: { companyId: string; message: string; conversationId?: string; businessId?: string; requestId: string } }>("/chat/development/processes",
+  app.post<{ Body: { companyId: string; message: string; targets?: import("@npati/shared").DevelopmentTarget[]; conversationId?: string; businessId?: string; requestId: string } }>("/chat/development/processes",
     { schema: { body: { type: "object", additionalProperties: false, required: ["companyId", "message", "requestId"], properties: {
       companyId: { type: "string", minLength: 1, maxLength: 200 }, message: { type: "string", minLength: 1, maxLength: 32000 }, requestId: { type: "string", minLength: 1, maxLength: 100 },
+      targets: { type: "array", items: { type: "object" } },
       conversationId: { type: "string", minLength: 1, maxLength: 200 }, businessId: { type: "string", minLength: 1, maxLength: 200 },
     } } } }, async (request, reply) => {
       try { return await service.start(await deps.auth.authenticate(request), request.body); } catch (error) { return fail(reply, error); }

@@ -406,8 +406,10 @@ export class ProjectSandboxService {
       if (!startProcess && !ready.mount) await this.download(ctx, ready.project, ready.scope, sandboxId, originals, secrets);
       const commandKind = decision.reason === "Install dependencies inside sandbox" ? "install" : normalized.args.includes("build") ? "build" : startProcess ? "preview" : "command";
       const failureCode = raw.status === "timed_out" ? "command_timeout" : raw.exitCode === 127 ? "command_not_found" : commandKind === "install" ? "install_failed" : commandKind === "build" ? "build_failed" : commandKind === "preview" ? "preview_start_failed" : "command_failed";
-      const detail = (raw.stderr || raw.stdout || "").trim();
-      const failureMessage = raw.status === "timed_out" ? "Sandbox command timed out" : commandKind === "install" ? `Dependency install failed${detail ? `: ${detail.slice(-300)}` : ""}` : commandKind === "build" ? `Build command failed${detail ? `: ${detail.slice(-300)}` : ""}` : commandKind === "preview" ? `Preview server failed to start${detail ? `: ${detail.slice(-300)}` : ""}` : `Sandbox command failed${detail ? `: ${detail.slice(-300)}` : ""}`;
+      const detailLimit = commandKind === "build" ? 6000 : 1200;
+      const diagnostic = redactTerminalText([raw.stdout, raw.stderr].filter(Boolean).join("\n"), secrets).replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "").trim();
+      const detail = diagnostic.length > detailLimit ? diagnostic.slice(0, detailLimit / 2) + "\n[output truncated]\n" + diagnostic.slice(-detailLimit / 2) : diagnostic;
+      const failureMessage = raw.status === "timed_out" ? "Sandbox command timed out" : commandKind === "install" ? `Dependency install failed${detail ? `: ${detail}` : ""}` : commandKind === "build" ? `Build command failed${detail ? `: ${detail}` : ""}` : commandKind === "preview" ? `Preview server failed to start${detail ? `: ${detail}` : ""}` : `Sandbox command failed${detail ? `: ${detail}` : ""}`;
       terminalEventAttempted = true;
       await this.events.append(ctx, companyId, request.projectId, { runId: request.runId, agentId: request.agentId, sandboxId, processId: raw.processId, commandSummary: decision.requiresApproval ? "Approved command (" + createHash("sha256").update(command).digest("hex").slice(0, 12) + ")" : redactTerminalText(command, secrets), riskLevel: decision.level, status: startProcess ? "running" : raw.status, exitCode: raw.exitCode, output, durationMs: raw.durationMs, errorCode: raw.status === "completed" ? undefined : failureCode });
       if (raw.status !== "completed" && !startProcess) {
@@ -667,11 +669,12 @@ export class ProjectSandboxService {
     if (!project.sandboxId) return;
     const history = await this.events.list(ctx, companyId, projectId);
     const approvedSummary = "Approved command (" + createHash("sha256").update(command).digest("hex").slice(0, 12) + ")";
-    const previous = history.find(event => event.processId && event.sandboxId === project.sandboxId && (event.commandSummary === command || event.commandSummary === approvedSummary) && event.status === "running");
-    if (!previous?.processId) return;
-    const latest = history.find(event => event.processId === previous.processId);
-    if (latest?.status === "stopped") return;
-    await this.process(ctx, companyId, { projectId, processId: previous.processId, action: "stop", agentId: "system" });
+    const candidates = history.filter(event => event.processId && event.sandboxId === project.sandboxId && (event.commandSummary === command || event.commandSummary === approvedSummary) && event.status === "running");
+    for (const processId of new Set(candidates.map(event => event.processId!))) {
+      const latest = history.find(event => event.processId === processId);
+      if (latest?.status !== "running") continue;
+      await this.process(ctx, companyId, { projectId, processId, action: "stop", agentId: "system" });
+    }
   }
 
   async proxyPreview(scope: SandboxScope, sandboxId: string, options: import("./sandbox-provider").PreviewProxyRequest) {

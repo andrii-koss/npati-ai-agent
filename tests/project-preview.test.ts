@@ -176,6 +176,35 @@ describe("Step 4 — Project Preview & Changes", () => {
     await preview.buildProject(owner, company.id, project.id);
     expect(execute.mock.calls.map(call => call[2].command)).toEqual(["npm install", "npm run build"]);
   });
+  it("serves verified Next.js builds and restores them without switching back to dev", async () => {
+    const { preview, workspace, projects, company, project } = await fixture();
+    await workspace.createFile(owner, company.id, project.id, "package.json", JSON.stringify({ scripts: { dev: "next dev" }, dependencies: { next: "14.2.35" } }));
+    expect((await preview.startPreview(owner, company.id, project.id)).command).toBe("npm run dev");
+    expect((await projects.get(owner, company.id, project.id)).lastBuildStatus).not.toBe("ready");
+    const built = await preview.startPreview(owner, company.id, project.id, { verifiedBuild: true });
+    expect(built.command).toBe("npx next start --hostname 0.0.0.0 --port 3000");
+    const manual = await preview.startPreview(owner, company.id, project.id);
+    expect(manual.command).toBe("npx next start --hostname 0.0.0.0 --port 3000");
+    expect((await preview.startPreview(owner, company.id, project.id, { command: "npm run dev" })).command).toBe("npm run dev");
+  });
+  it("compiles style edits in development without reinstalling unchanged dependencies",async()=>{
+    const {preview,workspace,projects,provider,company,project}=await fixture();
+    await workspace.createFile(owner,company.id,project.id,"package.json",JSON.stringify({scripts:{dev:"next dev"},dependencies:{next:"14.2.35"}}));
+    await projects.updatePreview(owner,company.id,project.id,{lastBuildStatus:"ready"});
+    expect((await preview.startPreview(owner,company.id,project.id,{verifiedBuild:false})).command).toBe("npm run dev");
+    expect(provider.calls.some(call=>/^exec:.*(?:install|ci)/.test(call))).toBe(false);
+    expect((await projects.get(owner,company.id,project.id)).lastBuildStatus).not.toBe("ready");
+  });
+  it("stops a recorded production server when switching to CSS development Preview after restart",async()=>{
+    const {preview,sandbox,workspace,projects,store,provider,company,project}=await fixture();
+    await workspace.createFile(owner,company.id,project.id,"package.json",JSON.stringify({scripts:{dev:"next dev"},dependencies:{next:"14.2.35"}}));
+    vi.spyOn(provider,"startProcess").mockImplementation(async(_scope,_id,command)=>{provider.calls.push("process:"+command);return {...commandResult("running"),processId:"44444444-4444-4444-8444-444444444444"};});
+    await preview.startPreview(owner,company.id,project.id,{verifiedBuild:true});
+    const restored=new ProjectPreviewService(projects,store,workspace,sandbox,"test-preview-secret-key-32chars!");
+    const count=provider.calls.length;
+    await restored.startPreview(owner,company.id,project.id,{verifiedBuild:false});
+    const calls=provider.calls.slice(count);expect(calls.indexOf("stopProcess")).toBeGreaterThanOrEqual(0);expect(calls.indexOf("stopProcess")).toBeLessThan(calls.findIndex(call=>call.startsWith("process:")));
+  });
   it("waits for HTTP readiness before publishing the preview", async () => {
     const { preview, sandbox, workspace, company, project } = await fixture();
     await workspace.createFile(owner, company.id, project.id, "index.html", "Ready");
@@ -215,6 +244,23 @@ describe("Step 4 — Project Preview & Changes", () => {
     const calls = provider.calls.slice(count);
     expect(calls.indexOf("stopProcess")).toBeGreaterThanOrEqual(0);
     expect(calls.indexOf("stopProcess")).toBeLessThan(calls.findIndex(call => call.startsWith("process:")));
+  });
+  it("stops the worker listener when the API retains an older preview session", async () => {
+    const { preview, sandbox, workspace, provider, projects, store, company, project } = await fixture();
+    const startProcess = provider.startProcess.bind(provider);
+    let sequence = 0;
+    vi.spyOn(provider, "startProcess").mockImplementation(async (...args) => ({
+      ...await startProcess(...args), status: "running", processId: "44444444-4444-4444-8444-" + String(++sequence).padStart(12, "0"),
+    }));
+    await workspace.createFile(owner, company.id, project.id, "index.html", "Preview");
+    await preview.startPreview(owner, company.id, project.id);
+    const worker = new ProjectPreviewService(projects, store, workspace, sandbox, "test-preview-secret-key-32chars!");
+    await worker.startPreview(owner, company.id, project.id);
+    const count = provider.calls.length;
+    await preview.startPreview(owner, company.id, project.id);
+    const calls = provider.calls.slice(count);
+    const start = calls.findIndex(call => call.startsWith("process:"));
+    expect(calls.slice(0, start).filter(call => call === "stopProcess")).toHaveLength(2);
   });
   describe("1. Framework & dev command & port detection", () => {
     it("detects Next.js with npm", async () => {
@@ -688,4 +734,17 @@ describe("Step 4 — Project Preview & Changes", () => {
       expect(changes.changes[0]?.status).toBe("added");
     });
   });
+});
+
+it("stops an older recorded preview even when a newer matching preview is already stopped", async () => {
+ const {preview,sandbox,workspace,projects,events,company,project}=await fixture();
+ await workspace.createFile(owner,company.id,project.id,"index.html","Ready");
+ const started=await preview.startPreview(owner,company.id,project.id);
+ const saved=await projects.get(owner,company.id,project.id);
+ const processId="55555555-5555-4555-8555-555555555555";
+ for(const status of ["running","stopped"] as const)await events.append(owner,company.id,project.id,{sandboxId:saved.sandboxId!,processId,commandSummary:started.command,riskLevel:"safe",status,exitCode:status==="running"?null:0,output:"",durationMs:0});
+ const process=vi.spyOn(sandbox,"process").mockResolvedValue(commandResult("stopped"));
+ await sandbox.stopRecordedPreview(owner,company.id,project.id,started.command);
+ expect(process).toHaveBeenCalledTimes(1);
+ expect(process.mock.calls[0]![2]).toMatchObject({action:"stop",processId:"44444444-4444-4444-8444-444444444444"});
 });

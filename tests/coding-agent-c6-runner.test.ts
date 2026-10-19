@@ -40,6 +40,7 @@ function session(overrides: Partial<CodeSession> = {}): CodeSession {
 }
 
 const TOOLS: CodeRunToolDescriptor[] = [
+  { name: "code.audit.read", version: 1, status: "active", description: "read administrative audit", write: false },
   { name: "code.fs.read", version: 1, status: "active", description: "read a file", write: false },
   { name: "code.fs.edit", version: 1, status: "active", description: "edit a file", write: true },
   { name: "code.shell.exec", version: 1, status: "active", description: "run a command", write: false },
@@ -721,4 +722,120 @@ describe("security-gate: C1a pinned manifest in the real runner", () => {
     expect(result).toMatchObject({ status: "failed", reason: "refused", code: "unknown_tool_manifest" });
     expect(harness.engineCalls).toHaveLength(0);
   });
+});
+
+
+describe("new project implementation progress", () => {
+  it("guides implementation while keeping read tools available throughout the run", async () => {
+    let changed = false;
+    const harness = createHarness({
+      script: [
+        ...[1, 2, 3].map(i => ({ content: "Inspecting", toolCalls: [nativeCall("code.fs.read", { path: "app/page.tsx" }, "read-" + i)] })),
+        { content: "Implementing", toolCalls: [nativeCall("code.fs.edit", { path: "app/page.tsx" }, "write-page")] },
+        ...[4, 5, 6].map(i => ({ content: "Inspecting again", toolCalls: [nativeCall("code.fs.read", { path: "app/section" + i + ".tsx" }, "read-" + i)] })),
+        { content: "Implementing checkout", toolCalls: [nativeCall("code.fs.edit", { path: "app/checkout/page.tsx" }, "write-checkout")] },
+        { content: "Implemented the storefront" },
+      ],
+      toolResult: tool => { if (tool === "code.fs.edit") changed = true; return { ok: true, tool, toolVersion: 1, schemaVersion: 1, result: {}, truncated: false, durationMs: 1 }; },
+      turnSummary: () => ({ files: changed ? 1 : 0, linesAdded: changed ? 20 : 0, linesRemoved: 0, changes: changed ? [{ path: "app/page.tsx", tool: "code.fs.edit" }] : [] }),
+    });
+    const result = await harness.run({ requireImplementation: true, verificationTools: [] });
+    expect(result.status).toBe("completed");
+    expect(harness.engineCalls[0]!.tools?.some(tool => tool.function.name === "code.audit.read")).toBe(false);
+    expect(harness.engineCalls[2]!.tools?.some(tool => tool.function.name === "code.fs.read")).toBe(true);
+    expect(harness.engineCalls[3]!.tools?.some(tool => tool.function.name === "code.fs.read")).toBe(true);
+    expect(harness.engineCalls[3]!.tools?.some(tool => tool.function.name === "code.fs.edit")).toBe(true);
+    expect(harness.engineCalls[3]!.toolChoice).toBe("auto");
+    expect(harness.engineCalls[4]!.tools?.some(tool => tool.function.name === "code.fs.read")).toBe(true);
+    expect(harness.engineCalls[7]!.tools?.some(tool => tool.function.name === "code.fs.read")).toBe(true);
+    expect(harness.engineCalls[8]!.messages.filter(message => message.role === "system" && String(message.content).startsWith("Current implementation progress (runtime facts): "))).toHaveLength(1);
+    expect(harness.engineCalls[8]!.messages.at(-1)?.content).toContain("app/page.tsx");
+    expect(harness.engineCalls[8]!.tools?.some(tool => tool.function.name === "code.fs.read")).toBe(true);
+    expect(result.summary.filesChanged).toContain("app/page.tsx");
+  });
+  it("does not verify or publish an unchanged template when the model only acknowledges creation", async () => {
+    const harness = createHarness({ script: [{ content: "Starting" }, { content: "Done" }, { content: "Done" }] });
+    const result = await harness.run({ requireImplementation: true, forceVerification: true, verificationTools: ["build"] });
+    expect(result.status).toBe("failed");
+    expect(result.message).toContain("No source files changed");
+    expect(harness.engineCalls).toHaveLength(3);
+    expect(harness.invocations).toHaveLength(0);
+  });
+  it("preserves read-only requests even when creation is mistakenly requested", async () => {
+    const harness = createHarness({ script: [{ content: "Analysis complete" }] });
+    expect((await harness.run({ requireImplementation: true, readOnlyIntent: true, verificationTools: [] })).status).toBe("completed");
+  });
+});
+
+it("executes registered reads after repeated inspection instead of reporting unknown_tool", async () => {
+  let changed = false;
+  const harness = createHarness({ script: [
+    ...[1,2,3,4].map(i=>({content:"Inspecting",toolCalls:i===4 ? [1,2,3,4].map(j=>nativeCall("code.fs.read",{path:"app/blocked"+j+".tsx"},"blocked-"+j)) : [nativeCall("code.fs.read",{path:"app/file"+i+".tsx"},"inspect-"+i)]})),
+    {content:"Implementing",toolCalls:[nativeCall("code.fs.edit",{path:"app/page.tsx"},"implement")]},
+    {content:"Done"},
+  ], toolResult: tool=>{if(tool==="code.fs.edit")changed=true;return {ok:true,tool,toolVersion:1,schemaVersion:1,result:{},truncated:false,durationMs:1};},
+  turnSummary:()=>({files:changed?1:0,linesAdded:changed?10:0,linesRemoved:0,changes:changed?[{path:"app/page.tsx",tool:"code.fs.edit"}]:[]}) });
+  const result=await harness.run({requireImplementation:true,verificationTools:[]});
+  expect(result.status).toBe("completed");
+  expect(harness.invocations.filter(call=>call.tool==="code.fs.read")).toHaveLength(7);
+  expect(harness.engineCalls[4]!.toolChoice).toBe("auto");
+  expect(harness.engineCalls[4]!.messages.some(message=>message.role==="tool" && typeof message.content === "string" && message.content.includes("unknown_tool"))).toBe(false);
+});
+
+it("resets correction attempts after a successful tool recovery across implementation phases", async () => {
+  let changed = false;
+  const script: ChatResult[] = [];
+  for (let phase=1;phase<=3;phase++) {
+    for (let read=1;read<=4;read++) script.push({content:"Inspect",toolCalls:[nativeCall("code.fs.read",{path:"app/phase"+phase+"-"+read+".tsx"},"phase-"+phase+"-"+read)]});
+    script.push({content:"Implement",toolCalls:[nativeCall("code.fs.edit",{path:"app/page"+phase+".tsx"},"write-"+phase)]});
+  }
+  script.push({content:"Done"});
+  const harness=createHarness({script,limits:{maxStepsPerRun:25},toolResult:tool=>{if(tool==="code.fs.edit")changed=true;return {ok:true,tool,toolVersion:1,schemaVersion:1,result:{},truncated:false,durationMs:1};},turnSummary:()=>({files:changed?1:0,linesAdded:changed?10:0,linesRemoved:0,changes:changed?[{path:"app/page.tsx",tool:"code.fs.edit"}]:[]})});
+  const result=await harness.run({requireImplementation:true,verificationTools:[]});
+  expect(result.status).toBe("completed");
+  expect(harness.invocations.filter(call=>call.tool==="code.fs.read")).toHaveLength(12);
+  expect(harness.invocations.filter(call=>call.tool==="code.fs.edit")).toHaveLength(3);
+});
+
+function expectSettledToolBatches(messages: CodingAgentChatRequest["messages"]) {
+  const pending=new Set<string>();
+  for(const message of messages){
+    if(message.role==="tool"){expect(pending.has(message.tool_call_id!)).toBe(true);pending.delete(message.tool_call_id!);continue;}
+    expect(pending.size, "Conversation messages must not split pending tool results").toBe(0);
+    for(const call of message.tool_calls??[])pending.add(call.id);
+  }
+  expect(pending.size).toBe(0);
+}
+it("keeps cycle reminders after every result in the triggering native tool batch",async()=>{
+ const harness=createHarness({script:[
+  ...Array.from({length:6},(_,i)=>({content:"",toolCalls:[nativeCall("code.fs.read",{path:"app/store.css",offset:i*100},"inspect-theme-"+i)]})),
+  {content:"Editing the theme",toolCalls:[nativeCall("code.fs.edit",{path:"app/store.css"},"edit-theme")]},
+  {content:"Theme updated"},
+ ]});
+ const result=await harness.run({verificationTools:[]});expect(result.status).toBe("completed");
+ expect(harness.engineCalls.some(call=>call.messages.some(m=>m.role==="system"&&String(m.content).includes("repeating pattern")))).toBe(true);
+ for(const call of harness.engineCalls)expectSettledToolBatches(call.messages);
+});
+it("keeps zero-diff feedback after both native edit results",async()=>{
+ const harness=createHarness({script:[{content:"Edit",toolCalls:[nativeCall("code.fs.edit",{path:"app/store.css"},"noop-1"),nativeCall("code.fs.edit",{path:"app/store.css"},"noop-2")]},{content:"Done"}],toolResult:tool=>({ok:true,tool,toolVersion:1,schemaVersion:1,result:{data:{path:"app/store.css",linesAdded:0,linesRemoved:0,created:false}},truncated:false,durationMs:1})});
+ await harness.run({verificationTools:[]});for(const call of harness.engineCalls)expectSettledToolBatches(call.messages);
+ expect(harness.engineCalls.at(-1)!.messages.some(m=>m.role==="system"&&String(m.content).includes("0 line changes"))).toBe(true);
+});
+
+it("retains saved edit progress for follow-up requests after a source change",async()=>{
+ let changed=false;const harness=createHarness({script:[{content:"Editing",toolCalls:[nativeCall("code.fs.edit",{path:"app/store.css"},"theme-edit")]},{content:"White theme applied"}],toolResult:tool=>{changed=true;return {ok:true,tool,toolVersion:1,schemaVersion:1,result:{data:{path:"app/store.css"}},truncated:false,durationMs:1};},turnSummary:()=>({files:changed?1:0,linesAdded:changed?1:0,linesRemoved:changed?1:0,changes:changed?[{path:"app/store.css",tool:"code.fs.edit"}]:[]})});
+ expect((await harness.run({verificationTools:[]})).status).toBe("completed");
+ const reminder=harness.engineCalls[1]!.messages.find(m=>m.role==="system"&&String(m.content).startsWith("Current implementation progress (runtime facts): "));
+ expect(reminder?.content).toContain("app/store.css");expect(reminder?.content).toContain("requested change");expect(reminder?.content).not.toContain("missing user-facing pages");
+});
+
+it("keeps the requested response language in the system policy on every tool turn", async () => {
+ const harness=createHarness({script:[{content:"",toolCalls:[nativeCall("code.fs.read",{path:"app/store.css"})]},{content:"Done"}]});
+ await harness.run({responseLanguage:"uk",websiteEdit:true,verificationTools:[]});
+ for(const request of harness.engineCalls){expect(request.messages[0]?.role).toBe("system");expect(request.messages[0]?.content).toContain("Reply entirely in Ukrainian");expect(request.messages[0]?.content).toContain("public progress updates");expect(request.tools?.some(tool=>tool.function.name==="code.audit.read")).toBe(false);expect(request.tools?.some(tool=>tool.function.name==="code.fs.read")).toBe(true);}
+});
+it.each([{path:"app/store.css",creation:false,fast:true},{path:"app/page.tsx",creation:false,fast:false},{path:"app/store.css",creation:true,fast:false}])("uses development compilation only for eligible saved CSS: %j",async({path,creation,fast})=>{
+ let changed=false;const harness=createHarness({script:[{content:"",toolCalls:[nativeCall("code.fs.edit",{path})]},{content:"Done"}],toolResult:tool=>{changed=true;return {ok:true,tool,toolVersion:1,schemaVersion:1,result:{},truncated:false,durationMs:1};},turnSummary:()=>({files:changed?1:0,linesAdded:changed?1:0,linesRemoved:0,changes:changed?[{path,tool:"code.fs.edit"}]:[]})});
+ const result=await harness.run({allowStylePreview:true,requireImplementation:creation,verificationTools:["build"],forceVerification:true});
+ expect(result.summary.stylePreview===true).toBe(fast);expect(harness.invocations.some(call=>call.tool==="code.verify.run")).toBe(!fast);
 });

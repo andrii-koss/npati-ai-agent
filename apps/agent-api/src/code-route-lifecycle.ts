@@ -306,9 +306,9 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
     },
     afterRun: (input, result) => finishCodeChatWebsite(input, result, {
       getProject: (ctx, companyId, projectId) => projectService.get(ctx, companyId, projectId),
-      startPreview: async (ctx, companyId, projectId, signal) => {
+      startPreview: async (ctx, companyId, projectId, signal, options) => {
         await featureFlagService.assertEnabled(ctx, "code.shell", { companyId });
-        return projectPreviewService.startPreview(ctx, companyId, projectId, { signal });
+        return projectPreviewService.startPreview(ctx, companyId, projectId, { signal, verifiedBuild: !options?.development });
       },
       markFailed: (ctx, companyId, projectId) => projectService.updatePreview(ctx, companyId, projectId, { status: "failed", lastBuildStatus: "failed" }),
     }),

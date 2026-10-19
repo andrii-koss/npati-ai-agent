@@ -88,9 +88,9 @@ export async function bootstrapWebsiteData(ctx: AuthContext, project: Project, p
     const products = await migrations.listOwnerRows(ctx, backend, "dev", "products", { limit: 1 });
     if (!products.length) {
       const initialProducts = [
-        { title: "Механічна клавіатура", slug: "mechanical-keyboard", description: "RGB геймерська клавіатура з тактильними перемикачами", price: 2499, is_active: true, image_url: `/api/projects/${project.id}/media/assets/keyboard.svg` },
-        { title: "Бездротова миша", slug: "wireless-mouse", description: "Ергономічна бездротова миша з високою точністю", price: 1299, is_active: true, image_url: `/api/projects/${project.id}/media/assets/mouse.svg` },
-        { title: "Ігрова гарнітура", slug: "gaming-headset", description: "Звукова гарнітура з просторовим аудіо", price: 3199, is_active: true, image_url: `/api/projects/${project.id}/media/assets/headset.svg` },
+        { title: "Механічна клавіатура", slug: "mechanical-keyboard", description: "RGB геймерська клавіатура з тактильними перемикачами", price: 2499, is_active: true, image_url: null },
+        { title: "Бездротова миша", slug: "wireless-mouse", description: "Ергономічна бездротова миша з високою точністю", price: 1299, is_active: true, image_url: null },
+        { title: "Ігрова гарнітура", slug: "gaming-headset", description: "Звукова гарнітура з просторовим аудіо", price: 3199, is_active: true, image_url: null },
       ];
       for (const item of initialProducts) {
         const product = await migrations.createOwnerRow(ctx, backend, "dev", "products", item);

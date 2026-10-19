@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { developmentIsActive, requestsDevelopmentRestore, type DevelopmentProcess, type DevelopmentTarget } from "@npati/shared";
+import { developmentIsActive, requestsDevelopmentRestore, planChatDevelopment, createDevelopmentAssistantIntro, type DevelopmentProcess, type DevelopmentTarget } from "@npati/shared";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "./business-workspace-shared";
 import type { CodeChatSession } from "./code-inbox-client";
@@ -9,14 +9,16 @@ import { developmentCard, hideDevelopmentMessage } from "./chat-development-view
 import { ChatDevelopmentPanel } from "./ChatDevelopmentPanel";
 import { useTranslation } from "./i18n";
 export function useChatDevelopment(options: {
-  companyId?: string | null; conversationId: string | null; businessId?: string; onConversation(id: string): void; onError(message: string): void; onAccepted(message: string): void; onSession(session: CodeChatSession, conversationId: string): void; boundSessionId?: string; busy?: boolean;
+  companyId?: string | null; conversationId: string | null; businessId?: string; onConversation(id: string, preserveActiveTurn?: boolean): void; onError(message: string): void; onAccepted(message: string, intro?: string): void; onSession(session: CodeChatSession, conversationId: string): void; boundSessionId?: string; busy?: boolean;
 }) {
   const navigate = useNavigate(); const [search] = useSearchParams();
   const { language } = useTranslation();
   const queryProjectId = search.get("project") ?? undefined; const root = search.get("developmentRoot");
   const [processes, setProcesses] = useState<DevelopmentProcess[]>([]);
   const currentProcess = processes.find(p => p.conversationId === options.conversationId && (!queryProjectId || p.projectId === queryProjectId))
-    ?? processes.find(p => p.parentConversationId === options.conversationId && (!queryProjectId || p.projectId === queryProjectId));
+    ?? processes.find(p => p.parentConversationId === options.conversationId && (!queryProjectId || p.projectId === queryProjectId))
+    ?? (queryProjectId ? processes.find(p => p.projectId === queryProjectId) : undefined)
+    ?? processes.find(p => developmentIsActive(p));
   const projectId = queryProjectId ?? currentProcess?.projectId;
   const [busyId, setBusyId] = useState<string>();
   const [showAll, setShowAll] = useState(false);
@@ -97,33 +99,28 @@ export function useChatDevelopment(options: {
     finally { if (alive.current) setBusyId(undefined); }
   }
   async function submit(message: string): Promise<boolean> {
-    let targets;
     const restore = requestsDevelopmentRestore(message);
-    if (planning.current || sending.current) return true;
-    planning.current = true;
-    try {
-      targets = restore ? [] : (await api<{ targets: DevelopmentTarget[] }>("/chat/development/plan", {
-        method: "POST", body: JSON.stringify({ message, projectId, companyId: callbacks.current.companyId ?? currentProcess?.companyId ?? undefined,
-          conversationId: callbacks.current.conversationId ?? undefined, businessId: callbacks.current.businessId }),
-      })).targets ?? [];
-    } catch (error) { callbacks.current.onError((error as Error).message); return true; }
-    finally { planning.current = false; }
-    if (!restore && !targets.length) {
-      const current = processes.find(p => p.projectId === projectId && p.conversationId === options.conversationId);
-      if (current && developmentIsActive(current) && !current.progress?.some(event => event.stage === "agent")) {
-        callbacks.current.onError(language === "uk" ? "Триває встановлення заготовки. Дочекайтеся початку роботи агента перед надсиланням змін." : "Template installation is still running. Wait for the coding agent to start before sending changes.");
-        return true;
+    let targets: DevelopmentTarget[] = [];
+    if (!restore) {
+      targets = planChatDevelopment(message, projectId);
+      if (!targets.length) {
+        const current = processes.find(p => p.projectId === projectId && p.conversationId === options.conversationId);
+        if (current && developmentIsActive(current) && !current.progress?.some(event => event.stage === "agent")) {
+          callbacks.current.onError(language === "uk" ? "Триває встановлення заготовки. Дочекайтеся початку роботи агента перед надсиланням змін." : "Template installation is still running. Wait for the coding agent to start before sending changes.");
+          return true;
+        }
+        return false;
       }
-      return false;
     }
     if (sending.current) return true;
     sending.current = true; setSubmitting(true);
+    callbacks.current.onAccepted(message);
     try {
       if (restore) {
         const data = await api<{ processes: DevelopmentProcess[]; conversationId?: string }>("/chat/development/restore", { method: "POST" });
         if (!data.processes.length) { callbacks.current.onError(language === "uk" ? "Проєктів для розробки ще немає. Створіть перший проєкт у чаті." : "No development projects yet. Create your first project in chat."); return true; }
-        setProcesses(data.processes); setShowAll(true); callbacks.current.onAccepted(message);
-        if (data.conversationId) { callbacks.current.onConversation(data.conversationId); navigate("/c/" + data.conversationId); }
+        setProcesses(data.processes); setShowAll(true);
+        if (data.conversationId) { callbacks.current.onConversation(data.conversationId, true); navigate("/c/" + data.conversationId); }
         return true;
       }
       let companyId = callbacks.current.companyId;
@@ -133,15 +130,17 @@ export function useChatDevelopment(options: {
         companyId = data.companies[0]!.id;
       }
       const originalConversationId = callbacks.current.conversationId;
-      const creationConversationId = currentProcess?.parentConversationId ?? originalConversationId;
+      const creationConversationId = originalConversationId ?? currentProcess?.parentConversationId;
       const payload = JSON.stringify([companyId, message, creationConversationId]);
       if (retry.current?.payload !== payload) retry.current = { payload, requestId: crypto.randomUUID() };
-      const data = await api<{ conversationId: string; processes: DevelopmentProcess[] }>("/chat/development/processes", { method: "POST", body: JSON.stringify({ companyId, message,
+      const data = await api<{ conversationId: string; processes: DevelopmentProcess[] }>("/chat/development/processes", { method: "POST", body: JSON.stringify({ companyId, message, targets,
         conversationId: creationConversationId ?? undefined, businessId: callbacks.current.businessId, requestId: retry.current.requestId }) });
-      retry.current = undefined; if (!alive.current) return true; callbacks.current.onAccepted(message);
-      callbacks.current.onConversation(data.conversationId);
-      if (originalConversationId !== data.conversationId) navigate("/c/" + data.conversationId, { replace: !originalConversationId });
-      await refresh();
+      retry.current = undefined; if (!alive.current) return true;
+      setProcesses(data.processes);
+      callbacks.current.onConversation(data.conversationId, true);
+      if (originalConversationId !== data.conversationId) {
+        window.history.replaceState({ ...window.history.state, usr: { neutralChat: true } }, "", "/c/" + data.conversationId);
+      }
       window.dispatchEvent(new Event("npati:conversations-changed"));
       return true;
     } catch (error) { callbacks.current.onError(error instanceof Error ? error.message : "Could not start development"); return true; }
@@ -149,5 +148,25 @@ export function useChatDevelopment(options: {
   }
   const currentRoot = root ?? currentProcess?.parentConversationId ?? options.conversationId;
   const visible = processes.filter(p => p.conversationId !== options.conversationId && (p.parentConversationId === currentRoot || !p.hidden && (showAll || !currentRoot)));
-  return { submit, submitting, project: currentProcess, card: (messages: Parameters<typeof developmentCard>[0], index: number) => developmentCard(messages, index, processes, options.conversationId), hideMessage: (messages: Parameters<typeof hideDevelopmentMessage>[0], index: number) => hideDevelopmentMessage(messages, index, processes), preview: <ChatDevelopmentPreview process={currentProcess} />, timeline: <ChatDevelopmentProgress process={currentProcess} isUk={language === "uk"} />, panel: null };
+  const activeProcess = (currentProcess && developmentIsActive(currentProcess))
+    ? currentProcess
+    : processes.find(developmentIsActive);
+  const isActive = Boolean(activeProcess);
+  return {
+    submit,
+    submitting,
+    stop: async () => {
+      const target = (currentProcess && developmentIsActive(currentProcess)) ? currentProcess : processes.find(developmentIsActive);
+      if (!target) return;
+      setProcesses(current => current.map(p => p.id === target.id ? { ...p, status: "cancelled" } : p));
+      await action(target.id, "stop");
+    },
+    isActive,
+    project: currentProcess,
+    card: (messages: Parameters<typeof developmentCard>[0], index: number) => developmentCard(messages, index, processes, options.conversationId),
+    hideMessage: (messages: Parameters<typeof hideDevelopmentMessage>[0], index: number) => hideDevelopmentMessage(messages, index, processes),
+    preview: <ChatDevelopmentPreview process={currentProcess} />,
+    timeline: <ChatDevelopmentProgress process={currentProcess} isUk={language === "uk"} />,
+    panel: null,
+  };
 }

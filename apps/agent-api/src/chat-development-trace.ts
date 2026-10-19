@@ -1,4 +1,4 @@
-import { sanitizeExecutionTrace, normalizeCodeRunStatus, type DevelopmentProcess, type DevelopmentProcessProgressItem } from "@npati/shared";
+import { sanitizeExecutionTrace, normalizeCodeRunStatus, developmentIsActive, type DevelopmentProcess, type DevelopmentProcessProgressItem } from "@npati/shared";
 import type { AuthContext, WorkspaceStore, CodeRunStateRecord } from "@npati/workspace";
 import { encodeCodeActivityCursor } from "@npati/workspace";
 import type { ProjectTerminalEventsRepository } from "./project-terminal-events";
@@ -56,9 +56,42 @@ function executionIso(value: unknown, fallback: string): string {
 }
 const string = (value: unknown) => typeof value === "string" ? value : undefined;
 /** Projection of existing write-ahead calls, replay results and terminal logs. Writes no execution ledger. */
+type CompletedTrace = { terminal: ProjectTerminalEventsRepository | undefined; promise: Promise<DevelopmentProcessProgressItem[]>; bytes: number };
+const completedTraceCaches = new WeakMap<WorkspaceStore, { entries: Map<string, CompletedTrace>; bytes: number }>();
+async function completedTrace(store: WorkspaceStore, key: string, terminal: ProjectTerminalEventsRepository | undefined, load: () => Promise<DevelopmentProcessProgressItem[]>) {
+  let cache = completedTraceCaches.get(store);
+  if (!cache) { cache = { entries: new Map(), bytes: 0 }; completedTraceCaches.set(store, cache); }
+  const existing = cache.entries.get(key);
+  if (existing && existing.terminal === terminal) { cache.entries.delete(key); cache.entries.set(key, existing); return structuredClone(await existing.promise); }
+  if (existing) { cache.entries.delete(key); cache.bytes -= existing.bytes; }
+  const state = cache;
+  const entry: CompletedTrace = { terminal, bytes: 0, promise: Promise.resolve([]) };
+  entry.promise = load().then(value => {
+    if (state.entries.get(key) === entry) {
+      entry.bytes = Buffer.byteLength(JSON.stringify(value)); state.bytes += entry.bytes;
+      while (state.entries.size > 128 || state.bytes > 32 * 1024 * 1024) {
+        const oldest = state.entries.keys().next().value; if (oldest === undefined) break;
+        state.bytes -= state.entries.get(oldest)!.bytes; state.entries.delete(oldest);
+      }
+    }
+    return value;
+  }).catch(error => { if (state.entries.get(key) === entry) { state.entries.delete(key); state.bytes -= entry.bytes; } throw error; });
+  state.entries.set(key, entry);
+  return structuredClone(await entry.promise);
+}
+/** Reuse immutable terminal transcripts; live runs and changed binding/run revisions stay fresh. */
 export async function developmentTrace(store: WorkspaceStore, ctx: AuthContext, process: DevelopmentProcess, terminal?: ProjectTerminalEventsRepository): Promise<DevelopmentProcessProgressItem[]> {
-  const progress = (process.progress ?? []).map(sanitizeProgress);
   const recordedRun = process.runId ? await store.getCodeRunState(process.companyId, process.runId) : null;
+  const scoped = recordedRun && recordedRun.workspaceId === ctx.workspaceId && recordedRun.projectId === process.projectId && recordedRun.sessionId === process.sessionId;
+  const status = recordedRun ? normalizeCodeRunStatus(recordedRun.status, recordedRun.details?.stopReason) : undefined;
+  const load = () => readDevelopmentTrace(store, ctx, process, recordedRun, terminal);
+  if (!scoped || developmentIsActive(process) || status === "running" || status === "waiting_for_user") return load();
+  const last = process.progress?.at(-1);
+  const key = JSON.stringify([ctx.workspaceId, ctx.userId, process.companyId, process.projectId, process.sessionId, process.runId, recordedRun.revision, status, process.updatedAt, process.status, process.progress?.length, last?.id, last?.status]);
+  return completedTrace(store, key, terminal, load);
+}
+async function readDevelopmentTrace(store: WorkspaceStore, ctx: AuthContext, process: DevelopmentProcess, recordedRun: CodeRunStateRecord | null, terminal?: ProjectTerminalEventsRepository): Promise<DevelopmentProcessProgressItem[]> {
+  const progress = (process.progress ?? []).map(sanitizeProgress);
   const run = recordedRun ? {...recordedRun,status:normalizeCodeRunStatus(recordedRun.status,recordedRun.details?.stopReason)} : null;
   if (run && (run.workspaceId !== ctx.workspaceId || run.projectId !== process.projectId || run.sessionId !== process.sessionId)) return progress;
   const calls = new Map<string, DevelopmentProcessProgressItem>();
@@ -76,7 +109,8 @@ export async function developmentTrace(store: WorkspaceStore, ctx: AuthContext, 
     for(const event of activity) {
       const p=event.payload;
       if(event.kind!=="run_activity" || p.eventType!=="model_call" || !["started","completed","failed"].includes(String(p.phase)) || typeof p.turn!=="number") continue;
-      const id=p.modelPurpose==="self_review" ? `${run.runId}:self-review:${p.turn}`+(typeof p.attempt==="number"?":attempt:"+p.attempt:"") : run.runId+":thinking:"+p.turn+(typeof p.attempt==="number"?":attempt:"+p.attempt:"");
+      const attemptSuffix = typeof p.attempt === "number" && p.attempt > 1 ? ":attempt:" + p.attempt : "";
+      const id=p.modelPurpose==="self_review" ? `${run.runId}:self-review:${p.turn}${attemptSuffix}` : `${run.runId}:thinking:${p.turn}${attemptSuffix}`;
       const existing=progress.find(e=>e.id===id);
       const phase=p.phase;
       if(existing && phase==="started" && ["completed","failed"].includes(existing.status ?? "")) continue;

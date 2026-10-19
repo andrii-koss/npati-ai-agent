@@ -456,3 +456,14 @@ describe("C4 production shell adapter timeout contract", () => {
     expect(raw).toMatchObject({ exitCode: 0, status: "completed", durationMs: 4 });
   });
 });
+
+it("returns the TypeScript build error with useful context instead of only its code-frame tail",async()=>{
+  const {store,company,project,provider,sandbox}=await fixture();
+  const agent=await store.createCompanyAgent(owner,company.id,{name:"Builder",role:"Developer",tools:["project.terminal.exec"]},"build-diagnostic-agent");
+  provider.commandResult={...result("failed",1,"Compiling Next.js application"),stderr:"app/account/page.tsx:70: Type error: Record<string, unknown>[] is not assignable to Order[].\n"+"Source excerpt line\n".repeat(35)+"password=do-not-expose\nNext.js build worker exited with code: 1"};
+  const error=await sandbox.execute(owner,company.id,{projectId:project.id,command:"npm run build",agentId:agent.id}).catch(error=>error);
+  expect(error.code).toBe("build_failed");
+  expect(error.message).toContain("app/account/page.tsx:70: Type error");
+  expect(error.message).toContain("Next.js build worker exited");
+  expect(error.message).not.toContain("do-not-expose");
+});

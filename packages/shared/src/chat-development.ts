@@ -72,3 +72,37 @@ export function planChatDevelopment(message: string, activeProjectId?: string): 
   const targets = kinds.length === 1 ? Array.from({ length: Math.max(1, count) }, () => kinds[0]!) : kinds;
   return targets.map((kind, index) => ({ kind, name: names[kind] + (count > 1 && kinds.length === 1 ? " " + (index + 1) : ""), framework: kind === "mobile_app" ? "Expo" : /html\s*(?:\/|and|\+)\s*css/iu.test(message) ? "HTML/CSS" : "Next.js" }));
 }
+
+export function createDevelopmentAssistantIntro(message: string, targets: DevelopmentTarget[], language?: string): string {
+  const isUk = language === "uk" || /[\u0400-\u04ff]/u.test(message);
+  const targetNames = targets.map(t => {
+    if (isUk) {
+      if (t.name === "Online store") return "Інтернет-магазин";
+      if (t.name === "Company website") return "Вебсайт компанії";
+      if (t.name === "Blog") return "Блог";
+      if (t.name === "Mobile app") return "Мобільний застосунок";
+      if (t.name === "CRM") return "CRM-система";
+    }
+    return t.name;
+  }).join(", ");
+  const framework = targets[0]?.framework ?? "Next.js";
+  if (isUk) {
+    const hasCatalog = /каталог/i.test(message);
+    const hasCart = /кошик/i.test(message);
+    const hasAuth = /авториз|auth/i.test(message);
+    const hasBuild = /build|збірк/i.test(message);
+    const hasPreview = /preview|прев/i.test(message);
+    const features: string[] = [];
+    if (hasCatalog) features.push("каталогом");
+    if (hasCart) features.push("кошиком");
+    if (hasAuth) features.push("авторизацією");
+    let intro = `Прийнято! Створюю проєкт «${targetNames}» на базі ${framework}`;
+    if (features.length > 0) intro += ` з ${features.join(", ")}`;
+    intro += ".";
+    if (hasBuild || hasPreview) intro += " Виконаю збірку та запущу Live Preview.";
+    else intro += " Налаштую структуру та необхідні компоненти.";
+    return intro;
+  }
+  return `Understood! Creating "${targetNames}" based on ${framework}. Implementing requested features and launching Live Preview.`;
+}
+

@@ -1,3 +1,4 @@
+import { chatLanguageInstruction, codingChatResponseInstruction } from "./company-chat-i18n";
 import type { AuthContext, CodeSession } from "@npati/workspace";
 import type { CodeAgentLimits } from "./code-agent-config";
 import type { CodeModelProfile } from "./code-model-profiles";
@@ -108,7 +109,11 @@ export async function buildRunPromptContext(args: BuildPromptContextArgs): Promi
     ...(contextBlocks ? { contextBlocks } : {}),
     ...(skillInstructions ? { skillInstructions } : {}),
     ...(input.agentId ? { agentId: input.agentId } : {}),
-    ...(input.extraSystemPromptLines ? { extraLines: input.extraSystemPromptLines } : {}),
+    extraLines: [
+      ...(input.extraSystemPromptLines ?? []),
+      ...(input.responseLanguage ? [chatLanguageInstruction("", [], input.responseLanguage), codingChatResponseInstruction()] : []),
+      ...(input.websiteEdit ? ["This is an edit to an existing working website. Inspect only the affected selectors, batch the requested changes and finish. Do not audit unrelated components. " + (input.allowStylePreview ? "If saved changes affect only CSS, the system verifies them through Next.js development compilation in Live Preview; a production build is unnecessary. If other files change, production verification remains mandatory." : "Production verification is handled automatically after your edits.")] : []),
+    ],
   });
 
   if (ports.snapshotConfigVersions) {

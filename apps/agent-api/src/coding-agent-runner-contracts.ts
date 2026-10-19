@@ -1,3 +1,4 @@
+import type { CompanyChatLanguage } from "./company-chat-i18n";
 import { sanitizeExecutionTrace } from "@npati/shared";
 import type { DevelopmentProcessProgressItem } from "@npati/shared";
 
@@ -103,6 +104,9 @@ export * from "./coding-agent-runner-ports";
 export * from "./coding-agent-runner-prompt";
 
 export interface CodingAgentRunInput {
+  responseLanguage?: CompanyChatLanguage;
+  websiteEdit?: boolean;
+  allowStylePreview?: boolean;
   onActivity?: (event: DevelopmentProcessProgressItem) => Promise<void>;
 
   initialInboxMessageId?: string;
@@ -131,6 +135,8 @@ export interface CodingAgentRunInput {
   verificationTools?: readonly string[];
 
   forceVerification?: boolean;
+
+  requireImplementation?: boolean;
 
   readOnlyIntent?: boolean;
 
@@ -170,6 +176,7 @@ export interface CodingAgentSubagentScopeInput {
 }
 
 export interface CodingAgentRunSummary {
+  stylePreview?: boolean;
   filesChanged: string[];
   diffStats: { files: number; linesAdded: number; linesRemoved: number };
   checksRun: string[];

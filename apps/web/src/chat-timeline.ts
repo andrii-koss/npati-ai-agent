@@ -42,6 +42,10 @@ export function activitySlots(messages: Message[], value: unknown, conversationI
       index = messages.findIndex(message => Number.isFinite(Date.parse(message.createdAt)) && Date.parse(message.createdAt) > time);
       if (index < 0) index = messages.length;
     } else if (messages.at(-1)?.role === "assistant") index--;
+    if (index === 0 && messages.length > 0) {
+      const assistantIdx = messages.findIndex(m => m.role === "assistant");
+      index = assistantIdx !== -1 ? assistantIdx + 1 : 1;
+    }
     const items = slots.get(index) ?? []; items.push(item); slots.set(index, items);
   }
   for (const items of slots.values()) items.sort((a,b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0) || (a.sequence ?? 0) - (b.sequence ?? 0) || a.id.localeCompare(b.id));
@@ -135,7 +139,21 @@ export function chatTimeline(messages: Message[], value: unknown, conversationId
 }
 
 export function mergeConversationMessages(messages: Message[], extra: Message[] = []) {
-  const merged = new Map(messages.map(message=>[message.id,message]));
-  for (const message of extra) if (message && typeof message.id==="string" && typeof message.content==="string" && ["user","assistant"].includes(message.role)) merged.set(message.id,message);
-  return [...merged.values()].sort((a,b)=>(Date.parse(a.createdAt)||0)-(Date.parse(b.createdAt)||0));
+  const list = [...messages];
+  for (const item of extra) {
+    if (!item || typeof item.id !== "string" || typeof item.content !== "string" || !["user", "assistant"].includes(item.role)) continue;
+    const existingIndex = list.findIndex(m => m.id === item.id);
+    if (existingIndex !== -1) {
+      list[existingIndex] = item;
+      continue;
+    }
+    const duplicateIndex = list.findIndex(m => m.role === item.role && m.content.trim() === item.content.trim());
+    if (duplicateIndex !== -1) {
+      list[duplicateIndex] = item;
+      continue;
+    }
+    list.push(item);
+  }
+  return list.sort((a, b) => (Date.parse(a.createdAt) || 0) - (Date.parse(b.createdAt) || 0));
 }
+

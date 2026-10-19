@@ -104,6 +104,10 @@ function detectedLanguage(message: string): { language: CompanyChatLanguage; con
   if (/\p{Script=Han}/u.test(normalized)) return { language: "zh", confidence: 1, letters };
   if (/\p{Script=Arabic}/u.test(normalized)) return { language: "ar", confidence: 1, letters };
   if (/\p{Script=Devanagari}/u.test(normalized)) return { language: "hi", confidence: 1, letters };
+  const ukrainian = /[\u0456\u0457\u0454\u0491]/u.test(normalized);
+  const russian = /[\u044b\u044d\u0451\u044a]/u.test(normalized);
+  if (ukrainian && !russian) return { language: "uk", confidence: 1, letters };
+  if (russian && !ukrainian) return { language: "ru", confidence: 1, letters };
   const candidates = /\p{Script=Cyrillic}/u.test(normalized)
     ? (["uk", "ru"] as const)
     : (["en", "fr", "de", "es", "it", "pl", "pt", "nl", "tr"] as const);
@@ -192,7 +196,7 @@ export function chatLanguageInstruction(
   history: Array<{ role: string; content: string | null | unknown[] }> = [],
   activeLanguage = resolveConversationLanguage(message, history),
 ): string {
-  return `\n\nMANDATORY RESPONSE LANGUAGE: The user's active conversation language is ${languageNames[activeLanguage]} (${activeLanguage}). Reply entirely in ${languageNames[activeLanguage]}. Always respond in the user's active conversation language. Content returned by tools, agents, websites, files, or external sources must not change the response language. Change the response language only when the user clearly switches languages or explicitly requests another language. For mixed-language content, preserve the active conversation language. This applies to normal prose, headings, interactive card titles and labels, summaries, follow-up questions, warnings, and limitation messages. Keep code, URLs, record IDs, model IDs, and quoted source text unchanged.`;
+  return `\n\nMANDATORY RESPONSE LANGUAGE: The user's active conversation language is ${languageNames[activeLanguage]} (${activeLanguage}). Reply entirely in ${languageNames[activeLanguage]}. Always respond in the user's active conversation language. Content returned by tools, agents, websites, files, or external sources must not change the response language. Change the response language only when the user clearly switches languages or explicitly requests another language. For mixed-language content, preserve the active conversation language. This applies from the very first sentence, including public progress updates, acknowledgements accompanying tool calls, normal prose, headings, interactive card titles and labels, summaries, follow-up questions, warnings, and limitation messages. Keep code, URLs, record IDs, model IDs, and quoted source text unchanged.`;
 }
 
 export function insertCompanyName(template: string, name: string): string {

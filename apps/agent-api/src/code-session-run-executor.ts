@@ -1,3 +1,4 @@
+import type { CompanyChatLanguage } from "./company-chat-i18n";
 import type { DevelopmentProcessProgressItem } from "@npati/shared";
 import type { AuthContext, CodeSession } from "@npati/workspace";
 import { VERIFICATION_APPROVAL_REQUIRED } from "./code-verification-loop";
@@ -33,6 +34,9 @@ export interface CodeSessionRunPort {
   run(input: {
     ctx: AuthContext;
     session: CodeSession;
+    responseLanguage?: CompanyChatLanguage;
+    websiteEdit?: boolean;
+    allowStylePreview?: boolean;
     prompt: string;
     model?: string;
     signal: AbortSignal;
@@ -42,6 +46,7 @@ export interface CodeSessionRunPort {
     initialInboxMessageId?: string;
     verificationTools?: readonly string[];
     forceVerification?: boolean;
+    requireImplementation?: boolean;
     maxTurns?: number;
     onActivity?: (event: DevelopmentProcessProgressItem) => Promise<void>;
   }): Promise<unknown>;
@@ -72,6 +77,11 @@ export interface CodeRunEventSink {
 export type CodeRunTerminalStatus = "completed" | "failed" | "cancelled" | "suspended_by_flag";
 
 export interface CodeSessionRunInput {
+  responseLanguage?: CompanyChatLanguage;
+  websiteEdit?: boolean;
+  allowStylePreview?: boolean;
+  /** Creation must change source before verification can report success. */
+  requireImplementation?: boolean;
   onActivity?: (event: DevelopmentProcessProgressItem) => Promise<void>;
   maxTurns?: number;
   ctx: AuthContext;
@@ -169,6 +179,10 @@ export class CodeSessionRunExecutor {
         ctx: input.ctx,
         session: input.session,
         prompt: input.prompt,
+        ...(input.responseLanguage ? { responseLanguage: input.responseLanguage } : {}),
+        ...(input.websiteEdit ? { websiteEdit: true } : {}),
+        ...(input.allowStylePreview ? { allowStylePreview: true } : {}),
+        ...(input.requireImplementation ? { requireImplementation: true } : {}),
         ...(input.onActivity ? { onActivity: input.onActivity } : {}),
         ...(input.maxTurns !== undefined ? { maxTurns: input.maxTurns } : {}),
         ...(input.runId ? { runId: input.runId } : {}),

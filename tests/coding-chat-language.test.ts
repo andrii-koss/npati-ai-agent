@@ -12,3 +12,11 @@ it("uses the conversation for short confirmations and technical-only requests",(
  const history=[{role:"user",content:"\u0421\u0442\u0432\u043e\u0440\u0438 \u043c\u0435\u043d\u0456 \u0441\u0430\u0439\u0442 \u043c\u0430\u0433\u0430\u0437\u0438\u043d\u0443 \u0442\u0430 \u043f\u043e\u044f\u0441\u043d\u0438 \u0432\u0441\u0456 \u0437\u043c\u0456\u043d\u0438"},{role:"assistant",content:"English technical log npm run build"}];
  for(const message of ["\u0442\u0430\u043a","npm run build","app/page.tsx"])expect(resolveCodingConversationLanguage(message,history)).toBe("uk");
 });
+
+it("keeps Ukrainian for the exact color-edit request with typos",()=>{
+ const message="зміни коліп на сайті постав білий основний колір";
+ const history=[{role:"user",content:"Створи сучасний інтернет-магазин на Next.js з каталогом, кошиком та авторизацією."},{role:"assistant",content:"I'll inspect the styles."}];
+ expect(resolveCodingConversationLanguage(message)).toBe("uk");
+ expect(resolveCodingConversationLanguage(message,history)).toBe("uk");
+ expect(chatLanguageInstruction(message,history,resolveCodingConversationLanguage(message,history))).toContain("Ukrainian (uk)");
+});
