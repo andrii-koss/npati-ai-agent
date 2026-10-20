@@ -440,6 +440,12 @@ const VERSION_FLAG = /^(?:-v|-V|--version|version)$/;
  */
 export function readOnlyUtilityCommand(executable: string, args: string[], raw = ""): { safe: boolean; reason: string } {
   if (/>|>>/.test(raw)) return { safe: false, reason: "the command redirects output, so it is not read-only" };
+  // Node's syntax-only mode parses one project file without executing its contents.
+  if (executable === "node" && args.length === 2 && ["--check", "-c"].includes(args[0]!)
+    && /\.(?:js|mjs|cjs)$/.test(args[1]!)
+    && args[1]!.split("/").every(part => /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(part))) {
+    return { safe: true, reason: "node checks syntax without executing the project file" };
+  }
   if (VERSION_ONLY_EXECUTABLES.has(executable)) {
     return args.length > 0 && args.every((value) => VERSION_FLAG.test(value))
       ? { safe: true, reason: `${executable} only reports its version` }

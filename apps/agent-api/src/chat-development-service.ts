@@ -120,7 +120,7 @@ export class ChatDevelopmentService {
     try { return await task; }
     finally { if (this.projections.get(key) === task) this.projections.delete(key); }
   }
-  private async listOwned(ctx: AuthContext): Promise<DevelopmentProcess[]> {
+  private async listOwned(ctx: AuthContext, includeTrace = true): Promise<DevelopmentProcess[]> {
     const items = await this.entries(ctx);
     const companyIds = [...new Set(items.map(p => p.companyId))];
     const accessible = new Set((await Promise.all(companyIds.map(async companyId => {
@@ -130,19 +130,19 @@ export class ChatDevelopmentService {
     const runs = new Map(await Promise.all(companies.map(async companyId => {
       return [companyId, await this.d.store.listCodeRunStates({ companyId, limit: 200 })] as const;
     })));
-    const inboxEnabled = new Map(await Promise.all(companies.map(async companyId => [companyId, this.d.inbox ? await this.d.inbox.isEnabled(ctx, companyId) : false] as const)));
+    const inboxEnabled = includeTrace ? new Map(await Promise.all(companies.map(async companyId => [companyId, this.d.inbox ? await this.d.inbox.isEnabled(ctx, companyId) : false] as const))) : new Map<string, boolean>();
     const views = await Promise.all(items.filter(p => accessible.has(p.companyId)).map(async ({ requestId: _requestId, ...stored }): Promise<DevelopmentProcess | null> => {
       try {
       const project = stored.projectId ? await this.d.projects.get(ctx, stored.companyId, stored.projectId) : null;
       const traceRuns = selectDevelopmentTraceRuns(runs.get(stored.companyId) ?? [], ctx, stored);
       const latestRun = traceRuns.roots.sort((a, b) => (executionTimestamp(b.startedAt) ?? 0) - (executionTimestamp(a.startedAt) ?? 0))[0];
       const traceProcess = latestRun ? { ...stored, runId: latestRun.runId, detail: latestRun.runId === stored.runId ? stored.detail : undefined } : stored;
-      const progress = await developmentTrace(this.d.store, ctx, traceProcess, this.d.terminalEvents);
-      const history = await Promise.all([...traceRuns.roots, ...traceRuns.children].filter(run => run.runId !== traceProcess.runId).map(run =>
-        developmentTrace(this.d.store, ctx, { ...stored, progress: (stored.progress ?? []).filter(event => event.runId === run.runId), runId: run.runId, sessionId: run.sessionId }, this.d.terminalEvents)));
+      const progress = includeTrace ? await developmentTrace(this.d.store, ctx, traceProcess, this.d.terminalEvents) : stored.progress ?? [];
+      const history = includeTrace ? await Promise.all([...traceRuns.roots, ...traceRuns.children].filter(run => run.runId !== traceProcess.runId).map(run =>
+        developmentTrace(this.d.store, ctx, { ...stored, progress: (stored.progress ?? []).filter(event => event.runId === run.runId), runId: run.runId, sessionId: run.sessionId }, this.d.terminalEvents))) : [];
       const conversationMessages: NonNullable<DevelopmentProcess["conversationMessages"]> = [];
       const queueLanguages = new Map<string,string>();
-      const chatHistory = stored.conversationId ? (await this.d.store.getNeutralConversation(ctx,stored.conversationId).catch(()=>({messages:[]}))).messages : [];
+      const chatHistory = includeTrace && stored.conversationId ? (await this.d.store.getNeutralConversation(ctx,stored.conversationId).catch(()=>({messages:[]}))).messages : [];
       if (stored.sessionId && this.d.inbox && inboxEnabled.get(stored.companyId)) {
         const session = await this.d.code.getSession(ctx,stored.companyId,stored.sessionId);
         const inbox = await this.d.inbox.transact(session,{kind:"read"});
@@ -235,7 +235,8 @@ export class ChatDevelopmentService {
     if (duplicate.length) return { conversationId: duplicate[0]!.parentConversationId, processes: duplicate };
     const targets = (input.targets && input.targets.length) ? input.targets : await this.plan(ctx, input);
     if (!targets.length) throw new DevelopmentError("Describe a website, blog, shop, mobile app or CRM to create.");
-    const activeExisting = (await this.list(ctx)).filter(developmentIsActive);
+    // Admission uses the existing status projection without replay, chat history or terminal logs.
+    const activeExisting = (await this.listOwned(ctx, false)).filter(developmentIsActive);
     if (activeExisting.length + targets.length > 4) throw new DevelopmentError("Four development processes are already active. Stop or wait for a process before starting another.", 409);
     let conversationId = input.conversationId;
     if (conversationId) {

@@ -635,7 +635,7 @@ export class CodingAgentRunner {
             await release("refused");
             return stop("failed", "refused", "The agent did not implement the requested project. No source files changed; build and Live Preview were not published.");
           }
-          messages.push({ role: "assistant", content: assistantText }, { role: "system", content: "This is a creation request and no source files changed. Implement the requested features with file tools. Acknowledgement or a plan alone does not complete this task." });
+          messages.push({ ...providerContinuationFor(result), role: "assistant", content: assistantText }, { role: "system", content: "This is a creation request and no source files changed. Implement the requested features with file tools. Acknowledgement or a plan alone does not complete this task." });
           continue;
         }
         await openTurn();

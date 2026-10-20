@@ -721,7 +721,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
               failed={!sending && progressFailed}
             />
           )}
-          {!development.project && sending && !streamingResponse && !progressEvents.some((event) => !event.type.startsWith("final_generation")) && <article className="assistant thinking thinking-status" aria-label="NPATI Agent is working"><p>{isWebsiteAnalysisRequest(activeTurn) ? "Analyzing website and sources…" : businessThinkingSteps[thinkingStep]}</p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span></article>}
+          {!development.isActive && sending && !streamingResponse && !progressEvents.some((event) => !event.type.startsWith("final_generation")) && <article className="assistant thinking thinking-status" aria-label="NPATI Agent is working"><p>{isWebsiteAnalysisRequest(activeTurn) ? "Analyzing website and sources…" : businessThinkingSteps[thinkingStep]}</p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span></article>}
+          {(development.submitting || development.project?.status === "preparing" && !development.project.progress?.length) && <article className="assistant thinking thinking-status" role="status" aria-label="Preparing development request"><p>{language === "uk" ? "Підготовка запиту" : "Preparing request"}</p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span></article>}
           {development.preview}
           {messages.length > 0 && <div className="chat-scroll-spacer" aria-hidden="true" />}
           <div ref={streamEndRef} aria-hidden="true" />

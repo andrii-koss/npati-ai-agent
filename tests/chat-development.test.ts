@@ -391,7 +391,7 @@ it("coalesces bursts of live updates into one pending SSE snapshot",async()=>{
  type Snapshot=Awaited<ReturnType<ChatDevelopmentService["list"]>>;
  let resolveSnapshot!:(value:Snapshot)=>void,calls=0;
  const pending=new Promise<Snapshot>(resolve=>{resolveSnapshot=resolve;});
- vi.spyOn(service,"list").mockImplementation(async()=>++calls<=2?[]:pending);
+ vi.spyOn(service,"list").mockImplementation(async()=>++calls===1?[]:pending);
  const base=await app.listen({port:0,host:"127.0.0.1"}),controller=new AbortController();
  const response=await fetch(base+"/chat/development/processes/stream",{signal:controller.signal});
  const reader=response.body!.getReader(),decode=new TextDecoder();
@@ -401,7 +401,7 @@ it("coalesces bursts of live updates into one pending SSE snapshot",async()=>{
   await vi.waitFor(()=>expect(f.controls.size).toBe(1));
   const callback=[...f.controls.values()][0]!.input.onActivity!;
   for(let n=0;n<8;n++)await callback({id:"burst-"+n,stage:"tool",title:"Operation",at:new Date().toISOString(),status:"completed"});
-  expect(calls).toBe(3);
+  expect(calls).toBe(2);
   resolveSnapshot(await actualList(owner));
   const frame=decode.decode((await reader.read()).value);
   const data=JSON.parse(frame.split("\n").find(line=>line.startsWith("data: "))!.slice(6));
@@ -457,4 +457,13 @@ it("retains details for a follow-up in an old completed chat ahead of newer idle
  await f.service.recordActivity(owner,f.company.id,"old-session","old-chat",{id:"followup:read",runId:"followup",stage:"preview",title:"Reading",at:new Date().toISOString(),result:JSON.stringify({data:{content:"current source"}})});
  const rows=(await f.store.getUserSetting(owner,key))!.value as Array<{id:string;progress?:Array<{id:string;fileContent?:string}>}>;
  expect(rows.find(p=>p.id==="old")?.progress?.find(e=>e.id==="followup:read")?.fileContent).toBe("current source");
+});
+
+it("accepts a new request without loading replay, activity or terminal transcripts", async () => {
+ const f=await fixture();await f.start("Create a Next.js website","first");await vi.waitFor(()=>expect(f.controls.size).toBe(1));
+ const replay=vi.spyOn(f.store,"getReplayBundle").mockRejectedValue(new Error("old replay must not block admission"));
+ const turns=vi.spyOn(f.store,"listCodeRunTurns").mockRejectedValue(new Error("old turns must not block admission"));
+ const logs=vi.spyOn(f.ports.terminalEvents,"list").mockRejectedValue(new Error("old logs must not block admission"));
+ const result=await f.start("Create a HTML website","second");expect(result.processes).toHaveLength(1);
+ expect(replay).not.toHaveBeenCalled();expect(turns).not.toHaveBeenCalled();expect(logs).not.toHaveBeenCalled();
 });

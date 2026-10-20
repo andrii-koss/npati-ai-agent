@@ -260,3 +260,8 @@ describe("security-gate: C4 verification output parsing", () => {
     expect(detectVerifyTool("random text")).toBe("unknown");
   });
 });
+
+it("allows only a syntax-only Node check of one relative JavaScript file", () => {
+  for (const command of ["node --check app.js", "node -c src/app.mjs", "node --check src/app.test.cjs"]) expect(classifyShellRisk(command), command).toBe("safe");
+  for (const command of ["node --check ../app.js", "node --check /tmp/app.js", "node --check app.js --require hook.js", "node --require hook.js --check app.js", "node -e alert", "node --check .private/app.js"]) expect(classifyShellRisk(command), command).not.toBe("safe");
+});

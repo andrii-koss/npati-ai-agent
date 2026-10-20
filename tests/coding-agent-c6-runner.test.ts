@@ -885,3 +885,11 @@ it("recovers only the DSML-corrupted call in a mixed batch without repeating a s
  expect(String(feedback.content)).toContain("Retry only this rejected call");
  for(const request of h.engineCalls)for(const message of request.messages)for(const call of message.tool_calls??[])expect(call.function.name).not.toContain("DSML");
 });
+
+it("retains private continuation when requesting implementation after a text-only reply", async () => {
+  const harness = createHarness({script:[retainProviderContinuation({content:"Acknowledged"},{reasoning_text:"opaque-retry-state"}),{content:"Still no edit"},{content:"No edit"}]});
+  const result = await harness.run({requireImplementation:true,verificationTools:[]});
+  expect(result.status).toBe("failed");
+  expect(harness.engineCalls[1]!.messages.find(message=>message.role==="assistant")?.reasoning_text).toBe("opaque-retry-state");
+  expect(JSON.stringify(harness.activity)).not.toContain("opaque-retry-state");
+});
