@@ -17,6 +17,8 @@ export const uk: TranslationSchema = {
     working: "Працює над проєктом",
     skipped: "Пропущено",
   "pending": "Очікує",
+  "preparing": "Підготовка",
+  "queued": "У черзі",
   "running": "Виконується",
   "completed": "Готово",
   "failed": "Помилка",

@@ -119,7 +119,13 @@ export class CodeService {
   /** Reads the manifest files the detector needs, ignoring files that do not exist. */
   private async readManifests(ctx: AuthContext, companyId: string, projectId: string): Promise<Record<string, string | undefined>> {
     const files: Record<string, string | undefined> = {};
+    // One tree walk instead of one failed access/read per manifest: the detector's 24-path list made a static
+    // project pay for 22 guaranteed ENOENT round trips before its first model call.
+    const present = typeof this.workspace.listFiles === "function"
+      ? new Set((await this.workspace.listFiles(ctx, companyId, projectId)).filter(entry => entry.type === "file").map(entry => entry.path))
+      : undefined;
     for (const path of TOOLCHAIN_MANIFEST_FILES) {
+      if (present && !present.has(path)) continue;
       try {
         const file = await this.workspace.readFile(ctx, companyId, projectId, path);
         files[path] = file.content;

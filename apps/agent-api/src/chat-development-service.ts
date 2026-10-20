@@ -94,6 +94,22 @@ export class ChatDevelopmentService {
     await this.change(ctx, items => items.map(item => item.id === id ? { ...item, ...patch, updatedAt: new Date().toISOString() } : item));
     this.notifyListeners();
   }
+  /** One settings write for a status change plus its progress row; startup is dominated by these writes. */
+  private async update(ctx: AuthContext, id: string, patch: Partial<Entry>, event?: { stage: string; title: string; details?: Record<string, unknown> }) {
+    await this.flushActivities(ctx);
+    await this.change(ctx, items => items.map(item => {
+      if (item.id !== id) return item;
+      let next: Entry = { ...item, ...patch, updatedAt: new Date().toISOString() };
+      if (event) {
+        const eventId = id + ":" + event.stage;
+        const previous = next.progress?.find(entry => entry.id === eventId);
+        const row = sanitizeProgress({ ...previous, id: eventId, stage: event.stage, title: event.title, at: previous?.at ?? new Date().toISOString(), conversationId: next.conversationId, ...Object.fromEntries(Object.entries(event.details ?? {}).filter(([, value]) => value !== undefined)) });
+        next = { ...next, progress: compactProgress([...(next.progress ?? []).filter(entry => entry.id !== eventId), row]) };
+      }
+      return next;
+    }));
+    this.notifyListeners();
+  }
   async list(ctx: AuthContext): Promise<DevelopmentProcess[]> {
     await this.flushActivities(ctx);
     const key = this.owner(ctx);
@@ -374,20 +390,17 @@ export class ChatDevelopmentService {
     let session: Awaited<ReturnType<CodeService["createSession"]>> | undefined;
     const ensureActive = () => { if (controller.signal.aborted) throw new DevelopmentError("Stopped by request"); };
     try {
-      await this.patch(ctx, process.id, { status: "preparing" });
       if (!process.conversationId) {
         process.conversationId = (await this.d.store.createNeutralConversation(ctx, process.name)).id;
         await this.d.store.appendNeutralMessage(ctx, process.conversationId, "user", message);
       }
-      await this.patch(ctx, process.id, { conversationId: process.conversationId });
-      await this.report(ctx, process.id, "project", "Preparing project workspace", { tool: "code.workspace", status: "running", agentId: "System" });
+      await this.update(ctx, process.id, { conversationId: process.conversationId }, { stage: "project", title: "Preparing project workspace", details: { tool: "code.workspace", status: "running", agentId: "System" } });
       ensureActive();
       const { project: raw } = await this.d.projects.create(ctx, process.companyId, {
         name: process.name, type: target.kind === "mobile_app" ? "mobile_app" : "code_project", description: message.slice(0, 5000),
-      }, "chat-development:" + process.id);
-      await this.report(ctx, process.id, "project", "Project workspace prepared", { tool: "code.workspace", status: "completed", agentId: "System" });
+      }, "chat-development:" + process.id, { attachDataBackend: target.framework !== "HTML/CSS" });
       process.projectId = raw.id;
-      await this.patch(ctx, process.id, { projectId: raw.id, conversationId: process.conversationId });
+      await this.update(ctx, process.id, { projectId: raw.id, conversationId: process.conversationId }, { stage: "project", title: "Project workspace prepared", details: { tool: "code.workspace", status: "completed", agentId: "System" } });
       await this.card(ctx, process, raw, "Агент готує проєкт. Стан запуску відображається над полем чату.");
       ensureActive();
       await this.report(ctx, process.id, "scaffold", "Preparing the existing " + target.framework + " template", { tool: "code.scaffold", status: "running", agentId: "System" });
@@ -405,7 +418,6 @@ export class ChatDevelopmentService {
       ensureActive();
       sink = this.d.background.start({ runId: process.runId, sessionId: session.id, companyId: process.companyId, userId: ctx.userId, projectId: project.id });
       controller.signal.addEventListener("abort", () => this.d.background.abort(process.runId!, "Stopped by request"), { once: true });
-      await this.patch(ctx, process.id, { status: "running" });
       if (this.d.preview) {
         await this.d.flags.assertEnabled(ctx, "code.shell", { companyId: process.companyId });
         let reports = Promise.resolve();
@@ -419,15 +431,10 @@ export class ChatDevelopmentService {
 
       }
       ensureActive();
-      await this.report(ctx, process.id, "agent", "Coding Agent is implementing the requested project", {
-        tool: "coding_agent",
-        status: "active",
-        agentId: "Coding Agent",
-      });
+      await this.update(ctx, process.id, { status: "running" }, { stage: "agent", title: "Coding Agent is implementing the requested project", details: { tool: "coding_agent", status: "active", agentId: "Coding Agent" } });
       const outcome = await this.d.executor.execute({
         responseLanguage: process.responseLanguage as import("./company-chat-i18n").CompanyChatLanguage,
         ctx, session, runId: process.runId, requireImplementation: true,
-        maxTurns: 20,
         onActivity: event => this.recordActivity(ctx, process.companyId, session!.id, process.conversationId, { ...event, language: process.responseLanguage }),
         prompt: "Begin with a brief natural acknowledgement in the user's language alongside your first tool calls, then implement the request. User request: " + message + "\nYour assigned project is " + target.name + " (" + target.kind + "). This is a framework deployment smoke test; the starter is intentionally minimal. Do not add tests, CI, new architecture or unrequested features. Do not inspect or rewrite the starter's /health route: it is already valid. Implement ONLY this project's complete user specification, including every requested page and working interaction. Other independent requested projects have their own workspaces. The existing " + target.framework + " template has already been prepared by the system. Reuse its working routes and assets. Implement exactly the requested features. Do not regenerate shared components that you have already implemented. For an existing file, read it and use code.fs.edit; use code.fs.write only for a new file. Start with " + (target.kind === "mobile_app" ? "App.tsx" : target.framework === "HTML/CSS" ? "index.html" : target.framework === "Next.js" ? "package.json and app/page.tsx" : "package.json and the framework's main entry point") + ". The system runs the production build and verification automatically after your edits; do NOT call code.verify.run yourself. Stop after the requested edits are saved; do not keep inspecting or rebuilding once the requested H1, title and section are present. If a limit prevents completion, state which deliverables remain; never claim the site is complete." + chatLanguageInstruction(message, [], process.responseLanguage as import("./company-chat-i18n").CompanyChatLanguage) + codingChatResponseInstruction(),
         cancelRequested: () => controller.signal.aborted,

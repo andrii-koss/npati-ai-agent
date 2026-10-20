@@ -5,7 +5,7 @@ import {
   subagentDepthForRun,
   type CodeRunCapabilityScope,
 } from "./code-subagent-limits";
-import { clampCodeSubagentTurnLimit } from "./code-subagent-types";
+import { CODE_SUBAGENT_MAX_TURNS, clampCodeSubagentTurnLimit } from "./code-subagent-types";
 import {
   type CodingAgentStopReason,
   type CodingAgentRunStatus,
@@ -163,8 +163,8 @@ export async function startCodingAgentSession(args: StartSessionArgs): Promise<S
   const delegationDepth = subagentDepthForRun(capabilityScope.parentRunId);
 
   const runTurnLimit = input.maxTurns === undefined
-    ? limits.maxStepsPerRun
-    : clampCodeSubagentTurnLimit(input.maxTurns, limits.maxStepsPerRun);
+    ? Math.max(0, Math.trunc(limits.maxStepsPerRun))
+    : clampCodeSubagentTurnLimit(input.maxTurns, limits.maxStepsPerRun > 0 ? limits.maxStepsPerRun : CODE_SUBAGENT_MAX_TURNS);
 
   let sessionBranch: { branch: string; created: boolean; switched: boolean; previousBranch: string | null } | null = null;
   if (ports.ensureSessionBranch && input.readOnlyIntent !== true) {

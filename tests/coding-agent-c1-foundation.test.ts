@@ -109,6 +109,8 @@ describe("C1 — configuration", () => {
     expect(CODE_AGENT_ENABLED_BY_DEFAULT).toBe(false);
     expect(resolveCodeAgentLimits({ NPATI_CODE_MAX_STEPS: "12" } as NodeJS.ProcessEnv).maxStepsPerRun).toBe(12);
     expect(resolveCodeAgentLimits({ NPATI_CODE_MAX_STEPS: "-3" } as NodeJS.ProcessEnv).maxStepsPerRun).toBe(40);
+    expect(resolveCodeAgentLimits({ NPATI_CODE_MAX_STEPS: "0" } as NodeJS.ProcessEnv).maxStepsPerRun).toBe(0);
+    expect(resolveCodeAgentLimits({ NPATI_CODE_MAX_RUN_MINUTES: "0" } as NodeJS.ProcessEnv).maxRunMinutes).toBe(0);
   });
 });
 

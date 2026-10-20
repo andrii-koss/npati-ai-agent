@@ -16,6 +16,8 @@ export const es: TranslationSchema = {
     working: "Trabajando en el proyecto",
     skipped: "Omitidos",
   "pending": "Pendiente",
+  "preparing": "Preparando",
+  "queued": "En cola",
   "running": "En curso",
   "completed": "Completado",
   "failed": "Fallido",

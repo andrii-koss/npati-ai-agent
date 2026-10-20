@@ -82,7 +82,7 @@ export function codingActivityRuns(value: unknown, process?: DevelopmentProcess)
     const current = group.runId === process?.runId || !group.runId && !process?.initialRunId;
     const rawState = (current ? process?.status : undefined) ?? persisted;
     const state = typeof rawState === "string" && ["running","active","pending","queued","preparing","completed","failed","cancelled","waiting_for_user","waiting_for_approval","awaiting_approval","stopping","interrupted","suspended_by_flag"].includes(rawState) ? rawState : undefined;
-    group.status = state === "waiting_for_user" || state === "awaiting_approval" ? "waiting_for_approval" : state === "queued" || state === "preparing" ? "pending" : state === "stopping" ? "running" : state === "interrupted" ? "failed" : state ?? (group.items.some(item=>["running","active"].includes(item.status??"")) ? "running" : group.items.some(item=>["awaiting_approval","waiting_for_approval"].includes(item.status??"")) ? "waiting_for_approval" : group.items.at(-1)?.status ?? "unknown");
+    group.status = state === "waiting_for_user" || state === "awaiting_approval" ? "waiting_for_approval" : state === "stopping" ? "running" : state === "interrupted" ? "failed" : state ?? (group.items.some(item=>["running","active"].includes(item.status??"")) ? "running" : group.items.some(item=>["awaiting_approval","waiting_for_approval"].includes(item.status??"")) ? "waiting_for_approval" : group.items.at(-1)?.status ?? "unknown");
     if (group.status === "active") group.status = "running";
   }
   return [...groups.values()];
@@ -92,7 +92,7 @@ export function codingActivityRuns(value: unknown, process?: DevelopmentProcess)
 export function codingActivityStages(value: unknown, process?: DevelopmentProcess, messages: Message[] = []): CodingActivityRun[] {
   const normalized = normalizeActivity(value);
   const compare = (a: {at:string;sequence?:number;id:string}, b: {at:string;sequence?:number;id:string}) => (Date.parse(a.at)||0)-(Date.parse(b.at)||0)||(a.sequence??0)-(b.sequence??0)||a.id.localeCompare(b.id);
-  const activeStates = ["running","pending","waiting_for_approval"];
+  const activeStates = ["running","pending","queued","preparing","waiting_for_approval"];
   const result: CodingActivityRun[] = [];
   for (const run of codingActivityRuns(normalized,process)) {
     const operations = run.items.filter(item=>!["agent","completed","model_usage"].includes(item.stage));

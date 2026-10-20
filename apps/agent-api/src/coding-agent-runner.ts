@@ -423,12 +423,12 @@ export class CodingAgentRunner {
         }
       }
 
-      if (steps >= runTurnLimit) {
+      if (runTurnLimit > 0 && steps >= runTurnLimit) {
         await release("step_limit");
         summary.remaining = "Step limit reached; the task may be unfinished.";
         return stop("stopped", "step_limit", `Stopped after ${runTurnLimit} turns: the step limit was reached.`);
       }
-      if (this.now() - startedAt > this.limits.maxRunMinutes * 60_000) {
+      if (this.limits.maxRunMinutes > 0 && this.now() - startedAt > this.limits.maxRunMinutes * 60_000) {
         await release("time_limit");
         summary.remaining = "Time limit reached; the task may be unfinished.";
         return stop("stopped", "time_limit", `Stopped after ${this.limits.maxRunMinutes} minutes: the time limit was reached.`);

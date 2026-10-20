@@ -151,6 +151,15 @@ export function buildSystemPrompt(input: {
   const editingGuidance = preferred && input.tools.some(tool => tool.name === preferred)
     ? ["Editing preference from model profile: " + preferred + ". Use another available tool when the change requires it."] : [];
   const agentName = input.agentId?.trim() || "NPATI Coding Agent";
+  const turnLimit = input.limits.maxStepsPerRun;
+  const minuteLimit = input.limits.maxRunMinutes;
+  const limitLine = turnLimit > 0 && minuteLimit > 0
+    ? `Limits: at most ${turnLimit} assistant turns and ${minuteLimit} minutes for this run.`
+    : turnLimit > 0
+      ? `Limits: at most ${turnLimit} assistant turns; no fixed wall-clock limit for this run.`
+      : minuteLimit > 0
+        ? `Limits: no fixed assistant-turn limit; ${minuteLimit} minutes for this run.`
+        : "Limits: no fixed assistant-turn or wall-clock limit for this run.";
   return [
 
     `You are the ${agentName} operating inside a sandboxed workspace.`,
@@ -161,7 +170,7 @@ export function buildSystemPrompt(input: {
     toolLines || "- (no tools are available in this mode)",
     ...editingGuidance,
     "",
-    `Limits: at most ${input.limits.maxStepsPerRun} assistant turns and ${input.limits.maxRunMinutes} minutes for this run.`,
+    limitLine,
     ...(input.extraLines && input.extraLines.length > 0 ? ["", ...input.extraLines] : []),
 
     ...(input.skillInstructions && input.skillInstructions.length > 0 ? ["", input.skillInstructions] : []),

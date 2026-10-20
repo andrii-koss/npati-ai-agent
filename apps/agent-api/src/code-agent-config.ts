@@ -97,6 +97,11 @@ function positiveInt(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+/** `0` is an explicit "no fixed limit" for the two hard run caps; other non-positive values keep the default. */
+function countOrUnlimited(value: string | undefined, fallback: number): number {
+  return value === "0" ? 0 : positiveInt(value, fallback);
+}
+
 function positiveFloat(value: string | undefined, fallback: number): number {
   const parsed = Number.parseFloat(value ?? "");
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -105,8 +110,8 @@ function positiveFloat(value: string | undefined, fallback: number): number {
 /** Reads the limits from the environment, falling back to the plan defaults. */
 export function resolveCodeAgentLimits(env: NodeJS.ProcessEnv = process.env): CodeAgentLimits {
   return {
-    maxStepsPerRun: positiveInt(env.NPATI_CODE_MAX_STEPS, DEFAULT_CODE_AGENT_LIMITS.maxStepsPerRun),
-    maxRunMinutes: positiveInt(env.NPATI_CODE_MAX_RUN_MINUTES, DEFAULT_CODE_AGENT_LIMITS.maxRunMinutes),
+    maxStepsPerRun: countOrUnlimited(env.NPATI_CODE_MAX_STEPS, DEFAULT_CODE_AGENT_LIMITS.maxStepsPerRun),
+    maxRunMinutes: countOrUnlimited(env.NPATI_CODE_MAX_RUN_MINUTES, DEFAULT_CODE_AGENT_LIMITS.maxRunMinutes),
     toolOutputChars: positiveInt(env.NPATI_CODE_TOOL_OUTPUT_CHARS, DEFAULT_CODE_AGENT_LIMITS.toolOutputChars),
     readFileLines: positiveInt(env.NPATI_CODE_READ_FILE_LINES, DEFAULT_CODE_AGENT_LIMITS.readFileLines),
     readFileBytes: positiveInt(env.NPATI_CODE_READ_FILE_BYTES, DEFAULT_CODE_AGENT_LIMITS.readFileBytes),
