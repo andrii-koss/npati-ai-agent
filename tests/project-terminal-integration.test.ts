@@ -467,3 +467,15 @@ it("returns the TypeScript build error with useful context instead of only its c
   expect(error.message).toContain("Next.js build worker exited");
   expect(error.message).not.toContain("do-not-expose");
 });
+
+it("stops the recorded Next.js dev listener before a production build writes .next",async()=>{
+ const {projects,company,project,workspace,provider,sandbox}=await fixture();
+ await workspace.createFile(owner,company.id,project.id,"package.json","{}");
+ await projects.updatePreview(owner,company.id,project.id,{framework:"Next.js",previewPort:3078});
+ vi.spyOn(provider,"startProcess").mockResolvedValue({...result(),status:"running",processId:"22222222-2222-4222-8222-222222222222"});
+ const order:string[]=[];vi.spyOn(provider,"stopProcess").mockImplementation(async()=>{order.push("stop");return {...result(),status:"stopped"};});
+ vi.spyOn(provider,"executeCommand").mockImplementation(async()=>{order.push("build");return result();});
+ await sandbox.process(owner,company.id,{projectId:project.id,action:"start",command:"npm run dev -- --port 3078",agentId:"system",approved:true});
+ await sandbox.execute(owner,company.id,{projectId:project.id,command:"npm run build",agentId:"system",approved:true});
+ expect(order).toEqual(["stop","build"]);
+});

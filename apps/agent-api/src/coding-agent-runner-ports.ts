@@ -546,6 +546,7 @@ export interface CodingAgentRunnerPorts {
 
   contextBlocks?: {
     load(input: {
+      websiteEdit?: boolean;
       ctx: AuthContext;
       companyId: string;
       projectId: string;

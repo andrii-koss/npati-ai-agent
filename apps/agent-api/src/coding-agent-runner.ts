@@ -389,6 +389,8 @@ export class CodingAgentRunner {
 
     let sawNativeToolCalls = false;
     let inspectionTurns = 0;
+    let inspectedStyles = false;
+    let inspectionReminderSent = false;
     let emptyImplementationReplies = 0;
     let initialTokenBudget: number | undefined;
     let budgetReminderSent = false;
@@ -474,8 +476,12 @@ export class CodingAgentRunner {
       // A creation run must progress from inspecting the template to changing source.
       const currentChanges = reviewCoordinator.runChanges().map(change => change.path);
       const needsImplementation = input.requireImplementation && !input.readOnlyIntent && session.mode !== "plan" && currentChanges.length === 0;
-      const implementNow = !input.readOnlyIntent && session.mode !== "plan" && inspectionTurns >= 3;
-      if (implementNow && inspectionTurns === 3) messages.push({ role: "system", content: currentChanges.length ? "Source changes have already been saved. If the requested edit is implemented, finish now so the system can verify and publish Preview. Do not audit unrelated styles or expand the task. Inspect only a concrete unresolved issue." : "You have spent three consecutive turns inspecting files without a source change. Use the relevant content already in context to make the requested targeted edit now. For a visual or color change, prefer editing the existing theme variables and affected selectors instead of rereading the whole stylesheet. Inspection tools remain available when necessary for a safe edit. Do not expand the scope or regenerate existing components." });
+      const inspectionLimit = input.allowStylePreview && inspectedStyles ? 1 : 3;
+      const implementNow = !input.readOnlyIntent && session.mode !== "plan" && inspectionTurns >= inspectionLimit;
+      if (implementNow && !inspectionReminderSent) {
+        inspectionReminderSent = true;
+        messages.push({ role: "system", content: currentChanges.length ? "Source changes have already been saved. If the requested edit is implemented, finish now so the system can verify and publish Preview. Do not audit unrelated styles or expand the task. Inspect only a concrete unresolved issue." : inspectionLimit === 1 ? "You have already read the relevant stylesheets for this existing-site edit. Use those declarations to implement the requested targeted change now, including any necessary contrast correction, then finish. Do not expand a simple palette change into repeated background searches or a component audit. Inspect further only for a concrete unresolved override or dependency. Read tools remain available." : "You have spent three consecutive turns inspecting files without a source change. Use the relevant content already in context to make the requested targeted edit now. For a visual or color change, prefer editing the existing theme variables and affected selectors instead of rereading the whole stylesheet. Inspection tools remain available when necessary for a safe edit. Do not expand the scope or regenerate existing components." });
+      }
       if (input.requireImplementation || currentChanges.length > 0 && !input.readOnlyIntent && session.mode !== "plan") {
         const marker = "Current implementation progress (runtime facts): ";
         const previous = messages.findIndex(message => message.role === "system" && typeof message.content === "string" && message.content.startsWith(marker));
@@ -601,8 +607,9 @@ export class CodingAgentRunner {
       });
 
       const callsToRun = executableToolCalls(normalized);
+      inspectedStyles = callsToRun.some(call => call.name === "code.fs.read" && typeof call.arguments.path === "string" && /\.css$/i.test(call.arguments.path));
       if (callsToRun.length && callsToRun.every(call => /^code\.fs\.(read|list|tree|search|glob|grep)$/.test(call.name))) inspectionTurns++;
-      else if (callsToRun.length) inspectionTurns = 0;
+      else if (callsToRun.length) { inspectionTurns = 0; inspectionReminderSent = false; }
       const publishActivity = async (event: import("@npati/shared").DevelopmentProcessProgressItem) => {
         await emitCodingActivity(input, event);
       };

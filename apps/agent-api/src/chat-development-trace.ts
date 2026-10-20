@@ -207,6 +207,8 @@ async function readDevelopmentTrace(store: WorkspaceStore, ctx: AuthContext, pro
     }
   }
   if (run && run.status !== "running") for (const event of progress) {
+    // Preview finalization runs after the code lease completes; preserve its actual lifecycle.
+    if (run.status === "completed" && event.stage === "preview") continue;
     if ((!event.runId || event.runId === run.runId) && (event.status === "running" || event.status === "active")) event.status = run.status === "waiting_for_user" ? "waiting_for_approval" : run.status === "completed" ? "completed" : run.status === "cancelled" ? "cancelled" : "failed";
   }
   return Array.from(new Map([...progress, ...calls.values()].map(item => [item.id, item])).values()).sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || (a.sequence ?? 0) - (b.sequence ?? 0) || a.id.localeCompare(b.id));

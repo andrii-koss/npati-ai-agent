@@ -10,6 +10,7 @@ import { LocalProjectWorkspace, generateUnifiedDiff } from "../apps/agent-api/sr
 import { ProjectSandboxService } from "../apps/agent-api/src/project-sandbox-service";
 import { ProjectTerminalEventsRepository } from "../apps/agent-api/src/project-terminal-events";
 import {
+  resolvePreviewSecret,
   detectProjectStack,
   extractPortFromCommand,
   ProjectPreviewService,
@@ -747,4 +748,38 @@ it("stops an older recorded preview even when a newer matching preview is alread
  await sandbox.stopRecordedPreview(owner,company.id,project.id,started.command);
  expect(process).toHaveBeenCalledTimes(1);
  expect(process.mock.calls[0]![2]).toMatchObject({action:"stop",processId:"44444444-4444-4444-8444-444444444444"});
+});
+
+it("shares Preview signatures across API/worker without a dedicated preview secret",async()=>{
+ const env={NPATI_ENCRYPTION_KEY:"installation-encryption-key-for-preview-tests"};
+ expect(resolvePreviewSecret(undefined,env)).toBe(resolvePreviewSecret(undefined,env));
+ expect(resolvePreviewSecret(undefined,{NPATI_ENCRYPTION_KEY:"another-installation-key"})).not.toBe(resolvePreviewSecret(undefined,env));
+ expect(resolvePreviewSecret("dedicated-preview-secret",env)).toBe("dedicated-preview-secret");
+ expect(resolvePreviewSecret(undefined,{...env,NPATI_PREVIEW_SECRET:"configured-secret"})).toBe("configured-secret");
+ const {projects,store,workspace,sandbox,company,project}=await fixture();
+ const worker=new ProjectPreviewService(projects,store,workspace,sandbox,resolvePreviewSecret(undefined,env));
+ const api=new ProjectPreviewService(projects,store,workspace,sandbox,resolvePreviewSecret(undefined,env));
+ const {token}=worker.generateToken({userId:owner.userId,companyId:company.id,projectId:project.id,sandboxId:"33333333-3333-4333-8333-333333333333"});
+ expect(api.verifyToken(token)).toMatchObject({projectId:project.id});
+});
+
+it("proxies a worker-created Preview after API restart using signed scope and persisted sandbox binding",async()=>{
+ const {preview,projects,store,workspace,sandbox,company,project}=await fixture();
+ await workspace.createFile(owner,company.id,project.id,"index.html","Preview");
+ const started=await preview.startPreview(owner,company.id,project.id);
+ const restored=new ProjectPreviewService(projects,store,workspace,sandbox,"test-preview-secret-key-32chars!");
+ const proxy=vi.spyOn(sandbox,"proxyPreview").mockResolvedValue({status:200,headers:{"content-type":"text/html"},body:Buffer.from("<h1>Restored Preview</h1>").toString("base64")});
+ const app=Fastify();registerProjectPreviewRoutes(app,restored,workspace,new LocalDevAuthProvider(owner));
+ try{
+  const root='/companies/'+company.id+'/projects/'+project.id+'/preview';
+  const response=await app.inject({method:"GET",url:root+'/proxy/?token='+started.token});expect(response.statusCode).toBe(200);expect(response.body).toContain("Restored Preview");
+  expect(proxy).toHaveBeenCalledWith(expect.objectContaining({workspaceId:owner.workspaceId,userId:owner.userId}),expect.any(String),expect.objectContaining({port:started.port}));
+  expect((await restored.getPreviewStatus(owner,company.id,project.id)).isRunning).toBe(true);
+  const renewed=(await app.inject({method:"GET",url:root+'/token'})).json();expect(restored.verifyToken(renewed.token)).toMatchObject({workspaceId:owner.workspaceId,sandboxId:restored.verifyToken(started.token).sandboxId});
+  const calls=proxy.mock.calls.length;
+  for(const override of [{workspaceId:"foreign-workspace"},{sandboxId:"foreign-sandbox"}]){
+   const {token}=restored.generateToken({...restored.verifyToken(started.token),...override});expect((await app.inject({method:"GET",url:root+'/proxy/?token='+token})).statusCode).not.toBe(200);
+  }
+  expect(proxy).toHaveBeenCalledTimes(calls);
+ }finally{await app.close();}
 });

@@ -88,14 +88,16 @@ export function registerProjectPreviewRoutes(
       if (!ctx) return;
       const { companyId, projectId } = request.params;
       const ttl = Number(request.query.ttlMs) || 15 * 60 * 1000;
-      try { await previewService.assertProjectAccess(ctx, companyId, projectId); }
+      let authorizedProject;
+      try { authorizedProject = await previewService.assertProjectAccess(ctx, companyId, projectId); }
       catch (error) {
         const status = error instanceof WorkspaceAccessError ? 403 : error instanceof WorkspaceNotFoundError ? 404 : 500;
         return reply.code(status).send({ error: { code: "preview_token_denied", message: "Preview token is unavailable for this project." } });
       }
       const session = previewService.getSession(projectId);
-      const sandboxId = session?.sandboxId || "default";
+      const sandboxId = session?.sandboxId || authorizedProject.sandboxId || "default";
       const token = previewService.generateToken({
+        workspaceId: ctx.workspaceId,
         userId: ctx.userId,
         companyId,
         projectId,

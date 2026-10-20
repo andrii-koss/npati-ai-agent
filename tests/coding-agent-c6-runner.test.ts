@@ -839,3 +839,29 @@ it.each([{path:"app/store.css",creation:false,fast:true},{path:"app/page.tsx",cr
  const result=await harness.run({allowStylePreview:true,requireImplementation:creation,verificationTools:["build"],forceVerification:true});
  expect(result.summary.stylePreview===true).toBe(fast);expect(harness.invocations.some(call=>call.tool==="code.verify.run")).toBe(!fast);
 });
+
+it("guides a small stylesheet edit after its first CSS read without hiding read tools",async()=>{
+ const harness=createHarness({script:[{content:"",toolCalls:[nativeCall("code.fs.read",{path:"app/store.css"})]},{content:"Done"}]});
+ await harness.run({websiteEdit:true,allowStylePreview:true,verificationTools:[]});
+ expect(harness.engineCalls[1]!.messages.some(message=>message.role==="system"&&String(message.content).includes("already read the relevant stylesheets"))).toBe(true);
+ expect(harness.engineCalls[1]!.tools?.some(tool=>tool.function.name==="code.fs.read")).toBe(true);
+});
+it("does not apply the first-CSS-read shortcut to component inspection",async()=>{
+ const harness=createHarness({script:[{content:"",toolCalls:[nativeCall("code.fs.read",{path:"app/page.tsx"})]},{content:"Done"}]});
+ await harness.run({websiteEdit:true,allowStylePreview:true,verificationTools:[]});
+ expect(harness.engineCalls[1]!.messages.some(message=>message.role==="system"&&String(message.content).includes("already read the relevant stylesheets"))).toBe(false);
+});
+
+it("rechecks an unchanged existing website in Preview without rebuilding it",async()=>{
+ const harness=createHarness({script:[{content:"The requested color is already applied."}]});
+ const result=await harness.run({websiteEdit:true,allowStylePreview:true,verificationTools:["build"],forceVerification:true});
+ expect(result.status).toBe("completed");expect(result.summary.stylePreview).toBe(true);expect(result.summary.filesChanged).toEqual([]);expect(harness.invocations.some(call=>call.tool==="code.verify.run")).toBe(false);
+});
+
+it("guides implementation when a CSS read shares a batch with another file or follows earlier inspection",async()=>{
+ for(const earlier of [false,true]){
+  const harness=createHarness({script:[...(earlier?[{content:"",toolCalls:[nativeCall("code.fs.read",{path:"app/layout.tsx"},"entry-read")]}]:[]),{content:"",toolCalls:[nativeCall("code.fs.read",{path:"app/store.css"},"css-read"),nativeCall("code.fs.read",{path:"app/layout.tsx"},"mixed-read")]},{content:"Done"}]});
+  await harness.run({websiteEdit:true,allowStylePreview:true,verificationTools:[]});
+  expect(harness.engineCalls.at(-1)!.messages.some(message=>message.role==="system"&&String(message.content).includes("already read the relevant stylesheets"))).toBe(true);
+ }
+});

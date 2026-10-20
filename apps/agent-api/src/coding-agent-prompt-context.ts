@@ -68,6 +68,7 @@ export async function buildRunPromptContext(args: BuildPromptContextArgs): Promi
         companyId,
         projectId,
         query: prompt.slice(0, 500),
+        ...(input.websiteEdit ? { websiteEdit: true } : {}),
       });
       if (loaded) {
         contextBlocks = renderContextBlocks([
@@ -112,7 +113,7 @@ export async function buildRunPromptContext(args: BuildPromptContextArgs): Promi
     extraLines: [
       ...(input.extraSystemPromptLines ?? []),
       ...(input.responseLanguage ? [chatLanguageInstruction("", [], input.responseLanguage), codingChatResponseInstruction()] : []),
-      ...(input.websiteEdit ? ["This is an edit to an existing working website. Inspect only the affected selectors, batch the requested changes and finish. Do not audit unrelated components. " + (input.allowStylePreview ? "If saved changes affect only CSS, the system verifies them through Next.js development compilation in Live Preview; a production build is unnecessary. If other files change, production verification remains mandatory." : "Production verification is handled automatically after your edits.")] : []),
+      ...(input.websiteEdit ? ["This is an edit to an existing working website. Inspect only the affected selectors, batch the requested changes and finish. For a small theme edit, when stylesheet locations are supplied in repository context, begin with a bounded read of their theme variables and body selectors; do not rediscover known stylesheet paths with grep/tree/list. Batch those reads in one turn, apply the necessary changes and finish. For CSS edits, account for the supplied stylesheet import order and overriding selectors: a rule in an earlier stylesheet can be overridden by a later one. Do not edit only the first matching background variable when another imported stylesheet controls the visible background. Do not audit unrelated components. " + (input.allowStylePreview ? "If saved changes affect only CSS, the system verifies them through Next.js development compilation in Live Preview; a production build is unnecessary. If other files change, production verification remains mandatory." : "Production verification is handled automatically after your edits.")] : []),
     ],
   });
 
