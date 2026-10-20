@@ -165,7 +165,9 @@ export class CodeToolRuntime {
    * Single entry point for every `code.*` tool call.
    */
   async invoke(ctx: AuthContext, input: {
-    companyId: string; projectId: string; sessionId?: string; tool: string; toolVersion?: number;
+    companyId: string; projectId: string; sessionId?: string;
+    sessionMode?: "plan" | "edit" | "ask" | "auto" | "auto_edit" | "full_auto" | "full_auto_sandbox";
+    tool: string; toolVersion?: number;
     args?: unknown; toolCallId: string;
     turnId?: string;
     /** Stable server-side identity when the runner has no durable run row. */
@@ -449,7 +451,7 @@ export class CodeToolRuntime {
       let raw: unknown;
       try {
         raw = await executor({
-          ctx, companyId: input.companyId, projectId: input.projectId, sessionId: input.sessionId, turnId,
+          ctx, companyId: input.companyId, projectId: input.projectId, sessionId: input.sessionId, sessionMode: input.sessionMode, turnId,
           ...(input.runId ? { runId: input.runId } : {}),
           toolCallId: input.toolCallId, leaseOwner: input.leaseOwner,
           tool, args, limits: this.limits, port,

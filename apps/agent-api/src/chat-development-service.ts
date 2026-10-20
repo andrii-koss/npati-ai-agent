@@ -16,7 +16,7 @@ import type { CodeRunCancellationRegistry } from "./code-run-cancellation";
 import { hasCodeChatPreview, isCodeChatWebsite } from "./code-chat-website";
 import { saveChatProjectCard } from "./project-chat-cards";
 
-import { developmentTrace, sanitizeProgress, selectDevelopmentTraceRuns, executionTimestamp, executionResultDetails } from "./chat-development-trace";
+import { developmentTrace, sanitizeProgress, selectDevelopmentTraceRuns, executionTimestamp, executionResultDetails, compactProgress, metadataOnlyProgress } from "./chat-development-trace";
 import type { ProjectTerminalEventsRepository } from "./project-terminal-events";
 import { readIntentHistory } from "./chat-project-intent";
 
@@ -72,7 +72,13 @@ export class ChatDevelopmentService {
       const setting = await this.d.store.getUserSetting(ctx, key);
       const items = Array.isArray(setting?.value) ? setting.value as Entry[] : [];
       const next = fn(items);
-      if (await this.d.store.setUserSetting(ctx, key, next, setting?.revision ?? 0)) return next;
+      const newest = [...next].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, 3).map(item => item.id);
+      const detailed = new Set([...next.filter(developmentIsActive).map(item => item.id), ...newest]);
+      const bounded = next.map(item => !item.progress?.length ? item : {
+        ...item,
+        progress: detailed.has(item.id) ? compactProgress(item.progress) : metadataOnlyProgress(item.progress),
+      });
+      if (await this.d.store.setUserSetting(ctx, key, bounded, setting?.revision ?? 0)) return bounded;
     }
     throw new DevelopmentError("Development processes changed. Please retry.", 409);
   }
@@ -187,9 +193,19 @@ export class ChatDevelopmentService {
     if (input.companyId) await this.d.store.getCompany(ctx, input.companyId);
     if (input.projectId) await this.d.projects.get(ctx, input.companyId!, input.projectId);
     const history = await readIntentHistory(this.d.store, ctx, input.conversationId, input.businessId);
+    // An explicit edit instruction wins over any semantic "this mentions a framework" guess. The
+    // semantic resolver sees the replacement title ("NPATI Express E2E") and otherwise classifies
+    // the turn as a new project, creating a second workspace instead of editing the active one.
+    if (/(?:не\s+створюй|не\s+создавай|do\s+not\s+create|don't\s+create)\s+(?:новий\s+|новый\s+|a\s+new\s+|new\s+)?(?:про[єе]кт|project)/iu.test(input.message)
+      || /(?:редагуй|edit)\s+(?:цей|this)\s+(?:самий\s+)?(?:про[єе]кт|project)/iu.test(input.message)) return [];
     if (!this.d.resolveProjectIntent) return planChatDevelopment(input.message, input.projectId);
-    return (await this.d.resolveProjectIntent(ctx, { message: input.message, activeProjectId: input.projectId,
-      activeCompanyId: input.companyId, conversationHistory: history })).targets;
+    const semantic = await this.d.resolveProjectIntent(ctx, { message: input.message, activeProjectId: input.projectId,
+      activeCompanyId: input.companyId, conversationHistory: history });
+    // The deterministic planner is the fallback when the semantic resolver recognizes a creation
+    // request but supplies no concrete target. An empty target list would otherwise turn a valid
+    // "create a Vue/FastAPI project" message into a plain chat turn.
+    if (semantic.targets.length) return semantic.targets;
+    return planChatDevelopment(input.message, input.projectId);
   }
   private async startOwned(ctx: AuthContext, input: { companyId: string; message: string; targets?: DevelopmentTarget[]; conversationId?: string; businessId?: string; requestId: string }) {
     if (!ctx.permissions.some(p => ["*", "owner", "admin:all", "business:manage", "workspace:write"].includes(p))) throw new DevelopmentError("Coding Agent write permission denied", 403);
@@ -219,6 +235,7 @@ export class ChatDevelopmentService {
       const processId = randomUUID();
       const localizedName = responseLanguage === "uk" && target.name === "Online store" ? "Інтернет-магазин"
         : responseLanguage === "uk" && target.name === "Company website" ? "Вебсайт компанії"
+        : responseLanguage === "uk" && target.name === "API service" ? "API-сервіс"
         : target.name;
       return {
         id: processId, requestId: input.requestId, companyId: input.companyId,
@@ -410,8 +427,9 @@ export class ChatDevelopmentService {
       const outcome = await this.d.executor.execute({
         responseLanguage: process.responseLanguage as import("./company-chat-i18n").CompanyChatLanguage,
         ctx, session, runId: process.runId, requireImplementation: true,
+        maxTurns: 20,
         onActivity: event => this.recordActivity(ctx, process.companyId, session!.id, process.conversationId, { ...event, language: process.responseLanguage }),
-        prompt: "Begin with a brief natural acknowledgement in the user's language alongside your first tool calls, then implement the request. User request: " + message + "\nYour assigned project is " + target.name + " (" + target.kind + "). Implement ONLY this project's complete user specification, including every requested page and working interaction. Other independent requested projects have their own workspaces. The existing template has already been prepared by the system. Reuse its working auth/database SDK and routes. Implement exactly the requested features; avoid unrequested sections and speculative infrastructure. Prefer a few complete pages with working interactions. Do not regenerate shared components that you have already implemented. Start with " + (target.kind === "mobile_app" ? "App.tsx" : target.framework === "HTML/CSS" ? "index.html" : "package.json and app/page.tsx") + ", then create all required files. Do not stop after the homepage or an initial visual implementation. Keep a checklist of the requested deliverables and verify them before declaring completion. Use the configured runtime budget, reserving time for verification and repairs. CRITICAL EXECUTION RULES: 1. Do NOT execute shell commands (code.shell.exec) with pipes (|), redirects (>), or bash expansions — they are blocked by security policy. Use code.fs.tree or code.fs.list for directory structure. 2. Do NOT spend multiple turns endlessly reading or listing template files. After a quick inspection of the entry point, IMMEDIATELY proceed to write and update the necessary source files using code.fs.write or code.fs.edit. 3. Batch independent file reads and related file changes; avoid reading back full files you just wrote. Read only files needed for this request. Preserve the attached database/auth SDK. Do not re-scaffold or run create-next-app. Template dependencies are already installed by the system. Only when adding a new package, use the available code.deps.add tool. Do not start a dev server. The system starts Live Preview after successful implementation and verification. If a limit prevents completion, state which deliverables remain; never claim the site is complete." + chatLanguageInstruction(message, [], process.responseLanguage as import("./company-chat-i18n").CompanyChatLanguage) + codingChatResponseInstruction(),
+        prompt: "Begin with a brief natural acknowledgement in the user's language alongside your first tool calls, then implement the request. User request: " + message + "\nYour assigned project is " + target.name + " (" + target.kind + "). This is a framework deployment smoke test; the starter is intentionally minimal. Do not add tests, CI, new architecture or unrequested features. Do not inspect or rewrite the starter's /health route: it is already valid. Implement ONLY this project's complete user specification, including every requested page and working interaction. Other independent requested projects have their own workspaces. The existing " + target.framework + " template has already been prepared by the system. Reuse its working routes and assets. Implement exactly the requested features. Do not regenerate shared components that you have already implemented. For an existing file, read it and use code.fs.edit; use code.fs.write only for a new file. Start with " + (target.kind === "mobile_app" ? "App.tsx" : target.framework === "HTML/CSS" ? "index.html" : target.framework === "Next.js" ? "package.json and app/page.tsx" : "package.json and the framework's main entry point") + ". The system runs the production build and verification automatically after your edits; do NOT call code.verify.run yourself. Stop after the requested edits are saved; do not keep inspecting or rebuilding once the requested H1, title and section are present. If a limit prevents completion, state which deliverables remain; never claim the site is complete." + chatLanguageInstruction(message, [], process.responseLanguage as import("./company-chat-i18n").CompanyChatLanguage) + codingChatResponseInstruction(),
         cancelRequested: () => controller.signal.aborted,
         abort: () => this.d.background.abort(process.runId!, "Stopped by request"),
         sink: { signal: sink.signal, emitResult: result => sink!.emit("result", result), emitTerminal: (status, reason) => sink!.finish(status, reason) },

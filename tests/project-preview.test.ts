@@ -15,6 +15,7 @@ import {
   extractPortFromCommand,
   ProjectPreviewService,
   PreviewError,
+  previewAuthCookieName,
 } from "../apps/agent-api/src/project-preview-service";
 import { registerProjectPreviewRoutes } from "../apps/agent-api/src/project-preview-routes";
 import {
@@ -307,7 +308,7 @@ describe("Step 4 — Project Preview & Changes", () => {
       const files = [{ path: "index.html" }, { path: "style.css" }, { path: "main.js" }];
       const stack = await detectProjectStack(files, async () => "");
       expect(stack.framework).toBe("static");
-      expect(stack.command).toBe("npx -y serve -s . -l 3000");
+      expect(stack.command).toBe("python3 -m http.server $PORT --bind 0.0.0.0");
       expect(stack.port).toBe(3000);
     });
 
@@ -315,7 +316,7 @@ describe("Step 4 — Project Preview & Changes", () => {
       const files = [{ path: "requirements.txt" }, { path: "main.py" }];
       const stack = await detectProjectStack(files, async () => "");
       expect(stack.framework).toBe("python");
-      expect(stack.command).toBe("python3 -m http.server 8000");
+      expect(stack.command).toBe(".venv/bin/python -m http.server $PORT --bind 0.0.0.0");
       expect(stack.port).toBe(8000);
     });
 
@@ -403,8 +404,8 @@ describe("Step 4 — Project Preview & Changes", () => {
       vi.spyOn(provider, "exposePort").mockResolvedValue({ port: 3002, internalHost: "127.0.0.1" });
       const result = await preview.startPreview(owner, company.id, project.id);
       expect(result.port).toBe(3002);
-      expect(result.command).toContain("-l 3002");
-      expect(provider.calls).toContain("process:npx -y serve -s . -l 3002");
+      expect(result.command).toBe("python3 -m http.server $PORT --bind 0.0.0.0");
+      expect(provider.calls).toContain("process:python3 -m http.server $PORT --bind 0.0.0.0");
       expect((await preview.getPreviewStatus(owner, company.id, project.id)).port).toBe(3002);
     });
 
@@ -594,6 +595,33 @@ describe("Step 4 — Project Preview & Changes", () => {
       expect(res.body).toContain('<img src="//images.example/product.png">');
       expect(res.body).toContain('document.addEventListener("click"');
       expect(proxy).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: owner.workspaceId, companyId: company.id }), expect.any(String), expect.objectContaining({ port: started.port, path: "/", method: "GET" }));
+    });
+
+    it("keeps preview authorization in a project-scoped HttpOnly cookie for internal navigation", async () => {
+      const { preview, workspace, sandbox, company, project } = await fixture();
+      const started = await preview.startPreview(owner, company.id, project.id);
+      vi.spyOn(sandbox, "proxyPreview").mockResolvedValue({
+        status: 200, headers: { "content-type": "text/html" },
+        body: Buffer.from("<head></head><a href=\"/hosting.html\">Hosting</a>").toString("base64"),
+      });
+      const app = Fastify();
+      registerProjectPreviewRoutes(app, preview, workspace, new LocalDevAuthProvider(owner));
+      const first = await app.inject({ method: "GET", url: `/companies/${company.id}/projects/${project.id}/preview/proxy/?token=${started.token}` });
+      expect(first.statusCode).toBe(200);
+      const cookieName = previewAuthCookieName(project.id);
+      const setCookie = String(first.headers["set-cookie"]);
+      expect(setCookie).toContain(`${cookieName}=`);
+      expect(setCookie).toContain("HttpOnly");
+      expect(setCookie).toContain(`Path=/api/companies/${company.id}/projects/${project.id}/preview/proxy`);
+
+      // A relative navigation drops the query token; the scoped cookie must still authorize it.
+      const second = await app.inject({
+        method: "GET",
+        url: `/companies/${company.id}/projects/${project.id}/preview/proxy/hosting.html`,
+        headers: { cookie: `${cookieName}=${started.token}` },
+      });
+      expect(second.statusCode).toBe(200);
+      expect(second.headers["set-cookie"]).toBeUndefined();
     });
 
     it("displays error card instead of blank page when dev server failed", async () => {

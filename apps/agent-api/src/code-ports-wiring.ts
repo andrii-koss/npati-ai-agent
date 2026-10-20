@@ -200,42 +200,35 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
         { toolchain?: { verifyCommands?: Record<string, string | undefined> } | null } | null;
       const commands = project?.toolchain?.verifyCommands ?? {};
       const startedAll = Date.now();
-      const results: Array<{ tool: "lint" | "typecheck" | "test" | "build"; ok: boolean; summary: string; findings: string[]; raw?: string }> = [];
-      if (input.tools.some((t) => t === "build" || t === "typecheck")) {
-        try {
-          await projectSandbox!.execute(input.ctx, input.companyId, {
-            projectId: input.projectId,
-            command: "npm install",
-            agentId: "system",
-            approved: true,
-          });
-        } catch {
-          // If npm install encounters an issue or not a Node project, proceed to verification commands
-        }
-      }
+      const results: Array<{ tool: "lint" | "typecheck" | "test" | "build"; ok: boolean; summary: string; findings: string[]; raw?: string; exitCode?: number | null; stdout?: string; stderr?: string; timedOut?: boolean; durationMs?: number; command?: string }> = [];
       for (const tool of input.tools) {
         const command = commands[tool];
         if (!command) {
           results.push({ tool, ok: false, summary: `No ${tool} command is configured for this project`, findings: [] });
           continue;
         }
-        let result: { stdout?: string; stderr?: string; output?: string; exitCode?: number } | undefined;
+        const started = Date.now();
+        let result: { stdout?: string; stderr?: string; output?: string; exitCode?: number | null; status?: string } | undefined;
         try {
           result = await projectSandbox!.execute(input.ctx, input.companyId, {
             projectId: input.projectId, command, agentId: "system", approved: true,
-          }) as { stdout?: string; stderr?: string; output?: string; exitCode?: number };
+            timeoutMs: input.timeoutMs,
+          }) as { stdout?: string; stderr?: string; output?: string; exitCode?: number | null; status?: string };
         } catch (error) {
           const errMsg = error instanceof Error ? error.message : String(error);
-          results.push({ tool, ok: false, summary: `${tool} execution failed: ${errMsg}`, findings: [errMsg], raw: errMsg });
+          results.push({ tool, ok: false, summary: `${tool} execution failed: ${errMsg}`, findings: [errMsg], raw: errMsg, command, exitCode: null, durationMs: Date.now() - started });
           continue;
         }
-        const output = `${result?.stdout ?? result?.output ?? ""}${result?.stderr ? `\n${result.stderr}` : ""}`.trim();
-        const exitCode = typeof result?.exitCode === "number" ? result.exitCode : 1;
-        const parsed = parseVerifyOutput(detectVerifyTool(output, command), output, exitCode);
+        const stdout = result?.stdout ?? result?.output ?? "";
+        const stderr = result?.stderr ?? "";
+        const output = `${stdout}${stderr ? `\n${stderr}` : ""}`.trim();
+        const timedOut = result?.status === "timed_out";
+        const exitCode = timedOut ? null : typeof result?.exitCode === "number" ? result.exitCode : 1;
+        const parsed = parseVerifyOutput(detectVerifyTool(output, command), output, exitCode ?? 1);
         let findings = parsed.findings
           .slice(0, 50)
           .map((finding) => `${finding.file ?? ""}${finding.line ? `:${finding.line}` : ""}${finding.column ? `:${finding.column}` : ""} ${finding.severity}: ${finding.message}`.trim());
-        if (!findings.length && exitCode !== 0 && output) {
+        if (!findings.length && (exitCode !== 0 || timedOut) && output) {
           const rawLines = output.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
           const errorLines = rawLines.filter((l) =>
             l.startsWith("./") || l.startsWith("Error:") || l.includes("Failed to compile") ||
@@ -243,12 +236,20 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
           );
           findings = (errorLines.length > 0 ? errorLines : rawLines).slice(0, 20);
         }
-        const summary = parsed.ok
-          ? `${tool} passed${parsed.summary.tests ? ` (${parsed.summary.passed}/${parsed.summary.tests} tests)` : ""}`
-          : `${tool} failed with exit code ${exitCode}`
-            + (parsed.summary.errors ? ` — ${parsed.summary.errors} error(s)` : "")
-            + (parsed.summary.failed ? `, ${parsed.summary.failed} failing test(s)` : "");
-        results.push({ tool, ok: parsed.ok, summary, findings, raw: parsed.raw ?? output.slice(0, 4000) });
+        if (timedOut && !findings.length) findings = [`${tool} timed out after ${input.timeoutMs} ms`];
+        const summary = timedOut
+          ? `${tool} timed out after ${input.timeoutMs} ms`
+          : parsed.ok
+            ? `${tool} passed${parsed.summary.tests ? ` (${parsed.summary.passed}/${parsed.summary.tests} tests)` : ""}`
+            : `${tool} failed with exit code ${exitCode}`
+              + (parsed.summary.errors ? ` — ${parsed.summary.errors} error(s)` : "")
+              + (parsed.summary.failed ? `, ${parsed.summary.failed} failing test(s)` : "");
+        results.push({
+          tool, ok: parsed.ok && !timedOut, summary, findings,
+          raw: parsed.raw ?? output.slice(0, 4000),
+          exitCode, stdout: stdout.slice(0, 4000), stderr: stderr.slice(0, 4000),
+          timedOut, durationMs: Date.now() - started, command,
+        });
       }
       return {
         results,

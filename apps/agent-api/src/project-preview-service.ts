@@ -21,6 +21,8 @@ export interface DetectedStack {
   framework: string;
   command: string;
   port: number;
+  /** Command that serves the verified production build, when the framework has one. */
+  productionCommand?: string;
 }
 
 export interface PreviewTokenPayload {
@@ -126,54 +128,104 @@ export async function detectProjectStack(
     const hasVite = Boolean(deps["vite"] || Array.from(pathSet).some((p) => /^vite\.config\.(?:js|ts|mjs)$/.test(p)));
     const hasAstro = Boolean(deps["astro"] || Array.from(pathSet).some((p) => /^astro\.config\.(?:js|ts|mjs)$/.test(p)));
     const hasNuxt = Boolean(deps["nuxt"] || Array.from(pathSet).some((p) => /^nuxt\.config\.(?:js|ts|mjs)$/.test(p)));
-    const hasRemix = Boolean(deps["@remix-run/react"] || Array.from(pathSet).some((p) => /^remix\.config\.(?:js|ts|mjs)$/.test(p)));
+    const hasRemix = Boolean(deps["@remix-run/react"] || deps["@react-router/dev"] || deps["@react-router/serve"] || Array.from(pathSet).some((p) => /^(?:remix|react-router)\.config\.(?:js|ts|mjs)$/.test(p)));
     const hasSvelteKit = Boolean(deps["@sveltejs/kit"] || Array.from(pathSet).some((p) => /^svelte\.config\.(?:js|ts|mjs)$/.test(p)));
+    const hasAngular = Boolean(deps["@angular/core"]);
+    const hasNest = Boolean(deps["@nestjs/core"]);
+    const hasFastify = Boolean(deps["fastify"]);
+    const hasExpress = Boolean(deps["express"]);
 
     if (hasNext) {
       const command = pkg.scripts?.dev ? `${packageManager} run dev` : "npx next dev";
-      return { packageManager, framework: "nextjs", command, port: 3000 };
+      return { packageManager, framework: "nextjs", command, port: 3000, productionCommand: serveCommand("npx next start --hostname 0.0.0.0", 3000) };
+    }
+    if (hasNuxt) {
+      const command = pkg.scripts?.dev ? `${packageManager} run dev` : "npx nuxi dev";
+      return { packageManager, framework: "nuxt", command, port: 3000, productionCommand: "node .output/server/index.mjs" };
     }
     if (hasAstro) {
       const command = pkg.scripts?.dev
         ? pkg.scripts.dev.includes("--host") ? `${packageManager} run dev` : `${packageManager} run dev -- --host 0.0.0.0`
         : "npx astro dev --host 0.0.0.0";
-      return { packageManager, framework: "astro", command, port: 4321 };
+      return { packageManager, framework: "astro", command, port: 4321, productionCommand: "npx astro preview --host 0.0.0.0 --port 4321" };
     }
-    if (hasVite || hasSvelteKit) {
-      const framework = hasSvelteKit ? "sveltekit" : "vite";
+    if (hasSvelteKit) {
       const command = pkg.scripts?.dev
         ? pkg.scripts.dev.includes("--host") ? `${packageManager} run dev` : `${packageManager} run dev -- --host 0.0.0.0`
         : "npx vite --host 0.0.0.0";
-      return { packageManager, framework, command, port: 5173 };
-    }
-    if (hasNuxt) {
-      const command = pkg.scripts?.dev ? `${packageManager} run dev` : "npx nuxi dev";
-      return { packageManager, framework: "nuxt", command, port: 3000 };
+      return { packageManager, framework: "sveltekit", command, port: 5173, productionCommand: "node build/index.js" };
     }
     if (hasRemix) {
       const command = pkg.scripts?.dev ? `${packageManager} run dev` : "npx remix dev";
-      return { packageManager, framework: "remix", command, port: 3000 };
+      return { packageManager, framework: "remix", command, port: 3000, productionCommand: "npx react-router-serve ./build/server/index.js" };
+    }
+    if (hasAngular) {
+      const command = pkg.scripts?.start ? `${packageManager} run start` : "npx serve -s dist -l 3000";
+      return { packageManager, framework: "angular", command, port: 3000, productionCommand: command };
+    }
+    if (hasNest) {
+      const command = pkg.scripts?.start ? `${packageManager} run start` : "node dist/main.js";
+      return { packageManager, framework: "nestjs", command, port: 3000, productionCommand: "node dist/main.js" };
+    }
+    if (hasFastify) {
+      const command = pkg.scripts?.start ? `${packageManager} run start` : "node dist/server.js";
+      return { packageManager, framework: "fastify", command, port: 3000, productionCommand: "node dist/server.js" };
+    }
+    if (hasExpress) {
+      const command = pkg.scripts?.start ? `${packageManager} run start` : "node dist/server.js";
+      return { packageManager, framework: "express", command, port: 3000, productionCommand: "node dist/server.js" };
+    }
+    if (hasVite) {
+      const framework = deps["vue"] ? "vue" : "vite";
+      const command = pkg.scripts?.dev
+        ? pkg.scripts.dev.includes("--host") ? `${packageManager} run dev` : `${packageManager} run dev -- --host 0.0.0.0`
+        : "npx vite --host 0.0.0.0";
+      return { packageManager, framework, command, port: 5173, productionCommand: "npx vite preview --host 0.0.0.0 --port 5173" };
     }
     if (pkg.scripts?.dev) {
       return { packageManager, framework: "custom", command: `${packageManager} run dev`, port: 3000 };
     }
     if (pkg.scripts?.start) {
-      return { packageManager, framework: "custom", command: `${packageManager} start`, port: 3000 };
+      return { packageManager, framework: "custom", command: `${packageManager} run start`, port: 3000 };
     }
   }
 
   // Non-Node / Static detection
+  if (pathSet.has("manage.py") && pathSet.has("requirements.txt")) {
+    const command = ".venv/bin/python manage.py runserver 0.0.0.0:$PORT --noreload";
+    return { packageManager, framework: "django", command, port: 8000, productionCommand: command };
+  }
+  if (pathSet.has("requirements.txt")) {
+    let fastapi = false;
+    if (pathSet.has("main.py")) {
+      const entry = await readFile("main.py").catch(() => "");
+      fastapi = /FastAPI\s*\(|from\s+fastapi\b/.test(entry);
+    }
+    if (fastapi) {
+      const command = ".venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port $PORT";
+      return { packageManager, framework: "fastapi", command, port: 8000, productionCommand: command };
+    }
+    if (pathSet.has("app.py")) {
+      return { packageManager, framework: "flask", command: ".venv/bin/python app.py", port: 3000, productionCommand: ".venv/bin/python app.py" };
+    }
+    return { packageManager, framework: "python", command: ".venv/bin/python -m http.server $PORT --bind 0.0.0.0", port: 8000, productionCommand: ".venv/bin/python -m http.server $PORT --bind 0.0.0.0" };
+  }
+  if (pathSet.has("composer.json")) {
+    const command = pathSet.has("artisan") ? "php artisan serve --host=0.0.0.0 --port=$PORT" : "php -S 0.0.0.0:$PORT -t public";
+    return { packageManager, framework: pathSet.has("artisan") ? "laravel" : "php", command, port: 8000, productionCommand: command };
+  }
+  if (pathSet.has("index.php")) {
+    return { packageManager, framework: "php", command: "php -S 0.0.0.0:$PORT", port: 8000, productionCommand: "php -S 0.0.0.0:$PORT" };
+  }
   if (pathSet.has("index.html")) {
-    return { packageManager, framework: "static", command: "npx -y serve -s . -l 3000", port: 3000 };
-  }
-  if (pathSet.has("requirements.txt") || pathSet.has("Pipfile") || pathSet.has("app.py") || pathSet.has("main.py")) {
-    return { packageManager, framework: "python", command: "python3 -m http.server 8000", port: 8000 };
-  }
-  if (pathSet.has("index.php") || pathSet.has("composer.json")) {
-    return { packageManager, framework: "php", command: "php -S 0.0.0.0:8000", port: 8000 };
+    return { packageManager, framework: "static", command: "python3 -m http.server $PORT --bind 0.0.0.0", port: 3000, productionCommand: "python3 -m http.server $PORT --bind 0.0.0.0" };
   }
 
-  return { packageManager, framework: "static", command: "npx -y serve -s . -l 3000", port: 3000 };
+  return { packageManager, framework: "static", command: "python3 -m http.server $PORT --bind 0.0.0.0", port: 3000, productionCommand: "python3 -m http.server $PORT --bind 0.0.0.0" };
+}
+
+function serveCommand(command: string, port: number): string {
+  return `${command} --port ${port}`;
 }
 
 export function extractPortFromCommand(command: string, fallbackPort: number): number {
@@ -262,6 +314,21 @@ export function filterIncomingCookies(
   return upstreamCookies.length > 0 ? upstreamCookies.join("; ") : undefined;
 }
 
+/** Project-scoped, HttpOnly preview session cookie. It is never forwarded to the project server. */
+export function previewAuthCookieName(projectId: string): string {
+  return `_npati_preview_${projectId.replace(/[^A-Za-z0-9]/g, "").slice(0, 8)}`;
+}
+
+export function readCookieValue(rawCookieHeader: string | undefined, name: string): string | undefined {
+  if (!rawCookieHeader) return undefined;
+  for (const part of rawCookieHeader.split(";")) {
+    const separator = part.indexOf("=");
+    if (separator < 0) continue;
+    if (part.slice(0, separator).trim() === name) return part.slice(separator + 1).trim();
+  }
+  return undefined;
+}
+
 export class ProjectPreviewService {
   private readonly secret: string;
   private readonly sessions = new Map<string, ActivePreviewSession>();
@@ -282,22 +349,34 @@ export class ProjectPreviewService {
     const files = await this.workspace.listFiles(ctx, companyId, projectId);
     const stack = await detectProjectStack(files, async (filePath) => (await this.workspace.readFile(ctx, companyId, projectId, filePath)).content);
     const paths = new Set(files.map((file) => file.path));
-    if (!paths.has("package.json")) return;
-    const manifest = JSON.parse((await this.workspace.readFile(ctx, companyId, projectId, "package.json")).content) as { scripts?: Record<string, string> };
-    if (!options.dependenciesOnly && !manifest.scripts?.build) return;
-    const install = stack.packageManager === "npm" && paths.has("package-lock.json") ? "npm ci"
-      : stack.packageManager === "pnpm" && paths.has("pnpm-lock.yaml") ? "pnpm install --frozen-lockfile"
-      : `${stack.packageManager} install`;
     try {
-      for (const [stage, command] of [["dependencies", install], ["build", stack.packageManager + " run build"]] as const) {
-        if (options.dependenciesOnly && stage === "build") break;
+      const run = async (stage: "dependencies" | "build", command: string) => {
         onStage?.(stage, { command, status: "running" });
         try {
-          const result = await this.sandbox.execute(ctx, companyId, { projectId, command, agentId: "system", approved: true });
+          const result = await this.sandbox!.execute(ctx, companyId, { projectId, command, agentId: "system", approved: true });
           onStage?.(stage, { command, status: result.exitCode === 0 ? "completed" : "failed", stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode ?? undefined, durationMs: result.durationMs });
           if (result.exitCode !== 0) throw new PreviewError("build_failed", "Command failed: " + command, 409);
         } catch (error) { onStage?.(stage, { command, status: "failed" }); throw error; }
+      };
+      if (!paths.has("package.json")) {
+        if (paths.has("requirements.txt")) {
+          await run("dependencies", "python3 -m venv .venv");
+          await run("dependencies", ".venv/bin/python -m pip install -r requirements.txt");
+        } else if (paths.has("composer.json")) {
+          await run("dependencies", "composer install --no-interaction --prefer-dist");
+        } else {
+          return;
+        }
+        if (!options.dependenciesOnly && paths.has("Makefile")) await run("build", "make build");
+        return;
       }
+      const manifest = JSON.parse((await this.workspace.readFile(ctx, companyId, projectId, "package.json")).content) as { scripts?: Record<string, string> };
+      if (!options.dependenciesOnly && !manifest.scripts?.build) return;
+      const install = stack.packageManager === "npm" && paths.has("package-lock.json") ? "npm ci"
+        : stack.packageManager === "pnpm" && paths.has("pnpm-lock.yaml") ? "pnpm install --frozen-lockfile"
+        : `${stack.packageManager} install`;
+      await run("dependencies", install);
+      if (!options.dependenciesOnly && manifest.scripts?.build) await run("build", `${stack.packageManager} run build`);
     } catch (error) {
       if (error instanceof SandboxProviderError && sandboxInfrastructureErrors.has(error.code)) {
         throw new PreviewError("sandbox_unavailable", error.message, error.status);
@@ -383,10 +462,9 @@ export class ProjectPreviewService {
     const files = await this.workspace.listFiles(ctx, companyId, projectId);
     const detected = await detectProjectStack(files, async (p) => (await this.workspace.readFile(ctx, companyId, projectId, p)).content);
 
-    const serveVerifiedBuild = (options.verifiedBuild ?? project.lastBuildStatus === "ready") && detected.framework === "nextjs";
-    const verifiedCommand = serveVerifiedBuild
-      ? "npx next start --hostname 0.0.0.0 --port 3000" : detected.command;
-    let devCommand = options.command?.trim() || verifiedCommand;
+    const verifiedBuild = options.verifiedBuild ?? project.lastBuildStatus === "ready";
+    let devCommand = options.command?.trim()
+      || (verifiedBuild && detected.productionCommand ? detected.productionCommand : detected.command);
     let devPort = options.port && Number.isInteger(options.port) ? options.port : extractPortFromCommand(devCommand, detected.port);
 
     const reused = options.verifiedBuild === false && !options.command && !options.port
@@ -416,7 +494,7 @@ export class ProjectPreviewService {
 
     // API and worker session maps can disagree; stop every recorded listener before replacement.
     const previousCommands = new Set([projectRuntimeCommandPort(detected.command, devPort), devCommand]);
-    if (detected.framework === "nextjs") previousCommands.add(projectRuntimeCommandPort("npx next start --hostname 0.0.0.0 --port 3000", devPort));
+    if (detected.productionCommand) previousCommands.add(projectRuntimeCommandPort(detected.productionCommand, devPort));
     for (const command of previousCommands) await this.sandbox.stopRecordedPreview(ctx, companyId, projectId, command);
 
     // Ensure dependencies are installed before starting the dev server for node/framework projects
@@ -518,7 +596,7 @@ export class ProjectPreviewService {
       previewUrl,
       previewPort: devPort,
       framework: finalFramework,
-      lastBuildStatus: detected.framework === "nextjs" && !serveVerifiedBuild ? null : "ready",
+      lastBuildStatus: verifiedBuild ? "ready" : detected.framework === "nextjs" ? null : "ready",
     });
 
     return {
@@ -675,7 +753,11 @@ export class ProjectPreviewService {
     reply: FastifyReply,
   ) {
     const { companyId, projectId } = request.params;
-    const token = request.query.token || (request.headers.authorization?.replace(/^Bearer\s+/i, "")) || "";
+    const cookieName = previewAuthCookieName(projectId);
+    const token = request.query.token
+      || (request.headers.authorization?.replace(/^Bearer\s+/i, ""))
+      || readCookieValue(request.headers.cookie, cookieName)
+      || "";
 
     let tokenPayload: PreviewTokenPayload;
     try {
@@ -716,6 +798,11 @@ export class ProjectPreviewService {
     }
 
     if (!this.sandbox) return reply.code(503).send({ error: "Sandbox runner unavailable" });
+    const cookiePath = `/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/preview/proxy`;
+    const secureCookie = (request.headers["x-forwarded-proto"] ?? request.protocol) === "https";
+    const previewCookie = request.query.token
+      ? `${cookieName}=${token}; Path=${cookiePath}; HttpOnly; SameSite=Lax; Max-Age=900${secureCookie ? "; Secure" : ""}`
+      : null;
     const subpath = "/" + (request.params["*"] ?? "");
     const query = new URL(request.url, "http://localhost").searchParams;
     query.delete("token");
@@ -772,15 +859,17 @@ export class ProjectPreviewService {
       }
 
       const setCookieRaw = result.headers["set-cookie"] || result.headers["Set-Cookie"];
+      let rewritten: string[] = [];
       if (setCookieRaw) {
         const cookieList: string[] = Array.isArray(setCookieRaw)
           ? setCookieRaw
           : typeof setCookieRaw === "string" && setCookieRaw.includes("\n")
             ? setCookieRaw.split("\n")
             : [String(setCookieRaw)];
-        const rewritten = cookieList.map((c) => rewriteSetCookieHeader(c, projectPrefix, prefix));
-        reply.header("set-cookie", rewritten);
+        rewritten = cookieList.map((c) => rewriteSetCookieHeader(c, projectPrefix, prefix));
       }
+      const cookies = previewCookie ? [previewCookie, ...rewritten] : rewritten;
+      if (cookies.length) reply.header("set-cookie", cookies);
       let body = Buffer.from(result.body, "base64");
       if (String(result.headers["content-type"] ?? "").includes("text/html")) {
         const html = body.toString("utf8").replace(/(src|href|action|poster)=(["'])(\/[^"']*)\2/gi, (match, attr: string, quote: string, target: string, offset: number, source: string) => {

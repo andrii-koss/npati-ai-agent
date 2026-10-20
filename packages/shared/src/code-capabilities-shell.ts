@@ -19,6 +19,7 @@ export const CODE_SHELL_CAPABILITIES: CapabilityDefinition[] = [
     doNotUseWhen: [
       "The command is interactive or long-running: use code.shell.process.start.",
       "The command needs production credentials or network access outside the allowlist: it will be refused.",
+      "The command contains a pipe, redirect, substitution or command chaining: use one simple command, or code.verify.run for build/typecheck/test.",
       "A read/search tool answers the question (code.fs.grep, code.fs.read): running a shell command for that is wasteful and riskier.",
     ],
     agentCallable: true,

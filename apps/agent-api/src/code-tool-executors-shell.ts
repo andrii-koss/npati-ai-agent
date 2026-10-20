@@ -36,6 +36,7 @@ export interface CodeShellRuntimePort {
     companyId: string;
     projectId: string;
     sessionId?: string;
+    sessionMode?: "plan" | "edit" | "ask" | "auto" | "auto_edit" | "full_auto" | "full_auto_sandbox";
     turnId?: string;
     command: string;
     cwd?: string;
@@ -94,7 +95,7 @@ export interface CodeVerifyRunnerPort {
     changedOnly: boolean;
     timeoutMs: number;
   }): Promise<{
-    results: Array<{ tool: "lint" | "typecheck" | "test" | "build"; ok: boolean; summary: string; findings: string[]; raw?: string }>;
+    results: Array<{ tool: "lint" | "typecheck" | "test" | "build"; ok: boolean; summary: string; findings: string[]; raw?: string; exitCode?: number | null; stdout?: string; stderr?: string; timedOut?: boolean; durationMs?: number; command?: string }>;
     stats: { tools: number; passed: number; failed: number; durationMs: number };
   }>;
 }
@@ -161,6 +162,19 @@ export function canonicalShellExecutors(options: CanonicalShellExecutorOptions =
     "code.shell.exec": async (input) => {
       const command = stringArg(input.args, ["command", "cmd", "commandLine"]);
       if (!command) throw new CodeToolError("invalid_arguments", "code.shell.exec requires a command", 400, "validate_arguments", false, input.tool.name);
+      // A shell pipeline or redirect is not a single command: the sandbox policy would have to
+      // ask for human approval, which a chat-created run cannot satisfy. Refuse it early with a
+      // retryable validation error so the agent corrects the call instead of waiting forever.
+      if (/[|&;`$<>]/.test(command)) {
+        throw new CodeToolError(
+          "invalid_arguments",
+          "code.shell.exec accepts one simple command; pipes, redirects, substitutions and command chaining are not available. Use code.verify.run for build/typecheck/test, or run the bare command (for example: npm run build).",
+          400,
+          "validate_arguments",
+          true,
+          input.tool.name,
+        );
+      }
       const runtime = shell();
       try {
         const result = await runtime.exec({
@@ -168,6 +182,7 @@ export function canonicalShellExecutors(options: CanonicalShellExecutorOptions =
           companyId: input.companyId,
           projectId: input.projectId,
           sessionId: input.sessionId,
+          sessionMode: input.sessionMode,
           turnId: input.turnId,
           command,
           cwd: stringArg(input.args, ["cwd", "workingDirectory"]) ?? undefined,

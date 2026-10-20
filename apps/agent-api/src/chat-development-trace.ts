@@ -9,10 +9,47 @@ export function sanitizeProgress(item: DevelopmentProcessProgressItem): Developm
     if (typeof safe[field] === "string") safe[field] = sanitizeExecutionTrace(safe[field]!);
   }
   if(safe.modelUsage) safe.modelUsage={...safe.modelUsage,model:safe.modelUsage.model ? sanitizeExecutionTrace(safe.modelUsage.model) : undefined,provider:safe.modelUsage.provider ? sanitizeExecutionTrace(safe.modelUsage.provider) : undefined};
-  if (safe.files) safe.files = safe.files.slice(0,200).map(file => ({ ...file, path: sanitizeExecutionTrace(file.path), diff: file.diff ? sanitizeExecutionTrace(file.diff).slice(0,128_000) : undefined }));
-  for (const field of ["arguments", "fileContent", "stdout", "stderr", "diff"] as const) if (safe[field] && safe[field]!.length > 128_000) { safe[field] = safe[field]!.slice(0,128_000); safe.resultTruncated = true; }
-  if (safe.result && safe.result.length > 128_000) { safe.result = safe.result.slice(0, 128_000); safe.resultTruncated = true; }
+  if (safe.files) safe.files = safe.files.slice(0,200).map(file => ({ ...file, path: sanitizeExecutionTrace(file.path), diff: file.diff ? sanitizeExecutionTrace(file.diff).slice(0,32_000) : undefined }));
+  for (const field of ["arguments", "fileContent", "stdout", "stderr", "diff"] as const) if (safe[field] && safe[field]!.length > 32_000) { safe[field] = safe[field]!.slice(0,32_000); safe.resultTruncated = true; }
+  if (safe.result && safe.result.length > 32_000) { safe.result = safe.result.slice(0, 32_000); safe.resultTruncated = true; }
   return safe;
+}
+
+/**
+ * Bounds the size of the process projection that is persisted on every activity update.
+ * Keeping every tool's full file content and diff in a JSONB user setting made each patch a
+ * multi-megabyte read/modify/write and starved concurrent projects. Recent events keep their
+ * payload; older events keep only the metadata needed for the trace.
+ */
+export function compactProgress(events: DevelopmentProcessProgressItem[], maxEvents = 50, maxBytes = 384_000): DevelopmentProcessProgressItem[] {
+  const kept = events.slice(-Math.max(1, maxEvents)).map(event => ({ ...event }));
+  const heavy = ["fileContent", "diff", "result", "stdout", "stderr", "files", "arguments"] as const;
+  let bytes = Buffer.byteLength(JSON.stringify(kept));
+  // The newest 8 events are the useful diff/detail window. Strip older payloads until the
+  // persisted projection fits its budget.
+  for (let index = 0; index < kept.length && bytes > maxBytes; index++) {
+    if (index >= kept.length - 8) continue;
+    let changed = false;
+    for (const field of heavy) {
+      if (kept[index]![field] !== undefined) { delete (kept[index] as Record<string, unknown>)[field]; changed = true; }
+    }
+    if (changed) {
+      kept[index]!.resultTruncated = true;
+      bytes = Buffer.byteLength(JSON.stringify(kept));
+    }
+  }
+  return kept;
+}
+
+/** Old processes keep an auditable trace but not file contents or diffs. */
+export function metadataOnlyProgress(events: DevelopmentProcessProgressItem[], limit = 8): DevelopmentProcessProgressItem[] {
+  const heavy = ["fileContent", "diff", "result", "stdout", "stderr", "files", "arguments"] as const;
+  return events.slice(-Math.max(1, limit)).map(event => {
+    const copy = { ...event };
+    for (const field of heavy) delete (copy as Record<string, unknown>)[field];
+    copy.resultTruncated = true;
+    return copy;
+  });
 }
 /** Include only the session's roots and their explicitly linked children in this tenant/project. */
 export function selectDevelopmentTraceRuns(runs: CodeRunStateRecord[], ctx: AuthContext, process: DevelopmentProcess) {
@@ -40,9 +77,11 @@ export function executionResultDetails(value: unknown): Partial<DevelopmentProce
   const readLines = Array.isArray(data.lines) && data.lines.every(line => typeof object(line).text === "string") ? data.lines.map(line => String(object(line).text)).join("\n") : undefined;
   const reports = Array.isArray(data.results) ? data.results.map(object) : [];
   const recordedOutput = reports.map(report => string(report.raw)).filter(Boolean).join("\n\n");
+  const firstReport = reports[0] ?? {};
+  const timedOut = reports.some(report => report.timedOut === true) || data.timedOut === true;
   const counts = object(data.tests);
   const tests = ["passed","failed","skipped","total"].every(key => numeric(counts[key]) !== undefined && Number(counts[key]) >= 0) ? counts as {passed:number;failed:number;skipped:number;total:number} : undefined;
-  return Object.fromEntries(Object.entries({status: envelope.ok === false || data.ok === false || data.success === false || (tests?.failed ?? 0) > 0 || reports.some(report => report.ok === false) || typeof data.exitCode === "number" && data.exitCode !== 0 || typeof object(data.stats).failed === "number" && Number(object(data.stats).failed) > 0 ? "failed" : undefined, dryRun:typeof data.dryRun==="boolean"?data.dryRun:undefined,file:string(data.path),fileContent:data.binary === true || data.encoding === "base64" ? undefined : string(data.content) ?? readLines,stdout:string(data.stdout) ?? (recordedOutput || undefined),stderr:string(data.stderr),exitCode:numeric(data.exitCode),diff:string(data.diff),linesAdded:numeric(data.linesAdded),linesRemoved:numeric(data.linesRemoved),fileChange:actions[String(data.status)],files,tests}).filter(([,value]) => value !== undefined)) as Partial<DevelopmentProcessProgressItem>;
+  return Object.fromEntries(Object.entries({status: envelope.ok === false || data.ok === false || data.success === false || (tests?.failed ?? 0) > 0 || reports.some(report => report.ok === false) || typeof data.exitCode === "number" && data.exitCode !== 0 || typeof object(data.stats).failed === "number" && Number(object(data.stats).failed) > 0 ? "failed" : undefined, dryRun:typeof data.dryRun==="boolean"?data.dryRun:undefined,file:string(data.path),fileContent:data.binary === true || data.encoding === "base64" ? undefined : string(data.content) ?? readLines,stdout:string(data.stdout) ?? (recordedOutput || reports.map(report => string(report.stdout)).filter(Boolean).join("\n\n") || undefined),stderr:string(data.stderr) ?? (reports.map(report => string(report.stderr)).filter(Boolean).join("\n\n") || undefined),exitCode:numeric(data.exitCode) ?? numeric(firstReport.exitCode),command:string(firstReport.command) ?? string(data.command),diff:string(data.diff),linesAdded:numeric(data.linesAdded),linesRemoved:numeric(data.linesRemoved),fileChange:actions[String(data.status)],files,tests,errorCode:timedOut?"verification_timeout":undefined,error:timedOut?"Verification timed out":undefined}).filter(([,value]) => value !== undefined)) as Partial<DevelopmentProcessProgressItem>;
 }
 /** JSONB serializes nested Date values as ISO strings; pg does not revive them. */
 export function executionTimestamp(value: unknown): number | undefined {

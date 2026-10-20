@@ -274,7 +274,7 @@ export class CodeShellRuntime {
     const classifier = this.options.classifier ?? defaultShellClassifier;
     const classification = classifier.classify(input.command);
     const extended = input as {
-      projectId?: string; sessionMode?: "plan" | "edit" | "auto" | "full_auto";
+      projectId?: string; sessionMode?: "plan" | "edit" | "ask" | "auto" | "auto_edit" | "full_auto" | "full_auto_sandbox";
       approvalId?: string; networkEnforcementGuaranteed?: boolean;
       // C5: optional policy inputs the caller (agent loop / routes) may supply. They are forwarded
       // verbatim; the engine stays the only place that decides what they mean, and absent fields

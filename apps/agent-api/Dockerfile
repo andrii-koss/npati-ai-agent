@@ -61,7 +61,10 @@ CMD ["node", "dist/server.js"]
 FROM node:24-alpine AS project-runtime-tools
 USER root
 ENV NPATI_SANDBOX_RUNNER_MODE=local
-RUN apk add --no-cache python3 py3-pip git openssh-client ripgrep build-base linux-headers bash coreutils findutils util-linux procps jq unzip curl iptables bubblewrap slirp4netns
+RUN apk add --no-cache python3 py3-pip git openssh-client ripgrep build-base linux-headers bash coreutils findutils util-linux procps jq unzip curl iptables bubblewrap slirp4netns \
+  php83 php83-phar php83-mbstring php83-openssl php83-tokenizer php83-xml php83-xmlwriter php83-dom php83-simplexml \
+  php83-ctype php83-fileinfo php83-session php83-curl php83-pdo php83-pdo_sqlite php83-sqlite3 php83-bcmath php83-iconv composer \
+  && ln -sf /usr/bin/php83 /usr/local/bin/php
 RUN npm install -g --prefix /opt/npati-package-managers --no-audit --no-fund pnpm@10 yarn@1.22.22
 COPY --from=project-web-toolchain /opt/npati-project-toolchain /opt/npati-project-toolchain
 COPY apps/agent-api/prepare-project-dependencies.cjs /opt/npati-runtime/prepare-project-dependencies.cjs

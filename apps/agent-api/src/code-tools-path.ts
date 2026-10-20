@@ -94,8 +94,10 @@ export interface NormalizePathOptions {
 }
 
 const GLOB_META = /[*?[\]{}()!+@]/;
-// These are literal framework directory names, never expanded as globs.
-const FRAMEWORK_ROUTE_SEGMENT = /^(?:\[(?:\.\.\.)?[A-Za-z_][A-Za-z0-9_-]*\]|\[\[\.\.\.[A-Za-z_][A-Za-z0-9_-]*\]\]|\([A-Za-z0-9_-]+\)|@[A-Za-z0-9_-]+)$/;
+// These are literal framework directory/file names, never expanded as globs.
+const FRAMEWORK_ROUTE_SEGMENT = /^(?:\[(?:\.\.\.)?[A-Za-z_][A-Za-z0-9_-]*\]|\[\[\.\.\.[A-Za-z_][A-Za-z0-9_-]*\]\]|\([A-Za-z0-9_-]+\)|@[A-Za-z0-9_-]+|\+[A-Za-z0-9_.@-]+)$/;
+// SvelteKit +page.svelte / +layout.server.ts and Astro [slug].astro are literal filenames.
+const FRAMEWORK_ROUTE_FILE = /^(?:\[(?:\.\.\.)?[A-Za-z_][A-Za-z0-9_-]*\]|\[\[\.\.\.[A-Za-z_][A-Za-z0-9_-]*\]\])\.(?:astro|md|mdx)$/;
 const DRIVE_PREFIX = /^[a-zA-Z]:/;
 
 /**
@@ -133,7 +135,7 @@ export function normalizeWorkspacePath(raw: unknown, options: NormalizePathOptio
     if (segment === "..") {
       throw new CodeToolError("path_outside_workspace", "Path traversal with \"..\" is not allowed", tool);
     }
-    if (!options.allowGlob && GLOB_META.test(segment) && !FRAMEWORK_ROUTE_SEGMENT.test(segment)) {
+    if (!options.allowGlob && GLOB_META.test(segment) && !FRAMEWORK_ROUTE_SEGMENT.test(segment) && !FRAMEWORK_ROUTE_FILE.test(segment)) {
       throw new CodeToolError("invalid_path", "Glob metacharacters are not allowed in this path", tool);
     }
   }
