@@ -1,0 +1,5 @@
+{
+  "framework": "Express",
+  "error": "TypeError: fetch failed\n    at node:internal/deps/undici/undici:13502:13\n    at async api (D:\\npati\\NPATI Agent\\scratch\\framework-chat-e2e.cjs:27:20)\n    at async waitForEditedPreview (D:\\npati\\NPATI Agent\\scratch\\framework-chat-e2e.cjs:78:22)\n    at async D:\\npati\\NPATI Agent\\scratch\\framework-chat-e2e.cjs:221:7",
+  "at": "2026-10-20T12:49:21.082Z"
+}

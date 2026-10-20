@@ -17,7 +17,9 @@ import {
   slugifyProjectName,
   isDataCapabilityPermitted,
   DATA_CAPABILITY_GROUPS,
+  canonicalFrameworkName,
 } from "@npati/shared";
+import { createFrameworkScaffold } from "./project-framework-scaffold";
 import { ProjectOrchestrationError } from "./project-orchestrator-types";
 
 /**
@@ -195,13 +197,21 @@ export async function scaffoldWebsiteProject(
   companyId: string,
   projectId: string,
   projectName: string,
-  framework: "nextjs" | "static",
+  framework: string,
   prompt?: string,
 ): Promise<void> {
   const template = /hosting|хост|vps|сервер|domain|домен/iu.test(`${projectName} ${prompt ?? ""}`) ? "hosting" : "landing";
-  const doc = createDefaultWebsiteDocument(projectName, framework, { template });
-  const adapter = getWebsiteAdapter(framework);
-  const files = adapter.scaffoldProject(doc);
+  const canonical = canonicalFrameworkName(framework) ?? (framework === "nextjs" ? "Next.js" : framework === "static" ? "HTML/CSS" : undefined);
+  let files: Record<string, string>;
+  if (!canonical || canonical === "Next.js") {
+    const doc = createDefaultWebsiteDocument(projectName, "nextjs", { template });
+    files = getWebsiteAdapter("nextjs").scaffoldProject(doc);
+  } else if (canonical === "HTML/CSS") {
+    const doc = createDefaultWebsiteDocument(projectName, "static", { template });
+    files = getWebsiteAdapter("static").scaffoldProject(doc);
+  } else {
+    files = createFrameworkScaffold({ projectName, prompt: prompt ?? "", framework: canonical });
+  }
   for (const [filePath, content] of Object.entries(files)) {
     try { await projectWorkspace.readFile(ctx, companyId, projectId, filePath); }
     catch { await projectWorkspace.createFile(ctx, companyId, projectId, filePath, content); }

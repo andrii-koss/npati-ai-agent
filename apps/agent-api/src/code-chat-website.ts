@@ -1,12 +1,13 @@
 import { emitCodingActivity } from "./coding-agent-runner-contracts";
 import type { AuthContext, Project } from "@npati/workspace";
 import type { CodeSessionRunInput } from "./code-session-run-executor";
+import { isSupportedProjectFramework } from "@npati/shared";
 
 /** Website chat uses the existing code loop and preview runtime; no second agent or queue. */
 export function isCodeChatWebsite(project: Pick<Project, "type" | "framework">): boolean {
   return ["website", "web_app", "landing_page"].includes(project.type)
     || (project.type === "mobile_app" && project.framework === "Expo")
-    || (project.type === "code_project" && /^(Next\.js|HTML\/CSS|React|Vite)$/i.test(project.framework ?? ""));
+    || (project.type === "code_project" && isSupportedProjectFramework(project.framework));
 }
 
 /** CSS compilation is available for an existing working Next.js site. */

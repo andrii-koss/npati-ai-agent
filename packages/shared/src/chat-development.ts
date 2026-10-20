@@ -1,7 +1,7 @@
 export const DEVELOPMENT_PROCESS_SETTINGS_KEY = "chat-development-processes:v1";
-import { classifyProjectIntent } from "./project-intent";
+import { classifyProjectIntent, extractFramework, isBackendProjectFramework } from "./project-intent";
 /** Shared deterministic routing: creation requests only, never ordinary project edits. */
-export type DevelopmentTarget = { name: string; kind: "website" | "blog" | "store" | "crm" | "mobile_app"; framework: "Next.js" | "HTML/CSS" | "Expo" };
+export type DevelopmentTarget = { name: string; kind: "website" | "blog" | "store" | "crm" | "mobile_app" | "api"; framework: string };
 export type ModelTurnUsage = { id: string; turn: number; totalTokens?: number; inputTokens?: number; outputTokens?: number; costUsd?: number; model?: string; provider?: string; toolCallIds: string[]; durationMs?: number };
 export type DevelopmentProcessProgressItem = {
   modelUsage?: ModelTurnUsage;
@@ -52,11 +52,17 @@ export function requestsDevelopmentRestore(message: string): boolean {
   return /(?:open|show|restore|відкри|покаж|віднов|открой).*(?:development processes|процеси.*розроб|процессы.*разраб)/iu.test(message);
 }
 export function planChatDevelopment(message: string, activeProjectId?: string): DevelopmentTarget[] {
+  // A follow-up that explicitly says "do not create a new project, edit this one" must never
+  // be re-planned as a creation just because the requested replacement text names a framework.
+  if (/(?:не\s+створюй|не\s+создавай|do\s+not\s+create|don't\s+create)\s+(?:новий\s+|новый\s+|a\s+new\s+|new\s+)?(?:про[єе]кт|project)/iu.test(message)) return [];
   if (activeProjectId && !["CREATE_PROJECT", "CREATE_WEBSITE"].includes(classifyProjectIntent({ message, activeProjectId }).intent)) return [];
   if (!/(?:\bcreate\b|\bbuild\s+(?:a\s+|an\s+|new\s+|[1-4]\s+)?(?:website|site|shop|store|blog|mobile|crm)|\bmake\b|створ|зроби|создай|создать)/iu.test(message)) return [];
   if (/(?:create|make|створ|зроби|создай).*(?:\bpage\b|\bcomponent\b|\bbutton\b|\bheader\b|сторінк|компонент|кнопк)/iu.test(message)
-      && !/(?:new\s+(?:website|site)|новий\s+сайт)/iu.test(message)) return [];
+      && (/(?:my|this|existing|current)\s+(?:website|web\s*site|\bsite\b|project|app)|(?:мій|цей|існуюч)\p{L}*/iu.test(message)
+        || (!/(?:website|web\s*site|\bsite\b|project|app|сайт|про[єе]кт|застосун\p{L}*|магазин|store|shop|blog|блог|crm|срм)/iu.test(message)
+          && !/(?:new\s+(?:website|site)|новий\s+сайт)/iu.test(message)))) return [];
   const kinds: DevelopmentTarget["kind"][] = [];
+  const requestedFramework = extractFramework(message);
   if (/(?:website|\bsite\b|сайт|landing)/iu.test(message)) kinds.push("website");
   if (/(?:blog|блог)/iu.test(message)) kinds.push("blog");
   if (/(?:store|shop|магазин)/iu.test(message)) {
@@ -66,11 +72,18 @@ export function planChatDevelopment(message: string, activeProjectId?: string): 
   }
   if (/(?:mobile\s+app|мобільн|мобильн)/iu.test(message)) kinds.push("mobile_app");
   if (/(?:\bcrm\b|срм)/iu.test(message)) kinds.push("crm");
-  const names = { website: "Company website", blog: "Blog", store: "Online store", mobile_app: "Mobile app", crm: "CRM" };
+  // A backend prompt need not contain the word "website": creating an Express/FastAPI service
+  // is still a code project and must enter the coding-agent path rather than a generic chat.
+  if (!kinds.length && isBackendProjectFramework(requestedFramework)) kinds.push("api");
+  const names = { website: "Company website", blog: "Blog", store: "Online store", mobile_app: "Mobile app", crm: "CRM", api: "API service" };
   const count = kinds.length === 1 ? Number(/(?:create|build|make|створи|зроби|создай)\s+(?:мені\s+)?(\d+)/iu.exec(message)?.[1] ?? 1) : kinds.length;
   if (count > 4 || kinds.length > 4) throw new Error("A chat can start up to four development projects at once.");
   const targets = kinds.length === 1 ? Array.from({ length: Math.max(1, count) }, () => kinds[0]!) : kinds;
-  return targets.map((kind, index) => ({ kind, name: names[kind] + (count > 1 && kinds.length === 1 ? " " + (index + 1) : ""), framework: kind === "mobile_app" ? "Expo" : /html\s*(?:\/|and|\+)\s*css/iu.test(message) ? "HTML/CSS" : "Next.js" }));
+  return targets.map((kind, index) => ({
+    kind,
+    name: names[kind] + (count > 1 && kinds.length === 1 ? " " + (index + 1) : ""),
+    framework: kind === "mobile_app" ? "Expo" : requestedFramework ?? "Next.js",
+  }));
 }
 
 export function createDevelopmentAssistantIntro(message: string, targets: DevelopmentTarget[], language?: string): string {
@@ -82,6 +95,7 @@ export function createDevelopmentAssistantIntro(message: string, targets: Develo
       if (t.name === "Blog") return "Блог";
       if (t.name === "Mobile app") return "Мобільний застосунок";
       if (t.name === "CRM") return "CRM-система";
+      if (t.name === "API service") return "API-сервіс";
     }
     return t.name;
   }).join(", ");

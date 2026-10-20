@@ -16,6 +16,7 @@ import type { DataBackendService } from "./data-studio/service";
 import type { ProjectRedirectRepository } from "./data-studio/redirect-repository";
 import {
   type ProjectCardData, type ProjectProgressEvent, type ProjectActionData, type ProjectIntentDecision, extractFramework,
+  canonicalFrameworkName,
   defaultAppScheme,
 } from "@npati/shared";
 import {
@@ -132,16 +133,17 @@ export class ProjectOrchestrator {
   }
 
   async prepareCodingWebsite(ctx: AuthContext, project: Project, prompt: string, framework: string): Promise<Project> {
-    await this.scaffoldWebsiteProject(ctx, project.companyId, project.id, project.name, framework === "Next.js" ? "nextjs" : "static", prompt);
-    await this.projectService.updatePreview(ctx, project.companyId, project.id, { framework });
-    await this.initSharedProjectContext(ctx, project.companyId, project.id, { name: project.name, description: prompt, framework, projectType: "code_project" });
-    if (framework === "Next.js" && this.prepareWebsiteData) {
+    const canonical = canonicalFrameworkName(framework) ?? framework;
+    await this.scaffoldWebsiteProject(ctx, project.companyId, project.id, project.name, canonical, prompt);
+    await this.projectService.updatePreview(ctx, project.companyId, project.id, { framework: canonical });
+    await this.initSharedProjectContext(ctx, project.companyId, project.id, { name: project.name, description: prompt, framework: canonical, projectType: "code_project" });
+    if (canonical === "Next.js" && this.prepareWebsiteData) {
       await this.prepareWebsiteData(ctx, await this.projectService.get(ctx, project.companyId, project.id), prompt);
     }
     return this.projectService.get(ctx, project.companyId, project.id);
   }
 
-  private async scaffoldWebsiteProject(ctx: AuthContext, companyId: string, projectId: string, projectName: string, framework: "nextjs" | "static", prompt?: string): Promise<void> {
+  private async scaffoldWebsiteProject(ctx: AuthContext, companyId: string, projectId: string, projectName: string, framework: string, prompt?: string): Promise<void> {
     return scaffoldWebsiteProject(this.projectWorkspace, ctx, companyId, projectId, projectName, framework, prompt);
   }
 
@@ -239,7 +241,9 @@ export class ProjectOrchestrator {
         params.intentDecision.targetDetails?.entityName,
       );
       const projectType = isMobileApp ? "mobile_app" : "website";
-      let framework = params.intentDecision.targetDetails?.framework || extractFramework(params.prompt) || (/магазин|store|shop|commerce/iu.test(params.prompt) ? "Next.js" : "HTML/CSS");
+      let framework = canonicalFrameworkName(params.intentDecision.targetDetails?.framework)
+        || extractFramework(params.prompt)
+        || (/магазин|store|shop|commerce/iu.test(params.prompt) ? "Next.js" : "HTML/CSS");
       let dataBackendId: string | undefined;
       if (isMobileApp) {
         const selection = await this.resolveMobileDataBackend(ctx, params.companyId, {
@@ -273,9 +277,9 @@ export class ProjectOrchestrator {
         report("files", "active", framework);
         await this.scaffoldMobileAppProject(ctx, params.companyId, project.id, project.name, scheme);
         await this.registerMobileRedirects(ctx, params.companyId, project.id, scheme);
-      } else if (framework === "Next.js" || framework === "HTML/CSS") {
+      } else if (framework !== "Expo") {
         report("files", "active", framework);
-        await this.scaffoldWebsiteProject(ctx, params.companyId, project.id, project.name, framework === "Next.js" ? "nextjs" : "static", params.prompt);
+        await this.scaffoldWebsiteProject(ctx, params.companyId, project.id, project.name, framework, params.prompt);
       }
 
       // Initialize PROJECT.md

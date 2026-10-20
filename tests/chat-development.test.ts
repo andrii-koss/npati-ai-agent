@@ -115,6 +115,13 @@ describe("development request planning", () => {
     expect(planned.statusCode, planned.body).toBe(200);
     expect(planned.json()).toEqual({ targets });
     expect(resolveProjectIntent).toHaveBeenLastCalledWith(owner, expect.objectContaining({ message }));
+    const edit = await app.inject({ method: "POST", url: "/chat/development/plan", payload: {
+      message: "Зміни H1 на «NPATI FastAPI E2E». Не створюй новий проєкт — редагуй цей самий проєкт.",
+      companyId: f.company.id,
+    } });
+    expect(edit.statusCode, edit.body).toBe(200);
+    expect(edit.json()).toEqual({ targets: [] });
+    expect(resolveProjectIntent).toHaveBeenCalledTimes(1);
     const denied = await app.inject({ method: "POST", url: "/chat/development/plan", payload: { message, companyId: "foreign-company" } });
     expect(denied.statusCode).not.toBe(200);
     expect(resolveProjectIntent).toHaveBeenCalledTimes(1);
@@ -134,6 +141,7 @@ describe("development request planning", () => {
     expect(planChatDevelopment("Create a new website with a contact form", "existing")).toHaveLength(1);
     expect(planChatDevelopment("Create 4 websites")).toHaveLength(4);
     expect(() => planChatDevelopment("Create 5 websites")).toThrow("four");
+    expect(planChatDevelopment("Зміни H1 на «NPATI FastAPI E2E», додай секцію. Не створюй новий проєкт — редагуй цей самий проєкт.")).toEqual([]);
     expect(requestsDevelopmentRestore("відкрий усі процеси розробки")).toBe(true);
   });
 });
@@ -292,7 +300,7 @@ describe("chat development lifecycle with the real store, queue and executor", (
     const process = (await f.service.list(owner))[0]!;
     expect(f.preview.buildProject).toHaveBeenCalledOnce(); expect(f.preview.buildProject.mock.calls[0]?.[4]).toEqual({dependenciesOnly:true}); expect(f.preview.startPreview).not.toHaveBeenCalled();
     expect(process.progress?.map(p => p.stage)).toEqual(expect.arrayContaining(["scaffold", "dependencies", "agent"]));
-    const runner = f.controls.get(process.projectId!)!; expect(runner.input.maxTurns).toBeUndefined(); expect(process.progress?.some(p=>["build","preview","template_ready"].includes(p.stage))).toBe(false); expect(runner.input.prompt).not.toContain("code.deps.install"); expect(runner.input.prompt).toContain("code.deps.add");
+    const runner = f.controls.get(process.projectId!)!; expect(runner.input.maxTurns).toBe(20); expect(process.progress?.some(p=>["build","preview","template_ready"].includes(p.stage))).toBe(false); expect(runner.input.prompt).not.toContain("code.deps.install"); expect(runner.input.prompt).toContain("Do not add tests");
     const child = await f.store.getNeutralConversation(owner, process.conversationId!); expect(child.messages.length).toBeGreaterThanOrEqual(1);
     expect((await getLatestChatProjectCard(f.store, owner, process.conversationId!))?.status).not.toBe("ready");
     runner.finish({ status: "stopped", reason: "budget_exhausted", message: "A2A_TOKEN_QUOTA_EXCEEDED", runId: runner.input.runId });

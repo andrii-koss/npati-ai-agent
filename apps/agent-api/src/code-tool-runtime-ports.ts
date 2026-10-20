@@ -42,6 +42,8 @@ export interface CodeToolExecutionContext {
   companyId: string;
   projectId: string;
   sessionId?: string;
+  /** Canonical session mode resolved by the caller; policy still makes the final decision. */
+  sessionMode?: "plan" | "edit" | "ask" | "auto" | "auto_edit" | "full_auto" | "full_auto_sandbox";
   /** C3: the turn this call belongs to, so executors can scope their output to it. */
   turnId?: string;
   /**

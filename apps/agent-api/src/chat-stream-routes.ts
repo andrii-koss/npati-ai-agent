@@ -34,7 +34,7 @@ import { AdmissionError } from "./resilience-admission-queue";
 import { SecurityPolicyViolation } from "./security-guardrails";
 import { StorageRateLimitError } from "./storage-protection";
 import { WorkspaceChatActions } from "./workspace-chat-actions";
-import { ContextValidationError, PROJECT_CARD_DATA_VERSION, ProjectCardData, codeIntentIsReadOnly, defaultHybridRouter } from "@npati/shared";
+import { ContextValidationError, PROJECT_CARD_DATA_VERSION, ProjectCardData, canonicalFrameworkName, codeIntentIsReadOnly, defaultHybridRouter, extractFramework } from "@npati/shared";
 import { ResearchProgressEvent, ResearchProgressListener } from "@npati/web-research";
 import { AuthContext, CodeSession, WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
 import type { CodeRunCancellationRegistry } from "./code-run-cancellation";
@@ -180,7 +180,9 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
           let project = await codeService.createProject(auth, activeCompanyId,
             { name: extractCleanProjectName(message, projectIntent.targetDetails?.entityName), description: message.slice(0, 5000) },
             `chat-website:${auth.userId}:${request.headers["idempotency-key"] ?? streamId ?? crypto.randomUUID()}`);
-          const framework = projectIntent.targetDetails?.framework === "HTML/CSS" ? "HTML/CSS" : "Next.js";
+          const framework = canonicalFrameworkName(projectIntent.targetDetails?.framework)
+            ?? extractFramework(message)
+            ?? "Next.js";
           project = await projectOrchestrator.prepareCodingWebsite(auth, project, message, framework);
           await codeService.detectAndPersist(auth, activeCompanyId, project.id);
           activeProjectId = project.id;

@@ -102,20 +102,88 @@ function extractEntityName(message: string): string | undefined {
   return name ? name.charAt(0).toUpperCase() + name.slice(1) : undefined;
 }
 
+/** Canonical framework names understood by project scaffolding, preview and verification. */
+export const SUPPORTED_PROJECT_FRAMEWORKS = [
+  "Next.js",
+  "React + Vite",
+  "Vue 3 + Vite",
+  "Nuxt",
+  "SvelteKit",
+  "Astro",
+  "Angular",
+  "Remix",
+  "Express",
+  "Fastify",
+  "NestJS",
+  "FastAPI",
+  "Django",
+  "Flask",
+  "Laravel",
+  "HTML/CSS",
+  "Expo",
+] as const;
+export type SupportedProjectFramework = typeof SUPPORTED_PROJECT_FRAMEWORKS[number];
+
+/** Frameworks whose primary deliverable is an HTTP API/server, not a browser-rendered site. */
+export const BACKEND_PROJECT_FRAMEWORKS = ["Express", "Fastify", "NestJS", "FastAPI", "Django", "Flask", "Laravel"] as const;
+export function isBackendProjectFramework(value: unknown): boolean {
+  return typeof value === "string" && (BACKEND_PROJECT_FRAMEWORKS as readonly string[]).includes(value);
+}
+
+export function isSupportedProjectFramework(value: unknown): value is SupportedProjectFramework {
+  return typeof value === "string" && (SUPPORTED_PROJECT_FRAMEWORKS as readonly string[]).includes(value);
+}
+
+/**
+ * Maps free-form framework spellings to the canonical name used by the project record.
+ * Kept separate from `extractFramework` so callers can normalise persisted metadata without
+ * re-parsing a prompt.
+ */
+export function canonicalFrameworkName(value: string | null | undefined): SupportedProjectFramework | undefined {
+  if (!value) return undefined;
+  const lower = value.toLowerCase();
+  if (lower.includes("expo") || lower.includes("react native") || lower.includes("react-native")) return "Expo";
+  if (lower.includes("next")) return "Next.js";
+  if (lower.includes("nuxt")) return "Nuxt";
+  if (lower.includes("svelte")) return "SvelteKit";
+  if (lower.includes("astro")) return "Astro";
+  if (lower.includes("angular")) return "Angular";
+  if (lower.includes("remix") || lower.includes("react router") || lower.includes("react-router")) return "Remix";
+  if (lower.includes("nestjs") || lower.includes("nest.js") || /\bnest\b/.test(lower)) return "NestJS";
+  if (lower.includes("fastify")) return "Fastify";
+  if (lower.includes("express")) return "Express";
+  if (lower.includes("fastapi") || lower.includes("fast api")) return "FastAPI";
+  if (lower.includes("django")) return "Django";
+  if (lower.includes("flask")) return "Flask";
+  if (lower.includes("laravel")) return "Laravel";
+  if (lower.includes("vue")) return "Vue 3 + Vite";
+  if (lower.includes("react") || lower === "vite") return "React + Vite";
+  if (lower.includes("html") || lower.includes("static")) return "HTML/CSS";
+  return undefined;
+}
+
 export function extractFramework(message: string): string | undefined {
   // Forbidden frameworks in a specification are constraints, not selections.
   const lower = message.toLowerCase().split(/\n|(?<=[.!?])\s+/u)
     .filter(line => !/(?:не\s+використовуй|не\s+використовувати|без\s|do\s+not\s+use|don't\s+use|must\s+not\s+use)/iu.test(line)).join("\n");
-  if (lower.includes("expo") || lower.includes("react native") || lower.includes("react-native")) return "Expo";
-  if (lower.includes("next.js") || lower.includes("nextjs") || lower.includes("next")) return "Next.js";
-  if (lower.includes("vite")) return "Vite";
-  if (lower.includes("astro")) return "Astro";
-  if (lower.includes("nuxt")) return "Nuxt";
-  if (lower.includes("remix")) return "Remix";
-  if (lower.includes("svelte")) return "SvelteKit";
-  if (lower.includes("react")) return "React";
-  if (lower.includes("vue")) return "Vue";
-  if (lower.includes("html") || lower.includes("static")) return "HTML/CSS";
+  if (/\b(?:fast\s*api|fastapi)\b/.test(lower)) return "FastAPI";
+  if (/\bdjango\b/.test(lower)) return "Django";
+  if (/\bflask\b/.test(lower)) return "Flask";
+  if (/\blaravel\b/.test(lower)) return "Laravel";
+  if (/\b(?:nestjs|nest\.js)\b/.test(lower)) return "NestJS";
+  if (/\bfastify\b/.test(lower)) return "Fastify";
+  if (/\bexpress(?:\.js)?\b/.test(lower)) return "Express";
+  if (/\b(?:remix|react[\s-]*router)\b/.test(lower)) return "Remix";
+  if (/\bangular\b/.test(lower)) return "Angular";
+  if (/\bexpo\b|\breact[\s-]*native\b/.test(lower)) return "Expo";
+  if (/\bnext(?:\.js|js)?\b/.test(lower)) return "Next.js";
+  if (/\bnuxt\b/.test(lower)) return "Nuxt";
+  if (/\bsvelte(?:kit)?\b/.test(lower)) return "SvelteKit";
+  if (/\bastro\b/.test(lower)) return "Astro";
+  if (/\bvue\b/.test(lower)) return "Vue 3 + Vite";
+  if (/\breact\b/.test(lower)) return "React + Vite";
+  if (/\bvite\b/.test(lower)) return "React + Vite";
+  if (/\bhtml\b|\bstatic\b/.test(lower)) return "HTML/CSS";
   return undefined;
 }
 
