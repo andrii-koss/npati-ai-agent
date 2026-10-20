@@ -336,7 +336,7 @@ export function ProjectChatCard({ card, onActivate, previewOnly = false, showPre
       const endpoint = `/api/companies/${encodeURIComponent(card.companyId)}/projects/${encodeURIComponent(card.projectId ?? card.id)}/preview`;
       const headers: Record<string, string> = {};
       if (token) headers.authorization = `Bearer ${token}`;
-      if (card.framework === "HTML/CSS") {
+      if (card.framework === "HTML/CSS" && !isCodeProject) {
         await loadStaticPreviewPage("index.html");
         return;
       }
