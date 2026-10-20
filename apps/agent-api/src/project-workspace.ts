@@ -32,6 +32,8 @@ export interface ProjectFileEntry {
 }
 
 export interface ProjectFileContent {
+  /** Exact bytes for binary sync; never use the lossy text preview for assets. */
+  contentBase64?: string;
   mode?: number;
   binary?: boolean;
   encoding?: string;
@@ -452,7 +454,7 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
     let binary = kind.binary;
     try { new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch { binary = true; }
     return { path: clean, content: bytes.toString("utf8"), size: bytes.length, revision: revision(bytes),
-      ...(binary ? { binary: true, encoding: "binary", mimeGuess: kind.mimeGuess } : {}) };
+      ...(binary ? { binary: true, encoding: "binary", contentBase64: bytes.toString("base64"), mimeGuess: kind.mimeGuess } : {}) };
   }
   private async tree(base: string): Promise<ProjectFileEntry[]> {
     const items: ProjectFileEntry[] = [];

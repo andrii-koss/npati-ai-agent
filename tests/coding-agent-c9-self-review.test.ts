@@ -772,3 +772,12 @@ describe("security-gate: C9 self-review — the review sees all six inputs", () 
     expect(result.status).toBe("completed");
   });
 });
+
+it("self-review receives the actual reference image and current redesign scope without leaking base64 into activity",async()=>{
+ const harness=createHarness({script:editThenFinish,reviews:[reviewJson([])]});
+ const result=await harness.run({images:[{mimeType:"image/png",dataBase64:"private-reference-image"}],extraSystemPromptLines:["FULL VISUAL REDESIGN: replace starter layout with reference columns."]});
+ expect(result.status).toBe("completed");expect(harness.reviewCalls).toHaveLength(1);
+ const user=harness.reviewCalls[0]!.messages.find(message=>message.role==="user")!;
+ expect(user.content).toEqual(expect.arrayContaining([{type:"image_url",image_url:{url:"data:image/png;base64,private-reference-image"}}]));
+ expect(JSON.stringify(user.content)).toContain("FULL VISUAL REDESIGN");expect(JSON.stringify(harness.activity)).not.toContain("private-reference-image");
+});

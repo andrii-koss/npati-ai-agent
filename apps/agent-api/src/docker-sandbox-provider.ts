@@ -425,8 +425,8 @@ fi
     const names = await this.inspect(scope, id);
     this.touch(id);
     if (files.length > this.limits.maxFiles || files.reduce((sum, file) => sum + Buffer.byteLength(file.content), 0) > this.limits.maxBytes) throw new SandboxProviderError("upload_limit", "Upload exceeds sandbox limits", 413);
-    const sanitized = files.map((file) => ({ path: safeProjectPath(file.path), content: file.content }));
-    const script = `let chunks=[];process.stdin.on("data",c=>chunks.push(c));process.stdin.on("end",async()=>{try{const files=JSON.parse(Buffer.concat(chunks).toString("utf8"));const fs=require("node:fs/promises");const path=require("node:path");for(const file of files){const target=path.resolve("/workspace",file.path);if(!target.startsWith("/workspace/"))throw Error("Unsafe path: "+file.path);await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,file.content,"utf8");}}catch(e){process.stderr.write(String(e));process.exitCode=1}})`;
+    const sanitized = files.map((file) => ({ path: safeProjectPath(file.path), content: file.content, ...(file.encoding ? { encoding: file.encoding } : {}) }));
+    const script = `let chunks=[];process.stdin.on("data",c=>chunks.push(c));process.stdin.on("end",async()=>{try{const files=JSON.parse(Buffer.concat(chunks).toString("utf8"));const fs=require("node:fs/promises");const path=require("node:path");for(const file of files){const target=path.resolve("/workspace",file.path);if(!target.startsWith("/workspace/"))throw Error("Unsafe path: "+file.path);await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,Buffer.from(file.content,file.encoding==='base64'?'base64':'utf8'));}}catch(e){process.stderr.write(String(e));process.exitCode=1}})`;
     await this.docker(["exec", "-i", names.sandbox, "node", "-e", script], 120_000, JSON.stringify(sanitized));
   }
   async downloadFiles(scope: SandboxScope, id: string): Promise<SandboxFile[]> {
@@ -445,8 +445,8 @@ fi
       if (total > this.limits.maxBytes) throw new SandboxProviderError("download_limit", "Sandbox files exceed sync limit", 413);
       let content: string;
       try { content = new TextDecoder("utf-8", { fatal: true }).decode(result.stdout); }
-      catch { throw new SandboxProviderError("unsupported_binary_file", "Sandbox generated a binary file outside ignored build artifacts", 422, "download"); }
-      if (content.includes("\0")) throw new SandboxProviderError("unsupported_binary_file", "Sandbox generated a binary file outside ignored build artifacts", 422, "download");
+      catch { files.push({ path: relative, content: result.stdout.toString("base64"), encoding: "base64" }); continue; }
+      if (content.includes("\0")) { files.push({ path: relative, content: result.stdout.toString("base64"), encoding: "base64" }); continue; }
       files.push({ path: relative, content });
     }
     return files;

@@ -778,7 +778,7 @@ export function buildApp(config: AppConfig = {}) {
     app, config, log: app.log, boundedResponseChunks, aiEngine, hub, workspaceStore, researchBundle,
     objectStorage, redisHealthCheck, coreBackendHealthCheck, agent, authProvider,
     discoverRuntimeMcpCapabilities, featureFlagService, mcpRuntimeCapabilities,
-    activeContextResolver, chatFiles, activeChatStreams, companyRuntime, getAIContext, marketplace,
+    activeContextResolver, chatFiles, projectMediaService, activeChatStreams, companyRuntime, getAIContext, marketplace,
     persistAutomaticCompanyMemory, projectOrchestrator, runBusinessMessage, runNeutralMessage,
     codeService, projectService, projectTerminalEvents, codeSessionRunExecutor, codeRunAdmission,
     codeBackgroundRuns, codeSessionInbox, projectSandbox, projectPreviewService, codeRunCancellation,

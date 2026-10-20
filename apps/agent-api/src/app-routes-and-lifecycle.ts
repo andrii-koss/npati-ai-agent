@@ -67,6 +67,7 @@ export interface AppRoutesAndLifecycleDeps {
   mcpRuntimeCapabilities: McpRuntimeCapabilityStore;
   activeContextResolver: ActiveContextResolver;
   chatFiles?: ReturnType<typeof createCoreServices>["chatFiles"];
+  projectMediaService?: import("./project-media-service").ProjectMediaService;
   activeChatStreams: ReturnType<typeof createRedisHealthWiring>["activeChatStreams"];
   companyRuntime: CompanyDelegationRuntime;
   getAIContext: ReturnType<typeof createAppChatOrchestration>["getAIContext"];
@@ -315,6 +316,7 @@ export function registerAppRoutesAndLifecycle(deps: AppRoutesAndLifecycleDeps) {
   });
 
   registerChatStreamRoutes(app, {
+    projectMediaService: deps.projectMediaService,
     aiEngine,
     chatFiles,
     resolveProjectIntent,

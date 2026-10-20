@@ -9,7 +9,7 @@ import { publicChatError, publicCompanyRunMessage } from "./chat-public-errors";
 import { explicitlyRequestsWebResearch } from "./chat-text-directives";
 import { readCodeActiveContext } from "./code-active-context-store";
 import { CodeBackgroundRunRegistry } from "./code-background-run-registry";
-import { canUseStylePreview, hasCodeChatPreview, isCodeChatWebsite, websiteConversationContext } from "./code-chat-website";
+import { canUseStylePreview, hasCodeChatPreview, isCodeChatWebsite, websiteConversationContext, websiteReferenceInstructions, isWebsiteReferenceRedesign, storeWebsiteReferenceAssets } from "./code-chat-website";
 import { resolveChatCodeIntent } from "./code-intent-routing";
 import { createCodeRunAdmission } from "./code-run-admission";
 import { CodeRunQueue, CodeRunRefusedError, resolveCodeRunQueueLimits } from "./code-run-queue";
@@ -43,6 +43,7 @@ import { readIntentHistory } from "./chat-project-intent";
 
 export interface ChatStreamRouteDeps {
   aiEngine: import("@npati/omniroute-adapter").AIEngine;
+  projectMediaService?: import("./project-media-service").ProjectMediaService;
   chatFiles?: ReturnType<typeof createCoreServices>["chatFiles"];
   resolveProjectIntent?: import("./chat-project-intent").ChatProjectIntentResolver;
   config: AppConfig;
@@ -322,6 +323,8 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
             }
             const responseLanguage = resolveCodingConversationLanguage(message, languageHistory);
             const media = await prepareChatAttachments(deps.aiEngine, message, request.body.attachments);
+            const referenceAssets = codeSession.mode !== "plan" && !codeIntentIsReadOnly(codeDecision.intent) && isWebsiteReferenceRedesign(message, media.images.length)
+              ? await storeWebsiteReferenceAssets(deps.projectMediaService, auth, codeSession.companyId, codeSession.projectId, media.decoded) : [];
             let cardConversationId: string | undefined;
             let savedUser: { id: string; createdAt: string } | undefined;
             let savedAssistant: { id: string; createdAt: string } | undefined;
@@ -405,6 +408,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
               session: codeSession,
               responseLanguage,
               images: media.images,
+              extraSystemPromptLines: websiteReferenceInstructions(message, media.images.length, referenceAssets),
               noMemory: memoryPolicy.noMemoryActive,
               websiteEdit: isCodeChatWebsite(codeProject),
               allowStylePreview: canUseStylePreview(codeProject, message),

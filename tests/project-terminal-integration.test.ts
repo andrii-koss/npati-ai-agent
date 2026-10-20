@@ -479,3 +479,15 @@ it("stops the recorded Next.js dev listener before a production build writes .ne
  await sandbox.execute(owner,company.id,{projectId:project.id,command:"npm run build",agentId:"system",approved:true});
  expect(order).toEqual(["stop","build"]);
 });
+
+it.each([false,true])("preserves unchanged binary assets and refuses Terminal binary modifications (modified=%s)",async modified=>{
+ const f=await fixture();const bytes=Buffer.from([137,80,78,71,13,10,26,10,0,255,128]);
+ await f.workspace.createFile(owner,f.company.id,f.project.id,"public/reference.png",bytes);
+ await f.workspace.createFile(owner,f.company.id,f.project.id,"page.ts","export const color = 'old';");
+ f.provider.executeCommand=async()=>{f.provider.files=f.provider.files.map(file=>file.path==="page.ts"?{...file,content:"export const color = 'new';"}:modified?{...file,content:Buffer.from("changed binary").toString("base64")}:file);return result();};
+ const run=f.sandbox.execute(owner,f.company.id,{projectId:f.project.id,agentId:"system",command:"npm run build"});
+ if(modified)await expect(run).rejects.toMatchObject({code:"unsupported_binary_file"});else await expect(run).resolves.toMatchObject({status:"completed"});
+ const photo=await f.workspace.readFile(owner,f.company.id,f.project.id,"public/reference.png");expect(photo.binary).toBe(true);expect(photo.contentBase64).toBe(bytes.toString("base64"));
+ expect(f.provider.files.find(file=>file.path==="public/reference.png")).toMatchObject({encoding:"base64"});
+ expect((await f.workspace.readFile(owner,f.company.id,f.project.id,"page.ts")).content).toContain(modified?"old":"new");
+});
