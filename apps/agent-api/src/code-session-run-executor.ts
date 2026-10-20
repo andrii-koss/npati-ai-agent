@@ -35,6 +35,7 @@ export interface CodeSessionRunPort {
     ctx: AuthContext;
     session: CodeSession;
     responseLanguage?: CompanyChatLanguage;
+    noMemory?: boolean;
     websiteEdit?: boolean;
     allowStylePreview?: boolean;
     prompt: string;
@@ -78,6 +79,7 @@ export type CodeRunTerminalStatus = "completed" | "failed" | "cancelled" | "susp
 
 export interface CodeSessionRunInput {
   responseLanguage?: CompanyChatLanguage;
+  noMemory?: boolean;
   websiteEdit?: boolean;
   allowStylePreview?: boolean;
   /** Creation must change source before verification can report success. */
@@ -180,6 +182,7 @@ export class CodeSessionRunExecutor {
         session: input.session,
         prompt: input.prompt,
         ...(input.responseLanguage ? { responseLanguage: input.responseLanguage } : {}),
+        ...(input.noMemory ? { noMemory: true } : {}),
         ...(input.websiteEdit ? { websiteEdit: true } : {}),
         ...(input.allowStylePreview ? { allowStylePreview: true } : {}),
         ...(input.requireImplementation ? { requireImplementation: true } : {}),

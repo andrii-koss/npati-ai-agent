@@ -1,3 +1,4 @@
+import { codeSearchTypeArguments } from "./code-search-types";
 import { parseCodeSearchOutput } from "./code-search-output";
 import { normalizeWorkspacePath } from "./code-tools-path";
 import type { AuthContext } from "@npati/workspace";
@@ -65,7 +66,7 @@ export function createProjectWorkspaceReadPort(
       if (glob !== undefined) args.push("--glob", quote(normalizeWorkspacePath(glob, { tool: "code.fs.grep", allowGlob: true })));
       if (type !== undefined) {
         if (!/^[a-zA-Z0-9_-]+$/.test(type)) throw new CodeToolError("invalid_arguments", "Invalid file type filter", 400);
-        args.push("--type", quote(type));
+        for (const [flag, value] of codeSearchTypeArguments(type)) args.push(flag, quote(value));
       }
       args.push("-e", quote(query), "--", quote(target));
       const result = await sandbox.execute(ctx, companyId, { projectId, command: args.join(" "), timeoutMs });

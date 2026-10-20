@@ -87,6 +87,7 @@ describe("durable coding activity", () => {
     const callback = f.controls.get(process.projectId!)!.input.onActivity!;
     const event = {id: process.runId + ":build-call",runId:process.runId,stage:"tool",title:"Build",at:new Date().toISOString(),command:"npm run build token=secret",status:"running" as const};
     await callback(event); await callback({...event,status:"completed",result:JSON.stringify({stdout:"built password=p",exitCode:0,tests:{passed:24,failed:0,skipped:0,total:24}})});
+    await new Promise(resolve => setTimeout(resolve, 120));
     const restored = new ChatDevelopmentService(f.ports);
     const progress = (await restored.list(owner))[0]!.progress!.filter(x=>x.id===event.id);
     expect(progress).toHaveLength(1);expect(progress[0]).toMatchObject({status:"completed",command:"npm run build token=[REDACTED]",exitCode:0,tests:{passed:24,total:24}});expect(progress[0]?.stdout).toContain("password=[REDACTED]");
@@ -419,8 +420,24 @@ it("recovers completed CSS Preview without requiring a production build and wait
  await f.store.applyCodeRunStateEvent({companyId:f.company.id,runId,seq:2,status:"completed",finishedAt:new Date()});
  await f.projects.updatePreview(owner,f.company.id,process.projectId!,{status:"previewing",lastBuildStatus:null,previewUrl:"https://preview.test/css"});
  const restarted=new ChatDevelopmentService({...f.ports,background:new CodeBackgroundRunRegistry()});shutdown.push(()=>restarted.close());
+ expect((await restarted.list(owner))[0]?.status).toBe("running");
+ const now=vi.spyOn(Date,"now").mockReturnValue(Date.now()+121_000);
+ try { expect((await restarted.list(owner))[0]?.status).toBe("failed"); } finally { now.mockRestore(); }
  for(const status of ["running","completed","failed"] as const){
   await f.service.recordActivity(owner,f.company.id,process.sessionId!,process.conversationId,{id:runId+":preview",runId,stage:"preview",title:"Starting Live Preview",at:new Date().toISOString(),status});
   expect((await restarted.list(owner))[0]?.status).toBe(status);
  }
+});
+
+it("batches secondary chat activity writes and flushes failures immediately",async()=>{
+ const f=await fixture();await f.start("Create a website on Next.js");await vi.waitFor(()=>expect(f.controls.size).toBe(1));
+ const process=(await f.service.list(owner))[0]!;
+ const writes=vi.spyOn(f.store,"setUserSetting");writes.mockClear();
+ for(let i=0;i<20;i++)await f.service.recordActivity(owner,f.company.id,process.sessionId!,process.conversationId,{id:"batched-"+i,runId:process.runId,stage:"tool",title:"Read",at:new Date().toISOString(),status:"running"});
+ expect(writes).not.toHaveBeenCalled();
+ await f.service.recordActivity(owner,f.company.id,process.sessionId!,process.conversationId,{id:"batched-failure",runId:process.runId,stage:"tool",title:"Read",at:new Date().toISOString(),status:"failed"});
+ expect(writes).toHaveBeenCalledTimes(1);
+ const restored=new ChatDevelopmentService(f.ports);
+ expect((await restored.list(owner))[0]!.progress!.filter(event=>event.id.startsWith("batched-"))).toHaveLength(21);
+ await restored.close();
 });

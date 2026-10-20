@@ -1,3 +1,4 @@
+import { reuseDevelopmentPreview } from "./project-preview-reuse";
 import { previewBrowserBridge } from "./preview-browser-bridge";
 import { createHmac, randomBytes } from "node:crypto";
 import type { FastifyReply, FastifyRequest } from "fastify";
@@ -379,7 +380,6 @@ export class ProjectPreviewService {
       throw new PreviewError("project_deleted", "Deleted project cannot run preview", 409);
     }
 
-    // Detect stack & dev command
     const files = await this.workspace.listFiles(ctx, companyId, projectId);
     const detected = await detectProjectStack(files, async (p) => (await this.workspace.readFile(ctx, companyId, projectId, p)).content);
 
@@ -389,6 +389,9 @@ export class ProjectPreviewService {
     let devCommand = options.command?.trim() || verifiedCommand;
     let devPort = options.port && Number.isInteger(options.port) ? options.port : extractPortFromCommand(devCommand, detected.port);
 
+    const reused = options.verifiedBuild === false && !options.command && !options.port
+      ? await reuseDevelopmentPreview(ctx, project, devCommand, devPort, detected.framework, this.sandbox, this.projects, scope => this.generateToken(scope), options.signal) : null;
+    if (reused) { this.sessions.set(projectId, reused.session); return reused.result; }
     // Stop existing session process if running
     const existing = this.sessions.get(projectId);
     if (existing) {

@@ -389,6 +389,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
               ctx: auth,
               session: codeSession,
               responseLanguage,
+              noMemory: memoryPolicy.noMemoryActive,
               websiteEdit: isCodeChatWebsite(codeProject),
               allowStylePreview: canUseStylePreview(codeProject, message),
               agentId: activeAgentName,

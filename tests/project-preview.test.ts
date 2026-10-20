@@ -783,3 +783,33 @@ it("proxies a worker-created Preview after API restart using signed scope and pe
   expect(proxy).toHaveBeenCalledTimes(calls);
  }finally{await app.close();}
 });
+
+it("reuses a live recorded Next dev server across service instances and uploads CSS before HTTP verification", async () => {
+ const {preview,sandbox,workspace,projects,store,provider,company,project}=await fixture();
+ await workspace.createFile(owner,company.id,project.id,"package.json",JSON.stringify({scripts:{dev:"next dev"},dependencies:{next:"14.2.35"}}));
+ await workspace.createFile(owner,company.id,project.id,"app/global.css","body{background:gray}");
+ vi.spyOn(sandbox,"supportsPreviewProxy").mockReturnValue(true);
+ const probe=vi.spyOn(sandbox,"proxyPreview").mockResolvedValue({status:200,headers:{},body:""});
+ vi.spyOn(provider,"startProcess").mockImplementation(async(_scope,_id,command)=>{provider.calls.push("process:"+command);return {...commandResult("running"),processId:"44444444-4444-4444-8444-444444444444"};});
+ await preview.startPreview(owner,company.id,project.id,{verifiedBuild:false});
+ const file=await workspace.readFile(owner,company.id,project.id,"app/global.css");
+ await workspace.writeFile(owner,company.id,project.id,file.path,"body{background:white}",file.revision);
+ const restored=new ProjectPreviewService(projects,store,workspace,sandbox,"test-preview-secret-key-32chars!");
+ const count=provider.calls.length;probe.mockClear();
+ const result=await restored.startPreview(owner,company.id,project.id,{verifiedBuild:false});
+ expect(result.status).toBe("running");expect(provider.calls.slice(count).some(call=>call.startsWith("process:")||call==="stopProcess")).toBe(false);
+ expect(provider.calls.slice(count)).toContain("upload");expect(probe).toHaveBeenCalled();
+ expect((await provider.downloadFiles({workspaceId:owner.workspaceId,userId:owner.userId,companyId:company.id,projectId:project.id},restored.getSession(project.id)!.sandboxId)).find(file=>file.path==="app/global.css")?.content).toBe("body{background:white}");
+});
+
+it("replaces a recorded dev process that has exited instead of reporting reused Preview", async()=>{
+ const {preview,sandbox,workspace,provider,company,project}=await fixture();
+ await workspace.createFile(owner,company.id,project.id,"package.json",JSON.stringify({scripts:{dev:"next dev"},dependencies:{next:"14.2.35"}}));
+ vi.spyOn(sandbox,"supportsPreviewProxy").mockReturnValue(true);
+ vi.spyOn(sandbox,"proxyPreview").mockResolvedValue({status:200,headers:{},body:""});
+ await preview.startPreview(owner,company.id,project.id,{verifiedBuild:false});
+ vi.spyOn(provider,"getProcessStatus").mockResolvedValueOnce(commandResult("failed",1));
+ const count=provider.calls.length;
+ expect((await preview.startPreview(owner,company.id,project.id,{verifiedBuild:false})).status).toBe("running");
+ expect(provider.calls.slice(count)).toContain("process:npm run dev");
+});

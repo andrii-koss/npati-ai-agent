@@ -1,3 +1,4 @@
+import { compactWriteReceipt } from "./code-write-receipt";
 import type { AuthContext } from "@npati/workspace";
 import { canonicalJson } from "@npati/workspace";
 import { resolveCodeAgentLimits, type CodeAgentLimits } from "./code-agent-config";
@@ -499,8 +500,9 @@ export class CodeToolRuntime {
 
       // (8b) Wrapping
       const serialized = JSON.stringify(raw ?? null);
-      const budgeted = enforceOutputBudget(raw, this.limits.toolOutputChars);
-      const truncated = budgeted.truncated;
+      const responseRaw = write && serialized.length > this.limits.toolOutputChars ? JSON.parse(compactWriteReceipt(tool.name, serialized)) : raw;
+      const budgeted = enforceOutputBudget(responseRaw, this.limits.toolOutputChars);
+      const truncated = budgeted.truncated || responseRaw !== raw;
       const payload = budgeted.data;
       const allWarnings = [...warnings, ...hookWarnings];
       const wrapped = this.wrap(tool.name, allWarnings.length || hookContext.length

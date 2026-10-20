@@ -184,25 +184,24 @@ export function applyHunksToContent(input: { path: string; content: string; hunk
       .filter((line) => !line.startsWith("+"))
       .map((line) => line.slice(1));
     const expectedStart = Math.max(0, hunk.beforeStart - 1 + delta);
-    // Search near the expected position first (fast path), then widen within the file.
-    const candidates = [expectedStart, ...Array.from({ length: working.length }, (_, offset) => offset)];
-    let foundAt = -1;
-    for (const candidate of candidates) {
-      if (candidate < 0 || candidate + expected.length > working.length) continue;
-      let ok = true;
-      for (let offset = 0; offset < expected.length; offset += 1) {
-        if (working[candidate + offset] !== expected[offset]) { ok = false; break; }
+    const matchesAt = (candidate: number) => candidate >= 0 && candidate + expected.length <= working.length
+      && expected.every((line, offset) => working[candidate + offset] === line);
+    let foundAt = hunk.beforeStart >= 0 && matchesAt(expectedStart) ? expectedStart : -1;
+    let ambiguous = false;
+    if (foundAt === -1 && expected.length) {
+      for (let candidate = 0; candidate + expected.length <= working.length; candidate++) {
+        if (!matchesAt(candidate)) continue;
+        if (foundAt !== -1) { ambiguous = true; break; }
+        foundAt = candidate;
       }
-      if (ok) { foundAt = candidate; break; }
-    }
-    if (foundAt === -1) {
+    } else if (foundAt === -1 && hunk.beforeStart === -1 && !expected.length) foundAt = working.length;
+    if (foundAt === -1 || ambiguous) {
       const actual = working.slice(expectedStart, expectedStart + Math.max(1, expected.length)).join("\n");
-      throw new CodeToolError(
-        "patch_conflict",
-        `Hunk ${index + 1} of "${input.path}" does not match the file at line ${hunk.beforeStart}`,
-        input.tool, 409, false, "patch",
-        { path: input.path, hunk: index + 1, line: hunk.beforeStart, expected: expected.join("\n"), actual },
-      );
+      throw new CodeToolError("patch_conflict",
+        "Hunk " + (index + 1) + " of " + input.path + " at line " + hunk.beforeStart + (ambiguous ? " matches multiple locations; include unique surrounding context" : " does not match current content; re-read the affected range"),
+        input.tool, 409, false, "patch", { path: input.path, hunk: index + 1, line: hunk.beforeStart,
+          reason: ambiguous ? "ambiguous_context" : "context_not_found", expected: expected.join("\n").slice(0, 1200), actual: actual.slice(0, 1200),
+          recovery: "Read the current affected range, then submit one corrected patch with exact, unique context. Do not retry the unchanged patch." });
     }
     const replacement = hunk.lines.filter((line) => !line.startsWith("-")).map((line) => line.slice(1));
     working = [...working.slice(0, foundAt), ...replacement, ...working.slice(foundAt + expected.length)];

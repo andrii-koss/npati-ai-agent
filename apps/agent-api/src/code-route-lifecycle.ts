@@ -1,3 +1,4 @@
+import { rememberWebsiteEdit } from "./website-style-context";
 
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { CodeRouteDeps } from "./code-route-wiring";
@@ -304,14 +305,19 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
       if (!isCodeChatWebsite(project) || input.readOnlyIntent || input.session.mode === "plan") return undefined;
       return project.framework === "HTML/CSS" ? [] : ["build"];
     },
-    afterRun: (input, result) => finishCodeChatWebsite(input, result, {
-      getProject: (ctx, companyId, projectId) => projectService.get(ctx, companyId, projectId),
-      startPreview: async (ctx, companyId, projectId, signal, options) => {
-        await featureFlagService.assertEnabled(ctx, "code.shell", { companyId });
-        return projectPreviewService.startPreview(ctx, companyId, projectId, { signal, verifiedBuild: !options?.development });
-      },
-      markFailed: (ctx, companyId, projectId) => projectService.updatePreview(ctx, companyId, projectId, { status: "failed", lastBuildStatus: "failed" }),
-    }),
+    afterRun: async (input, result) => {
+      const finished = await finishCodeChatWebsite(input, result, {
+        getProject: (ctx, companyId, projectId) => projectService.get(ctx, companyId, projectId),
+        startPreview: async (ctx, companyId, projectId, signal, options) => {
+          await featureFlagService.assertEnabled(ctx, "code.shell", { companyId });
+          return projectPreviewService.startPreview(ctx, companyId, projectId, { signal, verifiedBuild: !options?.development });
+        },
+        markFailed: (ctx, companyId, projectId) => projectService.updatePreview(ctx, companyId, projectId, { status: "failed", lastBuildStatus: "failed" }),
+        });
+      if (input.websiteEdit && !input.noMemory) await rememberWebsiteEdit(workspaceStore, projectWorkspace, input.ctx, input.session, finished)
+        .catch(error => log.warn({ err: error }, "website_edit_context_save_failed"));
+      return finished;
+    },
     resolveModel: async (ctx) => {
       const codePrefs = await codePreferences?.get(ctx).catch(() => null);
       if (codePrefs && codePrefs.activeAgentId && codePrefs.activeAgentId !== "npati") {
