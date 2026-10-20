@@ -1,6 +1,6 @@
 import type { AIEngine } from "@npati/omniroute-adapter";
 import type { AuthContext, WorkspaceStore } from "@npati/workspace";
-import { classifyProjectIntent, planChatDevelopment, type DevelopmentTarget, type ProjectIntent, type ProjectIntentDecision, type ProjectIntentInput } from "@npati/shared";
+import { isWebsiteReferenceEdit, classifyProjectIntent, planChatDevelopment, type DevelopmentTarget, type ProjectIntent, type ProjectIntentDecision, type ProjectIntentInput } from "@npati/shared";
 import { requestsNewBusinessIdea, requestsBusinessGoal, isShortAffirmativeReply, quickOnboardingReply } from "./chat-intent-helpers";
 import { isCompanyDeleteIntent } from "./company-delete-i18n";
 import { CompanyChatActions } from "./company-chat-actions";
@@ -68,7 +68,7 @@ export function createChatProjectIntentResolver(deps: {
       });
       return { decision, targets, source: "deterministic" as const };
     };
-    if (!message.trim()) return fallback();
+    if (!message.trim() || isWebsiteReferenceEdit(input)) return fallback();
     const deterministic = classifyProjectIntent(input);
     const planTargets = planChatDevelopment(message, input.activeProjectId ?? undefined);
     if (["CREATE_WEBSITE", "CREATE_PROJECT"].includes(deterministic.intent) && planTargets.length > 0) {

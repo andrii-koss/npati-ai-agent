@@ -1,3 +1,4 @@
+import type { CodingAgentRunInput } from "./coding-agent-runner-contracts";
 import type { CompanyChatLanguage } from "./company-chat-i18n";
 import type { DevelopmentProcessProgressItem } from "@npati/shared";
 import type { AuthContext, CodeSession } from "@npati/workspace";
@@ -38,6 +39,7 @@ export interface CodeSessionRunPort {
     noMemory?: boolean;
     websiteEdit?: boolean;
     allowStylePreview?: boolean;
+    images?: CodingAgentRunInput["images"];
     prompt: string;
     model?: string;
     signal: AbortSignal;
@@ -88,6 +90,7 @@ export interface CodeSessionRunInput {
   maxTurns?: number;
   ctx: AuthContext;
   session: CodeSession;
+  images?: CodingAgentRunInput["images"];
   prompt: string;
   runId?: string;
   agentId?: string;
@@ -130,7 +133,7 @@ export interface CodeSessionRunOutcome {
 export interface CodeSessionRunExecutorOptions {
   runner: CodeSessionRunPort;
   control: CodeRunControlPort;
-  resolveModel?: (ctx: AuthContext) => Promise<string | undefined>;
+  resolveModel?: (ctx: AuthContext, input: CodeSessionRunInput) => Promise<string | undefined>;
   resolveVerificationTools?: (input: CodeSessionRunInput) => Promise<readonly string[] | undefined>;
   afterRun?: (input: CodeSessionRunInput, result: unknown) => Promise<unknown>;
   logger?: { warn(payload: unknown, message?: string): void };
@@ -175,12 +178,13 @@ export class CodeSessionRunExecutor {
 
     let result: unknown;
     try {
-      const model = await this.options.resolveModel?.(input.ctx);
+      const model = await this.options.resolveModel?.(input.ctx, input);
       const verificationTools = await this.options.resolveVerificationTools?.(input);
       result = await runner.run({
         ctx: input.ctx,
         session: input.session,
         prompt: input.prompt,
+        ...(input.images?.length ? { images: input.images } : {}),
         ...(input.responseLanguage ? { responseLanguage: input.responseLanguage } : {}),
         ...(input.noMemory ? { noMemory: true } : {}),
         ...(input.websiteEdit ? { websiteEdit: true } : {}),

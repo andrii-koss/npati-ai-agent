@@ -12,8 +12,8 @@ export function ChatDevelopmentProgress({ process, items, run, isUk }: { process
   return <>{chatTimeline([],rows,process.conversationId,process).map(entry=>entry.kind!=="activity" ? null : entry.run ? <AgentExecutionTrace key={entry.item.id} process={process} items={entry.run.items} run={entry.run} isUk={isUk}/> : <article key={entry.item.id} className="assistant"><ChatMessageContent content={entry.item.title}/></article>)}</>;
 }
 /** Reuse the existing preview drawer; keep it mounted while the agent edits this project. */
-export function ChatDevelopmentPreview({ process }: { process?: DevelopmentProcess }) {
+export function ChatDevelopmentPreview({ process, busy = false }: { process?: DevelopmentProcess; busy?: boolean }) {
   if (!process?.previewUrl || !process.projectId) return null;
-  const ready = process.status === "completed" && !codingActivityRuns(process.progress,process).some(run => ["pending","running","waiting_for_approval"].includes(run.status));
+  const ready = !busy && process.status === "completed" && !codingActivityRuns(process.progress,process).some(run => ["pending","running","waiting_for_approval"].includes(run.status));
   return <div className="chat-development-preview"><ProjectChatCard previewOnly showPreviewTrigger={ready} card={{ id: process.projectId, projectId: process.projectId, companyId: process.companyId, name: process.name, framework: process.framework, status: process.status, previewUrl: process.previewUrl, kind: "code_project" }} /></div>;
 }

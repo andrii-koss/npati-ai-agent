@@ -136,7 +136,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       followBottomRef.current = true;
       window.requestAnimationFrame(() => scrollToBottom("auto"));
     },
-    busy: sending,
+    busy: sending || inboxSubmitting || codeInbox.active,
     onSession: codeInbox.accept,
     boundSessionId: codeInbox.session?.sessionId
   });
@@ -666,6 +666,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
             if (entry.kind === "activity") return <ChatDevelopmentProgress key={"activity:" + entry.item.id} process={development.project} items={entry.run?.items ?? [entry.item]} run={entry.run} />;
             const { message, index } = entry;
             if (development.hideMessage(displayMessages, index)) return null;
+            const messageCard = development.card(displayMessages, index);
             const isLatestAssistant = message.role === "assistant" && index === displayMessages.length - 1;
             const hasResearch = !development.project && progressEvents.some((event) => !event.type.startsWith("final_generation"));
             return (
@@ -693,7 +694,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
                 >
                   <PendingMessageAttachments value={message.attachments ?? []} />
                   {message.role === "user" ? <UserPromptMessage content={message.content} onEdit={(prompt) => { setInput(prompt); window.requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".onboarding-live-composer textarea")?.focus()); }} /> : <ChatMessageContent content={projectChatText(message.content, message.projectCard,development.project?.responseLanguage ?? language)} />}
-                  {development.card(displayMessages, index) && <ProjectChatCard card={development.card(messages, index)!} onActivate={(card) => { setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected }); }} />}
+                  {messageCard && <ProjectChatCard card={messageCard} previewOnly={messageCard.kind === "code_project"} showPreviewTrigger={messageCard.kind !== "code_project" || !!messageCard.previewUrl && ["completed", "ready", "previewing"].includes(messageCard.status)} onActivate={(card) => { setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected }); }} />}
                   {message.role === "assistant" && !sending && (
                     <AssistantMessageToolbar
                       content={message.content}

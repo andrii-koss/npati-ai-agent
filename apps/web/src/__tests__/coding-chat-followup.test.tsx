@@ -18,6 +18,8 @@ it.each(["/c/child?company=company&project=project&developmentRoot=parent", "/c/
   const card = { id:"project",projectId:"project",companyId:"company",name:process.name,status:"completed",kind:"code_project",previewUrl:process.previewUrl,lastBuildStatus:"ready" };
   mocks.api.mockImplementation(async (url: string) => url === "/chat/development/processes" ? {processes:[process]} : url === "/conversations" ? [] : url === "/conversations/child" ? {messages:[{id:"card",role:"assistant",content:process.name,projectCard:card,createdAt:""}]} : {});
   const requests: Record<string,unknown>[] = [];
+  let releaseFirstResponse: () => void;
+  const firstResponse = new Promise<void>(resolve => { releaseFirstResponse = resolve; });
   let changes: ReadableStreamDefaultController<Uint8Array>;
   let inboxPhase="settled";const queuedRequests: Record<string,unknown>[]=[];
   vi.stubGlobal("fetch",vi.fn(async (url: string, init?:RequestInit) => {
@@ -30,6 +32,7 @@ it.each(["/c/child?company=company&project=project&developmentRoot=parent", "/c/
     if(url.endsWith("/preview/token")) return new Response(JSON.stringify({token:"preview-token"}));
     if(url === "/api/chat/stream") {
       requests.push(JSON.parse(String(init?.body)));
+      if (requests.length === 1) await firstResponse;
       const result = {message:requests.length === 1 ? "Changed the button to green." : requests.length === 2 ? "Added the contact form." : "Changed the footer to blue.",conversationId:"child",projectCard:card,activeContext:{contextType:"project",companyId:"company",projectId:"project"}};
       return new Response(new ReadableStream({start(c){c.enqueue(new TextEncoder().encode('event: progress\ndata: {"routed":"code_runner","intent":"EDIT_CODE"}\n\nevent: code_session\ndata: {"companyId":"company","projectId":"project","sessionId":"session","inboxEnabled":true}\n\nevent: result\ndata: '+JSON.stringify(result)+'\n\n'));c.close();}}));
     }
@@ -48,6 +51,12 @@ it.each(["/c/child?company=company&project=project&developmentRoot=parent", "/c/
   await act(async()=>{changes!.enqueue(new TextEncoder().encode("event: change\ndata: {}\n\n"));await new Promise(resolve=>setTimeout(resolve,40));});
   expect(scrolling).not.toHaveBeenCalled();
   await act(async () => {host.querySelector("form")!.dispatchEvent(new Event("submit",{bubbles:true,cancelable:true}));});
+  // The server still reports the previous completed run while the next request is being admitted.
+  expect(requests).toHaveLength(1);
+  expect(host.querySelector(".chat-development-preview button")).toBeNull();
+  await act(async()=>{changes!.enqueue(new TextEncoder().encode("event: change\ndata: {}\n\n"));await new Promise(resolve=>setTimeout(resolve,40));});
+  expect(host.querySelector(".chat-development-preview button")).toBeNull();
+  await act(async()=>{releaseFirstResponse!();await new Promise(resolve=>setTimeout(resolve,30));});
   expect(host.querySelector(".codex-trace-row-header")).toBe(activityHeader);
   expect(activityHeader.getAttribute("aria-expanded")).toBe("true");
   expect(requests).toHaveLength(1);expect(requests[0]).toMatchObject({contextType:"project",projectId:"project",companyId:"company",conversationId:"child"});

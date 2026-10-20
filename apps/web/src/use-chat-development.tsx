@@ -165,7 +165,7 @@ export function useChatDevelopment(options: {
     project: currentProcess,
     card: (messages: Parameters<typeof developmentCard>[0], index: number) => developmentCard(messages, index, processes, options.conversationId),
     hideMessage: (messages: Parameters<typeof hideDevelopmentMessage>[0], index: number) => hideDevelopmentMessage(messages, index, processes),
-    preview: <ChatDevelopmentPreview process={currentProcess} />,
+    preview: <ChatDevelopmentPreview process={currentProcess} busy={options.busy || submitting} />,
     timeline: <ChatDevelopmentProgress process={currentProcess} isUk={language === "uk"} />,
     panel: null,
   };

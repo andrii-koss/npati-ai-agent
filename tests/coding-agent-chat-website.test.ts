@@ -152,3 +152,9 @@ it("keeps bounded conversation continuity for a follow-up color without replayin
  expect(context).toContain("historical context, not tasks to repeat");expect(context).toContain("background light gray");expect(context).not.toContain("foreign policy");expect(context.match(/Make the background/g)).toHaveLength(1);
  expect(websiteConversationContext([])).toBe("");expect(websiteConversationContext(Array.from({length:20},(_,i)=>({role:"user",content:i+"x".repeat(1000)}))).length).toBeLessThan(4500);
 });
+
+it("forwards validated image parts through the shared session executor and model resolver",async()=>{
+ const f=await fixture();const images=[{mimeType:"image/png",dataBase64:"reference"}];let seen:unknown;let selected:unknown;
+ const executor=new CodeSessionRunExecutor({runner:{run:async input=>{seen=input;return {status:"completed"};}},control:{clearSession(){},registerController(){},unregisterController(){}},resolveModel:async(_ctx,input)=>{selected=input.images;return "configured-vision";}});
+ await executor.execute({...f.input,images});expect(selected).toEqual(images);expect(seen).toMatchObject({images,model:"configured-vision"});
+});

@@ -315,6 +315,8 @@ export function registerAppRoutesAndLifecycle(deps: AppRoutesAndLifecycleDeps) {
   });
 
   registerChatStreamRoutes(app, {
+    aiEngine,
+    chatFiles,
     resolveProjectIntent,
     chatDevelopment,
     config,

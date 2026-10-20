@@ -865,3 +865,11 @@ it("guides implementation when a CSS read shares a batch with another file or fo
   expect(harness.engineCalls.at(-1)!.messages.some(message=>message.role==="system"&&String(message.content).includes("already read the relevant stylesheets"))).toBe(true);
  }
 });
+
+it("passes attached reference images to every model call without putting base64 in the text prompt",async()=>{
+ const harness=createHarness({script:[{content:"",toolCalls:[nativeCall("code.fs.read",{path:"app/globals.css"})]},{content:"Updated from the reference."}]});
+ const image={mimeType:"image/png",dataBase64:"test-reference-image"};
+ const result=await harness.run({images:[image]});expect(result.status).toBe("completed");expect(harness.engineCalls).toHaveLength(2);
+ for(const call of harness.engineCalls){const user=call.messages.find(message=>message.role==="user")!;expect(Array.isArray(user.content)).toBe(true);expect(user.content).toEqual(expect.arrayContaining([{type:"image_url",image_url:{url:"data:image/png;base64,test-reference-image"}}]));}
+ expect(JSON.stringify(harness.activity)).not.toContain("test-reference-image");
+});

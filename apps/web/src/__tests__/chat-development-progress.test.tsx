@@ -182,3 +182,7 @@ it("labels a searched directory as search rather than a modified file",()=>{
  const html=renderToStaticMarkup(<AgentExecutionTrace isUk items={[{id:"grep",stage:"tool",tool:"code.fs.grep",title:"grep",file:"components",status:"waiting_for_approval",at:"",errorCode:"approval_required"}]}/>);
  expect(html).not.toContain("Файл змінено");expect(html).toContain('data-status="waiting_for_approval"');
 });
+
+it("hides technical coding cards even when no development process has arrived yet",()=>{
+ expect(developmentCard([{content:"Waiting for the user to answer question q.",projectCard:{...card,status:"waiting_for_user"}}],0,[],"chat")).toBeNull();
+});

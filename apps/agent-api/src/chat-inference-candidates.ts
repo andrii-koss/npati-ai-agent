@@ -16,3 +16,11 @@ export function isUnavailableInferenceError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /\b(?:401|403|404)\b|unsupported|not a chat model|model_unavailable|model.*(?:missing|not found|disabled|invalid)|auth|unauthorized|no.*credentials/i.test(message);
 }
+
+/** Prefer the selected, known vision-capable model; text-only or unknown defaults cannot consume photos. */
+export function visionInferenceCandidates(configured: Array<string | null | undefined>, added: AIModelSummary[], available: ModelInfo[] = []): string[] {
+  const known = new Map<string, AIModelSummary | ModelInfo>([...added, ...available].map(model => [model.id, model]));
+  const eligible = chatInferenceCandidates(configured, added, available);
+  return [...new Set([...configured, ...eligible])].filter((id): id is string => !!id && eligible.includes(id)
+    && known.get(id)?.capabilities?.includes("vision") === true);
+}

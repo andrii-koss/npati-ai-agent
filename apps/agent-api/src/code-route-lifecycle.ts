@@ -1,3 +1,4 @@
+import { visionInferenceCandidates } from "./chat-inference-candidates";
 import { rememberWebsiteEdit } from "./website-style-context";
 
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
@@ -318,8 +319,18 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
         .catch(error => log.warn({ err: error }, "website_edit_context_save_failed"));
       return finished;
     },
-    resolveModel: async (ctx) => {
+    resolveModel: async (ctx, input) => {
+      if (input.images?.length && config.omnirouteVisionModel?.trim()) return config.omnirouteVisionModel.trim();
       const codePrefs = await codePreferences?.get(ctx).catch(() => null);
+      if (input.images?.length) {
+        const preferences = await aiPreferences.get(ctx);
+        const candidates = visionInferenceCandidates([codePrefs?.activeModelId, preferences.routing.defaultModelId, config.omnirouteVisionModel], preferences.addedModels);
+        for (const id of candidates) {
+          const model = preferences.addedModels.find(item => item.id === id);
+          if (model && (!marketplace || (await marketplace.provider(model.providerId).catch(() => null))?.connected)) return id;
+        }
+        throw new Error("Для роботи з фото потрібна підключена модель із підтримкою зображень. Оберіть її в налаштуваннях AI.");
+      }
       if (codePrefs && codePrefs.activeAgentId && codePrefs.activeAgentId !== "npati") {
         const prov = await marketplace?.provider(codePrefs.activeAgentId).catch(() => null);
         if (!prov || !prov.connected) {
