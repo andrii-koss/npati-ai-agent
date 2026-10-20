@@ -40,6 +40,7 @@ export interface CodeSessionRunPort {
     websiteEdit?: boolean;
     allowStylePreview?: boolean;
     images?: CodingAgentRunInput["images"];
+    extraSystemPromptLines?: CodingAgentRunInput["extraSystemPromptLines"];
     prompt: string;
     model?: string;
     signal: AbortSignal;
@@ -91,6 +92,7 @@ export interface CodeSessionRunInput {
   ctx: AuthContext;
   session: CodeSession;
   images?: CodingAgentRunInput["images"];
+  extraSystemPromptLines?: CodingAgentRunInput["extraSystemPromptLines"];
   prompt: string;
   runId?: string;
   agentId?: string;
@@ -185,6 +187,7 @@ export class CodeSessionRunExecutor {
         session: input.session,
         prompt: input.prompt,
         ...(input.images?.length ? { images: input.images } : {}),
+        ...(input.extraSystemPromptLines?.length ? { extraSystemPromptLines: input.extraSystemPromptLines } : {}),
         ...(input.responseLanguage ? { responseLanguage: input.responseLanguage } : {}),
         ...(input.noMemory ? { noMemory: true } : {}),
         ...(input.websiteEdit ? { websiteEdit: true } : {}),

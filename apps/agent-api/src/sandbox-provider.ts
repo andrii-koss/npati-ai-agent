@@ -18,7 +18,7 @@ export function assertProjectRuntimeProvider(kind: ProjectRuntimeMode, env: Reco
 export type SandboxState = "created" | "running" | "stopped" | "failed" | "destroyed";
 export interface SandboxScope { workspaceId: string; userId: string; companyId: string; projectId: string; }
 export interface SandboxStatus { id: string; state: SandboxState; createdAt: string; lastActivityAt: string; }
-export interface SandboxFile { path: string; content: string; revision?: string; }
+export interface SandboxFile { path: string; content: string; revision?: string; encoding?: "base64"; }
 export interface SandboxBrowserQaResult {
   statusCode: number; loadTimeMs: number; domContentLoadedMs: number; resourceCount: number; totalSizeBytes: number;
   consoleErrorCount: number; brokenLinks: Array<{ href: string; status?: number; error?: string }>;

@@ -1,5 +1,5 @@
 import { preferredEditTool, type EditProfile } from "./code-tools-write";
-import type { ChatToolCall } from "@npati/omniroute-adapter";
+import type { ChatMessage, ChatToolCall } from "@npati/omniroute-adapter";
 import type { AuthContext, CodeSession } from "@npati/workspace";
 import type { CodeAgentLimits } from "./code-agent-config";
 import type { NormalizedToolCall } from "./code-tool-call-adapter";
@@ -213,4 +213,15 @@ export function toChatToolCall(call: NormalizedToolCall): ChatToolCall {
 export function bounded(value: string, limit: number): { text: string; truncated: boolean } {
   if (value.length <= limit) return { text: value, truncated: false };
   return { text: `${value.slice(0, limit)}\n…[truncated ${value.length - limit} characters]`, truncated: true };
+}
+
+/** Reattach validated references at the provider boundary, including review calls after compaction. */
+export function withCodingReferenceImages(messages: ChatMessage[], images?: readonly { mimeType: string; dataBase64: string }[]): ChatMessage[] {
+  if (!images?.length) return messages;
+  const userIndex = messages.findIndex(message => message.role === "user");
+  return messages.map((message, index) => index !== userIndex ? message : {
+    ...message, content: [{ type: "text" as const, text: chatContentText(message.content) }, ...images.map(image => ({
+      type: "image_url" as const, image_url: { url: "data:" + image.mimeType + ";base64," + image.dataBase64 },
+    }))],
+  });
 }

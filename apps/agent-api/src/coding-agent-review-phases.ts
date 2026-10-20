@@ -1,4 +1,4 @@
-import { emitCodingActivity } from "./coding-agent-runner-contracts";
+import { emitCodingActivity, withCodingReferenceImages } from "./coding-agent-runner-contracts";
 import type { CodingAgentRunnerPorts } from "./coding-agent-runner-contracts";
 import type { CodeAgentLimits } from "./code-agent-config";
 import type { ChatMessage } from "@npati/omniroute-adapter";
@@ -341,7 +341,7 @@ export class CodingAgentReviewPhases {
     if (!state) return null;
     const verdict = await state.execute({
       input: {
-        originalGoal: prompt,
+        originalGoal: [prompt, ...(input.extraSystemPromptLines ?? [])].join("\n\n"),
         approvedPlan: await loadApprovedPlan(),
         finalDiff: boundedDiff(this.selfReviewDiffChars),
         changedFiles: runChanges().map((change) => ({
@@ -363,7 +363,7 @@ export class CodingAgentReviewPhases {
         try {
           const result = await this.ports.engine.chat({
             onProviderAttempt:async(event)=>{if(event.phase==="started") attempt++;await record({...metadata,attempt,...event});},
-            messages: request.messages,
+            messages: withCodingReferenceImages(request.messages, input.images),
 
             model: input.model,
             ...(input.fallbackModel ? { fallbackModel: input.fallbackModel } : {}),

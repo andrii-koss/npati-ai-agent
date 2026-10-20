@@ -320,7 +320,6 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
       return finished;
     },
     resolveModel: async (ctx, input) => {
-      if (input.images?.length && config.omnirouteVisionModel?.trim()) return config.omnirouteVisionModel.trim();
       const codePrefs = await codePreferences?.get(ctx).catch(() => null);
       if (input.images?.length) {
         const preferences = await aiPreferences.get(ctx);

@@ -309,7 +309,8 @@ export class ProjectSandboxService {
       for (const file of batch) {
         total += file.size;
         if (total > this.limits.syncMaxBytes) throw new SandboxProviderError("workspace_sync_limit", "Project exceeds sandbox sync limits", 413, "upload");
-        files.push({ path: file.path, content: file.content, revision: file.revision });
+        if (file.binary && file.contentBase64 === undefined) throw new SandboxProviderError("unsupported_binary_file", "Workspace did not supply exact binary bytes", 422, "upload");
+        files.push({ path: file.path, content: file.contentBase64 ?? file.content, revision: file.revision, ...(file.binary ? { encoding: "base64" as const } : {}) });
       }
     }
       return files;
@@ -326,7 +327,13 @@ export class ProjectSandboxService {
     for (const file of files) {
       if (artifact(file.path)) continue;
       safeProjectPath(file.path);
-      total += Buffer.byteLength(file.content, "utf8");
+      total += file.encoding === "base64" ? Buffer.from(file.content, "base64").length : Buffer.byteLength(file.content, "utf8");
+      if (total > this.limits.syncMaxBytes) throw new SandboxProviderError("workspace_sync_limit", "Sandbox files exceed sync limit", 413, "download");
+      if (file.encoding === "base64") {
+        const original = originals.get(file.path);
+        if (original?.encoding === "base64" && original.content === file.content) continue;
+        throw new SandboxProviderError("unsupported_binary_file", "Terminal changed a binary asset; use the project media upload API for asset writes", 422, "download");
+      }
       const fileName = file.path.split("/").pop() || "";
       const isLockfile = /^(?:package(?:-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|composer\.(?:json|lock)|requirements\.txt|Pipfile(?:\.lock)?)$/i.test(fileName);
       const original = originals.get(file.path);
@@ -510,7 +517,10 @@ export class ProjectSandboxService {
     if (files.length > this.limits.syncMaxFiles || files.reduce((bytes, file) => bytes + Buffer.byteLength(file.content, "utf8"), 0) > this.limits.syncMaxBytes) {
       throw new SandboxProviderError("repository_too_large", "Repository exceeds Project import limits", 413, "clone");
     }
-    for (const file of files) safeProjectPath(file.path);
+    for (const file of files) {
+      safeProjectPath(file.path);
+      if (file.encoding === "base64") throw new SandboxProviderError("unsupported_binary_file", "Repository contains binary files outside supported import paths", 422, "clone");
+    }
     return files;
   }
 
@@ -641,6 +651,7 @@ export class ProjectSandboxService {
       safeProjectPath(file.path);
       const original = snapshot.files.find((f) => f.path === file.path);
       if (original?.hash === createHash("sha256").update(file.content).digest("hex")) continue;
+      if (file.encoding === "base64") throw new SandboxProviderError("unsupported_binary_file", "Process changed a binary asset; use the project media upload API for asset writes", 422, "download");
       if (!scanTextForSecrets(file.content).clean) throw new SandboxProviderError("secret_content", "Process produced protected content", 403);
       // A repeated sync may see the exact result already committed by this operation.
       const existing = await this.workspace.readFile(ctx, op.companyId, op.projectId, file.path).catch((error) => { if ((error as { status?: number }).status === 404) return null; throw error; });

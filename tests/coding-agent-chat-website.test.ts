@@ -7,7 +7,7 @@ import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
 import type { AIEngine, OmniRouteMarketplace } from "@npati/omniroute-adapter";
 import { buildApp } from "../apps/agent-api/src/app";
 import { CodeSessionRunExecutor, type CodeSessionRunInput } from "../apps/agent-api/src/code-session-run-executor";
-import { canUseStylePreview, finishCodeChatWebsite, hasCodeChatPreview, websiteConversationContext } from "../apps/agent-api/src/code-chat-website";
+import { canUseStylePreview, finishCodeChatWebsite, hasCodeChatPreview, websiteConversationContext, websiteReferenceInstructions, storeWebsiteReferenceAssets } from "../apps/agent-api/src/code-chat-website";
 import { resolveChatCodeIntent } from "../apps/agent-api/src/code-intent-routing";
 import { getLatestChatProjectCard, saveChatProjectCard } from "../apps/agent-api/src/project-chat-cards";
 
@@ -156,5 +156,28 @@ it("keeps bounded conversation continuity for a follow-up color without replayin
 it("forwards validated image parts through the shared session executor and model resolver",async()=>{
  const f=await fixture();const images=[{mimeType:"image/png",dataBase64:"reference"}];let seen:unknown;let selected:unknown;
  const executor=new CodeSessionRunExecutor({runner:{run:async input=>{seen=input;return {status:"completed"};}},control:{clearSession(){},registerController(){},unregisterController(){}},resolveModel:async(_ctx,input)=>{selected=input.images;return "configured-vision";}});
- await executor.execute({...f.input,images});expect(selected).toEqual(images);expect(seen).toMatchObject({images,model:"configured-vision"});
+ await executor.execute({...f.input,images,extraSystemPromptLines:["visual scope"]});expect(seen).toMatchObject({extraSystemPromptLines:["visual scope"]});expect(selected).toEqual(images);expect(seen).toMatchObject({images,model:"configured-vision"});
+});
+
+it("treats a current photo appearance request as structural redesign rather than a historical color adjustment",()=>{
+ const instructions=websiteReferenceInstructions("зроби мені вигляд сайта як на фото",1).join("\n");
+ expect(instructions).toContain("FULL VISUAL REDESIGN");expect(instructions).toContain("templates/components AND styles");expect(instructions).toContain("historical and do not restrict");expect(instructions).toContain("passing build checks compilation, not visual similarity");
+});
+it.each(["зроби мені вигляд сайта як на фото; зміни тільки акцентний колір, решту залиш.","Make the website look like the image, but change only the accent color."])("preserves explicit narrow visual scope: %s",message=>{
+ expect(websiteReferenceInstructions(message,1).join(" ")).not.toContain("FULL VISUAL REDESIGN");
+});
+it("does not add redesign instructions to a request without images or a screenshot bug report",()=>{
+ expect(websiteReferenceInstructions("зроби мені вигляд сайта як на фото",0)).toEqual([]);
+ expect(websiteReferenceInstructions("Fix the login error in this screenshot",1).join(" ")).not.toContain("FULL VISUAL REDESIGN");
+});
+
+it("reuses project media and deterministic filenames for screenshot resources",async()=>{
+ const uploadMedia=vi.fn(async(_ctx:unknown,_company:string,_project:string,input:{name:string})=>({path:"references/"+input.name}) as never);
+ const images=[{kind:"image",mimeType:"image/png",data:Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAAAElFTkSuQmCC","base64")},{kind:"document",mimeType:"text/plain",data:Buffer.from("notes")}];
+ const paths=await storeWebsiteReferenceAssets({uploadMedia},ctx,"company","project",images);
+ expect(uploadMedia).toHaveBeenCalledTimes(1);expect(uploadMedia).toHaveBeenCalledWith(ctx,"company","project",expect.objectContaining({targetDir:"references",workspaceSync:true,data:images[0]!.data}));
+ expect(paths[0]).toMatchObject({width:1,height:1});expect(paths[0]!.path).toMatch(/^public\/references\/reference-[a-f0-9]{20}\.png$/);
+ const again=await storeWebsiteReferenceAssets({uploadMedia},ctx,"company","project",images);expect(again).toEqual(paths);
+ expect(websiteReferenceInstructions("make the website look like this image",1,paths).join(" ")).toContain(paths[0]!.path);
+ expect(websiteReferenceInstructions("make the website look like this image",1,paths).join(" ")).toContain("Do not replace available photographs");
 });
