@@ -41,6 +41,7 @@ export class ChatDevelopmentService {
   private jobs = new Map<string, { controller: AbortController; promise: Promise<void> }>();
   private starts = new Map<string, Promise<unknown>>();
   private updates = new Map<string, Promise<unknown>>();
+  private activityBatches = new Map<string, { ctx: AuthContext; timer: ReturnType<typeof setTimeout>; events: Array<{ companyId: string; sessionId: string; conversationId?: string; event: import("@npati/shared").DevelopmentProcessProgressItem }> }>();
   private closing = false;
   private readonly projections = new Map<string, Promise<DevelopmentProcess[]>>();
   private listeners = new Set<() => void>();
@@ -83,10 +84,12 @@ export class ChatDevelopmentService {
     return items.filter(p => keep.has(p.id));
   }
   private async patch(ctx: AuthContext, id: string, patch: Partial<Entry>) {
+    await this.flushActivities(ctx);
     await this.change(ctx, items => items.map(item => item.id === id ? { ...item, ...patch, updatedAt: new Date().toISOString() } : item));
     this.notifyListeners();
   }
   async list(ctx: AuthContext): Promise<DevelopmentProcess[]> {
+    await this.flushActivities(ctx);
     const key = this.owner(ctx);
     const pending = this.projections.get(key);
     if (pending) return pending;
@@ -146,8 +149,12 @@ export class ChatDevelopmentService {
         const live = this.d.background.isLive(latest.runId);
         const expired = latest.status === "running" && (executionTimestamp(latest.leaseExpiresAt) ?? Infinity) < Date.now();
         const previewEvent = merged.filter(event => event.runId === latest.runId && event.stage === "preview").at(-1);
-        const previewReady = !!project?.previewUrl && (project.lastBuildStatus === "ready" || project.status === "previewing" && previewEvent?.status === "completed");
-        const publishingPreview = previewEvent?.status === "running" || previewEvent?.status === "active";
+        const previewReady = !!project?.previewUrl && (previewEvent ? previewEvent.status === "completed" : project.lastBuildStatus === "ready");
+        // The coding lease finishes before afterRun starts Preview. Recover this bounded finalization gap.
+        const awaitingPreview = !previewEvent && !previewReady && latest.status === "completed"
+          && Date.now() - (executionTimestamp(latest.finishedAt) ?? 0) < 120_000;
+        const publishingPreview = awaitingPreview || (previewEvent?.status === "running" || previewEvent?.status === "active")
+          && Date.now() - Date.parse(previewEvent.at) < 120_000;
         const status: DevelopmentProcess["status"] = expired && !live ? "interrupted" : live || latest.status === "running" ? item.status === "stopping" && item.runId === latest.runId ? "stopping" : "running" : latest.status === "waiting_for_user" ? "awaiting_approval"
           : latest.status === "completed" && publishingPreview ? "running" : latest.status === "completed" && !previewReady ? "failed" : latest.status;
         return { ...item, runId: latest.runId, status, previewUrl: project?.previewUrl ?? undefined };
@@ -252,12 +259,43 @@ export class ChatDevelopmentService {
     return { conversationId, processes: created };
   }
   async recordActivity(ctx: AuthContext, companyId: string, sessionId: string, conversationId: string | undefined, event: import("@npati/shared").DevelopmentProcessProgressItem) {
-    const owned = (await this.entries(ctx)).find(p => p.companyId === companyId && p.sessionId === sessionId && (!conversationId || p.conversationId === conversationId));
-    if (!owned) return;
-    const details = executionResultDetails(event.result);
-    const safe = sanitizeProgress({ ...event, ...details, status: ["cancelled", "awaiting_approval", "waiting_for_approval"].includes(event.status ?? "") ? event.status : details.status ?? event.status, conversationId: owned.conversationId });
-    await this.change(ctx, items => items.map(p => p.id !== owned.id ? p : { ...p, progress: [...(p.progress ?? []).filter(item => item.id !== safe.id), safe], updatedAt: new Date().toISOString() }));
-    this.notifyListeners();
+    const owner = this.owner(ctx);
+    let batch = this.activityBatches.get(owner);
+    if (!batch) {
+      const timer = setTimeout(() => { void this.flushActivities(ctx).catch(error => this.d.log.warn({ err: error }, "chat_activity_batch_failed")); }, 100);
+      timer.unref?.();
+      batch = { ctx, timer, events: [] };
+      this.activityBatches.set(owner, batch);
+    }
+    batch.events.push({ companyId, sessionId, conversationId, event });
+    // Canonical run/replay events remain durable per step. Only the secondary UI projection is batched.
+    if (batch.events.length >= 32 || ["failed", "cancelled", "awaiting_approval", "waiting_for_approval"].includes(event.status ?? "")
+      || event.stage === "preview") await this.flushActivities(ctx);
+  }
+  private async flushActivities(ctx: AuthContext) {
+    const owner = this.owner(ctx), batch = this.activityBatches.get(owner);
+    if (!batch) { await this.updates.get(owner); return; }
+    clearTimeout(batch.timer);
+    this.activityBatches.delete(owner);
+    try {
+      await this.change(ctx, items => items.map(p => {
+        const matching = batch.events.filter(item => p.companyId === item.companyId && p.sessionId === item.sessionId && (!item.conversationId || p.conversationId === item.conversationId));
+        if (!matching.length) return p;
+        const progress = new Map((p.progress ?? []).map(event => [event.id, event]));
+        for (const { event } of matching) {
+          const details = executionResultDetails(event.result);
+          const safe = sanitizeProgress({ ...event, ...details, status: ["cancelled", "awaiting_approval", "waiting_for_approval"].includes(event.status ?? "") ? event.status : details.status ?? event.status, conversationId: p.conversationId });
+          progress.set(safe.id, safe);
+        }
+        return { ...p, progress: [...progress.values()].slice(-200), updatedAt: new Date().toISOString() };
+      }));
+      this.notifyListeners();
+    } catch (error) {
+      const pending = this.activityBatches.get(owner);
+      if (pending) pending.events.unshift(...batch.events);
+      else this.activityBatches.set(owner, batch);
+      throw error;
+    }
   }
   private async report(ctx: AuthContext, id: string, stage: string, title: string, details?: Record<string, unknown>) {
     await this.change(ctx, items => items.map(item => {
@@ -525,5 +563,7 @@ export class ChatDevelopmentService {
     await Promise.allSettled([...this.starts.values()]);
     for (const job of this.jobs.values()) job.controller.abort();
     await Promise.allSettled([...this.jobs.values()].map(j => j.promise));
+    await Promise.all([...this.activityBatches.values()].map(batch => this.flushActivities(batch.ctx)));
+    await Promise.all([...this.updates.values()]);
   }
 }

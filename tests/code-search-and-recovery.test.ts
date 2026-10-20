@@ -91,7 +91,7 @@ describe("code.fs.grep secure execution & terminal approval isolation", () => {
     });
     expect(executedCommands).toHaveLength(1);
     expect(executedCommands[0]).toContain("QUERY=");
-    expect(executedCommands[0]).toContain("rg --json --line-number --no-heading --color=never --max-count 10 -e \"$QUERY\" -- './index.html'");
+    expect(executedCommands[0]).toContain("rg --json --line-number --no-heading --color=never --no-require-git --max-count 10 -e \"$QUERY\" -- './index.html'");
   });
 
   it("safely encodes complex patterns with quotes and shell characters without shell injection", async () => {
@@ -719,4 +719,19 @@ describe("CodingAgentToolWaves argument error recovery semantics", () => {
     expect(normalized.rejected).toHaveLength(1);
     expect(normalized.rejected[0].code).toBe("unknown_tool");
   });
+});
+
+describe("unified patches use exact context when line numbers drift",()=>{
+ it("relocates unique numbered hunks and preserves CRLF",()=>{
+  const before=":root {\r\n  --ink: #fff;\r\n}\r\n.header {\r\n  background: white;\r\n}\r\n";
+  const patch="@@ -40,3 +40,3 @@\n .header {\n-  background: white;\n+  background: black;\n }\n";
+  expect(applyUnifiedDiffToFile("app/store.css",before,patch)).toBe(before.replace("background: white","background: black"));
+ });
+ it("refuses ambiguous relocation and genuinely stale text",()=>{
+  expect(()=>applyUnifiedDiffToFile("a.css","white\nwhite\n","@@ -40,1 +40,1 @@\n-white\n+black")).toThrow(/multiple locations/);
+  expect(()=>applyUnifiedDiffToFile("a.css","black\n","@@ -1,1 +1,1 @@\n-white\n+red")).toThrow(/re-read/);
+ });
+ it("keeps correctly positioned repeated context and supports length-changing hunks",()=>{
+  expect(applyUnifiedDiffToFile("a.css","white\nwhite\nend\n","@@ -2,1 +2,2 @@\n-white\n+black\n+new\n@@ -3,1 +4,1 @@\n-end\n+done")).toBe("white\nblack\nnew\ndone\n");
+ });
 });

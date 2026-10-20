@@ -1,3 +1,4 @@
+import { codeSearchTypeArguments } from "./code-search-types";
 import { projectRuntimeCommandPort } from "./shared-project-runtime-provider";
 import { commitSandboxWrites } from "./project-sandbox-write-commit";
 import type { PatchMutation } from "./code-patch-transaction";
@@ -574,7 +575,7 @@ export class ProjectSandboxService {
     }
     if (request.type !== undefined) {
       if (!/^[a-zA-Z0-9_-]+$/.test(request.type)) throw new SandboxProviderError("invalid_search_options", "Invalid file type filter", 400);
-      flags.push("--type '" + request.type + "'");
+      for (const [flag, value] of codeSearchTypeArguments(request.type)) flags.push(flag + " '" + value + "'");
     }
 
     const quotedTarget = "'" + target.replace(/'/g, "'\\''") + "'";
@@ -669,6 +670,24 @@ export class ProjectSandboxService {
   }
   supportsPreviewProxy(): boolean {
     return typeof this.provider.proxyPreview === "function";
+  }
+
+  /** Refresh the existing scoped workspace without executing a shell or restarting Next dev. */
+  async refreshPreview(ctx: AuthContext, companyId: string, projectId: string, command: string) {
+    await this.agent(ctx, companyId, "system", "project.terminal.process");
+    const project = await this.project(ctx, companyId, projectId);
+    if (!project.sandboxId) return null;
+    const history = await this.events.list(ctx, companyId, projectId);
+    const approved = "Approved command (" + createHash("sha256").update(command).digest("hex").slice(0, 12) + ")";
+    const candidate = history.find(event => event.sandboxId === project.sandboxId && event.processId && event.status === "running" && (event.commandSummary === command || event.commandSummary === approved));
+    if (!candidate?.processId || history.find(event => event.processId === candidate.processId)?.status !== "running") return null;
+    const scope = scopeOf(ctx, project);
+    const state = await this.provider.getProcessStatus(scope, project.sandboxId, candidate.processId);
+    if (state.status !== "running") return null;
+    const mount = await this.workspace.mountFor?.(ctx, companyId, projectId) ?? null;
+    await this.upload(ctx, project, scope, project.sandboxId, mount);
+    this.touch(ctx, project);
+    return { processId: candidate.processId, sandboxId: project.sandboxId };
   }
 
   async stopRecordedPreview(ctx: AuthContext, companyId: string, projectId: string, command: string) {

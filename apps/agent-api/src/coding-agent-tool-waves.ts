@@ -382,6 +382,9 @@ export class CodingAgentToolWaves {
         result: JSON.stringify(result.ok ? result.result : result.error),
         ...(result.ok ? { resultTruncated: result.truncated } : { error: result.error.message, errorCode: result.error.code }),
       });
+      if (!result.ok && ["patch_conflict", "edit_no_match", "edit_ambiguous"].includes(result.error.code)) {
+        deferredMessages.push({ role: "system", content: "The last file operation did not apply. Keep earlier successful edits. Re-read only the affected current range, then submit one corrected patch with exact unique context or one precise literal edit. Do not reuse stale text, guess line numbers, repeat the same failed patch, or restart the task. A successful dryRun is not a saved edit." });
+      }
       summary.toolCalls += 1;
       if (result.ok && call.arguments.dryRun !== true) {
         recordWrittenFiles(summary, call.name, result.result);

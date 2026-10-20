@@ -548,3 +548,13 @@ describe("security-gate: C3 undo audit failure is fail closed", () => {
     expect(h.files.get("src/orders.ts")).toBe(original);
   });
 });
+
+it("retains structured write receipts when a large CSS diff exceeds the output budget",async()=>{
+ const h=harness();h.files.set("src/orders.ts","/* "+"x".repeat(40_000)+" */\nbody { background: white; }\n");
+ await readFile(h,"src/orders.ts");
+ const result=await invoke(h,"code.fs.apply_patch",{patch:"--- src/orders.ts\n+++ src/orders.ts\n@@ -2,1 +2,1 @@\n-body { background: white; }\n+body { background: black; }"});
+ expect(result.ok).toBe(true);if(!result.ok)return;
+ const data=(result.result as {data:any}).data;
+ expect(data.path).toBe("src/orders.ts");expect(data.files[0].sha256).toBeTruthy();expect(data.stats.files).toBe(1);
+ expect(result.truncated).toBe(true);expect(data.truncatedPreview).toBeUndefined();expect(h.files.get("src/orders.ts")).toContain("background: black");
+});

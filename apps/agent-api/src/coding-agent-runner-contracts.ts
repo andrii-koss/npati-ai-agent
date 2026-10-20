@@ -105,6 +105,7 @@ export * from "./coding-agent-runner-prompt";
 
 export interface CodingAgentRunInput {
   responseLanguage?: CompanyChatLanguage;
+  noMemory?: boolean;
   websiteEdit?: boolean;
   allowStylePreview?: boolean;
   onActivity?: (event: DevelopmentProcessProgressItem) => Promise<void>;
