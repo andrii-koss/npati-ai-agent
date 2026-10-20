@@ -1,3 +1,4 @@
+import { projectRuntimeCommandPort } from "./shared-project-runtime-provider";
 import { commitSandboxWrites } from "./project-sandbox-write-commit";
 import type { PatchMutation } from "./code-patch-transaction";
 import { parseCodeSearchOutput } from "./code-search-output";
@@ -351,6 +352,12 @@ export class ProjectSandboxService {
     if ((decision.requiresApproval || Object.keys(request.environmentReferences ?? {}).length > 0) && request.approved !== true) {
       logTerminalPolicy({ rawCommand: normalized.rawCommand, normalizedCommand: command, sandboxId: project.sandboxId, projectId: project.id, decision: "approval", reason: decision.requiresApproval ? decision.reason : "Secret references require approval", policyRule: decision.policyRule, toolName: tool, executionContext: "project_sandbox", runId: request.runId ?? "direct", agentId: request.agentId, runType: "project_tool", cwd: normalized.cwd, rawArgs: normalized.args, commandPolicyRule: decision.policyRule });
       throw new SandboxProviderError("approval_required", "Terminal command requires approval", 403, "approval", tool);
+    }
+    // Next dev writes to the same .next tree as production build. Stop recorded listeners first.
+    if (!startProcess && project.framework === "Next.js" && project.previewPort && normalized.args.includes("build")) {
+      for (const command of ["npm run dev", "pnpm dev", "yarn dev", "npx next start --hostname 0.0.0.0 --port 3000"]) {
+        await this.stopRecordedPreview(ctx, companyId, project.id, projectRuntimeCommandPort(command, project.previewPort));
+      }
     }
     const environment = await this.environment(ctx, companyId, request.environmentReferences);
     const secrets = Object.values(environment);

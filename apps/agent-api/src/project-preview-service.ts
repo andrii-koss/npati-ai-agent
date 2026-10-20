@@ -8,6 +8,13 @@ import type { ProjectSandboxService } from "./project-sandbox-service";
 import { SandboxProviderError } from "./sandbox-provider";
 import { projectRuntimeCommandPort } from "./shared-project-runtime-provider";
 
+/** Stable across API/worker instances; the encryption key is never used directly as a signing key. */
+export function resolvePreviewSecret(secret?: string, env: NodeJS.ProcessEnv = process.env): string {
+  if (secret || env.NPATI_PREVIEW_SECRET) return (secret || env.NPATI_PREVIEW_SECRET)!;
+  if (env.NPATI_ENCRYPTION_KEY) return createHmac("sha256", env.NPATI_ENCRYPTION_KEY).update("npati/project-preview/v1").digest("hex");
+  return randomBytes(32).toString("hex");
+}
+
 export interface DetectedStack {
   packageManager: "npm" | "pnpm" | "yarn" | "bun";
   framework: string;
@@ -16,6 +23,7 @@ export interface DetectedStack {
 }
 
 export interface PreviewTokenPayload {
+  workspaceId?: string;
   userId: string;
   companyId: string;
   projectId: string;
@@ -265,7 +273,7 @@ export class ProjectPreviewService {
     secret?: string,
     private readonly onPreviewStart?: PreviewOriginRegistrar,
   ) {
-    this.secret = secret || process.env.NPATI_PREVIEW_SECRET || randomBytes(32).toString("hex");
+    this.secret = resolvePreviewSecret(secret);
   }
 
   async buildProject(ctx: AuthContext, companyId: string, projectId: string, onStage?: (stage: "dependencies" | "build", details?: { command: string; status: "running" | "completed" | "failed"; stdout?: string; stderr?: string; exitCode?: number; durationMs?: number }) => void, options: { dependenciesOnly?: boolean } = {}): Promise<void> {
@@ -473,6 +481,7 @@ export class ProjectPreviewService {
     }
     // Generate signed preview token
     const { token } = this.generateToken({
+      workspaceId: ctx.workspaceId,
       userId: ctx.userId,
       companyId,
       projectId,
@@ -569,7 +578,7 @@ export class ProjectPreviewService {
         port: project.previewPort,
         framework: project.framework,
         lastBuildStatus: project.lastBuildStatus,
-        isRunning: false,
+        isRunning: !!this.sandbox && project.status === "previewing" && !!project.previewUrl && !!project.previewPort,
         error: null,
         restartCount: 0,
       };
@@ -650,8 +659,8 @@ export class ProjectPreviewService {
     return this.sessions.get(projectId);
   }
 
-  async assertProjectAccess(ctx: AuthContext, companyId: string, projectId: string): Promise<void> {
-    await this.projects.get(ctx, companyId, projectId);
+  async assertProjectAccess(ctx: AuthContext, companyId: string, projectId: string): Promise<Project> {
+    return this.projects.get(ctx, companyId, projectId);
   }
 
   setSession(projectId: string, session: ActivePreviewSession): void {
@@ -665,14 +674,24 @@ export class ProjectPreviewService {
     const { companyId, projectId } = request.params;
     const token = request.query.token || (request.headers.authorization?.replace(/^Bearer\s+/i, "")) || "";
 
+    let tokenPayload: PreviewTokenPayload;
     try {
-      this.validateTokenForRequest(token, companyId, projectId);
+      tokenPayload = this.validateTokenForRequest(token, companyId, projectId);
     } catch (error) {
       const known = error instanceof PreviewError ? error : new PreviewError("access_denied", "Unauthorized preview token", 403);
       return reply.code(known.status).send({ error: { code: known.code, message: known.message } });
     }
 
-    const session = this.sessions.get(projectId);
+    let session: Pick<ActivePreviewSession, "workspaceId" | "userId" | "sandboxId" | "port" | "status" | "lastError"> | undefined = this.sessions.get(projectId);
+    // Worker-created previews and API restarts have no local session; authorize the signed scope again.
+    if (!session && tokenPayload.workspaceId && this.sandbox) {
+      try {
+        const project = await this.projects.get({ workspaceId: tokenPayload.workspaceId, userId: tokenPayload.userId, permissions: ["workspace:read"] }, companyId, projectId);
+        if (project.status === "previewing" && project.previewPort && project.sandboxId === tokenPayload.sandboxId) {
+          session = { workspaceId: tokenPayload.workspaceId, userId: tokenPayload.userId, sandboxId: tokenPayload.sandboxId, port: project.previewPort, status: "running" };
+        }
+      } catch { return reply.code(403).send({ error: { code: "preview_access_denied", message: "Preview project is unavailable." } }); }
+    }
     if (!session) {
       return reply.code(404).type("text/html").send(`
         <!DOCTYPE html><html><head><meta charset="utf-8"><title>Preview Inactive</title>

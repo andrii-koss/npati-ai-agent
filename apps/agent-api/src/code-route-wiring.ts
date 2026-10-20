@@ -1,3 +1,4 @@
+import { buildWebsiteStyleContext } from "./website-style-context";
 
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { AppConfig } from "./app";
@@ -457,7 +458,7 @@ export function registerCodeRouteWiring(app: FastifyInstance, deps: CodeRouteDep
         }
       : {}),
     contextBlocks: {
-      load: async ({ ctx, companyId, projectId, query }) => {
+      load: async ({ ctx, companyId, projectId, query, websiteEdit }) => {
         let companyMemory: string | null = null;
         try {
           const memories = await workspaceStore.listMemory(ctx, companyId, query, 25);
@@ -477,6 +478,13 @@ export function registerCodeRouteWiring(app: FastifyInstance, deps: CodeRouteDep
           projectContext = buildProjectContextBlock(raw.content)?.body ?? null;
         } catch {
           projectContext = null;
+        }
+        if (websiteEdit) {
+          try {
+            const files = await projectWorkspace.listFiles(ctx, companyId, projectId);
+            const styles = await buildWebsiteStyleContext(files, async path => (await projectWorkspace.readFile(ctx, companyId, projectId, path)).content);
+            if (styles) projectContext = [projectContext, styles].filter(Boolean).join("\n\n");
+          } catch { /* Optional repository hints never block an edit. */ }
         }
         if (!companyMemory && !projectContext) return null;
         return { companyMemory, projectContext };

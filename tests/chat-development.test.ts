@@ -410,3 +410,17 @@ it("refreshes completed chat preview URLs from the current project after a previ
   await f.projects.updatePreview(owner, f.company.id, process.projectId!, { previewUrl: null });
   expect((await f.service.list(owner))[0]?.previewUrl).toBeUndefined();
 });
+
+it("recovers completed CSS Preview without requiring a production build and waits while publishing",async()=>{
+ const f=await fixture();await f.start("Create a Next.js website");await vi.waitFor(()=>expect(f.controls.size).toBe(1));
+ const process=(await f.service.list(owner))[0]!;f.finish(process.projectId!);await vi.waitFor(async()=>expect((await f.service.list(owner))[0]?.status).toBe("completed"));
+ const runId="css-followup";
+ await f.store.createCodeRunState({runId,workspaceId:owner.workspaceId,companyId:f.company.id,projectId:process.projectId!,sessionId:process.sessionId!,owner:"worker",leaseMs:1000,now:new Date()});
+ await f.store.applyCodeRunStateEvent({companyId:f.company.id,runId,seq:2,status:"completed",finishedAt:new Date()});
+ await f.projects.updatePreview(owner,f.company.id,process.projectId!,{status:"previewing",lastBuildStatus:null,previewUrl:"https://preview.test/css"});
+ const restarted=new ChatDevelopmentService({...f.ports,background:new CodeBackgroundRunRegistry()});shutdown.push(()=>restarted.close());
+ for(const status of ["running","completed","failed"] as const){
+  await f.service.recordActivity(owner,f.company.id,process.sessionId!,process.conversationId,{id:runId+":preview",runId,stage:"preview",title:"Starting Live Preview",at:new Date().toISOString(),status});
+  expect((await restarted.list(owner))[0]?.status).toBe(status);
+ }
+});

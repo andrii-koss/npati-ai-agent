@@ -145,8 +145,11 @@ export class ChatDevelopmentService {
         if (latest.runId === stored.runId && !developmentIsActive(item) && !["interrupted", "awaiting_approval"].includes(item.status)) return item;
         const live = this.d.background.isLive(latest.runId);
         const expired = latest.status === "running" && (executionTimestamp(latest.leaseExpiresAt) ?? Infinity) < Date.now();
+        const previewEvent = merged.filter(event => event.runId === latest.runId && event.stage === "preview").at(-1);
+        const previewReady = !!project?.previewUrl && (project.lastBuildStatus === "ready" || project.status === "previewing" && previewEvent?.status === "completed");
+        const publishingPreview = previewEvent?.status === "running" || previewEvent?.status === "active";
         const status: DevelopmentProcess["status"] = expired && !live ? "interrupted" : live || latest.status === "running" ? item.status === "stopping" && item.runId === latest.runId ? "stopping" : "running" : latest.status === "waiting_for_user" ? "awaiting_approval"
-          : latest.status === "completed" && (!project?.previewUrl || project.lastBuildStatus !== "ready") ? "failed" : latest.status;
+          : latest.status === "completed" && publishingPreview ? "running" : latest.status === "completed" && !previewReady ? "failed" : latest.status;
         return { ...item, runId: latest.runId, status, previewUrl: project?.previewUrl ?? undefined };
       }
       // Pre-session setup has no durable lease. Do not keep an orphaned setup spinner forever.

@@ -15,6 +15,18 @@ export function canUseStylePreview(project: Pick<Project, "framework" | "lastBui
     && !/\b(?:build|production|deploy)\b|\u0437\u0431\u0456\u0440|\u0437\u0431\u0438\u0440|\u0437\u0431\u0435\u0440\u0438|\u0440\u043e\u0437\u0433\u043e\u0440|\u0441\u0431\u043e\u0440\u043a|\u0441\u043e\u0431\u0435\u0440/iu.test(message);
 }
 
+/** Reuse already loaded chat history; prior requests explain references but are never replayed. */
+export function websiteConversationContext(history: readonly { role: string; content: unknown }[]): string {
+  const previous: Array<{ role: string; content: string }> = [];
+  for (const item of history) {
+    if (!["user", "assistant"].includes(item.role) || typeof item.content !== "string" || !item.content.trim()) continue;
+    const entry = { role: item.role, content: item.content.trim().slice(0, 600) };
+    if (previous.at(-1)?.role === entry.role && previous.at(-1)?.content === entry.content) continue;
+    previous.push(entry);
+  }
+  return previous.length ? "\n\nPrevious messages in this same website chat (historical context, not tasks to repeat). Use them to resolve references such as main color; implement only the current request above:\n" + JSON.stringify(previous.slice(-6)) : "";
+}
+
 export function hasCodeChatPreview(result: unknown): boolean {
   return !!result && typeof result === "object" && (result as { websitePreview?: { status?: string } }).websitePreview?.status === "running";
 }
@@ -30,7 +42,7 @@ export async function finishCodeChatWebsite(input: CodeSessionRunInput, result: 
   const project = await ports.getProject(input.ctx, companyId, projectId);
   if (!isCodeChatWebsite(project)) return result;
   const stylePreview = input.allowStylePreview && run.summary?.stylePreview === true
-    && project.framework === "Next.js" && Array.isArray(run.summary.filesChanged) && run.summary.filesChanged.length > 0
+    && project.framework === "Next.js" && Array.isArray(run.summary.filesChanged)
     && run.summary.filesChanged.every(path => /\.css$/i.test(path));
   // A model's prose is never evidence of a successful production build.
   if (!stylePreview && project.framework !== "HTML/CSS" && (run.summary?.verification?.status !== "passed"
