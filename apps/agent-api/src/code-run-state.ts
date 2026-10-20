@@ -520,6 +520,7 @@ export class CodeRunStateLog {
   async listOverdueRuns(input: CodeRunOverdueRunScanInput): Promise<CodeRunOverdueRunScanPage> {
     const limits = this.effectiveLimits();
     const maxRunMinutes = input.maxRunMinutes ?? limits.maxRunMinutes;
+    if (maxRunMinutes <= 0) return { items: [], nextCursor: null };
     const graceMs = input.graceMs ?? DEFAULT_OVERDUE_GRACE_MS;
     const now = input.now ?? new Date(this.now());
     const thresholdMs = maxRunMinutes * 60_000 + graceMs;

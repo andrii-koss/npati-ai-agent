@@ -431,7 +431,7 @@ export class CodeReaper {
     }
 
     // 6. Runs past wall clock + grace.
-    if (!this.options.overdueRuns) skipped.push({ step: "overdue_runs", reason: "port_unavailable" });
+    if (!this.options.overdueRuns || this.options.maxRunMinutes <= 0) skipped.push({ step: "overdue_runs", reason: this.options.maxRunMinutes <= 0 ? "unlimited" : "port_unavailable" });
     else {
       await step("overdue_runs", async () => {
         const now = this.now();

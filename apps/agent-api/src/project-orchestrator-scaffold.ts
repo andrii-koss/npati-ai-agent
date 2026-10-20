@@ -1,4 +1,5 @@
 import type { AuthContext, CompanyAgent, CompanyAgentRunDetails, Project, WorkspaceStore } from "@npati/workspace";
+import type { PatchMutation } from "./code-patch-transaction";
 import type { ProjectService } from "./project-service";
 import type { ProjectWorkspace } from "./project-workspace";
 import type { DataBackendService } from "./data-studio/service";
@@ -212,9 +213,22 @@ export async function scaffoldWebsiteProject(
   } else {
     files = createFrameworkScaffold({ projectName, prompt: prompt ?? "", framework: canonical });
   }
+  const plan: PatchMutation[] = [];
   for (const [filePath, content] of Object.entries(files)) {
     try { await projectWorkspace.readFile(ctx, companyId, projectId, filePath); }
-    catch { await projectWorkspace.createFile(ctx, companyId, projectId, filePath, content); }
+    catch { plan.push({ path: filePath, before: "", after: content, existing: false }); }
+  }
+  // One lease transaction for the whole starter instead of one kernel-lease round trip per file: a new
+  // project's first paint is dominated by those lock acquisitions, not by writing these small files.
+  if (plan.length > 0 && projectWorkspace.applyPatchTransaction) {
+    try {
+      await projectWorkspace.applyPatchTransaction(ctx, companyId, projectId, plan);
+      return;
+    } catch { /* Fall back to the per-file path when the workspace does not support a batch commit. */ }
+  }
+  for (const item of plan) {
+    try { await projectWorkspace.createFile(ctx, companyId, projectId, item.path, item.after); }
+    catch { /* A concurrent scaffold may have created it. */ }
   }
 }
 

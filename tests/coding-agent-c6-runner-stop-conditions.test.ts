@@ -175,6 +175,31 @@ describe("security-gate: C6 runner — every stop condition reports a reason and
     expect(result.summary.remaining).toContain("Step limit");
   });
 
+  it("does not stop at a step limit when maxStepsPerRun is zero", async () => {
+    const calls = Array.from({ length: 6 }, (_value, index) => ({
+      content: "",
+      toolCalls: [nativeCall("code.fs.read", { path: `file-${index}.ts` }, `unlimited-${index}`)],
+    }));
+    const harness = createHarness({ script: [...calls, { content: "done" }], limits: { maxStepsPerRun: 0 } });
+    const result = await harness.run();
+    expect(result.reason).toBe("completed");
+    expect(result.status).toBe("completed");
+  });
+
+  it("does not stop at a time limit when maxRunMinutes is zero", async () => {
+    const harness = createHarness({
+      script: [
+        { content: "", toolCalls: [nativeCall("code.fs.read", { path: "a.ts" }, "unlimited-time")] },
+        { content: "done" },
+      ],
+      limits: { maxRunMinutes: 0 },
+      onFirstModelCall: () => harness.setClock(1_000 + 120_000),
+    });
+    const result = await harness.run();
+    expect(result.reason).toBe("completed");
+    expect(result.status).toBe("completed");
+  });
+
   it("stops with time_limit once the run exceeds maxRunMinutes", async () => {
     const harness = createHarness({
       script: [

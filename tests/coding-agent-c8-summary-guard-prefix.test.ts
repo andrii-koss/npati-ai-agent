@@ -305,6 +305,12 @@ describe("[C8] [security-gate] the system prompt keeps a stable, cacheable prefi
     });
   }
 
+  it("states that no fixed turn or wall-clock limit applies when both are zero", () => {
+    const unlimited = buildSystemPrompt({ session, tools, environment: { os: "linux", cwd: "/workspace/one", date: "2026-01-01" }, limits: { maxStepsPerRun: 0, maxRunMinutes: 0 } });
+    expect(unlimited).toContain("no fixed assistant-turn or wall-clock limit");
+    expect(unlimited).not.toContain("at most 0 assistant turns");
+  });
+
   it("is byte-identical across runs that differ only in data-dependent parts", () => {
     const first = prompt({ date: "2026-01-01", cwd: "/workspace/one" });
     const second = prompt({

@@ -19,7 +19,7 @@ export class ProjectService {
     return this.store.getCompany(context, companyId);
   }
 
-  async create(context: AuthContext, companyId: string, input: ProjectInput, idempotencyKey: string) {
+  async create(context: AuthContext, companyId: string, input: ProjectInput, idempotencyKey: string, options: { attachDataBackend?: boolean } = {}) {
     await this.company(context, companyId);
     const name = typeof input?.name === "string" ? input.name.trim() : "";
     if (!name || name.length > 200) throw new Error("Project name must be between 1 and 200 characters");
@@ -43,7 +43,7 @@ export class ProjectService {
     }, idempotencyKey);
     // Data Studio: a website created without an explicit database is attached to the company's
     // DataBackend automatically (created on demand the first time). Failures never block creation.
-    if (!created.project.dataBackendId && this.attachDataBackend) {
+    if (!created.project.dataBackendId && this.attachDataBackend && options.attachDataBackend !== false) {
       const attached = await this.attachDataBackend(context, companyId, created.project.id).catch(() => undefined);
       if (attached) {
         const project = await this.store.getProject(context, companyId, created.project.id).catch(() => created.project);

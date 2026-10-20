@@ -300,7 +300,7 @@ describe("chat development lifecycle with the real store, queue and executor", (
     const process = (await f.service.list(owner))[0]!;
     expect(f.preview.buildProject).toHaveBeenCalledOnce(); expect(f.preview.buildProject.mock.calls[0]?.[4]).toEqual({dependenciesOnly:true}); expect(f.preview.startPreview).not.toHaveBeenCalled();
     expect(process.progress?.map(p => p.stage)).toEqual(expect.arrayContaining(["scaffold", "dependencies", "agent"]));
-    const runner = f.controls.get(process.projectId!)!; expect(runner.input.maxTurns).toBe(20); expect(process.progress?.some(p=>["build","preview","template_ready"].includes(p.stage))).toBe(false); expect(runner.input.prompt).not.toContain("code.deps.install"); expect(runner.input.prompt).toContain("Do not add tests");
+    const runner = f.controls.get(process.projectId!)!; expect(runner.input.maxTurns).toBeUndefined(); expect(process.progress?.some(p=>["build","preview","template_ready"].includes(p.stage))).toBe(false); expect(runner.input.prompt).not.toContain("code.deps.install"); expect(runner.input.prompt).toContain("Do not add tests");
     const child = await f.store.getNeutralConversation(owner, process.conversationId!); expect(child.messages.length).toBeGreaterThanOrEqual(1);
     expect((await getLatestChatProjectCard(f.store, owner, process.conversationId!))?.status).not.toBe("ready");
     runner.finish({ status: "stopped", reason: "budget_exhausted", message: "A2A_TOKEN_QUOTA_EXCEEDED", runId: runner.input.runId });

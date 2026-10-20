@@ -511,7 +511,9 @@ export class CodingAgentReviewCoordinator {
       return { action: "stopped", result: await stop("interrupted", "async_collect_unsettled", "The collect barrier requires a durable inbox and completion collector.") };
     }
 
-    const deadline = Date.now() + Math.max(0, Math.min(ports.asyncCollect.timeoutMs ?? 30_000, limits.maxRunMinutes * 60_000 - (Date.now() - startedAt)));
+    const collectTimeoutMs = ports.asyncCollect.timeoutMs ?? 30_000;
+    const remainingRunMs = limits.maxRunMinutes > 0 ? limits.maxRunMinutes * 60_000 - (Date.now() - startedAt) : collectTimeoutMs;
+    const deadline = Date.now() + Math.max(0, Math.min(collectTimeoutMs, remainingRunMs));
     let collectedInput = false;
     try {
       for (;;) {

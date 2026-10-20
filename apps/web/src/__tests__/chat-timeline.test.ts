@@ -37,6 +37,13 @@ it("preserves factual multi-file changes and structured test counts without fabr
   expect(rows[0]?.files).toHaveLength(2);expect(rows[0]?.files?.[0]?.diff).toBe("+token=[REDACTED]");expect(rows[0]?.files?.[1]?.linesAdded).toBeUndefined();expect(rows[0]?.tests?.failed).toBe(1);
 });
 
+it("keeps preparing and queued runs visible instead of collapsing them to pending", () => {
+  const process: import("@npati/shared").DevelopmentProcess = { companyId:"c", parentConversationId:"parent", name:"Site", framework:"HTML/CSS", hidden:false, createdAt:at(1), updatedAt:at(2), id:"p", initialRunId:"r1", runId:"r1", status:"preparing", runStatuses:{r1:"preparing"}, runStartedAts:{r1:at(1)} };
+  expect(codingActivityRuns([], process).map(group=>group.status)).toEqual(["preparing"]);
+  expect(codingActivityStages([], process)).toHaveLength(1);
+  expect(codingActivityRuns([], { ...process, status:"queued", runStatuses:{r1:"queued"} }).map(group=>group.status)).toEqual(["queued"]);
+});
+
 it("anchors a whole run once, preserves completed runs and shows actual running state before the first tool",()=>{
  const process: import("@npati/shared").DevelopmentProcess = {companyId:"c",parentConversationId:"parent",name:"Site",framework:"Next.js",hidden:false,createdAt:at(1),updatedAt:at(6),id:"p",initialRunId:"r1",runId:"r2",status:"running",runStatuses:{r1:"completed",r2:"running"},runStartedAts:{r2:at(6)},runLanguages:{r2:"uk"}};
  const entries=chatTimeline(messages,[{...event("a",2),runId:"r1",status:"completed"},{...event("b",3),runId:"r1",status:"completed"}],"chat",process);
