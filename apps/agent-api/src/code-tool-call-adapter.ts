@@ -403,6 +403,16 @@ export function normalizeToolCalls(input: NormalizeToolCallsInput): NormalizeToo
         );
         continue;
       }
+      // A provider can leak DSML parameter markup into the native function name.
+      // Do not infer missing arguments or replay the batch as a new task.
+      if (!/^[a-zA-Z0-9_.-]{1,128}$/.test(rawName)) {
+        const prefix = rawName.match(/^[a-zA-Z0-9_.-]+/)?.[0];
+        const known = prefix ? resolveKnownTool(input.knownTools, prefix) : undefined;
+        rejected.push(rejection("malformed_native_tool_call",
+          "Provider returned a malformed function name. This call was not executed. Retry only this call with the registered tool name and complete JSON arguments. Preserve successful tool results and saved edits; do not restart the task.",
+          "native", { id, name: known?.name ?? "invalid_tool_call", rawFragment: truncateFragment(JSON.stringify(raw)) }));
+        continue;
+      }
       const resolved = resolveKnownTool(input.knownTools, rawName);
       if (!resolved) {
         rejected.push(

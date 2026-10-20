@@ -72,7 +72,7 @@ export class ChatDevelopmentService {
       const setting = await this.d.store.getUserSetting(ctx, key);
       const items = Array.isArray(setting?.value) ? setting.value as Entry[] : [];
       const next = fn(items);
-      const newest = [...next].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, 3).map(item => item.id);
+      const newest = [...next].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)).slice(0, 3).map(item => item.id);
       const detailed = new Set([...next.filter(developmentIsActive).map(item => item.id), ...newest]);
       const bounded = next.map(item => !item.progress?.length ? item : {
         ...item,
@@ -120,7 +120,7 @@ export class ChatDevelopmentService {
       const project = stored.projectId ? await this.d.projects.get(ctx, stored.companyId, stored.projectId) : null;
       const traceRuns = selectDevelopmentTraceRuns(runs.get(stored.companyId) ?? [], ctx, stored);
       const latestRun = traceRuns.roots.sort((a, b) => (executionTimestamp(b.startedAt) ?? 0) - (executionTimestamp(a.startedAt) ?? 0))[0];
-      const traceProcess = latestRun ? { ...stored, runId: latestRun.runId } : stored;
+      const traceProcess = latestRun ? { ...stored, runId: latestRun.runId, detail: latestRun.runId === stored.runId ? stored.detail : undefined } : stored;
       const progress = await developmentTrace(this.d.store, ctx, traceProcess, this.d.terminalEvents);
       const history = await Promise.all([...traceRuns.roots, ...traceRuns.children].filter(run => run.runId !== traceProcess.runId).map(run =>
         developmentTrace(this.d.store, ctx, { ...stored, progress: (stored.progress ?? []).filter(event => event.runId === run.runId), runId: run.runId, sessionId: run.sessionId }, this.d.terminalEvents)));
@@ -304,7 +304,7 @@ export class ChatDevelopmentService {
           const safe = sanitizeProgress({ ...event, ...details, status: ["cancelled", "awaiting_approval", "waiting_for_approval"].includes(event.status ?? "") ? event.status : details.status ?? event.status, conversationId: p.conversationId });
           progress.set(safe.id, safe);
         }
-        return { ...p, progress: [...progress.values()].slice(-200), updatedAt: new Date().toISOString() };
+        return { ...p, progress: compactProgress([...progress.values()]), updatedAt: new Date().toISOString() };
       }));
       this.notifyListeners();
     } catch (error) {
@@ -320,7 +320,7 @@ export class ChatDevelopmentService {
       const eventId = id + ":" + stage;
       const previous = item.progress?.find(event => event.id === eventId);
       const event = sanitizeProgress({ ...previous, id: eventId, stage, title, at: previous?.at ?? new Date().toISOString(), conversationId: item.conversationId, ...Object.fromEntries(Object.entries(details ?? {}).filter(([, value]) => value !== undefined)) });
-      return { ...item, progress: [...(item.progress ?? []).filter(event => event.id !== eventId), event].slice(-200), updatedAt: new Date().toISOString() };
+      return { ...item, progress: compactProgress([...(item.progress ?? []).filter(event => event.id !== eventId), event]), updatedAt: new Date().toISOString() };
     }));
     this.notifyListeners();
   }

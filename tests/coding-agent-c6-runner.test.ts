@@ -873,3 +873,15 @@ it("passes attached reference images to every model call without putting base64 
  for(const call of harness.engineCalls){const user=call.messages.find(message=>message.role==="user")!;expect(Array.isArray(user.content)).toBe(true);expect(user.content).toEqual(expect.arrayContaining([{type:"image_url",image_url:{url:"data:image/png;base64,test-reference-image"}}]));}
  expect(JSON.stringify(harness.activity)).not.toContain("test-reference-image");
 });
+
+it("recovers only the DSML-corrupted call in a mixed batch without repeating a saved edit",async()=>{
+ const broken={id:"broken-read",type:"function" as const,function:{name:'npati_code_fs_read_5ce97b8dd2cecabd<DSML parameter>',arguments:'{}'}};
+ const h=createHarness({script:[{content:"Updating the layout",toolCalls:[nativeCall("code.fs.edit",{path:"pages/index.vue"},"saved-edit"),broken,nativeCall("code.fs.read",{path:"app.vue"},"valid-read")]},{content:"Retrying only the read",toolCalls:[nativeCall("code.fs.read",{path:"nuxt.config.ts"},"recovered-read")]},{content:"Done"}]});
+ const result=await h.run({verificationTools:[]});expect(result.status).toBe("completed");
+ expect(h.invocations.filter(c=>c.tool==="code.fs.edit")).toHaveLength(1);
+ expect(h.invocations.filter(c=>c.tool==="code.fs.read")).toHaveLength(2);
+ expect(h.invocations.some(c=>c.toolCallId==="broken-read")).toBe(false);
+ const feedback=h.engineCalls[1]!.messages.find(m=>m.role==="tool"&&m.tool_call_id==="broken-read")!;
+ expect(String(feedback.content)).toContain("Retry only this rejected call");
+ for(const request of h.engineCalls)for(const message of request.messages)for(const call of message.tool_calls??[])expect(call.function.name).not.toContain("DSML");
+});

@@ -195,7 +195,7 @@ export class CodingAgentToolWaves {
         tool_call_id: rejected.id ?? `rejected:${messages.length}`,
         content: JSON.stringify({
           ...toolCallFeedback(rejected),
-          hint: `Fix the arguments and retry (attempt ${count} of ${MAX_ARGUMENT_CORRECTIONS}).`,
+          hint: `Retry only this rejected call with corrected arguments (attempt ${count} of ${MAX_ARGUMENT_CORRECTIONS}). Use the other tool results in this batch; do not repeat successful writes or restart saved changes.`,
         }),
       });
       await record({

@@ -581,7 +581,7 @@ describe("Step 4 — Project Preview & Changes", () => {
       const started = await preview.startPreview(owner, company.id, project.id);
       const proxy = vi.spyOn(sandbox, "proxyPreview").mockResolvedValue({
         status: 200, headers: { "content-type": "text/html" },
-        body: Buffer.from('<head></head><a href="/auth">Account</a><script src="/_next/static/app.js"></script><img src="//images.example/product.png">').toString("base64"),
+        body: Buffer.from('<head><style>.avatar{background:url("/references/photo.png")}</style></head><a href="/auth">Account</a><script src="/_next/static/app.js"></script><img src="//images.example/product.png">').toString("base64"),
       });
       const app = Fastify();
       registerProjectPreviewRoutes(app, preview, workspace, new LocalDevAuthProvider(owner));
@@ -590,8 +590,9 @@ describe("Step 4 — Project Preview & Changes", () => {
         url: `/companies/${company.id}/projects/${project.id}/preview/proxy/?token=${started.token}`,
       });
       expect(res.statusCode).toBe(200);
-      expect(res.body).toContain(`/api/companies/${company.id}/projects/${project.id}/preview/proxy/_next/static/app.js?token=`);
+      expect(res.body).toContain(`/api/companies/${company.id}/projects/${project.id}/preview/proxy/_next/static/app.js"`);
       expect(res.body).toContain('<a href="/auth">Account</a>');
+      expect(res.body).toContain(`background:url("/api/companies/${company.id}/projects/${project.id}/preview/proxy/references/photo.png")`);
       expect(res.body).toContain('<img src="//images.example/product.png">');
       expect(res.body).toContain('document.addEventListener("click"');
       expect(proxy).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: owner.workspaceId, companyId: company.id }), expect.any(String), expect.objectContaining({ port: started.port, path: "/", method: "GET" }));

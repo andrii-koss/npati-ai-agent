@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { sanitizeExecutionTrace, type DevelopmentProcess } from "@npati/shared";
 import type { AuthContext, WorkspaceStore } from "@npati/workspace";
-import { executionResultDetails, developmentTrace, selectDevelopmentTraceRuns } from "../apps/agent-api/src/chat-development-trace";
+import { compactProgress, metadataOnlyProgress, executionResultDetails, developmentTrace, selectDevelopmentTraceRuns } from "../apps/agent-api/src/chat-development-trace";
 const ctx: AuthContext = { workspaceId: "workspace", userId: "user", permissions: ["*"] };
 const process: DevelopmentProcess = { id: "process", companyId: "company", projectId: "project", sessionId: "session", runId: "run", parentConversationId: "parent", name: "Next.js", framework: "Next.js", status: "running", hidden: false, createdAt: "2026-10-13T10:00:00Z", updatedAt: "2026-10-13T10:00:00Z" };
 function fixture(status = "running", workspaceId = "workspace") {
@@ -148,4 +148,19 @@ it("does not turn a durable approval requirement into a generic failure on Activ
 it("restores real usage from canonical activity and replay without allocating tokens between a turn's tools",async()=>{
  const f=fixture("completed");f.mocks.listCodeRunTurns.mockResolvedValue([{turnIndex:1,toolCalls:[f.calls[0]]}]);f.mocks.listReplayBundleSteps.mockResolvedValue([{kind:"model_step",payload:{turnIndex:1,response:{usage:{totalTokens:150,promptTokens:120,completionTokens:30},toolCalls:[{id:"read-1",arguments:'{"path":"app/page.tsx"}'}]}}}]);
  const rows=await developmentTrace(f.store,ctx,process);expect(rows.find(e=>e.id==="run:read-1")?.modelUsage).toMatchObject({turn:1,inputTokens:120,outputTokens:30,totalTokens:150});expect(rows.filter(e=>e.stage==="model_usage")).toHaveLength(1);
+});
+
+it("keeps commentary when tool events exceed live and archived projection windows", () => {
+  const message = {id:"run:message:1",runId:"run",kind:"assistant_message" as const,stage:"planning",title:"Inspecting the photo",at:process.createdAt};
+  const events = [message,...Array.from({length:210},(_,i)=>({id:"tool:"+i,stage:"tool",title:"read",at:process.createdAt,result:"detail"}))];
+  expect(compactProgress(events)).toContainEqual(message);
+  expect(metadataOnlyProgress(compactProgress(events))).toContainEqual({...message,resultTruncated:true});
+});
+it("restores lost commentary from replay once with its original live identity", async () => {
+  const f=fixture("completed");f.mocks.listCodeRunTurns.mockResolvedValue([]);f.mocks.listCodeActivityEvents.mockResolvedValue([]);
+  f.mocks.listReplayBundleSteps.mockResolvedValue([{kind:"model_step",createdAt:new Date(process.createdAt),payload:{turnIndex:3,response:{content:"Checking the reference layout",toolCalls:[{id:"read",name:"code.fs.read"}]}}}]);
+  const rows=await developmentTrace(f.store,ctx,{...process,progress:[]});
+  expect(rows.filter(e=>e.kind==="assistant_message")).toEqual([expect.objectContaining({id:"run:message:3",title:"Checking the reference layout",sequence:3000})]);
+  const again=await developmentTrace(f.store,ctx,{...process,progress:rows});
+  expect(again.filter(e=>e.id==="run:message:3")).toHaveLength(1);
 });

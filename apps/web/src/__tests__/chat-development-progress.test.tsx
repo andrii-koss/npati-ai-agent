@@ -186,3 +186,11 @@ it("labels a searched directory as search rather than a modified file",()=>{
 it("hides technical coding cards even when no development process has arrived yet",()=>{
  expect(developmentCard([{content:"Waiting for the user to answer question q.",projectCard:{...card,status:"waiting_for_user"}}],0,[],"chat")).toBeNull();
 });
+
+it("never attaches a previous stop reason to an old run or a recovered operation phase", () => {
+ const run={id:"phase",runId:"new-run",at:"",items:[],status:"failed"};
+ const stale={...process,runId:"new-run",status:"completed" as const,detail:"Stopped by request"};
+ expect(renderToStaticMarkup(<AgentExecutionTrace process={stale} run={run}/>)).not.toContain("Stopped by request");
+ expect(renderToStaticMarkup(<AgentExecutionTrace process={{...stale,status:"failed",runId:"another-run"}} run={run}/>)).not.toContain("Stopped by request");
+ expect(renderToStaticMarkup(<AgentExecutionTrace process={{...stale,status:"failed",detail:"Actual current failure"}} run={run}/>)).toContain("Actual current failure");
+});
