@@ -2,18 +2,18 @@
 export function previewBrowserBridge(prefix: string, token: string): string {
   return `<script>(function(){
   const prefix=${JSON.stringify(prefix)},token=${JSON.stringify(token)};
-  function route(value){
+  function route(value,resource=false){
     if(typeof value!=="string" || !value || value.startsWith("#"))return value;
     const url=new URL(value,location.href);
     if(url.origin!==location.origin || url.pathname.startsWith("/v1/projects/") || url.pathname.startsWith("/api/") && !url.pathname.startsWith(prefix+"/"))return value;
     if(!url.pathname.startsWith(prefix+"/"))url.pathname=prefix+url.pathname;
-    url.searchParams.set("token",token);return url.href;
+    if(resource)url.searchParams.delete("token");else url.searchParams.set("token",token);return url.href;
   }
   try {
     const origSetAttribute = HTMLScriptElement.prototype.setAttribute;
     HTMLScriptElement.prototype.setAttribute = function(name, val) {
       if (typeof name === "string" && name.toLowerCase() === "src" ) {
-        val = route(String(val));
+        val = route(String(val),true);
       }
       return origSetAttribute.call(this, name, val);
     };
@@ -23,7 +23,7 @@ export function previewBrowserBridge(prefix: string, token: string): string {
       Object.defineProperty(HTMLScriptElement.prototype, "src", {
         get: desc.get,
         set: function(val) {
-          val = route(String(val));
+          val = route(String(val),true);
           return origSet.call(this, val);
         },
         configurable: true,
@@ -32,7 +32,7 @@ export function previewBrowserBridge(prefix: string, token: string): string {
     }
     const setLinkAttribute = HTMLLinkElement.prototype.setAttribute;
     HTMLLinkElement.prototype.setAttribute = function(name, val) {
-      if (typeof name === "string" && name.toLowerCase() === "href" ) val = route(String(val));
+      if (typeof name === "string" && name.toLowerCase() === "href" ) val = route(String(val),true);
       return setLinkAttribute.call(this, name, val);
     };
     const descLink = Object.getOwnPropertyDescriptor(HTMLLinkElement.prototype, "href");
@@ -41,7 +41,7 @@ export function previewBrowserBridge(prefix: string, token: string): string {
       Object.defineProperty(HTMLLinkElement.prototype, "href", {
         get: descLink.get,
         set: function(val) {
-          val = route(String(val));
+          val = route(String(val),true);
           return origSetLink.call(this, val);
         },
         configurable: true,

@@ -302,3 +302,20 @@ describe("security-gate: C6 tool-call adapter — normalisation never raises tru
     expect(JSON.stringify(feedback)).not.toMatch(/at Object|Error:/);
   });
 });
+
+it("rejects the recorded DSML name corruption without executing or exposing markup as a tool name", () => {
+ const malformed = 'npati_code_fs_read_5ce97b8dd2cecabd</｜｜DSML｜｜ parameter>\n<｜｜DSML｜｜ parameter name=';
+ const result=normalize({payload:{toolCalls:[
+  {id:"good",function:{name:"code.fs.read",arguments:'{"path":"app.vue"}'}},
+  {id:"broken",function:{name:malformed,arguments:'{}'}},
+ ]}});
+ expect(result.calls.map(c=>c.id)).toEqual(["good"]);
+ expect(result.rejected).toEqual([expect.objectContaining({id:"broken",name:"code.fs.read",code:"malformed_native_tool_call"})]);
+ expect(result.rejected[0]!.modelFeedback.error.message).toContain("Retry only this call");
+ expect(result.rejected[0]!.name).not.toContain("DSML");
+});
+it("does not salvage valid arguments from a provider-corrupted native function name",()=>{
+ const result=normalize({payload:{toolCalls:[{id:"broken-write",function:{name:'code.fs.apply_patch<DSML>',arguments:'{"patch":"destructive rewrite"}'}}]}});
+ expect(executableToolCalls(result)).toHaveLength(0);
+ expect(result.rejected[0]?.code).toBe("malformed_native_tool_call");
+});

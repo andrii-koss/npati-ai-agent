@@ -22,7 +22,10 @@ export function sanitizeProgress(item: DevelopmentProcessProgressItem): Developm
  * payload; older events keep only the metadata needed for the trace.
  */
 export function compactProgress(events: DevelopmentProcessProgressItem[], maxEvents = 50, maxBytes = 384_000): DevelopmentProcessProgressItem[] {
-  const kept = events.slice(-Math.max(1, maxEvents)).map(event => ({ ...event }));
+  const recent = new Set(events.filter(event => event.kind !== "assistant_message").slice(-Math.max(1, maxEvents)));
+  // Commentary is conversation content, not disposable tool detail. Replay restores it
+  // after refresh; retain it while the run is still live as well.
+  const kept = events.filter(event => event.kind === "assistant_message" || recent.has(event)).map(event => ({ ...event }));
   const heavy = ["fileContent", "diff", "result", "stdout", "stderr", "files", "arguments"] as const;
   let bytes = Buffer.byteLength(JSON.stringify(kept));
   // The newest 8 events are the useful diff/detail window. Strip older payloads until the
@@ -44,7 +47,8 @@ export function compactProgress(events: DevelopmentProcessProgressItem[], maxEve
 /** Old processes keep an auditable trace but not file contents or diffs. */
 export function metadataOnlyProgress(events: DevelopmentProcessProgressItem[], limit = 8): DevelopmentProcessProgressItem[] {
   const heavy = ["fileContent", "diff", "result", "stdout", "stderr", "files", "arguments"] as const;
-  return events.slice(-Math.max(1, limit)).map(event => {
+  const recent = new Set(events.filter(event => event.kind !== "assistant_message").slice(-Math.max(1, limit)));
+  return events.filter(event => event.kind === "assistant_message" || recent.has(event)).map(event => {
     const copy = { ...event };
     for (const field of heavy) delete (copy as Record<string, unknown>)[field];
     copy.resultTruncated = true;
@@ -169,6 +173,16 @@ async function readDevelopmentTrace(store: WorkspaceStore, ctx: AuthContext, pro
       const payload = object(step.payload);
       if (step.kind === "model_step") {
         const response=object(payload.response), usage=object(response.usage);
+        const text = typeof response.content === "string" ? response.content.trim() : "";
+        if (text && Array.isArray(response.toolCalls) && response.toolCalls.length && typeof payload.turnIndex === "number"
+            && !/\<\/?(?:think|analysis|tool_call|tool_calls)\b/i.test(text)) {
+          const id = run.runId + ":message:" + payload.turnIndex;
+          if (!progress.some(item => item.id === id)) progress.push(sanitizeProgress({
+            id, runId: run.runId, kind: "assistant_message", stage: "planning", title: text,
+            at: executionIso(turns.find(turn => turn.turnIndex === payload.turnIndex)?.startedAt, executionIso(step.createdAt, executionIso(run.startedAt, process.createdAt))),
+            sequence: payload.turnIndex * 1000, status: "completed", conversationId: process.conversationId,
+          }));
+        }
         if(typeof payload.turnIndex==="number" && typeof usage.totalTokens==="number") usages.set(payload.turnIndex,{id:run.runId+":model:"+payload.turnIndex,turn:payload.turnIndex,model:string(response.model),provider:string(response.provider),totalTokens:usage.totalTokens,inputTokens:typeof usage.promptTokens==="number"?usage.promptTokens:undefined,outputTokens:typeof usage.completionTokens==="number"?usage.completionTokens:undefined,toolCallIds:Array.isArray(response.toolCalls)?response.toolCalls.map(raw=>String(object(raw).id)):[]});
         const requested = response.toolCalls;
         if (Array.isArray(requested)) for (const call of requested) {

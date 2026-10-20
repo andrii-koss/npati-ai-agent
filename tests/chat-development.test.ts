@@ -449,3 +449,12 @@ it("batches secondary chat activity writes and flushes failures immediately",asy
  expect((await restored.list(owner))[0]!.progress!.filter(event=>event.id.startsWith("batched-"))).toHaveLength(21);
  await restored.close();
 });
+
+it("retains details for a follow-up in an old completed chat ahead of newer idle projects", async () => {
+ const f=await fixture();const key="chat-development-processes:v1";
+ const base={id:"old",companyId:f.company.id,sessionId:"old-session",conversationId:"old-chat",status:"completed",createdAt:"2020-01-01T00:00:00Z",updatedAt:"2020-01-01T00:00:00Z"};
+ await f.store.setUserSetting(owner,key,[base,...Array.from({length:4},(_,i)=>({...base,id:"new-"+i,sessionId:"new-session-"+i,createdAt:"2021-01-01T00:00:00Z",updatedAt:"2021-01-01T00:00:00Z"}))],0);
+ await f.service.recordActivity(owner,f.company.id,"old-session","old-chat",{id:"followup:read",runId:"followup",stage:"preview",title:"Reading",at:new Date().toISOString(),result:JSON.stringify({data:{content:"current source"}})});
+ const rows=(await f.store.getUserSetting(owner,key))!.value as Array<{id:string;progress?:Array<{id:string;fileContent?:string}>}>;
+ expect(rows.find(p=>p.id==="old")?.progress?.find(e=>e.id==="followup:read")?.fileContent).toBe("current source");
+});

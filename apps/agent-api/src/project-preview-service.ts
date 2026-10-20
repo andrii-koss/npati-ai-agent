@@ -876,10 +876,16 @@ export class ProjectPreviewService {
           // React must hydrate the original anchor props. The browser bridge routes clicks instead.
           const tag = source.slice(source.lastIndexOf("<", offset), offset);
           if (target.startsWith("//") || attr.toLowerCase() === "href" && /^<a\s/i.test(tag)) return match;
-          return `${attr}=${quote}${routed(target)}${quote}`;
+          // The document establishes the scoped HttpOnly preview cookie. Module URLs must
+          // match their relative imports exactly, otherwise Nuxt/Vue executes twice.
+          const resource = `${prefix}${target}`;
+          return `${attr}=${quote}${attr.toLowerCase() === "action" ? routed(target) : resource}${quote}`;
         });
+        const cssUrls = (css: string) => css.replace(/url\(\s*(["']?)(\/(?!\/)[^)'"\s]+)\1\s*\)/gi,
+          (match, quote: string, target: string) => target.startsWith(prefix + "/") ? match : `url(${quote}${prefix}${target}${quote})`);
+        const styledHtml = html.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, cssUrls);
         const bridge = previewBrowserBridge(prefix, token);
-        body = Buffer.from(html.includes("<head>") ? html.replace("<head>", "<head>"+bridge) : bridge+html);
+        body = Buffer.from(styledHtml.includes("<head>") ? styledHtml.replace("<head>", "<head>"+bridge) : bridge+styledHtml);
       }
       return reply.send(body);
     } catch (error) {
