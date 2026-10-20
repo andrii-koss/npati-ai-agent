@@ -51,3 +51,11 @@ describe("website cards in chat history", () => {
     }
   });
 });
+it("shows the stored question instead of the technical waiting receipt without leaking another workspace",async()=>{
+ const {publicCodeChatReply}=await import("../apps/agent-api/src/project-chat-cards");
+ const card={id:"s",projectId:"p",companyId:"c",runId:"r",name:"Website",status:"waiting_for_user",kind:"code_project" as const};
+ const store={getCodeRunState:async()=>({workspaceId:context.workspaceId,projectId:"p",sessionId:"s",details:{waitingForUser:{questionId:"q"}}}),getCodeUserQuestion:async()=>({prompt:"Який варіант макета обрати?",projectId:"p",sessionId:"s"})};
+ const content="Waiting for the user to answer question q.";
+ expect(await publicCodeChatReply(store as never,context,card,content)).toBe("Який варіант макета обрати?");
+ const foreign=await publicCodeChatReply(store as never,{...context,workspaceId:"other"},card,content);expect(foreign).not.toContain("q.");expect(foreign).not.toContain("Який варіант");
+});

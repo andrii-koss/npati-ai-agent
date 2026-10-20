@@ -2,7 +2,7 @@ import { developmentIsActive, type DevelopmentProcess, type ProjectCardData } fr
 type CardMessage = { content: string; projectCard?: ProjectCardData };
 export function developmentCard(messages: CardMessage[], index: number, processes: DevelopmentProcess[], conversationId: string | null): ProjectCardData | null {
   const card = messages[index]?.projectCard;
-  if (!card) return null;
+  if (!card || card.kind === "code_project" && card.status === "waiting_for_user") return null;
   const projectId = card.projectId ?? card.id;
   if (messages.slice(index + 1).some(m => (m.projectCard?.projectId ?? m.projectCard?.id) === projectId)) return null;
   const process = processes.find(p => p.projectId === projectId);

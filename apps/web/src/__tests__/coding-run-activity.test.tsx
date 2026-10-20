@@ -60,11 +60,12 @@ it("shows Preview only with settled activity and keeps an already open iframe du
   vi.spyOn(globalThis,"fetch").mockImplementation(async input=>new Response(JSON.stringify(String(input).endsWith("/status")?{isRunning:true}:{token:"test-preview-token"}),{status:200}));
   Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});const host=document.createElement("div");document.body.append(host);root=createRoot(host);
   const process:DevelopmentProcess={id:"p",companyId:"c",projectId:"project",parentConversationId:"parent",name:"Site",framework:"Next.js",status:"running",hidden:false,createdAt:"",updatedAt:"",runId:"run",initialRunId:"run",previewUrl:"/previous-preview",progress:[{id:"build",runId:"run",stage:"build",title:"Build",at:"",status:"running",command:"npm run build"}]};
-  const render=async(p:DevelopmentProcess)=>act(async()=>root!.render(<MemoryRouter><ChatDevelopmentProgress process={p}/><ChatDevelopmentPreview process={p}/></MemoryRouter>));
+  const render=async(p:DevelopmentProcess,busy=false)=>act(async()=>root!.render(<MemoryRouter><ChatDevelopmentProgress process={p}/><ChatDevelopmentPreview process={p} busy={busy}/></MemoryRouter>));
   await render(process);expect(host.querySelector(".chat-development-preview button")).toBeNull();expect(host.querySelector(".research-active-text")).not.toBeNull();
   const done={...process,status:"completed" as const,progress:process.progress!.map(e=>({...e,status:"completed" as const}))};
   await render(done);expect(host.querySelector(".research-active-text")).toBeNull();const button=host.querySelector<HTMLButtonElement>(".chat-development-preview button")!;expect(button).not.toBeNull();expect(button.querySelector(".coding-preview-framework")?.textContent).toBe("Next.js");await act(async()=>button.click());
   const iframe=document.querySelector('[aria-label="Preview of Site"] iframe');expect(iframe).not.toBeNull();
+  await render(done,true);expect(host.querySelector(".chat-development-preview button")).toBeNull();expect(document.querySelector('[aria-label="Preview of Site"] iframe')).toBe(iframe);
   await render(process);expect(host.querySelector(".chat-development-preview button")).toBeNull();expect(document.querySelector('[aria-label="Preview of Site"] iframe')).toBe(iframe);
   await render(done);expect(host.querySelector(".chat-development-preview button")).not.toBeNull();expect(document.querySelector('[aria-label="Preview of Site"] iframe')).toBe(iframe);
 });

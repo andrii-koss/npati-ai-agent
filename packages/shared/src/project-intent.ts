@@ -119,6 +119,15 @@ export function extractFramework(message: string): string | undefined {
   return undefined;
 }
 
+/** A visual reference changes the selected site unless a separate new deliverable is explicit. */
+export function isWebsiteReferenceEdit(input: ProjectIntentInput): boolean {
+  const text = input.message ?? input.prompt ?? "";
+  return !!input.activeProjectId && /(?:зроби|зміни|перероби|онови|make|change|redesign|update)/iu.test(text)
+    && /(?:вигляд|дизайн|оформлен|сайт|layout|design|appearance|look|website)/iu.test(text)
+    && /(?:фото|зображен|скрин|screenshot|image|picture|reference)/iu.test(text)
+    && !/(?:нов|інш|окрем|new|another|separate)[\p{L}]*\s+(?:сайт|про[єе]кт|магазин|website|site|project|store)/iu.test(text);
+}
+
 export function classifyProjectIntent(rawInput: ProjectIntentInput | string): ProjectIntentDecision {
   const input: ProjectIntentInput = typeof rawInput === "string" ? { message: rawInput } : rawInput;
   const raw = input.message ?? input.prompt ?? "";
@@ -141,6 +150,8 @@ export function classifyProjectIntent(rawInput: ProjectIntentInput | string): Pr
       needsClarification: false,
     });
   }
+
+  if (isWebsiteReferenceEdit(input)) return buildDecision({ intent: "EDIT_WEBSITE", confidence: 0.98, isExecutableInStep5: true, needsClarification: false });
 
   // The opening request defines a new deliverable. QA, preview, schema and repair
   // steps later in a long specification must not turn it into work on an existing project.

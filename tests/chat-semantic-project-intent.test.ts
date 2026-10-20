@@ -155,3 +155,9 @@ describe("semantic project routing", () => {
     expect(JSON.stringify(f.log.warn.mock.calls)).not.toContain("private");
   });
 });
+
+it("edits the selected site from a visual reference without routing to a new project",async()=>{
+ const f=fixture(creation);const result=await f.resolve(auth,{message:"зроби мені вигляд сайта як на фото",activeProjectId:"existing",activeCompanyId:"company",attachmentNames:["reference.png"]});
+ expect(result.decision.intent).toBe("EDIT_WEBSITE");expect(result.targets).toEqual([]);expect(f.chat).not.toHaveBeenCalled();
+ const explicit=await f.resolve(auth,{message:"створи новий сайт як на фото",activeProjectId:"existing",activeCompanyId:"company"});expect(explicit.decision.intent).toBe("CREATE_WEBSITE");
+});

@@ -120,6 +120,7 @@ export interface CodingAgentRunInput {
   runId?: string;
   agentId?: string;
   imageReference?: string;
+  images?: ReadonlyArray<{ mimeType: string; dataBase64: string }>;
   signal?: AbortSignal;
 
   cancelRequested?: () => boolean | Promise<boolean>;

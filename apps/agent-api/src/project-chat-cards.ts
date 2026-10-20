@@ -43,7 +43,22 @@ export async function getChatMessagesWithProjectCards(
   messages: ConversationMessage[],
 ): Promise<Array<ConversationMessage & { projectCard?: ProjectCardData }>> {
   const cards = readCards((await store.getUserSetting(context, settingKey(conversationId)))?.value);
-  return messages.map((message) => cards[message.id]
-    ? { ...message, projectCard: cards[message.id] }
-    : message);
+  return Promise.all(messages.map(async message => {
+    const card = cards[message.id];
+    return card ? { ...message, projectCard: card, content: await publicCodeChatReply(store, context, card, message.content) } : message;
+  }));
+}
+
+/** Technical pause receipts belong in Activity; chat shows the actual question. */
+export async function publicCodeChatReply(store: WorkspaceStore, context: AuthContext, card: ProjectCardData, content: string, language = "uk"): Promise<string> {
+  if (card.kind !== "code_project" || !/^Waiting for (?:the user to answer question|an approval decision on tool call) /u.test(content)) return content;
+  if (card.companyId && card.runId) {
+    const run = await store.getCodeRunState(card.companyId, card.runId);
+    const waiting = run?.details?.waitingForUser as { questionId?: string } | undefined;
+    if (run?.workspaceId === context.workspaceId && run.projectId === (card.projectId ?? card.id) && waiting?.questionId) {
+      const question = await store.getCodeUserQuestion(card.companyId, waiting.questionId);
+      if (question?.projectId === run.projectId && question.sessionId === run.sessionId) return question.prompt;
+    }
+  }
+  return language === "uk" ? "Потрібне уточнення для продовження роботи." : "A clarification is needed to continue.";
 }

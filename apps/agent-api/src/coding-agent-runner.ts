@@ -504,7 +504,11 @@ export class CodingAgentRunner {
             if(event.phase==="started") providerAttempt++;
             await record({kind:"model_call",companyId,projectId,sessionId,turn:steps+1,attempt:providerAttempt,...event});
           },
-          messages,
+          messages: input.images?.length ? messages.map((message, index) => index !== messages.findIndex(item => item.role === "user") ? message : {
+            ...message, content: [{ type: "text" as const, text: chatContentText(message.content) }, ...input.images!.map(image => ({
+              type: "image_url" as const, image_url: { url: "data:" + image.mimeType + ";base64," + image.dataBase64 },
+            }))],
+          }) : messages,
           ...(definitions.length ? { tools: definitions } : {}),
           ...(definitions.length ? { toolChoice: "auto" as const } : {}),
           model: input.model,
