@@ -143,7 +143,7 @@ export function DataStudioAuthSettingsTab({
               disabled={rotatingKeys}
               onClick={() => void handleRotateSigningKey()}
             >
-              {rotatingKeys ? (isUk ? "Ротація…" : "Rotating…") : isUk ? "🔄 Ротувати ключі підпису" : "🔄 Rotate Signing Keys"}
+              {rotatingKeys ? (isUk ? "Ротація…" : "Rotating…") : isUk ? "Ротувати ключі підпису" : "Rotate Signing Keys"}
             </button>
           </div>
 

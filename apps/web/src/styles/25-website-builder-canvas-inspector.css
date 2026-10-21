@@ -768,9 +768,9 @@ body:has(.project-chat-preview-layer) .chat-workspace-content .onboarding-live-c
    ========================================================================== */
 .data-studio-container {
   width: 100%;
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 24px;
+  max-width: none;
+  margin: 0;
+  padding: 0;
   min-height: calc(100vh - 80px);
   display: flex;
   flex-direction: column;

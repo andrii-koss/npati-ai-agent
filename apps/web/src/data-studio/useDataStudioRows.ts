@@ -41,8 +41,16 @@ export function useDataStudioRows({
   const [importContent, setImportContent] = useState("");
   const [importing, setImporting] = useState(false);
 
+  const notifyRef = React.useRef(notify);
+  useEffect(() => {
+    notifyRef.current = notify;
+  }, [notify]);
+
+  const hasOverview = Boolean(overview);
+  const overviewEnv = overview?.environment.environment;
+
   const loadRows = useCallback(async () => {
-    if (!selectedCollection || !overview || activeTab !== "data") return;
+    if (!selectedCollection || !hasOverview || activeTab !== "data") return;
     setRowsLoading(true);
     try {
       const validFilters = filters
@@ -72,17 +80,17 @@ export function useDataStudioRows({
       setRows(res.rows || []);
       setSelectedRowIds(new Set());
     } catch (err: any) {
-      notify(err.message || "Failed to load rows", "error");
+      notifyRef.current(err.message || "Failed to load rows", "error");
     } finally {
       setRowsLoading(false);
     }
-  }, [selectedCollection, overview, activeTab, basePath, pageLimit, pageOffset, sortField, sortDir, searchQuery, filters, notify]);
+  }, [selectedCollection, hasOverview, overviewEnv, activeTab, basePath, pageLimit, pageOffset, sortField, sortDir, searchQuery, filters]);
 
   useEffect(() => {
-    if (activeTab === "data") {
+    if (activeTab === "data" && selectedCollection && hasOverview) {
       void loadRows();
     }
-  }, [loadRows, activeTab]);
+  }, [loadRows, activeTab, selectedCollection, hasOverview]);
 
   const openCreateRowDrawer = () => {
     if (!currentTable) return;

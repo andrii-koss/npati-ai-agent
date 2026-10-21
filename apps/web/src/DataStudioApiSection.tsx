@@ -91,14 +91,20 @@ export function DataStudioApiSection({ companyId, projectId, environment, isUk }
       <p><strong>PROJECT_PUBLISHABLE_KEY:</strong> <code>{keys.publishableKey}</code></p>
       <p><strong>PROJECT_SECRET_KEY:</strong> {revealedSecret ? <code>{revealedSecret}</code> : keys.secretKeyMasked} ({isUk ? "лише для серверного середовища" : "server environment only"})</p>
       {newSecret && <p><strong>{isUk ? "Новий секретний ключ" : "New secret key"}:</strong> <code>{newSecret}</code></p>}
-      <div className="pane-actions">
-        <button type="button" onClick={() => void revealSecret()}>{isUk ? "Показати секретний ключ" : "Reveal secret key"}</button>
-        <button type="button" onClick={() => void rotateKeys()}>{isUk ? "Ротувати ключі" : "Rotate keys"}</button>
-        <button type="button" onClick={() => void openOpenApi()}>OpenAPI</button>
+      <div className="pane-actions" style={{ margin: "14px 0" }}>
+        <button type="button" className="button-secondary" onClick={() => void revealSecret()}>{isUk ? "Показати секретний ключ" : "Reveal secret key"}</button>
+        <button type="button" className="button-secondary" onClick={() => void rotateKeys()}>{isUk ? "Ротувати ключі" : "Rotate keys"}</button>
+        <button type="button" className="button-secondary" onClick={() => void openOpenApi()}>OpenAPI</button>
       </div>
-      <label htmlFor="project-api-origins">{isUk ? "Дозволені origins (по одному на рядок)" : "Allowed origins (one per line)"}</label>
-      <textarea id="project-api-origins" value={origins} onChange={(event) => setOrigins(event.target.value)} rows={4} />
-      <button type="button" disabled={saving} onClick={() => void saveOrigins()}>{isUk ? "Зберегти origins" : "Save origins"}</button>
+      <div style={{ marginTop: "16px" }}>
+        <label htmlFor="project-api-origins" style={{ display: "block", fontSize: "13px", fontWeight: 500, marginBottom: "6px", color: "#334155" }}>
+          {isUk ? "Дозволені origins (по одному на рядок)" : "Allowed origins (one per line)"}
+        </label>
+        <textarea id="project-api-origins" value={origins} onChange={(event) => setOrigins(event.target.value)} rows={4} style={{ width: "100%", padding: "8px 12px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "13px", fontFamily: "monospace" }} />
+        <div style={{ marginTop: "8px" }}>
+          <button type="button" className="button-primary" disabled={saving} onClick={() => void saveOrigins()}>{saving ? (isUk ? "Збереження…" : "Saving…") : isUk ? "Зберегти origins" : "Save origins"}</button>
+        </div>
+      </div>
     </section>}
     {usage && <section>
       <h3>{isUk ? "Використання" : "Usage"}</h3>
