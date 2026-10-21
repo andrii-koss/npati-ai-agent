@@ -194,3 +194,15 @@ it("never attaches a previous stop reason to an old run or a recovered operation
  expect(renderToStaticMarkup(<AgentExecutionTrace process={{...stale,status:"failed",runId:"another-run"}} run={run}/>)).not.toContain("Stopped by request");
  expect(renderToStaticMarkup(<AgentExecutionTrace process={{...stale,status:"failed",detail:"Actual current failure"}} run={run}/>)).toContain("Actual current failure");
 });
+
+it("never renders routing cards on user/system messages or hides a user's matching project name",()=>{
+ const ready={...card,status:"completed",previewUrl:"/preview/project",lastBuildStatus:"ready"};
+ for(const role of ["user","system"] as const){
+  const messages=[{role,content:process.name,projectCard:ready}];
+  expect(developmentCard(messages,0,[],"child")).toBeNull();
+  expect(developmentCard(messages,0,[{...process,status:"completed"}],"child")).toBeNull();
+  expect(hideDevelopmentMessage(messages,0,[process])).toBe(false);
+ }
+ const messages=[{role:"assistant" as const,content:"Ready",projectCard:ready},{role:"user" as const,content:"Edit this site",projectCard:ready}];
+ expect(developmentCard(messages,0,[],"child")).toMatchObject({id:card.id});
+});
