@@ -60,6 +60,7 @@ function nativeCall(name: string, args: Record<string, unknown>, id = `call-${na
 }
 
 interface HarnessOptions {
+  tools?: CodeRunToolDescriptor[];
   script?: Array<ChatResult | Error>;
   toolResult?: (tool: string) => CodeToolInvokeResult | CodeToolInvokeFailure;
   limits?: Partial<CodeAgentLimits>;
@@ -131,7 +132,7 @@ function createHarness(options: HarnessOptions = {}) {
   const script = [...(options.script ?? [{ content: "done" }])];
 
   const toolRuntime: CodingAgentRunnerPorts["toolRuntime"] = {
-    listTools: () => TOOLS.map((tool) => ({ ...tool })),
+    listTools: () => (options.tools ?? TOOLS).map((tool) => ({ ...tool })),
     invoke: async (_ctx, input) => {
       invocations.push({
         tool: input.tool,
@@ -188,7 +189,7 @@ function createHarness(options: HarnessOptions = {}) {
         return next ?? { content: "done" };
       },
     },
-    schemas: SCHEMAS,
+    schemas: options.tools ? options.tools.map(tool=>({...tool,inputSchema:{type:"object",properties:{path:{type:"string"},content:{type:"string"}}}})) : SCHEMAS,
     imageAdmission: {
       admit: async () => {
         if (options.imageAdmissionThrow) throw Object.assign(new Error("Image refused"), { code: "sandbox_image_unverified" });
@@ -892,4 +893,16 @@ it("retains private continuation when requesting implementation after a text-onl
   expect(result.status).toBe("failed");
   expect(harness.engineCalls[1]!.messages.find(message=>message.role==="assistant")?.reasoning_text).toBe("opaque-retry-state");
   expect(JSON.stringify(harness.activity)).not.toContain("opaque-retry-state");
+});
+
+
+it("starts blank HTML with a direct write in DeepSeek non-thinking mode and keeps existing edits on auto", async () => {
+ const tools=[...TOOLS,{name:"code.fs.write",version:1,status:"active" as const,description:"Write a new file",write:true}];
+ let changed=false;
+ const h=createHarness({tools,script:[{content:"Creating",toolCalls:[nativeCall("code.fs.write",{path:"index.html",content:"<main>Store</main>"})]},{content:"Ready"}],toolResult:tool=>{if(tool==="code.fs.write")changed=true;return {ok:true,tool,toolVersion:1,schemaVersion:1,result:{},truncated:false,durationMs:1}},turnSummary:()=>({files:changed?1:0,linesAdded:changed?1:0,linesRemoved:0,changes:changed?[{path:"index.html",tool:"code.fs.write"}]:[]})});
+ await h.run({emptyHtmlWorkspace:true,requireImplementation:true,model:"deepseek/deepseek-flash",verificationTools:[]});
+ expect(h.engineCalls[0]).toMatchObject({reasoningMode:"disabled",toolChoice:{type:"function",function:{name:"code.fs.write"}}});
+ expect(h.engineCalls[1]?.toolChoice).toBe("auto");
+ const existing=createHarness({tools});await existing.run({model:"deepseek/deepseek-flash"});
+ expect(existing.engineCalls[0]?.toolChoice).toBe("auto");expect(existing.engineCalls[0]?.reasoningMode).toBeUndefined();
 });

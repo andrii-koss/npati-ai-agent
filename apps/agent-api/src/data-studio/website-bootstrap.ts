@@ -30,6 +30,8 @@ export interface WebsiteBootstrapServices {
 
 /** Trusted bootstrap of new dev objects, explicitly authorized by creating the site. */
 export async function bootstrapWebsiteData(ctx: AuthContext, project: Project, prompt: string, services: WebsiteBootstrapServices): Promise<void> {
+  // Creating a website does not authorize provisioning; only enrich an explicit attachment.
+  if (!project.dataBackendId) return;
   const { backends, repository, provider, migrations, agentData, auth, gateway, studio, workspace } = services;
   const companyId = project.companyId;
   const commerce = isCommerceWebsite(prompt);

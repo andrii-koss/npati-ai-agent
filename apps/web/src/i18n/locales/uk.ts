@@ -2,6 +2,9 @@ import type { TranslationSchema } from "../types";
 
 export const uk: TranslationSchema = {
   executionTrace: {
+    modelResponding: "\u041c\u043e\u0434\u0435\u043b\u044c \u0432\u0456\u0434\u043f\u043e\u0432\u0456\u0434\u0430\u0454",
+    waitingForModel: "\u041e\u0447\u0456\u043a\u0443\u044e \u0432\u0456\u0434\u043f\u043e\u0432\u0456\u0434\u044c \u043c\u043e\u0434\u0435\u043b\u0456",
+    generatingCode: "\u0413\u0435\u043d\u0435\u0440\u0443\u044e \u043a\u043e\u0434",
     suspended_by_flag: "Призупинено: Coding Agent вимкнено",
 "usage": "Токени моделі",
 "inputTokens": "Вхідні",

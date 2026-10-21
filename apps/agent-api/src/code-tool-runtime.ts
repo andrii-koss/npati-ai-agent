@@ -316,7 +316,7 @@ export class CodeToolRuntime {
       let approved = false;
       if (tool.name.startsWith("code.data.") && write) {
         if (tool.name === "code.data.backend.attach" && args.dryRun !== true && (typeof args.targetProjectId !== "string" || args.expectedTargetBackendId === undefined)) throw new CodeToolError("invalid_arguments", "Preview and select a target project and its current database attachment", 400, "arguments", false, tool.name);
-        if (tool.name !== "code.data.schema.apply" && args.dryRun !== true) {
+        if (!["code.data.schema.apply", "code.data.backend.create"].includes(tool.name) && args.dryRun !== true) {
           if (!this.options.approvals) throw new CodeToolError("approval_unavailable", "Database changes require the approval system", 503, "approval", false, tool.name);
           const payload = { projectId: input.projectId, sessionId, turnId, tool: tool.name, toolVersion: tool.version, args };
           if (!input.approvalId) await this.writeGuard.requestApprovalDecision(ctx, input, tool, "delete", `${tool.name}: ${JSON.stringify(args)}`, payload);

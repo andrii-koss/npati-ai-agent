@@ -21,6 +21,9 @@ function operation(item: DevelopmentProcessProgressItem) {
   if (/browser/.test(tool)) return ["browser", Globe] as const;
   if (/preview/.test(tool)) return ["preview", Monitor] as const;
   if (/coding_agent|^agent$/.test(tool)) return ["working", Brain] as const;
+  if (item.stage === "model_generation") return ["generatingCode", FilePenLine] as const;
+  if (item.stage === "model_output") return ["modelResponding", Brain] as const;
+  if (item.stage === "model_response") return ["waitingForModel", Brain] as const;
   if (/planning|thinking/.test(tool)) return ["planning", Brain] as const;
   if (/sandbox|workspace/.test(tool)) return ["sandbox", Monitor] as const;
   return ["command", Terminal] as const;
@@ -45,7 +48,7 @@ export function AgentExecutionTrace({ process, items: directItems, run, nested =
   const [copied, setCopied] = useState<string>();
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
-    if (!run || !["running", "pending"].includes(run.status)) return;
+    if (!run || !["running", "pending", "preparing"].includes(run.status)) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [run?.id, run?.status]);
@@ -57,10 +60,10 @@ export function AgentExecutionTrace({ process, items: directItems, run, nested =
   const items = normalizeActivity(directItems ?? process?.progress);
   if (!items.length && !run) return null;
   if (run) {
-    const running = run.status === "running" || run.status === "pending" && items.some(item=>["running","active"].includes(item.status??""));
+    const running = run.status === "running" || run.status === "preparing" || run.status === "pending" && items.some(item=>["running","active"].includes(item.status??""));
     const current = [...items].reverse().find(item=>["running","active","awaiting_approval","waiting_for_approval"].includes(item.status??"")) ?? (running ? {id:run.id,stage:"agent",title:"",at:run.at,status:"running" as const} : items.at(-1) ?? {id:run.id,stage:"agent",title:"",at:run.at,status:"pending" as const});
     const [, Icon] = operation(current);
-    const label = run.status === "completed" ? t("operationsDone").replace("{{count}}",String(items.filter(item=>item.stage!=="agent").length)) : running ? title(current,t,true) : t(run.status === "waiting_for_approval" ? "awaiting_approval" : run.status);
+    const label = run.status === "completed" ? t("operationsDone").replace("{{count}}",String(items.filter(item=>!["agent","planning","model_response","model_generation","model_output","provider_retry"].includes(item.stage)).length)) : running ? title(current,t,true) : t(run.status === "waiting_for_approval" ? "awaiting_approval" : run.status);
     const files = new Map<string, {path: string; linesAdded?: number; linesRemoved?: number; status?: string}>();
     for (const item of items) {
       if (!/write|edit|patch|move|delete/.test(item.tool ?? "")) continue;

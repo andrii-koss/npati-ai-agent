@@ -37,6 +37,10 @@ export type ChatToolChoice = "auto" | "none" | "required" | {
 };
 
 export interface ChatRequest {
+  /** Opt-in streamed generation counters; no text, arguments or private reasoning is exposed. */
+  /** Supported fast creation path for DeepSeek Flash; other providers retain their settings. */
+  reasoningMode?: "disabled";
+  onGenerationProgress?: (event: {phase:"response"|"tool_arguments";firstTokenMs:number;outputCharacters:number}) => void | Promise<void>;
   /** Best-effort metadata observer; never receives credentials, prompts or provider bodies. */
   onProviderAttempt?: (event: {model:string;phase:"started"|"completed"|"failed";durationMs?:number;httpStatus?:number;errorCode?:string;retryScheduled?:boolean}) => void | Promise<void>;
   messages: ChatMessage[];

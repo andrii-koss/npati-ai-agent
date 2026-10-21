@@ -17,6 +17,31 @@ export class DataBackendRepository {
     this.pool = new Pool({ connectionString: databaseUrl, max: 5 });
   }
 
+
+  /** Reserve and attach metadata atomically before any external provisioning work. */
+  async reserveForProject(ctx: AuthContext, companyId: string, projectId: string, name: string): Promise<DataBackend> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const project = await client.query<{data_backend_id:string|null}>(
+        "SELECT data_backend_id FROM projects WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND created_by=$4 AND status NOT IN ('archived','soft_deleted','purging','deleted') FOR UPDATE",
+        [projectId,ctx.workspaceId,companyId,ctx.userId]);
+      if (!project.rowCount) throw new DataStudioError(404,"create_backend","Project not found",false,"PROJECT_NOT_FOUND");
+      const existing = project.rows[0]!.data_backend_id;
+      if (existing) {
+        const result = await client.query<DataBackend>("SELECT "+backendColumns+" FROM data_backends WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND created_by=$4",[existing,ctx.workspaceId,companyId,ctx.userId]);
+        if (!result.rowCount) throw new DataStudioError(404,"create_backend","Database not found",false,"BACKEND_NOT_FOUND");
+        await client.query("COMMIT"); return result.rows[0]!;
+      }
+      const id = randomUUID();
+      const result = await client.query<DataBackend>("INSERT INTO data_backends(id,workspace_id,company_id,created_by,name,provider) VALUES($1,$2,$3,$4,$5,'shared_postgres') RETURNING "+backendColumns,[id,ctx.workspaceId,companyId,ctx.userId,name]);
+      for (const environment of ["dev","prod"]) await client.query("INSERT INTO data_backend_environments(id,workspace_id,company_id,backend_id,environment) VALUES($1,$2,$3,$4,$5)",[randomUUID(),ctx.workspaceId,companyId,id,environment]);
+      await client.query("UPDATE projects SET data_backend_id=$1,revision=revision+1,updated_at=now() WHERE id=$2",[id,projectId]);
+      await client.query("COMMIT"); return result.rows[0]!;
+    } catch(error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+
   async create(ctx: AuthContext, companyId: string, name: string, provider: DataProviderKind): Promise<DataBackend> {
     const id = randomUUID();
     const client = await this.pool.connect();

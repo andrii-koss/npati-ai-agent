@@ -1,3 +1,4 @@
+import { validateStaticProjectResources } from "./static-project-validation";
 import { detectProjectStack, extractPortFromCommand } from "./project-preview-stack";
 export { detectProjectStack, extractPortFromCommand } from "./project-preview-stack";
 export type { DetectedStack } from "./project-preview-stack";
@@ -296,6 +297,10 @@ export class ProjectPreviewService {
 
     const files = await this.workspace.listFiles(ctx, companyId, projectId);
     const detected = await detectProjectStack(files, async (p) => (await this.workspace.readFile(ctx, companyId, projectId, p)).content);
+    if (detected.framework === "static" && (!options.command || project.framework === "HTML/CSS")) {
+      try { await validateStaticProjectResources(files, async p => (await this.workspace.readFile(ctx, companyId, projectId, p)).content); }
+      catch (error) { throw new PreviewError("preview_resources_missing", error instanceof Error ? error.message : "Static resource validation failed", 409); }
+    }
 
     const verifiedBuild = options.verifiedBuild ?? project.lastBuildStatus === "ready";
     let devCommand = options.command?.trim()

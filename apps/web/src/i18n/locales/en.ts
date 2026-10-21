@@ -2,6 +2,9 @@ import type { TranslationSchema } from "../types";
 
 export const en: TranslationSchema = {
   executionTrace: {
+    modelResponding: "Model is responding",
+    waitingForModel: "Waiting for the model response",
+    generatingCode: "Generating code",
     suspended_by_flag: "Paused: Coding Agent disabled",
 "usage": "Model tokens",
 "inputTokens": "Input",

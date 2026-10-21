@@ -2,6 +2,7 @@ import type { ServiceHealth } from "@npati/shared";
 import { isChatCapableModel } from "./normalization";
 import { providerToolNames } from "./provider-tool-names";
 import { retainProviderContinuation } from "./provider-continuation";
+import { readChatStream } from "./chat-stream";
 import { observeProviderAttempt } from "./provider-attempt";
 import type { A2AMessageRequest, A2AMessageResult, AIEngine, AudioTranscriptionInput, AudioTranscriptionResult, ChatContentPart, ChatMessage, ChatToolCall, EmbeddingInput, EmbeddingResult, ModerationInput, ModerationResult, RerankInput, RerankResult, ChatRequest, ChatResult, MCPToolCallRequest, ModelInfo, OmniRouteComboInput, OmniRouteConfig, OmniRouteResilienceSnapshot, SpeechAudioFormat, SpeechSynthesisInput, SpeechSynthesisResult, WebFetchInput, WebPageResult, WebSearchInput, WebSearchResponse } from "./types";
 
@@ -90,6 +91,8 @@ export class OmniRouteEngine implements AIEngine {
         : {
             model,
             messages: wire.messages,
+            ...(request.reasoningMode === "disabled" && model === "deepseek/deepseek-flash" ? {thinking:{type:"disabled"},reasoning_effort:"none"} : {}),
+            ...(request.onGenerationProgress ? {stream:true,stream_options:{include_usage:true}} : {}),
             ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
             ...(wire.tools?.length ? { tools: wire.tools, tool_choice: wire.toolChoice ?? "auto", parallel_tool_calls: false } : {}),
           };
@@ -122,7 +125,7 @@ export class OmniRouteEngine implements AIEngine {
         if (canRetryNext && retryable) continue;
         throw Object.assign(new Error(lastError),{httpStatus:response.status,code:"provider_http_error"});
       }
-      const payload = (await response.json()) as {
+      const payload = (await (useResponses ? response.json() : readChatStream(response, request, attemptStarted))) as {
         model?: string;
         provider?: string;
         usage?: Record<string, unknown>;

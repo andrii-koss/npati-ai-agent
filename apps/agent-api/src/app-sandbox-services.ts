@@ -19,6 +19,7 @@ export interface AppSandboxServicesDeps {
   workspaceStore: WorkspaceStore;
   projectService: ProjectService;
   projectWorkspace: MountedWorkspaceProvider;
+  dataBackendService?: ReturnType<typeof createDataBackendServices>["dataBackendService"];
   dataBackendRepository?: ReturnType<typeof createDataBackendServices>["dataBackendRepository"];
   databaseProvisioner?: ReturnType<typeof createDataBackendServices>["databaseProvisioner"];
   dataProvider?: ReturnType<typeof createDataBackendServices>["dataProvider"];
@@ -37,6 +38,7 @@ export function createAppSandboxServices(deps: AppSandboxServicesDeps) {
     workspaceStore,
     projectService,
     projectWorkspace,
+    dataBackendService,
     dataBackendRepository,
     databaseProvisioner,
     dataProvider,
@@ -83,6 +85,24 @@ export function createAppSandboxServices(deps: AppSandboxServicesDeps) {
           projectWorkspace,
           projectAuthService as never,
           promoteService,
+          dataBackendService ? async (ctx, companyId, projectId, name) => {
+            const result = await dataBackendService.ensureForProject(ctx, companyId, projectId, name, async backend => {
+              await projectAuthService?.ensureInitialized(ctx, backend, "dev");
+              const environment = await projectApiGatewayService?.getSandboxEnvironment(ctx, companyId, projectId) ?? {};
+              const origin = process.env.NPATI_WEB_ORIGIN;
+              if (origin) await dataStudioService?.registerPreviewCorsOrigin(ctx, companyId, projectId, "dev", new URL(origin).origin);
+              return environment;
+            });
+            const environment = result.environment ?? {};
+            if (result.created) {
+              const setting = await workspaceStore.getUserSetting(ctx, "chat-development-processes:v1");
+              const processes = Array.isArray(setting?.value) ? setting.value as import("@npati/shared").DevelopmentProcess[] : [];
+              const process = processes.find(item => item.projectId === projectId && item.companyId === companyId);
+              if (process?.conversationId) await workspaceStore.appendNeutralMessage(ctx, process.conversationId, "assistant",
+                process.responseLanguage === "uk" ? "\u0421\u0442\u0432\u043e\u0440\u0435\u043d\u043e \u0431\u0430\u0437\u0443 \u0434\u0430\u043d\u0438\u0445 \u00ab" + result.backend.name + "\u00bb \u0434\u043b\u044f \u0446\u044c\u043e\u0433\u043e \u043f\u0440\u043e\u0454\u043a\u0442\u0443." : "Created database: " + result.backend.name + ".");
+            }
+            return { ...result, environment };
+          } : undefined,
         )
       : undefined;
 

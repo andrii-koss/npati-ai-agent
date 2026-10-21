@@ -6,7 +6,7 @@ import type { PolicyEngine } from "./code-policy-engine";
 import type { RowTransferInput } from "./data-studio/row-transfer";
 
 export interface CodeDataToolOptions {
-  projectData?: Pick<AgentDataStudioService, "inspectSchema" | "applySchema"> & Partial<Pick<AgentDataStudioService, "assertBackend" | "transferRows" | "attachToProject" | "listRows">>;
+  projectData?: Pick<AgentDataStudioService, "inspectSchema" | "applySchema"> & Partial<Pick<AgentDataStudioService, "createBackend" | "assertBackend" | "transferRows" | "attachToProject" | "listRows">>;
   dataPolicy?: Pick<PolicyEngine, "evaluate">;
 }
 
@@ -51,6 +51,12 @@ export function codeDataExecutors(options: CodeDataToolOptions) {
     });
     if (decision.decision !== "allow") throw new CodeToolError("policy_denied", "Project database operation was refused by coding policy", decision.status ?? 403, "policy", false, input.tool.name, { decision: decision.decision, code: decision.code });
     try {
+      if (input.tool.name === "code.data.backend.create") {
+        if (!options.projectData.createBackend) throw new CodeToolError("tool_not_configured", "Database creation is unavailable", 503, "configure", false, input.tool.name);
+        const name = String(input.args.name ?? "").trim(), reason = String(input.args.reason ?? "").trim();
+        if (!name || !reason) throw new CodeToolError("invalid_arguments", "A database name and reason are required", 400, "arguments", false, input.tool.name);
+        return await options.projectData.createBackend(input.ctx, input.companyId, input.projectId, { name, reason });
+      }
       if (!apply) return await options.projectData.inspectSchema(input.ctx, input.companyId, input.projectId);
       const operation = input.args.operation as SchemaOperation;
       if (!operation || !["create_collection", "add_field", "create_index"].includes(operation.kind)) throw new CodeToolError("invalid_arguments", "Only create_collection, add_field and create_index are available; destructive changes and raw SQL are not supported", 400, "schema", false, input.tool.name);
@@ -74,6 +80,7 @@ export function codeDataExecutors(options: CodeDataToolOptions) {
     "code.data.rows.list": extended,
     "code.data.rows.transfer": extended,
     "code.data.backend.attach": extended,
+    "code.data.backend.create": (input: CodeToolExecutionContext) => execute(input, true),
     "code.data.schema.inspect": (input: CodeToolExecutionContext) => execute(input, false),
     "code.data.schema.apply": (input: CodeToolExecutionContext) => execute(input, true),
   };

@@ -68,6 +68,8 @@ RUN apk add --no-cache python3 py3-pip git openssh-client ripgrep build-base lin
 RUN npm install -g --prefix /opt/npati-package-managers --no-audit --no-fund pnpm@10 yarn@1.22.22
 COPY --from=project-web-toolchain /opt/npati-project-toolchain /opt/npati-project-toolchain
 COPY apps/agent-api/prepare-project-dependencies.cjs /opt/npati-runtime/prepare-project-dependencies.cjs
+COPY apps/agent-api/project-runtime-composer.sh /usr/local/bin/composer
+RUN chmod +x /usr/local/bin/composer
 COPY apps/agent-api/project-runtime-guard.c /tmp/project-runtime-guard.c
 COPY apps/agent-api/project-runtime-launcher.mjs apps/agent-api/project-runtime-inner.mjs /opt/npati-runtime/
 RUN apk add --no-cache libseccomp-dev chromium font-noto

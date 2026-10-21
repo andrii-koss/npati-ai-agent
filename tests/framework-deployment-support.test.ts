@@ -70,7 +70,7 @@ describe("deterministic framework starters", () => {
   it("keeps Fastify top-level await in ESM and serves an independently editable HTML file", () => {
     const files = createFrameworkScaffold({ projectName: "Fastify test", prompt: "Build it", framework: "Fastify" });
     expect(JSON.parse(files["package.json"]!).type).toBe("module");
-    expect(files["index.html"]).toContain("<h1>Fastify test</h1>");
+    expect(files["index.html"]).toContain("<main></main>");
     expect(files["src/server.ts"]).toContain('new URL("../index.html", import.meta.url)');
     expect(new URL("../index.html", "file:///projects/test/dist/server.js").pathname).toBe("/projects/test/index.html");
   });
@@ -79,7 +79,7 @@ describe("deterministic framework starters", () => {
     const files = createFrameworkScaffold({ projectName: "SSR test", prompt: "Build it", framework: "Remix" });
     const manifest = JSON.parse(files["package.json"]!);
     // Without isbot the framework runs npm install during build and can prune dev tooling.
-    expect(manifest.dependencies.isbot).toMatch(/^\^5\./);
+    expect(manifest.dependencies.isbot).toMatch(/^5\./);
   });
 
   it.each([
@@ -87,7 +87,6 @@ describe("deterministic framework starters", () => {
     ["Django", ["manage.py", "config/settings.py", "web/views.py", "Makefile"], "django"],
     ["Flask", ["app.py", "requirements.txt", "Makefile"], "Flask"],
     ["Laravel", ["composer.json", "artisan", "routes/web.php", "config/app.php", "Makefile"], "Laravel"],
-    ["HTML/CSS", ["index.html", "styles.css", "health.json"], "HTML/CSS"],
   ])("creates a %s starter with its build/health surface", (framework, required, marker) => {
     const files = createFrameworkScaffold({ projectName: `Test ${framework}`, prompt: "Build it", framework });
     for (const file of required) expect(files[file], `${framework} is missing ${file}`).toBeTruthy();

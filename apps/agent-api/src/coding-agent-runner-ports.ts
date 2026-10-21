@@ -218,7 +218,7 @@ export interface CodeRunStatePort {
 }
 
 export interface CodeRunActivityEvent {
-  kind: "run_started" | "turn" | "tool_call" | "reminder" | "run_finished" | "session_branch" | "model_call";
+  kind: "run_started" | "turn" | "tool_call" | "reminder" | "run_finished" | "session_branch" | "model_call" | "model_first_token";
   phase?: "started" | "completed" | "failed";
   model?: string;
   provider?: string;
@@ -237,6 +237,7 @@ export interface CodeRunActivityEvent {
   errorCode?: string;
   bytes?: number;
   durationMs?: number;
+  firstTokenMs?: number;
   reason?: string;
   snapshotId?: string;
 

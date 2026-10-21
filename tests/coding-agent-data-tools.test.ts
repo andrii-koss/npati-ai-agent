@@ -20,6 +20,7 @@ async function fixture(mode = "auto", approvals?: CodeApprovalPort) {
   const projectData = {
     inspectSchema: vi.fn(async () => ({ backend: { id: "db", name: "Site DB", status: "ready" as const }, environment: { name: "dev", syncStatus: "synced" as const, schemaFingerprint: "before" }, schema: { tables: [] }, expectedSchema: null })),
     applySchema: vi.fn(),
+    createBackend: vi.fn(async()=>({created:true,backend:{id:"db",name:"Orders",status:"ready"},environment:{PROJECT_API_URL:"https://api.test/v1/projects/selected-site",PROJECT_PUBLISHABLE_KEY:"public"}})),
     assertBackend: vi.fn(),
     listRows: vi.fn(async () => ({ rows: [] })),
     transferRows: vi.fn(async () => ({ applied: true, rows: 1, transferId: crypto.randomUUID(), source: "products", target: "archive", mode: "move" as const, snapshotId: null })),
@@ -124,4 +125,26 @@ describe("Coding Agent extended database operations", () => {
     expect(await f.invoke("code.data.schema.modify", { ...modify, dryRun: true })).toMatchObject({ ok: false, error: { details: { dataCode: "BACKEND_CHANGED" } } });
     expect(f.projectData.applySchema).not.toHaveBeenCalled();
   });
+});
+
+describe("on-demand project databases",()=>{
+ it("does not provision when inspecting, and provisions only on an explicit tool call",async()=>{
+  const f=await fixture();await f.invoke("code.data.schema.inspect");expect(f.projectData.createBackend).not.toHaveBeenCalled();
+  const result=await f.invoke("code.data.backend.create",{name:"Orders",reason:"Persist customer orders shared across devices"});
+  expect(result.ok).toBe(true);expect(f.projectData.createBackend).toHaveBeenCalledWith(ctx,f.company.id,"selected-site",{name:"Orders",reason:"Persist customer orders shared across devices"});
+ });
+ it.each(["plan"])("denies database creation in %s mode",async mode=>{
+  const f=await fixture(mode);expect((await f.invoke("code.data.backend.create",{name:"Orders",reason:"Store orders"})).ok).toBe(false);
+  expect(f.projectData.createBackend).not.toHaveBeenCalled();
+ });
+ it("denies read-only intent and target substitution",async()=>{
+  const f=await fixture();
+  expect((await f.invoke("code.data.backend.create",{name:"Orders",reason:"Store orders"},{readOnlyIntent:true})).ok).toBe(false);
+  expect((await f.invoke("code.data.backend.create",{name:"Orders",reason:"Store orders",projectId:"foreign"})).ok).toBe(false);
+  expect(f.projectData.createBackend).not.toHaveBeenCalled();
+ });
+ it("keeps previous manifests immutable and publishes creation only to new sessions",()=>{
+  expect(resolveManifestForSession(13).tools.some(t=>t.name==="code.data.backend.create")).toBe(false);
+  expect(resolveManifestForSession(14).tools.some(t=>t.name==="code.data.backend.create")).toBe(true);
+ });
 });

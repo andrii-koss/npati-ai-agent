@@ -294,6 +294,7 @@ export function buildApp(config: AppConfig = {}) {
   const projectWorkspace = new MountedWorkspaceProvider(projectService, { root: projectWorkspaceRoot, bases: projectWorkspaceBases, maxFileBytes: Number(process.env.NPATI_PROJECT_MAX_FILE_BYTES) || undefined, maxFiles: Number(process.env.NPATI_PROJECT_MAX_FILES) || undefined });
 
   const sandboxServices = createAppSandboxServices({
+    dataBackendService,
     config,
     log: app.log,
     workspaceStore,

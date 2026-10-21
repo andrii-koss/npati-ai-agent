@@ -57,7 +57,8 @@ export function nearChatBottom(element: Pick<HTMLElement, "scrollHeight" | "scro
 
 export type CodingActivityRun = { id: string; runId?: string; at: string; items: DevelopmentProcessProgressItem[]; status: string; language?: string; sequence?: number; usage?: NonNullable<DevelopmentProcessProgressItem["modelUsage"]>[] };
 export function codingActivityRuns(value: unknown, process?: DevelopmentProcess): CodingActivityRun[] {
-  const rows = normalizeActivity(value).filter(item => item.kind !== "assistant_message" && item.stage !== "template_ready");
+  const rows = normalizeActivity(value).filter(item => item.kind !== "assistant_message" && item.stage !== "template_ready"
+    && !(item.stage === "project" && item.tool === "code.workspace" && !["failed", "cancelled", "awaiting_approval", "waiting_for_approval"].includes(item.status ?? "")));
   const groups = new Map<string, CodingActivityRun>();
   for (const item of rows) {
     const initial = !item.runId || item.runId === process?.initialRunId;
@@ -72,6 +73,10 @@ export function codingActivityRuns(value: unknown, process?: DevelopmentProcess)
     if (!runId || typeof state!=="string") continue;
     const id = runId === process?.initialRunId ? process.id + ":initial" : runId;
     if (!groups.has(id)) groups.set(id,{id,runId,at:process?.runStartedAts?.[runId] ?? process?.createdAt ?? "",items:[],status:state,language:process?.runLanguages?.[runId] ?? process?.responseLanguage});
+  }
+  if (!groups.size && process && ["preparing", "running", "queued", "stopping"].includes(process.status)) {
+    const id = process.id + ":initial";
+    groups.set(id, { id, runId: process.initialRunId ?? process.runId, at: process.createdAt, items: [], status: process.status, language: process.responseLanguage });
   }
   for (const group of groups.values()) {
     const startedAt = group.runId ? process?.runStartedAts?.[group.runId] : undefined;
