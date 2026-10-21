@@ -111,6 +111,7 @@ export function DatabaseDetailView({
   refresh,
   setDetailId,
 }: DatabaseDetailViewProps) {
+  const [selectedUnattachedId, setSelectedUnattachedId] = React.useState<string>("");
   const detailEnvironments = environments[detail.id] ?? [];
   const envOrder: Array<"dev" | "prod"> = ["dev", "prod"];
 
@@ -217,24 +218,47 @@ export function DatabaseDetailView({
       )}
 
       {unattachedProjects.length > 0 && (
-        <div className="data-studio-attachments">
-          <h3>{isUk ? "Прикріпити проєкт" : "Attach a project"}</h3>
-          {unattachedProjects.map((item) => (
-            <label key={item.id}>
-              <span>{item.name}</span>
-              <select
-                aria-label={isUk ? `База для ${item.name}` : `Database for ${item.name}`}
-                value=""
-                disabled={backendBusy}
-                onChange={(event) => { if (event.target.value) void attachProject(detail.companyId, item.id, event.target.value); }}
-              >
-                <option value="">{isUk ? "До цієї бази" : "To this database"}</option>
-                {detailCompanyBackends.map((backend) => (
-                  <option key={backend.id} value={backend.id}>{backend.name}</option>
-                ))}
-              </select>
-            </label>
-          ))}
+        <div className="ds-attach-project-box" style={{ marginTop: "16px", marginBottom: "20px" }}>
+          <h3 style={{ fontSize: "15px", fontWeight: 600, marginBottom: "8px" }}>
+            {isUk ? "Прикріпити проєкт" : "Attach a project"}
+          </h3>
+          <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+            <select
+              aria-label={isUk ? "Оберіть проєкт для прикріплення" : "Select project to attach"}
+              style={{
+                padding: "8px 12px",
+                borderRadius: "8px",
+                border: "1px solid #d1d5db",
+                fontSize: "14px",
+                minWidth: "260px",
+                background: "#fff",
+              }}
+              value={selectedUnattachedId}
+              disabled={backendBusy}
+              onChange={(e) => setSelectedUnattachedId(e.target.value)}
+            >
+              <option value="">{isUk ? "-- Оберіть проєкт для прикріплення --" : "-- Select project to attach --"}</option>
+              {unattachedProjects.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}{item.type ? ` (${item.type})` : ""}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="automation-action-btn run-btn"
+              disabled={backendBusy || !selectedUnattachedId}
+              onClick={() => {
+                if (selectedUnattachedId) {
+                  void attachProject(detail.companyId, selectedUnattachedId, detail.id).then(() => {
+                    setSelectedUnattachedId("");
+                  });
+                }
+              }}
+            >
+              {isUk ? "＋ Прикріпити до цієї бази" : "＋ Attach to this database"}
+            </button>
+          </div>
         </div>
       )}
 

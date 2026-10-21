@@ -78,7 +78,11 @@ export function registerProjectRoutes(app: FastifyInstance, service: ProjectServ
 
   app.delete<{ Params: { companyId: string; projectId: string } }>("/companies/:companyId/projects/:projectId", async (request, reply) => {
     try {
-      await service.delete(await authorize(auth, request, "business:manage"), request.params.companyId, request.params.projectId);
+      const context = await authorize(auth, request, "business:manage");
+      await service.delete(context, request.params.companyId, request.params.projectId);
+      if (workspace) {
+        await workspace.removeProjectWorkspace(context, request.params.companyId, request.params.projectId).catch(() => undefined);
+      }
       return reply.code(204).send();
     } catch (error) { return fail(reply, error); }
   });
