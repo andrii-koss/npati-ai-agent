@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import { writeProjectFile } from "./project-files-client";
@@ -33,7 +33,10 @@ import {
 } from "./website-builder-constants";
 import { CreateWebsiteDrawer } from "./website-builder-drawer";
 import { WebsiteFiltersBar } from "./website-builder-filters";
-import { WebsiteProjectCard } from "./website-builder-card";
+import { WebsiteProjectCard, invalidateWebsitePreviewCache } from "./website-builder-card";
+
+const WEBSITES_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const lastFetchedWebsites = new Map<string, number>();
 
 export function WebsiteBuilderDashboard() {
   const navigate = useNavigate();
@@ -123,16 +126,25 @@ export function WebsiteBuilderDashboard() {
   }, []);
 
   // Load Websites for Company
-  const loadWebsites = async (targetCompanyId?: string) => {
+  const loadWebsites = useCallback(async (targetCompanyId?: string, options?: { force?: boolean }) => {
     const id = targetCompanyId ?? companyId;
     if (!id) {
       return;
     }
+
+    const last = lastFetchedWebsites.get(id) ?? 0;
+    const now = Date.now();
+    // Throttle website list reload: if not forced and last fetch was < 5 min ago, skip
+    if (!options?.force && now - last < WEBSITES_CACHE_TTL_MS && websites.length > 0) {
+      return;
+    }
+
     try {
       const res = await apiFetch<{ projects: WebsiteProject[] }>(
         `/companies/${encodeURIComponent(id)}/projects?includeArchived=true`
       );
       const nextProjects = (res.projects || []).filter(site => site.type !== "code_project" || /^(Next\.js|HTML\/CSS|React|Vite)$/i.test(site.framework ?? ""));
+      lastFetchedWebsites.set(id, Date.now());
       setWebsites(nextProjects);
       updateCachedWebsites(id, nextProjects);
       setError("");
@@ -141,13 +153,13 @@ export function WebsiteBuilderDashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [companyId, t.loadError, websites.length]);
 
   useEffect(() => {
     if (companyId) {
       void loadWebsites(companyId);
     }
-  }, [companyId]);
+  }, [companyId, loadWebsites]);
 
   // When framework selection changes in drawer, update suggested values.
   const handleSelectFramework = (fw: FrameworkStarterOption) => {
@@ -307,7 +319,7 @@ export function WebsiteBuilderDashboard() {
     }
   };
 
-  const handleRename = async (site: WebsiteProject) => {
+  const handleRename = useCallback(async (site: WebsiteProject) => {
     const next = await promptModal({ message: t.renamePrompt, defaultValue: site.name });
     if (!next || !next.trim() || next.trim() === site.name) return;
     try {
@@ -318,13 +330,14 @@ export function WebsiteBuilderDashboard() {
           body: JSON.stringify({ name: next.trim(), expectedRevision: site.revision }),
         }
       );
-      await loadWebsites();
+      invalidateWebsitePreviewCache(companyId, site.id);
+      await loadWebsites(companyId, { force: true });
     } catch (err: any) {
       alert(err.message || "Failed to rename website");
     }
-  };
+  }, [companyId, loadWebsites, t.renamePrompt]);
 
-  const handleDuplicate = async (site: WebsiteProject) => {
+  const handleDuplicate = useCallback(async (site: WebsiteProject) => {
     try {
       setLoading(true);
       const res = await apiFetch<{ project: WebsiteProject }>(
@@ -335,7 +348,7 @@ export function WebsiteBuilderDashboard() {
           body: JSON.stringify({ name: `${site.name} (Copy)` }),
         }
       );
-      await loadWebsites();
+      await loadWebsites(companyId, { force: true });
       if (res?.project?.id) {
         navigate(`/settings/websites/${encodeURIComponent(companyId)}/${encodeURIComponent(res.project.id)}`);
       }
@@ -344,9 +357,9 @@ export function WebsiteBuilderDashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [companyId, loadWebsites, navigate]);
 
-  const handleArchive = async (site: WebsiteProject) => {
+  const handleArchive = useCallback(async (site: WebsiteProject) => {
     if (!(await confirmModal({ message: t.archivePrompt }))) return;
     try {
       await apiFetch(
@@ -356,24 +369,26 @@ export function WebsiteBuilderDashboard() {
           body: JSON.stringify({ expectedRevision: site.revision }),
         }
       );
-      await loadWebsites();
+      invalidateWebsitePreviewCache(companyId, site.id);
+      await loadWebsites(companyId, { force: true });
     } catch (err: any) {
       alert(err.message || "Failed to archive website");
     }
-  };
+  }, [companyId, loadWebsites, t.archivePrompt]);
 
-  const handleDelete = async (site: WebsiteProject) => {
+  const handleDelete = useCallback(async (site: WebsiteProject) => {
     if (!(await confirmModal({ message: t.deletePrompt, isDanger: true }))) return;
     try {
       await apiFetch(
         `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(site.id)}`,
         { method: "DELETE" }
       );
-      await loadWebsites();
+      invalidateWebsitePreviewCache(companyId, site.id);
+      await loadWebsites(companyId, { force: true });
     } catch (err: any) {
       alert(err.message || "Failed to delete website");
     }
-  };
+  }, [companyId, loadWebsites, t.deletePrompt]);
 
   return (
     <main className="company-refined company-page" style={{ maxWidth: "1400px", margin: "0 auto", padding: "20px 24px" }}>

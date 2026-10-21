@@ -1,5 +1,5 @@
 import { readProjectFile } from "./project-files-client";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   MessageSquare,
@@ -22,6 +22,51 @@ export interface WebsiteProjectCardProps {
   handleDelete: (site: WebsiteProject) => void | Promise<void>;
 }
 
+const PREVIEW_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+interface CachedPreview {
+  liveUrl: string;
+  staticHtml: string;
+  fetchedAt: number;
+}
+
+const previewCache = new Map<string, CachedPreview>();
+
+function getStoredPreview(companyId: string, projectId: string): CachedPreview | null {
+  const key = `${companyId}:${projectId}`;
+  const mem = previewCache.get(key);
+  if (mem) return mem;
+  try {
+    const raw = sessionStorage.getItem(`npati_preview_${key}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.fetchedAt === "number") {
+        previewCache.set(key, parsed);
+        return parsed;
+      }
+    }
+  } catch {}
+  return null;
+}
+
+function setStoredPreview(companyId: string, projectId: string, data: CachedPreview) {
+  const key = `${companyId}:${projectId}`;
+  previewCache.set(key, data);
+  try {
+    if (data.staticHtml.length < 200000) {
+      sessionStorage.setItem(`npati_preview_${key}`, JSON.stringify(data));
+    }
+  } catch {}
+}
+
+export function invalidateWebsitePreviewCache(companyId: string, projectId: string) {
+  const key = `${companyId}:${projectId}`;
+  previewCache.delete(key);
+  try {
+    sessionStorage.removeItem(`npati_preview_${key}`);
+  } catch {}
+}
+
 export function WebsiteCardPreview({
   site,
   companyId,
@@ -37,15 +82,33 @@ export function WebsiteCardPreview({
   onLiveUrlChange?: (url: string) => void;
   onStaticHtmlChange?: (html: string) => void;
 }) {
-  const [liveUrl, setLiveUrl] = useState<string>("");
-  const [staticHtml, setStaticHtml] = useState<string>("");
-  const [loading, setLoading] = useState<boolean>(true);
+  const initialCache = useMemo(
+    () => getStoredPreview(companyId, site.id),
+    [companyId, site.id]
+  );
+
+  const [liveUrl, setLiveUrl] = useState<string>(() => initialCache?.liveUrl ?? "");
+  const [staticHtml, setStaticHtml] = useState<string>(() => initialCache?.staticHtml ?? "");
+  const [loading, setLoading] = useState<boolean>(() => !initialCache?.liveUrl && !initialCache?.staticHtml);
   const [iframeKey, setIframeKey] = useState<number>(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState<{ width: number; height: number }>({
     width: 600,
     height: 375,
   });
+
+  const lastFetchRef = useRef<number>(initialCache?.fetchedAt ?? 0);
+  const isFetchingRef = useRef<boolean>(false);
+  const currentLiveUrlRef = useRef<string>(initialCache?.liveUrl ?? "");
+  const currentStaticHtmlRef = useRef<string>(initialCache?.staticHtml ?? "");
+
+  useEffect(() => {
+    currentLiveUrlRef.current = liveUrl;
+  }, [liveUrl]);
+
+  useEffect(() => {
+    currentStaticHtmlRef.current = staticHtml;
+  }, [staticHtml]);
 
   // Track container width and height for responsive desktop viewport scaling
   useEffect(() => {
@@ -54,7 +117,11 @@ export function WebsiteCardPreview({
       if (containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
         if (rect.width > 0 && rect.height > 0) {
-          setDimensions({ width: rect.width, height: rect.height });
+          setDimensions((prev) =>
+            prev.width === rect.width && prev.height === rect.height
+              ? prev
+              : { width: rect.width, height: rect.height }
+          );
         }
       }
     };
@@ -64,9 +131,25 @@ export function WebsiteCardPreview({
     return () => ro.disconnect();
   }, []);
 
-  const fetchPreviewState = async () => {
+  const fetchPreviewState = async (options?: { force?: boolean }) => {
     if (!companyId || !site.id) return;
-    setLoading(true);
+
+    const now = Date.now();
+    const timeSinceLast = now - lastFetchRef.current;
+
+    // Throttle updates: if not forced, only refresh every 5 minutes (300,000 ms)
+    if (!options?.force && timeSinceLast < PREVIEW_CACHE_TTL_MS && (currentLiveUrlRef.current || currentStaticHtmlRef.current)) {
+      return;
+    }
+
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+
+    // Do NOT show loading skeleton if we already have a preview (prevent blinking/flashing!)
+    if (!currentLiveUrlRef.current && !currentStaticHtmlRef.current) {
+      setLoading(true);
+    }
+
     try {
       // 1. Check sandbox preview status
       let runningUrl = "";
@@ -89,8 +172,20 @@ export function WebsiteCardPreview({
       } catch {}
 
       if (runningUrl) {
-        setLiveUrl(runningUrl);
-        setStaticHtml("");
+        lastFetchRef.current = Date.now();
+        setStoredPreview(companyId, site.id, {
+          liveUrl: runningUrl,
+          staticHtml: "",
+          fetchedAt: lastFetchRef.current,
+        });
+
+        if (currentLiveUrlRef.current !== runningUrl) {
+          setLiveUrl(runningUrl);
+          setIframeKey((k) => k + 1);
+        }
+        if (currentStaticHtmlRef.current) {
+          setStaticHtml("");
+        }
         onLiveUrlChange?.(runningUrl);
         setLoading(false);
         return;
@@ -120,8 +215,20 @@ export function WebsiteCardPreview({
       } catch {}
 
       if (htmlContent) {
-        setStaticHtml(htmlContent);
-        setLiveUrl("");
+        lastFetchRef.current = Date.now();
+        setStoredPreview(companyId, site.id, {
+          liveUrl: "",
+          staticHtml: htmlContent,
+          fetchedAt: lastFetchRef.current,
+        });
+
+        if (currentStaticHtmlRef.current !== htmlContent) {
+          setStaticHtml(htmlContent);
+          setIframeKey((k) => k + 1);
+        }
+        if (currentLiveUrlRef.current) {
+          setLiveUrl("");
+        }
         onStaticHtmlChange?.(htmlContent);
         setLoading(false);
 
@@ -132,7 +239,15 @@ export function WebsiteCardPreview({
             { method: "POST", body: "{}" }
           ).then((startRes) => {
             if (startRes?.previewUrl) {
-              setLiveUrl(startRes.previewUrl);
+              setStoredPreview(companyId, site.id, {
+                liveUrl: startRes.previewUrl,
+                staticHtml: "",
+                fetchedAt: Date.now(),
+              });
+              if (currentLiveUrlRef.current !== startRes.previewUrl) {
+                setLiveUrl(startRes.previewUrl);
+                setIframeKey((k) => k + 1);
+              }
               setStaticHtml("");
               onLiveUrlChange?.(startRes.previewUrl);
             }
@@ -149,7 +264,16 @@ export function WebsiteCardPreview({
             { method: "POST", body: "{}" }
           );
           if (startRes?.previewUrl) {
-            setLiveUrl(startRes.previewUrl);
+            lastFetchRef.current = Date.now();
+            setStoredPreview(companyId, site.id, {
+              liveUrl: startRes.previewUrl,
+              staticHtml: "",
+              fetchedAt: lastFetchRef.current,
+            });
+            if (currentLiveUrlRef.current !== startRes.previewUrl) {
+              setLiveUrl(startRes.previewUrl);
+              setIframeKey((k) => k + 1);
+            }
             setStaticHtml("");
             onLiveUrlChange?.(startRes.previewUrl);
             setLoading(false);
@@ -160,7 +284,16 @@ export function WebsiteCardPreview({
 
       // 4. Fallback to site previewUrl or deploymentUrl (skip stale proxy URLs)
       if (site.deploymentUrl && !site.deploymentUrl.includes("/preview/proxy")) {
-        setLiveUrl(site.deploymentUrl);
+        lastFetchRef.current = Date.now();
+        setStoredPreview(companyId, site.id, {
+          liveUrl: site.deploymentUrl,
+          staticHtml: "",
+          fetchedAt: lastFetchRef.current,
+        });
+        if (currentLiveUrlRef.current !== site.deploymentUrl) {
+          setLiveUrl(site.deploymentUrl);
+          setIframeKey((k) => k + 1);
+        }
         setStaticHtml("");
         onLiveUrlChange?.(site.deploymentUrl);
         setLoading(false);
@@ -169,30 +302,39 @@ export function WebsiteCardPreview({
     } catch {
       // ignore
     } finally {
+      isFetchingRef.current = false;
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    void fetchPreviewState();
+    // Check if we need initial fetch (e.g. if cache expired or not in cache)
+    const now = Date.now();
+    if (!initialCache || now - initialCache.fetchedAt >= PREVIEW_CACHE_TTL_MS) {
+      void fetchPreviewState();
+    } else {
+      if (initialCache.liveUrl) onLiveUrlChange?.(initialCache.liveUrl);
+      if (initialCache.staticHtml) onStaticHtmlChange?.(initialCache.staticHtml);
+    }
 
     // Auto-update preview when project is modified by Coding Agent or changes in workspace
     const onProjectUpdate = (e: Event) => {
       const detail = (e as CustomEvent<{ projectId?: string }>).detail;
       if (!detail?.projectId || detail.projectId === site.id) {
-        setIframeKey((k) => k + 1);
-        void fetchPreviewState();
+        void fetchPreviewState({ force: true });
       }
     };
 
     const onCompanyChange = () => {
-      setIframeKey((k) => k + 1);
-      void fetchPreviewState();
+      void fetchPreviewState({ force: true });
     };
 
+    // When returning to the tab, check if 5 minutes have elapsed since last fetch
     const onFocus = () => {
-      setIframeKey((k) => k + 1);
-      void fetchPreviewState();
+      const timeSince = Date.now() - lastFetchRef.current;
+      if (timeSince >= PREVIEW_CACHE_TTL_MS) {
+        void fetchPreviewState();
+      }
     };
 
     window.addEventListener("npati-code-project-updated", onProjectUpdate);
@@ -205,6 +347,7 @@ export function WebsiteCardPreview({
       window.removeEventListener("focus", onFocus);
     };
   }, [companyId, site.id, site.updatedAt, site.revision]);
+
 
   const VIRTUAL_WIDTH = 1200;
   const scale = Math.max(0.15, Math.min(1, dimensions.width / VIRTUAL_WIDTH));
@@ -330,7 +473,7 @@ export function WebsiteCardPreview({
   );
 }
 
-export function WebsiteProjectCard({
+export const WebsiteProjectCard = React.memo(function WebsiteProjectCard({
   site,
   companyId,
   language,
@@ -560,4 +703,4 @@ export function WebsiteProjectCard({
       </div>
     </article>
   );
-}
+});
