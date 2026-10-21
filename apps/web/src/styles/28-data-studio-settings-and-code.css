@@ -1191,3 +1191,49 @@
 }
 .code-execution-control > p { flex: 1; margin: 0; min-width: 200px; }
 .code-execution-control > div { width: 100%; }
+
+/* --- Data Studio bulk database operations --- */
+.ds-bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ds-bulk-select-link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: 8px;
+  color: var(--npati-red, #cf3035);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.ds-bulk-select-link:hover {
+  opacity: 0.8;
+}
+
+.ds-selected-count {
+  font-weight: 600;
+  color: var(--npati-black, #111111);
+}
+
+.automations-table input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--npati-red, #cf3035);
+  vertical-align: middle;
+}
+
+.automations-table tr.row-selected td {
+  background: #fff5f5;
+}
+
+.automations-table tr.row-selected:hover td {
+  background: #fee2e2;
+}
+

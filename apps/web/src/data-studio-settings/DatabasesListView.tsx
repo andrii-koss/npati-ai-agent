@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type {
   BackendEnvironment,
@@ -50,6 +50,7 @@ export interface DatabasesListViewProps {
   setDetailId: (id: string | null) => void;
   toggleArchive: (backend: BackendSummary) => Promise<void>;
   deleteDatabase: (backend: BackendSummary) => Promise<void>;
+  deleteDatabases?: (backends: BackendSummary[]) => Promise<void>;
   createOpen: boolean;
   createDatabase: (input: { name: string; provider: "shared_postgres" | "external_postgres"; connectionString?: string }) => Promise<void>;
 }
@@ -85,9 +86,87 @@ export function DatabasesListView({
   setDetailId,
   toggleArchive,
   deleteDatabase,
+  deleteDatabases,
   createOpen,
   createDatabase,
 }: DatabasesListViewProps) {
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Reset selection when switching company filter
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [companyFilter]);
+
+  // Clean up selected IDs that are no longer in companyBackends
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (!prev.size) return prev;
+      const validIds = new Set(companyBackends.map((b) => b.id));
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (validIds.has(id)) next.add(id);
+      }
+      return next.size === prev.size ? prev : next;
+    });
+  }, [companyBackends]);
+
+  const allFilteredSelected = filteredBackends.length > 0 && filteredBackends.every((b) => selectedIds.has(b.id));
+  const someFilteredSelected = filteredBackends.some((b) => selectedIds.has(b.id));
+
+  const handleToggleSelectAll = () => {
+    if (allFilteredSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const b of filteredBackends) next.delete(b.id);
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const b of filteredBackends) next.add(b.id);
+        return next;
+      });
+    }
+  };
+
+  const handleSelectAllFiltered = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const b of filteredBackends) next.add(b.id);
+      return next;
+    });
+  };
+
+  const handleClearSelection = () => {
+    setSelectedIds(new Set());
+  };
+
+  const handleToggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectedBackends = useMemo(
+    () => companyBackends.filter((b) => selectedIds.has(b.id)),
+    [companyBackends, selectedIds]
+  );
+
+  const handleBulkDelete = async () => {
+    if (!selectedBackends.length) return;
+    if (deleteDatabases) {
+      await deleteDatabases(selectedBackends);
+    } else {
+      for (const backend of selectedBackends) {
+        await deleteDatabase(backend);
+      }
+    }
+    setSelectedIds(new Set());
+  };
+
   return (
     <main className="automations-container">
       <header className="inspector-header automations-header">
@@ -203,7 +282,52 @@ export function DatabasesListView({
             {isUk ? `Показано ${filteredBackends.length} з ${companyBackends.length}` : `Showing ${filteredBackends.length} of ${companyBackends.length}`}
             {searchQuery ? (isUk ? ` за запитом «${searchQuery}»` : ` matching “${searchQuery}”`) : ""}
           </span>
+          {filteredBackends.length > 0 && selectedIds.size === 0 && (
+            <button
+              type="button"
+              className="ds-bulk-select-link"
+              onClick={handleSelectAllFiltered}
+            >
+              {isUk ? `Вибрати всі (${filteredBackends.length})` : `Select all (${filteredBackends.length})`}
+            </button>
+          )}
+          {selectedIds.size > 0 && (
+            <span className="ds-selected-count">
+              • {isUk ? `Вибрано: ${selectedIds.size}` : `Selected: ${selectedIds.size}`}
+            </span>
+          )}
         </div>
+        {selectedIds.size > 0 && (
+          <div className="ds-bulk-actions">
+            {selectedIds.size < filteredBackends.length && (
+              <button
+                type="button"
+                className="button-secondary"
+                style={{ padding: "4px 10px", fontSize: "12px", height: "auto" }}
+                onClick={handleSelectAllFiltered}
+              >
+                {isUk ? `Вибрати всі (${filteredBackends.length})` : `Select all (${filteredBackends.length})`}
+              </button>
+            )}
+            <button
+              type="button"
+              className="button-secondary"
+              style={{ padding: "4px 10px", fontSize: "12px", height: "auto" }}
+              onClick={handleClearSelection}
+            >
+              {isUk ? "Зняти вибір" : "Deselect"}
+            </button>
+            <button
+              type="button"
+              className="automation-action-btn danger"
+              style={{ padding: "4px 12px", fontSize: "12px", height: "auto", display: "inline-flex", alignItems: "center", gap: "6px" }}
+              disabled={backendBusy}
+              onClick={() => void handleBulkDelete()}
+            >
+              🗑️ {isUk ? `Видалити вибрані (${selectedIds.size})` : `Delete selected (${selectedIds.size})`}
+            </button>
+          </div>
+        )}
       </div>
 
       {backendsLoading && backends.length === 0 ? (
@@ -211,6 +335,9 @@ export function DatabasesListView({
           <table className="automations-table">
             <thead>
               <tr>
+                <th style={{ width: "40px", textAlign: "center" }}>
+                  <input type="checkbox" disabled aria-label="Select all" />
+                </th>
                 <th style={{ minWidth: "220px" }}>{isUk ? "Назва" : "Name"}</th>
                 <th style={{ minWidth: "160px" }}>{isUk ? "Компанія" : "Company"}</th>
                 <th style={{ width: "150px" }}>{isUk ? "Провайдер" : "Provider"}</th>
@@ -224,6 +351,7 @@ export function DatabasesListView({
             <tbody>
               {Array.from({ length: 3 }).map((_, index) => (
                 <tr key={`skeleton-${index}`} style={{ opacity: 0.5 }}>
+                  <td style={{ textAlign: "center", width: "40px" }}><span style={{ display: "inline-block", width: "16px", height: "16px", background: "var(--npati-gray-100)", borderRadius: "3px" }} /></td>
                   <td><span style={{ display: "inline-block", width: "160px", height: "16px", background: "var(--npati-gray-100)", borderRadius: "4px" }} /></td>
                   <td><span style={{ display: "inline-block", width: "110px", height: "16px", background: "var(--npati-gray-100)", borderRadius: "4px" }} /></td>
                   <td><span style={{ display: "inline-block", width: "90px", height: "16px", background: "var(--npati-gray-100)", borderRadius: "4px" }} /></td>
@@ -264,6 +392,17 @@ export function DatabasesListView({
           <table className="automations-table">
             <thead>
               <tr>
+                <th style={{ width: "40px", textAlign: "center" }}>
+                  <input
+                    type="checkbox"
+                    aria-label={isUk ? "Вибрати всі бази даних" : "Select all databases"}
+                    checked={allFilteredSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = someFilteredSelected && !allFilteredSelected;
+                    }}
+                    onChange={handleToggleSelectAll}
+                  />
+                </th>
                 <th style={{ minWidth: "220px" }}>{isUk ? "Назва" : "Name"}</th>
                 <th style={{ minWidth: "160px" }}>{isUk ? "Компанія" : "Company"}</th>
                 <th style={{ width: "150px" }}>{isUk ? "Провайдер" : "Provider"}</th>
@@ -278,8 +417,17 @@ export function DatabasesListView({
               {filteredBackends.map((backend) => {
                 const list = environments[backend.id] ?? [];
                 const attached = projects.filter((item) => item.dataBackendId === backend.id).length;
+                const isSelected = selectedIds.has(backend.id);
                 return (
-                  <tr key={backend.id}>
+                  <tr key={backend.id} className={isSelected ? "row-selected" : undefined}>
+                    <td style={{ textAlign: "center", width: "40px" }}>
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => handleToggleSelect(backend.id)}
+                        aria-label={isUk ? `Вибрати ${backend.name}` : `Select ${backend.name}`}
+                      />
+                    </td>
                     <td className="automation-title-cell">
                       <button type="button" className="ds-name-link" onClick={() => setDetailId(backend.id)}>{backend.name}</button>
                       <p>{isUk ? "Оновлено" : "Updated"}: {backend.updatedAt ? new Date(backend.updatedAt).toLocaleDateString(isUk ? "uk-UA" : "en-US") : "—"}</p>
