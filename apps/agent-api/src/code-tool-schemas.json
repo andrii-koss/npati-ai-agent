@@ -3418,5 +3418,74 @@
       }
     },
     "description": "Share the current project database with another website/code project belonging to the same owner and company. Inspect source backend ID. Preview with dryRun to obtain target currentBackendId; pass that as expectedTargetBackendId (null for an unattached site). Execution requires confirmation, refuses concurrent attachment changes. Does not delete the previous database or promote dev to production. Configure each app with its own Project API URL and publishable key. With dryRun and no targetProjectId, list eligible sites with IDs and current attachments; choose one before execution."
+  },
+  {
+    "name": "code.data.backend.create",
+    "version": 1,
+    "status": "active",
+    "description": "Create and attach a database to the current project only when the user's request or required persistent shared data needs one. Explain the reason. Idempotent: reuse the current attachment on retry. Returns safe database identity and public SDK configuration, never credentials. Tell the user after success.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "reason"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": [
+        "kind",
+        "tool",
+        "toolVersion",
+        "schemaVersion",
+        "trust",
+        "note",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "code_tool_result"
+        },
+        "tool": {
+          "const": "code.data.backend.create"
+        },
+        "toolVersion": {
+          "type": "integer"
+        },
+        "schemaVersion": {
+          "type": "integer"
+        },
+        "trust": {
+          "const": "untrusted_data"
+        },
+        "note": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "truncation": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "data": {
+          "type": "object"
+        }
+      }
+    }
   }
 ]

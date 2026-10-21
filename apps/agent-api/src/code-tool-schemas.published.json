@@ -1,6 +1,6 @@
 {
-  "manifestVersion": 13,
-  "checksum": "de1711a2f4a4019846ad64fdd619a0ae7368893934fb1f9c5ee1dad5dca47d6f",
+  "manifestVersion": 14,
+  "checksum": "8cc857eeb17be7f185ca5511fee4d7203520eb1098c20c1698d1772dd8722587",
   "tools": [
     {
       "key": "code.agent.continue@1",
@@ -57,6 +57,14 @@
       "status": "active",
       "checksum": "205b996c8d477de0491928f12e30c403e0e32d5ba8e630f713f3df32fee0db6a",
       "canonical": "{\"deprecatedAt\":null,\"description\":\"Share the current project database with another website/code project belonging to the same owner and company. Inspect source backend ID. Preview with dryRun to obtain target currentBackendId; pass that as expectedTargetBackendId (null for an unattached site). Execution requires confirmation, refuses concurrent attachment changes. Does not delete the previous database or promote dev to production. Configure each app with its own Project API URL and publishable key. With dryRun and no targetProjectId, list eligible sites with IDs and current attachments; choose one before execution.\",\"inputSchema\":{\"additionalProperties\":false,\"properties\":{\"dryRun\":{\"type\":\"boolean\"},\"expectedBackendId\":{\"maxLength\":128,\"minLength\":1,\"type\":\"string\"},\"expectedTargetBackendId\":{\"maxLength\":128,\"minLength\":1,\"type\":[\"string\",\"null\"]},\"targetProjectId\":{\"maxLength\":128,\"minLength\":1,\"type\":\"string\"}},\"required\":[\"expectedBackendId\"],\"type\":\"object\"},\"name\":\"code.data.backend.attach\",\"outputSchema\":{\"additionalProperties\":false,\"properties\":{\"data\":{\"type\":\"object\"},\"kind\":{\"const\":\"code_tool_result\"},\"note\":{\"type\":\"string\"},\"schemaVersion\":{\"type\":\"integer\"},\"tool\":{\"const\":\"code.data.backend.attach\"},\"toolVersion\":{\"type\":\"integer\"},\"truncated\":{\"type\":\"boolean\"},\"truncation\":{\"additionalProperties\":true,\"type\":\"object\"},\"trust\":{\"const\":\"untrusted_data\"}},\"required\":[\"kind\",\"tool\",\"toolVersion\",\"schemaVersion\",\"trust\",\"note\",\"data\"],\"type\":\"object\"},\"status\":\"active\",\"version\":1}"
+    },
+    {
+      "key": "code.data.backend.create@1",
+      "name": "code.data.backend.create",
+      "version": 1,
+      "status": "active",
+      "checksum": "e01d939ef20edf0411132cd954fee4c1f42fa47d42028dc685e2d2bc8f995367",
+      "canonical": "{\"deprecatedAt\":null,\"description\":\"Create and attach a database to the current project only when the user's request or required persistent shared data needs one. Explain the reason. Idempotent: reuse the current attachment on retry. Returns safe database identity and public SDK configuration, never credentials. Tell the user after success.\",\"inputSchema\":{\"additionalProperties\":false,\"properties\":{\"name\":{\"maxLength\":200,\"minLength\":1,\"type\":\"string\"},\"reason\":{\"maxLength\":1000,\"minLength\":1,\"type\":\"string\"}},\"required\":[\"name\",\"reason\"],\"type\":\"object\"},\"name\":\"code.data.backend.create\",\"outputSchema\":{\"additionalProperties\":false,\"properties\":{\"data\":{\"type\":\"object\"},\"kind\":{\"const\":\"code_tool_result\"},\"note\":{\"type\":\"string\"},\"schemaVersion\":{\"type\":\"integer\"},\"tool\":{\"const\":\"code.data.backend.create\"},\"toolVersion\":{\"type\":\"integer\"},\"truncated\":{\"type\":\"boolean\"},\"truncation\":{\"additionalProperties\":true,\"type\":\"object\"},\"trust\":{\"const\":\"untrusted_data\"}},\"required\":[\"kind\",\"tool\",\"toolVersion\",\"schemaVersion\",\"trust\",\"note\",\"data\"],\"type\":\"object\"},\"status\":\"active\",\"version\":1}"
     },
     {
       "key": "code.data.rows.list@1",

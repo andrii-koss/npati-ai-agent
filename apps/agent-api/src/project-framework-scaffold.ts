@@ -1,3 +1,4 @@
+import { minimalHtml, finalizeMinimalScaffold } from "./project-minimal-scaffold";
 import { randomBytes } from "node:crypto";
 import { canonicalFrameworkName, type SupportedProjectFramework } from "@npati/shared";
 
@@ -23,49 +24,9 @@ function packageJson(name: string, scripts: Record<string, string>, dependencies
   return JSON.stringify({ name: slug(name), version: "0.1.0", private: true, scripts, dependencies, devDependencies }, null, 2) + "\n";
 }
 
-function htmlPage(title: string, framework: string, body: string, script = ""): string {
-  return `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${title}</title>
-  <style>
-    :root { color-scheme: dark; --bg:#0b1020; --card:#151c33; --text:#f7f9ff; --muted:#a9b4d0; --accent:#6d8cff; }
-    * { box-sizing: border-box; }
-    body { margin:0; min-height:100vh; font-family: ui-sans-serif, system-ui, sans-serif; background: radial-gradient(circle at 20% 0%, #1d2a57 0, var(--bg) 55%); color:var(--text); }
-    header { display:flex; align-items:center; justify-content:space-between; max-width:1060px; margin:0 auto; padding:24px; }
-    nav a { color:var(--muted); text-decoration:none; margin-left:18px; }
-    nav a:hover { color:var(--text); }
-    main { max-width:1060px; margin:0 auto; padding:56px 24px 80px; }
-    .badge { display:inline-block; padding:6px 14px; border:1px solid #3a4b80; border-radius:999px; color:#b9c7ff; font-size:13px; }
-    h1 { font-size: clamp(38px, 7vw, 68px); line-height:1.03; margin:24px 0 18px; letter-spacing:-.04em; }
-    p { color:var(--muted); font-size:18px; line-height:1.65; max-width:650px; }
-    .card { background:var(--card); border:1px solid #273154; border-radius:22px; padding:28px; margin-top:38px; }
-    button { border:0; border-radius:12px; padding:12px 20px; background:var(--accent); color:white; font-weight:700; cursor:pointer; }
-    button:hover { filter:brightness(1.1); }
-    .count { font-size:34px; font-weight:800; margin-left:14px; }
-  </style>
-</head>
-<body>
-  <header><strong>${title}</strong><nav><a href="/">Home</a><a href="#features">Features</a></nav></header>
-  <main>${body}</main>
-  ${script ? `<script>${script}</script>` : ""}
-</body>
-</html>
-`;
-}
-
-const commonBody = (framework: string, title: string) => `<span class="badge">${framework}</span>
-  <h1>${title}</h1>
-  <p>A responsive starter created by the NPATI Coding Agent. It has a real build, a health endpoint and working browser interactions.</p>
-  <section class="card" id="features">
-    <h2>Interactive demo</h2>
-    <p>Click the button to confirm that client-side JavaScript is running.</p>
-    <button id="counter">Click me</button><span class="count" id="count">0</span>
-  </section>`;
-
-const counterScript = `let n=0;const b=document.getElementById('counter'),c=document.getElementById('count');b.addEventListener('click',()=>{n+=1;c.textContent=String(n);});`;
+function htmlPage(title: string, _framework: string, _body: string, _script = ""): string { return minimalHtml(title); }
+const commonBody = (_framework: string, _title: string) => "";
+const counterScript = "";
 
 function spaIndex(title: string, entry: string, id = "app"): string {
   return `<!doctype html>\n<html lang="en">\n<head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>${title}</title></head>\n<body><div id="${id}"></div><script type="module" src="${entry}"></script></body>\n</html>\n`;
@@ -161,7 +122,7 @@ function expressApp(name: string, framework: string): Record<string, string> {
   return {
     "package.json": packageJson(name, { build: "tsc -p tsconfig.json", start: "node dist/server.js" }, { express: "^4.21.2" }, { "@types/express": "^5.0.0", "@types/node": "^22.10.5", typescript: "^5.7.2" }),
     "tsconfig.json": JSON.stringify({ compilerOptions: { target: "ES2022", module: "NodeNext", moduleResolution: "NodeNext", outDir: "dist", rootDir: "src", strict: true, esModuleInterop: true, skipLibCheck: true, forceConsistentCasingInFileNames: true }, include: ["src/**/*.ts"] }, null, 2) + "\n",
-    "src/server.ts": `import express from "express";\nconst app = express();\nconst port = Number(process.env.PORT || 3000);\nconst page = ${JSON.stringify(htmlPage(name, framework, commonBody(framework, name), counterScript))};\napp.get("/", (_req, res) => res.type("html").send(page));\napp.get("/health", (_req, res) => res.json({ status: "ok", framework: "Express" }));\napp.get("/api/info", (_req, res) => res.json({ name: ${JSON.stringify(name)}, framework: "Express" }));\napp.listen(port, "0.0.0.0", () => console.log(\`Express listening on \${port}\`));\n`,
+    "src/server.ts": `import express from "express";\nconst app = express();\nconst port = Number(process.env.PORT || 3000);\nconst page = ${JSON.stringify(htmlPage(name, framework, commonBody(framework, name), counterScript))};\napp.get("/", (_req, res) => res.type("html").send(page));\napp.get("/health", (_req, res) => res.json({ status: "ok", framework: "Express" }));\napp.get("/api/info", (_req, res) => res.json({ name: ${JSON.stringify(name)}, framework: "Express" }));\napp.listen(port, "0.0.0.0");\n`,
     "Makefile": `build:\n\tnpm run build\n`,
   };
 }
@@ -289,10 +250,11 @@ export function createFrameworkScaffold(input: FrameworkScaffoldInput): Record<s
   if (!canonical || canonical === "Next.js" || canonical === "Expo" || !BUILDERS[canonical]) {
     throw new Error(`Unsupported framework for deterministic scaffolding: ${input.framework}`);
   }
+  if (canonical === "HTML/CSS") return {};
   const files = BUILDERS[canonical]!(input.projectName, canonical);
   // The project context is written separately; a README makes the starter self-describing.
   files["README.md"] = `# ${input.projectName}\n\nFramework: **${canonical}**\n\nThis project was scaffolded by the NPATI Coding Agent. Build and preview commands are managed by the platform.\n\n## Request\n\n${input.prompt}\n`;
-  return files;
+  return finalizeMinimalScaffold(files, canonical);
 }
 
 export function canonicalScaffoldFramework(value: string): SupportedProjectFramework | undefined {

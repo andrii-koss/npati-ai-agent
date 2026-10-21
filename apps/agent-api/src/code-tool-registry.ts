@@ -200,8 +200,9 @@ export const PUBLISHED_V9_TOOL_SCHEMA_CHECKSUM = "b498efdc44e06ea1fd8b75860947a7
 export const V10_TOOL_SCHEMAS = CODE_TOOL_SCHEMAS.filter((tool) => !tool.name.startsWith("code.data.") && !["code.agent.spawn_async","code.agent.continue","code.agent.send_message","code.agent.interrupt"].includes(tool.name));
 export const PUBLISHED_V10_TOOL_SCHEMA_CHECKSUM = "880e0aa6ec32a5ee666864bd9174192e486f559205b8657ea3365c47c7885050";
 export const V11_TOOL_SCHEMAS = CODE_TOOL_SCHEMAS.filter(tool => !tool.name.startsWith("code.data."));
-export const V12_TOOL_SCHEMAS = CODE_TOOL_SCHEMAS.filter(tool => !["code.data.schema.modify", "code.data.rows.list", "code.data.rows.transfer", "code.data.backend.attach"].includes(tool.name));
-export const CODE_TOOL_MANIFEST_VERSION = 13;
+export const V12_TOOL_SCHEMAS = CODE_TOOL_SCHEMAS.filter(tool => !["code.data.backend.create", "code.data.schema.modify", "code.data.rows.list", "code.data.rows.transfer", "code.data.backend.attach"].includes(tool.name));
+export const V13_TOOL_SCHEMAS = CODE_TOOL_SCHEMAS.filter(tool => tool.name !== "code.data.backend.create");
+export const CODE_TOOL_MANIFEST_VERSION = 14;
 
 /* Step 6 publishes additive controls and spawn_async in v11; spawn@1 and manifests v1?v10 stay frozen. */
 
@@ -220,7 +221,7 @@ export const CODE_TOOL_MANIFEST_VERSION = 13;
  * places that report the artifact as stale, while `assertManifestConsistent()` — and therefore the manifest
  * the application publishes — is already satisfied.
  */
-export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "de1711a2f4a4019846ad64fdd619a0ae7368893934fb1f9c5ee1dad5dca47d6f";
+export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "8cc857eeb17be7f185ca5511fee4d7203520eb1098c20c1698d1772dd8722587";
 
 /**
  * Checksum of the v8 published set (36 tools: everything through the eleven `code.git.*` tools). Frozen for
@@ -393,6 +394,7 @@ export const KNOWN_TOOL_MANIFESTS: readonly CodeToolManifest[] = [
   toolManifest(V10_TOOL_SCHEMAS, 10),
   toolManifest(V11_TOOL_SCHEMAS, 11),
   toolManifest(V12_TOOL_SCHEMAS, 12),
+  toolManifest(V13_TOOL_SCHEMAS, 13),
   toolManifest(CODE_TOOL_SCHEMAS, CODE_TOOL_MANIFEST_VERSION),
 ];
 

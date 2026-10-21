@@ -51,6 +51,8 @@ export interface CodeSessionRunPort {
     verificationTools?: readonly string[];
     forceVerification?: boolean;
     requireImplementation?: boolean;
+    /** Trusted creation context; never set for existing-project edits. */
+    emptyHtmlWorkspace?: boolean;
     maxTurns?: number;
     onActivity?: (event: DevelopmentProcessProgressItem) => Promise<void>;
   }): Promise<unknown>;
@@ -87,6 +89,8 @@ export interface CodeSessionRunInput {
   allowStylePreview?: boolean;
   /** Creation must change source before verification can report success. */
   requireImplementation?: boolean;
+  /** Trusted creation context; never set for existing-project edits. */
+  emptyHtmlWorkspace?: boolean;
   onActivity?: (event: DevelopmentProcessProgressItem) => Promise<void>;
   maxTurns?: number;
   ctx: AuthContext;
@@ -193,6 +197,7 @@ export class CodeSessionRunExecutor {
         ...(input.websiteEdit ? { websiteEdit: true } : {}),
         ...(input.allowStylePreview ? { allowStylePreview: true } : {}),
         ...(input.requireImplementation ? { requireImplementation: true } : {}),
+        ...(input.emptyHtmlWorkspace ? { emptyHtmlWorkspace: true } : {}),
         ...(input.onActivity ? { onActivity: input.onActivity } : {}),
         ...(input.maxTurns !== undefined ? { maxTurns: input.maxTurns } : {}),
         ...(input.runId ? { runId: input.runId } : {}),

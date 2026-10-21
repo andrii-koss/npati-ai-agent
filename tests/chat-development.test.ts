@@ -467,3 +467,30 @@ it("accepts a new request without loading replay, activity or terminal transcrip
  const result=await f.start("Create a HTML website","second");expect(result.processes).toHaveLength(1);
  expect(replay).not.toHaveBeenCalled();expect(turns).not.toHaveBeenCalled();expect(logs).not.toHaveBeenCalled();
 });
+
+it("skips scaffold and dependency progress entirely for a new plain HTML project",async()=>{
+ const f=await fixture();await f.start("Create a store on HTML / CSS / JavaScript");
+ await vi.waitFor(()=>expect(f.controls.size).toBe(1));
+ expect(f.preview.buildProject).not.toHaveBeenCalled();
+ const process=(await f.service.list(owner))[0]!;
+ expect(process.progress?.some(event=>event.stage==="scaffold"||event.stage==="dependencies")).toBe(false);
+ expect(f.controls.get(process.projectId!)!.input.prompt).toContain("NEW, EMPTY");
+});
+
+
+describe("direct HTML startup", () => {
+  it("does not scan an empty workspace, publish setup operations or claim an uncontended queue", async () => {
+    const f = await fixture();
+    const detect = vi.spyOn(f.code, "detectAndPersist");
+    const writes = vi.spyOn(f.store, "setUserSetting");
+    const result = await f.start("Create an online store in HTML / CSS / JavaScript");
+    expect(result.processes[0]).toMatchObject({ framework: "HTML/CSS", status: "running" });
+    await vi.waitFor(() => expect(f.controls.size).toBe(1));
+    expect(detect).not.toHaveBeenCalled();
+    const process = (await f.service.list(owner))[0]!;
+    expect(process.progress?.some(item => ["project", "scaffold", "dependencies"].includes(item.stage))).toBe(false);
+    const published = writes.mock.calls.filter(call => call[1] === "chat-development-processes:v1").flatMap(call => Array.isArray(call[2]) ? call[2] : []);
+    expect(published.some((item: {status:string}) => ["preparing", "queued"].includes(item.status))).toBe(false);
+    f.finish(process.projectId!);
+  });
+});

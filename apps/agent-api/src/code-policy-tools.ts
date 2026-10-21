@@ -117,6 +117,7 @@ export const REVIEW_SAFE_GIT_TOOLS = new Set(["code.git.status", "code.git.diff"
 
 export const SHELL_TOOLS = new Set(["code.shell.exec_async", "code.shell.exec", "code.shell.process.start", "code.shell.process.stop"]);
 export const WRITE_TOOLS = new Set([
+  "code.data.backend.create",
   "code.data.schema.apply",
   "code.data.schema.modify",
   "code.data.rows.transfer",

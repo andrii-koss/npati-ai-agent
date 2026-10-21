@@ -41,6 +41,7 @@ export function formatSchemaForProjectContext(backendName: string, schema: Schem
     `- Client SDK: import { createProjectClient } from "${PROJECT_SDK_IMPORT_PATH}" — generated file ${PROJECT_SDK_FILE_NAME} sits in the project root, no package install is required.`,
     "- Usage: createProjectClient({ apiUrl: PROJECT_API_URL, publishableKey: PROJECT_PUBLISHABLE_KEY }).",
     "- Auth: client.auth.signUp(credentials), signIn, signOut, getUser; Data queries: client.from(\"table\").list() returns Promise<{ data: Row[], meta: { total: number } }> (access rows via res.data), get(id) returns Promise<Row>, create(row), update(id, row), delete(id).",
+    "- For a plain HTML/JavaScript site, use fetch with the public API URL/key; do not import an uncompiled TypeScript SDK directly into a browser.",
     "- Never put PROJECT_SECRET_KEY, DATABASE_URL or any database credential into generated client code.",
     "- Send the user access token through the SDK. Access policies and row level security apply to every request.",
   ];
@@ -104,7 +105,18 @@ export class AgentDataStudioService {
     private readonly authService?: ProjectAuthService,
     /** D7: dev → prod promote (approval-gated). */
     private readonly promote?: PromoteService,
+    private readonly backendCreator?: (ctx: AuthContext, companyId: string, projectId: string, name: string) => Promise<{ created: boolean; backend: { id: string; name: string; status: string }; environment: Record<string,string> }>,
   ) {}
+
+
+  async createBackend(ctx: AuthContext, companyId: string, projectId: string, input: { name: string; reason: string }) {
+    await this.store.getProject(ctx, companyId, projectId);
+    if (!this.backendCreator) throw new DataStudioError(503,"create_backend","Database provisioning is unavailable",true,"PROJECT_DATABASE_UNAVAILABLE");
+    const result = await this.backendCreator(ctx, companyId, projectId, input.name);
+    const { backend } = await this.context(ctx, companyId, projectId);
+    await syncProjectMdSchema(ctx, companyId, projectId, backend.name, await this.provider.introspectSchema(backend,"dev"), this.workspace);
+    return { ...result, reason: input.reason, userMessage: result.created ? "Created database: " + result.backend.name : "Using existing database: " + result.backend.name };
+  }
 
   private async context(ctx: AuthContext, companyId: string, projectId: string, requestedEnv?: string) {
     if (requestedEnv && requestedEnv !== "dev") {

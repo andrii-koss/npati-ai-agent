@@ -578,6 +578,7 @@ describe("Step 4 — Project Preview & Changes", () => {
 
     it("routes Next.js assets through the runner without a sandbox IP", async () => {
       const { preview, workspace, sandbox, company, project } = await fixture();
+      await workspace.createFile(owner, company.id, project.id, "index.html", "<html><head></head><body>Preview</body></html>");
       const started = await preview.startPreview(owner, company.id, project.id);
       const proxy = vi.spyOn(sandbox, "proxyPreview").mockResolvedValue({
         status: 200, headers: { "content-type": "text/html" },
@@ -600,6 +601,7 @@ describe("Step 4 — Project Preview & Changes", () => {
 
     it("keeps preview authorization in a project-scoped HttpOnly cookie for internal navigation", async () => {
       const { preview, workspace, sandbox, company, project } = await fixture();
+      await workspace.createFile(owner, company.id, project.id, "index.html", "<html><head></head><body>Preview</body></html>");
       const started = await preview.startPreview(owner, company.id, project.id);
       vi.spyOn(sandbox, "proxyPreview").mockResolvedValue({
         status: 200, headers: { "content-type": "text/html" },

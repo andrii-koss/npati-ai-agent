@@ -1,3 +1,4 @@
+import { createProjectImplementationPrompt } from "./project-creation-prompt";
 import { resolveCodingConversationLanguage, codingChatResponseInstruction, chatLanguageInstruction } from "./company-chat-i18n";
 import { randomUUID } from "node:crypto";
 import { DEVELOPMENT_PROCESS_SETTINGS_KEY, sanitizeExecutionTrace, developmentIsActive, planChatDevelopment, type DevelopmentProcess, type DevelopmentTarget } from "@npati/shared";
@@ -259,7 +260,7 @@ export class ChatDevelopmentService {
         conversationId: index === 0 ? conversationId! : undefined,
         parentConversationId: conversationId!, responseLanguage, businessId: input.businessId,
         name: localizedName, framework: target.framework,
-        status: "preparing",
+        status: target.framework === "HTML/CSS" ? "running" : "preparing",
         hidden: false, createdAt: now, updatedAt: now
       };
     });
@@ -390,36 +391,49 @@ export class ChatDevelopmentService {
     let runResult: unknown;
     let session: Awaited<ReturnType<CodeService["createSession"]>> | undefined;
     const ensureActive = () => { if (controller.signal.aborted) throw new DevelopmentError("Stopped by request"); };
+    const plainHtml = target.framework === "HTML/CSS";
     try {
       if (!process.conversationId) {
         process.conversationId = (await this.d.store.createNeutralConversation(ctx, process.name)).id;
         await this.d.store.appendNeutralMessage(ctx, process.conversationId, "user", message);
       }
-      await this.update(ctx, process.id, { conversationId: process.conversationId }, { stage: "project", title: "Preparing project workspace", details: { tool: "code.workspace", status: "running", agentId: "System" } });
+      if (!plainHtml) await this.update(ctx, process.id, { conversationId: process.conversationId }, { stage: "project", title: "Preparing project workspace", details: { tool: "code.workspace", status: "running", agentId: "System" } });
       ensureActive();
       const { project: raw } = await this.d.projects.create(ctx, process.companyId, {
         name: process.name, type: target.kind === "mobile_app" ? "mobile_app" : "code_project", description: message.slice(0, 5000),
-      }, "chat-development:" + process.id, { attachDataBackend: target.framework !== "HTML/CSS" });
+      }, "chat-development:" + process.id, { attachDataBackend: false });
       process.projectId = raw.id;
-      await this.update(ctx, process.id, { projectId: raw.id, conversationId: process.conversationId }, { stage: "project", title: "Project workspace prepared", details: { tool: "code.workspace", status: "completed", agentId: "System" } });
+      if (plainHtml) await this.patch(ctx, process.id, { projectId: raw.id, conversationId: process.conversationId });
+      else await this.update(ctx, process.id, { projectId: raw.id, conversationId: process.conversationId }, { stage: "project", title: "Project workspace prepared", details: { tool: "code.workspace", status: "completed", agentId: "System" } });
       await this.card(ctx, process, raw, "Агент готує проєкт. Стан запуску відображається над полем чату.");
       ensureActive();
-      await this.report(ctx, process.id, "scaffold", "Preparing the existing " + target.framework + " template", { tool: "code.scaffold", status: "running", agentId: "System" });
+      if (!plainHtml) await this.report(ctx, process.id, "scaffold", "Preparing minimal " + target.framework + " configuration", { tool: "code.scaffold", status: "running", agentId: "System" });
       const project = target.kind === "mobile_app"
         ? await this.d.preparer.prepareCodingMobile(ctx, raw, message)
         : await this.d.preparer.prepareCodingWebsite(ctx, raw, message, target.framework);
       ensureActive();
-      await this.report(ctx, process.id, "scaffold", "Project template prepared", { tool: "code.scaffold", status: "completed", agentId: "System" });
-      await this.d.code.detectAndPersist(ctx, process.companyId, project.id);
+      if (!plainHtml) await this.report(ctx, process.id, "scaffold", "Framework configuration prepared", { tool: "code.scaffold", status: "completed", agentId: "System" });
+      // An empty HTML workspace has no manifests to inspect. Detect the real files during final verification.
+      if (!plainHtml) await this.d.code.detectAndPersist(ctx, process.companyId, project.id);
       session = await this.d.code.createSession(ctx, process.companyId, project.id, { mode: "auto" });
       process.sessionId = session.id; process.runId = randomUUID();
       await this.card(ctx, process, project, "Coding Agent session started.");
-      await this.patch(ctx, process.id, { sessionId: session.id, runId: process.runId, status: "queued" });
-      lease = await this.d.admission.admit({ workspaceId: ctx.workspaceId, userId: ctx.userId, companyId: process.companyId, sessionId: session.id }, { signal: controller.signal });
+      await this.patch(ctx, process.id, { sessionId: session.id, runId: process.runId });
+      let queueUpdate = Promise.resolve();
+      lease = await this.d.admission.admit({ workspaceId: ctx.workspaceId, userId: ctx.userId, companyId: process.companyId, sessionId: session.id }, {
+        signal: controller.signal,
+        onQueued: () => {
+          queueUpdate = this.patch(ctx, process.id, { status: "queued" }).catch(error => {
+            this.d.log.warn({ err: error, processId: process.id }, "development_queue_projection_failed");
+          });
+        },
+      });
+      await queueUpdate;
       ensureActive();
+      await this.patch(ctx, process.id, { status: "running" });
       sink = this.d.background.start({ runId: process.runId, sessionId: session.id, companyId: process.companyId, userId: ctx.userId, projectId: project.id });
       controller.signal.addEventListener("abort", () => this.d.background.abort(process.runId!, "Stopped by request"), { once: true });
-      if (this.d.preview) {
+      if (this.d.preview && !plainHtml) {
         await this.d.flags.assertEnabled(ctx, "code.shell", { companyId: process.companyId });
         let reports = Promise.resolve();
         await this.d.preview.buildProject(ctx, process.companyId, project.id, (stage, details) => {
@@ -435,9 +449,9 @@ export class ChatDevelopmentService {
       await this.update(ctx, process.id, { status: "running" }, { stage: "agent", title: "Coding Agent is implementing the requested project", details: { tool: "coding_agent", status: "active", agentId: "Coding Agent" } });
       const outcome = await this.d.executor.execute({
         responseLanguage: process.responseLanguage as import("./company-chat-i18n").CompanyChatLanguage,
-        ctx, session, runId: process.runId, requireImplementation: true,
+        ctx, session, runId: process.runId, requireImplementation: true, emptyHtmlWorkspace: plainHtml,
         onActivity: event => this.recordActivity(ctx, process.companyId, session!.id, process.conversationId, { ...event, language: process.responseLanguage }),
-        prompt: "Begin with a brief natural acknowledgement in the user's language alongside your first tool calls, then implement the request. User request: " + message + "\nYour assigned project is " + target.name + " (" + target.kind + "). This is a framework deployment smoke test; the starter is intentionally minimal. Do not add tests, CI, new architecture or unrequested features. Do not inspect or rewrite the starter's /health route: it is already valid. Implement ONLY this project's complete user specification, including every requested page and working interaction. Other independent requested projects have their own workspaces. The existing " + target.framework + " template has already been prepared by the system. Reuse its working routes and assets. Implement exactly the requested features. Do not regenerate shared components that you have already implemented. For an existing file, read it and use code.fs.edit; use code.fs.write only for a new file. Start with " + (target.kind === "mobile_app" ? "App.tsx" : target.framework === "HTML/CSS" ? "index.html" : target.framework === "Next.js" ? "package.json and app/page.tsx" : "package.json and the framework's main entry point") + ". The system runs the production build and verification automatically after your edits; do NOT call code.verify.run yourself. Stop after the requested edits are saved; do not keep inspecting or rebuilding once the requested H1, title and section are present. If a limit prevents completion, state which deliverables remain; never claim the site is complete." + chatLanguageInstruction(message, [], process.responseLanguage as import("./company-chat-i18n").CompanyChatLanguage) + codingChatResponseInstruction(),
+        prompt: createProjectImplementationPrompt(message, target) + chatLanguageInstruction(message, [], process.responseLanguage as import("./company-chat-i18n").CompanyChatLanguage) + codingChatResponseInstruction(),
         cancelRequested: () => controller.signal.aborted,
         abort: () => this.d.background.abort(process.runId!, "Stopped by request"),
         sink: { signal: sink.signal, emitResult: result => sink!.emit("result", result), emitTerminal: (status, reason) => sink!.finish(status, reason) },

@@ -7,7 +7,7 @@ import { ChatDevelopmentProgress } from "../ChatDevelopmentProgress";
 import { I18nProvider } from "../i18n";
 let root: Root | undefined;
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;document.body.innerHTML="";vi.restoreAllMocks();});
-it("updates one collapsed run row, retains all operations inside click-open history and hides service labels",async()=>{
+it("updates one collapsed run row, retains actual operations inside click-open history and hides service labels",async()=>{
   localStorage.setItem("npati_language","en");Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});const host=document.createElement("div");document.body.append(host);root=createRoot(host);
   let process:DevelopmentProcess={id:"process",companyId:"company",parentConversationId:"parent",name:"Site",framework:"Next.js",status:"running",hidden:false,createdAt:"",updatedAt:"",runId:"run",initialRunId:"run",responseLanguage:"uk",progress:[]};
   const steps=[{stage:"project",tool:"code.workspace"},{stage:"files",tool:"code.fs.edit"},{stage:"dependencies",command:"npm install"},{stage:"build",command:"npm run build"}];
@@ -21,12 +21,12 @@ it("updates one collapsed run row, retains all operations inside click-open hist
   }
   expect(host.textContent).toContain("npm run build");expect(host.textContent).not.toContain("npm install");expect(host.querySelector(".coding-run-header")?.textContent).toContain("\u0412\u0438\u043a\u043e\u043d\u0443\u0454");
   await act(async()=>host.querySelector<HTMLButtonElement>(".coding-run-header")!.click());
-  expect(host.querySelectorAll(".coding-operation-history .codex-trace-row")).toHaveLength(4);expect(host.textContent).toContain("npm install");
+  expect(host.querySelectorAll(".coding-operation-history .codex-trace-row")).toHaveLength(3);expect(host.textContent).toContain("npm install");
   const commandHeader=host.querySelectorAll<HTMLButtonElement>(".coding-operation-history .codex-trace-row-header")[2]!;
   commandHeader.focus();expect(document.activeElement).toBe(commandHeader);await act(async()=>commandHeader.click());expect(commandHeader.getAttribute("aria-expanded")).toBe("true");
   process={...process,status:"completed",runStatuses:{run:"completed"},progress:process.progress!.map(item=>({...item,status:"completed"}))};
   await act(async()=>root!.render(<I18nProvider><ChatDevelopmentProgress process={process}/></I18nProvider>));
-  expect(host.querySelector(".coding-run-header")).toBe(header);expect(host.querySelector(".coding-run-header")?.textContent).toContain("4");
+  expect(host.querySelector(".coding-run-header")).toBe(header);expect(host.querySelector(".coding-run-header")?.textContent).toContain("3");
   for(const text of ["SYSTEM","Completed","NPATI Coding Agent"])expect(host.textContent).not.toContain(text);
   expect(host.querySelector(".codex-trace-status-pill")).toBeNull();
   await act(async()=>host.querySelector<HTMLButtonElement>(".coding-run-header")!.click());expect(host.querySelector(".codex-trace-collapse")?.getAttribute("aria-hidden")).toBe("true");

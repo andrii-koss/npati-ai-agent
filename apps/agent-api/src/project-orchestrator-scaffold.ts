@@ -1,3 +1,4 @@
+import { minimalNextScaffold, finalizeMinimalScaffold } from "./project-minimal-scaffold";
 import type { AuthContext, CompanyAgent, CompanyAgentRunDetails, Project, WorkspaceStore } from "@npati/workspace";
 import type { PatchMutation } from "./code-patch-transaction";
 import type { ProjectService } from "./project-service";
@@ -11,8 +12,6 @@ import {
   canBuildMobileApp,
 } from "./project-agent-capabilities";
 import {
-  createDefaultWebsiteDocument,
-  getWebsiteAdapter,
   createMobileAppScaffold,
   defaultAppScheme,
   slugifyProjectName,
@@ -186,6 +185,9 @@ export async function scaffoldMobileAppProject(
   scheme: string,
 ): Promise<void> {
   const scaffold = createMobileAppScaffold({ name: projectName, slug: slugifyProjectName(projectName), scheme });
+  for (const file of Object.keys(scaffold.files)) if (!["package.json","app.config.js","tsconfig.json"].includes(file)) delete scaffold.files[file];
+  scaffold.files["App.tsx"] = 'import { View } from "react-native";\nexport default function App() { return <View />; }\n';
+  finalizeMinimalScaffold(scaffold.files, "Expo");
   for (const [filePath, content] of Object.entries(scaffold.files)) {
     try { await projectWorkspace.readFile(ctx, companyId, projectId, filePath); }
     catch { await projectWorkspace.createFile(ctx, companyId, projectId, filePath, content); }
@@ -203,16 +205,10 @@ export async function scaffoldWebsiteProject(
 ): Promise<void> {
   const template = /hosting|хост|vps|сервер|domain|домен/iu.test(`${projectName} ${prompt ?? ""}`) ? "hosting" : "landing";
   const canonical = canonicalFrameworkName(framework) ?? (framework === "nextjs" ? "Next.js" : framework === "static" ? "HTML/CSS" : undefined);
-  let files: Record<string, string>;
-  if (!canonical || canonical === "Next.js") {
-    const doc = createDefaultWebsiteDocument(projectName, "nextjs", { template });
-    files = getWebsiteAdapter("nextjs").scaffoldProject(doc);
-  } else if (canonical === "HTML/CSS") {
-    const doc = createDefaultWebsiteDocument(projectName, "static", { template });
-    files = getWebsiteAdapter("static").scaffoldProject(doc);
-  } else {
-    files = createFrameworkScaffold({ projectName, prompt: prompt ?? "", framework: canonical });
-  }
+  if (canonical === "HTML/CSS") return;
+  const files = !canonical || canonical === "Next.js"
+    ? minimalNextScaffold(projectName)
+    : createFrameworkScaffold({ projectName, prompt: prompt ?? "", framework: canonical });
   const plan: PatchMutation[] = [];
   for (const [filePath, content] of Object.entries(files)) {
     try { await projectWorkspace.readFile(ctx, companyId, projectId, filePath); }
@@ -245,29 +241,12 @@ export async function initSharedProjectContext(
   const isMobileApp = details.projectType === "mobile_app";
   const content = isMobileApp
     ? [
-        `# ${details.name}`,
+        "# " + details.name,
         "",
-        "## Purpose & Overview",
-        details.purpose || details.description || "AI-generated mobile app (Expo / React Native).",
-        "",
-        "## Architecture & Tech Stack",
-        `- Framework: ${details.framework || "Expo (React Native)"} with TypeScript`,
-        "- Preview: Expo Web export served in the sandbox (Live Preview); store builds are not part of this step.",
-        "",
-        "## Backend Rules (Project API & Project Auth)",
-        "- This app shares the DataBackend of its website: same collections, same end users, same access policies and RLS. Never create or copy a database.",
-        "- Use only PROJECT_PUBLISHABLE_KEY (public). PROJECT_SECRET_KEY, DATABASE_URL and any database role credentials must never appear in the app code, bundle, logs or prompts.",
-        "- Import the client SDK from `./npati-client` (already generated in the project root) and pass the deep link redirect from `./src/config`.",
-        "- Refresh tokens stay in expo-secure-store; never fall back to plain AsyncStorage.",
-        "",
-        "## Engineering Mandate & Guidelines",
-        "- **Targeted Edits Rule**: always search and inspect relevant files before modifying. Make surgical, targeted edits.",
-        "- **No Blind Rewrites**: do NOT recreate the whole project or overwrite unchanged screens.",
-        "- **Preserve Stability**: keep navigation, auth state and API wiring intact across iterations.",
-        "",
-        "## Project Status",
-        `- Initialized: ${new Date().toISOString()}`,
-        "- Mode: Active development",
+        "Framework: Expo / React Native. Minimal app configuration and App.tsx are prepared.",
+        "Implement the requested screens. Do not assume a database, authentication screens or SDK bindings exist.",
+        "Use code.data.backend.create only when the request requires persistent shared data; otherwise no database is needed.",
+        "For later edits, read current source and preserve existing functionality.",
       ].join("\n")
     : [
         `# ${details.name}`,
@@ -281,7 +260,7 @@ export async function initSharedProjectContext(
         "",
         "## Engineering Mandate & Guidelines",
         details.projectType === "code_project"
-          ? "- Source files are the source of truth. Edit this website in the Coding Agent workspace; preserve the attached database/auth SDK and existing routes."
+          ? "- Source files are the source of truth. Edit this website in the Coding Agent workspace; preserve any existing database/auth SDK and routes. A database is optional and must be created explicitly when needed."
           : "- **Single Source of Truth**: website.config.json defines all pages, blocks, components, styles, and content. When modifying or creating sections, keep website.config.json synchronized so the visual editor and live preview stay in sync.",
         "- **Targeted Edits Rule**: Always search and inspect relevant files before modifying. Make surgical, targeted edits.",
         "- **No Blind Rewrites**: Do NOT recreate the entire project or overwrite unchanged components.",

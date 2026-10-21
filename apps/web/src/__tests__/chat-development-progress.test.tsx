@@ -206,3 +206,28 @@ it("never renders routing cards on user/system messages or hides a user's matchi
  const messages=[{role:"assistant" as const,content:"Ready",projectCard:ready},{role:"user" as const,content:"Edit this site",projectCard:ready}];
  expect(developmentCard(messages,0,[],"child")).toMatchObject({id:card.id});
 });
+
+it("shows one working row during blank HTML startup and preserves real queue waits", () => {
+  const startup: DevelopmentProcess = { ...process, framework: "HTML/CSS", status: "preparing", progress: [], runId: undefined, initialRunId: undefined };
+  const markup = renderToStaticMarkup(<ChatDevelopmentProgress process={startup} />);
+  expect(markup.match(/coding-run-header/g)).toHaveLength(1);
+  expect(markup).toContain("Working on the project");
+  expect(markup).toContain("research-active-text");
+  expect(markup).not.toContain(">Preparing<");
+  const queued = renderToStaticMarkup(<ChatDevelopmentProgress process={{ ...startup, status: "queued" }} />);
+  expect(queued).toContain(">Queued<");
+  expect(queued).not.toContain("research-active-text");
+  const restored = renderToStaticMarkup(<ChatDevelopmentProgress process={{ ...startup, status: "completed", progress: [{id:"registration",stage:"project",tool:"code.workspace",title:"Project workspace prepared",status:"completed",at:""}] }} />);
+  expect(restored).toBe("");
+  const failed = renderToStaticMarkup(<ChatDevelopmentProgress process={{ ...startup, status: "failed", progress: [{id:"registration",stage:"project",tool:"code.workspace",title:"Project setup failed",status:"failed",at:""}] }} />);
+  expect(failed).toContain(">Failed<");
+});
+
+
+it("distinguishes provider waiting from streamed code generation without claiming a planning step", () => {
+ const event={id:"model",stage:"model_response",title:"Waiting for model",status:"running" as const,at:""};
+ const waiting=renderToStaticMarkup(<ChatDevelopmentProgress process={{...process,progress:[event]}} />);
+ expect(waiting).toContain("Waiting for the model response");expect(waiting).not.toContain(">Planning<");
+ const generating=renderToStaticMarkup(<ChatDevelopmentProgress process={{...process,progress:[{...event,stage:"model_generation"}]}} />);
+ expect(generating).toContain("Generating code");expect(generating).not.toContain(">Planning<");
+});

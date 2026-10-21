@@ -140,6 +140,10 @@ export interface CodingAgentRunInput {
 
   requireImplementation?: boolean;
 
+  /** Trusted creation context; never set for existing-project edits. */
+
+  emptyHtmlWorkspace?: boolean;
+
   readOnlyIntent?: boolean;
 
   subagentScope?: CodingAgentSubagentScopeInput;

@@ -6,7 +6,7 @@ import { ChatMessageContent } from "./ChatMessageContent";
 import { AgentExecutionTrace } from "./AgentExecutionTrace";
 export function ChatDevelopmentProgress({ process, items, run, isUk }: { process?: DevelopmentProcess; items?: DevelopmentProcessProgressItem[]; run?: CodingActivityRun; isUk?: boolean }) {
   const rows = normalizeActivity(items ?? process?.progress);
-  if (!process || !rows.length && !run && !Object.keys(process.runStatuses ?? {}).length) return null;
+  if (!process || !rows.length && !run && !Object.keys(process.runStatuses ?? {}).length && !["preparing", "running", "queued", "stopping"].includes(process.status)) return null;
   if (run) return <AgentExecutionTrace process={process} items={run.items} run={run} isUk={isUk} />;
   if (items && rows.every(item=>item.kind==="assistant_message")) return <>{rows.map(item=><article key={item.id} className="assistant"><ChatMessageContent content={item.title}/></article>)}</>;
   return <>{chatTimeline([],rows,process.conversationId,process).map(entry=>entry.kind!=="activity" ? null : entry.run ? <AgentExecutionTrace key={entry.item.id} process={process} items={entry.run.items} run={entry.run} isUk={isUk}/> : <article key={entry.item.id} className="assistant"><ChatMessageContent content={entry.item.title}/></article>)}</>;

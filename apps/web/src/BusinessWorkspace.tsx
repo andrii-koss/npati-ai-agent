@@ -439,7 +439,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     const optimisticMessage: Message = { id: optimisticId, role: "user", content: optimisticContent, createdAt: new Date().toISOString(), attachments: sentAttachments };
     setMessages((current) => [...current, optimisticMessage]);
     resetProgress();
-    if (projectProgressIntent.intent !== "CHAT" && !development.project) enqueueProgress({ type: "project_progress", stage: "project", status: "active", title: /[\u0400-\u04ff]/u.test(requestMessage) ? "Підготовка запиту" : "Preparing request", timestamp: new Date().toISOString() });
+    if (projectProgressIntent.intent !== "CHAT" && !development.project) enqueueProgress({ type: "project_progress", stage: "project", status: "active", title: /[\u0400-\u04ff]/u.test(requestMessage) ? "\u041f\u0440\u0430\u0446\u044e\u044e \u043d\u0430\u0434 \u043f\u0440\u043e\u0454\u043a\u0442\u043e\u043c" : "Working on the project", timestamp: new Date().toISOString() });
     for (const mutationTarget of mutationTargets) enqueueProgress({ type: "action_started", ...mutationTarget, timestamp: new Date().toISOString() });
     setSending(true); setStreamingResponse(false); setNotice("");
     if (draftVersion.current === submittedDraftVersion) { setInput(""); setAttachments([]); }
@@ -722,7 +722,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
             />
           )}
           {!development.isActive && sending && !streamingResponse && !progressEvents.some((event) => !event.type.startsWith("final_generation")) && <article className="assistant thinking thinking-status" aria-label="NPATI Agent is working"><p>{isWebsiteAnalysisRequest(activeTurn) ? "Analyzing website and sources…" : businessThinkingSteps[thinkingStep]}</p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span></article>}
-          {(development.submitting || development.project?.status === "preparing" && !development.project.progress?.length) && <article className="assistant thinking thinking-status" role="status" aria-label="Preparing development request"><p>{language === "uk" ? "Підготовка запиту" : "Preparing request"}</p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span></article>}
+          {(development.submitting && !development.project && !progressEvents.some(event => !event.type.startsWith("final_generation"))) && <article className="assistant thinking thinking-status" role="status" aria-label="NPATI Agent is working"><p>{language === "uk" ? "\u041f\u0440\u0430\u0446\u044e\u044e \u043d\u0430\u0434 \u043f\u0440\u043e\u0454\u043a\u0442\u043e\u043c" : "Working on the project"}</p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span></article>}
           {development.preview}
           {messages.length > 0 && <div className="chat-scroll-spacer" aria-hidden="true" />}
           <div ref={streamEndRef} aria-hidden="true" />

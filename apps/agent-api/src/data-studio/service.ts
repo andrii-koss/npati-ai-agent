@@ -1,3 +1,4 @@
+import { Client } from "pg";
 import type { AuthContext, WorkspaceStore } from "@npati/workspace";
 import { DataStudioError } from "./identifier";
 import type { DataBackendRepository } from "./repository";
@@ -12,6 +13,38 @@ export class DataBackendService {
     private readonly provisioner?: DatabaseProvisioner,
     private readonly dataProvider?: DataProvider,
   ) {}
+
+
+  /** Explicit agent request only; retries resume the same reserved database. */
+  async ensureForProject(ctx: AuthContext, companyId: string, projectId: string, name: string, onReady?: (backend: DataBackend) => Promise<Record<string,string>>) {
+    await this.store.getProject(ctx, companyId, projectId);
+    name = name.trim();
+    if (!name || name.length > 200) throw new DataStudioError(400,"create_backend","Name must be 1-200 characters",false,"INVALID_NAME");
+    const client = new Client({ connectionString: this.repository.pool.options.connectionString });
+    await client.connect();
+    const key = JSON.stringify([ctx.workspaceId, companyId, projectId]);
+    let locked = false;
+    try {
+      locked = Boolean((await client.query("SELECT pg_try_advisory_lock(hashtextextended($1,0)) AS locked", [key])).rows[0]?.locked);
+      if (!locked) throw new DataStudioError(409, "create_backend", "Database creation for this project is already in progress; retry shortly", true, "DATABASE_CREATION_BUSY");
+      const project = await this.store.getProject(ctx, companyId, projectId);
+      if (project.status === "archived" || ["soft_deleted","purging","deleted"].includes(project.status)) throw new DataStudioError(409,"create_backend","Inactive project cannot create a database",false,"PROJECT_INACTIVE");
+      if (project.dataBackendId) {
+        const backend = await this.repository.get(ctx, companyId, project.dataBackendId);
+        const created = backend.status !== "ready";
+        const ready = created ? await this.activate(ctx, companyId, backend.id) : backend;
+        return { created, backend: { id: ready.id, name: ready.name, status: ready.status }, ...(onReady ? { environment: await onReady(ready) } : {}) };
+      }
+      this.available();
+      // Attach the metadata reservation before provisioning so failures/restarts can resume it.
+      const backend = await this.repository.reserveForProject(ctx, companyId, projectId, name);
+      const ready = await this.activate(ctx, companyId, backend.id);
+      return { created: true, backend: { id: ready.id, name: ready.name, status: ready.status }, ...(onReady ? { environment: await onReady(ready) } : {}) };
+    } finally {
+      if (locked) await client.query("SELECT pg_advisory_unlock(hashtextextended($1,0))", [key]).catch(() => undefined);
+      await client.end();
+    }
+  }
 
   private available(): DatabaseProvisioner {
     if (!this.provisioner) throw new DataStudioError(503, "provision", "Project database service unavailable", true, "PROJECT_DATABASE_UNAVAILABLE");

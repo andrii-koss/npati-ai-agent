@@ -136,10 +136,7 @@ export class ProjectOrchestrator {
     const canonical = canonicalFrameworkName(framework) ?? framework;
     await this.scaffoldWebsiteProject(ctx, project.companyId, project.id, project.name, canonical, prompt);
     await this.projectService.updatePreview(ctx, project.companyId, project.id, { framework: canonical });
-    await this.initSharedProjectContext(ctx, project.companyId, project.id, { name: project.name, description: prompt, framework: canonical, projectType: "code_project" });
-    if (canonical === "Next.js" && this.prepareWebsiteData) {
-      await this.prepareWebsiteData(ctx, await this.projectService.get(ctx, project.companyId, project.id), prompt);
-    }
+    if (canonical !== "HTML/CSS") await this.initSharedProjectContext(ctx, project.companyId, project.id, { name: project.name, description: prompt, framework: canonical, projectType: "code_project" });
     return this.projectService.get(ctx, project.companyId, project.id);
   }
 
@@ -226,14 +223,6 @@ export class ProjectOrchestrator {
       if (project.status === "archived") {
         throw new ProjectOrchestrationError("PROJECT_ARCHIVED", `Project ${params.projectId} is archived`, 400);
       }
-      if (project.type === "website" && project.framework === "Next.js" && project.status === "failed" && !project.lastBuildStatus && this.prepareWebsiteData && !isRepositoryAction && !isDataTask) {
-        try { await this.prepareWebsiteData(ctx, project, project.description || params.prompt); }
-        catch (error) {
-          if (error instanceof DataStudioError) throw new ProjectOrchestrationError(error.code || "DATA_BOOTSTRAP_FAILED", error.message, error.status);
-          throw error;
-        }
-        project = await this.projectService.get(ctx, params.companyId, project.id);
-      }
     } else {
       isCreate = true;
       const name = extractCleanProjectName(
@@ -283,23 +272,12 @@ export class ProjectOrchestrator {
       }
 
       // Initialize PROJECT.md
-      await this.initSharedProjectContext(ctx, params.companyId, project.id, {
+      if (framework !== "HTML/CSS") await this.initSharedProjectContext(ctx, params.companyId, project.id, {
         name: project.name,
         framework,
         purpose: params.prompt,
         projectType,
       });
-      if (!isMobileApp && framework === "Next.js" && this.prepareWebsiteData) {
-        report("database", "active", framework);
-        try {
-          await this.prepareWebsiteData(ctx, project, params.prompt);
-          project = await this.projectService.get(ctx, params.companyId, project.id);
-        } catch (error) {
-          await this.workspaceStore.updateProjectPreview(ctx, params.companyId, project.id, { status: "failed", lastBuildStatus: null });
-          if (error instanceof DataStudioError) throw new ProjectOrchestrationError(error.code || "DATA_BOOTSTRAP_FAILED", error.message, error.status);
-          throw error;
-        }
-      }
     }
 
     // 2. Prepare Prompt with Targeted Edits Rule & Shared Context
@@ -308,14 +286,14 @@ export class ProjectOrchestrator {
     const guidelinesHeader = [
       `[PROJECT MANDATE: "${project.name}"]`,
       `Targeted Edits Rule: You are modifying project "${project.name}" (ID: ${project.id}).`,
-      "1. Always search and read relevant files BEFORE editing. Do not blindly overwrite entire files or recreate the whole project.",
+      isCreate ? "1. This is a new project. Implement the requested content directly in the empty workspace or minimal framework entry points. Read only existing configuration needed for your changes." : "1. Always search and read relevant files BEFORE editing. Do not blindly overwrite entire files or recreate the whole project.",
       "2. Make surgical, minimal modifications to fulfill the user request precisely.",
       "3. Keep all working pages, styles, assets, and configurations functional.",
       isDataTask ? "Use project.data.schema.inspect first. Add fields with project.data.schema.apply and kind add_field. Do not recreate existing collections or apply a template merely to add a column." : "",
-      project.dataBackendId ? "The attached DataBackend, SDK, auth page and form bindings are already prepared. Preserve their wiring. Inspect lib/project-client.ts and use its projectClient for all database and auth calls. Never simulate form success with alert or local-only storage." : "",
+      project.dataBackendId ? "A DataBackend is attached. Inspect its schema and available SDK, preserving existing bindings. Do not assume auth pages or form components have been generated. Never simulate form success with alert or local-only storage." : "",
       project.framework === "HTML/CSS" ? "4. This is a static HTML/CSS website. Edit its .html files directly and do not introduce Next.js or a package manager unless the user asks for it." : "",
       project.framework === "Next.js" ? "4. The Next.js project structure, package.json, and layout are ALREADY scaffolded in the workspace. Do not run create-next-app or re-scaffold; inspect and edit the existing files directly." : "",
-      project.type === "mobile_app" ? "4. This is an Expo (React Native) app. The template, screens and ./npati-client SDK are ALREADY in the workspace. Use PROJECT_PUBLISHABLE_KEY from ./src/config only; never add PROJECT_SECRET_KEY, DATABASE_URL or any database credentials to the app." : "",
+      project.type === "mobile_app" ? "4. This is an Expo (React Native) app. Minimal Expo configuration exists; implement the requested screens. Do not assume a database or auth/SDK screens exist. Use only a public publishable key when data access is needed; never add PROJECT_SECRET_KEY, DATABASE_URL or any database credentials to the app." : "",
       "5. Focus ONLY on inspecting, creating, and modifying project source files. Do NOT execute 'npm run build', terminal commands, or preview tools (`project.terminal.exec`, `project.preview.start`) manually — the system automatically installs dependencies, executes production build verification, and launches Live Preview immediately after this step.",
       sharedContext ? `\n[Shared Project Context (PROJECT.md)]:\n${sharedContext.slice(0, 2000)}` : "",
       `\nUser Task: ${params.prompt}`,

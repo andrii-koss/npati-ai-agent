@@ -493,21 +493,31 @@ export class CodingAgentRunner {
       let modelStarted = this.now();
       const thinking = {
         id: `${stateRunId ?? input.runId}:thinking:${steps + 1}`, runId: stateRunId ?? input.runId,
-        stage: "planning", title: "Preparing the next implementation step", at: new Date(modelStarted).toISOString(),
+        stage: "model_response", title: "Waiting for the model response", at: new Date(modelStarted).toISOString(),
       };
       await emitCodingActivity(input, { ...thinking, status: "running" });
       await record({kind:"model_call",phase:"started",companyId,projectId,sessionId,turn:steps+1,model:input.model});
       try {
         modelStarted = this.now();
         let providerAttempt=0;
+        let firstTokenRecorded=false;
         result = await this.ports.engine.chat({
+          ...(input.emptyHtmlWorkspace ? {reasoningMode:"disabled" as const} : {}),
+          onGenerationProgress: async event => {
+            if (!firstTokenRecorded) {
+              firstTokenRecorded=true;
+              await record({kind:"model_first_token",companyId,projectId,sessionId,turn:steps+1,model:input.model,firstTokenMs:event.firstTokenMs});
+            }
+            await emitCodingActivity(input, {...thinking, stage:event.phase === "tool_arguments" ? "model_generation" : "model_output", title:event.phase === "tool_arguments" ? "Generating code" : "The model is responding",status:"running",durationMs:this.now()-modelStarted});
+          },
           onProviderAttempt:async(event)=>{
             if(event.phase==="started") providerAttempt++;
             await record({kind:"model_call",companyId,projectId,sessionId,turn:steps+1,attempt:providerAttempt,...event});
           },
           messages: withCodingReferenceImages(messages, input.images),
           ...(definitions.length ? { tools: definitions } : {}),
-          ...(definitions.length ? { toolChoice: "auto" as const } : {}),
+          ...(definitions.length ? { toolChoice: input.emptyHtmlWorkspace && /^deepseek\/(?:deepseek-flash|deepseek-v4(?:\.1)?-flash)$/i.test(input.model ?? "") && steps === 0 && needsImplementation && definitions.some(tool => tool.function.name === "code.fs.write")
+            ? {type:"function" as const,function:{name:"code.fs.write"}} : "auto" as const } : {}),
           model: input.model,
           ...(input.fallbackModel ? { fallbackModel: input.fallbackModel } : {}),
           signal: input.signal,
