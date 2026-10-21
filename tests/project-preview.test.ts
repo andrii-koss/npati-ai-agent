@@ -863,3 +863,51 @@ it("keeps durable preview metadata when the runner cannot confirm explicit stop"
  await expect(restored.stopPreview(owner,company.id,project.id)).rejects.toThrow("runner unavailable");
  expect((await projects.get(owner,company.id,project.id)).previewPort).toBe(3000);
 });
+
+it("recovers a persisted preview after API and runtime restart, coalescing concurrent status checks", async () => {
+ const {preview,projects,store,workspace,sandbox,provider,company,project}=await fixture();
+ await workspace.createFile(owner,company.id,project.id,"index.html","<h1>Recovered</h1>");
+ await preview.startPreview(owner,company.id,project.id);
+ const restored=new ProjectPreviewService(projects,store,workspace,sandbox,"test-preview-secret-key-32chars!");
+ vi.spyOn(sandbox,"supportsPreviewProxy").mockReturnValue(true);
+ const probe=vi.spyOn(sandbox,"proxyPreview").mockRejectedValue(new Error("Project Preview server unavailable"));
+ const launch=vi.spyOn(provider,"startProcess").mockImplementation(async()=>{
+   probe.mockResolvedValue({status:200,headers:{},body:""});
+   return {...commandResult("running"),processId:"55555555-5555-4555-8555-555555555555"};
+ });
+ const results=await Promise.all([restored.getPreviewStatus(owner,company.id,project.id),restored.getPreviewStatus(owner,company.id,project.id)]);
+ expect(results.every(result=>result.isRunning)).toBe(true);
+ expect(launch).toHaveBeenCalledTimes(1);
+ expect(restored.getSession(project.id)?.processId).toBe("55555555-5555-4555-8555-555555555555");
+});
+
+it("does not restart a healthy persisted preview or a deliberately stopped site", async () => {
+ const {preview,projects,store,workspace,sandbox,provider,company,project}=await fixture();
+ await workspace.createFile(owner,company.id,project.id,"index.html","<h1>Healthy</h1>");
+ await preview.startPreview(owner,company.id,project.id);
+ vi.spyOn(sandbox,"supportsPreviewProxy").mockReturnValue(true);
+ const probe=vi.spyOn(sandbox,"proxyPreview").mockResolvedValue({status:200,headers:{},body:""});
+ const launch=vi.spyOn(provider,"startProcess");
+ const restored=new ProjectPreviewService(projects,store,workspace,sandbox,"test-preview-secret-key-32chars!");
+ expect((await restored.getPreviewStatus(owner,company.id,project.id)).isRunning).toBe(true);
+ expect(launch).not.toHaveBeenCalled();
+ await preview.stopPreview(owner,company.id,project.id);
+ probe.mockClear();
+ expect((await restored.getPreviewStatus(owner,company.id,project.id)).isRunning).toBe(false);
+ expect(probe).not.toHaveBeenCalled();
+ expect(launch).not.toHaveBeenCalled();
+});
+
+it("reports recovery failure instead of claiming a dead persisted preview is running", async () => {
+ const {preview,projects,store,workspace,sandbox,company,project}=await fixture();
+ await workspace.createFile(owner,company.id,project.id,"index.html","<h1>Site</h1>");
+ await preview.startPreview(owner,company.id,project.id);
+ vi.spyOn(sandbox,"supportsPreviewProxy").mockReturnValue(true);
+ vi.spyOn(sandbox,"proxyPreview").mockRejectedValue(new Error("unavailable"));
+ const restored=new ProjectPreviewService(projects,store,workspace,sandbox,"test-preview-secret-key-32chars!");
+ vi.spyOn(restored,"startPreview").mockRejectedValue(new Error("runner unavailable"));
+ const status=await restored.getPreviewStatus(owner,company.id,project.id);
+ expect(status.isRunning).toBe(false);
+ expect(status.error).toBe("runner unavailable");
+ await expect(restored.getPreviewStatus(otherUser,company.id,project.id)).rejects.toThrow();
+});
