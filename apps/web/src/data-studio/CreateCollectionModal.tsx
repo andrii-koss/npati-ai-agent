@@ -27,21 +27,25 @@ export function CreateCollectionModal({
           <button type="button" className="company-drawer-close" onClick={onClose}>×</button>
         </header>
         <form onSubmit={onSubmit}>
-          <label>
-            <span>{isUk ? "Назва колекції (таблиці):" : "Collection name (table):"}</span>
-            <input
-              type="text"
-              required
-              pattern="^[a-z][a-z0-9_]{0,62}$"
-              placeholder="e.g. products, categories, orders"
-              value={newCollectionName}
-              onChange={(e) => setNewCollectionName(e.target.value)}
-              maxLength={63}
-            />
-            <small>{isUk ? "Лише малі літери, цифри та підкреслення (напр. products)" : "Lowercase letters, numbers, and underscores only"}</small>
-          </label>
+          <section>
+            <label>
+              <span>{isUk ? "Назва колекції (таблиці):" : "Collection name (table):"}</span>
+              <input
+                type="text"
+                required
+                pattern="^[a-z][a-z0-9_]{0,62}$"
+                placeholder="e.g. products, categories, orders"
+                value={newCollectionName}
+                onChange={(e) => setNewCollectionName(e.target.value)}
+                maxLength={63}
+              />
+              <small style={{ color: "#64748b", fontSize: "12px", marginTop: "4px" }}>
+                {isUk ? "Лише малі літери, цифри та підкреслення (напр. products)" : "Lowercase letters, numbers, and underscores only"}
+              </small>
+            </label>
+          </section>
 
-          <footer>
+          <footer style={{ justifyContent: "flex-end" }}>
             <button type="button" className="button-secondary" onClick={onClose}>
               {isUk ? "Скасувати" : "Cancel"}
             </button>

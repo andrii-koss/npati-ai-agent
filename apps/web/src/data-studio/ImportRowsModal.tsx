@@ -38,33 +38,35 @@ export function ImportRowsModal({
         </header>
 
         <form onSubmit={onSubmit}>
-          <div className="import-format-toggle">
-            <label>
-              <span>{isUk ? "Формат даних:" : "Data format:"}</span>
-              <select value={importFormat} onChange={(e) => setImportFormat(e.target.value as "csv" | "json")}>
-                <option value="csv">CSV (Comma-separated)</option>
-                <option value="json">JSON Array</option>
-              </select>
-            </label>
+          <section>
+            <div className="import-format-toggle">
+              <label>
+                <span>{isUk ? "Формат даних:" : "Data format:"}</span>
+                <select value={importFormat} onChange={(e) => setImportFormat(e.target.value as "csv" | "json")}>
+                  <option value="csv">CSV (Comma-separated)</option>
+                  <option value="json">JSON Array</option>
+                </select>
+              </label>
+
+              <label>
+                <span>{isUk ? "Завантажити файл (< 1 МБ):" : "Upload file (< 1 MB):"}</span>
+                <input type="file" accept=".csv,.json" onChange={handleFileUpload} />
+              </label>
+            </div>
 
             <label>
-              <span>{isUk ? "Завантажити файл (< 1 МБ):" : "Upload file (< 1 MB):"}</span>
-              <input type="file" accept=".csv,.json" onChange={handleFileUpload} />
+              <span>{isUk ? "Або вставте вміст:" : "Or paste content directly:"}</span>
+              <textarea
+                rows={8}
+                placeholder={importFormat === "csv" ? "title,price,is_active\nProduct A,100,true" : '[{"title": "Product A", "price": 100}]'}
+                value={importContent}
+                onChange={(e) => setImportContent(e.target.value)}
+                required
+              />
             </label>
-          </div>
+          </section>
 
-          <label>
-            <span>{isUk ? "Або вставте вміст:" : "Or paste content directly:"}</span>
-            <textarea
-              rows={8}
-              placeholder={importFormat === "csv" ? "title,price,is_active\nProduct A,100,true" : '[{"title": "Product A", "price": 100}]'}
-              value={importContent}
-              onChange={(e) => setImportContent(e.target.value)}
-              required
-            />
-          </label>
-
-          <footer>
+          <footer style={{ justifyContent: "flex-end" }}>
             <button type="button" className="button-secondary" onClick={onClose}>
               {isUk ? "Скасувати" : "Cancel"}
             </button>
