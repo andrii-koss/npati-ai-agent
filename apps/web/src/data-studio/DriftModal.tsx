@@ -62,7 +62,7 @@ export function DriftModal({ isOpen, onClose, isUk, drift }: DriftModalProps) {
           </div>
         </div>
 
-        <footer>
+        <footer style={{ justifyContent: "flex-end" }}>
           <button type="button" className="button-secondary" onClick={onClose}>
             {isUk ? "Закрити" : "Close"}
           </button>

@@ -71,7 +71,7 @@ export function SchemaDiffModal({
           )}
         </div>
 
-        <footer>
+        <footer style={{ justifyContent: "flex-end" }}>
           <button type="button" className="button-secondary" onClick={onClose}>
             {isUk ? "Скасувати" : "Cancel"}
           </button>

@@ -38,70 +38,72 @@ export function RowDrawer({
         </header>
 
         <form onSubmit={onSubmit}>
-          {currentTable.columns.map((col) => {
-            if (col.name === "id") return null;
-            const val = rowFormData[col.name];
-            return (
-              <label key={col.name} className="row-field-label">
-                <span>
-                  {col.name} <small className="muted-text">({col.type})</small>
-                  {!col.nullable && <span className="req">*</span>}
-                </span>
+          <section>
+            {currentTable.columns.map((col) => {
+              if (col.name === "id") return null;
+              const val = rowFormData[col.name];
+              return (
+                <label key={col.name} className="row-field-label">
+                  <span>
+                    {col.name} <small className="muted-text">({col.type})</small>
+                    {!col.nullable && <span className="req">*</span>}
+                  </span>
 
-                {col.type === "boolean" ? (
-                  <select
-                    value={val === true || val === "true" ? "true" : val === false || val === "false" ? "false" : ""}
-                    onChange={(e) =>
-                      setRowFormData((prev) => ({
-                        ...prev,
-                        [col.name]: e.target.value === "true" ? true : e.target.value === "false" ? false : null,
-                      }))
-                    }
-                  >
-                    <option value="">null</option>
-                    <option value="true">true</option>
-                    <option value="false">false</option>
-                  </select>
-                ) : col.type === "text" || col.type === "jsonb" ? (
-                  <textarea
-                    rows={col.type === "jsonb" ? 4 : 2}
-                    value={typeof val === "object" && val !== null ? JSON.stringify(val, null, 2) : String(val ?? "")}
-                    onChange={(e) =>
-                      setRowFormData((prev) => ({ ...prev, [col.name]: e.target.value }))
-                    }
-                    placeholder={col.type === "jsonb" ? "{ ... }" : ""}
-                  />
-                ) : col.type.includes("int") || col.type.includes("numeric") ? (
-                  <input
-                    type="number"
-                    step={col.type.includes("int") ? "1" : "any"}
-                    value={val == null ? "" : String(val)}
-                    onChange={(e) =>
-                      setRowFormData((prev) => ({ ...prev, [col.name]: e.target.value }))
-                    }
-                  />
-                ) : col.type === "date" ? (
-                  <input
-                    type="date"
-                    value={val ? String(val).slice(0, 10) : ""}
-                    onChange={(e) =>
-                      setRowFormData((prev) => ({ ...prev, [col.name]: e.target.value }))
-                    }
-                  />
-                ) : (
-                  <input
-                    type="text"
-                    value={val == null ? "" : String(val)}
-                    onChange={(e) =>
-                      setRowFormData((prev) => ({ ...prev, [col.name]: e.target.value }))
-                    }
-                  />
-                )}
-              </label>
-            );
-          })}
+                  {col.type === "boolean" ? (
+                    <select
+                      value={val === true || val === "true" ? "true" : val === false || val === "false" ? "false" : ""}
+                      onChange={(e) =>
+                        setRowFormData((prev) => ({
+                          ...prev,
+                          [col.name]: e.target.value === "true" ? true : e.target.value === "false" ? false : null,
+                        }))
+                      }
+                    >
+                      <option value="">null</option>
+                      <option value="true">true</option>
+                      <option value="false">false</option>
+                    </select>
+                  ) : col.type === "text" || col.type === "jsonb" ? (
+                    <textarea
+                      rows={col.type === "jsonb" ? 4 : 2}
+                      value={typeof val === "object" && val !== null ? JSON.stringify(val, null, 2) : String(val ?? "")}
+                      onChange={(e) =>
+                        setRowFormData((prev) => ({ ...prev, [col.name]: e.target.value }))
+                      }
+                      placeholder={col.type === "jsonb" ? "{ ... }" : ""}
+                    />
+                  ) : col.type.includes("int") || col.type.includes("numeric") ? (
+                    <input
+                      type="number"
+                      step={col.type.includes("int") ? "1" : "any"}
+                      value={val == null ? "" : String(val)}
+                      onChange={(e) =>
+                        setRowFormData((prev) => ({ ...prev, [col.name]: e.target.value }))
+                      }
+                    />
+                  ) : col.type === "date" ? (
+                    <input
+                      type="date"
+                      value={val ? String(val).slice(0, 10) : ""}
+                      onChange={(e) =>
+                        setRowFormData((prev) => ({ ...prev, [col.name]: e.target.value }))
+                      }
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      value={val == null ? "" : String(val)}
+                      onChange={(e) =>
+                        setRowFormData((prev) => ({ ...prev, [col.name]: e.target.value }))
+                      }
+                    />
+                  )}
+                </label>
+              );
+            })}
+          </section>
 
-          <footer>
+          <footer style={{ justifyContent: "flex-end" }}>
             <button type="button" className="button-secondary" onClick={onClose}>
               {isUk ? "Скасувати" : "Cancel"}
             </button>
