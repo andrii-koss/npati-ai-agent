@@ -99,3 +99,37 @@ it.each(["/c/child?company=company&project=project&developmentRoot=parent", "/c/
   await act(async()=>document.dispatchEvent(new Event("visibilitychange")));
   expect(traceCalls().at(-1)![1]!.signal!.aborted).toBe(false);
 });
+
+it("keeps Preview outside user messages before and after reloading persisted chat history", async () => {
+ Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});
+ Object.defineProperty(HTMLElement.prototype,"scrollIntoView",{configurable:true,value:vi.fn()});
+ Object.defineProperty(HTMLElement.prototype,"scrollTo",{configurable:true,value:vi.fn()});
+ const card={id:"reload-project",projectId:"reload-project",companyId:"company",name:"Store",framework:"HTML/CSS",kind:"code_project",status:"completed",previewUrl:"/preview/store",lastBuildStatus:"ready"};
+ const process:DevelopmentProcess={id:"reload-process",companyId:"company",projectId:"reload-project",parentConversationId:"parent",conversationId:"reload-chat",name:"Store",framework:"HTML/CSS",status:"completed",hidden:false,createdAt:"2026-10-21T10:00:00Z",updatedAt:"2026-10-21T10:02:00Z",previewUrl:"/preview/store",progress:[{id:"build",stage:"build",title:"Build complete",status:"completed",at:"2026-10-21T10:01:00Z"}]};
+ const messages=[{id:"request",role:"user",content:"Create my store",projectCard:card,createdAt:"2026-10-21T10:00:00Z"},{id:"reply",role:"assistant",content:"The store is ready.",createdAt:"2026-10-21T10:02:00Z"}];
+ let releaseProcesses:()=>void=()=>{};
+ let loaded:Promise<void>;
+ mocks.api.mockImplementation(async(url:string)=>{
+  if(url==="/chat/development/processes"){await loaded;return {processes:[process]};}
+  if(url==="/conversations")return [];
+  if(url==="/conversations/reload-chat")return {messages:JSON.parse(JSON.stringify(messages))};
+  return {};
+ });
+ vi.stubGlobal("fetch",vi.fn(async(_url:string,init?:RequestInit)=>new Response(new ReadableStream({start(c){init?.signal?.addEventListener("abort",()=>c.close(),{once:true});}}))));
+ const host=document.createElement("div");document.body.append(host);
+ for(let reload=0;reload<2;reload++){
+  loaded=new Promise<void>(resolve=>{releaseProcesses=resolve;});
+  root=createRoot(host);
+  await act(async()=>{root!.render(<MemoryRouter initialEntries={["/c/reload-chat"]}><I18nProvider><BusinessChatPage neutralChat initialConversationId="reload-chat" /></I18nProvider></MemoryRouter>);});
+  expect(host.querySelector("article.user")?.textContent).toContain("Create my store");
+  expect(host.querySelector("article.user .coding-preview-trigger")).toBeNull();
+  expect(host.querySelector("article.user .project-chat-card")).toBeNull();
+  await act(async()=>releaseProcesses());
+  const preview=host.querySelector(".chat-development-preview")!;
+  const reply=host.querySelector("article.assistant")!;
+  expect(host.querySelector("article.user .coding-preview-trigger")).toBeNull();
+  expect(host.querySelectorAll(".coding-preview-trigger")).toHaveLength(1);
+  expect(reply.compareDocumentPosition(preview)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  await act(async()=>root!.unmount());root=undefined;
+ }
+});
