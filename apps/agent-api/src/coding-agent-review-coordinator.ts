@@ -251,10 +251,25 @@ export class CodingAgentReviewCoordinator {
   }
 
   boundedDiff(limit: number): string {
-    const parts = this.runChanges()
-      .filter((change) => typeof change.diff === "string" && change.diff.length > 0)
-      .map((change) => `--- ${change.path}\n${change.diff ?? ""}`);
-    const joined = parts.join("\n");
+    // runChanges intentionally keeps the latest metadata per path. A review needs
+    // earlier patches too: a later body edit must not hide a prior title fix.
+    const patches: Array<{ path: string; diff: string; source: string }> = [];
+    for (const index of this.host.toolSteps) {
+      try {
+        const turn = this.host.ports.toolRuntime.turnSummary?.(this.host.sessionId, this.host.stepTurnKey(index));
+        for (const change of turn?.changes ?? []) if (change.diff) {
+          patches.push({ path: change.path, diff: change.diff, source: `turn ${index}` });
+        }
+      } catch { /* Retain the same unavailable-summary behavior as runChanges. */ }
+    }
+    const recorded = new Set(patches.map(change => change.path + "\0" + change.diff));
+    for (const change of [...this.collectedChanges, ...this.runChanges()]) {
+      if (!change.diff || recorded.has(change.path + "\0" + change.diff)) continue;
+      patches.push({ path: change.path, diff: change.diff, source: "collected operation" });
+      recorded.add(change.path + "\0" + change.diff);
+    }
+    const joined = patches.length ? "Recorded incremental patches; later turns apply to preceding file versions. Lines outside a hunk are not evidence of missing code.\n" +
+      patches.map(change => `--- ${change.path} (${change.source})\n${change.diff}`).join("\n") : "";
     const bound = bounded(joined, limit);
     return bound.truncated ? `${bound.text}\n[the diff shown to this review was truncated at ${limit} characters]` : bound.text;
   }

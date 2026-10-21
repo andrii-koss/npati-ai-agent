@@ -1,3 +1,4 @@
+import { CodingAgentReviewCoordinator, type ReviewCoordinatorHost } from "../apps/agent-api/src/coding-agent-review-coordinator";
 import { describe, expect, it } from "vitest";
 import type { AIEngine, ChatRequest, ChatResult } from "@npati/omniroute-adapter";
 import type { AuthContext, CodeSession } from "@npati/workspace";
@@ -780,4 +781,25 @@ it("self-review receives the actual reference image and current redesign scope w
  const user=harness.reviewCalls[0]!.messages.find(message=>message.role==="user")!;
  expect(user.content).toEqual(expect.arrayContaining([{type:"image_url",image_url:{url:"data:image/png;base64,private-reference-image"}}]));
  expect(JSON.stringify(user.content)).toContain("FULL VISUAL REDESIGN");expect(JSON.stringify(harness.activity)).not.toContain("private-reference-image");
+});
+
+describe("self-review patch history", () => {
+  it("retains the earlier title change when a later turn edits the same page body", () => {
+    const patches = ["-export const meta = () => [{title: \"Old\"}];\n+export const meta = () => [{title: \"Requested\"}];", "-<h1>Old</h1>\n+<h1>Requested</h1>"];
+    const host = { input: { verificationTools: [] }, ports: { toolRuntime: { turnSummary: (_session: string, turn: string) => ({ changes: [{ path: "app/routes/home.tsx", tool: "code.fs.edit", diff: patches[Number(turn)-1] }] }) } }, toolSteps: [1,2], sessionId: "s", stepTurnKey: String } as unknown as ReviewCoordinatorHost;
+    const review = new CodingAgentReviewCoordinator(host);
+    expect(review.runChanges()).toHaveLength(1);
+    const diff = review.boundedDiff(4000);
+    expect(diff).toContain(patches[0]);
+    expect(diff).toContain(patches[1]);
+    expect(diff.indexOf(patches[0]!)).toBeLessThan(diff.indexOf(patches[1]!));
+    expect(review.boundedDiff(40)).toContain("truncated at 40 characters");
+  });
+  it("retains actual repeated patches across turns but deduplicates collected metadata", () => {
+    const patch = "-Old\n+New";
+    const host = { input: { verificationTools: [] }, ports: { toolRuntime: { turnSummary: () => ({ changes: [{ path: "page.tsx", tool: "code.fs.edit", diff: patch }] }) } }, toolSteps: [1,2], sessionId: "s", stepTurnKey: String } as unknown as ReviewCoordinatorHost;
+    const review = new CodingAgentReviewCoordinator(host);
+    review.collectedChanges = [{ path: "page.tsx", tool: "code.fs.edit", diff: patch }];
+    expect(review.boundedDiff(4000).split(patch)).toHaveLength(3);
+  });
 });
