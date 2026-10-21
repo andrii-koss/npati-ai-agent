@@ -61,8 +61,8 @@ export const COMPONENT_REGISTRY: Record<WebsiteBlockType, ComponentDefinition> =
       subtitle: "The all-in-one platform for modern businesses. Empower your workflows with autonomous AI agents and responsive website experiences.",
       primaryCtaText: "Start Free Trial",
       primaryCtaUrl: "#pricing",
-      secondaryCtaText: "Live Demo",
-      secondaryCtaUrl: "#demo",
+      secondaryCtaText: "View Features",
+      secondaryCtaUrl: "#features",
       imageUrl: "https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=1200&q=80",
       layout: "split",
     },
@@ -157,7 +157,7 @@ export const COMPONENT_REGISTRY: Record<WebsiteBlockType, ComponentDefinition> =
           features: ["1 Website", "Standard Preview", "Community Support", "Free SSL"],
           isPopular: false,
           buttonText: "Get Started",
-          buttonUrl: "#signup",
+          buttonUrl: "#contact",
         },
         {
           name: "Professional",
@@ -166,7 +166,7 @@ export const COMPONENT_REGISTRY: Record<WebsiteBlockType, ComponentDefinition> =
           features: ["Unlimited Websites", "AI Agent Assistant", "Custom Domains", "Priority 24/7 Support", "Automated Backups"],
           isPopular: true,
           buttonText: "Start Pro Trial",
-          buttonUrl: "#signup",
+          buttonUrl: "#contact",
         },
         {
           name: "Enterprise",

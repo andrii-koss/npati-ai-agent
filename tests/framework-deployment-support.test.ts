@@ -67,6 +67,21 @@ describe("deterministic framework starters", () => {
     expect(manifest.dependencies ?? {}).toBeTypeOf("object");
   });
 
+  it("keeps Fastify top-level await in ESM and serves an independently editable HTML file", () => {
+    const files = createFrameworkScaffold({ projectName: "Fastify test", prompt: "Build it", framework: "Fastify" });
+    expect(JSON.parse(files["package.json"]!).type).toBe("module");
+    expect(files["index.html"]).toContain("<h1>Fastify test</h1>");
+    expect(files["src/server.ts"]).toContain('new URL("../index.html", import.meta.url)');
+    expect(new URL("../index.html", "file:///projects/test/dist/server.js").pathname).toBe("/projects/test/index.html");
+  });
+
+  it("declares the React Router default SSR entry dependency before building", () => {
+    const files = createFrameworkScaffold({ projectName: "SSR test", prompt: "Build it", framework: "Remix" });
+    const manifest = JSON.parse(files["package.json"]!);
+    // Without isbot the framework runs npm install during build and can prune dev tooling.
+    expect(manifest.dependencies.isbot).toMatch(/^\^5\./);
+  });
+
   it.each([
     ["FastAPI", ["main.py", "requirements.txt", "Makefile"], "FastAPI"],
     ["Django", ["manage.py", "config/settings.py", "web/views.py", "Makefile"], "django"],
@@ -92,6 +107,19 @@ describe("stack detection and preview commands", () => {
     const detected = await detectProjectStack(Object.keys(files).map((path) => ({ path })), async (path) => files[path] ?? "");
     expect(detected.framework).toBe(framework);
     expect(detected.productionCommand).toBeTruthy();
+  });
+
+  it("keeps Angular serve on its assigned port without forwarding an unsupported --port", async () => {
+    const files = { "package.json": JSON.stringify({ dependencies: { "@angular/core": "19" }, scripts: { start: "serve -s dist/app/browser -l 3000" } }) };
+    const detected = await detectProjectStack([{ path: "package.json" }], async () => files["package.json"]);
+    expect(detected.productionCommand).toBe("npx serve -s dist/app/browser -l 3000");
+    expect(projectRuntimeCommandPort(detected.productionCommand!, 3135)).toBe("npx serve -s dist/app/browser -l 3135");
+  });
+
+  it("preserves custom Angular start scripts", async () => {
+    const detected = await detectProjectStack([{ path: "package.json" }], async () => JSON.stringify({ dependencies: { "@angular/core": "19" }, scripts: { start: "ng serve --host 0.0.0.0" } }));
+    expect(detected.command).toBe("npm run start");
+    expect(projectRuntimeCommandPort(detected.command, 3136)).toBe("npm run start -- --port 3136");
   });
 
   it("detects Python and PHP servers instead of serving them as static files", async () => {
@@ -126,4 +154,14 @@ describe("stack detection and preview commands", () => {
     expect(projectRuntimeCommandPort(".venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000", 3044)).toContain("--port 3044");
     expect(extractPortFromCommand("node build/index.js", 3000)).toBe(3000);
   });
+});
+
+it("targets a supported Laravel release and the project PHP runtime without disabling advisory blocking", () => {
+  const files = createFrameworkScaffold({ projectName: "Laravel test", prompt: "Build it", framework: "Laravel" });
+  const composer = JSON.parse(files["composer.json"]!);
+  expect(composer.require["laravel/framework"]).toBe("^13.0");
+  expect(composer.require.php).toBe("^8.3");
+  expect(composer.config.platform.php).toBe("8.3.0");
+  expect(composer.config.audit).toBeUndefined();
+  expect(composer.config.policy).toBeUndefined();
 });

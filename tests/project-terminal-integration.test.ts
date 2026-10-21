@@ -491,3 +491,13 @@ it.each([false,true])("preserves unchanged binary assets and refuses Terminal bi
  expect(f.provider.files.find(file=>file.path==="public/reference.png")).toMatchObject({encoding:"base64"});
  expect((await f.workspace.readFile(owner,f.company.id,f.project.id,"page.ts")).content).toContain(modified?"old":"new");
 });
+
+it.each(["running", "failed", "timed_out"] as const)("records the actual preview process outcome %s without a spurious failure", async status => {
+ const {company,project,workspace,provider,sandbox,events}=await fixture();
+ await workspace.createFile(owner,company.id,project.id,"package.json","{}");
+ vi.spyOn(provider,"startProcess").mockResolvedValue({...result(status,status==="failed"?1:0),processId:"22222222-2222-4222-8222-222222222222"});
+ await sandbox.process(owner,company.id,{projectId:project.id,action:"start",command:"npm run dev",agentId:"system",approved:true});
+ const event=(await events.list(owner,company.id,project.id)).find(e=>e.commandSummary==="npm run dev")!;
+ expect(event.status).toBe(status);
+ expect(event.errorCode).toBe(status==="running"?undefined:status==="timed_out"?"command_timeout":"preview_start_failed");
+});

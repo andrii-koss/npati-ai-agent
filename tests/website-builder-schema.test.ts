@@ -147,3 +147,10 @@ describe("Website Builder Document Model & Adapters", () => {
     expect(files["package.json"]).toContain('"vite":');
   });
 });
+
+it("gives every default static landing-page anchor an existing target", () => {
+  const files = getWebsiteAdapter("static").scaffoldProject(createDefaultWebsiteDocument("Landing test", "static", { template: "landing" }));
+  const html = files["index.html"]!;
+  const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
+  for (const match of html.matchAll(/\bhref="#([^"]+)"/g)) expect(ids.has(match[1]), `Missing target ${match[1]}`).toBe(true);
+});

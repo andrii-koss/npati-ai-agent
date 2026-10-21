@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { LocalProjectWorkspace, ProjectFileError } from "../apps/agent-api/src/project-workspace";
 
+import { createFrameworkScaffold } from "../apps/agent-api/src/project-framework-scaffold";
+
 const context = { userId: "user-a", workspaceId: "tenant-a", permissions: ["workspace:read", "business:manage"] };
 const project = { id: "project-a", companyId: "company-a", workspaceId: "tenant-a", status: "ready", repositoryBranch: "main", revision: 1 };
 const projectService = { get: async (ctx: typeof context, companyId: string, projectId: string) => {
@@ -68,4 +70,14 @@ describe("Project workspace confidentiality and concurrency", () => {
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     expect(results.filter((result) => result.status === "rejected")).toMatchObject([{ reason: { code: "revision_conflict" } }]);
   });
+});
+
+it("reads Django starter settings without exempting hardcoded secrets from workspace policy", async () => {
+  const { workspace } = await fixture();
+  const files = createFrameworkScaffold({ projectName: "Django test", prompt: "Build it", framework: "Django" });
+  await workspace.createFile(context, "company-a", "project-a", "config/settings.py", files["config/settings.py"]!);
+  const file = await workspace.readFile(context, "company-a", "project-a", "config/settings.py");
+  expect(file.content).toContain('os.environ.get("DJANGO_SECRET_KEY") or secrets.token_urlsafe(48)');
+  await workspace.createFile(context, "company-a", "project-a", "private.py", 'SECRET_KEY = "do-not-expose-this-secret"');
+  await expect(workspace.readFile(context, "company-a", "project-a", "private.py")).rejects.toMatchObject({ code: "secret_content" });
 });

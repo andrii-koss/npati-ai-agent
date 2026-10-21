@@ -130,7 +130,7 @@ class MockSandbox implements SandboxProvider {
   async startProcess(scope: SandboxScope, id: string, command: string) {
     this.check(scope, id);
     this.calls.push("process:" + command);
-    return { ...commandResult(), processId: "44444444-4444-4444-8444-444444444444" };
+    return { ...commandResult("running"), processId: "44444444-4444-4444-8444-444444444444" };
   }
   async stopProcess(scope: SandboxScope, id: string, _processId: string) {
     this.check(scope, id);
@@ -841,4 +841,25 @@ it("replaces a recorded dev process that has exited instead of reporting reused 
  const count=provider.calls.length;
  expect((await preview.startPreview(owner,company.id,project.id,{verifiedBuild:false})).status).toBe("running");
  expect(provider.calls.slice(count)).toContain("process:npm run dev");
+});
+
+it("explicitly stops the durable worker preview after the API session map is lost", async () => {
+ const {preview,sandbox,workspace,provider,projects,store,company,project,events}=await fixture();
+ await workspace.createFile(owner,company.id,project.id,"index.html","<h1>Recorded</h1>");
+ await preview.startPreview(owner,company.id,project.id);
+ const restored=new ProjectPreviewService(projects,store,workspace,sandbox,"test-preview-secret-key-32chars!");
+ const stopped=vi.spyOn(provider,"stopProcess");
+ await restored.stopPreview(owner,company.id,project.id);
+ expect(stopped).toHaveBeenCalledTimes(1);
+ expect((await events.list(owner,company.id,project.id))[0]).toMatchObject({status:"stopped",commandSummary:"Stop process"});
+ expect((await projects.get(owner,company.id,project.id)).previewPort ?? null).toBeNull();
+});
+it("keeps durable preview metadata when the runner cannot confirm explicit stop", async () => {
+ const {preview,sandbox,workspace,provider,projects,store,company,project}=await fixture();
+ await workspace.createFile(owner,company.id,project.id,"index.html","<h1>Recorded</h1>");
+ await preview.startPreview(owner,company.id,project.id);
+ const restored=new ProjectPreviewService(projects,store,workspace,sandbox,"test-preview-secret-key-32chars!");
+ vi.spyOn(provider,"stopProcess").mockRejectedValueOnce(new Error("runner unavailable"));
+ await expect(restored.stopPreview(owner,company.id,project.id)).rejects.toThrow("runner unavailable");
+ expect((await projects.get(owner,company.id,project.id)).previewPort).toBe(3000);
 });

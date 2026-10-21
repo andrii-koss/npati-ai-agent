@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { runInNewContext } from "node:vm";
-import { previewBrowserBridge } from "../apps/agent-api/src/preview-browser-bridge";
+import { previewBrowserBridge, rewritePreviewSsrResources } from "../apps/agent-api/src/preview-browser-bridge";
 
 describe("hydrated preview resource URLs", () => {
   it("routes React link attributes and webpack link properties through the signed project proxy", () => {
@@ -28,4 +28,50 @@ describe("hydrated preview resource URLs", () => {
     stylesheet.setAttribute("rel", "stylesheet"); expect(stylesheet.attributes.rel).toBe("stylesheet");
     stylesheet.setAttribute("href", "https://cdn.test/external.css"); expect(stylesheet.attributes.href).toBe("https://cdn.test/external.css");
   });
+});
+
+describe("inline SSR module resources", () => {
+  it("routes static/dynamic ESM imports and React Router asset manifests with one module identity", () => {
+    const prefix = "/api/companies/c/projects/p/preview/proxy";
+    const html = '<script type="module">import * as root from "/assets/root.js";window.__reactRouterManifest={entry:{module:"/assets/entry.js",imports:["/assets/shared.mjs"],css:["/assets/root.css"]}};import("/assets/entry.js");</script>';
+    const rewritten = rewritePreviewSsrResources(html, prefix);
+    for (const asset of ["root.js", "entry.js", "shared.mjs", "root.css"]) expect(rewritten).toContain(prefix + "/assets/" + asset);
+    expect(rewritePreviewSsrResources(rewritten, prefix)).toBe(rewritten);
+    expect(rewritten).not.toContain("token=");
+  });
+  it("preserves other projects, external imports, relative imports, routes, and nonmodule data", () => {
+    const prefix = "/api/companies/c/projects/p/preview/proxy";
+    const html = '<script type="application/json">{"file":"/assets/data.js"}</script><script>const path="/assets/not-module.js"</script><script type=module>import "https://cdn.test/a.js";import "//cdn.test/a.js";import "./relative.js";const route="/health";const scoped="/api/companies/c/projects/other/preview/proxy/assets/file.js";</script>';
+    expect(rewritePreviewSsrResources(html, prefix)).toBe(html);
+    const other = rewritePreviewSsrResources('<script type="module">import "/assets/root.js"</script>', prefix.replace("/p/", "/other/"));
+    expect(other).toContain("/projects/other/preview/proxy/assets/root.js");
+    expect(other).not.toContain(prefix + "/");
+  });
+});
+
+it("navigates project API links through Preview without rerouting SDK platform fetches", () => {
+  const prefix = "/api/companies/c/projects/p/preview/proxy";
+  let click: (event: unknown) => void = () => {};
+  let assigned = "";
+  class Element { closest() { return this; } getAttribute() { return "/api/info"; } hasAttribute() { return false; } target = ""; }
+  const location = { href: "http://preview.test" + prefix + "/", origin: "http://preview.test", assign: (url: string) => { assigned = url; } };
+  const window = { fetch: (url: string) => url };
+  const script = previewBrowserBridge(prefix, "signed").replace(/^<script>|<\/script>$/g, "");
+  runInNewContext(script, { URL, Request, location, Element, window, document: { addEventListener: (_name: string, handler: typeof click) => { click = handler; } }, history: { pushState() {}, replaceState() {} } });
+  expect(window.fetch("/api/companies/c/projects/p")).toBe("/api/companies/c/projects/p");
+  click({ target: new Element(), button: 0, preventDefault() {}, stopImmediatePropagation() {} });
+  expect(new URL(assigned).pathname).toBe(prefix + "/api/info");
+});
+
+it.each(["/", "/shop"])("hydrates React Router at its scoped basename %s without changing route data", (basename) => {
+  const prefix = "/api/companies/c/projects/p/preview/proxy";
+  const context = { basename, ssr: true, future: {}, hydrationData: { label: "</script>" } };
+  const source = '<script>window.__reactRouterContext=' + JSON.stringify(context).replace(/</g,"\\u003c") + ';window.next=1;</script>';
+  const rewritten = rewritePreviewSsrResources(source, prefix);
+  const window: Record<string, unknown> = {};
+  runInNewContext(rewritten.replace(/^<script>|<\/script>$/g,""), { window });
+  expect(window.__reactRouterContext).toEqual({ ...context, basename: prefix + (basename === "/" ? "" : basename) });
+  expect(window.next).toBe(1);
+  expect(rewritePreviewSsrResources(rewritten, prefix)).toBe(rewritten);
+  expect(rewritten).not.toContain('"</script>"');
 });
