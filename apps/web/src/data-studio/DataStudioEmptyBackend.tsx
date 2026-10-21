@@ -29,19 +29,36 @@ export function DataStudioEmptyBackend({
   handleCreateAndAttachBackend,
 }: DataStudioEmptyBackendProps) {
   return (
-    <div className="data-studio-container">
-      <header className="data-studio-header">
-        <div className="data-studio-breadcrumbs">
-          <Link to="/company">{isUk ? "← Компанія" : "← Company"}</Link>
-          <span>/</span>
-          <span>{project?.name || "Project"}</span>
-          <span>/</span>
-          <strong>Data Studio</strong>
+    <main className="automations-container data-studio-container">
+      <header className="inspector-header automations-header" style={{ marginBottom: "20px" }}>
+        <div className="automations-header-top">
+          <div>
+            <p className="eyebrow">{isUk ? "Компанія · Data Studio" : "Company · Data Studio"}</p>
+            <h1>
+              <Link
+                to="/settings/data-studio"
+                className="marketplace-back-button"
+                aria-label={isUk ? "Назад до списку баз даних" : "Back to databases"}
+                title={isUk ? "Назад до списку баз даних" : "Back to databases"}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M19 12H5M12 19l-7-7 7-7" />
+                </svg>
+              </Link>
+              <span>{project?.name ? `${project.name} data` : "Data Studio"}</span>
+            </h1>
+          </div>
         </div>
       </header>
 
       <section className="data-studio-empty-card" aria-label="No DataBackend Attached">
-        <div className="empty-icon">🗄️</div>
+        <div className="empty-icon">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" style={{ color: "#64748b" }}>
+            <ellipse cx="12" cy="5" rx="9" ry="3" />
+            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
+            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+          </svg>
+        </div>
         <h2>{isUk ? "До проєкту не підключено DataBackend" : "No DataBackend attached to this project"}</h2>
         <p>
           {isUk
@@ -107,6 +124,6 @@ export function DataStudioEmptyBackend({
           </div>
         </div>
       </section>
-    </div>
+    </main>
   );
 }

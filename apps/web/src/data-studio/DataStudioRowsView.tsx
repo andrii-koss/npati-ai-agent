@@ -63,23 +63,26 @@ export function DataStudioRowsView({
       {/* Data Toolbar: Search, Filters, Add Row, Import, Export, Bulk Delete */}
       <div className="data-view-toolbar">
         <div className="toolbar-search-filter">
-          <div className="search-input-box">
+          <div className="search-input-box" style={{ display: "flex", alignItems: "center", position: "relative" }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", left: "10px", color: "#94a3b8", pointerEvents: "none" }}>
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
             <input
               type="search"
               placeholder={isUk ? "Пошук по рядках…" : "Search rows…"}
               value={searchQuery}
+              style={{ paddingLeft: "32px" }}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && void loadRows()}
             />
-            <button type="button" className="button-secondary" onClick={() => void loadRows()}>
-              🔍
-            </button>
           </div>
 
           {/* Add filter button */}
           <button
             type="button"
             className="button-secondary"
+            style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
             onClick={() =>
               setFilters((prev) => [
                 ...prev,
@@ -87,7 +90,10 @@ export function DataStudioRowsView({
               ])
             }
           >
-            + {isUk ? "Фільтр" : "Filter"}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+            </svg>
+            <span>{isUk ? "Фільтр" : "Filter"}</span>
           </button>
         </div>
 
@@ -98,11 +104,31 @@ export function DataStudioRowsView({
             </button>
           )}
 
-          <button type="button" className="button-secondary" onClick={() => void handleExport("csv")}>
-            📥 CSV
+          <button
+            type="button"
+            className="button-secondary"
+            style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+            onClick={() => void handleExport("csv")}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            <span>CSV</span>
           </button>
-          <button type="button" className="button-secondary" onClick={() => void handleExport("json")}>
-            📥 JSON
+          <button
+            type="button"
+            className="button-secondary"
+            style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+            onClick={() => void handleExport("json")}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            <span>JSON</span>
           </button>
 
           {environment === "dev" && (
@@ -110,12 +136,22 @@ export function DataStudioRowsView({
               <button
                 type="button"
                 className="button-secondary"
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
                 onClick={onOpenImportModal}
               >
-                📤 {isUk ? "Імпорт" : "Import"}
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+                <span>{isUk ? "Імпорт" : "Import"}</span>
               </button>
-              <button type="button" className="button-primary" onClick={openCreateRowDrawer}>
-                + {isUk ? "Додати рядок" : "New Row"}
+              <button
+                type="button"
+                className="button-primary automations-action-primary"
+                onClick={openCreateRowDrawer}
+              >
+                ＋ {isUk ? "Новий рядок" : "New Row"}
               </button>
             </>
           )}
@@ -184,14 +220,19 @@ export function DataStudioRowsView({
 
       {/* Rows Table */}
       <div className="data-table-container">
-        {rowsLoading ? (
-          <div className="table-loading-spinner">{isUk ? "Завантаження рядків…" : "Loading rows…"}</div>
+        {rowsLoading && rows.length === 0 ? (
+          <div className="table-loading-spinner" style={{ padding: "48px 24px", textAlign: "center", color: "#64748b" }}>
+            <div className="ds-table-spinner" />
+            <span>{isUk ? "Завантаження рядків…" : "Loading rows…"}</span>
+          </div>
         ) : rows.length === 0 ? (
           <div className="empty-rows-hint">
             <p>{isUk ? "Рядків у цій колекції ще немає." : "No rows found in this collection."}</p>
           </div>
         ) : (
-          <table className="data-studio-table data-rows-table">
+          <div className="data-table-wrapper" style={{ position: "relative" }}>
+            {rowsLoading && <div className="data-table-loading-bar" />}
+            <table className="data-studio-table data-rows-table" style={{ opacity: rowsLoading ? 0.65 : 1, transition: "opacity 0.15s ease" }}>
             <thead>
               <tr>
                 {environment === "dev" && (
@@ -291,6 +332,7 @@ export function DataStudioRowsView({
               })}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

@@ -167,7 +167,7 @@ function Workspace({ children }: { children: ReactNode }) {
   }
   const isChat = location.pathname === "/chat" || location.pathname.startsWith("/b/") || location.pathname.startsWith("/c/") || window.location.pathname === "/chat" || window.location.pathname.startsWith("/b/") || window.location.pathname.startsWith("/c/");
   const isSettings = location.pathname === "/settings" || location.pathname.startsWith("/settings/");
-  const isCompany = location.pathname === "/company";
+  const isCompany = location.pathname === "/company" || location.pathname.startsWith("/companies");
   const isActivity = location.pathname === "/activity";
   const isAutomations = location.pathname === "/automations" || location.pathname.startsWith("/automations");
   const isGoals = location.pathname === "/goals" || location.pathname.startsWith("/goals");
@@ -204,7 +204,7 @@ function Workspace({ children }: { children: ReactNode }) {
         />
       )}
       <Sidebar isOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
-      <section className={`workspace-content ${isChat ? "chat-workspace-content" : ""} ${isSettings || isProjects || isActivity || isAutomations || isGoals || isContent || isConnections || isMemory || isSkills || isInbox ? "settings-workspace-content" : ""}`}>
+      <section className={`workspace-content ${isChat ? "chat-workspace-content" : ""} ${isSettings || isProjects || isCompany || isActivity || isAutomations || isGoals || isContent || isConnections || isMemory || isSkills || isInbox ? "settings-workspace-content" : ""}`}>
         {isChat && <ChatUserMenu />}
         {!isChat && !isSettings && !isProjects && !isCompany && !isActivity && !isAutomations && !isGoals && !isContent && !isConnections && !isMemory && !isSkills && !isInbox && <div className="workspace-topbar"><BusinessSwitcher /></div>}
         {children}
