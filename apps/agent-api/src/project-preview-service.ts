@@ -166,6 +166,7 @@ export function readCookieValue(rawCookieHeader: string | undefined, name: strin
 export class ProjectPreviewService {
   private readonly secret: string;
   private readonly sessions = new Map<string, ActivePreviewSession>();
+  private readonly recoveries = new Map<string, Promise<unknown>>();
 
   constructor(
     private readonly projects: ProjectService,
@@ -499,6 +500,30 @@ export class ProjectPreviewService {
     const session = this.sessions.get(projectId);
 
     if (!session || !this.sandbox) {
+      // Database state survives a restart; the site's HTTP process may not.
+      if (this.sandbox?.supportsPreviewProxy() && project.status === "previewing" && project.sandboxId && project.previewPort) {
+        const scope = { workspaceId: ctx.workspaceId, userId: ctx.userId, companyId, projectId };
+        const response = await this.sandbox.proxyPreview(scope, project.sandboxId,
+          { port: project.previewPort, path: "/", method: "GET", headers: {} }).catch(() => null);
+        if (!response || response.status >= 500) {
+          const key = JSON.stringify(scope);
+          let recovery = this.recoveries.get(key);
+          if (!recovery) {
+            recovery = this.startPreview(ctx, companyId, projectId, { verifiedBuild: project.lastBuildStatus === "ready" });
+            this.recoveries.set(key, recovery);
+          }
+          try {
+            await recovery;
+          } catch (error) {
+            return { status: project.status, previewUrl: project.previewUrl, port: project.previewPort,
+              framework: project.framework, lastBuildStatus: project.lastBuildStatus, isRunning: false,
+              error: error instanceof Error ? error.message : "Preview recovery failed", restartCount: 0 };
+          } finally {
+            if (this.recoveries.get(key) === recovery) this.recoveries.delete(key);
+          }
+          return this.getPreviewStatus(ctx, companyId, projectId);
+        }
+      }
       return {
         status: project.status,
         previewUrl: project.previewUrl,
@@ -521,7 +546,7 @@ export class ProjectPreviewService {
       });
       const statusValue = (procStatus as any).status;
 
-      if (statusValue === "failed" || statusValue === "completed" || statusValue === "timed_out") {
+      if (statusValue === "failed" || statusValue === "completed" || statusValue === "timed_out" || statusValue === "stopped") {
         // Dev server exited
         const logData = await this.sandbox.process(ctx, companyId, {
           projectId,
