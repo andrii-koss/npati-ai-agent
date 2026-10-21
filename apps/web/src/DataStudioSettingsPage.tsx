@@ -343,6 +343,102 @@ export function DataStudioSettingsPage() {
     }
   }, [detailId, isUk, notify, refresh]);
 
+  const deleteDatabases = useCallback(async (targets: BackendSummary[]) => {
+    if (!targets.length) return;
+    const count = targets.length;
+    const confirmed = await confirmModal({
+      title: isUk ? "Масове видалення баз даних" : "Bulk delete databases",
+      message: isUk
+        ? `Буде видалено ${count} баз даних зараз, без очікування. Бази dev/prod та їхні дані буде фізично видалено. Усі приєднані проєкти буде відв’язано від цих баз. Самі проєкти залишаться.`
+        : `${count} databases will be deleted now, without waiting. The dev/prod databases and their data will be physically deleted. All attached projects will be disconnected from these databases. The projects will remain.`,
+      confirmText: isUk ? "Продовжити" : "Continue",
+      isDanger: true,
+    });
+    if (!confirmed) return;
+
+    const namesSample = targets.slice(0, 5).map((b) => `«${b.name}»`).join(", ");
+    const remainingCount = count > 5 ? ` ${isUk ? `та ще ${count - 5}` : `and ${count - 5} more`}` : "";
+    const typed = await promptModal({
+      title: isUk ? "Підтвердіть масове видалення" : "Confirm bulk deletion",
+      message: isUk
+        ? `Бази даних (${count}):\n${namesSample}${remainingCount}\n\nВведіть DELETE, щоб підтвердити видалення.`
+        : `Databases (${count}):\n${namesSample}${remainingCount}\n\nType DELETE to confirm deletion.`,
+      placeholder: "DELETE",
+      confirmText: isUk ? `Видалити ${count} баз` : `Delete ${count} databases`,
+      isDanger: true,
+    });
+    if (typed?.trim() !== "DELETE") {
+      if (typed !== null) notify(isUk ? "Для підтвердження введіть DELETE" : "Type DELETE to confirm", "error");
+      return;
+    }
+
+    setBackendBusy(true);
+    let succeeded = 0;
+    let failed = 0;
+    const deletedIds = new Set<string>();
+
+    try {
+      for (const [i, backend] of targets.entries()) {
+        notify(
+          isUk
+            ? `Видалення ${i + 1} з ${count}: «${backend.name}»…`
+            : `Deleting ${i + 1} of ${count}: “${backend.name}”…`,
+          "info"
+        );
+        try {
+          const result = await apiFetch<{ deleted: boolean; deferred: boolean; removeAfter?: string }>(
+            `/companies/${encodeURIComponent(backend.companyId)}/data-backends/${encodeURIComponent(backend.id)}`,
+            {
+              method: "DELETE",
+              body: JSON.stringify({ confirmName: backend.name, detachProjects: true, immediate: true }),
+            }
+          );
+          if (result.deleted) {
+            succeeded++;
+            deletedIds.add(backend.id);
+          } else {
+            failed++;
+          }
+        } catch {
+          failed++;
+        }
+      }
+
+      if (deletedIds.size > 0) {
+        setBackends((current) => current.filter((item) => !deletedIds.has(item.id)));
+        setProjects((current) =>
+          current.map((item) =>
+            item.dataBackendId && deletedIds.has(item.dataBackendId)
+              ? { ...item, dataBackendId: null }
+              : item
+          )
+        );
+        if (detailId && deletedIds.has(detailId)) setDetailId(null);
+      }
+
+      if (failed === 0) {
+        notify(
+          isUk
+            ? `Успішно видалено ${succeeded} ${succeeded === 1 ? "базу даних" : succeeded < 5 ? "бази даних" : "баз даних"}`
+            : `Successfully deleted ${succeeded} database${succeeded === 1 ? "" : "s"}`
+        );
+      } else {
+        notify(
+          isUk
+            ? `Видалено ${succeeded} баз даних, помилка при видаленні: ${failed}`
+            : `Deleted ${succeeded} database(s), failed to delete: ${failed}`,
+          "error"
+        );
+      }
+      refresh();
+    } catch (cause) {
+      notify(cause instanceof Error ? cause.message : "Could not delete databases", "error");
+    } finally {
+      setBackendBusy(false);
+    }
+  }, [detailId, isUk, notify, refresh]);
+
+
   /** Moves a database (with all of its data) into another company of the same workspace. */
   const transferDatabase = useCallback(async (backend: BackendSummary, input: { targetCompanyId: string; confirmName: string }): Promise<void> => {
     setBackendBusy(true);
@@ -699,6 +795,7 @@ export function DataStudioSettingsPage() {
       setDetailId={setDetailId}
       toggleArchive={toggleArchive}
       deleteDatabase={deleteDatabase}
+      deleteDatabases={deleteDatabases}
       createOpen={createOpen}
       createDatabase={createDatabase}
     />
