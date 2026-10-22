@@ -166,6 +166,35 @@ export function findWhitespaceTolerantMatch(content: string, needle: string): { 
   return null;
 }
 
+/**
+ * The current text around the most likely intended location of a failed edit, with line numbers, so the model can
+ * retry with the exact text instead of re-reading the file or rewriting it (audit F-05). Picks the first content line
+ * that contains a non-trivial line of the needle; otherwise the line sharing the most words with it.
+ */
+export function findClosestFragment(content: string, needle: string, radius = 4): { line: number; fragment: string } | null {
+  const lines = splitLines(content).lines;
+  const needleLines = splitLines(needle).lines.map((line) => line.trim()).filter((line) => line.length >= 3);
+  if (!lines.length || !needleLines.length) return null;
+  let index = -1;
+  for (const candidate of needleLines) {
+    index = lines.findIndex((line) => line.includes(candidate));
+    if (index >= 0) break;
+  }
+  if (index < 0) {
+    const words = new Set(needleLines.join(" ").toLowerCase().split(/[^\p{L}\p{N}_#.-]+/u).filter((word) => word.length >= 3));
+    let best = 0;
+    lines.forEach((line, position) => {
+      const score = line.toLowerCase().split(/[^\p{L}\p{N}_#.-]+/u).filter((word) => words.has(word)).length;
+      if (score > best) { best = score; index = position; }
+    });
+  }
+  if (index < 0) return null;
+  const from = Math.max(0, index - radius);
+  const to = Math.min(lines.length, index + radius + 1);
+  const fragment = lines.slice(from, to).map((line, offset) => `${from + offset + 1}: ${line}`).join("\n").slice(0, 1_500);
+  return { line: index + 1, fragment };
+}
+
 export interface EditInput {
   path: unknown;
   old_string: unknown;
@@ -231,7 +260,7 @@ export async function applyEdit(
     throw new CodeToolError("invalid_argument", "old_string and new_string must be strings", tool);
   }
   if (oldString === newString) {
-    throw new CodeToolError("unchanged", "old_string and new_string are identical; nothing to change", tool);
+    throw new CodeToolError("unchanged", "old_string and new_string are identical; nothing to change. The file may already contain the requested change: re-read the affected range to confirm, then finish or edit a different fragment", tool);
   }
   const replaceAll = input.replace_all === true;
   const before = await port.readFile(guarded.path);
@@ -241,13 +270,16 @@ export async function applyEdit(
   const occurrences = countOccurrences(body, oldString);
   if (occurrences === 0) {
     const tolerant = findWhitespaceTolerantMatch(body, oldString);
+    const closest = tolerant ? null : findClosestFragment(body, oldString);
     throw new CodeToolError(
       "edit_no_match",
       tolerant
-        ? `old_string was not found verbatim, but a similar block exists at line ${tolerant.line}; match the existing indentation exactly or use code.fs.write to update the file`
-        : "old_string was not found in the file; check indentation or use code.fs.write",
+        ? `old_string was not found verbatim, but a similar block exists at line ${tolerant.line}; retry code.fs.edit with that exact text (indentation included)`
+        : closest
+          ? `old_string was not found; the closest current text is around line ${closest.line} (see currentFragment). Retry code.fs.edit with the exact current text; do not rewrite the whole file`
+          : "old_string was not found in the file; read the affected range with code.fs.read and retry code.fs.edit with the exact current text",
       tool, 409, false, "edit",
-      tolerant ? { hint: tolerant.snippet, line: tolerant.line } : {},
+      tolerant ? { hint: tolerant.snippet, line: tolerant.line } : closest ? { currentFragment: closest.fragment, line: closest.line } : {},
     );
   }
   if (occurrences > 1 && !replaceAll) {

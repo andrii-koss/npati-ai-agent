@@ -130,6 +130,13 @@ export function parsePatch(patch: unknown, tool = "code.fs.apply_patch"): Parsed
       };
       continue;
     }
+    // A header without line ranges ("@@" or "@@ <anchor text>", as Codex-style patches emit it): the hunk is located
+    // by its context lines only, and an ambiguous context is still refused in applyHunksToContent.
+    if (/^@@(?:\s.*)?$/.test(line) && current.action === "update") {
+      pushHunk();
+      currentHunk = { beforeStart: -1, beforeCount: -1, afterStart: -1, afterCount: -1, lines: [] };
+      continue;
+    }
     if (current.action === "add") {
       if (line.startsWith("+")) current.addedLines!.push(line.slice(1));
       else if (line.startsWith("\\")) continue;
@@ -155,6 +162,7 @@ export function parsePatch(patch: unknown, tool = "code.fs.apply_patch"): Parsed
   if (!files.length) throw new CodeToolError("patch_invalid", "Patch contains no file operations", tool);
   for (const file of files) {
     for (const hunk of file.hunks) {
+      if (hunk.beforeStart === -1) continue;
       const before = hunk.lines.filter((line) => !line.startsWith("+")).length;
       const after = hunk.lines.filter((line) => !line.startsWith("-")).length;
       if (before !== hunk.beforeCount || after !== hunk.afterCount) throw new CodeToolError("patch_invalid", `Hunk counts do not match the content for "${file.path}"`, tool);
