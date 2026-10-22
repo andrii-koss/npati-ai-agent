@@ -106,3 +106,24 @@ describe("a repeated screenshot without a change is answered from run state", ()
     expect(invoked).toContain("code.fs.edit:e1");
   });
 });
+
+describe("a Data Studio write is progress for the loop guard", () => {
+  it("a database task that keeps inspecting after creating tables is not stopped as a loop", async () => {
+    const { CodingAgentRunner } = await import("../apps/agent-api/src/coding-agent-runner");
+    const { CODE_TOOL_SCHEMAS } = await import("../apps/agent-api/src/code-tool-registry");
+    const names = ["code.data.schema.inspect", "code.data.backend.create", "code.fs.read"];
+    const tools = names.map((name) => ({ name, version: 1, status: "active", description: name, write: name === "code.data.backend.create" }));
+    const inspect = (id: string) => ({ content: "", toolCalls: [{ id, type: "function" as const, function: { name: "code.fs.read", arguments: JSON.stringify({ path: "lib/" + id + ".ts" }) } }] });
+    const create = { content: "", toolCalls: [{ id: "create", type: "function" as const, function: { name: "code.data.backend.create", arguments: JSON.stringify({ name: "Shop DB", reason: "The user asked for a database." }) } }] };
+    const script = [...[1, 2, 3, 4, 5, 6].map((n) => inspect("a" + n)), create, ...[1, 2, 3, 4, 5, 6].map((n) => inspect("b" + n)), { content: "done" }];
+    const runner = new CodingAgentRunner({
+      flags: { assertEnabled: async () => true }, rbac: { authorize: async () => ({ allowed: true }) },
+      toolRuntime: { listTools: () => tools, invoke: async (_ctx, input) => ({ ok: true, tool: input.tool, toolVersion: 1, schemaVersion: 1, result: { data: {} }, truncated: false, durationMs: 1 }) },
+      engine: { chat: async () => script.shift() ?? { content: "done" } },
+      schemas: tools.map((tool) => ({ ...tool, inputSchema: CODE_TOOL_SCHEMAS.find((schema) => schema.name === tool.name)!.inputSchema })),
+      limits: { maxStepsPerRun: 30, maxRunMinutes: 5 },
+    });
+    const outcome = await runner.run({ ctx: { userId: "u", workspaceId: "w", permissions: ["workspace:write"] }, session: { id: "s", workspaceId: "w", companyId: "c", projectId: "p", userId: "u", mode: "auto", status: "active", dataClassification: "confidential", retentionClass: "standard", revision: 1, createdAt: "", updatedAt: "" } as never, prompt: "Create a database with products", websiteEdit: true, toolContext: { userMessage: "Create a database with products", dataBackendAttached: true } }) as { status: string; reason?: string };
+    expect(outcome.reason).not.toBe("loop_detected");
+  });
+});

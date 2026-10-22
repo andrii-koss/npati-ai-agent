@@ -779,7 +779,7 @@ export class CodingAgentRunner {
 
       const waveOutcome = await toolWaves.executeTurnTools({ steps, normalized, callsToRun, profile, modelUsage });
       // Remember whether this turn attempted a source mutation; the guard runs at the start of the next turn.
-      lastTurnMutated = callsToRun.some(call => /^code\.fs\.(write|edit|apply_patch|move|delete)$/.test(call.name) || call.name === "code.deps.add");
+      lastTurnMutated = callsToRun.some(call => /^code\.fs\.(write|edit|apply_patch|move|delete)$|^code\.deps\.add$|^code\.data\.(schema\.(apply|modify)|rows\.(seed|transfer)|policies\.apply|backend\.(create|attach))$/.test(call.name));
       if (waveOutcome.action === "paused" || waveOutcome.action === "stopped") return waveOutcome.result;
 
       // `code.finish`: an explicit end of the run. Only a call the runtime accepted counts; a refused or invalid
