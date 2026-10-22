@@ -21,6 +21,7 @@ export const CODE_SHELL_CAPABILITIES: CapabilityDefinition[] = [
       "The command needs production credentials or network access outside the allowlist: it will be refused.",
       "The command contains a pipe, redirect, substitution or command chaining: use one simple command, or code.verify.run for build/typecheck/test.",
       "A read/search tool answers the question (code.fs.grep, code.fs.read): running a shell command for that is wasteful and riskier.",
+      "The check is a build, typecheck, test or lint: use code.verify.run, which runs the project's configured commands and returns structured findings. Outside a short allowlist (npm run build, npm test, ls, cat, git status/diff) a shell command pauses for human approval.",
     ],
     agentCallable: true,
     userVisible: true,
@@ -145,6 +146,7 @@ export const CODE_SHELL_CAPABILITIES: CapabilityDefinition[] = [
     useWhen: [
       "After changing code, to prove the change does not break the project.",
       "Before proposing a change as finished, so the model sees real results instead of assuming.",
+      "For build, typecheck, test or lint: prefer it over code.shell.exec; it needs no approval and reports exit codes with parsed findings.",
     ],
     doNotUseWhen: [
       "The project has no configured command for the requested tool: the result reports it as unavailable rather than inventing a command.",

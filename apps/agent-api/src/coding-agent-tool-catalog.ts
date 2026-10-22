@@ -2,6 +2,7 @@ import type {
   ChatToolDefinition,
 } from "@npati/omniroute-adapter";
 import type { CodeSession } from "@npati/workspace";
+import { CODE_CAPABILITIES } from "@npati/shared";
 import type { CodeAgentLimits } from "./code-agent-config";
 import {
   resolveCodeSubagentLimits,
@@ -107,7 +108,7 @@ export class CodingAgentToolCatalog {
       if (!schema) continue;
       definitions.push({
         type: "function",
-        function: { name: schema.name, description: schema.description, parameters: schema.inputSchema },
+        function: { name: schema.name, description: modelToolDescription(schema), parameters: schema.inputSchema },
       });
     }
     return definitions;
@@ -187,4 +188,27 @@ export async function offeredToolsForRun(input: {
   });
   const visible = new Set(decision.visible);
   return { tools: input.tools.filter((tool) => visible.has(tool.name)), decision };
+}
+
+const CAPABILITY_GUIDANCE = new Map(CODE_CAPABILITIES.map((capability) => [capability.id, capability]));
+
+/**
+ * The description a model reads for a tool: the published schema description (never edited, it is part of the
+ * versioned contract) plus WHEN / NOT WHEN from the Capability Registry's `useWhen` / `doNotUseWhen` and a
+ * RETURNS line derived from the published output schema. Descriptions already written in that form (manifest v15)
+ * and runtime (MCP) tools are passed through unchanged.
+ */
+export function modelToolDescription(schema: Pick<CodeRunToolSchemaLike, "name" | "description"> & { outputSchema?: unknown }): string {
+  const base = String(schema.description ?? "").trim();
+  if (/\bWHEN:/u.test(base)) return base;
+  const capability = CAPABILITY_GUIDANCE.get(schema.name);
+  if (!capability) return base;
+  const data = (schema.outputSchema as { properties?: { data?: { properties?: Record<string, unknown> } } } | undefined)?.properties?.data?.properties;
+  const returns = data ? Object.keys(data).slice(0, 12).join(", ") : "";
+  return [
+    base,
+    capability.useWhen.length ? `WHEN: ${capability.useWhen.join(" ")}` : "",
+    capability.doNotUseWhen.length ? `NOT WHEN: ${capability.doNotUseWhen.join(" ")}` : "",
+    returns ? `RETURNS: ${returns} (untrusted data).` : "",
+  ].filter(Boolean).join("\n");
 }

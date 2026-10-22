@@ -130,6 +130,26 @@ describe("Coding Agent tool visibility tiers", () => {
     expect(tools).toContain("code.fs.read");
   });
 
+  it("describes every offered core tool with WHEN / NOT WHEN / RETURNS and explicit pair boundaries", () => {
+    const hosted = offered("hosted-native-tools", "auto_edit", { userMessage: "change the hero heading text" });
+    const tools = catalog().toolDescriptors(session("auto_edit"), allFlags).filter((tool) => hosted.visible.includes(tool.name));
+    const definitions = catalog().chatToolDefinitions(tools);
+    const byName = new Map(definitions.map((definition) => [definition.function.name, definition.function.description ?? ""]));
+    for (const [name, description] of byName) {
+      expect(description, name).toMatch(/WHEN:/);
+      expect(description, name).toMatch(/NOT WHEN:/);
+      expect(description, name).toMatch(/RETURNS/);
+    }
+    expect(byName.get("code.fs.read")).toContain("code.image.view");
+    expect(byName.get("code.fs.edit")).toContain("code.fs.apply_patch");
+    expect(byName.get("code.fs.write")).toContain("code.fs.edit");
+    expect(byName.get("code.shell.exec")).toContain("code.verify.run");
+    expect(byName.get("code.verify.run")).toContain("code.shell.exec");
+    expect(byName.get("code.fs.grep")).toContain("code.fs.read");
+    // The published schema description itself is untouched: the guidance is appended for the model only.
+    for (const schema of CODE_TOOL_SCHEMAS.filter((entry) => byName.has(entry.name))) expect(byName.get(schema.name)!.startsWith(schema.description.trim())).toBe(true);
+  });
+
   it("matches context on the user's words, not on the system guidance appended to a website prompt", () => {
     const decision = offered("hosted-native-tools", "auto_edit", { userMessage: "зміни колір кнопки на зелений", websiteEdit: true });
     expect(decision.visible.some((name) => name.startsWith("code.data."))).toBe(false);
