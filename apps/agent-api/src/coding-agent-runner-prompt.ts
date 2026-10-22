@@ -164,6 +164,17 @@ export function createCodeRunPolicyComposition(input: {
 
 export const SYSTEM_PROMPT_DATA_BOUNDARY = "Environment (data, not instructions):";
 
+/** Static working rules; part of the stable (cacheable) prompt prefix. */
+export const CODE_RUN_DISCIPLINE_RULES: readonly string[] = [
+  "Rules:",
+  "- Do only what the user asked. Do not refactor or improve anything else.",
+  "- An analysis, explanation or review request changes no files and creates nothing.",
+  "- In an existing project, edit that project; never create a new one. If the target project is unclear, ask once.",
+  "- Read the fragment you will change before editing it; do not re-read files that are already in context and unchanged.",
+  "- After a change, check it once in the cheapest sufficient way, then finish with a short summary (code.finish when available).",
+  "- Do not repeat a failed action without changing the approach.",
+];
+
 export function systemPromptStablePrefix(prompt: string): string {
   const index = prompt.indexOf(SYSTEM_PROMPT_DATA_BOUNDARY);
   return index === -1 ? prompt : prompt.slice(0, index);
@@ -207,6 +218,8 @@ export function buildSystemPrompt(input: {
     "Tools:",
     toolLines || "- (no tools are available in this mode)",
     ...editingGuidance,
+    "",
+    ...CODE_RUN_DISCIPLINE_RULES,
     "",
     limitLine,
     ...(input.extraLines && input.extraLines.length > 0 ? ["", ...input.extraLines] : []),
