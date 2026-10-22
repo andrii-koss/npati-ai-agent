@@ -71,13 +71,15 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
       approvalsRepo
         ? {
             expireStaleApprovals: async (input: { now: number }) => {
+              const release = deps.mcpApprovalPauseRelease;
+              if (!release) throw new Error("mcp_approval_pause_release_not_ready");
               const expired = await approvalsRepo!.expireStaleApprovalsDetailed({ now: input.now });
-              if (mcpApprovalPauseRelease) {
+              {
                 for (const row of expired.rows) {
                   const runId = mcpApprovalRunIdOf(row.inputPayload);
                   if (!runId) continue;
                   try {
-                    await mcpApprovalPauseRelease({
+                    await release({
                       companyId: row.companyId,
                       runId,
                       approvalId: row.id,
@@ -96,12 +98,12 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
 
     userQuestions: {
       previewCodeUserQuestions: async (input) => {
-        if (!codeUserQuestionReaperPort) throw new Error("code_ask_user_reaper_not_ready");
-        return codeUserQuestionReaperPort.previewCodeUserQuestions(input);
+        if (!deps.codeUserQuestionReaperPort) throw new Error("code_ask_user_reaper_not_ready");
+        return deps.codeUserQuestionReaperPort.previewCodeUserQuestions(input);
       },
       expireCodeUserQuestions: async (input) => {
-        if (!codeUserQuestionReaperPort) throw new Error("code_ask_user_reaper_not_ready");
-        return codeUserQuestionReaperPort.expireCodeUserQuestions(input);
+        if (!deps.codeUserQuestionReaperPort) throw new Error("code_ask_user_reaper_not_ready");
+        return deps.codeUserQuestionReaperPort.expireCodeUserQuestions(input);
       },
     },
     disk: {
@@ -191,6 +193,14 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
     ...createCodeProcessControls(codeProcessManager, codeProcessSessions),
   } : undefined;
 
+  /**
+   * Step 2: this port runs exactly the checks it is given.
+   *
+   * `changedOnly` used to promise per-file scoping that no layer implemented — the port has no file list, so the
+   * flag could not narrow anything and every call ran every requested command. Selection now happens in
+   * `planVerification` (the caller knows the changed paths), and the flag remains a pass-through hint only: the
+   * authoritative narrowing is the `tools` array. Nothing here may add a check the caller did not ask for.
+   */
   const codeVerifyRunnerPort: CodeVerifyRunnerPort | undefined = projectSandbox ? {
     run: async (input: {
       ctx: AuthContext; companyId: string; projectId: string;

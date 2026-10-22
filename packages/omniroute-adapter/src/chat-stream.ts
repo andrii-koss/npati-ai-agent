@@ -26,6 +26,14 @@ export async function readChatStream(response: Response, request: ChatRequest, s
     for (const key of ["content", "reasoning_content", "reasoning_text"] as const) {
       if (typeof delta[key] === "string") message[key] += delta[key];
     }
+    /**
+     * Step 5: forward only the assistant's answer text. Reasoning and tool arguments are deliberately excluded: the
+     * former is internal, the latter is partial JSON that must never reach a client. The listener is isolated so a
+     * broken consumer cannot interrupt inference.
+     */
+    if (typeof delta.content === "string" && delta.content.length > 0 && request.onTextDelta) {
+      try { request.onTextDelta(delta.content); } catch { /* Presentation cannot interrupt inference. */ }
+    }
     let toolCharacters = 0;
     for (const part of delta.tool_calls ?? []) {
       if (!Number.isInteger(part.index) || part.index < 0 || part.index > 200) throw new Error("provider_stream_invalid_call");

@@ -1,0 +1,17 @@
+﻿services:
+  agent-api:
+    image: npati-step10-local:20261021
+    build:
+      args:
+        NPATI_BUILD_COMMIT: step10-b545d0c
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-validation-admin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Existing local MinIO password is required}
+  company-worker:
+    image: npati-step10-local:20261021
+    build:
+      args:
+        NPATI_BUILD_COMMIT: step10-b545d0c
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-validation-admin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Existing local MinIO password is required}

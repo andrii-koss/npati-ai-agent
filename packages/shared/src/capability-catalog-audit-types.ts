@@ -13,8 +13,8 @@ import type { InspectorReport } from "./capability-inspector";
  * this value through `push(...)` during C9/C11/C12, which is exactly the change the old gate could not see.
  */
 export const STATIC_CATALOG_BASELINE = {
-  total: 397,
-  agentCallable: 133,
+  total: 398,
+  agentCallable: 134,
   runtimeOnly: 264,
 } as const;
 
@@ -22,8 +22,12 @@ export const STATIC_CATALOG_BASELINE = {
  * Version of `apps/agent-api/src/code-tool-schemas.published.json` (the schema manifest the model-facing
  * tool registry publishes). Pinned here on purpose: a manifest bump is a reviewable event, and
  * `scripts/code-tool-schemas-generate.mjs --manifest-version N` is where it comes from.
+ *
+ * v14 published `code.data.backend.create` (50 tools). Reviewed before this pin moved: the runtime requires
+ * `workspace:write`, evaluates the project data policy before acting, refuses without a recorded approval
+ * (`approval_required`), scopes the call to `companyId` + `projectId`, and returns only public SDK identity.
  */
-export const TOOL_SCHEMA_MANIFEST_VERSION = 13;
+export const TOOL_SCHEMA_MANIFEST_VERSION = 14;
 
 export interface CapabilityAuditIssue {
   /** Stable machine-readable code; the negative control asserts on these, never on prose. */

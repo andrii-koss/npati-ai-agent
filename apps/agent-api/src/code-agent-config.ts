@@ -59,6 +59,11 @@ export interface CodeAgentLimits {
    * sense of being skippable-by-configuration *and* reported as clean: `not_run` says so.
    */
   selfReviewFixIterations: number;
+  /**
+   * Step 4: allow the adaptive rule to skip the review for a verified presentation-only change. `false` restores
+   * "review every change"; the skip is always recorded as `not_run` with its own reason, never as clean.
+   */
+  selfReviewAdaptive: boolean;
 }
 
 export const DEFAULT_CODE_AGENT_LIMITS: CodeAgentLimits = {
@@ -90,6 +95,7 @@ export const DEFAULT_CODE_AGENT_LIMITS: CodeAgentLimits = {
   transcriptRetentionDays: 90,
   maxChangedFiles: 25,
   selfReviewFixIterations: 1,
+  selfReviewAdaptive: true,
 };
 
 function positiveInt(value: string | undefined, fallback: number): number {
@@ -139,6 +145,8 @@ export function resolveCodeAgentLimits(env: NodeJS.ProcessEnv = process.env): Co
     // unset), and the result is clamped by the module that owns the cap: the environment can turn the fix
     // iteration off, never add a second one.
     selfReviewFixIterations: selfReviewFixIterationsFromEnv(env),
+    // `NPATI_CODE_SELF_REVIEW_ADAPTIVE=false` (or "0"/"off") restores "review every change".
+    selfReviewAdaptive: !["false", "0", "off", "no"].includes(String(env.NPATI_CODE_SELF_REVIEW_ADAPTIVE ?? "").trim().toLowerCase()),
   };
 }
 

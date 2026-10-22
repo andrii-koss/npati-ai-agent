@@ -109,6 +109,11 @@ export interface CodingAgentRunInput {
   websiteEdit?: boolean;
   allowStylePreview?: boolean;
   onActivity?: (event: DevelopmentProcessProgressItem) => Promise<void>;
+  /**
+   * Step 5: assistant prose as the provider streams it, for the chat transport. Only answer text is delivered —
+   * never reasoning or tool-call arguments — and the callback is presentation-only: it cannot change the run.
+   */
+  onTextDelta?: (text: string) => void;
 
   initialInboxMessageId?: string;
   ctx: AuthContext;
@@ -206,6 +211,11 @@ export interface CodingAgentSelfReviewSummary {
 
   reason?: string;
 
+  /** Step 4: the risk level the adaptive rule assigned to this change set. */
+  risk?: "low" | "elevated" | "high";
+  /** Step 4: true when the review was deliberately skipped by the adaptive rule rather than by config. */
+  adaptiveSkip?: boolean;
+
   detail?: string;
   ran: boolean;
 
@@ -243,6 +253,15 @@ export interface CodingAgentVerificationSummary {
   maxAttempts: number;
   verificationRuns: number;
   requestedTools: string[];
+  /**
+   * Step 2: the checks the last verification actually executed. `requestedTools` stays the run's configured list
+   * (the Live Preview gate reads it), while this states what was proven. `build` is never omitted when requested.
+   */
+  executedTools?: string[];
+  /** Step 2: requested checks deliberately not run for this change set, with a machine-readable reason. */
+  skippedChecks?: Array<{ tool: string; reason: string }>;
+  /** Step 2: true when the result was reused because the revision and every verification input were unchanged. */
+  reused?: boolean;
 
   failedChecks: Array<{ tool: string; code?: string }>;
 

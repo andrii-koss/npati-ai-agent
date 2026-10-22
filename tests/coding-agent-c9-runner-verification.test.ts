@@ -105,7 +105,7 @@ function createHarness(options: HarnessOptions = {}) {
       files: (options.changes ?? []).length,
       linesAdded: 1,
       linesRemoved: 1,
-      changes: options.changes ?? [{ path: "src/a.ts", tool: "code.fs.edit", status: "modified" }],
+      changes: (options.changes ?? [{ path: "src/a.ts", tool: "code.fs.edit", status: "modified" }]).map(change => ({ ...change, diff: change.diff ?? "@@ -1 +1 @@\n-before\n+after\n" })),
     }),
   };
 
@@ -116,6 +116,8 @@ function createHarness(options: HarnessOptions = {}) {
     toolRuntime,
     engine: {
       chat: async (request) => {
+        // Review has its own no-tools contract and must not consume the scripted implementation turns.
+        if (!request.tools?.length) return { content: JSON.stringify({ status: "clean", findings: [] }) };
         engineCalls.push(request);options.modelRequest?.(request);
         const next = script.shift();
         if (next instanceof Error) throw next;

@@ -348,13 +348,19 @@ describe("security-gate: C1c privileged audit adapter payload binding", () => {
     await store.updateCompanyMemberRole({ companyId: company.id, userId: admin.userId, role: "admin",
       expectedRevision: member!.revision, updatedAt: new Date() });
     const services = createAuditServices({ databaseUrl: "postgres://unused:unused@127.0.0.1:1/unused",
-      store, systemWorkspaceId: admin.workspaceId, log: { info() {}, warn() {}, error() {} } });
+      store, systemWorkspaceId: "system-not-the-company-workspace", log: { info() {}, warn() {}, error() {} } });
     try {
       const payloadHash = canonicalPayloadHash({ command: "npm test", cwd: "/projects/approved" });
-      await services.approvalDecisionAudit!.record({ companyId: company.id, actor: admin.userId,
+      await services.approvalDecisionAudit!.record({ workspaceId: admin.workspaceId, userId: admin.userId, companyId: company.id, actor: admin.userId,
         action: "company.approval.decided", resourceType: "company_approval", resourceId: "approved-one",
         decision: "allow", payloadHash });
-      expect((await services.auditLogService!.list(admin, company.id))[0]).toMatchObject({ payloadHash, actorRole: "admin" });
+      await services.approvalDecisionAudit!.record({ workspaceId: admin.workspaceId, userId: admin.userId, companyId: company.id, actor: "system",
+        action: "company.approval.expired", resourceType: "company_approval", resourceId: "expired-one", decision: "deny" });
+      const entries = await services.auditLogService!.list(admin, company.id);
+      expect(entries.find(entry => entry.resourceId === "approved-one")).toMatchObject({ payloadHash, actorRole: "admin", workspaceId: admin.workspaceId });
+      expect(entries.find(entry => entry.resourceId === "expired-one")).toMatchObject({ actor: "system", actorRole: "service", workspaceId: admin.workspaceId });
+      await expect(services.approvalDecisionAudit!.record({ workspaceId: "other-tenant", userId: admin.userId, companyId: company.id, actor: "system",
+        action: "company.approval.expired", resourceType: "company_approval", resourceId: "wrong-tenant", decision: "deny" })).rejects.toThrow();
     } finally {
       clearInterval(services.verifyTimer);
       clearInterval(services.anchorTimer);

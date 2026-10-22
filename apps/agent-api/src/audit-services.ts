@@ -51,7 +51,7 @@ export function createAuditServices(input: AuditServicesInput): AuditServices {
     ? {
         record: async (input) => {
           await auditLogService.record(
-            { workspaceId: systemWorkspaceId, userId: input.actor, permissions: [] } as AuthContext,
+            { workspaceId: input.workspaceId, userId: input.userId, companyId: input.companyId, permissions: [] } as AuthContext,
             {
               companyId: input.companyId,
               actor: input.actor,

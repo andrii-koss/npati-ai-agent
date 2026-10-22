@@ -405,7 +405,13 @@ export function normalizeToolCalls(input: NormalizeToolCallsInput): NormalizeToo
       }
       // A provider can leak DSML parameter markup into the native function name.
       // Do not infer missing arguments or replay the batch as a new task.
-      if (!/^[a-zA-Z0-9_.-]{1,128}$/.test(rawName)) {
+      /**
+       * Runtime MCP capabilities are addressed by their canonical id (`mcp:<connectionId>/<toolName>`, see
+       * `mcpToolId`), so `:` and `/` are legitimate name characters for a **known** tool. They are allowed here
+       * only because the very next step still resolves the name against `knownTools`: an id nobody published is
+       * `unknown_tool`, never executed. Markup characters (`<`, `>`, whitespace, quotes) remain refused.
+       */
+      if (!/^[a-zA-Z0-9_.:/-]{1,128}$/.test(rawName)) {
         const prefix = rawName.match(/^[a-zA-Z0-9_.-]+/)?.[0];
         const known = prefix ? resolveKnownTool(input.knownTools, prefix) : undefined;
         rejected.push(rejection("malformed_native_tool_call",
@@ -574,6 +580,32 @@ export function normalizeToolCalls(input: NormalizeToolCallsInput): NormalizeToo
       calls.push(buildCall("text", { name, args }));
     }
     if (!calls.length && !rejected.length) warnings.push("no_text_tool_calls");
+  }
+
+  /**
+   * Step 1: a response that stopped on the output limit may have been cut inside the last tool call.
+   *
+   * Some providers report `finish_reason: "length"` for that; when they do, no call from that response is
+   * executed, because a syntactically valid object can still carry a half-written file body. The provider that
+   * motivated this guard (DeepSeek Flash with reasoning disabled) instead reports `tool_calls` and simply stops
+   * mid-string, so the structural JSON check above remains the primary detector and this is the second one.
+   */
+  if (String(payload.finishReason ?? "").toLowerCase() === "length" && calls.length) {
+    let marked = 0;
+    for (const call of calls) {
+      if (call.partial) continue;
+      call.partial = true;
+      marked += 1;
+      rejected.push(
+        rejection(
+          "partial_tool_call",
+          `Tool ${call.name} arguments may be incomplete: the model stopped at the output limit, so nothing was executed`,
+          call.source,
+          { name: call.name, id: call.id, rawFragment: call.rawFragment },
+        ),
+      );
+    }
+    if (marked) warnings.push("output_limit_tool_calls");
   }
 
   // Deterministic ids must stay unique even when the model emits the same tool twice in one turn.

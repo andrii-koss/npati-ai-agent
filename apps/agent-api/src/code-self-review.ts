@@ -72,6 +72,12 @@ export interface CreateSelfReviewInput {
   maxFixIterations?: number | null;
   /** `false` disables the pass entirely (the operator turned it off). Recorded as `not_run`. */
   enabled?: boolean;
+  /**
+   * Step 4: the adaptive rule already decided that this change does not need a model review. The pass is recorded
+   * as `not_run` with this reason and **no model call is made**; the verdict is sealed, so a later `execute` cannot
+   * turn a deliberate skip into a review.
+   */
+  skipReason?: { reason: SelfReviewReason; detail?: string };
   /** Called when the pass reaches a verdict, so the caller can journal it without polling. */
   onVerdict?: (verdict: SelfReviewVerdict) => void;
 }
@@ -214,6 +220,16 @@ export function createSelfReview(create: CreateSelfReviewInput): SelfReviewState
     if (!enabled) {
       return buildVerdict("not_run", "disabled_by_configuration", "Self-review is disabled by configuration.", [], 0, false);
     }
+    if (create.skipReason && !fixApplied) {
+      return buildVerdict(
+        "not_run",
+        create.skipReason.reason,
+        create.skipReason.detail ?? "The adaptive rule judged this change low-risk after a passing verification.",
+        [],
+        0,
+        false,
+      );
+    }
     if (fixApplied) {
       /**
        * The single fix iteration ran, so the verdict is the *first* review's list interpreted by what the fix
@@ -287,12 +303,17 @@ export function createSelfReview(create: CreateSelfReviewInput): SelfReviewState
 
       if (!enabled) return setVerdict(compute(), true);
 
+      // Step 4: a deliberate adaptive skip is final and never reaches the model.
+      if (create.skipReason) return setVerdict(compute(), true);
+
       // Source 3 must have something in it, or there is no change to review. "No diff" is `not_run`, never
       // `clean`: a reviewer shown nothing cannot certify anything.
-      if (!reviewedInput.finalDiff || reviewedInput.changedFiles.length === 0) {
+      if (reviewedInput.changedFiles.length === 0) {
         lastFindings = null;
         return setVerdict(compute(), true);
       }
+
+      if (!reviewedInput.finalDiff) return setVerdict(buildVerdict("unavailable", "review_diff_unavailable", "Changed files have no reviewable diff.", [], 0, false), true);
 
       reviewRuns += 1;
       if (input.guardPrompt) {

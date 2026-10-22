@@ -207,6 +207,42 @@ describe("Step 4 — Project Preview & Changes", () => {
     await restored.startPreview(owner,company.id,project.id,{verifiedBuild:false});
     const calls=provider.calls.slice(count);expect(calls.indexOf("stopProcess")).toBeGreaterThanOrEqual(0);expect(calls.indexOf("stopProcess")).toBeLessThan(calls.findIndex(call=>call.startsWith("process:")));
   });
+  it("reports restart readiness as 503 until HTTP becomes ready, including another API instance", async () => {
+    const { preview, sandbox, workspace, store, projects, company, project } = await fixture();
+    await workspace.createFile(owner, company.id, project.id, "index.html", "Ready");
+    vi.spyOn(sandbox, "supportsPreviewProxy").mockReturnValue(true);
+    let ready!: (value: { status: number; headers: Record<string, string>; body: string }) => void;
+    const pending = new Promise<{ status: number; headers: Record<string, string>; body: string }>(resolve => { ready = resolve; });
+    const probe = vi.spyOn(sandbox, "proxyPreview").mockReturnValueOnce(pending);
+    const start = preview.startPreview(owner, company.id, project.id);
+    await vi.waitFor(() => expect(probe).toHaveBeenCalledTimes(1));
+    const app = Fastify();
+    const api = new ProjectPreviewService(projects, store, workspace, sandbox, "test-preview-secret-key-32chars!");
+    registerProjectPreviewRoutes(app, api, workspace, new LocalDevAuthProvider(owner));
+    const { token } = preview.generateToken({ workspaceId: owner.workspaceId, userId: owner.userId, companyId: company.id, projectId: project.id, sandboxId: "test" });
+    try {
+      const response = await app.inject({ method: "GET", url: "/companies/"+company.id+"/projects/"+project.id+"/preview/proxy/?token="+token });
+      expect(response.statusCode).toBe(503);
+      expect(response.headers["retry-after"]).toBe("1");
+      expect(response.json().error.code).toBe("preview_starting");
+      expect(probe).toHaveBeenCalledTimes(1);
+    } finally { ready({ status: 200, headers: {}, body: "" }); await start; await app.close(); }
+    expect((await projects.get(owner, company.id, project.id)).status).toBe("previewing");
+  });
+
+  it("preserves a durable preview failure as 502 after an API restart", async () => {
+    const { preview, projects, workspace, company, project } = await fixture();
+    await projects.updatePreview(owner, company.id, project.id, { status: "failed" });
+    const app = Fastify();
+    registerProjectPreviewRoutes(app, preview, workspace, new LocalDevAuthProvider(owner));
+    const { token } = preview.generateToken({ workspaceId: owner.workspaceId, userId: owner.userId, companyId: company.id, projectId: project.id, sandboxId: "failed-sandbox" });
+    try {
+      const response = await app.inject({ method: "GET", url: "/companies/"+company.id+"/projects/"+project.id+"/preview/proxy/?token="+token });
+      expect(response.statusCode).toBe(502);
+      expect(response.json().error.code).toBe("preview_failed");
+    } finally { await app.close(); }
+  });
+
   it("waits for HTTP readiness before publishing the preview", async () => {
     const { preview, sandbox, workspace, company, project } = await fixture();
     await workspace.createFile(owner, company.id, project.id, "index.html", "Ready");

@@ -70,10 +70,14 @@ export function createChatProjectIntentResolver(deps: {
     };
     if (!message.trim() || isWebsiteReferenceEdit(input)) return fallback();
     const deterministic = classifyProjectIntent(input);
-    const planTargets = planChatDevelopment(message, input.activeProjectId ?? undefined);
-    if (["CREATE_WEBSITE", "CREATE_PROJECT"].includes(deterministic.intent) && planTargets.length > 0) {
-      return { decision: deterministic, targets: planTargets, source: "deterministic" as const };
-    }
+    /**
+     * Modality is not a regex. A message that *mentions* creating a site can be an imperative, a question
+     * ("how do I create a website?"), advice, or a quoted example, and the router is the only component
+     * instructed to tell them apart across languages (`instructions`: "A question about how to build a site …
+     * is CHAT"). A deterministic fast path here skipped that read and turned questions into project creation,
+     * so creation always goes through the semantic classifier; the deterministic guards below may still
+     * answer without a model call.
+     */
     const hasSpreadsheet = (input.attachmentNames ?? []).some(name => /\.(xlsx|xlsm|xlsb|xls|csv)$/iu.test(name))
       || (input.conversationHistory ?? []).some(item => /\[\[npati-attachment:document:[0-9a-f-]{36}:[^\]]+\.(?:xlsx|xlsm|xlsb|xls|csv)\]\]/iu.test(item.content));
     if (!input.activeProjectId && hasSpreadsheet && isSpreadsheetEditRequest(message)

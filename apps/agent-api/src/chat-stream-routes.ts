@@ -423,6 +423,13 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
                 signal: isBackground ? backgroundSink!.signal : streamController.signal,
                 emitResult: (result) => { send("result", { routed: "code_runner", intent: codeDecision.intent, run: result }); },
                 emitTerminal: (status, reason) => { backgroundSink?.finish(status, reason); },
+                /**
+                 * Step 5: the assistant answer as it is generated. It goes through the same SSE writer and the same
+                 * sequence numbers as every other event, so ordering and reconnect (`id:` replay) are unchanged. A
+                 * client renders these as a live preview and replaces them with the final `result` message; it must
+                 * not append both.
+                 */
+                emitDelta: (text) => { if (text) send("delta", { delta: text, runId: runKey }); },
               },
               abort: isBackground
                 ? (reason?: unknown) => { codeBackgroundRuns.abort(runKey, reason instanceof Error ? reason.message : "Stopped by request"); }

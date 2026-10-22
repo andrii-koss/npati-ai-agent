@@ -525,9 +525,9 @@ export function buildApp(config: AppConfig = {}) {
     codeProjectTrust,
     codeSandboxExecPort,
     codeShellRuntime,
-    codeUserQuestionReaperPort,
+    get codeUserQuestionReaperPort() { return codeUserQuestionReaperPort; },
     featureFlagService,
-    mcpApprovalPauseRelease,
+    get mcpApprovalPauseRelease() { return mcpApprovalPauseRelease; },
     projectSandbox,
     projectService,
     projectWorkspace,
@@ -632,6 +632,7 @@ export function buildApp(config: AppConfig = {}) {
     contentLibrary,
     integrationsRepo,
   } = companyAutomationsWiring;
+  mcpIntegrationSourceForRuntime = companyAutomationsWiring.mcpIntegrationSourceForRuntime;
 
   const chatOrchestrationWiring = createAppChatOrchestration({
     config,
@@ -774,6 +775,7 @@ export function buildApp(config: AppConfig = {}) {
     runAutomation, runNeutralMessage, scopedMemory, workspaceStore,
   });
   codeUserQuestionReaperPort = platformRoutes.codeUserQuestionReaperPort;
+  mcpApprovalPauseRelease = platformRoutes.mcpApprovalPauseRelease;
 
   registerAppRoutesAndLifecycle({
     app, config, log: app.log, boundedResponseChunks, aiEngine, hub, workspaceStore, researchBundle,

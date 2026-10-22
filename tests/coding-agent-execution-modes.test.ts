@@ -21,7 +21,7 @@ async function fixture(ctx = user) {
   const company = await store.createCompany(ctx, { name: "Company" }, "company");
   const audit = { record: vi.fn(async () => ({})) };
   const flags = new FeatureFlagService(store, audit as never, { enabledByDefault: true });
-  const code = new CodeService(store, new ProjectService(store), {} as never, undefined, undefined, undefined, flags);
+  const code = new CodeService(store, new ProjectService(store), { listFiles: async () => [] } as never, undefined, undefined, undefined, flags);
   const project = await code.createProject(ctx, company.id, { name: "Project" }, "project");
   return { store, company, flags, code, project, audit };
 }

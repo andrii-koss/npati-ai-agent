@@ -19,6 +19,47 @@ export function requiresResponsesApi(model?: ModelInfo) {
   return endpoints.some((endpoint) => /responses/i.test(endpoint)) && !endpoints.some((endpoint) => /chat/i.test(endpoint));
 }
 
+/**
+ * Step 3: which models need an **explicit** cache marker.
+ *
+ * Anthropic-family models only cache a prefix that carries `cache_control`; every other provider NPATI is configured
+ * with either caches implicitly (DeepSeek reports `cached_tokens` on repeated prompts without any directive) or does
+ * not cache at all. Sending an Anthropic-shaped content-block array to a provider that expects a system string is not
+ * neutral: measured on DeepSeek Flash, the array form made the provider drop the system prompt (prompt_tokens 2438 →
+ * 37). The list is therefore an allowlist by explicit model id, and `auto/*` combos are excluded because the model
+ * that actually answers is not known at request time — an unknown provider gets the plain string, never a guess.
+ */
+export function modelSupportsExplicitPromptCache(model?: string): boolean {
+  const id = String(model ?? "").trim().toLowerCase();
+  if (!id || id === "auto" || id.startsWith("auto/")) return false;
+  return id.startsWith("anthropic/") || id.startsWith("claude") || id.includes("/claude");
+}
+
+/**
+ * Marks the stable prefix of the first system message for models that require it. The prompt itself is unchanged:
+ * the same text is split into two blocks, the first carrying the cache marker. Anything unexpected (no prefix, a
+ * prefix that does not match, a system message that is already structured) returns the messages untouched.
+ */
+export function withExplicitPromptCache<M extends ChatMessage>(
+  messages: readonly M[],
+  prefix: string | undefined,
+  model: string | undefined,
+): M[] {
+  if (!prefix || !modelSupportsExplicitPromptCache(model)) return [...messages];
+  const index = messages.findIndex((message) => message.role === "system");
+  if (index < 0) return [...messages];
+  const content = messages[index]!.content;
+  if (typeof content !== "string" || !content.startsWith(prefix)) return [...messages];
+  const rest = content.slice(prefix.length);
+  const blocks = [
+    { type: "text" as const, text: prefix, cache_control: { type: "ephemeral" as const } },
+    ...(rest ? [{ type: "text" as const, text: rest }] : []),
+  ];
+  return messages.map((message, position) => position === index
+    ? ({ ...message, content: blocks } as unknown as M)
+    : message);
+}
+
 export function responsesText(payload: {
   output_text?: string;
   output?: Array<{ content?: Array<{ type?: string; text?: string }> }>;

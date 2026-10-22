@@ -76,7 +76,7 @@ describe("security-gate: C13 MCP run path wiring — one discovery system, reach
 
   it("discovers before the model-visible tool list and before the ExecutionSnapshot", () => {
     const discovery = runnerSource.indexOf("this.ports.runtimeCapabilities.prepareForRun(");
-    const toolList = runnerSource.indexOf("const tools = this.toolDescriptors(session, toolOptions);");
+    const toolList = runnerSource.indexOf("const tools = this.toolDescriptors(");
     const snapshot = runnerSource.indexOf("const snapshot = await this.snapshot.create({");
     /**
      * The loop's own model call, not the file's first one: the self-review pass (`runSelfReview`) also calls the
@@ -96,7 +96,7 @@ describe("security-gate: C13 MCP run path wiring — one discovery system, reach
     expect(snapshot).toBeLessThan(firstModelCall);
     // The discovery happens exactly once per run: no second call site, and no call inside the tool loop.
     expect([...runnerSource.matchAll(/runtimeCapabilities\.prepareForRun\(/g)]).toHaveLength(1);
-    expect([...runnerSource.matchAll(/const tools = this\.toolDescriptors\(session, toolOptions\);/g)]).toHaveLength(1);
+    expect([...runnerSource.matchAll(/const tools = this\.toolDescriptors\(session, toolOptions\)/g)]).toHaveLength(1);
   });
 
   it("keeps discovery independent of the Inspector, in both the runner and the MCP run path", () => {
@@ -136,8 +136,9 @@ describe("security-gate: C13 MCP run path wiring — one discovery system, reach
       const runtime = combined.json().runtime as Record<string, unknown>;
       expect(runtime).toBeDefined();
       const discovery = runtime.discovery as Record<string, unknown>;
-      // A fresh deployment has no configured integration source and must fail closed, visibly.
-      expect(discovery).toMatchObject({ error: { code: "mcp_integration_source_unavailable" } });
+      // The composed app binds its existing integration repository; an empty repository publishes no tools.
+      expect(discovery).not.toHaveProperty("error");
+      expect(discovery).toMatchObject({ publishedTools: 0, connections: [] });
       expect((runtime.items as unknown[]).length).toBe(0);
       // The static numbers the combined view reports are the Inspector's own, untouched by the runtime source.
       const counts = runtime.counts as Record<string, number>;

@@ -117,7 +117,8 @@ function createHarness(options: { script: ChatResult[]; withTurnTracker?: boolea
     rbac: { authorize: async () => ({ allowed: true }) },
     toolRuntime,
     engine: {
-      chat: async () => {
+      chat: async (request) => {
+        if (!request.tools?.length) return { content: JSON.stringify({ status: "clean", findings: [] }) };
         const next = script.shift();
         if (!next) throw new Error("the script ran out of answers");
         return next;

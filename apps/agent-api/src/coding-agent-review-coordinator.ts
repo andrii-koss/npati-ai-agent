@@ -15,10 +15,15 @@ import {
 import type { TestIntegrityVerdict } from "./code-test-integrity-guard";
 import type { ScopeGuardResult } from "./code-scope-guard";
 import {
-  SELF_REVIEW_SCHEMA_VERSION,
+  planVerification,
+  verificationFingerprint,
+  type VerificationPlan,
+} from "./code-verification-plan";
+import { decideSelfReview, type SelfReviewRiskDecision } from "./code-self-review-risk";
+import { buildSelfReviewSummary, buildVerificationSummary } from "./code-review-summary";
+import {
   createSelfReview,
   selfReviewStopMessage,
-  type SelfReviewFinding,
   type SelfReviewState,
   type SelfReviewVerdict,
 } from "./code-self-review";
@@ -29,10 +34,10 @@ import {
   type CodingAgentRunnerPorts,
   type CodingAgentRunInput,
   type CodingAgentRunSummary,
-  type CodingAgentSelfReviewFinding,
   type CodingAgentRunResult,
   DEFAULT_VERIFICATION_TOOLS,
   bounded,
+  emitCodingActivity,
 } from "./coding-agent-runner-contracts";
 import type { CodingAgentReviewPhases } from "./coding-agent-review-phases";
 
@@ -64,6 +69,12 @@ export interface ReviewCoordinatorHost {
   ) => Promise<CodingAgentRunResult>;
 }
 
+/**
+ * How many verification results one run may remember. A run edits a handful of revisions; the cap exists so a
+ * pathological edit/verify cycle cannot grow the map without bound.
+ */
+const VERIFICATION_CACHE_LIMIT = 4;
+
 export class CodingAgentReviewCoordinator {
   private readonly verificationTools: readonly string[];
   private readonly verificationLoop: VerificationLoop;
@@ -80,6 +91,19 @@ export class CodingAgentReviewCoordinator {
   private selfReviewFixPending = false;
   private lastCheckpointId: string | null = null;
   collectedChanges: Array<{ path: string; tool: string; status?: string; diff?: string }> = [];
+  /**
+   * Step 2: successful **and** failed verification results, keyed by the fingerprint of their inputs. A cached
+   * result is re-recorded into the loop instead of re-running the commands, so the repair budget and the decision
+   * behave exactly as a fresh run would — only the sandbox work is saved. Capped: a run edits a handful of
+   * revisions, and an unbounded map would be a leak.
+   */
+  private readonly verificationCache = new Map<string, { checks: VerificationCheckReport[]; revision: string }>();
+  private lastVerificationPlan: VerificationPlan | null = null;
+  private lastVerificationReused = false;
+  /** How many recorded "runs" were replays of a cached result, so the summary can report real executions. */
+  private verificationReuses = 0;
+  /** Step 4: the adaptive risk decision for this run's change set, reported in the summary. */
+  private selfReviewRisk: SelfReviewRiskDecision | null = null;
 
   constructor(private readonly host: ReviewCoordinatorHost) {
     this.verificationTools = Object.freeze([...(host.input.verificationTools ?? DEFAULT_VERIFICATION_TOOLS)]);
@@ -101,6 +125,39 @@ export class CodingAgentReviewCoordinator {
       this.host.projectId,
       this.host.sessionId,
     ).catch(() => null) ?? Promise.resolve(null);
+  }
+
+  /** The checks this change set actually needs. A pure decision: it reads the run's changed paths, nothing else. */
+  verificationPlan(): VerificationPlan {
+    return planVerification({
+      requestedTools: this.verificationTools,
+      changedPaths: this.runChanges().map((change) => change.path),
+    });
+  }
+
+  /**
+   * The identity a verification result is stored under. `null` means the workspace revision cannot be proven, and
+   * an unprovable revision must never authorise reuse — the caller then simply runs the checks.
+   *
+   * `knownRevision` is passed by callers that have just read the revision (the model-verify observer): re-reading
+   * it would add a second, racy read and could file the result under a revision that was never observed.
+   */
+  async verificationFingerprintFor(
+    tools: readonly string[],
+    knownRevision?: string | null,
+  ): Promise<{ fingerprint: string; revision: string } | null> {
+    const revision = knownRevision === undefined ? await this.readVerificationRevision() : knownRevision;
+    if (!revision) return null;
+    const sandboxImage = this.host.ports.environment?.sandboxImage?.()?.digest ?? null;
+    return {
+      revision,
+      fingerprint: verificationFingerprint({
+        revision,
+        tools,
+        sandboxImage,
+        changeSignature: this.currentChangeSignature(),
+      }),
+    };
   }
 
   turnCheckpointId(steps: number): string | null {
@@ -188,11 +245,19 @@ export class CodingAgentReviewCoordinator {
     this.scopeGuard = evaluated.scopeGuard;
   }
 
-  toCheckReports(outcome: CodeToolInvokeResult | CodeToolInvokeFailure): VerificationCheckReport[] {
-    return verificationChecks(outcome, this.verificationTools);
+  /**
+   * Maps the executor outcome to check reports **for the checks that actually ran**. Passing the requested list
+   * here after a narrowed plan would mark every skipped check as `unavailable`, and an unavailable check is a
+   * failure by construction — the summary must state what was proven, not what was wished for.
+   */
+  toCheckReports(
+    outcome: CodeToolInvokeResult | CodeToolInvokeFailure,
+    tools: readonly string[] = this.verificationTools,
+  ): VerificationCheckReport[] {
+    return verificationChecks(outcome, tools);
   }
 
-  runVerification(steps: number, stateRunId?: string): Promise<void> {
+  runVerification(steps: number, stateRunId?: string, tools: readonly string[] = this.verificationTools): Promise<void> {
     return this.host.reviewPhases.verifyOnce({
       ctx: this.host.ctx,
       input: this.host.input,
@@ -202,10 +267,10 @@ export class CodingAgentReviewCoordinator {
       stateRunId,
       steps,
       turnId: this.host.turnId,
-      verificationTools: this.verificationTools,
+      verificationTools: tools,
       capabilityScopeFields: this.host.capabilityScopeFields,
       verificationLoop: this.verificationLoop,
-      toCheckReports: (outcome) => this.toCheckReports(outcome),
+      toCheckReports: (outcome) => this.toCheckReports(outcome, tools),
       record: this.host.record,
     });
   }
@@ -214,27 +279,13 @@ export class CodingAgentReviewCoordinator {
     if (this.verificationDisabled) return;
     const report: VerificationReport = this.verificationLoop.report();
     if (report.status === "not_run" && !this.testIntegrity) return;
-    const integrity = this.testIntegrity;
-    const unjustified = integrity?.requiresJustification === true && report.status === "passed";
-    this.host.summary.verification = {
-      schemaVersion: report.schemaVersion,
-      status: unjustified ? "passed_with_unjustified_test_changes" : report.status,
-      attemptsUsed: report.attemptsUsed,
-      maxAttempts: report.maxAttempts,
-      verificationRuns: report.verificationRuns,
-      requestedTools: [...report.requestedTools],
-      failedChecks: report.failedChecks.map((check) => ({ tool: check.tool, ...(check.code ? { code: check.code } : {}) })),
-      ...(integrity ? {
-        testIntegrity: {
-          flagged: integrity.flagged,
-          requiresJustification: integrity.requiresJustification,
-          justificationProvided: false,
-          findings: integrity.findings.map((f) => ({ path: f.path, kind: f.kind, detail: f.detail })),
-          testFilesTouched: [...integrity.testFilesTouched],
-          testFilesDeleted: [...integrity.testFilesDeleted],
-        },
-      } : {}),
-    };
+    this.host.summary.verification = buildVerificationSummary({
+      report,
+      plan: this.lastVerificationPlan,
+      reused: this.lastVerificationReused,
+      reuses: this.verificationReuses,
+      integrity: this.testIntegrity,
+    });
   }
 
   verificationStopMessage(): string {
@@ -328,33 +379,10 @@ export class CodingAgentReviewCoordinator {
     ].join("\n");
   }
 
-  toFindingSummary(finding: SelfReviewFinding): CodingAgentSelfReviewFinding {
-    return {
-      id: finding.id,
-      category: finding.category,
-      severity: finding.severity,
-      file: finding.file,
-      reason: finding.reason,
-      suggestedFix: finding.suggested_fix,
-      blocking: finding.blocking,
-    };
-  }
-
   writeSelfReviewSummary(): void {
     const verdict = this.selfReviewVerdict;
     if (!verdict) return;
-    this.host.summary.selfReview = {
-      schemaVersion: SELF_REVIEW_SCHEMA_VERSION,
-      status: verdict.status,
-      ...(verdict.reason ? { reason: verdict.reason } : {}),
-      ...(verdict.detail ? { detail: verdict.detail } : {}),
-      ran: verdict.ran, reviewRuns: verdict.reviewRuns,
-      iterationsUsed: verdict.iterationsUsed, maxIterations: verdict.maxIterations,
-      fixApplied: verdict.fixApplied, findingsCount: verdict.findings.length,
-      blocking: verdict.blocking, unresolved: verdict.unresolved.length,
-      findings: verdict.findings.map((f) => this.toFindingSummary(f)),
-      inputs: verdict.inputs, reviewHash: verdict.reviewHash,
-    };
+    this.host.summary.selfReview = buildSelfReviewSummary({ verdict, risk: this.selfReviewRisk?.risk ?? null });
   }
 
   async runSelfReview(steps: number, prompt: string): Promise<void> {
@@ -379,11 +407,35 @@ export class CodingAgentReviewCoordinator {
     if (verdict) this.selfReviewVerdict = verdict;
   }
 
-  beginSelfReviewState(): SelfReviewVerdict | null {
+  /**
+   * Step 4: the adaptive decision for this change set.
+   *
+   * It is computed from facts the run already holds — the changed paths and diffs, the verification verdict and its
+   * repair history, the test-integrity verdict and the scope guard — never from the model. A change can only be
+   * skipped when it is presentation-only, verified, unrepaired, integrity-clean and small.
+   */
+  selfReviewDecision(): SelfReviewRiskDecision {
+    const status = this.verificationLoop.status();
+    const totals = this.runChangeTotals();
+    return decideSelfReview({
+      changedFiles: this.runChanges(),
+      verificationStatus: status === "passed" ? "passed" : status === "not_run" ? "not_run" : "failed",
+      hadRepair: this.verificationLoop.attemptsUsed() > 0,
+      testIntegrity: this.testIntegrity
+        ? { flagged: this.testIntegrity.flagged, requiresJustification: this.testIntegrity.requiresJustification }
+        : null,
+      scopeExceeded: this.scopeGuard?.exceeded === true,
+      totalLinesChanged: totals.linesAdded + totals.linesRemoved,
+      adaptiveEnabled: this.host.ports.selfReview?.adaptive ?? this.host.limits.selfReviewAdaptive,
+    });
+  }
+
+  beginSelfReviewState(skip?: { reason: "adaptive_low_risk_skip"; detail: string }): SelfReviewVerdict | null {
     if (this.selfReviewPasses > 0 && this.selfReviewState) return this.selfReviewState.report();
     this.selfReviewPasses += 1;
     this.selfReviewState = createSelfReview({
-      input: { finalDiff: this.boundedDiff(this.host.selfReviewDiffChars) },
+      input: { originalGoal: this.host.input.prompt, changedFiles: this.runChanges(), finalDiff: this.boundedDiff(this.host.selfReviewDiffChars), verification: this.verificationForReview(), testIntegrity: this.testIntegrityForReview() },
+      ...(skip ? { skipReason: skip } : {}),
       ...(this.host.ports.selfReview?.maxFixIterations !== undefined
         ? { maxFixIterations: this.host.ports.selfReview.maxFixIterations }
         : { maxFixIterations: this.host.ports.limits?.selfReviewFixIterations ?? 2 }),
@@ -392,10 +444,53 @@ export class CodingAgentReviewCoordinator {
     return this.selfReviewState.report();
   }
 
+  /**
+   * Step 2: verification is skipped only when its **inputs** are provably unchanged.
+   *
+   * The fingerprint covers the canonical workspace revision (a content digest, so it moves when any file —
+   * including `package.json` or a lockfile — changes), the checks that would run, the execution image and the
+   * run's own change signature. A cached result is replayed through `record()`, which keeps the repair budget
+   * and `decide()` semantics identical to a real run; only the sandbox commands are saved.
+   */
   async verifyAndDecide(steps: number, stateRunId?: string): Promise<"passed" | "repair" | "approval_required" | "unavailable" | "exhausted"> {
-    const revision = this.verifiedRevision ? await this.readVerificationRevision() : null;
-    if (!revision || revision !== this.verifiedRevision || this.verificationLoop.status() !== "passed" || this.verifiedSignature !== this.currentChangeSignature()) {
-      await this.runVerification(steps, stateRunId);
+    const plan = this.verificationPlan();
+    this.lastVerificationPlan = plan;
+    const identity = await this.verificationFingerprintFor(plan.tools);
+    /**
+     * A pass produced by the model against the **full** requested list is stronger evidence than the narrowed
+     * plan, so it may satisfy a narrowed lookup too (same revision, strictly more checks). The reverse is never
+     * allowed: a narrowed pass cannot be reused for a full check set.
+     */
+    const fullIdentity = plan.tools.length === this.verificationTools.length
+      ? identity
+      : await this.verificationFingerprintFor(this.verificationTools);
+    const cached = (identity ? this.verificationCache.get(identity.fingerprint) : undefined)
+      ?? (fullIdentity ? this.verificationCache.get(fullIdentity.fingerprint) : undefined);
+
+    if (cached) {
+      this.lastVerificationReused = true;
+      this.verificationReuses += 1;
+      this.verificationLoop.record(cached.checks);
+      this.verifiedRevision = cached.revision;
+      this.verifiedSignature = this.currentChangeSignature();
+      await emitCodingActivity(this.host.input, {
+        id: `${stateRunId ?? this.host.input.runId}:verify:reused:${steps}`,
+        runId: stateRunId ?? this.host.input.runId,
+        stage: "build",
+        title: "Verification reused for the unchanged revision",
+        tool: "code.verify.run",
+        at: new Date().toISOString(),
+        status: "completed",
+        agentId: this.host.input.agentId ?? "NPATI Coding Agent",
+      });
+    } else {
+      this.lastVerificationReused = false;
+      await this.runVerification(steps, stateRunId, plan.tools);
+      const report = this.verificationLoop.report();
+      if (identity && report.checks.length) {
+        this.cacheVerification(identity.fingerprint, report.checks, identity.revision);
+        if (report.status === "passed") this.verifiedRevision = identity.revision;
+      }
     }
 
     this.verifiedSignature = this.currentChangeSignature();
@@ -420,7 +515,30 @@ export class CodingAgentReviewCoordinator {
     return "exhausted";
   }
 
-  async beginSelfReview(steps: number, prompt: string): Promise<void> {
+  async beginSelfReview(steps: number, prompt: string, decision?: SelfReviewRiskDecision): Promise<void> {
+    this.selfReviewRisk = decision ?? this.selfReviewRisk;
+    /**
+     * Step 4: the adaptive skip. The pass is recorded as `not_run` with its own reason and **no model call is made**;
+     * `afterSelfReview` then treats it as "nothing to decide" exactly like an empty change set, so completion is
+     * unaffected — the run was already verified, and this only removes a second, model-based opinion.
+     */
+    if (decision?.decision === "skip") {
+      this.selfReviewVerdict = this.beginSelfReviewState({
+        reason: "adaptive_low_risk_skip",
+        detail: `Skipped: ${decision.reason} (${decision.signals.join(", ")}).`,
+      });
+      this.writeSelfReviewSummary();
+      await this.host.record({
+        kind: "reminder",
+        companyId: this.host.companyId,
+        projectId: this.host.projectId,
+        sessionId: this.host.sessionId,
+        runId: this.host.input.runId,
+        turn: steps,
+        reason: "self_review_skipped",
+      });
+      return;
+    }
     this.beginSelfReviewState();
     await this.runSelfReview(steps, prompt);
   }
@@ -503,7 +621,23 @@ export class CodingAgentReviewCoordinator {
         this.verificationLoop.record(checks);
         this.verifiedSignature = this.currentChangeSignature();
         this.verifiedRevision = beforeVerification;
+        /**
+         * Step 2: a pass the model itself produced is evidence for exactly this revision. Remembering it lets the
+         * backend decision reuse it instead of paying for the same build twice. Only the full requested set is
+         * cached: a partial pass is not evidence for checks it did not run.
+         */
+        const identity = await this.verificationFingerprintFor(this.verificationTools, beforeVerification);
+        if (identity) this.cacheVerification(identity.fingerprint, checks, identity.revision);
       }
+    }
+  }
+
+  private cacheVerification(fingerprint: string, checks: readonly VerificationCheckReport[], revision: string): void {
+    this.verificationCache.set(fingerprint, { checks: checks.map((check) => ({ ...check })), revision });
+    while (this.verificationCache.size > VERIFICATION_CACHE_LIMIT) {
+      const oldest = this.verificationCache.keys().next().value;
+      if (oldest === undefined) break;
+      this.verificationCache.delete(oldest);
     }
   }
 
@@ -575,8 +709,23 @@ export class CodingAgentReviewCoordinator {
       && changeSet.every(change => /\.css$/i.test(change.path));
     if (stylePreview) this.host.summary.stylePreview = true;
     if (stylePreview || this.verificationDisabled || (changeSet.length === 0 && !this.host.input.forceVerification)) {
-      this.selfReviewVerdict = this.beginSelfReviewState();
-      this.writeSelfReviewSummary();
+      if (changeSet.length > 0) {
+        let outcome;
+        if (this.selfReviewFixPending) outcome = await this.afterSelfReviewFix(steps, stateRunId);
+        else {
+          await this.beginSelfReview(steps, prompt, this.selfReviewDecision());
+          outcome = await this.afterSelfReview(steps);
+        }
+        if (outcome.action === "continue") return { action: "continue" };
+        if (outcome.action === "stop") {
+          this.host.summary.remaining = outcome.reason;
+          await this.host.release(outcome.reason);
+          return { action: "stopped", result: await this.host.stop("stopped", outcome.reason, outcome.message) };
+        }
+      } else {
+        this.selfReviewVerdict = this.beginSelfReviewState();
+        this.writeSelfReviewSummary();
+      }
       await this.host.release("completed");
       await this.host.ports.runEvents?.append({
         eventKey: `code-run-completed:${this.host.turnId}`, eventType: "completed",
@@ -616,7 +765,8 @@ export class CodingAgentReviewCoordinator {
 
       verificationExhausted = failing === "exhausted";
       if (verificationExhausted) this.host.summary.remaining = VERIFICATION_REPAIR_EXHAUSTED;
-      await this.beginSelfReview(steps, prompt);
+      const riskDecision = this.selfReviewDecision();
+      await this.beginSelfReview(steps, prompt, riskDecision);
 
       const outcome = await this.afterSelfReview(steps);
       if (outcome.action === "stop") {

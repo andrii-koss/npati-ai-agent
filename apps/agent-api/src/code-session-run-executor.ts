@@ -78,6 +78,12 @@ export interface CodeRunEventSink {
   emitResult(result: unknown): void;
   /** Records how the run ended. Called once, after `emitResult`. */
   emitTerminal(status: CodeRunTerminalStatus, reason: string | null): void;
+  /**
+   * Step 5: assistant **answer text** as the provider streams it, before the run settles. It is a preview of the
+   * final message, never tool arguments or reasoning; a client must replace it with the final `result` message
+   * instead of appending both.
+   */
+  emitDelta?(text: string): void;
 }
 
 export type CodeRunTerminalStatus = "completed" | "failed" | "cancelled" | "suspended_by_flag";
@@ -199,6 +205,8 @@ export class CodeSessionRunExecutor {
         ...(input.requireImplementation ? { requireImplementation: true } : {}),
         ...(input.emptyHtmlWorkspace ? { emptyHtmlWorkspace: true } : {}),
         ...(input.onActivity ? { onActivity: input.onActivity } : {}),
+        // Step 5: assistant prose reaches the transport through the sink, before the run settles.
+        ...(sink?.emitDelta ? { onTextDelta: (text: string) => sink.emitDelta?.(text) } : {}),
         ...(input.maxTurns !== undefined ? { maxTurns: input.maxTurns } : {}),
         ...(input.runId ? { runId: input.runId } : {}),
         ...(input.agentId ? { agentId: input.agentId } : {}),

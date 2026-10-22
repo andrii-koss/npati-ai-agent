@@ -20,7 +20,7 @@ async function fixture(mode = "auto", approvals?: CodeApprovalPort) {
   const projectData = {
     inspectSchema: vi.fn(async () => ({ backend: { id: "db", name: "Site DB", status: "ready" as const }, environment: { name: "dev", syncStatus: "synced" as const, schemaFingerprint: "before" }, schema: { tables: [] }, expectedSchema: null })),
     applySchema: vi.fn(),
-    createBackend: vi.fn(async()=>({created:true,backend:{id:"db",name:"Orders",status:"ready"},environment:{PROJECT_API_URL:"https://api.test/v1/projects/selected-site",PROJECT_PUBLISHABLE_KEY:"public"}})),
+    createBackend: vi.fn(async()=>({reason:"Persist test orders",userMessage:"Test backend created",created:true,backend:{id:"db",name:"Orders",status:"ready"},environment:{PROJECT_API_URL:"https://api.test/v1/projects/selected-site",PROJECT_PUBLISHABLE_KEY:"public"}})),
     assertBackend: vi.fn(),
     listRows: vi.fn(async () => ({ rows: [] })),
     transferRows: vi.fn(async () => ({ applied: true, rows: 1, transferId: crypto.randomUUID(), source: "products", target: "archive", mode: "move" as const, snapshotId: null })),

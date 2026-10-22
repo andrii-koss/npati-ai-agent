@@ -18,6 +18,7 @@ import {
   textHeader,
   chatUsage,
   normalizeM4aContainer,
+  withExplicitPromptCache,
 } from "./omniroute-engine-helpers";
 
 export class OmniRouteEngine implements AIEngine {
@@ -80,6 +81,12 @@ export class OmniRouteEngine implements AIEngine {
       const path = useResponses ? "/api/v1/responses" : "/api/v1/chat/completions";
       const responseTools = wire.tools?.map((tool) => ({ type: "function", ...tool.function }));
       const responseChoice = typeof wire.toolChoice === "object" ? { type: "function", name: wire.toolChoice.function.name } : wire.toolChoice ?? "auto";
+      /**
+       * Step 3: an explicit cache marker is applied only for models that need one (see the helper). For every other
+       * provider the messages are byte-for-byte what they were, which keeps implicit caching and text-protocol
+       * providers on the exact wire format they were measured with.
+       */
+      const requestMessages = withExplicitPromptCache(wire.messages, request.systemCachePrefix, model);
       const body = useResponses
         ? {
             model,
@@ -90,9 +97,9 @@ export class OmniRouteEngine implements AIEngine {
           }
         : {
             model,
-            messages: wire.messages,
+            messages: requestMessages,
             ...(request.reasoningMode === "disabled" && model === "deepseek/deepseek-flash" ? {thinking:{type:"disabled"},reasoning_effort:"none"} : {}),
-            ...(request.onGenerationProgress ? {stream:true,stream_options:{include_usage:true}} : {}),
+            ...(request.onGenerationProgress || request.onTextDelta ? {stream:true,stream_options:{include_usage:true}} : {}),
             ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
             ...(wire.tools?.length ? { tools: wire.tools, tool_choice: wire.toolChoice ?? "auto", parallel_tool_calls: false } : {}),
           };
