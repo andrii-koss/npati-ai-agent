@@ -65,6 +65,18 @@ export interface CompactionInput {
   messages: readonly CompactableMessage[];
   keepRecentTurns?: number;
   maxSummaryChars?: number;
+  /**
+   * Keep everything from the N-th last assistant message on, so a turn's parallel tool results are never split.
+   * Counted in turns rather than messages: six reads of one turn are seven messages, and `keepRecentTurns: 4`
+   * used to stub the current turn's own reads (audit F-01).
+   */
+  keepRecentAssistantTurns?: number;
+  /**
+   * Never stub the latest `code.fs.read` result of a file that was not written afterwards, up to this many
+   * characters in total. Stubbing those made the model re-read the same files every few turns (audit F-01: 71
+   * turns, 112 reads, 0 edits).
+   */
+  preserveLatestReadsChars?: number;
 }
 
 export interface CompactionResult {
@@ -286,6 +298,48 @@ function stubFor(message: CompactableMessage): string {
   return `${STUB_MARKER} ${identity.join(" ")} chars=${size}`;
 }
 
+const WRITE_RESULT_TOOLS = /^code.fs.(write|edit|apply_patch|move|delete)$/;
+
+function toolResultPaths(content: string): string[] {
+  try {
+    const value = JSON.parse(content) as { ok?: boolean; result?: { data?: Record<string, unknown> } & Record<string, unknown> };
+    if (value.ok !== true) return [];
+    const data = (value.result?.data ?? value.result ?? {}) as Record<string, unknown>;
+    const rows = Array.isArray(data.files) ? data.files as Array<Record<string, unknown>> : [data];
+    return rows.flatMap((row) => [row.path, row.from, row.to]).filter((path): path is string => typeof path === "string");
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Indices of the newest successful `code.fs.read` result per path that no later write touched, newest first, while
+ * their total size in the compacted region stays within `budgetChars`. Deterministic: depends only on the message list.
+ */
+function latestUnchangedReads(messages: readonly CompactableMessage[], budgetChars: number, elidableEnd: number): Set<number> {
+  const keep = new Set<number>();
+  const written = new Set<string>();
+  const seen = new Set<string>();
+  let used = 0;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
+    if (message.role !== "tool" || message.content.startsWith(STUB_MARKER)) continue;
+    if (message.toolName && WRITE_RESULT_TOOLS.test(message.toolName)) {
+      for (const path of toolResultPaths(message.content)) written.add(path);
+      continue;
+    }
+    if (message.toolName !== "code.fs.read") continue;
+    const [path] = toolResultPaths(message.content);
+    if (!path || written.has(path) || seen.has(path)) continue;
+    seen.add(path);
+    // Reads in the kept tail are kept anyway: they only mark the path as already visible, never use the budget.
+    if (index >= elidableEnd || used + message.content.length > budgetChars) continue;
+    used += message.content.length;
+    keep.add(index);
+  }
+  return keep;
+}
+
 /**
  * Compacts a conversation. Deterministic: the same input always yields byte-identical output, which is what
  * lets the compacted list be part of the replayed input rather than an out-of-band artifact.
@@ -297,11 +351,17 @@ export function compactConversation(input: CompactionInput): CompactionResult {
 
   // The system message and the original goal are never elided: losing them would lose the task itself.
   const protectedCount = Math.min(messages.length, 2);
-  const elidableEnd = Math.max(protectedCount, messages.length - keepRecentTurns);
+  let elidableEnd = Math.max(protectedCount, messages.length - keepRecentTurns);
+  if (input.keepRecentAssistantTurns !== undefined && input.keepRecentAssistantTurns > 0) {
+    const assistants = messages.map((message, index) => (message.role === "assistant" ? index : -1)).filter((index) => index >= 0);
+    const boundary = assistants[assistants.length - input.keepRecentAssistantTurns];
+    if (boundary !== undefined) elidableEnd = Math.max(protectedCount, Math.min(elidableEnd, boundary));
+  }
+  const preserved = input.preserveLatestReadsChars ? latestUnchangedReads(messages, input.preserveLatestReadsChars, elidableEnd) : new Set<number>();
   let stubbed = 0;
 
   const compacted = messages.map((message, index) => {
-    const elidable = index >= protectedCount && index < elidableEnd;
+    const elidable = index >= protectedCount && index < elidableEnd && !preserved.has(index);
     if (!elidable) return message;
     if (message.role !== "tool" || message.content.startsWith(STUB_MARKER) || stubFor(message).length >= message.content.length) return message;
     stubbed += 1;
