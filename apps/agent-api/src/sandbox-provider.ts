@@ -23,11 +23,11 @@ export interface SandboxBrowserQaResult {
   statusCode: number; loadTimeMs: number; domContentLoadedMs: number; resourceCount: number; totalSizeBytes: number;
   consoleErrorCount: number; brokenLinks: Array<{ href: string; status?: number; error?: string }>;
   accessibility: Array<{ rule: string; impact: string; selector?: string }>;
-  screenshot?: { mimeType: "image/png"; base64Data: string; sizeBytes: number; redacted: true };
+  screenshot?: { mimeType: "image/png"; base64Data: string; sizeBytes: number; redacted: true; captureMode?: "layout" | "visual" };
 }
 export interface SandboxBrowserQaOptions {
   port: number; path: string; viewport: { width: number; height: number }; timeoutMs: number;
-  maxScreenshotBytes: number; maxBrokenLinks: number; screenshot: boolean;
+  maxScreenshotBytes: number; maxBrokenLinks: number; screenshot: boolean; screenshotMode?: "layout" | "visual";
 }
 export interface SandboxCommandResult {
   status: "running" | "stopped" | "completed" | "failed" | "timed_out";

@@ -400,6 +400,8 @@ export interface CodeRunReplayRecorderPort {
 
       model: string | null;
       messageCount: number;
+      imageCount?: number;
+      imageHashes?: string[];
       toolNames: string[];
       idempotencyKey?: string;
       dataClassification?: string;

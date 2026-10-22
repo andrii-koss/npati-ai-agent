@@ -123,6 +123,7 @@ export interface CodeRouteDeps {
   notifyMessagingConnections: (input: { workspaceId: string; userId: string; companyId: string; agentId?: string | null; kind: "automation" | "background_run" | "approval"; title: string; detail: string }) => Promise<void>;
   projectGitService: ProjectGitService;
   projectPreviewService: ProjectPreviewService;
+  projectBrowserQaService?: import("./project-browser-qa-service").ProjectBrowserQaService;
   projectSandbox: ProjectSandboxService | undefined;
   projectService: ProjectService;
   projectWorkspace: MountedWorkspaceProvider;

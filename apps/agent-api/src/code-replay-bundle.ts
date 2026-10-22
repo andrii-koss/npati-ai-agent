@@ -231,6 +231,8 @@ export interface ReplayModelStepInput {
   request: {
     model: string;
     messageCount: number;
+    imageCount?: number;
+    imageHashes?: string[];
     toolNames: string[];
     idempotencyKey?: string;
     /** Recorded so a replay can prove the provider data policy context was the same. */

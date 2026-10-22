@@ -230,9 +230,10 @@ export class ProjectOrchestrator {
         params.intentDecision.targetDetails?.entityName,
       );
       const projectType = isMobileApp ? "mobile_app" : "website";
+      if (!params.intentDecision.targetDetails?.framework && !extractFramework(params.prompt) && /магазин|store|shop|crm|saas|api/iu.test(params.prompt)) throw new ProjectOrchestrationError("TECHNOLOGY_SELECTION_REQUIRED", "Choose a supported technology through the AI planner or specify it explicitly before creating this application.", 409);
       let framework = canonicalFrameworkName(params.intentDecision.targetDetails?.framework)
         || extractFramework(params.prompt)
-        || (/магазин|store|shop|commerce/iu.test(params.prompt) ? "Next.js" : "HTML/CSS");
+        || "HTML/CSS";
       let dataBackendId: string | undefined;
       if (isMobileApp) {
         const selection = await this.resolveMobileDataBackend(ctx, params.companyId, {

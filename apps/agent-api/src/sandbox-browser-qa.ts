@@ -1,6 +1,7 @@
 import { SandboxProviderError, type SandboxBrowserQaOptions, type SandboxBrowserQaResult } from "./sandbox-provider";
 
 export function assertBrowserQaOptions(options: SandboxBrowserQaOptions): void {
+  if (options?.screenshotMode !== undefined && !["layout", "visual"].includes(options.screenshotMode)) throw new SandboxProviderError("invalid_qa_options", "Invalid screenshot mode", 400, "browser_qa", "project.qa.inspect");
   if (!options || !Number.isInteger(options.port) || options.port < 1 || options.port > 65535 ||
       typeof options.path !== "string" || !/^\/(?!\/)[A-Za-z0-9/_~.%-]*$/.test(options.path) || options.path.includes("..") || options.path.length > 512 ||
       !Number.isInteger(options.timeoutMs) || options.timeoutMs < 1000 || options.timeoutMs > 60000 ||

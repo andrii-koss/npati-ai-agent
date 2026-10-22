@@ -12,7 +12,7 @@ try {
     if (Buffer.concat(chunks).length > 4096) throw new Error("invalid_input");
   }
   const input = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  const { host, port, path, viewport, timeoutMs, maxScreenshotBytes, maxBrokenLinks, screenshot } = input;
+  const { host, port, path, viewport, timeoutMs, maxScreenshotBytes, maxBrokenLinks, screenshot, screenshotMode = "layout" } = input;
   const shared = process.argv.includes("--shared-runtime");
   // The launcher gives every command a private /tmp; short paths fit Unix sockets.
   if (shared) process.env.TMPDIR = "/tmp";
@@ -23,6 +23,7 @@ try {
       !Number.isInteger(viewport?.height) || viewport.height < 320 || viewport.height > 1200 ||
       !Number.isInteger(maxScreenshotBytes) || maxScreenshotBytes < 50000 || maxScreenshotBytes > 2000000 ||
       !Number.isInteger(maxBrokenLinks) || maxBrokenLinks < 1 || maxBrokenLinks > 50) throw new Error("invalid_input");
+  if (!["layout", "visual"].includes(screenshotMode)) throw new Error("invalid_input");
   const origin = `http://${host}:${port}`;
   stage = "launch";
   const browser = await chromium.launch({ headless: true, ...(shared ? { executablePath: "/usr/bin/chromium-browser" } : {}), args: ["--no-sandbox", "--disable-dev-shm-usage", ...(shared ? ["--no-proxy-server"] : [])] });
@@ -101,7 +102,14 @@ try {
     }
     let captured;
     stage = "screenshot";
-    if (screenshot) {
+    if (screenshot && screenshotMode === "visual") {
+      // Explicit reference-review mode captures the real render; default QA remains layout-only.
+      // Mask user-entered values and regions explicitly marked private without replacing the design.
+      const bytes = await page.screenshot({ type: "png", fullPage: false, animations: "disabled", caret: "hide",
+        mask: [page.locator('input,textarea,[contenteditable],[data-private],[data-sensitive],iframe')],
+        timeout: Math.min(5000, timeoutMs) });
+      if (bytes.length <= maxScreenshotBytes) captured = { mimeType: "image/png", base64Data: bytes.toString("base64"), sizeBytes: bytes.length, redacted: true, captureMode: "visual" };
+    } else if (screenshot) {
       const boxes = await page.evaluate(({ width, height }) => {
         const tags = "header,nav,main,section,article,aside,footer,h1,h2,h3,p,button,a,input,textarea,img,svg,canvas,video";
         return [...document.querySelectorAll(tags)].slice(0, 500).flatMap(element => {
@@ -121,7 +129,7 @@ try {
       await layoutPage.setContent(`<html><body style="margin:0;background:#fff"><svg xmlns="http://www.w3.org/2000/svg" width="${viewport.width}" height="${viewport.height}" viewBox="0 0 ${viewport.width} ${viewport.height}">${rectangles}</svg></body></html>`);
       const bytes = await layoutPage.screenshot({ type: "png", fullPage: false, timeout: Math.min(5000, timeoutMs) });
       await layoutPage.close();
-      if (bytes.length <= maxScreenshotBytes) captured = { mimeType: "image/png", base64Data: bytes.toString("base64"), sizeBytes: bytes.length, redacted: true };
+      if (bytes.length <= maxScreenshotBytes) captured = { mimeType: "image/png", base64Data: bytes.toString("base64"), sizeBytes: bytes.length, redacted: true, captureMode: "layout" };
     }    process.stdout.write(JSON.stringify({
       statusCode: response?.status() ?? 0, loadTimeMs, domContentLoadedMs: Math.round(observations.domContentLoadedMs),
       resourceCount: observations.resourceCount, totalSizeBytes: observations.totalSizeBytes,

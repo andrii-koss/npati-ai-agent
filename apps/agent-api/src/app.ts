@@ -740,7 +740,7 @@ export function buildApp(config: AppConfig = {}) {
     codeCommandRegistry, codeDataPolicy, codeDataPolicyStoreService, codeHooksService,
     codeInstructionsLoader, codeMembership, codePrivilegedAudit, codeProcessManager, codeReaper,
     codeService, codeSkillsService, codeToolRuntime, codeTurnTracker, featureFlagService,
-    mcpRunPath, notifyMessagingConnections, projectGitService, projectPreviewService, projectSandbox,
+    mcpRunPath, notifyMessagingConnections, projectGitService, projectPreviewService, projectSandbox, projectBrowserQaService,
     projectService, projectWorkspace, providerDataGuardInstance, readRuntimeMcpManifest,
     sandboxImagePolicy, trackedProcesses, workspaceStore, lifecycleService: projectLifecycleService,
   });

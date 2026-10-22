@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import { CODE_AGENT_MASTER_FLAG } from "./feature-flags";
 import { emitCodingActivity } from "./coding-agent-runner-contracts";
 import { providerContinuationFor } from "@npati/omniroute-adapter";
@@ -100,7 +101,22 @@ export class CodingAgentRunner {
     return this.toolCatalog.toolDescriptors(session, options);
   }
 
+  private readonly visualContexts = new Map<string, { images: NonNullable<CodingAgentRunInput["images"]>; model?: string; extraSystemPromptLines?: readonly string[]; websiteEdit: true }>();
+  private visualContextKey(ctx: CodingAgentRunInput["ctx"], session: CodeSession, runId: string): string {
+    return JSON.stringify([ctx.workspaceId, ctx.userId, session.companyId, session.projectId, session.id, runId]);
+  }
+  referenceContext(ctx: CodingAgentRunInput["ctx"], session: CodeSession, parentRunId: string) {
+    return this.visualContexts.get(this.visualContextKey(ctx, session, parentRunId));
+  }
   async run(input: CodingAgentRunInput): Promise<CodingAgentRunResult> {
+    if (!input.images?.length) return this.runOwned(input);
+    input = { ...input, runId: input.runId ?? randomUUID(), runDetails: { ...input.runDetails, referenceImageCount: input.images.length } };
+    const key = this.visualContextKey(input.ctx, input.session, input.runId!);
+    this.visualContexts.set(key, { images: input.images!, model: input.model, extraSystemPromptLines: input.extraSystemPromptLines, websiteEdit: true });
+    try { return await this.runOwned(input); }
+    finally { this.visualContexts.delete(key); }
+  }
+  private async runOwned(input: CodingAgentRunInput): Promise<CodingAgentRunResult> {
     const startedAt = this.now();
     const { ctx, session } = input;
     const companyId = session.companyId;
@@ -391,6 +407,8 @@ export class CodingAgentRunner {
 
     let sawNativeToolCalls = false;
     let inspectionTurns = 0;
+    let noProgressTurns = 0;
+    let lastProgressFingerprint = "";
     let inspectedStyles = false;
     let inspectionReminderSent = false;
     let emptyImplementationReplies = 0;
@@ -476,7 +494,21 @@ export class CodingAgentRunner {
       const beforeModelStop = await stopIfFlagDisabled();
       if (beforeModelStop) return beforeModelStop;
       // A creation run must progress from inspecting the template to changing source.
-      const currentChanges = reviewCoordinator.runChanges().map(change => change.path);
+      const progressChanges = reviewCoordinator.runChanges();
+      const currentChanges = progressChanges.map(change => change.path);
+      if (!input.readOnlyIntent && session.mode !== "plan" && (input.websiteEdit || input.requireImplementation)) {
+        const fingerprint = JSON.stringify(progressChanges);
+        noProgressTurns = steps > 0 && fingerprint === lastProgressFingerprint ? noProgressTurns + 1 : 0;
+        lastProgressFingerprint = fingerprint;
+        if (noProgressTurns === 4) {
+          await record({ kind: "reminder", companyId, projectId, sessionId, runId: input.runId, turn: steps, reason: "no_source_progress" });
+          messages.push({ role: "system", content: "Four model turns produced no source progress. Stop repeated inspection/planning. Use the files already read to implement the current request; if blocked, report the concrete blocker. Build/Preview and visual acceptance are separate system checks." });
+        }
+        if (noProgressTurns >= 10) {
+          await release("loop_detected");
+          return stop("stopped", "loop_detected", "Stopped: ten model turns without source progress. No claim of completed implementation or visual acceptance is made.");
+        }
+      }
       const needsImplementation = input.requireImplementation && !input.readOnlyIntent && session.mode !== "plan" && currentChanges.length === 0;
       const inspectionLimit = input.allowStylePreview && inspectedStyles ? 1 : 3;
       const implementNow = !input.readOnlyIntent && session.mode !== "plan" && inspectionTurns >= inspectionLimit;
@@ -621,6 +653,8 @@ export class CodingAgentRunner {
         turnIndex: steps,
         request: {
           model: input.model ?? null, messageCount: messages.length,
+          imageCount: input.images?.length ?? 0,
+          imageHashes: input.images?.map(image => createHash("sha256").update(Buffer.from(image.dataBase64, "base64")).digest("hex")) ?? [],
           toolNames: definitions.map((d) => d.function.name), idempotencyKey: `${sessionId}:${turnId}:${steps}`,
           dataClassification: session.dataClassification,
         },

@@ -78,3 +78,9 @@ describe("project browser QA", () => {
     expect(JSON.stringify(report)).not.toContain("SECRET");
   });
 });
+
+it("refuses layout-only captures when actual visual pixels were requested", async () => {
+  const f = await fixture();
+  await expect(f.qa.inspect(owner, f.company.id, { projectId: f.project.id, screenshotMode: "visual" })).rejects.toMatchObject({ code: "visual_screenshot_unavailable" });
+  expect(await f.qa.listReports(owner, f.company.id, f.project.id)).toEqual([]);
+});

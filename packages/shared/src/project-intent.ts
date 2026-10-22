@@ -42,6 +42,7 @@ export interface ProjectIntentDecision {
   targetDetails?: {
     topic?: string;
     framework?: string;
+    technologySelection?: import("./chat-development").DevelopmentTarget["technologySelection"];
     actionDescription?: string;
     entityName?: string;
     /** D6: a mobile app project shares an existing DataBackend with the website. */
@@ -162,10 +163,22 @@ export function canonicalFrameworkName(value: string | null | undefined): Suppor
   return undefined;
 }
 
+export function frameworkConstraints(message: string): { positive: string; forbidden: string[]; noFramework: boolean } {
+  const forbidden: string[] = [];
+  const positive = message.replace(/(?:не\s+використовуй(?:те)?|не\s+використовувати|без|do\s+not\s+use|don't\s+use|must\s+not\s+use|without)\s+([^\n!?;]+?)(?=[!?;\n]|\.\s|$)/giu, (_all, clause: string) => {
+    for (const part of clause.split(/,|\s+(?:or|and|або|та|і)\s+/iu)) {
+      const name = canonicalFrameworkName(part.trim());
+      if (name) forbidden.push(name);
+    }
+    return " ";
+  });
+  return { positive, forbidden: [...new Set(forbidden)], noFramework: /(?:без\s+фреймворк|without\s+(?:any\s+)?framework|no\s+framework)/iu.test(message) };
+}
+
 export function extractFramework(message: string): string | undefined {
-  // Forbidden frameworks in a specification are constraints, not selections.
-  const lower = message.toLowerCase().split(/\n|(?<=[.!?])\s+/u)
-    .filter(line => !/(?:не\s+використовуй|не\s+використовувати|без\s|do\s+not\s+use|don't\s+use|must\s+not\s+use)/iu.test(line)).join("\n");
+  const constraints = frameworkConstraints(message);
+  if (constraints.noFramework) return "HTML/CSS";
+  const lower = constraints.positive.toLowerCase();
   if (/\b(?:fast\s*api|fastapi)\b/.test(lower)) return "FastAPI";
   if (/\bdjango\b/.test(lower)) return "Django";
   if (/\bflask\b/.test(lower)) return "Flask";

@@ -38,6 +38,8 @@ export interface CodeSessionRunPort {
     responseLanguage?: CompanyChatLanguage;
     noMemory?: boolean;
     websiteEdit?: boolean;
+  referenceImageRequired?: boolean;
+  resolvedModel?: string;
     allowStylePreview?: boolean;
     images?: CodingAgentRunInput["images"];
     extraSystemPromptLines?: CodingAgentRunInput["extraSystemPromptLines"];
@@ -47,6 +49,8 @@ export interface CodeSessionRunPort {
     cancelRequested: () => boolean | Promise<boolean>;
     readOnlyIntent?: boolean;
     runId?: string;
+    runDetails?: CodingAgentRunInput["runDetails"];
+    quotaSessionId?: string;
     initialInboxMessageId?: string;
     verificationTools?: readonly string[];
     forceVerification?: boolean;
@@ -89,6 +93,8 @@ export interface CodeRunEventSink {
 export type CodeRunTerminalStatus = "completed" | "failed" | "cancelled" | "suspended_by_flag";
 
 export interface CodeSessionRunInput {
+  referenceImageRequired?: boolean;
+  resolvedModel?: string;
   responseLanguage?: CompanyChatLanguage;
   noMemory?: boolean;
   websiteEdit?: boolean;
@@ -146,8 +152,10 @@ export interface CodeSessionRunExecutorOptions {
   runner: CodeSessionRunPort;
   control: CodeRunControlPort;
   resolveModel?: (ctx: AuthContext, input: CodeSessionRunInput) => Promise<string | undefined>;
+  prepareReference?: (input: CodeSessionRunInput) => Promise<readonly string[]>;
   resolveVerificationTools?: (input: CodeSessionRunInput) => Promise<readonly string[] | undefined>;
   afterRun?: (input: CodeSessionRunInput, result: unknown) => Promise<unknown>;
+  settle?: (input: CodeSessionRunInput, result: unknown) => Promise<void>;
   logger?: { warn(payload: unknown, message?: string): void };
 }
 
@@ -190,7 +198,15 @@ export class CodeSessionRunExecutor {
 
     let result: unknown;
     try {
+      if (input.referenceImageRequired && !input.images?.length) throw new Error("reference_image_missing");
       const model = await this.options.resolveModel?.(input.ctx, input);
+      if (input.websiteEdit && input.images?.length && !model) throw new Error("vision_model_unavailable");
+      input = { ...input, resolvedModel: model };
+      if (input.referenceImageRequired) {
+        if (!this.options.prepareReference) throw new Error("vision_analysis_unavailable");
+        const analysis = await this.options.prepareReference(input);
+        input = { ...input, extraSystemPromptLines: [...(input.extraSystemPromptLines ?? []), ...analysis] };
+      }
       const verificationTools = await this.options.resolveVerificationTools?.(input);
       result = await runner.run({
         ctx: input.ctx,
@@ -206,7 +222,7 @@ export class CodeSessionRunExecutor {
         ...(input.emptyHtmlWorkspace ? { emptyHtmlWorkspace: true } : {}),
         ...(input.onActivity ? { onActivity: input.onActivity } : {}),
         // Step 5: assistant prose reaches the transport through the sink, before the run settles.
-        ...(sink?.emitDelta ? { onTextDelta: (text: string) => sink.emitDelta?.(text) } : {}),
+        ...(sink?.emitDelta && !input.referenceImageRequired ? { onTextDelta: (text: string) => sink.emitDelta?.(text) } : {}),
         ...(input.maxTurns !== undefined ? { maxTurns: input.maxTurns } : {}),
         ...(input.runId ? { runId: input.runId } : {}),
         ...(input.agentId ? { agentId: input.agentId } : {}),
@@ -220,6 +236,24 @@ export class CodeSessionRunExecutor {
       });
       if (this.options.afterRun && !controller.signal.aborted && !await input.cancelRequested()) {
         result = await this.options.afterRun(input, result);
+        const rootRunId = input.runId ?? (result as { runId?: string })?.runId;
+        const deadline = Date.now() + 180_000;
+        const repairRunIds: string[] = [];
+        for (let attempt = 1; attempt <= 2 && Date.now() < deadline; attempt++) {
+          const review = result as { visualAcceptance?: { status: string; differences: string[] }; status?: string };
+          if (review.visualAcceptance?.status !== "failed" || controller.signal.aborted || await input.cancelRequested()) break;
+          const repairRunId = String(rootRunId ?? sessionId) + ":visual-repair:" + attempt;
+          repairRunIds.push(repairRunId);
+          result = await runner.run({ ctx: input.ctx, session: input.session, model, images: input.images,
+            prompt: input.prompt + "\nVisual acceptance failed. Correct these observed screenshot differences in the SAME project, preserving functionality: " + JSON.stringify(review.visualAcceptance.differences) + "\nRead current files before editing. Do not scaffold or reinstall unchanged dependencies. Finish saved edits for automatic build and screenshot review.",
+            runId: repairRunId, runDetails: { parentRunId: rootRunId ?? null, visualParentRunId: rootRunId ?? null, visualRepairAttempt: attempt },
+            quotaSessionId: sessionId, maxTurns: Math.min(input.maxTurns ?? 12, 12), websiteEdit: true,
+            verificationTools, forceVerification: verificationTools?.includes("build"), extraSystemPromptLines: input.extraSystemPromptLines,
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(Math.max(1, deadline - Date.now()))]),
+            cancelRequested: input.cancelRequested, onActivity: input.onActivity });
+          result = await this.options.afterRun({ ...input, runId: repairRunId }, result);
+        }
+        if (repairRunIds.length && result && typeof result === "object") result = { ...result, runId: rootRunId, visualRepairRunIds: repairRunIds };
       }
     } catch (error) {
       /**
@@ -236,6 +270,8 @@ export class CodeSessionRunExecutor {
       control.unregisterController(sessionId, controller);
     }
 
+    try { await this.options.settle?.(input, result); }
+    catch { result = { ...(result && typeof result === "object" ? result : {}), status: "failed", reason: "acceptance_persistence_failed", message: "Acceptance could not be persisted; completion is not confirmed." }; }
     const view = result && typeof result === "object" ? (result as RunnerResultView) : null;
     const terminalStatus: CodeRunTerminalStatus = view?.status === "suspended_by_flag" ? "suspended_by_flag" : view?.status === "cancelled"
       ? "cancelled"

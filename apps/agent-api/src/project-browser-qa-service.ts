@@ -9,6 +9,7 @@ export interface BrowserQaInspectOptions {
   projectId: string;
   path?: string;
   viewport?: "desktop" | "tablet" | "mobile";
+  screenshotMode?: "layout" | "visual";
   checks?: Array<"console" | "links" | "a11y" | "performance" | "screenshot">;
   timeoutMs?: number;
   maxScreenshotBytes?: number;
@@ -74,7 +75,7 @@ export class ProjectBrowserQaService {
     const result: SandboxBrowserQaResult = await this.sandbox.inspectBrowser(ctx, companyId, project.id, {
       port: previewPort, path, viewport, timeoutMs, maxScreenshotBytes,
       maxBrokenLinks: bounded(options.maxBrokenLinksToCheck, 20, 1, 50),
-      screenshot: enabled.has("screenshot"), agentId: options.agentId,
+      screenshot: enabled.has("screenshot"), ...(options.screenshotMode ? { screenshotMode: options.screenshotMode } : {}), agentId: options.agentId,
     });
     const consoleErrors = enabled.has("console")
       ? Array.from({ length: Math.min(100, result.consoleErrorCount) }, () => ({ type: "error", message: "Browser console error" }))
@@ -91,12 +92,13 @@ export class ProjectBrowserQaService {
       issues.push(issue("performance", "warning", `Page load took ${result.loadTimeMs} ms`, "Review page loading and resource usage."));
     if (enabled.has("performance") && result.totalSizeBytes > 1_000_000)
       issues.push(issue("performance", "warning", "Rendered HTML exceeds 1 MB", "Reduce inlined page content."));
+    if (options.screenshotMode === "visual" && result.screenshot?.captureMode !== "visual") throw new BrowserQaError("visual_screenshot_unavailable", "The runner did not return a real visual capture; layout-only screenshots cannot verify a reference.", 503);
     const screenshots: BrowserQaScreenshot[] = [];
     if (enabled.has("screenshot") && result.screenshot) {
       const bytes = Buffer.from(result.screenshot.base64Data, "base64");
       if (result.screenshot.redacted === true && result.screenshot.mimeType === "image/png" && bytes.length <= maxScreenshotBytes &&
           bytes.length === result.screenshot.sizeBytes && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])))
-        screenshots.push({ name: options.viewport ?? "desktop", viewport, mimeType: "image/png", base64Data: result.screenshot.base64Data, sizeBytes: bytes.length });
+        screenshots.push({ name: options.viewport ?? "desktop", viewport, mimeType: "image/png", base64Data: result.screenshot.base64Data, sizeBytes: bytes.length, captureMode: result.screenshot.captureMode ?? "layout" });
     }
     const status: BrowserQaStatus = issues.some(item => item.severity === "error") ? "failed" : issues.length ? "warning" : "passed";
     const metrics: BrowserQaMetrics = {
