@@ -183,3 +183,12 @@ describe("differences are graded: only major ones fail and are repaired", () => 
     expect(reviewed.visualAcceptance).toMatchObject({ status: "failed", differences: ["Header is light instead of dark"] });
   });
 });
+
+describe("visual review timeout", () => {
+  it("gives a two-image review enough time (measured 30-42 s)", async () => {
+    const f = await fixture();
+    const chat = vi.fn(async () => ({ content: JSON.stringify({ scores: { layout: 1, colors: 1, typography: 1, spacing: 1, imagery: 1 }, differences: [] }) }));
+    await reviewWebsiteReference(f.input, f.run, { inspect: async () => f.qa, chat: chat as never });
+    expect((chat.mock.calls as any)[0][0].timeoutMs).toBeGreaterThanOrEqual(90_000);
+  });
+});
