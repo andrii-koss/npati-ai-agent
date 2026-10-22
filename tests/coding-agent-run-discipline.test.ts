@@ -127,3 +127,15 @@ describe("a Data Studio write is progress for the loop guard", () => {
     expect(outcome.reason).not.toBe("loop_detected");
   });
 });
+
+describe("a full build without source changes only when it is asked for", () => {
+  it("forces the build for creation and explicit build/preview requests only", async () => {
+    const { forcesBuild } = await import("../apps/agent-api/src/code-session-run-executor");
+    expect(forcesBuild({ requireImplementation: true, prompt: "Створи магазин" })).toBe(true);
+    expect(forcesBuild({ prompt: "Створи сучасний інтернет-магазин на Next.js. Запусти Live Preview." })).toBe(true);
+    expect(forcesBuild({ prompt: "Rebuild the site and check it" })).toBe(true);
+    expect(forcesBuild({ prompt: "Створи для мого інтернет-магазину базу даних із таблицями products, categories та orders." })).toBe(false);
+    expect(forcesBuild({ prompt: "Зміни колір кнопки на зелений" })).toBe(false);
+    expect(forcesBuild({ prompt: "x", toolContext: { userMessage: "Перезапусти превʼю" } })).toBe(true);
+  });
+});
