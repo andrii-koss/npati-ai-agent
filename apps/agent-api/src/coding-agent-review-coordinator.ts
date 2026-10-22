@@ -648,6 +648,11 @@ export class CodingAgentReviewCoordinator {
     const { startedAt, stateRunId, stateOwner, inboxOpened, cancelled, admitInbox } = args;
     const { ctx, companyId, session, ports, limits, input, release, stop } = this.host;
 
+    /**
+     * A visual-repair continuation is not a fresh run: it must not block on the async collect barrier (which
+     * requires the inbox lease the chat transport holds) and it consumes no new user messages.
+     */
+    if (input.skipAsyncCollect) return { action: "ready" };
     let useCollectBarrier = false;
     try {
       useCollectBarrier = !input.subagentScope && !!ports.asyncCollect && await ports.asyncCollect.enabled(ctx, companyId);
