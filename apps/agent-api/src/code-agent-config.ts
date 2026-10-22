@@ -25,6 +25,8 @@ export interface CodeAgentLimits {
   contextCompressionRatio: number;
   /** Compact old outputs before a large-context model repeatedly bills them. */
   modelInputTokens?: number;
+  /** Turn and time budgets per task class (code-run-budget.ts); `false` keeps only the configured limits. */
+  adaptiveRunLimits?: boolean;
   /**
    * C12: nesting levels allowed below a main run. This was dead configuration (zero readers) until the
    * capability scope started reading it; it is clamped to the structural limit, so configuration may turn
@@ -128,6 +130,7 @@ export function resolveCodeAgentLimits(env: NodeJS.ProcessEnv = process.env): Co
     repairLoopAttempts: positiveInt(env.NPATI_CODE_REPAIR_LOOP, DEFAULT_CODE_AGENT_LIMITS.repairLoopAttempts),
     modelInputTokens: positiveInt(env.NPATI_CODE_MODEL_INPUT_TOKENS, DEFAULT_CODE_AGENT_LIMITS.modelInputTokens ?? 16_384),
     contextCompressionRatio: positiveFloat(env.NPATI_CODE_CONTEXT_COMPRESSION_RATIO, DEFAULT_CODE_AGENT_LIMITS.contextCompressionRatio),
+    adaptiveRunLimits: env.NPATI_CODE_ADAPTIVE_RUN_LIMITS !== "false",
     subagentDepth: clampCodeSubagentDepth(env.NPATI_CODE_SUBAGENT_DEPTH ?? DEFAULT_CODE_AGENT_LIMITS.subagentDepth),
     subagentParallelism: clampCodeSubagentParallelism(env.NPATI_CODE_SUBAGENT_PARALLELISM ?? DEFAULT_CODE_AGENT_LIMITS.subagentParallelism),
     flagPropagationSeconds: positiveInt(env.NPATI_CODE_FLAG_PROPAGATION_SECONDS, DEFAULT_CODE_AGENT_LIMITS.flagPropagationSeconds),
