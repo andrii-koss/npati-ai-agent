@@ -377,3 +377,19 @@ describe("competitor discovery", () => {
     expect(outcome?.sources[0]?.url).toBe("https://hostkoss.com/");
   });
 });
+
+describe("an explicit web_search call is a search", () => {
+  it("does not turn a framework name in the query into an official-site lookup", async () => {
+    const provider = {
+      search: vi.fn().mockResolvedValue([{ title: "Shop A", url: "https://shop-a.example/", snippet: "Home goods store", position: 1 }]),
+      fetch: vi.fn(),
+      crawl: vi.fn(),
+      crawlMany: vi.fn().mockResolvedValue({ pages: [{ url: "https://shop-a.example/", title: "Shop A", markdown: "# Shop A" }] }),
+    };
+    const service = new WebResearchService(provider as never, { validate: async (url: string) => new URL(url) } as SafeUrlValidator, limits);
+    const outcome = await service.run("online stores similar to my Next.js shop design", {}, false, undefined, { mode: "search" });
+    expect(provider.search).toHaveBeenCalledTimes(1);
+    expect(provider.search.mock.calls[0]?.[0]?.query).not.toMatch(/official website/);
+    expect(outcome?.sources.map((source) => source.url)).toContain("https://shop-a.example/");
+  });
+});
