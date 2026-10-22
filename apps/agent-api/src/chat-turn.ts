@@ -4,7 +4,7 @@ import { BusinessActionHandler } from "./business-action-handler";
 import { summarizeBusinessProfileChat } from "./business-profile-response";
 import { ChatAttachmentInput, prepareChatAttachments } from "./chat-attachments";
 import { conversationTitle, isCompositeBusinessCompanyCreation, isShortAffirmativeReply, normalizeNewBusinessDirective, requestsBusinessGoal, requestsBusinessMemory, requestsCompositeCompanyDeletionIntent, requestsNewBusinessIdea, resolveContextualCompanyFollowUp } from "./chat-intent-helpers";
-import { attachResearchSources, unreachablePageMessage } from "./chat-public-errors";
+import { attachResearchSources, unreachablePageMessage, webResearchFailedMessage } from "./chat-public-errors";
 import { StructuredChatPlan, businessPlanComplete, companyPlanComplete, planStructuredChatRequest } from "./chat-task-plan";
 import { addColumnDirectiveFromMarkdown, explicitlyRequestsWebResearch, isSpreadsheetEditRequest, mapColumnDirectiveFromProposal, spreadsheetEditedMessage } from "./chat-text-directives";
 import { CHAT_TOOL_SELECTION_INSTRUCTION, CORE_CHAT_TOOLS, ChatToolExecutionResult, runChatToolLoop } from "./chat-tool-orchestrator";
@@ -455,16 +455,16 @@ export function createChatTurn(deps: ChatTurnDeps) {
       } catch (error) {
         if (nativeCompanyPrimary || (error as { code?: string }).code === "TOOL_PRIMARY_INCOMPLETE") throw error;
         log.warn({ err: error, model: ai.model }, "Native chat tool loop failed; using prompt-compatible fallback");
-        // The fallback has no tools. A page the user named is still fetched, so the answer rests on its actual content
-        // (or states why it could not be opened) instead of the model's memory of the site.
-        if (!research && namedPage && webResearch?.shouldResearch(safePrompt)) {
+        // The fallback has no tools. A page the user named, or a web search the user asked for, is still run, so the
+        // answer rests on actual content (or states why it could not be retrieved) instead of the model's memory.
+        if (!research && !companySettingsRequest && (namedPage || explicitlyRequestsWebResearch(message)) && webResearch?.shouldResearch(safePrompt)) {
           await runWebResearch(webResearch);
           if (research) chatRequest.messages.splice(1, 0, { role: "system", content: researchInstructionFor(research) });
         }
       }
     }
-    if (!content && namedPage && research && !research.sources.length && research.degraded) {
-      content = unreachablePageMessage(namedPage, research.degraded, safeUserRequest);
+    if (!content && research && !research.sources.length && research.degraded && (namedPage || explicitlyRequestsWebResearch(message))) {
+      content = namedPage ? unreachablePageMessage(namedPage, research.degraded, safeUserRequest) : webResearchFailedMessage(research.degraded, safeUserRequest);
       onDelta?.(content);
     }
     if (!content && !nativeCompanyAction && !nativeBusinessAction && !companySettingsRequest) {
