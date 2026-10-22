@@ -21,6 +21,8 @@ export interface CodeToolInvokeResult {
   cached?: boolean;
   /** Server metadata survives output budgeting; only canonical process executors populate it. */
   processReceipt?: { kind: string; processId: string };
+  /** `code.image.view` / `code.preview.screenshot`: the image, kept out of `result` and delivered by the runner. */
+  imageAttachment?: { mimeType: string; dataBase64: string; source: string; question?: string };
 }
 
 export interface CodeToolInvokeFailure {

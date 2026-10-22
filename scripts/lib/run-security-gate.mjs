@@ -964,6 +964,9 @@ export const SECURITY_GATE_TESTS = [
   // Manifest v15 Data Studio tools: structured arguments only (no SQL), the coding policy runs first, and both
   // writes (seed, RLS policies) are refused without a recorded approval unless they are a dry run.
   "tests/coding-agent-data-studio-tools.test.ts",
+  // Tool images: bytes never enter the tool result text; a vision model receives the image part, any other model a
+  // description from the configured vision model or an explicit image_view_unsupported note; OmniRoute forwards it.
+  "tests/coding-agent-image-delivery.test.ts",
 ];
 
 /**

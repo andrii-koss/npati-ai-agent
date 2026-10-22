@@ -1,5 +1,6 @@
 import type { AuthContext } from "@npati/workspace";
-import { CodeToolError, type CodeToolExecutionContext } from "./code-tool-runtime";
+import { CodeToolError } from "./code-tool-runtime-errors";
+import type { CodeToolExecutionContext } from "./code-tool-runtime";
 import { normalizeWorkspacePath } from "./code-tools-path";
 import { isSensitivePath } from "./code-tools-sensitive";
 

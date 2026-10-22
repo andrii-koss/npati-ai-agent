@@ -478,6 +478,8 @@ export interface CodingAgentRunnerPorts {
   toolRuntime: CodeRunToolRuntimePort;
 
   runtimeCapabilities?: CodeRunRuntimeCapabilitiesPort;
+  /** Delivers images from `code.image.view` / `code.preview.screenshot`: attached for vision models, described otherwise. */
+  vision?: import("./coding-agent-image-delivery").CodeRunVisionPort;
   engine: CodeRunEnginePort;
 
   schemas?: readonly CodeRunToolSchemaLike[];
