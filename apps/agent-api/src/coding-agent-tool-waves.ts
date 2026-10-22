@@ -9,6 +9,7 @@ import {
   type NormalizeToolCallsResult,
 } from "./code-tool-call-adapter";
 import type { CodeModelProfile } from "./code-model-profiles";
+import { toolImageMessage } from "./coding-agent-image-delivery";
 import {
   type CodeToolInvokeFailure,
   type CodeToolInvokeResult,
@@ -498,6 +499,9 @@ export class CodingAgentToolWaves {
         ...(outcome.result.ok ? { truncated: outcome.result.truncated === true } : {}),
       });
       messages.push({ role: "tool", tool_call_id: outcome.call.id, name: outcome.call.name, content: modelText });
+      if (outcome.result.ok && outcome.result.imageAttachment) {
+        deferredMessages.push(await toolImageMessage({ vision: ports.vision, ctx, model: input.model, tool: outcome.call.name, attachment: outcome.result.imageAttachment }));
+      }
       if (outcome.result.ok && stateRunId && ["code.shell.exec_async", "code.shell.process.wait"].includes(outcome.call.name)) {
         const notice = await ports.completions?.admittedTool(
           ctx,

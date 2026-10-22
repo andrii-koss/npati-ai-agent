@@ -77,6 +77,9 @@ export interface AppCodeToolRuntimeWiringDeps {
   projectGitService: ProjectGitService;
   subagentChildRunnerWithAck?: CodeSubagentDetachedRunner;
   codeSubagentOperationsRef?: (() => CodeSubagentOperationService) | undefined;
+  /** Manifest v15: the existing Browser QA service (created after this wiring) and the web-research provider. */
+  getProjectBrowserQaService?: () => import("./project-browser-qa-service").ProjectBrowserQaService | undefined;
+  webResearchProvider?: import("./code-tool-executors-assist").CodeAssistToolOptions["webResearch"];
 }
 
 export function createAppCodeToolRuntimeWiring(deps: AppCodeToolRuntimeWiringDeps) {
@@ -209,6 +212,8 @@ export function createAppCodeToolRuntimeWiring(deps: AppCodeToolRuntimeWiringDep
     subagentChildRunnerWithAck,
     trackedProcesses,
     workspaceStore,
+    ...(deps.getProjectBrowserQaService ? { getProjectBrowserQaService: deps.getProjectBrowserQaService } : {}),
+    ...(deps.webResearchProvider ? { webResearchProvider: deps.webResearchProvider } : {}),
   });
   const { codeToolRuntime } = codeToolRuntimeWiring;
   codeToolRuntimeRef = codeToolRuntime;

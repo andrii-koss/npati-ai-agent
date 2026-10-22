@@ -1,4 +1,7 @@
 
+import { BrowserQaError, type ProjectBrowserQaService } from "./project-browser-qa-service";
+import type { CodeAssistToolOptions } from "./code-tool-executors-assist";
+import { CodeToolError } from "./code-tool-runtime-errors";
 import type { FastifyBaseLogger } from "fastify";
 import type { AppConfig } from "./app";
 import { CompanyApprovalsRepository } from "./approvals-repository";
@@ -66,6 +69,8 @@ export interface CodeToolRuntimeWiringDeps {
   subagentChildRunnerWithAck: CodeSubagentDetachedRunner | undefined;
   trackedProcesses: CodeAsyncProcessService | undefined;
   workspaceStore: ReturnType<typeof createCoreServices>["workspaceStore"];
+  getProjectBrowserQaService?: () => ProjectBrowserQaService | undefined;
+  webResearchProvider?: CodeAssistToolOptions["webResearch"];
 }
 
 export function createCodeToolRuntimeWiring(deps: CodeToolRuntimeWiringDeps) {
@@ -78,6 +83,10 @@ export function createCodeToolRuntimeWiring(deps: CodeToolRuntimeWiringDeps) {
     limits: config.codeAgentLimits,
 
     executors: allCanonicalExecutors({
+      // Manifest v15: viewing and documentation tools over the existing workspace, Browser QA and web research.
+      readWorkspaceFile: ({ ctx, companyId, projectId, path }) => projectWorkspace.readFile(ctx, companyId, projectId, path) as never,
+      ...(deps.getProjectBrowserQaService ? { previewScreenshot: previewScreenshotPort(deps.getProjectBrowserQaService, featureFlagService) } : {}),
+      ...(deps.webResearchProvider ? { webResearch: deps.webResearchProvider } : {}),
       projectData: deps.agentDataStudioService,
       dataPolicy: enrichedPolicyEngine,
       projectLoader: async ({ ctx, companyId, projectId }) => {
@@ -261,5 +270,33 @@ export function createCodeToolRuntimeWiring(deps: CodeToolRuntimeWiringDeps) {
 
   return {
     codeToolRuntime,
+  };
+}
+
+/**
+ * `code.preview.screenshot` over the existing Browser QA capture (the same call the visual acceptance makes), gated by
+ * `code.shell` exactly as that path is. A Browser QA refusal keeps its reason (for example `preview_not_running`).
+ */
+function previewScreenshotPort(
+  getService: () => ProjectBrowserQaService | undefined,
+  flags: Pick<FeatureFlagService, "assertEnabled">,
+): NonNullable<CodeAssistToolOptions["previewScreenshot"]> {
+  return async ({ ctx, companyId, projectId, path, viewport, runId }) => {
+    const service = getService();
+    if (!service) throw new CodeToolError("visual_screenshot_unavailable", "Browser QA is not configured in this deployment", 503, "configure", false, "code.preview.screenshot");
+    await flags.assertEnabled(ctx, "code.shell", { companyId });
+    try {
+      const report = await service.inspect(ctx, companyId, {
+        projectId, path, viewport, checks: ["screenshot"], screenshotMode: "visual", maxScreenshotBytes: 2_000_000, agentId: "system", ...(runId ? { runId } : {}),
+      });
+      const shot = report.screenshots[0];
+      if (!shot) throw new CodeToolError("visual_screenshot_unavailable", "The preview runner returned no screenshot", 503, "execute", true, "code.preview.screenshot");
+      return { mimeType: shot.mimeType, base64Data: shot.base64Data, sizeBytes: shot.sizeBytes, issues: report.issues.length };
+    } catch (error) {
+      if (error instanceof BrowserQaError) {
+        throw new CodeToolError("visual_screenshot_unavailable", `${error.code}: ${error.message}`, error.status, "execute", error.code === "preview_not_running", "code.preview.screenshot");
+      }
+      throw error;
+    }
   };
 }

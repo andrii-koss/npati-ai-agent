@@ -1,4 +1,5 @@
 import { preferredEditTool, type EditProfile } from "./code-tools-write";
+import { isToolImageMessage } from "./coding-agent-image-delivery";
 import type { ChatMessage, ChatToolCall } from "@npati/omniroute-adapter";
 import type { AuthContext, CodeSession } from "@npati/workspace";
 import type { CodeAgentLimits } from "./code-agent-config";
@@ -272,7 +273,8 @@ export function withCodingReferenceImages(messages: ChatMessage[], images?: read
    */
   let userIndex = -1;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index]?.role === "user") { userIndex = index; break; }
+    // A tool image follow-up is not the user's request; the reference belongs to the request itself.
+    if (messages[index]?.role === "user" && !isToolImageMessage(messages[index]!)) { userIndex = index; break; }
   }
   if (userIndex < 0) return messages;
   return messages.map((message, index) => {
