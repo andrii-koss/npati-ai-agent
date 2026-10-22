@@ -175,6 +175,17 @@ interface RunnerResultView {
   summary?: { remaining?: unknown } | null;
 }
 
+const BUILD_REQUEST = /\b(?:build|rebuild|compile|preview|deploy|launch)\b|збер|зібр|збір|компіл|запусти|перезапусти|прев['’ʼ]?ю|превью/iu;
+
+/**
+ * A full build without any source change is only worth its 1-3 minutes when the user asked for a build/preview or a
+ * new project is being implemented. Edits still verify because they change files; a Data Studio-only or read-only
+ * run no longer pays for a build of an unchanged workspace (E2E S3: 60-200 s per database request).
+ */
+export function forcesBuild(input: { requireImplementation?: boolean; prompt: string; toolContext?: { userMessage?: string } }): boolean {
+  return input.requireImplementation === true || BUILD_REQUEST.test(input.toolContext?.userMessage ?? input.prompt);
+}
+
 /**
  * Drives one code session. The returned value is the whole of what a caller may conclude about the run: the
  * runner's result, the normalised terminal status, the reason and whether a human decision is pending.
@@ -237,7 +248,7 @@ export class CodeSessionRunExecutor {
         ...(input.initialInboxMessageId ? { initialInboxMessageId: input.initialInboxMessageId } : {}),
         ...(model ? { model } : {}),
         ...(verificationTools ? { verificationTools } : {}),
-        ...(verificationTools?.includes("build") ? { forceVerification: true } : {}),
+        ...(verificationTools?.includes("build") && forcesBuild(input) ? { forceVerification: true } : {}),
         signal: sink ? sink.signal : controller.signal,
         cancelRequested: input.cancelRequested,
         ...(input.readOnlyIntent ? { readOnlyIntent: true } : {}),
