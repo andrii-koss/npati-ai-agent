@@ -206,3 +206,22 @@ describe("security-gate: C6 the CHAT entry point reaches the runner only for cod
     if (decision.mode === "run") expect(decision.intent).not.toBe("EDIT_CODE");
   });
 });
+
+describe("analysing an external website stays read-only web research", () => {
+  it.each([
+    "Проаналізуй сайт https://example.com",
+    "Проаналізуй сайт https://example.com і коротко скажи, що в ньому можна покращити. Нічого не змінюй у моєму проєкті.",
+    "Analyze the website https://example.com and tell me what could be improved",
+  ])("%s is answered by chat, not by a run over this project", (message) => {
+    for (const projectIntent of [undefined, "EDIT_WEBSITE", "CHAT"] as const) {
+      const decision = resolveChatCodeIntent({ message, projectIntent: projectIntent as never, codingEnabled: true, companyId: "c", projectId: "p", projectKind: "website", sessionBound: true });
+      if (decision.mode === "run") expect(decision.readOnly).toBe(true);
+      if (projectIntent !== undefined) expect(decision.mode).toBe("chat");
+    }
+  });
+
+  it("a change request that mentions a URL still runs with write access", () => {
+    const decision = resolveChatCodeIntent({ message: "Додай на сайт посилання на https://instagram.com/ranok у футер", projectIntent: "EDIT_WEBSITE" as never, codingEnabled: true, companyId: "c", projectId: "p", projectKind: "website", sessionBound: true });
+    expect(decision).toMatchObject({ mode: "run", readOnly: false });
+  });
+});

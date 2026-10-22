@@ -331,8 +331,9 @@ describe("a provider that refuses a forced tool_choice still answers from the fe
     try {
       const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Проаналізуй сайт https://unreachable.invalid", contextType: "none" } });
       expect(response.statusCode).toBe(200);
-      expect(prompts[0]).toContain("do not fabricate findings");
-      expect(prompts[0]).toContain("ENOTFOUND");
+      // No page content: the answer is the error itself, the model is not asked to "analyse" anything.
+      expect(prompts).toHaveLength(0);
+      expect(streamResult(response.body).message).toMatch(/^Не вдалося відкрити сторінку https:\/\/unreachable\.invalid\/?: fetch_failed: getaddrinfo ENOTFOUND/);
       expect(streamResult(response.body).research).toMatchObject({ used: true, degraded: expect.stringContaining("ENOTFOUND") });
     } finally {
       await app.close();
@@ -354,6 +355,40 @@ describe("a failed web_fetch is reported to the model as missing evidence", () =
       const content = JSON.parse(String(toolMessage?.content));
       expect(content.error).toContain("No hostname allowlist");
       expect(content.instruction).toMatch(/could not be opened.*Do not describe or analyse the page from memory/s);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe("an unreachable page gets a clear error, never an analysis from memory", () => {
+  it("native tool path: the model's own text is replaced by the error", async () => {
+    const webResearch = researchService();
+    webResearch.run.mockRejectedValueOnce(new Error("No hostname allowlist is configured, so no host is reachable"));
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), authProvider: { authenticate: async () => auth }, aiEngine: productionPathEngine([]), marketplace, webResearch });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Проаналізуй сайт https://npati.com", contextType: "none" } });
+      const result = streamResult(response.body);
+      expect(result.message).toMatch(/^Не вдалося відкрити сторінку https:\/\/npati\.com\/?: No hostname allowlist/);
+      expect(result.message).not.toContain("actually opened");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("fallback path: the model is not asked at all", async () => {
+    const prompts: string[] = [];
+    const webResearch = researchService();
+    webResearch.run.mockRejectedValueOnce(new Error("fetch_failed: ENOTFOUND"));
+    const base = productionPathEngine([]);
+    const engine: AIEngine = { ...base, chat: async (request) => { if (typeof request.toolChoice === "object") throw new Error("HTTP 400: Thinking mode does not support this tool_choice"); return base.chat(request); },
+      async *stream(request) { prompts.push(String(request.messages[0]?.content)); yield "From memory: example sites usually need a CTA."; } };
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), authProvider: { authenticate: async () => auth }, aiEngine: engine, marketplace, webResearch });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Analyze the website https://unreachable.invalid", contextType: "none" } });
+      expect(prompts).toHaveLength(0);
+      expect(streamResult(response.body).message).toMatch(/^The page https:\/\/unreachable\.invalid\/? could not be opened: fetch_failed: ENOTFOUND/);
+      expect(response.body).not.toContain("From memory");
     } finally {
       await app.close();
     }
