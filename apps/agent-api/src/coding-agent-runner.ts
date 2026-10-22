@@ -21,11 +21,10 @@ import {
   modelProfileFallbackTrace,
   resolveEffectiveToolCallingMode,
   resolveModelProfile,
-  resolveToolVisibility,
   type CodeModelProfile,
   type CodeModelProfileFallbackReason,
 } from "./code-model-profiles";
-import { selectVisibleTools } from "./code-tool-visibility";
+import { CODE_DATA_STUDIO_FLAG, WEBSITE_EDIT_TOOL_PATTERN, finishedRunText } from "./code-tool-visibility";
 import { resolveModelRequestPressure, type ModelRequestPressure } from "./code-context-budget";
 import { validateArguments } from "./code-tool-runtime";
 import { replayArgumentsHash } from "./code-replay-bundle";
@@ -58,7 +57,7 @@ import {
 } from "./coding-agent-runner-contracts";
 import { CodingAgentRunPhases } from "./coding-agent-run-phases";
 import { CodingAgentReviewPhases } from "./coding-agent-review-phases";
-import { CodingAgentToolCatalog, type ToolCatalogOptions } from "./coding-agent-tool-catalog";
+import { CodingAgentToolCatalog, offeredToolsForRun, type ToolCatalogOptions } from "./coding-agent-tool-catalog";
 import { startCodingAgentSession } from "./coding-agent-session-starter";
 import { buildRunPromptContext } from "./coding-agent-prompt-context";
 import { compactConversationContextIfNeeded } from "./coding-agent-context-compactor";
@@ -68,11 +67,7 @@ import { CodingAgentToolWaves } from "./coding-agent-tool-waves";
 
 export * from "./coding-agent-runner-contracts";
 
-/** Tool families a website edit or a creation run may be offered; git, sub-agents and admin tools are not. */
-export const WEBSITE_EDIT_TOOL_PATTERN = /^code\.(fs\.|deps\.|shell\.|verify\.|web\.|data\.|plan\.|project\.info$|ask_user$|finish$|image\.view$|preview\.screenshot$)/;
-
-/** Gates whether the `code.data.*` family is offered to the model at all (a view, never a permission). */
-export const CODE_DATA_STUDIO_FLAG = "code.data_studio";
+export { WEBSITE_EDIT_TOOL_PATTERN, CODE_DATA_STUDIO_FLAG, CODE_FINISH_TOOL, toolCallSucceeded } from "./code-tool-visibility";
 
 export class CodingAgentRunner {
   private readonly limits: CodeAgentLimits;
@@ -306,27 +301,13 @@ export class CodingAgentRunner {
     });
     const profile: CodeModelProfile = profileResolution.profile;
 
-    /**
-     * Tool tiers (core / contextual / intent) from the model profile. A delegated run keeps exactly the tool
-     * list its parent granted, so the tiers apply to main runs only. Hidden tools stay in the registry and are
-     * still judged by the runtime if named; this only decides what the model is offered.
-     */
+    // Profile tool tiers decide what the model is offered (main runs only; a sub-agent keeps its granted scope).
     let offeredTools = tools;
     if (!capabilityScope.isSubagent) {
       const dataStudioEnabled = await this.ports.flags.assertEnabled(ctx, CODE_DATA_STUDIO_FLAG, { companyId, userId: ctx.userId })
         .then(() => true, () => false);
-      const visibility = selectVisibleTools(tools.map(tool => tool.name), resolveToolVisibility(profile), {
-        userMessage: input.toolContext?.userMessage ?? input.prompt,
-        sessionMode: session.mode,
-        readOnlyIntent: input.readOnlyIntent === true,
-        websiteEdit: input.websiteEdit === true,
-        requireImplementation: input.requireImplementation === true,
-        imageCount: input.images?.length ?? 0,
-        dataBackendAttached: input.toolContext?.dataBackendAttached === true,
-        dataStudioEnabled,
-      });
-      const visible = new Set(visibility.visible);
-      offeredTools = tools.filter(tool => visible.has(tool.name));
+      const { tools: visibleTools, decision: visibility } = await offeredToolsForRun({ tools, profile, run: input, sessionMode: session.mode, dataStudioEnabled });
+      offeredTools = visibleTools;
       await record({
         kind: "tool_visibility", companyId, projectId, sessionId, runId: input.runId, turn: 0,
         profileId: profile.id, offeredCount: offeredTools.length, catalogCount: tools.length,
@@ -733,16 +714,9 @@ export class CodingAgentRunner {
         await writeState(() => this.ports.runState!.appendTurn({ companyId, runId: stateRunId!, turnIndex: steps, status: "running" }));
       };
 
-      if (!callsToRun.length && !normalized.rejected.length) {
-        if (needsImplementation) {
-          if (++emptyImplementationReplies >= 3) {
-            await release("refused");
-            return stop("failed", "refused", "The agent did not implement the requested project. No source files changed; build and Live Preview were not published.");
-          }
-          messages.push({ ...providerContinuationFor(result), role: "assistant", content: assistantText }, { role: "system", content: "This is a creation request and no source files changed. Implement the requested features with file tools. Acknowledgement or a plan alone does not complete this task." });
-          continue;
-        }
-        await openTurn();
+      // Final answer for a reply without tool calls or a successful `code.finish`; `null` keeps the loop going.
+      const settleTurn = async (finalText: string, turnOpened: boolean): Promise<CodingAgentRunResult | null> => {
+        if (!turnOpened) await openTurn();
         if (stateRunId && this.ports.runState) {
           await writeState(() => this.ports.runState!.appendTurn({
             companyId, runId: stateRunId!, turnIndex: steps, status: "finished", outcome: "ok",
@@ -753,25 +727,39 @@ export class CodingAgentRunner {
         reviewCoordinator!.applyTurnSummary();
 
         const barrierResult = await reviewCoordinator!.handleCollectBarrier({
-          startedAt, stateRunId, stateOwner, inboxOpened: inboxManager.isOpened,
+          startedAt, stateRunId, stateOwner, inboxOpened: inboxManager!.isOpened,
           cancelled, admitInbox: () => inboxManager!.admitInbox(steps),
         });
 
         if (barrierResult.action === "stopped") return barrierResult.result;
-        if (barrierResult.action === "input_collected") continue;
+        if (barrierResult.action === "input_collected") return null;
 
-        if (inboxManager.isOpened && stateRunId) {
+        if (inboxManager!.isOpened && stateRunId) {
           try {
-            if (await inboxManager.admitInbox(steps)) continue;
-            const sealed = await inboxManager.sealInbox();
-            if (!sealed) continue;
+            if (await inboxManager!.admitInbox(steps)) return null;
+            const sealed = await inboxManager!.sealInbox();
+            if (!sealed) return null;
           } catch {
             return stop("interrupted", "interrupted", "Stopped: the inbox finalization cutoff could not be recorded.");
           }
         }
 
-        const reviewOutcome = await reviewCoordinator!.finalizeOrReviewTurn({ steps, prompt, assistantText, stateRunId });
+        const reviewOutcome = await reviewCoordinator!.finalizeOrReviewTurn({ steps, prompt, assistantText: finalText, stateRunId });
         if (reviewOutcome.action === "completed" || reviewOutcome.action === "stopped") return reviewOutcome.result;
+        return null;
+      };
+
+      if (!callsToRun.length && !normalized.rejected.length) {
+        if (needsImplementation) {
+          if (++emptyImplementationReplies >= 3) {
+            await release("refused");
+            return stop("failed", "refused", "The agent did not implement the requested project. No source files changed; build and Live Preview were not published.");
+          }
+          messages.push({ ...providerContinuationFor(result), role: "assistant", content: assistantText }, { role: "system", content: "This is a creation request and no source files changed. Implement the requested features with file tools. Acknowledgement or a plan alone does not complete this task." });
+          continue;
+        }
+        const settled = await settleTurn(assistantText, false);
+        if (settled) return settled;
         continue;
       }
 
@@ -793,6 +781,20 @@ export class CodingAgentRunner {
       // Remember whether this turn attempted a source mutation; the guard runs at the start of the next turn.
       lastTurnMutated = callsToRun.some(call => /^code\.fs\.(write|edit|apply_patch|move|delete)$/.test(call.name) || call.name === "code.deps.add");
       if (waveOutcome.action === "paused" || waveOutcome.action === "stopped") return waveOutcome.result;
+
+      // `code.finish`: an explicit end of the run. Only a call the runtime accepted counts; a refused or invalid
+      // finish is ordinary tool feedback and the loop continues.
+      const finishText = finishedRunText(callsToRun, messages, assistantText);
+      if (finishText !== null && input.requireImplementation && !input.readOnlyIntent && session.mode !== "plan" && reviewCoordinator.runChanges().length === 0) {
+        if (++emptyImplementationReplies >= 3) {
+          await release("refused");
+          return stop("failed", "refused", "The agent did not implement the requested project. No source files changed; build and Live Preview were not published.");
+        }
+        messages.push({ role: "system", content: "code.finish was called but this is a creation request and no source files changed. Implement the requested features with file tools before finishing." });
+      } else if (finishText !== null) {
+        const settled = await settleTurn(finishText, true);
+        if (settled) return settled;
+      }
     }
   }
 }

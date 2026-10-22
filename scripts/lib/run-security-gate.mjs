@@ -955,6 +955,15 @@ export const SECURITY_GATE_TESTS = [
   // needs Docker, PostgreSQL or a port.
   "tests/coding-agent-r1a-limits-and-quotas.test.ts",
   "tests/coding-agent-r1a-sandbox-quotas.test.ts",
+  // Tool visibility tiers: a read-only analysis or plan run offers no write, shell or data-write tool at all, a
+  // tool without an executor or marked degraded is never offered, and every profile's tier set is valid.
+  "tests/coding-agent-tool-visibility.test.ts",
+  // Manifest v15 assist tools: image viewing refuses protected paths and non-images by magic bytes, the preview
+  // screenshot only accepts local preview paths, web fetch only http(s), and `code.finish` ends the loop.
+  "tests/coding-agent-assist-tools.test.ts",
+  // Manifest v15 Data Studio tools: structured arguments only (no SQL), the coding policy runs first, and both
+  // writes (seed, RLS policies) are refused without a recorded approval unless they are a dry run.
+  "tests/coding-agent-data-studio-tools.test.ts",
 ];
 
 /**

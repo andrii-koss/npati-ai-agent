@@ -1,4 +1,6 @@
 import { codeDataExecutors, type CodeDataToolOptions } from "./code-data-tools";
+import { codeDataStudioExecutors, type CodeDataStudioToolOptions } from "./code-data-studio-tools";
+import { canonicalAssistExecutors, type CodeAssistToolOptions } from "./code-tool-executors-assist";
 import { canonicalCodeAgentControlExecutors } from "./code-agent-controls";
 import type { CodeSubagentOperationService } from "./code-subagent-operations";
 import {
@@ -115,7 +117,7 @@ export function canonicalSubagentExecutors(
  * the executor validates, intersects capabilities with the existing `SubagentToolPolicyGuard` and forwards.
  */
 export function allCanonicalExecutors(
-  options: CanonicalAskUserExecutorOptions & CanonicalGitExecutorOptions & CanonicalSubagentExecutorOptions & CodeDataToolOptions = {},
+  options: CanonicalAskUserExecutorOptions & CanonicalGitExecutorOptions & CanonicalSubagentExecutorOptions & CodeDataToolOptions & CodeAssistToolOptions = {},
 ): Record<string, (input: CodeToolExecutionContext) => Promise<unknown>> {
   return {
     ...canonicalExecutors(options),
@@ -127,6 +129,8 @@ export function allCanonicalExecutors(
     ...canonicalGitExecutors(options),
     ...canonicalSubagentExecutors(options),
     ...codeDataExecutors(options),
+    ...codeDataStudioExecutors(options as CodeDataStudioToolOptions),
+    ...canonicalAssistExecutors(options),
   };
 }
 

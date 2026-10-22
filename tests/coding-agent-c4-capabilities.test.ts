@@ -96,12 +96,12 @@ describe("security-gate: C4 sandbox execution capabilities", () => {
     // C2 (6 reads) + C3 (7 file tools) + C4 (6 sandbox tools) + C4a (3 dependency tools) = 22 code tools, plus
     // C9's three (the planning pair and the user question), C11's eleven git tools and C12's delegation tool = 37,
     // all agent-callable.
-    expect(CODE_CAPABILITIES).toHaveLength(50); // v14 adds code.data.backend.create on inventory id 398
-    expect(callable.filter((capability) => capability.domain === "code")).toHaveLength(50);
-    expect(CAPABILITY_CATALOG.length).toBe(398);
-    expect(callable.length).toBe(134);
+    expect(CODE_CAPABILITIES).toHaveLength(60); // v15 adds ten tools on inventory ids 399-408
+    expect(callable.filter((capability) => capability.domain === "code")).toHaveLength(60);
+    expect(CAPABILITY_CATALOG.length).toBe(408);
+    expect(callable.length).toBe(144);
     expect(CAPABILITY_CATALOG.length - callable.length).toBe(264);
-    expect(CODE_TOOL_MANIFEST_VERSION).toBe(14);
+    expect(CODE_TOOL_MANIFEST_VERSION).toBe(15);
   });
 
   it("never exposes a sandbox tool without a manifest version and a versioned schema", () => {

@@ -1,4 +1,5 @@
 import { CODE_DATABASE_CREATION_CAPABILITY } from "./code-capabilities-database-create";
+import { CODE_DATA_STUDIO_CAPABILITIES } from "./code-capabilities-data-studio";
 import type { CapabilityDefinition } from './capabilities';
 import type { CapabilityMatrixEntry } from './capability-matrix';
 // Confirmation for schema.modify, rows.transfer and backend.attach is enforced by CodeToolRuntime against exact arguments.
@@ -749,6 +750,7 @@ export const CODE_DATA_CAPABILITIES: (CapabilityDefinition & { inputSchema: Reco
       }
     }
   },
-  CODE_DATABASE_CREATION_CAPABILITY
+  CODE_DATABASE_CREATION_CAPABILITY,
+  ...CODE_DATA_STUDIO_CAPABILITIES
 ];
-export const CODE_DATA_MATRIX: CapabilityMatrixEntry[] = CODE_DATA_CAPABILITIES.map(c => ({id:c.inventoryIds[0]!,capabilityId:c.id,name:c.name,type:'tool',domain:'code',agentCallable:true,risk:c.risk,testType:'integration',testFiles:['tests/coding-agent-data-tools.test.ts'],status:'VERIFIED_EXISTING'}));
+export const CODE_DATA_MATRIX: CapabilityMatrixEntry[] = CODE_DATA_CAPABILITIES.map(c => ({id:c.inventoryIds[0]!,capabilityId:c.id,name:c.name,type:'tool',domain:'code',agentCallable:true,risk:c.risk,testType:'integration',testFiles:[CODE_DATA_STUDIO_CAPABILITIES.some(s => s.id === c.id) ? 'tests/coding-agent-data-studio-tools.test.ts' : 'tests/coding-agent-data-tools.test.ts'],status:'VERIFIED_EXISTING'}));

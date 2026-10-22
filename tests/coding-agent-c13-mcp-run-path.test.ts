@@ -914,9 +914,9 @@ describe("[security-gate] C13 MCP run path — idempotency, the snapshot contrac
     // Measured after a real run-path discovery…
     const view = buildCombinedCapabilityView(harness.capabilityStore.overlayFor(COMPANY_A));
     expect(view.counts.staticTotal).toBe(STATIC_CATALOG_BASELINE.total);
-    expect(view.counts.staticTotal).toBe(398);
+    expect(view.counts.staticTotal).toBe(408);
     expect(view.counts.overlayTotal).toBe(2);
-    expect(view.counts.combinedTotal).toBe(400);
+    expect(view.counts.combinedTotal).toBe(410);
     // …the static stores are unchanged in size, and no runtime id ever became a static capability.
     expect(CAPABILITY_CATALOG.length).toBe(STATIC_CATALOG_BASELINE.total);
     expect(CAPABILITY_MATRIX.length).toBe(STATIC_CATALOG_BASELINE.total);
