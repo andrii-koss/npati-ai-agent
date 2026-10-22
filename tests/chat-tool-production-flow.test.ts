@@ -286,3 +286,56 @@ describe("production chat endpoint tool execution", () => {
     }
   });
 });
+
+describe("a provider that refuses a forced tool_choice still answers from the fetched page", () => {
+  function thinkingModeEngine(fallbackPrompts: string[]): AIEngine {
+    const base = productionPathEngine([]);
+    return {
+      ...base,
+      chat: async (request) => {
+        if (typeof request.toolChoice === "object") throw Object.assign(new Error("OmniRoute chat failed with HTTP 400: Thinking mode does not support this tool_choice"), { httpStatus: 400 });
+        return base.chat(request);
+      },
+      async *stream(request) {
+        fallbackPrompts.push(request.messages.filter((item) => item.role === "system").map((item) => String(item.content)).join("\n"));
+        yield "Answer from the supplied page evidence.";
+      },
+    };
+  }
+
+  it.each([
+    ["Ukrainian", "Проаналізуй сайт https://npati.com і скажи, що покращити"],
+    ["English", "Analyze the website https://npati.com and tell me what to improve"],
+  ])("%s: fetches the named page once and puts its content into the fallback prompt", async (_label, message) => {
+    const prompts: string[] = [];
+    const webResearch = researchService();
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), authProvider: { authenticate: async () => auth }, aiEngine: thinkingModeEngine(prompts), marketplace, webResearch });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message, contextType: "none" } });
+      expect(response.statusCode).toBe(200);
+      expect(webResearch.run).toHaveBeenCalledTimes(1);
+      expect(webResearch.run.mock.calls[0]?.[0]).toContain("https://npati.com");
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0]).toContain("Fetched page evidence: NPATI provides an AI business-agent platform.");
+      expect(streamResult(response.body).research).toMatchObject({ used: true, kind: "url_analysis" });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("states that the page could not be opened instead of analysing it from memory", async () => {
+    const prompts: string[] = [];
+    const webResearch = researchService();
+    webResearch.run.mockRejectedValueOnce(new Error("fetch_failed: getaddrinfo ENOTFOUND unreachable.invalid"));
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), authProvider: { authenticate: async () => auth }, aiEngine: thinkingModeEngine(prompts), marketplace, webResearch });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Проаналізуй сайт https://unreachable.invalid", contextType: "none" } });
+      expect(response.statusCode).toBe(200);
+      expect(prompts[0]).toContain("do not fabricate findings");
+      expect(prompts[0]).toContain("ENOTFOUND");
+      expect(streamResult(response.body).research).toMatchObject({ used: true, degraded: expect.stringContaining("ENOTFOUND") });
+    } finally {
+      await app.close();
+    }
+  });
+});
