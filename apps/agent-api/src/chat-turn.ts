@@ -4,7 +4,7 @@ import { BusinessActionHandler } from "./business-action-handler";
 import { summarizeBusinessProfileChat } from "./business-profile-response";
 import { ChatAttachmentInput, prepareChatAttachments } from "./chat-attachments";
 import { conversationTitle, isCompositeBusinessCompanyCreation, isShortAffirmativeReply, normalizeNewBusinessDirective, requestsBusinessGoal, requestsBusinessMemory, requestsCompositeCompanyDeletionIntent, requestsNewBusinessIdea, resolveContextualCompanyFollowUp } from "./chat-intent-helpers";
-import { attachResearchSources } from "./chat-public-errors";
+import { attachResearchSources, unreachablePageMessage } from "./chat-public-errors";
 import { StructuredChatPlan, businessPlanComplete, companyPlanComplete, planStructuredChatRequest } from "./chat-task-plan";
 import { addColumnDirectiveFromMarkdown, explicitlyRequestsWebResearch, isSpreadsheetEditRequest, mapColumnDirectiveFromProposal, spreadsheetEditedMessage } from "./chat-text-directives";
 import { CHAT_TOOL_SELECTION_INSTRUCTION, CORE_CHAT_TOOLS, ChatToolExecutionResult, runChatToolLoop } from "./chat-tool-orchestrator";
@@ -235,6 +235,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
     const webResearchRequested = !nativeToolCalling && (!hasAttachedEvidence || explicitlyRequestsWebResearch(message)) && (
       !companySettingsRequest || explicitlyRequestsWebResearch(message)
     );
+    const namedPage = companySettingsRequest ? undefined : extractTargetUrlOrDomain(message) ?? undefined;
     const runWebResearch = async (researchService: NonNullable<typeof webResearch>) => {
       const scope = { workspaceId: auth.workspaceId, businessId: "00000000-0000-0000-0000-000000000000", userId: auth.userId };
       try {
@@ -446,17 +447,25 @@ export function createChatTurn(deps: ChatTurnDeps) {
           content = nativeBusinessMessage;
         }
         if (nativeCompanyPrimary && !nativeBusinessAction && nativeCompanyAction && nativeCompanyCleanText) content = nativeCompanyCleanText;
+        const failedFetch = loop.traces.find((trace) => trace.toolName === "web_fetch" && trace.status === "failed");
+        if (namedPage && failedFetch && !research?.sources.length && !loop.traces.some((trace) => trace.toolName === "web_fetch" && trace.status === "succeeded")) {
+          content = unreachablePageMessage(namedPage, failedFetch.error, safeUserRequest);
+        }
         if (content && !emailSettingsRequest && !WorkspaceChatActions.isManagementRequest(safeUserRequest) && !spreadsheetEditRequested) onDelta?.(content);
       } catch (error) {
         if (nativeCompanyPrimary || (error as { code?: string }).code === "TOOL_PRIMARY_INCOMPLETE") throw error;
         log.warn({ err: error, model: ai.model }, "Native chat tool loop failed; using prompt-compatible fallback");
         // The fallback has no tools. A page the user named is still fetched, so the answer rests on its actual content
         // (or states why it could not be opened) instead of the model's memory of the site.
-        if (!research && !companySettingsRequest && extractTargetUrlOrDomain(message) && webResearch?.shouldResearch(safePrompt)) {
+        if (!research && namedPage && webResearch?.shouldResearch(safePrompt)) {
           await runWebResearch(webResearch);
           if (research) chatRequest.messages.splice(1, 0, { role: "system", content: researchInstructionFor(research) });
         }
       }
+    }
+    if (!content && namedPage && research && !research.sources.length && research.degraded) {
+      content = unreachablePageMessage(namedPage, research.degraded, safeUserRequest);
+      onDelta?.(content);
     }
     if (!content && !nativeCompanyAction && !nativeBusinessAction && !companySettingsRequest) {
       if(onDelta){

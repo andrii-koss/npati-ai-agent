@@ -75,3 +75,15 @@ export function attachResearchSources(content: string, research?: { sources: Arr
   }).join("\n");
 }
 
+
+/**
+ * The answer when the page a user asked to analyse could not be opened. Built here rather than by the model: with
+ * no page content, models describe a familiar site from memory, which reads like an analysis of the live page.
+ */
+export function unreachablePageMessage(target: string, error: string | undefined, requestMessage: string) {
+  const reason = (error ?? "").replace(/\s+/g, " ").trim().slice(0, 300);
+  const language = detectCompanyChatLanguage(requestMessage);
+  if (language === "uk") return `Не вдалося відкрити сторінку ${target}${reason ? ": " + reason : "."}\n\nБез її вмісту я не аналізую сайт, щоб не вигадувати висновки. Перевірте адресу та доступність сайту або надішліть скріншот чи HTML сторінки.`;
+  if (language === "ru") return `Не удалось открыть страницу ${target}${reason ? ": " + reason : "."}\n\nБез её содержимого я не анализирую сайт, чтобы не выдумывать выводы. Проверьте адрес и доступность сайта или пришлите скриншот или HTML страницы.`;
+  return `The page ${target} could not be opened${reason ? ": " + reason : "."}\n\nWithout its content I will not analyse the site, so as not to invent findings. Check the address and that the site is reachable, or send a screenshot or the page HTML.`;
+}

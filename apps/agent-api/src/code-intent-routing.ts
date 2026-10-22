@@ -202,6 +202,9 @@ export function resolveChatCodeIntent(input: {
     return { mode: "clarify", intent: classification.intent, message: classification.clarificationMessage ?? "Which project should I work in?" };
   }
   if (!input.projectId) return { mode: "chat" };
+  // Analysing an external page is web research, not a review of this project: chat fetches the named page and says
+  // plainly when it cannot be opened, while a review run tends to inspect the project's own files instead.
+  if (codeIntentIsReadOnly(classification.intent) && /\bhttps?:\/\/\S+/iu.test(input.message)) return { mode: "chat" };
   /**
    * C11 (owner decision 10): `readOnly` travels with the decision.
    *
