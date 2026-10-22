@@ -412,3 +412,52 @@ describe("a review request for an external URL reaches Web Research, not the pro
     }
   });
 });
+
+describe("a web search request survives a provider that refuses forced tool_choice", () => {
+  const thinking = (prompts: string[]): AIEngine => {
+    const base = productionPathEngine([]);
+    return { ...base, chat: async (request) => { if (typeof request.toolChoice === "object") throw new Error("HTTP 400: Thinking mode does not support this tool_choice"); return base.chat(request); },
+      async *stream(request) { prompts.push(request.messages.filter((m) => m.role === "system").map((m) => String(m.content)).join("\n")); yield "Answer from the supplied evidence."; } };
+  };
+
+  it("runs the search before the tool-less fallback and gives it the evidence", async () => {
+    const prompts: string[] = [];
+    const webResearch = researchService();
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), authProvider: { authenticate: async () => auth }, aiEngine: thinking(prompts), marketplace, webResearch });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Знайди в інтернеті три інтернет-магазини з подібними товарами і проаналізуй їхній дизайн. Пошукай competitors.", contextType: "none" } });
+      expect(response.statusCode).toBe(200);
+      expect(webResearch.run).toHaveBeenCalledTimes(1);
+      expect(prompts[0]).toContain("Verified competitor evidence from external public sources.");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("states that the search returned nothing instead of answering from memory", async () => {
+    const prompts: string[] = [];
+    const webResearch = researchService();
+    webResearch.run.mockRejectedValueOnce(new Error("search provider unavailable"));
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), authProvider: { authenticate: async () => auth }, aiEngine: thinking(prompts), marketplace, webResearch });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Знайди в інтернеті competitors для мого магазину", contextType: "none" } });
+      expect(prompts).toHaveLength(0);
+      expect(streamResult(response.body).message).toMatch(/^Вебпошук не дав результатів.*search provider unavailable/s);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("a model's web_search call is executed in search mode", async () => {
+    const requests: ChatRequest[] = [];
+    const webResearch = researchService();
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), authProvider: { authenticate: async () => auth }, aiEngine: productionPathEngine(requests), marketplace, webResearch });
+    try {
+      await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Search the web for competitors of my store", contextType: "none" } });
+      const searchCall = webResearch.run.mock.calls.find((call: unknown[]) => (call[4] as { mode?: string } | undefined)?.mode === "search");
+      expect(searchCall).toBeDefined();
+    } finally {
+      await app.close();
+    }
+  });
+});

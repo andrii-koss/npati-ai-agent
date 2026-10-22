@@ -87,3 +87,12 @@ export function unreachablePageMessage(target: string, error: string | undefined
   if (language === "ru") return `Не удалось открыть страницу ${target}${reason ? ": " + reason : "."}\n\nБез её содержимого я не анализирую сайт, чтобы не выдумывать выводы. Проверьте адрес и доступность сайта или пришлите скриншот или HTML страницы.`;
   return `The page ${target} could not be opened${reason ? ": " + reason : "."}\n\nWithout its content I will not analyse the site, so as not to invent findings. Check the address and that the site is reachable, or send a screenshot or the page HTML.`;
 }
+
+/** The answer when a web search the user asked for returned nothing usable; see `unreachablePageMessage`. */
+export function webResearchFailedMessage(error: string | undefined, requestMessage: string) {
+  const reason = (error ?? "").replace(/\s+/g, " ").trim().slice(0, 300);
+  const language = detectCompanyChatLanguage(requestMessage);
+  if (language === "uk") return `Вебпошук не дав результатів, на які можна спертися${reason ? ": " + reason : "."}\n\nБез знайдених сторінок я не роблю висновків, щоб не вигадувати. Спробуйте уточнити запит або назвіть конкретні сайти.`;
+  if (language === "ru") return `Веб-поиск не дал результатов, на которые можно опереться${reason ? ": " + reason : "."}\n\nБез найденных страниц я не делаю выводов, чтобы не выдумывать. Уточните запрос или назовите конкретные сайты.`;
+  return `The web search returned nothing usable${reason ? ": " + reason : "."}\n\nWithout retrieved pages I will not draw conclusions, so as not to invent findings. Refine the request or name specific sites.`;
+}
