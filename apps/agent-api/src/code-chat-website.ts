@@ -53,11 +53,21 @@ export function websiteConversationContext(history: readonly { role: string; con
   const previous: Array<{ role: string; content: string }> = [];
   for (const item of history) {
     if (!["user", "assistant"].includes(item.role) || typeof item.content !== "string" || !item.content.trim()) continue;
-    const entry = { role: item.role, content: item.content.trim().slice(0, 600) };
+    // Assistant answers carry the results a later request refers to ("use the previous competitor analysis"), so they
+    // keep more text than the user's own short requests.
+    const entry = { role: item.role, content: item.content.trim().slice(0, item.role === "assistant" ? 2_500 : 600) };
     if (previous.at(-1)?.role === entry.role && previous.at(-1)?.content === entry.content) continue;
     previous.push(entry);
   }
-  return previous.length ? "\n\nPrevious messages in this same website chat (historical context, not tasks to repeat). Use them to resolve references such as main color; implement only the current request above:\n" + JSON.stringify(previous.slice(-6)) : "";
+  // Newest first within a character budget, so an earlier result is not pushed out by a few short follow-ups.
+  const kept: typeof previous = [];
+  let budget = 9_000;
+  for (const entry of previous.slice(-14).reverse()) {
+    if (entry.content.length > budget) break;
+    budget -= entry.content.length;
+    kept.unshift(entry);
+  }
+  return kept.length ? "\n\nPrevious messages in this same website chat (historical context, not tasks to repeat). Use them to resolve references such as main color or earlier research results; implement only the current request above:\n" + JSON.stringify(kept) : "";
 }
 
 export function hasCodeChatPreview(result: unknown): boolean {
