@@ -21,9 +21,11 @@ import {
   modelProfileFallbackTrace,
   resolveEffectiveToolCallingMode,
   resolveModelProfile,
+  resolveToolVisibility,
   type CodeModelProfile,
   type CodeModelProfileFallbackReason,
 } from "./code-model-profiles";
+import { selectVisibleTools } from "./code-tool-visibility";
 import { resolveModelRequestPressure, type ModelRequestPressure } from "./code-context-budget";
 import { validateArguments } from "./code-tool-runtime";
 import { replayArgumentsHash } from "./code-replay-bundle";
@@ -65,6 +67,12 @@ import { CodingAgentReviewCoordinator } from "./coding-agent-review-coordinator"
 import { CodingAgentToolWaves } from "./coding-agent-tool-waves";
 
 export * from "./coding-agent-runner-contracts";
+
+/** Tool families a website edit or a creation run may be offered; git, sub-agents and admin tools are not. */
+export const WEBSITE_EDIT_TOOL_PATTERN = /^code\.(fs\.|deps\.|shell\.|verify\.|web\.|data\.|plan\.|project\.info$|ask_user$|finish$|image\.view$|preview\.screenshot$)/;
+
+/** Gates whether the `code.data.*` family is offered to the model at all (a view, never a permission). */
+export const CODE_DATA_STUDIO_FLAG = "code.data_studio";
 
 export class CodingAgentRunner {
   private readonly limits: CodeAgentLimits;
@@ -275,7 +283,7 @@ export class CodingAgentRunner {
       runtimeTools: runtimeToolDescriptors,
     };
 
-    const tools = this.toolDescriptors(session, toolOptions).filter(tool => !input.websiteEdit || /^code\.(fs\.|deps\.|shell\.|verify\.|browser\.|web\.|data\.|plan\.|project\.info$|ask_user$)/.test(tool.name));
+    const tools = this.toolDescriptors(session, toolOptions).filter(tool => !input.websiteEdit || WEBSITE_EDIT_TOOL_PATTERN.test(tool.name));
     const modelName = input.model ?? "auto";
     const modelProviderHint = modelName.includes("/") ? (modelName.split("/")[0] ?? modelName) : modelName;
 
@@ -298,16 +306,45 @@ export class CodingAgentRunner {
     });
     const profile: CodeModelProfile = profileResolution.profile;
 
+    /**
+     * Tool tiers (core / contextual / intent) from the model profile. A delegated run keeps exactly the tool
+     * list its parent granted, so the tiers apply to main runs only. Hidden tools stay in the registry and are
+     * still judged by the runtime if named; this only decides what the model is offered.
+     */
+    let offeredTools = tools;
+    if (!capabilityScope.isSubagent) {
+      const dataStudioEnabled = await this.ports.flags.assertEnabled(ctx, CODE_DATA_STUDIO_FLAG, { companyId, userId: ctx.userId })
+        .then(() => true, () => false);
+      const visibility = selectVisibleTools(tools.map(tool => tool.name), resolveToolVisibility(profile), {
+        userMessage: input.toolContext?.userMessage ?? input.prompt,
+        sessionMode: session.mode,
+        readOnlyIntent: input.readOnlyIntent === true,
+        websiteEdit: input.websiteEdit === true,
+        requireImplementation: input.requireImplementation === true,
+        imageCount: input.images?.length ?? 0,
+        dataBackendAttached: input.toolContext?.dataBackendAttached === true,
+        dataStudioEnabled,
+      });
+      const visible = new Set(visibility.visible);
+      offeredTools = tools.filter(tool => visible.has(tool.name));
+      await record({
+        kind: "tool_visibility", companyId, projectId, sessionId, runId: input.runId, turn: 0,
+        profileId: profile.id, offeredCount: offeredTools.length, catalogCount: tools.length,
+        contextualTools: visibility.contextual, intentGroups: visibility.intentGroups,
+        degradedTools: visibility.hidden.filter(entry => entry.reason === "degraded").map(entry => entry.name),
+      });
+    }
+
     const resolvedProfileTrace = modelProfileFallbackTrace(profileResolution, { enabledProfileIds: enabledProfileIds ?? null });
     modelProfileFallbackReason = resolvedProfileTrace.fallbackReason;
     this.ports.environment?.setModelProfileTrace(resolvedProfileTrace);
     const schemaByName = this.toolCatalog.toolSchemaByName(runtimeToolDescriptors, session);
 
-    const knownTools: KnownTool[] = tools.map((tool) => ({ name: tool.name, inputSchema: schemaByName.get(tool.name)?.inputSchema ?? {} }));
-    const definitions = this.toolCatalog.chatToolDefinitions(tools, runtimeToolDescriptors, session)
+    const knownTools: KnownTool[] = offeredTools.map((tool) => ({ name: tool.name, inputSchema: schemaByName.get(tool.name)?.inputSchema ?? {} }));
+    const definitions = this.toolCatalog.chatToolDefinitions(offeredTools, runtimeToolDescriptors, session)
       // Keep the runtime registry intact; advertise the tools needed to implement
       // a new project instead of repeatedly paying for unrelated admin schemas.
-      .filter(tool => !input.requireImplementation || /^code\.(fs\.|deps\.|shell\.|verify\.|browser\.|web\.|data\.|plan\.|project\.info$|ask_user$)/.test(tool.function.name));
+      .filter(tool => !input.requireImplementation || WEBSITE_EDIT_TOOL_PATTERN.test(tool.function.name));
 
     let engineSupportsNativeTools = false;
     if (this.ports.engine.supportsNativeTools) {
@@ -316,7 +353,7 @@ export class CodingAgentRunner {
 
     const { systemPrompt } = await buildRunPromptContext({
       ctx, session, input, ports: this.ports, limits: this.limits, companyId, projectId, sessionId,
-      prompt, startedAt, runTurnLimit, tools, profile,
+      prompt, startedAt, runTurnLimit, tools: offeredTools, profile,
     });
 
     this.ports.environment?.setModelSelection({ provider: modelProviderHint, model: modelName });
@@ -338,12 +375,12 @@ export class CodingAgentRunner {
       modelSelection: this.ports.environment?.modelSelection() ?? null,
       systemPrompt: this.ports.environment?.systemPrompt() ?? null,
       modelProfileVersion: this.ports.environment?.modelProfileVersion() ?? null,
-      toolVersions: Object.fromEntries(tools.map((tool) => [tool.name, tool.version])),
+      toolVersions: Object.fromEntries(offeredTools.map((tool) => [tool.name, tool.version])),
       dataClassification: session.dataClassification, retentionClass: session.retentionClass,
       ...(commandPrompt.provenance.length > 0 ? { commandProvenance: commandPrompt.provenance } : {}),
     });
 
-    const toolVersionByName = new Map(tools.map((tool) => [tool.name, tool.version] as const));
+    const toolVersionByName = new Map(offeredTools.map((tool) => [tool.name, tool.version] as const));
     const runtimeToolByName = new Map(runtimeToolDescriptors.map((tool) => [tool.name, tool] as const));
 
     const messages: ChatMessage[] = [

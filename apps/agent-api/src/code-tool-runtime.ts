@@ -48,6 +48,9 @@ export * from "./code-tool-runtime-ports";
 export * from "./code-tool-runtime-guards";
 export * from "./code-tool-runtime-workspace";
 
+/** Tools the runtime handles itself inside `invoke` rather than through an executor. */
+const INLINE_RUNTIME_TOOLS: ReadonlySet<string> = new Set(["code.fs.diff", "code.fs.undo_last_turn"]);
+
 /**
  * C2: the runtime that executes read-only and write `code.*` tools.
  */
@@ -154,6 +157,9 @@ export class CodeToolRuntime {
       deprecatedAt: tool.deprecatedAt ?? null,
       write: this.isWriteTool(tool.name),
       limits: (tool as { limits?: Record<string, unknown> }).limits ?? null,
+      // A published tool with no executor would only ever fail with `tool_not_configured`; the catalogue uses
+      // this to keep it out of the model's tool list while the registry and the Inspector still show it.
+      available: INLINE_RUNTIME_TOOLS.has(tool.name) || typeof this.executors[tool.name] === "function",
     }));
   }
 

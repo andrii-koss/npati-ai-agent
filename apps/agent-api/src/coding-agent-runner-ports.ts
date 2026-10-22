@@ -25,6 +25,8 @@ export interface CodeRunToolDescriptor {
   status: string;
   description: string;
   write: boolean;
+  /** `false` when the runtime has no executor for the tool; such a tool is never offered to the model. */
+  available?: boolean;
 }
 
 export interface CodeRunRuntimeToolDescriptor {
@@ -218,7 +220,14 @@ export interface CodeRunStatePort {
 }
 
 export interface CodeRunActivityEvent {
-  kind: "run_started" | "turn" | "tool_call" | "reminder" | "run_finished" | "session_branch" | "model_call" | "model_first_token";
+  kind: "run_started" | "turn" | "tool_call" | "reminder" | "run_finished" | "session_branch" | "model_call" | "model_first_token" | "tool_visibility";
+  /** `tool_visibility`: which profile tiers produced the offered tool list (names and counts only). */
+  profileId?: string;
+  offeredCount?: number;
+  catalogCount?: number;
+  contextualTools?: string[];
+  intentGroups?: string[];
+  degradedTools?: string[];
   phase?: "started" | "completed" | "failed";
   model?: string;
   provider?: string;

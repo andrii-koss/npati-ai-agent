@@ -158,11 +158,23 @@ export interface CodingAgentRunInput {
 
   readOnlyIntent?: boolean;
 
+  /**
+   * Trusted signals for choosing which tools the model is offered (see `code-tool-visibility.ts`). The user's
+   * own message is used for keyword matching because `prompt` also carries system guidance; absent → `prompt`.
+   */
+  toolContext?: CodingAgentToolContext;
+
   subagentScope?: CodingAgentSubagentScopeInput;
 
   maxTurns?: number;
 
   approvedToolCalls?: readonly CodingAgentApprovedToolCall[];
+}
+
+export interface CodingAgentToolContext {
+  userMessage?: string;
+  /** The project has a Data Studio backend attached (`project.dataBackendId`). */
+  dataBackendAttached?: boolean;
 }
 
 export interface CodingAgentApprovedToolCall {
