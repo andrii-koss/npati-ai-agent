@@ -158,7 +158,11 @@ async function success(id, companyId, projectId, metrics, outcome) {
     const contents = await Promise.all(metrics.changedFiles.map(read));
     return { ok: contents.some((text) => /16a34a/i.test(text)), status, changedFiles: metrics.changedFiles.length };
   }
-  if (id === "s3-photo") return { ok: metrics.runs.some((r) => r.status === "completed"), status, visualAcceptance: run?.visualAcceptance?.status ?? null };
+  if (id === "s3-photo") {
+    // The root run (not a visual repair) carries the visual acceptance verdict: failed acceptance fails the root run.
+    const root = metrics.runs.find((r) => !String(r.runId).includes(":visual-repair:"));
+    return { ok: root?.status === "completed", status: root?.status ?? status, rootStopReason: root?.stopReason ?? null, visualAcceptance: run?.visualAcceptance?.status ?? null };
+  }
   if (id === "s4-analyze") return { ok: metrics.writeCalls === 0 && metrics.changedFiles.length === 0, status, writeCalls: metrics.writeCalls };
   if (id === "s5-table") {
     const migrations = projectId ? sql(`select json_agg(operation::text) from data_backend_migrations where backend_id=(select data_backend_id from projects where id='${projectId}') and created_at >= '${outcome.sinceIso}'`) ?? [] : [];
