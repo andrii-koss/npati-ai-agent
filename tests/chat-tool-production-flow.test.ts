@@ -394,3 +394,21 @@ describe("an unreachable page gets a clear error, never an analysis from memory"
     }
   });
 });
+
+describe("a review request for an external URL reaches Web Research, not the project stub", () => {
+  it("REVIEW_PROJECT + URL fetches the page", async () => {
+    const webResearch = researchService();
+    const base = productionPathEngine([]);
+    const engine: AIEngine = { ...base, chat: async (request) => request.messages[0]?.content.startsWith("Classify the user's primary intent")
+      ? { content: JSON.stringify({ intent: "REVIEW_PROJECT", confidence: 1, targets: [] }) } : base.chat(request) };
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), authProvider: { authenticate: async () => auth }, aiEngine: engine, marketplace, webResearch });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Проаналізуй сайт https://npati.com", contextType: "none" } });
+      expect(response.statusCode).toBe(200);
+      expect(webResearch.run).toHaveBeenCalledTimes(1);
+      expect(response.body).not.toContain("будуть розширені у наступних кроках");
+    } finally {
+      await app.close();
+    }
+  });
+});
