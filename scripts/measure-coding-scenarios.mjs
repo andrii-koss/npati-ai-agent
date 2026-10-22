@@ -131,7 +131,10 @@ function collect(companyId, sinceIso, untilIso) {
     if (typeof parsed.patch === "string") for (const match of parsed.patch.matchAll(/^(?:\*\*\* (?:Update|Add|Delete) File: |\+\+\+ b\/)(.+)$/gm)) files.add(match[1].trim());
   }
   return {
-    runs, modelCalls: modelCalls.length, selfReviewCalls: modelCalls.filter((event) => event.p.modelPurpose === "self_review").length,
+    runs, tokens: runs.reduce((sum, run) => sum + (Number(run.tokens) || 0), 0),
+    visualRepairs: runs.filter((run) => String(run.runId).includes(":visual-repair:")).length,
+    screenshots: toolCalls.filter((event) => event.p.tool === "code.preview.screenshot").length,
+    modelCalls: modelCalls.length, selfReviewCalls: modelCalls.filter((event) => event.p.modelPurpose === "self_review").length,
     toolCalls: toolCalls.length, writeCalls: writeCalls.length, failedToolCalls: toolCalls.filter((event) => event.p.ok === false).length,
     toolsByName: Object.fromEntries([...toolCalls.reduce((map, event) => map.set(event.p.tool, (map.get(event.p.tool) ?? 0) + 1), new Map())]),
     firstToolAtMs: firstTool, changedFiles: [...files].sort(),
@@ -222,7 +225,7 @@ try {
     };
     report.scenarios.push(record);
     writeFileSync(path.join(outDir, `${phase}-${model.replace(/[^a-z0-9]+/gi, "_")}-${scenario.id}.events.json`), JSON.stringify(outcome.events, null, 1));
-    console.log(JSON.stringify({ id: record.id, ok: record.success.ok, status: record.success.status, totalMs: record.totalMs, firstAction: record.timeToFirstActionMs, modelCalls: record.modelCalls, toolCalls: record.toolCalls, writes: record.writeCalls, files: record.changedFiles }));
+    console.log(JSON.stringify({ id: record.id, ok: record.success.ok, status: record.success.status, totalMs: record.totalMs, firstAction: record.timeToFirstActionMs, modelCalls: record.modelCalls, toolCalls: record.toolCalls, writes: record.writeCalls, tokens: record.tokens, repairs: record.visualRepairs, screenshots: record.screenshots, files: record.changedFiles }));
   }
 } finally {
   if (originalDefault) { await http("PUT", "/ai/models/default", { modelId: originalDefault }).then(() => { report.originalDefaultRestored = true; }).catch(() => undefined); }

@@ -118,6 +118,9 @@ export function questionIdFrom(
 }
 
 export class CodingAgentToolWaves {
+  /** Successful writes in this run, and the write count each screenshot (page@viewport) was taken at. */
+  private writesInRun = 0;
+  private readonly screenshotAtWrite = new Map<string, number>();
   private readonly repeatedSignatures: string[] = [];
   private readonly repeatedErrors: string[] = [];
   private readonly argumentCorrections = new Map<string, number>();
@@ -335,7 +338,15 @@ export class CodingAgentToolWaves {
       };
       const beforeVerification = call.name === "code.verify.run" ? await reviewCoordinator.readVerificationRevision() : null;
       let result: CodeToolInvokeResult | CodeToolInvokeFailure;
-      try {
+      // A screenshot of the same page and viewport with no file written since the previous one would be identical:
+      // answer from the run's own state instead of rebuilding and capturing again (nothing is executed).
+      const screenshotKey = call.name === "code.preview.screenshot"
+        ? `${typeof call.arguments.path === "string" ? call.arguments.path : "/"}@${typeof call.arguments.viewport === "string" ? call.arguments.viewport : "desktop"}` : null;
+      if (screenshotKey && this.screenshotAtWrite.get(screenshotKey) === this.writesInRun) {
+        const data = { unchangedSinceLastScreenshot: true, note: "No file changed in this run since the previous screenshot of this page and viewport, so it would be identical. Change files first, or finish: the system screenshots and compares the result after you finish." };
+        result = { ok: true, tool: call.name, toolVersion: toolVersionByName.get(call.name) ?? 1, schemaVersion: 1, truncated: false, durationMs: 0,
+          result: { kind: "code_tool_result", tool: call.name, toolVersion: 1, schemaVersion: 1, trust: "untrusted_data", note: "Run state, not a new capture.", data } };
+      } else try {
         const runtimeTool = runtimeToolByName.get(call.name);
         result = runtimeTool && ports.runtimeCapabilities
           ? await ports.runtimeCapabilities.invoke({
@@ -368,7 +379,8 @@ export class CodingAgentToolWaves {
           },
         };
       }
-
+      if (result.ok && /^code\.fs\.(write|edit|apply_patch|move|delete)$|^code\.deps\.add$/.test(call.name) && call.arguments.dryRun !== true) this.writesInRun += 1;
+      if (screenshotKey && result.ok) this.screenshotAtWrite.set(screenshotKey, this.writesInRun);
 
       if (stateRunId && ports.runState) {
         await writeState(() => ports.runState!.appendToolCall({

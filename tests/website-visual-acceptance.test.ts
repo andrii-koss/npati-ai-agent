@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { InMemoryWorkspaceStore } from "@npati/workspace";
 import { CodeSessionRunExecutor, type CodeSessionRunInput } from "../apps/agent-api/src/code-session-run-executor";
 import { CodeRunCancellationRegistry } from "../apps/agent-api/src/code-run-cancellation";
-import { analyzeWebsiteReference, reviewWebsiteReference } from "../apps/agent-api/src/website-visual-acceptance";
+import { analyzeWebsiteReference, reviewWebsiteReference, visualAcceptanceScreenshot, visualRepairFindings } from "../apps/agent-api/src/website-visual-acceptance";
 import { withCodingReferenceImages } from "../apps/agent-api/src/coding-agent-runner-prompt";
 const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAAAElFTkSuQmCC";
 async function fixture() {
@@ -22,9 +22,9 @@ describe("reference attachment point", () => {
   it("attaches the reference to the current (last) user message, never to the original creation prompt, and never twice", () => {
     const messages = [
       { role: "system" as const, content: "system" },
-      { role: "user" as const, content: "створи мені інтернет магазин" },
-      { role: "assistant" as const, content: "Готово" },
-      { role: "user" as const, content: "зміни дизайн сайта, зроби такий як на фото" },
+      { role: "user" as const, content: "пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ" },
+      { role: "assistant" as const, content: "пїЅпїЅпїЅпїЅпїЅпїЅ" },
+      { role: "user" as const, content: "пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅ" },
     ];
     const image = { mimeType: "image/png", dataBase64: png };
     const attached = withCodingReferenceImages(messages, [image]);
@@ -95,11 +95,53 @@ describe("pixel-evidence visual acceptance", () => {
   });
 
   it("uses at most two repairs with the same session/images, and settles honest failure once", async () => {
-    const f = await fixture(), run = vi.fn(async () => f.run), settle = vi.fn(async () => undefined);
+    // Each repair saves a change, so each one earns a new build + screenshot review.
+    const f = await fixture(), run = vi.fn(async () => ({ ...f.run, summary: { ...f.run.summary, filesChanged: ["app/page.tsx"] } })), settle = vi.fn(async () => undefined);
     const executor = new CodeSessionRunExecutor({ runner: { run }, control: new CodeRunCancellationRegistry(), resolveModel: async () => "connected/vision", prepareReference: async () => ["observed reference"], afterRun: async (_input, result) => ({ ...result as any, status: "failed", reason: "visual_acceptance_failed", visualAcceptance: { status: "failed", differences: ["Wrong structure"] } }), settle });
     const result = await executor.execute(f.input);
     expect(run).toHaveBeenCalledTimes(3); expect(result.terminalStatus).toBe("failed"); expect(settle).toHaveBeenCalledOnce();
     for (const [input] of run.mock.calls as any) { expect(input.session).toBe(f.input.session); expect(input.images).toBe(f.input.images); }
     expect((result.result as any).visualRepairRunIds).toHaveLength(2);
+  });
+});
+
+describe("one central visual check, repairs only with findings", () => {
+  const failing = (differences: string[]) => async (_input: unknown, result: unknown) => ({ ...result as object, status: "failed", reason: "visual_acceptance_failed", visualAcceptance: { status: "failed", differences } });
+
+  it("does not start a repair without concrete findings", async () => {
+    const f = await fixture(), run = vi.fn(async () => f.run);
+    const executor = new CodeSessionRunExecutor({ runner: { run }, control: new CodeRunCancellationRegistry(), resolveModel: async () => "connected/vision", prepareReference: async () => ["observed reference"], afterRun: failing([]), settle: async () => undefined });
+    const result = await executor.execute(f.input);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(result.terminalStatus).toBe("failed");
+    expect(visualRepairFindings({ status: "failed", differences: ["visual repair 1 made no changes", "ok"] })).toEqual([]);
+    expect(visualRepairFindings({ status: "passed", differences: ["Header is light"] })).toEqual([]);
+  });
+
+  it("does not rebuild and re-screenshot after a repair that changed nothing", async () => {
+    const f = await fixture(), run = vi.fn(async () => f.run);
+    const afterRun = vi.fn(failing(["Header is light instead of dark"]));
+    const executor = new CodeSessionRunExecutor({ runner: { run }, control: new CodeRunCancellationRegistry(), resolveModel: async () => "connected/vision", prepareReference: async () => ["observed reference"], afterRun, settle: async () => undefined });
+    const result = await executor.execute(f.input);
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(afterRun).toHaveBeenCalledTimes(1);
+    expect((result.result as any).visualAcceptance.differences.join(" ")).toContain("visual repair 1 made no changes");
+  });
+
+  it("shows the repair the screenshot that failed, after the reference", async () => {
+    const f = await fixture(), run = vi.fn(async () => ({ ...f.run, summary: { ...f.run.summary, filesChanged: ["app/page.tsx"] } }));
+    const chat = vi.fn(async () => response(0.5, ["Header is light instead of dark"]));
+    const afterRun = async (input: CodeSessionRunInput, result: unknown) => reviewWebsiteReference(input, result, { inspect: async () => f.qa, chat: chat as never });
+    const executor = new CodeSessionRunExecutor({ runner: { run }, control: new CodeRunCancellationRegistry(), resolveModel: async () => "connected/vision", prepareReference: async () => ["observed reference"], afterRun, settle: async () => undefined });
+    await executor.execute(f.input);
+    const repair = (run.mock.calls as any)[1][0];
+    expect(repair.images).toHaveLength(2);
+    expect(repair.images[0]).toBe(f.input.images![0]);
+    expect(repair.images[1]).toMatchObject({ dataBase64: png });
+    expect(repair.prompt).toContain("LAST attached image is the current Preview screenshot");
+    expect(repair.prompt).toContain("Header is light instead of dark");
+    // The central review keeps judging against the reference only.
+    for (const call of chat.mock.calls as any) expect(call[0].messages[1].content.filter((part: any) => part.type === "image_url")).toHaveLength(2);
+    expect(visualAcceptanceScreenshot(await afterRun(f.input, f.run))).toMatchObject({ dataBase64: png });
   });
 });

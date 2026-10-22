@@ -78,3 +78,31 @@ describe("system prompt carries the working rules in its stable prefix", () => {
     expect(prefix).toContain("changes no files and creates nothing");
   });
 });
+
+describe("a repeated screenshot without a change is answered from run state", () => {
+  it("captures again only after a file was written", async () => {
+    const { CodingAgentRunner } = await import("../apps/agent-api/src/coding-agent-runner");
+    const { CODE_TOOL_SCHEMAS } = await import("../apps/agent-api/src/code-tool-registry");
+    const names = ["code.preview.screenshot", "code.fs.edit", "code.fs.read"];
+    const tools = names.map((name) => ({ name, version: 1, status: "active", description: name, write: name === "code.fs.edit" }));
+    const shot = (id: string) => ({ id, type: "function" as const, function: { name: "code.preview.screenshot", arguments: JSON.stringify({ path: "/" }) } });
+    const script = [
+      { content: "", toolCalls: [shot("s1")] },
+      { content: "", toolCalls: [shot("s2")] },
+      { content: "", toolCalls: [{ id: "e1", type: "function" as const, function: { name: "code.fs.edit", arguments: JSON.stringify({ path: "a.css", old_string: "a", new_string: "b" }) } }] },
+      { content: "", toolCalls: [shot("s3")] },
+      { content: "done" },
+    ];
+    const invoked: string[] = [];
+    const runner = new CodingAgentRunner({
+      flags: { assertEnabled: async () => true }, rbac: { authorize: async () => ({ allowed: true }) },
+      toolRuntime: { listTools: () => tools, invoke: async (_ctx, input) => { invoked.push(`${input.tool}:${input.toolCallId}`); return { ok: true, tool: input.tool, toolVersion: 1, schemaVersion: 1, result: { data: {} }, truncated: false, durationMs: 1 }; } },
+      engine: { chat: async () => script.shift() ?? { content: "done" } },
+      schemas: tools.map((tool) => ({ ...tool, inputSchema: CODE_TOOL_SCHEMAS.find((schema) => schema.name === tool.name)!.inputSchema })),
+      limits: { maxStepsPerRun: 10, maxRunMinutes: 5 },
+    });
+    await runner.run({ ctx: { userId: "u", workspaceId: "w", permissions: ["workspace:write"] }, session: { id: "s", workspaceId: "w", companyId: "c", projectId: "p", userId: "u", mode: "auto", status: "active", dataClassification: "confidential", retentionClass: "standard", revision: 1, createdAt: "", updatedAt: "" } as never, prompt: "make the hero darker", websiteEdit: true, images: [{ mimeType: "image/png", dataBase64: "iVBORw0KGgo=" }], toolContext: { userMessage: "make the hero darker" } });
+    expect(invoked.filter((entry) => entry.startsWith("code.preview.screenshot"))).toEqual(["code.preview.screenshot:s1", "code.preview.screenshot:s3"]);
+    expect(invoked).toContain("code.fs.edit:e1");
+  });
+});
