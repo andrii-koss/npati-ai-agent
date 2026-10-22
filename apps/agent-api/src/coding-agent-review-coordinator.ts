@@ -426,8 +426,7 @@ export class CodingAgentReviewCoordinator {
         : null,
       scopeExceeded: this.scopeGuard?.exceeded === true,
       totalLinesChanged: totals.linesAdded + totals.linesRemoved,
-      adaptiveEnabled: this.host.ports.selfReview?.adaptive ?? this.host.limits.selfReviewAdaptive,
-      ...(options.previewVerifies ? { previewVerifies: true } : {}),
+      adaptiveEnabled: this.host.ports.selfReview?.adaptive ?? this.host.limits.selfReviewAdaptive, previewVerifies: options.previewVerifies === true,
     });
   }
 
