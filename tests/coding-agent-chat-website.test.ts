@@ -150,7 +150,14 @@ it("keeps bounded conversation continuity for a follow-up color without replayin
  const previous={role:"user",content:"Make the background light gray #f5f5f5"};
  const context=websiteConversationContext([{role:"system",content:"foreign policy"},previous,previous,{role:"assistant",content:"The background is now light gray."}]);
  expect(context).toContain("historical context, not tasks to repeat");expect(context).toContain("background light gray");expect(context).not.toContain("foreign policy");expect(context.match(/Make the background/g)).toHaveLength(1);
- expect(websiteConversationContext([])).toBe("");expect(websiteConversationContext(Array.from({length:20},(_,i)=>({role:"user",content:i+"x".repeat(1000)}))).length).toBeLessThan(4500);
+ expect(websiteConversationContext([])).toBe("");expect(websiteConversationContext(Array.from({length:20},(_,i)=>({role:"user",content:i+"x".repeat(1000)}))).length).toBeLessThan(10_500);
+});
+
+it("keeps an earlier assistant result reachable after several short follow-ups",()=>{
+ const research={role:"assistant",content:"Competitor analysis: shop-a.com uses a sticky category bar; shop-b.com shows trust badges. "+"detail ".repeat(200)};
+ const later=[{role:"user",content:"Create the database"},{role:"assistant",content:"Created products, categories and orders."},{role:"user",content:"Retry"},{role:"assistant",content:"Schema already exists."},{role:"user",content:"Connect the database"},{role:"assistant",content:"Connected; catalog reads products."},{role:"user",content:"Redesign from the photo"},{role:"assistant",content:"Redesigned."}];
+ const context=websiteConversationContext([{role:"user",content:"Find three competitor shops"},research,...later]);
+ expect(context).toContain("sticky category bar");expect(context).toContain("Redesigned.");
 });
 
 it("forwards validated image parts through the shared session executor and model resolver",async()=>{
