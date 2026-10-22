@@ -90,7 +90,12 @@ export async function compactConversationContextIfNeeded(args: CompactContextArg
     });
 
     try {
-      const compaction = compactConversation({ messages: compactable });
+      // Keep the last two turns whole and the newest unchanged reads (within 30 % of the budget), so compaction
+      // does not force the model to re-read files it has not changed (audit F-01).
+      const compaction = compactConversation({
+        messages: compactable, keepRecentAssistantTurns: 2,
+        preserveLatestReadsChars: Math.floor(lastBudget.thresholdTokens * 4 * 0.3),
+      });
       const summaryText = renderSummaryMessage(compaction.summary);
 
       if (ports.providerDataGuard) {
