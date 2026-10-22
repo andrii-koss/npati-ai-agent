@@ -9,6 +9,13 @@ import { sha256Hex } from "./code-tool-runtime";
 import type { CodeRunPolicyCompositionSources, CodeRunToolDescriptor } from "./coding-agent-runner-ports";
 
 export const CODE_RUN_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
+  "code.image.view",
+  "code.preview.screenshot",
+  "code.web.fetch",
+  "code.web.search",
+  "code.data.query.read",
+  "code.data.migrations.list",
+  "code.data.policies.inspect",
   "code.data.schema.inspect",
   "code.data.rows.list",
   "code.shell.process.wait",

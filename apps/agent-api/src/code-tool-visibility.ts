@@ -218,3 +218,33 @@ export function validateCodeToolVisibilityPolicy(policy: unknown, profileId: str
     throw new Error(`Model profile ${profileId}: toolVisibility.intentGroups contains an unknown group`);
   }
 }
+
+/** Tool families a website edit or a creation run may be offered; git, sub-agents and admin tools are not. */
+export const WEBSITE_EDIT_TOOL_PATTERN = /^code\.(fs\.|deps\.|shell\.|verify\.|web\.|data\.|plan\.|project\.info$|ask_user$|finish$|image\.view$|preview\.screenshot$)/;
+
+/** Gates whether the `code.data.*` family is offered to the model at all (a view, never a permission). */
+export const CODE_DATA_STUDIO_FLAG = "code.data_studio";
+
+/** The explicit end-of-run tool; a successful call settles the run like a final answer. */
+export const CODE_FINISH_TOOL = "code.finish";
+
+/** True when the settled tool message for `toolCallId` reports success. */
+export function toolCallSucceeded(messages: ReadonlyArray<{ role: string; tool_call_id?: string; content?: unknown }>, toolCallId: string): boolean {
+  const settled = messages.find((message) => message.role === "tool" && message.tool_call_id === toolCallId);
+  return typeof settled?.content === "string" && /^\{\s*"ok"\s*:\s*true\b/u.test(settled.content);
+}
+
+/**
+ * The final answer of a turn that called `code.finish` successfully (assistant prose plus the summary), or
+ * `null` when the turn did not finish. A refused or invalid finish is ordinary tool feedback.
+ */
+export function finishedRunText(
+  calls: ReadonlyArray<{ id: string; name: string; arguments: Record<string, unknown> }>,
+  messages: ReadonlyArray<{ role: string; tool_call_id?: string; content?: unknown }>,
+  assistantText: string,
+): string | null {
+  const call = calls.find((entry) => entry.name === CODE_FINISH_TOOL);
+  if (!call || !toolCallSucceeded(messages, call.id)) return null;
+  const summary = typeof call.arguments.summary === "string" ? call.arguments.summary.trim() : "";
+  return [assistantText.trim(), summary].filter(Boolean).join("\n\n");
+}

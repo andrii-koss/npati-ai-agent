@@ -9,6 +9,8 @@ import {
   type ResolvedCodeSubagentLimits,
 } from "./code-subagent-limits";
 import { isPlanSafeTool } from "./code-policy-engine";
+import { resolveToolVisibility, type CodeModelProfile } from "./code-model-profiles";
+import { selectVisibleTools, type CodeToolVisibilityDecision } from "./code-tool-visibility";
 import { CODE_TOOL_SCHEMAS, resolveManifestForSession, schemasForToolManifest } from "./code-tool-registry";
 import {
   isReadOnlyRunTool,
@@ -160,4 +162,29 @@ export class CodingAgentToolCatalog {
       return { text: input.prompt, provenance: [], refusals: [code] };
     }
   }
+}
+
+/**
+ * Applies the model profile's tool tiers to the catalogue tools of one run (see `code-tool-visibility.ts`).
+ * Returns the offered subset (input order kept) and the decision for a metadata-only Activity record.
+ */
+export async function offeredToolsForRun(input: {
+  tools: readonly CodeRunToolDescriptor[];
+  profile: CodeModelProfile;
+  run: Pick<CodingAgentRunInput, "toolContext" | "prompt" | "readOnlyIntent" | "websiteEdit" | "requireImplementation" | "images">;
+  sessionMode: string;
+  dataStudioEnabled: boolean;
+}): Promise<{ tools: CodeRunToolDescriptor[]; decision: CodeToolVisibilityDecision }> {
+  const decision = selectVisibleTools(input.tools.map((tool) => tool.name), resolveToolVisibility(input.profile), {
+    userMessage: input.run.toolContext?.userMessage ?? input.run.prompt,
+    sessionMode: input.sessionMode,
+    readOnlyIntent: input.run.readOnlyIntent === true,
+    websiteEdit: input.run.websiteEdit === true,
+    requireImplementation: input.run.requireImplementation === true,
+    imageCount: input.run.images?.length ?? 0,
+    dataBackendAttached: input.run.toolContext?.dataBackendAttached === true,
+    dataStudioEnabled: input.dataStudioEnabled,
+  });
+  const visible = new Set(decision.visible);
+  return { tools: input.tools.filter((tool) => visible.has(tool.name)), decision };
 }

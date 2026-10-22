@@ -1,6 +1,6 @@
 {
-  "manifestVersion": 14,
-  "checksum": "8cc857eeb17be7f185ca5511fee4d7203520eb1098c20c1698d1772dd8722587",
+  "manifestVersion": 15,
+  "checksum": "f43bffffd3abc0f78c3418eae40f233a2d371d1143db62a675f1cbca6a89ffb7",
   "tools": [
     {
       "key": "code.agent.continue@1",
@@ -59,11 +59,46 @@
       "checksum": "e01d939ef20edf0411132cd954fee4c1f42fa47d42028dc685e2d2bc8f995367"
     },
     {
+      "key": "code.data.migrations.list@1",
+      "name": "code.data.migrations.list",
+      "version": 1,
+      "status": "active",
+      "checksum": "abc4dcc219000f2694079a3998c34ddf9525cbd1874d1f6dd27b0393f124e09d"
+    },
+    {
+      "key": "code.data.policies.apply@1",
+      "name": "code.data.policies.apply",
+      "version": 1,
+      "status": "active",
+      "checksum": "dc1577e9a38067e0f75fdce05a29816e8caa1f0f06a9795be44613addc669797"
+    },
+    {
+      "key": "code.data.policies.inspect@1",
+      "name": "code.data.policies.inspect",
+      "version": 1,
+      "status": "active",
+      "checksum": "5141077b5b2c9dc32d24248e17b8e37ed9ebef8155644f4c86e48f50be35e163"
+    },
+    {
+      "key": "code.data.query.read@1",
+      "name": "code.data.query.read",
+      "version": 1,
+      "status": "active",
+      "checksum": "ca47ac2c73804b2c5d62221fe81f11181df9e43adea21ea42fd5bc60c49f05fc"
+    },
+    {
       "key": "code.data.rows.list@1",
       "name": "code.data.rows.list",
       "version": 1,
       "status": "active",
       "checksum": "98b777d960638ab2ee5373fa415f01c9020a21b24aa52ce2f5adaa465184cced"
+    },
+    {
+      "key": "code.data.rows.seed@1",
+      "name": "code.data.rows.seed",
+      "version": 1,
+      "status": "active",
+      "checksum": "793e0d43fd180de349030a0b214df6ed1093216ffbeaf766a2498982bdbcd33d"
     },
     {
       "key": "code.data.rows.transfer@1",
@@ -113,6 +148,13 @@
       "version": 1,
       "status": "active",
       "checksum": "c5d931ccb60a5c3f128f717da9b864ea2bfda95cc770e9cc541321dabab254fa"
+    },
+    {
+      "key": "code.finish@1",
+      "name": "code.finish",
+      "version": 1,
+      "status": "active",
+      "checksum": "94e42bd15b3bd297523000ef1d5d7db2cb00f0aaf88ecc28b69eb0717db77b4f"
     },
     {
       "key": "code.fs.apply_patch@1",
@@ -269,6 +311,13 @@
       "checksum": "10ba1b4f1e34e4beba71d9cbaad258ef58906f0788466fb69892913b1201478e"
     },
     {
+      "key": "code.image.view@1",
+      "name": "code.image.view",
+      "version": 1,
+      "status": "active",
+      "checksum": "e92d89dc63d91b0078ee387385af39f1512a1551b1d9702c7f6692399cf03f86"
+    },
+    {
       "key": "code.plan.propose@1",
       "name": "code.plan.propose",
       "version": 1,
@@ -281,6 +330,13 @@
       "version": 1,
       "status": "active",
       "checksum": "6d6589ab5a1368b92298305a9215ac0f5317e630f3e351d3b38df9fa3b2beec5"
+    },
+    {
+      "key": "code.preview.screenshot@1",
+      "name": "code.preview.screenshot",
+      "version": 1,
+      "status": "active",
+      "checksum": "719869c8985b1cd161f663213e1bc38bb0fb8639a816b97cb72fd859d087c6f2"
     },
     {
       "key": "code.project.info@1",
@@ -351,6 +407,20 @@
       "version": 1,
       "status": "active",
       "checksum": "d0f9ff32320c801617ad85edc217f4dd2517cef82ac6510825493843a639951d"
+    },
+    {
+      "key": "code.web.fetch@1",
+      "name": "code.web.fetch",
+      "version": 1,
+      "status": "active",
+      "checksum": "140cf131da8cdf26339513358952ac2166a1e8257cb53e583c04297fb4a0d98a"
+    },
+    {
+      "key": "code.web.search@1",
+      "name": "code.web.search",
+      "version": 1,
+      "status": "active",
+      "checksum": "92ebefe513eebf12c896a0f86dad7b0bfa0e6be307a5a5a0d703d3c2681104df"
     }
   ]
 }

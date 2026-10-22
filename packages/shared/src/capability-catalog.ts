@@ -1,4 +1,5 @@
 import { CODE_DATA_CAPABILITIES } from './code-capabilities-data';
+import { CODE_ASSIST_CAPABILITIES } from './code-capabilities-assist';
 // Auto-generated canonical Capability Catalog covering all 306 inventory items
 import type { CapabilityDefinition } from "./capabilities";
 
@@ -7275,6 +7276,7 @@ import { CODE_AGENT_CONTROL_CAPABILITIES, CODE_ASYNC_PROCESS_CAPABILITIES, CODE_
 CAPABILITY_CATALOG.push(...CODE_READ_CAPABILITIES);
 CAPABILITY_CATALOG.push(...CODE_WRITE_CAPABILITIES);
 CAPABILITY_CATALOG.push(...CODE_DATA_CAPABILITIES);
+CAPABILITY_CATALOG.push(...CODE_ASSIST_CAPABILITIES);
 CAPABILITY_CATALOG.push(...CODE_SHELL_CAPABILITIES);
 CAPABILITY_CATALOG.push(...CODE_DEPS_CAPABILITIES);
 CAPABILITY_CATALOG.push(...CODE_PLAN_CAPABILITIES);

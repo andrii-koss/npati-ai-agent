@@ -82,6 +82,9 @@ export function matrixModeFor(mode: string | null | undefined): MatrixMode {
 }
 
 export const READ_TOOLS = new Set([
+  // Manifest v15: viewing, documentation lookup and Data Studio reads. None touches the workspace or the dev data.
+  "code.image.view", "code.preview.screenshot", "code.web.fetch", "code.web.search",
+  "code.data.query.read", "code.data.migrations.list", "code.data.policies.inspect",
   "code.data.schema.inspect",
   "code.data.rows.list",
   "code.fs.read", "code.fs.list", "code.fs.grep", "code.fs.tree",
@@ -100,7 +103,7 @@ export const READ_TOOLS = new Set([
  * therefore a narrow, reviewable list, read by the same three places that used to read the class — the
  * `plan` branch below, the runner's offered-tool filter, and the sub-flag/permission mapping.
  */
-export const PLAN_SAFE_TOOLS = new Set(["code.plan.propose", "code.plan.update", "code.ask_user"]);
+export const PLAN_SAFE_TOOLS = new Set(["code.plan.propose", "code.plan.update", "code.ask_user", "code.finish"]);
 
 /**
  * C11 (owner decision 10): the tools a **read-only intent** may call beyond the reads and the plan-safe
@@ -117,6 +120,8 @@ export const REVIEW_SAFE_GIT_TOOLS = new Set(["code.git.status", "code.git.diff"
 
 export const SHELL_TOOLS = new Set(["code.shell.exec_async", "code.shell.exec", "code.shell.process.start", "code.shell.process.stop"]);
 export const WRITE_TOOLS = new Set([
+  "code.data.rows.seed",
+  "code.data.policies.apply",
   "code.data.backend.create",
   "code.data.schema.apply",
   "code.data.schema.modify",
