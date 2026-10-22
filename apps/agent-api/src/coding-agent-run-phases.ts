@@ -1,3 +1,4 @@
+import { redactSecrets } from "./code-tools-sensitive";
 import type { CodingAgentRunnerPorts } from "./coding-agent-runner-contracts";
 import type { CodeAgentLimits } from "./code-agent-config";
 import type { AuthContext, CodeSession } from "@npati/workspace";
@@ -482,6 +483,9 @@ export class CodingAgentRunPhases {
         companyId, runId: stateRunId!, status: stateStatus, reason,
 
         estimate: {
+          // Why a run ended without completing (audit F-11/F-12: provider 400 and "interrupted" were recorded with no
+          // cause). Server-authored stop text only; a completed run's message is the model's answer and is not stored.
+          ...(status !== "completed" && status !== "cancelled" ? { stopDetail: redactSecrets(String(args.message ?? "")).slice(0, 300) } : {}),
           tokenCount: summary.tokens,
           costUsd: Number.isFinite(summary.costUsd) ? summary.costUsd : null,
           turns: summary.turns,
