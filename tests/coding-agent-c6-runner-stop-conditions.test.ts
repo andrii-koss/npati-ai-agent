@@ -105,6 +105,7 @@ function createHarness(options: HarnessOptions) {
 
   const runner = new CodingAgentRunner(ports);
   return {
+    runner,
     engineCalls,
     activity,
     setClock: (value: number) => { clock = value; },
@@ -441,4 +442,28 @@ describe("security-gate: C3 runner operation scope", () => {
     expect(calls.every(call => call.runId === runId)).toBe(true);
     expect(calls.every(call => call.runScopeId === "user-request")).toBe(true);
   });
+});
+
+
+it("stops website inspection with changing arguments after ten turns without saved source progress", async () => {
+  const h = createHarness({ limits: { maxStepsPerRun: 40 }, script: Array.from({ length: 30 }, (_, i) => ({ content: "Inspect", toolCalls: [nativeCall("code.fs.read", { path: "component-" + i + ".tsx" }, "read-" + i)] })) });
+  const result = await h.run({ websiteEdit: true });
+  expect(result.reason).toBe("loop_detected");
+  expect(h.engineCalls.length).toBeLessThanOrEqual(11);
+  expect(result.summary.filesChanged).toEqual([]);
+  expect(h.activity.some(event => event.kind === "reminder" && event.reason === "no_source_progress")).toBe(true);
+});
+
+
+it("retains reference bytes only for the active authorized parent and clears them on settlement", async () => {
+  const images = [{ mimeType: "image/png", dataBase64: "aW1hZ2U=" }];
+  const h = createHarness({ script: [{ content: "done" }], onFirstModelCall: () => {
+    expect(h.runner.referenceContext(ctx, session(), "visual-root")?.images).toBe(images);
+    expect(h.runner.referenceContext({ ...ctx, userId: "foreign" }, session(), "visual-root")).toBeUndefined();
+    expect(h.runner.referenceContext(ctx, session({ projectId: "other" }), "visual-root")).toBeUndefined();
+  } });
+  await h.run({ runId: "visual-root", images, model: "vision" });
+  expect(h.runner.referenceContext(ctx, session(), "visual-root")).toBeUndefined();
+  const imageParts = (h.engineCalls[0]!.messages.find(message => message.role === "user")!.content as any[]).filter(part => part.type === "image_url");
+  expect(imageParts).toHaveLength(1);
 });

@@ -1,3 +1,4 @@
+import { analyzeWebsiteReference, reviewWebsiteReference } from "./website-visual-acceptance";
 import { visionInferenceCandidates } from "./chat-inference-candidates";
 import { rememberWebsiteEdit } from "./website-style-context";
 
@@ -55,6 +56,7 @@ export interface RegisterCodeLifecycleRoutesOutputs {
 }
 
 export function registerCodeLifecycleRoutes(app: FastifyInstance, input: RegisterCodeLifecycleRoutesInput): RegisterCodeLifecycleRoutesOutputs {
+  const inputDeps = input;
   const { getCodeSessionResumeService, config, log, activeContextResolver, agent, aiPreferences, codePreferences, marketplace, authProvider, codeActivitySink, codePrivilegedAudit, codeService, featureFlagService, projectGitService, projectPreviewService, projectSandbox, projectService, projectWorkspace, readRuntimeMcpManifest, trackedProcesses, workspaceStore, codeRbacForRun, codeRunStateLog, codeSessionInbox, codeProcessCompletions, codingAgentRunner } = input;
   let codingAgentRunnerRefValue: CodingAgentRunner | undefined;
   let codeSubagentOperationsRefValue: (() => CodeSubagentOperationService) | undefined;
@@ -67,25 +69,19 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
     subagentChildRunnerWithAckValue = {
       ...createCodeSubagentChildRunner({
         loadSession: async ({ ctx, companyId, sessionId }) => codeService.getSession(ctx, companyId, sessionId),
-        runAgent: async ({ ctx, session, prompt, model, runId, parentRunId, allowedTools, readOnlyIntent, maxTurns, runStateOwner, runDetails, signal, quotaSessionId, detachedChildInbox, initialTurnIndex, subagentWritePaths }) =>
-          codingAgentRunnerRefValue!.run({
-            ctx,
-            session,
-            prompt,
-            runId,
-            maxTurns,
+        runAgent: async ({ ctx, session, prompt, model, runId, parentRunId, allowedTools, readOnlyIntent, maxTurns, runStateOwner, runDetails, signal, quotaSessionId, detachedChildInbox, initialTurnIndex, subagentWritePaths }) => {
+          const inherited = codingAgentRunnerRefValue!.referenceContext(ctx, session, parentRunId);
+          const parent = inherited ? null : await codeRunStateLog.loadRunState(session.companyId, parentRunId);
+          if (!inherited && Number(parent?.details.referenceImageCount ?? 0) > 0) throw new Error("reference_image_unavailable_after_restart");
+          return codingAgentRunnerRefValue!.run({ ctx, session, prompt, runId, maxTurns,
             subagentScope: { parentRunId, allowedTools: [...allowedTools] },
-            ...(model ? { model } : {}),
-
-            ...(readOnlyIntent ? { readOnlyIntent: true } : {}),
-            ...(runStateOwner ? { runStateOwner } : {}),
-            ...(runDetails ? { runDetails } : {}),
-            ...(signal ? { signal } : {}),
-            ...(quotaSessionId ? { quotaSessionId } : {}),
-            ...(detachedChildInbox ? { detachedChildInbox } : {}),
-            ...(initialTurnIndex !== undefined ? { initialTurnIndex } : {}),
+            ...(model ? { model } : {}), ...(inherited ?? {}),
+            ...(readOnlyIntent ? { readOnlyIntent: true } : {}), ...(runStateOwner ? { runStateOwner } : {}),
+            ...(runDetails ? { runDetails } : {}), ...(signal ? { signal } : {}), ...(quotaSessionId ? { quotaSessionId } : {}),
+            ...(detachedChildInbox ? { detachedChildInbox } : {}), ...(initialTurnIndex !== undefined ? { initialTurnIndex } : {}),
             ...(subagentWritePaths ? { subagentWritePaths } : {}),
-          }),
+          });
+        },
 
         onSettled: (request, outcome) => {
           void codeSubagentOperationsRefValue?.()?.settleChild(request, request.runId, outcome)
@@ -301,13 +297,14 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
   const codeSessionRunExecutor = new CodeSessionRunExecutor({
     runner: codingAgentRunner,
     control: codeRunCancellation,
+    prepareReference: input => analyzeWebsiteReference(input, request => inputDeps.aiEngine.chat(request)),
     resolveVerificationTools: async (input) => {
       const project = await projectService.get(input.ctx, input.session.companyId, input.session.projectId);
       if (!isCodeChatWebsite(project) || input.readOnlyIntent || input.session.mode === "plan") return undefined;
       return project.framework === "HTML/CSS" ? [] : ["build"];
     },
     afterRun: async (input, result) => {
-      const finished = await finishCodeChatWebsite(input, result, {
+      let finished = await finishCodeChatWebsite(input, result, {
         getProject: (ctx, companyId, projectId) => projectService.get(ctx, companyId, projectId),
         startPreview: async (ctx, companyId, projectId, signal, options) => {
           await featureFlagService.assertEnabled(ctx, "code.shell", { companyId });
@@ -315,6 +312,15 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
         },
         markFailed: (ctx, companyId, projectId) => projectService.updatePreview(ctx, companyId, projectId, { status: "failed", lastBuildStatus: "failed" }),
         });
+      finished = await reviewWebsiteReference(input, finished, {
+        inspect: async () => {
+          if (!inputDeps.projectBrowserQaService) throw new Error("visual_screenshot_unavailable");
+          await featureFlagService.assertEnabled(input.ctx, "code.shell", { companyId: input.session.companyId });
+          return inputDeps.projectBrowserQaService.inspect(input.ctx, input.session.companyId, { projectId: input.session.projectId, runId: input.runId,
+            checks: ["screenshot", "console", "links"], screenshotMode: "visual", maxScreenshotBytes: 2_000_000, agentId: "system" });
+        },
+        chat: request => inputDeps.aiEngine.chat(request),
+      });
       if (input.websiteEdit && !input.noMemory) await rememberWebsiteEdit(workspaceStore, projectWorkspace, input.ctx, input.session, finished)
         .catch(error => log.warn({ err: error }, "website_edit_context_save_failed"));
       return finished;
@@ -328,7 +334,7 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
           const model = preferences.addedModels.find(item => item.id === id);
           if (model && (!marketplace || (await marketplace.provider(model.providerId).catch(() => null))?.connected)) return id;
         }
-        throw new Error("Для роботи з фото потрібна підключена модель із підтримкою зображень. Оберіть її в налаштуваннях AI.");
+        throw new Error("vision_model_unavailable: Для роботи з фото потрібна підключена модель із підтримкою зображень. Оберіть її в налаштуваннях AI.");
       }
       if (codePrefs && codePrefs.activeAgentId && codePrefs.activeAgentId !== "npati") {
         const prov = await marketplace?.provider(codePrefs.activeAgentId).catch(() => null);
@@ -351,6 +357,14 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
         throw new Error("The default AI model cannot run coding tasks. Choose a chat model in AI Settings.");
       }
       return modelId;
+    },
+    settle: async (input, result) => {
+      const view = result as { runId?: string; status?: string; reason?: string };
+      const runId = input.runId ?? view.runId;
+      if (!runId || !await codeRunStateLog.loadRunState(input.session.companyId, runId)) return;
+      if (view.status === "failed" && /^(visual_|website_|reference_image_|vision_)/.test(view.reason ?? "") || input.referenceImageRequired && ["failed", "stopped", "cancelled", "interrupted"].includes(view.status ?? "")) {
+        await codeRunStateLog.markFinished({ companyId: input.session.companyId, runId, status: view.status === "cancelled" ? "cancelled" : "failed", reason: view.reason ?? "visual_workflow_incomplete" });
+      }
     },
     logger: { warn: (payload, message) => { log.warn(payload as Record<string, unknown>, message ?? "code_session_run_warning"); } },
   });

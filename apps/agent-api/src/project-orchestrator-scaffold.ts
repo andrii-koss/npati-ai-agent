@@ -205,8 +205,9 @@ export async function scaffoldWebsiteProject(
 ): Promise<void> {
   const template = /hosting|хост|vps|сервер|domain|домен/iu.test(`${projectName} ${prompt ?? ""}`) ? "hosting" : "landing";
   const canonical = canonicalFrameworkName(framework) ?? (framework === "nextjs" ? "Next.js" : framework === "static" ? "HTML/CSS" : undefined);
+  if (!canonical) throw new Error("Unsupported project framework: " + framework);
   if (canonical === "HTML/CSS") return;
-  const files = !canonical || canonical === "Next.js"
+  const files = canonical === "Next.js"
     ? minimalNextScaffold(projectName)
     : createFrameworkScaffold({ projectName, prompt: prompt ?? "", framework: canonical });
   const plan: PatchMutation[] = [];

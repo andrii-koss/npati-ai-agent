@@ -10,7 +10,7 @@ function fixture(value: unknown) {
   const log = { warn: vi.fn() };
   return { chat, log, resolve: createChatProjectIntentResolver({ engine: { chat }, getAIContext: async () => ({ model: "selected-model" }), log }) };
 }
-const creation = { intent: "CREATE_WEBSITE", confidence: 0.98, targets: [{ name: "Portfolio", kind: "website", framework: "HTML/CSS" }] };
+const creation = { intent: "CREATE_WEBSITE", confidence: 0.98, targets: [{ name: "Portfolio", kind: "website", framework: "HTML/CSS", reason: "Static presentation does not require a framework", criteria: ["static_content"] }] };
 
 describe("semantic project routing", () => {
   it("finishes cancellation even when the routing provider ignores its signal", async () => {
@@ -114,7 +114,7 @@ describe("semantic project routing", () => {
     const f = fixture(creation);
     const result = await f.resolve(auth, { message, activeProjectId: "old-site" });
     expect(result).toMatchObject({ source: "semantic", decision: { intent: "CREATE_WEBSITE", needsClarification: false,
-      targetDetails: { framework: "HTML/CSS", topic: message } }, targets: creation.targets });
+      targetDetails: { framework: "HTML/CSS", topic: message } }, targets: [expect.objectContaining({ name: "Portfolio", framework: "HTML/CSS" })] });
     expect(f.chat.mock.calls[0]![0]).toMatchObject({ model: "selected-model", toolChoice: "none", tools: [] });
     expect(JSON.parse(f.chat.mock.calls[0]![0].messages[1]!.content)).toMatchObject({ message, hasActiveProject: true });
   });

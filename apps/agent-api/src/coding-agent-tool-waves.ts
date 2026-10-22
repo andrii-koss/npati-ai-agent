@@ -437,6 +437,10 @@ export class CodingAgentToolWaves {
               }
             }
           } else {
+            this.repeatedSignatures.length = 0;
+            this.turnPatterns.length = 0;
+            this.loopReminded = false;
+            this.cycleReminded = false;
             this.zeroDiffEdits.length = 0;
             this.zeroDiffReminded = false;
           }

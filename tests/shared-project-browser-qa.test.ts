@@ -51,7 +51,7 @@ describe("security-gate: shared Browser QA", () => {
   });
 
   it.each([{ path: "//internal" }, { path: "/../secret" }, { timeoutMs: 60001 }, { viewport: { width: 1, height: 667 } },
-    { maxScreenshotBytes: 3000000 }, { maxBrokenLinks: 100 }])("rejects unsafe or unbounded options: %j", invalid => {
+    { maxScreenshotBytes: 3000000 }, { maxBrokenLinks: 100 }, { screenshotMode: "raw" }])("rejects unsafe or unbounded options: %j", invalid => {
     expect(() => assertBrowserQaOptions({ ...options, ...invalid })).toThrow();
   });
 

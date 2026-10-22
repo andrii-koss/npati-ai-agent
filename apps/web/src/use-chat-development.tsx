@@ -133,7 +133,7 @@ export function useChatDevelopment(options: {
       const creationConversationId = originalConversationId ?? currentProcess?.parentConversationId;
       const payload = JSON.stringify([companyId, message, creationConversationId]);
       if (retry.current?.payload !== payload) retry.current = { payload, requestId: crypto.randomUUID() };
-      const data = await api<{ conversationId: string; processes: DevelopmentProcess[] }>("/chat/development/processes", { method: "POST", body: JSON.stringify({ companyId, message, targets,
+      const data = await api<{ conversationId: string; processes: DevelopmentProcess[] }>("/chat/development/processes", { method: "POST", body: JSON.stringify({ companyId, message,
         conversationId: creationConversationId ?? undefined, businessId: callbacks.current.businessId, requestId: retry.current.requestId }) });
       retry.current = undefined; if (!alive.current) return true;
       setProcesses(data.processes);

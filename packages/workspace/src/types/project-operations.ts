@@ -83,6 +83,7 @@ export interface BrowserQaMetrics {
 }
 
 export interface BrowserQaScreenshot {
+  captureMode?: "layout" | "visual";
   name: string;
   viewport: { width: number; height: number };
   mimeType: string;

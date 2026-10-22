@@ -1,7 +1,7 @@
 export const DEVELOPMENT_PROCESS_SETTINGS_KEY = "chat-development-processes:v1";
 import { classifyProjectIntent, extractFramework, isBackendProjectFramework } from "./project-intent";
 /** Shared deterministic routing: creation requests only, never ordinary project edits. */
-export type DevelopmentTarget = { name: string; kind: "website" | "blog" | "store" | "crm" | "mobile_app" | "api"; framework: string };
+export type DevelopmentTarget = { name: string; kind: "website" | "blog" | "store" | "crm" | "mobile_app" | "api"; framework: string; technologySelection?: { source: "user_explicit" | "ai_planner" | "policy_fallback"; reason: string; criteria: string[] } };
 export type ModelTurnUsage = { id: string; turn: number; totalTokens?: number; inputTokens?: number; outputTokens?: number; costUsd?: number; model?: string; provider?: string; toolCallIds: string[]; durationMs?: number; /** Provider-reported cached prompt tokens, when it reports them. */ cachedTokens?: number };
 export type DevelopmentProcessProgressItem = {
   modelUsage?: ModelTurnUsage;
@@ -82,7 +82,7 @@ export function planChatDevelopment(message: string, activeProjectId?: string): 
   return targets.map((kind, index) => ({
     kind,
     name: names[kind] + (count > 1 && kinds.length === 1 ? " " + (index + 1) : ""),
-    framework: kind === "mobile_app" ? "Expo" : requestedFramework ?? "Next.js",
+    framework: kind === "mobile_app" ? "Expo" : requestedFramework ?? "HTML/CSS",
   }));
 }
 
@@ -99,7 +99,7 @@ export function createDevelopmentAssistantIntro(message: string, targets: Develo
     }
     return t.name;
   }).join(", ");
-  const framework = targets[0]?.framework ?? "Next.js";
+  const framework = targets[0]?.framework ?? "HTML/CSS";
   if (isUk) {
     const hasCatalog = /каталог/i.test(message);
     const hasCart = /кошик/i.test(message);

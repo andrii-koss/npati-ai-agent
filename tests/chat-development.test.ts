@@ -147,7 +147,7 @@ describe("development request planning", () => {
 });
 describe("chat development lifecycle with the real store, queue and executor", () => {
   it("acknowledges early, starts four distinct sessions and verifies build before Preview", async () => {
-    const f = await fixture(); const result = await f.start();
+    const f = await fixture(); const result = await f.start(bulk + "; websites use Next.js");
     expect(result.processes).toHaveLength(4);
     await vi.waitFor(() => expect(f.controls.size).toBe(4));
     const live = await f.service.list(owner);

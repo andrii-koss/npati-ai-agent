@@ -221,8 +221,9 @@ export class ChatDevelopmentService {
     // The deterministic planner is the fallback when the semantic resolver recognizes a creation
     // request but supplies no concrete target. An empty target list would otherwise turn a valid
     // "create a Vue/FastAPI project" message into a plain chat turn.
+    if (semantic.decision.needsClarification || semantic.decision.unsupportedIntentMessage) throw new DevelopmentError(semantic.decision.clarificationPrompt ?? semantic.decision.unsupportedIntentMessage ?? "Technology selection is blocked", 409);
     if (semantic.targets.length) return semantic.targets;
-    return planChatDevelopment(input.message, input.projectId);
+    return [];
   }
   private async startOwned(ctx: AuthContext, input: { companyId: string; message: string; targets?: DevelopmentTarget[]; conversationId?: string; businessId?: string; requestId: string }) {
     if (!ctx.permissions.some(p => ["*", "owner", "admin:all", "business:manage", "workspace:write"].includes(p))) throw new DevelopmentError("Coding Agent write permission denied", 403);
@@ -234,7 +235,8 @@ export class ChatDevelopmentService {
     const existing = await this.entries(ctx);
     const duplicate = existing.filter(p => p.requestId === input.requestId);
     if (duplicate.length) return { conversationId: duplicate[0]!.parentConversationId, processes: duplicate };
-    const targets = (input.targets && input.targets.length) ? input.targets : await this.plan(ctx, input);
+    // Client targets cannot override authoritative server technology planning.
+    const targets = await this.plan(ctx, input);
     if (!targets.length) throw new DevelopmentError("Describe a website, blog, shop, mobile app or CRM to create.");
     // Admission uses the existing status projection without replay, chat history or terminal logs.
     const activeExisting = (await this.listOwned(ctx, false)).filter(developmentIsActive);
@@ -407,6 +409,7 @@ export class ChatDevelopmentService {
       else await this.update(ctx, process.id, { projectId: raw.id, conversationId: process.conversationId }, { stage: "project", title: "Project workspace prepared", details: { tool: "code.workspace", status: "completed", agentId: "System" } });
       await this.card(ctx, process, raw, "Агент готує проєкт. Стан запуску відображається над полем чату.");
       ensureActive();
+      if (target.technologySelection) await this.report(ctx, process.id, "technology_selection", target.framework + ": " + target.technologySelection.reason, { agentId: target.technologySelection.source === "ai_planner" ? "AI Planner" : "System", status: "completed", result: JSON.stringify(target.technologySelection) });
       if (!plainHtml) await this.report(ctx, process.id, "scaffold", "Preparing minimal " + target.framework + " configuration", { tool: "code.scaffold", status: "running", agentId: "System" });
       const project = target.kind === "mobile_app"
         ? await this.d.preparer.prepareCodingMobile(ctx, raw, message)
