@@ -482,7 +482,7 @@ ${localized.next}`;
         ? [String(input.args.url ?? "").trim(), String(input.args.goal ?? input.requestMessage).trim()].filter(Boolean).join(" ")
         : String(input.args.query ?? "").trim();
       if (!query) throw new Error(`${input.call.function.name} requires a non-empty ${input.call.function.name === "web_fetch" ? "url" : "query"}`);
-      const outcome = await webResearch.run(query, {}, false, input.progress);
+      const outcome = await webResearch.run(query, {}, false, input.progress, input.call.function.name === "web_search" ? { mode: "search" } : {});
       if (!outcome) throw new Error("Web research returned no evidence");
       return {
         output: { kind: outcome.kind, evidence: outcome.context, sources: outcome.sources, degraded: outcome.degraded },
