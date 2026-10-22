@@ -60,3 +60,26 @@ describe("prepared project dependencies", () => {
     expect(await prepareWorkspace(workspace, toolchain, "install")).toBeNull();
   });
 });
+
+describe("chat-created projects match a prepared profile", () => {
+  const locks = require("../apps/agent-api/src/project-framework-locks.json");
+  it.each([["next-locked", "Next.js"], ["vite-react-locked", "React + Vite"], ["vite-vue-locked", "Vue 3 + Vite"]])("%s serves the %s scaffold without a registry download", async (profile, framework) => {
+    const { minimalNextScaffold } = await import("../apps/agent-api/src/project-minimal-scaffold");
+    const { createFrameworkScaffold } = await import("../apps/agent-api/src/project-framework-scaffold");
+    expect(profiles[profile]).toEqual({ lockedFramework: framework });
+    const files = framework === "Next.js" ? minimalNextScaffold("Coffee Shop") : createFrameworkScaffold({ framework, projectName: "Coffee Shop" } as never);
+    // The toolchain exactly as build-project-runtime-profiles.cjs lays it out for a locked profile.
+    const root = await mkdtemp(path.join(tmpdir(), "npati-locked-deps-")); roots.push(root);
+    const toolchain = path.join(root, "toolchain"), workspace = path.join(root, "project");
+    const lock = locks[framework], { dependencies = {}, devDependencies = {} } = lock.packages[""];
+    await mkdir(path.join(toolchain, profile, "node_modules", "marker"), { recursive: true });
+    await writeFile(path.join(toolchain, profile, "node_modules", "marker", "index.js"), "prepared");
+    await writeFile(path.join(toolchain, profile, "package-lock.json"), JSON.stringify(lock));
+    await writeFile(path.join(toolchain, "profiles.json"), JSON.stringify({ ...profiles, [profile]: { dependencies, devDependencies } }));
+    await mkdir(workspace);
+    for (const name of ["package.json", "package-lock.json"]) await writeFile(path.join(workspace, name), files[name]!);
+    expect(await prepareWorkspace(workspace, toolchain, "ci")).toBe(profile);
+    expect(await readFile(path.join(workspace, "package-lock.json"), "utf8")).toBe(files["package-lock.json"]);
+    expect(await readFile(path.join(workspace, "node_modules", "marker", "index.js"), "utf8")).toBe("prepared");
+  });
+});
