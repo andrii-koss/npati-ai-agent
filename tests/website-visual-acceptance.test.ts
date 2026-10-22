@@ -145,3 +145,41 @@ describe("one central visual check, repairs only with findings", () => {
     expect(visualAcceptanceScreenshot(await afterRun(f.input, f.run))).toMatchObject({ dataBase64: png });
   });
 });
+
+describe("differences are graded: only major ones fail and are repaired", () => {
+  const graded = (score: number, differences: Array<{ severity: string; text: string } | string>) => ({ content: JSON.stringify({ scores: { layout: score, colors: score, typography: score, spacing: score, imagery: score }, differences }) });
+
+  it("passes with minor differences only, reports them, and starts no repair", async () => {
+    const f = await fixture(), run = vi.fn(async () => f.run);
+    const chat = vi.fn(async () => graded(0.92, [{ severity: "minor", text: "Button is about 6 px wider" }, { severity: "minor", text: "Gradient stop slightly warmer" }]));
+    const afterRun = async (input: CodeSessionRunInput, result: unknown) => reviewWebsiteReference(input, result, { inspect: async () => f.qa, chat: chat as never });
+    const executor = new CodeSessionRunExecutor({ runner: { run }, control: new CodeRunCancellationRegistry(), resolveModel: async () => "connected/vision", prepareReference: async () => ["observed reference"], afterRun, settle: async () => undefined });
+    const result = await executor.execute(f.input) as any;
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(result.result.visualAcceptance).toMatchObject({ status: "passed", differences: [], minorDifferences: ["Button is about 6 px wider", "Gradient stop slightly warmer"] });
+    expect(result.result.message).toContain("Button is about 6 px wider");
+  });
+
+  it("fails on a major difference and repairs only the major findings", async () => {
+    const f = await fixture(), run = vi.fn(async () => ({ ...f.run, summary: { ...f.run.summary, filesChanged: ["app/page.tsx"] } }));
+    const chat = vi.fn(async () => graded(0.9, [{ severity: "major", text: "Menu cards section is missing" }, { severity: "minor", text: "Logo letter-spacing is wider" }]));
+    const afterRun = async (input: CodeSessionRunInput, result: unknown) => reviewWebsiteReference(input, result, { inspect: async () => f.qa, chat: chat as never });
+    const executor = new CodeSessionRunExecutor({ runner: { run }, control: new CodeRunCancellationRegistry(), resolveModel: async () => "connected/vision", prepareReference: async () => ["observed reference"], afterRun, settle: async () => undefined });
+    await executor.execute(f.input);
+    const repair = (run.mock.calls as any)[1][0];
+    expect(repair.prompt).toContain("Menu cards section is missing");
+    expect(repair.prompt).not.toContain("Logo letter-spacing");
+  });
+
+  it("a score below threshold still fails even when every difference is minor", async () => {
+    const f = await fixture();
+    const reviewed = await reviewWebsiteReference(f.input, f.run, { inspect: async () => f.qa, chat: async () => graded(0.7, [{ severity: "minor", text: "Shade slightly lighter" }]) as never }) as any;
+    expect(reviewed.visualAcceptance.status).toBe("failed");
+  });
+
+  it("an ungraded (string) difference counts as major", async () => {
+    const f = await fixture();
+    const reviewed = await reviewWebsiteReference(f.input, f.run, { inspect: async () => f.qa, chat: async () => graded(0.95, ["Header is light instead of dark"]) as never }) as any;
+    expect(reviewed.visualAcceptance).toMatchObject({ status: "failed", differences: ["Header is light instead of dark"] });
+  });
+});
