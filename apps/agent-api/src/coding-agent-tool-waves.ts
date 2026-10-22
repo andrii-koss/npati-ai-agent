@@ -143,7 +143,7 @@ export class CodingAgentToolWaves {
     | { action: "paused"; result: CodingAgentRunResult }
     | { action: "stopped"; result: CodingAgentRunResult }
   > {
-    const { steps, normalized, callsToRun, profile, modelUsage } = args;
+    const { steps, normalized, callsToRun, modelUsage } = args;
     const {
       ports,
       limits,
@@ -473,7 +473,9 @@ export class CodingAgentToolWaves {
       return { call, result };
     };
 
-    const waveLimit = Math.max(1, Math.min(profile.maxParallelToolCalls, limits.parallelReadOnlyCalls));
+    // Read-only calls the model already emitted run concurrently up to the read-only limit (default 8): the profile's
+    // maxParallelToolCalls governs how many calls a model may emit and still bounds anything that writes.
+    const waveLimit = Math.max(1, Math.min(8, limits.parallelReadOnlyCalls));
 
     const appendToolResult = async (outcome: { call: NormalizedToolCall; result: CodeToolInvokeResult | CodeToolInvokeFailure }): Promise<void> => {
       const text = canonicalizeSettledToolResult({
