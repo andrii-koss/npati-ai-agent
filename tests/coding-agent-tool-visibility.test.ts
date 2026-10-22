@@ -150,6 +150,16 @@ describe("Coding Agent tool visibility tiers", () => {
     for (const schema of CODE_TOOL_SCHEMAS.filter((entry) => byName.has(entry.name))) expect(byName.get(schema.name)!.startsWith(schema.description.trim())).toBe(true);
   });
 
+  it("does not offer image viewing or screenshots when a website edit carries the reference and the system verifies it", () => {
+    const withReference = offered("hosted-native-tools", "auto_edit", { userMessage: "зроби дизайн як на фото", websiteEdit: true, imageCount: 1 });
+    expect(withReference.visible).not.toContain("code.image.view");
+    expect(withReference.visible).not.toContain("code.preview.screenshot");
+    const styleOnly = offered("hosted-native-tools", "auto_edit", { userMessage: "зроби кнопку яскравішою", websiteEdit: true });
+    expect(styleOnly.visible).toContain("code.preview.screenshot");
+    const codeProject = offered("hosted-native-tools", "auto_edit", { userMessage: "check logo.png", imageCount: 0 });
+    expect(codeProject.visible).toContain("code.image.view");
+  });
+
   it("matches context on the user's words, not on the system guidance appended to a website prompt", () => {
     const decision = offered("hosted-native-tools", "auto_edit", { userMessage: "зміни колір кнопки на зелений", websiteEdit: true });
     expect(decision.visible.some((name) => name.startsWith("code.data."))).toBe(false);
