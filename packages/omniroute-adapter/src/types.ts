@@ -40,7 +40,19 @@ export interface ChatRequest {
   /** Opt-in streamed generation counters; no text, arguments or private reasoning is exposed. */
   /** Supported fast creation path for DeepSeek Flash; other providers retain their settings. */
   reasoningMode?: "disabled";
+  /**
+   * Step 3: the stable prefix of the first system message, when the caller can name it. Only providers that require
+   * an explicit cache marker (Anthropic-family) receive it as a `cache_control` block; every other provider gets the
+   * unchanged string, because an unexpected content-block array can make a provider drop the system prompt.
+   */
+  systemCachePrefix?: string;
   onGenerationProgress?: (event: {phase:"response"|"tool_arguments";firstTokenMs:number;outputCharacters:number}) => void | Promise<void>;
+  /**
+   * Step 5: assistant **prose** as it arrives. Only `delta.content` is reported — never reasoning text, tool names or
+   * tool-call argument fragments — so a caller can render the answer live without ever exposing a partial JSON
+   * argument or a hidden field. Best effort: a throwing listener cannot interrupt inference.
+   */
+  onTextDelta?: (text: string) => void;
   /** Best-effort metadata observer; never receives credentials, prompts or provider bodies. */
   onProviderAttempt?: (event: {model:string;phase:"started"|"completed"|"failed";durationMs?:number;httpStatus?:number;errorCode?:string;retryScheduled?:boolean}) => void | Promise<void>;
   messages: ChatMessage[];

@@ -51,6 +51,7 @@ import {
   chatContentText,
   withCodingReferenceImages,
   toChatToolCall,
+  systemPromptStablePrefix,
 } from "./coding-agent-runner-contracts";
 import { CodingAgentRunPhases } from "./coding-agent-run-phases";
 import { CodingAgentReviewPhases } from "./coding-agent-review-phases";
@@ -502,7 +503,13 @@ export class CodingAgentRunner {
         let providerAttempt=0;
         let firstTokenRecorded=false;
         result = await this.ports.engine.chat({
-          ...(input.emptyHtmlWorkspace ? {reasoningMode:"disabled" as const} : {}),
+          /**
+           * Step 1: the reasoning override is deliberately NOT sent. Measured on the live provider, disabling
+           * reasoning for a tool-bearing turn caps the tool-call arguments at ~21.2 KB and the call arrives with
+           * `finish_reason: "tool_calls"` but truncated JSON, which is then rejected as `partial_tool_call`.
+           * The same turn with the model's default reasoning produced a valid 50.6 KB argument object. A forced
+           * `tool_choice` is also rejected by the provider while reasoning is on, so it stays `"auto"`.
+           */
           onGenerationProgress: async event => {
             if (!firstTokenRecorded) {
               firstTokenRecorded=true;
@@ -515,9 +522,20 @@ export class CodingAgentRunner {
             await record({kind:"model_call",companyId,projectId,sessionId,turn:steps+1,attempt:providerAttempt,...event});
           },
           messages: withCodingReferenceImages(messages, input.images),
+          /**
+           * Step 3: the stable prefix is offered to the adapter. Only providers that require an explicit cache
+           * marker use it; everyone else receives the same system string as before (measured: implicit caching
+           * already reports cached tokens without a directive, and an unexpected block array can drop the prompt).
+           */
+          systemCachePrefix: systemPromptStablePrefix(systemPrompt),
           ...(definitions.length ? { tools: definitions } : {}),
-          ...(definitions.length ? { toolChoice: input.emptyHtmlWorkspace && /^deepseek\/(?:deepseek-flash|deepseek-v4(?:\.1)?-flash)$/i.test(input.model ?? "") && steps === 0 && needsImplementation && definitions.some(tool => tool.function.name === "code.fs.write")
-            ? {type:"function" as const,function:{name:"code.fs.write"}} : "auto" as const } : {}),
+          ...(definitions.length ? { toolChoice: "auto" as const } : {}),
+          /**
+           * Step 5: stream the answer text to the transport as it arrives. Turning streaming on for this request is
+           * the same switch the progress counters already use; the adapter reports only `delta.content`, so no tool
+           * argument fragment or reasoning text can reach the client.
+           */
+          ...(input.onTextDelta ? { onTextDelta: input.onTextDelta } : {}),
           model: input.model,
           ...(input.fallbackModel ? { fallbackModel: input.fallbackModel } : {}),
           signal: input.signal,
@@ -544,7 +562,7 @@ export class CodingAgentRunner {
       }
 
       steps += 1;
-      await record({kind:"model_call",phase:"completed",companyId,projectId,sessionId,turn:steps,model:result.model ?? input.model,provider:result.telemetry?.provider,durationMs:this.now()-modelStarted});
+      await record({kind:"model_call",phase:"completed",companyId,projectId,sessionId,turn:steps,model:result.model ?? input.model,provider:result.telemetry?.provider,finishReason:result.finishReason,durationMs:this.now()-modelStarted});
       await emitCodingActivity(input, { ...thinking, status: "completed", durationMs: this.now() - modelStarted });
       summary.turns = steps;
       model = result.model ?? model;
@@ -556,6 +574,7 @@ export class CodingAgentRunner {
         totalTokens: result.usage ? tokens : undefined,
         inputTokens: result.usage?.promptTokens,
         outputTokens: result.usage?.completionTokens,
+        ...(result.usage?.cachedTokens ? { cachedTokens: result.usage.cachedTokens } : {}),
         costUsd: result.telemetry?.costUsd,
         model: result.model ?? input.model,
         provider: result.telemetry?.provider,

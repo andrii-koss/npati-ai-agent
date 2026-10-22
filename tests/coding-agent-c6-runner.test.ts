@@ -163,7 +163,7 @@ function createHarness(options: HarnessOptions = {}) {
         durationMs: 1,
       } satisfies CodeToolInvokeResult;
     },
-    ...(options.turnSummary ? { turnSummary: options.turnSummary } : {}),
+    ...(options.turnSummary ? { turnSummary: (sessionId, turnId) => { const summary = options.turnSummary!(sessionId, turnId); return { ...summary, changes: summary.changes.map(change => ({ ...change, diff: "@@ -1 +1 @@\n-before\n+after\n" })) }; } } : {}),
   };
 
   const ports: CodingAgentRunnerPorts = {
@@ -183,6 +183,7 @@ function createHarness(options: HarnessOptions = {}) {
     toolRuntime,
     engine: {
       chat: async (request) => {
+        if (!request.tools?.length) return { content: JSON.stringify({ status: "clean", findings: [] }) };
         engineCalls.push(request);
         const next = script.shift();
         if (next instanceof Error) throw next;
@@ -896,13 +897,17 @@ it("retains private continuation when requesting implementation after a text-onl
 });
 
 
-it("starts blank HTML with a direct write in DeepSeek non-thinking mode and keeps existing edits on auto", async () => {
+it("keeps the provider's reasoning and auto tool choice for blank HTML so large writes are not truncated", async () => {
  const tools=[...TOOLS,{name:"code.fs.write",version:1,status:"active" as const,description:"Write a new file",write:true}];
  let changed=false;
  const h=createHarness({tools,script:[{content:"Creating",toolCalls:[nativeCall("code.fs.write",{path:"index.html",content:"<main>Store</main>"})]},{content:"Ready"}],toolResult:tool=>{if(tool==="code.fs.write")changed=true;return {ok:true,tool,toolVersion:1,schemaVersion:1,result:{},truncated:false,durationMs:1}},turnSummary:()=>({files:changed?1:0,linesAdded:changed?1:0,linesRemoved:0,changes:changed?[{path:"index.html",tool:"code.fs.write"}]:[]})});
  await h.run({emptyHtmlWorkspace:true,requireImplementation:true,model:"deepseek/deepseek-flash",verificationTools:[]});
- expect(h.engineCalls[0]).toMatchObject({reasoningMode:"disabled",toolChoice:{type:"function",function:{name:"code.fs.write"}}});
- expect(h.engineCalls[1]?.toolChoice).toBe("auto");
+ // Step 1: disabling reasoning for a tool-bearing turn capped DeepSeek Flash tool-call arguments at ~21 KB and
+ // produced partial_tool_call, so the override and the forced tool_choice (rejected by the provider while
+ // reasoning is on) are gone. The model still writes first because the run prompt says so, not tool_choice.
+ expect(h.engineCalls[0]?.reasoningMode).toBeUndefined();
+ expect(h.engineCalls[0]?.toolChoice).toBe("auto");
+ expect(h.invocations.some(call=>call.tool==="code.fs.write")).toBe(true);
  const existing=createHarness({tools});await existing.run({model:"deepseek/deepseek-flash"});
  expect(existing.engineCalls[0]?.toolChoice).toBe("auto");expect(existing.engineCalls[0]?.reasoningMode).toBeUndefined();
 });

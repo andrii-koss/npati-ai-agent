@@ -178,7 +178,7 @@ export class CodingAgentReviewPhases {
       parentRunId?: string;
     };
     verificationLoop: VerificationLoop;
-    toCheckReports: (outcome: CodeToolInvokeResult | CodeToolInvokeFailure) => VerificationCheckReport[];
+    toCheckReports: (outcome: CodeToolInvokeResult | CodeToolInvokeFailure, tools: readonly string[]) => VerificationCheckReport[];
     record: (event: CodeRunActivityEvent) => Promise<void>;
   }): Promise<void> {
     const {
@@ -228,7 +228,7 @@ export class CodingAgentReviewPhases {
         },
       };
     }
-    const checks = toCheckReports(outcome);
+    const checks = toCheckReports(outcome, verificationTools);
     await emitCodingActivity(input, { ...activity, status: checks.some(check => check.state === "approval_required") ? "awaiting_approval" : checks.every(check => check.state === "passed") ? "completed" : "failed", result: JSON.stringify(outcome.ok ? outcome.result : outcome.error), durationMs: this.now() - Date.parse(activity.at) });
     verificationLoop.record(checks);
     await record({
@@ -441,7 +441,7 @@ export class CodingAgentReviewPhases {
     setSelfReviewFixPending: (pending: boolean) => void;
     writeSelfReviewSummary: () => void;
     writeVerificationSummary: () => void;
-    toCheckReports: (outcome: CodeToolInvokeResult | CodeToolInvokeFailure) => VerificationCheckReport[];
+    toCheckReports: (outcome: CodeToolInvokeResult | CodeToolInvokeFailure, tools: readonly string[]) => VerificationCheckReport[];
     record: (event: CodeRunActivityEvent) => Promise<void>;
   }): Promise<{ action: "complete" } | { action: "stop"; reason: CodingAgentStopReason; message: string }> {
     const {
@@ -469,7 +469,7 @@ export class CodingAgentReviewPhases {
     } = args;
     const changed = currentChangeSignature() !== verifiedSignature;
     setSelfReviewFixPending(false);
-    if (!changed) {
+    if (!changed || verificationTools.length === 0) {
 
       selfReviewState?.noteFixOutcome(false);
       setSelfReviewVerdict(selfReviewState?.report() ?? getSelfReviewVerdict());
@@ -513,7 +513,7 @@ export class CodingAgentReviewPhases {
         },
       };
     }
-    const checks = toCheckReports(outcome);
+    const checks = toCheckReports(outcome, verificationTools);
     await emitCodingActivity(input, { ...activity, status: checks.some(check => check.state === "approval_required") ? "awaiting_approval" : checks.every(check => check.state === "passed") ? "completed" : "failed", result: JSON.stringify(outcome.ok ? outcome.result : outcome.error), durationMs: this.now() - Date.parse(activity.at) });
     verificationLoop.record(checks);
     verificationLoop.blockFurtherRepairs();

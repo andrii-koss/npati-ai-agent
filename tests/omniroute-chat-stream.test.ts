@@ -23,6 +23,17 @@ it("decodes fragmented UTF8/CRLF, tool calls, usage and private continuation whi
 it("refuses a truncated stream so partial tool arguments never execute",async()=>{
  await expect(readChatStream(response(event({choices:[{delta:{tool_calls:[{index:0,id:"call",function:{name:"write",arguments:'{"path":'}}]}}]})),{messages:[]})).rejects.toThrow("provider_stream_incomplete");
 });
+it("Step 5: reports assistant prose only, never reasoning or tool-argument fragments",async()=>{
+ const deltas:string[]=[];
+ const text=event({choices:[{index:0,delta:{reasoning_content:"private reasoning"}}]})+
+  event({choices:[{index:0,delta:{content:"Hel"}}]})+
+  event({choices:[{index:0,delta:{tool_calls:[{index:0,id:"call",function:{name:"code_fs_write",arguments:'{"path":"secret.html",'}}]}}]})+
+  event({choices:[{index:0,delta:{content:"lo"},finish_reason:"tool_calls"}]})+"data: [DONE]\r\n\r\n";
+ const payload=await readChatStream(response(text),{messages:[],onTextDelta:(value)=>{deltas.push(value);}});
+ expect(deltas.join("")).toBe("Hello");
+ expect(deltas.join("")).not.toMatch(/private reasoning|secret\.html|\{"path"/);
+ expect(payload.choices[0].message).toMatchObject({content:"Hello"});
+});
 it("does not convert an upstream stream error into an empty successful answer",async()=>{
  await expect(readChatStream(response(event({error:{message:"provider unavailable"}})),{messages:[]})).rejects.toThrow("provider_stream_error");
 });

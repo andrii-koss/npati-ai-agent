@@ -482,6 +482,22 @@ describe("security-gate: C9 self-review — a review fix is re-verified, a revie
     expect(harness.reviewCalls).toHaveLength(1);
   });
 
+  it("does not certify a blocking review fix when no checks are configured", async () => {
+    const harness = createHarness({
+      script: [...editThenFinish,
+        { content: "fixing", toolCalls: [nativeCall("code.fs.edit", { path: "src/a.ts" }, "fix-1")] },
+        { content: "fixed" }],
+      reviews: [reviewWith([{ category: "correctness", severity: "blocking", file: "src/a.ts", reason: "Off-by-one.", suggested_fix: "Start at zero." }])],
+      fixesTheCode: true,
+    });
+    const result = await harness.run({ verificationTools: [] });
+    expect(harness.verifyCalls()).toHaveLength(0);
+    expect(harness.reviewCalls).toHaveLength(1);
+    expect(result.status).toBe("stopped");
+    expect(result.reason).toBe("self_review_unresolved");
+    expect(result.selfReview?.status).not.toBe("repaired");
+  });
+
   it("does not run an extra verification when the review changed nothing", async () => {
     const harness = createHarness({
       script: [...editThenFinish, { content: "nothing to change" }],
@@ -513,14 +529,13 @@ describe("security-gate: C9 self-review — a review fix is re-verified, a revie
     expect(result.selfReview?.findingsCount).toBe(0);
   });
 
-  it("reports `not_run` rather than `clean` when the caller opted out of verification", async () => {
+  it("reviews saved changes even when no build verification is configured", async () => {
     const harness = createHarness({ script: editThenFinish });
     const result = await harness.run({ verificationTools: [] });
-
-    expect(harness.reviewCalls).toHaveLength(0);
+    expect(harness.reviewCalls).toHaveLength(1);
+    expect(harness.verifyCalls()).toHaveLength(0);
     expect(result.status).toBe("completed");
-    expect(result.selfReview?.status).toBe("not_run");
-    expect(result.selfReview?.ran).toBe(false);
+    expect(result.selfReview).toMatchObject({ status: "clean", ran: true, inputs: { changedFiles: 1 } });
   });
 });
 

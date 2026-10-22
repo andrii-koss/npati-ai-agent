@@ -225,6 +225,8 @@ export interface CodeRunActivityEvent {
   httpStatus?: number;
   attempt?: number;
   retryScheduled?: boolean;
+  /** Provider stop reason for a completed model call (`stop`, `tool_calls`, `length`, …), when it supplied one. */
+  finishReason?: string;
   modelPurpose?: "self_review";
   companyId: string;
   projectId: string;
@@ -656,6 +658,11 @@ export interface CodingAgentRunnerPorts {
     maxFixIterations?: number;
 
     enabled?: boolean;
+    /**
+     * Step 4: allow the adaptive rule to skip the review for a verified presentation-only change. Defaults to
+     * enabled; `false` restores the previous "review every change" behaviour without touching anything else.
+     */
+    adaptive?: boolean;
   };
 
   selfReviewDiffChars?: number;

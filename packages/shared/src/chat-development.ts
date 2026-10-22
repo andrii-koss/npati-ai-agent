@@ -2,7 +2,7 @@ export const DEVELOPMENT_PROCESS_SETTINGS_KEY = "chat-development-processes:v1";
 import { classifyProjectIntent, extractFramework, isBackendProjectFramework } from "./project-intent";
 /** Shared deterministic routing: creation requests only, never ordinary project edits. */
 export type DevelopmentTarget = { name: string; kind: "website" | "blog" | "store" | "crm" | "mobile_app" | "api"; framework: string };
-export type ModelTurnUsage = { id: string; turn: number; totalTokens?: number; inputTokens?: number; outputTokens?: number; costUsd?: number; model?: string; provider?: string; toolCallIds: string[]; durationMs?: number };
+export type ModelTurnUsage = { id: string; turn: number; totalTokens?: number; inputTokens?: number; outputTokens?: number; costUsd?: number; model?: string; provider?: string; toolCallIds: string[]; durationMs?: number; /** Provider-reported cached prompt tokens, when it reports them. */ cachedTokens?: number };
 export type DevelopmentProcessProgressItem = {
   modelUsage?: ModelTurnUsage;
   dryRun?: boolean;

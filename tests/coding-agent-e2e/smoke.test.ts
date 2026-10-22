@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import {
-  createJwtToken,
   sendChatStream,
   defaultConfig,
   assertNoSecretsLeaked,
@@ -100,9 +99,10 @@ function queryPostgres(sql: string): Promise<string> {
 }
 
 describe("Coding Agent E2E Smoke Suite (Stage 2 Extended)", () => {
-  const validToken = createJwtToken();
+  const validToken = process.env.NPATI_E2E_ACCESS_TOKEN ?? "";
 
   beforeAll(async () => {
+    if (!validToken) throw new Error("BLOCKED: live smoke requires a legitimate test-user session via NPATI_E2E_ACCESS_TOKEN; manually signed test JWTs are not accepted for this local audit.");
     // Preflight health check
     const healthRes = await fetch(`${BASE_URL}/health`);
     expect(healthRes.status).toBe(200);

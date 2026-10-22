@@ -34,6 +34,7 @@ import {
   LOOP_REPEAT_THRESHOLD,
   MAX_ARGUMENT_CORRECTIONS,
   REMINDER_MESSAGE,
+  TRUNCATED_TOOL_CALL_HINT,
   isReadOnlyRunTool,
   toolCallSignature,
   emitCodingActivity,
@@ -173,29 +174,46 @@ export class CodingAgentToolWaves {
 
     // Finish the assistant tool-call batch before inserting ordinary conversation messages.
     const deferredMessages: ChatMessage[] = [];
+    /** A turn whose calls were all rejected did not do any work, so it must not be recorded as a clean turn. */
+    let turnHadFailure = false;
     try {
     const correctionKeys = new Set<string>();
+    const rejectedSignatures: string[] = [];
     for (const rejected of normalized.rejected) {
       const key = `${rejected.name ?? "unknown"}:${rejected.code}`;
-      // A batch is one opportunity to correct a class of errors on the next turn.
-      const count = (this.argumentCorrections.get(key) ?? 0) + (correctionKeys.has(key) ? 0 : 1);
-      correctionKeys.add(key);
-      this.argumentCorrections.set(key, count);
-      if (count > MAX_ARGUMENT_CORRECTIONS) {
-        await release("invalid_arguments_exhausted");
-        const res = await stop(
-          "stopped",
-          "invalid_arguments_exhausted",
-          `Stopped: the model kept sending unusable arguments for ${rejected.name ?? "a tool"} (${rejected.code}).`,
-        );
-        return { action: "stopped", result: res };
+      /**
+       * A truncated call has no arguments to correct: the provider stopped mid-JSON. Counting it as an
+       * argument mistake would stop the run before the model can switch to a smaller write, so it is bounded by
+       * the repeat detector below instead. Every other rejection keeps the existing correction budget.
+       */
+      const truncated = rejected.code === "partial_tool_call";
+      let count = 0;
+      if (!truncated) {
+        // A batch is one opportunity to correct a class of errors on the next turn.
+        count = (this.argumentCorrections.get(key) ?? 0) + (correctionKeys.has(key) ? 0 : 1);
+        correctionKeys.add(key);
+        this.argumentCorrections.set(key, count);
+        if (count > MAX_ARGUMENT_CORRECTIONS) {
+          await release("invalid_arguments_exhausted");
+          const res = await stop(
+            "stopped",
+            "invalid_arguments_exhausted",
+            `Stopped: the model kept sending unusable arguments for ${rejected.name ?? "a tool"} (${rejected.code}).`,
+          );
+          return { action: "stopped", result: res };
+        }
       }
+      rejectedSignatures.push(`rejected:${key}`);
+      turnHadFailure = true;
+      const hint = truncated
+        ? TRUNCATED_TOOL_CALL_HINT
+        : `Retry only this rejected call with corrected arguments (attempt ${count} of ${MAX_ARGUMENT_CORRECTIONS}). Use the other tool results in this batch; do not repeat successful writes or restart saved changes.`;
       messages.push({
         role: "tool",
         tool_call_id: rejected.id ?? `rejected:${messages.length}`,
         content: JSON.stringify({
           ...toolCallFeedback(rejected),
-          hint: `Retry only this rejected call with corrected arguments (attempt ${count} of ${MAX_ARGUMENT_CORRECTIONS}). Use the other tool results in this batch; do not repeat successful writes or restart saved changes.`,
+          hint,
         }),
       });
       await record({
@@ -212,21 +230,31 @@ export class CodingAgentToolWaves {
       });
     }
 
-    if (!callsToRun.length) return { action: "continue" };
-
-    const signatures = callsToRun.map(toolCallSignature);
-    this.repeatedSignatures.push(...signatures);
-    while (this.repeatedSignatures.length > LOOP_REPEAT_THRESHOLD) this.repeatedSignatures.shift();
-    if (this.repeatedSignatures.length === LOOP_REPEAT_THRESHOLD && new Set(this.repeatedSignatures).size === 1) {
-      if (this.loopReminded) {
-        await release("loop_detected");
-        const res = await stop("stopped", "loop_detected", `Stopped: the same tool call (${callsToRun[0]?.name ?? "unknown"}) was repeated without progress.`);
-        return { action: "stopped", result: res };
+    /**
+     * Rejections are fed into the same repeat detector as executed calls, so an identical truncated or refused
+     * call cannot be retried forever: the third identical signature produces the existing corrective reminder,
+     * and the next one stops the run with `loop_detected`. Signatures are namespaced (`rejected:`) so a
+     * rejection can never be confused with a successful call, and distinct tools keep distinct signatures —
+     * normal work therefore cannot trip the detector.
+     */
+    const signatures = [...callsToRun.map(toolCallSignature), ...rejectedSignatures];
+    if (signatures.length) {
+      this.repeatedSignatures.push(...signatures);
+      while (this.repeatedSignatures.length > LOOP_REPEAT_THRESHOLD) this.repeatedSignatures.shift();
+      if (this.repeatedSignatures.length === LOOP_REPEAT_THRESHOLD && new Set(this.repeatedSignatures).size === 1) {
+        if (this.loopReminded) {
+          await release("loop_detected");
+          const repeated = callsToRun[0]?.name ?? normalized.rejected[0]?.name ?? "unknown";
+          const res = await stop("stopped", "loop_detected", `Stopped: the same tool call (${repeated}) was repeated without progress.`);
+          return { action: "stopped", result: res };
+        }
+        this.loopReminded = true;
+        deferredMessages.push({ role: "system", content: REMINDER_MESSAGE });
+        await record({ kind: "reminder", companyId, projectId, sessionId, runId: input.runId, turn: steps, reason: "repeated_call" });
       }
-      this.loopReminded = true;
-      deferredMessages.push({ role: "system", content: REMINDER_MESSAGE });
-      await record({ kind: "reminder", companyId, projectId, sessionId, runId: input.runId, turn: steps, reason: "repeated_call" });
     }
+
+    if (!callsToRun.length) return { action: "continue" };
 
     const turnSig = callsToRun.map((c) => {
       const p = (c.arguments as Record<string, unknown>)?.path;
@@ -340,6 +368,7 @@ export class CodingAgentToolWaves {
         };
       }
 
+
       if (stateRunId && ports.runState) {
         await writeState(() => ports.runState!.appendToolCall({
           companyId, runId: stateRunId!, turnIndex: steps,
@@ -440,7 +469,6 @@ export class CodingAgentToolWaves {
     };
 
     const waveLimit = Math.max(1, Math.min(profile.maxParallelToolCalls, limits.parallelReadOnlyCalls));
-    let turnHadFailure = false;
 
     const appendToolResult = async (outcome: { call: NormalizedToolCall; result: CodeToolInvokeResult | CodeToolInvokeFailure }): Promise<void> => {
       const text = canonicalizeSettledToolResult({

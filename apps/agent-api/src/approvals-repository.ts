@@ -81,6 +81,8 @@ export function approvalAudienceOf(approval: Pick<CompanyApproval, "inputPayload
  */
 export interface ApprovalDecisionAuditPort {
   record(input: {
+    workspaceId: string;
+    userId: string;
     action: string;
     actor: string;
     companyId: string;
@@ -414,6 +416,8 @@ export class CompanyApprovalsRepository {
     if (!this.audit) return;
     try {
       await this.audit.record({
+        workspaceId: approval.workspaceId,
+        userId: approval.userId,
         action: "company.approval.expired",
         actor: "system",
         companyId: approval.companyId,
@@ -457,6 +461,8 @@ export class CompanyApprovalsRepository {
     if (!this.audit) return;
     try {
       await this.audit.record({
+        workspaceId: approval.workspaceId,
+        userId: approval.userId,
         action: "company.approval.decided",
         actor: String(ctx.userId),
         companyId,

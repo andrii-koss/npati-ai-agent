@@ -2,7 +2,7 @@ import { validateStaticProjectResources } from "./static-project-validation";
 import { detectProjectStack, extractPortFromCommand } from "./project-preview-stack";
 export { detectProjectStack, extractPortFromCommand } from "./project-preview-stack";
 export type { DetectedStack } from "./project-preview-stack";
-import { reuseDevelopmentPreview } from "./project-preview-reuse";
+import { canReusePreviewSession, reuseDevelopmentPreview } from "./project-preview-reuse";
 import { previewBrowserBridge, rewritePreviewSsrResources } from "./preview-browser-bridge";
 import { createHmac, randomBytes } from "node:crypto";
 import type { FastifyReply, FastifyRequest } from "fastify";
@@ -307,11 +307,14 @@ export class ProjectPreviewService {
       || (verifiedBuild && detected.productionCommand ? detected.productionCommand : detected.command);
     let devPort = options.port && Number.isInteger(options.port) ? options.port : extractPortFromCommand(devCommand, detected.port);
 
-    const reused = options.verifiedBuild === false && !options.command && !options.port
+    const reused = canReusePreviewSession({ verifiedBuild: options.verifiedBuild, command: options.command, port: options.port, framework: detected.framework })
       ? await reuseDevelopmentPreview(ctx, project, devCommand, devPort, detected.framework, this.sandbox, this.projects, scope => this.generateToken(scope), options.signal) : null;
     if (reused) { this.sessions.set(projectId, reused.session); return reused.result; }
     // Stop existing session process if running
     const existing = this.sessions.get(projectId);
+    await this.projects.updatePreview(ctx, companyId, projectId, { status: "building" });
+    if (existing) existing.status = "restarting";
+    try {
     if (existing) {
       await this.sandbox.process(ctx, companyId, {
         projectId,
@@ -447,6 +450,11 @@ export class ProjectPreviewService {
       framework: finalFramework,
       command: devCommand,
     };
+    } catch (error) {
+      if (existing) { existing.status = "failed"; existing.lastError = "Preview server failed to become ready"; this.sessions.set(projectId, existing); }
+      await this.projects.updatePreview(ctx, companyId, projectId, { status: "failed" }).catch(() => undefined);
+      throw error;
+    }
   }
 
   async stopPreview(
@@ -643,6 +651,13 @@ export class ProjectPreviewService {
       return reply.code(known.status).send({ error: { code: known.code, message: known.message } });
     }
 
+    const scope = { workspaceId: tokenPayload.workspaceId ?? this.sessions.get(projectId)?.workspaceId ?? "", userId: tokenPayload.userId, permissions: ["workspace:read"] };
+    try {
+      const project = await this.projects.get(scope, companyId, projectId);
+      if (project.status === "building") return reply.code(503).header("retry-after", "1").send({ error: { code: "preview_starting", message: "Preview is restarting; its upstream is not ready yet." } });
+      if (project.status === "failed") return reply.code(502).send({ error: { code: "preview_failed", message: "Preview failed to start. Inspect the build or runtime error before restarting." } });
+    } catch { return reply.code(403).send({ error: { code: "preview_access_denied", message: "Preview project is unavailable." } }); }
+
     let session: Pick<ActivePreviewSession, "workspaceId" | "userId" | "sandboxId" | "port" | "status" | "lastError"> | undefined = this.sessions.get(projectId);
     // Worker-created previews and API restarts have no local session; authorize the signed scope again.
     if (!session && tokenPayload.workspaceId && this.sandbox) {
@@ -661,6 +676,8 @@ export class ProjectPreviewService {
         <body><div class="card"><h2>Preview server is not running</h2><p>Click "Start Preview" in the Project header to launch the site.</p></div></body></html>
       `);
     }
+
+    if (session.status === "starting" || session.status === "restarting") return reply.code(503).header("retry-after", "1").send({ error: { code: "preview_starting", message: "Preview upstream is not ready yet." } });
 
     if (session.status === "failed") {
       return reply.code(502).type("text/html").send(`

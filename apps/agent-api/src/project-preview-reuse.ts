@@ -4,6 +4,31 @@ import type { ProjectSandboxService } from "./project-sandbox-service";
 import type { ProjectService } from "./project-service";
 import { projectRuntimeCommandPort } from "./shared-project-runtime-provider";
 
+/**
+ * Step 5: when a healthy preview can be kept instead of restarted.
+ *
+ * Two cases are provably safe:
+ *
+ * - **development** (`verifiedBuild === false`): a dev server watches the workspace, so the changed files are already
+ *   visible; restarting it would only add startup time (and would drop HMR state).
+ * - **static** (`framework === "static"`): the server (`python -m http.server`) reads files from the workspace on
+ *   every request, so a new file is served without any restart.
+ *
+ * Everything else keeps the previous behaviour: a production preview (`next start`, `vite preview`, …) reads its build
+ * at startup, so a new build genuinely requires a restart. This predicate never decides *whether* a build is verified;
+ * the caller still enforces the verification gate before it is asked.
+ */
+export function canReusePreviewSession(input: {
+  verifiedBuild?: boolean;
+  command?: string;
+  port?: number;
+  framework: string;
+}): boolean {
+  if (input.command || input.port) return false;
+  if (input.verifiedBuild === false) return true;
+  return input.framework === "static";
+}
+
 /** Same sandbox and upload path as startPreview; only a healthy matching dev process can be reused. */
 export async function reuseDevelopmentPreview(ctx: AuthContext, project: Project, devCommand: string, devPort: number, framework: string,
   sandbox: ProjectSandboxService, projects: Pick<ProjectService,"updatePreview">,

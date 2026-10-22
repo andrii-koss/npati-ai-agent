@@ -134,7 +134,10 @@ describe("security-gate: C6 runner — every stop condition reports a reason and
     const result = await harness.run({ signal: controller.signal, onActivity: async event => { events.push(event); } });
     expect(result.summary.tokens).toBe(18);
     expect(harness.activity.some(event => event.kind === "model_call" && event.phase === "completed")).toBe(true);
-    expect(events.some(event => event.stage === "planning" && event.status === "completed")).toBe(true);
+    // The `planning` event carries the assistant's prose (`title: result.content`), and this scripted turn has no
+    // prose — only a tool call. Emitting an empty "planning completed" message would be a fabricated event, so the
+    // contract is the opposite: no prose, no planning event. The real telemetry of the turn is asserted above.
+    expect(events.some(event => event.stage === "planning")).toBe(false);
     expect(events.some(event => event.stage === "model_usage" && event.modelUsage?.totalTokens === 18)).toBe(true);
     expect(result.status).toBe("cancelled");
     expect(result.reason).toBe("cancelled");

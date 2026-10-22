@@ -79,9 +79,12 @@ export interface SelfReviewFinding {
 export type SelfReviewReason =
   | "no_changes_to_review"
   | "disabled_by_configuration"
+  /** Step 4: the adaptive rule judged this change low-risk after a passing verification. */
+  | "adaptive_low_risk_skip"
   | "review_parser_unavailable"
   | "review_response_empty"
   | "review_call_failed"
+  | "review_diff_unavailable"
   | "review_prompt_refused_by_provider_policy"
   | "review_response_mismatch";
 
