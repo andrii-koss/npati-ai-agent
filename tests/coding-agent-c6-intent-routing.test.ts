@@ -225,3 +225,18 @@ describe("analysing an external website stays read-only web research", () => {
     expect(decision).toMatchObject({ mode: "run", readOnly: false });
   });
 });
+
+describe("an improvement request that mentions earlier analysis is a change, not a review", () => {
+  it.each([
+    "Використай результати попереднього аналізу конкурентів і покращи головну сторінку магазину.",
+    "Use the previous competitor analysis and improve the home page of my store.",
+    "Use a análise anterior dos concorrentes e melhore a página inicial da loja.",
+    "Підключи створену базу даних до мого Next.js-магазину. Зроби відображення товарів із бази.",
+  ])("%s runs with write access", (message) => {
+    expect(resolveChatCodeIntent({ message, codingEnabled: true, companyId: "c", projectId: "p", projectKind: "website", sessionBound: true })).toMatchObject({ mode: "run", readOnly: false });
+  });
+
+  it("a pure analysis request stays read-only", () => {
+    expect(resolveChatCodeIntent({ message: "Проаналізуй код головної сторінки і скажи, що не так", codingEnabled: true, companyId: "c", projectId: "p", projectKind: "website", sessionBound: true })).toMatchObject({ mode: "run", readOnly: true });
+  });
+});
