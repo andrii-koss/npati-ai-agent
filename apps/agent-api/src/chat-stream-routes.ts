@@ -10,7 +10,7 @@ import { explicitlyRequestsWebResearch } from "./chat-text-directives";
 import { readCodeActiveContext } from "./code-active-context-store";
 import { CodeBackgroundRunRegistry } from "./code-background-run-registry";
 import { canUseStylePreview, hasCodeChatPreview, isCodeChatWebsite, websiteConversationContext, websiteReferenceInstructions, isWebsiteReferenceRedesign, storeWebsiteReferenceAssets } from "./code-chat-website";
-import { resolveChatCodeIntent } from "./code-intent-routing";
+import { namesExternalPage, resolveChatCodeIntent } from "./code-intent-routing";
 import { createCodeRunAdmission } from "./code-run-admission";
 import { CodeRunQueue, CodeRunRefusedError, resolveCodeRunQueueLimits } from "./code-run-queue";
 import { CodeRunRateLimitedError } from "./code-run-rate-limit";
@@ -545,7 +545,8 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
 
       const progress = (event: ResearchProgressEvent) => send("progress", { ...event, timestamp: new Date().toISOString() });
       try {
-        if (projectIntent.intent !== "CHAT") {
+        // A review of an external page is answered by chat with Web Research, not by the project pipeline.
+        if (projectIntent.intent !== "CHAT" && !(projectIntent.intent === "REVIEW_PROJECT" && namesExternalPage(message))) {
           let projectResponse;
           if (projectIntent.unsupportedIntentMessage || projectIntent.needsClarification) {
             projectResponse = {
