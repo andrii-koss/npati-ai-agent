@@ -3,6 +3,7 @@ import type { CompanyChatLanguage } from "./company-chat-i18n";
 import type { DevelopmentProcessProgressItem } from "@npati/shared";
 import type { AuthContext, CodeSession } from "@npati/workspace";
 import { VERIFICATION_APPROVAL_REQUIRED } from "./code-verification-loop";
+import { visualAcceptanceScreenshot, visualRepairFindings } from "./website-visual-acceptance";
 
 /**
  * C15 — the **one** place a code session is driven.
@@ -250,6 +251,10 @@ export class CodeSessionRunExecutor {
         for (let attempt = 1; attempt <= 2 && Date.now() < deadline; attempt++) {
           const review = result as { visualAcceptance?: { status: string; differences: string[] }; status?: string };
           if (review.visualAcceptance?.status !== "failed" || controller.signal.aborted || await input.cancelRequested()) break;
+          // A repair is a model run: only spend it on concrete, named differences (never on a bare low score).
+          const findings = visualRepairFindings(review.visualAcceptance);
+          if (!findings.length) break;
+          const failedCapture = visualAcceptanceScreenshot(result);
           const repairRunId = String(rootRunId ?? sessionId) + ":visual-repair:" + attempt;
           repairRunIds.push(repairRunId);
           /**
@@ -260,8 +265,12 @@ export class CodeSessionRunExecutor {
           const previous = result;
           let repaired: unknown;
           try {
-            repaired = await runner.run({ ctx: input.ctx, session: input.session, model, images: input.images, useInbox: false, skipAsyncCollect: true,
-            prompt: input.prompt + "\nVisual acceptance failed. Correct these observed screenshot differences in the SAME project, preserving functionality: " + JSON.stringify(review.visualAcceptance.differences) + "\nRead current files before editing. Do not scaffold or reinstall unchanged dependencies. Finish saved edits for automatic build and screenshot review.",
+            // The repair sees the reference AND the screenshot that failed, so it does not need to capture one itself.
+            const repairImages = failedCapture && input.images?.length ? [...input.images, failedCapture] : input.images;
+            repaired = await runner.run({ ctx: input.ctx, session: input.session, model, images: repairImages, useInbox: false, skipAsyncCollect: true,
+            prompt: input.prompt + "\nVisual acceptance failed. Correct these observed screenshot differences in the SAME project, preserving functionality: " + JSON.stringify(findings)
+              + (failedCapture ? "\nThe LAST attached image is the current Preview screenshot that failed this check; the other images are the reference. Compare them instead of taking a new screenshot." : "")
+              + "\nRead current files before editing. Do not scaffold or reinstall unchanged dependencies. Finish saved edits for automatic build and screenshot review.",
             runId: repairRunId, runDetails: { parentRunId: rootRunId ?? null, visualParentRunId: rootRunId ?? null, visualRepairAttempt: attempt },
             quotaSessionId: sessionId, maxTurns: Math.min(input.maxTurns ?? 12, 12), websiteEdit: true,
             ...(input.toolContext ? { toolContext: input.toolContext } : {}),
@@ -281,6 +290,16 @@ export class CodeSessionRunExecutor {
            * A repair that never ran (lease, cancellation, provider refusal) must not replace the root result with its
            * own failure and thereby erase the visual mismatch the user needs to see.
            */
+          const repairChanged = ((repaired as { summary?: { filesChanged?: unknown[] } } | null)?.summary?.filesChanged?.length ?? 0) > 0;
+          if (repaired && typeof repaired === "object" && (repaired as { status?: string }).status === "completed" && !repairChanged) {
+            // Same revision as the failed check: a new build + screenshot + review would repeat the same verdict.
+            const root = previous && typeof previous === "object" ? previous as Record<string, unknown> : {};
+            const acceptance = (root.visualAcceptance && typeof root.visualAcceptance === "object") ? root.visualAcceptance as Record<string, unknown> : {};
+            const differences = Array.isArray(acceptance.differences) ? [...acceptance.differences as string[]] : [];
+            differences.push("visual repair " + attempt + " made no changes");
+            result = { ...root, visualAcceptance: { ...acceptance, status: "failed", differences } };
+            break;
+          }
           if (repaired && typeof repaired === "object" && (repaired as { status?: string }).status === "completed") {
             result = await this.options.afterRun({ ...input, runId: repairRunId }, repaired);
           } else {

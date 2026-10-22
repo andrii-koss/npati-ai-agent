@@ -13,6 +13,25 @@ export interface VisualAcceptance {
   detail?: string;
   evidence?: { reportId: string; referenceHashes: string[]; screenshotHash: string; model: string };
 }
+/**
+ * The Preview screenshot a verdict was based on, kept outside the serialisable result (it travels to the client) so a
+ * visual repair can show the model what actually rendered next to the reference and the findings.
+ */
+const acceptanceScreenshots = new WeakMap<object, { mimeType: string; dataBase64: string }>();
+export function visualAcceptanceScreenshot(result: unknown): { mimeType: string; dataBase64: string } | undefined {
+  return result && typeof result === "object" ? acceptanceScreenshots.get(result) : undefined;
+}
+
+/**
+ * Concrete, actionable findings of a failed verdict. A repair is only worth a model run when there is something
+ * specific to correct; a low score without a named difference is reported, not "repaired" blindly.
+ */
+export function visualRepairFindings(acceptance: { status?: string; differences?: unknown } | undefined): string[] {
+  if (acceptance?.status !== "failed" || !Array.isArray(acceptance.differences)) return [];
+  return acceptance.differences.filter((item): item is string => typeof item === "string" && item.trim().length >= 8
+    && !/^visual repair \d+ (could not start|did not complete|made no changes)/.test(item));
+}
+
 /** Review actual pixels, never model prose or source code as a substitute for the screenshot. */
 export async function reviewWebsiteReference(input: CodeSessionRunInput, result: unknown, ports: {
   inspect(): Promise<BrowserQaReportResult>;
@@ -26,12 +45,14 @@ export async function reviewWebsiteReference(input: CodeSessionRunInput, result:
   await emitCodingActivity(input, { ...event, status: "running" });
   let acceptance: VisualAcceptance;
   let browserQaPassed = false;
+  let capture: { mimeType: string; dataBase64: string } | undefined;
   try {
     if (!input.resolvedModel) throw new Error("vision_model_unavailable");
     const qa = await ports.inspect();
     browserQaPassed = qa.success;
     const screenshot = qa.screenshots[0];
     if (!screenshot || screenshot.captureMode !== "visual") throw new Error("visual_screenshot_unavailable");
+    capture = { mimeType: screenshot.mimeType, dataBase64: screenshot.base64Data };
     const response = await ports.chat({
       model: input.resolvedModel, temperature: 0, tools: [], toolChoice: "none", compression: "off",
       timeoutMs: 45_000, signal: input.sink?.signal,
@@ -64,9 +85,11 @@ export async function reviewWebsiteReference(input: CodeSessionRunInput, result:
     acceptance = { status: "blocked", differences: [code], detail: specific ? undefined : message.slice(0, 300) };
   }
   await emitCodingActivity(input, { ...event, status: acceptance.status === "passed" ? "completed" : "failed", result: JSON.stringify(acceptance), errorCode: acceptance.status === "passed" ? undefined : "visual_acceptance_" + acceptance.status });
-  return { ...run, status: acceptance.status === "passed" ? "completed" : "failed", reason: acceptance.status === "passed" ? null : "visual_acceptance_" + acceptance.status,
+  const reviewed = { ...run, status: acceptance.status === "passed" ? "completed" : "failed", reason: acceptance.status === "passed" ? null : "visual_acceptance_" + acceptance.status,
     message: acceptance.status === "passed" ? (input.responseLanguage === "uk" ? "Preview працює; візуальна перевірка референсу пройшла. Бізнес-функції потребують окремих сценарних перевірок." : "Preview and visual reference acceptance passed. Business behavior requires separate scenario checks.") : (input.responseLanguage === "uk" ? "Візуальна перевірка не пройшла: " : "Visual acceptance " + acceptance.status + ": ") + acceptance.differences.join("; "),
     visualAcceptance: acceptance, acceptance: { codeGenerated: Array.isArray(run.summary?.filesChanged) && run.summary!.filesChanged.length > 0, buildPassed: (run.summary?.verification as { requestedTools?: string[]; status?: string } | undefined)?.requestedTools?.includes("build") ? (run.summary?.verification as { status?: string }).status === "passed" : "not_applicable", previewRunning: true, browserQaPassed, functionalBehaviorVerified: false, visualReferenceMatched: acceptance.status === "passed", requirementsVerified: acceptance.status === "passed" ? "visual_scope_only" : false } };
+  if (capture) acceptanceScreenshots.set(reviewed, capture);
+  return reviewed;
 }
 
 /** Analysis is an actual image-bearing inference before any implementation tool is dispatched. */
