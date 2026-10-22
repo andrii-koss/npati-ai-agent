@@ -89,6 +89,8 @@ export interface CodeRunToolSchemaLike {
   status: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  /** Published result schema; used to tell the model what a tool returns. */
+  outputSchema?: Record<string, unknown>;
 }
 
 export interface CodeRunToolRuntimePort {
