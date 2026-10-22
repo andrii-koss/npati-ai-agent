@@ -40,7 +40,7 @@ export class CodingAgentToolCatalog {
   }
 
   publishedTools(): CodeRunToolDescriptor[] {
-    return this.ports.toolRuntime.listTools().filter((tool) => tool.status === "active");
+    return this.ports.toolRuntime.listTools().filter((tool) => tool.status === "active" && tool.available !== false);
   }
 
   toolDescriptors(

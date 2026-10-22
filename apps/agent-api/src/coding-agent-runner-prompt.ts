@@ -16,6 +16,7 @@ export const CODE_RUN_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "code.fs.list",
   "code.fs.tree",
   "code.fs.grep",
+  "code.fs.diff",
   "code.symbols.outline",
   "code.project.info",
   "code.protected_branches.read",

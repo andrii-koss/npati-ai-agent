@@ -48,6 +48,7 @@ export interface CodeSessionRunPort {
     signal: AbortSignal;
     cancelRequested: () => boolean | Promise<boolean>;
     readOnlyIntent?: boolean;
+    toolContext?: CodingAgentRunInput["toolContext"];
     runId?: string;
     /** `false` for the automatic visual-repair continuation, which must not take the chat's inbox lease. */
     useInbox?: boolean;
@@ -119,6 +120,8 @@ export interface CodeSessionRunInput {
   initialInboxMessageId?: string;
   /** `codeIntentIsReadOnly(intent)` of the resolved intent — never a model argument and never a guess. */
   readOnlyIntent?: boolean;
+  /** Signals for the offered tool tiers: the user's own words and the project's data backend state. */
+  toolContext?: CodingAgentRunInput["toolContext"];
   /**
    * Where the run reports. When present, this is also the signal the loop runs under: the caller owns the
    * cancellation semantics (the background registry mints its own signal so a closed tab cannot reach the run), and
@@ -237,6 +240,7 @@ export class CodeSessionRunExecutor {
         signal: sink ? sink.signal : controller.signal,
         cancelRequested: input.cancelRequested,
         ...(input.readOnlyIntent ? { readOnlyIntent: true } : {}),
+        ...(input.toolContext ? { toolContext: input.toolContext } : {}),
       });
       if (this.options.afterRun && !controller.signal.aborted && !await input.cancelRequested()) {
         result = await this.options.afterRun(input, result);
@@ -260,6 +264,7 @@ export class CodeSessionRunExecutor {
             prompt: input.prompt + "\nVisual acceptance failed. Correct these observed screenshot differences in the SAME project, preserving functionality: " + JSON.stringify(review.visualAcceptance.differences) + "\nRead current files before editing. Do not scaffold or reinstall unchanged dependencies. Finish saved edits for automatic build and screenshot review.",
             runId: repairRunId, runDetails: { parentRunId: rootRunId ?? null, visualParentRunId: rootRunId ?? null, visualRepairAttempt: attempt },
             quotaSessionId: sessionId, maxTurns: Math.min(input.maxTurns ?? 12, 12), websiteEdit: true,
+            ...(input.toolContext ? { toolContext: input.toolContext } : {}),
             verificationTools, forceVerification: verificationTools?.includes("build"), extraSystemPromptLines: input.extraSystemPromptLines,
             signal: AbortSignal.any([controller.signal, AbortSignal.timeout(Math.max(1, deadline - Date.now()))]),
             cancelRequested: input.cancelRequested, onActivity: input.onActivity });
