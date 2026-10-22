@@ -339,3 +339,23 @@ describe("a provider that refuses a forced tool_choice still answers from the fe
     }
   });
 });
+
+describe("a failed web_fetch is reported to the model as missing evidence", () => {
+  it("tells the model the page was not opened and must not be analysed from memory", async () => {
+    const requests: ChatRequest[] = [];
+    const webResearch = researchService();
+    webResearch.run.mockRejectedValueOnce(new Error("No hostname allowlist is configured, so no host is reachable"));
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), authProvider: { authenticate: async () => auth }, aiEngine: productionPathEngine(requests), marketplace, webResearch });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Analyze the website https://npati.com", contextType: "none" } });
+      expect(response.statusCode).toBe(200);
+      const toolMessage = requests[1]?.messages.at(-1);
+      expect(toolMessage).toMatchObject({ role: "tool", name: "web_fetch" });
+      const content = JSON.parse(String(toolMessage?.content));
+      expect(content.error).toContain("No hostname allowlist");
+      expect(content.instruction).toMatch(/could not be opened.*Do not describe or analyse the page from memory/s);
+    } finally {
+      await app.close();
+    }
+  });
+});

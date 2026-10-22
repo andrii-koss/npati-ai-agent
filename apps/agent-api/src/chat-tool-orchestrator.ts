@@ -211,7 +211,11 @@ export async function runChatToolLoop(input: {
         const failed: ChatToolTrace = { ...requested, status: "failed", error: message };
         traces.push(failed);
         input.onTrace?.(failed);
-        messages.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content: JSON.stringify({ error: message }) });
+        // A failed fetch/search leaves no evidence; without saying so, models fill the gap from memory.
+        const instruction = /^web_(fetch|search)$/.test(call.function.name)
+          ? "No page content was retrieved. Tell the user it could not be opened and why. Do not describe or analyse the page from memory or general knowledge."
+          : undefined;
+        messages.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content: JSON.stringify({ error: message, ...(instruction ? { instruction } : {}) }) });
       }
     }
   }
