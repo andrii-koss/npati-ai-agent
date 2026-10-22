@@ -243,7 +243,7 @@ export class CodingAgentRunner {
 
     const sessionState = sessionStart.state;
     stateRunId = sessionState.stateRunId;
-    const { capabilityScope, capabilityScopeFields, delegationDepth, runTurnLimit, leaseState } = sessionState;
+    const { capabilityScope, capabilityScopeFields, delegationDepth, runTurnLimit, runMinuteLimit, leaseState } = sessionState;
     if (sessionState.heartbeatTimer) {
       stopHeartbeat = () => {
         if (sessionState.heartbeatTimer) { clearInterval(sessionState.heartbeatTimer); sessionState.heartbeatTimer = null; }
@@ -467,10 +467,10 @@ export class CodingAgentRunner {
         summary.remaining = "Step limit reached; the task may be unfinished.";
         return stop("stopped", "step_limit", `Stopped after ${runTurnLimit} turns: the step limit was reached.`);
       }
-      if (this.limits.maxRunMinutes > 0 && this.now() - startedAt > this.limits.maxRunMinutes * 60_000) {
+      if (runMinuteLimit > 0 && this.now() - startedAt > runMinuteLimit * 60_000) {
         await release("time_limit");
         summary.remaining = "Time limit reached; the task may be unfinished.";
-        return stop("stopped", "time_limit", `Stopped after ${this.limits.maxRunMinutes} minutes: the time limit was reached.`);
+        return stop("stopped", "time_limit", `Stopped after ${runMinuteLimit} minutes: the time limit was reached.`);
       }
       let quotaRemaining: number | undefined;
       if (this.ports.quota) {
