@@ -104,7 +104,7 @@ export async function startCodingAgentSession(args: StartSessionArgs): Promise<S
     // Session start lifecycle errors are non-fatal
   }
 
-  const useInbox = (!input.subagentScope || input.detachedChildInbox === true) && !!ports.inbox && await ports.inbox.isEnabled(ctx, companyId);
+  const useInbox = input.useInbox !== false && (!input.subagentScope || input.detachedChildInbox === true) && !!ports.inbox && await ports.inbox.isEnabled(ctx, companyId);
   const leaseState = { lost: false };
   let heartbeatTimer: NodeJS.Timeout | null = null;
 

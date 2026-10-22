@@ -409,6 +409,8 @@ export class CodingAgentRunner {
     let inspectionTurns = 0;
     let noProgressTurns = 0;
     let lastProgressFingerprint = "";
+    /** A turn that executed a mutating tool is progress even when the changed-file set stays the same. */
+    let lastTurnMutated = false;
     let inspectedStyles = false;
     let inspectionReminderSent = false;
     let emptyImplementationReplies = 0;
@@ -498,8 +500,10 @@ export class CodingAgentRunner {
       const currentChanges = progressChanges.map(change => change.path);
       if (!input.readOnlyIntent && session.mode !== "plan" && (input.websiteEdit || input.requireImplementation)) {
         const fingerprint = JSON.stringify(progressChanges);
-        noProgressTurns = steps > 0 && fingerprint === lastProgressFingerprint ? noProgressTurns + 1 : 0;
+        const progressed = steps > 0 && (fingerprint !== lastProgressFingerprint || lastTurnMutated);
+        noProgressTurns = progressed ? 0 : noProgressTurns + 1;
         lastProgressFingerprint = fingerprint;
+        lastTurnMutated = false;
         if (noProgressTurns === 4) {
           await record({ kind: "reminder", companyId, projectId, sessionId, runId: input.runId, turn: steps, reason: "no_source_progress" });
           messages.push({ role: "system", content: "Four model turns produced no source progress. Stop repeated inspection/planning. Use the files already read to implement the current request; if blocked, report the concrete blocker. Build/Preview and visual acceptance are separate system checks." });
@@ -749,6 +753,8 @@ export class CodingAgentRunner {
       messages.push(assistantMessage);
 
       const waveOutcome = await toolWaves.executeTurnTools({ steps, normalized, callsToRun, profile, modelUsage });
+      // Remember whether this turn attempted a source mutation; the guard runs at the start of the next turn.
+      lastTurnMutated = callsToRun.some(call => /^code\.fs\.(write|edit|apply_patch|move|delete)$/.test(call.name) || call.name === "code.deps.add");
       if (waveOutcome.action === "paused" || waveOutcome.action === "stopped") return waveOutcome.result;
     }
   }

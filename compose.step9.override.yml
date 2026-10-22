@@ -2,18 +2,26 @@
 # (Steps 1-8 are uncommitted, so the build context is the repo root, not an artifacts snapshot).
 services:
   agent-api:
-    image: npati-step9-local:20261021
+    image: npati-fix-local:20261022
     build:
       context: .
       dockerfile: apps/agent-api/Dockerfile
       target: runtime
       args:
-        NPATI_BUILD_COMMIT: step9-b545d0c
+        NPATI_BUILD_COMMIT: fix-97b1d7a
   company-worker:
-    image: npati-step9-local:20261021
+    image: npati-fix-local:20261022
     build:
       context: .
       dockerfile: apps/agent-api/Dockerfile
       target: runtime
       args:
-        NPATI_BUILD_COMMIT: step9-b545d0c
+        NPATI_BUILD_COMMIT: fix-97b1d7a
+  sandbox-runner:
+    image: npati-fix-runtime:20261022
+    build:
+      context: .
+      dockerfile: apps/agent-api/Dockerfile
+      target: project-runtime
+      args:
+        NPATI_BUILD_COMMIT: fix-97b1d7a

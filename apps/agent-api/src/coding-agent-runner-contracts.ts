@@ -105,6 +105,13 @@ export * from "./coding-agent-runner-prompt";
 
 export interface CodingAgentRunInput {
   responseLanguage?: CompanyChatLanguage;
+  /**
+   * `false` starts the run without the session inbox lease. Used by the automatic visual-repair continuation,
+   * which runs while the chat transport still owns that lease and consumes no new user messages.
+   */
+  useInbox?: boolean;
+  /** `true` for the visual-repair continuation: it must not wait on the async collect barrier. */
+  skipAsyncCollect?: boolean;
   noMemory?: boolean;
   websiteEdit?: boolean;
   allowStylePreview?: boolean;

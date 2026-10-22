@@ -9,6 +9,8 @@ export interface VisualAcceptance {
   status: "passed" | "failed" | "blocked";
   scores?: Record<typeof VISUAL_CRITERIA[number], number>;
   differences: string[];
+  /** Machine-readable cause when blocked, so the user is not left with a generic refusal. */
+  detail?: string;
   evidence?: { reportId: string; referenceHashes: string[]; screenshotHash: string; model: string };
 }
 /** Review actual pixels, never model prose or source code as a substitute for the screenshot. */
@@ -51,7 +53,15 @@ export async function reviewWebsiteReference(input: CodeSessionRunInput, result:
     } };
     if (!qa.success) acceptance.differences.unshift("Browser QA failed; inspect the saved report before claiming functional completion.");
   } catch (error) {
-    acceptance = { status: "blocked", differences: [error instanceof Error && /^(vision_model_unavailable|visual_screenshot_unavailable|visual_review_invalid_result)$/.test(error.message) ? error.message : "visual_review_unavailable"] };
+    /**
+     * Never hide the concrete cause behind one generic word. The specific codes below are the contract; any other
+     * failure keeps its own machine code (e.g. `qa_unavailable`, `qa_timeout`, `browser_qa_missing_image`) and a
+     * bounded message, without screenshot bytes or provider bodies.
+     */
+    const message = error instanceof Error ? error.message : String(error);
+    const specific = /^(vision_model_unavailable|visual_screenshot_unavailable|visual_review_invalid_result)$/.test(message);
+    const code = specific ? message : (error as { code?: string })?.code ?? "visual_review_unavailable";
+    acceptance = { status: "blocked", differences: [code], detail: specific ? undefined : message.slice(0, 300) };
   }
   await emitCodingActivity(input, { ...event, status: acceptance.status === "passed" ? "completed" : "failed", result: JSON.stringify(acceptance), errorCode: acceptance.status === "passed" ? undefined : "visual_acceptance_" + acceptance.status });
   return { ...run, status: acceptance.status === "passed" ? "completed" : "failed", reason: acceptance.status === "passed" ? null : "visual_acceptance_" + acceptance.status,

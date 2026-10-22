@@ -49,6 +49,10 @@ export interface CodeSessionRunPort {
     cancelRequested: () => boolean | Promise<boolean>;
     readOnlyIntent?: boolean;
     runId?: string;
+    /** `false` for the automatic visual-repair continuation, which must not take the chat's inbox lease. */
+    useInbox?: boolean;
+    /** `true` for the same continuation: no async collect barrier (it needs the inbox lease). */
+    skipAsyncCollect?: boolean;
     runDetails?: CodingAgentRunInput["runDetails"];
     quotaSessionId?: string;
     initialInboxMessageId?: string;
@@ -237,21 +241,50 @@ export class CodeSessionRunExecutor {
       if (this.options.afterRun && !controller.signal.aborted && !await input.cancelRequested()) {
         result = await this.options.afterRun(input, result);
         const rootRunId = input.runId ?? (result as { runId?: string })?.runId;
-        const deadline = Date.now() + 180_000;
+        const deadline = Date.now() + 600_000;
         const repairRunIds: string[] = [];
         for (let attempt = 1; attempt <= 2 && Date.now() < deadline; attempt++) {
           const review = result as { visualAcceptance?: { status: string; differences: string[] }; status?: string };
           if (review.visualAcceptance?.status !== "failed" || controller.signal.aborted || await input.cancelRequested()) break;
           const repairRunId = String(rootRunId ?? sessionId) + ":visual-repair:" + attempt;
           repairRunIds.push(repairRunId);
-          result = await runner.run({ ctx: input.ctx, session: input.session, model, images: input.images,
+          /**
+           * The root run still owns the session inbox lease (the chat transport opened it), so a repair cannot open
+           * the inbox again. The repair is an automatic continuation of the same run: it consumes no new user
+           * messages and must not fail on a lease it cannot take.
+           */
+          const previous = result;
+          let repaired: unknown;
+          try {
+            repaired = await runner.run({ ctx: input.ctx, session: input.session, model, images: input.images, useInbox: false, skipAsyncCollect: true,
             prompt: input.prompt + "\nVisual acceptance failed. Correct these observed screenshot differences in the SAME project, preserving functionality: " + JSON.stringify(review.visualAcceptance.differences) + "\nRead current files before editing. Do not scaffold or reinstall unchanged dependencies. Finish saved edits for automatic build and screenshot review.",
             runId: repairRunId, runDetails: { parentRunId: rootRunId ?? null, visualParentRunId: rootRunId ?? null, visualRepairAttempt: attempt },
             quotaSessionId: sessionId, maxTurns: Math.min(input.maxTurns ?? 12, 12), websiteEdit: true,
             verificationTools, forceVerification: verificationTools?.includes("build"), extraSystemPromptLines: input.extraSystemPromptLines,
             signal: AbortSignal.any([controller.signal, AbortSignal.timeout(Math.max(1, deadline - Date.now()))]),
             cancelRequested: input.cancelRequested, onActivity: input.onActivity });
-          result = await this.options.afterRun({ ...input, runId: repairRunId }, result);
+          } catch (error) {
+            /** A repair that cannot start is reported as a difference; the root mismatch stays visible. */
+            const root = previous && typeof previous === "object" ? previous as Record<string, unknown> : {};
+            const acceptance = (root.visualAcceptance && typeof root.visualAcceptance === "object") ? root.visualAcceptance as Record<string, unknown> : {};
+            const differences = Array.isArray(acceptance.differences) ? [...acceptance.differences as string[]] : [];
+            differences.push("visual repair " + attempt + " could not start: " + (error instanceof Error ? error.message : String(error)).slice(0, 200));
+            result = { ...root, visualAcceptance: { ...acceptance, status: "failed", differences } };
+            break;
+          }
+          /**
+           * A repair that never ran (lease, cancellation, provider refusal) must not replace the root result with its
+           * own failure and thereby erase the visual mismatch the user needs to see.
+           */
+          if (repaired && typeof repaired === "object" && (repaired as { status?: string }).status === "completed") {
+            result = await this.options.afterRun({ ...input, runId: repairRunId }, repaired);
+          } else {
+            const root = previous && typeof previous === "object" ? previous as Record<string, unknown> : {};
+            const acceptance = (root.visualAcceptance && typeof root.visualAcceptance === "object") ? root.visualAcceptance as Record<string, unknown> : {};
+            const differences = Array.isArray(acceptance.differences) ? [...acceptance.differences as string[]] : [];
+            differences.push("visual repair " + attempt + " did not complete: " + String((repaired as { reason?: string } | null)?.reason ?? "unknown"));
+            result = { ...root, visualAcceptance: { ...acceptance, status: "failed", differences } };
+          }
         }
         if (repairRunIds.length && result && typeof result === "object") result = { ...result, runId: rootRunId, visualRepairRunIds: repairRunIds };
       }

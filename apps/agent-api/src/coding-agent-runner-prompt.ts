@@ -256,10 +256,25 @@ export function bounded(value: string, limit: number): { text: string; truncated
 /** Reattach validated references at the provider boundary, including review calls after compaction. */
 export function withCodingReferenceImages(messages: ChatMessage[], images?: readonly { mimeType: string; dataBase64: string }[]): ChatMessage[] {
   if (!images?.length) return messages;
-  const userIndex = messages.findIndex(message => message.role === "user");
-  return messages.map((message, index) => index !== userIndex ? message : {
-    ...message, content: [{ type: "text" as const, text: chatContentText(message.content) }, ...images.map(image => ({
-      type: "image_url" as const, image_url: { url: "data:" + image.mimeType + ";base64," + image.dataBase64 },
-    }))],
+  /**
+   * The reference belongs to the **current** request, not to the first message of the conversation.
+   * A continued chat carries the original creation prompt as its first user message; attaching the
+   * photo there made the model see the reference beside an older instruction and changed the cacheable
+   * prefix of every later turn. The last user message is the turn being executed.
+   */
+  let userIndex = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "user") { userIndex = index; break; }
+  }
+  if (userIndex < 0) return messages;
+  return messages.map((message, index) => {
+    if (index !== userIndex) return message;
+    // A caller may already have attached image parts; do not duplicate them.
+    if (Array.isArray(message.content)) return message;
+    return {
+      ...message, content: [{ type: "text" as const, text: chatContentText(message.content) }, ...images.map(image => ({
+        type: "image_url" as const, image_url: { url: "data:" + image.mimeType + ";base64," + image.dataBase64 },
+      }))],
+    };
   });
 }
