@@ -171,7 +171,7 @@ export const CODE_RUN_DISCIPLINE_RULES: readonly string[] = [
   "- An analysis, explanation or review request changes no files and creates nothing.",
   "- In an existing project, edit that project; never create a new one. If the target project is unclear, ask once.",
   "- Read the fragment you will change before editing it; do not re-read files that are already in context and unchanged.",
-  "- After a change, check it once in the cheapest sufficient way, then finish with a short summary (code.finish when available). Skip your own check when the system verifies after you finish (website edits are built, previewed and screenshot-compared automatically).",
+  "- After a change, check it once in the cheapest sufficient way, then finish with a short summary (code.finish when available).",
   "- Do not repeat a failed action without changing the approach.",
 ];
 

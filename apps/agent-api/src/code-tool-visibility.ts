@@ -134,14 +134,9 @@ export function contextualToolMatches(context: CodeToolVisibilityContext): Set<s
   const matched = new Set<string>();
   const hasImages = (context.imageCount ?? 0) > 0;
   if (hasImages || IMAGE_PATTERN.test(message)) matched.add("code.image.view");
-  // A website edit with an attached reference already carries the image in the request, and the system builds,
-  // previews and screenshot-compares the result after the run: viewing it again or screenshotting mid-run only adds
-  // turns (measured: 3 extra screenshot turns per visual repair).
-  const systemVerifiesVisual = Boolean(context.websiteEdit && hasImages);
   if (URL_PATTERN.test(message)) matched.add("code.web.fetch");
   if (DOCS_PATTERN.test(message)) { matched.add("code.web.search"); matched.add("code.web.fetch"); }
   if (context.websiteEdit && (hasImages || VISUAL_PATTERN.test(message))) matched.add("code.preview.screenshot");
-  if (systemVerifiesVisual) { matched.delete("code.image.view"); matched.delete("code.preview.screenshot"); }
   // A question is worth pausing a run for only when the request is genuinely open: a creation request, an
   // explicit "ask me", or a message too short to name a target. A concrete edit must not stop to ask.
   if (context.requireImplementation || ASK_PATTERN.test(message) || wordCount(message) <= 3) matched.add("code.ask_user");
