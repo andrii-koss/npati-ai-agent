@@ -7,7 +7,7 @@ import { ChatAttachmentInput } from "./chat-attachments";
 import { conversationTitle, inferOnboardingScenario, isLikelyOnboardingAside, isShortAffirmativeReply, isSimpleGreeting, onboardingGoalQuestion, quickOnboardingReply, requestsCompositeCompanyDeletionIntent } from "./chat-intent-helpers";
 import { publicChatError, publicCompanyRunMessage } from "./chat-public-errors";
 import { applyChatTelemetryHeaders } from "./chat-telemetry";
-import { CompanyChatActions } from "./company-chat-actions";
+import { CompanyChatActions, isReadOnlyCompanySwitch } from "./company-chat-actions";
 import { CompanyDelegationRuntime, companyRunTelemetryHeaders } from "./company-runtime";
 import { ContextCompactor } from "./context-compactor";
 import { createCoreServices } from "./core-services";
@@ -311,7 +311,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
         const runnableMainAgent = company.mainAgentId
           ? await workspaceStore.getCompanyAgent(auth, company.id, company.mainAgentId).then((agent) => agent.isActive).catch(() => false)
           : false;
-        if (managementRequest || !runnableMainAgent) {
+        if (managementRequest || isReadOnlyCompanySwitch(prompt ?? "") || !runnableMainAgent) {
           const result = await runNeutralMessage(auth, prompt || "", request.body.conversationId, request.body.attachments, undefined, memoryPolicy, undefined, undefined, { id: company.id, name: company.name });
           applyChatTelemetryHeaders(reply, result);
           return { ...result, activeContext: resolved.context };

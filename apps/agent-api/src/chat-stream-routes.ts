@@ -17,7 +17,7 @@ import { CodeRunRateLimitedError } from "./code-run-rate-limit";
 import { CodeService } from "./code-service";
 import { CodeSessionInboxService } from "./code-session-inbox";
 import { CodingAgentRunResult } from "./coding-agent-runner";
-import { CompanyChatActions } from "./company-chat-actions";
+import { CompanyChatActions, isReadOnlyCompanySwitch } from "./company-chat-actions";
 import { CompanyDelegationRuntime, companyRunTelemetryHeaders } from "./company-runtime";
 import { createCoreServices } from "./core-services";
 import { ActiveSessionRegistry } from "./distributed-session-registry";
@@ -685,7 +685,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
           const runnableMainAgent = company.mainAgentId
             ? await workspaceStore.getCompanyAgent(auth, company.id, company.mainAgentId).then((agent) => agent.isActive).catch(() => false)
             : false;
-          if (managementRequest || explicitCoreWebRequest || !runnableMainAgent) {
+          if (managementRequest || isReadOnlyCompanySwitch(message) || explicitCoreWebRequest || !runnableMainAgent) {
             const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal, { id: resolved.company!.id, name: resolved.company!.name });
             send("result", { ...result, activeContext: resolved.context });
           } else {

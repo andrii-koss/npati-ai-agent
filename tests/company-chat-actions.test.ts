@@ -981,3 +981,9 @@ describe("a refused company deletion", () => {
     expect(onlyRequestedCompanyDeletion("Видали агента Марко з компанії", "update")).toBe(true);
   });
 });
+
+it("keeps a read-only context switch out of mutation planning despite negative constraints",()=>{
+ const message='Switch to company "Test Studio" for this conversation. Tell me its exact name and agent names; do not create anything.';
+ expect(CompanyChatActions.isManagementRequest(message)).toBe(false);expect(CompanyChatActions.isPotentialMutationRequest(message)).toBe(false);
+ expect(CompanyChatActions.isManagementRequest('Do not delete company Test Studio. Update company Test Bakery description to new.')).toBe(true);
+});

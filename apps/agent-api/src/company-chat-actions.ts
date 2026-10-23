@@ -161,8 +161,20 @@ const numberWordMap: Record<string, number> = {
   "एक": 1, "दो": 2, "तीन": 3, "चार": 4, "पाँच": 5, "पांच": 5, "छह": 6, "छः": 6, "सात": 7, "आठ": 8, "नौ": 9, "दस": 10,
 };
 
+/** Ignore prohibited operations when deciding whether the user requested a company mutation. */
+function companyMutationText(message: string): string {
+  return message.replace(/\b(?:do\s+not|don't|never)\s+(?:create|add|edit|update|change|rename|delete|remove|configure|assign|build|set\s+up)\b/giu, " ");
+}
+
+export function isReadOnlyCompanySwitch(message: string): boolean {
+  const text = companyMutationText(message);
+  return /\b(?:switch|return)\s+to\s+(?:the\s+)?company\b/iu.test(text)
+    && !/\b(?:create|add|edit|update|change|rename|delete|remove|configure|assign|build|set\s+up)\b/iu.test(text);
+}
+
 export function isInformationalOrCapabilityQuery(message: string): boolean {
-  const text = message.trim();
+  const text = companyMutationText(message).trim();
+  if (isReadOnlyCompanySwitch(message)) return true;
   // A single question about existing records ("Які дві компанії ми створили?") asks, it does not change anything.
   const question = /^(?:які|який|яка|яке|скільки|хто|коли|де|чи|що|какие|какой|сколько|кто|when|which|what|who|whose|where|did|does|do|is|are|was|were|how\s+many|quais|qual|quantos|quantas|cuántos|cuántas|cuál|cuáles|welche|welcher|wie\s+viele|wer|wann)(?![\p{L}])/iu.test(text)
     && text.endsWith("?") && !/[.!]\s+\p{L}/u.test(text);
@@ -422,6 +434,7 @@ export class CompanyChatActions {
   }
 
   static isManagementRequest(message: string): boolean {
+    message = companyMutationText(message);
     if (isInformationalOrCapabilityQuery(message)) return false;
     return /^(?=[\s\S]*(?:створ|дод|редаг|змін|онов|видал|приб|налашт|признач|нада|доповн|заповн|зроб|побуд|засну|організ|переймен|поверн)\p{L}*)(?=[\s\S]*(?:компан|агент|пол(?:е|я|ів|ями)\s+(?:компан|агент)|головн\p{L}*\s+(?:агент|знову|має|буде|стане)|інструкц|промпт|рол|можливост)\p{L}*)/iu.test(message)
       || /^(?=[\s\S]*(?:созда|добав|редакт|измен|обнов|удал|убер|настро|назнач|предостав|допол)\p{L}*)(?=[\s\S]*(?:компан|агент|инструкц|промпт|рол|возможност)\p{L}*)/iu.test(message)
@@ -432,6 +445,8 @@ export class CompanyChatActions {
   }
 
   static isPotentialMutationRequest(message: string): boolean {
+    message = companyMutationText(message);
+    if (isInformationalOrCapabilityQuery(message)) return false;
     const mutation = /(?:заповн|дод|змін|онов|редаг|налашт|признач|нада|видал|приб|переймен|rename|созда|добав|измен|обнов|редакт|настро|назнач|предостав|удал|fill|set|add|change|update|edit|configure|assign|remove|delete)/iu.test(message);
     const companyField = /(?:recommended\s+prompts?|system\s+instructions?|prompt\s+guidelines?|tools?\s*(?:&|and)?\s*capabilities|instructions?|agents?|roles?|models?|пол(?:е|я|ів|ями)\s+(?:компан|агент)|інструкц|промпт|можливост|агент|рол|модел|инструкц|возможност)/iu.test(message);
     const deleteReference = deleteMutationSignal.test(withoutQuotedNames(message)) && selectedDeleteReferenceSignal.test(message);
