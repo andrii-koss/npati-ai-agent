@@ -139,6 +139,12 @@ export class ProjectMigrationEngine {
           [id, backend.id, environment, version, JSON.stringify(request.operation), change.reversible, change.destructive,
             change.requiresSnapshot, change.upSql, change.downSql ?? null, request.authorId, request.runId ?? null, checksum, snapshot?.id ?? null],
         ).catch(() => undefined);
+        // A schema or constraint error (e.g. a relation on a missing column) is the caller's to fix: report the
+        // database's message, which names only the identifiers of this operation, instead of an opaque failure.
+        const pg = error as { code?: unknown; message?: unknown };
+        if (!(error instanceof DataStudioError) && typeof pg.code === "string" && /^(42|23)/.test(pg.code) && typeof pg.message === "string") {
+          throw new DataStudioError(400, "migration", "The database rejected this migration: " + pg.message.slice(0, 300), false, "MIGRATION_REJECTED");
+        }
         throw error;
       } finally { client.release(); }
       const updated = await this.provider.introspectSchema(backend, environment);
