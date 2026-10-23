@@ -153,6 +153,8 @@ describe("company management from chat", () => {
   it("treats renaming an agent as company management", () => {
     expect(CompanyChatActions.isManagementRequest("Перейменуй агента Марко на «Марко SMM».")).toBe(true);
     expect(CompanyChatActions.isManagementRequest("Rename the agent Leo to Leo Content")).toBe(true);
+    expect(CompanyChatActions.isManagementRequest("Ні, поверни як було — головною знову має бути Олена.")).toBe(true);
+    expect(CompanyChatActions.isManagementRequest("Зроби головну сторінку темнішою")).toBe(false);
   });
 
   it("does not create a duplicate when the planner decorates an existing company name", async () => {

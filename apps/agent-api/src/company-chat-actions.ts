@@ -423,7 +423,7 @@ export class CompanyChatActions {
 
   static isManagementRequest(message: string): boolean {
     if (isInformationalOrCapabilityQuery(message)) return false;
-    return /^(?=[\s\S]*(?:створ|дод|редаг|змін|онов|видал|приб|налашт|признач|нада|доповн|заповн|зроб|побуд|засну|організ|переймен)\p{L}*)(?=[\s\S]*(?:компан|агент|пол(?:е|я|ів|ями)\s+(?:компан|агент)|інструкц|промпт|рол|можливост)\p{L}*)/iu.test(message)
+    return /^(?=[\s\S]*(?:створ|дод|редаг|змін|онов|видал|приб|налашт|признач|нада|доповн|заповн|зроб|побуд|засну|організ|переймен|поверн)\p{L}*)(?=[\s\S]*(?:компан|агент|пол(?:е|я|ів|ями)\s+(?:компан|агент)|головн\p{L}*\s+(?:агент|знову|має|буде|стане)|інструкц|промпт|рол|можливост)\p{L}*)/iu.test(message)
       || /^(?=[\s\S]*(?:созда|добав|редакт|измен|обнов|удал|убер|настро|назнач|предостав|допол)\p{L}*)(?=[\s\S]*(?:компан|агент|инструкц|промпт|рол|возможност)\p{L}*)/iu.test(message)
       || /\b(?:create|add|edit|update|change|rename|delete|remove|configure|assign|build|set\s+up)\s+(?:(?:a|an|the|my|new|main|another|me|\d+|one|two|three|four|five|six|seven|eight|nine|ten|more)\s+){0,3}(?:compan(?:y|ies)|agents?|orchestrator|agent\s+(?:team|network))\b/i.test(message)
       || /(?:компан\p{L}*|агент\p{L}*)\s+(?:мені\s+|для\s+мене\s+)?(?:створ\p{L}*|дод\p{L}*|редаг\p{L}*|онов\p{L}*|видал\p{L}*)/iu.test(message)
