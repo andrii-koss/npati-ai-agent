@@ -170,14 +170,17 @@ export async function runChatToolLoop(input: {
       ? step === 0 ? input.request.toolChoice ?? "auto" : "auto"
       : "none";
     const modelKey = String(input.request.model ?? "default");
-    if (typeof toolChoice === "object" && modelsRejectingForcedToolChoice.has(modelKey)) toolChoice = "auto";
+    // A forced web_search/web_fetch is a guarantee that the answer rests on retrieved content: its refusal goes to the
+    // caller's fallback, which runs the research itself. Only NPATI record actions are relaxed to "auto".
+    const relaxable = typeof toolChoice === "object" && !["web_search", "web_fetch"].includes(toolChoice.function.name);
+    if (relaxable && modelsRejectingForcedToolChoice.has(modelKey)) toolChoice = "auto";
     try {
       try {
         result = await input.ai.chat({ ...input.request, messages: [...messages], tools, toolChoice });
       } catch (error) {
         // Thinking models (DeepSeek) refuse a forced tool_choice. The same step is asked once with "auto", and the
         // model is remembered so later requests do not spend a failed call on it.
-        if (typeof toolChoice !== "object" || !/does not support this tool_choice/i.test(String((error as Error)?.message ?? error))) throw error;
+        if (!relaxable || typeof toolChoice !== "object" || !/does not support this tool_choice/i.test(String((error as Error)?.message ?? error))) throw error;
         modelsRejectingForcedToolChoice.add(modelKey);
         toolChoice = "auto";
         result = await input.ai.chat({ ...input.request, messages: [...messages], tools, toolChoice });
