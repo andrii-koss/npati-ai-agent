@@ -176,7 +176,9 @@ export async function runChatToolLoop(input: {
     if (relaxable && modelsRejectingForcedToolChoice.has(modelKey)) toolChoice = "auto";
     try {
       try {
-        result = await input.ai.chat({ ...input.request, messages: [...messages], tools, toolChoice });
+        result = await input.ai.chat({ ...input.request, messages: [...messages], tools, toolChoice,
+          // DeepSeek thinking rejects a named tool. The adapter applies this only to that supported model.
+          reasoningMode: typeof toolChoice === "object" ? "disabled" : input.request.reasoningMode });
       } catch (error) {
         // Thinking models (DeepSeek) refuse a forced tool_choice. The same step is asked once with "auto", and the
         // model is remembered so later requests do not spend a failed call on it.

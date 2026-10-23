@@ -121,7 +121,7 @@ export function createChatProjectIntentResolver(deps: {
       const context = await deps.getAIContext(auth);
       const routingSignal = input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000);
       const result = await routeWithSignal(() => deps.engine.chat({
-        model: context.model, temperature: 0, toolChoice: "none", tools: [], compression: "off",
+        model: context.model, temperature: 0, toolChoice: "none", tools: [], compression: "off", reasoningMode: "disabled",
         timeoutMs: 15_000, signal: routingSignal,
         messages: [{ role: "system", content: instructions }, { role: "user", content: JSON.stringify({
           message: SecurityPolicyEngine.protectText(message).sanitized, hasActiveProject: Boolean(input.activeProjectId),
