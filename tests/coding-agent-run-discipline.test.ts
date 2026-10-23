@@ -155,3 +155,23 @@ describe("an approval wait actually waits for the human decision", () => {
     expect(never.mock.calls.length).toBeGreaterThanOrEqual(5);
   });
 });
+
+describe("creating several tables in a row is not a tool-call cycle", () => {
+  it("lets a run apply schema operations for different collections", async () => {
+    const { CodingAgentRunner } = await import("../apps/agent-api/src/coding-agent-runner");
+    const { CODE_TOOL_SCHEMAS } = await import("../apps/agent-api/src/code-tool-registry");
+    const names = ["code.data.schema.inspect", "code.data.schema.apply", "code.fs.read"];
+    const tools = names.map((name) => ({ name, version: 1, status: "active", description: name, write: name === "code.data.schema.apply" }));
+    const apply = (collection: string) => ({ content: "", toolCalls: [{ id: collection, type: "function" as const, function: { name: "code.data.schema.apply", arguments: JSON.stringify({ expectedFingerprint: "f", operation: { kind: "create_collection", collection, fields: [{ name: "name", type: "string" }] } }) } }] });
+    const script = ["categories", "products", "orders", "reviews", "carts", "wishlists", "coupons"].map(apply).concat([{ content: "done" } as never]);
+    const runner = new CodingAgentRunner({
+      flags: { assertEnabled: async () => true }, rbac: { authorize: async () => ({ allowed: true }) },
+      toolRuntime: { listTools: () => tools, invoke: async (_ctx, input) => ({ ok: true, tool: input.tool, toolVersion: 1, schemaVersion: 1, result: { data: {} }, truncated: false, durationMs: 1 }) },
+      engine: { chat: async () => script.shift() ?? { content: "done" } },
+      schemas: tools.map((tool) => ({ ...tool, inputSchema: CODE_TOOL_SCHEMAS.find((schema) => schema.name === tool.name)!.inputSchema })),
+      limits: { maxStepsPerRun: 30, maxRunMinutes: 5 },
+    });
+    const outcome = await runner.run({ ctx: { userId: "u", workspaceId: "w", permissions: ["workspace:write"] }, session: { id: "s", workspaceId: "w", companyId: "c", projectId: "p", userId: "u", mode: "auto", status: "active", dataClassification: "confidential", retentionClass: "standard", revision: 1, createdAt: "", updatedAt: "" } as never, prompt: "Create the store database", websiteEdit: true, toolContext: { userMessage: "Create the store database", dataBackendAttached: true } }) as { reason?: string; message?: string };
+    expect(outcome.reason, outcome.message).not.toBe("loop_detected");
+  });
+});
