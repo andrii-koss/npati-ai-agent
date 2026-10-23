@@ -76,6 +76,13 @@ describe("workspace resources from chat", () => {
     expect(await WorkspaceChatActions.buildSystemPrompt(alice, store, "Create an automation for the bakery every Monday")).toContain(bakery.id);
   });
 
+  it("treats a remember request as a memory action in every chat language", () => {
+    for (const message of ["Remember for Nordic Fit: classes start every hour from 7am to 9pm.", "Merk dir: wir backen jeden Morgen um 6 Uhr", "Recuerda que abrimos a las 7", "Lembra que abrimos às 7", "Запам'ятай: ми працюємо з 7:00"]) {
+      expect(WorkspaceChatActions.isManagementRequest(message), message).toBe(true);
+    }
+    expect(WorkspaceChatActions.isManagementRequest("Do you remember how HIIT works?")).toBe(false);
+  });
+
   it("does not treat company or business profile fields (brand tone, audience) as a workspace resource", () => {
     for (const message of [
       "Створи компанію «Пекарня Сонях» — крафтова пекарня на Подолі. Тон бренду теплий і дружній. Мови: українська та англійська.",
