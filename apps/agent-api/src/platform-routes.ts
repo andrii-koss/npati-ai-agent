@@ -472,7 +472,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
       const result = await companyRuntime.execute(context, company.id, { task, mode: targetAgent ? "single" : "auto", preferredAgentId: targetAgent?.id, memoryScope: { sessionId: conversationId } }, connection.channel+":"+connection.id+":"+session.id+":"+Date.now(),signal);
       if (result.run.errorCode === "SECURITY_GUARDRAIL_BLOCKED") throw Object.assign(new Error(result.run.errorMessage || "Request blocked by security guardrails"), { status: 400, code: result.run.errorCode });
       await persistAutomaticCompanyMemory(context, company.id, result.run.id, text, result.run.status, false);
-      const message=publicCompanyRunMessage(result.run.result, result.run.errorMessage, text);return { message:messagingResultText(message),attachments:await messagingResultAttachments(context,message) };
+      const message=publicCompanyRunMessage(result.run.result, result.run.errorMessage, text, result.run.errorCode);return { message:messagingResultText(message),attachments:await messagingResultAttachments(context,message) };
     },
   });
   emailInboxWorker.setGatewayHook(async (input) => {

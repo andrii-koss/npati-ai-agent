@@ -54,10 +54,19 @@ export function publicChatError(error: unknown, route?: string) {
   return "NPATI Agent could not complete this message. Please try again.";
 }
 
-export function publicCompanyRunMessage(result: string | null | undefined, errorMessage: string | null | undefined, requestMessage: string) {
+/** Run failures caused by the company's own configuration or policy, not by the AI model. */
+const COMPANY_RUN_POLICY_ERRORS = new Set(["TOOL_FORBIDDEN", "NO_MEMORY_TOOL_FORBIDDEN", "COMPANY_INACTIVE", "CONTEXT_DELETED", "MAIN_AGENT_INACTIVE", "PERMISSION_REVOKED", "RUN_CANCELLED", "SECURITY_GUARDRAIL_BLOCKED"]);
+
+export function publicCompanyRunMessage(result: string | null | undefined, errorMessage: string | null | undefined, requestMessage: string, errorCode?: string | null) {
   if (result?.trim()) return result;
   if (!errorMessage?.trim()) return "Company run completed.";
   const language = detectCompanyChatLanguage(requestMessage);
+  if (errorCode && COMPANY_RUN_POLICY_ERRORS.has(errorCode)) {
+    const reason = errorMessage.trim().slice(0, 300);
+    if (language === "uk") return `Завдання компанії не виконано: ${reason}`;
+    if (language === "ru") return `Задача компании не выполнена: ${reason}`;
+    return `The company task was not completed: ${reason}`;
+  }
   if (language === "uk") return "Не вдалося виконати завдання компанії через тимчасову недоступність вибраної AI-моделі. Перевірте підключення вибраної моделі в AI Marketplace і спробуйте ще раз.";
   if (language === "ru") return "Не удалось выполнить задачу компании из-за временной недоступности выбранной AI-модели. Проверьте подключение выбранной модели в AI Marketplace и попробуйте снова.";
   return "The company task could not be completed because the selected AI model is temporarily unavailable. Check the selected model connection in AI Marketplace, then try again.";
