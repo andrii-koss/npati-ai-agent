@@ -321,15 +321,13 @@ ${localized.next}`;
       ? await CompanyChatActions.buildDeterministicAction(auth, workspaceStore, requestMessage, route?.selectedCompanyId, route?.responseLanguage) ?? content
       : content;
     // A directive whose JSON does not parse is planned once more with the parser error; one attempt, no loop.
-    const malformedDirective = (text: string) => {
-      const block = text.match(/```company-action\s*([\s\S]*?)```/i)?.[1];
-      if (block === undefined) return undefined;
-      try { JSON.parse(block.trim()); return undefined; } catch (error) { return error instanceof Error ? error.message : String(error); }
-    };
+    const malformedDirective = (text: string) => malformedFencedJson(text, "company-action");
     let parseError = malformedDirective(actionText);
+    let retriedMalformed = false;
     for (let attempt = 0; attempt < 2 && managementRequest && auth.permissions.includes("business:manage"); attempt += 1) {
       if (/```company-action/i.test(actionText) && !parseError) break;
       if (attempt > 0 && !parseError) break;
+      if (parseError && retriedMalformed) break;
       try {
         const prompt = await CompanyChatActions.buildActionPlannerPrompt(auth, workspaceStore, requestMessage!, route?.selectedCompanyId, addedModels, aiRefinement, route?.researchContext, route?.responseLanguage);
         const planned = await aiEngine.chat({
@@ -340,7 +338,7 @@ ${localized.next}`;
           signal: route?.signal,
           messages: [
             { role: "system", content: prompt },
-            ...(parseError ? [{ role: "system" as const, content: `The previous company-action block was not valid JSON (${parseError.slice(0, 200)}). Return one complete block with valid JSON.` }] : []),
+            ...((retriedMalformed = Boolean(parseError)) ? [{ role: "system" as const, content: `The previous company-action block was not valid JSON (${String(parseError).slice(0, 200)}). Return one complete block with valid JSON.` }] : []),
             { role: "user", content: requestMessage! },
           ],
         });
@@ -635,11 +633,24 @@ ${localized.next}`;
     return { ...memoryResult, cleanText: [cleanBusinessReply, memoryResult.cleanText].filter(Boolean).join("\n\n") };
   }
 
+  /** The parser error of a fenced directive's JSON, or undefined when it parses or is absent. */
+  function malformedFencedJson(text: string, fence: "company-action" | "email-action"): string | undefined {
+    const block = (fence === "company-action" ? /```company-action\s*([\s\S]*?)```/i : /```email-action\s*([\s\S]*?)```/i).exec(text)?.[1];
+    if (block === undefined) return undefined;
+    try { JSON.parse(block.trim()); return undefined; } catch (error) { return error instanceof Error ? error.message : String(error); }
+  }
+
   async function executeEmailChatAction(auth: AuthContext, content: string, requestMessage?: string, route?: { model?: string; fallbackModel?: string; signal?: AbortSignal; selectedCompanyId?: string; attachments?: import("./email-inbox-types").EmailAttachment[] }) {
     const managementRequest = Boolean(requestMessage && EmailChatActions.isManagementRequest(requestMessage));
     if (!/```email-action/i.test(content) && !managementRequest) return { cleanText: content, emailAction: undefined };
     let actionText = content;
-    if (!/```email-action/i.test(actionText) && managementRequest && auth.permissions.includes("business:manage")) {
+    // As for company actions: a directive with malformed JSON is planned once more with the parser error.
+    let parseError = malformedFencedJson(actionText, "email-action");
+    let retriedMalformed = false;
+    for (let attempt = 0; attempt < 2 && managementRequest && auth.permissions.includes("business:manage"); attempt += 1) {
+      if (/```email-action/i.test(actionText) && !parseError) break;
+      if (attempt > 0 && !parseError) break;
+      if (parseError && retriedMalformed) break;
       try {
         const prompt = await EmailChatActions.buildActionPlannerPrompt(auth, workspaceStore, emailInboxRepo, requestMessage!, route?.selectedCompanyId, apiKeysRepo);
         const planned = await aiEngine.chat({
@@ -648,11 +659,17 @@ ${localized.next}`;
           admission: admissionFor(auth),
           timeoutMs: 90_000,
           signal: route?.signal,
-          messages: [{ role: "system", content: prompt }, { role: "user", content: requestMessage! }],
+          messages: [
+            { role: "system", content: prompt },
+            ...((retriedMalformed = Boolean(parseError)) ? [{ role: "system" as const, content: `The previous email-action block was not valid JSON (${String(parseError).slice(0, 200)}). Return one complete block with valid JSON.` }] : []),
+            { role: "user", content: requestMessage! },
+          ],
         });
         actionText = planned.content;
+        parseError = malformedFencedJson(actionText, "email-action");
       } catch (error) {
         log.warn({ err: error }, "Email action planning failed");
+        break;
       }
     }
     if (!/```email-action/i.test(actionText)) return {
