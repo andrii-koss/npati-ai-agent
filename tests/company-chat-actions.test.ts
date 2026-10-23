@@ -120,6 +120,12 @@ describe("company management from chat", () => {
     expect(await CompanyChatActions.deleteConfirmationMessage(alice, store, "Видали компанію «Temp Delete Co».")).toBeTruthy();
   });
 
+  it("does not treat a question about existing companies as a change", () => {
+    expect(CompanyChatActions.isManagementRequest("Які дві компанії ми сьогодні створили і яка з них має сайт на Next.js?")).toBe(false);
+    expect(CompanyChatActions.isManagementRequest("Which agents did we add to Nordic Fit?")).toBe(false);
+    expect(CompanyChatActions.isManagementRequest("Створи компанію Nordic Fit. Які агенти їй потрібні?")).toBe(true);
+  });
+
   it("treats renaming an agent as company management", () => {
     expect(CompanyChatActions.isManagementRequest("Перейменуй агента Марко на «Марко SMM».")).toBe(true);
     expect(CompanyChatActions.isManagementRequest("Rename the agent Leo to Leo Content")).toBe(true);

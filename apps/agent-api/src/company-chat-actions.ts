@@ -163,6 +163,10 @@ const numberWordMap: Record<string, number> = {
 
 export function isInformationalOrCapabilityQuery(message: string): boolean {
   const text = message.trim();
+  // A single question about existing records ("Які дві компанії ми створили?") asks, it does not change anything.
+  const question = /^(?:які|який|яка|яке|скільки|хто|коли|де|чи|що|какие|какой|сколько|кто|when|which|what|who|whose|where|did|does|do|is|are|was|were|how\s+many|quais|qual|quantos|quantas|cuántos|cuántas|cuál|cuáles|welche|welcher|wie\s+viele|wer|wann)(?![\p{L}])/iu.test(text)
+    && text.endsWith("?") && !/[.!]\s+\p{L}/u.test(text);
+  if (question) return true;
   const informationalSignal = /(?:how\s+(?:to|do\s+I|can\s+I|does\s+one|should\s+I)|tell\s+me\s+how|explain\s+how|what\s+(?:is|are|can\s+you\s+do)|can\s+you\s+(?:create|add|manage|build|do)\b|are\s+you\s+able\s+to|is\s+it\s+possible\s+to|show\s+me\s+how|help\s+me\s+understand|як\s+(?:створити|додати|керувати|налаштувати|зробити)|розкажи(?:те)?\s+як|поясни(?:те)?\s+як|чи\s+мож(?:ете|на)|чи\s+вмієте|що\s+таке|как\s+(?:создать|добавить|управлять|настроить|сделать)|расскажи(?:те)?\s+как|объясни(?:те)?\s+как|можешь\s+ли|вы\s+можете|comment\s+(?:créer|ajouter|faire)|pouvez-vous|peux-tu|wie\s+(?:kann\s+ich|erstelle\s+ich|funktioniert)|kannst\s+du|können\s+sie|cómo\s+(?:crear|puedo|se\s+crea)|puedes|puede|come\s+(?:creare|posso|si\s+crea)|puoi|potete|jak\s+(?:stworzyć|utworzyć|dodać|mogę)|czy\s+możesz|como\s+(?:criar|posso|se\s+cria)|você\s+pode|hoe\s+(?:kan\s+ik|maak\s+ik)|kun\s+je|kunt\s+u|nasıl\s+(?:oluşturulur|eklenir|yapılır)|yapabilir\s+misin|如何|怎么|能否|可以.*吗|你会.*吗|怎样|どうやって|どのように|できますか|可能ですか|作成方法|어떻게|할\s+수\s+있나요|가능한가요|만드는\s+방법|كيف\s+(?:أنشئ|يمكن|تستطيع)|هل\s+يمكنك|اشرح\s+لي\s+كيف|कैसे\s+(?:बनाएँ|बनाते\s+हैं|करूं)|क्या\s+आप)/iu.test(text);
 
   if (!informationalSignal) return false;
