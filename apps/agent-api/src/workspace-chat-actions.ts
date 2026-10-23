@@ -1,3 +1,4 @@
+import { requestsBusinessGoal } from "./chat-intent-helpers";
 import { createHash } from "node:crypto";
 import type { AuthContext, Business, Company, CompanyAgentRunDetails, CompanyRunMode, MemoryInput, WorkspaceStore } from "@npati/workspace";
 import type { CompanyAutomation, CompanyAutomationsRepository } from "./automations-repository";
@@ -328,7 +329,7 @@ export class WorkspaceChatActions {
   static isManagementRequest(message: string): boolean {
     const subject = profileEntitySignal.test(message) ? message.replace(profileFieldTerms, " ") : message;
     const resource = resourceSignals.some((pattern) => pattern.test(subject)) || websiteResourceSignals.some((pattern) => pattern.test(subject)) || webhookResourceSignal.test(subject);
-    return memoryVerbSignal.test(subject) || resource && (actionSignals.some((pattern) => pattern.test(message)) || automationReadSignals.some((pattern) => pattern.test(message)));
+    return requestsBusinessGoal(message) || memoryVerbSignal.test(subject) || resource && (actionSignals.some((pattern) => pattern.test(message)) || automationReadSignals.some((pattern) => pattern.test(message)));
   }
 
   static isPotentialMutationRequest(message: string): boolean {

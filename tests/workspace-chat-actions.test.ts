@@ -371,3 +371,15 @@ describe("workspace resources from chat", () => {
     } finally { await app.close(); }
   });
 });
+
+describe("Business Goal routing inside a company conversation", () => {
+  it.each([
+    "Create a goal Launch linked to Business Bakery, priority 2",
+    "Створи ціль Запуск для бізнесу Пекарня",
+    "Atualize o objetivo Lançamento do Business Padaria",
+    "Cambia el objetivo Lanzamiento del Business Panadería",
+    "Ändere das Ziel Einführung im Business Bäckerei",
+  ])("keeps record operations with the existing workspace coordinator: %s", message => {
+    expect(WorkspaceChatActions.isManagementRequest(message)).toBe(true);
+  });
+});
