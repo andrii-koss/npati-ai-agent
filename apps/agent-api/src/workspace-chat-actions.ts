@@ -197,6 +197,9 @@ const profileEntitySignal = /(?:компан\p{L}*|бізнес[- ]?профіл
 // "Do you remember ...?" is a question, not an action.
 const memoryVerbSignal = /(?:^|[.!?;:]\s+)(?:please\s+|por favor,?\s+|bitte\s+)?(?:remember|merk(?:e|t)?\s+dir|merken?\s+sie|recuerd[ae]|lembr[ae](?:-?se)?|m[ée]morise|ricorda|zapamiętaj|onthoud|hatırla|запомни)(?![\p{L}])/iu;
 
+/** Researching or analysing websites is reading them, not managing the campaign's website targets. */
+const researchVerbSignal = /(?:\bresearch\b|recherch\p{L}*|pesquis\p{L}*|investiga\p{L}*|\bsearch\b|\banaly[sz]e\b|analysier\p{L}*|\bcompare\b|vergleich\p{L}*|досліди\p{L}*|дослідж\p{L}*|проаналізуй|порівня\p{L}*|знайди\s+в\s+інтернеті)/iu;
+
 // Webhooks are the company's inbound integrations; they are managed like automations.
 const webhookResourceSignal = /(?:webhook|вебхук|веб-хук|інтеграц\p{L}*|integration|integraç\p{L}*|integraci\p{L}*|integrationen)/iu;
 
@@ -328,8 +331,13 @@ function contentTask(task: string): { title?: string; type: ContentLibraryType }
 export class WorkspaceChatActions {
   static isManagementRequest(message: string, options: { includeGoals?: boolean } = {}): boolean {
     const subject = profileEntitySignal.test(message) ? message.replace(profileFieldTerms, " ") : message;
-    const resource = resourceSignals.some((pattern) => pattern.test(subject)) || websiteResourceSignals.some((pattern) => pattern.test(subject)) || webhookResourceSignal.test(subject);
-    return (options.includeGoals !== false && requestsBusinessGoal(message)) || memoryVerbSignal.test(subject) || resource && (actionSignals.some((pattern) => pattern.test(message)) || automationReadSignals.some((pattern) => pattern.test(message)));
+    // "Research two bakery websites …" reads websites; it does not manage the browser campaign's website targets.
+    const websiteTargets = websiteResourceSignals.some((pattern) => pattern.test(subject)) && !researchVerbSignal.test(message);
+    const resource = resourceSignals.some((pattern) => pattern.test(subject)) || websiteTargets || webhookResourceSignal.test(subject);
+    // A question about the goals ("Welche Ziele hat die Bäckerei?") is answered, not planned as a goal action.
+    const question = /\?\s*$/u.test(message.trim())
+      && /^(?:[^:?]{0,40}:\s*)?(?:які|який|яка|скільки|що|чи|какие|сколько|what|which|how\s+many|do\s+we|does|welche|welcher|was|wie\s+viele|quais|qual|quantos|cuáles|cuál|cuántos|quelles?|quels?)(?![\p{L}])/iu.test(message.trim());
+    return (options.includeGoals !== false && requestsBusinessGoal(message) && !question) || memoryVerbSignal.test(subject) || resource && (actionSignals.some((pattern) => pattern.test(message)) || automationReadSignals.some((pattern) => pattern.test(message)));
   }
 
   static isPotentialMutationRequest(message: string): boolean {

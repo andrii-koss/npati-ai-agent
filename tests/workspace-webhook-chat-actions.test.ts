@@ -72,3 +72,12 @@ describe("activity from chat", () => {
     expect(result.cleanText).toContain("storage.company_memory");
   });
 });
+
+describe("questions and research mentioning workspace records", () => {
+  it("are not planned as workspace actions", () => {
+    expect(WorkspaceChatActions.isManagementRequest("Wechsel zu Deutsch: Welche Ziele hat die Bäckerei gerade?")).toBe(false);
+    expect(WorkspaceChatActions.isManagementRequest("Recherchiere zwei echte deutsche Bäckerei-Websites und nenne drei Designideen für unsere Startseite, mit Quellen.")).toBe(false);
+    expect(WorkspaceChatActions.isManagementRequest("Яка зараз ситуація по цілі 350 замовлень? Встанови поточне значення 120.")).toBe(true);
+    expect(WorkspaceChatActions.isManagementRequest("Can you add a goal for 100 customers?")).toBe(true);
+  });
+});
