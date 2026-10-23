@@ -291,7 +291,9 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         const codeProjectKind = codeProject ? ((codeProject as { type?: string }).type === "code_project" ? "code_project" : "website") : null;
         const codeDecision = resolveChatCodeIntent({
           message,
-          projectIntent: semantic?.source === "semantic" ? projectIntent.intent : undefined,
+          // A guard decision (an NPATI company/automation/memory request) is binding like a semantic one; only the
+          // deterministic fallback for an unavailable classifier is left to the code-intent classifier.
+          projectIntent: semantic?.source === "semantic" || semantic?.source === "guard" ? projectIntent.intent : undefined,
           codingEnabled,
           companyId: activeCompanyId,
           projectId: codeProject ? effectiveProjectId : null,
