@@ -242,7 +242,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
     let researchJob: { id: string } | undefined;
     const hasAttachedEvidence = media.images.length > 0 || media.extractedDocs.length > 0 || Boolean(previousSpreadsheet);
     const webResearchRequested = !nativeToolCalling && (!hasAttachedEvidence || explicitlyRequestsWebResearch(message)) && (
-      !companySettingsRequest || explicitlyRequestsWebResearch(message)
+      (!companySettingsRequest && !workspaceSettingsRequest && !emailSettingsRequest) || explicitlyRequestsWebResearch(message)
     );
     const namedPage = companySettingsRequest ? undefined : extractTargetUrlOrDomain(message) ?? undefined;
     const runWebResearch = async (researchService: NonNullable<typeof webResearch>, options: { mode?: "search" } = {}) => {
