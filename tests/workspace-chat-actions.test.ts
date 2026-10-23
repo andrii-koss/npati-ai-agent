@@ -57,6 +57,17 @@ describe("workspace resources from chat", () => {
     expect(WorkspaceChatActions.isManagementRequest("Explain what an automation is")).toBe(false);
   });
 
+  it("does not treat company or business profile fields (brand tone, audience) as a workspace resource", () => {
+    for (const message of [
+      "Створи компанію «Пекарня Сонях» — крафтова пекарня на Подолі. Тон бренду теплий і дружній. Мови: українська та англійська.",
+      "Create a company Nordic Fit, brand voice energetic, audience professionals aged 25-40",
+      "Cria uma empresa Café Lisboa com voz da marca acolhedora",
+    ]) expect(WorkspaceChatActions.isManagementRequest(message)).toBe(false);
+    expect(WorkspaceChatActions.isManagementRequest("Запам'ятай тон бренду компанії: теплий і дружній")).toBe(true);
+    expect(WorkspaceChatActions.isManagementRequest("Save our brand voice: warm and friendly")).toBe(true);
+    expect(WorkspaceChatActions.isManagementRequest("Створи автоматизацію для компанії: щопонеділка план постів")).toBe(true);
+  });
+
   it("creates a validated automation for an owned company", async () => {
     const store = new InMemoryWorkspaceStore();
     const automations = new CompanyAutomationsRepository();
