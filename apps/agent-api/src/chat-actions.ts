@@ -379,7 +379,7 @@ ${localized.next}`;
     const availableToolNames = tools.map((tool) => tool.function.name);
     const directUrl = extractTargetUrlOrDomain(message);
     const semanticExternalIntent = Boolean(webResearch?.shouldResearch(message));
-    const companyManagementIntent = CompanyChatActions.isManagementRequest(message);
+    const companyManagementIntent = !WorkspaceChatActions.isManagementRequest(message) && !EmailChatActions.isManagementRequest(message) && CompanyChatActions.isManagementRequest(message);
     const internalManagementIntent = companyManagementIntent || WorkspaceChatActions.isManagementRequest(message) || EmailChatActions.isManagementRequest(message);
     const explicitWebIntent = explicitlyRequestsWebResearch(message, { requireOperation: internalManagementIntent });
     const primaryInstruction = message.split(String.fromCharCode(10)).map((line) => line.trim()).filter(Boolean).slice(0, 3).join(" ");
@@ -524,7 +524,7 @@ ${localized.next}`;
   }
 
   async function executeWorkspaceChatAction(auth: AuthContext, content: string, conversationId?: string, requestMessage?: string, route?: { model?: string; fallbackModel?: string; signal?: AbortSignal; selectedCompanyId?: string; selectedBusinessId?: string }) {
-    const explicitManagement = Boolean(requestMessage && WorkspaceChatActions.isManagementRequest(requestMessage));
+    const explicitManagement = Boolean(requestMessage && WorkspaceChatActions.isManagementRequest(requestMessage, { includeGoals: false }));
     let contextualMutation = false;
     if (!explicitManagement && requestMessage && conversationId && WorkspaceChatActions.isPotentialMutationRequest(requestMessage)) {
       const conversation = await (route?.selectedBusinessId
