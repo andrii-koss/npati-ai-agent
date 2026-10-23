@@ -182,6 +182,11 @@ const referenceSignals = [
   /(?:इसे|यह|इसको|अंतिम|पिछल)/u,
 ];
 
+// Brand voice and audience are also Company / Business Profile fields: they only name a memory resource when the
+// request is not about a company or business profile ("Create company X. Brand tone: warm" creates a company).
+const profileFieldTerms = /(?:brand\s+(?:voice|tone)|audience(?:\s+profile)?|тон\p{L}*\s+бренд\p{L}*|аудитор\p{L}*|voix de marque|markenstimme|zielgruppe|voz de marca|audiencia|voce del marchio|pubblico|głos marki|odbiorcy|voz da marca|público|merkstem|doelgroep|marka sesi|hedef kitle|голос\p{L}*\s+бренд\p{L}*|品牌语气|受众)/giu;
+const profileEntitySignal = /(?:компан\p{L}*|бізнес[- ]?профіл\p{L}*|бизнес[- ]?профил\p{L}*|\bcompan(?:y|ies)\b|business\s+profile|entreprise|unternehmen|empresa|azienda|perfil\s+de\s+neg[óo]cio|bedrijf|şirket|公司)/iu;
+
 const automationReadSignals = [
   /\b(?:list|show|which|when|status|history|runs?|tasks?|websites?|sites?)\b/iu,
   /(?:покажи|перегля|список|який|яка|які|коли|статус|історі|запуск|завдан|сайт)/iu,
@@ -309,7 +314,8 @@ function contentTask(task: string): { title?: string; type: ContentLibraryType }
 
 export class WorkspaceChatActions {
   static isManagementRequest(message: string): boolean {
-    const resource = resourceSignals.some((pattern) => pattern.test(message)) || websiteResourceSignals.some((pattern) => pattern.test(message));
+    const subject = profileEntitySignal.test(message) ? message.replace(profileFieldTerms, " ") : message;
+    const resource = resourceSignals.some((pattern) => pattern.test(subject)) || websiteResourceSignals.some((pattern) => pattern.test(subject));
     return resource && (actionSignals.some((pattern) => pattern.test(message)) || automationReadSignals.some((pattern) => pattern.test(message)));
   }
 
