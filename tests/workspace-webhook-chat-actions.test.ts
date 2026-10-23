@@ -56,3 +56,19 @@ describe("enable and disable requests", () => {
     expect(WorkspaceChatActions.isManagementRequest("Turn off the weekly automation")).toBe(true);
   });
 });
+
+describe("activity from chat", () => {
+  it("lists recent company runs with their status and failure reason", async () => {
+    const context: AuthContext = { workspaceId: "workspace-activity", userId: "owner", permissions: ["workspace:read", "workspace:write", "business:manage"] };
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(context, { name: "Bakery" }, "bakery-activity");
+    const main = await store.createCompanyAgent(context, company.id, { name: "Олена", role: "COO" }, "olena-activity");
+    await store.setCompanyMainAgent(context, company.id, main.id, company.revision);
+    const run = await store.createCompanyAgentRun(context, company.id, { task: "Підготуй план постів", requestedMode: "single" } as never, "activity-run");
+    await store.updateCompanyAgentRun(context, company.id, (run as { run?: { id: string } }).run?.id ?? (run as { id: string }).id, { status: "failed", errorCode: "TOOL_FORBIDDEN", errorMessage: "Agent may not use storage.company_memory" } as never);
+    const result = await WorkspaceChatActions.extractAndExecute(context, "```workspace-action\n" + JSON.stringify({ action: "activity.list", companyId: company.id, intro: "Останні дії:" }) + "\n```", { store } as never, "activity-conversation", { requestMessage: "Покажи останні дії в Activity", selectedCompanyId: company.id });
+    expect(result.cleanText).toContain("Підготуй план постів");
+    expect(result.cleanText).toContain("TOOL_FORBIDDEN");
+    expect(result.cleanText).toContain("storage.company_memory");
+  });
+});
