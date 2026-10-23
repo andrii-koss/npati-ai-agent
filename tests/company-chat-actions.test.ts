@@ -95,6 +95,11 @@ describe("company management from chat", () => {
     } finally { await app.close(); }
   });
 
+  it("treats renaming an agent as company management", () => {
+    expect(CompanyChatActions.isManagementRequest("Перейменуй агента Марко на «Марко SMM».")).toBe(true);
+    expect(CompanyChatActions.isManagementRequest("Rename the agent Leo to Leo Content")).toBe(true);
+  });
+
   it("does not create a duplicate when the planner decorates an existing company name", async () => {
     const store = new InMemoryWorkspaceStore();
     const existing = await store.createCompany(alice, { name: "Nordic Fit" }, "existing-fit");
