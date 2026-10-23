@@ -906,3 +906,12 @@ describe("Email / AI Inbox Module", () => {
     await app.close();
   });
 });
+
+describe("inbound email without a mailbox", () => {
+  it("is refused explicitly instead of failing on a placeholder account id", async () => {
+    const processor = new EmailAIProcessor(new EmailInboxRepository());
+    const auth = { workspaceId: "ws-no-mailbox", userId: "owner", permissions: ["email:manage_accounts"] } as AuthContext;
+    await expect(processor.processInbound(auth, "company-without-mailbox", { from: "customer@example.com", subject: "Hello", body: "Do you bake gluten-free bread?" }))
+      .rejects.toMatchObject({ status: 409, code: "EMAIL_ACCOUNT_REQUIRED" });
+  });
+});
