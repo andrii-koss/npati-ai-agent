@@ -261,8 +261,13 @@ export class CodingAgentToolWaves {
     if (!callsToRun.length) return { action: "continue" };
 
     const turnSig = callsToRun.map((c) => {
-      const p = (c.arguments as Record<string, unknown>)?.path;
-      return p && typeof p === "string" ? `${c.name}:${p}` : c.name;
+      const args = c.arguments as Record<string, unknown> | undefined;
+      const p = args?.path;
+      if (p && typeof p === "string") return `${c.name}:${p}`;
+      // Data tools carry no path: creating categories, products and orders is three different steps, not a cycle.
+      const op = args?.operation as Record<string, unknown> | undefined;
+      const target = [args?.collection, op?.kind, op?.collection, (op?.field as Record<string, unknown> | undefined)?.name].filter((v) => typeof v === "string").join(":");
+      return target ? `${c.name}:${target}` : c.name;
     }).join(";");
     this.turnPatterns.push(turnSig);
     while (this.turnPatterns.length > 12) this.turnPatterns.shift();
