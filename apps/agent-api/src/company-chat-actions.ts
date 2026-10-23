@@ -349,6 +349,19 @@ export function companyNamedAfterNoun(message: string): string | undefined {
   return capitalised?.[1]?.trim();
 }
 
+class NamedCompanyNotFoundError extends Error {
+  constructor(readonly companyName: string) { super(`Company "${companyName}" was not found in your account`); }
+}
+
+const namedCompanyNotFoundCopy: Partial<Record<CompanyChatLanguage, string>> = {
+  uk: "Компанію «{name}» не знайдено серед ваших компаній (можливо, її видалено). Нічого не змінено.",
+  ru: "Компания «{name}» не найдена среди ваших компаний (возможно, она удалена). Ничего не изменено.",
+  pt: "A empresa «{name}» não foi encontrada (talvez tenha sido excluída). Nada foi alterado.",
+  es: "No se encontró la empresa «{name}» (quizá se eliminó). No se cambió nada.",
+  de: "Das Unternehmen «{name}» wurde nicht gefunden (vielleicht gelöscht). Nichts wurde geändert.",
+  en: "Company «{name}» was not found among your companies (it may have been deleted). Nothing was changed.",
+};
+
 /** Whether the request names a different company than `company` (case-insensitive prefix match either way). */
 function requestNamesOtherCompany(message: string, company: Pick<Company, "name">): boolean {
   const named = companyNamedAfterNoun(message)?.toLocaleLowerCase();
@@ -622,7 +635,7 @@ For update, include only fields that should change. To change only agents, use a
         company = await ownedCompany(store, auth, directive, options.selectedCompanyId);
         // "Add an agent to company X" must never change the selected company Y when X does not exist (or was deleted).
         if (options.requestMessage && requestNamesOtherCompany(options.requestMessage, company)) {
-          throw new Error(`Company "${companyNamedAfterNoun(options.requestMessage)}" was not found in your account`);
+          throw new NamedCompanyNotFoundError(companyNamedAfterNoun(options.requestMessage)!);
         }
         if (directive.action === "delete") {
           if (directive.agents?.length) throw new Error("Do not combine company deletion with agent changes");
@@ -703,6 +716,10 @@ For update, include only fields that should change. To change only agents, use a
       return { cleanText, companyAction: { action: actualAction, companyId: company.id, companyName: company.name, agentCount: agents.length } };
     } catch (error) {
       options.onError?.(error);
+      if (error instanceof NamedCompanyNotFoundError) {
+        const language = options.responseLanguage ?? detectCompanyChatLanguage(options.requestMessage ?? "");
+        return { cleanText: (namedCompanyNotFoundCopy[language] ?? namedCompanyNotFoundCopy.en!).replace("{name}", safeMarkdown(error.companyName)) };
+      }
       const labels = companyChatCopy(options.requestMessage, options.responseLanguage);
       return { cleanText: `${labels.failed}. ${changed ? labels.partial : labels.unchanged}` };
     }

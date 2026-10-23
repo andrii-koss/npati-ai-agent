@@ -135,6 +135,7 @@ describe("company management from chat", () => {
     expect(await CompanyChatActions.buildDeterministicAction(alice, store, message, bakery.id)).toBeUndefined();
     const result = await CompanyChatActions.extractAndExecute(alice, directive({ action: "update", companyId: bakery.id, agents: [{ action: "create", fields: { name: "Тест", role: "Тест" } }] }), store, "named-missing", { requestMessage: message, selectedCompanyId: bakery.id });
     expect(result.companyAction).toBeUndefined();
+    expect(result.cleanText).toContain("Temp Delete Co");
     expect(await store.listCompanyAgents(alice, bakery.id)).toHaveLength(0);
     const own = await CompanyChatActions.extractAndExecute(alice, directive({ action: "update", companyId: bakery.id, agents: [{ action: "create", fields: { name: "Олег", role: "Бариста" } }] }), store, "named-own", { requestMessage: "Додай агента «Олег» у компанію Пекарня Сонях", selectedCompanyId: bakery.id });
     expect(own.companyAction?.companyId).toBe(bakery.id);
