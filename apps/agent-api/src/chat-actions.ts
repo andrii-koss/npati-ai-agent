@@ -652,7 +652,7 @@ ${localized.next}`;
       if (attempt > 0 && !parseError) break;
       if (parseError && retriedMalformed) break;
       try {
-        const prompt = await EmailChatActions.buildActionPlannerPrompt(auth, workspaceStore, emailInboxRepo, requestMessage!, route?.selectedCompanyId, apiKeysRepo);
+        const prompt = await EmailChatActions.buildActionPlannerPrompt(auth, workspaceStore, emailInboxRepo, requestMessage!, route?.selectedCompanyId, apiKeysRepo, route?.addressReferences);
         const planned = await aiEngine.chat({
           model: route?.model,
           fallbackModel: route?.fallbackModel,
@@ -673,7 +673,7 @@ ${localized.next}`;
       }
     }
     if (!/```email-action/i.test(actionText)) return {
-      cleanText: managementRequest ? EmailChatActions.noActionMessage() : content,
+      cleanText: managementRequest ? EmailChatActions.noActionMessage(requestMessage) : content,
       emailAction: undefined,
     };
     return EmailChatActions.extractAndExecute(auth, actionText, workspaceStore, emailInboxRepo, {

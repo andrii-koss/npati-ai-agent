@@ -915,3 +915,21 @@ describe("inbound email without a mailbox", () => {
       .rejects.toMatchObject({ status: 409, code: "EMAIL_ACCOUNT_REQUIRED" });
   });
 });
+
+describe("email planner scope", () => {
+  it("uses the one other company whose inbox has mail from the address the request names", async () => {
+    const { EmailChatActions } = await import("../apps/agent-api/src/email-chat-actions");
+    const { InMemoryWorkspaceStore } = await import("@npati/workspace");
+    const auth = { workspaceId: "ws-scope", userId: "owner", permissions: ["business:manage", "email:manage_accounts"] } as AuthContext;
+    const store = new InMemoryWorkspaceStore();
+    const repo = new EmailInboxRepository();
+    const fit = await store.createCompany(auth, { name: "Nordic Fit" }, "fit");
+    const bakery = await store.createCompany(auth, { name: "Bakery" }, "bakery");
+    await repo.createAccount(auth, bakery.id, { emailAddress: "bakery@example.com", testMode: true } as never);
+    await new EmailAIProcessor(repo).processInbound(auth, bakery.id, { from: "e2e-test@example.com", subject: "Late order", body: "My order was two hours late." });
+    const prompt = await EmailChatActions.buildSystemPrompt(auth, store, repo, "Прийшов лист зі скаргою від EMAIL_REF_ab_1. Склади відповідь", fit.id, undefined, { EMAIL_REF_ab_1: "e2e-test@example.com" });
+    expect(prompt).toContain(bakery.id);
+    expect(prompt).not.toContain(`"companyId":"${fit.id}"`);
+    expect(EmailChatActions.noActionMessage("Видали лист про лотерею")).toMatch(/^Не вдалося/);
+  });
+});

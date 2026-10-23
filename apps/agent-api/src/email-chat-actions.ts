@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { AuthContext, WorkspaceStore } from "@npati/workspace";
 import type { ApiKeysRepository } from "./api-keys-repository";
+import { detectCompanyChatLanguage } from "./company-chat-i18n";
 import { EmailConnectionTester } from "./email-connection-tester";
 import { EmailDnsVerifier } from "./email-dns-verifier";
 import type { EmailAttachmentStorage } from "./email-attachment-storage";
@@ -189,20 +190,43 @@ export class EmailChatActions {
     return "Не надсилайте пароль, app password, OAuth token або client secret у чат. Відкрийте [Email Settings](/settings/email), виберіть скриньку та самостійно вставте секретні дані у захищені поля IMAP/SMTP або OAuth. Після збереження можете попросити мене перевірити з’єднання.";
   }
 
-  static noActionMessage(): string {
-    return "I could not safely determine the requested email action. Specify the company or personal mailbox, target item, and exact operation.";
+  static noActionMessage(message = ""): string {
+    const copy: Partial<Record<ReturnType<typeof detectCompanyChatLanguage>, string>> = {
+      uk: "Не вдалося безпечно визначити дію з поштою. Уточніть компанію або особисту скриньку, потрібний лист і саму дію.",
+      ru: "Не удалось безопасно определить действие с почтой. Уточните компанию или личный ящик, нужное письмо и само действие.",
+      pt: "Não consegui determinar com segurança a ação de e-mail. Indique a empresa ou caixa pessoal, a mensagem e a operação.",
+      es: "No pude determinar con seguridad la acción de correo. Indica la empresa o el buzón personal, el mensaje y la operación.",
+      de: "Die E-Mail-Aktion ließ sich nicht sicher bestimmen. Nennen Sie das Unternehmen oder Ihr persönliches Postfach, die Nachricht und den Vorgang.",
+    };
+    return copy[detectCompanyChatLanguage(message)] ?? "I could not safely determine the requested email action. Specify the company or personal mailbox, target item, and exact operation.";
   }
 
-  static async buildSystemPrompt(auth: AuthContext, store: WorkspaceStore, repo: EmailInboxRepository, message: string, selectedCompanyId?: string, apiKeys?: ApiKeysRepository): Promise<string> {
+  static async buildSystemPrompt(auth: AuthContext, store: WorkspaceStore, repo: EmailInboxRepository, message: string, selectedCompanyId?: string, apiKeys?: ApiKeysRepository, addressReferences: Record<string, string> = {}): Promise<string> {
     if (!auth.permissions.includes("business:manage") || !this.isManagementRequest(message)) return "";
     const companies = (await store.listCompanies(auth, 100)).items;
     const requestsPersonal = /(?:\bpersonal\b|особист(?:а|у|ої|ій)?\s+(?:пошт|скрин)|приватн(?:а|у|ої|ій)?\s+(?:пошт|скрин))/iu.test(message);
     const requestedScope = requestsPersonal ? "personal" : selectedCompanyId;
-    const company = requestedScope === "personal"
+    let company = requestedScope === "personal"
       ? undefined
       : requestedScope
         ? await store.getCompany(auth, requestedScope)
         : companies.length === 1 ? companies[0] : undefined;
+    // "A complaint came from e2e-test@example.com": when the selected company has no mail from that address but
+    // exactly one other owned company does, that company's inbox is the one meant.
+    const addresses = [...new Set([
+      ...(message.match(/[\p{L}\p{N}._%+-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+/gu) ?? []),
+      // The planner sees masked EMAIL_REF_* placeholders; their addresses are resolved locally.
+      ...Object.entries(addressReferences).filter(([reference]) => message.includes(reference)).map(([, address]) => address),
+    ].map((value) => value.toLowerCase()))];
+    if (requestedScope !== "personal" && addresses.length) {
+      const hasMail = async (companyId: string) => (await repo.listThreads(auth, companyId, { limit: 100 }).catch(() => []))
+        .some((thread) => addresses.includes(thread.customerEmail.toLowerCase()));
+      if (!company || !await hasMail(company.id)) {
+        const owners = [];
+        for (const candidate of companies.slice(0, 30)) if (candidate.id !== company?.id && await hasMail(candidate.id)) owners.push(candidate);
+        if (owners.length === 1) company = owners[0];
+      }
+    }
     const scopeId = requestedScope === "personal" ? personalScopeId(auth) : company?.id;
     if (!scopeId) return "\n\nEMAIL MANAGEMENT: Ask the user to select the owned company, or explicitly say this is their personal mailbox.";
     const [accounts, rules, templates, contacts, threads, permissions] = await Promise.all([
@@ -230,8 +254,8 @@ ${fence}
 Do not expose the directive in user-facing prose.`;
   }
 
-  static async buildActionPlannerPrompt(auth: AuthContext, store: WorkspaceStore, repo: EmailInboxRepository, message: string, selectedCompanyId?: string, apiKeys?: ApiKeysRepository): Promise<string> {
-    return `${await this.buildSystemPrompt(auth, store, repo, message, selectedCompanyId, apiKeys)}
+  static async buildActionPlannerPrompt(auth: AuthContext, store: WorkspaceStore, repo: EmailInboxRepository, message: string, selectedCompanyId?: string, apiKeys?: ApiKeysRepository, addressReferences: Record<string, string> = {}): Promise<string> {
+    return `${await this.buildSystemPrompt(auth, store, repo, message, selectedCompanyId, apiKeys, addressReferences)}
 
 Return ONLY one complete email-action block for the latest request. Omit every unspecified field. Use an actions array for multiple explicit operations. Return exactly NO_ACTION if the target or required value is ambiguous.`;
   }
