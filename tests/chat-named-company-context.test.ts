@@ -52,3 +52,16 @@ describe("company named in a chat message", () => {
     expect(await resolver.resolveNamedCompany(auth, current, "Нехай Олена підготує план")).toBeUndefined();
   });
 });
+
+describe("a creation request naming an existing company", () => {
+  it("does not switch the context to that company", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const auth: AuthContext = { userId: "owner", workspaceId: "workspace", permissions: ["workspace:read", "workspace:write", "business:manage"] };
+    const bakery = await store.createCompany(auth, { name: "Пекарня Сонях" }, "bakery");
+    await store.createCompany(auth, { name: "NovaScale Labs" }, "nova");
+    const resolver = new ActiveContextResolver(store);
+    const current = await resolver.resolve(auth, { contextType: "company", companyId: bakery.id });
+    expect(await resolver.resolveNamedCompany(auth, current, "Create NovaScale Labs")).toBeUndefined();
+    expect((await resolver.resolveNamedCompany(auth, current, "Create a website for NovaScale Labs", { intent: "CREATE_WEBSITE" } as never))?.context.companyId).not.toBe(bakery.id);
+  });
+});
