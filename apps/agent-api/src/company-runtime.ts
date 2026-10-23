@@ -336,6 +336,31 @@ export class CompanyDelegationRuntime {
         corrected.toolRequests = corrected.toolRequests.map((request) => ({ ...request, agentId: resolveAgentId(request.agentId)! }));
         plan = corrected;
       }
+      // One repair of tool requests the selected agents are not permitted to use: a plan that asks for a forbidden
+      // tool again still fails closed with TOOL_FORBIDDEN in the executor, and no forbidden tool ever runs.
+      const agentFor = (id: string) => byId.get(id) ?? (id === main.id ? main : undefined);
+      const forbiddenRequests = (candidate: typeof plan) => candidate.toolRequests.filter((request) => {
+        const agent = agentFor(request.agentId);
+        return agent && !agent.tools.map(toolName).includes(toolName(request.tool));
+      });
+      if (forbiddenRequests(plan).length && !options.preferredAgentId && this.ai.a2aSend) {
+        if (options.callBudget && --options.callBudget.remaining < 0)
+          throw new CompanyRuntimeError("MODEL_CALL_BUDGET_EXCEEDED", "Project model call limit reached", 429);
+        const permitted = [main, ...candidates.filter((agent) => agent.id !== main.id)].map((agent) => ({ id: agent.id, name: agent.name, tools: agent.tools.map(toolName) }));
+        const repaired = await this.ai.a2aSend({
+          ...planningRequest,
+          idempotencyKey: `${created.run.id}:tool-repair`,
+          messages: [
+            ...planningRequest.messages,
+            { role: "user", content: `These tool requests are not permitted for their agents: ${JSON.stringify(forbiddenRequests(plan).map((request) => ({ agentId: request.agentId, tool: request.tool }))).slice(0, 1000)}. Each agent may request only its own tools: ${JSON.stringify(permitted).slice(0, 4000)}. Return the corrected JSON plan only; omit a tool request when no permitted tool fits.` },
+          ],
+        });
+        const corrected = parsePlan(repaired.content, input.mode ?? "auto");
+        corrected.agentIds = corrected.agentIds.map((id) => resolveAgentId(id)!);
+        corrected.reviewerAgentId = resolveAgentId(corrected.reviewerAgentId);
+        corrected.toolRequests = corrected.toolRequests.map((request) => ({ ...request, agentId: resolveAgentId(request.agentId)! }));
+        plan = corrected;
+      }
       let selected = plan.agentIds.map((id) => byId.get(id)).filter((agent): agent is CompanyAgent => Boolean(agent));
       if (selected.length !== plan.agentIds.length) throw new CompanyRuntimeError("CROSS_COMPANY_AGENT_SELECTION", "Main Agent selected an unavailable agent", 502);
       selected = selected.filter((agent) => agent.id !== main.id);

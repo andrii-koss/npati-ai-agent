@@ -93,6 +93,24 @@ describe("Project delegation JSON recovery", () => {
     expect(plans).toHaveLength(0);
   });
 
+  it("repairs a request for a tool the agent may not use once, and fails closed when it is repeated", async () => {
+    const store = new InMemoryWorkspaceStore();
+    await store.initialize();
+    const ctx = { workspaceId: "tool-repair-ws", userId: "tool-repair-user", permissions: ["workspace:read", "business:manage"] };
+    let company = await store.createCompany(ctx, { name: "Fit" }, "tool-repair-company");
+    const main = await store.createCompanyAgent(ctx, company.id, { name: "Coach Ana", role: "manager", tools: [] }, "tool-repair-main");
+    company = await store.setCompanyMainAgent(ctx, company.id, main.id, company.revision);
+    const forbidden = JSON.stringify({ mode: "single", agentIds: [], toolRequests: [{ agentId: main.id, tool: "knowledge", input: { query: "classes" } }] });
+    const clean = JSON.stringify({ mode: "single", agentIds: [], toolRequests: [] });
+    const plans = [forbidden, clean];
+    const repairing = engine({ a2aSend: async () => ({ taskId: "tool-plan", content: plans.shift() ?? clean, metadata: {} }) });
+    const repaired = await new CompanyDelegationRuntime(store, repairing).execute(ctx, company.id, { task: "Summarise tomorrow's classes", mode: "single" }, "tool-repair-run");
+    expect(repaired.run.status).toBe("completed");
+    const stubborn = engine({ a2aSend: async () => ({ taskId: "tool-plan", content: forbidden, metadata: {} }) });
+    const refused = await new CompanyDelegationRuntime(store, stubborn).execute(ctx, company.id, { task: "Summarise tomorrow's classes", mode: "single" }, "tool-repair-refused");
+    expect(refused.run).toMatchObject({ status: "failed", errorCode: "TOOL_FORBIDDEN" });
+  });
+
   it("reads the delegation object when the model includes another JSON object first", async () => {
     const store = new InMemoryWorkspaceStore();
     await store.initialize();
