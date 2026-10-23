@@ -236,7 +236,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
       !companySettingsRequest || explicitlyRequestsWebResearch(message)
     );
     const namedPage = companySettingsRequest ? undefined : extractTargetUrlOrDomain(message) ?? undefined;
-    const runWebResearch = async (researchService: NonNullable<typeof webResearch>) => {
+    const runWebResearch = async (researchService: NonNullable<typeof webResearch>, options: { mode?: "search" } = {}) => {
       const scope = { workspaceId: auth.workspaceId, businessId: "00000000-0000-0000-0000-000000000000", userId: auth.userId };
       try {
         researchJob = memoryPolicy.writeAllowed ? await researchBundle?.jobs.create({
@@ -250,6 +250,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
           {},
           /\b(refresh|analyze again)\b|\u043e\u043d\u043e\u0432\u0438|\u043f\u043e\u0432\u0442\u043e\u0440\u0438\s+\u0430\u043d\u0430\u043b\u0456\u0437/iu.test(message),
           progress,
+          options,
         )) ?? undefined;
         if (signal?.aborted) throw signal.reason ?? new DOMException("Cancelled", "AbortError");
         if (researchJob) {
@@ -458,7 +459,8 @@ export function createChatTurn(deps: ChatTurnDeps) {
         // The fallback has no tools. A page the user named, or a web search the user asked for, is still run, so the
         // answer rests on actual content (or states why it could not be retrieved) instead of the model's memory.
         if (!research && !companySettingsRequest && (namedPage || explicitlyRequestsWebResearch(message)) && webResearch?.shouldResearch(safePrompt)) {
-          await runWebResearch(webResearch);
+          // A search request is searched as written; the free-form heuristics turned it into "<word> official website".
+          await runWebResearch(webResearch, namedPage ? {} : { mode: "search" });
           if (research) chatRequest.messages.splice(1, 0, { role: "system", content: researchInstructionFor(research) });
         }
       }
