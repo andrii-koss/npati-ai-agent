@@ -83,11 +83,16 @@ describe("a chat whose stored company was deleted", () => {
     const company = await store.createCompany(context, { name: "Cafe" }, "cafe");
     await store.createProject(context, company.id, { name: "Cafe site", type: "website" } as never, "cafe-site");
     const project = (await store.listProjects(context, company.id))[0]!;
+    const conversation = await store.createNeutralConversation(context, "Cafe site");
+    await store.appendNeutralMessage(context, conversation.id, "assistant", `Created the site. [Open project](/code?company=${company.id}&project=${project.id})`);
     await store.deleteCompany(context, company.id, (await store.getCompany(context, company.id)).revision);
-    const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Hello! Thanks for the help today.", contextType: "project", companyId: company.id, projectId: project.id } });
+    const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Hello! Thanks for the help today.", conversationId: conversation.id, contextType: "project", companyId: company.id, projectId: project.id } });
     expect(response.statusCode).toBe(200);
     expect(response.body).not.toContain("BUSINESS_ACCESS_DENIED");
     expect(response.body).toContain('"contextType":"none"');
+    // A companyId the conversation never worked with keeps the access refusal.
+    const foreign = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Hello!", contextType: "company", companyId: "00000000-0000-4000-8000-000000000000" } });
+    expect(foreign.statusCode === 403 || foreign.body.includes("BUSINESS_ACCESS_DENIED") || foreign.body.includes("not available")).toBe(true);
   });
 });
 

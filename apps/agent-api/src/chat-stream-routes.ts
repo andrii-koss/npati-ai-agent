@@ -150,6 +150,12 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
       let staleContext = false;
       let resolved = await activeContextResolver.resolveChat(auth, requestedContext, message, semantic?.decision).catch(async (error: unknown) => {
         if (!(error instanceof WorkspaceAccessError) || (!requestedContext.companyId && !requestedContext.projectId)) throw error;
+        // Only a context this conversation itself worked in (its project card or a card in its history) may have gone
+        // stale; an arbitrary or foreign companyId keeps its 403.
+        const known = [requestedContext.projectId, requestedContext.companyId].filter((id): id is string => Boolean(id));
+        const fromConversation = (conversationCard && known.includes(conversationCard.companyId))
+          || history.some((item) => item.role === "assistant" && known.some((id) => item.content.includes(id)));
+        if (!fromConversation) throw error;
         staleContext = true;
         Object.assign(requestedContext, { contextType: "none", companyId: null, projectId: null });
         return activeContextResolver.resolveChat(auth, requestedContext, message, semantic?.decision);
