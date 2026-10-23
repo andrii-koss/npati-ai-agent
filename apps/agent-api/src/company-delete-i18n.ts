@@ -87,8 +87,21 @@ export function withoutQuotedNames(message: string): string {
   return message.replace(/«[^»\n]{1,120}»|“[^”\n]{1,120}”|„[^“”\n]{1,120}[“”]|"[^"\n]{1,120}"/gu, "«…»");
 }
 
+const deleteWord = /(?:видал|удал|\bdelete\b|\bremove\b|supprim|lösch|elimin|borr|usuń|exclu|apagar|verwijder|\bsil\b|kaldır)/iu;
+const otherActionWord = /(?:дод\p{L}*|створ\p{L}*|онов\p{L}*|змін\p{L}*|переймен\p{L}*|\badd\b|\bcreate\b|\bupdate\b|\brename\b|\bcri[ea]\p{L}*|añad\p{L}*|füge|erstell\p{L}*|ajout\p{L}*)/iu;
+
+/** "Add an agent to Temp Delete Co": another action verb before the delete word makes the name, not the verb, matter. */
+export function deleteIsTheAction(message: string): boolean {
+  const remove = deleteWord.exec(message);
+  // Scripts without a listed delete word (zh, ja, ko, ar, hi) keep the caller's own delete signal.
+  if (!remove) return true;
+  const other = otherActionWord.exec(message);
+  return !other || remove.index < other.index;
+}
+
 export function isCompanyDeleteIntent(message: string): boolean {
   message = withoutQuotedNames(message);
+  if (!deleteIsTheAction(message)) return false;
   return /(?:видал|приб|удал|убер|\bdelete\b|\bremove\b|supprim|effac|lösch|entfern|elimin|borr|usuń|skasuj|exclu|apagar|verwijder|\bsil\b|kaldır|删除|削除|삭제|احذف|إزالة|हटा)/iu.test(message);
 }
 

@@ -118,6 +118,8 @@ describe("company management from chat", () => {
     expect(await CompanyChatActions.deleteConfirmationMessage(alice, store, "Створи тимчасову компанію «Temp Delete Co» для тесту, без агентів.")).toBeUndefined();
     expect(await CompanyChatActions.deleteConfirmationMessage(alice, store, "Додай агента «Тест» у компанію \"Temp Delete Co\".")).toBeUndefined();
     expect(await CompanyChatActions.deleteConfirmationMessage(alice, store, "Видали компанію «Temp Delete Co».")).toBeTruthy();
+    expect(await CompanyChatActions.deleteConfirmationMessage(alice, store, "Додай агента «Тест» у компанію Temp Delete Co.")).toBeUndefined();
+    expect(await CompanyChatActions.deleteConfirmationMessage(alice, store, "Видали компанію Temp Delete Co, яку я створив учора.")).toBeTruthy();
   });
 
   it("does not treat a question about existing companies as a change", () => {
