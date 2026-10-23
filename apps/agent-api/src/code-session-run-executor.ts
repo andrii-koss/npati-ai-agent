@@ -331,9 +331,11 @@ export class CodeSessionRunExecutor {
        */
       this.options.logger?.warn({ err: error, sessionId }, "code_session_run_failed");
       const reason = error instanceof Error ? error.message : "run_failed";
+      // A missing vision model is the user's to fix in AI settings: its text is written for the user.
+      const userFacing = /^vision_model_unavailable:\s*/u.test(reason) ? reason.replace(/^vision_model_unavailable:\s*/u, "") : undefined;
       result = result && typeof result === "object"
         ? { ...result, status: controller.signal.aborted ? "cancelled" : "failed", reason, message: reason }
-        : { status: "failed", reason };
+        : { status: "failed", reason, ...(userFacing ? { message: userFacing } : {}) };
     } finally {
       control.unregisterController(sessionId, controller);
     }
