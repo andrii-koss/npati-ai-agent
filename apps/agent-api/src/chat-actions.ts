@@ -516,7 +516,18 @@ ${localized.next}`;
   }
 
   async function executeWorkspaceChatAction(auth: AuthContext, content: string, conversationId?: string, requestMessage?: string, route?: { model?: string; fallbackModel?: string; signal?: AbortSignal; selectedCompanyId?: string; selectedBusinessId?: string }) {
-    const managementRequest = Boolean(requestMessage && (WorkspaceChatActions.isManagementRequest(requestMessage) || ((route?.selectedCompanyId || route?.selectedBusinessId) && WorkspaceChatActions.isPotentialMutationRequest(requestMessage))));
+    const explicitManagement = Boolean(requestMessage && WorkspaceChatActions.isManagementRequest(requestMessage));
+    let contextualMutation = false;
+    if (!explicitManagement && requestMessage && conversationId && WorkspaceChatActions.isPotentialMutationRequest(requestMessage)) {
+      const conversation = await (route?.selectedBusinessId
+        ? workspaceStore.getConversation(auth, route.selectedBusinessId, conversationId)
+        : workspaceStore.getNeutralConversation(auth, conversationId)).catch(() => undefined);
+      const previous = [...(conversation?.messages ?? [])].reverse().find(item => item.role === "assistant")?.content ?? "";
+      // An active company alone is not an antecedent for "change it" (Spanish "resume" also means summarize).
+      contextualMutation = /\/settings\/(?:memory|automations|activity|content)(?:[/?#)]|$)/iu.test(previous)
+        || /\x60\x60\x60workspace-action/iu.test(previous);
+    }
+    const managementRequest = explicitManagement || contextualMutation;
     if (requestMessage && auth.permissions.includes("business:manage") && WorkspaceChatActions.isBusinessMemoryDeletionRequest(requestMessage)) {
       const savedMemory = await workspaceStore.listUserMemories(auth);
       if (savedMemory.length === 0) return { cleanText: WorkspaceChatActions.noSavedMemoryMessage(requestMessage), workspaceAction: undefined, companyRunId: undefined };
