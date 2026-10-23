@@ -38,4 +38,17 @@ describe("company named in a chat message", () => {
     expect(create?.context).toMatchObject({ contextType: "company", companyId: fit.id });
     expect(await resolver.resolveNamedCompany(auth, current, "Додай сторінку на сайт пекарні")).toBeUndefined();
   });
+
+  it("switches to the company whose agent the message addresses when no company is named", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const auth: AuthContext = { userId: "owner", workspaceId: "workspace", permissions: ["workspace:read", "workspace:write", "business:manage"] };
+    const bakery = await store.createCompany(auth, { name: "Пекарня Сонях" }, "bakery");
+    await store.createCompanyAgent(auth, bakery.id, { name: "Олена", role: "Операційна директорка" }, "olena");
+    const fit = await store.createCompany(auth, { name: "Nordic Fit" }, "fit");
+    await store.createCompanyAgent(auth, fit.id, { name: "Coach Ana", role: "Lead trainer" }, "ana");
+    const resolver = new ActiveContextResolver(store);
+    const current = await resolver.resolve(auth, { contextType: "company", companyId: bakery.id });
+    expect((await resolver.resolveNamedCompany(auth, current, "Have Coach Ana write three captions"))?.context).toMatchObject({ contextType: "company", companyId: fit.id });
+    expect(await resolver.resolveNamedCompany(auth, current, "Нехай Олена підготує план")).toBeUndefined();
+  });
 });

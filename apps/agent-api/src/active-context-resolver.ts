@@ -58,7 +58,21 @@ export class ActiveContextResolver {
       companies.push(...page.items);
       cursor = page.nextCursor ?? undefined;
     } while (cursor && companies.length < 500);
-    const named = companyNamedInMessage(companies, message, current.company?.id ?? current.project?.companyId ?? null);
+    const activeId = current.company?.id ?? current.project?.companyId ?? null;
+    let named = companyNamedInMessage(companies, message, activeId);
+    if (!named) {
+      // No company name, but an agent's full name that belongs to exactly one company ("have Coach Ana delegate to Leo").
+      const lower = message.toLocaleLowerCase();
+      // Bounded to the 20 most recently updated companies (the ones the user works with), read in parallel.
+      const recent = [...companies].sort((a, b) => new Date(b.updatedAt as unknown as string).getTime() - new Date(a.updatedAt as unknown as string).getTime()).slice(0, 20);
+      const owners = new Set<string>();
+      await Promise.all(recent.map(async (company) => {
+        const agents = (await this.store.listCompanyAgentsPage(auth, company.id, 50).catch(() => ({ items: [] }))).items;
+        if (agents.some((agent) => agent.name.trim().length >= 3 && lower.includes(agent.name.trim().toLocaleLowerCase()))) owners.add(company.id);
+      }));
+      const owner = owners.size === 1 ? [...owners][0] : undefined;
+      if (owner && owner !== activeId) named = companies.find((company) => company.id === owner);
+    }
     if (!named) return undefined;
     const creating = decision?.intent === "CREATE_WEBSITE" || decision?.intent === "CREATE_PROJECT";
     const projects = creating ? [] : (await this.store.listProjects(auth, named.id)).filter((project) => project.status !== "archived");
