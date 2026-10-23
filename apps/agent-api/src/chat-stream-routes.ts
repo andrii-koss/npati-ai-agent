@@ -1,4 +1,4 @@
-import { resolveCodingConversationLanguage, codingChatResponseInstruction, chatLanguageInstruction } from "./company-chat-i18n";
+import { resolveCodingConversationLanguage, codingChatResponseInstruction, chatLanguageInstruction, detectCompanyChatLanguage } from "./company-chat-i18n";
 
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { AppConfig } from "./app";
@@ -631,6 +631,20 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
                   activeContext: resolved.context,
                 };
               }
+            }
+            // A change to "the website" when the company has none (e.g. it was just deleted) must not quietly create a
+            // new project named after the request; creation is a separate, explicit request.
+            const creationIntent = projectIntent.intent === "CREATE_PROJECT" || projectIntent.intent === "CREATE_WEBSITE";
+            if (targetCompanyId && !creationIntent && !activeProjectId && !(await workspaceStore.listProjects(auth, targetCompanyId).catch(() => [])).length) {
+              const noSite: Record<string, string> = {
+                uk: "У цієї компанії зараз немає сайту, який можна змінити (його могли видалити). Створити новий сайт?",
+                ru: "У этой компании сейчас нет сайта, который можно изменить (его могли удалить). Создать новый сайт?",
+                pt: "Esta empresa não tem agora nenhum site para alterar (pode ter sido excluído). Criar um site novo?",
+                es: "Esta empresa no tiene ahora ningún sitio que cambiar (puede que se eliminara). ¿Creo un sitio nuevo?",
+                de: "Dieses Unternehmen hat derzeit keine Website, die geändert werden kann (sie wurde womöglich gelöscht). Soll eine neue erstellt werden?",
+              };
+              projectResponse = { message: noSite[detectCompanyChatLanguage(message)] ?? "This company has no website to change right now (it may have been deleted). Create a new one?", suggestedActions: [], activeContext: resolved.context };
+              targetCompanyId = null;
             }
             if (targetCompanyId) {
               const executed = await projectOrchestrator.executeWebsiteTask(auth, {

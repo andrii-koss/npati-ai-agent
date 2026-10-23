@@ -124,3 +124,22 @@ describe("deleting a website from chat", () => {
     expect(await store.listProjects(context, company.id)).toHaveLength(0);
   });
 });
+
+describe("editing the website of a company that has none", () => {
+  it("says there is no website instead of creating a project named after the request", async () => {
+    const context: AuthContext = { workspaceId: "workspace-no-site", userId: "owner", permissions: ["workspace:read", "workspace:write", "business:manage", "chat:use"] };
+    const store = new InMemoryWorkspaceStore();
+    const aiEngine: AIEngine = {
+      chat: vi.fn(async () => ({ content: JSON.stringify({ intent: "EDIT_WEBSITE", confidence: 0.9, targets: [] }) })), async *stream() { yield ""; },
+      listModels: async () => [], getModel: async () => undefined, executeTool: async () => ({}),
+      searchMemory: async () => [], saveMemory: async () => undefined, getCapabilities: async () => ["chat"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => ({ ...context }) }, aiEngine, marketplace });
+    apps.push(app);
+    const company = await store.createCompany(context, { name: "Nordic Fit" }, "fit-no-site");
+    const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Add a contact form to the Nordic Fit website.", contextType: "company", companyId: company.id } });
+    expect(response.statusCode).toBe(200);
+    expect(await store.listProjects(context, company.id)).toHaveLength(0);
+  });
+});
