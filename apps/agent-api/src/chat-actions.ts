@@ -319,7 +319,16 @@ ${localized.next}`;
       : requestMessage && managementRequest
       ? await CompanyChatActions.buildDeterministicAction(auth, workspaceStore, requestMessage, route?.selectedCompanyId, route?.responseLanguage) ?? content
       : content;
-    if (!/```company-action/i.test(actionText) && managementRequest && auth.permissions.includes("business:manage")) {
+    // A directive whose JSON does not parse is planned once more with the parser error; one attempt, no loop.
+    const malformedDirective = (text: string) => {
+      const block = text.match(/```company-action\s*([\s\S]*?)```/i)?.[1];
+      if (block === undefined) return undefined;
+      try { JSON.parse(block.trim()); return undefined; } catch (error) { return error instanceof Error ? error.message : String(error); }
+    };
+    let parseError = malformedDirective(actionText);
+    for (let attempt = 0; attempt < 2 && managementRequest && auth.permissions.includes("business:manage"); attempt += 1) {
+      if (/```company-action/i.test(actionText) && !parseError) break;
+      if (attempt > 0 && !parseError) break;
       try {
         const prompt = await CompanyChatActions.buildActionPlannerPrompt(auth, workspaceStore, requestMessage!, route?.selectedCompanyId, addedModels, aiRefinement, route?.researchContext, route?.responseLanguage);
         const planned = await aiEngine.chat({
@@ -328,11 +337,17 @@ ${localized.next}`;
           admission: admissionFor(auth),
           timeoutMs: 90_000,
           signal: route?.signal,
-          messages: [{ role: "system", content: prompt }, { role: "user", content: requestMessage! }],
+          messages: [
+            { role: "system", content: prompt },
+            ...(parseError ? [{ role: "system" as const, content: `The previous company-action block was not valid JSON (${parseError.slice(0, 200)}). Return one complete block with valid JSON.` }] : []),
+            { role: "user", content: requestMessage! },
+          ],
         });
         actionText = planned.content;
+        parseError = malformedDirective(actionText);
       } catch (error) {
         log.warn({ err: error }, "Company action planning failed");
+        break;
       }
     }
     if (!/```company-action/i.test(actionText)) return {

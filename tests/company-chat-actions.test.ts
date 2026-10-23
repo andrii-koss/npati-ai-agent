@@ -95,6 +95,33 @@ describe("company management from chat", () => {
     } finally { await app.close(); }
   });
 
+  it("plans a company action once more when its directive JSON does not parse", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const valid = directive({ action: "create", fields: { name: "Malformed Studio", industry: "Fitness" } });
+    const broken = "Done.\n\n```company-action\n{\"action\":\"create\",\"fields\":{\"name\":\"Malformed Studio\" \"industry\":\"Fitness\"}}\n```";
+    const calls: ChatRequestLike[] = [];
+    type ChatRequestLike = { messages: Array<{ role: string; content: unknown }> };
+    const aiEngine: AIEngine = {
+      chat: async (request) => {
+        calls.push(request as ChatRequestLike);
+        const retry = (request as ChatRequestLike).messages.some((item) => item.role === "system" && String(item.content).includes("was not valid JSON"));
+        return { content: retry ? valid : broken };
+      },
+      async *stream() { yield { delta: broken }; },
+      listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => alice }, aiEngine, marketplace });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Create a company named Malformed Studio for a fitness studio", contextType: "none" } });
+      expect(response.statusCode).toBe(200);
+      expect((await store.listCompanies(alice)).items.map((company) => company.name)).toContain("Malformed Studio");
+      expect(calls.filter((request) => request.messages.some((item) => String(item.content).includes("was not valid JSON")))).toHaveLength(1);
+    } finally { await app.close(); }
+  });
+
   it("returns a completed company card in the request language", async () => {
     const store = new InMemoryWorkspaceStore();
     const result = await CompanyChatActions.extractAndExecute(alice, directive({ action: "create", fields: { name: "Atelier IA", industry: "Technologie" }, agents: [{ action: "create", fields: { name: "Responsable", role: "Coordination" }, main: true }] }), store, "conversation-fr", { requestMessage: "Crée une entreprise avec un agent" });
