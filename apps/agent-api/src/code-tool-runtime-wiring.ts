@@ -6,7 +6,7 @@ import type { FastifyBaseLogger } from "fastify";
 import type { AppConfig } from "./app";
 import { CompanyApprovalsRepository } from "./approvals-repository";
 import { createAuditServices } from "./audit-services";
-import { CodeApprovalScopeService, resolveApprovalTimeoutMs } from "./code-approval-scope";
+import { CodeApprovalScopeService, resolveApprovalTimeoutMs, waitForApprovalDecision } from "./code-approval-scope";
 import { createCodeAskUserService } from "./code-ask-user-service";
 import { CodeAsyncProcessService } from "./code-async-process";
 import { isCodeChatWebsite } from "./code-chat-website";
@@ -209,7 +209,7 @@ export function createCodeToolRuntimeWiring(deps: CodeToolRuntimeWiringDeps) {
     approvalDecision: approvalsRepo ? {
       timeoutMs: resolveApprovalTimeoutMs(process.env),
       wait: async ({ ctx, companyId, approvalId }) => {
-        const report = await approvalsRepo!.get(ctx, companyId, approvalId).catch(() => null);
+        const report = await waitForApprovalDecision(() => approvalsRepo!.get(ctx, companyId, approvalId).catch(() => null), resolveApprovalTimeoutMs(process.env));
         if (!report) return null;
         if (report.status === "approved") return { status: "approved" as const };
         if (report.status === "rejected") return { status: "rejected" as const, comment: report.decisionNotes ?? null };

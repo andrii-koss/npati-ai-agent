@@ -139,3 +139,19 @@ describe("a full build without source changes only when it is asked for", () => 
     expect(forcesBuild({ prompt: "x", toolContext: { userMessage: "Перезапусти превʼю" } })).toBe(true);
   });
 });
+
+describe("an approval wait actually waits for the human decision", () => {
+  it("polls until approved, and returns pending only after the timeout", async () => {
+    const { waitForApprovalDecision } = await import("../apps/agent-api/src/code-approval-scope");
+    let clock = 0; const sleep = async (ms: number) => { clock += ms; };
+    const statuses = ["pending", "pending", "approved"];
+    const read = vi.fn(async () => ({ status: statuses.shift() ?? "approved" }));
+    await expect(waitForApprovalDecision(read, 60_000, { sleep, now: () => clock })).resolves.toEqual({ status: "approved" });
+    expect(read).toHaveBeenCalledTimes(3);
+    clock = 0;
+    const never = vi.fn(async () => ({ status: "pending" }));
+    await expect(waitForApprovalDecision(never, 5_000, { sleep, now: () => clock, intervalMs: 1_000 })).resolves.toEqual({ status: "pending" });
+    expect(clock).toBeGreaterThanOrEqual(5_000);
+    expect(never.mock.calls.length).toBeGreaterThanOrEqual(5);
+  });
+});
