@@ -44,6 +44,14 @@ describe("Coding Agent website chat", () => {
     expect(await finishCodeChatWebsite(input, run, ports)).toBe(run);
     expect(ports.startPreview).not.toHaveBeenCalled();
   });
+  it("keeps a working site as it is when the run changed no file (Data Studio only)", async () => {
+    const { input, ports } = await fixture();
+    const run = { status: "completed", summary: { filesChanged: [], verification: { status: "not_run", requestedTools: ["build"] } } };
+    expect(await finishCodeChatWebsite(input, run, ports)).toBe(run);
+    expect(ports.markFailed).not.toHaveBeenCalled(); expect(ports.startPreview).not.toHaveBeenCalled();
+    // A creation run that produced nothing is still not a success.
+    expect(await finishCodeChatWebsite({ ...input, requireImplementation: true }, run, ports)).toMatchObject({ status: "failed", reason: "website_build_not_verified" });
+  });
   it("rejects an unverified build even if the model claims completion", async () => {
     const { input, ports } = await fixture();
     expect(await finishCodeChatWebsite(input, { status: "completed", message: "Build passed!" }, ports)).toMatchObject({ status: "failed", reason: "website_build_not_verified" });

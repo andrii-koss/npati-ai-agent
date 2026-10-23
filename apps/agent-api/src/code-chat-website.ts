@@ -87,6 +87,10 @@ export async function finishCodeChatWebsite(input: CodeSessionRunInput, result: 
   const stylePreview = input.allowStylePreview && run.summary?.stylePreview === true
     && project.framework === "Next.js" && Array.isArray(run.summary.filesChanged)
     && run.summary.filesChanged.every(path => /\.css$/i.test(path));
+  // A run that changed no file (e.g. Data Studio only) leaves the last verified build and Preview as they were; it must
+  // not mark a working site as failed for lacking a build it had no reason to run.
+  if (!input.requireImplementation && Array.isArray(run.summary?.filesChanged) && run.summary.filesChanged.length === 0
+      && run.summary.verification?.status !== "failed") return result;
   // A model's prose is never evidence of a successful production build.
   if (!stylePreview && project.framework !== "HTML/CSS" && (run.summary?.verification?.status !== "passed"
       || !run.summary.verification.requestedTools?.includes("build"))) {
