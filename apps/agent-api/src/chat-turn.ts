@@ -108,7 +108,10 @@ export function createChatTurn(deps: ChatTurnDeps) {
     }
     const media = await prepareChatAttachments(aiEngine, effectiveMessage, attachments, progress);
 
-    const safeUserRequest = SecurityPolicyEngine.protectText(effectiveMessage).sanitized;
+    const emailReferences = EmailChatActions.isManagementRequest(effectiveMessage)
+      ? EmailChatActions.addressReferences(effectiveMessage) : { prompt: effectiveMessage, addresses: {} };
+    const protectEmailOperands = (text: string) => Object.entries(emailReferences.addresses).reduce((value, [reference, address]) => value.split(address).join(reference), text);
+    const safeUserRequest = SecurityPolicyEngine.protectText(emailReferences.prompt).sanitized;
     let conversation = memoryPolicy.noMemoryActive
       ? undefined
       : conversationId
@@ -152,7 +155,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
       + JSON.stringify({ id: projectContext.id, name: projectContext.name.slice(0, 200),
         description: projectContext.description?.slice(0, 4000), framework: projectContext.framework?.slice(0, 100) })
       + "\nEND UNTRUSTED SELECTED PROJECT DATA" : "";
-    const safePrompt=SecurityPolicyEngine.protectText(promptWithAttachmentContext + selectedProject).sanitized;
+    const safePrompt=SecurityPolicyEngine.protectText(protectEmailOperands(promptWithAttachmentContext + selectedProject)).sanitized;
     const spreadsheetEditRequested = isSpreadsheetEditRequest(safeUserRequest)
       && Boolean(previousSpreadsheet || media.decoded.some((item) => /\.(xlsx|xlsm|xlsb|xls|csv)$/i.test(item.name)));
     const contextualCompanyRequest = effectiveMessage !== message;
@@ -586,6 +589,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
     });
     const emailAction = workspaceSettingsRequest ? { cleanText: executedAction.cleanText, emailAction: undefined, emailActions: undefined } : await executeEmailChatAction(auth, executedAction.cleanText, safeUserRequest, {
       model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id,
+      addressReferences: emailReferences.addresses,
       attachments: media.decoded.map((item) => ({ filename: item.name, contentType: item.mimeType, sizeBytes: item.data.length, contentBase64: item.data.toString("base64") })),
     });
     const companyAction = nativeCompanyAction

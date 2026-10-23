@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type { AuthContext, WorkspaceStore } from "@npati/workspace";
 import type { ApiKeysRepository } from "./api-keys-repository";
 import { EmailConnectionTester } from "./email-connection-tester";
@@ -150,6 +150,31 @@ function exact<T>(items: T[], predicate: (item: T) => boolean, label: string): T
 }
 
 export class EmailChatActions {
+  /** Ephemeral address references keep PII masking enabled without losing action operands. Never persist this map. */
+  static addressReferences(message: string): { prompt: string; addresses: Record<string, string> } {
+    const addresses: Record<string, string> = {};
+    const byAddress = new Map<string, string>();
+    const prefix = "EMAIL_REF_" + randomBytes(6).toString("hex") + "_";
+    const prompt = message.replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, address => {
+      let reference = byAddress.get(address.toLowerCase());
+      if (!reference) { reference = prefix + (byAddress.size + 1); byAddress.set(address.toLowerCase(), reference); addresses[reference] = address; }
+      return reference;
+    });
+    return { prompt, addresses };
+  }
+
+  private static resolveAddresses(directive: EmailDirective, references: Record<string, string>): void {
+    const restore = (value: unknown): unknown => {
+      if (typeof value !== "string" || !value.startsWith("EMAIL_REF_")) return value;
+      if (!Object.hasOwn(references, value)) throw new Error("Unknown email address reference");
+      return references[value];
+    };
+    if (directive.accountEmail !== undefined) directive.accountEmail = restore(directive.accountEmail) as string;
+    if (!directive.fields) return;
+    for (const key of ["emailAddress", "email"]) if (directive.fields[key] !== undefined) directive.fields[key] = restore(directive.fields[key]);
+    for (const key of ["toAddresses", "ccAddresses", "bccAddresses"]) if (Array.isArray(directive.fields[key])) directive.fields[key] = directive.fields[key].map(restore);
+  }
+
   static isManagementRequest(message: string): boolean {
     const operation = /(?:\b(?:add|create|connect|configure|set up|edit|update|change|save|delete|remove|test|check|list|show|read|search|find|send|compose|reply|draft|approve|archive|mark|password|token|secret)\b|дод|створ|підключ|налашт|редаг|онов|змін|збереж|видал|перевір|покаж|переглян|прочит|знайд|пошук|відправ|надішл|напиш|відпов|чернет|погод|архів|познач|парол|токен|секрет)/iu.test(message);
     const resource = /(?:\b(?:email|e-mail|mail|mailbox|inbox|message|imap|smtp|autopilot|routing rule|email rule|email template|signature|follow-?up|contact|vip|blacklist|draft|permission|password|token|secret)\b|пошт|скринь|імейл|емейл|лист|повідомлен|вхідн|правил|маршрут|шаблон|підпис|контакт|автопілот|чернет|дозвіл|парол|токен|секрет)/iu.test(message);
@@ -196,6 +221,7 @@ Threads: ${JSON.stringify(threads.map((item) => ({ id: item.id, emailAccountId: 
 Permission keys: ${JSON.stringify(permissions.map((item) => ({ id: item.id, name: item.name, scopes: item.scopes, revokedAt: item.revokedAt, expiresAt: item.expiresAt })))}.
 Allowed actions: account.list/create/update/delete/test/dns_check; rule.list/create/update/delete; template.list/create/update/delete; contact.list/upsert; permission.list/revoke; inbox.list/read/compose/reply; draft.update/approve; thread.update/delete.
 Use companyId ${requestedScope === "personal" ? "personal" : scopeId}. Account fields: ${[...accountFields].join(", ")}. Rule fields: ${[...ruleFields].join(", ")}. Template fields: ${[...templateFields].join(", ")}. Contact fields: ${[...contactFields].join(", ")}. Thread fields: ${[...threadFields].join(", ")}. Compose fields: ${[...composeFields].join(", ")}.
+Preserve EMAIL_REF_* placeholders exactly in email address fields (emailAddress, email, accountEmail, toAddresses, ccAddresses, bccAddresses). They are complete user-provided address references, not missing credentials; the server resolves them locally after authorization. Never invent or expand a reference.
 For compose/reply, attachmentNames may contain exact filenames attached to the latest user message. For permission/API-key creation, OAuth authorization, and initial secret entry, direct the user to Email Settings. These create new credentials and must not be returned in persistent chat.
 Example:
 ${fence}email-action
@@ -215,10 +241,11 @@ Return ONLY one complete email-action block for the latest request. Omit every u
     text: string,
     store: WorkspaceStore,
     repo: EmailInboxRepository,
-    options: { selectedCompanyId?: string; requestMessage?: string; apiKeys?: ApiKeysRepository; attachmentStorage?: EmailAttachmentStorage; attachments?: EmailAttachment[]; onEmailQueued?: () => void; onError?: (error: unknown) => void } = {},
+    options: { addressReferences?: Record<string, string>; selectedCompanyId?: string; requestMessage?: string; apiKeys?: ApiKeysRepository; attachmentStorage?: EmailAttachmentStorage; attachments?: EmailAttachment[]; onEmailQueued?: () => void; onError?: (error: unknown) => void } = {},
   ): Promise<EmailChatActionResult> {
     try {
       const directives = parseDirectives(text);
+      for (const directive of directives) this.resolveAddresses(directive, options.addressReferences ?? {});
       if (!directives.length) return { cleanText: text };
       if (!auth.permissions.includes("business:manage")) throw new Error("Missing permission to manage email settings");
       const actions: NonNullable<EmailChatActionResult["emailActions"]> = [];

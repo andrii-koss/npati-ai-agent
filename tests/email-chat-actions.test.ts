@@ -175,3 +175,30 @@ describe("EmailChatActions", () => {
     expect((await apiKeys.listApiKeys(company.id, auth.workspaceId))[0]?.revokedAt).not.toBeNull();
   });
 });
+
+describe("email action operands through PII masking", () => {
+  it("keeps new addresses opaque to the model and resolves only trusted local references", async () => {
+    const store=new InMemoryWorkspaceStore(), repo=new EmailInboxRepository();
+    const company=await store.createCompany(auth,{name:"Reference test"},"reference-test");
+    const prepared=EmailChatActions.addressReferences("Create email account fixture@npati.test then use fixture@npati.test");
+    expect(prepared.prompt).not.toContain("fixture@npati.test");expect(Object.keys(prepared.addresses)).toHaveLength(1);
+    const reference=Object.keys(prepared.addresses)[0];
+    const result=await EmailChatActions.extractAndExecute(auth,directive({action:"account.create",companyId:company.id,fields:{emailAddress:reference,displayName:"Fixture"}}),store,repo,{selectedCompanyId:company.id,addressReferences:prepared.addresses});
+    expect(result.emailAction?.action).toBe("account.create");expect((await repo.listAccounts(auth,company.id))[0].emailAddress).toBe("fixture@npati.test");
+  });
+  it("rejects forged references without creating an account or bypassing credential checks", async () => {
+    const store=new InMemoryWorkspaceStore(), repo=new EmailInboxRepository();const company=await store.createCompany(auth,{name:"Ref denial"},"ref-denial");
+    const result=await EmailChatActions.extractAndExecute(auth,directive({action:"account.create",companyId:company.id,fields:{emailAddress:"EMAIL_REF_forged_1"}}),store,repo);
+    expect(result.emailAction).toBeUndefined();expect(await repo.listAccounts(auth,company.id)).toHaveLength(0);
+  });
+});
+import type { AIEngine, ChatRequest, OmniRouteMarketplace } from "@npati/omniroute-adapter";
+import { buildApp } from "../apps/agent-api/src/app";
+import { SecurityPolicyEngine } from "../apps/agent-api/src/security-guardrails";
+it("creates an email account through chat without sending its address to the model", async () => {
+  const store=new InMemoryWorkspaceStore(), repo=new EmailInboxRepository();const company=await store.createCompany(auth,{name:"Private operands"},"private-operands");const captured: ChatRequest[]=[];
+  const content=(input:ChatRequest)=>{captured.push(input);if(String(input.messages[0]?.content).startsWith("Classify"))return JSON.stringify({intent:"CHAT",confidence:.99,targets:[]});const ref=/EMAIL_REF_[a-f0-9]+_1/.exec(JSON.stringify(input.messages))?.[0];return directive({action:"account.create",companyId:company.id,fields:{emailAddress:ref,displayName:"Opaque Fixture"}});};
+  const ai={chat:async(input:ChatRequest)=>({content:content(input)}),async *stream(input:ChatRequest){yield content(input);},listModels:async()=>[],getModel:async()=>undefined,executeTool:async()=>undefined,searchMemory:async()=>[],saveMemory:async()=>undefined,getCapabilities:async()=>["chat","streaming"],healthCheck:async()=>({status:"ok"})} as AIEngine;
+  const app=buildApp({workspaceStore:store,authProvider:{authenticate:async()=>auth},aiEngine:ai,marketplace:{marketplace:async()=>({overview:{connectedProviders:1}})} as unknown as OmniRouteMarketplace});
+  try{const r=await app.inject({method:"POST",url:"/chat/stream",payload:{message:"Create email account opaque-fixture@npati.test, display name Opaque Fixture, leave SMTP unconfigured.",contextType:"company",companyId:company.id}});expect(r.statusCode).toBe(200);const accounts=await app.inject({method:"GET",url:"/companies/"+company.id+"/email-accounts"});expect(accounts.json().accounts[0]?.emailAddress).toBe("opaque-fixture@npati.test");expect(JSON.stringify(captured)).not.toContain("opaque-fixture@npati.test");expect(SecurityPolicyEngine.protectText("opaque-fixture@npati.test").sanitized).toContain("[REDACTED_EMAIL]");}finally{await app.close();}
+});

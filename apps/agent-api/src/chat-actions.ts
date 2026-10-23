@@ -640,7 +640,7 @@ ${localized.next}`;
     try { JSON.parse(block.trim()); return undefined; } catch (error) { return error instanceof Error ? error.message : String(error); }
   }
 
-  async function executeEmailChatAction(auth: AuthContext, content: string, requestMessage?: string, route?: { model?: string; fallbackModel?: string; signal?: AbortSignal; selectedCompanyId?: string; attachments?: import("./email-inbox-types").EmailAttachment[] }) {
+  async function executeEmailChatAction(auth: AuthContext, content: string, requestMessage?: string, route?: { model?: string; fallbackModel?: string; signal?: AbortSignal; selectedCompanyId?: string; addressReferences?: Record<string, string>; attachments?: import("./email-inbox-types").EmailAttachment[] }) {
     const managementRequest = Boolean(requestMessage && EmailChatActions.isManagementRequest(requestMessage));
     if (!/```email-action/i.test(content) && !managementRequest) return { cleanText: content, emailAction: undefined };
     let actionText = content;
@@ -681,6 +681,7 @@ ${localized.next}`;
       selectedCompanyId: route?.selectedCompanyId,
       apiKeys: apiKeysRepo,
       attachmentStorage: emailAttachmentStorage,
+      addressReferences: route?.addressReferences,
       attachments: route?.attachments,
       onEmailQueued: () => emailInboxWorker?.triggerTick(),
       onError: (error) => log.warn({ err: error, selectedCompanyId: route?.selectedCompanyId }, "Email action execution failed"),
