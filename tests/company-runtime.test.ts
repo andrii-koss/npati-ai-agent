@@ -72,6 +72,21 @@ describe("Project delegation JSON recovery", () => {
     expect(JSON.stringify(finalChat.mock.calls)).toContain("Summarize only verified tool results in at most 120 words");
   });
 
+  it("accepts this company's agent names in place of ids and still refuses other agents", async () => {
+    const store = new InMemoryWorkspaceStore();
+    await store.initialize();
+    const ctx = { workspaceId: "agent-names-ws", userId: "agent-names-user", permissions: ["workspace:read", "business:manage"] };
+    let company = await store.createCompany(ctx, { name: "Bakery" }, "agent-names-company");
+    const main = await store.createCompanyAgent(ctx, company.id, { name: "Олена", role: "manager", tools: [] }, "agent-names-main");
+    await store.createCompanyAgent(ctx, company.id, { name: "Ірина", role: "support", tools: [] }, "agent-names-support");
+    company = await store.setCompanyMainAgent(ctx, company.id, main.id, company.revision);
+    const planWith = (agentIds: string[]) => engine({ a2aSend: async () => ({ taskId: "names-plan", content: JSON.stringify({ mode: "single", agentIds, toolRequests: [] }), metadata: {} }) });
+    const byName = await new CompanyDelegationRuntime(store, planWith(["Ірина"])).execute(ctx, company.id, { task: "Prepare a reply template", mode: "single" }, "agent-names-run");
+    expect(byName.run.status).toBe("completed");
+    const foreign = await new CompanyDelegationRuntime(store, planWith(["Someone Else"])).execute(ctx, company.id, { task: "Prepare a reply template", mode: "single" }, "agent-names-foreign");
+    expect(foreign.run).toMatchObject({ status: "failed", errorCode: "CROSS_COMPANY_AGENT_SELECTION" });
+  });
+
   it("reads the delegation object when the model includes another JSON object first", async () => {
     const store = new InMemoryWorkspaceStore();
     await store.initialize();
