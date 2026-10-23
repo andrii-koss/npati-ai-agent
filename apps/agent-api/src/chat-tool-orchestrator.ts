@@ -70,6 +70,9 @@ export const CORE_CHAT_TOOLS: ChatToolDefinition[] = [
   },
 ];
 
+/** Models whose provider refused a forced (named) tool_choice in this process. */
+const modelsRejectingForcedToolChoice = new Set<string>();
+
 export interface ChatToolExecutionResult {
   output: unknown;
   metadata?: Record<string, unknown>;
@@ -163,11 +166,22 @@ export async function runChatToolLoop(input: {
 
   for (let step = 0; step < maxSteps; step += 1) {
     const tools = input.tools ? await input.tools() : CORE_CHAT_TOOLS;
-    const toolChoice = tools.length
+    let toolChoice = tools.length
       ? step === 0 ? input.request.toolChoice ?? "auto" : "auto"
       : "none";
+    const modelKey = String(input.request.model ?? "default");
+    if (typeof toolChoice === "object" && modelsRejectingForcedToolChoice.has(modelKey)) toolChoice = "auto";
     try {
-      result = await input.ai.chat({ ...input.request, messages: [...messages], tools, toolChoice });
+      try {
+        result = await input.ai.chat({ ...input.request, messages: [...messages], tools, toolChoice });
+      } catch (error) {
+        // Thinking models (DeepSeek) refuse a forced tool_choice. The same step is asked once with "auto", and the
+        // model is remembered so later requests do not spend a failed call on it.
+        if (typeof toolChoice !== "object" || !/does not support this tool_choice/i.test(String((error as Error)?.message ?? error))) throw error;
+        modelsRejectingForcedToolChoice.add(modelKey);
+        toolChoice = "auto";
+        result = await input.ai.chat({ ...input.request, messages: [...messages], tools, toolChoice });
+      }
     } catch (error) {
       if (hasPersistedPrimary() && (!input.primaryOutcomeComplete || input.primaryOutcomeComplete(metadata))) {
         return { result: { content: "" }, messages, traces, metadata, completionFallback: "model_error" };
