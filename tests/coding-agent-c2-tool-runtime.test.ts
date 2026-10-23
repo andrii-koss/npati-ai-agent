@@ -374,7 +374,8 @@ describe("security-gate: C2 canonical executor wiring", () => {
     const names = tools.map((tool) => tool.name);
     // The runtime serves exactly the published registry (not a hand-written list)…
     expect([...names].sort()).toEqual(CODE_TOOL_SCHEMAS.map((tool) => tool.name).sort());
-    expect(new Set(names).size).toBe(names.length);
+    expect(new Set(tools.map(tool => `${tool.name}@${tool.version}`)).size).toBe(tools.length);
+    expect(tools.filter(tool => tool.name === "code.data.schema.apply").map(tool => tool.version).sort()).toEqual([1, 2]);
     // …which must still contain every read-only tool C2 published, even though C3 added more.
     const C2_READ_TOOLS = ["code.fs.grep", "code.fs.list", "code.fs.read", "code.fs.tree", "code.project.info", "code.symbols.outline"];
     expect(C2_READ_TOOLS.every((name) => names.includes(name))).toBe(true);

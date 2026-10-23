@@ -41,7 +41,7 @@ ENV DOCKER_CONFIG=/tmp/npati-docker NPATI_SANDBOX_IMAGE_CATALOG=/opt/npati-sandb
 RUN apk add --no-cache docker-cli docker-cli-buildx cosign
 COPY docker/sandbox/images.json /opt/npati-sandbox-images/catalog.json
 COPY apps/agent-api/Dockerfile.project-sandbox apps/agent-api/Dockerfile.sandbox-egress /opt/npati-sandbox-images/
-COPY apps/agent-api/src/sandbox-egress-proxy.mjs /opt/npati-sandbox-images/src/
+COPY apps/agent-api/src/sandbox-egress-proxy.mjs apps/agent-api/src/sandbox-project-api-binding.mjs /opt/npati-sandbox-images/src/
 COPY apps/agent-api/sandbox-runner-entrypoint.sh /opt/npati-sandbox-images/entrypoint.sh
 EXPOSE 7865
 CMD ["sh", "/opt/npati-sandbox-images/entrypoint.sh"]
@@ -75,10 +75,12 @@ COPY apps/agent-api/project-runtime-launcher.mjs apps/agent-api/project-runtime-
 RUN apk add --no-cache libseccomp-dev chromium font-noto
 RUN npm install --prefix /opt/npati-qa --omit=dev --ignore-scripts --no-audit --no-fund playwright@1.63.0
 COPY apps/agent-api/browser-qa-runner.mjs /opt/npati-qa/browser-qa-runner.mjs
+COPY apps/agent-api/browser-qa-diagnostics.mjs /opt/npati-qa/browser-qa-diagnostics.mjs
 RUN cc -O2 -Wall -Wextra -Werror /tmp/project-runtime-guard.c -lseccomp -o /usr/local/bin/npati-project-exec \
   && /usr/local/bin/npati-project-exec --emit-filter /opt/npati-runtime/project-command.seccomp \
   && rm /tmp/project-runtime-guard.c
 COPY apps/agent-api/src/sandbox-egress-proxy.mjs /opt/npati-runtime/sandbox-egress-proxy.mjs
+COPY apps/agent-api/src/sandbox-project-api-binding.mjs /opt/npati-runtime/sandbox-project-api-binding.mjs
 COPY apps/agent-api/project-runtime-entrypoint.sh /opt/npati-runtime/entrypoint.sh
 RUN mkdir -p /projects /runtime-state && chmod 711 /projects && chmod 700 /runtime-state
 EXPOSE 7865

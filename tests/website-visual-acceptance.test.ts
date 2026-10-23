@@ -212,3 +212,16 @@ describe("a malformed verdict is asked for once more", () => {
     expect(reviewed.visualAcceptance).toMatchObject({ status: "blocked" });
   });
 });
+
+it("blocks visual inference and repair on functional QA failures, preserving only canonical diagnostics", async () => {
+  const f = await fixture(), chat = vi.fn();
+  const qa = { ...f.qa as object, success: false, report: { id: "broken-page" },
+    consoleErrors: [{ type: "pageerror", cause: "undefined_reference", message: "SECRET", source: "page.tsx", line: 12, column: 4 }] };
+  const r = await reviewWebsiteReference(f.input, f.run, { inspect: async () => qa as never, chat }) as any;
+  expect(chat).not.toHaveBeenCalled();
+  expect(r.functionalAcceptance).toMatchObject({ status: "failed", reportId: "broken-page" });
+  expect(r.functionalAcceptance.diagnostics[0]).toMatchObject({ cause: "undefined_reference", line: 12 });
+  expect(r.visualAcceptance).toMatchObject({ status: "blocked", differences: ["functional_qa_failed"] });
+  expect(visualRepairFindings(r.visualAcceptance)).toEqual([]);
+  expect(JSON.stringify(r)).not.toContain("SECRET");
+});

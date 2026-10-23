@@ -1,3 +1,4 @@
+import { withAuthPolicySchemaSnapshot } from "./auth-policy-schema-snapshot";
 import type { AuthContext } from "@npati/workspace";
 import type { ProjectAccessPolicy } from "@npati/shared";
 import { quoteIdentifier } from "./identifier";
@@ -26,6 +27,7 @@ export async function applyAuthAccessPolicies(
   policies: ProjectAccessPolicy[],
 ): Promise<{ compiled: number; fingerprint: string }> {
   const backend = await host.getBackend(ctx, companyId, projectId);
+  return withAuthPolicySchemaSnapshot(host, ctx, backend, environment, policies, async () => {
   const migratorPool = await host.getPool(backend, environment, "migrator");
 
   // Group policies by collection
@@ -60,6 +62,7 @@ export async function applyAuthAccessPolicies(
   const allPolicies = await host.repository.getAccessPolicies(ctx, companyId, backend.id, environment);
   const fingerprint = RlsPolicyCompiler.computeFingerprint("all", allPolicies);
   return { compiled: byCollection.size, fingerprint };
+  });
 }
 
 export async function rotateAuthSigningKey(

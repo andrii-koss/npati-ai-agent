@@ -247,7 +247,7 @@ describe("security-gate: C2 tool schema parity", () => {
     expect([...capabilityById.keys()].sort()).toEqual([...TOOL_NAMES].sort());
     // No hardcoded count: the three sources must agree, whichever step published the last tool.
     expect(CODE_CAPABILITIES).toHaveLength(TOOL_NAMES.length);
-    expect(CODE_TOOL_SCHEMAS).toHaveLength(TOOL_NAMES.length);
+    expect(CODE_TOOL_SCHEMAS).toHaveLength(TOOL_NAMES.length + 1); // schema.apply@1 remains available
   });
 
   it("keeps argument schemas identical field by field for every tool", () => {
@@ -282,11 +282,11 @@ describe("security-gate: C2 tool schema parity", () => {
     }
   });
 
-  it("pins one published version per tool and keeps the mirror keyed by tool name", () => {
+  it("mirrors the latest published version and keeps historical versions separately", () => {
     for (const name of TOOL_NAMES) {
       const tool = toolByName.get(name)!;
       const capability = capabilityById.get(name)!;
-      expect(tool.version, `${name} registry version`).toBe(1);
+      expect(tool.version, `${name} registry version`).toBe(name === "code.data.schema.apply" ? 2 : 1);
       expect(tool.status).toBe("active");
       expect(capability.version, `${name} capability version must equal the tool version`).toBe(tool.version);
       expect(capability.type, `${name} capability type`).toBe("tool");
@@ -336,7 +336,7 @@ describe("security-gate: C2 tool schema parity", () => {
     // Reuse the registry's own hasher instead of a second implementation: two hashers would be two truths
     // and could disagree exactly when it matters.
     expect(PUBLISHED_TOOL_SCHEMA_CHECKSUM, "registry checksum must match the schemas it pins").toBe(toolSchemaChecksum(CODE_TOOL_SCHEMAS));
-    expect(published.tools.map((tool) => tool.name).sort()).toEqual([...TOOL_NAMES].sort());
+    expect([...new Set(published.tools.map((tool) => tool.name))].sort()).toEqual([...TOOL_NAMES].sort());
   });
 
   it("serves exactly one manifest for the published version and keeps the frozen v5 and v6 sets intact", () => {
@@ -346,7 +346,7 @@ describe("security-gate: C2 tool schema parity", () => {
     expect(publishedVersions, "exactly one manifest per published version").toHaveLength(1);
 
     const current = KNOWN_TOOL_MANIFESTS.find((manifest) => manifest.version === CODE_TOOL_MANIFEST_VERSION)!;
-    expect(current.tools.map((tool) => tool.name).sort()).toEqual([...TOOL_NAMES].sort());
+    expect([...new Set(current.tools.map((tool) => tool.name))].sort()).toEqual([...TOOL_NAMES].sort());
 
     // Rule 13: an already published version is never rewritten, so a tool published later cannot leak
     // into v5 — a session created before C9 must keep resolving exactly the 22 tools it started with.

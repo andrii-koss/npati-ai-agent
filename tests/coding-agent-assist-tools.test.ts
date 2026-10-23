@@ -127,3 +127,16 @@ describe("code.web.search / code.web.fetch", () => {
     await expect(executors["code.web.fetch"]!(execution("code.web.fetch", { url: "file:///etc/passwd" }))).rejects.toMatchObject({ code: "invalid_arguments" });
   });
 });
+
+it("delivers canonical JS causes to the Coding Agent preview result without raw messages", async () => {
+  const executors = canonicalAssistExecutors({ previewScreenshot: async () => ({
+    mimeType: "image/png", base64Data: PNG.toString("base64"), sizeBytes: PNG.length,
+    functionalQaPassed: false, consoleDiagnostics: [{
+      type: "pageerror", cause: "null_property", message: "SECRET instructions", source: "page.tsx", line: 9, column: 3,
+    }],
+  }) });
+  const result = await executors["code.preview.screenshot"]!(execution("code.preview.screenshot", {})) as any;
+  expect(result.functionalQaPassed).toBe(false);
+  expect(result.consoleDiagnostics[0]).toMatchObject({ cause: "null_property", source: "page.tsx", line: 9 });
+  expect(JSON.stringify(result.consoleDiagnostics)).not.toContain("SECRET");
+});

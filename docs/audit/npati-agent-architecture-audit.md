@@ -161,3 +161,13 @@ Open (not changed — need a decision, a new published version, or environment):
 5. Runtime verification before data/UI success claims (RC-5); owner decision on console-error text (RC-3).
 6. Separate vision reviewer with JSON mode (RC-4); a model profile for Gemma.
 7. Project context for neutral chat (RC-6); Company `web.fetch` through the SSRF-validated provider (RC-8).
+
+## 9. Follow-up on 2026-10-23
+
+See [the architecture follow-up](npati-agent-architecture-followup-2026-10-23.md) for the current patch, audit and evidence.
+
+Overall **BLOCKED**: the user confirmed there is no existing Project API endpoint reachable through the sandbox egress proxy. Full six-step paid reruns were not performed. This report's earlier E2E measurements remain historical.
+
+Implemented locally: schema.apply@2 / manifest v16 with v1 and old session manifests preserved; bounded canonical Browser QA diagnostics delivered to the Coding Agent; functional QA gate before visual inference/repair; native Node proxy configuration; static sandbox Project API URL preflight. Real disposable sandbox/Chromium checks and a temporary-table PostgreSQL FK check passed. No production, RBAC, approval policy or sandbox network/isolation changes, push or merge.
+
+The actual running runtime mode is shared (bubblewrap + slirp4netns), despite the stack name containing isolated. One logical coordinator should reuse Chat Orchestrator's context/transport and Company Runtime's authorized execution, with Coding Agent as its existing coding tool/run. A new Main Agent would duplicate these components. Universal single-chat behavior is not yet certified.

@@ -73,7 +73,7 @@ export interface ChatStreamRouteDeps {
   projectSandbox: ProjectSandboxService | undefined;
   projectService: ProjectService;
   runBusinessMessage: (auth: AuthContext, businessId: string, message: string, conversationId: string | undefined, log: { warn(value: unknown, message?: string): void }, progress?: ResearchProgressListener, attachments?: ChatAttachmentInput[], memoryPolicy?: NoMemoryEvaluationResult, signal?: AbortSignal) => Promise<{ message: string; companyAction?: { companyId: string; action: string } }>;
-  runNeutralMessage: (auth: AuthContext, message: string, conversationId: string | undefined, attachments?: ChatAttachmentInput[], progress?: ResearchProgressListener, memoryPolicy?: NoMemoryEvaluationResult, onDelta?: (chunk: string) => void, signal?: AbortSignal, managementCompany?: { id: string; name: string }) => Promise<{ message: string; companyAction?: { companyId: string; action: string } }>;
+  runNeutralMessage: (auth: AuthContext, message: string, conversationId: string | undefined, attachments?: ChatAttachmentInput[], progress?: ResearchProgressListener, memoryPolicy?: NoMemoryEvaluationResult, onDelta?: (chunk: string) => void, signal?: AbortSignal, managementCompany?: { id: string; name: string }, projectContext?: Pick<import("@npati/workspace").Project, "id" | "name" | "description" | "framework">) => Promise<{ message: string; companyAction?: { companyId: string; action: string } }>;
   chatDevelopment?: import("./chat-development-service").ChatDevelopmentService;
   workspaceStore: ReturnType<typeof createCoreServices>["workspaceStore"];
   boundedResponseChunks: (value: string, maxCharacters?: number) => Iterable<string>;
@@ -625,7 +625,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
           }
           send("result", projectResponse);
         } else if (resolved.context.contextType === "project" && !(await addressesCompanyAgent(resolved.company))) {
-          const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal, resolved.company ? { id: resolved.company.id, name: resolved.company.name } : undefined);
+          const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal, resolved.company ? { id: resolved.company.id, name: resolved.company.name } : undefined, resolved.project);
           send("result", { ...result, activeContext: resolved.context });
         } else if (resolved.context.contextType === "none") {
           const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy,(delta)=>send("delta",{delta}),streamController.signal);

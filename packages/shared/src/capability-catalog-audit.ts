@@ -22,6 +22,7 @@
  *
  * This module is bundled into the web app (`@npati/shared`), so it deliberately imports no Node builtins.
  */
+import { CODE_DATA_SCHEMA_APPLY_V1 } from "./code-data-schema-apply-v1";
 import { CAPABILITY_CATALOG } from "./capability-catalog";
 import { CAPABILITY_MATRIX, type CapabilityMatrixEntry } from "./capability-matrix";
 import { defaultCapabilityRegistry, type CapabilityDefinition } from "./capabilities";
@@ -261,7 +262,7 @@ export function checkStaticManifestParity(
   }
 
   const manifestNames = manifest.tools.map((tool) => tool.name ?? "");
-  const duplicateNames = duplicates(manifestNames);
+  const duplicateNames = duplicates(manifest.tools.map(tool => `${tool.name}@${tool.version}`));
   if (duplicateNames.length > 0) {
     fail("manifest_duplicate_tool_name", summarize(duplicateNames));
   }
@@ -279,7 +280,9 @@ export function checkStaticManifestParity(
 
   const matrixStatusByCapabilityId = new Map(CAPABILITY_MATRIX.map((entry) => [entry.capabilityId, entry.status]));
   const keyIssues: string[] = [];
-  const versionIssues: string[] = [];
+  const versionIssues: string[] = catalogCodeTools
+    .filter(capability => !manifest.tools.some(tool => tool.name === capability.id && tool.version === capability.version))
+    .map(capability => `${capability.id}: current catalog version ${capability.version} absent from manifest`);
   const canonicalIssues: string[] = [];
   const inputSchemaIssues: string[] = [];
   const outputSchemaIssues: string[] = [];
@@ -289,8 +292,12 @@ export function checkStaticManifestParity(
     if (tool.key !== `${tool.name}@${tool.version}`) {
       keyIssues.push(`${tool.key} != ${tool.name}@${tool.version}`);
     }
-    const capability = catalogByName.get(tool.name);
-    if (!capability) continue;
+    const current = catalogByName.get(tool.name);
+    if (!current) continue;
+    // A legacy contract must match an explicitly retained immutable schema, never any arbitrary older version.
+    const capability = current.version === tool.version ? current
+      : tool.name === CODE_DATA_SCHEMA_APPLY_V1.id && tool.version === CODE_DATA_SCHEMA_APPLY_V1.version
+        ? CODE_DATA_SCHEMA_APPLY_V1 : current;
     if (capability.version !== tool.version) {
       versionIssues.push(`${tool.name}: catalog=${capability.version} manifest=${tool.version}`);
     }

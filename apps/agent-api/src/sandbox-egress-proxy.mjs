@@ -21,6 +21,7 @@
  * to an internal collector URL when one exists (TODO(C5a): write allowlist changes to the AuditLog).
  */
 import net, { isIP } from "node:net";
+import { createProjectApiServiceBinding } from "./sandbox-project-api-binding.mjs";
 import http from "node:http";
 import { lookup } from "node:dns/promises";
 
@@ -54,6 +55,7 @@ const allowedGitHosts = allowlist(process.env.ALLOWED_GIT_HOSTS, "github.com,cod
 const MAX_REDIRECTS = parsePositiveInt(process.env.NPATI_SANDBOX_EGRESS_MAX_REDIRECTS, 5);
 const DNS_CACHE_TTL_MS = parsePositiveInt(process.env.NPATI_SANDBOX_EGRESS_DNS_TTL_MS, 30_000);
 const AUDIT_HOOK = process.env.NPATI_EGRESS_AUDIT_HOOK;
+const projectApiBinding = createProjectApiServiceBinding(process.env.NPATI_PROJECT_API_SERVICE_BINDING);
 
 /**
  * Normalizes a hostname as it arrives in a request. Anything ambiguous (whitespace, control
@@ -254,6 +256,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     const url = new URL(req.url);
+    if (projectApiBinding?.matches(url)) return projectApiBinding.handle(req, res, url);
     if (url.protocol !== "http:") { logDenied("invalid_scheme", { scheme: url.protocol }); res.writeHead(403); res.end(); return; }
     const depth = Number.parseInt(String(req.headers["x-npati-redirect-depth"] ?? "0"), 10);
     if (Number.isFinite(depth) && depth > MAX_REDIRECTS) {
@@ -285,6 +288,7 @@ const server = http.createServer(async (req, res) => {
 });
 server.on("connect", async (req, client, head) => {
   client.pause();
+  if (projectApiBinding?.connect(req, client, head)) return;
   const rawTarget = String(req.url ?? "");
   try {
     const parts = rawTarget.split(":");

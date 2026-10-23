@@ -49,6 +49,8 @@ export class CodeToolSchemaError extends Error {
  * same source as this registry — one artefact, no duplicated copy to drift.
  */
 export const CODE_TOOL_SCHEMAS: readonly CodeToolSchema[] = authoredSchemas as unknown as readonly CodeToolSchema[];
+// All pre-v16 sessions retain schema.apply@1 exactly as published.
+const LEGACY_TOOL_SCHEMAS = CODE_TOOL_SCHEMAS.filter(tool => tool.name !== "code.data.schema.apply" || tool.version === 1);
 
 /**
  * The C2 published subset (read/search only). Kept as a named constant because manifest v2 must keep
@@ -63,7 +65,7 @@ const C2_TOOL_NAMES: readonly string[] = [
   "code.symbols.outline",
   "code.project.info",
 ];
-export const C2_TOOL_SCHEMAS: readonly CodeToolSchema[] = CODE_TOOL_SCHEMAS.filter((tool) => C2_TOOL_NAMES.includes(tool.name));
+export const C2_TOOL_SCHEMAS: readonly CodeToolSchema[] = LEGACY_TOOL_SCHEMAS.filter((tool) => C2_TOOL_NAMES.includes(tool.name));
 
 /**
  * The C3 published subset (reads plus the mutating file tools). Kept as a named constant for the same
@@ -80,7 +82,7 @@ const C3_TOOL_NAMES: readonly string[] = [
   "code.fs.diff",
   "code.fs.undo_last_turn",
 ];
-export const C3_TOOL_SCHEMAS: readonly CodeToolSchema[] = CODE_TOOL_SCHEMAS.filter((tool) => C3_TOOL_NAMES.includes(tool.name));
+export const C3_TOOL_SCHEMAS: readonly CodeToolSchema[] = LEGACY_TOOL_SCHEMAS.filter((tool) => C3_TOOL_NAMES.includes(tool.name));
 
 /**
  * The C4 published subset (reads, mutating file tools, sandbox execution and verification). Kept for the
@@ -96,11 +98,11 @@ const C4_TOOL_NAMES: readonly string[] = [
   "code.shell.process.stop",
   "code.verify.run",
 ];
-export const C4_TOOL_SCHEMAS: readonly CodeToolSchema[] = CODE_TOOL_SCHEMAS.filter((tool) => C4_TOOL_NAMES.includes(tool.name));
+export const C4_TOOL_SCHEMAS: readonly CodeToolSchema[] = LEGACY_TOOL_SCHEMAS.filter((tool) => C4_TOOL_NAMES.includes(tool.name));
 
 /** The C4a dependency subset (inspection, audit and adding a dependency). */
 const C4A_TOOL_NAMES: readonly string[] = ["code.deps.inspect", "code.deps.audit", "code.deps.add"];
-export const C4A_TOOL_SCHEMAS: readonly CodeToolSchema[] = CODE_TOOL_SCHEMAS.filter((tool) => C4A_TOOL_NAMES.includes(tool.name));
+export const C4A_TOOL_SCHEMAS: readonly CodeToolSchema[] = LEGACY_TOOL_SCHEMAS.filter((tool) => C4A_TOOL_NAMES.includes(tool.name));
 
 /**
  * The C9 published additions (planning metadata): proposing a plan and updating the session todo list.
@@ -143,7 +145,7 @@ const V5_TOOL_NAMES: readonly string[] = [
   "code.deps.audit",
   "code.deps.add",
 ];
-export const V5_TOOL_SCHEMAS: readonly CodeToolSchema[] = CODE_TOOL_SCHEMAS.filter((tool) => V5_TOOL_NAMES.includes(tool.name));
+export const V5_TOOL_SCHEMAS: readonly CodeToolSchema[] = LEGACY_TOOL_SCHEMAS.filter((tool) => V5_TOOL_NAMES.includes(tool.name));
 
 /**
  * The v6 published set (24 tools: everything published through the C9 planning tools, which is v5 plus
@@ -156,7 +158,7 @@ const V6_TOOL_NAMES: readonly string[] = [
   "code.plan.propose",
   "code.plan.update",
 ];
-export const V6_TOOL_SCHEMAS: readonly CodeToolSchema[] = CODE_TOOL_SCHEMAS.filter((tool) => V6_TOOL_NAMES.includes(tool.name));
+export const V6_TOOL_SCHEMAS: readonly CodeToolSchema[] = LEGACY_TOOL_SCHEMAS.filter((tool) => V6_TOOL_NAMES.includes(tool.name));
 
 /**
  * C11: the v7 published set (25 tools: v6 plus `code.ask_user`). Frozen **explicitly**, name by name, for
@@ -169,7 +171,7 @@ const V7_TOOL_NAMES: readonly string[] = [
   ...V6_TOOL_NAMES,
   "code.ask_user",
 ];
-export const V7_TOOL_SCHEMAS: readonly CodeToolSchema[] = CODE_TOOL_SCHEMAS.filter((tool) => V7_TOOL_NAMES.includes(tool.name));
+export const V7_TOOL_SCHEMAS: readonly CodeToolSchema[] = LEGACY_TOOL_SCHEMAS.filter((tool) => V7_TOOL_NAMES.includes(tool.name));
 
 /**
  * C12: the v8 published set (36 tools: v7's 25 plus the eleven `code.git.*` workflow tools, inventory ids
@@ -192,23 +194,24 @@ const V8_TOOL_NAMES: readonly string[] = [
   "code.git.pr.create",
   "code.git.pr.comment",
 ];
-export const V8_TOOL_SCHEMAS: readonly CodeToolSchema[] = CODE_TOOL_SCHEMAS.filter((tool) => V8_TOOL_NAMES.includes(tool.name));
+export const V8_TOOL_SCHEMAS: readonly CodeToolSchema[] = LEGACY_TOOL_SCHEMAS.filter((tool) => V8_TOOL_NAMES.includes(tool.name));
 
 /** Manifest version of the currently published schema set. Bump together with the checksum. */
-export const V9_TOOL_SCHEMAS = CODE_TOOL_SCHEMAS.filter((tool) => V8_TOOL_NAMES.includes(tool.name) || tool.name === "code.agent.spawn");
+export const V9_TOOL_SCHEMAS = LEGACY_TOOL_SCHEMAS.filter((tool) => V8_TOOL_NAMES.includes(tool.name) || tool.name === "code.agent.spawn");
 export const PUBLISHED_V9_TOOL_SCHEMA_CHECKSUM = "b498efdc44e06ea1fd8b75860947a770e74f8b9a63dcd92026068a98de963d20";
 /** Manifest v15 adds run completion, image/preview viewing, documentation lookup and five Data Studio tools. */
 export const V15_ADDED_TOOL_NAMES: readonly string[] = [
   "code.finish", "code.image.view", "code.preview.screenshot", "code.web.fetch", "code.web.search",
   "code.data.query.read", "code.data.rows.seed", "code.data.migrations.list", "code.data.policies.inspect", "code.data.policies.apply",
 ];
-export const V10_TOOL_SCHEMAS = CODE_TOOL_SCHEMAS.filter((tool) => !V15_ADDED_TOOL_NAMES.includes(tool.name) && !tool.name.startsWith("code.data.") && !["code.agent.spawn_async","code.agent.continue","code.agent.send_message","code.agent.interrupt"].includes(tool.name));
+export const V10_TOOL_SCHEMAS = LEGACY_TOOL_SCHEMAS.filter((tool) => !V15_ADDED_TOOL_NAMES.includes(tool.name) && !tool.name.startsWith("code.data.") && !["code.agent.spawn_async","code.agent.continue","code.agent.send_message","code.agent.interrupt"].includes(tool.name));
 export const PUBLISHED_V10_TOOL_SCHEMA_CHECKSUM = "880e0aa6ec32a5ee666864bd9174192e486f559205b8657ea3365c47c7885050";
-export const V11_TOOL_SCHEMAS = CODE_TOOL_SCHEMAS.filter(tool => !V15_ADDED_TOOL_NAMES.includes(tool.name) && !tool.name.startsWith("code.data."));
-export const V12_TOOL_SCHEMAS = CODE_TOOL_SCHEMAS.filter(tool => !V15_ADDED_TOOL_NAMES.includes(tool.name) && !["code.data.backend.create", "code.data.schema.modify", "code.data.rows.list", "code.data.rows.transfer", "code.data.backend.attach"].includes(tool.name));
-export const V13_TOOL_SCHEMAS = CODE_TOOL_SCHEMAS.filter(tool => !V15_ADDED_TOOL_NAMES.includes(tool.name) && tool.name !== "code.data.backend.create");
-export const V14_TOOL_SCHEMAS = CODE_TOOL_SCHEMAS.filter(tool => !V15_ADDED_TOOL_NAMES.includes(tool.name));
-export const CODE_TOOL_MANIFEST_VERSION = 15;
+export const V11_TOOL_SCHEMAS = LEGACY_TOOL_SCHEMAS.filter(tool => !V15_ADDED_TOOL_NAMES.includes(tool.name) && !tool.name.startsWith("code.data."));
+export const V12_TOOL_SCHEMAS = LEGACY_TOOL_SCHEMAS.filter(tool => !V15_ADDED_TOOL_NAMES.includes(tool.name) && !["code.data.backend.create", "code.data.schema.modify", "code.data.rows.list", "code.data.rows.transfer", "code.data.backend.attach"].includes(tool.name));
+export const V13_TOOL_SCHEMAS = LEGACY_TOOL_SCHEMAS.filter(tool => !V15_ADDED_TOOL_NAMES.includes(tool.name) && tool.name !== "code.data.backend.create");
+export const V14_TOOL_SCHEMAS = LEGACY_TOOL_SCHEMAS.filter(tool => !V15_ADDED_TOOL_NAMES.includes(tool.name));
+export const V15_TOOL_SCHEMAS = LEGACY_TOOL_SCHEMAS;
+export const CODE_TOOL_MANIFEST_VERSION = 16;
 
 /* Step 6 publishes additive controls and spawn_async in v11; spawn@1 and manifests v1?v10 stay frozen. */
 
@@ -227,7 +230,7 @@ export const CODE_TOOL_MANIFEST_VERSION = 15;
  * places that report the artifact as stale, while `assertManifestConsistent()` — and therefore the manifest
  * the application publishes — is already satisfied.
  */
-export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "f43bffffd3abc0f78c3418eae40f233a2d371d1143db62a675f1cbca6a89ffb7";
+export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "8e7ba87add7d4c3e1e23a83aa4920622378ced1030724ac177ab9b7373cd2bd2";
 
 /**
  * Checksum of the v8 published set (36 tools: everything through the eleven `code.git.*` tools). Frozen for
@@ -402,6 +405,7 @@ export const KNOWN_TOOL_MANIFESTS: readonly CodeToolManifest[] = [
   toolManifest(V12_TOOL_SCHEMAS, 12),
   toolManifest(V13_TOOL_SCHEMAS, 13),
   toolManifest(V14_TOOL_SCHEMAS, 14),
+  toolManifest(V15_TOOL_SCHEMAS, 15),
   toolManifest(CODE_TOOL_SCHEMAS, CODE_TOOL_MANIFEST_VERSION),
 ];
 
@@ -421,4 +425,10 @@ export function schemasForToolManifest(manifestVersion: number): readonly CodeTo
     }
     return schema;
   });
+}
+
+/** Resolve the exact published version for policy; unknown versions retain the existing mismatch denial. */
+export function publishedSchemaForPolicy(name: string, version?: number): CodeToolSchema | undefined {
+  return CODE_TOOL_SCHEMAS.find(tool => tool.name === name && (version === undefined || tool.version === version))
+    ?? CODE_TOOL_SCHEMAS.find(tool => tool.name === name);
 }

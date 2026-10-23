@@ -15,6 +15,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { chromium } from "playwright";
 
 const args = Object.fromEntries(process.argv.slice(2).reduce((pairs, value, index, all) => (value.startsWith("--") ? [...pairs, [value.slice(2), all[index + 1]]] : pairs), []));
 const api = process.env.NPATI_API_URL ?? "http://127.0.0.1:13001";
@@ -44,6 +45,7 @@ const outDir = args.out ?? path.resolve("artifacts", "measure");
 const only = args.only ? new Set(args.only.split(",")) : null;
 const scenarioTimeoutMs = Number(args.timeout ?? 900_000);
 mkdirSync(outDir, { recursive: true });
+if (args["require-network-report"] && JSON.parse(readFileSync(args["require-network-report"], "utf8")).status !== "PASS") throw new Error("Deterministic network acceptance must PASS before model requests");
 
 const WRITE_TOOLS = /^code\.(fs\.(write|edit|apply_patch|move|delete)|deps\.add|data\.(schema\.(apply|modify)|rows\.(seed|transfer)|policies\.apply|backend\.(create|attach)))$/;
 const redact = (value) => JSON.parse(JSON.stringify(value ?? null, (key, item) => (/token|authorization|secret/i.test(key) ? "[redacted]" : typeof item === "string" ? item.replace(/([?&]token=)[^&\s"]+/g, "$1REDACTED") : item)));
@@ -156,7 +158,7 @@ function collect(companyId, sinceIso, untilIso) {
     toolMs: toolCalls.reduce((sum, event) => sum + (Number(event.p.durationMs) || 0), 0),
     toolMsByName: sumBy(toolCalls, (event) => event.p.tool),
     repeatedReads: reads.length - new Set(reads).size,
-    runs, tokens: runs.reduce((sum, run) => sum + (Number(run.tokens) || 0), 0),
+    runs, tokens: runs.length ? runs.reduce((sum, run) => sum + (Number(run.tokens) || 0), 0) : null,
     visualRepairs: runs.filter((run) => String(run.runId).includes(":visual-repair:")).length,
     screenshots: toolCalls.filter((event) => event.p.tool === "code.preview.screenshot").length,
     modelCalls: modelCalls.length, selfReviewCalls: modelCalls.filter((event) => event.p.modelPurpose === "self_review").length,
@@ -187,16 +189,22 @@ function omnirouteUsage(sinceIso, untilIso) {
   const clean = text.replace(/\x1b\[[0-9;]*m/g, "");
   const usage = [...clean.matchAll(/\[USAGE\] (\S+) \| in=(\d+) \| out=(\d+)/g)].map((m) => ({ provider: m[1], input: Number(m[2]), output: Number(m[3]) }));
   const streams = [...clean.matchAll(/\[(?:STREAM|NON-STREAM|REQUEST)\] \S+ \| ([^|]+) \| (\d+)ms/g)].map((m) => ({ model: m[1].trim(), ms: Number(m[2]) }));
-  return { llmRequests: usage.length, inputTokens: usage.reduce((s, u) => s + u.input, 0), outputTokens: usage.reduce((s, u) => s + u.output, 0), llmMs: streams.reduce((s, x) => s + x.ms, 0), llmTimed: streams.length };
+  return { usageCoverage: "partial; neutral requests may be unlogged", llmRequests: null, inputTokens: null, outputTokens: null, observedUsageRequests: usage.length, observedInputTokens: usage.reduce((s, u) => s + u.input, 0), observedOutputTokens: usage.reduce((s, u) => s + u.output, 0), llmMs: streams.reduce((s, x) => s + x.ms, 0), llmTimed: streams.length };
 }
 
 /** GETs a Preview page through the authenticated proxy; `{ status, html }`. */
 async function previewPage(companyId, projectId, pagePath) {
+  let browser;
   try {
-    const { token } = await http("GET", `/companies/${companyId}/projects/${projectId}/preview/token`);
-    const response = await fetch(`${api}/companies/${companyId}/projects/${projectId}/preview/proxy${pagePath === "/" ? "/" : pagePath}?token=${encodeURIComponent(token)}`, { signal: AbortSignal.timeout(60_000) });
-    return { status: response.status, html: await response.text() };
+    const { token: previewToken } = await http("GET", `/companies/${companyId}/projects/${projectId}/preview/token`);
+    browser = await chromium.launch({ headless: true }).catch(() => chromium.launch({ channel: "msedge", headless: true }));
+    const context = await browser.newContext({ extraHTTPHeaders: { authorization: "Bearer " + token } });
+    await context.route("**/*", route => new URL(route.request().url()).origin === new URL(api).origin ? route.continue() : route.abort());
+    const page = await context.newPage();
+    const response = await page.goto(`${api}/companies/${companyId}/projects/${projectId}/preview/proxy${pagePath}?token=${encodeURIComponent(previewToken)}`, { waitUntil: "networkidle", timeout: 60000 });
+    return { status: response?.status() ?? 0, html: await page.locator("body").innerText() };
   } catch (error) { return { status: 0, html: "", error: error.message }; }
+  finally { await browser?.close(); }
 }
 
 async function projectFiles(companyId, projectId) {
@@ -205,15 +213,15 @@ async function projectFiles(companyId, projectId) {
 }
 
 const STOREFRONT = [
-  { id: "f1-create", message: "Створи сучасний інтернет-магазин на Next.js із головною сторінкою, каталогом товарів і сторінкою контактів. Запусти Live Preview." },
-  { id: "f2-research", message: "Знайди в інтернеті три інтернет-магазини з подібними товарами. Проаналізуй їхній дизайн і запропонуй покращення для мого сайту. Поки нічого не змінюй." },
-  { id: "f3-database", message: "Створи для мого інтернет-магазину базу даних із таблицями products, categories та orders." },
-  { id: "f3-retry", message: "Створи для мого інтернет-магазину базу даних із таблицями products, categories та orders." },
-  { id: "f4-connect", message: "Підключи створену базу даних до мого Next.js-магазину. Зроби відображення товарів із бази." },
+  { id: "f1-create", message: "Create a modern Next.js electronics shop with a home page, product catalog and contact page. Start Live Preview." },
+  { id: "f2-research", message: "Research the real Apple Store, Google Store US and Samsung US electronics shops on the web. Compare their designs and propose improvements for my shop. Use current web sources. Do not modify my project." },
+  { id: "f3-database", message: "Create the dev database for my shop with products, categories and orders. Include a foreign key from products.category_id to categories.id. Keep production unchanged." },
+  { id: "f3-retry", message: "The schema.apply published-version mismatch has been fixed by the operator. Continue in this same shop: create the dev products, categories and orders tables if missing, with products.category_id referencing categories.id. Do not duplicate existing tables. Keep production unchanged." },
+  { id: "f4-connect", message: "Connect the existing dev database to this Next.js shop and display real products. Add sample products if necessary using the existing approval flow. Use the runtime server-side PROJECT_API_URL and publishable key; browser requests should use a same-origin route. Show an explicit error on API failure rather than static substitute products." },
   // A user approves the pending sample-data writes in the UI and tells the agent to continue; only run when needed.
   { id: "f4-approve", message: "Підтверджую додавання товарів у базу. Продовжуй.", approvePending: true },
   { id: "f5-design", message: "Зміни дизайн мого магазину відповідно до прикріпленого референсного фото. Збережи функціональність сайту та підключення до бази.", attach: true },
-  { id: "f6-recall", message: "Використай результати попереднього аналізу конкурентів і покращи головну сторінку магазину." },
+  { id: "f6-recall", message: "Use the earlier competitor research in this conversation to improve my shop home page. Reuse those findings without searching again. Preserve the database connection." },
 ];
 const SECRET_IN_CLIENT = /(postgres(?:ql)?:\/\/[^\s"'`]+|service_role|sk_live_|npati_sk_[A-Za-z0-9]|SECRET_KEY\s*[:=]\s*["'`][^"'`]{8,})/i;
 
@@ -231,8 +239,8 @@ async function storefrontSuccess(id, companyId, projectId, metrics, outcome, sta
     if (catalogPath) pages.catalog = await previewPage(companyId, projectId, "/" + catalogPath.split("/")[1]);
     if (contactPath) pages.contacts = await previewPage(companyId, projectId, "/" + contactPath.split("/")[1]);
     const qa = await http("POST", `/companies/${companyId}/projects/${projectId}/qa/inspect`, {}).catch((error) => ({ error: error.message }));
-    const ok = projects === 1 && Boolean(catalogPath && contactPath) && Object.values(pages).every((page) => page.status === 200) && metrics.runs.some((r) => r.status === "completed");
-    return { ok, status, projects, catalogPath, contactPath, pageStatus: Object.fromEntries(Object.entries(pages).map(([k, v]) => [k, v.status])), qaSuccess: qa?.success ?? qa?.report?.status ?? qa?.error ?? null };
+    const ok = qa?.success === true && projects === 1 && Boolean(catalogPath && contactPath) && Object.values(pages).every((page) => page.status === 200) && metrics.runs.some((r) => r.status === "completed");
+    return { ok, status, projects, catalogPath, contactPath, pageStatus: Object.fromEntries(Object.entries(pages).map(([k, v]) => [k, v.status])), qaIssues: qa?.issues?.map(issue => ({ type: issue.type, message: issue.message })), qaSuccess: qa?.success ?? qa?.report?.status ?? qa?.error ?? null };
   }
   if (id === "f2-research") {
     const sources = outcome.result?.research?.sources ?? [];
@@ -240,7 +248,7 @@ async function storefrontSuccess(id, companyId, projectId, metrics, outcome, sta
     const external = sources.filter((source) => /^https?:\/\//.test(source.url ?? "") && !/127\.0\.0\.1|localhost/.test(source.url));
     state.researchAnswer = String(outcome.result?.message ?? "");
     const newMigrations = migrations.length - (state.migrationCount ?? 0);
-    return { ok: metrics.writeCalls === 0 && newMigrations === 0 && external.length >= 1 && fetched >= 1, status, sources: external.map((s) => s.url), pagesFetched: fetched, writeCalls: metrics.writeCalls, routed: outcome.result?.routed ?? "chat", degraded: outcome.result?.research?.degraded ?? null };
+    return { ok: metrics.writeCalls === 0 && newMigrations === 0 && new Set(external.map(source => new URL(source.url).hostname)).size >= 3 && fetched >= 3, status, sources: external.map((s) => s.url), pagesFetched: fetched, writeCalls: metrics.writeCalls, routed: outcome.result?.routed ?? "chat", degraded: outcome.result?.research?.degraded ?? null };
   }
   if (id === "f3-database" || id === "f3-retry") {
     const creates = migrations.filter((m) => /create/i.test(JSON.stringify(m.op)));
@@ -250,7 +258,7 @@ async function storefrontSuccess(id, companyId, projectId, metrics, outcome, sta
     const overview = { dev: await http("GET", `/companies/${companyId}/projects/${projectId}/data-studio/dev`).catch((e) => ({ error: e.message })), prod: await http("GET", `/companies/${companyId}/projects/${projectId}/data-studio/prod`).catch((e) => ({ error: e.message })) };
     const collections = (o) => (o.collections ?? o.overview?.collections ?? []).map((c) => c.name ?? c.id ?? c);
     const relations = migrations.some((m) => /references/i.test(m.sql));
-    return { ok: required && duplicates.length === 0, status, tables: [...new Set(tableNames)], duplicates, relations, environments: [...new Set(migrations.map((m) => m.env))], devCollections: collections(overview.dev), prodCollections: collections(overview.prod), migrations: migrations.length };
+    return { ok: required && relations && duplicates.length === 0, status, tables: [...new Set(tableNames)], duplicates, relations, environments: [...new Set(migrations.map((m) => m.env))], devCollections: collections(overview.dev), prodCollections: collections(overview.prod), migrations: migrations.length };
   }
   if (id === "f4-connect" || id === "f4-approve" || id === "f5-design") {
     const files = await projectFiles(companyId, projectId);
@@ -260,16 +268,31 @@ async function storefrontSuccess(id, companyId, projectId, metrics, outcome, sta
     const clientLeaks = sources.filter((s) => /^\s*["']use client["']/m.test(s.text) && SECRET_IN_CLIENT.test(s.text)).map((s) => s.file);
     const dataAccess = sources.filter((s) => /data-studio|npati|fetch\(|process\.env\.[A-Z_]*(DATA|DB|API)/i.test(s.text) && /product/i.test(s.text)).map((s) => s.file);
     const rows = await http("POST", `/companies/${companyId}/projects/${projectId}/data-studio/dev/collections/products/rows/query`, { limit: 20 }).catch((e) => ({ error: e.message }));
-    const names = (rows.rows ?? rows.items ?? []).map((row) => row.name ?? row.title).filter((v) => typeof v === "string" && v.length > 2);
+    let rowItems = rows.rows ?? rows.items ?? [];
+    if (id === "f4-connect" && rowItems.length && !state.marker) {
+      const row = { ...rowItems[0] };
+      for (const key of ["id", "created_at", "updated_at"]) delete row[key];
+      const label = typeof row.name === "string" ? "name" : typeof row.title === "string" ? "title" : null;
+      if (label) {
+        state.marker = "E2E_LIVE_" + crypto.randomUUID().slice(0, 8); row[label] = state.marker;
+        for (const key of ["slug", "sku"]) if (typeof row[key] === "string") row[key] += "-" + state.marker;
+        try { await http("POST", `/companies/${companyId}/projects/${projectId}/data-studio/dev/collections/products/rows`, { row });
+          const refreshed = await http("POST", `/companies/${companyId}/projects/${projectId}/data-studio/dev/collections/products/rows/query`, { limit: 100 });
+          rowItems = refreshed.rows ?? refreshed.items ?? [];
+        } catch (error) { state.markerError = error.message; }
+      }
+    }
+    const names = rowItems.map((row) => row.name ?? row.title).filter((v) => typeof v === "string" && v.length > 2);
     const catalog = files.find((file) => /^app\/(catalog|products|shop)\/page\.(t|j)sx?$/.test(file));
     const page = await previewPage(companyId, projectId, catalog ? "/" + catalog.split("/")[1] : "/");
     const shown = names.filter((name) => page.html.includes(name));
-    const base = { status, clientLeaks, dataAccess, productRows: names.length, rowsShown: shown.length, pageStatus: page.status, projects };
+    const markerShown = Boolean(state.marker && page.html.includes(state.marker));
+    const base = { marker: state.marker ?? null, markerShown, markerError: state.markerError ?? null, status, clientLeaks, dataAccess, productRows: names.length, rowsShown: shown.length, pageStatus: page.status, projects };
     // Connecting is judged on the wiring; showing rows needs rows, which may wait for the user's approval (f4-approve).
-    if (id === "f4-connect") return { ...base, ok: page.status === 200 && clientLeaks.length === 0 && dataAccess.length > 0 && (names.length === 0 || shown.length > 0), pendingApprovals: sql(`select count(*) from company_approvals where company_id='${companyId}' and status='pending'`) };
+    if (id === "f4-connect") return { ...base, ok: page.status === 200 && clientLeaks.length === 0 && markerShown && dataAccess.length > 0 && (names.length > 0 && shown.length > 0), pendingApprovals: sql(`select count(*) from company_approvals where company_id='${companyId}' and status='pending'`) };
     if (id === "f4-approve") return { ...base, ok: page.status === 200 && clientLeaks.length === 0 && names.length > 0 && shown.length > 0, approved: state.approved ?? 0 };
     const root = metrics.runs.find((r) => !String(r.runId).includes(":visual-repair:"));
-    return { ...base, ok: root?.status === "completed" && page.status === 200 && clientLeaks.length === 0 && (names.length === 0 || shown.length > 0), visualAcceptance: run?.visualAcceptance?.status ?? null, major: run?.visualAcceptance?.differences?.length ?? null };
+    return { ...base, ok: root?.status === "completed" && page.status === 200 && markerShown && clientLeaks.length === 0 && (names.length > 0 && shown.length > 0), visualAcceptance: run?.visualAcceptance?.status ?? null, major: run?.visualAcceptance?.differences?.length ?? null };
   }
   if (id === "f6-recall") {
     const searched = progress.some((type) => /search|page_fetch/.test(type)) || Object.keys(metrics.toolsByName).some((name) => /^code\.web\./.test(name));
@@ -311,14 +334,15 @@ await renewToken(true);
 const routing = await http("GET", "/ai/routing");
 const originalDefault = routing?.defaultModelId ?? routing?.routing?.defaultModelId ?? null;
 await http("PUT", "/ai/models/default", { modelId: model });
-const report = { phase, model, api, startedAt: new Date().toISOString(), originalDefaultRestored: false, scenarios: [] };
+const report = args.resume ? JSON.parse(readFileSync(args.resume, "utf8")) : { phase, model, api, startedAt: new Date().toISOString(), originalDefaultRestored: false, scenarios: [] };
 try {
-  const company = await http("POST", "/companies", { name: `Measure ${phase} ${model.split("/").pop()} ${new Date().toISOString().slice(0, 16)}` });
+  const company = report.companyId ? { id: report.companyId } : await http("POST", "/companies", { name: `Measure ${phase} ${model.split("/").pop()} ${new Date().toISOString().slice(0, 16)}` });
   const companyId = company.id ?? company.company?.id;
-  const conversation = await http("POST", "/conversations", { title: `Measure ${phase} ${model}` });
+  const conversation = report.conversationId ? { id: report.conversationId } : await http("POST", "/conversations", { title: `Measure ${phase} ${model}` });
   report.companyId = companyId;
-  let projectId = null;
-  const state = {};
+  report.conversationId = conversation.id;
+  let projectId = report.scenarios.at(-1)?.projectId ?? null;
+  const state = { migrationCount: projectId ? sql(`select count(*) from data_backend_migrations where backend_id=(select data_backend_id from projects where id='${projectId}')`) : 0 };
   for (const scenario of args.suite === "storefront" ? STOREFRONT : SCENARIOS) {
     if (only && !only.has(scenario.id)) continue;
     // The approval dialog is answered while the run waits (waitForRuns); this follow-up only runs if one is still open.
@@ -351,6 +375,7 @@ try {
     const firstEvent = outcome.events[0];
     const record = {
       id: scenario.id, projectId, settled,
+      metricCoverage: { totalModelCalls: "unknown", tokens: "run estimates only; provider usage below is incomplete", toolCalls: "recorded Coding Agent tools; excludes neutral provider research operations" },
       firstEventMs: firstEvent?.atMs ?? null, firstEvent: firstEvent ? (firstEvent.payload?.routed ?? firstEvent.payload?.type ?? firstEvent.event) : null,
       routed: outcome.events.find((event) => event.payload?.routed)?.payload?.routed ?? (outcome.result?.routed ?? "chat"),
       ...omnirouteUsage(new Date(outcome.started - 1_000).toISOString(), new Date(endedAt + 1_000).toISOString()),
@@ -364,6 +389,7 @@ try {
       answer: String(outcome.result?.run?.message ?? outcome.result?.message ?? "").slice(0, 600),
     };
     report.scenarios.push(record);
+    writeFileSync(path.join(outDir, "current.json"), JSON.stringify(report, null, 2));
     writeFileSync(path.join(outDir, `${phase}-${model.replace(/[^a-z0-9]+/gi, "_")}-${scenario.id}.events.json`), JSON.stringify(outcome.events, null, 1));
     if (args.suite === "storefront") state.migrationCount = sql(`select count(*) from data_backend_migrations where backend_id=(select data_backend_id from projects where id='${projectId}')`) ?? 0;
     console.log(JSON.stringify({ id: record.id, ok: record.success.ok, status: record.success.status, totalMs: record.totalMs, firstEvent: record.firstEventMs, firstAction: record.timeToFirstActionMs, routed: record.routed, llm: record.llmRequests, inTok: record.inputTokens, outTok: record.outputTokens, modelCalls: record.modelCalls, toolCalls: record.toolCalls, writes: record.writeCalls, repairs: record.visualRepairs, screenshots: record.screenshots, files: record.changedFiles }));

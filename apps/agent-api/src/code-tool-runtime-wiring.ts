@@ -1,4 +1,5 @@
 
+import { normalizeBrowserDiagnostic } from "../browser-qa-diagnostics.mjs";
 import { BrowserQaError, type ProjectBrowserQaService } from "./project-browser-qa-service";
 import type { CodeAssistToolOptions } from "./code-tool-executors-assist";
 import { CodeToolError } from "./code-tool-runtime-errors";
@@ -287,11 +288,12 @@ function previewScreenshotPort(
     await flags.assertEnabled(ctx, "code.shell", { companyId });
     try {
       const report = await service.inspect(ctx, companyId, {
-        projectId, path, viewport, checks: ["screenshot"], screenshotMode: "visual", maxScreenshotBytes: 2_000_000, agentId: "system", ...(runId ? { runId } : {}),
+        projectId, path, viewport, checks: ["screenshot", "console", "links"], screenshotMode: "visual", maxScreenshotBytes: 2_000_000, agentId: "system", ...(runId ? { runId } : {}),
       });
       const shot = report.screenshots[0];
       if (!shot) throw new CodeToolError("visual_screenshot_unavailable", "The preview runner returned no screenshot", 503, "execute", true, "code.preview.screenshot");
-      return { mimeType: shot.mimeType, base64Data: shot.base64Data, sizeBytes: shot.sizeBytes, issues: report.issues.length };
+      return { mimeType: shot.mimeType, base64Data: shot.base64Data, sizeBytes: shot.sizeBytes, issues: report.issues.length,
+        functionalQaPassed: report.success, consoleDiagnostics: report.consoleErrors.slice(0, 5).map(normalizeBrowserDiagnostic) };
     } catch (error) {
       if (error instanceof BrowserQaError) {
         throw new CodeToolError("visual_screenshot_unavailable", `${error.code}: ${error.message}`, error.status, "execute", error.code === "preview_not_running", "code.preview.screenshot");

@@ -1,0 +1,327 @@
+{
+  "date": "2026-10-23",
+  "scope": "Local shared runtime; no production deployment",
+  "deterministic": {
+    "status": "PASS",
+    "llmCalls": 0,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "modelToolCalls": 0,
+    "httpCalls": 28,
+    "steps": [
+      {
+        "name": "create-test-project-and-backend",
+        "status": "PASS",
+        "ms": 186,
+        "evidence": {
+          "companyId": "f69098c7-6c1e-4249-bdf4-a39301fe9cd8",
+          "projectId": "8b7099df-2c87-40ba-875d-4eb99fe5489d",
+          "backendId": "88d29c52-4c3c-41b3-9db8-6800534b7492",
+          "environment": "dev"
+        }
+      },
+      {
+        "name": "create-products-and-unique-row",
+        "status": "PASS",
+        "ms": 632,
+        "evidence": {
+          "rowId": "aabe2dce-7cb6-4a6e-97f2-79501c686e2c",
+          "marker": "NPATI_CONTROL_ee9a4843",
+          "directGatewayStatus": 200,
+          "invalidKeyStatus": 401,
+          "publicPolicy": "products SELECT only"
+        }
+      },
+      {
+        "name": "create-nextjs-site",
+        "status": "PASS",
+        "ms": 19879,
+        "evidence": {
+          "framework": "nextjs",
+          "status": "running",
+          "usesRuntimeEnvironment": true,
+          "staticFallbackProducts": false
+        }
+      },
+      {
+        "name": "unique-row-is-visible-in-real-browser",
+        "status": "PASS",
+        "ms": 929,
+        "evidence": {
+          "httpStatus": 200,
+          "products": [
+            "NPATI_CONTROL_ee9a4843: 123.450000"
+          ],
+          "errors": []
+        }
+      },
+      {
+        "name": "database-update-is-visible-without-static-fallback",
+        "status": "PASS",
+        "ms": 913,
+        "evidence": {
+          "httpStatus": 200,
+          "products": [
+            "NPATI_CONTROL_ee9a4843_UPDATED: 987.650000"
+          ],
+          "errors": []
+        }
+      },
+      {
+        "name": "break-only-test-api-path",
+        "status": "PASS",
+        "ms": 13727,
+        "evidence": {
+          "httpStatus": 200,
+          "products": [],
+          "errors": [
+            "PROJECT_API_UNAVAILABLE"
+          ],
+          "dataRouteStatus": 503,
+          "altered": "only this project's api-path.json",
+          "sharedApiStopped": false,
+          "sharedDatabaseStopped": false
+        }
+      },
+      {
+        "name": "restore-path-and-recheck-real-row",
+        "status": "PASS",
+        "ms": 16335,
+        "evidence": {
+          "httpStatus": 200,
+          "products": [
+            "NPATI_CONTROL_ee9a4843_UPDATED: 987.650000"
+          ],
+          "errors": [],
+          "dataRouteStatus": 200,
+          "rowId": "aabe2dce-7cb6-4a6e-97f2-79501c686e2c"
+        }
+      }
+    ],
+    "totalMs": 52601,
+    "projectId": "8b7099df-2c87-40ba-875d-4eb99fe5489d",
+    "companyId": "f69098c7-6c1e-4249-bdf4-a39301fe9cd8",
+    "marker": "NPATI_CONTROL_ee9a4843"
+  },
+  "singleChat": {
+    "overall": "FAIL",
+    "network": "PASS",
+    "deterministicData": "PASS",
+    "vision": "BLOCKED",
+    "companyId": "44d5d37e-49e5-46ca-bd57-64eb5af1da0a",
+    "conversationId": "08b41590-c158-4ce5-b1ce-817fe3796f93",
+    "projectId": "bac36dec-21be-4961-b813-5c7db7405a36",
+    "originalDefaultRestored": true,
+    "uninterruptedFirstAttempt": false,
+    "metricsCoverage": "Actual total LLM calls/tokens unknown. Provider usage is an observed lower bound; Coding Agent activity counts exclude neutral routing/research and failed pre-run vision requests.",
+    "stages": [
+      {
+        "id": "f1-create",
+        "result": "FAIL",
+        "reason": "Three routes HTTP 200, but functional QA fails document-title (empty title).",
+        "elapsedMs": 159151,
+        "firstSseEventMs": 38706,
+        "recordedCodingModelCalls": 13,
+        "recordedCodingToolCalls": 13,
+        "failedCodingToolCalls": 1,
+        "observedUsageRequests": 12,
+        "observedInputTokens": 111959,
+        "observedOutputTokens": 4284,
+        "totalLlmCalls": null,
+        "totalInputTokens": null,
+        "totalOutputTokens": null,
+        "rawHarnessOk": true
+      },
+      {
+        "id": "f2-research",
+        "result": "FAIL",
+        "reason": "One evidenced Samsung source/page; comparison of three shops is not supported by three retrieved sources.",
+        "elapsedMs": 28602,
+        "firstSseEventMs": 1529,
+        "recordedCodingModelCalls": 0,
+        "recordedCodingToolCalls": 0,
+        "failedCodingToolCalls": 0,
+        "observedUsageRequests": 0,
+        "observedInputTokens": 0,
+        "observedOutputTokens": 0,
+        "totalLlmCalls": null,
+        "totalInputTokens": null,
+        "totalOutputTokens": null,
+        "rawHarnessOk": true
+      },
+      {
+        "id": "f3-database",
+        "result": "FAIL",
+        "reason": "Policy adapter selected v1 for requested v2; loop_detected.",
+        "elapsedMs": 30901,
+        "firstSseEventMs": 1890,
+        "recordedCodingModelCalls": 13,
+        "recordedCodingToolCalls": 13,
+        "failedCodingToolCalls": 8,
+        "observedUsageRequests": 13,
+        "observedInputTokens": 152245,
+        "observedOutputTokens": 1678,
+        "totalLlmCalls": null,
+        "totalInputTokens": null,
+        "totalOutputTokens": null,
+        "rawHarnessOk": false
+      },
+      {
+        "id": "f3-retry",
+        "result": "PASS",
+        "reason": "After exact-version correction: products, categories, orders and FK; dev only; no duplicates.",
+        "elapsedMs": 41491,
+        "firstSseEventMs": 1138,
+        "recordedCodingModelCalls": 13,
+        "recordedCodingToolCalls": 13,
+        "failedCodingToolCalls": 7,
+        "observedUsageRequests": 13,
+        "observedInputTokens": 168161,
+        "observedOutputTokens": 2864,
+        "totalLlmCalls": null,
+        "totalInputTokens": null,
+        "totalOutputTokens": null,
+        "rawHarnessOk": true
+      },
+      {
+        "id": "f4-connect",
+        "result": "FAIL",
+        "reason": "Seven real product rows including a new independent marker; no rows visible, step_limit. HTTP 502 at checkpoint. After S6 catalog returns explicit authorization error; dev access policies are empty.",
+        "elapsedMs": 161157,
+        "firstSseEventMs": 1351,
+        "recordedCodingModelCalls": 25,
+        "recordedCodingToolCalls": 26,
+        "failedCodingToolCalls": 6,
+        "observedUsageRequests": 24,
+        "observedInputTokens": 460835,
+        "observedOutputTokens": 4626,
+        "totalLlmCalls": null,
+        "totalInputTokens": null,
+        "totalOutputTokens": null,
+        "rawHarnessOk": false
+      },
+      {
+        "id": "f5-design",
+        "result": "BLOCKED",
+        "reason": "HTTP 401: No active credentials for provider deepseek. No paid rerun.",
+        "elapsedMs": 15433,
+        "firstSseEventMs": 497,
+        "recordedCodingModelCalls": 0,
+        "recordedCodingToolCalls": 0,
+        "failedCodingToolCalls": 0,
+        "observedUsageRequests": 0,
+        "observedInputTokens": 0,
+        "observedOutputTokens": 0,
+        "totalLlmCalls": null,
+        "totalInputTokens": null,
+        "totalOutputTokens": null,
+        "rawHarnessOk": false
+      },
+      {
+        "id": "f6-recall",
+        "result": "PASS",
+        "reason": "Behavioral acceptance: same project/conversation, home/CSS edits, no new web activity, story-centric presentation matches prior recommendations. Full semantic context provenance remains unverified because replay does not retain prompts.",
+        "elapsedMs": 97804,
+        "firstSseEventMs": 2316,
+        "recordedCodingModelCalls": 10,
+        "recordedCodingToolCalls": 15,
+        "failedCodingToolCalls": 1,
+        "observedUsageRequests": 9,
+        "observedInputTokens": 153957,
+        "observedOutputTokens": 2919,
+        "totalLlmCalls": null,
+        "totalInputTokens": null,
+        "totalOutputTokens": null,
+        "rawHarnessOk": true
+      }
+    ],
+    "interruptedAttempt": {
+      "status": "INTERRUPTED",
+      "runId": "code-run-mvkm7cxz-2grnrbrj",
+      "startedAt": "2026-10-23T06:54:40.968Z",
+      "interruptedAt": "2026-10-23T07:00:03.728Z",
+      "elapsedUntilLeaseRecoveryMs": 322760,
+      "activeExecutionMs": null,
+      "codingModelCalls": 23,
+      "toolCalls": 27,
+      "failedTools": 5,
+      "tokens": null,
+      "reason": "Harness stopped after deterministic version mismatch; Stop initially failed closed on incorrect audit workspace; source installed and existing lease recovery marked run interrupted. This recovery delay is not model latency."
+    }
+  },
+  "finalBrowser": {
+    "pages": [
+      {
+        "path": "/",
+        "status": 200,
+        "title": "",
+        "markerVisible": false,
+        "hasExplicitError": false,
+        "body": "ElectroShop\nHome\nCatalog\nContact\nSilence the World\n\nExperience sound like never before. Our latest noise-canceling technology brings you closer to your music.\n\nBuy NowLearn More >\n[ High-Resolution Product Imagery ]\nThe Remote Work Setup\n\nEverything you need to stay productive from anywhere in the world.\n\nExplore Bundle >\nThe Gamer's Edge\n\nUltra-low latency, high refresh rates, and immersive audio for the win.\n\nExplore Bundle >\nWhy Choose ElectroShop\nPremium Quality\n\nWe source only the best components and brands for our customers.\n\nFast Shipping\n\nGet your tech delivered to your doorstep in record time.\n\nExpert Support\n\nOur technicians are ready to help you with any setup or troubleshooting.\n\n© 2026 ElectroShop. All rights reserved."
+      },
+      {
+        "path": "/catalog",
+        "status": 200,
+        "title": "",
+        "markerVisible": false,
+        "hasExplicitError": true,
+        "body": "ElectroShop\nHome\nCatalog\nContact\nProduct Catalog\n\nError\n\nCollection action is not permitted\n\n© 2026 ElectroShop. All rights reserved."
+      }
+    ],
+    "marker": "E2E_LIVE_34f44180",
+    "modelCalls": 0
+  },
+  "postDeployment": {
+    "status": "PASS",
+    "httpStatus": 200,
+    "uniqueUpdatedRowVisible": true,
+    "llmCalls": 0
+  },
+  "verification": {
+    "finalSourceTests": {
+      "passed": 339,
+      "failed": 0,
+      "skipped": 0,
+      "files": 26,
+      "elapsedMs": 56249
+    },
+    "apiTypecheck": "PASS",
+    "testTypecheck": "PASS",
+    "build": "PASS",
+    "schemaAudit": "PASS",
+    "lintGuard": "PASS",
+    "xss": "PASS",
+    "fullLint": "FAIL: unchanged DataStudioSettingsPage.tsx source-size baseline",
+    "productionChanged": false,
+    "pushOrMerge": false
+  },
+  "measurementLimits": "Raw credential-bearing sessions and SSE artifacts are excluded. LLM/provider totals are unknown where logging is incomplete.",
+  "preMergeValidation": {
+    "focusedVersionParityTests": 123,
+    "sharedTypecheck": "PASS",
+    "apiTypecheck": "PASS",
+    "testTypecheck": "PASS",
+    "capabilityAudit": "4/4 PASS",
+    "securityGate": {
+      "ok": true,
+      "suites": {
+        "configured": 187,
+        "present": 187,
+        "missing": []
+      },
+      "tests": {
+        "passed": 2888,
+        "failed": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "steps": {
+        "typosquatDatasetPrepare": true,
+        "toolSchemas": true,
+        "sandboxImages": true,
+        "typosquatDataset": true
+      },
+      "generatedAt": "2026-10-23T12:05:22.503Z"
+    }
+  }
+}

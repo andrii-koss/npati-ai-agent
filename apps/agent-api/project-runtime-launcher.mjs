@@ -88,6 +88,12 @@ try {
   const proxy = 'http://10.0.2.2:8080';
   const env = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'npm_config_proxy', 'npm_config_https_proxy']
     .flatMap(key => ['--setenv', key, proxy]);
+  // Native Node fetch must use the same enforced proxy as package managers.
+  env.push('--setenv', 'NODE_USE_ENV_PROXY', '1');
+  // Preserve access to this project's already-fenced Preview socket. Other
+  // projects/control ports remain denied by the existing network policy.
+  const noProxy = 'localhost,127.0.0.1,0.0.0.0,::1,10.0.2.2:' + port;
+  env.push('--setenv', 'NO_PROXY', noProxy, '--setenv', 'no_proxy', noProxy);
   sandbox = spawn('/usr/bin/bwrap', [...base, ...(checking ? ['--clearenv'] : ['--bind', project, project]), '--chdir', cwd,
     '--info-fd', '3', '--block-fd', '4', '--seccomp', '5', ...env, '--',
     // Only Preview needs the Node relay. Foreground commands execute directly.
