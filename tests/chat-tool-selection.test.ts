@@ -69,7 +69,8 @@ describe("native chat tool selection", () => {
     let researchCalls = 0;
     const ai = engine(async (request) => {
       modelCalls += 1;
-      expect(request.tools?.map((item) => item.function.name)).toEqual(["npati_company_action", "web_search", "web_fetch", "npati_business_profile"]);
+      expect(request.tools?.map((item) => item.function.name)).toEqual(["npati_company_action", "npati_business_profile"]);
+      if(modelCalls===1)expect(request.reasoningMode).toBe("disabled");
       expect(request.toolChoice).toEqual(modelCalls === 1
         ? { type: "function", function: { name: "npati_company_action" } }
         : "auto");

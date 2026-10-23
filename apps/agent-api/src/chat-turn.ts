@@ -242,7 +242,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
     let researchJob: { id: string } | undefined;
     const hasAttachedEvidence = media.images.length > 0 || media.extractedDocs.length > 0 || Boolean(previousSpreadsheet);
     const webResearchRequested = !nativeToolCalling && (!hasAttachedEvidence || explicitlyRequestsWebResearch(message)) && (
-      (!companySettingsRequest && !workspaceSettingsRequest && !emailSettingsRequest) || explicitlyRequestsWebResearch(message)
+      (!companySettingsRequest && !workspaceSettingsRequest && !emailSettingsRequest) || explicitlyRequestsWebResearch(message, { requireOperation: true })
     );
     const namedPage = companySettingsRequest ? undefined : extractTargetUrlOrDomain(message) ?? undefined;
     const runWebResearch = async (researchService: NonNullable<typeof webResearch>, options: { mode?: "search" } = {}) => {
@@ -403,7 +403,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
     let businessCreateRequestKey: string = crypto.randomUUID();
     if (nativeToolCalling) {
       try {
-        const tools = availableCoreChatTools(auth);
+        const tools = availableCoreChatTools(auth, safeUserRequest);
         const plan = await planStructuredChatRequest(aiEngine, chatRequest, safeUserRequest);
         const routing = coreChatRoutingDecision(safeUserRequest, tools, hasAttachedEvidence);
         const businessPrimary = plan?.primary_action === "create_business_profile";

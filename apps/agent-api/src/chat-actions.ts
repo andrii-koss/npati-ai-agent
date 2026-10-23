@@ -364,10 +364,12 @@ ${localized.next}`;
     });
   }
 
-  function availableCoreChatTools(auth: AuthContext): ChatToolDefinition[] {
+  function availableCoreChatTools(auth: AuthContext, message = ""): ChatToolDefinition[] {
+    const internal = CompanyChatActions.isManagementRequest(message) || WorkspaceChatActions.isManagementRequest(message) || EmailChatActions.isManagementRequest(message);
+    const allowResearch = !internal || explicitlyRequestsWebResearch(message, { requireOperation: true });
     return [...CORE_CHAT_TOOLS, BUSINESS_PROFILE_TOOL].filter((tool) => {
       if (tool.function.name === "npati_company_action" || tool.function.name === "npati_business_profile") return auth.permissions.includes("business:manage");
-      if (tool.function.name === "web_search" || tool.function.name === "web_fetch") return Boolean(webResearch);
+      if (tool.function.name === "web_search" || tool.function.name === "web_fetch") return Boolean(webResearch) && allowResearch;
       return false;
     });
   }
@@ -376,10 +378,11 @@ ${localized.next}`;
     const availableToolNames = tools.map((tool) => tool.function.name);
     const directUrl = extractTargetUrlOrDomain(message);
     const semanticExternalIntent = Boolean(webResearch?.shouldResearch(message));
-    const internalManagementIntent = CompanyChatActions.isManagementRequest(message);
-    const explicitWebIntent = explicitlyRequestsWebResearch(message);
+    const companyManagementIntent = CompanyChatActions.isManagementRequest(message);
+    const internalManagementIntent = companyManagementIntent || WorkspaceChatActions.isManagementRequest(message) || EmailChatActions.isManagementRequest(message);
+    const explicitWebIntent = explicitlyRequestsWebResearch(message, { requireOperation: internalManagementIntent });
     const primaryInstruction = message.split(String.fromCharCode(10)).map((line) => line.trim()).filter(Boolean).slice(0, 3).join(" ");
-    const primaryExplicitWebIntent = explicitlyRequestsWebResearch(primaryInstruction);
+    const primaryExplicitWebIntent = explicitlyRequestsWebResearch(primaryInstruction, { requireOperation: internalManagementIntent });
     const explicitExternalIntent = Boolean(directUrl) || (
       internalManagementIntent
         ? primaryExplicitWebIntent
@@ -390,7 +393,7 @@ ${localized.next}`;
       toolChoice = { type: "function", function: { name: "web_fetch" } };
     } else if (explicitExternalIntent && availableToolNames.includes("web_search")) {
       toolChoice = { type: "function", function: { name: "web_search" } };
-    } else if (internalManagementIntent && availableToolNames.includes("npati_company_action")) {
+    } else if (companyManagementIntent && availableToolNames.includes("npati_company_action")) {
       toolChoice = { type: "function", function: { name: "npati_company_action" } };
     }
     return {

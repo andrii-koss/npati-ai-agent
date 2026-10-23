@@ -10,7 +10,13 @@ export function isSpreadsheetEditRequest(message: string): boolean {
   return edit && spreadsheet;
 }
 
-export function explicitlyRequestsWebResearch(message: string): boolean {
+export function explicitlyRequestsWebResearch(message: string, options: { requireOperation?: boolean } = {}): boolean {
+  if (options.requireOperation && !extractTargetUrlOrDomain(message)) {
+    return message.split(/[.!?;\n]/u).some(clause =>
+      !/^\s*(?:do not|don't|never|no |ne |nicht )/iu.test(clause)
+      && /(?:\b(?:research|search|browse|crawl|fetch|competitors?|sources)\b|pesquis|recherch|busca|investig|fuentes|fontes|quellen|\u0434\u043e\u0441\u043b\u0456\u0434|\u043f\u043e\u0448\u0443\u043a|\u043f\u043e\u0440\u0456\u0432\u043d|\u0434\u0436\u0435\u0440\u0435\u043b)/iu.test(clause)
+      && explicitlyRequestsWebResearch(clause));
+  }
   return Boolean(extractTargetUrlOrDomain(message))
     || /(?:https?:\/\/|\bweb\b|\binternet\b|\bwebsite\b|\bonline\b|\bsearch\b|\bbrowse\b|\bcrawl\b|\bcompetitors?\b|\bcompetition\b|інтернет|веб|сайт|пошук|пошукай|конкурент|конкурентів|проскануй|интернет|сайт|поиск|найди\s+в\s+интернете|concurrents?|mitbewerber|wettbewerb|competidores?|concorrenti?|głównych\s+konkurentów|rakipler?|竞争对手|競合|경쟁사|المنافسين|प्रतिस्पर्धियों|pesquis\p{L}*|recherch\p{L}*|investig\p{L}*\s+(?:na|en|in|im)\s+(?:web|internet)|busca\p{L}*\s+(?:en|na)\s+(?:la\s+)?(?:web|internet)|(?:with|com|con|mit|avec|з|с)\s+(?:sources|fontes|fuentes|quellen|джерелами|источниками))/iu.test(message);
 }

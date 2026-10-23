@@ -197,7 +197,7 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
     const workspaceSettingsRequest = WorkspaceChatActions.isManagementRequest(safePrompt);
     const emailSettingsRequest = EmailChatActions.isManagementRequest(safePrompt);
     const imageResearchRequested = !nativeToolCalling && (!hasAttachedEvidence || explicitlyRequestsWebResearch(message))
-      && ((!workspaceSettingsRequest && !emailSettingsRequest) || explicitlyRequestsWebResearch(message));
+      && ((!workspaceSettingsRequest && !emailSettingsRequest) || explicitlyRequestsWebResearch(message, { requireOperation: true }));
     if (imageResearchRequested && webResearch?.shouldResearch(safePrompt)) {
       const scope = { workspaceId: auth.workspaceId, businessId, userId: auth.userId };
       try {
@@ -256,7 +256,7 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
     const businessCreateRequestKey = crypto.randomUUID();
     const nativeChat = nativeToolCalling ? async (request: ChatRequest) => {
       try {
-        const tools = availableCoreChatTools(auth);
+        const tools = availableCoreChatTools(auth, safePrompt);
         const plan = await planStructuredChatRequest(aiEngine, request, safePrompt);
         const routing = coreChatRoutingDecision(safePrompt, tools, hasAttachedEvidence);
         const businessPrimary = plan?.primary_action === "create_business_profile";
