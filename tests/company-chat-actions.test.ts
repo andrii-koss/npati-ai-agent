@@ -128,6 +128,18 @@ describe("company management from chat", () => {
     expect(CompanyChatActions.isManagementRequest("Створи компанію Nordic Fit. Які агенти їй потрібні?")).toBe(true);
   });
 
+  it("never applies a change aimed at another, missing company to the selected company", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const bakery = await store.createCompany(alice, { name: "Пекарня Сонях" }, "named-bakery");
+    const message = "Додай агента «Тест» у компанію Temp Delete Co.";
+    expect(await CompanyChatActions.buildDeterministicAction(alice, store, message, bakery.id)).toBeUndefined();
+    const result = await CompanyChatActions.extractAndExecute(alice, directive({ action: "update", companyId: bakery.id, agents: [{ action: "create", fields: { name: "Тест", role: "Тест" } }] }), store, "named-missing", { requestMessage: message, selectedCompanyId: bakery.id });
+    expect(result.companyAction).toBeUndefined();
+    expect(await store.listCompanyAgents(alice, bakery.id)).toHaveLength(0);
+    const own = await CompanyChatActions.extractAndExecute(alice, directive({ action: "update", companyId: bakery.id, agents: [{ action: "create", fields: { name: "Олег", role: "Бариста" } }] }), store, "named-own", { requestMessage: "Додай агента «Олег» у компанію Пекарня Сонях", selectedCompanyId: bakery.id });
+    expect(own.companyAction?.companyId).toBe(bakery.id);
+  });
+
   it("treats renaming an agent as company management", () => {
     expect(CompanyChatActions.isManagementRequest("Перейменуй агента Марко на «Марко SMM».")).toBe(true);
     expect(CompanyChatActions.isManagementRequest("Rename the agent Leo to Leo Content")).toBe(true);

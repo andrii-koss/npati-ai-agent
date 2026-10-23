@@ -335,6 +335,28 @@ function fields(value: unknown, allowed: Set<string>, kind: string): Record<stri
   return input;
 }
 
+/**
+ * The company a request explicitly names after a company noun ("у компанію Temp Delete Co", "to company «Nordic»"),
+ * or undefined. Used to refuse a change aimed at one company from being applied to another (the selected one).
+ */
+export function companyNamedAfterNoun(message: string): string | undefined {
+  // A name is quoted, or unquoted and capitalised ("company website" names no company).
+  const noun = /(?:компані[юяїі]|компанії|компании|компанию|\bcompany|\bempresa|\bunternehmen|\bentreprise)\s+/iu.source;
+  const end = /(?:[.,!?;:]|\s+(?:і|та|and|e|y|und|et|з|with|для|for)\s|$)/u.source;
+  const quoted = new RegExp(noun + "[«\"“„]([^»\"”“\\n]{2,80})[»\"”“]", "iu").exec(message);
+  if (quoted) return quoted[1]!.trim();
+  const capitalised = new RegExp(noun + "(\\p{Lu}[\\p{L}\\p{N}'’ &-]{1,79}?)" + end, "u").exec(message);
+  return capitalised?.[1]?.trim();
+}
+
+/** Whether the request names a different company than `company` (case-insensitive prefix match either way). */
+function requestNamesOtherCompany(message: string, company: Pick<Company, "name">): boolean {
+  const named = companyNamedAfterNoun(message)?.toLocaleLowerCase();
+  if (!named) return false;
+  const actual = company.name.trim().toLocaleLowerCase();
+  return !(actual.startsWith(named) || named.startsWith(actual));
+}
+
 async function ownedCompany(store: WorkspaceStore, auth: AuthContext, directive: CompanyDirective, selectedCompanyId?: string): Promise<Company> {
   if (directive.companyId) return store.getCompany(auth, directive.companyId);
   if (!directive.companyName?.trim() && selectedCompanyId) return store.getCompany(auth, selectedCompanyId);
@@ -442,6 +464,7 @@ export class CompanyChatActions {
       && /(?:agents?|агент|agenten|agenti|agentów|ajan|智能体|エージェント|에이전트|وكلاء|وكيل|एजेंट)/iu.test(message);
     if (selectedCompanyId && addAgents && !createCompany) {
       const company = await store.getCompany(auth, selectedCompanyId);
+      if (requestNamesOtherCompany(message, company)) return undefined;
       const existingAgents = await store.listCompanyAgents(auth, company.id);
       const agentCount = requestedAgentCount(message, {}) ?? 1;
       const profiles = defaultAgentProfiles(message);
@@ -597,6 +620,10 @@ For update, include only fields that should change. To change only agents, use a
         }
       } else {
         company = await ownedCompany(store, auth, directive, options.selectedCompanyId);
+        // "Add an agent to company X" must never change the selected company Y when X does not exist (or was deleted).
+        if (options.requestMessage && requestNamesOtherCompany(options.requestMessage, company)) {
+          throw new Error(`Company "${companyNamedAfterNoun(options.requestMessage)}" was not found in your account`);
+        }
         if (directive.action === "delete") {
           if (directive.agents?.length) throw new Error("Do not combine company deletion with agent changes");
           await options.beforeDeleteCompany?.(company.id);
