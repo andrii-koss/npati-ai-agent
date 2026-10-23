@@ -12,7 +12,7 @@ export function isSpreadsheetEditRequest(message: string): boolean {
 
 export function explicitlyRequestsWebResearch(message: string): boolean {
   return Boolean(extractTargetUrlOrDomain(message))
-    || /(?:https?:\/\/|\bweb\b|\binternet\b|\bwebsite\b|\bonline\b|\bsearch\b|\bbrowse\b|\bcrawl\b|\bcompetitors?\b|\bcompetition\b|інтернет|веб|сайт|пошук|пошукай|конкурент|конкурентів|проскануй|интернет|сайт|поиск|найди\s+в\s+интернете|concurrents?|mitbewerber|wettbewerb|competidores?|concorrenti?|głównych\s+konkurentów|rakipler?|竞争对手|競合|경쟁사|المنافسين|प्रतिस्पर्धियों)/iu.test(message);
+    || /(?:https?:\/\/|\bweb\b|\binternet\b|\bwebsite\b|\bonline\b|\bsearch\b|\bbrowse\b|\bcrawl\b|\bcompetitors?\b|\bcompetition\b|інтернет|веб|сайт|пошук|пошукай|конкурент|конкурентів|проскануй|интернет|сайт|поиск|найди\s+в\s+интернете|concurrents?|mitbewerber|wettbewerb|competidores?|concorrenti?|głównych\s+konkurentów|rakipler?|竞争对手|競合|경쟁사|المنافسين|प्रतिस्पर्धियों|pesquis\p{L}*|recherch\p{L}*|investig\p{L}*\s+(?:na|en|in|im)\s+(?:web|internet)|busca\p{L}*\s+(?:en|na)\s+(?:la\s+)?(?:web|internet)|(?:with|com|con|mit|avec|з|с)\s+(?:sources|fontes|fuentes|quellen|джерелами|источниками))/iu.test(message);
 }
 
 export const spreadsheetEditedCopies: Record<ReturnType<typeof detectCompanyChatLanguage>, string> = {
