@@ -38,3 +38,28 @@ describe("chat in a project context", () => {
     expect(neutral.body).not.toContain('"companyRunId"');
   });
 });
+
+describe("management actions in a project chat", () => {
+  it("use the project's company as the selected company", async () => {
+    const context: AuthContext = { workspaceId: "workspace-project-management", userId: "owner", permissions: ["workspace:read", "workspace:write", "business:manage", "chat:use"] };
+    const store = new InMemoryWorkspaceStore();
+    const prompts: string[] = [];
+    const aiEngine: AIEngine = {
+      chat: vi.fn(async (request) => { prompts.push(request.messages.map((item) => String(item.content)).join("\n")); return { content: "NO_ACTION" }; }),
+      async *stream(request) { prompts.push(request.messages.map((item) => String(item.content)).join("\n")); yield "NO_ACTION"; },
+      listModels: async () => [], getModel: async () => undefined, executeTool: async () => ({}),
+      searchMemory: async () => [], saveMemory: async () => undefined, getCapabilities: async () => ["chat"],
+      healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => ({ ...context }) }, aiEngine, marketplace });
+    apps.push(app);
+    await store.createCompany(context, { name: "Other Co" }, "other");
+    const company = await store.createCompany(context, { name: "Bakery" }, "bakery");
+    await store.createProject(context, company.id, { name: "Bakery site", type: "website" } as never, "site");
+    const project = (await store.listProjects(context, company.id))[0]!;
+    const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Створи автоматизацію: щопонеділка о 9:00 план постів для Instagram", contextType: "project", companyId: company.id, projectId: project.id } });
+    expect(response.statusCode).toBe(200);
+    expect(prompts.some((prompt) => prompt.includes(`Selected company ID: ${JSON.stringify(company.id)}`))).toBe(true);
+  });
+});
