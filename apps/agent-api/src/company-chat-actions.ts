@@ -544,7 +544,15 @@ For update, include only fields that should change. To change only agents, use a
             ? (/тест/iu.test(options.requestMessage ?? "") ? "Тестова компанія" : "Нова компанія")
             : (/\btest/iu.test(options.requestMessage ?? "") ? "Test Company" : "New Company");
         }
-        const targetName = String(companyPatch.name ?? "").trim().toLocaleLowerCase();
+        let targetName = String(companyPatch.name ?? "").trim().toLocaleLowerCase();
+        // A planner may decorate the name of a company that already exists ("Nordic Fit (New)") so the exact-name
+        // duplicate check below does not match; the user asked for the name without that suffix.
+        const request = (options.requestMessage ?? "").toLocaleLowerCase();
+        const undecorated = targetName.replace(/\s*\([^)]*\)\s*$/u, "").trim();
+        if (undecorated && undecorated !== targetName && request.includes(undecorated) && !request.includes(targetName)) {
+          targetName = undecorated;
+          companyPatch.name = String(companyPatch.name).trim().replace(/\s*\([^)]*\)\s*$/u, "").trim();
+        }
         if (targetName) {
           let cursor: string | undefined;
           let duplicate: Company | undefined;

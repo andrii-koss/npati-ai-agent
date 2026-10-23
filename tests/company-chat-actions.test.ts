@@ -95,6 +95,17 @@ describe("company management from chat", () => {
     } finally { await app.close(); }
   });
 
+  it("does not create a duplicate when the planner decorates an existing company name", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const existing = await store.createCompany(alice, { name: "Nordic Fit" }, "existing-fit");
+    const result = await CompanyChatActions.extractAndExecute(alice, directive({ action: "create", fields: { name: "Nordic Fit (New)", industry: "Fitness" } }), store, "conversation-duplicate", { requestMessage: "Create a second company «Nordic Fit» — a boutique fitness studio in Lisbon" });
+    expect((await store.listCompanies(alice)).items.map((company) => company.name)).toEqual(["Nordic Fit"]);
+    expect(result.companyAction?.companyId).toBe(existing.id);
+    const named = await CompanyChatActions.extractAndExecute(alice, directive({ action: "create", fields: { name: "Studio (Lisbon)" } }), store, "conversation-parenthesis", { requestMessage: "Create a company named Studio (Lisbon)" });
+    expect(named.companyAction?.action).toBe("create");
+    expect((await store.listCompanies(alice)).items.map((company) => company.name)).toContain("Studio (Lisbon)");
+  });
+
   it("plans a company action once more when its directive JSON does not parse", async () => {
     const store = new InMemoryWorkspaceStore();
     const valid = directive({ action: "create", fields: { name: "Malformed Studio", industry: "Fitness" } });
