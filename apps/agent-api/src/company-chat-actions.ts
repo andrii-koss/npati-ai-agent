@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { AuthContext, Company, CompanyAgent, CompanyAgentInput, CompanyInput, WorkspaceStore } from "@npati/workspace";
 import { companyChatCopy, detectCompanyChatLanguage, insertCompanyName, isLocalizedCompanyManagementRequest, type CompanyChatLanguage } from "./company-chat-i18n";
 import { defaultLocalizedAgentProfiles } from "./company-agent-profile-i18n";
-import { companyDeleteCopy, isCompanyDeleteConfirmed } from "./company-delete-i18n";
+import { companyDeleteCopy, isCompanyDeleteConfirmed, withoutQuotedNames } from "./company-delete-i18n";
 
 type CompanyOperation = "create" | "update" | "delete";
 type AgentOperation = CompanyOperation;
@@ -40,7 +40,7 @@ const toolAliases = new Map([
   ["code mode exec", "exec"],
 ]);
 
-const deleteMutationSignal = /(?:видал|приб|удал|убер|\bdelete\b|\bremove\b|supprim|effac|lösch|entfern|elimin|borr|usuń|skasuj|exclu|apagar|verwijder|sil|kaldır|删除|削除|삭제|احذف|إزالة|हटा)/iu;
+const deleteMutationSignal = /(?:видал|приб|удал|убер|\bdelete\b|\bremove\b|supprim|effac|lösch|entfern|elimin|borr|usuń|skasuj|exclu|apagar|verwijder|\bsil\b|kaldır|删除|削除|삭제|احذف|إزالة|हटा)/iu;
 const selectedDeleteReferenceSignal = /(?:її|його|їх|це\s+все|все\s+це|усе\s+це|щойно\s+створен\p{L}*|ее|его|их|это\s+вс[её]|вс[её](?:\s+это|\s*,?\s*что)|только\s+что\s+создан\p{L}*|\bit\b|\bthis\s+one\b|\beverything\b|\ball\s+(?:of\s+it|this)\b|what\s+(?:you|was)\s+just\s+created|tout\s+(?:cela|ça|ce\s+que)|alles|todo\s+(?:esto|lo\s+que)|tutto\s+(?:questo|ciò)|wszystko|tudo\s+(?:isso|o\s+que)|dit\s+allemaal|hepsini|tümünü|her\s+şeyi|全部|这一切|すべて|全て|모두|전부|모든\s+것|كل\s+(?:شيء|هذا|ما)|सब\s+(?:कुछ|चीज़ें)|यह\s+सब)/iu;
 
 function normalizedLabel(value: string): string {
@@ -394,12 +394,12 @@ export class CompanyChatActions {
   static isPotentialMutationRequest(message: string): boolean {
     const mutation = /(?:заповн|дод|змін|онов|редаг|налашт|признач|нада|видал|приб|переймен|rename|созда|добав|измен|обнов|редакт|настро|назнач|предостав|удал|fill|set|add|change|update|edit|configure|assign|remove|delete)/iu.test(message);
     const companyField = /(?:recommended\s+prompts?|system\s+instructions?|prompt\s+guidelines?|tools?\s*(?:&|and)?\s*capabilities|instructions?|agents?|roles?|models?|пол|інструкц|промпт|можливост|агент|рол|модел|инструкц|возможност)/iu.test(message);
-    const deleteReference = deleteMutationSignal.test(message) && selectedDeleteReferenceSignal.test(message);
+    const deleteReference = deleteMutationSignal.test(withoutQuotedNames(message)) && selectedDeleteReferenceSignal.test(message);
     return mutation && companyField || deleteReference;
   }
 
   static async deleteConfirmationMessage(auth: AuthContext, store: WorkspaceStore, message: string, selectedCompanyId?: string, responseLanguage?: CompanyChatLanguage): Promise<string | undefined> {
-    const deleteRequest = deleteMutationSignal.test(message)
+    const deleteRequest = deleteMutationSignal.test(withoutQuotedNames(message))
       && (/(?:компан|compan)/iu.test(message) || selectedDeleteReferenceSignal.test(message));
     const confirmed = isCompanyDeleteConfirmed(message);
     if (!deleteRequest || confirmed) return undefined;

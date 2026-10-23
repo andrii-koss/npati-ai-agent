@@ -112,6 +112,14 @@ describe("company management from chat", () => {
     expect(agents.find((agent) => agent.id === marko.id)?.role).toBe("Маркетинг і SMM");
   });
 
+  it("does not read a deletion word inside a quoted company name as a deletion request", async () => {
+    const store = new InMemoryWorkspaceStore();
+    await store.createCompany(alice, { name: "Temp Delete Co" }, "temp-delete");
+    expect(await CompanyChatActions.deleteConfirmationMessage(alice, store, "Створи тимчасову компанію «Temp Delete Co» для тесту, без агентів.")).toBeUndefined();
+    expect(await CompanyChatActions.deleteConfirmationMessage(alice, store, "Додай агента «Тест» у компанію \"Temp Delete Co\".")).toBeUndefined();
+    expect(await CompanyChatActions.deleteConfirmationMessage(alice, store, "Видали компанію «Temp Delete Co».")).toBeTruthy();
+  });
+
   it("treats renaming an agent as company management", () => {
     expect(CompanyChatActions.isManagementRequest("Перейменуй агента Марко на «Марко SMM».")).toBe(true);
     expect(CompanyChatActions.isManagementRequest("Rename the agent Leo to Leo Content")).toBe(true);
