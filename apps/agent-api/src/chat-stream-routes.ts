@@ -668,7 +668,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
               runResult.run.status,
               memoryPolicy.noMemoryActive,
             );
-            const responseMessage=publicCompanyRunMessage(runResult.run.result, runResult.run.errorMessage, message);
+            const responseMessage=publicCompanyRunMessage(runResult.run.result, runResult.run.errorMessage, message, runResult.run.errorCode);
             if (conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", responseMessage);
             for(const delta of boundedResponseChunks(responseMessage))send("delta",{delta});
             send("result", {

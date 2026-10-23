@@ -340,7 +340,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
           memoryPolicy.noMemoryActive,
         );
 
-        const responseMessage = publicCompanyRunMessage(runResult.run.result, runResult.run.errorMessage, prompt || "");
+        const responseMessage = publicCompanyRunMessage(runResult.run.result, runResult.run.errorMessage, prompt || "", runResult.run.errorCode);
         if (conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", responseMessage);
         return {
           message: responseMessage,
