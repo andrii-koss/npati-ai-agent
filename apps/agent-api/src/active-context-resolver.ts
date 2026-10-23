@@ -58,6 +58,10 @@ export class ActiveContextResolver {
       companies.push(...page.items);
       cursor = page.nextCursor ?? undefined;
     } while (cursor && companies.length < 500);
+    const creating = decision?.intent === "CREATE_WEBSITE" || decision?.intent === "CREATE_PROJECT";
+    // "Create X" names X as the thing to create, not as the place to work ("create NovaScale" when it exists is a
+    // duplicate request for the company actions); only a new project for a named company switches.
+    if (!creating && /^\s*(?:please\s+)?(?:create|створи|створіть|создай|crie|cria|crea|erstelle|crée|maak)(?![\p{L}])/iu.test(message)) return undefined;
     const activeId = current.company?.id ?? current.project?.companyId ?? null;
     let named = companyNamedInMessage(companies, message, activeId);
     if (!named) {
@@ -74,7 +78,6 @@ export class ActiveContextResolver {
       if (owner && owner !== activeId) named = companies.find((company) => company.id === owner);
     }
     if (!named) return undefined;
-    const creating = decision?.intent === "CREATE_WEBSITE" || decision?.intent === "CREATE_PROJECT";
     const projects = creating ? [] : (await this.store.listProjects(auth, named.id)).filter((project) => project.status !== "archived");
     const latest = projects.sort((a, b) => new Date(b.updatedAt as unknown as string).getTime() - new Date(a.updatedAt as unknown as string).getTime())[0];
     return latest
