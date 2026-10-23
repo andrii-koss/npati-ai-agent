@@ -9,7 +9,7 @@ import { chatLanguageInstruction, detectCompanyChatLanguage } from "./company-ch
 import { ContentLibraryStore, type ContentLibraryType } from "./content-library-store";
 import type { IntegrationsRepository } from "./integrations-repository";
 
-type WorkspaceActionKind = "activity.run" | "activity.cancel" | "automation.list" | "automation.create" | "automation.update" | "automation.delete" | "automation.run" | "automation.history" | "website.list" | "website.create" | "website.seed_demo" | "website.update" | "website.delete" | "content.create" | "content.update" | "content.delete" | "memory.create" | "memory.update" | "memory.delete" | "webhook.list" | "webhook.create" | "webhook.update" | "webhook.delete";
+type WorkspaceActionKind = "activity.run" | "activity.cancel" | "activity.list" | "automation.list" | "automation.create" | "automation.update" | "automation.delete" | "automation.run" | "automation.history" | "website.list" | "website.create" | "website.seed_demo" | "website.update" | "website.delete" | "content.create" | "content.update" | "content.delete" | "memory.create" | "memory.update" | "memory.delete" | "webhook.list" | "webhook.create" | "webhook.update" | "webhook.delete";
 type ContentType = "article" | "seo_blueprint" | "social_post" | "brief" | "strategy" | "other";
 
 type WorkspaceDirective = {
@@ -476,7 +476,7 @@ To edit or delete an existing record, use the exact owned ID from the supplied d
 - Memory: action memory.update or memory.delete, memoryId, businessId, and for update a memory object containing only changed fields. Editable fields: type, title, content, confidence.
 If the user refers to the record on Settings > Memory or says "it" and exactly one owned Business Memory record exists, use that record's exact memoryId and businessId. If several records could match, ask for the title instead of guessing.
 - Webhook (inbound integration that starts a company agent run): webhook.list with companyId; webhook.create with companyId and webhook {name, promptTemplate describing what the agent does with the incoming data, optional agentId}; webhook.update with webhookId (or exact webhookName) and webhook {isActive} to enable or disable it; webhook.delete with webhookId or exact webhookName. Never reveal a webhook secret or its URL in chat; point to Settings > Integrations.
-- Activity: completed run traces are immutable audit records and cannot be edited or deleted. An active run may be cancelled with action activity.cancel, companyId, and activity.runId. If asked to alter a completed result, offer a new activity instead.
+- Activity: to show recent company runs (status, agents, duration, failures and their reasons) use activity.list with companyId and optional historyLimit (default 10). Completed run traces are immutable audit records and cannot be edited or deleted. An active run may be cancelled with action activity.cancel, companyId, and activity.runId. If asked to alter a completed result, offer a new activity instead.
 Use activity.run when the user asks the company agents to perform work and wants a trace. Use content.create for a durable article, SEO blueprint, social draft, brief, or strategy in Content Hub. Never save guesses as Memory. In a multi-step request whose primary outcome is a Business Profile, memory is a dependent record linked to that profile; never treat memory creation as completion of the whole request. If the user asks for recommendations, recommend missing durable categories from the supplied memory summary (business facts, audience, brand voice, products, channels, decisions, experiments/results) in the user's language; create one only when explicitly requested. Keep intro concise, put the verified details in the server-rendered card, and end followUp with a useful next question.`;
   }
 
@@ -491,7 +491,7 @@ Use activity.run when the user asks the company agents to perform work and wants
       if (!auth.permissions.includes("business:manage")) throw new Error("Permission denied");
       if (matches.length !== 1) throw new Error("Use one action per response");
       const directive = JSON.parse(matches[0][1]!.trim()) as WorkspaceDirective;
-      if (!directive || !["activity.run", "activity.cancel", "automation.list", "automation.create", "automation.update", "automation.delete", "automation.run", "automation.history", "website.list", "website.create", "website.seed_demo", "website.update", "website.delete", "content.create", "content.update", "content.delete", "memory.create", "memory.update", "memory.delete", "webhook.list", "webhook.create", "webhook.update", "webhook.delete"].includes(directive.action)) throw new Error("Invalid action");
+      if (!directive || !["activity.run", "activity.cancel", "activity.list", "automation.list", "automation.create", "automation.update", "automation.delete", "automation.run", "automation.history", "website.list", "website.create", "website.seed_demo", "website.update", "website.delete", "content.create", "content.update", "content.delete", "memory.create", "memory.update", "memory.delete", "webhook.list", "webhook.create", "webhook.update", "webhook.delete"].includes(directive.action)) throw new Error("Invalid action");
       const key = idempotency(auth, conversationId, options.requestMessage ?? matches[0][0], directive.action);
       const labels = copyFor(options.requestMessage);
 
@@ -745,6 +745,20 @@ Use activity.run when the user asks the company agents to perform work and wants
         return { cleanText: finish(directive, card), workspaceAction: { action: directive.action, resourceId: created.id, companyId: company.id } };
       }
 
+      if (directive.action === "activity.list") {
+        // Read-only: the run ledger the Activity page shows, newest first, without results longer than a summary.
+        const runs = await deps.store.listCompanyAgentRuns(auth, company.id, Math.min(50, Math.max(1, directive.historyLimit ?? 10)));
+        const agents = await deps.store.listCompanyAgents(auth, company.id);
+        const names = (ids: string[]) => ids.map((id) => agents.find((agent) => agent.id === id)?.name).filter(Boolean).join(", ");
+        const lines = runs.length ? runs.map((run) => [
+          "### " + clean(run.task, 160),
+          "**" + labels.status + ":** " + run.status + (run.errorCode ? " (" + run.errorCode + ")" : ""),
+          ...(run.selectedAgentIds?.length ? ["**Agents:** " + clean(names(run.selectedAgentIds), 300)] : []),
+          "**Started:** " + (run.startedAt ?? run.createdAt) + (run.totalDurationMs ? " · " + Math.round(run.totalDurationMs / 1000) + " s" : ""),
+          ...(run.errorMessage ? ["**Error:** " + clean(run.errorMessage, 300)] : []),
+        ].join("\n")).join("\n\n") : "No company runs yet.";
+        return { cleanText: intro(directive) + "\n\n" + lines, workspaceAction: { action: directive.action, resourceId: company.id, companyId: company.id } };
+      }
       if (directive.action === "activity.cancel") {
         const runId = directive.activity?.runId;
         if (!runId) throw new Error("Run ID is required");
