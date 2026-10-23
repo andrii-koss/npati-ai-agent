@@ -316,6 +316,26 @@ export class CompanyDelegationRuntime {
       plan.agentIds = plan.agentIds.map((id) => resolveAgentId(id)!);
       plan.reviewerAgentId = resolveAgentId(plan.reviewerAgentId);
       plan.toolRequests = plan.toolRequests.map((request) => ({ ...request, agentId: resolveAgentId(request.agentId)! }));
+      if (plan.agentIds.some((id) => !byId.has(id)) && !options.preferredAgentId && this.ai.a2aSend) {
+        // One repair of the agent selection: the plan named agents this company does not have. The repaired plan is
+        // validated exactly like the first one, so a second invalid selection still fails the run.
+        if (options.callBudget && --options.callBudget.remaining < 0)
+          throw new CompanyRuntimeError("MODEL_CALL_BUDGET_EXCEEDED", "Project model call limit reached", 429);
+        const roster = candidates.map((agent) => ({ id: agent.id, name: agent.name, role: agent.role }));
+        const repaired = await this.ai.a2aSend({
+          ...planningRequest,
+          idempotencyKey: `${created.run.id}:selection-repair`,
+          messages: [
+            ...planningRequest.messages,
+            { role: "user", content: `The plan selected agents that do not exist in this company: ${JSON.stringify(plan.agentIds.filter((id) => !byId.has(id))).slice(0, 500)}. Use only these agent IDs: ${JSON.stringify(roster).slice(0, 4000)}. Return the corrected JSON plan only.` },
+          ],
+        });
+        const corrected = parsePlan(repaired.content, input.mode ?? "auto");
+        corrected.agentIds = corrected.agentIds.map((id) => resolveAgentId(id)!);
+        corrected.reviewerAgentId = resolveAgentId(corrected.reviewerAgentId);
+        corrected.toolRequests = corrected.toolRequests.map((request) => ({ ...request, agentId: resolveAgentId(request.agentId)! }));
+        plan = corrected;
+      }
       let selected = plan.agentIds.map((id) => byId.get(id)).filter((agent): agent is CompanyAgent => Boolean(agent));
       if (selected.length !== plan.agentIds.length) throw new CompanyRuntimeError("CROSS_COMPANY_AGENT_SELECTION", "Main Agent selected an unavailable agent", 502);
       selected = selected.filter((agent) => agent.id !== main.id);

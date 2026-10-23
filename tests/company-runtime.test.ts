@@ -85,6 +85,12 @@ describe("Project delegation JSON recovery", () => {
     expect(byName.run.status).toBe("completed");
     const foreign = await new CompanyDelegationRuntime(store, planWith(["Someone Else"])).execute(ctx, company.id, { task: "Prepare a reply template", mode: "single" }, "agent-names-foreign");
     expect(foreign.run).toMatchObject({ status: "failed", errorCode: "CROSS_COMPANY_AGENT_SELECTION" });
+    // One repair of the selection: an invalid first plan followed by a valid one completes.
+    const plans = [["Someone Else"], ["Ірина"]];
+    const repairing = engine({ a2aSend: async () => ({ taskId: "repair-plan", content: JSON.stringify({ mode: "single", agentIds: plans.shift() ?? [], toolRequests: [] }), metadata: {} }) });
+    const repaired = await new CompanyDelegationRuntime(store, repairing).execute(ctx, company.id, { task: "Prepare a reply template", mode: "single" }, "agent-names-repair");
+    expect(repaired.run.status).toBe("completed");
+    expect(plans).toHaveLength(0);
   });
 
   it("reads the delegation object when the model includes another JSON object first", async () => {
