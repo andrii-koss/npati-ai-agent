@@ -1,4 +1,4 @@
-import { getStoredAuthToken } from "./AuthContext";
+import { getStoredAuthToken, useAuth } from "./AuthContext";
 import { ReactNode, createContext, useContext, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -74,6 +74,7 @@ export function EmptyBusiness({ feature }: { feature: string }) {
 }
 export const WorkspaceContext = createContext<WorkspaceValue | null>(null);
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
+  const { token, isLoading: authLoading } = useAuth();
   const [overview, setOverview] = useState<WorkspaceOverview | null>(getInitialWorkspaceOverview);
   const [loading, setLoading] = useState(() => getInitialWorkspaceOverview() === null);
   const [error, setError] = useState("");
@@ -96,11 +97,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     finally { setLoading(false); }
   }
   useEffect(() => {
+    if (authLoading || !token) return;
     void refresh();
     const handleBusinessChanged = () => { void refresh(); };
     window.addEventListener("npati:business-changed", handleBusinessChanged);
     return () => window.removeEventListener("npati:business-changed", handleBusinessChanged);
-  }, []);
+  }, [authLoading, token]);
   async function switchBusiness(id: string) {
     await api("/workspace/current-business", { method: "PUT", body: JSON.stringify({ businessId: id }) });
     await refresh();
