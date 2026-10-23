@@ -23,6 +23,16 @@ describe("AI marketplace normalization", () => {
     expect(filterProviders(providers, manifest, { tab: "connected" }).map((provider) => provider.id)).toEqual(["openai"]);
   });
 
+  it("3a. does not report a provider whose every connection is disabled as connected", () => {
+    const disabled = [{ ...connection[0], active: false }];
+    const providers = normalizeCatalog(manifest, disabled);
+    const openai = providers.find((provider) => provider.id === "openai");
+    expect(openai).toMatchObject({ connected: false, connectionStatus: "not_connected", availability: "requires_credentials" });
+    expect(openai?.availabilityReason).toMatch(/disabled/);
+    expect(openai?.connections).toHaveLength(1);
+    expect(filterProviders(providers, manifest, { tab: "connected" }).map((provider) => provider.id)).not.toContain("openai");
+  });
+
   it("4. filters only providers with actual free metadata", () => {
     const providers = normalizeCatalog(manifest, connection);
     const free = filterProviders(providers, manifest, { tab: "free" });
