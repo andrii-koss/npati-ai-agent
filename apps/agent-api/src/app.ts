@@ -652,6 +652,7 @@ export function buildApp(config: AppConfig = {}) {
     dataBackendService,
     emailAttachmentStorage,
     emailInboxRepo,
+    integrationsRepo,
     emailInboxWorker,
     fileRepository,
     guardrailPolicies,

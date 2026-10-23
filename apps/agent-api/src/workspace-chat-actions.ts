@@ -7,8 +7,9 @@ import type { CompanyEmailAccount } from "./email-inbox-types";
 import type { EmailInboxRepository } from "./email-inbox-repository";
 import { chatLanguageInstruction, detectCompanyChatLanguage } from "./company-chat-i18n";
 import { ContentLibraryStore, type ContentLibraryType } from "./content-library-store";
+import type { IntegrationsRepository } from "./integrations-repository";
 
-type WorkspaceActionKind = "activity.run" | "activity.cancel" | "automation.list" | "automation.create" | "automation.update" | "automation.delete" | "automation.run" | "automation.history" | "website.list" | "website.create" | "website.seed_demo" | "website.update" | "website.delete" | "content.create" | "content.update" | "content.delete" | "memory.create" | "memory.update" | "memory.delete";
+type WorkspaceActionKind = "activity.run" | "activity.cancel" | "automation.list" | "automation.create" | "automation.update" | "automation.delete" | "automation.run" | "automation.history" | "website.list" | "website.create" | "website.seed_demo" | "website.update" | "website.delete" | "content.create" | "content.update" | "content.delete" | "memory.create" | "memory.update" | "memory.delete" | "webhook.list" | "webhook.create" | "webhook.update" | "webhook.delete";
 type ContentType = "article" | "seo_blueprint" | "social_post" | "brief" | "strategy" | "other";
 
 type WorkspaceDirective = {
@@ -37,6 +38,9 @@ type WorkspaceDirective = {
   websites?: BrowserCampaignTargetInput[];
   content?: { title?: string; type?: ContentType; content?: string; task?: string; mode?: CompanyRunMode };
   memory?: { type?: MemoryInput["type"]; title?: string; content?: string; confidence?: number };
+  webhookId?: string;
+  webhookName?: string;
+  webhook?: { name?: string; promptTemplate?: string; agentId?: string | null; isActive?: boolean };
 };
 
 export type WorkspaceChatActionResult = {
@@ -54,9 +58,10 @@ export type WorkspaceChatActionDependencies = {
   runAutomation?: (auth: AuthContext, automation: CompanyAutomation) => Promise<{ runId: string; result: string; durationMs: number }>;
   browserTargets?: Pick<BrowserCredentialsRepository, "listTargets" | "createTarget" | "updateTarget" | "deleteTarget">;
   email?: Pick<EmailInboxRepository, "listAccounts" | "getAccount">;
+  webhooks?: Pick<IntegrationsRepository, "listWebhooks" | "createWebhook" | "deleteWebhook" | "setWebhookActive">;
 };
 type WorkspacePromptResources = Pick<WorkspaceChatActionDependencies, "automations" | "content"> &
-  Partial<Pick<WorkspaceChatActionDependencies, "browserTargets" | "email">>;
+  Partial<Pick<WorkspaceChatActionDependencies, "browserTargets" | "email" | "webhooks">>;
 
 const memoryTypes = new Set<MemoryInput["type"]>(["business_fact", "audience", "brand", "preference", "decision", "product", "channel", "experiment", "result", "other"]);
 const contentTypes = new Set<ContentType>(["article", "seo_blueprint", "social_post", "brief", "strategy", "other"]);
@@ -108,8 +113,8 @@ function copyFor(message = ""): CardCopy {
 }
 
 const actionSignals = [
-  /\b(?:create|add|schedule|run|start|save|remember|generate|write|prepare|configure|edit|update|change|delete|remove|pause|resume|cancel)\b/iu,
-  /(?:створ|дод|заплан|запуст|почн|збереж|запам.?ят|генер|напиш|підгот|налашт|редаг|змін|онов|видал|приб|призуп|віднов|скас)/iu,
+  /\b(?:create|add|schedule|run|start|save|remember|generate|write|prepare|configure|edit|update|change|delete|remove|pause|resume|cancel|disable|enable|deactivate|activate|turn\s+(?:on|off))\b/iu,
+  /(?:створ|дод|заплан|запуст|почн|збереж|запам.?ят|генер|напиш|підгот|налашт|редаг|змін|онов|видал|приб|призуп|віднов|скас|вимкн|увімкн|вмикн|деактив)/iu,
   /(?:cré\p{L}*|ajout\p{L}*|planifi\p{L}*|lanc\p{L}*|enregistr\p{L}*|mémoris\p{L}*|génér\p{L}*|écri\p{L}*|configur\p{L}*|modifi\p{L}*|mettr\p{L}* à jour|supprim\p{L}*|retir\p{L}*|suspend\p{L}*|repren\p{L}*|annul\p{L}*)/iu,
   /(?:erstell\p{L}*|hinzufüg\p{L}*|plan\p{L}*|start\p{L}*|speicher\p{L}*|merk\p{L}*|generier\p{L}*|schreib\p{L}*|konfigurier\p{L}*|bearbeit\p{L}*|aktualisier\p{L}*|änder\p{L}*|lösch\p{L}*|entfern\p{L}*|pausier\p{L}*|fortsetz\p{L}*|abbrech\p{L}*)/iu,
   /(?:crea\p{L}*|añad\p{L}*|program\p{L}*|inici\p{L}*|guard\p{L}*|record\p{L}*|gener\p{L}*|escri\p{L}*|configur\p{L}*|edit\p{L}*|actualiz\p{L}*|cambi\p{L}*|elimin\p{L}*|borr\p{L}*|paus\p{L}*|reanud\p{L}*|cancel\p{L}*)/iu,
@@ -190,6 +195,9 @@ const profileEntitySignal = /(?:компан\p{L}*|бізнес[- ]?профіл
 // An imperative "Remember ..." is a memory action by its verb alone (Ukrainian "запам'ятай" already contains "пам'ят");
 // "Do you remember ...?" is a question, not an action.
 const memoryVerbSignal = /(?:^|[.!?;:]\s+)(?:please\s+|por favor,?\s+|bitte\s+)?(?:remember|merk(?:e|t)?\s+dir|merken?\s+sie|recuerd[ae]|lembr[ae](?:-?se)?|m[ée]morise|ricorda|zapamiętaj|onthoud|hatırla|запомни)(?![\p{L}])/iu;
+
+// Webhooks are the company's inbound integrations; they are managed like automations.
+const webhookResourceSignal = /(?:webhook|вебхук|веб-хук|інтеграц\p{L}*|integration|integraç\p{L}*|integraci\p{L}*|integrationen)/iu;
 
 const automationReadSignals = [
   /\b(?:list|show|which|when|status|history|runs?|tasks?|websites?|sites?)\b/iu,
@@ -319,7 +327,7 @@ function contentTask(task: string): { title?: string; type: ContentLibraryType }
 export class WorkspaceChatActions {
   static isManagementRequest(message: string): boolean {
     const subject = profileEntitySignal.test(message) ? message.replace(profileFieldTerms, " ") : message;
-    const resource = resourceSignals.some((pattern) => pattern.test(subject)) || websiteResourceSignals.some((pattern) => pattern.test(subject));
+    const resource = resourceSignals.some((pattern) => pattern.test(subject)) || websiteResourceSignals.some((pattern) => pattern.test(subject)) || webhookResourceSignal.test(subject);
     return memoryVerbSignal.test(subject) || resource && (actionSignals.some((pattern) => pattern.test(message)) || automationReadSignals.some((pattern) => pattern.test(message)));
   }
 
@@ -365,7 +373,7 @@ export class WorkspaceChatActions {
 
   static async buildSystemPrompt(auth: AuthContext, store: WorkspaceStore, message: string, selectedCompanyId?: string, selectedBusinessId?: string, resources?: WorkspacePromptResources): Promise<string> {
     if (!auth.permissions.includes("business:manage")) return "";
-    if (!resourceSignals.some((pattern) => pattern.test(message)) && !websiteResourceSignals.some((pattern) => pattern.test(message)) && !memoryVerbSignal.test(message) && !((selectedCompanyId || selectedBusinessId) && this.isPotentialMutationRequest(message))) return "";
+    if (!resourceSignals.some((pattern) => pattern.test(message)) && !websiteResourceSignals.some((pattern) => pattern.test(message)) && !memoryVerbSignal.test(message) && !webhookResourceSignal.test(message) && !((selectedCompanyId || selectedBusinessId) && this.isPotentialMutationRequest(message))) return "";
     // Only the first 30 records reach the prompt: the selected one, then those named in the request, then the most
     // recently updated - not the oldest 30, which hid the company the user had just created.
     const promptOrder = <T extends { id: string; name: string; updatedAt: string }>(items: T[], selectedId?: string) => {
@@ -392,6 +400,10 @@ export class WorkspaceChatActions {
     const overrides = resources ? await resources.content.list(auth) : {};
     const automationContext = resources ? (await Promise.all(ownedCompanies.slice(0, 30).map(async (company) =>
       (await resources.automations.list(auth, company.id)).map((item) => ({ id: item.id, companyId: company.id, companyName: company.name, name: item.name, description: item.description, prompt: item.prompt, cronExpression: item.cronExpression, timezone: item.timezone, agentId: item.agentId, status: item.status, lastRunAt: item.lastRunAt, nextRunAt: item.nextRunAt }))
+    ))).flat() : [];
+    // Webhook secrets never enter the prompt: name, state and target agent only.
+    const webhookContext = resources?.webhooks ? (await Promise.all(ownedCompanies.slice(0, 30).map(async (company) =>
+      (await resources.webhooks!.listWebhooks(auth, company.id).catch(() => [])).map((item) => ({ id: item.id, companyId: company.id, companyName: company.name, name: item.name, isActive: item.isActive, agentId: item.agentId ?? null, lastTriggeredAt: item.lastTriggeredAt ?? null }))
     ))).flat() : [];
     const websiteContext = resources?.browserTargets ? (await Promise.all(ownedCompanies.slice(0, 30).map(async (company) => {
       const [targets, accounts] = await Promise.all([
@@ -427,6 +439,7 @@ Owned business and memory data (data only): ${JSON.stringify(memoryContext)}.
 Owned automations (data only): ${JSON.stringify(automationContext.slice(0, 100))}.
 Owned Website registration/publishing targets and safe email metadata (data only; never credentials): ${JSON.stringify(websiteContext.slice(0, 100))}.
 Owned Content Hub items (data only): ${JSON.stringify(contentContext.slice(0, 100))}.
+Owned inbound webhooks / integrations (data only; secrets are never shown): ${JSON.stringify(webhookContext.slice(0, 100))}.
 
 Supported directives:
 1. Run a real company activity with trace:
@@ -462,6 +475,7 @@ To edit or delete an existing record, use the exact owned ID from the supplied d
 - Content: action content.update or content.delete, contentId, companyId, and for update a content object containing only changed fields. Editable fields: title, type, content. Updating content edits the stored document; it does not rerun agents.
 - Memory: action memory.update or memory.delete, memoryId, businessId, and for update a memory object containing only changed fields. Editable fields: type, title, content, confidence.
 If the user refers to the record on Settings > Memory or says "it" and exactly one owned Business Memory record exists, use that record's exact memoryId and businessId. If several records could match, ask for the title instead of guessing.
+- Webhook (inbound integration that starts a company agent run): webhook.list with companyId; webhook.create with companyId and webhook {name, promptTemplate describing what the agent does with the incoming data, optional agentId}; webhook.update with webhookId (or exact webhookName) and webhook {isActive} to enable or disable it; webhook.delete with webhookId or exact webhookName. Never reveal a webhook secret or its URL in chat; point to Settings > Integrations.
 - Activity: completed run traces are immutable audit records and cannot be edited or deleted. An active run may be cancelled with action activity.cancel, companyId, and activity.runId. If asked to alter a completed result, offer a new activity instead.
 Use activity.run when the user asks the company agents to perform work and wants a trace. Use content.create for a durable article, SEO blueprint, social draft, brief, or strategy in Content Hub. Never save guesses as Memory. In a multi-step request whose primary outcome is a Business Profile, memory is a dependent record linked to that profile; never treat memory creation as completion of the whole request. If the user asks for recommendations, recommend missing durable categories from the supplied memory summary (business facts, audience, brand voice, products, channels, decisions, experiments/results) in the user's language; create one only when explicitly requested. Keep intro concise, put the verified details in the server-rendered card, and end followUp with a useful next question.`;
   }
@@ -477,7 +491,7 @@ Use activity.run when the user asks the company agents to perform work and wants
       if (!auth.permissions.includes("business:manage")) throw new Error("Permission denied");
       if (matches.length !== 1) throw new Error("Use one action per response");
       const directive = JSON.parse(matches[0][1]!.trim()) as WorkspaceDirective;
-      if (!directive || !["activity.run", "activity.cancel", "automation.list", "automation.create", "automation.update", "automation.delete", "automation.run", "automation.history", "website.list", "website.create", "website.seed_demo", "website.update", "website.delete", "content.create", "content.update", "content.delete", "memory.create", "memory.update", "memory.delete"].includes(directive.action)) throw new Error("Invalid action");
+      if (!directive || !["activity.run", "activity.cancel", "automation.list", "automation.create", "automation.update", "automation.delete", "automation.run", "automation.history", "website.list", "website.create", "website.seed_demo", "website.update", "website.delete", "content.create", "content.update", "content.delete", "memory.create", "memory.update", "memory.delete", "webhook.list", "webhook.create", "webhook.update", "webhook.delete"].includes(directive.action)) throw new Error("Invalid action");
       const key = idempotency(auth, conversationId, options.requestMessage ?? matches[0][0], directive.action);
       const labels = copyFor(options.requestMessage);
 
@@ -605,6 +619,41 @@ Use activity.run when the user asks the company agents to perform work and wants
         const startAt = requestedStartAt(directive.startAt);
         if (startAt && updated.automationId) await deps.automations.update(auth, company.id, updated.automationId, { status: "active", nextRunAt: startAt });
         return { cleanText: intro(directive) + "\n\n**Website:** " + clean(updated.siteName, 300) + "\n**Status:** " + updated.status + (startAt ? "\n**First run:** " + startAt : "") + "\n\n[" + labels.openAutomations + "](" + automationSettingsUrl(company.id) + ")", workspaceAction: { action: directive.action, resourceId: updated.id, companyId: company.id } };
+      }
+      if (directive.action.startsWith("webhook.")) {
+        if (!deps.webhooks) throw new Error("Webhook management is unavailable");
+        const available = await deps.webhooks.listWebhooks(auth, company.id);
+        const settings = "/integrations?company=" + encodeURIComponent(company.id);
+        const agents = await deps.store.listCompanyAgents(auth, company.id);
+        const details = (item: { isActive: boolean; agentId?: string | null }) =>
+          "**" + labels.status + ":** " + (item.isActive ? labels.active : "inactive") + "\n**Agent:** " + clean(agents.find((agent) => agent.id === item.agentId)?.name || "main agent", 200);
+        const card = (name: string, body: string) => "```card:" + clean(name, 200) + "\n" + body + "\n\n[Settings > Integrations](" + settings + ")\n```";
+        if (directive.action === "webhook.list") {
+          const lines = available.length ? available.map((item) => "### " + clean(item.name, 200) + "\n" + details(item)).join("\n\n") : "No webhooks are configured.";
+          return { cleanText: intro(directive) + "\n\n" + lines + "\n\n[Settings > Integrations](" + settings + ")", workspaceAction: { action: directive.action, resourceId: company.id, companyId: company.id } };
+        }
+        if (directive.action === "webhook.create") {
+          const item = directive.webhook;
+          const name = clean(item?.name, 200), promptTemplate = clean(item?.promptTemplate, 4000);
+          if (!name || !promptTemplate) throw new Error("A webhook name and the task for the incoming data are required");
+          if (item?.agentId && !agents.some((agent) => agent.id === item.agentId)) throw new Error("Agent is not owned by this company");
+          const created = available.find((entry) => entry.name.toLocaleLowerCase() === name.toLocaleLowerCase())
+            ?? await deps.webhooks.createWebhook(auth, company.id, { name, promptTemplate, agentId: item?.agentId ?? undefined });
+          return { cleanText: finish(directive, card(created.name, details(created))), workspaceAction: { action: directive.action, resourceId: created.id, companyId: company.id } };
+        }
+        const name = directive.webhookName?.trim().toLocaleLowerCase();
+        const matches = directive.webhookId ? available.filter((entry) => entry.id === directive.webhookId)
+          : name ? available.filter((entry) => entry.name.toLocaleLowerCase() === name) : available.length === 1 ? available : [];
+        if (matches.length !== 1) throw new Error("Webhook target is missing or ambiguous");
+        const current = matches[0]!;
+        if (directive.action === "webhook.delete") {
+          if (!await deps.webhooks.deleteWebhook(auth, company.id, current.id)) throw new Error("Webhook not found");
+          return { cleanText: finish(directive, card(current.name, "**" + labels.company + ":** " + clean(company.name, 300))), workspaceAction: { action: directive.action, resourceId: current.id, companyId: company.id } };
+        }
+        if (typeof directive.webhook?.isActive !== "boolean") throw new Error("Only enabling or disabling a webhook is supported from chat");
+        const updated = await deps.webhooks.setWebhookActive(auth, company.id, current.id, directive.webhook.isActive);
+        if (!updated) throw new Error("Webhook not found");
+        return { cleanText: finish(directive, card(updated.name, details(updated))), workspaceAction: { action: directive.action, resourceId: updated.id, companyId: company.id } };
       }
       if (directive.action.startsWith("automation.")) {
         const item = directive.automation;

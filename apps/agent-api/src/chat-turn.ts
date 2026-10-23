@@ -41,6 +41,7 @@ export interface ChatTurnDeps {
   contentLibrary: ChatOrchestrationDeps["contentLibrary"];
   coreChatRoutingDecision: ReturnType<typeof createChatActions>["coreChatRoutingDecision"];
   emailInboxRepo: ChatOrchestrationDeps["emailInboxRepo"];
+  integrationsRepo?: ChatOrchestrationDeps["integrationsRepo"];
   executeCompanyChatAction: ReturnType<typeof createChatActions>["executeCompanyChatAction"];
   executeCompositeBusinessCompanyCreation: ReturnType<typeof createChatActions>["executeCompositeBusinessCompanyCreation"];
   executeCompositeCompanyDeletion: ReturnType<typeof createChatActions>["executeCompositeCompanyDeletion"];
@@ -60,7 +61,7 @@ export interface ChatTurnDeps {
 }
 
 export function createChatTurn(deps: ChatTurnDeps) {
-  const { admissionFor, agent, aiEngine, aiPreferences, apiKeysRepo, automationsRepo, availableCoreChatTools, browserCredentials, chatFiles, completeCreatedBusinessGoal, completeCreatedBusinessMemory, config, contentLibrary, coreChatRoutingDecision, emailInboxRepo, executeCompanyChatAction, executeCompositeBusinessCompanyCreation, executeCompositeCompanyDeletion, executeCoreChatTool, executeEmailChatAction, executeWorkspaceChatAction, getAIContext, log, logToolModelStep, logToolSelectionConfiguration, logToolSelectionTrace, memoryDocuments, persistBusinessLogo, researchBundle, webResearch, workspaceStore } = deps;
+  const { admissionFor, agent, aiEngine, aiPreferences, apiKeysRepo, automationsRepo, availableCoreChatTools, browserCredentials, chatFiles, completeCreatedBusinessGoal, completeCreatedBusinessMemory, config, contentLibrary, coreChatRoutingDecision, emailInboxRepo, executeCompanyChatAction, executeCompositeBusinessCompanyCreation, executeCompositeCompanyDeletion, executeCoreChatTool, executeEmailChatAction, executeWorkspaceChatAction, getAIContext, integrationsRepo, log, logToolModelStep, logToolSelectionConfiguration, logToolSelectionTrace, memoryDocuments, persistBusinessLogo, researchBundle, webResearch, workspaceStore } = deps;
   async function runNeutralMessage(
     auth: AuthContext,
     message: string,
@@ -370,7 +371,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
         return { businessId: b.id, businessName: b.name, goals };
       })
     );
-    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, /агент|agent|модел|model/iu.test(safeUserRequest) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, undefined, { automations: automationsRepo, content: contentLibrary, browserTargets: browserCredentials, email: emailInboxRepo }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safeUserRequest, effectiveManagementCompany?.id, apiKeysRepo) + chatLanguageInstruction(safeUserRequest, existing.messages, activeConversationLanguage) + (nativeToolCalling ? CHAT_TOOL_SELECTION_INSTRUCTION : "");
+    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, /агент|agent|модел|model/iu.test(safeUserRequest) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, undefined, { automations: automationsRepo, content: contentLibrary, browserTargets: browserCredentials, email: emailInboxRepo, webhooks: integrationsRepo }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safeUserRequest, effectiveManagementCompany?.id, apiKeysRepo) + chatLanguageInstruction(safeUserRequest, existing.messages, activeConversationLanguage) + (nativeToolCalling ? CHAT_TOOL_SELECTION_INSTRUCTION : "");
     const chatRequest: ChatRequest = {
       model: ai.model,
       fallbackModel: ai.fallbackModel,

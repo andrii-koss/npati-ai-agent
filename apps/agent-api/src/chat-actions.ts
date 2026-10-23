@@ -66,6 +66,7 @@ export interface ChatActionDeps {
   dataBackendService: ChatOrchestrationDeps["dataBackendService"];
   emailAttachmentStorage: ChatOrchestrationDeps["emailAttachmentStorage"];
   emailInboxRepo: ChatOrchestrationDeps["emailInboxRepo"];
+  integrationsRepo?: ChatOrchestrationDeps["integrationsRepo"];
   emailInboxWorker: ChatOrchestrationDeps["emailInboxWorker"];
   fileRepository: ChatOrchestrationDeps["fileRepository"];
   getAIContext: ChatOrchestrationDeps["getAIContext"];
@@ -81,7 +82,7 @@ export interface ChatActionDeps {
 }
 
 export function createChatActions(deps: ChatActionDeps) {
-  const { log, admissionFor, agent, aiEngine, aiPreferences, apiKeysRepo, auditRepo, automationsRepo, browserCredentials, chatFiles, companyRunQueue, companyRuntime, contentLibrary, dataBackendService, emailAttachmentStorage, emailInboxRepo, emailInboxWorker, fileRepository, getAIContext, guardrailPolicies, hub, knowledgeRepo, objectStorage, persistBusinessLogo, runAutomation, scopedMemory, webResearch, workspaceStore } = deps;
+  const { log, admissionFor, agent, aiEngine, aiPreferences, apiKeysRepo, auditRepo, automationsRepo, browserCredentials, chatFiles, companyRunQueue, companyRuntime, contentLibrary, dataBackendService, emailAttachmentStorage, emailInboxRepo, emailInboxWorker, fileRepository, getAIContext, guardrailPolicies, hub, integrationsRepo, knowledgeRepo, objectStorage, persistBusinessLogo, runAutomation, scopedMemory, webResearch, workspaceStore } = deps;
   const contextBuilder = new ContextBuilder({
     store: workspaceStore,
     hub,
@@ -521,6 +522,7 @@ ${localized.next}`;
       content: contentLibrary,
       browserTargets: browserCredentials,
       email: emailInboxRepo,
+      webhooks: integrationsRepo,
       runAutomation: async (context, automation) => {
         await workspaceStore.getCompany(context, automation.companyId);
         const current = await automationsRepo.get(context, automation.companyId, automation.id);
