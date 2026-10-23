@@ -41,6 +41,7 @@ export interface AppChatOrchestrationDeps {
   dataBackendService?: ReturnType<typeof createDataBackendServices>["dataBackendService"];
   emailAttachmentStorage?: EmailAttachmentStorage;
   emailInboxRepo: EmailInboxRepository;
+  integrationsRepo?: import("./integrations-repository").IntegrationsRepository;
   emailInboxWorker: EmailInboxWorker;
   fileRepository: ReturnType<typeof createCoreServices>["fileRepository"];
   guardrailPolicies: GuardrailPolicyRepository;
@@ -74,6 +75,7 @@ export function createAppChatOrchestration(deps: AppChatOrchestrationDeps) {
     dataBackendService,
     emailAttachmentStorage,
     emailInboxRepo,
+    integrationsRepo,
     emailInboxWorker,
     fileRepository,
     guardrailPolicies,
@@ -146,6 +148,7 @@ export function createAppChatOrchestration(deps: AppChatOrchestrationDeps) {
     dataBackendService,
     emailAttachmentStorage,
     emailInboxRepo,
+    integrationsRepo,
     emailInboxWorker,
     fileRepository,
     getAIContext,

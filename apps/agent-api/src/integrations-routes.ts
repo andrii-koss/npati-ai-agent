@@ -107,6 +107,24 @@ export function registerIntegrationsRoutes(
     }
   });
 
+  app.patch<{ Params: { companyId: string; webhookId: string }; Body: { isActive?: boolean } }>(
+    "/companies/:companyId/webhooks/:webhookId",
+    async (r, reply) => {
+      try {
+        const c = await ctx(auth, r, "business:manage");
+        await store.getCompany(c, r.params.companyId);
+        if (typeof r.body?.isActive !== "boolean") {
+          throw Object.assign(new Error("isActive must be a boolean."), { status: 400, code: "MISSING_PARAMETERS" });
+        }
+        const webhook = await repo.setWebhookActive(c, r.params.companyId, r.params.webhookId, r.body.isActive);
+        if (!webhook) return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Webhook not found." } });
+        return reply.code(200).send({ webhook });
+      } catch (e) {
+        return err(reply, e);
+      }
+    }
+  );
+
   app.delete<{ Params: { companyId: string; webhookId: string } }>(
     "/companies/:companyId/webhooks/:webhookId",
     async (r, reply) => {
