@@ -367,7 +367,9 @@ export class WorkspaceChatActions {
     const promptOrder = <T extends { id: string; name: string; updatedAt: string }>(items: T[], selectedId?: string) => {
       const lower = message.toLocaleLowerCase();
       const rank = (item: T) => (item.id === selectedId ? 0 : lower.includes(item.name.toLocaleLowerCase()) ? 1 : 2);
-      return [...items].sort((a, b) => rank(a) - rank(b) || b.updatedAt.localeCompare(a.updatedAt));
+      // The PostgreSQL store returns timestamps as Date objects despite the string type.
+      const time = (item: T) => new Date(item.updatedAt as unknown as string | Date).getTime() || 0;
+      return [...items].sort((a, b) => rank(a) - rank(b) || time(b) - time(a));
     };
     const ownedCompanies = promptOrder(await companies(store, auth), selectedCompanyId);
     const ownedBusinesses = promptOrder(await store.listUserBusinesses(auth), selectedBusinessId);

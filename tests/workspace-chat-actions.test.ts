@@ -67,6 +67,13 @@ describe("workspace resources from chat", () => {
     const selected = (await store.listCompanies(alice, 1)).items[0]!;
     const selectedPrompt = await WorkspaceChatActions.buildSystemPrompt(alice, store, "Create an automation every Monday", selected.id);
     expect(selectedPrompt.indexOf(selected.id)).toBeLessThan(selectedPrompt.indexOf(bakery.id));
+    // The PostgreSQL store hands timestamps back as Date objects.
+    const listCompanies = store.listCompanies.bind(store);
+    store.listCompanies = (async (...args: Parameters<typeof listCompanies>) => {
+      const page = await listCompanies(...args);
+      return { ...page, items: page.items.map((item) => ({ ...item, updatedAt: new Date(item.updatedAt) as unknown as string })) };
+    }) as typeof store.listCompanies;
+    expect(await WorkspaceChatActions.buildSystemPrompt(alice, store, "Create an automation for the bakery every Monday")).toContain(bakery.id);
   });
 
   it("does not treat company or business profile fields (brand tone, audience) as a workspace resource", () => {
