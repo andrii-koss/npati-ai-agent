@@ -575,3 +575,23 @@ export function buildApprovalTimeoutError(input: { approvalId?: string; waitedMs
       approvalId: input.approvalId ?? null, waitedMs: input.waitedMs, timeoutMs: input.timeoutMs ?? null,
     }, false);
 }
+
+/**
+ * Polls one approval until a human decides or `timeoutMs` passes — the `approvalDecision.wait` contract ("waits for a
+ * human decision"). A single read returned "pending" at once, so every database approval expired within milliseconds
+ * while the log claimed the full timeout had been waited (E2E: requested 01:11:01.744, "timeout" 01:11:01.818).
+ */
+export async function waitForApprovalDecision<T extends { status: string }>(
+  read: () => Promise<T | null>,
+  timeoutMs: number,
+  options: { intervalMs?: number; sleep?: (ms: number) => Promise<void>; now?: () => number } = {},
+): Promise<T | null> {
+  const now = options.now ?? Date.now;
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const deadline = now() + timeoutMs;
+  for (;;) {
+    const report = await read();
+    if (!report || report.status !== "pending" || now() >= deadline) return report;
+    await sleep(Math.min(options.intervalMs ?? 1_000, Math.max(0, deadline - now())));
+  }
+}

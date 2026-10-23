@@ -12,21 +12,21 @@ describe("Section 15: Developer / Capability Inspector", () => {
     it("returns correct aggregate counts matching the extended 387-item catalog", () => {
       const report = inspector.inspect("all");
 
-      expect(report.counts.all).toBe(397);
-      expect(report.counts.agentCallable).toBe(133);
+      expect(report.counts.all).toBe(408);
+      expect(report.counts.agentCallable).toBe(144);
       expect(report.counts.runtimeOnly).toBe(264);
-      expect(report.counts.userVisible).toBe(133);
+      expect(report.counts.userVisible).toBe(144);
       expect(report.counts.automatic).toBeGreaterThan(0);
       expect(report.counts.requiresApproval).toBeGreaterThan(0);
       expect(report.counts.destructive).toBeGreaterThan(0);
       expect(report.counts.missingTest).toBe(0);
       expect(report.counts.missingUi).toBe(264);
-      expect(report.items.length).toBe(397);
+      expect(report.items.length).toBe(408);
     });
 
     it("filters precisely by agent-callable slice (123 tools)", () => {
       const report = inspector.inspect("agent-callable");
-      expect(report.items.length).toBe(133);
+      expect(report.items.length).toBe(144);
       for (const item of report.items) {
         expect(item.agentCallable).toBe(true);
       }
@@ -172,9 +172,9 @@ describe("Section 15: Developer / Capability Inspector", () => {
       expect(res.statusCode).toBe(200);
 
       const body = JSON.parse(res.body);
-      expect(body.counts.all).toBe(397);
-      expect(body.counts.agentCallable).toBe(133);
-      expect(body.items.length).toBe(133);
+      expect(body.counts.all).toBe(408);
+      expect(body.counts.agentCallable).toBe(144);
+      expect(body.items.length).toBe(144);
       expect(body.activeSlice).toBe("agent-callable");
 
       await app.close();
@@ -191,7 +191,10 @@ describe("Section 15: Developer / Capability Inspector", () => {
     const GIT_IDS = ["code.git.status", "code.git.diff", "code.git.log", "code.git.branch.create", "code.git.branch.switch", "code.git.stage", "code.git.commit", "code.git.restore", "code.git.push", "code.git.pr.create", "code.git.pr.comment"];
     /** C12: the delegation tool (inventory id 385), visible in the Inspector like every other `code.*` tool. */
     const SUBAGENT_IDS = ["code.agent.spawn"];
-    const ALL_CODE_IDS = [...CODE_IDS, ...PLAN_AND_QUESTION_IDS, ...GIT_IDS, ...SUBAGENT_IDS, "code.shell.exec_async", "code.shell.process.wait", "code.agent.spawn_async", "code.agent.continue", "code.agent.send_message", "code.agent.interrupt", "code.data.schema.inspect", "code.data.schema.apply", "code.data.schema.modify", "code.data.rows.list", "code.data.rows.transfer", "code.data.backend.attach"];
+    const ALL_CODE_IDS = [...CODE_IDS, ...PLAN_AND_QUESTION_IDS, ...GIT_IDS, ...SUBAGENT_IDS, "code.shell.exec_async", "code.shell.process.wait", "code.agent.spawn_async", "code.agent.continue", "code.agent.send_message", "code.agent.interrupt", "code.data.schema.inspect", "code.data.schema.apply", "code.data.schema.modify", "code.data.rows.list", "code.data.rows.transfer", "code.data.backend.attach", "code.data.backend.create",
+      // Manifest v15 (inventory ids 399-408).
+      "code.finish", "code.image.view", "code.preview.screenshot", "code.web.fetch", "code.web.search",
+      "code.data.query.read", "code.data.rows.seed", "code.data.migrations.list", "code.data.policies.inspect", "code.data.policies.apply"];
     const EXPECTED_RISK: Record<string, string> = {
       "code.fs.list": "low", "code.fs.read": "low", "code.fs.grep": "low", "code.fs.tree": "low",
       "code.symbols.outline": "low", "code.project.info": "low", "code.fs.diff": "low",
@@ -210,7 +213,9 @@ describe("Section 15: Developer / Capability Inspector", () => {
       "code.agent.spawn": "medium",
       "code.shell.exec_async": "high", "code.shell.process.wait": "low",
       "code.agent.spawn_async": "medium", "code.agent.continue": "medium", "code.agent.send_message": "medium", "code.agent.interrupt": "medium",
-      "code.data.schema.inspect": "low", "code.data.schema.apply": "medium", "code.data.schema.modify": "high", "code.data.rows.list": "low", "code.data.rows.transfer": "high", "code.data.backend.attach": "high",
+      "code.data.schema.inspect": "low", "code.data.schema.apply": "medium", "code.data.schema.modify": "high", "code.data.rows.list": "low", "code.data.rows.transfer": "high", "code.data.backend.attach": "high", "code.data.backend.create": "medium",
+      "code.finish": "low", "code.image.view": "low", "code.preview.screenshot": "low", "code.web.fetch": "medium", "code.web.search": "medium",
+      "code.data.query.read": "low", "code.data.rows.seed": "medium", "code.data.migrations.list": "low", "code.data.policies.inspect": "low", "code.data.policies.apply": "high",
     };
 
     it("registers every code capability with the expected contract and unique inventory ids", () => {
@@ -234,7 +239,7 @@ describe("Section 15: Developer / Capability Inspector", () => {
       // The code domain is additive and grows with every Coding Agent step: assert the invariant
     // (the registered set matches the contract lists) instead of a hardcoded step number.
     expect(byDomain.code).toBe(ALL_CODE_IDS.length);
-      expect(report.counts.all).toBe(397);
+      expect(report.counts.all).toBe(408);
     });
 
     it("never reports a code capability as allowed when no flag source is available", () => {
@@ -274,8 +279,8 @@ describe("Section 15: Developer / Capability Inspector", () => {
         expect(["off", "unknown"], `${item.capabilityId} must not be on when its flag is missing`).toContain(item.flagState);
       }
       // Dark launch default: the flags are off, and the capability list itself is unchanged (Step 3: 387 entries).
-      expect(off.counts.all).toBe(397);
-      expect(on.counts.all).toBe(397);
+      expect(off.counts.all).toBe(408);
+      expect(on.counts.all).toBe(408);
     });
   });
 });

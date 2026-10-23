@@ -319,7 +319,13 @@ export function normalizeCatalog(
     const local = provider.category === "local";
     const localRuntime = localHealth[provider.id];
     const auth = authType(provider, plugin);
-    const metadata = connectionMetadata(provider, auth, providerConnections.length > 0);
+    // OmniRoute refuses every request of a provider whose saved connections are all disabled
+    // ("No active credentials"), so only an active connection makes the provider usable.
+    const activeConnections = providerConnections.filter((connection) => connection.active);
+    const metadata = connectionMetadata(provider, auth, activeConnections.length > 0);
+    if (!activeConnections.length && providerConnections.length) {
+      metadata.availabilityReason = "Every saved connection of this provider is disabled in OmniRoute; its models are refused until a connection is re-enabled or reconnected.";
+    }
     const modelCount = new Set((plugin?.models ?? []).map((model) => model.id).filter(Boolean)).size;
     return {
       id: provider.id,
@@ -327,7 +333,7 @@ export function normalizeCatalog(
       description: typeof provider.freeNote === "string" ? provider.freeNote : undefined,
       category: provider.category,
       authType: auth,
-      connectionStatus: connectionStatus(providerConnections),
+      connectionStatus: connectionStatus(activeConnections),
       freeStatus: freeStatus(provider),
       local,
       localStatus: local
@@ -337,7 +343,7 @@ export function normalizeCatalog(
         : undefined,
       modelCount,
       capabilities: providerCapabilities(provider, plugin),
-      connected: providerConnections.length > 0,
+      connected: activeConnections.length > 0,
       recommended: (RECOMMENDED_PROVIDER_IDS as readonly string[]).includes(provider.id),
       experimental: provider.deprecated === true || provider.riskNoticeVariant === "deprecated",
       website: typeof provider.website === "string" ? provider.website : undefined,

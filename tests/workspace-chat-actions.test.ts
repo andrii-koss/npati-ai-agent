@@ -57,6 +57,43 @@ describe("workspace resources from chat", () => {
     expect(WorkspaceChatActions.isManagementRequest("Explain what an automation is")).toBe(false);
   });
 
+  it("shows the newest and the named company to the planner when more than 30 companies exist", async () => {
+    const store = new InMemoryWorkspaceStore();
+    for (let index = 0; index < 34; index += 1) await store.createCompany(alice, { name: `Old Company ${index}` }, `old-${index}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const bakery = await store.createCompany(alice, { name: "Sunflower Bakery" }, "bakery");
+    const prompt = await WorkspaceChatActions.buildSystemPrompt(alice, store, "Create an automation for the bakery: every Monday at 9:00 plan posts");
+    expect(prompt).toContain(bakery.id);
+    const selected = (await store.listCompanies(alice, 1)).items[0]!;
+    const selectedPrompt = await WorkspaceChatActions.buildSystemPrompt(alice, store, "Create an automation every Monday", selected.id);
+    expect(selectedPrompt.indexOf(selected.id)).toBeLessThan(selectedPrompt.indexOf(bakery.id));
+    // The PostgreSQL store hands timestamps back as Date objects.
+    const listCompanies = store.listCompanies.bind(store);
+    store.listCompanies = (async (...args: Parameters<typeof listCompanies>) => {
+      const page = await listCompanies(...args);
+      return { ...page, items: page.items.map((item) => ({ ...item, updatedAt: new Date(item.updatedAt) as unknown as string })) };
+    }) as typeof store.listCompanies;
+    expect(await WorkspaceChatActions.buildSystemPrompt(alice, store, "Create an automation for the bakery every Monday")).toContain(bakery.id);
+  });
+
+  it("treats a remember request as a memory action in every chat language", () => {
+    for (const message of ["Remember for Nordic Fit: classes start every hour from 7am to 9pm.", "Merk dir: wir backen jeden Morgen um 6 Uhr", "Recuerda que abrimos a las 7", "Lembra que abrimos às 7", "Запам'ятай: ми працюємо з 7:00"]) {
+      expect(WorkspaceChatActions.isManagementRequest(message), message).toBe(true);
+    }
+    expect(WorkspaceChatActions.isManagementRequest("Do you remember how HIIT works?")).toBe(false);
+  });
+
+  it("does not treat company or business profile fields (brand tone, audience) as a workspace resource", () => {
+    for (const message of [
+      "Створи компанію «Пекарня Сонях» — крафтова пекарня на Подолі. Тон бренду теплий і дружній. Мови: українська та англійська.",
+      "Create a company Nordic Fit, brand voice energetic, audience professionals aged 25-40",
+      "Cria uma empresa Café Lisboa com voz da marca acolhedora",
+    ]) expect(WorkspaceChatActions.isManagementRequest(message)).toBe(false);
+    expect(WorkspaceChatActions.isManagementRequest("Запам'ятай тон бренду компанії: теплий і дружній")).toBe(true);
+    expect(WorkspaceChatActions.isManagementRequest("Save our brand voice: warm and friendly")).toBe(true);
+    expect(WorkspaceChatActions.isManagementRequest("Створи автоматизацію для компанії: щопонеділка план постів")).toBe(true);
+  });
+
   it("creates a validated automation for an owned company", async () => {
     const store = new InMemoryWorkspaceStore();
     const automations = new CompanyAutomationsRepository();

@@ -4,6 +4,7 @@ import type { AppConfig } from "./app";
 import { DEFAULT_CODE_MODEL_PROFILES, resolveEnabledModelProfileIds } from "./code-model-profiles";
 import { createCoreServices } from "./core-services";
 import { currentToolManifest } from "./code-tool-registry";
+import { codeToolModelStatus } from "./code-tool-visibility";
 import { FeatureFlagService, CODE_AGENT_MASTER_FLAG, CODE_AGENT_SUB_FLAGS } from "./feature-flags";
 import { McpRuntimeCapabilityStore } from "./mcp-runtime-capabilities";
 import { CapabilityInspectorService, buildCombinedCapabilityView, defaultCapabilityRegistry, defaultEffectiveCapabilityResolver, validateActiveContext } from "@npati/shared";
@@ -71,9 +72,13 @@ export function registerCapabilityRoutes(app: FastifyInstance, deps: CapabilityR
       ...rawReport,
       items: rawReport.items.map(item => {
         const toolVersion = versions.get(item.capabilityId) ?? (item.capabilityId.startsWith("code.") ? currentToolManifest().version : undefined);
+        // How the Coding Agent offers the tool to a model: `degraded` tools stay registered and inspectable but
+        // are never put in the model's tool list (see code-tool-visibility.ts).
+        const modelVisibility = item.capabilityId.startsWith("code.") ? codeToolModelStatus(item.capabilityId) : undefined;
         return {
           ...item,
           ...(toolVersion !== undefined ? { toolVersion } : {}),
+          ...(modelVisibility ? { modelVisibility: modelVisibility.status, ...(modelVisibility.reason ? { modelVisibilityReason: modelVisibility.reason } : {}) } : {}),
         };
       }),
     };

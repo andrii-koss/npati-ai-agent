@@ -107,7 +107,8 @@ async function harness(options: HarnessOptions = {}) {
   const rbac = new CodeRbac({ registry, audit: rbacAudit });
 
   const audit: CodeAuditPort = {
-    record: async () => {
+    record: async (input) => {
+      expect(input.workspaceId).toBe("ws-1");
       order.push("audit");
       calls.audits += 1;
       if (options.auditFails) throw new Error("audit_down");

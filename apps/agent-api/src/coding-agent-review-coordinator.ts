@@ -414,7 +414,7 @@ export class CodingAgentReviewCoordinator {
    * repair history, the test-integrity verdict and the scope guard — never from the model. A change can only be
    * skipped when it is presentation-only, verified, unrepaired, integrity-clean and small.
    */
-  selfReviewDecision(): SelfReviewRiskDecision {
+  selfReviewDecision(options: { previewVerifies?: boolean } = {}): SelfReviewRiskDecision {
     const status = this.verificationLoop.status();
     const totals = this.runChangeTotals();
     return decideSelfReview({
@@ -426,7 +426,7 @@ export class CodingAgentReviewCoordinator {
         : null,
       scopeExceeded: this.scopeGuard?.exceeded === true,
       totalLinesChanged: totals.linesAdded + totals.linesRemoved,
-      adaptiveEnabled: this.host.ports.selfReview?.adaptive ?? this.host.limits.selfReviewAdaptive,
+      adaptiveEnabled: this.host.ports.selfReview?.adaptive ?? this.host.limits.selfReviewAdaptive, previewVerifies: options.previewVerifies === true,
     });
   }
 
@@ -718,7 +718,7 @@ export class CodingAgentReviewCoordinator {
         let outcome;
         if (this.selfReviewFixPending) outcome = await this.afterSelfReviewFix(steps, stateRunId);
         else {
-          await this.beginSelfReview(steps, prompt, this.selfReviewDecision());
+          await this.beginSelfReview(steps, prompt, this.selfReviewDecision({ previewVerifies: stylePreview }));
           outcome = await this.afterSelfReview(steps);
         }
         if (outcome.action === "continue") return { action: "continue" };

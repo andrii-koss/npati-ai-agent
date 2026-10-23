@@ -86,7 +86,8 @@ describe("security-gate: shared Browser QA", () => {
 describe("Browser QA WebSocket destination isolation", () => {
   it("executes the runner and admits only the current project's WebSocket origin", async () => {
     const source = readFileSync(new URL("../apps/agent-api/browser-qa-runner.mjs", import.meta.url), "utf8")
-      .replace('import { chromium } from "playwright";', "");
+      .replace('import { chromium } from "playwright";', "")
+      .replace('import { captureBrowserDiagnostic } from "./browser-qa-diagnostics.mjs";', "");
     let handler: ((socket: { url(): string; connectToServer(): void; close(): void }) => void) | undefined;
     const page = {
       routeWebSocket: vi.fn(async (_pattern: string, callback: typeof handler) => { handler = callback; }),

@@ -1,3 +1,4 @@
+import { registerProjectApiControlClient } from "../project-api-control-channel";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { DataStudioError } from "./identifier";
 import type { ProjectApiGatewayService, GatewayAuthResult } from "./gateway-service";
@@ -25,6 +26,7 @@ export function registerProjectApiGatewayRoutes(
   authService?: ProjectAuthService,
 ) {
   const base = "/v1/projects/:projectId";
+  if (gateway) registerProjectApiControlClient(app);
 
   const runWithGateway = async (
     request: FastifyRequest<{ Params: ProjectRouteParams }>,

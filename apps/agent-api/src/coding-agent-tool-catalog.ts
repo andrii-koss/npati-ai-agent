@@ -2,6 +2,7 @@ import type {
   ChatToolDefinition,
 } from "@npati/omniroute-adapter";
 import type { CodeSession } from "@npati/workspace";
+import { CODE_CAPABILITIES } from "@npati/shared";
 import type { CodeAgentLimits } from "./code-agent-config";
 import {
   resolveCodeSubagentLimits,
@@ -9,6 +10,8 @@ import {
   type ResolvedCodeSubagentLimits,
 } from "./code-subagent-limits";
 import { isPlanSafeTool } from "./code-policy-engine";
+import { resolveToolVisibility, type CodeModelProfile } from "./code-model-profiles";
+import { selectVisibleTools, type CodeToolVisibilityDecision } from "./code-tool-visibility";
 import { CODE_TOOL_SCHEMAS, resolveManifestForSession, schemasForToolManifest } from "./code-tool-registry";
 import {
   isReadOnlyRunTool,
@@ -40,7 +43,7 @@ export class CodingAgentToolCatalog {
   }
 
   publishedTools(): CodeRunToolDescriptor[] {
-    return this.ports.toolRuntime.listTools().filter((tool) => tool.status === "active");
+    return this.ports.toolRuntime.listTools().filter((tool) => tool.status === "active" && tool.available !== false);
   }
 
   toolDescriptors(
@@ -50,8 +53,11 @@ export class CodingAgentToolCatalog {
     const scope = options.capabilityScope;
     const mayDelegate = scope ? scope.mayDelegate : this.subagentLimits.delegationAllowed;
     const pinned = session.toolManifestVersion == null ? null : resolveManifestForSession(session.toolManifestVersion);
-    const staticTools = this.publishedTools().filter(tool => !pinned
+    const pinnedTools = this.publishedTools().filter(tool => !pinned
       || pinned.tools.some(candidate => candidate.name === tool.name && candidate.version === tool.version));
+    // Select one version per model function name, after applying the session pin.
+    const staticTools = pinnedTools.filter(tool =>
+      !pinnedTools.some(other => other.name === tool.name && other.version > tool.version));
     const staticNames = new Set(staticTools.map((tool) => tool.name.toLowerCase()));
 
     const runtimeTools = [...(options.runtimeTools ?? [])]
@@ -105,7 +111,7 @@ export class CodingAgentToolCatalog {
       if (!schema) continue;
       definitions.push({
         type: "function",
-        function: { name: schema.name, description: schema.description, parameters: schema.inputSchema },
+        function: { name: schema.name, description: modelToolDescription(schema), parameters: schema.inputSchema },
       });
     }
     return definitions;
@@ -160,4 +166,52 @@ export class CodingAgentToolCatalog {
       return { text: input.prompt, provenance: [], refusals: [code] };
     }
   }
+}
+
+/**
+ * Applies the model profile's tool tiers to the catalogue tools of one run (see `code-tool-visibility.ts`).
+ * Returns the offered subset (input order kept) and the decision for a metadata-only Activity record.
+ */
+export async function offeredToolsForRun(input: {
+  tools: readonly CodeRunToolDescriptor[];
+  profile: CodeModelProfile;
+  run: Pick<CodingAgentRunInput, "toolContext" | "prompt" | "readOnlyIntent" | "websiteEdit" | "requireImplementation" | "images">;
+  sessionMode: string;
+  dataStudioEnabled: boolean;
+}): Promise<{ tools: CodeRunToolDescriptor[]; decision: CodeToolVisibilityDecision }> {
+  const decision = selectVisibleTools(input.tools.map((tool) => tool.name), resolveToolVisibility(input.profile), {
+    userMessage: input.run.toolContext?.userMessage ?? input.run.prompt,
+    sessionMode: input.sessionMode,
+    readOnlyIntent: input.run.readOnlyIntent === true,
+    websiteEdit: input.run.websiteEdit === true,
+    requireImplementation: input.run.requireImplementation === true,
+    imageCount: input.run.images?.length ?? 0,
+    dataBackendAttached: input.run.toolContext?.dataBackendAttached === true,
+    dataStudioEnabled: input.dataStudioEnabled,
+  });
+  const visible = new Set(decision.visible);
+  return { tools: input.tools.filter((tool) => visible.has(tool.name)), decision };
+}
+
+const CAPABILITY_GUIDANCE = new Map(CODE_CAPABILITIES.map((capability) => [capability.id, capability]));
+
+/**
+ * The description a model reads for a tool: the published schema description (never edited, it is part of the
+ * versioned contract) plus WHEN / NOT WHEN from the Capability Registry's `useWhen` / `doNotUseWhen` and a
+ * RETURNS line derived from the published output schema. Descriptions already written in that form (manifest v15)
+ * and runtime (MCP) tools are passed through unchanged.
+ */
+export function modelToolDescription(schema: Pick<CodeRunToolSchemaLike, "name" | "description"> & { outputSchema?: unknown; version?: number }): string {
+  const base = String(schema.description ?? "").trim();
+  if (/\bWHEN:/u.test(base)) return base;
+  const capability = CAPABILITY_GUIDANCE.get(schema.name);
+  if (!capability || schema.version !== undefined && capability.version !== schema.version) return base;
+  const data = (schema.outputSchema as { properties?: { data?: { properties?: Record<string, unknown> } } } | undefined)?.properties?.data?.properties;
+  const returns = data ? Object.keys(data).slice(0, 12).join(", ") : "";
+  return [
+    base,
+    capability.useWhen.length ? `WHEN: ${capability.useWhen.join(" ")}` : "",
+    capability.doNotUseWhen.length ? `NOT WHEN: ${capability.doNotUseWhen.join(" ")}` : "",
+    returns ? `RETURNS: ${returns} (untrusted data).` : "",
+  ].filter(Boolean).join("\n");
 }

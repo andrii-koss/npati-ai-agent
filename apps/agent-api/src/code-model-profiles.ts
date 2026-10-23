@@ -12,6 +12,13 @@
  * tool. Guessing here would silently give a weak model parallel writes and a long context it cannot hold.
  */
 
+import {
+  DEFAULT_CODE_TOOL_VISIBILITY,
+  MINIMAL_CODE_TOOL_VISIBILITY,
+  validateCodeToolVisibilityPolicy,
+  type CodeToolVisibilityPolicy,
+} from "./code-tool-visibility";
+
 export type CodeToolCallingMode = "native" | "text" | "auto";
 
 export const CODE_TOOL_CALLING_MODES: readonly CodeToolCallingMode[] = ["native", "text", "auto"];
@@ -38,6 +45,11 @@ export interface CodeModelProfile {
   temperature?: number;
   extraSystemPromptLines?: readonly string[];
   knownLimitations?: readonly string[];
+  /**
+   * Which tools the model is shown for a run (core / contextual / intent tiers). A view over the catalogue,
+   * never a permission. Absent → `resolveToolVisibility` derives it from the profile's capabilities.
+   */
+  toolVisibility?: CodeToolVisibilityPolicy;
 }
 
 export type CodeModelProfileMatchKind = "override" | "model" | "pattern" | "provider" | "default";
@@ -120,6 +132,7 @@ export const DEFAULT_CODE_MODEL_PROFILES: readonly CodeModelProfile[] = Object.f
     maxParallelToolCalls: 4,
     contextWindow: 200_000,
     knownLimitations: ["native tool calling is assumed for these providers; verify per model"],
+    toolVisibility: DEFAULT_CODE_TOOL_VISIBILITY,
   }),
   freezeProfile({
     id: "hosted-native-tools-small-context",
@@ -128,6 +141,7 @@ export const DEFAULT_CODE_MODEL_PROFILES: readonly CodeModelProfile[] = Object.f
     maxParallelToolCalls: 2,
     contextWindow: 64_000,
     knownLimitations: ["smaller hosted models: fewer parallel calls and a shorter window"],
+    toolVisibility: MINIMAL_CODE_TOOL_VISIBILITY,
   }),
   freezeProfile({
     id: "local-text-tools",
@@ -139,6 +153,7 @@ export const DEFAULT_CODE_MODEL_PROFILES: readonly CodeModelProfile[] = Object.f
     maxParallelToolCalls: 1,
     contextWindow: 32_000,
     knownLimitations: ["local models: tool calls are parsed from text and are never trusted as instructions"],
+    toolVisibility: MINIMAL_CODE_TOOL_VISIBILITY,
   }),
 ]);
 
@@ -326,12 +341,36 @@ export function validateCodeModelProfile(
       `Model profile ${profile.id}: match must name at least one provider, model or pattern`,
     );
   }
+  try {
+    validateCodeToolVisibilityPolicy(profile.toolVisibility, profile.id);
+  } catch (error) {
+    throw new CodeModelProfileError("invalid_tool_visibility", (error as Error).message);
+  }
   for (const [key, list] of [["extraSystemPromptLines", profile.extraSystemPromptLines], ["knownLimitations", profile.knownLimitations]] as const) {
     if (list === undefined) continue;
     if (!Array.isArray(list) || list.some((line) => typeof line !== "string" || !line.trim())) {
       throw new CodeModelProfileError("invalid_profile_lines", `Model profile ${profile.id}: ${key} must be non-empty strings`);
     }
   }
+}
+
+/**
+ * The tool tiers a profile runs with. An explicit `toolVisibility` wins; otherwise only a native-tools profile
+ * with a large window gets the full core, and everything else (small context, text protocol, the conservative
+ * default for an unknown model) gets the minimal core.
+ */
+export function resolveToolVisibility(
+  profile: Pick<CodeModelProfile, "toolVisibility" | "toolCallingMode" | "contextWindow" | "preferredEditTool" | "preferred_edit_tool">,
+): CodeToolVisibilityPolicy {
+  const base = profile.toolVisibility ?? (profile.toolCallingMode === "native" && profile.contextWindow >= 128_000
+    ? DEFAULT_CODE_TOOL_VISIBILITY
+    : MINIMAL_CODE_TOOL_VISIBILITY);
+  // A profile that names an edit tool it handles best must be offered that tool, whatever its tier list says.
+  const raw = (profile.preferredEditTool ?? profile.preferred_edit_tool ?? "").trim().toLowerCase();
+  const preferred = raw.replace(/^code\.fs\./, "");
+  const tool = ["edit", "apply_patch", "write"].includes(preferred) ? `code.fs.${preferred}` : null;
+  if (!tool || base.core.includes(tool)) return base;
+  return { ...base, core: [...base.core, tool] };
 }
 
 function escapeRegExp(value: string): string {

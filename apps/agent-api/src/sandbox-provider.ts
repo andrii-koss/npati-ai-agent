@@ -21,6 +21,7 @@ export interface SandboxStatus { id: string; state: SandboxState; createdAt: str
 export interface SandboxFile { path: string; content: string; revision?: string; encoding?: "base64"; }
 export interface SandboxBrowserQaResult {
   statusCode: number; loadTimeMs: number; domContentLoadedMs: number; resourceCount: number; totalSizeBytes: number;
+  consoleDiagnostics?: import("../browser-qa-diagnostics.mjs").BrowserDiagnostic[];
   consoleErrorCount: number; brokenLinks: Array<{ href: string; status?: number; error?: string }>;
   accessibility: Array<{ rule: string; impact: string; selector?: string }>;
   screenshot?: { mimeType: "image/png"; base64Data: string; sizeBytes: number; redacted: true; captureMode?: "layout" | "visual" };

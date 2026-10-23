@@ -324,8 +324,11 @@ export class WebResearchService {
     return Boolean(extractTargetUrlOrDomain(message) || extractSiteEntity(message) || RESEARCH_PATTERN.test(message));
   }
 
-  async run(message: string, business: BusinessResearchContext, refresh = false, progress?: ResearchProgressListener): Promise<ResearchOutcome | null> {
+  async run(message: string, business: BusinessResearchContext, refresh = false, progress?: ResearchProgressListener, options: { mode?: "search" } = {}): Promise<ResearchOutcome | null> {
     const directUrl = extractTargetUrlOrDomain(message);
+    // An explicit search request (a model's web_search call) is a search: a product or framework name in the query
+    // must not turn it into "find this brand's official site".
+    if (options.mode === "search" && !directUrl) return this.analyzeSearch(message, business, refresh, progress, true);
     if (directUrl) {
       const explicitlyLight = LIGHT_FETCH_PATTERN.test(message) && !RESEARCH_PATTERN.test(message);
       return this.analyzeUrl(directUrl, business, refresh, !explicitlyLight, progress);
@@ -510,8 +513,10 @@ export class WebResearchService {
     };
   }
 
-  private async analyzeSearch(message: string, business: BusinessResearchContext, refresh: boolean, progress?: ResearchProgressListener): Promise<ResearchOutcome> {
-    const normalized = generalSearchQuery(message);
+  private async analyzeSearch(message: string, business: BusinessResearchContext, refresh: boolean, progress?: ResearchProgressListener, literal = false): Promise<ResearchOutcome> {
+    // A query written for search is used as is; the heuristic rewrite ("<Capitalized word> official website") is
+    // only for free-form chat messages.
+    const normalized = literal ? { query: message.trim().slice(0, 500), entities: [] as string[] } : generalSearchQuery(message);
     const query = normalized.query;
     report(progress, { type: "search_started", query });
     const results = await this.provider.search({

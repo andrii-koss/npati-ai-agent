@@ -1,3 +1,4 @@
+import { validateArguments } from "./code-tool-runtime-guards";
 import type { AgentDataStudioService } from "./data-studio/agent-data-service";
 import type { SchemaOperation } from "./data-studio/data-provider";
 import { DataStudioError } from "./data-studio/identifier";
@@ -59,10 +60,18 @@ export function codeDataExecutors(options: CodeDataToolOptions) {
       }
       if (!apply) return await options.projectData.inspectSchema(input.ctx, input.companyId, input.projectId);
       const operation = input.args.operation as SchemaOperation;
-      if (!operation || !["create_collection", "add_field", "create_index"].includes(operation.kind)) throw new CodeToolError("invalid_arguments", "Only create_collection, add_field and create_index are available; destructive changes and raw SQL are not supported", 400, "schema", false, input.tool.name);
+      const allowedKinds = ["create_collection", "add_field", "create_index", ...(input.tool.version >= 2 ? ["create_relation"] : [])];
+      if (!operation || !allowedKinds.includes(operation.kind)) throw new CodeToolError("invalid_arguments", `Only ${allowedKinds.join(", ")} are available; destructive changes and raw SQL are not supported`, 400, "schema", false, input.tool.name);
+      if (input.tool.version >= 2) {
+        const branches = (input.tool.inputSchema.properties as Record<string, { oneOf: Record<string, unknown>[] }>).operation!.oneOf;
+        validateArguments(branches[operation.kind === "create_relation" ? 1 : 0]!, operation, input.tool.name);
+        if (!options.projectData.assertBackend) throw new CodeToolError("tool_not_configured", "Backend verification is unavailable", 503, "schema", false, input.tool.name);
+        await options.projectData.assertBackend(input.ctx, input.companyId, input.projectId, String(input.args.expectedBackendId ?? ""));
+      }
       const fingerprint = input.args.expectedFingerprint;
       if (typeof fingerprint !== "string" || !fingerprint.trim()) throw new CodeToolError("invalid_arguments", "Inspect the schema and provide its current fingerprint before applying a change", 400, "schema", false, input.tool.name);
       const result = await options.projectData.applySchema(input.ctx, input.companyId, input.projectId, operation, {
+        ...(input.tool.version >= 2 ? { expectedBackendId: String(input.args.expectedBackendId) } : {}),
         expectedFingerprint: fingerprint, dryRunOnly: input.args.dryRun === true,
         runId: input.runId, agentId: input.agentId,
         // Model arguments and filesystem approvals never grant database approval.

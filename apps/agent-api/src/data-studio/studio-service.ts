@@ -85,7 +85,7 @@ export function validateOperation(operation: SchemaOperation): void {
       if (!Array.isArray(operation.fields)) throw new DataStudioError(400, "operation", "Fields must be an array", false, "INVALID_FIELDS");
       for (const field of operation.fields) {
         validateIdentifier(field.name);
-        if (!VALID_FIELD_TYPES.has(field.type)) throw new DataStudioError(400, "operation", `Invalid field type: ${field.type}`, false, "INVALID_FIELD_TYPE");
+        if (!VALID_FIELD_TYPES.has(field.type)) throw new DataStudioError(400, "operation", `Invalid field type: ${field.type}. Use one of: ${[...VALID_FIELD_TYPES].join(", ")}`, false, "INVALID_FIELD_TYPE");
       }
       break;
     case "rename_collection":
@@ -94,7 +94,7 @@ export function validateOperation(operation: SchemaOperation): void {
     case "add_field":
     case "alter_field":
       validateIdentifier(operation.field.name);
-      if (!VALID_FIELD_TYPES.has(operation.field.type)) throw new DataStudioError(400, "operation", `Invalid field type: ${operation.field.type}`, false, "INVALID_FIELD_TYPE");
+      if (!VALID_FIELD_TYPES.has(operation.field.type)) throw new DataStudioError(400, "operation", `Invalid field type: ${operation.field.type}. Use one of: ${[...VALID_FIELD_TYPES].join(", ")}`, false, "INVALID_FIELD_TYPE");
       break;
     case "drop_field":
       validateIdentifier(operation.field);

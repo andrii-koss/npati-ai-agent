@@ -72,7 +72,7 @@ export async function bootstrapWebsiteData(ctx: AuthContext, project: Project, p
   // The SDK synchronizer must succeed before creating files that import it.
   const inspected = await gateway.inspectApi(ctx, companyId, project.id);
   if (!inspected.sdk?.available) throw new DataStudioError(503, "website_bootstrap", "Project client SDK could not be delivered", true, "PROJECT_SDK_UNAVAILABLE");
-  const files = createWebsiteDataFiles(apiEnvironment.PROJECT_API_URL, apiEnvironment.PROJECT_PUBLISHABLE_KEY, project.id, commerce);
+  const files = createWebsiteDataFiles(publicBase.replace(new RegExp("/+$"), "") + "/v1/projects/" + encodeURIComponent(project.id), apiEnvironment.PROJECT_PUBLISHABLE_KEY, project.id, commerce);
   for (const [filePath, content] of Object.entries(files)) {
     let existing;
     try { existing = await workspace.readFile(ctx, companyId, project.id, filePath); } catch { /* New scaffold asset. */ }

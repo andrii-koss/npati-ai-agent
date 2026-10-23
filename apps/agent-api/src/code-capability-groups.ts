@@ -28,6 +28,12 @@ export const CODE_CAPABILITY_GROUPS: Record<CodeGroup, string[]> = {
     "code.project.info",
     "code.fs.diff",
     "code.deps.inspect",
+    // Manifest v15: viewing, documentation lookup and explicit completion touch neither workspace nor data.
+    "code.image.view",
+    "code.preview.screenshot",
+    "code.web.fetch",
+    "code.web.search",
+    "code.finish",
   ],
   "code.write": [
     "code.fs.edit",

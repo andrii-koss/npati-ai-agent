@@ -1,3 +1,6 @@
+import { withTransientModelRetry } from "./coding-agent-provider-retry";
+import { createCodeRunVisionPort } from "./coding-agent-image-delivery";
+import { visionInferenceCandidates } from "./chat-inference-candidates";
 import { buildWebsiteStyleContext, websiteEditMemory } from "./website-style-context";
 
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
@@ -376,7 +379,15 @@ export function registerCodeRouteWiring(app: FastifyInstance, deps: CodeRouteDep
     toolRuntime: codeToolRuntime,
 
     runtimeCapabilities: mcpRunPath,
-    engine: aiEngine,
+    // One retry of a model request after a transient provider failure; tool calls run only after a response.
+    engine: withTransientModelRetry(aiEngine),
+    vision: createCodeRunVisionPort({
+      chat: (request) => aiEngine.chat(request),
+      preferences: (ctx) => aiPreferences.get(ctx),
+      activeModelId: async (ctx) => (await deps.codePreferences?.get(ctx))?.activeModelId ?? null,
+      configuredVisionModel: config.omnirouteVisionModel,
+      candidates: (configured, added) => visionInferenceCandidates(configured, added),
+    }),
     schemas: CODE_TOOL_SCHEMAS,
 
     modelProfiles: {

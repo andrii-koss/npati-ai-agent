@@ -11,6 +11,7 @@ apps/web/.vite/
 data/
 
 # Generated runtime directories & test evidence
+.data/
 artifacts/
 test-results/
 playwright-report/

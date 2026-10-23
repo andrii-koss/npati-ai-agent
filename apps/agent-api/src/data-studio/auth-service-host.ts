@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import type { DataProvider } from "./data-provider";
 import type { AuthContext, WorkspaceStore } from "@npati/workspace";
 import type { ProjectAuthSettings } from "@npati/shared";
 import type { DataBackendRepository } from "./repository";
@@ -16,6 +17,7 @@ export interface ProjectAuthHost {
   rateLimiter: AuthRateLimiter;
   poolFactory?: (backend: DataBackend, environment: DataEnvironmentName, role: "migrator" | "runtime") => Promise<Pool> | Pool;
   redirects?: ProjectRedirectRepository;
+  schemaProvider?: Pick<DataProvider, "introspectSchema" | "schemaFingerprint">;
 
   ownerContext(backend: DataBackend): AuthContext;
   resolveAuthRedirect(

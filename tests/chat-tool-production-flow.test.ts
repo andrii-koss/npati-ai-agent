@@ -286,3 +286,178 @@ describe("production chat endpoint tool execution", () => {
     }
   });
 });
+
+describe("a provider that refuses a forced tool_choice still answers from the fetched page", () => {
+  function thinkingModeEngine(fallbackPrompts: string[]): AIEngine {
+    const base = productionPathEngine([]);
+    return {
+      ...base,
+      chat: async (request) => {
+        if (typeof request.toolChoice === "object") throw Object.assign(new Error("OmniRoute chat failed with HTTP 400: Thinking mode does not support this tool_choice"), { httpStatus: 400 });
+        return base.chat(request);
+      },
+      async *stream(request) {
+        fallbackPrompts.push(request.messages.filter((item) => item.role === "system").map((item) => String(item.content)).join("\n"));
+        yield "Answer from the supplied page evidence.";
+      },
+    };
+  }
+
+  it.each([
+    ["Ukrainian", "Проаналізуй сайт https://npati.com і скажи, що покращити"],
+    ["English", "Analyze the website https://npati.com and tell me what to improve"],
+  ])("%s: fetches the named page once and puts its content into the fallback prompt", async (_label, message) => {
+    const prompts: string[] = [];
+    const webResearch = researchService();
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), authProvider: { authenticate: async () => auth }, aiEngine: thinkingModeEngine(prompts), marketplace, webResearch });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message, contextType: "none" } });
+      expect(response.statusCode).toBe(200);
+      expect(webResearch.run).toHaveBeenCalledTimes(1);
+      expect(webResearch.run.mock.calls[0]?.[0]).toContain("https://npati.com");
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0]).toContain("Fetched page evidence: NPATI provides an AI business-agent platform.");
+      expect(streamResult(response.body).research).toMatchObject({ used: true, kind: "url_analysis" });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("states that the page could not be opened instead of analysing it from memory", async () => {
+    const prompts: string[] = [];
+    const webResearch = researchService();
+    webResearch.run.mockRejectedValueOnce(new Error("fetch_failed: getaddrinfo ENOTFOUND unreachable.invalid"));
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), authProvider: { authenticate: async () => auth }, aiEngine: thinkingModeEngine(prompts), marketplace, webResearch });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Проаналізуй сайт https://unreachable.invalid", contextType: "none" } });
+      expect(response.statusCode).toBe(200);
+      // No page content: the answer is the error itself, the model is not asked to "analyse" anything.
+      expect(prompts).toHaveLength(0);
+      expect(streamResult(response.body).message).toMatch(/^Не вдалося відкрити сторінку https:\/\/unreachable\.invalid\/?: fetch_failed: getaddrinfo ENOTFOUND/);
+      expect(streamResult(response.body).research).toMatchObject({ used: true, degraded: expect.stringContaining("ENOTFOUND") });
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe("a failed web_fetch is reported to the model as missing evidence", () => {
+  it("tells the model the page was not opened and must not be analysed from memory", async () => {
+    const requests: ChatRequest[] = [];
+    const webResearch = researchService();
+    webResearch.run.mockRejectedValueOnce(new Error("No hostname allowlist is configured, so no host is reachable"));
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), authProvider: { authenticate: async () => auth }, aiEngine: productionPathEngine(requests), marketplace, webResearch });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Analyze the website https://npati.com", contextType: "none" } });
+      expect(response.statusCode).toBe(200);
+      const toolMessage = requests[1]?.messages.at(-1);
+      expect(toolMessage).toMatchObject({ role: "tool", name: "web_fetch" });
+      const content = JSON.parse(String(toolMessage?.content));
+      expect(content.error).toContain("No hostname allowlist");
+      expect(content.instruction).toMatch(/could not be opened.*Do not describe or analyse the page from memory/s);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe("an unreachable page gets a clear error, never an analysis from memory", () => {
+  it("native tool path: the model's own text is replaced by the error", async () => {
+    const webResearch = researchService();
+    webResearch.run.mockRejectedValueOnce(new Error("No hostname allowlist is configured, so no host is reachable"));
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), authProvider: { authenticate: async () => auth }, aiEngine: productionPathEngine([]), marketplace, webResearch });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Проаналізуй сайт https://npati.com", contextType: "none" } });
+      const result = streamResult(response.body);
+      expect(result.message).toMatch(/^Не вдалося відкрити сторінку https:\/\/npati\.com\/?: No hostname allowlist/);
+      expect(result.message).not.toContain("actually opened");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("fallback path: the model is not asked at all", async () => {
+    const prompts: string[] = [];
+    const webResearch = researchService();
+    webResearch.run.mockRejectedValueOnce(new Error("fetch_failed: ENOTFOUND"));
+    const base = productionPathEngine([]);
+    const engine: AIEngine = { ...base, chat: async (request) => { if (typeof request.toolChoice === "object") throw new Error("HTTP 400: Thinking mode does not support this tool_choice"); return base.chat(request); },
+      async *stream(request) { prompts.push(String(request.messages[0]?.content)); yield "From memory: example sites usually need a CTA."; } };
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), authProvider: { authenticate: async () => auth }, aiEngine: engine, marketplace, webResearch });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Analyze the website https://unreachable.invalid", contextType: "none" } });
+      expect(prompts).toHaveLength(0);
+      expect(streamResult(response.body).message).toMatch(/^The page https:\/\/unreachable\.invalid\/? could not be opened: fetch_failed: ENOTFOUND/);
+      expect(response.body).not.toContain("From memory");
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe("a review request for an external URL reaches Web Research, not the project stub", () => {
+  it("REVIEW_PROJECT + URL fetches the page", async () => {
+    const webResearch = researchService();
+    const base = productionPathEngine([]);
+    const engine: AIEngine = { ...base, chat: async (request) => request.messages[0]?.content.startsWith("Classify the user's primary intent")
+      ? { content: JSON.stringify({ intent: "REVIEW_PROJECT", confidence: 1, targets: [] }) } : base.chat(request) };
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), authProvider: { authenticate: async () => auth }, aiEngine: engine, marketplace, webResearch });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Проаналізуй сайт https://npati.com", contextType: "none" } });
+      expect(response.statusCode).toBe(200);
+      expect(webResearch.run).toHaveBeenCalledTimes(1);
+      expect(response.body).not.toContain("будуть розширені у наступних кроках");
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe("a web search request survives a provider that refuses forced tool_choice", () => {
+  const thinking = (prompts: string[]): AIEngine => {
+    const base = productionPathEngine([]);
+    return { ...base, chat: async (request) => { if (typeof request.toolChoice === "object") throw new Error("HTTP 400: Thinking mode does not support this tool_choice"); return base.chat(request); },
+      async *stream(request) { prompts.push(request.messages.filter((m) => m.role === "system").map((m) => String(m.content)).join("\n")); yield "Answer from the supplied evidence."; } };
+  };
+
+  it("runs the search before the tool-less fallback and gives it the evidence", async () => {
+    const prompts: string[] = [];
+    const webResearch = researchService();
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), authProvider: { authenticate: async () => auth }, aiEngine: thinking(prompts), marketplace, webResearch });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Знайди в інтернеті три інтернет-магазини з подібними товарами і проаналізуй їхній дизайн. Пошукай competitors.", contextType: "none" } });
+      expect(response.statusCode).toBe(200);
+      expect(webResearch.run).toHaveBeenCalledTimes(1);
+      expect(prompts[0]).toContain("Verified competitor evidence from external public sources.");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("states that the search returned nothing instead of answering from memory", async () => {
+    const prompts: string[] = [];
+    const webResearch = researchService();
+    webResearch.run.mockRejectedValueOnce(new Error("search provider unavailable"));
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), authProvider: { authenticate: async () => auth }, aiEngine: thinking(prompts), marketplace, webResearch });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Знайди в інтернеті competitors для мого магазину", contextType: "none" } });
+      expect(prompts).toHaveLength(0);
+      expect(streamResult(response.body).message).toMatch(/^Вебпошук не дав результатів.*search provider unavailable/s);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("a model's web_search call is executed in search mode", async () => {
+    const requests: ChatRequest[] = [];
+    const webResearch = researchService();
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), authProvider: { authenticate: async () => auth }, aiEngine: productionPathEngine(requests), marketplace, webResearch });
+    try {
+      await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Search the web for competitors of my store", contextType: "none" } });
+      const searchCall = webResearch.run.mock.calls.find((call: unknown[]) => (call[4] as { mode?: string } | undefined)?.mode === "search");
+      expect(searchCall).toBeDefined();
+    } finally {
+      await app.close();
+    }
+  });
+});

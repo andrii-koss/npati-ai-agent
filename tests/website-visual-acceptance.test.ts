@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { InMemoryWorkspaceStore } from "@npati/workspace";
 import { CodeSessionRunExecutor, type CodeSessionRunInput } from "../apps/agent-api/src/code-session-run-executor";
 import { CodeRunCancellationRegistry } from "../apps/agent-api/src/code-run-cancellation";
-import { analyzeWebsiteReference, reviewWebsiteReference } from "../apps/agent-api/src/website-visual-acceptance";
+import { analyzeWebsiteReference, reviewWebsiteReference, visualAcceptanceScreenshot, visualRepairFindings } from "../apps/agent-api/src/website-visual-acceptance";
 import { withCodingReferenceImages } from "../apps/agent-api/src/coding-agent-runner-prompt";
 const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAAAElFTkSuQmCC";
 async function fixture() {
@@ -22,9 +22,9 @@ describe("reference attachment point", () => {
   it("attaches the reference to the current (last) user message, never to the original creation prompt, and never twice", () => {
     const messages = [
       { role: "system" as const, content: "system" },
-      { role: "user" as const, content: "створи мені інтернет магазин" },
-      { role: "assistant" as const, content: "Готово" },
-      { role: "user" as const, content: "зміни дизайн сайта, зроби такий як на фото" },
+      { role: "user" as const, content: "пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ" },
+      { role: "assistant" as const, content: "пїЅпїЅпїЅпїЅпїЅпїЅ" },
+      { role: "user" as const, content: "пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅ" },
     ];
     const image = { mimeType: "image/png", dataBase64: png };
     const attached = withCodingReferenceImages(messages, [image]);
@@ -95,11 +95,133 @@ describe("pixel-evidence visual acceptance", () => {
   });
 
   it("uses at most two repairs with the same session/images, and settles honest failure once", async () => {
-    const f = await fixture(), run = vi.fn(async () => f.run), settle = vi.fn(async () => undefined);
+    // Each repair saves a change, so each one earns a new build + screenshot review.
+    const f = await fixture(), run = vi.fn(async () => ({ ...f.run, summary: { ...f.run.summary, filesChanged: ["app/page.tsx"] } })), settle = vi.fn(async () => undefined);
     const executor = new CodeSessionRunExecutor({ runner: { run }, control: new CodeRunCancellationRegistry(), resolveModel: async () => "connected/vision", prepareReference: async () => ["observed reference"], afterRun: async (_input, result) => ({ ...result as any, status: "failed", reason: "visual_acceptance_failed", visualAcceptance: { status: "failed", differences: ["Wrong structure"] } }), settle });
     const result = await executor.execute(f.input);
     expect(run).toHaveBeenCalledTimes(3); expect(result.terminalStatus).toBe("failed"); expect(settle).toHaveBeenCalledOnce();
     for (const [input] of run.mock.calls as any) { expect(input.session).toBe(f.input.session); expect(input.images).toBe(f.input.images); }
     expect((result.result as any).visualRepairRunIds).toHaveLength(2);
   });
+});
+
+describe("one central visual check, repairs only with findings", () => {
+  const failing = (differences: string[]) => async (_input: unknown, result: unknown) => ({ ...result as object, status: "failed", reason: "visual_acceptance_failed", visualAcceptance: { status: "failed", differences } });
+
+  it("does not start a repair without concrete findings", async () => {
+    const f = await fixture(), run = vi.fn(async () => f.run);
+    const executor = new CodeSessionRunExecutor({ runner: { run }, control: new CodeRunCancellationRegistry(), resolveModel: async () => "connected/vision", prepareReference: async () => ["observed reference"], afterRun: failing([]), settle: async () => undefined });
+    const result = await executor.execute(f.input);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(result.terminalStatus).toBe("failed");
+    expect(visualRepairFindings({ status: "failed", differences: ["visual repair 1 made no changes", "ok"] })).toEqual([]);
+    expect(visualRepairFindings({ status: "passed", differences: ["Header is light"] })).toEqual([]);
+  });
+
+  it("does not rebuild and re-screenshot after a repair that changed nothing", async () => {
+    const f = await fixture(), run = vi.fn(async () => f.run);
+    const afterRun = vi.fn(failing(["Header is light instead of dark"]));
+    const executor = new CodeSessionRunExecutor({ runner: { run }, control: new CodeRunCancellationRegistry(), resolveModel: async () => "connected/vision", prepareReference: async () => ["observed reference"], afterRun, settle: async () => undefined });
+    const result = await executor.execute(f.input);
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(afterRun).toHaveBeenCalledTimes(1);
+    expect((result.result as any).visualAcceptance.differences.join(" ")).toContain("visual repair 1 made no changes");
+  });
+
+  it("shows the repair the screenshot that failed, after the reference", async () => {
+    const f = await fixture(), run = vi.fn(async () => ({ ...f.run, summary: { ...f.run.summary, filesChanged: ["app/page.tsx"] } }));
+    const chat = vi.fn(async () => response(0.5, ["Header is light instead of dark"]));
+    const afterRun = async (input: CodeSessionRunInput, result: unknown) => reviewWebsiteReference(input, result, { inspect: async () => f.qa, chat: chat as never });
+    const executor = new CodeSessionRunExecutor({ runner: { run }, control: new CodeRunCancellationRegistry(), resolveModel: async () => "connected/vision", prepareReference: async () => ["observed reference"], afterRun, settle: async () => undefined });
+    await executor.execute(f.input);
+    const repair = (run.mock.calls as any)[1][0];
+    expect(repair.images).toHaveLength(2);
+    expect(repair.images[0]).toBe(f.input.images![0]);
+    expect(repair.images[1]).toMatchObject({ dataBase64: png });
+    expect(repair.prompt).toContain("LAST attached image is the current Preview screenshot");
+    expect(repair.prompt).toContain("Header is light instead of dark");
+    // The central review keeps judging against the reference only.
+    for (const call of chat.mock.calls as any) expect(call[0].messages[1].content.filter((part: any) => part.type === "image_url")).toHaveLength(2);
+    expect(visualAcceptanceScreenshot(await afterRun(f.input, f.run))).toMatchObject({ dataBase64: png });
+  });
+});
+
+describe("differences are graded: only major ones fail and are repaired", () => {
+  const graded = (score: number, differences: Array<{ severity: string; text: string } | string>) => ({ content: JSON.stringify({ scores: { layout: score, colors: score, typography: score, spacing: score, imagery: score }, differences }) });
+
+  it("passes with minor differences only, reports them, and starts no repair", async () => {
+    const f = await fixture(), run = vi.fn(async () => f.run);
+    const chat = vi.fn(async () => graded(0.92, [{ severity: "minor", text: "Button is about 6 px wider" }, { severity: "minor", text: "Gradient stop slightly warmer" }]));
+    const afterRun = async (input: CodeSessionRunInput, result: unknown) => reviewWebsiteReference(input, result, { inspect: async () => f.qa, chat: chat as never });
+    const executor = new CodeSessionRunExecutor({ runner: { run }, control: new CodeRunCancellationRegistry(), resolveModel: async () => "connected/vision", prepareReference: async () => ["observed reference"], afterRun, settle: async () => undefined });
+    const result = await executor.execute(f.input) as any;
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(result.result.visualAcceptance).toMatchObject({ status: "passed", differences: [], minorDifferences: ["Button is about 6 px wider", "Gradient stop slightly warmer"] });
+    expect(result.result.message).toContain("Button is about 6 px wider");
+  });
+
+  it("fails on a major difference and repairs only the major findings", async () => {
+    const f = await fixture(), run = vi.fn(async () => ({ ...f.run, summary: { ...f.run.summary, filesChanged: ["app/page.tsx"] } }));
+    const chat = vi.fn(async () => graded(0.9, [{ severity: "major", text: "Menu cards section is missing" }, { severity: "minor", text: "Logo letter-spacing is wider" }]));
+    const afterRun = async (input: CodeSessionRunInput, result: unknown) => reviewWebsiteReference(input, result, { inspect: async () => f.qa, chat: chat as never });
+    const executor = new CodeSessionRunExecutor({ runner: { run }, control: new CodeRunCancellationRegistry(), resolveModel: async () => "connected/vision", prepareReference: async () => ["observed reference"], afterRun, settle: async () => undefined });
+    await executor.execute(f.input);
+    const repair = (run.mock.calls as any)[1][0];
+    expect(repair.prompt).toContain("Menu cards section is missing");
+    expect(repair.prompt).not.toContain("Logo letter-spacing");
+  });
+
+  it("a score below threshold still fails even when every difference is minor", async () => {
+    const f = await fixture();
+    const reviewed = await reviewWebsiteReference(f.input, f.run, { inspect: async () => f.qa, chat: async () => graded(0.7, [{ severity: "minor", text: "Shade slightly lighter" }]) as never }) as any;
+    expect(reviewed.visualAcceptance.status).toBe("failed");
+  });
+
+  it("an ungraded (string) difference counts as major", async () => {
+    const f = await fixture();
+    const reviewed = await reviewWebsiteReference(f.input, f.run, { inspect: async () => f.qa, chat: async () => graded(0.95, ["Header is light instead of dark"]) as never }) as any;
+    expect(reviewed.visualAcceptance).toMatchObject({ status: "failed", differences: ["Header is light instead of dark"] });
+  });
+});
+
+describe("visual review timeout", () => {
+  it("gives a two-image review enough time (measured 30-42 s)", async () => {
+    const f = await fixture();
+    const chat = vi.fn(async () => ({ content: JSON.stringify({ scores: { layout: 1, colors: 1, typography: 1, spacing: 1, imagery: 1 }, differences: [] }) }));
+    await reviewWebsiteReference(f.input, f.run, { inspect: async () => f.qa, chat: chat as never });
+    expect((chat.mock.calls as any)[0][0].timeoutMs).toBeGreaterThanOrEqual(90_000);
+  });
+});
+
+describe("a malformed verdict is asked for once more", () => {
+  it("uses a valid second answer and never a third", async () => {
+    const f = await fixture();
+    const chat = vi.fn()
+      .mockResolvedValueOnce({ content: '{"scores":{"layout":0.9,"colors":0.9' })
+      .mockResolvedValueOnce({ content: JSON.stringify({ scores: { layout: 0.9, colors: 0.9, typography: 0.9, spacing: 0.9, imagery: 0.9 }, differences: [{ severity: "minor", text: "Gradient slightly warmer" }] }) });
+    const reviewed = await reviewWebsiteReference(f.input, f.run, { inspect: async () => f.qa, chat: chat as never }) as any;
+    expect(chat).toHaveBeenCalledTimes(2);
+    expect(reviewed.visualAcceptance.status).toBe("passed");
+  });
+
+  it("stays blocked when the second answer is malformed too", async () => {
+    const f = await fixture();
+    const chat = vi.fn().mockResolvedValue({ content: "not json" });
+    const reviewed = await reviewWebsiteReference(f.input, f.run, { inspect: async () => f.qa, chat: chat as never }) as any;
+    expect(chat).toHaveBeenCalledTimes(2);
+    expect(reviewed.visualAcceptance).toMatchObject({ status: "blocked" });
+  });
+});
+
+it("blocks visual inference and repair on functional QA failures, preserving only canonical diagnostics", async () => {
+  const f = await fixture(), chat = vi.fn();
+  const qa = { ...f.qa as object, success: false, report: { id: "broken-page" },
+    consoleErrors: [{ type: "pageerror", cause: "undefined_reference", message: "SECRET", source: "page.tsx", line: 12, column: 4 }] };
+  const r = await reviewWebsiteReference(f.input, f.run, { inspect: async () => qa as never, chat }) as any;
+  expect(chat).not.toHaveBeenCalled();
+  expect(r.functionalAcceptance).toMatchObject({ status: "failed", reportId: "broken-page" });
+  expect(r.functionalAcceptance.diagnostics[0]).toMatchObject({ cause: "undefined_reference", line: 12 });
+  expect(r.visualAcceptance).toMatchObject({ status: "blocked", differences: ["functional_qa_failed"] });
+  expect(visualRepairFindings(r.visualAcceptance)).toEqual([]);
+  expect(JSON.stringify(r)).not.toContain("SECRET");
 });

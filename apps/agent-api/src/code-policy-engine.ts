@@ -227,7 +227,7 @@ export interface PolicyEngineDeps {
   capabilities?: {
     get(
       id: string,
-      scope?: { workspaceId?: string; companyId?: string; projectId?: string },
+      scope?: { workspaceId?: string; companyId?: string; projectId?: string; toolVersion?: number },
     ): { id: string; status?: string; version?: number; requiresConfirmation?: boolean } | undefined;
   };
   classifier?: (command: string, opts?: unknown) => { risk: PolicyRisk; reasons?: string[] };
@@ -372,7 +372,7 @@ export class PolicyEngine {
     // is still `unknown_tool` — the "unknown ⇒ deny" half of the owner's lookup rule, unchanged.
     const registry = this.deps.capabilities;
     if (!registry) return deny("policy_engine_unavailable", "Capability registry is not configured", 503, "capability");
-    const capability = registry.get(tool, { workspaceId: ctx.workspaceId, companyId: request.companyId, projectId: request.projectId });
+    const capability = registry.get(tool, { workspaceId: ctx.workspaceId, companyId: request.companyId, projectId: request.projectId, toolVersion: request.toolVersion });
     if (!capability) return deny("unknown_tool", `Unknown tool: ${tool}`, 404, "capability");
     if (capability.status === "deprecated") return deny("tool_deprecated", `Tool is deprecated: ${tool}`, 409, "capability");
     if (request.toolVersion !== undefined && capability.version !== undefined && capability.version !== request.toolVersion) {

@@ -46,6 +46,7 @@ export const CODE_READ_CAPABILITIES: CapabilityDefinition[] = [
       "The agent wants to find where something is defined across many files: use code.fs.grep first.",
       "The file is outside the workspace, is a symlink leaving the workspace, or is a secret/credential file.",
       "The file is large and only a summary is needed (read a bounded range instead).",
+      "The file is an image (PNG, JPEG, WebP, GIF): use code.image.view; code.fs.read returns only metadata for binary files.",
     ],
     agentCallable: true,
     userVisible: true,

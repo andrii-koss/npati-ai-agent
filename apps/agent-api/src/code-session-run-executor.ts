@@ -3,6 +3,7 @@ import type { CompanyChatLanguage } from "./company-chat-i18n";
 import type { DevelopmentProcessProgressItem } from "@npati/shared";
 import type { AuthContext, CodeSession } from "@npati/workspace";
 import { VERIFICATION_APPROVAL_REQUIRED } from "./code-verification-loop";
+import { visualAcceptanceScreenshot, visualRepairFindings } from "./website-visual-acceptance";
 
 /**
  * C15 — the **one** place a code session is driven.
@@ -48,6 +49,7 @@ export interface CodeSessionRunPort {
     signal: AbortSignal;
     cancelRequested: () => boolean | Promise<boolean>;
     readOnlyIntent?: boolean;
+    toolContext?: CodingAgentRunInput["toolContext"];
     runId?: string;
     /** `false` for the automatic visual-repair continuation, which must not take the chat's inbox lease. */
     useInbox?: boolean;
@@ -119,6 +121,8 @@ export interface CodeSessionRunInput {
   initialInboxMessageId?: string;
   /** `codeIntentIsReadOnly(intent)` of the resolved intent — never a model argument and never a guess. */
   readOnlyIntent?: boolean;
+  /** Signals for the offered tool tiers: the user's own words and the project's data backend state. */
+  toolContext?: CodingAgentRunInput["toolContext"];
   /**
    * Where the run reports. When present, this is also the signal the loop runs under: the caller owns the
    * cancellation semantics (the background registry mints its own signal so a closed tab cannot reach the run), and
@@ -169,6 +173,17 @@ interface RunnerResultView {
   reason?: unknown;
   code?: unknown;
   summary?: { remaining?: unknown } | null;
+}
+
+const BUILD_REQUEST = /\b(?:build|rebuild|compile|preview|deploy|launch)\b|збер|зібр|збір|компіл|запусти|перезапусти|прев['’ʼ]?ю|превью/iu;
+
+/**
+ * A full build without any source change is only worth its 1-3 minutes when the user asked for a build/preview or a
+ * new project is being implemented. Edits still verify because they change files; a Data Studio-only or read-only
+ * run no longer pays for a build of an unchanged workspace (E2E S3: 60-200 s per database request).
+ */
+export function forcesBuild(input: { requireImplementation?: boolean; prompt: string; toolContext?: { userMessage?: string } }): boolean {
+  return input.requireImplementation === true || BUILD_REQUEST.test(input.toolContext?.userMessage ?? input.prompt);
 }
 
 /**
@@ -233,10 +248,11 @@ export class CodeSessionRunExecutor {
         ...(input.initialInboxMessageId ? { initialInboxMessageId: input.initialInboxMessageId } : {}),
         ...(model ? { model } : {}),
         ...(verificationTools ? { verificationTools } : {}),
-        ...(verificationTools?.includes("build") ? { forceVerification: true } : {}),
+        ...(verificationTools?.includes("build") && forcesBuild(input) ? { forceVerification: true } : {}),
         signal: sink ? sink.signal : controller.signal,
         cancelRequested: input.cancelRequested,
         ...(input.readOnlyIntent ? { readOnlyIntent: true } : {}),
+        ...(input.toolContext ? { toolContext: input.toolContext } : {}),
       });
       if (this.options.afterRun && !controller.signal.aborted && !await input.cancelRequested()) {
         result = await this.options.afterRun(input, result);
@@ -246,6 +262,10 @@ export class CodeSessionRunExecutor {
         for (let attempt = 1; attempt <= 2 && Date.now() < deadline; attempt++) {
           const review = result as { visualAcceptance?: { status: string; differences: string[] }; status?: string };
           if (review.visualAcceptance?.status !== "failed" || controller.signal.aborted || await input.cancelRequested()) break;
+          // A repair is a model run: only spend it on concrete, named differences (never on a bare low score).
+          const findings = visualRepairFindings(review.visualAcceptance);
+          if (!findings.length) break;
+          const failedCapture = visualAcceptanceScreenshot(result);
           const repairRunId = String(rootRunId ?? sessionId) + ":visual-repair:" + attempt;
           repairRunIds.push(repairRunId);
           /**
@@ -256,10 +276,15 @@ export class CodeSessionRunExecutor {
           const previous = result;
           let repaired: unknown;
           try {
-            repaired = await runner.run({ ctx: input.ctx, session: input.session, model, images: input.images, useInbox: false, skipAsyncCollect: true,
-            prompt: input.prompt + "\nVisual acceptance failed. Correct these observed screenshot differences in the SAME project, preserving functionality: " + JSON.stringify(review.visualAcceptance.differences) + "\nRead current files before editing. Do not scaffold or reinstall unchanged dependencies. Finish saved edits for automatic build and screenshot review.",
+            // The repair sees the reference AND the screenshot that failed, so it does not need to capture one itself.
+            const repairImages = failedCapture && input.images?.length ? [...input.images, failedCapture] : input.images;
+            repaired = await runner.run({ ctx: input.ctx, session: input.session, model, images: repairImages, useInbox: false, skipAsyncCollect: true,
+            prompt: input.prompt + "\nVisual acceptance failed. Correct these observed screenshot differences in the SAME project, preserving functionality: " + JSON.stringify(findings)
+              + (failedCapture ? "\nThe LAST attached image is the current Preview screenshot that failed this check; the other images are the reference. Compare them instead of taking a new screenshot." : "")
+              + "\nRead current files before editing. Do not scaffold or reinstall unchanged dependencies. Finish saved edits for automatic build and screenshot review.",
             runId: repairRunId, runDetails: { parentRunId: rootRunId ?? null, visualParentRunId: rootRunId ?? null, visualRepairAttempt: attempt },
             quotaSessionId: sessionId, maxTurns: Math.min(input.maxTurns ?? 12, 12), websiteEdit: true,
+            ...(input.toolContext ? { toolContext: input.toolContext } : {}),
             verificationTools, forceVerification: verificationTools?.includes("build"), extraSystemPromptLines: input.extraSystemPromptLines,
             signal: AbortSignal.any([controller.signal, AbortSignal.timeout(Math.max(1, deadline - Date.now()))]),
             cancelRequested: input.cancelRequested, onActivity: input.onActivity });
@@ -276,6 +301,16 @@ export class CodeSessionRunExecutor {
            * A repair that never ran (lease, cancellation, provider refusal) must not replace the root result with its
            * own failure and thereby erase the visual mismatch the user needs to see.
            */
+          const repairChanged = ((repaired as { summary?: { filesChanged?: unknown[] } } | null)?.summary?.filesChanged?.length ?? 0) > 0;
+          if (repaired && typeof repaired === "object" && (repaired as { status?: string }).status === "completed" && !repairChanged) {
+            // Same revision as the failed check: a new build + screenshot + review would repeat the same verdict.
+            const root = previous && typeof previous === "object" ? previous as Record<string, unknown> : {};
+            const acceptance = (root.visualAcceptance && typeof root.visualAcceptance === "object") ? root.visualAcceptance as Record<string, unknown> : {};
+            const differences = Array.isArray(acceptance.differences) ? [...acceptance.differences as string[]] : [];
+            differences.push("visual repair " + attempt + " made no changes");
+            result = { ...root, visualAcceptance: { ...acceptance, status: "failed", differences } };
+            break;
+          }
           if (repaired && typeof repaired === "object" && (repaired as { status?: string }).status === "completed") {
             result = await this.options.afterRun({ ...input, runId: repairRunId }, repaired);
           } else {
@@ -296,9 +331,11 @@ export class CodeSessionRunExecutor {
        */
       this.options.logger?.warn({ err: error, sessionId }, "code_session_run_failed");
       const reason = error instanceof Error ? error.message : "run_failed";
+      // A missing vision model is the user's to fix in AI settings: its text is written for the user.
+      const userFacing = /^vision_model_unavailable:\s*/u.test(reason) ? reason.replace(/^vision_model_unavailable:\s*/u, "") : undefined;
       result = result && typeof result === "object"
         ? { ...result, status: controller.signal.aborted ? "cancelled" : "failed", reason, message: reason }
-        : { status: "failed", reason };
+        : { status: "failed", reason, ...(userFacing ? { message: userFacing } : {}) };
     } finally {
       control.unregisterController(sessionId, controller);
     }

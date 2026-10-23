@@ -76,6 +76,13 @@ const TEST_PATTERNS = [/(?:запусти тести|прожени тести|�
 const REVIEW_PATTERNS = [/(?:рев[ʼ']?ю|перевір код|оглянь код|review (?:the )?code|code review|audit (?:the )?code)/iu];
 const REFACTOR_PATTERNS = [/(?:рефактор|перепиши чистіше|оптимізуй код|спрости код|refactor|clean up the code|simplify)/iu];
 const EXPLAIN_PATTERNS = [/(?:поясни (?:код|функцію|цей файл)|що робить (?:цей )?(?:код|файл|метод)|explain (?:this |the )?(?:code|function|file)|what does (?:this|the) (?:code|function) do)/iu];
+/**
+ * An explicit analysis request ("проаналізуй", "оціни", "analyze", "audit"). It is read-only only while the same
+ * message carries no change verb: "проаналізуй і виправ" is an edit. Checked before the router's project intent,
+ * like EXPLAIN, because a semantic "edit this site" label must not turn "analyze the site" into a write run.
+ */
+const ANALYSIS_PATTERNS = [/(?:проаналізу|проаналізува|аналізу|зроби аналіз|оціни|оцінити|переглянь|ознайомся|опиши (?:код|проєкт|структур|сайт)|знайди (?:проблем|помилк|слабк)|які (?:є )?проблеми|що не так|analy[sz]e|analysis|\bassess|\bevaluate|\binspect\b|\baudit\b|what(?:'s| is) wrong|find (?:issues|problems|bugs))/iu];
+const CHANGE_VERB_PATTERNS = [/(?:виправ|полагод|зміни|змінити|онови|додай|створи|видали|перепиши|зроби (?!аналіз)|налаштуй|встанови|заміни|рефактор|реалізуй|впровад|переробі|покращ(?:и|іть)(?![\p{L}])|поліпш(?:и|іть)(?![\p{L}])|оптимізуй|підключ(?:и|іть)(?![\p{L}])|\bimprove\b|\benhance\b|\boptimi[sz]e\b|\bconnect\b|\bredesign\b|\bmelhore\b|\botimize\b|\bconecte\b|\badicione\b|\bcrie\b|\baltere\b|\bmude\b|\bfix|\bchange|\bupdate|\badd\b|\bcreate|\bremove|\bdelete|\brewrite|\bmake\b|\bimplement|\brefactor|\breplace|\bapply\b|\binstall|\bbuild\b)/iu];
 const CREATE_PATTERNS = [/(?:створи|згенеруй|напиши|додай)\s+(?:новий\s+|нову\s+|new\s+)?(?:скрипт|модуль|функці\p{L}*|клас|файл|ендпойнт|сервіс)|create (?:a )?(?:new )?(?:script|module|function|class|file|endpoint|service)/iu];
 const EDIT_PATTERNS = [/(?:зміни|змінити|відредагуй|онови|поправ|перейменуй|видали|додай)[^\n]{0,40}(?:функці\p{L}*|модул\p{L}*|файл\p{L}*|клас\p{L}*|код\p{L}*)|(?:edit|modify|update|rename|delete|add)[^\n]{0,30}(?:the )?(?:code|file|function|module|class)/iu];
 
@@ -99,6 +106,8 @@ export function classifyCodeIntent(input: CodeIntentInput): CodeIntentDecision {
   if (!codeContext) {
     return { intent: "CHAT", confidence: 0.9, reason: `project_kind_not_code:${projectKind}`, needsProjectSelection: false, projectOptional: false };
   }
+
+  if (matches(ANALYSIS_PATTERNS) && !matches(CHANGE_VERB_PATTERNS)) return decided("REVIEW_CODE", 0.8, "analysis_keywords_without_change");
 
   // Explicit project intent from the existing router has priority: it already understands the domain.
   const fromProjectIntent = mapProjectIntentToCodeIntent(input.projectIntent ?? null, projectKind);

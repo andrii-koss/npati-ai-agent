@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { AuthContext, Company, CompanyAgent, CompanyAgentInput, CompanyInput, WorkspaceStore } from "@npati/workspace";
 import { companyChatCopy, detectCompanyChatLanguage, insertCompanyName, isLocalizedCompanyManagementRequest, type CompanyChatLanguage } from "./company-chat-i18n";
 import { defaultLocalizedAgentProfiles } from "./company-agent-profile-i18n";
-import { companyDeleteCopy, isCompanyDeleteConfirmed } from "./company-delete-i18n";
+import { companyDeleteCopy, deleteIsTheAction, isCompanyDeleteConfirmed, withoutQuotedNames } from "./company-delete-i18n";
 
 type CompanyOperation = "create" | "update" | "delete";
 type AgentOperation = CompanyOperation;
@@ -40,7 +40,7 @@ const toolAliases = new Map([
   ["code mode exec", "exec"],
 ]);
 
-const deleteMutationSignal = /(?:видал|приб|удал|убер|\bdelete\b|\bremove\b|supprim|effac|lösch|entfern|elimin|borr|usuń|skasuj|exclu|apagar|verwijder|sil|kaldır|删除|削除|삭제|احذف|إزالة|हटा)/iu;
+const deleteMutationSignal = /(?:видал|приб|удал|убер|\bdelete\b|\bremove\b|supprim|effac|lösch|entfern|elimin|borr|usuń|skasuj|exclu|apagar|verwijder|\bsil\b|kaldır|删除|削除|삭제|احذف|إزالة|हटा)/iu;
 const selectedDeleteReferenceSignal = /(?:її|його|їх|це\s+все|все\s+це|усе\s+це|щойно\s+створен\p{L}*|ее|его|их|это\s+вс[её]|вс[её](?:\s+это|\s*,?\s*что)|только\s+что\s+создан\p{L}*|\bit\b|\bthis\s+one\b|\beverything\b|\ball\s+(?:of\s+it|this)\b|what\s+(?:you|was)\s+just\s+created|tout\s+(?:cela|ça|ce\s+que)|alles|todo\s+(?:esto|lo\s+que)|tutto\s+(?:questo|ciò)|wszystko|tudo\s+(?:isso|o\s+que)|dit\s+allemaal|hepsini|tümünü|her\s+şeyi|全部|这一切|すべて|全て|모두|전부|모든\s+것|كل\s+(?:شيء|هذا|ما)|सब\s+(?:कुछ|चीज़ें)|यह\s+सब)/iu;
 
 function normalizedLabel(value: string): string {
@@ -163,6 +163,10 @@ const numberWordMap: Record<string, number> = {
 
 export function isInformationalOrCapabilityQuery(message: string): boolean {
   const text = message.trim();
+  // A single question about existing records ("Які дві компанії ми створили?") asks, it does not change anything.
+  const question = /^(?:які|який|яка|яке|скільки|хто|коли|де|чи|що|какие|какой|сколько|кто|when|which|what|who|whose|where|did|does|do|is|are|was|were|how\s+many|quais|qual|quantos|quantas|cuántos|cuántas|cuál|cuáles|welche|welcher|wie\s+viele|wer|wann)(?![\p{L}])/iu.test(text)
+    && text.endsWith("?") && !/[.!]\s+\p{L}/u.test(text);
+  if (question) return true;
   const informationalSignal = /(?:how\s+(?:to|do\s+I|can\s+I|does\s+one|should\s+I)|tell\s+me\s+how|explain\s+how|what\s+(?:is|are|can\s+you\s+do)|can\s+you\s+(?:create|add|manage|build|do)\b|are\s+you\s+able\s+to|is\s+it\s+possible\s+to|show\s+me\s+how|help\s+me\s+understand|як\s+(?:створити|додати|керувати|налаштувати|зробити)|розкажи(?:те)?\s+як|поясни(?:те)?\s+як|чи\s+мож(?:ете|на)|чи\s+вмієте|що\s+таке|как\s+(?:создать|добавить|управлять|настроить|сделать)|расскажи(?:те)?\s+как|объясни(?:те)?\s+как|можешь\s+ли|вы\s+можете|comment\s+(?:créer|ajouter|faire)|pouvez-vous|peux-tu|wie\s+(?:kann\s+ich|erstelle\s+ich|funktioniert)|kannst\s+du|können\s+sie|cómo\s+(?:crear|puedo|se\s+crea)|puedes|puede|come\s+(?:creare|posso|si\s+crea)|puoi|potete|jak\s+(?:stworzyć|utworzyć|dodać|mogę)|czy\s+możesz|como\s+(?:criar|posso|se\s+cria)|você\s+pode|hoe\s+(?:kan\s+ik|maak\s+ik)|kun\s+je|kunt\s+u|nasıl\s+(?:oluşturulur|eklenir|yapılır)|yapabilir\s+misin|如何|怎么|能否|可以.*吗|你会.*吗|怎样|どうやって|どのように|できますか|可能ですか|作成方法|어떻게|할\s+수\s+있나요|가능한가요|만드는\s+방법|كيف\s+(?:أنشئ|يمكن|تستطيع)|هل\s+يمكنك|اشرح\s+لي\s+كيف|कैसे\s+(?:बनाएँ|बनाते\s+हैं|करूं)|क्या\s+आप)/iu.test(text);
 
   if (!informationalSignal) return false;
@@ -348,6 +352,22 @@ async function ownedCompany(store: WorkspaceStore, auth: AuthContext, directive:
   return matches[0]!;
 }
 
+/** Whole-word, case-insensitive occurrence of a name in the user's request. */
+function requestNames(request: string, name: string): boolean {
+  const value = name.trim().toLocaleLowerCase();
+  if (value.length < 2) return false;
+  const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "iu").test(request.toLocaleLowerCase());
+}
+
+/** The one existing agent the request names (the longest name wins when one name contains another). */
+function agentNamedInRequest(agents: CompanyAgent[], request: string): CompanyAgent | undefined {
+  const named = agents.filter((agent) => requestNames(request, agent.name)).sort((a, b) => b.name.length - a.name.length);
+  if (!named.length) return undefined;
+  const longest = named[0]!;
+  return named.every((agent) => agent === longest || longest.name.toLocaleLowerCase().includes(agent.name.toLocaleLowerCase())) ? longest : undefined;
+}
+
 function findAgent(agents: CompanyAgent[], id?: string | null, name?: string | null, fallbackId?: string): CompanyAgent {
   if (!id && !name && fallbackId) id = fallbackId;
   if (!id && !name && agents.length === 1) return agents[0]!;
@@ -367,23 +387,23 @@ export class CompanyChatActions {
 
   static isManagementRequest(message: string): boolean {
     if (isInformationalOrCapabilityQuery(message)) return false;
-    return /^(?=[\s\S]*(?:створ|дод|редаг|змін|онов|видал|приб|налашт|признач|нада|доповн|заповн|зроб|побуд|засну|організ)\p{L}*)(?=[\s\S]*(?:компан|агент|пол|інструкц|промпт|рол|можливост)\p{L}*)/iu.test(message)
+    return /^(?=[\s\S]*(?:створ|дод|редаг|змін|онов|видал|приб|налашт|признач|нада|доповн|заповн|зроб|побуд|засну|організ|переймен)\p{L}*)(?=[\s\S]*(?:компан|агент|пол|інструкц|промпт|рол|можливост)\p{L}*)/iu.test(message)
       || /^(?=[\s\S]*(?:созда|добав|редакт|измен|обнов|удал|убер|настро|назнач|предостав|допол)\p{L}*)(?=[\s\S]*(?:компан|агент|инструкц|промпт|рол|возможност)\p{L}*)/iu.test(message)
-      || /\b(?:create|add|edit|update|change|delete|remove|configure|assign|build|set\s+up)\s+(?:(?:a|an|the|my|new|main|another|me|\d+|one|two|three|four|five|six|seven|eight|nine|ten|more)\s+){0,3}(?:compan(?:y|ies)|agents?|orchestrator|agent\s+(?:team|network))\b/i.test(message)
+      || /\b(?:create|add|edit|update|change|rename|delete|remove|configure|assign|build|set\s+up)\s+(?:(?:a|an|the|my|new|main|another|me|\d+|one|two|three|four|five|six|seven|eight|nine|ten|more)\s+){0,3}(?:compan(?:y|ies)|agents?|orchestrator|agent\s+(?:team|network))\b/i.test(message)
       || /(?:компан\p{L}*|агент\p{L}*)\s+(?:мені\s+|для\s+мене\s+)?(?:створ\p{L}*|дод\p{L}*|редаг\p{L}*|онов\p{L}*|видал\p{L}*)/iu.test(message)
       || /create +(?:(?!for +)[A-Za-z0-9-]+ +){0,8}compan(?:y|ies)/iu.test(message)
       || isLocalizedCompanyManagementRequest(message);
   }
 
   static isPotentialMutationRequest(message: string): boolean {
-    const mutation = /(?:заповн|дод|змін|онов|редаг|налашт|признач|нада|видал|приб|созда|добав|измен|обнов|редакт|настро|назнач|предостав|удал|fill|set|add|change|update|edit|configure|assign|remove|delete)/iu.test(message);
+    const mutation = /(?:заповн|дод|змін|онов|редаг|налашт|признач|нада|видал|приб|переймен|rename|созда|добав|измен|обнов|редакт|настро|назнач|предостав|удал|fill|set|add|change|update|edit|configure|assign|remove|delete)/iu.test(message);
     const companyField = /(?:recommended\s+prompts?|system\s+instructions?|prompt\s+guidelines?|tools?\s*(?:&|and)?\s*capabilities|instructions?|agents?|roles?|models?|пол|інструкц|промпт|можливост|агент|рол|модел|инструкц|возможност)/iu.test(message);
-    const deleteReference = deleteMutationSignal.test(message) && selectedDeleteReferenceSignal.test(message);
+    const deleteReference = deleteMutationSignal.test(withoutQuotedNames(message)) && selectedDeleteReferenceSignal.test(message);
     return mutation && companyField || deleteReference;
   }
 
   static async deleteConfirmationMessage(auth: AuthContext, store: WorkspaceStore, message: string, selectedCompanyId?: string, responseLanguage?: CompanyChatLanguage): Promise<string | undefined> {
-    const deleteRequest = deleteMutationSignal.test(message)
+    const deleteRequest = deleteMutationSignal.test(withoutQuotedNames(message)) && deleteIsTheAction(withoutQuotedNames(message))
       && (/(?:компан|compan)/iu.test(message) || selectedDeleteReferenceSignal.test(message));
     const confirmed = isCompanyDeleteConfirmed(message);
     if (!deleteRequest || confirmed) return undefined;
@@ -544,7 +564,15 @@ For update, include only fields that should change. To change only agents, use a
             ? (/тест/iu.test(options.requestMessage ?? "") ? "Тестова компанія" : "Нова компанія")
             : (/\btest/iu.test(options.requestMessage ?? "") ? "Test Company" : "New Company");
         }
-        const targetName = String(companyPatch.name ?? "").trim().toLocaleLowerCase();
+        let targetName = String(companyPatch.name ?? "").trim().toLocaleLowerCase();
+        // A planner may decorate the name of a company that already exists ("Nordic Fit (New)") so the exact-name
+        // duplicate check below does not match; the user asked for the name without that suffix.
+        const request = (options.requestMessage ?? "").toLocaleLowerCase();
+        const undecorated = targetName.replace(/\s*\([^)]*\)\s*$/u, "").trim();
+        if (undecorated && undecorated !== targetName && request.includes(undecorated) && !request.includes(targetName)) {
+          targetName = undecorated;
+          companyPatch.name = String(companyPatch.name).trim().replace(/\s*\([^)]*\)\s*$/u, "").trim();
+        }
         if (targetName) {
           let cursor: string | undefined;
           let duplicate: Company | undefined;
@@ -608,8 +636,12 @@ For update, include only fields that should change. To change only agents, use a
           if (operation.main) requestedMain = agent;
           if (operation.parentAgentId !== undefined || operation.parentAgentName !== undefined) parentChanges.push({ childId: agent.id, parentId: operation.parentAgentId, parentName: operation.parentAgentName });
         } else {
-          const implicitAgentId = operation.action === "update" ? company.mainAgentId : undefined;
-          const current = findAgent(agents, operation.agentId, operation.agentName, implicitAgentId);
+          // The agent the user named wins over an omitted or mismatched target: "rename Marko to Marko SMM" must never
+          // rename the main agent because the planner left agentId out.
+          const named = agentNamedInRequest(agents, options.requestMessage ?? "");
+          const implicitAgentId = operation.action === "update" ? named?.id ?? company.mainAgentId : undefined;
+          let current = findAgent(agents, operation.agentId, operation.agentName, implicitAgentId);
+          if (named && current.id !== named.id && !requestNames(options.requestMessage ?? "", current.name)) current = named;
           if (operation.action === "delete") {
             await store.deleteCompanyAgent(auth, company.id, current.id, current.revision);
             agents = agents.filter((agent) => agent.id !== current.id);

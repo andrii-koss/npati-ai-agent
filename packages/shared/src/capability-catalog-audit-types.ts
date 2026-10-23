@@ -13,8 +13,8 @@ import type { InspectorReport } from "./capability-inspector";
  * this value through `push(...)` during C9/C11/C12, which is exactly the change the old gate could not see.
  */
 export const STATIC_CATALOG_BASELINE = {
-  total: 398,
-  agentCallable: 134,
+  total: 408,
+  agentCallable: 144,
   runtimeOnly: 264,
 } as const;
 
@@ -26,8 +26,14 @@ export const STATIC_CATALOG_BASELINE = {
  * v14 published `code.data.backend.create` (50 tools). Reviewed before this pin moved: the runtime requires
  * `workspace:write`, evaluates the project data policy before acting, refuses without a recorded approval
  * (`approval_required`), scopes the call to `companyId` + `projectId`, and returns only public SDK identity.
+ *
+ * v15 published ten tools (60): code.finish, code.image.view, code.preview.screenshot, code.web.fetch,
+ * code.web.search and code.data.query.read/rows.seed/migrations.list/policies.inspect/policies.apply. Reviewed:
+ * the viewing and web tools reuse Browser QA and the SSRF-validated web-research provider, the data tools call the
+ * existing AgentDataStudioService (dev only), and both data writes need a recorded approval unless dryRun.
  */
-export const TOOL_SCHEMA_MANIFEST_VERSION = 14;
+// v16 retains schema.apply@1 and adds the dev-only, attachment-bound FK schema.apply@2.
+export const TOOL_SCHEMA_MANIFEST_VERSION = 16;
 
 export interface CapabilityAuditIssue {
   /** Stable machine-readable code; the negative control asserts on these, never on prose. */

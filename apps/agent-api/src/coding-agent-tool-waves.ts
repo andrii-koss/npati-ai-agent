@@ -9,6 +9,7 @@ import {
   type NormalizeToolCallsResult,
 } from "./code-tool-call-adapter";
 import type { CodeModelProfile } from "./code-model-profiles";
+import { toolImageMessage } from "./coding-agent-image-delivery";
 import {
   type CodeToolInvokeFailure,
   type CodeToolInvokeResult,
@@ -117,6 +118,9 @@ export function questionIdFrom(
 }
 
 export class CodingAgentToolWaves {
+  /** Successful writes in this run, and the write count each screenshot (page@viewport) was taken at. */
+  private writesInRun = 0;
+  private readonly screenshotAtWrite = new Map<string, number>();
   private readonly repeatedSignatures: string[] = [];
   private readonly repeatedErrors: string[] = [];
   private readonly argumentCorrections = new Map<string, number>();
@@ -142,7 +146,7 @@ export class CodingAgentToolWaves {
     | { action: "paused"; result: CodingAgentRunResult }
     | { action: "stopped"; result: CodingAgentRunResult }
   > {
-    const { steps, normalized, callsToRun, profile, modelUsage } = args;
+    const { steps, normalized, callsToRun, modelUsage } = args;
     const {
       ports,
       limits,
@@ -257,8 +261,13 @@ export class CodingAgentToolWaves {
     if (!callsToRun.length) return { action: "continue" };
 
     const turnSig = callsToRun.map((c) => {
-      const p = (c.arguments as Record<string, unknown>)?.path;
-      return p && typeof p === "string" ? `${c.name}:${p}` : c.name;
+      const args = c.arguments as Record<string, unknown> | undefined;
+      const p = args?.path;
+      if (p && typeof p === "string") return `${c.name}:${p}`;
+      // Data tools carry no path: creating categories, products and orders is three different steps, not a cycle.
+      const op = args?.operation as Record<string, unknown> | undefined;
+      const target = [args?.collection, op?.kind, op?.collection, (op?.field as Record<string, unknown> | undefined)?.name].filter((v) => typeof v === "string").join(":");
+      return target ? `${c.name}:${target}` : c.name;
     }).join(";");
     this.turnPatterns.push(turnSig);
     while (this.turnPatterns.length > 12) this.turnPatterns.shift();
@@ -334,7 +343,15 @@ export class CodingAgentToolWaves {
       };
       const beforeVerification = call.name === "code.verify.run" ? await reviewCoordinator.readVerificationRevision() : null;
       let result: CodeToolInvokeResult | CodeToolInvokeFailure;
-      try {
+      // A screenshot of the same page and viewport with no file written since the previous one would be identical:
+      // answer from the run's own state instead of rebuilding and capturing again (nothing is executed).
+      const screenshotKey = call.name === "code.preview.screenshot"
+        ? `${typeof call.arguments.path === "string" ? call.arguments.path : "/"}@${typeof call.arguments.viewport === "string" ? call.arguments.viewport : "desktop"}` : null;
+      if (screenshotKey && this.screenshotAtWrite.get(screenshotKey) === this.writesInRun) {
+        const data = { unchangedSinceLastScreenshot: true, note: "No file changed in this run since the previous screenshot of this page and viewport, so it would be identical. Change files first, or finish: the system screenshots and compares the result after you finish." };
+        result = { ok: true, tool: call.name, toolVersion: toolVersionByName.get(call.name) ?? 1, schemaVersion: 1, truncated: false, durationMs: 0,
+          result: { kind: "code_tool_result", tool: call.name, toolVersion: 1, schemaVersion: 1, trust: "untrusted_data", note: "Run state, not a new capture.", data } };
+      } else try {
         const runtimeTool = runtimeToolByName.get(call.name);
         result = runtimeTool && ports.runtimeCapabilities
           ? await ports.runtimeCapabilities.invoke({
@@ -367,7 +384,8 @@ export class CodingAgentToolWaves {
           },
         };
       }
-
+      if (result.ok && /^code\.fs\.(write|edit|apply_patch|move|delete)$|^code\.deps\.add$/.test(call.name) && call.arguments.dryRun !== true) this.writesInRun += 1;
+      if (screenshotKey && result.ok) this.screenshotAtWrite.set(screenshotKey, this.writesInRun);
 
       if (stateRunId && ports.runState) {
         await writeState(() => ports.runState!.appendToolCall({
@@ -472,7 +490,9 @@ export class CodingAgentToolWaves {
       return { call, result };
     };
 
-    const waveLimit = Math.max(1, Math.min(profile.maxParallelToolCalls, limits.parallelReadOnlyCalls));
+    // Read-only calls the model already emitted run concurrently up to the read-only limit (default 8): the profile's
+    // maxParallelToolCalls governs how many calls a model may emit and still bounds anything that writes.
+    const waveLimit = Math.max(1, Math.min(8, limits.parallelReadOnlyCalls));
 
     const appendToolResult = async (outcome: { call: NormalizedToolCall; result: CodeToolInvokeResult | CodeToolInvokeFailure }): Promise<void> => {
       const text = canonicalizeSettledToolResult({
@@ -498,6 +518,9 @@ export class CodingAgentToolWaves {
         ...(outcome.result.ok ? { truncated: outcome.result.truncated === true } : {}),
       });
       messages.push({ role: "tool", tool_call_id: outcome.call.id, name: outcome.call.name, content: modelText });
+      if (outcome.result.ok && outcome.result.imageAttachment) {
+        deferredMessages.push(await toolImageMessage({ vision: ports.vision, ctx, model: input.model, tool: outcome.call.name, attachment: outcome.result.imageAttachment }));
+      }
       if (outcome.result.ok && stateRunId && ["code.shell.exec_async", "code.shell.process.wait"].includes(outcome.call.name)) {
         const notice = await ports.completions?.admittedTool(
           ctx,

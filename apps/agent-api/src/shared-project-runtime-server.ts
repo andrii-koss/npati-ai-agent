@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import { registerProjectApiControlServer } from "./project-api-control-channel";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { SharedProjectRuntimeProvider } from "./shared-project-runtime-provider";
@@ -14,6 +15,7 @@ const provider = new SharedProjectRuntimeProvider();
 const seen = new Map<string, number>();
 const app = Fastify({ bodyLimit: 25_000_000, logger: false });
 app.addContentTypeParser("application/json", { parseAs: "string" }, (_request, body, done) => done(null, body));
+const projectApiControl = registerProjectApiControlServer(app, secret, seen, { enabled: process.env.NPATI_PROJECT_API_SERVICE_BINDING === "dev" });
 const execute = promisify(execFile);
 const readinessChecks = createSharedRuntimeReadiness({
   isolation: () => execute("/usr/local/bin/npati-project-exec", ["--check"], { timeout: 4000 }).then(result => result.stdout.trim()),
@@ -27,7 +29,7 @@ async function readiness() {
   if (!proxy) reasons.push("egress_proxy_unavailable");
   if (!network) reasons.push("network_policy_unavailable");
   return { docker_ready: true, required_images_ready: true, egress_proxy_ready: proxy, network_policy_ready: network, dns_policy_ready: network,
-    overall_ready: Boolean(isolation) && proxy && network, reasons, details: { runtimeMode: "shared", dockerRequired: false, isolation, projectRoot: "/projects" }, checkedAt: Date.now() };
+    overall_ready: Boolean(isolation) && proxy && network, reasons, details: { runtimeMode: "shared", dockerRequired: false, isolation, projectRoot: "/projects", projectApiControl: projectApiControl.status() }, checkedAt: Date.now() };
 }
 app.get("/health", async (_request, reply) => { const report = await readiness(); return reply.code(report.overall_ready ? 200 : 503).send(report); });
 app.post<{ Body: string }>("/v1/readiness", async (request, reply) => {

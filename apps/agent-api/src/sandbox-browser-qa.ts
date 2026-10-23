@@ -1,3 +1,4 @@
+import { normalizeBrowserDiagnostic } from "../browser-qa-diagnostics.mjs";
 import { SandboxProviderError, type SandboxBrowserQaOptions, type SandboxBrowserQaResult } from "./sandbox-provider";
 
 export function assertBrowserQaOptions(options: SandboxBrowserQaOptions): void {
@@ -23,6 +24,9 @@ export function parseBrowserQaResult(stdout: string): SandboxBrowserQaResult {
         ![result.loadTimeMs, result.domContentLoadedMs, result.resourceCount, result.totalSizeBytes].every(value => Number.isFinite(value) && value >= 0)) {
       throw new Error("invalid_browser_result");
     }
+    if (Array.isArray(result.consoleDiagnostics)) result.consoleDiagnostics =
+      result.consoleDiagnostics.slice(0, Math.min(5, result.consoleErrorCount)).map(normalizeBrowserDiagnostic);
+    else delete result.consoleDiagnostics;
     return result;
   } catch {
     throw new SandboxProviderError("qa_invalid_result", "Browser QA runner returned invalid output", 503, "browser_qa", "project.qa.inspect");

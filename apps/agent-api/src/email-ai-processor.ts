@@ -123,34 +123,12 @@ export class EmailAIProcessor {
       account = accounts[0];
     }
 
-    // Default account fallback
-    const effectiveAccount: CompanyEmailAccount = account || {
-      id: "default_account",
-      workspaceId: ctx.workspaceId,
-      companyId,
-      userId: ctx.userId,
-      emailAddress: parsed.to,
-      mode: "approval",
-      status: "connected",
-      testMode: false,
-      provider: "imap_smtp",
-      connectionScope: companyId.startsWith("personal:") ? "account" : "company",
-      senderPolicy: "open",
-      allowedSenders: [],
-      allowedDomains: [],
-      requireAuthenticatedSender: false,
-      outboundPolicy: "approval_required",
-      confidenceThreshold: 0.8,
-      languageMode: "auto",
-      fallbackLanguage: "en",
-      imapConfig: {},
-      smtpConfig: {},
-      rateLimits: { maxPerHour: 50, maxPerDay: 500, maxPerRecipientDaily: 100, maxFollowups: 3 },
-      signatureConfig: {},
-      followupConfig: { enabled: false, delayDays: 2, maxFollowups: 2, action: "draft" },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+    // Threads and messages reference a real mailbox; a placeholder id failed in PostgreSQL ("default_account" is not a
+    // uuid). Without a mailbox the request is refused explicitly.
+    if (!account) {
+      throw Object.assign(new Error("Connect a mailbox for this company before processing inbound email."), { status: 409, code: "EMAIL_ACCOUNT_REQUIRED" });
+    }
+    const effectiveAccount: CompanyEmailAccount = account;
 
     // IMAP retries and reconnects can deliver the same provider message more
     // than once. Treat a provider Message-ID as an idempotency key before any

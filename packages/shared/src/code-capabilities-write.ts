@@ -20,6 +20,7 @@ export const CODE_WRITE_CAPABILITIES: CapabilityDefinition[] = [
       "The file was not read in this session: read-before-write is enforced and the edit will be refused.",
       "The change spans several files or needs structural rewriting: use code.fs.apply_patch.",
       "The file is a secret/credential file or a path outside the workspace.",
+      "A previous edit failed with edit_no_match: re-read the affected range and retry code.fs.edit with the exact current text instead of rewriting the file with code.fs.write.",
     ],
     agentCallable: true,
     userVisible: true,

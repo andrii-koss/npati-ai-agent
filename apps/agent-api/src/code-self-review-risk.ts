@@ -38,6 +38,12 @@ export interface SelfReviewRiskInput {
   testIntegrity?: { flagged: boolean; requiresJustification: boolean } | null;
   scopeExceeded?: boolean;
   totalLinesChanged?: number;
+  /**
+   * A presentation-only change of an existing site is verified by the system's own Live Preview compilation after the
+   * run (style preview), not by a verification tool inside it. For such a change that check counts as the passed
+   * verification; it never applies to source, test, dependency or sensitive files.
+   */
+  previewVerifies?: boolean;
   /** Operator switch; `false` forces the previous behaviour (every change is reviewed). */
   adaptiveEnabled?: boolean;
   maxFiles?: number;
@@ -122,7 +128,7 @@ export function decideSelfReview(input: SelfReviewRiskInput): SelfReviewRiskDeci
 
   const skippable = input.adaptiveEnabled !== false
     && risk === "low"
-    && input.verificationStatus === "passed"
+    && (input.verificationStatus === "passed" || (input.previewVerifies === true && input.verificationStatus === "not_run"))
     && !input.hadRepair
     && !input.testIntegrity?.flagged
     && !input.testIntegrity?.requiresJustification

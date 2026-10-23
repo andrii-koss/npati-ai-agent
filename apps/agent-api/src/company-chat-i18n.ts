@@ -96,6 +96,18 @@ function profileSimilarity(left: Map<string, number>, right: Map<string, number>
   return leftSize && rightSize ? dot / Math.sqrt(leftSize * rightSize) : 0;
 }
 
+const functionWords: Record<"en" | "fr" | "de" | "es" | "it" | "pl" | "pt" | "nl" | "tr", Set<string>> = {
+  en: new Set(["the", "and", "for", "from", "with", "every", "our", "my", "your", "have", "has", "is", "are", "this", "that", "please", "show", "what", "which", "how", "me", "it", "of", "to", "by", "at", "on", "an"]),
+  fr: new Set(["le", "les", "et", "pour", "avec", "une", "est", "dans", "des", "du", "nous", "vous", "sur", "pas", "qui", "au", "aux"]),
+  de: new Set(["der", "die", "das", "und", "mit", "für", "ist", "nicht", "ein", "eine", "auf", "bitte", "wir", "ich", "zu", "den", "dem"]),
+  es: new Set(["el", "los", "las", "y", "para", "con", "una", "es", "está", "por", "qué", "cómo", "del", "al", "tiene"]),
+  it: new Set(["il", "gli", "per", "una", "è", "che", "non", "sono", "della", "alla", "nel", "degli"]),
+  pl: new Set(["w", "z", "na", "się", "jest", "nie", "dla", "oraz", "że", "jak"]),
+  pt: new Set(["o", "os", "as", "para", "com", "uma", "é", "está", "não", "você", "do", "da", "em", "no", "na", "dos", "das"]),
+  nl: new Set(["het", "een", "van", "met", "voor", "niet", "wij", "ik", "naar", "ook"]),
+  tr: new Set(["ve", "bir", "bu", "için", "ile", "çok", "gibi"]),
+};
+
 function detectedLanguage(message: string): { language: CompanyChatLanguage; confidence: number; letters: number } {
   const normalized = normalizedLanguageText(message);
   const letters = [...normalized].filter((character) => /\p{L}/u.test(character)).length;
@@ -111,6 +123,14 @@ function detectedLanguage(message: string): { language: CompanyChatLanguage; con
   const candidates = /\p{Script=Cyrillic}/u.test(normalized)
     ? (["uk", "ru"] as const)
     : (["en", "fr", "de", "es", "it", "pl", "pt", "nl", "tr"] as const);
+  if (candidates[0] === "en") {
+    // Function words decide short Latin-script messages, which the small trigram samples misread
+    // ("Remember for Nordic Fit: classes start every hour from 7am to 9pm." scored as French).
+    const words = normalized.split(" ");
+    const hits = Object.entries(functionWords).map(([language, set]) => ({ language: language as CompanyChatLanguage, count: words.filter((word) => set.has(word)).length }))
+      .sort((left, right) => right.count - left.count);
+    if (hits[0]!.count >= 2 && hits[0]!.count > hits[1]!.count) return { language: hits[0]!.language, confidence: 1, letters };
+  }
   const input = ngramProfile(normalized);
   const ranked = candidates.map((language) => ({ language, score: profileSimilarity(input, profiles[language]) })).sort((left, right) => right.score - left.score);
   return { language: ranked[0]?.language ?? "en", confidence: Math.max(0, (ranked[0]?.score ?? 0) - (ranked[1]?.score ?? 0)), letters };

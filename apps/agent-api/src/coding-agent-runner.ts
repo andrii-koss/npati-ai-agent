@@ -24,6 +24,7 @@ import {
   type CodeModelProfile,
   type CodeModelProfileFallbackReason,
 } from "./code-model-profiles";
+import { CODE_DATA_STUDIO_FLAG, WEBSITE_EDIT_TOOL_PATTERN, finishedRunText } from "./code-tool-visibility";
 import { resolveModelRequestPressure, type ModelRequestPressure } from "./code-context-budget";
 import { validateArguments } from "./code-tool-runtime";
 import { replayArgumentsHash } from "./code-replay-bundle";
@@ -56,7 +57,7 @@ import {
 } from "./coding-agent-runner-contracts";
 import { CodingAgentRunPhases } from "./coding-agent-run-phases";
 import { CodingAgentReviewPhases } from "./coding-agent-review-phases";
-import { CodingAgentToolCatalog, type ToolCatalogOptions } from "./coding-agent-tool-catalog";
+import { CodingAgentToolCatalog, offeredToolsForRun, type ToolCatalogOptions } from "./coding-agent-tool-catalog";
 import { startCodingAgentSession } from "./coding-agent-session-starter";
 import { buildRunPromptContext } from "./coding-agent-prompt-context";
 import { compactConversationContextIfNeeded } from "./coding-agent-context-compactor";
@@ -65,6 +66,8 @@ import { CodingAgentReviewCoordinator } from "./coding-agent-review-coordinator"
 import { CodingAgentToolWaves } from "./coding-agent-tool-waves";
 
 export * from "./coding-agent-runner-contracts";
+
+export { WEBSITE_EDIT_TOOL_PATTERN, CODE_DATA_STUDIO_FLAG, CODE_FINISH_TOOL, toolCallSucceeded } from "./code-tool-visibility";
 
 export class CodingAgentRunner {
   private readonly limits: CodeAgentLimits;
@@ -240,7 +243,7 @@ export class CodingAgentRunner {
 
     const sessionState = sessionStart.state;
     stateRunId = sessionState.stateRunId;
-    const { capabilityScope, capabilityScopeFields, delegationDepth, runTurnLimit, leaseState } = sessionState;
+    const { capabilityScope, capabilityScopeFields, delegationDepth, runTurnLimit, runMinuteLimit, leaseState } = sessionState;
     if (sessionState.heartbeatTimer) {
       stopHeartbeat = () => {
         if (sessionState.heartbeatTimer) { clearInterval(sessionState.heartbeatTimer); sessionState.heartbeatTimer = null; }
@@ -275,7 +278,7 @@ export class CodingAgentRunner {
       runtimeTools: runtimeToolDescriptors,
     };
 
-    const tools = this.toolDescriptors(session, toolOptions).filter(tool => !input.websiteEdit || /^code\.(fs\.|deps\.|shell\.|verify\.|browser\.|web\.|data\.|plan\.|project\.info$|ask_user$)/.test(tool.name));
+    const tools = this.toolDescriptors(session, toolOptions).filter(tool => !input.websiteEdit || WEBSITE_EDIT_TOOL_PATTERN.test(tool.name));
     const modelName = input.model ?? "auto";
     const modelProviderHint = modelName.includes("/") ? (modelName.split("/")[0] ?? modelName) : modelName;
 
@@ -298,16 +301,31 @@ export class CodingAgentRunner {
     });
     const profile: CodeModelProfile = profileResolution.profile;
 
+    // Profile tool tiers decide what the model is offered (main runs only; a sub-agent keeps its granted scope).
+    let offeredTools = tools;
+    if (!capabilityScope.isSubagent) {
+      const dataStudioEnabled = await this.ports.flags.assertEnabled(ctx, CODE_DATA_STUDIO_FLAG, { companyId, userId: ctx.userId })
+        .then(() => true, () => false);
+      const { tools: visibleTools, decision: visibility } = await offeredToolsForRun({ tools, profile, run: input, sessionMode: session.mode, dataStudioEnabled });
+      offeredTools = visibleTools;
+      await record({
+        kind: "tool_visibility", companyId, projectId, sessionId, runId: input.runId, turn: 0,
+        profileId: profile.id, offeredCount: offeredTools.length, catalogCount: tools.length,
+        contextualTools: visibility.contextual, intentGroups: visibility.intentGroups,
+        degradedTools: visibility.hidden.filter(entry => entry.reason === "degraded").map(entry => entry.name),
+      });
+    }
+
     const resolvedProfileTrace = modelProfileFallbackTrace(profileResolution, { enabledProfileIds: enabledProfileIds ?? null });
     modelProfileFallbackReason = resolvedProfileTrace.fallbackReason;
     this.ports.environment?.setModelProfileTrace(resolvedProfileTrace);
     const schemaByName = this.toolCatalog.toolSchemaByName(runtimeToolDescriptors, session);
 
-    const knownTools: KnownTool[] = tools.map((tool) => ({ name: tool.name, inputSchema: schemaByName.get(tool.name)?.inputSchema ?? {} }));
-    const definitions = this.toolCatalog.chatToolDefinitions(tools, runtimeToolDescriptors, session)
+    const knownTools: KnownTool[] = offeredTools.map((tool) => ({ name: tool.name, inputSchema: schemaByName.get(tool.name)?.inputSchema ?? {} }));
+    const definitions = this.toolCatalog.chatToolDefinitions(offeredTools, runtimeToolDescriptors, session)
       // Keep the runtime registry intact; advertise the tools needed to implement
       // a new project instead of repeatedly paying for unrelated admin schemas.
-      .filter(tool => !input.requireImplementation || /^code\.(fs\.|deps\.|shell\.|verify\.|browser\.|web\.|data\.|plan\.|project\.info$|ask_user$)/.test(tool.function.name));
+      .filter(tool => !input.requireImplementation || WEBSITE_EDIT_TOOL_PATTERN.test(tool.function.name));
 
     let engineSupportsNativeTools = false;
     if (this.ports.engine.supportsNativeTools) {
@@ -316,7 +334,7 @@ export class CodingAgentRunner {
 
     const { systemPrompt } = await buildRunPromptContext({
       ctx, session, input, ports: this.ports, limits: this.limits, companyId, projectId, sessionId,
-      prompt, startedAt, runTurnLimit, tools, profile,
+      prompt, startedAt, runTurnLimit, tools: offeredTools, profile,
     });
 
     this.ports.environment?.setModelSelection({ provider: modelProviderHint, model: modelName });
@@ -338,12 +356,12 @@ export class CodingAgentRunner {
       modelSelection: this.ports.environment?.modelSelection() ?? null,
       systemPrompt: this.ports.environment?.systemPrompt() ?? null,
       modelProfileVersion: this.ports.environment?.modelProfileVersion() ?? null,
-      toolVersions: Object.fromEntries(tools.map((tool) => [tool.name, tool.version])),
+      toolVersions: Object.fromEntries(offeredTools.map((tool) => [tool.name, tool.version])),
       dataClassification: session.dataClassification, retentionClass: session.retentionClass,
       ...(commandPrompt.provenance.length > 0 ? { commandProvenance: commandPrompt.provenance } : {}),
     });
 
-    const toolVersionByName = new Map(tools.map((tool) => [tool.name, tool.version] as const));
+    const toolVersionByName = new Map(offeredTools.map((tool) => [tool.name, tool.version] as const));
     const runtimeToolByName = new Map(runtimeToolDescriptors.map((tool) => [tool.name, tool] as const));
 
     const messages: ChatMessage[] = [
@@ -449,10 +467,10 @@ export class CodingAgentRunner {
         summary.remaining = "Step limit reached; the task may be unfinished.";
         return stop("stopped", "step_limit", `Stopped after ${runTurnLimit} turns: the step limit was reached.`);
       }
-      if (this.limits.maxRunMinutes > 0 && this.now() - startedAt > this.limits.maxRunMinutes * 60_000) {
+      if (runMinuteLimit > 0 && this.now() - startedAt > runMinuteLimit * 60_000) {
         await release("time_limit");
         summary.remaining = "Time limit reached; the task may be unfinished.";
-        return stop("stopped", "time_limit", `Stopped after ${this.limits.maxRunMinutes} minutes: the time limit was reached.`);
+        return stop("stopped", "time_limit", `Stopped after ${runMinuteLimit} minutes: the time limit was reached.`);
       }
       let quotaRemaining: number | undefined;
       if (this.ports.quota) {
@@ -696,16 +714,9 @@ export class CodingAgentRunner {
         await writeState(() => this.ports.runState!.appendTurn({ companyId, runId: stateRunId!, turnIndex: steps, status: "running" }));
       };
 
-      if (!callsToRun.length && !normalized.rejected.length) {
-        if (needsImplementation) {
-          if (++emptyImplementationReplies >= 3) {
-            await release("refused");
-            return stop("failed", "refused", "The agent did not implement the requested project. No source files changed; build and Live Preview were not published.");
-          }
-          messages.push({ ...providerContinuationFor(result), role: "assistant", content: assistantText }, { role: "system", content: "This is a creation request and no source files changed. Implement the requested features with file tools. Acknowledgement or a plan alone does not complete this task." });
-          continue;
-        }
-        await openTurn();
+      // Final answer for a reply without tool calls or a successful `code.finish`; `null` keeps the loop going.
+      const settleTurn = async (finalText: string, turnOpened: boolean): Promise<CodingAgentRunResult | null> => {
+        if (!turnOpened) await openTurn();
         if (stateRunId && this.ports.runState) {
           await writeState(() => this.ports.runState!.appendTurn({
             companyId, runId: stateRunId!, turnIndex: steps, status: "finished", outcome: "ok",
@@ -716,25 +727,39 @@ export class CodingAgentRunner {
         reviewCoordinator!.applyTurnSummary();
 
         const barrierResult = await reviewCoordinator!.handleCollectBarrier({
-          startedAt, stateRunId, stateOwner, inboxOpened: inboxManager.isOpened,
+          startedAt, stateRunId, stateOwner, inboxOpened: inboxManager!.isOpened,
           cancelled, admitInbox: () => inboxManager!.admitInbox(steps),
         });
 
         if (barrierResult.action === "stopped") return barrierResult.result;
-        if (barrierResult.action === "input_collected") continue;
+        if (barrierResult.action === "input_collected") return null;
 
-        if (inboxManager.isOpened && stateRunId) {
+        if (inboxManager!.isOpened && stateRunId) {
           try {
-            if (await inboxManager.admitInbox(steps)) continue;
-            const sealed = await inboxManager.sealInbox();
-            if (!sealed) continue;
+            if (await inboxManager!.admitInbox(steps)) return null;
+            const sealed = await inboxManager!.sealInbox();
+            if (!sealed) return null;
           } catch {
             return stop("interrupted", "interrupted", "Stopped: the inbox finalization cutoff could not be recorded.");
           }
         }
 
-        const reviewOutcome = await reviewCoordinator!.finalizeOrReviewTurn({ steps, prompt, assistantText, stateRunId });
+        const reviewOutcome = await reviewCoordinator!.finalizeOrReviewTurn({ steps, prompt, assistantText: finalText, stateRunId });
         if (reviewOutcome.action === "completed" || reviewOutcome.action === "stopped") return reviewOutcome.result;
+        return null;
+      };
+
+      if (!callsToRun.length && !normalized.rejected.length) {
+        if (needsImplementation) {
+          if (++emptyImplementationReplies >= 3) {
+            await release("refused");
+            return stop("failed", "refused", "The agent did not implement the requested project. No source files changed; build and Live Preview were not published.");
+          }
+          messages.push({ ...providerContinuationFor(result), role: "assistant", content: assistantText }, { role: "system", content: "This is a creation request and no source files changed. Implement the requested features with file tools. Acknowledgement or a plan alone does not complete this task." });
+          continue;
+        }
+        const settled = await settleTurn(assistantText, false);
+        if (settled) return settled;
         continue;
       }
 
@@ -754,8 +779,22 @@ export class CodingAgentRunner {
 
       const waveOutcome = await toolWaves.executeTurnTools({ steps, normalized, callsToRun, profile, modelUsage });
       // Remember whether this turn attempted a source mutation; the guard runs at the start of the next turn.
-      lastTurnMutated = callsToRun.some(call => /^code\.fs\.(write|edit|apply_patch|move|delete)$/.test(call.name) || call.name === "code.deps.add");
+      lastTurnMutated = callsToRun.some(call => /^code\.fs\.(write|edit|apply_patch|move|delete)$|^code\.deps\.add$|^code\.data\.(schema\.(apply|modify)|rows\.(seed|transfer)|policies\.apply|backend\.(create|attach))$/.test(call.name));
       if (waveOutcome.action === "paused" || waveOutcome.action === "stopped") return waveOutcome.result;
+
+      // `code.finish`: an explicit end of the run. Only a call the runtime accepted counts; a refused or invalid
+      // finish is ordinary tool feedback and the loop continues.
+      const finishText = finishedRunText(callsToRun, messages, assistantText);
+      if (finishText !== null && input.requireImplementation && !input.readOnlyIntent && session.mode !== "plan" && reviewCoordinator.runChanges().length === 0) {
+        if (++emptyImplementationReplies >= 3) {
+          await release("refused");
+          return stop("failed", "refused", "The agent did not implement the requested project. No source files changed; build and Live Preview were not published.");
+        }
+        messages.push({ role: "system", content: "code.finish was called but this is a creation request and no source files changed. Implement the requested features with file tools before finishing." });
+      } else if (finishText !== null) {
+        const settled = await settleTurn(finishText, true);
+        if (settled) return settled;
+      }
     }
   }
 }

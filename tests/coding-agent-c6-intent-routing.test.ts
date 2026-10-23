@@ -206,3 +206,37 @@ describe("security-gate: C6 the CHAT entry point reaches the runner only for cod
     if (decision.mode === "run") expect(decision.intent).not.toBe("EDIT_CODE");
   });
 });
+
+describe("analysing an external website stays read-only web research", () => {
+  it.each([
+    "Проаналізуй сайт https://example.com",
+    "Проаналізуй сайт https://example.com і коротко скажи, що в ньому можна покращити. Нічого не змінюй у моєму проєкті.",
+    "Analyze the website https://example.com and tell me what could be improved",
+  ])("%s is answered by chat, not by a run over this project", (message) => {
+    for (const projectIntent of [undefined, "EDIT_WEBSITE", "CHAT"] as const) {
+      const decision = resolveChatCodeIntent({ message, projectIntent: projectIntent as never, codingEnabled: true, companyId: "c", projectId: "p", projectKind: "website", sessionBound: true });
+      if (decision.mode === "run") expect(decision.readOnly).toBe(true);
+      if (projectIntent !== undefined) expect(decision.mode).toBe("chat");
+    }
+  });
+
+  it("a change request that mentions a URL still runs with write access", () => {
+    const decision = resolveChatCodeIntent({ message: "Додай на сайт посилання на https://instagram.com/ranok у футер", projectIntent: "EDIT_WEBSITE" as never, codingEnabled: true, companyId: "c", projectId: "p", projectKind: "website", sessionBound: true });
+    expect(decision).toMatchObject({ mode: "run", readOnly: false });
+  });
+});
+
+describe("an improvement request that mentions earlier analysis is a change, not a review", () => {
+  it.each([
+    "Використай результати попереднього аналізу конкурентів і покращи головну сторінку магазину.",
+    "Use the previous competitor analysis and improve the home page of my store.",
+    "Use a análise anterior dos concorrentes e melhore a página inicial da loja.",
+    "Підключи створену базу даних до мого Next.js-магазину. Зроби відображення товарів із бази.",
+  ])("%s runs with write access", (message) => {
+    expect(resolveChatCodeIntent({ message, codingEnabled: true, companyId: "c", projectId: "p", projectKind: "website", sessionBound: true })).toMatchObject({ mode: "run", readOnly: false });
+  });
+
+  it("a pure analysis request stays read-only", () => {
+    expect(resolveChatCodeIntent({ message: "Проаналізуй код головної сторінки і скажи, що не так", codingEnabled: true, companyId: "c", projectId: "p", projectKind: "website", sessionBound: true })).toMatchObject({ mode: "run", readOnly: true });
+  });
+});

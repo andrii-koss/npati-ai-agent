@@ -159,6 +159,11 @@ function emptyClassification(reason: string): CodeIntentDecision {
   return { intent: "CHAT", confidence: 0, reason, needsProjectSelection: false, projectOptional: false };
 }
 
+/** The message names an external page by URL; read-only requests about it are web research (see below). */
+export function namesExternalPage(message: string): boolean {
+  return /\bhttps?:\/\/\S+/iu.test(message);
+}
+
 /**
  * Decision used by the CHAT entry point (not by the standalone endpoint): given the already-resolved chat
  * context, should this message go to the agent loop, ask for a project, or stay ordinary chat?
@@ -202,6 +207,9 @@ export function resolveChatCodeIntent(input: {
     return { mode: "clarify", intent: classification.intent, message: classification.clarificationMessage ?? "Which project should I work in?" };
   }
   if (!input.projectId) return { mode: "chat" };
+  // Analysing an external page is web research, not a review of this project: chat fetches the named page and says
+  // plainly when it cannot be opened, while a review run tends to inspect the project's own files instead.
+  if (codeIntentIsReadOnly(classification.intent) && namesExternalPage(input.message)) return { mode: "chat" };
   /**
    * C11 (owner decision 10): `readOnly` travels with the decision.
    *

@@ -95,6 +95,82 @@ describe("company management from chat", () => {
     } finally { await app.close(); }
   });
 
+  it("renames the agent the user named, not the main agent, when the directive omits or mismatches the target", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(alice, { name: "Пекарня" }, "rename-bakery");
+    const olena = await store.createCompanyAgent(alice, company.id, { name: "Олена", role: "COO" }, "olena");
+    const marko = await store.createCompanyAgent(alice, company.id, { name: "Марко", role: "Маркетолог" }, "marko");
+    await store.setCompanyMainAgent(alice, company.id, olena.id, company.revision);
+    const request = "Перейменуй агента Марко на «Марко SMM».";
+    await CompanyChatActions.extractAndExecute(alice, directive({ action: "update", companyId: company.id, agents: [{ action: "update", fields: { name: "Марко SMM" } }] }), store, "rename-1", { requestMessage: request, selectedCompanyId: company.id });
+    let agents = await store.listCompanyAgents(alice, company.id);
+    expect(agents.find((agent) => agent.id === olena.id)?.name).toBe("Олена");
+    expect(agents.find((agent) => agent.id === marko.id)?.name).toBe("Марко SMM");
+    await CompanyChatActions.extractAndExecute(alice, directive({ action: "update", companyId: company.id, agents: [{ action: "update", agentId: olena.id, fields: { role: "Маркетинг і SMM" } }] }), store, "rename-2", { requestMessage: "Зміни роль агента Марко SMM на «Маркетинг і SMM»", selectedCompanyId: company.id });
+    agents = await store.listCompanyAgents(alice, company.id);
+    expect(agents.find((agent) => agent.id === olena.id)?.role).toBe("COO");
+    expect(agents.find((agent) => agent.id === marko.id)?.role).toBe("Маркетинг і SMM");
+  });
+
+  it("does not read a deletion word inside a quoted company name as a deletion request", async () => {
+    const store = new InMemoryWorkspaceStore();
+    await store.createCompany(alice, { name: "Temp Delete Co" }, "temp-delete");
+    expect(await CompanyChatActions.deleteConfirmationMessage(alice, store, "Створи тимчасову компанію «Temp Delete Co» для тесту, без агентів.")).toBeUndefined();
+    expect(await CompanyChatActions.deleteConfirmationMessage(alice, store, "Додай агента «Тест» у компанію \"Temp Delete Co\".")).toBeUndefined();
+    expect(await CompanyChatActions.deleteConfirmationMessage(alice, store, "Видали компанію «Temp Delete Co».")).toBeTruthy();
+    expect(await CompanyChatActions.deleteConfirmationMessage(alice, store, "Додай агента «Тест» у компанію Temp Delete Co.")).toBeUndefined();
+    expect(await CompanyChatActions.deleteConfirmationMessage(alice, store, "Видали компанію Temp Delete Co, яку я створив учора.")).toBeTruthy();
+  });
+
+  it("does not treat a question about existing companies as a change", () => {
+    expect(CompanyChatActions.isManagementRequest("Які дві компанії ми сьогодні створили і яка з них має сайт на Next.js?")).toBe(false);
+    expect(CompanyChatActions.isManagementRequest("Which agents did we add to Nordic Fit?")).toBe(false);
+    expect(CompanyChatActions.isManagementRequest("Створи компанію Nordic Fit. Які агенти їй потрібні?")).toBe(true);
+  });
+
+  it("treats renaming an agent as company management", () => {
+    expect(CompanyChatActions.isManagementRequest("Перейменуй агента Марко на «Марко SMM».")).toBe(true);
+    expect(CompanyChatActions.isManagementRequest("Rename the agent Leo to Leo Content")).toBe(true);
+  });
+
+  it("does not create a duplicate when the planner decorates an existing company name", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const existing = await store.createCompany(alice, { name: "Nordic Fit" }, "existing-fit");
+    const result = await CompanyChatActions.extractAndExecute(alice, directive({ action: "create", fields: { name: "Nordic Fit (New)", industry: "Fitness" } }), store, "conversation-duplicate", { requestMessage: "Create a second company «Nordic Fit» — a boutique fitness studio in Lisbon" });
+    expect((await store.listCompanies(alice)).items.map((company) => company.name)).toEqual(["Nordic Fit"]);
+    expect(result.companyAction?.companyId).toBe(existing.id);
+    const named = await CompanyChatActions.extractAndExecute(alice, directive({ action: "create", fields: { name: "Studio (Lisbon)" } }), store, "conversation-parenthesis", { requestMessage: "Create a company named Studio (Lisbon)" });
+    expect(named.companyAction?.action).toBe("create");
+    expect((await store.listCompanies(alice)).items.map((company) => company.name)).toContain("Studio (Lisbon)");
+  });
+
+  it("plans a company action once more when its directive JSON does not parse", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const valid = directive({ action: "create", fields: { name: "Malformed Studio", industry: "Fitness" } });
+    const broken = "Done.\n\n```company-action\n{\"action\":\"create\",\"fields\":{\"name\":\"Malformed Studio\" \"industry\":\"Fitness\"}}\n```";
+    const calls: ChatRequestLike[] = [];
+    type ChatRequestLike = { messages: Array<{ role: string; content: unknown }> };
+    const aiEngine: AIEngine = {
+      chat: async (request) => {
+        calls.push(request as ChatRequestLike);
+        const retry = (request as ChatRequestLike).messages.some((item) => item.role === "system" && String(item.content).includes("was not valid JSON"));
+        return { content: retry ? valid : broken };
+      },
+      async *stream() { yield { delta: broken }; },
+      listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => alice }, aiEngine, marketplace });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Create a company named Malformed Studio for a fitness studio", contextType: "none" } });
+      expect(response.statusCode).toBe(200);
+      expect((await store.listCompanies(alice)).items.map((company) => company.name)).toContain("Malformed Studio");
+      expect(calls.filter((request) => request.messages.some((item) => String(item.content).includes("was not valid JSON")))).toHaveLength(1);
+    } finally { await app.close(); }
+  });
+
   it("returns a completed company card in the request language", async () => {
     const store = new InMemoryWorkspaceStore();
     const result = await CompanyChatActions.extractAndExecute(alice, directive({ action: "create", fields: { name: "Atelier IA", industry: "Technologie" }, agents: [{ action: "create", fields: { name: "Responsable", role: "Coordination" }, main: true }] }), store, "conversation-fr", { requestMessage: "Crée une entreprise avec un agent" });
@@ -841,6 +917,33 @@ describe("company management from chat", () => {
       expect(response.body).not.toContain("ollama-cloud");
       expect(response.body).not.toContain("diagnostics");
       expect(response.body).not.toContain("HTTP 402");
+    } finally { await app.close(); }
+  });
+});
+
+describe("email action with malformed directive JSON", () => {
+  it("is planned once more with the parser error", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(alice, { name: "Mail Co" }, "mail-co");
+    const broken = "```email-action\n{\"actions\":[{\"action\":\"contact.upsert\",\"companyId\":\"" + company.id + "\" \"fields\":{}}]}\n```";
+    const notes: number[] = [];
+    const aiEngine: AIEngine = {
+      chat: async (request) => {
+        const retry = request.messages.some((item) => item.role === "system" && String(item.content).includes("email-action block was not valid JSON"));
+        notes.push(retry ? 1 : 0);
+        return { content: broken };
+      },
+      async *stream() { yield broken; },
+      listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => alice }, aiEngine, marketplace });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Заблокуй відправника winner@lottery.example у пошті", contextType: "company", companyId: company.id } });
+      expect(response.statusCode).toBe(200);
+      expect(notes.filter(Boolean)).toHaveLength(1);
     } finally { await app.close(); }
   });
 });

@@ -306,6 +306,16 @@ export class CompanyDelegationRuntime {
         plan.reviewerAgentId = undefined;
         plan.toolRequests = plan.toolRequests.filter((request) => request.agentId === preferred.id);
       }
+      // Some models answer with this company's agent names instead of their ids; an exact name of one of the
+      // candidates is that agent. Anything else still fails as an unavailable selection.
+      const resolveAgentId = (value: string | undefined) => {
+        if (!value || byId.has(value)) return value;
+        const named = candidates.filter((agent) => agent.name.trim().toLocaleLowerCase() === value.trim().toLocaleLowerCase());
+        return named.length === 1 ? named[0]!.id : value;
+      };
+      plan.agentIds = plan.agentIds.map((id) => resolveAgentId(id)!);
+      plan.reviewerAgentId = resolveAgentId(plan.reviewerAgentId);
+      plan.toolRequests = plan.toolRequests.map((request) => ({ ...request, agentId: resolveAgentId(request.agentId)! }));
       let selected = plan.agentIds.map((id) => byId.get(id)).filter((agent): agent is CompanyAgent => Boolean(agent));
       if (selected.length !== plan.agentIds.length) throw new CompanyRuntimeError("CROSS_COMPANY_AGENT_SELECTION", "Main Agent selected an unavailable agent", 502);
       selected = selected.filter((agent) => agent.id !== main.id);

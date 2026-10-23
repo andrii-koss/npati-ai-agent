@@ -161,6 +161,26 @@ export class IntegrationsRepository {
     return this.memoryWebhooks.delete(id);
   }
 
+  async setWebhookActive(ctx: AuthContext, companyId: string, id: string, isActive: boolean): Promise<CompanyWebhook | null> {
+    if (this.pool) {
+      const result = await this.pool.query<CompanyWebhook>(
+        `UPDATE company_webhooks SET is_active = $5, updated_at = now()
+         WHERE id = $1 AND workspace_id = $2 AND company_id = $3 AND user_id = $4
+         RETURNING ${webhookCols}`,
+        [id, ctx.workspaceId, companyId, ctx.userId, isActive]
+      );
+      return result.rows[0] || null;
+    }
+
+    const item = this.memoryWebhooks.get(id);
+    if (!item || item.workspaceId !== ctx.workspaceId || item.companyId !== companyId || item.userId !== ctx.userId) {
+      return null;
+    }
+    item.isActive = isActive;
+    item.updatedAt = new Date().toISOString();
+    return item;
+  }
+
   async getWebhook(ctx: AuthContext, companyId: string, id: string): Promise<CompanyWebhook | null> {
     if (this.pool) {
       const result = await this.pool.query<CompanyWebhook>(

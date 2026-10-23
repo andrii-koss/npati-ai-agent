@@ -271,7 +271,8 @@ describe("security-gate: C9 plan mode and decisions", () => {
      * widening the read class can no longer widen plan mode.
      */
     it("keeps the planning allowance a narrow name list instead of the read-only class", () => {
-      expect([...PLAN_SAFE_TOOLS].sort()).toEqual(["code.ask_user", "code.plan.propose", "code.plan.update"]);
+      // v15: `code.finish` ends the run with a summary and touches neither workspace nor sandbox nor network.
+      expect([...PLAN_SAFE_TOOLS].sort()).toEqual(["code.ask_user", "code.finish", "code.plan.propose", "code.plan.update"]);
       for (const tool of ["code.plan.propose", "code.plan.update", "code.ask_user"]) {
         expect(isReadOnlyTool(tool)).toBe(false);
         expect(CODE_RUN_READ_ONLY_TOOLS.has(tool)).toBe(false);

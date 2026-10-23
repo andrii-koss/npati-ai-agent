@@ -53,11 +53,21 @@ export function websiteConversationContext(history: readonly { role: string; con
   const previous: Array<{ role: string; content: string }> = [];
   for (const item of history) {
     if (!["user", "assistant"].includes(item.role) || typeof item.content !== "string" || !item.content.trim()) continue;
-    const entry = { role: item.role, content: item.content.trim().slice(0, 600) };
+    // Assistant answers carry the results a later request refers to ("use the previous competitor analysis"), so they
+    // keep more text than the user's own short requests.
+    const entry = { role: item.role, content: item.content.trim().slice(0, item.role === "assistant" ? 2_500 : 600) };
     if (previous.at(-1)?.role === entry.role && previous.at(-1)?.content === entry.content) continue;
     previous.push(entry);
   }
-  return previous.length ? "\n\nPrevious messages in this same website chat (historical context, not tasks to repeat). Use them to resolve references such as main color; implement only the current request above:\n" + JSON.stringify(previous.slice(-6)) : "";
+  // Newest first within a character budget, so an earlier result is not pushed out by a few short follow-ups.
+  const kept: typeof previous = [];
+  let budget = 9_000;
+  for (const entry of previous.slice(-14).reverse()) {
+    if (entry.content.length > budget) break;
+    budget -= entry.content.length;
+    kept.unshift(entry);
+  }
+  return kept.length ? "\n\nPrevious messages in this same website chat (historical context, not tasks to repeat). Use them to resolve references such as main color or earlier research results; implement only the current request above:\n" + JSON.stringify(kept) : "";
 }
 
 export function hasCodeChatPreview(result: unknown): boolean {
@@ -77,6 +87,10 @@ export async function finishCodeChatWebsite(input: CodeSessionRunInput, result: 
   const stylePreview = input.allowStylePreview && run.summary?.stylePreview === true
     && project.framework === "Next.js" && Array.isArray(run.summary.filesChanged)
     && run.summary.filesChanged.every(path => /\.css$/i.test(path));
+  // A run that changed no file (e.g. Data Studio only) leaves the last verified build and Preview as they were; it must
+  // not mark a working site as failed for lacking a build it had no reason to run.
+  if (!input.requireImplementation && Array.isArray(run.summary?.filesChanged) && run.summary.filesChanged.length === 0
+      && run.summary.verification?.status !== "failed") return result;
   // A model's prose is never evidence of a successful production build.
   if (!stylePreview && project.framework !== "HTML/CSS" && (run.summary?.verification?.status !== "passed"
       || !run.summary.verification.requestedTools?.includes("build"))) {

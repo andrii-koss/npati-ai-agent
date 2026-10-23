@@ -48,6 +48,11 @@ export * from "./code-tool-runtime-ports";
 export * from "./code-tool-runtime-guards";
 export * from "./code-tool-runtime-workspace";
 
+import { CODE_IMAGE_ATTACHMENT_KEY, type CodeToolImageAttachment } from "./code-tool-executors-assist";
+
+/** Tools the runtime handles itself inside `invoke` rather than through an executor. */
+const INLINE_RUNTIME_TOOLS: ReadonlySet<string> = new Set(["code.fs.diff", "code.fs.undo_last_turn"]);
+
 /**
  * C2: the runtime that executes read-only and write `code.*` tools.
  */
@@ -154,6 +159,9 @@ export class CodeToolRuntime {
       deprecatedAt: tool.deprecatedAt ?? null,
       write: this.isWriteTool(tool.name),
       limits: (tool as { limits?: Record<string, unknown> }).limits ?? null,
+      // A published tool with no executor would only ever fail with `tool_not_configured`; the catalogue uses
+      // this to keep it out of the model's tool list while the registry and the Inspector still show it.
+      available: INLINE_RUNTIME_TOOLS.has(tool.name) || typeof this.executors[tool.name] === "function",
     }));
   }
 
@@ -470,6 +478,14 @@ export class CodeToolRuntime {
         if (conflict) throw this.writeGuard.recordRevisionConflict(operationScope, conflict.currentRevision, input, tool.name, writeTargets.map(target => target.path));
         throw error;
       }
+      // Image bytes never enter the model-visible text: the runner delivers them as an image part (or a
+      // description) in the next message, so the settled tool result only states that it was delivered.
+      let imageAttachment: CodeToolImageAttachment | undefined;
+      if (raw && typeof raw === "object" && CODE_IMAGE_ATTACHMENT_KEY in raw) {
+        const { [CODE_IMAGE_ATTACHMENT_KEY]: attachment, ...rest } = raw as Record<string, unknown>;
+        imageAttachment = attachment as CodeToolImageAttachment;
+        raw = { ...rest, imageDelivery: "next_message" };
+      }
 
       // (9) Write bookkeeping
       const warnings: string[] = [];
@@ -531,6 +547,7 @@ export class CodeToolRuntime {
         const receipt = raw as { kind?: unknown; processId?: unknown };
         if (typeof receipt.kind === "string" && typeof receipt.processId === "string") result.processReceipt = { kind: receipt.kind, processId: receipt.processId };
       }
+      if (imageAttachment) result.imageAttachment = imageAttachment;
       this.idempotency.set(cacheKey, { at: Date.now(), signature, result });
       await this.hooksCoordinator.recordActivity({ ...input, turnId, tool: tool.name, toolVersion: tool.version, durationMs: result.durationMs, bytes: serialized.length, truncated, ok: true });
       await this.hooksCoordinator.recordAudit(ctx, { ...input, sessionId, tool: tool.name }, tool, "allowed", undefined, { checkpointId, turnId, changes: write ? this.turns.listChanges(sessionId, turnId).length : 0, ...(input.snapshotId ? { snapshotId: input.snapshotId } : {}) });

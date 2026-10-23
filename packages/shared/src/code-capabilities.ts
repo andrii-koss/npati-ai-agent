@@ -1,5 +1,7 @@
 import type { CapabilityDefinition } from "./capabilities";
 import { CODE_DATA_CAPABILITIES } from "./code-capabilities-data";
+import { CODE_ASSIST_CAPABILITIES } from "./code-capabilities-assist";
+export { CODE_ASSIST_CAPABILITIES, CODE_ASSIST_MATRIX } from "./code-capabilities-assist";
 export { CODE_DATA_CAPABILITIES, CODE_DATA_MATRIX } from "./code-capabilities-data";
 import { READ_PERMISSION, resultEnvelope, FILE_ENTRY } from "./code-capabilities-shared";
 import { CODE_TOOL_SCHEMA_MIRROR_PART1 } from "./code-tool-schema-mirror-part1";
@@ -39,6 +41,7 @@ export const CODE_CAPABILITIES: CapabilityDefinition[] = [
   ...CODE_ASK_USER_CAPABILITIES,
   ...CODE_GIT_CAPABILITIES,
   ...CODE_SUBAGENT_CAPABILITIES,
+  ...CODE_ASSIST_CAPABILITIES,
 ];
 
 export const CODE_TOOL_FLAG_KEYS: Record<string, string> = Object.fromEntries(

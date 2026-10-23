@@ -351,7 +351,18 @@ export function createSelfReview(create: CreateSelfReviewInput): SelfReviewState
         return setVerdict(buildVerdict("unavailable", "review_call_failed", answer.code, [], 0, false), true);
       }
 
-      const parsed = parseSelfReviewAnswer(answer.content);
+      let parsed = parseSelfReviewAnswer(answer.content);
+      if (!parsed.ok && parsed.code === "review_parser_unavailable") {
+        // One format retry: some models answer the review in prose. Still unreadable afterwards is `unavailable`.
+        const retry = await input.chat({
+          ...input.reviewRequest,
+          idempotencyKey: input.reviewRequest.idempotencyKey + ":format",
+          messages: [...input.reviewRequest.messages,
+            { role: "assistant", content: answer.content.slice(0, 4_000) },
+            { role: "user", content: "That answer could not be read. Reply with only the JSON object in the requested schema." }],
+        }).catch(() => null);
+        if (retry?.ok) parsed = parseSelfReviewAnswer(retry.content);
+      }
       if (!parsed.ok) {
         // "The reviewer said nothing usable" is unavailable, not clean — the whole point of the distinction.
         lastFindings = null;

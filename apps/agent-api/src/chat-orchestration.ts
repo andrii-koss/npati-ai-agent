@@ -68,6 +68,7 @@ export interface ChatOrchestrationDeps {
   dataBackendService: ReturnType<typeof createDataBackendServices>["dataBackendService"];
   emailAttachmentStorage: EmailAttachmentStorage | undefined;
   emailInboxRepo: EmailInboxRepository;
+  integrationsRepo?: import("./integrations-repository").IntegrationsRepository;
   emailInboxWorker: EmailInboxWorker;
   fileRepository: ReturnType<typeof createCoreServices>["fileRepository"];
   getAIContext: (auth: AuthContext) => Promise<AgentAIContext>;
@@ -88,11 +89,11 @@ export interface ChatOrchestration {
   persistAutomaticCompanyMemory: (auth: AuthContext, companyId: string, runId: string, prompt: string, runStatus: string, noMemory: boolean) => Promise<unknown>;
   beforeDeleteCompany: (context: AuthContext, companyId: string) => Promise<void>;
   runBusinessMessage: (auth: AuthContext, businessId: string, message: string, conversationId: string | undefined, log: { warn(value: unknown, message?: string): void }, progress?: ResearchProgressListener, attachments?: ChatAttachmentInput[], memoryPolicy?: NoMemoryEvaluationResult, signal?: AbortSignal) => Promise<Parameters<typeof applyChatTelemetryHeaders>[1] & { message: string; companyAction?: { companyId: string; action: string } }>;
-  runNeutralMessage: (auth: AuthContext, message: string, conversationId: string | undefined, attachments?: ChatAttachmentInput[], progress?: ResearchProgressListener, memoryPolicy?: NoMemoryEvaluationResult, onDelta?: (chunk: string) => void, signal?: AbortSignal, managementCompany?: { id: string; name: string }) => Promise<Parameters<typeof applyChatTelemetryHeaders>[1] & { message: string; companyAction?: { companyId: string; action: string } }>;
+  runNeutralMessage: (auth: AuthContext, message: string, conversationId: string | undefined, attachments?: ChatAttachmentInput[], progress?: ResearchProgressListener, memoryPolicy?: NoMemoryEvaluationResult, onDelta?: (chunk: string) => void, signal?: AbortSignal, managementCompany?: { id: string; name: string }, projectContext?: Pick<import("@npati/workspace").Project, "id" | "name" | "description" | "framework">) => Promise<Parameters<typeof applyChatTelemetryHeaders>[1] & { message: string; companyAction?: { companyId: string; action: string } }>;
 }
 
 export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrchestration {
-  const { log, admissionFor, agent, aiEngine, aiPreferences, apiKeysRepo, auditRepo, automationsRepo, browserCredentials, chatFiles, companyRunQueue, companyRuntime, config, contentLibrary, dataBackendService, emailAttachmentStorage, emailInboxRepo, emailInboxWorker, fileRepository, getAIContext, guardrailPolicies, hub, knowledgeRepo, memoryDocuments, objectStorage, persistBusinessLogo, researchBundle, runAutomation, scopedMemory, webResearch, workspaceStore } = deps;
+  const { log, admissionFor, agent, aiEngine, aiPreferences, apiKeysRepo, auditRepo, automationsRepo, browserCredentials, chatFiles, companyRunQueue, companyRuntime, config, contentLibrary, dataBackendService, emailAttachmentStorage, emailInboxRepo, emailInboxWorker, fileRepository, getAIContext, guardrailPolicies, hub, integrationsRepo, knowledgeRepo, memoryDocuments, objectStorage, persistBusinessLogo, researchBundle, runAutomation, scopedMemory, webResearch, workspaceStore } = deps;
 
   const chatActions = createChatActions({
     log,
@@ -111,6 +112,7 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
     dataBackendService,
     emailAttachmentStorage,
     emailInboxRepo,
+    integrationsRepo,
     emailInboxWorker,
     fileRepository,
     getAIContext,
@@ -242,7 +244,7 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
         return { businessId: b.id, businessName: b.name, goals };
       })
     );
-    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, /агент|agent|модел|model/iu.test(safePrompt) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, businessId, { automations: automationsRepo, content: contentLibrary, browserTargets: browserCredentials, email: emailInboxRepo }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safePrompt, undefined, apiKeysRepo) + chatLanguageInstruction(safePrompt, existing.messages, activeConversationLanguage) + (nativeToolCalling ? CHAT_TOOL_SELECTION_INSTRUCTION : "");
+    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, /агент|agent|модел|model/iu.test(safePrompt) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, businessId, { automations: automationsRepo, content: contentLibrary, browserTargets: browserCredentials, email: emailInboxRepo, webhooks: integrationsRepo }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safePrompt, undefined, apiKeysRepo) + chatLanguageInstruction(safePrompt, existing.messages, activeConversationLanguage) + (nativeToolCalling ? CHAT_TOOL_SELECTION_INSTRUCTION : "");
     let nativeCompanyAction: { action: "create" | "update" | "delete"; companyId: string; companyName: string; agentCount: number } | undefined;
     let nativeCompanyCleanText = "";
     let nativeCompanyPrimary = false;
@@ -356,6 +358,7 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
     contentLibrary,
     coreChatRoutingDecision,
     emailInboxRepo,
+    integrationsRepo,
     executeCompanyChatAction,
     executeCompositeBusinessCompanyCreation,
     executeCompositeCompanyDeletion,

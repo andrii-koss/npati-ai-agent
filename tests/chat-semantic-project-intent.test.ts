@@ -92,9 +92,19 @@ describe("semantic project routing", () => {
   ])("preserves recognized settings requests without a routing model call: %s", async message => {
     const f = fixture(creation);
     expect(await f.resolve(auth, { message })).toMatchObject({
-      source: "deterministic", decision: { intent: "CHAT", isProjectIntent: false }, targets: [],
+      source: "guard", decision: { intent: "CHAT", isProjectIntent: false }, targets: [],
     });
     expect(f.chat).not.toHaveBeenCalled();
+  });
+
+  it("keeps an automation request inside a website conversation out of the Coding Agent", async () => {
+    const f = fixture(creation);
+    const message = "Створи автоматизацію для пекарні: щопонеділка о 9:00 агент Марко готує план постів для Instagram на тиждень.";
+    const result = await f.resolve(auth, { message, activeCompanyId: "company", activeProjectId: "project" });
+    expect(result).toMatchObject({ source: "guard", decision: { intent: "CHAT" } });
+    // The route passes a guard decision on, and a CHAT decision is never turned into a run by a session binding.
+    expect(resolveChatCodeIntent({ message, projectIntent: result.decision.intent, codingEnabled: true, companyId: "company", projectId: "project", projectKind: "website", sessionBound: true })).toEqual({ mode: "chat" });
+    expect(resolveChatCodeIntent({ message, codingEnabled: true, companyId: "company", projectId: "project", projectKind: "website", sessionBound: true })).toMatchObject({ mode: "run" });
   });
 
   it.each([
