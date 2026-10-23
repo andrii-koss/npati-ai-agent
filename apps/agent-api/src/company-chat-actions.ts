@@ -367,16 +367,16 @@ export class CompanyChatActions {
 
   static isManagementRequest(message: string): boolean {
     if (isInformationalOrCapabilityQuery(message)) return false;
-    return /^(?=[\s\S]*(?:створ|дод|редаг|змін|онов|видал|приб|налашт|признач|нада|доповн|заповн|зроб|побуд|засну|організ)\p{L}*)(?=[\s\S]*(?:компан|агент|пол|інструкц|промпт|рол|можливост)\p{L}*)/iu.test(message)
+    return /^(?=[\s\S]*(?:створ|дод|редаг|змін|онов|видал|приб|налашт|признач|нада|доповн|заповн|зроб|побуд|засну|організ|переймен)\p{L}*)(?=[\s\S]*(?:компан|агент|пол|інструкц|промпт|рол|можливост)\p{L}*)/iu.test(message)
       || /^(?=[\s\S]*(?:созда|добав|редакт|измен|обнов|удал|убер|настро|назнач|предостав|допол)\p{L}*)(?=[\s\S]*(?:компан|агент|инструкц|промпт|рол|возможност)\p{L}*)/iu.test(message)
-      || /\b(?:create|add|edit|update|change|delete|remove|configure|assign|build|set\s+up)\s+(?:(?:a|an|the|my|new|main|another|me|\d+|one|two|three|four|five|six|seven|eight|nine|ten|more)\s+){0,3}(?:compan(?:y|ies)|agents?|orchestrator|agent\s+(?:team|network))\b/i.test(message)
+      || /\b(?:create|add|edit|update|change|rename|delete|remove|configure|assign|build|set\s+up)\s+(?:(?:a|an|the|my|new|main|another|me|\d+|one|two|three|four|five|six|seven|eight|nine|ten|more)\s+){0,3}(?:compan(?:y|ies)|agents?|orchestrator|agent\s+(?:team|network))\b/i.test(message)
       || /(?:компан\p{L}*|агент\p{L}*)\s+(?:мені\s+|для\s+мене\s+)?(?:створ\p{L}*|дод\p{L}*|редаг\p{L}*|онов\p{L}*|видал\p{L}*)/iu.test(message)
       || /create +(?:(?!for +)[A-Za-z0-9-]+ +){0,8}compan(?:y|ies)/iu.test(message)
       || isLocalizedCompanyManagementRequest(message);
   }
 
   static isPotentialMutationRequest(message: string): boolean {
-    const mutation = /(?:заповн|дод|змін|онов|редаг|налашт|признач|нада|видал|приб|созда|добав|измен|обнов|редакт|настро|назнач|предостав|удал|fill|set|add|change|update|edit|configure|assign|remove|delete)/iu.test(message);
+    const mutation = /(?:заповн|дод|змін|онов|редаг|налашт|признач|нада|видал|приб|переймен|rename|созда|добав|измен|обнов|редакт|настро|назнач|предостав|удал|fill|set|add|change|update|edit|configure|assign|remove|delete)/iu.test(message);
     const companyField = /(?:recommended\s+prompts?|system\s+instructions?|prompt\s+guidelines?|tools?\s*(?:&|and)?\s*capabilities|instructions?|agents?|roles?|models?|пол|інструкц|промпт|можливост|агент|рол|модел|инструкц|возможност)/iu.test(message);
     const deleteReference = deleteMutationSignal.test(message) && selectedDeleteReferenceSignal.test(message);
     return mutation && companyField || deleteReference;
