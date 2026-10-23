@@ -398,6 +398,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
       signal,
     };
     let content="";
+    let nativeToolUsage: {requested:number;succeeded:number;failed:number;byName:Record<string,number>}|undefined;
     let chatResult: Awaited<ReturnType<AIEngine["chat"]>> | undefined;
     let nativeCompanyAction: { action: "create" | "update" | "delete"; companyId: string; companyName: string; agentCount: number } | undefined;
     let nativeCompanyCleanText = "";
@@ -441,6 +442,8 @@ export function createChatTurn(deps: ChatTurnDeps) {
           onTrace: ({ arguments: _arguments, ...trace }) => logToolSelectionTrace(trace, { model: ai.model, conversationId: conversation?.id }, "Chat tool selection"),
           onModelStep: (event) => logToolModelStep(event, { model: ai.model, conversationId: conversation?.id, contextType: "none" }),
         });
+        const byName:Record<string,number>={};for(const trace of loop.traces.filter(t=>t.status==="requested")){const name=tools.some(tool=>tool.function.name===trace.toolName)?trace.toolName:"unavailable_tool";byName[name]=(byName[name]??0)+1;}
+        nativeToolUsage={requested:loop.traces.filter(t=>t.status==="requested").length,succeeded:loop.traces.filter(t=>t.status==="succeeded").length,failed:loop.traces.filter(t=>t.status==="failed").length,byName};
         chatResult = loop.result;
         content = loop.result.content.replace(/[\u2014\u2013]/g, " - ");
         for (const item of loop.metadata) {
@@ -632,6 +635,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
       companyAction: companyAction.companyAction,
       workspaceAction: workspaceAction.workspaceAction,
       companyRunId: workspaceAction.companyRunId,
+      nativeToolUsage,
       model: chatResult?.model ?? ai.model,
       telemetry: chatResult?.telemetry ? { ...chatResult.telemetry, usage: chatResult.usage } : undefined,
       conversationId: conversation?.id,
