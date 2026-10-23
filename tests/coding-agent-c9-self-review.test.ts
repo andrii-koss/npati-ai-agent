@@ -669,7 +669,7 @@ describe("security-gate: C9 self-review — the provider data guard and the hone
   it("is `unavailable` when the review answers in a shape that cannot be read", async () => {
     const harness = createHarness({
       script: editThenFinish,
-      reviews: [{ content: "I had a look and it seems fine to me." }],
+      reviews: [{ content: "I had a look and it seems fine to me." }, { content: "Still fine, no JSON from me." }],
     });
 
     const result = await harness.run();
@@ -678,6 +678,20 @@ describe("security-gate: C9 self-review — the provider data guard and the hone
     expect(result.selfReview?.reason).toBe("review_parser_unavailable");
     expect(result.status).toBe("stopped");
     expect(result.reason).toBe("self_review_unavailable");
+    expect(harness.reviewCalls).toHaveLength(2);
+  });
+
+  it("asks once more for the JSON verdict when the review answered in prose", async () => {
+    const harness = createHarness({
+      script: editThenFinish,
+      reviews: [{ content: "I had a look and it seems fine to me." }, reviewJson([], "clean")],
+    });
+
+    const result = await harness.run();
+
+    expect(harness.reviewCalls).toHaveLength(2);
+    expect(String(harness.reviewCalls[1]?.messages.at(-1)?.content)).toContain("only the JSON object");
+    expect(result.selfReview?.status).toBe("clean");
   });
 
   it("is `clean` only when the review actually said so", async () => {
