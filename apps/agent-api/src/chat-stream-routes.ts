@@ -144,10 +144,14 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         attachmentNames: request.body.attachments?.flatMap(item => typeof item?.name === "string" ? [item.name] : []),
         conversationHistory: history, signal: streamController.signal,
       });
-      const resolved = await activeContextResolver.resolveChat(auth, requestedContext, message, semantic?.decision);
+      let resolved = await activeContextResolver.resolveChat(auth, requestedContext, message, semantic?.decision);
+      // The request names another owned company than the selected one: work there instead of the open project.
+      const namedContext = await activeContextResolver.resolveNamedCompany(auth, resolved, message, semantic?.decision)
+        .catch((err) => { request.log.warn({ err }, "named_company_resolution_failed"); return undefined; });
+      if (namedContext) resolved = namedContext;
 
       let activeProjectId = resolved.project?.id ?? null;
-      let activeCompanyId = request.body.companyId ?? resolved.company?.id ?? resolved.project?.companyId ?? null;
+      let activeCompanyId = (namedContext ? undefined : request.body.companyId) ?? resolved.company?.id ?? resolved.project?.companyId ?? null;
       const projectIntent = semantic?.decision ?? defaultHybridRouter.classifyProject({
         message,
         activeCompanyId,
@@ -157,7 +161,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
       let creatingChatWebsite = (projectIntent.intent === "CREATE_WEBSITE" || projectIntent.intent === "CREATE_PROJECT")
         && projectIntent.targetDetails?.projectType !== "mobile_app";
 
-      const boundCard = !creatingChatWebsite ? conversationCard : null;
+      const boundCard = !creatingChatWebsite && !namedContext ? conversationCard : null;
       if (boundCard && !request.body.projectId) {
         activeCompanyId = boundCard.companyId;
         activeProjectId = boundCard.projectId ?? boundCard.id;
