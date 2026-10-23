@@ -90,3 +90,32 @@ describe("a chat whose stored company was deleted", () => {
     expect(response.body).toContain('"contextType":"none"');
   });
 });
+
+describe("deleting a website from chat", () => {
+  it("asks for confirmation, then deletes the project through the project service", async () => {
+    const { isProjectDeleteRequest } = await import("../apps/agent-api/src/chat-project-delete");
+    expect(isProjectDeleteRequest("Видали сайт Nordic Fit — він більше не потрібен.")).toBe(true);
+    expect(isProjectDeleteRequest("Видали сторінку /about з сайту")).toBe(false);
+    const context: AuthContext = { workspaceId: "workspace-site-delete", userId: "owner", permissions: ["workspace:read", "workspace:write", "business:manage", "chat:use"] };
+    const store = new InMemoryWorkspaceStore();
+    const aiEngine: AIEngine = {
+      chat: vi.fn(async () => ({ content: "Neutral answer" })), async *stream() { yield "Neutral answer"; },
+      listModels: async () => [], getModel: async () => undefined, executeTool: async () => ({}),
+      searchMemory: async () => [], saveMemory: async () => undefined, getCapabilities: async () => ["chat"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => ({ ...context }) }, aiEngine, marketplace });
+    apps.push(app);
+    const company = await store.createCompany(context, { name: "Fit" }, "fit-delete");
+    await store.createProject(context, company.id, { name: "Fit landing", type: "website" } as never, "fit-landing");
+    const project = (await store.listProjects(context, company.id))[0]!;
+    const payload = { contextType: "project", companyId: company.id, projectId: project.id };
+    const asked = await app.inject({ method: "POST", url: "/chat/stream", payload: { ...payload, message: "Видали сайт Fit landing — він більше не потрібен." } });
+    expect(asked.body).toContain("Для підтвердження напишіть");
+    expect(await store.listProjects(context, company.id)).toHaveLength(1);
+    const conversationId = /"conversationId":"([^"]+)"/.exec(asked.body)?.[1];
+    const confirmed = await app.inject({ method: "POST", url: "/chat/stream", payload: { ...payload, conversationId, message: "Так, підтверджую видалення." } });
+    expect(confirmed.body).toContain("видалено");
+    expect(await store.listProjects(context, company.id)).toHaveLength(0);
+  });
+});

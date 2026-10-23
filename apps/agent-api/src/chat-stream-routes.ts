@@ -26,6 +26,7 @@ import { EmailChatActions } from "./email-chat-actions";
 import { NoMemoryEvaluationResult, PerRequestNoMemoryGate } from "./ephemeral-no-memory-and-rtk";
 import { CODE_AGENT_MASTER_FLAG, FeatureFlagService } from "./feature-flags";
 import { publicCodeChatReply, getLatestChatProjectCard, saveChatProjectCard } from "./project-chat-cards";
+import { confirmedProjectDeletion, isProjectDeleteRequest, projectDeleteQuestion, projectDeletedMessage } from "./chat-project-delete";
 import { ProjectOrchestrationError, ProjectOrchestrator, extractCleanProjectName } from "./project-orchestrator";
 import { ProjectPreviewService } from "./project-preview-service";
 import { ProjectSandboxService } from "./project-sandbox-service";
@@ -288,6 +289,36 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
       }, 15_000);
 
       try {
+        // Deleting a whole site is a confirmed project deletion through ProjectService, never a Coding Agent run.
+        const previousAssistant = [...history].reverse().find((item) => item.role === "assistant")?.content ?? "";
+        const confirmedName = confirmedProjectDeletion(message, previousAssistant);
+        if (activeCompanyId && (confirmedName || isProjectDeleteRequest(message))) {
+          const projects = await workspaceStore.listProjects(auth, activeCompanyId).catch(() => []);
+          const lower = message.toLocaleLowerCase();
+          const target = confirmedName
+            ? projects.find((project) => project.name === confirmedName)
+            : projects.find((project) => project.name.length > 2 && lower.includes(project.name.toLocaleLowerCase()))
+              ?? projects.find((project) => project.id === activeProjectId) ?? (projects.length === 1 ? projects[0] : undefined);
+          if (target) {
+            if (confirmedName) await projectService.delete(auth, activeCompanyId, target.id);
+            const answer = confirmedName ? projectDeletedMessage(message, target.name) : projectDeleteQuestion(message, target);
+            const conversation = memoryPolicy.writeAllowed
+              ? request.body.conversationId
+                ? (await workspaceStore.getNeutralConversation(auth, request.body.conversationId)).conversation
+                : await workspaceStore.createNeutralConversation(auth, message.slice(0, 72))
+              : undefined;
+            if (conversation) {
+              await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", message);
+              await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", answer);
+            }
+            send("delta", { delta: answer });
+            send("result", { message: answer, suggestedActions: [], conversationId: conversation?.id,
+              activeContext: confirmedName ? { contextType: "none", companyId: null, businessId: null } : resolved.context });
+            clearInterval(heartbeat);
+            if (!reply.raw.writableEnded) reply.raw.end();
+            return;
+          }
+        }
         const codingEnabled = activeCompanyId
           ? await featureFlagService.isEnabled(auth, CODE_AGENT_MASTER_FLAG, { companyId: activeCompanyId, userId: auth.userId }).catch(() => false)
           : false;
