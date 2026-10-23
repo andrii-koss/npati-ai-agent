@@ -362,8 +362,15 @@ export class WorkspaceChatActions {
   static async buildSystemPrompt(auth: AuthContext, store: WorkspaceStore, message: string, selectedCompanyId?: string, selectedBusinessId?: string, resources?: WorkspacePromptResources): Promise<string> {
     if (!auth.permissions.includes("business:manage")) return "";
     if (!resourceSignals.some((pattern) => pattern.test(message)) && !websiteResourceSignals.some((pattern) => pattern.test(message)) && !((selectedCompanyId || selectedBusinessId) && this.isPotentialMutationRequest(message))) return "";
-    const ownedCompanies = await companies(store, auth);
-    const ownedBusinesses = await store.listUserBusinesses(auth);
+    // Only the first 30 records reach the prompt: the selected one, then those named in the request, then the most
+    // recently updated - not the oldest 30, which hid the company the user had just created.
+    const promptOrder = <T extends { id: string; name: string; updatedAt: string }>(items: T[], selectedId?: string) => {
+      const lower = message.toLocaleLowerCase();
+      const rank = (item: T) => (item.id === selectedId ? 0 : lower.includes(item.name.toLocaleLowerCase()) ? 1 : 2);
+      return [...items].sort((a, b) => rank(a) - rank(b) || b.updatedAt.localeCompare(a.updatedAt));
+    };
+    const ownedCompanies = promptOrder(await companies(store, auth), selectedCompanyId);
+    const ownedBusinesses = promptOrder(await store.listUserBusinesses(auth), selectedBusinessId);
     const companyContext = await Promise.all(ownedCompanies.slice(0, 30).map(async (company) => ({
       id: company.id,
       name: company.name,

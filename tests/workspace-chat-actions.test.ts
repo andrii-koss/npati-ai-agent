@@ -57,6 +57,18 @@ describe("workspace resources from chat", () => {
     expect(WorkspaceChatActions.isManagementRequest("Explain what an automation is")).toBe(false);
   });
 
+  it("shows the newest and the named company to the planner when more than 30 companies exist", async () => {
+    const store = new InMemoryWorkspaceStore();
+    for (let index = 0; index < 34; index += 1) await store.createCompany(alice, { name: `Old Company ${index}` }, `old-${index}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const bakery = await store.createCompany(alice, { name: "Sunflower Bakery" }, "bakery");
+    const prompt = await WorkspaceChatActions.buildSystemPrompt(alice, store, "Create an automation for the bakery: every Monday at 9:00 plan posts");
+    expect(prompt).toContain(bakery.id);
+    const selected = (await store.listCompanies(alice, 1)).items[0]!;
+    const selectedPrompt = await WorkspaceChatActions.buildSystemPrompt(alice, store, "Create an automation every Monday", selected.id);
+    expect(selectedPrompt.indexOf(selected.id)).toBeLessThan(selectedPrompt.indexOf(bakery.id));
+  });
+
   it("does not treat company or business profile fields (brand tone, audience) as a workspace resource", () => {
     for (const message of [
       "Створи компанію «Пекарня Сонях» — крафтова пекарня на Подолі. Тон бренду теплий і дружній. Мови: українська та англійська.",
