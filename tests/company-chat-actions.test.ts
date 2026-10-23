@@ -140,6 +140,13 @@ describe("company management from chat", () => {
     expect(own.companyAction?.companyId).toBe(bakery.id);
   });
 
+  it("does not take a database field for a company field, and reads Portuguese infinitives", () => {
+    expect(CompanyChatActions.isManagementRequest("Я передумав: прибери поле delivery_date з таблиці orders.")).toBe(false);
+    expect(CompanyChatActions.isPotentialMutationRequest("Я передумав: прибери поле delivery_date з таблиці orders.")).toBe(false);
+    expect(CompanyChatActions.isManagementRequest("Заповни поля компанії: сайт і галузь")).toBe(true);
+    expect(CompanyChatActions.isManagementRequest("Usa essa pesquisa para atualizar as instruções da empresa Nordic Fit")).toBe(true);
+  });
+
   it("treats renaming an agent as company management", () => {
     expect(CompanyChatActions.isManagementRequest("Перейменуй агента Марко на «Марко SMM».")).toBe(true);
     expect(CompanyChatActions.isManagementRequest("Rename the agent Leo to Leo Content")).toBe(true);

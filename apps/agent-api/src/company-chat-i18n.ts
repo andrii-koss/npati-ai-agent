@@ -146,7 +146,7 @@ const companyManagementPatterns: RegExp[] = [
   /^(?=.*(?:crea|crear|añade|agrega|modifica|actualiza|elimina|configura))(?=.*(?:empresa|compañía|agentes?))/miu,
   /^(?=.*(?:crea|creare|aggiungi|modifica|aggiorna|elimina|configura))(?=.*(?:azienda|società|agenti?))/miu,
   /^(?=.*(?:utwórz|stwórz|dodaj|zmień|zaktualizuj|usuń|skonfiguruj))(?=.*(?:firmę|firma|spółkę|agentów|agenta|agent|agenci))/miu,
-  /^(?=.*(?:crie|criar|adicione|altere|atualize|exclua|configure))(?=.*(?:empresa|companhia|agentes?))/miu,
+  /^(?=.*(?:crie|cria|criar|adicione|adiciona|altere|altera|atualize|atualiza|exclua|exclui|configure|muda|renomeia))(?=.*(?:empresa|companhia|agentes?))/miu,
   /^(?=.*(?:maak|voeg|wijzig|werk bij|verwijder|configureer))(?=.*(?:bedrijf|onderneming|agenten?))/miu,
   /^(?=.*(?:oluştur|ekle|değiştir|güncelle|sil|yapılandır))(?=.*(?:şirket|firma|ajanlar?|ajanı))/miu,
   /^(?=.*(?:создай|создать|добавь|добавить|измени|обнови|удали|настрой))(?=.*(?:компани|агент))/miu,
