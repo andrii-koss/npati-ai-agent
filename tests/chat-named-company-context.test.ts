@@ -64,6 +64,7 @@ describe("a creation request naming an existing company", () => {
     const resolver = new ActiveContextResolver(store);
     const current = await resolver.resolve(auth, { contextType: "company", companyId: bakery.id });
     expect(await resolver.resolveNamedCompany(auth, current, "Create NovaScale Labs")).toBeUndefined();
+    expect(await resolver.resolveNamedCompany(auth, current, "Видали компанію «NovaScale Labs»")).toBeUndefined();
     expect((await resolver.resolveNamedCompany(auth, current, "Create a website for NovaScale Labs", { intent: "CREATE_WEBSITE" } as never))?.context.companyId).not.toBe(bakery.id);
   });
 });

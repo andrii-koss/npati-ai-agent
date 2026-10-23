@@ -69,6 +69,8 @@ export class ActiveContextResolver {
     // "Create X" names X as the thing to create, not as the place to work ("create NovaScale" when it exists is a
     // duplicate request for the company actions); only a new project for a named company switches.
     if (!creating && /^\s*(?:please\s+)?(?:create|створи|створіть|создай|crie|cria|crea|erstelle|crée|maak)(?![\p{L}])/iu.test(message)) return undefined;
+    // Deleting a company names its target, not a place to continue working (the chat would be left inside it).
+    if (/^\s*(?:please\s+)?(?:delete|remove|видали|видаліть|удали|exclua|elimina|lösche|supprime)(?![\p{L}])/iu.test(message)) return undefined;
     const activeId = current.company?.id ?? current.project?.companyId ?? null;
     let named = companyNamedInMessage(companies, message, activeId);
     if (!named) {
