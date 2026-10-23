@@ -393,3 +393,29 @@ describe("an explicit web_search call is a search", () => {
     expect(outcome?.sources.map((source) => source.url)).toContain("https://shop-a.example/");
   });
 });
+
+describe("explicit multi-site research", () => {
+  const validator = { validate: vi.fn(async (url: string) => { if (url.includes("127.0.0.1")) throw new UnsafeUrlError("Blocked target"); return new URL(url); }) } as unknown as SafeUrlValidator;
+  function provider() { return { search: vi.fn(), fetch: vi.fn(), crawl: vi.fn(async ({url}: {url: string}) => ({rootUrl:url,startedAt:"",completedAt:"",pages:[{url,title:new URL(url).hostname,text:"Verified public page with navigation and products."}]})) }; }
+  it("normalizes punctuation and retrieves every distinct requested site", async () => {
+    const p=provider(); const service=new WebResearchService(p,validator,limits);
+    const result=await service.run("Compare https://www.apple.com, https://www.samsung.com; and https://store.google.com. Also https://www.apple.com",{});
+    expect(p.crawl).toHaveBeenCalledTimes(3);
+    expect(result?.sources.map(s=>new URL(s.url).hostname).sort()).toEqual(["store.google.com","www.apple.com","www.samsung.com"]);
+    expect(result?.degraded).toBeUndefined();
+  });
+  it("refuses the complete batch before provider dispatch when one target is unsafe", async () => {
+    const p=provider();const service=new WebResearchService(p,validator,limits);
+    await expect(service.run("Compare https://www.apple.com and http://127.0.0.1/admin",{})).rejects.toThrow("Blocked target");
+    expect(p.crawl).not.toHaveBeenCalled();expect(p.fetch).not.toHaveBeenCalled();
+  });
+  it("reports partial retrieval instead of inventing missing sources", async () => {
+    const p=provider();p.crawl.mockRejectedValueOnce(new Error("Crawler unavailable"));p.fetch.mockRejectedValueOnce(new Error("Fetch unavailable"));
+    const result=await new WebResearchService(p,validator,limits).run("Compare https://www.apple.com, https://www.samsung.com",{});
+    expect(result?.sources).toHaveLength(1);expect(result?.degraded).toContain("retrieval failed");expect(result?.context).toContain("Incomplete coverage");
+  });
+  it("preserves the configured target bound before provider calls", async () => {
+    const p=provider();const service=new WebResearchService(p,validator,{...limits,maxCompetitors:1});
+    await expect(service.run("Compare https://www.apple.com and https://www.samsung.com",{})).rejects.toThrow("site limit");expect(p.crawl).not.toHaveBeenCalled();
+  });
+});

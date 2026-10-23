@@ -16,20 +16,21 @@ const RESEARCH_PATTERN = /\b(competitor|competitors|competition|market research|
 const COMPETITOR_PATTERN = /\b(competitor|competitors|competition|find companies|who sells|concorrentes?|competidores?|competencia|concurrents?|konkurrenten?|mitbewerber|concorrenti?|konkurencj[aęi]|concurrenten?|rakipler?)\b|\u043a\u043e\u043d\u043a\u0443\u0440\u0435\u043d\u0442|竞争对手|競合|경쟁사|منافس|प्रतिस्पर्धी/iu;
 const LIGHT_FETCH_PATTERN = /\b(read|open|fetch|summarize this page)\b|\u043f\u0440\u043e\u0447\u0438\u0442\u0430\u0439|\u0432\u0456\u0434\u043a\u0440\u0438\u0439|\u043a\u043e\u0440\u043e\u0442\u043a\u043e/iu;
 
-export function extractTargetUrlOrDomain(message: string): string | null {
-  const match = message.match(URL_OR_DOMAIN_REGEX);
-  if (!match) return null;
-  let raw = match[0].replace(/[.,;!?)\\]>]+$/, "").trim();
-  if (/^[a-z0-9.-]+\.[a-z]{2,}/i.test(raw) && !/^https?:\/\//i.test(raw)) {
-    raw = "https://" + raw;
+export function extractTargetUrlsOrDomains(message: string): string[] {
+  const targets: string[] = [];
+  for (const match of message.match(URL_OR_DOMAIN_REGEX) ?? []) {
+    let raw = match.replace(/[.,;!?)>\]]+$/u, "").trim();
+    if (!/^https?:\/\//i.test(raw)) raw = "https://" + raw;
+    try {
+      const parsed = new URL(raw);
+      if ((parsed.protocol === "http:" || parsed.protocol === "https:") && !targets.includes(parsed.toString())) targets.push(parsed.toString());
+    } catch {}
   }
-  try {
-    const parsed = new URL(raw);
-    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-      return parsed.toString();
-    }
-  } catch {}
-  return null;
+  return targets;
+}
+
+export function extractTargetUrlOrDomain(message: string): string | null {
+  return extractTargetUrlsOrDomains(message)[0] ?? null;
 }
 
 const GENERIC_WORDS = new Set([
@@ -325,7 +326,9 @@ export class WebResearchService {
   }
 
   async run(message: string, business: BusinessResearchContext, refresh = false, progress?: ResearchProgressListener, options: { mode?: "search" } = {}): Promise<ResearchOutcome | null> {
-    const directUrl = extractTargetUrlOrDomain(message);
+    const directUrls = extractTargetUrlsOrDomains(message);
+    const directUrl = directUrls[0];
+    if (directUrls.length > 1) return this.analyzeUrls(directUrls, business, refresh, progress);
     // An explicit search request (a model's web_search call) is a search: a product or framework name in the query
     // must not turn it into "find this brand's official site".
     if (options.mode === "search" && !directUrl) return this.analyzeSearch(message, business, refresh, progress, true);
@@ -341,6 +344,37 @@ export class WebResearchService {
     return COMPETITOR_PATTERN.test(message)
       ? this.analyzeCompetitors(business, refresh, progress)
       : this.analyzeSearch(message, business, refresh, progress);
+  }
+
+  private async analyzeUrls(urls: string[], business: BusinessResearchContext, refresh: boolean, progress?: ResearchProgressListener): Promise<ResearchOutcome> {
+    if (urls.length > this.limits.maxCompetitors) throw new Error("Explicit research targets exceed the configured site limit.");
+    // Validate every target before any provider call; each existing analyzeUrl path validates again at execution.
+    for (const url of urls) await this.validator.validate(url);
+    const outcomes: Array<ResearchOutcome | undefined> = new Array(urls.length);
+    const failures: string[] = [];
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.max(1, Math.min(this.limits.maxConcurrentJobs, urls.length)) }, async () => {
+      while (next < urls.length) {
+        const index = next++;
+        const url = urls[index]!;
+        try {
+          outcomes[index] = await this.analyzeUrl(url, business, refresh, true, progress);
+          if (!outcomes[index]!.sources.length) failures.push(new URL(url).hostname + ": no usable page retrieved");
+        } catch (error) {
+          failures.push(new URL(url).hostname + ": retrieval failed");
+          report(progress, { type: "page_fetch_failed", url, domain: hostname(url), error: "Retrieval failed" });
+        }
+      }
+    }));
+    const available = outcomes.filter((value): value is ResearchOutcome => Boolean(value));
+    const budget = Math.floor(this.limits.maxContentCharacters / urls.length);
+    const degraded = [...failures, ...available.flatMap(value => value.degraded ? [value.degraded] : [])];
+    return {
+      kind: "url_analysis",
+      sources: available.flatMap(value => value.sources).filter((source, index, sources) => sources.findIndex(item => item.url === source.url) === index),
+      context: ["Explicit research targets: " + urls.join(", "), "Use retrieved evidence only. Missing targets cannot be presented as analyzed.", ...available.map(value => value.context.slice(0, budget)), ...(failures.length ? ["Incomplete coverage: " + failures.join("; ")] : [])].join("\n\n").slice(0, this.limits.maxContentCharacters),
+      degraded: degraded.length ? degraded.join("; ") : undefined,
+    };
   }
 
   private async analyzeSiteByName(
