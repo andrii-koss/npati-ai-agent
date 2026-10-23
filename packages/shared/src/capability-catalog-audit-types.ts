@@ -32,7 +32,8 @@ export const STATIC_CATALOG_BASELINE = {
  * the viewing and web tools reuse Browser QA and the SSRF-validated web-research provider, the data tools call the
  * existing AgentDataStudioService (dev only), and both data writes need a recorded approval unless dryRun.
  */
-export const TOOL_SCHEMA_MANIFEST_VERSION = 15;
+// v16 retains schema.apply@1 and adds the dev-only, attachment-bound FK schema.apply@2.
+export const TOOL_SCHEMA_MANIFEST_VERSION = 16;
 
 export interface CapabilityAuditIssue {
   /** Stable machine-readable code; the negative control asserts on these, never on prose. */

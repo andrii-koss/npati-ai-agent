@@ -1,0 +1,426 @@
+{
+  "manifestVersion": 15,
+  "checksum": "f43bffffd3abc0f78c3418eae40f233a2d371d1143db62a675f1cbca6a89ffb7",
+  "tools": [
+    {
+      "key": "code.agent.continue@1",
+      "name": "code.agent.continue",
+      "version": 1,
+      "status": "active",
+      "checksum": "e4cdd45aa77015f995a108a0265fa050388910246bfd4930ab8306c25744b28e"
+    },
+    {
+      "key": "code.agent.interrupt@1",
+      "name": "code.agent.interrupt",
+      "version": 1,
+      "status": "active",
+      "checksum": "d589204dd2c748dbb3060dcecc87f10b3f596d2c388a58273fc33ee9a5130512"
+    },
+    {
+      "key": "code.agent.send_message@1",
+      "name": "code.agent.send_message",
+      "version": 1,
+      "status": "active",
+      "checksum": "33692cf5ca01c4967e05ad7a59e4a9e9a20c5de63ecc50db46050af25b5707bb"
+    },
+    {
+      "key": "code.agent.spawn@1",
+      "name": "code.agent.spawn",
+      "version": 1,
+      "status": "active",
+      "checksum": "59bcf82d4fbd1d0d1412f588021efe0fa151fe3d25e473e990092248c68728ab"
+    },
+    {
+      "key": "code.agent.spawn_async@1",
+      "name": "code.agent.spawn_async",
+      "version": 1,
+      "status": "active",
+      "checksum": "7cab6a6b1f853bc89291f3285a0bd76d04607abe21d12cc50b5c2d8889b3749d"
+    },
+    {
+      "key": "code.ask_user@1",
+      "name": "code.ask_user",
+      "version": 1,
+      "status": "active",
+      "checksum": "de42bc30fa5cfd636963db95fa840523630ca1c98f2b94149e0b9dc44c4cd090"
+    },
+    {
+      "key": "code.data.backend.attach@1",
+      "name": "code.data.backend.attach",
+      "version": 1,
+      "status": "active",
+      "checksum": "205b996c8d477de0491928f12e30c403e0e32d5ba8e630f713f3df32fee0db6a"
+    },
+    {
+      "key": "code.data.backend.create@1",
+      "name": "code.data.backend.create",
+      "version": 1,
+      "status": "active",
+      "checksum": "e01d939ef20edf0411132cd954fee4c1f42fa47d42028dc685e2d2bc8f995367"
+    },
+    {
+      "key": "code.data.migrations.list@1",
+      "name": "code.data.migrations.list",
+      "version": 1,
+      "status": "active",
+      "checksum": "abc4dcc219000f2694079a3998c34ddf9525cbd1874d1f6dd27b0393f124e09d"
+    },
+    {
+      "key": "code.data.policies.apply@1",
+      "name": "code.data.policies.apply",
+      "version": 1,
+      "status": "active",
+      "checksum": "dc1577e9a38067e0f75fdce05a29816e8caa1f0f06a9795be44613addc669797"
+    },
+    {
+      "key": "code.data.policies.inspect@1",
+      "name": "code.data.policies.inspect",
+      "version": 1,
+      "status": "active",
+      "checksum": "5141077b5b2c9dc32d24248e17b8e37ed9ebef8155644f4c86e48f50be35e163"
+    },
+    {
+      "key": "code.data.query.read@1",
+      "name": "code.data.query.read",
+      "version": 1,
+      "status": "active",
+      "checksum": "ca47ac2c73804b2c5d62221fe81f11181df9e43adea21ea42fd5bc60c49f05fc"
+    },
+    {
+      "key": "code.data.rows.list@1",
+      "name": "code.data.rows.list",
+      "version": 1,
+      "status": "active",
+      "checksum": "98b777d960638ab2ee5373fa415f01c9020a21b24aa52ce2f5adaa465184cced"
+    },
+    {
+      "key": "code.data.rows.seed@1",
+      "name": "code.data.rows.seed",
+      "version": 1,
+      "status": "active",
+      "checksum": "793e0d43fd180de349030a0b214df6ed1093216ffbeaf766a2498982bdbcd33d"
+    },
+    {
+      "key": "code.data.rows.transfer@1",
+      "name": "code.data.rows.transfer",
+      "version": 1,
+      "status": "active",
+      "checksum": "bbb01e5946e8e177e69cb8581db47558c29fa21d3dc6d50ea7285a7e16ddf0b8"
+    },
+    {
+      "key": "code.data.schema.apply@1",
+      "name": "code.data.schema.apply",
+      "version": 1,
+      "status": "active",
+      "checksum": "3efb5d449b355437bbb43bd82ecd2aa12ccdca5001e8123f392fefecdb4089ff"
+    },
+    {
+      "key": "code.data.schema.inspect@1",
+      "name": "code.data.schema.inspect",
+      "version": 1,
+      "status": "active",
+      "checksum": "97b3192259ed217c215b3b9c25c857934f2021aa5ab7e4d7cfb13d4f47d67bd5"
+    },
+    {
+      "key": "code.data.schema.modify@1",
+      "name": "code.data.schema.modify",
+      "version": 1,
+      "status": "active",
+      "checksum": "5ff63dd8778590a3fdc0d696a27391ac71aeaa76373e2794fd716e527bbb69a7"
+    },
+    {
+      "key": "code.deps.add@1",
+      "name": "code.deps.add",
+      "version": 1,
+      "status": "active",
+      "checksum": "7b4dc7907307a688e9aecff2bd14507094ee884e1951a90a3e4bab909f9b7993"
+    },
+    {
+      "key": "code.deps.audit@1",
+      "name": "code.deps.audit",
+      "version": 1,
+      "status": "active",
+      "checksum": "bb87df0e9943bc7bc75d7c9bfe018c88278bd90c9d2493f4bdd717cfde77d10d"
+    },
+    {
+      "key": "code.deps.inspect@1",
+      "name": "code.deps.inspect",
+      "version": 1,
+      "status": "active",
+      "checksum": "c5d931ccb60a5c3f128f717da9b864ea2bfda95cc770e9cc541321dabab254fa"
+    },
+    {
+      "key": "code.finish@1",
+      "name": "code.finish",
+      "version": 1,
+      "status": "active",
+      "checksum": "94e42bd15b3bd297523000ef1d5d7db2cb00f0aaf88ecc28b69eb0717db77b4f"
+    },
+    {
+      "key": "code.fs.apply_patch@1",
+      "name": "code.fs.apply_patch",
+      "version": 1,
+      "status": "active",
+      "checksum": "18d8626636e1edb58e94e3d7bcf4d81a8ecb73381cd12efcc88248ef292a6956"
+    },
+    {
+      "key": "code.fs.delete@1",
+      "name": "code.fs.delete",
+      "version": 1,
+      "status": "active",
+      "checksum": "04e57e5a9b45de37809b4be2f10476bf05affde3ce4efb4db7458a9a2d1c7ebd"
+    },
+    {
+      "key": "code.fs.diff@1",
+      "name": "code.fs.diff",
+      "version": 1,
+      "status": "active",
+      "checksum": "a191b48c314830701a041f8b30e976da5b2925d77561439c4a74e54d55c4f953"
+    },
+    {
+      "key": "code.fs.edit@1",
+      "name": "code.fs.edit",
+      "version": 1,
+      "status": "active",
+      "checksum": "6f9587579d21ab307d2662eb477ae87d35fe71a89f6d7f5b8cd88f61acd044f1"
+    },
+    {
+      "key": "code.fs.grep@1",
+      "name": "code.fs.grep",
+      "version": 1,
+      "status": "active",
+      "checksum": "291d2c52314280efc8e37b7c04bba94f33ba1ccfe2169357967e9f49b608f6c1"
+    },
+    {
+      "key": "code.fs.list@1",
+      "name": "code.fs.list",
+      "version": 1,
+      "status": "active",
+      "checksum": "02e09004873fdc7c399a1f92f5df1f01365527a16283226c254dca06486fb7d9"
+    },
+    {
+      "key": "code.fs.move@1",
+      "name": "code.fs.move",
+      "version": 1,
+      "status": "active",
+      "checksum": "be94c5c366a001eaeac84076e773ee444ed497ab17f2d5175d1f155656a710e1"
+    },
+    {
+      "key": "code.fs.read@1",
+      "name": "code.fs.read",
+      "version": 1,
+      "status": "active",
+      "checksum": "67158bd9282d69dd97c40a66eb5f5be026a26b0dd385276ce93176c02ff249de"
+    },
+    {
+      "key": "code.fs.tree@1",
+      "name": "code.fs.tree",
+      "version": 1,
+      "status": "active",
+      "checksum": "516fe45fd1d6e65277fe71d5c5aa4eaa2df79eafcbba1cd87e166f01b1d6a62f"
+    },
+    {
+      "key": "code.fs.undo_last_turn@1",
+      "name": "code.fs.undo_last_turn",
+      "version": 1,
+      "status": "active",
+      "checksum": "dc0e50a5eb014a99675286525d0225212625a0c3b20f2ccb21fb7bdeb1c5541c"
+    },
+    {
+      "key": "code.fs.write@1",
+      "name": "code.fs.write",
+      "version": 1,
+      "status": "active",
+      "checksum": "2aa3e6fe7110e3522f640e134e445edfddcd2eeda3010d6f9954529a70d7e61d"
+    },
+    {
+      "key": "code.git.branch.create@1",
+      "name": "code.git.branch.create",
+      "version": 1,
+      "status": "active",
+      "checksum": "1417ba430ee786f72ee78f728d10f0703580f123d2785e1495f89b309fc3e11e"
+    },
+    {
+      "key": "code.git.branch.switch@1",
+      "name": "code.git.branch.switch",
+      "version": 1,
+      "status": "active",
+      "checksum": "f8b5df7988edf0be623a74e9f6d960499e58a3ccd6395dd5711df7f0e6664925"
+    },
+    {
+      "key": "code.git.commit@1",
+      "name": "code.git.commit",
+      "version": 1,
+      "status": "active",
+      "checksum": "8df18e869b90b6c4a1bef8269d4abe9c3f6062f034db02d935b90d71aa7f3a3b"
+    },
+    {
+      "key": "code.git.diff@1",
+      "name": "code.git.diff",
+      "version": 1,
+      "status": "active",
+      "checksum": "de5adc03198bb56bcd34913e7a1d71a43c3877ddca4a409e89e1ee1ed081b319"
+    },
+    {
+      "key": "code.git.log@1",
+      "name": "code.git.log",
+      "version": 1,
+      "status": "active",
+      "checksum": "1d6ee633a216dddfaba63f6a845dd643a862841f25ad320c88bb8343909148ef"
+    },
+    {
+      "key": "code.git.pr.comment@1",
+      "name": "code.git.pr.comment",
+      "version": 1,
+      "status": "active",
+      "checksum": "1d8ab5654d1f5d222a247531508bcf34214f8f6e5410e8ac30470fcd56ee254f"
+    },
+    {
+      "key": "code.git.pr.create@1",
+      "name": "code.git.pr.create",
+      "version": 1,
+      "status": "active",
+      "checksum": "d806741d0c236e66ad96e92e667b45b255f09d8faa983476753a341821a12840"
+    },
+    {
+      "key": "code.git.push@1",
+      "name": "code.git.push",
+      "version": 1,
+      "status": "active",
+      "checksum": "3d4fec90d74828217412090f05396f6204da6a305445fb0d56a145c167ed69ab"
+    },
+    {
+      "key": "code.git.restore@1",
+      "name": "code.git.restore",
+      "version": 1,
+      "status": "active",
+      "checksum": "1d45e82c2918416c1414e374a5d8deb0d34ec37ca642f576edf546d40ef2f1d3"
+    },
+    {
+      "key": "code.git.stage@1",
+      "name": "code.git.stage",
+      "version": 1,
+      "status": "active",
+      "checksum": "1fd998a26f8249502611ec50d8d01aea244cfdd0af3505324f9810fc4d1565b4"
+    },
+    {
+      "key": "code.git.status@1",
+      "name": "code.git.status",
+      "version": 1,
+      "status": "active",
+      "checksum": "10ba1b4f1e34e4beba71d9cbaad258ef58906f0788466fb69892913b1201478e"
+    },
+    {
+      "key": "code.image.view@1",
+      "name": "code.image.view",
+      "version": 1,
+      "status": "active",
+      "checksum": "e92d89dc63d91b0078ee387385af39f1512a1551b1d9702c7f6692399cf03f86"
+    },
+    {
+      "key": "code.plan.propose@1",
+      "name": "code.plan.propose",
+      "version": 1,
+      "status": "active",
+      "checksum": "7b1b6f9d0f89f8135965e41d1f9e7fc802eb3e9a5287bfd5461cce1a7e81d5b0"
+    },
+    {
+      "key": "code.plan.update@1",
+      "name": "code.plan.update",
+      "version": 1,
+      "status": "active",
+      "checksum": "6d6589ab5a1368b92298305a9215ac0f5317e630f3e351d3b38df9fa3b2beec5"
+    },
+    {
+      "key": "code.preview.screenshot@1",
+      "name": "code.preview.screenshot",
+      "version": 1,
+      "status": "active",
+      "checksum": "719869c8985b1cd161f663213e1bc38bb0fb8639a816b97cb72fd859d087c6f2"
+    },
+    {
+      "key": "code.project.info@1",
+      "name": "code.project.info",
+      "version": 1,
+      "status": "active",
+      "checksum": "ed977bbb00a2c40fefb024f0ac6d377cc5e884fac77cd03f5bc61e38f5816674"
+    },
+    {
+      "key": "code.shell.exec@1",
+      "name": "code.shell.exec",
+      "version": 1,
+      "status": "active",
+      "checksum": "0f8a03d1f31732fc9e4a72c34af44be01376121e8706bd0f10db308208c7ce17"
+    },
+    {
+      "key": "code.shell.exec_async@1",
+      "name": "code.shell.exec_async",
+      "version": 1,
+      "status": "active",
+      "checksum": "ed663b54016f81c9a132ccb635c423025f8743b7bb90a423eb2cb4eae771cc89"
+    },
+    {
+      "key": "code.shell.process.list@1",
+      "name": "code.shell.process.list",
+      "version": 1,
+      "status": "active",
+      "checksum": "4092c841adad624d5687170a9dadc5b111445f40b386628e976fbc24e0157bf6"
+    },
+    {
+      "key": "code.shell.process.logs@1",
+      "name": "code.shell.process.logs",
+      "version": 1,
+      "status": "active",
+      "checksum": "461e5cdd26baaab0a5705428249bdc404de4010724f1669f5a9596d7ac2d4b0c"
+    },
+    {
+      "key": "code.shell.process.start@1",
+      "name": "code.shell.process.start",
+      "version": 1,
+      "status": "active",
+      "checksum": "ad395fb5782517a37f569a5ed127ab6c84bb258ec32cbf3e9cb89ec716b7eae0"
+    },
+    {
+      "key": "code.shell.process.stop@1",
+      "name": "code.shell.process.stop",
+      "version": 1,
+      "status": "active",
+      "checksum": "4344685b2676fcfadf1cd14bbc71eaee33cb418d1eebcc2533deab26b589f7ac"
+    },
+    {
+      "key": "code.shell.process.wait@1",
+      "name": "code.shell.process.wait",
+      "version": 1,
+      "status": "active",
+      "checksum": "445b5713f8cd00bb6453f29f208d7ffc017a5916fd81303e067d9e18d296ac4a"
+    },
+    {
+      "key": "code.symbols.outline@1",
+      "name": "code.symbols.outline",
+      "version": 1,
+      "status": "active",
+      "checksum": "65624898ceb405ec024aedb83e0e962729938c57d6dd85308619e5f1a7272abf"
+    },
+    {
+      "key": "code.verify.run@1",
+      "name": "code.verify.run",
+      "version": 1,
+      "status": "active",
+      "checksum": "d0f9ff32320c801617ad85edc217f4dd2517cef82ac6510825493843a639951d"
+    },
+    {
+      "key": "code.web.fetch@1",
+      "name": "code.web.fetch",
+      "version": 1,
+      "status": "active",
+      "checksum": "140cf131da8cdf26339513358952ac2166a1e8257cb53e583c04297fb4a0d98a"
+    },
+    {
+      "key": "code.web.search@1",
+      "name": "code.web.search",
+      "version": 1,
+      "status": "active",
+      "checksum": "92ebefe513eebf12c896a0f86dad7b0bfa0e6be307a5a5a0d703d3c2681104df"
+    }
+  ]
+}

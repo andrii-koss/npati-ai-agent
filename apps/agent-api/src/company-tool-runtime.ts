@@ -132,19 +132,8 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
       return this.ai.executeTool(tool, { ...input, query: q });
     }
     if (tool === "web.fetch") {
-      try {
-        return await this.ai.executeTool(tool, input);
-      } catch (err) {
-        if (this.research && typeof input.url === "string" && input.url.trim()) {
-          return await this.research.crawl({
-            url: text(input.url, "Crawler URL", 4_096),
-            maxPages: 1,
-            maxDepth: 0,
-            deep: false,
-          });
-        }
-        throw err;
-      }
+      if (!this.research) throw new Error("Validated web research provider is not configured");
+      return this.research.fetch({ url: text(input.url, "Fetch URL", 4_096) });
     }
     if (tool === "web.crawl") {
       if (!this.research) throw new Error("Crawler runtime is not configured");

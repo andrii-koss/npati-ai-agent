@@ -1,3 +1,4 @@
+import { normalizeBrowserDiagnostic, type BrowserDiagnostic } from "../browser-qa-diagnostics.mjs";
 import type { AuthContext } from "@npati/workspace";
 import { CodeToolError } from "./code-tool-runtime-errors";
 import type { CodeToolExecutionContext } from "./code-tool-runtime";
@@ -32,7 +33,7 @@ export interface CodeAssistToolOptions {
   /** Existing Browser QA capture of the running Live Preview. */
   previewScreenshot?: (input: {
     ctx: AuthContext; companyId: string; projectId: string; path: string; viewport: "desktop" | "tablet" | "mobile"; runId?: string;
-  }) => Promise<{ mimeType: string; base64Data: string; sizeBytes: number; statusCode?: number; issues?: number }>;
+  }) => Promise<{ mimeType: string; base64Data: string; sizeBytes: number; statusCode?: number; issues?: number; functionalQaPassed?: boolean; consoleDiagnostics?: BrowserDiagnostic[] }>;
   /** Existing web-research provider (search + SSRF-safe fetch). */
   webResearch?: {
     search(input: { query: string; maxResults?: number }): Promise<Array<{ title?: string; url: string; snippet?: string }>>;
@@ -106,6 +107,8 @@ export function canonicalAssistExecutors(options: CodeAssistToolOptions = {}): R
         path, viewport, mimeType, bytes: bytes.length,
         ...(shot.statusCode !== undefined ? { statusCode: shot.statusCode } : {}),
         ...(shot.issues !== undefined ? { issues: shot.issues } : {}),
+        ...(shot.functionalQaPassed !== undefined ? { functionalQaPassed: shot.functionalQaPassed } : {}),
+        ...(Array.isArray(shot.consoleDiagnostics) ? { consoleDiagnostics: shot.consoleDiagnostics.slice(0, 5).map(normalizeBrowserDiagnostic) } : {}),
         [CODE_IMAGE_ATTACHMENT_KEY]: { mimeType, dataBase64: shot.base64Data, source: `preview:${path}@${viewport}`, ...(question ? { question } : {}) } satisfies CodeToolImageAttachment,
       };
     };

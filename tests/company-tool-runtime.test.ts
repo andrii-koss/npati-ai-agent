@@ -64,3 +64,17 @@ describe("Company tool runtime adapters",()=>{
     expect(repository.deleteMemory).toHaveBeenCalledWith(context,company.id,"memory-1");
   });
 });
+
+it("uses the same validated fetch provider for Company research and never bypasses it through OmniRoute", async () => {
+  const executeTool = vi.fn(), fetch = vi.fn(async (_input: unknown) => ({ text: "validated page" }));
+  const runtime = new CompanyToolRuntime({ executeTool } as unknown as AIEngine, { fetch } as never);
+  await expect(runtime.execute(context, company, "web.fetch", { url: "https://example.com" }, new AbortController().signal))
+    .resolves.toMatchObject({ text: "validated page" });
+  expect(fetch).toHaveBeenCalledWith({ url: "https://example.com" });
+  fetch.mockRejectedValueOnce(new Error("private_destination"));
+  await expect(runtime.execute(context, company, "web.fetch", { url: "http://127.0.0.1" }, new AbortController().signal)).rejects.toThrow("private_destination");
+  expect(executeTool).not.toHaveBeenCalled();
+  const unavailable = new CompanyToolRuntime({ executeTool } as unknown as AIEngine);
+  await expect(unavailable.execute(context, company, "web.fetch", { url: "https://example.com" }, new AbortController().signal)).rejects.toThrow("Validated web research provider");
+  expect(executeTool).not.toHaveBeenCalled();
+});

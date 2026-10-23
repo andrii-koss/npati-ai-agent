@@ -7,7 +7,7 @@ import { CodeApprovalScopeService } from "./code-approval-scope";
 import { PolicyEngine, isAgentPrincipal, matrixModeFor } from "./code-policy-engine";
 import { CodeProtectedBranchService } from "./code-protected-branches";
 import { classifyShellCommand } from "./code-shell-classifier";
-import { CODE_TOOL_SCHEMAS } from "./code-tool-registry";
+import { publishedSchemaForPolicy } from "./code-tool-registry";
 import { createCoreServices } from "./core-services";
 import { FeatureFlagService } from "./feature-flags";
 import { McpRuntimeCapabilityStore, lookupCapability } from "./mcp-runtime-capabilities";
@@ -45,7 +45,7 @@ export function createCodePolicyWiring(deps: CreateCodePolicyWiringDeps) {
           {
             staticCapabilities: {
               get: (toolId) => {
-                const schema = CODE_TOOL_SCHEMAS.find((tool) => tool.name === toolId);
+                const schema = publishedSchemaForPolicy(toolId, scope?.toolVersion);
                 return schema ? { id: schema.name, status: schema.status, version: schema.version } : undefined;
               },
             },

@@ -88,6 +88,7 @@ export function createDataBackendServices(input: DataBackendServicesInput) {
         provisioner: databaseProvisioner,
         redirects: projectRedirectRepository,
         emailProvider,
+        schemaProvider: dataProvider,
       })
     : undefined;
 

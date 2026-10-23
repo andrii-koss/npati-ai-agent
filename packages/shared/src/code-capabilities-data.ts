@@ -1,3 +1,4 @@
+import { CODE_DATA_SCHEMA_APPLY_V2_INPUT } from "./code-data-schema-apply-v2";
 import { CODE_DATABASE_CREATION_CAPABILITY } from "./code-capabilities-database-create";
 import { CODE_DATA_STUDIO_CAPABILITIES } from "./code-capabilities-data-studio";
 import type { CapabilityDefinition } from './capabilities';
@@ -85,9 +86,9 @@ export const CODE_DATA_CAPABILITIES: (CapabilityDefinition & { inputSchema: Reco
     "type": "tool",
     "domain": "code",
     "name": "code.data.schema.apply",
-    "description": "Create a table (create_collection), add a field (add_field), or create an index (create_index) in this project attached dev database. Inspect first and pass expectedFingerprint. Use dryRun to preview. Cannot execute raw SQL, delete tables/fields, or modify production. If no backend is attached, configure it in Data Studio first.",
+    "description": "Create a table, add a field/index, or create a foreign-key relation (create_relation) in this project's attached dev database. Inspect first and pass expectedBackendId and expectedFingerprint. Relation fields must be UUIDs; omit field to create a new relation column, or supply an existing UUID field. Use dryRun to preview. No raw SQL, destructive changes or production access.",
     "useWhen": [
-      "Create a table (create_collection), add a field (add_field), or create an index (create_index) in this project attached dev database. Inspect first and pass expectedFingerprint. Use dryRun to preview. Cannot execute raw SQL, delete tables/fields, or modify production. If no backend is attached, configure it in Data Studio first."
+      "Create a table, add a field/index, or create a foreign-key relation (create_relation) in this project's attached dev database. Inspect first and pass expectedBackendId and expectedFingerprint. Relation fields must be UUIDs; omit field to create a new relation column, or supply an existing UUID field. Use dryRun to preview. No raw SQL, destructive changes or production access."
     ],
     "doNotUseWhen": [
       "The target is outside this owner/company, or direct production access is required."
@@ -100,101 +101,8 @@ export const CODE_DATA_CAPABILITIES: (CapabilityDefinition & { inputSchema: Reco
     "requiredPermissions": [
       "workspace:write"
     ],
-    "version": 1,
-    "inputSchema": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "operation",
-        "expectedFingerprint"
-      ],
-      "properties": {
-        "expectedFingerprint": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
-        },
-        "dryRun": {
-          "type": "boolean"
-        },
-        "operation": {
-          "type": "object",
-          "required": [
-            "kind",
-            "collection"
-          ],
-          "additionalProperties": false,
-          "properties": {
-            "kind": {
-              "type": "string",
-              "enum": [
-                "create_collection",
-                "add_field",
-                "create_index"
-              ]
-            },
-            "collection": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 63
-            },
-            "fields": {
-              "type": "array",
-              "items": {}
-            },
-            "field": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "name",
-                "type"
-              ],
-              "properties": {
-                "name": {
-                  "type": "string"
-                },
-                "type": {
-                  "type": "string",
-                  "enum": [
-                    "string",
-                    "text",
-                    "integer",
-                    "decimal",
-                    "boolean",
-                    "date",
-                    "datetime",
-                    "json",
-                    "uuid",
-                    "enum",
-                    "file_reference"
-                  ]
-                },
-                "required": {
-                  "type": "boolean"
-                },
-                "default": {
-                  "type": [
-                    "string",
-                    "number",
-                    "boolean",
-                    "null"
-                  ]
-                },
-                "options": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                }
-              }
-            },
-            "unique": {
-              "type": "boolean"
-            }
-          }
-        }
-      }
-    },
+    "version": 2,
+    "inputSchema": CODE_DATA_SCHEMA_APPLY_V2_INPUT,
     "outputSchema": {
       "type": "object",
       "required": [

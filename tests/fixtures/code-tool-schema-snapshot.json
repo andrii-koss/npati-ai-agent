@@ -1,6 +1,6 @@
 {
-  "manifestVersion": 15,
-  "checksum": "f43bffffd3abc0f78c3418eae40f233a2d371d1143db62a675f1cbca6a89ffb7",
+  "manifestVersion": 16,
+  "checksum": "8e7ba87add7d4c3e1e23a83aa4920622378ced1030724ac177ab9b7373cd2bd2",
   "tools": [
     {
       "key": "code.agent.continue@1",
@@ -113,6 +113,13 @@
       "version": 1,
       "status": "active",
       "checksum": "3efb5d449b355437bbb43bd82ecd2aa12ccdca5001e8123f392fefecdb4089ff"
+    },
+    {
+      "key": "code.data.schema.apply@2",
+      "name": "code.data.schema.apply",
+      "version": 2,
+      "status": "active",
+      "checksum": "807225d224b16997003762ad31c0522637afcf9d005c3bcfe547243624f41dfa"
     },
     {
       "key": "code.data.schema.inspect@1",

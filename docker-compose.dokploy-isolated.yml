@@ -14,6 +14,9 @@ services:
       NPATI_ENV: production
       NPATI_AGENT_API_PORT: 3001
       NPATI_PROJECT_RUNTIME_MODE: shared
+      # Optional dev Project API binding over the existing signed runner channel.
+      NPATI_PROJECT_API_SANDBOX_URL: ${NPATI_PROJECT_API_SANDBOX_URL:-}
+      NPATI_PROJECT_API_SERVICE_BINDING: ${NPATI_PROJECT_API_SERVICE_BINDING:-}
       NPATI_SANDBOX_RUNNER_MODE: ${NPATI_SANDBOX_RUNNER_MODE:-local}
       NPATI_SANDBOX_RUNNER_URL: ${NPATI_SANDBOX_RUNNER_URL:-http://sandbox-runner:7865}
       NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:?NPATI_SANDBOX_RUNNER_SECRET must be at least 32 characters for isolated execution}
@@ -168,6 +171,9 @@ services:
     restart: unless-stopped
     environment:
       NPATI_PROJECT_RUNTIME_MODE: shared
+      # Optional dev Project API binding over the existing signed runner channel.
+      NPATI_PROJECT_API_SANDBOX_URL: ${NPATI_PROJECT_API_SANDBOX_URL:-}
+      NPATI_PROJECT_API_SERVICE_BINDING: ${NPATI_PROJECT_API_SERVICE_BINDING:-}
       NPATI_SANDBOX_RUNNER_MODE: local
       NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:?NPATI_SANDBOX_RUNNER_SECRET must be at least 32 characters}
       ALLOWED_HOSTS: ${NPATI_SANDBOX_ALLOWED_HOSTS:-registry.npmjs.org,registry.yarnpkg.com,pypi.org,files.pythonhosted.org,github.com,codeload.github.com,api.github.com,objects.githubusercontent.com,repo.packagist.org}

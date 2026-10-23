@@ -4,6 +4,9 @@ services:
   agent-api:
     environment:
       NPATI_PROJECT_RUNTIME_MODE: shared
+      # Optional dev Project API binding over the existing signed runner channel.
+      NPATI_PROJECT_API_SANDBOX_URL: ${NPATI_PROJECT_API_SANDBOX_URL:-}
+      NPATI_PROJECT_API_SERVICE_BINDING: ${NPATI_PROJECT_API_SERVICE_BINDING:-}
       NPATI_SANDBOX_RUNNER_MODE: local
       NPATI_SANDBOX_RUNNER_URL: http://sandbox-runner:7865
       NPATI_PREVIEW_SECRET: ${NPATI_PREVIEW_SECRET:?required}
@@ -11,6 +14,9 @@ services:
   company-worker:
     environment:
       NPATI_PROJECT_RUNTIME_MODE: shared
+      # Optional dev Project API binding over the existing signed runner channel.
+      NPATI_PROJECT_API_SANDBOX_URL: ${NPATI_PROJECT_API_SANDBOX_URL:-}
+      NPATI_PROJECT_API_SERVICE_BINDING: ${NPATI_PROJECT_API_SERVICE_BINDING:-}
       NPATI_SANDBOX_RUNNER_MODE: local
       NPATI_SANDBOX_RUNNER_URL: http://sandbox-runner:7865
       NPATI_PREVIEW_SECRET: ${NPATI_PREVIEW_SECRET:?required}
@@ -24,6 +30,9 @@ services:
     restart: unless-stopped
     environment:
       NPATI_PROJECT_RUNTIME_MODE: shared
+      # Optional dev Project API binding over the existing signed runner channel.
+      NPATI_PROJECT_API_SANDBOX_URL: ${NPATI_PROJECT_API_SANDBOX_URL:-}
+      NPATI_PROJECT_API_SERVICE_BINDING: ${NPATI_PROJECT_API_SERVICE_BINDING:-}
       NPATI_SANDBOX_RUNNER_MODE: local
       NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:?required}
       ALLOWED_HOSTS: ${NPATI_SANDBOX_ALLOWED_HOSTS:-registry.npmjs.org,registry.yarnpkg.com,pypi.org,files.pythonhosted.org,github.com,codeload.github.com,api.github.com,objects.githubusercontent.com}

@@ -53,8 +53,11 @@ export class CodingAgentToolCatalog {
     const scope = options.capabilityScope;
     const mayDelegate = scope ? scope.mayDelegate : this.subagentLimits.delegationAllowed;
     const pinned = session.toolManifestVersion == null ? null : resolveManifestForSession(session.toolManifestVersion);
-    const staticTools = this.publishedTools().filter(tool => !pinned
+    const pinnedTools = this.publishedTools().filter(tool => !pinned
       || pinned.tools.some(candidate => candidate.name === tool.name && candidate.version === tool.version));
+    // Select one version per model function name, after applying the session pin.
+    const staticTools = pinnedTools.filter(tool =>
+      !pinnedTools.some(other => other.name === tool.name && other.version > tool.version));
     const staticNames = new Set(staticTools.map((tool) => tool.name.toLowerCase()));
 
     const runtimeTools = [...(options.runtimeTools ?? [])]
@@ -198,11 +201,11 @@ const CAPABILITY_GUIDANCE = new Map(CODE_CAPABILITIES.map((capability) => [capab
  * RETURNS line derived from the published output schema. Descriptions already written in that form (manifest v15)
  * and runtime (MCP) tools are passed through unchanged.
  */
-export function modelToolDescription(schema: Pick<CodeRunToolSchemaLike, "name" | "description"> & { outputSchema?: unknown }): string {
+export function modelToolDescription(schema: Pick<CodeRunToolSchemaLike, "name" | "description"> & { outputSchema?: unknown; version?: number }): string {
   const base = String(schema.description ?? "").trim();
   if (/\bWHEN:/u.test(base)) return base;
   const capability = CAPABILITY_GUIDANCE.get(schema.name);
-  if (!capability) return base;
+  if (!capability || schema.version !== undefined && capability.version !== schema.version) return base;
   const data = (schema.outputSchema as { properties?: { data?: { properties?: Record<string, unknown> } } } | undefined)?.properties?.data?.properties;
   const returns = data ? Object.keys(data).slice(0, 12).join(", ") : "";
   return [

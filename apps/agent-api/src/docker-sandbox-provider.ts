@@ -154,6 +154,7 @@ export function buildSandboxCreateArgs(input: {
     "--env", "PIP_TARGET=/workspace/.npati-runtime/python",
     "--env", "PYTHONPATH=/workspace/.npati-runtime/python",
     "--env", "NEXT_TELEMETRY_DISABLED=1",
+    "--env", "NODE_USE_ENV_PROXY=1",
     "--env", "HTTP_PROXY=http://egress:8080",
     "--env", "HTTPS_PROXY=http://egress:8080",
     "--env", "http_proxy=http://egress:8080",

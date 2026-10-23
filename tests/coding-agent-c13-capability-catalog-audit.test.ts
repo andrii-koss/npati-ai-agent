@@ -312,11 +312,11 @@ describe("C13 combined Capability Inspector view", () => {
 });
 
 describe("C13 static manifest / schema parity", () => {
-  it("matches the published manifest v9 and its 37 code tools, schema by schema", () => {
+  it("matches manifest v16 with 61 versioned schemas for 60 current code capabilities", () => {
     const result = checkStaticManifestParity(readManifest());
     expect(result.ok).toBe(true);
-    expect(result.facts.manifestVersion).toBe(15);
-    expect(result.facts.manifestTools).toBe(60);
+    expect(result.facts.manifestVersion).toBe(16);
+    expect(result.facts.manifestTools).toBe(61);
     expect(result.facts.catalogCodeTools).toBe(60);
     expect(result.issues.length).toBe(0);
   });
@@ -365,5 +365,24 @@ describe("C13 static manifest / schema parity", () => {
     }
     expect(checkStaticManifestParity(readManifest()).ok).toBe(true);
     expect(checkStaticManifestParity(readManifest()).facts.catalogCodeTools).toBe(60);
+  });
+});
+
+describe("C13 immutable multi-version parity", () => {
+  it("rejects duplicate name/version pairs, an invented version and a missing current version", () => {
+    const manifest = readManifest();
+    const legacy = manifest.tools.find(tool => tool.key === "code.data.schema.apply@1")!;
+    manifest.tools.push({ ...legacy });
+    expect(codes(checkStaticManifestParity(manifest))).toContain("manifest_duplicate_tool_name");
+    const invented = readManifest();
+    invented.tools.push({ ...legacy, key: "code.data.schema.apply@999", version: 999 });
+    expect(codes(checkStaticManifestParity(invented))).toContain("manifest_tool_version_divergence");
+    const missing = readManifest(); missing.tools = missing.tools.filter(tool => tool.key !== "code.data.schema.apply@2");
+    expect(codes(checkStaticManifestParity(missing))).toContain("manifest_tool_version_divergence");
+  });
+  it("rejects tampering with the retained legacy schema too", () => {
+    const manifest = readManifest(); const legacy = manifest.tools.find(tool => tool.key === "code.data.schema.apply@1")!;
+    const canonical = JSON.parse(legacy.canonical); canonical.inputSchema = { type: "object" }; legacy.canonical = JSON.stringify(canonical);
+    expect(codes(checkStaticManifestParity(manifest))).toContain("manifest_input_schema_divergence");
   });
 });

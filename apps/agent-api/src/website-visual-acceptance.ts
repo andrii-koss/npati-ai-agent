@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { normalizeBrowserDiagnostic, type BrowserDiagnostic } from "../browser-qa-diagnostics.mjs";
 import type { AIEngine } from "@npati/omniroute-adapter";
 import type { CodeSessionRunInput } from "./code-session-run-executor";
 import type { BrowserQaReportResult } from "./project-browser-qa-service";
@@ -56,11 +57,17 @@ export async function reviewWebsiteReference(input: CodeSessionRunInput, result:
   await emitCodingActivity(input, { ...event, status: "running" });
   let acceptance: VisualAcceptance;
   let browserQaPassed = false;
+  let functionalAcceptance: { status: "passed" | "failed"; reportId: string; diagnostics: BrowserDiagnostic[] } | undefined;
   let capture: { mimeType: string; dataBase64: string } | undefined;
   try {
-    if (!input.resolvedModel) throw new Error("vision_model_unavailable");
     const qa = await ports.inspect();
     browserQaPassed = qa.success;
+    functionalAcceptance = { status: qa.success ? "passed" : "failed", reportId: qa.report.id,
+      diagnostics: (qa.consoleErrors ?? []).slice(0, 5).map(normalizeBrowserDiagnostic) };
+    // A broken page is a functional failure, not a visual mismatch. Do not spend
+    // reviewer/visual-repair calls until the functional QA gate passes.
+    if (!qa.success) throw new Error("functional_qa_failed");
+    if (!input.resolvedModel) throw new Error("vision_model_unavailable");
     const screenshot = qa.screenshots[0];
     if (!screenshot || screenshot.captureMode !== "visual") throw new Error("visual_screenshot_unavailable");
     capture = { mimeType: screenshot.mimeType, dataBase64: screenshot.base64Data };
@@ -106,7 +113,7 @@ export async function reviewWebsiteReference(input: CodeSessionRunInput, result:
      * bounded message, without screenshot bytes or provider bodies.
      */
     const message = error instanceof Error ? error.message : String(error);
-    const specific = /^(vision_model_unavailable|visual_screenshot_unavailable|visual_review_invalid_result)$/.test(message);
+    const specific = /^(vision_model_unavailable|visual_screenshot_unavailable|visual_review_invalid_result|functional_qa_failed)$/.test(message);
     const code = specific ? message : (error as { code?: string })?.code ?? "visual_review_unavailable";
     acceptance = { status: "blocked", differences: [code], detail: specific ? undefined : message.slice(0, 300) };
   }
@@ -114,7 +121,7 @@ export async function reviewWebsiteReference(input: CodeSessionRunInput, result:
   const reviewed = { ...run, status: acceptance.status === "passed" ? "completed" : "failed", reason: acceptance.status === "passed" ? null : "visual_acceptance_" + acceptance.status,
     message: acceptance.status === "passed" ? (input.responseLanguage === "uk" ? "Preview працює; візуальна перевірка референсу пройшла. Бізнес-функції потребують окремих сценарних перевірок." : "Preview and visual reference acceptance passed. Business behavior requires separate scenario checks.")
       + (acceptance.minorDifferences?.length ? (input.responseLanguage === "uk" ? " Дрібні відмінності: " : " Minor differences: ") + acceptance.minorDifferences.join("; ") : "") :(input.responseLanguage === "uk" ? "Візуальна перевірка не пройшла: " : "Visual acceptance " + acceptance.status + ": ") + acceptance.differences.join("; "),
-    visualAcceptance: acceptance, acceptance: { codeGenerated: Array.isArray(run.summary?.filesChanged) && run.summary!.filesChanged.length > 0, buildPassed: (run.summary?.verification as { requestedTools?: string[]; status?: string } | undefined)?.requestedTools?.includes("build") ? (run.summary?.verification as { status?: string }).status === "passed" : "not_applicable", previewRunning: true, browserQaPassed, functionalBehaviorVerified: false, visualReferenceMatched: acceptance.status === "passed", requirementsVerified: acceptance.status === "passed" ? "visual_scope_only" : false } };
+    functionalAcceptance, visualAcceptance: acceptance, acceptance: { codeGenerated: Array.isArray(run.summary?.filesChanged) && run.summary!.filesChanged.length > 0, buildPassed: (run.summary?.verification as { requestedTools?: string[]; status?: string } | undefined)?.requestedTools?.includes("build") ? (run.summary?.verification as { status?: string }).status === "passed" : "not_applicable", previewRunning: true, browserQaPassed, functionalBehaviorVerified: false, visualReferenceMatched: acceptance.status === "passed", requirementsVerified: acceptance.status === "passed" ? "visual_scope_only" : false } };
   if (capture) acceptanceScreenshots.set(reviewed, capture);
   return reviewed;
 }

@@ -42,6 +42,7 @@ export function formatSchemaForProjectContext(backendName: string, schema: Schem
     "- Usage: createProjectClient({ apiUrl: PROJECT_API_URL, publishableKey: PROJECT_PUBLISHABLE_KEY }).",
     "- Auth: client.auth.signUp(credentials), signIn, signOut, getUser; Data queries: client.from(\"table\").list() returns Promise<{ data: Row[], meta: { total: number } }> (access rows via res.data), get(id) returns Promise<Row>, create(row), update(id, row), delete(id).",
     "- For a plain HTML/JavaScript site, use fetch with the public API URL/key; do not import an uncompiled TypeScript SDK directly into a browser.",
+    "- In Sandbox, PROJECT_API_URL can be a private service hostname. Use it server-side (Next.js Route Handler or Server Component); browser components call same-origin routes. Verify real rows in Preview and show an explicit API error instead of static fallback products.",
     "- Never put PROJECT_SECRET_KEY, DATABASE_URL or any database credential into generated client code.",
     "- Send the user access token through the SDK. Access policies and row level security apply to every request.",
   ];

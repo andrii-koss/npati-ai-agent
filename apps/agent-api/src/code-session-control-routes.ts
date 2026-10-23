@@ -337,6 +337,7 @@ export async function registerCodeSessionControlRoutes(instance: FastifyInstance
     try {
       await deps.audit.record({
         action: input.action,
+        workspaceId: input.ctx.workspaceId,
         actor: input.ctx.userId,
         companyId: input.companyId,
         resourceType: "code_session",

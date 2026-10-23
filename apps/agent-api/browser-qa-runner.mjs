@@ -1,4 +1,5 @@
 import { chromium } from "playwright";
+import { captureBrowserDiagnostic } from "./browser-qa-diagnostics.mjs";
 
 let stage = "input";
 const fail = (code) => {
@@ -47,8 +48,13 @@ try {
       socket.close();
     });
     let consoleErrorCount = 0;
-    page.on("console", message => { if (message.type() === "error") consoleErrorCount++; });
-    page.on("pageerror", () => { consoleErrorCount++; });
+    const consoleDiagnostics = [];
+    const capture = (type, message, location, stack) => {
+      consoleErrorCount++;
+      if (consoleDiagnostics.length < 5) consoleDiagnostics.push(captureBrowserDiagnostic(type, message, location, stack, origin));
+    };
+    page.on("console", message => { if (message.type() === "error") capture("error", message.text(), message.location()); });
+    page.on("pageerror", error => capture("pageerror", error.message, undefined, error.stack));
     const started = Date.now();
     stage = "navigation";
     const response = await page.goto(origin + path, { waitUntil: "domcontentloaded", timeout: timeoutMs });
@@ -133,7 +139,7 @@ try {
     }    process.stdout.write(JSON.stringify({
       statusCode: response?.status() ?? 0, loadTimeMs, domContentLoadedMs: Math.round(observations.domContentLoadedMs),
       resourceCount: observations.resourceCount, totalSizeBytes: observations.totalSizeBytes,
-      consoleErrorCount: Math.min(consoleErrorCount, 100), brokenLinks, accessibility: observations.violations,
+      consoleErrorCount: Math.min(consoleErrorCount, 100), consoleDiagnostics, brokenLinks, accessibility: observations.violations,
       screenshot: captured,
     }));
     await context.close();

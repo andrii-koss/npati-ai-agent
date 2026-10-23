@@ -196,7 +196,7 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
     return { ...gitShellHardeningEnv(resolveDepsPolicyLimits()), ...projectEnvironment,
       PATH: "/opt/npati-package-managers/bin:/usr/local/bin:/usr/bin:/bin", HOME: `${directory}/.npati-runtime/home`, TMPDIR: `${directory}/.npati-runtime/tmp`,
       PORT: String(entry.port), HOST: "0.0.0.0", NITRO_PORT: String(entry.port), NITRO_HOST: "0.0.0.0", NUXT_PORT: String(entry.port), NUXT_HOST: "0.0.0.0", NODE_OPTIONS: "", NODE_PATH: "", LD_PRELOAD: "", LD_LIBRARY_PATH: "",
-      HTTP_PROXY: "http://127.0.0.1:8080", HTTPS_PROXY: "http://127.0.0.1:8080", http_proxy: "http://127.0.0.1:8080", https_proxy: "http://127.0.0.1:8080",
+      NODE_USE_ENV_PROXY: "1", HTTP_PROXY: "http://127.0.0.1:8080", HTTPS_PROXY: "http://127.0.0.1:8080", http_proxy: "http://127.0.0.1:8080", https_proxy: "http://127.0.0.1:8080",
       // Frameworks such as Nuxt fetch modules from their own dev server.
       // Loopback belongs to the command namespace; its helper enforces egress.
       NO_PROXY: "localhost,127.0.0.1,0.0.0.0,::1", no_proxy: "localhost,127.0.0.1,0.0.0.0,::1",

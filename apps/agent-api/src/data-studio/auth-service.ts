@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import type { DataProvider } from "./data-provider";
 import type { AuthContext, WorkspaceStore } from "@npati/workspace";
 import {
   DEFAULT_AUTH_SETTINGS,
@@ -69,6 +70,7 @@ export interface ProjectAuthServiceOptions {
   poolFactory?: (backend: DataBackend, environment: DataEnvironmentName, role: "migrator" | "runtime") => Promise<Pool> | Pool;
   /** Per-project redirect URL allowlist used for mobile deep links (D6). */
   redirects?: ProjectRedirectRepository;
+  schemaProvider?: Pick<DataProvider, "introspectSchema" | "schemaFingerprint">;
 }
 
 export class ProjectAuthService implements ProjectAuthHost {
@@ -79,12 +81,14 @@ export class ProjectAuthService implements ProjectAuthHost {
   readonly rateLimiter: AuthRateLimiter;
   readonly poolFactory?: (backend: DataBackend, environment: DataEnvironmentName, role: "migrator" | "runtime") => Promise<Pool> | Pool;
   readonly redirects?: ProjectRedirectRepository;
+  readonly schemaProvider?: Pick<DataProvider, "introspectSchema" | "schemaFingerprint">;
   private readonly pools = new Map<string, Pool>();
 
   constructor(options: ProjectAuthServiceOptions) {
     this.store = options.store;
     this.repository = options.repository;
     this.provisioner = options.provisioner;
+    this.schemaProvider = options.schemaProvider;
     this.emailProvider = options.emailProvider ?? new UnconfiguredEmailProvider();
     this.rateLimiter = options.rateLimiter ?? new AuthRateLimiter();
     this.poolFactory = options.poolFactory;
