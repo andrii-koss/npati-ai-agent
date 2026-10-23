@@ -95,6 +95,23 @@ describe("company management from chat", () => {
     } finally { await app.close(); }
   });
 
+  it("renames the agent the user named, not the main agent, when the directive omits or mismatches the target", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(alice, { name: "Пекарня" }, "rename-bakery");
+    const olena = await store.createCompanyAgent(alice, company.id, { name: "Олена", role: "COO" }, "olena");
+    const marko = await store.createCompanyAgent(alice, company.id, { name: "Марко", role: "Маркетолог" }, "marko");
+    await store.setCompanyMainAgent(alice, company.id, olena.id, company.revision);
+    const request = "Перейменуй агента Марко на «Марко SMM».";
+    await CompanyChatActions.extractAndExecute(alice, directive({ action: "update", companyId: company.id, agents: [{ action: "update", fields: { name: "Марко SMM" } }] }), store, "rename-1", { requestMessage: request, selectedCompanyId: company.id });
+    let agents = await store.listCompanyAgents(alice, company.id);
+    expect(agents.find((agent) => agent.id === olena.id)?.name).toBe("Олена");
+    expect(agents.find((agent) => agent.id === marko.id)?.name).toBe("Марко SMM");
+    await CompanyChatActions.extractAndExecute(alice, directive({ action: "update", companyId: company.id, agents: [{ action: "update", agentId: olena.id, fields: { role: "Маркетинг і SMM" } }] }), store, "rename-2", { requestMessage: "Зміни роль агента Марко SMM на «Маркетинг і SMM»", selectedCompanyId: company.id });
+    agents = await store.listCompanyAgents(alice, company.id);
+    expect(agents.find((agent) => agent.id === olena.id)?.role).toBe("COO");
+    expect(agents.find((agent) => agent.id === marko.id)?.role).toBe("Маркетинг і SMM");
+  });
+
   it("treats renaming an agent as company management", () => {
     expect(CompanyChatActions.isManagementRequest("Перейменуй агента Марко на «Марко SMM».")).toBe(true);
     expect(CompanyChatActions.isManagementRequest("Rename the agent Leo to Leo Content")).toBe(true);

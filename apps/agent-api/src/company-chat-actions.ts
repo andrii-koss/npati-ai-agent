@@ -348,6 +348,22 @@ async function ownedCompany(store: WorkspaceStore, auth: AuthContext, directive:
   return matches[0]!;
 }
 
+/** Whole-word, case-insensitive occurrence of a name in the user's request. */
+function requestNames(request: string, name: string): boolean {
+  const value = name.trim().toLocaleLowerCase();
+  if (value.length < 2) return false;
+  const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "iu").test(request.toLocaleLowerCase());
+}
+
+/** The one existing agent the request names (the longest name wins when one name contains another). */
+function agentNamedInRequest(agents: CompanyAgent[], request: string): CompanyAgent | undefined {
+  const named = agents.filter((agent) => requestNames(request, agent.name)).sort((a, b) => b.name.length - a.name.length);
+  if (!named.length) return undefined;
+  const longest = named[0]!;
+  return named.every((agent) => agent === longest || longest.name.toLocaleLowerCase().includes(agent.name.toLocaleLowerCase())) ? longest : undefined;
+}
+
 function findAgent(agents: CompanyAgent[], id?: string | null, name?: string | null, fallbackId?: string): CompanyAgent {
   if (!id && !name && fallbackId) id = fallbackId;
   if (!id && !name && agents.length === 1) return agents[0]!;
@@ -616,8 +632,12 @@ For update, include only fields that should change. To change only agents, use a
           if (operation.main) requestedMain = agent;
           if (operation.parentAgentId !== undefined || operation.parentAgentName !== undefined) parentChanges.push({ childId: agent.id, parentId: operation.parentAgentId, parentName: operation.parentAgentName });
         } else {
-          const implicitAgentId = operation.action === "update" ? company.mainAgentId : undefined;
-          const current = findAgent(agents, operation.agentId, operation.agentName, implicitAgentId);
+          // The agent the user named wins over an omitted or mismatched target: "rename Marko to Marko SMM" must never
+          // rename the main agent because the planner left agentId out.
+          const named = agentNamedInRequest(agents, options.requestMessage ?? "");
+          const implicitAgentId = operation.action === "update" ? named?.id ?? company.mainAgentId : undefined;
+          let current = findAgent(agents, operation.agentId, operation.agentName, implicitAgentId);
+          if (named && current.id !== named.id && !requestNames(options.requestMessage ?? "", current.name)) current = named;
           if (operation.action === "delete") {
             await store.deleteCompanyAgent(auth, company.id, current.id, current.revision);
             agents = agents.filter((agent) => agent.id !== current.id);
