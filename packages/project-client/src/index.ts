@@ -278,6 +278,8 @@ export function createProjectClient(options: ProjectClientOptions): ProjectClien
       : `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
 
     const res = await fetchFn(fullUrl, {
+      // Project rows and auth state must stay fresh in server-rendered framework fetch caches.
+      cache: "no-store",
       ...init,
       headers,
     });
@@ -546,7 +548,7 @@ export function createProjectClient(options: ProjectClientOptions): ProjectClien
         if (session?.accessToken) headers.set("Authorization", `Bearer ${session.accessToken}`);
         if (typeof init.body === "string" && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
       }
-      return fetchFn(fullUrl, { ...init, headers });
+      return fetchFn(fullUrl, { ...(internal ? { cache: "no-store" as const } : {}), ...init, headers });
     },
   };
 }
