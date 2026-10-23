@@ -82,7 +82,13 @@ export function companyDeleteCompletedAll(language: CompanyChatLanguage, values:
     .replaceAll("{memories}", String(values.memories));
 }
 
+/** A quoted name is data, not an instruction: «Temp Delete Co» must not read as a deletion request. */
+export function withoutQuotedNames(message: string): string {
+  return message.replace(/«[^»\n]{1,120}»|“[^”\n]{1,120}”|„[^“”\n]{1,120}[“”]|"[^"\n]{1,120}"/gu, "«…»");
+}
+
 export function isCompanyDeleteIntent(message: string): boolean {
+  message = withoutQuotedNames(message);
   return /(?:видал|приб|удал|убер|\bdelete\b|\bremove\b|supprim|effac|lösch|entfern|elimin|borr|usuń|skasuj|exclu|apagar|verwijder|\bsil\b|kaldır|删除|削除|삭제|احذف|إزالة|हटा)/iu.test(message);
 }
 
