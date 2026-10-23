@@ -23,8 +23,50 @@ export interface ResolvedActiveContext {
   snapshot: RunContextSnapshot;
 }
 
+const nameWords = (value: string) => value.toLocaleLowerCase().match(/[\p{L}]+/gu) ?? [];
+
+/**
+ * The one owned company a message names, when it is not the active one: "build a landing page for Nordic Fit" while
+ * the bakery's site is open. A name word matches an inflected message word by its stem (Ukrainian "пекарні" names
+ * "Пекарня"); only words of five or more letters count, so short generic words ("New", "Fit") never switch context.
+ * Returns undefined when no company or more than one company scores best, or when the active company scores as well.
+ */
+export function companyNamedInMessage<T extends { id: string; name: string }>(companies: T[], message: string, activeCompanyId?: string | null): T | undefined {
+  const words = nameWords(message);
+  const score = (company: T) => nameWords(company.name).filter((word) => word.length >= 5)
+    .filter((word) => { const stem = word.slice(0, Math.max(4, word.length - 2)); return words.some((candidate) => candidate.startsWith(stem)); }).length;
+  const scored = companies.map((company) => ({ company, score: score(company) })).filter((entry) => entry.score > 0).sort((a, b) => b.score - a.score);
+  const best = scored[0];
+  if (!best || scored[1]?.score === best.score) return undefined;
+  const active = activeCompanyId ? scored.find((entry) => entry.company.id === activeCompanyId) : undefined;
+  if (best.company.id === activeCompanyId || (active && active.score >= best.score)) return undefined;
+  return best.company;
+}
+
 export class ActiveContextResolver {
   constructor(private readonly store: WorkspaceStore) {}
+
+  /**
+   * Switches the chat context to another owned company the message names (see companyNamedInMessage): that company's
+   * most recently updated project for follow-up work, or the company itself for a new project.
+   */
+  async resolveNamedCompany(auth: AuthContext, current: ResolvedActiveContext, message: string, decision?: import("@npati/shared").ProjectIntentDecision): Promise<ResolvedActiveContext | undefined> {
+    const companies: Company[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await this.store.listCompanies(auth, 100, cursor);
+      companies.push(...page.items);
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor && companies.length < 500);
+    const named = companyNamedInMessage(companies, message, current.company?.id ?? current.project?.companyId ?? null);
+    if (!named) return undefined;
+    const creating = decision?.intent === "CREATE_WEBSITE" || decision?.intent === "CREATE_PROJECT";
+    const projects = creating ? [] : (await this.store.listProjects(auth, named.id)).filter((project) => project.status !== "archived");
+    const latest = projects.sort((a, b) => new Date(b.updatedAt as unknown as string).getTime() - new Date(a.updatedAt as unknown as string).getTime())[0];
+    return latest
+      ? this.resolve(auth, { contextType: "project", companyId: named.id, projectId: latest.id })
+      : this.resolve(auth, { contextType: "company", companyId: named.id });
+  }
 
   /** A new Project request must not validate or reuse the previous chat's Project. */
   async resolveChat(auth: AuthContext, requested: Parameters<ActiveContextResolver["resolve"]>[1], message: string, decision?: import("@npati/shared").ProjectIntentDecision): Promise<ResolvedActiveContext> {
