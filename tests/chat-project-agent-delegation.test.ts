@@ -33,6 +33,10 @@ describe("chat in a project context", () => {
     expect(delegated.statusCode).toBe(200);
     expect(delegated.body).toContain('"companyRunId"');
 
+    // Delegation that mentions an email reply template is still work for the agents, not an email setting.
+    const template = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Нехай Coach Ana доручить Leo підготувати шаблон відповіді на скарги про запізнення", contextType: "project", companyId: company.id, projectId: project.id } });
+    expect(template.body).toContain('"companyRunId"');
+
     const neutral = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Hello! Thanks for the help today.", contextType: "project", companyId: company.id, projectId: project.id } });
     expect(neutral.statusCode).toBe(200);
     expect(neutral.body).not.toContain('"companyRunId"');

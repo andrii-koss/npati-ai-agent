@@ -633,7 +633,11 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         } else if (resolved.context.contextType === "company" || resolved.context.contextType === "project") {
           // Project context reaches this branch only when the message addresses one of the company's agents by name.
           const company = resolved.company!;
-          const managementRequest = isShortAffirmativeReply(message) || requestsCompositeCompanyDeletionIntent(message) || EmailChatActions.isManagementRequest(message) || CompanyChatActions.isManagementRequest(message) || CompanyChatActions.isPotentialMutationRequest(message) || WorkspaceChatActions.isManagementRequest(message) || WorkspaceChatActions.isPotentialMutationRequest(message);
+          // Work handed to a named agent ("нехай Олена доручить Ірині підготувати шаблон відповіді ...") is a company run even
+          // when it mentions an email template or a memory; editing the company or its agents stays a settings action.
+          const delegatesWork = /(?:доруч\p{L}*|делегу\p{L}*|\bdelegat\p{L}*|\bнехай\b|\bпоручи\p{L}*|\bhave\s+\p{Lu}|\bask\s+\p{Lu})/u.test(message) && await addressesCompanyAgent(company);
+          const managementRequest = isShortAffirmativeReply(message) || requestsCompositeCompanyDeletionIntent(message) || CompanyChatActions.isManagementRequest(message) || CompanyChatActions.isPotentialMutationRequest(message)
+            || (!delegatesWork && (EmailChatActions.isManagementRequest(message) || WorkspaceChatActions.isManagementRequest(message) || WorkspaceChatActions.isPotentialMutationRequest(message)));
           const explicitCoreWebRequest = explicitlyRequestsWebResearch(message);
           const runnableMainAgent = company.mainAgentId
             ? await workspaceStore.getCompanyAgent(auth, company.id, company.mainAgentId).then((agent) => agent.isActive).catch(() => false)
