@@ -9,3 +9,8 @@ coverage
 !.env.example
 !.env.production.example
 vendor/omniroute
+
+artifacts
+.data
+test-results
+playwright-report
