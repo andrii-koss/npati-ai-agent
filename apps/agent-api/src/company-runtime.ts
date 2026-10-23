@@ -1,3 +1,8 @@
+import {canonicalJson,sha256} from "@npati/workspace";
+import {defaultCapabilityRegistry} from "@npati/shared";
+import type {ChatToolDefinition} from "@npati/omniroute-adapter";
+import {chatCapabilityParameters, CHAT_ROW_CAPABILITIES} from "./chat-project-data-capabilities";
+import {validateArguments} from "./code-tool-runtime-guards";
 import { isChatCapableModel, type AIEngine, type AIModelSummary, type ChatResult } from "@npati/omniroute-adapter";
 import { chatInferenceCandidates, isUnavailableInferenceError } from "./chat-inference-candidates";
 import type { AuthContext, Business, Company, CompanyAgent, CompanyAgentRunDetails, CompanyRunMode, Goal, MemoryItem, WorkspaceStore } from "@npati/workspace";
@@ -52,6 +57,42 @@ export class CompanyDelegationRuntime {
     this.toolRuntime = toolRuntime ?? { execute: async (_context, _company, tool, input) => this.ai.executeTool(tool, input) };
     this.capabilityResolver = capabilityResolver ?? defaultEffectiveCapabilityResolver;
     this.riskApprovalService = riskApprovalService ?? defaultRiskApprovalService;
+  }
+
+  /** The chat loop selects a canonical tool; this runtime keeps its existing authorization, approval and audit boundary. */
+  async chatProjectTools(ctx: AuthContext, companyId: string, projectId: string, requested: string[]): Promise<ChatToolDefinition[]> {
+    const company=await this.store.getCompany(ctx,companyId);const project=await this.store.getProject(ctx,companyId,projectId);
+    if(project.status==="archived")return[];
+    if(company.status==="inactive"||!company.mainAgentId)return[];
+    const main=await this.store.getCompanyAgent(ctx,companyId,company.mainAgentId);if(!main.isActive)return[];
+    const supported=new Set<string>(["project.data.schema.inspect",...CHAT_ROW_CAPABILITIES]);
+    return requested.filter(id=>supported.has(id)&&main.tools.map(toolName).includes(id)&&this.capabilityResolver.canExecute({auth:ctx,activeContext:{contextType:"company",companyId,businessId:null},company:{id:company.id,revision:company.revision},agent:{id:main.id,revision:main.revision,tools:main.tools.map(toolName)}},id).allowed).map(id=>{
+      const cap=defaultCapabilityRegistry.get(id)!;return{type:"function",function:{name:id,description:cap.description,parameters:chatCapabilityParameters(id)}};
+    });
+  }
+
+  async executeChatProjectTool(ctx: AuthContext, companyId: string, projectId: string, tool: string, args: Record<string,unknown>, key: string, signal?: AbortSignal, noMemory=false): Promise<{output:unknown;runId:string}> {
+    const offered=await this.chatProjectTools(ctx,companyId,projectId,[tool]);
+    if(!offered.length)throw new CompanyRuntimeError("TOOL_FORBIDDEN","This Company main agent is not authorized for the requested capability",403);
+    validateArguments(chatCapabilityParameters(tool),args,tool);
+    if(args.projectId!==projectId)throw new CompanyRuntimeError("PROJECT_SCOPE_MISMATCH","Tool targets another project",403);
+    const company=await this.store.getCompany(ctx,companyId), main=await this.store.getCompanyAgent(ctx,companyId,company.mainAgentId!);
+    const task="Chat capability: "+tool+" #"+sha256(canonicalJson(args));
+    const created=await this.create(ctx,companyId,{task,projectId,mode:"single"},key);
+    if(created.run.task!==task)throw new CompanyRuntimeError("IDEMPOTENCY_CONFLICT","Tool call identity was reused with different arguments",409);
+    if(!created.created){const previous=await this.store.getCompanyAgentRun(ctx,companyId,created.run.id);if(previous.run.status!=="completed")throw new CompanyRuntimeError("RUN_NOT_COMPLETED","Previous capability execution did not complete; inspect its run trace",409);return{output:JSON.parse(previous.run.result??"null"),runId:previous.run.id};}
+    const runId=created.run.id,controller=new AbortController(),started=Date.now();this.controllers.set(runId,controller);
+    const bound=AbortSignal.any([controller.signal,AbortSignal.timeout(this.timeoutMs),...(signal?[signal]:[])]);
+    const plan:Plan={mode:"single",agentIds:[main.id],toolRequests:[{agentId:main.id,tool,input:args}]};let output:unknown;
+    try{
+      await this.store.updateCompanyAgentRun(ctx,companyId,runId,{status:"running",executionMode:"single",selectedAgentIds:[main.id]});
+      await executeCompanyRunTools({ctx,company,runId,plans:plan.toolRequests,agents:new Map([[main.id,main]]),signal:bound,knowledge:{chunks:[],memories:[]},noMemory,allowedProjectId:projectId,runProjectId:projectId,store:this.store,toolRuntime:this.toolRuntime,capabilityResolver:this.capabilityResolver,riskApprovalService:this.riskApprovalService,durableApprovals:this.durableApprovals,telemetry:this.telemetry,onResult:(_name,value)=>{output=value;},onApprovalPending:async(nextToolIndex,evidence)=>{await this.store.setCompanyRunPendingPlan(ctx,companyId,runId,{plan,nextToolIndex,evidence});}});
+      const detail=await this.store.getCompanyAgentRun(ctx,companyId,runId);if(detail.toolAudit.some(item=>item.status==="failed"||item.status==="blocked"))throw new CompanyRuntimeError("CAPABILITY_EXECUTION_FAILED","The requested capability failed; inspect its run trace",502);
+      const policy=await this.guardrailPolicyResolver?.(ctx,companyId);const safe=SecurityPolicyEngine.protectObject(SecurityPolicyEngine.redactObject(output,policy),policy);
+      await this.store.updateCompanyAgentRun(ctx,companyId,runId,{status:"completed",result:json(safe),totalDurationMs:Date.now()-started,totalTokens:0,totalCost:0});
+      return{output:safe,runId};
+    }catch(error){const code=(error as {code?:string}).code??"CAPABILITY_EXECUTION_FAILED";await this.store.updateCompanyAgentRun(ctx,companyId,runId,{status:code==="APPROVAL_REQUIRED"?"awaiting_approval":bound.aborted?"cancelled":"failed",errorCode:code,errorMessage:"Chat capability did not complete: "+code,totalDurationMs:Date.now()-started});throw error;}
+    finally{this.controllers.delete(runId);}
   }
 
   async create(ctx: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode; projectId?: string }, key: string) {

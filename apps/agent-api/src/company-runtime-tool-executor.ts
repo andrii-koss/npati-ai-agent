@@ -59,6 +59,7 @@ export interface CompanyRunToolsParams {
   startIndex?: number;
   runType?: string;
   onTool?: (tool: string, path?: string) => void;
+  onResult?: (tool: string, result: unknown) => void;
   store: WorkspaceStore;
   toolRuntime: CompanyToolExecutor;
   capabilityResolver: EffectiveCapabilityResolver;
@@ -72,7 +73,7 @@ export async function executeCompanyRunTools(params: CompanyRunToolsParams): Pro
     ctx, company, runId, plans, agents, signal, knowledge,
     noMemory = false, approvalId, allowedProjectPaths, allowedProjectId,
     runProjectId, onApprovalPending, previousEvidence, startIndex = 0,
-    runType = "company_run", onTool, store, toolRuntime,
+    runType = "company_run", onTool, onResult, store, toolRuntime,
     capabilityResolver, riskApprovalService, durableApprovals, telemetry
   } = params;
 
@@ -336,6 +337,7 @@ export async function executeCompanyRunTools(params: CompanyRunToolsParams): Pro
       if (tool === "email.send" || tool === "communications.email_send" || tool.startsWith("browser.")) adapterInput.__npatiTaskRunId = runId;
       onTool?.(tool, tool.startsWith("project.files.") && typeof adapterInput.path === "string" ? adapterInput.path : undefined);
       const result = tool === "knowledge" ? knowledge : await toolRuntime.execute(ctx, company, tool, adapterInput, signal);
+      onResult?.(tool,result);
       const latencyMs = Math.round(performance.now() - toolStart);
       await store.appendCompanyAgentToolAudit(ctx, company.id, runId,
         { agentId: agent.id, toolName: tool, decision: "allowed", status: "succeeded", inputSummary: summary(tool.startsWith("project.terminal.") ? approvalPayload : plan.input), latencyMs, sequenceNumber: sequenceNumber++ });

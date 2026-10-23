@@ -89,7 +89,7 @@ export interface ChatOrchestration {
   persistAutomaticCompanyMemory: (auth: AuthContext, companyId: string, runId: string, prompt: string, runStatus: string, noMemory: boolean) => Promise<unknown>;
   beforeDeleteCompany: (context: AuthContext, companyId: string) => Promise<void>;
   runBusinessMessage: (auth: AuthContext, businessId: string, message: string, conversationId: string | undefined, log: { warn(value: unknown, message?: string): void }, progress?: ResearchProgressListener, attachments?: ChatAttachmentInput[], memoryPolicy?: NoMemoryEvaluationResult, signal?: AbortSignal) => Promise<Parameters<typeof applyChatTelemetryHeaders>[1] & { message: string; companyAction?: { companyId: string; action: string } }>;
-  runNeutralMessage: (auth: AuthContext, message: string, conversationId: string | undefined, attachments?: ChatAttachmentInput[], progress?: ResearchProgressListener, memoryPolicy?: NoMemoryEvaluationResult, onDelta?: (chunk: string) => void, signal?: AbortSignal, managementCompany?: { id: string; name: string }, projectContext?: Pick<import("@npati/workspace").Project, "id" | "name" | "description" | "framework">) => Promise<Parameters<typeof applyChatTelemetryHeaders>[1] & { message: string; companyAction?: { companyId: string; action: string } }>;
+  runNeutralMessage: (auth: AuthContext, message: string, conversationId: string | undefined, attachments?: ChatAttachmentInput[], progress?: ResearchProgressListener, memoryPolicy?: NoMemoryEvaluationResult, onDelta?: (chunk: string) => void, signal?: AbortSignal, managementCompany?: { id: string; name: string }, projectContext?: Pick<import("@npati/workspace").Project, "id" | "name" | "description" | "framework"> & { capabilityIds?: string[] }) => Promise<Parameters<typeof applyChatTelemetryHeaders>[1] & { message: string; companyAction?: { companyId: string; action: string } }>;
 }
 
 export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrchestration {
@@ -256,7 +256,7 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
     const businessCreateRequestKey = crypto.randomUUID();
     const nativeChat = nativeToolCalling ? async (request: ChatRequest) => {
       try {
-        const tools = availableCoreChatTools(auth, safePrompt);
+        const tools = await availableCoreChatTools(auth, safePrompt);
         const plan = await planStructuredChatRequest(aiEngine, request, safePrompt);
         const routing = coreChatRoutingDecision(safePrompt, tools, hasAttachedEvidence);
         const businessPrimary = plan?.primary_action === "create_business_profile";

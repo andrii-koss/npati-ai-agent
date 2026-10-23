@@ -1,3 +1,4 @@
+import {rowTaskCapabilities} from "./chat-project-data-capabilities";
 import { isOllamaChatPayload } from "./runtime-compat-routes";
 
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
@@ -40,7 +41,7 @@ export interface ChatRouteDeps {
   persistAutomaticCompanyMemory: (auth: AuthContext, companyId: string, runId: string, prompt: string, runStatus: string, noMemory: boolean) => Promise<unknown>;
   projectOrchestrator: ProjectOrchestrator;
   runBusinessMessage: (auth: AuthContext, businessId: string, message: string, conversationId: string | undefined, log: { warn(value: unknown, message?: string): void }, progress?: ResearchProgressListener, attachments?: ChatAttachmentInput[], memoryPolicy?: NoMemoryEvaluationResult, signal?: AbortSignal) => Promise<Parameters<typeof applyChatTelemetryHeaders>[1] & { message: string; companyAction?: { companyId: string; action: string } }>;
-  runNeutralMessage: (auth: AuthContext, message: string, conversationId: string | undefined, attachments?: ChatAttachmentInput[], progress?: ResearchProgressListener, memoryPolicy?: NoMemoryEvaluationResult, onDelta?: (chunk: string) => void, signal?: AbortSignal, managementCompany?: { id: string; name: string }, projectContext?: Pick<import("@npati/workspace").Project, "id" | "name" | "description" | "framework">) => Promise<Parameters<typeof applyChatTelemetryHeaders>[1] & { message: string; companyAction?: { companyId: string; action: string } }>;
+  runNeutralMessage: (auth: AuthContext, message: string, conversationId: string | undefined, attachments?: ChatAttachmentInput[], progress?: ResearchProgressListener, memoryPolicy?: NoMemoryEvaluationResult, onDelta?: (chunk: string) => void, signal?: AbortSignal, managementCompany?: { id: string; name: string }, projectContext?: Pick<import("@npati/workspace").Project, "id" | "name" | "description" | "framework"> & { capabilityIds?: string[] }) => Promise<Parameters<typeof applyChatTelemetryHeaders>[1] & { message: string; companyAction?: { companyId: string; action: string } }>;
   workspaceStore: ReturnType<typeof createCoreServices>["workspaceStore"];
   boundedResponseChunks: (value: string, maxCharacters?: number) => Iterable<string>;
 }
@@ -193,6 +194,10 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
       const activeProjId = resolved.project?.id ?? null;
       const activeCompId = requestedContext.companyId ?? resolved.company?.id ?? resolved.project?.companyId ?? null;
 
+      if(semantic?.rowCapability&&resolved.project&&resolved.company){
+        const result=await runNeutralMessage(auth,prompt??"",request.body.conversationId,request.body.attachments,undefined,memoryPolicy,undefined,undefined,{id:resolved.company.id,name:resolved.company.name},{...resolved.project,capabilityIds:rowTaskCapabilities(semantic.rowCapability)});
+        return reply.send({...result,activeContext:resolved.context});
+      }
       const intentDecision = semantic?.decision ?? defaultHybridRouter.classifyProject({
         message: prompt || "",
         activeCompanyId: activeCompId,

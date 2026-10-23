@@ -1,3 +1,4 @@
+import {rowTaskCapabilities} from "./chat-project-data-capabilities";
 import { resolveCodingConversationLanguage, codingChatResponseInstruction, chatLanguageInstruction, detectCompanyChatLanguage } from "./company-chat-i18n";
 
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
@@ -74,7 +75,7 @@ export interface ChatStreamRouteDeps {
   projectSandbox: ProjectSandboxService | undefined;
   projectService: ProjectService;
   runBusinessMessage: (auth: AuthContext, businessId: string, message: string, conversationId: string | undefined, log: { warn(value: unknown, message?: string): void }, progress?: ResearchProgressListener, attachments?: ChatAttachmentInput[], memoryPolicy?: NoMemoryEvaluationResult, signal?: AbortSignal) => Promise<{ message: string; companyAction?: { companyId: string; action: string } }>;
-  runNeutralMessage: (auth: AuthContext, message: string, conversationId: string | undefined, attachments?: ChatAttachmentInput[], progress?: ResearchProgressListener, memoryPolicy?: NoMemoryEvaluationResult, onDelta?: (chunk: string) => void, signal?: AbortSignal, managementCompany?: { id: string; name: string }, projectContext?: Pick<import("@npati/workspace").Project, "id" | "name" | "description" | "framework">) => Promise<{ message: string; companyAction?: { companyId: string; action: string } }>;
+  runNeutralMessage: (auth: AuthContext, message: string, conversationId: string | undefined, attachments?: ChatAttachmentInput[], progress?: ResearchProgressListener, memoryPolicy?: NoMemoryEvaluationResult, onDelta?: (chunk: string) => void, signal?: AbortSignal, managementCompany?: { id: string; name: string }, projectContext?: Pick<import("@npati/workspace").Project, "id" | "name" | "description" | "framework"> & { capabilityIds?: string[] }) => Promise<{ message: string; companyAction?: { companyId: string; action: string } }>;
   chatDevelopment?: import("./chat-development-service").ChatDevelopmentService;
   workspaceStore: ReturnType<typeof createCoreServices>["workspaceStore"];
   boundedResponseChunks: (value: string, maxCharacters?: number) => Iterable<string>;
@@ -295,6 +296,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         sequence += 1;
         reply.raw.write(`id: ${sequence}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
       };
+      const progress = (event: ResearchProgressEvent) => send("progress", { ...event, timestamp: new Date().toISOString() });
       const heartbeat = setInterval(() => {
         if (!reply.raw.destroyed) reply.raw.write(": heartbeat\n\n");
       }, 15_000);
@@ -335,6 +337,10 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
           ? await projectService.get(auth, activeCompanyId, effectiveProjectId).catch(() => null)
           : null;
         const codeProjectKind = codeProject ? ((codeProject as { type?: string }).type === "code_project" ? "code_project" : "website") : null;
+        if (semantic?.rowCapability && resolved.project && activeCompanyId) {
+          const result=await runNeutralMessage(auth,message,request.body.conversationId,request.body.attachments,progress,memoryPolicy,delta=>send("delta",{delta}),streamController.signal,{id:resolved.company!.id,name:resolved.company!.name},{...resolved.project,capabilityIds:rowTaskCapabilities(semantic.rowCapability)});
+          send("result",{...result,activeContext:resolved.context});clearInterval(heartbeat);if(!reply.raw.writableEnded)reply.raw.end();return;
+        }
         const codeDecision = resolveChatCodeIntent({
           message,
           // A guard decision (an NPATI company/automation/memory request) is binding like a semantic one; only the
@@ -589,7 +595,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         return;
       }
 
-      const progress = (event: ResearchProgressEvent) => send("progress", { ...event, timestamp: new Date().toISOString() });
+
       /** Work addressed to a company agent by name ("have Coach Ana delegate to Leo ...") is run by the Company Runtime,
        * not answered by the neutral chat model playing those agents. */
       const addressesCompanyAgent = async (company?: { id: string }) => {

@@ -171,3 +171,8 @@ it("edits the selected site from a visual reference without routing to a new pro
  expect(result.decision.intent).toBe("EDIT_WEBSITE");expect(result.targets).toEqual([]);expect(f.chat).not.toHaveBeenCalled();
  const explicit=await f.resolve(auth,{message:"створи новий сайт як на фото",activeProjectId:"existing",activeCompanyId:"company"});expect(explicit.decision.intent).toBe("CREATE_WEBSITE");
 });
+
+it("selects an existing row-update capability in the same semantic routing call",async()=>{const f=fixture({intent:"EDIT_DATA_MODEL",confidence:.99,targets:[],rowCapability:"project.data.rows.update"});const r=await f.resolve(auth,{message:"Update the existing dev product price",activeProjectId:"project"});expect(r.rowCapability).toBe("project.data.rows.update");expect(f.chat).toHaveBeenCalledOnce();expect(f.chat.mock.calls[0][0].reasoningMode).toBe("disabled");});
+it("ignores fabricated row capabilities and keeps schema editing on its existing executor",async()=>{const f=fixture({intent:"EDIT_DATA_MODEL",confidence:.99,targets:[],rowCapability:"project.data.sql.exec"});expect((await f.resolve(auth,{message:"Add a column to products",activeProjectId:"project"})).rowCapability).toBeUndefined();});
+
+it("does not turn a capability question into a row mutation",async()=>{const f=fixture({intent:"CHAT",confidence:.99,targets:[],rowCapability:"project.data.rows.update"});expect((await f.resolve(auth,{message:"Can you update product prices?",activeProjectId:"project"})).rowCapability).toBeUndefined();});
