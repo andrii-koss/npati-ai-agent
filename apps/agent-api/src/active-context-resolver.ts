@@ -50,14 +50,21 @@ export class ActiveContextResolver {
    * Switches the chat context to another owned company the message names (see companyNamedInMessage): that company's
    * most recently updated project for follow-up work, or the company itself for a new project.
    */
-  async resolveNamedCompany(auth: AuthContext, current: ResolvedActiveContext, message: string, decision?: import("@npati/shared").ProjectIntentDecision): Promise<ResolvedActiveContext | undefined> {
-    const companies: Company[] = [];
+  async resolveNamedCompany(auth: AuthContext, current: ResolvedActiveContext, message: string, decision?: import("@npati/shared").ProjectIntentDecision, conversationText = ""): Promise<ResolvedActiveContext | undefined> {
+    const owned: Company[] = [];
     let cursor: string | undefined;
     do {
       const page = await this.store.listCompanies(auth, 100, cursor);
-      companies.push(...page.items);
+      owned.push(...page.items);
       cursor = page.nextCursor ?? undefined;
-    } while (cursor && companies.length < 500);
+    } while (cursor && owned.length < 500);
+    // A loose (stem or agent-name) match may only select a company this conversation has already dealt with; any other
+    // company needs its full name in the message. "Delete the bakery webhook" must not jump to another "… Bakery".
+    const lowerMessage = message.toLocaleLowerCase(), lowerConversation = conversationText.toLocaleLowerCase();
+    const companies = owned.filter((company) => {
+      const name = company.name.trim().toLocaleLowerCase();
+      return company.id === (current.company?.id ?? current.project?.companyId) || (name.length > 2 && (lowerMessage.includes(name) || lowerConversation.includes(name)));
+    });
     const creating = decision?.intent === "CREATE_WEBSITE" || decision?.intent === "CREATE_PROJECT";
     // "Create X" names X as the thing to create, not as the place to work ("create NovaScale" when it exists is a
     // duplicate request for the company actions); only a new project for a named company switches.

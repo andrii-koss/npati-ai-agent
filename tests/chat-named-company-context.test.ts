@@ -48,7 +48,9 @@ describe("company named in a chat message", () => {
     await store.createCompanyAgent(auth, fit.id, { name: "Coach Ana", role: "Lead trainer" }, "ana");
     const resolver = new ActiveContextResolver(store);
     const current = await resolver.resolve(auth, { contextType: "company", companyId: bakery.id });
-    expect((await resolver.resolveNamedCompany(auth, current, "Have Coach Ana write three captions"))?.context).toMatchObject({ contextType: "company", companyId: fit.id });
+    expect((await resolver.resolveNamedCompany(auth, current, "Have Coach Ana write three captions", undefined, "We created Nordic Fit with Coach Ana."))?.context).toMatchObject({ contextType: "company", companyId: fit.id });
+    // Without that company in the conversation, an agent name alone does not switch to it.
+    expect(await resolver.resolveNamedCompany(auth, current, "Have Coach Ana write three captions")).toBeUndefined();
     expect(await resolver.resolveNamedCompany(auth, current, "Нехай Олена підготує план")).toBeUndefined();
   });
 });
@@ -63,5 +65,21 @@ describe("a creation request naming an existing company", () => {
     const current = await resolver.resolve(auth, { contextType: "company", companyId: bakery.id });
     expect(await resolver.resolveNamedCompany(auth, current, "Create NovaScale Labs")).toBeUndefined();
     expect((await resolver.resolveNamedCompany(auth, current, "Create a website for NovaScale Labs", { intent: "CREATE_WEBSITE" } as never))?.context.companyId).not.toBe(bakery.id);
+  });
+});
+
+describe("a loose company match", () => {
+  it("never selects a company this conversation has not dealt with", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const auth: AuthContext = { userId: "owner", workspaceId: "workspace", permissions: ["workspace:read", "workspace:write", "business:manage"] };
+    const bakery = await store.createCompany(auth, { name: "Пекарня Сонях" }, "bakery");
+    const fit = await store.createCompany(auth, { name: "Nordic Fit" }, "fit");
+    await store.createCompany(auth, { name: "Stress DS1023 Bakery" }, "other-session");
+    const resolver = new ActiveContextResolver(store);
+    const current = await resolver.resolve(auth, { contextType: "company", companyId: fit.id });
+    const history = "Створи компанію «Пекарня Сонях» ... Create a second company «Nordic Fit»";
+    expect(await resolver.resolveNamedCompany(auth, current, "Delete the bakery webhook for new orders", undefined, history)).toBeUndefined();
+    expect((await resolver.resolveNamedCompany(auth, current, "Повернімося до сайту пекарні", undefined, history))?.context.companyId).toBe(bakery.id);
+    expect((await resolver.resolveNamedCompany(auth, current, "Show the Stress DS1023 Bakery site", undefined, history))?.context.companyId).not.toBe(fit.id);
   });
 });
