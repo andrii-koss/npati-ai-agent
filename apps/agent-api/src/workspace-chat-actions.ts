@@ -9,6 +9,7 @@ import type { EmailInboxRepository } from "./email-inbox-repository";
 import { chatLanguageInstruction, detectCompanyChatLanguage } from "./company-chat-i18n";
 import { ContentLibraryStore, type ContentLibraryType } from "./content-library-store";
 import type { IntegrationsRepository } from "./integrations-repository";
+import { executeWebhookAction, webhookPromptContext, webhookResourceSignal, type WebhookDirective } from "./workspace-webhook-actions";
 
 type WorkspaceActionKind = "activity.run" | "activity.cancel" | "activity.list" | "automation.list" | "automation.create" | "automation.update" | "automation.delete" | "automation.run" | "automation.history" | "website.list" | "website.create" | "website.seed_demo" | "website.update" | "website.delete" | "content.create" | "content.update" | "content.delete" | "memory.create" | "memory.update" | "memory.delete" | "webhook.list" | "webhook.create" | "webhook.update" | "webhook.delete";
 type ContentType = "article" | "seo_blueprint" | "social_post" | "brief" | "strategy" | "other";
@@ -39,10 +40,7 @@ type WorkspaceDirective = {
   websites?: BrowserCampaignTargetInput[];
   content?: { title?: string; type?: ContentType; content?: string; task?: string; mode?: CompanyRunMode };
   memory?: { type?: MemoryInput["type"]; title?: string; content?: string; confidence?: number };
-  webhookId?: string;
-  webhookName?: string;
-  webhook?: { name?: string; promptTemplate?: string; agentId?: string | null; isActive?: boolean };
-};
+} & Omit<WebhookDirective, "action">;
 
 export type WorkspaceChatActionResult = {
   cleanText: string;
@@ -199,9 +197,6 @@ const memoryVerbSignal = /(?:^|[.!?;:]\s+)(?:please\s+|por favor,?\s+|bitte\s+)?
 
 /** Researching or analysing websites is reading them, not managing the campaign's website targets. */
 const researchVerbSignal = /(?:\bresearch\b|recherch\p{L}*|pesquis\p{L}*|investiga\p{L}*|\bsearch\b|\banaly[sz]e\b|analysier\p{L}*|\bcompare\b|vergleich\p{L}*|досліди\p{L}*|дослідж\p{L}*|проаналізуй|порівня\p{L}*|знайди\s+в\s+інтернеті)/iu;
-
-// Webhooks are the company's inbound integrations; they are managed like automations.
-const webhookResourceSignal = /(?:webhook|вебхук|веб-хук|інтеграц\p{L}*|integration|integraç\p{L}*|integraci\p{L}*|integrationen)/iu;
 
 const automationReadSignals = [
   /\b(?:list|show|which|when|status|history|runs?|tasks?|websites?|sites?)\b/iu,
@@ -410,10 +405,7 @@ export class WorkspaceChatActions {
     const automationContext = resources ? (await Promise.all(ownedCompanies.slice(0, 30).map(async (company) =>
       (await resources.automations.list(auth, company.id)).map((item) => ({ id: item.id, companyId: company.id, companyName: company.name, name: item.name, description: item.description, prompt: item.prompt, cronExpression: item.cronExpression, timezone: item.timezone, agentId: item.agentId, status: item.status, lastRunAt: item.lastRunAt, nextRunAt: item.nextRunAt }))
     ))).flat() : [];
-    // Webhook secrets never enter the prompt: name, state and target agent only.
-    const webhookContext = resources?.webhooks ? (await Promise.all(ownedCompanies.slice(0, 30).map(async (company) =>
-      (await resources.webhooks!.listWebhooks(auth, company.id).catch(() => [])).map((item) => ({ id: item.id, companyId: company.id, companyName: company.name, name: item.name, isActive: item.isActive, agentId: item.agentId ?? null, lastTriggeredAt: item.lastTriggeredAt ?? null }))
-    ))).flat() : [];
+    const webhookContext = resources?.webhooks ? await webhookPromptContext(auth, resources.webhooks, ownedCompanies.slice(0, 30)) : [];
     const websiteContext = resources?.browserTargets ? (await Promise.all(ownedCompanies.slice(0, 30).map(async (company) => {
       const [targets, accounts] = await Promise.all([
         resources.browserTargets!.listTargets(auth, company.id),
@@ -484,7 +476,7 @@ To edit or delete an existing record, use the exact owned ID from the supplied d
 - Content: action content.update or content.delete, contentId, companyId, and for update a content object containing only changed fields. Editable fields: title, type, content. Updating content edits the stored document; it does not rerun agents.
 - Memory: action memory.update or memory.delete, memoryId, businessId, and for update a memory object containing only changed fields. Editable fields: type, title, content, confidence.
 If the user refers to the record on Settings > Memory or says "it" and exactly one owned Business Memory record exists, use that record's exact memoryId and businessId. If several records could match, ask for the title instead of guessing.
-- Webhook (inbound integration that starts a company agent run): webhook.list with companyId; webhook.create with companyId and webhook {name, promptTemplate describing what the agent does with the incoming data, optional agentId}; webhook.update with webhookId (or exact webhookName) and webhook {isActive} to enable or disable it; webhook.delete with webhookId or exact webhookName. Never reveal a webhook secret or its URL in chat; point to Settings > Integrations.
+- Webhook (inbound integration that starts a company agent run): webhook.list with companyId; webhook.create with companyId and webhook {name, promptTemplate describing what the agent does with the incoming data, optional agentId, optional isActive preserving a requested disabled state}; webhook.update with webhookId (or exact webhookName) and webhook {isActive} to enable or disable it; webhook.delete with webhookId or exact webhookName. Never reveal a webhook secret or its URL in chat; point to Settings > Integrations.
 - Activity: to show recent company runs (status, agents, duration, failures and their reasons) use activity.list with companyId and optional historyLimit (default 10). Completed run traces are immutable audit records and cannot be edited or deleted. An active run may be cancelled with action activity.cancel, companyId, and activity.runId. If asked to alter a completed result, offer a new activity instead.
 Use activity.run when the user asks the company agents to perform work and wants a trace. Use content.create for a durable article, SEO blueprint, social draft, brief, or strategy in Content Hub. Never save guesses as Memory. In a multi-step request whose primary outcome is a Business Profile, memory is a dependent record linked to that profile; never treat memory creation as completion of the whole request. If the user asks for recommendations, recommend missing durable categories from the supplied memory summary (business facts, audience, brand voice, products, channels, decisions, experiments/results) in the user's language; create one only when explicitly requested. Keep intro concise, put the verified details in the server-rendered card, and end followUp with a useful next question.`;
   }
@@ -631,38 +623,8 @@ Use activity.run when the user asks the company agents to perform work and wants
       }
       if (directive.action.startsWith("webhook.")) {
         if (!deps.webhooks) throw new Error("Webhook management is unavailable");
-        const available = await deps.webhooks.listWebhooks(auth, company.id);
-        const settings = "/integrations?company=" + encodeURIComponent(company.id);
-        const agents = await deps.store.listCompanyAgents(auth, company.id);
-        const details = (item: { isActive: boolean; agentId?: string | null }) =>
-          "**" + labels.status + ":** " + (item.isActive ? labels.active : "inactive") + "\n**Agent:** " + clean(agents.find((agent) => agent.id === item.agentId)?.name || "main agent", 200);
-        const card = (name: string, body: string) => "```card:" + clean(name, 200) + "\n" + body + "\n\n[Settings > Integrations](" + settings + ")\n```";
-        if (directive.action === "webhook.list") {
-          const lines = available.length ? available.map((item) => "### " + clean(item.name, 200) + "\n" + details(item)).join("\n\n") : "No webhooks are configured.";
-          return { cleanText: intro(directive) + "\n\n" + lines + "\n\n[Settings > Integrations](" + settings + ")", workspaceAction: { action: directive.action, resourceId: company.id, companyId: company.id } };
-        }
-        if (directive.action === "webhook.create") {
-          const item = directive.webhook;
-          const name = clean(item?.name, 200), promptTemplate = clean(item?.promptTemplate, 4000);
-          if (!name || !promptTemplate) throw new Error("A webhook name and the task for the incoming data are required");
-          if (item?.agentId && !agents.some((agent) => agent.id === item.agentId)) throw new Error("Agent is not owned by this company");
-          const created = available.find((entry) => entry.name.toLocaleLowerCase() === name.toLocaleLowerCase())
-            ?? await deps.webhooks.createWebhook(auth, company.id, { name, promptTemplate, agentId: item?.agentId ?? undefined });
-          return { cleanText: finish(directive, card(created.name, details(created))), workspaceAction: { action: directive.action, resourceId: created.id, companyId: company.id } };
-        }
-        const name = directive.webhookName?.trim().toLocaleLowerCase();
-        const matches = directive.webhookId ? available.filter((entry) => entry.id === directive.webhookId)
-          : name ? available.filter((entry) => entry.name.toLocaleLowerCase() === name) : available.length === 1 ? available : [];
-        if (matches.length !== 1) throw new Error("Webhook target is missing or ambiguous");
-        const current = matches[0]!;
-        if (directive.action === "webhook.delete") {
-          if (!await deps.webhooks.deleteWebhook(auth, company.id, current.id)) throw new Error("Webhook not found");
-          return { cleanText: finish(directive, card(current.name, "**" + labels.company + ":** " + clean(company.name, 300))), workspaceAction: { action: directive.action, resourceId: current.id, companyId: company.id } };
-        }
-        if (typeof directive.webhook?.isActive !== "boolean") throw new Error("Only enabling or disabling a webhook is supported from chat");
-        const updated = await deps.webhooks.setWebhookActive(auth, company.id, current.id, directive.webhook.isActive);
-        if (!updated) throw new Error("Webhook not found");
-        return { cleanText: finish(directive, card(updated.name, details(updated))), workspaceAction: { action: directive.action, resourceId: updated.id, companyId: company.id } };
+        const result = await executeWebhookAction(auth, { store: deps.store, webhooks: deps.webhooks }, company, directive as WebhookDirective, labels, intro(directive), (card) => finish(directive, card));
+        return { cleanText: result.text, workspaceAction: { action: directive.action, resourceId: result.resourceId, companyId: company.id } };
       }
       if (directive.action.startsWith("automation.")) {
         const item = directive.automation;

@@ -383,3 +383,10 @@ describe("Business Goal routing inside a company conversation", () => {
     expect(WorkspaceChatActions.isManagementRequest(message)).toBe(true);
   });
 });
+
+it("creates an inactive webhook and reuses it without activating or duplicating it", async () => {
+ const store=new InMemoryWorkspaceStore();const company=await store.createCompany(alice,{name:"Disabled webhook test"},"disabled-webhook");const {IntegrationsRepository}=await import("../apps/agent-api/src/integrations-repository");const repo=new IntegrationsRepository();const automations=new CompanyAutomationsRepository();const deps={...dependencies(store,automations,async()=>completedRun(company.id,"test")),webhooks:repo};
+ const text=directive({action:"webhook.create",companyId:company.id,webhook:{name:"Inactive fixture",promptTemplate:"Report test payload",isActive:false}});
+ const first=await WorkspaceChatActions.extractAndExecute(alice,text,deps,"webhook-chat");expect(first.workspaceAction?.action).toBe("webhook.create");const created=(await repo.listWebhooks(alice,company.id))[0];expect(created.isActive).toBe(false);expect(await repo.getWebhookBySecret(created.secret)).toBeNull();
+ await repo.setWebhookActive(alice,company.id,created.id,true);const second=await WorkspaceChatActions.extractAndExecute(alice,text,deps,"webhook-chat");expect(second.workspaceAction?.resourceId).toBe(created.id);expect(await repo.listWebhooks(alice,company.id)).toHaveLength(1);expect((await repo.listWebhooks(alice,company.id))[0].isActive).toBe(false);
+});

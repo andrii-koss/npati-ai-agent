@@ -75,12 +75,13 @@ export function registerIntegrationsRoutes(
 
   app.post<{
     Params: { companyId: string };
-    Body: { name: string; promptTemplate: string; agentId?: string };
+    Body: { name: string; promptTemplate: string; agentId?: string; isActive?: boolean };
   }>("/companies/:companyId/webhooks", async (r, reply) => {
     try {
       const c = await ctx(auth, r, "business:manage");
       await store.getCompany(c, r.params.companyId);
-      const { name, promptTemplate, agentId } = r.body || {};
+      const { name, promptTemplate, agentId, isActive } = r.body || {};
+      if (isActive !== undefined && typeof isActive !== "boolean") throw Object.assign(new Error("isActive must be a boolean."), { status: 400, code: "MISSING_PARAMETERS" });
 
       if (!name || typeof name !== "string" || name.trim().length === 0 || name.length > 200) {
         throw Object.assign(new Error("name is required and must be a string up to 200 characters."), {
@@ -100,6 +101,7 @@ export function registerIntegrationsRoutes(
         name: name.trim(),
         promptTemplate: promptTemplate.trim(),
         agentId: agentId || undefined,
+        isActive,
       });
       return reply.code(201).send({ webhook: created, ...created });
     } catch (e) {

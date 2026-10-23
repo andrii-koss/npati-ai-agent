@@ -76,7 +76,7 @@ export class IntegrationsRepository {
   async createWebhook(
     ctx: AuthContext,
     companyId: string,
-    input: { name: string; promptTemplate: string; agentId?: string }
+    input: { name: string; promptTemplate: string; agentId?: string; isActive?: boolean }
   ): Promise<CompanyWebhook> {
     const id = randomUUID();
     const secret = "whsec_" + randomBytes(24).toString("hex");
@@ -85,10 +85,10 @@ export class IntegrationsRepository {
     if (this.pool) {
       const result = await this.pool.query<CompanyWebhook>(
         `INSERT INTO company_webhooks (
-           id, workspace_id, company_id, user_id, name, secret, agent_id, prompt_template
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           id, workspace_id, company_id, user_id, name, secret, agent_id, prompt_template, is_active
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING ${webhookCols}`,
-        [id, ctx.workspaceId, companyId, ctx.userId, input.name.trim(), secret, input.agentId || null, input.promptTemplate.trim()]
+        [id, ctx.workspaceId, companyId, ctx.userId, input.name.trim(), secret, input.agentId || null, input.promptTemplate.trim(), input.isActive !== false]
       );
       return result.rows[0]!;
     }
@@ -102,7 +102,7 @@ export class IntegrationsRepository {
       secret,
       agentId: input.agentId || null,
       promptTemplate: input.promptTemplate.trim(),
-      isActive: true,
+      isActive: input.isActive !== false,
       lastTriggeredAt: null,
       createdAt: now,
       updatedAt: now,
