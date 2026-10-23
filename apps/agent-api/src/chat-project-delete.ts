@@ -46,3 +46,23 @@ export function confirmedProjectDeletion(message: string, previousAssistant: str
     || Object.values(copy).some((item) => message.toLocaleLowerCase().includes(item.confirmWord.toLocaleLowerCase()));
   return yes ? name : undefined;
 }
+
+/** Resolve a deletion target before confirmation; a confirmation never falls back to another project. */
+export function projectDeleteTarget<T extends { id: string; name: string }>(projects: T[], message: string, confirmedName?: string, activeProjectId?: string | null): T | undefined {
+  if (confirmedName) return projects.find(project => project.name === confirmedName);
+  const lower = message.toLocaleLowerCase();
+  const named = projects.filter(project => project.name.length > 2 && lower.includes(project.name.toLocaleLowerCase()));
+  if (named.length > 1) return undefined;
+  return named[0] ?? projects.find(project => project.id === activeProjectId) ?? (projects.length === 1 ? projects[0] : undefined);
+}
+
+export function noWebsiteToChangeMessage(message: string): string {
+  const messages: Record<string, string> = {
+    uk: "У цієї компанії зараз немає сайту, який можна змінити (його могли видалити). Створити новий сайт?",
+    ru: "У этой компании сейчас нет сайта, который можно изменить (его могли удалить). Создать новый сайт?",
+    pt: "Esta empresa não tem agora nenhum site para alterar (pode ter sido excluído). Criar um site novo?",
+    es: "Esta empresa no tiene ahora ningún sitio que cambiar (puede que se eliminara). ¿Creo un sitio nuevo?",
+    de: "Dieses Unternehmen hat derzeit keine Website, die geändert werden kann (sie wurde womöglich gelöscht). Soll eine neue erstellt werden?",
+  };
+  return messages[detectCompanyChatLanguage(message)] ?? "This company has no website to change right now (it may have been deleted). Create a new one?";
+}

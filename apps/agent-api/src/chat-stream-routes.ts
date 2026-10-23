@@ -26,7 +26,7 @@ import { EmailChatActions } from "./email-chat-actions";
 import { NoMemoryEvaluationResult, PerRequestNoMemoryGate } from "./ephemeral-no-memory-and-rtk";
 import { CODE_AGENT_MASTER_FLAG, FeatureFlagService } from "./feature-flags";
 import { publicCodeChatReply, getLatestChatProjectCard, saveChatProjectCard } from "./project-chat-cards";
-import { confirmedProjectDeletion, isProjectDeleteRequest, projectDeleteQuestion, projectDeletedMessage } from "./chat-project-delete";
+import { confirmedProjectDeletion, isProjectDeleteRequest, noWebsiteToChangeMessage, projectDeleteQuestion, projectDeletedMessage, projectDeleteTarget } from "./chat-project-delete";
 import { ProjectOrchestrationError, ProjectOrchestrator, extractCleanProjectName } from "./project-orchestrator";
 import { ProjectPreviewService } from "./project-preview-service";
 import { ProjectSandboxService } from "./project-sandbox-service";
@@ -131,6 +131,11 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         projectId: request.body.projectId ?? null,
       };
 
+      // The neutral conversation this turn is saved in; undefined when memory writes are off.
+      const chatConversation = async () => memoryPolicy.writeAllowed
+        ? request.body.conversationId ? (await workspaceStore.getNeutralConversation(auth, request.body.conversationId)).conversation
+          : await workspaceStore.createNeutralConversation(auth, conversationTitle(message))
+        : undefined;
       const conversationCard = request.body.conversationId && !memoryPolicy.noMemoryActive
         ? await getLatestChatProjectCard(workspaceStore, auth, request.body.conversationId, requestedContext.businessId ?? undefined) : null;
       if (!requestedContext.projectId && conversationCard?.companyId) {
@@ -300,19 +305,11 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         const confirmedName = confirmedProjectDeletion(message, previousAssistant);
         if (activeCompanyId && (confirmedName || isProjectDeleteRequest(message))) {
           const projects = await workspaceStore.listProjects(auth, activeCompanyId).catch(() => []);
-          const lower = message.toLocaleLowerCase();
-          const target = confirmedName
-            ? projects.find((project) => project.name === confirmedName)
-            : projects.find((project) => project.name.length > 2 && lower.includes(project.name.toLocaleLowerCase()))
-              ?? projects.find((project) => project.id === activeProjectId) ?? (projects.length === 1 ? projects[0] : undefined);
+          const target = projectDeleteTarget(projects, message, confirmedName, activeProjectId);
           if (target) {
             if (confirmedName) await projectService.delete(auth, activeCompanyId, target.id);
             const answer = confirmedName ? projectDeletedMessage(message, target.name) : projectDeleteQuestion(message, target);
-            const conversation = memoryPolicy.writeAllowed
-              ? request.body.conversationId
-                ? (await workspaceStore.getNeutralConversation(auth, request.body.conversationId)).conversation
-                : await workspaceStore.createNeutralConversation(auth, message.slice(0, 72))
-              : undefined;
+            const conversation = await chatConversation();
             if (conversation) {
               await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", message);
               await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", answer);
@@ -380,9 +377,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
             let savedUser: { id: string; createdAt: string } | undefined;
             let savedAssistant: { id: string; createdAt: string } | undefined;
             if (memoryPolicy.writeAllowed) {
-              const conversation = request.body.conversationId
-                ? (await workspaceStore.getNeutralConversation(auth, request.body.conversationId)).conversation
-                : await workspaceStore.createNeutralConversation(auth, conversationTitle(message));
+              const conversation = (await chatConversation())!;
               cardConversationId = conversation.id;
               if (media.decoded.length && !deps.chatFiles) throw new Error("Persistent object storage is not configured.");
               const savedAttachments = media.decoded.length ? await deps.chatFiles!.persist(auth, undefined, conversation.id, media.decoded) : [];
@@ -636,14 +631,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
             // new project named after the request; creation is a separate, explicit request.
             const creationIntent = projectIntent.intent === "CREATE_PROJECT" || projectIntent.intent === "CREATE_WEBSITE";
             if (targetCompanyId && !creationIntent && !activeProjectId && !(await workspaceStore.listProjects(auth, targetCompanyId).catch(() => [])).length) {
-              const noSite: Record<string, string> = {
-                uk: "У цієї компанії зараз немає сайту, який можна змінити (його могли видалити). Створити новий сайт?",
-                ru: "У этой компании сейчас нет сайта, который можно изменить (его могли удалить). Создать новый сайт?",
-                pt: "Esta empresa não tem agora nenhum site para alterar (pode ter sido excluído). Criar um site novo?",
-                es: "Esta empresa no tiene ahora ningún sitio que cambiar (puede que se eliminara). ¿Creo un sitio nuevo?",
-                de: "Dieses Unternehmen hat derzeit keine Website, die geändert werden kann (sie wurde womöglich gelöscht). Soll eine neue erstellt werden?",
-              };
-              projectResponse = { message: noSite[detectCompanyChatLanguage(message)] ?? "This company has no website to change right now (it may have been deleted). Create a new one?", suggestedActions: [], activeContext: resolved.context };
+              projectResponse = { message: noWebsiteToChangeMessage(message), suggestedActions: [], activeContext: resolved.context };
               targetCompanyId = null;
             }
             if (targetCompanyId) {
@@ -655,11 +643,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
                 prompt: message,
                 idempotencyKey: (request.headers["idempotency-key"] as string) || `website-${Date.now()}`,
               });
-              const conversation = memoryPolicy.writeAllowed
-                ? request.body.conversationId
-                  ? (await workspaceStore.getNeutralConversation(auth, request.body.conversationId)).conversation
-                  : await workspaceStore.createNeutralConversation(auth, conversationTitle(message))
-                : undefined;
+              const conversation = await chatConversation();
               if (conversation) {
                 await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", message);
                 const assistantMessage = await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", executed.responseMessage);
@@ -705,11 +689,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
             const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal, { id: resolved.company!.id, name: resolved.company!.name });
             send("result", { ...result, activeContext: resolved.context });
           } else {
-          const conversation = memoryPolicy.writeAllowed
-            ? request.body.conversationId
-              ? (await workspaceStore.getNeutralConversation(auth, request.body.conversationId)).conversation
-              : await workspaceStore.createNeutralConversation(auth, conversationTitle(message))
-            : undefined;
+          const conversation = await chatConversation();
           if (conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", message);
           progress({ type: "final_generation_started" });
           const runResult = await companyRuntime.execute(
