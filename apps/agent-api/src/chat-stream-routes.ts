@@ -550,6 +550,14 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
       }
 
       const progress = (event: ResearchProgressEvent) => send("progress", { ...event, timestamp: new Date().toISOString() });
+      /** Work addressed to a company agent by name ("have Coach Ana delegate to Leo ...") is run by the Company Runtime,
+       * not answered by the neutral chat model playing those agents. */
+      const addressesCompanyAgent = async (company?: { id: string }) => {
+        if (!company) return false;
+        const lower = message.toLocaleLowerCase();
+        const agents = (await workspaceStore.listCompanyAgentsPage(auth, company.id, 50).catch(() => ({ items: [] }))).items;
+        return agents.some((agent) => agent.isActive && agent.name.trim().length >= 3 && lower.includes(agent.name.trim().toLocaleLowerCase()));
+      };
       try {
         // A review of an external page is answered by chat with Web Research, not by the project pipeline.
         if (projectIntent.intent !== "CHAT" && !(projectIntent.intent === "REVIEW_PROJECT" && namesExternalPage(message))) {
@@ -616,13 +624,14 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
             }
           }
           send("result", projectResponse);
-        } else if (resolved.context.contextType === "project") {
+        } else if (resolved.context.contextType === "project" && !(await addressesCompanyAgent(resolved.company))) {
           const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal);
           send("result", { ...result, activeContext: resolved.context });
         } else if (resolved.context.contextType === "none") {
           const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy,(delta)=>send("delta",{delta}),streamController.signal);
           send("result", { ...result, activeContext: resolved.context });
-        } else if (resolved.context.contextType === "company") {
+        } else if (resolved.context.contextType === "company" || resolved.context.contextType === "project") {
+          // Project context reaches this branch only when the message addresses one of the company's agents by name.
           const company = resolved.company!;
           const managementRequest = isShortAffirmativeReply(message) || requestsCompositeCompanyDeletionIntent(message) || EmailChatActions.isManagementRequest(message) || CompanyChatActions.isManagementRequest(message) || CompanyChatActions.isPotentialMutationRequest(message) || WorkspaceChatActions.isManagementRequest(message) || WorkspaceChatActions.isPotentialMutationRequest(message);
           const explicitCoreWebRequest = explicitlyRequestsWebResearch(message);
