@@ -971,3 +971,13 @@ describe("email action with malformed directive JSON", () => {
     } finally { await app.close(); }
   });
 });
+
+describe("a refused company deletion", () => {
+  it("allows only the deletion itself while the user asks to delete a company", async () => {
+    const { onlyRequestedCompanyDeletion } = await import("../apps/agent-api/src/company-delete-i18n");
+    expect(onlyRequestedCompanyDeletion("Так, видали компанію Пекарня Сонях", "update")).toBe(false);
+    expect(onlyRequestedCompanyDeletion("Так, видали компанію Пекарня Сонях", "delete")).toBe(true);
+    expect(onlyRequestedCompanyDeletion("Додай агента «Тест» у компанію Temp Delete Co", "update")).toBe(true);
+    expect(onlyRequestedCompanyDeletion("Видали агента Марко з компанії", "update")).toBe(true);
+  });
+});

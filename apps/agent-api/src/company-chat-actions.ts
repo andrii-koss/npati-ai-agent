@@ -722,7 +722,9 @@ For update, include only fields that should change. To change only agents, use a
         return { cleanText: (namedCompanyNotFoundCopy[language] ?? namedCompanyNotFoundCopy.en!).replace("{name}", safeMarkdown(error.companyName)) };
       }
       const labels = companyChatCopy(options.requestMessage, options.responseLanguage);
-      return { cleanText: `${labels.failed}. ${changed ? labels.partial : labels.unchanged}` };
+      // A business rule that refused the change (e.g. data backends still owned by the company) is the user's to act on.
+      const rule = error instanceof Error && /cannot be deleted while/iu.test(error.message) ? `: ${error.message}` : ".";
+      return { cleanText: `${labels.failed}${rule} ${changed ? labels.partial : labels.unchanged}` };
     }
   }
 }

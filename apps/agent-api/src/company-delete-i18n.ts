@@ -99,6 +99,16 @@ export function deleteIsTheAction(message: string): boolean {
   return !other || remove.index < other.index;
 }
 
+/**
+ * While the user asks to delete a company itself ("видали компанію X", "delete the company X"), only that deletion may
+ * run in the request: a model whose delete was refused must not work around it by removing agents or editing fields.
+ * Deleting an agent of a company ("видали агента Марко з компанії") is not a company deletion.
+ */
+export function onlyRequestedCompanyDeletion(message: string, action: unknown): boolean {
+  const deletesCompany = /(?:видали|видалити|видаліть|удали|delete|remove|exclua|elimina|lösche|supprime)\s+(?:(?:the|my|this|that|цю|нашу|мою|ту)\s+)?(?:компані\p{L}*|компани\p{L}*|compan\p{L}*|empresa|unternehmen|entreprise|azienda)/iu.test(withoutQuotedNames(message));
+  return !deletesCompany || action === "delete";
+}
+
 export function isCompanyDeleteIntent(message: string): boolean {
   message = withoutQuotedNames(message);
   if (!deleteIsTheAction(message)) return false;

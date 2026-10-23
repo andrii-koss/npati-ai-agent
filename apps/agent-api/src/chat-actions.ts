@@ -18,7 +18,7 @@ import { CHAT_TOOL_SELECTION_INSTRUCTION, CORE_CHAT_TOOLS, ChatToolExecutionResu
 import { createCodeRunAdmission } from "./code-run-admission";
 import { CompanyChatActions } from "./company-chat-actions";
 import { CompanyChatLanguage, chatLanguageInstruction, companyChatCopy, detectCompanyChatLanguage, resolveConversationLanguage } from "./company-chat-i18n";
-import { companyDeleteCompletedAll, companyDeleteConfirmAll, isCompanyDeleteConfirmed } from "./company-delete-i18n";
+import { companyDeleteCompletedAll, companyDeleteConfirmAll, isCompanyDeleteConfirmed, onlyRequestedCompanyDeletion } from "./company-delete-i18n";
 import { reconcilePlannedCompanyArgs } from "./company-plan-reconciliation";
 import { verifyPlannedCompany } from "./company-plan-verification";
 import { CompanyRunQueueProducer } from "./company-run-queue";
@@ -471,6 +471,11 @@ ${localized.next}`;
     if (input.call.function.name === "npati_company_action") {
       if (!input.auth.permissions.includes("business:manage")) throw new Error("Company management permission is required");
       const directiveArgs = input.companyPlan ? reconcilePlannedCompanyArgs(input.args, input.companyPlan) : input.args;
+      // While the user asks to delete a company, only that deletion may run: a model whose delete was refused must not
+      // "work around" it by removing the company's agents or editing it.
+      if (!onlyRequestedCompanyDeletion(input.requestMessage, directiveArgs.action)) {
+        throw new Error("Only the requested company deletion may run in this request. Do not change agents or company fields instead; tell the user why the deletion did not complete.");
+      }
       const directive = `\`\`\`company-action\n${JSON.stringify(directiveArgs)}\n\`\`\``;
       const executed = await executeCompanyChatAction(input.auth, directive, input.conversationId, input.requestMessage, {
         model: input.model,
