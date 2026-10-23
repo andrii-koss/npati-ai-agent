@@ -499,36 +499,30 @@ You can emit BOTH \`\`\`business-action\`\`\` and \`\`\`goal-action\`\`\` in the
           } else {
             const g = directive.goal || {};
             const title = String(g.title || "").trim();
-            if (!title) throw new Error("Goal title is required");
+            if ((directive.action === "create" || g.title !== undefined) && !title) throw new Error("Goal title is required");
 
-            const goalInput: GoalInput = {
-              title,
-              description: g.description ? String(g.description).trim() : undefined,
-              priority: normalizeGoalPriority(g.priority),
-              status: normalizeGoalStatus(g.status),
-              targetValue: g.targetValue !== undefined && g.targetValue !== null && g.targetValue !== "" ? Number(g.targetValue) : undefined,
-              currentValue: g.currentValue !== undefined && g.currentValue !== null && g.currentValue !== "" ? Number(g.currentValue) : undefined,
-              targetUnit: g.targetUnit ? String(g.targetUnit).trim() : undefined,
-              targetDate: g.targetDate ? String(g.targetDate).trim() : undefined,
+            const goalInput: Partial<GoalInput> = {
+              ...(title ? { title } : {}),
+              ...(g.description !== undefined ? { description: String(g.description).trim() } : {}),
+              ...(g.priority !== undefined ? { priority: normalizeGoalPriority(g.priority) } : {}),
+              ...(g.status !== undefined ? { status: normalizeGoalStatus(g.status) } : {}),
+              ...(g.targetValue !== undefined && g.targetValue !== null && g.targetValue !== "" ? { targetValue: Number(g.targetValue) } : {}),
+              ...(g.currentValue !== undefined && g.currentValue !== null && g.currentValue !== "" ? { currentValue: Number(g.currentValue) } : {}),
+              ...(g.targetUnit !== undefined ? { targetUnit: String(g.targetUnit).trim() } : {}),
+              ...(g.targetDate !== undefined ? { targetDate: String(g.targetDate).trim() } : {}),
             };
 
             let goal: Goal;
             if (directive.action === "create") {
-              goal = await workspaceStore.createGoal(auth, targetBusinessId, goalInput);
+              goal = await workspaceStore.createGoal(auth, targetBusinessId, { ...goalInput, title });
             } else {
               // Update existing goal
               const existingGoals = await workspaceStore.listGoals(auth, targetBusinessId);
-              let targetGoalId = directive.goalId?.trim();
-              if (!targetGoalId || !existingGoals.some((eg) => eg.id === targetGoalId)) {
-                // Match by title
-                const matched = existingGoals.find(
-                  (eg) => eg.title.toLowerCase() === title.toLowerCase() ||
-                         (directive.goalId && eg.title.toLowerCase().includes(directive.goalId.toLowerCase()))
-                );
-                if (matched) targetGoalId = matched.id;
-                else if (existingGoals.length === 1) targetGoalId = existingGoals[0]!.id;
-                else throw new Error(`Goal "${title}" not found for business "${targetBusiness.name}".`);
-              }
+              const requested = directive.goalId?.trim() || title;
+              const exact = existingGoals.filter(item => item.id === requested || item.title.toLowerCase() === requested.toLowerCase());
+              const target = exact.length === 1 ? exact[0] : !requested && existingGoals.length === 1 ? existingGoals[0] : undefined;
+              if (!target) throw new Error("Goal target is missing or ambiguous for the selected Business");
+              const targetGoalId = target.id;
               goal = await workspaceStore.updateGoal(auth, targetBusinessId, targetGoalId, goalInput);
             }
 

@@ -158,3 +158,9 @@ describe("business legal/contact fields and logo from chat", () => {
     }
   });
 });
+
+it("updates only supplied Goal fields without requiring the title again", async () => {
+ const store=new InMemoryWorkspaceStore();const business=await store.createBusiness(alice,{name:"Goal patch test",businessStage:"operating"});const goal=await store.createGoal(alice,business.id,{title:"Original launch",description:"Before",priority:2,status:"paused"});
+ const result=await BusinessActionHandler.extractAndExecute(alice,"```goal-action\n"+JSON.stringify({action:"update",businessId:business.id,goalId:goal.id,goal:{description:"Catálogo con datos reales"}})+"\n```",store);
+ expect(result.goalAction?.action).toBe("update");expect((await store.listGoals(alice,business.id))[0]).toMatchObject({id:goal.id,title:"Original launch",description:"Catálogo con datos reales",priority:2,status:"paused"});
+});

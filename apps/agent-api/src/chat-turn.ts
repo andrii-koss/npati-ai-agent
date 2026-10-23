@@ -608,6 +608,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
     const createdBusiness = createdBusinessAction?.action === "create" ? createdBusinessAction.business : undefined;
     const goalCompletion = await completeCreatedBusinessGoal(auth, safeUserRequest, createdBusiness, executedAction.cleanText);
     const initialWorkspaceAction = nativeBusinessAction || nativeCompanyAction || companySettingsRequest
+      || (executedAction.goalAction && !WorkspaceChatActions.isManagementRequest(safeUserRequest, { includeGoals: false }))
       ? { cleanText: companyAction.cleanText, workspaceAction: undefined, companyRunId: undefined }
       : await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safeUserRequest, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id, selectedBusinessId: createdBusiness?.id });
     const workspaceAction = await completeCreatedBusinessMemory(auth, safeUserRequest, conversation?.id, createdBusiness, goalCompletion.reply, initialWorkspaceAction);

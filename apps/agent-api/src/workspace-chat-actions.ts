@@ -326,10 +326,10 @@ function contentTask(task: string): { title?: string; type: ContentLibraryType }
 }
 
 export class WorkspaceChatActions {
-  static isManagementRequest(message: string): boolean {
+  static isManagementRequest(message: string, options: { includeGoals?: boolean } = {}): boolean {
     const subject = profileEntitySignal.test(message) ? message.replace(profileFieldTerms, " ") : message;
     const resource = resourceSignals.some((pattern) => pattern.test(subject)) || websiteResourceSignals.some((pattern) => pattern.test(subject)) || webhookResourceSignal.test(subject);
-    return requestsBusinessGoal(message) || memoryVerbSignal.test(subject) || resource && (actionSignals.some((pattern) => pattern.test(message)) || automationReadSignals.some((pattern) => pattern.test(message)));
+    return (options.includeGoals !== false && requestsBusinessGoal(message)) || memoryVerbSignal.test(subject) || resource && (actionSignals.some((pattern) => pattern.test(message)) || automationReadSignals.some((pattern) => pattern.test(message)));
   }
 
   static isPotentialMutationRequest(message: string): boolean {
