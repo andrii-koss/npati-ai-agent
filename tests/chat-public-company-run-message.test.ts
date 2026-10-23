@@ -6,6 +6,7 @@ describe("public company run message", () => {
     const refused = publicCompanyRunMessage("", 'Agent "Олена" may not use storage.company_memory', "Перейменуй агента Марко", "TOOL_FORBIDDEN");
     expect(refused).toBe('Завдання компанії не виконано: Agent "Олена" may not use storage.company_memory');
     expect(publicCompanyRunMessage("", "Main agent is inactive", "Run the company", "MAIN_AGENT_INACTIVE")).toMatch(/^The company task was not completed/);
+    expect(publicCompanyRunMessage("", "Main Agent selected an unavailable agent", "Run the company", "CROSS_COMPANY_AGENT_SELECTION")).toMatch(/unavailable agent/);
     expect(publicCompanyRunMessage("", "upstream 503", "Запусти компанію", "MODEL_UNAVAILABLE")).toMatch(/AI-моделі/);
   });
 });
