@@ -625,7 +625,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
           }
           send("result", projectResponse);
         } else if (resolved.context.contextType === "project" && !(await addressesCompanyAgent(resolved.company))) {
-          const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal);
+          const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal, resolved.company ? { id: resolved.company.id, name: resolved.company.name } : undefined);
           send("result", { ...result, activeContext: resolved.context });
         } else if (resolved.context.contextType === "none") {
           const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy,(delta)=>send("delta",{delta}),streamController.signal);
