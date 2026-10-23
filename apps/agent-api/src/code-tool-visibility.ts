@@ -109,6 +109,8 @@ export interface CodeToolVisibilityContext {
 }
 
 const URL_PATTERN = /\bhttps?:\/\/[^\s<>"']+/iu;
+/** A check of the running site (console errors, broken links, Live Preview) needs the Browser QA tool, not only a build. */
+const BROWSER_QA_PATTERN = /(?:browser\s*qa|\bqa\b|console\s+errors?|broken\s+links?|live\s+preview|\bpreview\b|консол\p{L}*|бит\p{L}*\s+посилан\p{L}*|прев[ʼ'’]?ю|відкрий\s+(?:сайт|сторінк\p{L}*|меню)|erros?\s+de\s+console|links?\s+quebrad\p{L}*|errores?\s+de\s+consola|konsolenfehler|defekte\s+links)/iu;
 const DOCS_PATTERN = /(?:документац|довідк|знайди в (?:інтернеті|мережі)|пошукай в (?:інтернеті|мережі)|загугли|\bdocs?\b|documentation|api reference|search the web|look it up online|\bgoogle\b|latest version|остання версія)/iu;
 const IMAGE_PATTERN = /(?:фото|зображен|картинк|скрин|логотип|іконк|\bimage|\bpicture|\bphoto|screenshot|\blogo\b|\.(?:png|jpe?g|gif|webp|svg)\b)/iu;
 const VISUAL_PATTERN = /(?:дизайн|вигляд|виглядає|колір|кольор|стил[ьяі]|макет|верстк|шрифт|відступ|адаптив|мобільн|кнопк|(?<!\p{L})фон(?!\p{L})|\bdesign|\blook|\bcolou?r|\bstyle|\blayout|\bcss\b|\bfont|spacing|responsive|\btheme|\bui\b|screenshot|скрин)/iu;
@@ -136,7 +138,7 @@ export function contextualToolMatches(context: CodeToolVisibilityContext): Set<s
   if (hasImages || IMAGE_PATTERN.test(message)) matched.add("code.image.view");
   if (URL_PATTERN.test(message)) matched.add("code.web.fetch");
   if (DOCS_PATTERN.test(message)) { matched.add("code.web.search"); matched.add("code.web.fetch"); }
-  if (context.websiteEdit && (hasImages || VISUAL_PATTERN.test(message))) matched.add("code.preview.screenshot");
+  if (context.websiteEdit && (hasImages || VISUAL_PATTERN.test(message) || BROWSER_QA_PATTERN.test(message))) matched.add("code.preview.screenshot");
   // A question is worth pausing a run for only when the request is genuinely open: a creation request, an
   // explicit "ask me", or a message too short to name a target. A concrete edit must not stop to ask.
   if (context.requireImplementation || ASK_PATTERN.test(message) || wordCount(message) <= 3) matched.add("code.ask_user");
