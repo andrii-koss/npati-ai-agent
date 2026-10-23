@@ -920,3 +920,30 @@ describe("company management from chat", () => {
     } finally { await app.close(); }
   });
 });
+
+describe("email action with malformed directive JSON", () => {
+  it("is planned once more with the parser error", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(alice, { name: "Mail Co" }, "mail-co");
+    const broken = "```email-action\n{\"actions\":[{\"action\":\"contact.upsert\",\"companyId\":\"" + company.id + "\" \"fields\":{}}]}\n```";
+    const notes: number[] = [];
+    const aiEngine: AIEngine = {
+      chat: async (request) => {
+        const retry = request.messages.some((item) => item.role === "system" && String(item.content).includes("email-action block was not valid JSON"));
+        notes.push(retry ? 1 : 0);
+        return { content: broken };
+      },
+      async *stream() { yield broken; },
+      listModels: async () => [], getModel: async () => undefined,
+      executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+      getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => alice }, aiEngine, marketplace });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Заблокуй відправника winner@lottery.example у пошті", contextType: "company", companyId: company.id } });
+      expect(response.statusCode).toBe(200);
+      expect(notes.filter(Boolean)).toHaveLength(1);
+    } finally { await app.close(); }
+  });
+});
