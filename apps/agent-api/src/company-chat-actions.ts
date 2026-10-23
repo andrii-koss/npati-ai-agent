@@ -383,7 +383,8 @@ async function ownedCompany(store: WorkspaceStore, auth: AuthContext, directive:
     cursor = page.nextCursor ?? undefined;
     if (matches.length > 1) break;
   } while (cursor);
-  if (matches.length !== 1) throw new Error(matches.length ? "More than one company has this name; use its ID" : "Company not found in your account");
+  if (matches.length > 1) throw new Error("More than one company has this name; use its ID");
+  if (!matches.length) throw new NamedCompanyNotFoundError(directive.companyName!.trim());
   return matches[0]!;
 }
 
