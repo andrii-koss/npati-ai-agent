@@ -192,3 +192,23 @@ describe("visual review timeout", () => {
     expect((chat.mock.calls as any)[0][0].timeoutMs).toBeGreaterThanOrEqual(90_000);
   });
 });
+
+describe("a malformed verdict is asked for once more", () => {
+  it("uses a valid second answer and never a third", async () => {
+    const f = await fixture();
+    const chat = vi.fn()
+      .mockResolvedValueOnce({ content: '{"scores":{"layout":0.9,"colors":0.9' })
+      .mockResolvedValueOnce({ content: JSON.stringify({ scores: { layout: 0.9, colors: 0.9, typography: 0.9, spacing: 0.9, imagery: 0.9 }, differences: [{ severity: "minor", text: "Gradient slightly warmer" }] }) });
+    const reviewed = await reviewWebsiteReference(f.input, f.run, { inspect: async () => f.qa, chat: chat as never }) as any;
+    expect(chat).toHaveBeenCalledTimes(2);
+    expect(reviewed.visualAcceptance.status).toBe("passed");
+  });
+
+  it("stays blocked when the second answer is malformed too", async () => {
+    const f = await fixture();
+    const chat = vi.fn().mockResolvedValue({ content: "not json" });
+    const reviewed = await reviewWebsiteReference(f.input, f.run, { inspect: async () => f.qa, chat: chat as never }) as any;
+    expect(chat).toHaveBeenCalledTimes(2);
+    expect(reviewed.visualAcceptance).toMatchObject({ status: "blocked" });
+  });
+});
