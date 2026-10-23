@@ -213,10 +213,17 @@ describe("P0.2 Production Suite: Company Knowledge & Long-Term Agent Memory", ()
       expect(result.summary).toContain("use PostgreSQL");
       expect(requests).toHaveLength(1);
 
+      // A later turn reuses the summary of the same older block instead of summarizing it again.
+      const later = await ContextCompactor.compactWithModel({ ai, model: "provider/model", messages: [...messages, { role: "user", content: "Message 15" }, { role: "assistant", content: "Message 16" }], keepRecentTurns: 4 });
+      expect(later.summary).toContain("use PostgreSQL");
+      expect(later.preservedMessages).toHaveLength(6);
+      expect(requests).toHaveLength(1);
+
       const unavailable = { chat: async () => { throw new Error("provider unavailable"); } } as AIEngine;
-      const fallback = await ContextCompactor.compactWithModel({ ai: unavailable, model: "provider/model", messages, keepRecentTurns: 4 });
+      const other = messages.map((message) => ({ ...message, content: message.content + " (other conversation)" }));
+      const fallback = await ContextCompactor.compactWithModel({ ai: unavailable, model: "provider/model", messages: other, keepRecentTurns: 4 });
       expect(fallback.compacted).toBe(false);
-      expect(fallback.preservedMessages).toEqual(messages);
+      expect(fallback.preservedMessages).toEqual(other);
       expect(fallback.failureReason).toContain("provider unavailable");
     });
 
