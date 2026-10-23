@@ -67,3 +67,26 @@ describe("management actions in a project chat", () => {
     expect(prompts.some((prompt) => prompt.includes(`Selected company ID: ${JSON.stringify(company.id)}`))).toBe(true);
   });
 });
+
+describe("a chat whose stored company was deleted", () => {
+  it("continues without that context instead of failing every message", async () => {
+    const context: AuthContext = { workspaceId: "workspace-stale", userId: "owner", permissions: ["workspace:read", "workspace:write", "business:manage", "chat:use"] };
+    const store = new InMemoryWorkspaceStore();
+    const aiEngine: AIEngine = {
+      chat: vi.fn(async () => ({ content: "Neutral answer" })), async *stream() { yield "Neutral answer"; },
+      listModels: async () => [], getModel: async () => undefined, executeTool: async () => ({}),
+      searchMemory: async () => [], saveMemory: async () => undefined, getCapabilities: async () => ["chat"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => ({ ...context }) }, aiEngine, marketplace });
+    apps.push(app);
+    const company = await store.createCompany(context, { name: "Cafe" }, "cafe");
+    await store.createProject(context, company.id, { name: "Cafe site", type: "website" } as never, "cafe-site");
+    const project = (await store.listProjects(context, company.id))[0]!;
+    await store.deleteCompany(context, company.id, (await store.getCompany(context, company.id)).revision);
+    const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Hello! Thanks for the help today.", contextType: "project", companyId: company.id, projectId: project.id } });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).not.toContain("BUSINESS_ACCESS_DENIED");
+    expect(response.body).toContain('"contextType":"none"');
+  });
+});
