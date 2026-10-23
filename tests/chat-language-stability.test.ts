@@ -134,3 +134,15 @@ describe("stable active conversation language", () => {
     expect(resolveConversationLanguage("Please continue the launch plan. Source quote: « le marché progresse rapidement ».", englishHistory)).toBe("en");
   });
 });
+
+describe("short Latin-script messages", () => {
+  it("detects the language of short requests by their function words", async () => {
+    const { detectCompanyChatLanguage } = await import("../apps/agent-api/src/company-chat-i18n");
+    expect(detectCompanyChatLanguage("Remember for Nordic Fit: classes start every hour from 7am to 9pm.")).toBe("en");
+    expect(detectCompanyChatLanguage("Have Coach Ana delegate to Leo: write 3 Instagram captions for our Monday HIIT class.")).toBe("en");
+    expect(detectCompanyChatLanguage("Agora em português: atualiza a descrição da Nordic Fit para incluir também aulas de pilates.")).toBe("pt");
+    expect(detectCompanyChatLanguage("En español, por favor: ¿cuántos agentes tiene la panadería y quién es el agente principal?")).toBe("es");
+    expect(detectCompanyChatLanguage("Bitte auf Deutsch: Fasse den aktuellen Stand der Bäckerei zusammen")).toBe("de");
+    expect(detectCompanyChatLanguage("Les cours commencent toutes les heures, de 7h00 à 21h00.")).toBe("fr");
+  });
+});
