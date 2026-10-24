@@ -276,7 +276,10 @@ export function registerAppRoutesAndLifecycle(deps: AppRoutesAndLifecycleDeps) {
   const resolveProjectIntent = createChatProjectIntentResolver({ engine: aiEngine, getAIContext, log,
     // The 20 most recent owned companies, read in parallel, as in the named-company context resolver.
     listAgentNames: async (auth) => {
-      const companies = (await workspaceStore.listCompanies(auth, 20)).items;
+      const owned: Awaited<ReturnType<typeof workspaceStore.listCompanies>>["items"] = [];
+      let cursor: string | undefined;
+      do { const page = await workspaceStore.listCompanies(auth, 100, cursor); owned.push(...page.items); cursor = page.nextCursor ?? undefined; } while (cursor && owned.length < 500);
+      const companies = owned.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(0, 20);
       return (await Promise.all(companies.map(async (company) => (await workspaceStore.listCompanyAgentsPage(auth, company.id, 50)).items.map((agent) => agent.name)))).flat();
     } });
   registerChatRoutes(app, {

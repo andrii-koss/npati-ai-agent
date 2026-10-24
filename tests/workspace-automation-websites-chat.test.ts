@@ -212,3 +212,13 @@ it("treats a request that names an owned automation as workspace management with
   const prompt = await WorkspaceChatActions.buildSystemPrompt(alice, store, message, company.id, undefined, { automations, content: new ContentLibraryStore(store) });
   expect(prompt).toContain("Stress Weekly Revised");
 });
+
+it("finds a named automation in a recently updated company beyond the oldest twenty", async () => {
+  const store = new InMemoryWorkspaceStore();
+  const automations = new CompanyAutomationsRepository();
+  for (let index = 0; index < 22; index++) await store.createCompany(alice, { name: "Old company " + index }, "old-company-" + index);
+  const recent = await store.createCompany(alice, { name: "Recent Bakery" }, "recent-bakery");
+  const agent = await store.createCompanyAgent(alice, recent.id, { name: "Runner", role: "Operator", tools: [] }, "recent-bakery-agent");
+  await automations.create(alice, recent.id, { name: "Recent Weekly", prompt: "Report OK", cronExpression: "0 9 * * 1", agentId: agent.id });
+  expect(await WorkspaceChatActions.namesOwnedAutomation(alice, store, 'Run "Recent Weekly" once.', automations)).toBe(true);
+});

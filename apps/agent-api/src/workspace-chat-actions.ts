@@ -320,7 +320,9 @@ export class WorkspaceChatActions {
   /** "Run Stress Weekly Revised once" names an automation without the word "automation": its exact name counts as the resource. */
   static async namesOwnedAutomation(auth: AuthContext, store: WorkspaceStore, message: string, automations?: WorkspaceChatActionDependencies["automations"]): Promise<boolean> {
     if (!automations || !auth.permissions.includes("business:manage")) return false;
-    const owned = (await store.listCompanies(auth, 20).catch(() => ({ items: [] as Company[] }))).items;
+    // The listing is oldest first; the 20 most recently updated companies are the ones the user works with.
+    const owned = (await companies(store, auth).catch(() => [] as Company[]))
+      .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(0, 20);
     const names = (await Promise.all(owned.map((company) => automations.list(auth, company.id).catch(() => [])))).flat().map((item) => item.name.trim());
     return names.some((name) => name.length > 2 && new RegExp(`(?<![\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "u").test(message));
   }
