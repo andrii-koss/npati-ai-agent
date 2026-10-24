@@ -242,6 +242,7 @@ export class CompanyDelegationRuntime {
                 id: agent.id, name: agent.name, role: agent.role, description: agent.description,
                 tools: agent.tools.map(toolName).filter((tool) => !options.noMemory || !["knowledge", "files", "storage.company_memory"].includes(tool)),
               })), 30_000),
+              'When a named Main Agent authors work for a distinct reviewer, include the author Main Agent ID in agentIds. A sole reviewer cannot review its own output.',
               'Return JSON only: {"mode":"single|pipeline|fusion","agentIds":["id"],"reviewerAgentId":"id or omit","toolRequests":[{"agentId":"id","tool":"tool id","input":{}}]}.',
               "Tool selection rules and input contracts (only request a tool allowed for that agent):",
               'web.search: {"query":"non-empty specific search query","maxResults":5,"searchType":"web or news"}. Use ONLY when live public external web information, competitor research, or current market facts are needed. Do NOT use for internal company data or general capability queries.',
@@ -402,6 +403,7 @@ export class CompanyDelegationRuntime {
         corrected.toolRequests = corrected.toolRequests.map((request) => ({ ...request, agentId: resolveAgentId(request.agentId)! }));
         plan = corrected;
       }
+      const mainAssignedWork = plan.agentIds.includes(main.id);
       let selected = plan.agentIds.map((id) => byId.get(id)).filter((agent): agent is CompanyAgent => Boolean(agent));
       if (selected.length !== plan.agentIds.length) throw new CompanyRuntimeError("CROSS_COMPANY_AGENT_SELECTION", "Main Agent selected an unavailable agent", 502);
       selected = selected.filter((agent) => agent.id !== main.id);
@@ -414,7 +416,7 @@ export class CompanyDelegationRuntime {
       if (plan.toolRequests.length > 20) {
         throw new CompanyRuntimeError("TOOL_LOOP_DETECTED", "Too many tool requests in delegation plan", 400);
       }
-      if (reviewer && selected.length === 1 && selected[0]?.id === reviewer.id) {
+      if (reviewer && selected.length === 1 && selected[0]?.id === reviewer.id && !mainAssignedWork) {
         throw new CompanyRuntimeError("CIRCULAR_DELEGATION", "An agent cannot review only its own work", 400);
       }
       // Retrieved chunks are injected only into the Main Agent's final/grounding calls.
@@ -439,7 +441,7 @@ export class CompanyDelegationRuntime {
         knowledge.memories.length ? "Relevant Company Memory:\n" + knowledge.memories.map(item => item.content).join("\n") : "",
         knowledge.chunks.length ? "Authoritative Relevant Company Knowledge (use exact facts; do not invent replacements):\n" + knowledge.chunks.map(item => item.content).join("\n\n---\n\n") : "",
       ].filter(Boolean).join("\n\n");
-      const execution = await this.combos(company, main, selected, reviewer, plan.mode, signal, !options.noMemory, linked, inferenceModels.length ? inferenceModels : undefined);
+      const execution = await this.combos(company, main, selected, reviewer, plan.mode, signal, !options.noMemory, linked, inferenceModels.length ? inferenceModels : undefined, mainAssignedWork);
       const ids = [...new Set([...selected.map((agent) => agent.id), main.id])];
       await this.store.replaceCompanyAgentRunSteps(ctx, companyId, created.run.id, ids.map((id, index) => {
         const agent = byId.get(id) ?? main;
@@ -661,7 +663,7 @@ export class CompanyDelegationRuntime {
     });
   }
 
-  private async combos(company: Company, main: CompanyAgent, selected: CompanyAgent[], reviewer: CompanyAgent | undefined, mode: Mode, signal: AbortSignal, includeMemory = true, linked?: LinkedBusinessContext, inferenceModels?: string[]) {
+  private async combos(company: Company, main: CompanyAgent, selected: CompanyAgent[], reviewer: CompanyAgent | undefined, mode: Mode, signal: AbortSignal, includeMemory = true, linked?: LinkedBusinessContext, inferenceModels?: string[], mainAssignedWork = false) {
     if (!this.ai.ensureCombo) throw new CompanyRuntimeError("OMNIROUTE_COMBOS_UNAVAILABLE", "NPATI AI routing combinations are unavailable", 503);
     const unique = [...new Map([...selected, main].map((agent) => [agent.id, agent])).values()], names = new Map<string, string>();
     for (const agent of unique) {
@@ -688,9 +690,11 @@ export class CompanyDelegationRuntime {
       names.set(agent.id, name);
     }
     const workers = selected.filter((agent) => agent.id !== main.id && agent.id !== reviewer?.id);
+    // A main agent explicitly selected as an author produces a draft before a distinct reviewer.
+    if (mainAssignedWork && reviewer && reviewer.id !== main.id) workers.unshift(main);
     if (mode === "single" && !workers.length && (!reviewer || reviewer.id === main.id))
       return { model: names.get(main.id)!, mode: "single" as const };
-    const signature = digest(json({ company: company.id, mode, agents: unique.map((agent) => [agent.id, names.get(agent.id)]), reviewer: reviewer?.id, judgeModel: this.strictInferenceRouting ? inferenceModels?.[0] : comboModel(main.modelId) }));
+    const signature = digest(json({ company: company.id, mode, mainAssignedWork, agents: unique.map((agent) => [agent.id, names.get(agent.id)]), reviewer: reviewer?.id, judgeModel: this.strictInferenceRouting ? inferenceModels?.[0] : comboModel(main.modelId) }));
     if (mode === "fusion" && workers.length >= 2) {
       const fusion = `npati/f/${signature}`;
       await this.ai.ensureCombo({

@@ -360,3 +360,28 @@ describe("Company delegation runtime", () => {
   });
 
 });
+
+
+it.each([true, false])("allows an explicit main-agent author before a distinct reviewer, while rejecting self-review only: %s", async includeAuthor => {
+  const combos: OmniRouteComboInput[] = [];
+  let plan = "";
+  const chat = vi.fn(async () => ({ content: "Designer draft reviewed by Reviewer.", model: "openai/gpt-4o" }));
+  const active = { value: { workspaceId: "review-workspace", userId: "review-owner", permissions: ["workspace:read", "business:manage"] } };
+  const { app, companyId } = await setup(engine({ chat, a2aSend: async () => ({ taskId: "review-plan", content: plan }), ensureCombo: async combo => { combos.push(combo); return { name: combo.name }; } }), active);
+  const author = await addAgent(app, companyId, "main-author-review", { name: "Designer", role: "Designer" });
+  const reviewer = await addAgent(app, companyId, "distinct-reviewer", { name: "Reviewer", role: "Reviewer" });
+  await app.inject({ method: "PUT", url: "/companies/" + companyId + "/main-agent", payload: { agentId: author.id, expectedRevision: 1 } });
+  plan = JSON.stringify({ mode: "pipeline", agentIds: includeAuthor ? [author.id, reviewer.id] : [reviewer.id], reviewerAgentId: reviewer.id, toolRequests: [] });
+  const response = await app.inject({ method: "POST", url: "/companies/" + companyId + "/runs", headers: { "idempotency-key": "explicit-author-" + includeAuthor }, payload: { task: "Designer and Reviewer collaborate on a review" } });
+  if (!includeAuthor) {
+    expect(response.json().run.errorCode).toBe("CIRCULAR_DELEGATION");
+    expect(chat).not.toHaveBeenCalled();
+  } else {
+    expect(response.json().run.status).toBe("completed");
+    const pipeline = combos.find(combo => combo.strategy === "pipeline")!;
+    expect(pipeline.models).toHaveLength(3);
+    expect(pipeline.models[0]).toEqual(pipeline.models[2]);
+    expect(pipeline.models[1]).not.toEqual(pipeline.models[0]);
+    expect(chat).toHaveBeenCalledTimes(1);
+  }
+});
