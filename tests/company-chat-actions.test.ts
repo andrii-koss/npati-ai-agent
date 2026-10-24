@@ -1015,5 +1015,6 @@ describe("company deletion target", () => {
     expect(await CompanyChatActions.deleteConfirmationMessage(alice, store, "Видали компанію «Stress Studio»", company.id)).toContain("Stress Studio");
     expect(await CompanyChatActions.deleteConfirmationMessage(alice, store, 'In "Stress Next Shop" delete only row TEST_SCRATCH_735 from dev stress_scratch, then read the table to prove it is empty.', company.id)).toBeUndefined();
     expect(await CompanyChatActions.deleteConfirmationMessage(alice, store, "Delete it", company.id)).toContain("Stress Studio");
+    expect(CompanyChatActions.isManagementRequest('In "Stress Next Shop" delete only row TEST_SCRATCH_735 from dev stress_scratch, then read the table to prove it is empty.')).toBe(false);
   });
 });

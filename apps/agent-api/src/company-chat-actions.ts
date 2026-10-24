@@ -450,7 +450,7 @@ export class CompanyChatActions {
     if (isInformationalOrCapabilityQuery(message)) return false;
     const mutation = /(?:заповн|дод|змін|онов|редаг|налашт|признач|нада|видал|приб|переймен|rename|созда|добав|измен|обнов|редакт|настро|назнач|предостав|удал|fill|set|add|change|update|edit|configure|assign|remove|delete)/iu.test(message);
     const companyField = /(?:recommended\s+prompts?|system\s+instructions?|prompt\s+guidelines?|tools?\s*(?:&|and)?\s*capabilities|instructions?|agents?|roles?|models?|пол(?:е|я|ів|ями)\s+(?:компан|агент)|інструкц|промпт|можливост|агент|рол|модел|инструкц|возможност)/iu.test(message);
-    const deleteReference = deleteMutationSignal.test(withoutQuotedNames(message)) && selectedDeleteReferenceSignal.test(message);
+    const deleteReference = deleteMutationSignal.test(withoutQuotedNames(message)) && selectedDeleteReferenceSignal.test(message) && !namesOtherDeleteTarget(message);
     return mutation && companyField || deleteReference;
   }
 
