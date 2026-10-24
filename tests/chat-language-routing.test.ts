@@ -74,3 +74,10 @@ describe("chat response language", () => {
     expect(isSpreadsheetEditRequest(message)).toBe(true);
   });
 });
+
+it("returns to English for a request dominated by quoted names and codes after a Portuguese turn", async () => {
+  const { resolveConversationLanguage } = await import("../apps/agent-api/src/company-chat-i18n");
+  const history = [{ role: "user", content: 'No projeto "Stress DS1023 Astro", adicione o texto STRESS_ASTRO_UPDATED à página /about sem recriar o projeto.' }];
+  expect(resolveConversationLanguage('In "Stress DS1023 Bakery", update template "Stress DS1023 Reply" to include PICKUP_ORANGE_734, preserving its subject.', history)).toBe("en");
+  expect(resolveConversationLanguage('Exclua apenas o objetivo temporário "Stress DS1023 Temp Goal". Preserve "Stress DS1023 Launch".', history)).toBe("pt");
+});

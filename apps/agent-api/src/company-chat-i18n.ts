@@ -69,7 +69,11 @@ const languageCalibrationSamples: Partial<Record<keyof typeof languageSamples, s
 };
 
 function normalizedLanguageText(value: string): string {
-  return value.normalize("NFKC").toLocaleLowerCase().replace(/https?:\/\/\S+|```[\s\S]*?```|`[^`]*`/gu, " ").replace(/[^\p{L}\p{M}]+/gu, " ").replace(/\s+/g, " ").trim();
+  // Quoted names ("Stress Bakery", «Пекарня») and codes (PICKUP_ORANGE_734, DS1023) are not evidence of the user's language.
+  return value.normalize("NFKC")
+    .replace(/"[^"\n]{1,160}"|«[^»\n]{1,160}»|“[^”\n]{1,160}”|„[^“”\n]{1,160}[“”]/gu, " ")
+    .replace(/[\p{L}\p{N}]*[\p{N}_][\p{L}\p{N}_]*/gu, " ")
+    .toLocaleLowerCase().replace(/https?:\/\/\S+|```[\s\S]*?```|`[^`]*`/gu, " ").replace(/[^\p{L}\p{M}]+/gu, " ").replace(/\s+/g, " ").trim();
 }
 
 function ngramProfile(value: string): Map<string, number> {
