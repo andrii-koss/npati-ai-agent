@@ -243,6 +243,7 @@ it("recognizes reply template requests in several languages without treating web
   expect(EmailChatActions.isManagementRequest("Crea una plantilla de respuesta para pedidos de prueba")).toBe(true);
   expect(EmailChatActions.isManagementRequest("Erstelle eine Antwortvorlage für Testbestellungen")).toBe(true);
   expect(EmailChatActions.isManagementRequest("Create a landing page template for the bakery website")).toBe(false);
+  expect(EmailChatActions.isManagementRequest('In "Stress Bakery", update template "Stress Reply" to include PICKUP_ORANGE_734, preserving its subject.')).toBe(true);
 });
 
 it("creates a reply template with the default category when the planner invents one, and refuses an invalid category update", async () => {
