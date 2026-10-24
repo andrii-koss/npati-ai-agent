@@ -590,7 +590,9 @@ ${localized.next}`;
         });
         actionText = planned.content;
         // A management-looking read ("read the profile … no changes") keeps the grounded answer instead of a refusal.
-        readOnly = /^\s*READ_ONLY\s*$/.test(planned.content);
+        readOnly = !/```workspace-action/i.test(planned.content) && /\bREAD_ONLY\b/.test(planned.content);
+        if (!/```workspace-action/i.test(planned.content))
+          log.info({ outcome: readOnly ? "read_only" : /\bNO_ACTION\b/.test(planned.content) ? "no_action" : "no_directive" }, "Workspace action planner returned no directive");
       } catch (error) {
         log.warn({ err: error }, "Workspace action planning failed");
       }
