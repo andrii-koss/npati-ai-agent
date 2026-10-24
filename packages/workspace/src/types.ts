@@ -173,6 +173,8 @@ import type {
   CompanyRunMode,
   Conversation,
   ConversationMessage,
+  ConversationResearchEvidence,
+  ConversationResearchInput,
   CreateCheckpointInput,
   CreateCodeActivityEventInput,
   CreateCodeContextSummaryInput,
@@ -424,6 +426,9 @@ export interface WorkspaceStore {
   updateNeutralConversation(context: AuthContext, conversationId: string, title: string): Promise<Conversation>;
   deleteNeutralConversation(context: AuthContext, conversationId: string): Promise<boolean>;
   appendNeutralMessage(context: AuthContext, conversationId: string, role: ConversationMessage["role"], content: string): Promise<ConversationMessage>;
+  /** Research evidence of one owned conversation (newest last); never visible from another conversation or user. */
+  appendConversationResearch?(context: AuthContext, conversationId: string, input: ConversationResearchInput): Promise<ConversationResearchEvidence>;
+  listConversationResearch?(context: AuthContext, conversationId: string, limit?: number): Promise<ConversationResearchEvidence[]>;
   getOnboarding(context: AuthContext, businessId?: string): Promise<BusinessOnboardingSession | null>;
   listOnboardings(context: AuthContext): Promise<BusinessOnboardingSession[]>;
   startOnboarding(context: AuthContext, scenario: OnboardingScenario, options?: { forceNew?: boolean }): Promise<BusinessOnboardingSession>;

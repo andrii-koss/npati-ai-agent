@@ -517,7 +517,7 @@ ${localized.next}`;
       if (!outcome) throw new Error("Web research returned no evidence");
       return {
         output: { kind: outcome.kind, evidence: outcome.context, sources: outcome.sources, degraded: outcome.degraded },
-        metadata: { kind: "research", research: outcome },
+        metadata: { kind: "research", research: outcome, query, tool: input.call.function.name },
       };
     }
 

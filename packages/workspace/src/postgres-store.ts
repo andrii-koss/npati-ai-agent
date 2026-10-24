@@ -1,4 +1,5 @@
 import * as support from "./postgres-store-support";
+import * as research from "./conversation-research-evidence";
 import * as company from "./postgres-company-repositories";
 import * as project from "./postgres-workspace-repositories";
 import * as policy from "./postgres-policy-repositories";
@@ -42,7 +43,7 @@ import { runPostgresMigrationsLatePart1, runPostgresMigration083, runPostgresMig
 import { PostgresCodeInboxStore } from "./code-session-inbox-postgres";
 import { PostgresCodeProcessStore } from "./code-process-store-postgres";
 import { Pool } from "pg";
-import type { AuthContext, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionMode, CodeSessionStatus, ProjectCodeSettings, ProjectCodeTrust, ProjectCodeTrustInput, ProjectMountedFolder, ProjectMountedFolderInput, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification, FeatureFlag, FeatureFlagInput, FeatureFlagHistoryEntry, CodeToolManifest, SandboxImage, SandboxImageInput, SandboxImageVariant, CodeApprovalRule, CodeApprovalRuleInput, CodeApprovalRuleScope,
+import type { AuthContext, ConversationResearchInput, Business, BusinessInput, BusinessOnboardingSession, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInput, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, OnboardingScenario, WorkspaceOverview, WorkspaceStore, CodeSession, CodeSessionInput, CodeSessionMode, CodeSessionStatus, ProjectCodeSettings, ProjectCodeTrust, ProjectCodeTrustInput, ProjectMountedFolder, ProjectMountedFolderInput, DataClassification, RetentionClass, AuditEntry, AuditEntryInput, AuditAnchor, AuditChainState, AuditChainVerification, FeatureFlag, FeatureFlagInput, FeatureFlagHistoryEntry, CodeToolManifest, SandboxImage, SandboxImageInput, SandboxImageVariant, CodeApprovalRule, CodeApprovalRuleInput, CodeApprovalRuleScope,
   CompanyMember, CompanyInvite, CompanyInviteInput, AcceptCompanyInviteInput, UpdateCompanyMemberRoleInput, RemoveCompanyMemberInput, CompanyRole,
   ProviderDataPolicyRecord, UpsertProviderDataPolicyStoreInput, ProviderDataPolicyVersionRecord, ProjectDataPolicyRecord,
   UpsertProjectDataPolicyStoreInput, ProjectDataPolicyPathRule, ProviderHostedConsentRecord,
@@ -316,6 +317,8 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   async updateNeutralConversation(context: AuthContext, conversationId: string, title: string) { return collab.updateNeutralConversation(this.pool, context, conversationId, title); }
   async deleteNeutralConversation(context: AuthContext, conversationId: string) { return collab.deleteNeutralConversation(this.pool, context, conversationId); }
   async appendNeutralMessage(context: AuthContext, conversationId: string, role: ConversationMessage["role"], content: string) { return collab.appendNeutralMessage(this.pool, context, conversationId, role, content); }
+  async appendConversationResearch(context: AuthContext, conversationId: string, input: ConversationResearchInput) { return research.appendConversationResearch(this.pool, context, conversationId, input); }
+  async listConversationResearch(context: AuthContext, conversationId: string, limit?: number) { return research.listConversationResearch(this.pool, context, conversationId, limit); }
   async getCompanyMembership(companyId: string, userId: string): Promise<CompanyMember | null> { return company.getCompanyMembership(this.pool, companyId, userId); }
   async listCompanyMembers(companyId: string): Promise<CompanyMember[]> { return company.listCompanyMembers(this.pool, companyId); }
   async countCompanyOwners(companyId: string): Promise<number> { return company.countCompanyOwners(this.pool, companyId); }

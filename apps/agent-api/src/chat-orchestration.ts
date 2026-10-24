@@ -46,6 +46,7 @@ import { ContextBuilder } from "@npati/agent";
 import { AIEngine, ChatContentPart, ChatRequest, ChatToolCall, ChatToolDefinition, isChatCapableModel } from "@npati/omniroute-adapter";
 import { defaultSkillRegistry } from "@npati/skills";
 import { ResearchOutcome, ResearchProgressListener, extractTargetUrlOrDomain } from "@npati/web-research";
+import { researchEvidenceContext, researchEvidenceInput } from "./chat-research-evidence";
 import { AuthContext, Business } from "@npati/workspace";
 import type { AgentAIContext } from "@npati/agent";
 import { applyChatTelemetryHeaders } from "./chat-telemetry";
@@ -193,6 +194,8 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
     const nativeToolCalling = aiEngine.supportsNativeTools?.(context.ai.model) === true;
     let research: ResearchOutcome | undefined;
     let researchJob;
+    // Every research result of this turn, recorded verbatim for later recall in this conversation (A098).
+    const researchRecords: Array<{ tool: string; query: string; outcome: ResearchOutcome }> = [];
     const hasAttachedEvidence = media.images.length > 0 || media.extractedDocs.length > 0;
     const workspaceSettingsRequest = WorkspaceChatActions.isManagementRequest(safePrompt) || await WorkspaceChatActions.namesOwnedAutomation(auth, workspaceStore, safePrompt, automationsRepo);
     const emailSettingsRequest = EmailChatActions.isManagementRequest(safePrompt);
@@ -214,6 +217,7 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
           progress,
         )) ?? undefined;
         if(signal?.aborted)throw signal.reason??new DOMException("Cancelled","AbortError");
+        if (research?.sources.length) researchRecords.push({ tool: "web_research", query: safePrompt, outcome: research });
         if (researchJob) {
           await researchBundle?.jobs.update(scope, researchJob.id, {
             status: "completed",
@@ -231,6 +235,9 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
     const protectedHistory = memoryPolicy.readAllowed
       ? existing.messages.map((item) => ({ ...item, content: SecurityPolicyEngine.protectText(item.content).sanitized }))
       : [];
+    const priorResearch = memoryPolicy.readAllowed && conversation
+      ? researchEvidenceContext(await workspaceStore.listConversationResearch?.(auth, conversation.id, 12).catch(() => []) ?? [])
+      : undefined;
     const compaction = await ContextCompactor.compactWithModel({
       ai: aiEngine,
       model: context.ai.model,
@@ -283,7 +290,10 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
           onModelStep: (event) => logToolModelStep(event, { model: context.ai.model, conversationId: conversation?.id, contextType: "business" }),
         });
         for (const item of loop.metadata) {
-          if (item.kind === "research" && item.research) research = item.research as ResearchOutcome;
+          if (item.kind === "research" && item.research) {
+            research = item.research as ResearchOutcome;
+            if (research.sources.length) researchRecords.push({ tool: String(item.tool ?? "web_research"), query: String(item.query ?? safePrompt), outcome: research });
+          }
           if (item.kind === "business_profile" && item.outcome) {
             const outcome = item.outcome as { action: "create" | "update"; businessId: string };
             nativeBusinessAction = { action: outcome.action, business: await workspaceStore.getUserBusiness(auth, outcome.businessId), businessId: outcome.businessId };
@@ -309,7 +319,7 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
       message: safePrompt,
       context,
       history: compaction.preservedMessages as typeof existing.messages,
-      contextSummary: compaction.compacted ? compaction.summary : undefined,
+      contextSummary: [compaction.compacted ? compaction.summary : undefined, priorResearch].filter(Boolean).join("\n\n") || undefined,
       research: research ? SecurityPolicyEngine.protectObject(research) : undefined,
       images: media.images,
       businessActionInstruction,
@@ -341,6 +351,9 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
     result.message = workspaceAction.cleanText;
     progress?.({ type: "final_generation_completed" });
     if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendMessage(auth, businessId, conversation.id, "assistant", result.message);
+    if (memoryPolicy.writeAllowed && conversation) for (const record of researchRecords)
+      await workspaceStore.appendConversationResearch?.(auth, conversation.id, researchEvidenceInput(record.tool, record.query, record.outcome, null))
+        .catch((error: unknown) => log.warn({ err: error }, "Conversation research evidence could not be recorded"));
     return { ...result, businessAction: nativeBusinessAction ?? executedAction.businessAction, goalAction: goalCompletion.goalAction ?? executedAction.goalAction, emailAction: emailAction.emailAction, emailActions: emailAction.emailActions, companyAction: companyAction.companyAction, workspaceAction: workspaceAction.workspaceAction, companyRunId: workspaceAction.companyRunId, memoryCandidate: memoryPolicy.writeAllowed ? result.memoryCandidate : undefined, conversationId: conversation?.id, researchJobId: researchJob?.id, noMemory: memoryPolicy.noMemoryActive, contextCompaction: { applied: compaction.compacted, originalCount: compaction.originalCount, preservedCount: compaction.preservedMessages.length, failureReason: compaction.failureReason, automaticMemoryFlush } };
   }
 

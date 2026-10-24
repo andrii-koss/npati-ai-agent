@@ -626,5 +626,17 @@ export async function runPostgresMigrationsPost086(pool: Pool): Promise<void> {
         await client.query("COMMIT");
       } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
     }
+    const researchEvidenceMigration = await pool.query("SELECT 1 FROM schema_migrations WHERE version='094_conversation_research_evidence'");
+    if (!researchEvidenceMigration.rowCount) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT pg_advisory_xact_lock(hashtext('094_conversation_research_evidence'))");
+        const { runMigration094 } = await import("./migration-094");
+        await runMigration094(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('094_conversation_research_evidence') ON CONFLICT DO NOTHING");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
+    }
 
 }
