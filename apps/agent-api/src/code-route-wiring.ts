@@ -1,6 +1,6 @@
 import { withTransientModelRetry } from "./coding-agent-provider-retry";
 import { createCodeRunVisionPort } from "./coding-agent-image-delivery";
-import { visionInferenceCandidates } from "./chat-inference-candidates";
+import { confirmedVisionInferenceCandidates } from "./chat-inference-candidates";
 import { buildWebsiteStyleContext, websiteEditMemory } from "./website-style-context";
 
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
@@ -386,7 +386,7 @@ export function registerCodeRouteWiring(app: FastifyInstance, deps: CodeRouteDep
       preferences: (ctx) => aiPreferences.get(ctx),
       activeModelId: async (ctx) => (await deps.codePreferences?.get(ctx))?.activeModelId ?? null,
       configuredVisionModel: config.omnirouteVisionModel,
-      candidates: (configured, added) => visionInferenceCandidates(configured, added),
+      candidates: (configured, added) => confirmedVisionInferenceCandidates(configured, added, deps.marketplace ? provider => deps.marketplace!.models(provider) : undefined),
     }),
     schemas: CODE_TOOL_SCHEMAS,
 

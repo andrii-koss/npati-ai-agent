@@ -24,3 +24,15 @@ export function visionInferenceCandidates(configured: Array<string | null | unde
   return [...new Set([...configured, ...eligible])].filter((id): id is string => !!id && eligible.includes(id)
     && known.get(id)?.capabilities?.includes("vision") === true);
 }
+
+/** Revalidate stored image claims against the existing provider catalog before sending any image bytes. */
+export async function confirmedVisionInferenceCandidates(
+  configured: Array<string | null | undefined>, added: AIModelSummary[],
+  loadModels?: (providerId: string) => Promise<AIModelSummary[]>,
+): Promise<string[]> {
+  if (!loadModels) return [];
+  const providers = [...new Set(added.filter(model => model.capabilities.includes("vision") || configured.includes(model.id)).map(model => model.providerId))];
+  const fresh = (await Promise.all(providers.map(provider => loadModels(provider).catch(() => [])))).flat();
+  return visionInferenceCandidates(configured, added, fresh)
+    .filter(id => fresh.some(model => model.id === id && model.capabilities.includes("vision")));
+}

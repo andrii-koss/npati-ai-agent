@@ -1,5 +1,5 @@
 import { analyzeWebsiteReference, reviewWebsiteReference } from "./website-visual-acceptance";
-import { visionInferenceCandidates } from "./chat-inference-candidates";
+import { confirmedVisionInferenceCandidates } from "./chat-inference-candidates";
 import { rememberWebsiteEdit } from "./website-style-context";
 
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
@@ -329,7 +329,7 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
       const codePrefs = await codePreferences?.get(ctx).catch(() => null);
       if (input.images?.length) {
         const preferences = await aiPreferences.get(ctx);
-        const candidates = visionInferenceCandidates([codePrefs?.activeModelId, preferences.routing.defaultModelId, config.omnirouteVisionModel], preferences.addedModels);
+        const candidates = await confirmedVisionInferenceCandidates([codePrefs?.activeModelId, preferences.routing.defaultModelId, config.omnirouteVisionModel], preferences.addedModels, marketplace ? provider => marketplace.models(provider) : undefined);
         for (const id of candidates) {
           const model = preferences.addedModels.find(item => item.id === id);
           if (model && (!marketplace || (await marketplace.provider(model.providerId).catch(() => null))?.connected)) return id;

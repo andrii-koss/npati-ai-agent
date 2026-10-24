@@ -71,18 +71,18 @@ export function createCodeRunVisionPort(deps: {
   preferences(ctx: AuthContext): Promise<{ routing: { defaultModelId?: string | null }; addedModels: import("@npati/omniroute-adapter").AIModelSummary[] }>;
   activeModelId?(ctx: AuthContext): Promise<string | null | undefined>;
   configuredVisionModel?: string;
-  candidates(configured: Array<string | null | undefined>, added: import("@npati/omniroute-adapter").AIModelSummary[]): string[];
+  candidates(configured: Array<string | null | undefined>, added: import("@npati/omniroute-adapter").AIModelSummary[]): string[] | Promise<string[]>;
 }): CodeRunVisionPort {
   return {
     async supportsImages(ctx, model) {
       if (!model) return false;
       const preferences = await deps.preferences(ctx);
-      return deps.candidates([model], preferences.addedModels).includes(model);
+      return (await deps.candidates([model], preferences.addedModels)).includes(model);
     },
     async describe(ctx, image) {
       const preferences = await deps.preferences(ctx);
       const active = await deps.activeModelId?.(ctx).catch(() => null);
-      const model = deps.candidates([active, preferences.routing.defaultModelId, deps.configuredVisionModel], preferences.addedModels)[0];
+      const model = (await deps.candidates([active, preferences.routing.defaultModelId, deps.configuredVisionModel], preferences.addedModels))[0];
       if (!model) return null;
       const response = await deps.chat({
         model,
