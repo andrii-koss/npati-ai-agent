@@ -1013,5 +1013,7 @@ describe("company deletion target", () => {
     const company = await store.createCompany(alice, { name: "Stress Studio" }, "delete-target-company");
     expect(await CompanyChatActions.deleteConfirmationMessage(alice, store, "У компанії «Stress Studio» видали лише тестового агента Accessibility Reviewer.", company.id)).toBeUndefined();
     expect(await CompanyChatActions.deleteConfirmationMessage(alice, store, "Видали компанію «Stress Studio»", company.id)).toContain("Stress Studio");
+    expect(await CompanyChatActions.deleteConfirmationMessage(alice, store, 'In "Stress Next Shop" delete only row TEST_SCRATCH_735 from dev stress_scratch, then read the table to prove it is empty.', company.id)).toBeUndefined();
+    expect(await CompanyChatActions.deleteConfirmationMessage(alice, store, "Delete it", company.id)).toContain("Stress Studio");
   });
 });

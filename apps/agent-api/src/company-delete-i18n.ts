@@ -90,7 +90,13 @@ export function companyDeleteCompletedAll(language: CompanyChatLanguage, values:
  */
 export function deletesCompanyItself(message: string): boolean {
   const match = /(?:видали|видалити|видаліть|удали|удалить|delete|remove|exclua|excluir|elimina|eliminar|lösche|löschen|supprime|supprimer)((?:\s+[\p{L}'’-]+){0,3}?)\s+(?:компані\p{L}*|компани\p{L}*|compan\p{L}*|empresa|unternehmen|firma|entreprise|azienda)/iu.exec(withoutQuotedNames(message));
-  return Boolean(match && !/(?:агент|agent|webhook|вебхук|automat|автомат|project|проєкт|проект|projeto|proyecto|template|шаблон|memor|пам|goal|ціл|цел|row|рядок|строк|table|таблиц|field|поле|contact|контакт|site|сайт)/iu.test(match[1] ?? ""));
+  return Boolean(match && !otherDeleteTarget.test(match[1] ?? ""));
+}
+
+const otherDeleteTarget = /(?:агент|agent|webhook|вебхук|automat|автомат|project|проєкт|проект|projeto|proyecto|template|шаблон|memor|пам|goal|ціл|цел|row|рядок|строк|table|таблиц|field|поле|contact|контакт|site|сайт)/iu;
+/** A delete request that names an object other than a company ("delete row X …, prove it is empty"). */
+export function namesOtherDeleteTarget(message: string): boolean {
+  return otherDeleteTarget.test(withoutQuotedNames(message));
 }
 
 export function withoutQuotedNames(message: string): string {
