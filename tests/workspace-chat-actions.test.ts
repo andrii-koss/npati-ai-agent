@@ -399,9 +399,12 @@ it("limits memory contents to the active or explicitly named business and honors
   const other = await store.createBusiness(alice, { name: "Other Profile", businessStage: "idea" });
   await store.createMemory(alice, other.id, { type: "business_fact", title: "Other", content: "OTHER_MEMORY_CANARY" });
   const studio = await store.createCompany(alice, { name: "Unlinked Studio" }, "memory-read-studio");
-  const prompt = await WorkspaceChatActions.buildSystemPrompt(alice, store, 'Show the current memory code of "Bakery Profile".', studio.id);
+  const prompt = await WorkspaceChatActions.buildSystemPrompt(alice, store, 'Show the current memory code of "Bakery Profile".', studio.id, other.id);
   expect(prompt).toContain("RECIPE_LIME_732");
   expect(prompt).not.toContain("OTHER_MEMORY_CANARY");
+  const neutral = await WorkspaceChatActions.buildSystemPrompt(alice, store, 'Show the memory of "Bakery Profile".');
+  expect(neutral).toContain("RECIPE_LIME_732");
+  expect(neutral).not.toContain("OTHER_MEMORY_CANARY");
   const resources = { automations: new CompanyAutomationsRepository(), content: new ContentLibraryStore(store), memoryReadAllowed: false };
   const ephemeral = await WorkspaceChatActions.buildSystemPrompt(alice, store, 'Show the memory of "Bakery Profile".', studio.id, undefined, resources);
   expect(ephemeral).not.toContain("RECIPE_LIME_732");

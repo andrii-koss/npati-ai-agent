@@ -403,9 +403,10 @@ export class WorkspaceChatActions {
       agents: (await store.listCompanyAgentsPage(auth, company.id, 50)).items.map((agent) => ({ id: agent.id, name: agent.name, role: agent.role, active: agent.isActive })),
     })));
     const linkedBusinessId = ownedCompanies.find(company => company.id === selectedCompanyId)?.businessId;
+    const namedBusinesses = new Set(ownedBusinesses.filter(business => message.toLocaleLowerCase().includes(business.name.toLocaleLowerCase())).map(business => business.id));
     const memoryBusinesses = resources?.memoryReadAllowed === false ? [] : ownedBusinesses.filter(business =>
-      (!selectedCompanyId && !selectedBusinessId) || business.id === selectedBusinessId || business.id === linkedBusinessId
-      || message.toLocaleLowerCase().includes(business.name.toLocaleLowerCase()));
+      namedBusinesses.size ? namedBusinesses.has(business.id) : (!selectedCompanyId && !selectedBusinessId)
+        || business.id === selectedBusinessId || business.id === linkedBusinessId);
     const memoryContext = await Promise.all(memoryBusinesses.slice(0, 30).map(async (business) => ({
       id: business.id,
       name: business.name,
