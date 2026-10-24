@@ -73,7 +73,9 @@ export class ActiveContextResolver {
     // duplicate request for the company actions); only a new project for a named company switches.
     if (!creating && /^\s*(?:please\s+)?(?:create|створи|створіть|создай|crie|cria|crea|erstelle|crée|maak)(?![\p{L}])/iu.test(message)) return undefined;
     // Deleting a company names its target, not a place to continue working (the chat would be left inside it).
-    if (/^\s*(?:please\s+)?(?:delete|remove|видали|видаліть|удали|exclua|elimina|lösche|supprime)(?![\p{L}])/iu.test(message)) return undefined;
+    // Removing data inside a named project ("Remove only field test_note from Next Shop") still targets that project.
+    const removesProjectData = /(?<![\p{L}])(?:field|column|table|row|record|поле|колонк\p{L}*|таблиц\p{L}*|рядок|запис\p{L}*|campo|columna|coluna|tabla|tabela|fila|linha|feld|spalte|tabelle|zeile)(?![\p{L}])/iu.test(message);
+    if (!removesProjectData && /^\s*(?:please\s+)?(?:delete|remove|видали|видаліть|удали|exclua|elimina|lösche|supprime)(?![\p{L}])/iu.test(message)) return undefined;
     // An exact owned project named by a code task takes precedence over the previous chat card.
     // Search only authorized companies already selected or named in this conversation.
     if (decision && decision.intent !== "CHAT" && !creating) {

@@ -141,3 +141,16 @@ it("does not switch to a company whose name or agent name is an ordinary word in
   const message = 'Update goal "Stress Launch" priority to 1 and add an acceptance condition: database updates must appear on the website.';
   expect(await resolver.resolveNamedCompany(auth, current, message, { intent: "CHAT" } as never, "We added a new acceptance check and a new page.")).toBeUndefined();
 });
+
+it("targets the named project when a request removes data inside it", async () => {
+  const store = new InMemoryWorkspaceStore();
+  const auth: AuthContext = { userId: "remove-field-owner", workspaceId: "remove-field-workspace", permissions: ["workspace:read", "workspace:write", "business:manage"] };
+  const bakery = await store.createCompany(auth, { name: "Stress Bakery" }, "remove-field-bakery");
+  const { project: astro } = await store.createProject(auth, bakery.id, { name: "Stress Astro", type: "website" } as never, "remove-field-astro");
+  const { project: shop } = await store.createProject(auth, bakery.id, { name: "Stress Next Shop", type: "website" } as never, "remove-field-shop");
+  const resolver = new ActiveContextResolver(store);
+  const current = await resolver.resolve(auth, { contextType: "project", companyId: bakery.id, projectId: astro.id });
+  const resolved = await resolver.resolveNamedCompany(auth, current, 'Remove only field test_note from "Stress Next Shop" dev products using schema tools.', { intent: "EDIT_PROJECT" } as never);
+  expect(resolved?.context).toMatchObject({ contextType: "project", projectId: shop.id });
+  expect(await resolver.resolveNamedCompany(auth, current, 'Delete only the test project "Stress Next Shop".', { intent: "EDIT_PROJECT" } as never)).toBeUndefined();
+});
