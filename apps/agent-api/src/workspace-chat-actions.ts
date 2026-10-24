@@ -322,7 +322,7 @@ export class WorkspaceChatActions {
     if (!automations || !auth.permissions.includes("business:manage")) return false;
     // The listing is oldest first; the 20 most recently updated companies are the ones the user works with.
     const owned = (await companies(store, auth).catch(() => [] as Company[]))
-      .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(0, 20);
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()).slice(0, 20);
     const names = (await Promise.all(owned.map((company) => automations.list(auth, company.id).catch(() => [])))).flat().map((item) => item.name.trim());
     return names.some((name) => name.length > 2 && new RegExp(`(?<![\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "u").test(message));
   }

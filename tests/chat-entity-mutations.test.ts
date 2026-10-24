@@ -212,3 +212,25 @@ describe("business and goal mutations through production chat", () => {
     } finally { await app.close(); }
   });
 });
+
+it("plans a workspace action for a request that names an owned automation without the word 'automation'", async () => {
+  const store = new InMemoryWorkspaceStore();
+  const company = await store.createCompany(auth, { name: "Automation Bakery" }, "named-automation-chat-company");
+  const agent = await store.createCompanyAgent(auth, company.id, { name: "Runner", role: "Operator", tools: [] }, "named-automation-chat-agent");
+  const { project } = await store.createProject(auth, company.id, { name: "Automation Shop", type: "website" } as never, "named-automation-chat-project");
+  const prompts: string[] = [];
+  const ai: AIEngine = {
+    chat: async (request) => { prompts.push(String(request.messages[0]?.content ?? "")); return { content: "NO_ACTION" }; },
+    async *stream() { yield "Working on it."; },
+    listModels: async () => [], getModel: async () => undefined, executeTool: async () => undefined,
+    searchMemory: async () => [], saveMemory: async () => undefined,
+    getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+  };
+  const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace });
+  try {
+    const created = await app.inject({ method: "POST", url: `/companies/${company.id}/automations`, payload: { name: "Stress Weekly Revised", prompt: "Report OK", cronExpression: "0 9 * * 1", agentId: agent.id } });
+    expect(created.statusCode, created.body).toBeLessThan(300);
+    await app.inject({ method: "POST", url: "/chat/stream", payload: { message: 'Run "Stress Weekly Revised" manually once for "Automation Bakery" and inspect its actual execution history. Keep the schedule disabled.', contextType: "project", companyId: company.id, projectId: project.id } });
+    expect(prompts.some((prompt) => prompt.includes("Stress Weekly Revised") && prompt.includes("workspace-action"))).toBe(true);
+  } finally { await app.close(); }
+});

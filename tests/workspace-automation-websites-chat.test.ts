@@ -222,3 +222,10 @@ it("finds a named automation in a recently updated company beyond the oldest twe
   await automations.create(alice, recent.id, { name: "Recent Weekly", prompt: "Report OK", cronExpression: "0 9 * * 1", agentId: agent.id });
   expect(await WorkspaceChatActions.namesOwnedAutomation(alice, store, 'Run "Recent Weekly" once.', automations)).toBe(true);
 });
+
+it("orders companies by timestamp value when the store returns Date objects", async () => {
+  const items = Array.from({ length: 25 }, (_, index) => ({ id: "c" + index, name: "Company " + index, updatedAt: new Date(Date.UTC(2026, 9, 1 + index)) }));
+  const store = { listCompanies: async () => ({ items, nextCursor: null }) } as never;
+  const automations = { list: async (_auth: AuthContext, companyId: string) => companyId === "c24" ? [{ name: "Newest Weekly" }] : [] } as never;
+  expect(await WorkspaceChatActions.namesOwnedAutomation(alice, store, 'Run "Newest Weekly" once.', automations)).toBe(true);
+});

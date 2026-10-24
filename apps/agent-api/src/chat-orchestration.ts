@@ -194,7 +194,7 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
     let research: ResearchOutcome | undefined;
     let researchJob;
     const hasAttachedEvidence = media.images.length > 0 || media.extractedDocs.length > 0;
-    const workspaceSettingsRequest = WorkspaceChatActions.isManagementRequest(safePrompt);
+    const workspaceSettingsRequest = WorkspaceChatActions.isManagementRequest(safePrompt) || await WorkspaceChatActions.namesOwnedAutomation(auth, workspaceStore, safePrompt, automationsRepo);
     const emailSettingsRequest = EmailChatActions.isManagementRequest(safePrompt);
     const imageResearchRequested = !forbidsNewWebResearch(message) && !nativeToolCalling && (!hasAttachedEvidence || explicitlyRequestsWebResearch(message))
       && ((!workspaceSettingsRequest && !emailSettingsRequest) || explicitlyRequestsWebResearch(message, { requireOperation: true }));

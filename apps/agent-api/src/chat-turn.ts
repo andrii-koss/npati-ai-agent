@@ -159,13 +159,15 @@ export function createChatTurn(deps: ChatTurnDeps) {
     const spreadsheetEditRequested = isSpreadsheetEditRequest(safeUserRequest)
       && Boolean(previousSpreadsheet || media.decoded.some((item) => /\.(xlsx|xlsm|xlsb|xls|csv)$/i.test(item.name)));
     const contextualCompanyRequest = effectiveMessage !== message;
-    const workspaceSettingsRequest = !contextualCompanyRequest && WorkspaceChatActions.isManagementRequest(safeUserRequest);
+    const workspaceSettingsRequest = !contextualCompanyRequest && (WorkspaceChatActions.isManagementRequest(safeUserRequest)
+      || await WorkspaceChatActions.namesOwnedAutomation(auth, workspaceStore, safeUserRequest, automationsRepo));
     const emailSettingsRequest = !contextualCompanyRequest && !workspaceSettingsRequest && EmailChatActions.isManagementRequest(safeUserRequest);
     const companySettingsRequest = !emailSettingsRequest && !workspaceSettingsRequest && (
       effectiveMessage !== message ||
       CompanyChatActions.isManagementRequest(safeUserRequest)
       || Boolean(effectiveManagementCompany && (CompanyChatActions.isPotentialMutationRequest(safeUserRequest) || requestsCompositeCompanyDeletionIntent(safeUserRequest)))
     );
+    log.info({ workspaceSettingsRequest, emailSettingsRequest, companySettingsRequest, contextualCompanyRequest }, "Chat management routing");
     if (!memoryPolicy.noMemoryActive && conversation && existing.messages.length === 0 && conversation.title.trim().toLowerCase() === "new conversation") {
       conversation = await workspaceStore.updateNeutralConversation(auth, conversation.id, conversationTitle(media.prompt));
     }
