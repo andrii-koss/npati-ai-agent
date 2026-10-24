@@ -273,7 +273,12 @@ export function registerAppRoutesAndLifecycle(deps: AppRoutesAndLifecycleDeps) {
     workspaceStore,
   });
 
-  const resolveProjectIntent = createChatProjectIntentResolver({ engine: aiEngine, getAIContext, log });
+  const resolveProjectIntent = createChatProjectIntentResolver({ engine: aiEngine, getAIContext, log,
+    // The 20 most recent owned companies, read in parallel, as in the named-company context resolver.
+    listAgentNames: async (auth) => {
+      const companies = (await workspaceStore.listCompanies(auth, 20)).items;
+      return (await Promise.all(companies.map(async (company) => (await workspaceStore.listCompanyAgentsPage(auth, company.id, 50)).items.map((agent) => agent.name)))).flat();
+    } });
   registerChatRoutes(app, {
     ollamaChat: createOllamaChatHandler(aiEngine, authProvider),
     resolveProjectIntent,
