@@ -273,6 +273,8 @@ export async function updateMessage(host: EmailInboxMessageHost,
     messageId: string,
     patch: Partial<CompanyEmailMessage>
   ): Promise<CompanyEmailMessage> {
+    // An omitted field (undefined) keeps the stored value instead of clearing a NOT NULL column.
+    patch = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) as Partial<CompanyEmailMessage>;
 
     if (host.pool) {
       const existing = (

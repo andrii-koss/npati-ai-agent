@@ -153,8 +153,10 @@ describe("EmailChatActions", () => {
     const ambiguous = await EmailChatActions.extractAndExecute(auth, directive({ action: "draft.approve", companyId: company.id, threadSubject: "STRESS_ORDER_732" }), store, repo);
     expect(ambiguous.cleanText).toContain("several drafts");
     expect((await repo.listMessages(auth, company.id, several)).every((item) => item.isDraft)).toBe(true);
+    // An update that omits the body (e.g. planned before a send) keeps the stored NOT NULL body.
+    await EmailChatActions.extractAndExecute(auth, directive({ action: "draft.update", companyId: company.id, threadSubject: "STRESS_ORDER_731", fields: {} }), store, repo);
     await EmailChatActions.extractAndExecute(auth, directive({ action: "draft.approve", companyId: company.id, threadSubject: "STRESS_ORDER_731" }), store, repo);
-    expect((await repo.listMessages(auth, company.id, single)).map((item) => item.isDraft)).toEqual([false]);
+    expect((await repo.listMessages(auth, company.id, single)).map((item) => [item.isDraft, item.bodyText])).toEqual([[false, "Reserve one loaf"]]);
   });
 
   it("blocks cross-user company access and isolates personal mailboxes", async () => {
