@@ -154,10 +154,15 @@ export class ContextCompactor {
         });
       }
 
+      // Facts the user explicitly stated or asked to remember stay verbatim: a merged summary may drop a small checkpoint
+      // code from a long chat (A089 lost CHAT_A_LIME_731 after 270 compacted turns).
+      const flushedMemories = this.extractMemoriesToFlush(olderMessages);
+      const pinned = flushedMemories.slice(-30).map((fact) => "- " + fact.slice(0, 400)).join("\n");
       return {
         compacted: true,
-        summary: `[Previous conversation summary; ${olderMessages.length} turns compacted]\n${summary}`,
-        flushedMemories: this.extractMemoriesToFlush(olderMessages),
+        summary: `[Previous conversation summary; ${olderMessages.length} turns compacted]\n${summary}`
+          + (pinned ? `\n\n[User-stated facts from the compacted turns, verbatim, oldest first]\n${pinned}` : ""),
+        flushedMemories,
         preservedMessages,
         originalCount: messages.length,
       };

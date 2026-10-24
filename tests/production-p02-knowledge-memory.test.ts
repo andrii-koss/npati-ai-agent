@@ -485,3 +485,12 @@ describe("P0.2 Production Suite: Company Knowledge & Long-Term Agent Memory", ()
     });
   });
 });
+
+describe("compaction keeps user-stated facts", () => {
+  it("keeps a remembered checkpoint verbatim even when the merged summary drops it", async () => {
+    const messages = Array.from({ length: 96 }, (_, index) => ({ role: index % 2 ? "assistant" : "user", content: index === 10 ? "Remember in this Chat A: checkpoint CHAT_A_PIN_731." : "turn " + index }));
+    const ai = { chat: async () => ({ content: "General progress on the website and catalog." }) } as unknown as AIEngine;
+    const result = await ContextCompactor.compactWithModel({ ai, model: "pin/model", messages });
+    expect(result.summary).toContain("CHAT_A_PIN_731");
+  });
+});
