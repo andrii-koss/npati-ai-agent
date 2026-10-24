@@ -407,3 +407,31 @@ it("plans from granted tool contracts without dropping the user's task or advert
   expect(result.run.status).toBe("completed");
   expect(a2aSend).toHaveBeenCalledTimes(1);
 });
+
+
+it("uses the existing engine's non-thinking DeepSeek plan without the A2A inner timeout or synthetic task IDs", async () => {
+  const store = new InMemoryWorkspaceStore();
+  const ctx = { workspaceId: "deepseek-plan-ws", userId: "deepseek-plan-owner", permissions: ["workspace:read", "business:manage"] };
+  let company = await store.createCompany(ctx, { name: "DeepSeek Plan" }, "deepseek-plan-company");
+  const main = await store.createCompanyAgent(ctx, company.id, { name: "Coordinator", role: "Lead", modelId: "deepseek/deepseek-flash", tools: [] }, "deepseek-plan-main");
+  company = await store.setCompanyMainAgent(ctx, company.id, main.id, company.revision);
+  const a2aSend = vi.fn(async () => { throw Error("The opaque 30s A2A transport must not run"); });
+  const ensureA2AEnabled = vi.fn(async () => undefined);
+  const requests: import("@npati/omniroute-adapter").ChatRequest[] = [];
+  const chat = vi.fn(async (request: import("@npati/omniroute-adapter").ChatRequest) => {
+    requests.push(request);
+    return request.reasoningMode === "disabled"
+      ? { content: JSON.stringify({ mode: "single", agentIds: [], toolRequests: [] }), model: "deepseek-flash", usage: { promptTokens: 100, completionTokens: 20, totalTokens: 120 } }
+      : { content: "Completed scoped task.", model: "deepseek-flash", usage: { promptTokens: 40, completionTokens: 10, totalTokens: 50 } };
+  });
+  const runtime = new CompanyDelegationRuntime(store, engine({ chat, a2aSend, ensureA2AEnabled }));
+  const result = await runtime.execute(ctx, company.id, { task: "Summarize the owned company", mode: "single" }, "deepseek-plan-run");
+  expect(result.run.status).toBe("completed");
+  expect(a2aSend).not.toHaveBeenCalled();
+  expect(ensureA2AEnabled).not.toHaveBeenCalled();
+  expect(chat).toHaveBeenCalledTimes(2);
+  expect(requests[0]).toMatchObject({ model: "deepseek/deepseek-flash", reasoningMode: "disabled" });
+  expect(result.run.omnirouteTaskId).toBeFalsy();
+  expect(result.run.totalTokens).toBe(170);
+  expect(result.toolAudit.filter(entry => entry.toolName === "ai.inference")).toHaveLength(2);
+});

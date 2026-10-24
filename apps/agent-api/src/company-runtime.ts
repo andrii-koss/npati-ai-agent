@@ -217,7 +217,6 @@ export class CompanyDelegationRuntime {
         ? (await this.store.listProjects(ctx, companyId)).slice(0, 50).map((project) => ({ id: project.id, name: project.name, type: project.type })) : [];
       const planningMemory = !options.noMemory && mainTools.includes("knowledge") && this.knowledgeRetriever ? await this.knowledgeRetriever(ctx, companyId, input.task, options.memoryScope).catch(() => ({ chunks: [], memories: [] })) : { chunks: [], memories: [] };
       const actionPlanningContext = planningMemory.memories.filter(memory => memory.source === "action_sensitive").map(memory => memory.content).join("\n");
-      await this.ai.ensureA2AEnabled();
       if (!pendingState && options.callBudget && --options.callBudget.remaining < 0) throw new CompanyRuntimeError("MODEL_CALL_BUDGET_EXCEEDED", "Project model call limit reached", 429);
       const resolvedAddedModels = typeof this.addedModelsResolver === "function" ? (await this.addedModelsResolver(ctx).catch(() => [])) : [];
       const inferenceModels = this.strictInferenceRouting
@@ -293,6 +292,20 @@ export class CompanyDelegationRuntime {
           ].join("\n\n")) },
         ];
       }
+      let a2aReady = false, planningSequence = 0;
+      const sendPlanningRequest = async (request: Parameters<NonNullable<AIEngine["a2aSend"]>>[0]) => {
+        // OmniRoute's A2A smart-routing transport has a fixed 30s inner timeout and cannot forward thinking mode.
+        // Use the same existing engine for DeepSeek's bounded JSON plan, retaining run policy/cancellation/accounting.
+        if (request.model === "deepseek/deepseek-flash") {
+          const result = await this.ai.chat({ ...request, reasoningMode: "disabled",
+            admission: { tenantId: ctx.workspaceId, tier: ctx.permissions.includes("admin:all") ? "enterprise" : "pro" } });
+          const measured = await this.recordInference(ctx, companyId, created.run.id, main.id, "planning", "single", result, planningSequence++);
+          totalCost += measured.costUsd; totalTokens += measured.totalTokens;
+          return { content: result.content, taskId: undefined, metadata: {} };
+        }
+        if (!a2aReady) { await this.ai.ensureA2AEnabled(); a2aReady = true; }
+        return this.ai.a2aSend!(request);
+      };
       let plan: Plan;
       if (pendingState) {
         plan = pendingState.plan;
@@ -306,7 +319,7 @@ export class CompanyDelegationRuntime {
         const planned = await (async () => {
           let lastError: unknown;
           for (const model of planningCandidates.length ? planningCandidates : [planningRequest.model, "auto"]) {
-            try { const result = await this.ai.a2aSend!({ ...planningRequest, model }); plannedModel = model; return result; }
+            try { const result = await sendPlanningRequest({ ...planningRequest, model }); plannedModel = model; return result; }
             catch (error) { lastError = error; if (!isUnavailableInferenceError(error)) throw error; }
           }
           throw new CompanyRuntimeError("model_routing_failed", `All chat-compatible models failed: ${String(lastError)}`, 503);
@@ -321,7 +334,7 @@ export class CompanyDelegationRuntime {
             throw new CompanyRuntimeError("MODEL_CALL_BUDGET_EXCEEDED", "Project model call limit reached", 429);
           const preferred = candidates.find((agent) => agent.id === options.preferredAgentId);
           if (!preferred) throw new CompanyRuntimeError("BOUND_AGENT_UNAVAILABLE", "The bound Company Agent is inactive or unavailable", 409);
-          const repaired = await this.ai.a2aSend!({
+          const repaired = await sendPlanningRequest({
             ...planningRequest, model: plannedModel,
             idempotencyKey: `${created.run.id}:plan-repair`,
             messages: [
@@ -365,7 +378,7 @@ export class CompanyDelegationRuntime {
         if (options.callBudget && --options.callBudget.remaining < 0)
           throw new CompanyRuntimeError("MODEL_CALL_BUDGET_EXCEEDED", "Project model call limit reached", 429);
         const roster = candidates.map((agent) => ({ id: agent.id, name: agent.name, role: agent.role }));
-        const repaired = await this.ai.a2aSend({
+        const repaired = await sendPlanningRequest({
           ...planningRequest,
           idempotencyKey: `${created.run.id}:selection-repair`,
           messages: [
@@ -390,7 +403,7 @@ export class CompanyDelegationRuntime {
         if (options.callBudget && --options.callBudget.remaining < 0)
           throw new CompanyRuntimeError("MODEL_CALL_BUDGET_EXCEEDED", "Project model call limit reached", 429);
         const permitted = [main, ...candidates.filter((agent) => agent.id !== main.id)].map((agent) => ({ id: agent.id, name: agent.name, tools: agent.tools.map(toolName) }));
-        const repaired = await this.ai.a2aSend({
+        const repaired = await sendPlanningRequest({
           ...planningRequest,
           idempotencyKey: `${created.run.id}:tool-repair`,
           messages: [
