@@ -168,7 +168,8 @@ function companyMutationText(message: string): string {
 
 export function isReadOnlyCompanySwitch(message: string): boolean {
   const text = companyMutationText(message);
-  return /\b(?:switch|return)\s+to\s+(?:the\s+)?company\b/iu.test(text)
+  // "Cambia a la empresa X" switches to X (es); "cambia la empresa" without "a" is an edit and stays a mutation.
+  return /(?:\b(?:switch|return)\s+to\s+(?:the\s+)?company\b|\b(?:cambia|cambiar|vuelve|volver)\s+a\s+la\s+empresa\b|\b(?:mude|mudar|volte|voltar)\s+para\s+a\s+empresa\b|\b(?:wechsle|wechseln|zurück)\s+zu[rm]?\s+(?:der\s+|dem\s+)?(?:firma|unternehmen)\b|(?:перейди|перейдімо|повернись|повернімося)\s+до\s+компан|(?:перейди|вернись)\s+(?:к|в)\s+компан)/iu.test(text)
     && !/\b(?:create|add|edit|update|change|rename|delete|remove|configure|assign|build|set\s+up)\b/iu.test(text);
 }
 

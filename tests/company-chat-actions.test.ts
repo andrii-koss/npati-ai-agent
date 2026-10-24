@@ -987,3 +987,16 @@ it("keeps a read-only context switch out of mutation planning despite negative c
  expect(CompanyChatActions.isManagementRequest(message)).toBe(false);expect(CompanyChatActions.isPotentialMutationRequest(message)).toBe(false);
  expect(CompanyChatActions.isManagementRequest('Do not delete company Test Studio. Update company Test Bakery description to new.')).toBe(true);
 });
+
+describe("read-only company switch in several languages", () => {
+  it("treats a switch request as read-only and keeps an edit of the company a mutation", async () => {
+    const { isReadOnlyCompanySwitch } = await import("../apps/agent-api/src/company-chat-actions");
+    expect(isReadOnlyCompanySwitch('Cambia a la empresa "Stress Bakery" y nombra su agente principal.')).toBe(true);
+    expect(isReadOnlyCompanySwitch('Mude para a empresa "Stress Bakery".')).toBe(true);
+    expect(isReadOnlyCompanySwitch('Wechsle zur Firma "Stress Bakery".')).toBe(true);
+    expect(isReadOnlyCompanySwitch("Перейди до компанії «Stress Bakery»")).toBe(true);
+    expect(isReadOnlyCompanySwitch("Switch to the company Stress Bakery")).toBe(true);
+    expect(isReadOnlyCompanySwitch('Cambia la empresa "Stress Bakery": nuevo tono acogedor.')).toBe(false);
+    expect(CompanyChatActions.isManagementRequest('Cambia a la empresa "Stress Bakery" y nombra su agente principal.')).toBe(false);
+  });
+});
