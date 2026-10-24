@@ -177,8 +177,8 @@ export class EmailChatActions {
   }
 
   static isManagementRequest(message: string): boolean {
-    const operation = /(?:\b(?:add|create|connect|configure|set up|edit|update|change|save|delete|remove|test|check|list|show|read|search|find|send|compose|reply|draft|approve|archive|mark|password|token|secret)\b|дод|створ|підключ|налашт|редаг|онов|змін|збереж|видал|перевір|покаж|переглян|прочит|знайд|пошук|відправ|надішл|напиш|відпов|чернет|погод|архів|познач|парол|токен|секрет)/iu.test(message);
-    const resource = /(?:\b(?:email|e-mail|mail|mailbox|inbox|message|imap|smtp|autopilot|routing rule|email rule|email template|signature|follow-?up|contact|vip|blacklist|draft|permission|password|token|secret)\b|пошт|скринь|імейл|емейл|лист|повідомлен|вхідн|правил|маршрут|шаблон|підпис|контакт|автопілот|чернет|дозвіл|парол|токен|секрет)/iu.test(message);
+    const operation = /(?:\b(?:add|create|connect|configure|set up|edit|update|change|save|delete|remove|test|check|list|show|read|search|find|send|compose|reply|draft|approve|archive|mark|password|token|secret)\b|дод|створ|підключ|налашт|редаг|онов|змін|збереж|видал|перевір|покаж|переглян|прочит|знайд|пошук|відправ|надішл|напиш|відпов|чернет|погод|архів|познач|парол|токен|секрет|\b(?:crea|cria|actualiz|atualiz|elimin|exclu|borr|envi|erstell|aktualisier|änder|lösch)\p{L}*)/iu.test(message);
+    const resource = /(?:\b(?:email|e-mail|mail|mailbox|inbox|message|imap|smtp|autopilot|routing rule|email rule|(?:email|e-mail|mail|reply|response|answer)\s+templates?|signature|follow-?up|contact|vip|blacklist|draft|permission|password|token|secret)\b|пошт|скринь|імейл|емейл|лист|повідомлен|вхідн|правил|маршрут|шаблон|plantilla de (?:respuesta|correo)|modelo de (?:resposta|e-?mail)|antwortvorlage|e-?mail-?vorlage|mailvorlage|підпис|контакт|автопілот|чернет|дозвіл|парол|токен|секрет)/iu.test(message);
     return operation && resource;
   }
 

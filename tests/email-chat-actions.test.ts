@@ -236,3 +236,11 @@ it("rejects a whole email batch that replaces an explicitly named company with a
   expect(await repo.listContacts(auth, bakery.id)).toHaveLength(0);
   expect(await repo.listContacts(auth, other.id)).toHaveLength(0);
 });
+
+it("recognizes reply template requests in several languages without treating website templates as email", () => {
+  expect(EmailChatActions.isManagementRequest('In "Stress Bakery" create a reply template titled "Stress Reply", subject "Re: test order"')).toBe(true);
+  expect(EmailChatActions.isManagementRequest("Update the response template to include the pickup code")).toBe(true);
+  expect(EmailChatActions.isManagementRequest("Crea una plantilla de respuesta para pedidos de prueba")).toBe(true);
+  expect(EmailChatActions.isManagementRequest("Erstelle eine Antwortvorlage für Testbestellungen")).toBe(true);
+  expect(EmailChatActions.isManagementRequest("Create a landing page template for the bakery website")).toBe(false);
+});
