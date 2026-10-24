@@ -244,3 +244,16 @@ it("recognizes reply template requests in several languages without treating web
   expect(EmailChatActions.isManagementRequest("Erstelle eine Antwortvorlage für Testbestellungen")).toBe(true);
   expect(EmailChatActions.isManagementRequest("Create a landing page template for the bakery website")).toBe(false);
 });
+
+it("creates a reply template with the default category when the planner invents one, and refuses an invalid category update", async () => {
+  const store = new InMemoryWorkspaceStore();
+  const repo = new EmailInboxRepository();
+  const company = await store.createCompany(auth, { name: "Template Category" }, "email-chat-template-category");
+  await EmailChatActions.extractAndExecute(auth, directive({ action: "template.create", companyId: company.id,
+    fields: { title: "Stress Reply", category: "orders", subjectTemplate: "Re: test order", bodyTemplate: "Thank you; no payment required." } }), store, repo);
+  const [template] = await repo.listTemplates(auth, company.id);
+  expect(template).toMatchObject({ title: "Stress Reply", subjectTemplate: "Re: test order" });
+  expect(template?.category ?? "general").toBe("general");
+  const refused = await EmailChatActions.extractAndExecute(auth, directive({ action: "template.update", companyId: company.id, templateTitle: "Stress Reply", fields: { category: "orders" } }), store, repo);
+  expect(refused.cleanText).toContain("Template category must be one of");
+});

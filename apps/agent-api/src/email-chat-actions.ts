@@ -46,6 +46,13 @@ const accountFields = new Set([
 ]);
 const ruleFields = new Set(["name", "emailAccountId", "conditions", "actions", "priorityOrder", "isActive"]);
 const templateFields = new Set(["title", "category", "subjectTemplate", "bodyTemplate", "emailAccountId"]);
+/** The company_email_templates.category CHECK values; a create without a valid one uses the column default. */
+const templateCategories = new Set(["support", "sales", "billing", "information", "general"]);
+function templateInput(fields: Record<string, unknown>, creating: boolean) {
+  if (fields.category === undefined || templateCategories.has(String(fields.category))) return fields;
+  if (!creating) throw new Error(`Template category must be one of ${[...templateCategories].join(", ")}`);
+  const { category: _category, ...rest } = fields; return rest;
+}
 const contactFields = new Set(["email", "name", "companyName", "phone", "isVip", "isBlacklisted", "notes"]);
 const threadFields = new Set(["status", "priority", "folder", "assignedAgentId", "unreadCount"]);
 const composeFields = new Set(["toAddresses", "ccAddresses", "bccAddresses", "subject", "bodyText", "bodyHtml", "isDraft", "attachmentNames"]);
@@ -244,7 +251,7 @@ Contacts: ${JSON.stringify(contacts.map((item) => ({ email: item.email, name: it
 Threads: ${JSON.stringify(threads.map((item) => ({ id: item.id, emailAccountId: item.emailAccountId, subject: item.subject, customerEmail: item.customerEmail, status: item.status, priority: item.priority, folder: item.folder, assignedAgentId: item.assignedAgentId, unreadCount: item.unreadCount, lastMessageAt: item.lastMessageAt })))}.
 Permission keys: ${JSON.stringify(permissions.map((item) => ({ id: item.id, name: item.name, scopes: item.scopes, revokedAt: item.revokedAt, expiresAt: item.expiresAt })))}.
 Allowed actions: account.list/create/update/delete/test/dns_check; rule.list/create/update/delete; template.list/create/update/delete; contact.list/upsert; permission.list/revoke; inbox.list/read/compose/reply; draft.update/approve; thread.update/delete.
-Use companyId ${requestedScope === "personal" ? "personal" : scopeId}. Account fields: ${[...accountFields].join(", ")}. Rule fields: ${[...ruleFields].join(", ")}. Template fields: ${[...templateFields].join(", ")}. Contact fields: ${[...contactFields].join(", ")}. Thread fields: ${[...threadFields].join(", ")}. Compose fields: ${[...composeFields].join(", ")}.
+Use companyId ${requestedScope === "personal" ? "personal" : scopeId}. Account fields: ${[...accountFields].join(", ")}. Rule fields: ${[...ruleFields].join(", ")}. Template fields: ${[...templateFields].join(", ")} (category: ${[...templateCategories].join("|")}). Contact fields: ${[...contactFields].join(", ")}. Thread fields: ${[...threadFields].join(", ")}. Compose fields: ${[...composeFields].join(", ")}.
 Preserve EMAIL_REF_* placeholders exactly in email address fields (emailAddress, email, accountEmail, toAddresses, ccAddresses, bccAddresses). They are complete user-provided address references, not missing credentials; the server resolves them locally after authorization. Never invent or expand a reference.
 For compose/reply, attachmentNames may contain exact filenames attached to the latest user message. For permission/API-key creation, OAuth authorization, and initial secret entry, direct the user to Email Settings. These create new credentials and must not be returned in persistent chat.
 Example:
@@ -328,11 +335,11 @@ Return ONLY one complete email-action block for the latest request. Omit every u
           const items = await repo.listTemplates(auth, companyId); notice = items.length ? items.map((item) => `- **${safeMarkdown(item.title)}** — ${safeMarkdown(item.category)}`).join("\n") : "No response templates are configured.";
         } else if (directive.action === "template.create") {
           const fields = validateObject(directive.fields, templateFields); if (typeof fields.title !== "string" || typeof fields.bodyTemplate !== "string") throw new Error("Template title and bodyTemplate are required");
-          const item = await repo.createTemplate(auth, companyId, fields as any); resourceId = item.id; notice = `Response template **${safeMarkdown(item.title)}** created.`;
+          const item = await repo.createTemplate(auth, companyId, templateInput(fields, true) as any); resourceId = item.id; notice = `Response template **${safeMarkdown(item.title)}** created.`;
         } else if (directive.action === "template.update" || directive.action === "template.delete") {
           const item = exact(await repo.listTemplates(auth, companyId), (entry) => directive.templateId ? entry.id === directive.templateId : entry.title.toLowerCase() === directive.templateTitle?.toLowerCase(), "response template"); resourceId = item.id;
           if (directive.action === "template.delete") { await repo.deleteTemplate(auth, companyId, item.id); notice = `Response template **${safeMarkdown(item.title)}** deleted.`; }
-          else { const updated = await repo.updateTemplate(auth, companyId, item.id, validateObject(directive.fields, templateFields)); notice = `Response template **${safeMarkdown(updated.title)}** updated.`; }
+          else { const updated = await repo.updateTemplate(auth, companyId, item.id, templateInput(validateObject(directive.fields, templateFields), false)); notice = `Response template **${safeMarkdown(updated.title)}** updated.`; }
         } else if (directive.action === "contact.list") {
           const items = await repo.listContacts(auth, companyId); notice = items.length ? items.map((item) => `- **${safeMarkdown(item.email)}**${item.name ? ` — ${safeMarkdown(item.name)}` : ""}${item.isVip ? " — VIP" : ""}${item.isBlacklisted ? " — blocked" : ""}`).join("\n") : "No contacts are configured.";
         } else if (directive.action === "contact.upsert") {
