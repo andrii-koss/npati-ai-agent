@@ -156,12 +156,16 @@ export class ContextCompactor {
 
       // Facts the user explicitly stated or asked to remember stay verbatim: a merged summary may drop a small checkpoint
       // code from a long chat (A089 lost CHAT_A_LIME_731 after 270 compacted turns).
+      // Explicit "remember" facts first (up to 20), then other stated facts (10); per-turn "do not" constraints are not pinned.
       const flushedMemories = this.extractMemoriesToFlush(olderMessages);
-      const pinned = flushedMemories.slice(-30).map((fact) => "- " + fact.slice(0, 400)).join("\n");
+      const facts = AutomaticMemoryExtractor.extractFacts(olderMessages).filter((fact) => fact.provenance.role === "user" && fact.category !== "constraint");
+      const remembered = new Set(facts.filter((fact) => /^(?:remember|запам)/iu.test(fact.content)).slice(-20));
+      const kept = new Set([...remembered, ...facts.filter((fact) => !remembered.has(fact)).slice(-10)]);
+      const pinned = facts.filter((fact) => kept.has(fact)).map((fact) => "- " + fact.content.slice(0, 400)).join("\n");
       return {
         compacted: true,
         summary: `[Previous conversation summary; ${olderMessages.length} turns compacted]\n${summary}`
-          + (pinned ? `\n\n[User-stated facts from the compacted turns, verbatim, oldest first]\n${pinned}` : ""),
+          + (pinned ? `\n\n[User-stated facts from the compacted turns, verbatim, oldest first; they take precedence over any assistant statement that contradicts them]\n${pinned}` : ""),
         flushedMemories,
         preservedMessages,
         originalCount: messages.length,
