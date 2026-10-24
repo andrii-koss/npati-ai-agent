@@ -317,6 +317,14 @@ export class WorkspaceChatActions {
     return (options.includeGoals !== false && requestsBusinessGoal(message) && !question) || memoryVerbSignal.test(subject) || resource && (actionSignals.some((pattern) => pattern.test(message)) || automationReadSignals.some((pattern) => pattern.test(message)));
   }
 
+  /** "Run Stress Weekly Revised once" names an automation without the word "automation": its exact name counts as the resource. */
+  static async namesOwnedAutomation(auth: AuthContext, store: WorkspaceStore, message: string, automations?: WorkspaceChatActionDependencies["automations"]): Promise<boolean> {
+    if (!automations || !auth.permissions.includes("business:manage")) return false;
+    const owned = (await store.listCompanies(auth, 20).catch(() => ({ items: [] as Company[] }))).items;
+    const names = (await Promise.all(owned.map((company) => automations.list(auth, company.id).catch(() => [])))).flat().map((item) => item.name.trim());
+    return names.some((name) => name.length > 2 && new RegExp(`(?<![\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "u").test(message));
+  }
+
   static isPotentialMutationRequest(message: string): boolean {
     return mutationSignals.some((pattern) => pattern.test(message)) && referenceSignals.some((pattern) => pattern.test(message));
   }
@@ -359,7 +367,8 @@ export class WorkspaceChatActions {
 
   static async buildSystemPrompt(auth: AuthContext, store: WorkspaceStore, message: string, selectedCompanyId?: string, selectedBusinessId?: string, resources?: WorkspacePromptResources): Promise<string> {
     if (!auth.permissions.includes("business:manage")) return "";
-    if (!resourceSignals.some((pattern) => pattern.test(message)) && !websiteResourceSignals.some((pattern) => pattern.test(message)) && !memoryVerbSignal.test(message) && !webhookResourceSignal.test(message) && !((selectedCompanyId || selectedBusinessId) && this.isPotentialMutationRequest(message))) return "";
+    if (!resourceSignals.some((pattern) => pattern.test(message)) && !websiteResourceSignals.some((pattern) => pattern.test(message)) && !memoryVerbSignal.test(message) && !webhookResourceSignal.test(message) && !((selectedCompanyId || selectedBusinessId) && this.isPotentialMutationRequest(message))
+      && !await this.namesOwnedAutomation(auth, store, message, resources?.automations)) return "";
     // Only the first 30 records reach the prompt: the selected one, then those named in the request, then the most
     // recently updated - not the oldest 30, which hid the company the user had just created.
     const promptOrder = <T extends { id: string; name: string; updatedAt: string }>(items: T[], selectedId?: string) => {

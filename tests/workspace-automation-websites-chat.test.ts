@@ -197,3 +197,18 @@ describe("automation and Website registration/publishing from chat", () => {
     expect(await targets.listTargets(bob, company.id)).toEqual([]);
   });
 });
+
+it("treats a request that names an owned automation as workspace management without the word 'automation'", async () => {
+  const store = new InMemoryWorkspaceStore();
+  const automations = new CompanyAutomationsRepository();
+  const company = await store.createCompany(alice, { name: "Named Automation Co" }, "named-automation-company");
+  const agent = await store.createCompanyAgent(alice, company.id, { name: "Runner", role: "Operator", tools: [] }, "named-automation-agent");
+  await automations.create(alice, company.id, { name: "Stress Weekly Revised", prompt: "Report STRESS_WEEKLY_OK", cronExpression: "0 9 * * 1", agentId: agent.id });
+  const message = 'Run "Stress Weekly Revised" manually once and inspect its actual execution history.';
+  expect(WorkspaceChatActions.isManagementRequest(message)).toBe(false);
+  expect(await WorkspaceChatActions.namesOwnedAutomation(alice, store, message, automations)).toBe(true);
+  expect(await WorkspaceChatActions.namesOwnedAutomation(bob, store, message, automations)).toBe(false);
+  expect(await WorkspaceChatActions.namesOwnedAutomation(alice, store, "Write a weekly revised plan", automations)).toBe(false);
+  const prompt = await WorkspaceChatActions.buildSystemPrompt(alice, store, message, company.id, undefined, { automations, content: new ContentLibraryStore(store) });
+  expect(prompt).toContain("Stress Weekly Revised");
+});
