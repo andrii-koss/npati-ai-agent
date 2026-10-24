@@ -60,7 +60,7 @@ export type WorkspaceChatActionDependencies = {
   webhooks?: Pick<IntegrationsRepository, "listWebhooks" | "createWebhook" | "deleteWebhook" | "setWebhookActive">;
 };
 type WorkspacePromptResources = Pick<WorkspaceChatActionDependencies, "automations" | "content"> &
-  Partial<Pick<WorkspaceChatActionDependencies, "browserTargets" | "email" | "webhooks">>;
+  Partial<Pick<WorkspaceChatActionDependencies, "browserTargets" | "email" | "webhooks">> & { memoryReadAllowed?: boolean };
 
 const memoryTypes = new Set<MemoryInput["type"]>(["business_fact", "audience", "brand", "preference", "decision", "product", "channel", "experiment", "result", "other"]);
 const contentTypes = new Set<ContentType>(["article", "seo_blueprint", "social_post", "brief", "strategy", "other"]);
@@ -324,6 +324,12 @@ function contentTask(task: string): { title?: string; type: ContentLibraryType }
 }
 
 export class WorkspaceChatActions {
+  /** Reading stored memory uses the existing scoped context; it must not start a mutation planner. */
+  static isReadOnlyMemoryRequest(message: string): boolean {
+    const memory = /(?:\bmemor(?:y|ies|ia)\b|mem\u00f3ria|ged\u00e4chtnis|m\u00e9moire|\u043f\u0430\u043c['\u2019]?\u044f\u0442|\u043f\u0430\u043c\u044f\u0442)/iu.test(message);
+    return memory && !memoryVerbSignal.test(message) && !actionSignals.some(pattern => pattern.test(message));
+  }
+
   static isManagementRequest(message: string, options: { includeGoals?: boolean } = {}): boolean {
     const subject = profileEntitySignal.test(message) ? message.replace(profileFieldTerms, " ") : message;
     // "Research two bakery websites …" reads websites; it does not manage the browser campaign's website targets.
@@ -396,7 +402,11 @@ export class WorkspaceChatActions {
       mainAgentId: company.mainAgentId,
       agents: (await store.listCompanyAgentsPage(auth, company.id, 50)).items.map((agent) => ({ id: agent.id, name: agent.name, role: agent.role, active: agent.isActive })),
     })));
-    const memoryContext = await Promise.all(ownedBusinesses.slice(0, 30).map(async (business) => ({
+    const linkedBusinessId = ownedCompanies.find(company => company.id === selectedCompanyId)?.businessId;
+    const memoryBusinesses = resources?.memoryReadAllowed === false ? [] : ownedBusinesses.filter(business =>
+      (!selectedCompanyId && !selectedBusinessId) || business.id === selectedBusinessId || business.id === linkedBusinessId
+      || message.toLocaleLowerCase().includes(business.name.toLocaleLowerCase()));
+    const memoryContext = await Promise.all(memoryBusinesses.slice(0, 30).map(async (business) => ({
       id: business.id,
       name: business.name,
       memory: (await store.listMemory(auth, business.id)).slice(0, 50).map((item) => ({ id: item.id, type: item.type, title: item.title, content: item.content, confidence: item.confidence })),

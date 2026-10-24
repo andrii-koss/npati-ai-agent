@@ -390,3 +390,46 @@ it("creates an inactive webhook and reuses it without activating or duplicating 
  const first=await WorkspaceChatActions.extractAndExecute(alice,text,deps,"webhook-chat");expect(first.workspaceAction?.action).toBe("webhook.create");const created=(await repo.listWebhooks(alice,company.id))[0];expect(created.isActive).toBe(false);expect(await repo.getWebhookBySecret(created.secret)).toBeNull();
  await repo.setWebhookActive(alice,company.id,created.id,true);const second=await WorkspaceChatActions.extractAndExecute(alice,text,deps,"webhook-chat");expect(second.workspaceAction?.resourceId).toBe(created.id);expect(await repo.listWebhooks(alice,company.id)).toHaveLength(1);expect((await repo.listWebhooks(alice,company.id))[0].isActive).toBe(false);
 });
+
+
+it("limits memory contents to the active or explicitly named business and honors NoMemory", async () => {
+  const store = new InMemoryWorkspaceStore();
+  const bakery = await store.createBusiness(alice, { name: "Bakery Profile", businessStage: "idea" });
+  await store.createMemory(alice, bakery.id, { type: "business_fact", title: "Recipe", content: "RECIPE_LIME_732" });
+  const other = await store.createBusiness(alice, { name: "Other Profile", businessStage: "idea" });
+  await store.createMemory(alice, other.id, { type: "business_fact", title: "Other", content: "OTHER_MEMORY_CANARY" });
+  const studio = await store.createCompany(alice, { name: "Unlinked Studio" }, "memory-read-studio");
+  const prompt = await WorkspaceChatActions.buildSystemPrompt(alice, store, 'Show the current memory code of "Bakery Profile".', studio.id);
+  expect(prompt).toContain("RECIPE_LIME_732");
+  expect(prompt).not.toContain("OTHER_MEMORY_CANARY");
+  const resources = { automations: new CompanyAutomationsRepository(), content: new ContentLibraryStore(store), memoryReadAllowed: false };
+  const ephemeral = await WorkspaceChatActions.buildSystemPrompt(alice, store, 'Show the memory of "Bakery Profile".', studio.id, undefined, resources);
+  expect(ephemeral).not.toContain("RECIPE_LIME_732");
+  expect(ephemeral).not.toContain("OTHER_MEMORY_CANARY");
+});
+
+it.each([
+  'Show the current recipe code in memory of "Bakery Profile".',
+  '\u042f\u043a\u0438\u0439 \u0430\u043a\u0442\u0443\u0430\u043b\u044c\u043d\u0438\u0439 \u043a\u043e\u0434 \u0443 \u043f\u0430\u043c\'\u044f\u0442\u0456 \u0431\u0456\u0437\u043d\u0435\u0441\u0443 "Bakery Profile"? \u041d\u0430\u0437\u0432\u0438 \u043b\u0438\u0448\u0435 \u0430\u043a\u0442\u0443\u0430\u043b\u044c\u043d\u0438\u0439 \u043a\u043e\u0434.',
+])("keeps a memory read answer instead of replacing it with a failed write plan: %s", async message => {
+  expect(WorkspaceChatActions.isReadOnlyMemoryRequest(message)).toBe(true);
+  const store = new InMemoryWorkspaceStore();
+  const business = await store.createBusiness(alice, { name: "Bakery Profile", businessStage: "idea" });
+  await store.createMemory(alice, business.id, { type: "business_fact", title: "Recipe", content: "RECIPE_LIME_732" });
+  const company = await store.createCompany(alice, { name: "Memory Read Studio" }, "memory-read-company");
+  const ai: AIEngine = {
+    chat: async request => ({ content: String(request.messages[0]?.content).startsWith("Classify") ? JSON.stringify({ intent: "CHAT", confidence: 1, targets: [] }) : "RECIPE_LIME_732" }),
+    async *stream() { yield "RECIPE_LIME_732"; }, listModels: async () => [], getModel: async () => undefined,
+    executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
+    getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+  };
+  const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+  const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => alice }, aiEngine: ai, marketplace });
+  try {
+    const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message, contextType: "company", companyId: company.id } });
+    const frame = response.body.split("\n\n").find(frame => frame.includes("event: result"));
+    const result = JSON.parse(frame!.split("\n").find(line => line.startsWith("data:"))!.slice(5));
+    expect(result.message).toBe("RECIPE_LIME_732");
+    expect(await store.listMemory(alice, business.id)).toHaveLength(1);
+  } finally { await app.close(); }
+});

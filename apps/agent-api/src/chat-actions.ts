@@ -525,6 +525,7 @@ ${localized.next}`;
   }
 
   async function executeWorkspaceChatAction(auth: AuthContext, content: string, conversationId?: string, requestMessage?: string, route?: { model?: string; fallbackModel?: string; signal?: AbortSignal; selectedCompanyId?: string; selectedBusinessId?: string }) {
+    if (requestMessage && WorkspaceChatActions.isReadOnlyMemoryRequest(requestMessage)) return { cleanText: content.replace(/```workspace-action[\s\S]*?```/gi, "").trim(), workspaceAction: undefined, companyRunId: undefined };
     const explicitManagement = Boolean(requestMessage && WorkspaceChatActions.isManagementRequest(requestMessage, { includeGoals: false }));
     let contextualMutation = false;
     if (!explicitManagement && requestMessage && conversationId && WorkspaceChatActions.isPotentialMutationRequest(requestMessage)) {
