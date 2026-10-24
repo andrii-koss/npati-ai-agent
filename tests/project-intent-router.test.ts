@@ -293,6 +293,13 @@ describe("Step 5 - Project Orchestrator: Agent Selection, Targeted Edits & Repai
           idempotencyKey
         );
 
+        if (params.projectId) {
+          const project = await store.getProject(ctx, companyId, params.projectId);
+          if (project.framework === "HTML/CSS") {
+            const page = "<!doctype html><html lang=\"uk\"><head><title>" + project.name + "</title></head><body><h1>" + project.name + "</h1></body></html>";
+            await projectWorkspace.createFile(ctx, companyId, params.projectId, "index.html", page).catch(() => undefined);
+          }
+        }
         await store.updateCompanyAgentRun(ctx, companyId, run.id, {
           status: "completed",
           selectedAgentIds: params.preferredAgentId ? [params.preferredAgentId] : [],
@@ -315,24 +322,19 @@ describe("Step 5 - Project Orchestrator: Agent Selection, Targeted Edits & Repai
     );
   });
 
-  it("stops before AI on a database bootstrap failure and retries the same project", async () => {
+  it("creates a website without running a database bootstrap (provisioning is opt-in)", async () => {
     let company = await store.createCompany(authUserA, { name: "Shop bootstrap" }, "bootstrap-company");
     const main = await store.createCompanyAgent(authUserA, company.id, { name: "Coordinator", role: "manager", tools: [], isActive: true }, "bootstrap-main");
     company = await store.setCompanyMainAgent(authUserA, company.id, main.id, company.revision);
     let attempts = 0;
     const hooked = new ProjectOrchestrator(store, projectService, projectWorkspace, undefined, gitPreviewService, gitCompanyRuntime,
       undefined, undefined, undefined, undefined, undefined, undefined, undefined,
-      async () => { if (++attempts === 1) throw new DataStudioError(503, "website_bootstrap", "Configure Project API URL", false, "PROJECT_API_URL_REQUIRED"); });
+      async () => { attempts++; throw new DataStudioError(503, "website_bootstrap", "Configure Project API URL", false, "PROJECT_API_URL_REQUIRED"); });
     const message = "Створи тестовий сайт інтернет магазин на Next.js, запусти build і Live Preview.";
-    await expect(hooked.executeWebsiteTask(authUserA, { companyId: company.id, prompt: message, intentDecision: classifyProjectIntent({message}), idempotencyKey: "shop-first" })).rejects.toMatchObject({code:"PROJECT_API_URL_REQUIRED",status:503});
-    const projects = await projectService.list(authUserA, company.id);
-    expect(projects).toHaveLength(1);
-    expect(projects[0]!.status).toBe("failed");
-    expect(await store.listProjectRuns(authUserA, company.id, projects[0]!.id)).toHaveLength(0);
-    const result = await hooked.executeWebsiteTask(authUserA, {companyId:company.id,projectId:projects[0]!.id,prompt:"Збери проєкт",intentDecision:classifyProjectIntent({message:"Збери проєкт",activeProjectId:projects[0]!.id}),idempotencyKey:"shop-retry"});
-    expect(attempts).toBe(2);
-    expect(result.project.id).toBe(projects[0]!.id);
-    expect(result.projectCard.buildStatus).toBe("success");
+    const result = await hooked.executeWebsiteTask(authUserA, { companyId: company.id, prompt: message, intentDecision: classifyProjectIntent({ message }), idempotencyKey: "shop-first" });
+    expect(attempts).toBe(0);
+    expect(result.project.dataBackendId).toBeUndefined();
+    expect(await projectService.list(authUserA, company.id)).toHaveLength(1);
   });
 
   it("connects a repository and records a project commit in Activity", async () => {
@@ -458,9 +460,9 @@ describe("Step 5 - Project Orchestrator: Agent Selection, Targeted Edits & Repai
     expect(result.previewUrl).toBe("/api/preview-mock/url");
     expect(result.responseMessage).toContain("стартовий сайт");
     expect(result.responseMessage).toContain("AI-персоналізацію не завершено");
-    const website = JSON.parse((await projectWorkspace.readFile(authUserA, company.id, result.project.id, "website.config.json")).content);
-    expect(website.pages.map((page: { slug: string }) => page.slug)).toContain("/hosting");
-    expect(JSON.stringify(website.pages[0].blocks)).not.toContain("Створи мені сайт");
+    const page = await projectWorkspace.readFile(authUserA, company.id, result.project.id, "app/page.tsx");
+    expect(page.content).not.toContain("Створи мені сайт");
+    expect(JSON.parse((await projectWorkspace.readFile(authUserA, company.id, result.project.id, "package.json")).content).dependencies.next).toBeTruthy();
     const originalRuns = await store.listProjectRuns(authUserA, company.id, result.project.id);
     expect(originalRuns.some((run) => run.errorCode === "INVALID_DELEGATION_PLAN")).toBe(true);
   });
@@ -574,7 +576,7 @@ describe("Step 5 - Project Orchestrator: Agent Selection, Targeted Edits & Repai
     expect(result.responseMessage).toContain("HTML/CSS сайт");
     const home = await projectWorkspace.readFile(authUserA, company.id, result.project.id, "index.html");
     expect(home.content).toContain("<html lang=\"uk\">");
-    expect(home.content).toContain("id=\"pricing\"");
+    expect(home.content).toMatch(/<body[\s>]/); // authored by the agent; the fixed hosting template was removed
     expect(home.content).not.toContain("next dev");
   });
   it("creates an HTML blog for the exact chat request", async () => {
@@ -762,5 +764,28 @@ describe("Step 5 - Project Orchestrator: Agent Selection, Targeted Edits & Repai
     expect(result.repairAttempts).toBe(2);
     expect(result.projectCard.buildStatus).toBe("success");
     expect(result.previewUrl).toBe("/api/preview-mock/url");
+  });
+});
+
+describe("static site fallback", () => {
+  it("writes the starter page it announces when the specialist could not run", async () => {
+    const { InMemoryWorkspaceStore: Store } = await import("@npati/workspace");
+    const { mkdtemp } = await import("node:fs/promises");
+    const store = new Store();
+    const projectService = new ProjectService(store);
+    const projectWorkspace = new LocalProjectWorkspace(projectService, { root: await mkdtemp(path.join(tmpdir(), "npati-static-fallback-")) });
+    const auth = { userId: "fallback-owner", workspaceId: "fallback-ws", permissions: ["workspace:read", "workspace:write", "business:manage"] };
+    let company = await store.createCompany(auth, { name: "Static Fallback Co" }, "static-fallback-company");
+    const coordinator = await store.createCompanyAgent(auth, company.id, { name: "Coordinator", role: "manager", tools: [], isActive: true }, "static-fallback-main");
+    company = await store.setCompanyMainAgent(auth, company.id, coordinator.id, company.revision);
+    const unavailable = { async execute() { throw new Error("Sandbox runner is not configured"); } } as unknown as CompanyDelegationRuntime;
+    const preview = { async startPreview() { throw new Error("not used"); }, async getPreviewStatus() { return { status: "stopped" }; } } as unknown as ProjectPreviewService;
+    const orchestrator = new ProjectOrchestrator(store, projectService, projectWorkspace, undefined, preview, unavailable);
+    const result = await orchestrator.executeWebsiteTask(auth, { companyId: company.id, prompt: "Створи мені сайт, для хостінга",
+      intentDecision: classifyProjectIntent({ message: "Створи мені сайт, для хостінга" }), idempotencyKey: "static-fallback" });
+    expect(result.project.framework).toBe("HTML/CSS");
+    expect(result.projectCard.buildStatus).toBe("success");
+    const home = await projectWorkspace.readFile(auth, company.id, result.project.id, "index.html");
+    expect(home.content).toMatch(/<body[\s>]/);
   });
 });

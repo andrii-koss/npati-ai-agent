@@ -154,6 +154,13 @@ export class ProjectOrchestrator {
   private async recordScaffoldFallback(
     ctx: AuthContext, companyId: string, project: Project, idempotencyKey: string,
   ): Promise<CompanyAgentRunDetails> {
+    // Static sites are no longer template-scaffolded, so the fallback writes the minimal starter page it announces.
+    if (project.framework === "HTML/CSS") {
+      const exists = await this.projectWorkspace.readFile(ctx, companyId, project.id, "index.html").then(() => true, () => false);
+      const name = project.name.replace(/[<>&"]/g, "");
+      if (!exists) await this.projectWorkspace.createFile(ctx, companyId, project.id, "index.html",
+        `<!doctype html>\n<html lang="uk">\n<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${name}</title></head>\n<body>\n<main><h1>${name}</h1></main>\n</body>\n</html>\n`);
+    }
     return recordScaffoldFallback(this.workspaceStore, ctx, companyId, project, idempotencyKey);
   }
 
