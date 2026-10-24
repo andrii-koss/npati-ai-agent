@@ -172,8 +172,10 @@ describe("Stage 2: NPATI Website Integration - Auth, CORS & Preview Proxy", () =
         },
       };
 
+      // The proxy confirms the project is still previewable (not deleted, failed or rebuilding) before forwarding.
+      const projects = { get: async () => ({ id: projectId, companyId, status: "previewing" }) };
       const previewService = new ProjectPreviewService(
-        {} as any,
+        projects as any,
         {} as any,
         {} as any,
         mockSandbox,

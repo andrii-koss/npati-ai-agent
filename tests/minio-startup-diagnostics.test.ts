@@ -68,7 +68,7 @@ describe("MinIO startup diagnostics with the real SDK", () => {
     // A missing bucket proceeds to creation, whose mocked response is not an S3 error.
     await client.initialize();
     expect(requests.some(request => request === "GET /")).toBe(false);
-    expect(requests.filter(request => request.startsWith("PUT "))).toHaveLength(4);
+    expect(requests.filter(request => request.startsWith("PUT "))).toHaveLength(Object.values(NPATI_BUCKETS).length);
   });
   it("preserves non-authorization errors without extra requests", async () => {
     const { client, requests } = await storage(400);

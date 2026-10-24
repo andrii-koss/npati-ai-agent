@@ -486,7 +486,7 @@ describe("D7 — lifecycle", () => {
 });
 
 describe("D7 — automatic DataBackend attachment", () => {
-  it("attaches a database to a new Project and returns it with the backend already linked", async () => {
+  it("attaches a database only on request and returns the Project with the backend already linked", async () => {
     const store = new InMemoryWorkspaceStore();
     await store.initialize();
     const company = await store.createCompany(owner, { name: "Auto attach" }, "auto-attach");
@@ -498,7 +498,11 @@ describe("D7 — automatic DataBackend attachment", () => {
       return "backend-auto";
     });
 
-    const created = await service.create(owner, company.id, { name: "Shop", type: "website" }, "auto-attach-key");
+    // Since the opt-in change, creating a website alone never provisions a database.
+    const plain = await service.create(owner, company.id, { name: "Plain site", type: "website" }, "auto-attach-plain");
+    expect(calls).toHaveLength(0);
+    expect(plain.project.dataBackendId).toBeUndefined();
+    const created = await service.create(owner, company.id, { name: "Shop", type: "website" }, "auto-attach-key", { attachDataBackend: true });
     expect(calls).toHaveLength(1);
     expect(created.project.dataBackendId).toBe("backend-auto");
   });

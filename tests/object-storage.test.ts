@@ -8,6 +8,7 @@ describe("NPATI object storage", () => {
       "npati-company-knowledge",
       "npati-generated-media",
       "npati-exports",
+      "npati-project-media", // website media, served only through the authenticated project media route
     ]);
   });
 
