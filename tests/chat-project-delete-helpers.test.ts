@@ -7,3 +7,4 @@ describe("shared website deletion helpers", () => {
  it("refuses a message naming multiple possible targets",()=>expect(projectDeleteTarget(projects,"Delete Bakery Shop and Studio Site",undefined,"a")).toBeUndefined());
  it("returns the existing localized no-site message",()=>expect(noWebsiteToChangeMessage("Зміни сайт")).toContain("немає сайту"));
 });
+it("takes the one site named before a keep clause as the deletion target",()=>{const list=[{id:"v",name:"Stress Vite"},{id:"n",name:"Stress Next Shop"},{id:"a",name:"Stress Astro"}];expect(projectDeleteTarget(list,'Delete only the test project "Stress Vite". Keep "Stress Next Shop" and "Stress Astro".')?.id).toBe("v");expect(projectDeleteTarget(list,'Delete "Stress Vite" and "Stress Astro". Keep "Stress Next Shop".')).toBeUndefined();});

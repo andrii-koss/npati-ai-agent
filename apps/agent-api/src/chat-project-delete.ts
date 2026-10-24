@@ -51,9 +51,14 @@ export function confirmedProjectDeletion(message: string, previousAssistant: str
 export function projectDeleteTarget<T extends { id: string; name: string }>(projects: T[], message: string, confirmedName?: string, activeProjectId?: string | null): T | undefined {
   if (confirmedName) return projects.find(project => project.name === confirmedName);
   const lower = message.toLocaleLowerCase();
-  const named = projects.filter(project => project.name.length > 2 && lower.includes(project.name.toLocaleLowerCase()));
-  if (named.length > 1) return undefined;
-  return named[0] ?? projects.find(project => project.id === activeProjectId) ?? (projects.length === 1 ? projects[0] : undefined);
+  const named = projects.map(project => ({ project, at: project.name.length > 2 ? lower.indexOf(project.name.toLocaleLowerCase()) : -1 }))
+    .filter(entry => entry.at >= 0).sort((a, b) => a.at - b.at);
+  if (named.length > 1) {
+    // "Delete X ... Keep Y and Z": only the one site named before the keep clause is the target; otherwise ambiguous.
+    const keep = lower.search(/(?:\bkeep\b|\bpreserve\b|\bretain\b|залиш|збереж|не\s+чіпай|сохрани|оставь|mant[eé]n|conserv|behalte)/iu);
+    return keep >= 0 && named[0]!.at < keep && named[1]!.at > keep ? named[0]!.project : undefined;
+  }
+  return named[0]?.project ?? projects.find(project => project.id === activeProjectId) ?? (projects.length === 1 ? projects[0] : undefined);
 }
 
 export function noWebsiteToChangeMessage(message: string): string {
