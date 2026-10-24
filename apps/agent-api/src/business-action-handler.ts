@@ -54,7 +54,27 @@ export interface GoalActionDirective {
     currentValue?: number | string;
     targetUnit?: string;
     targetDate?: string;
+    /** Exact Company Agent name or ID; null removes the assignment. */
+    assignedAgent?: string | null;
+    /** Company name that disambiguates an agent name shared by several owned companies. */
+    assignedCompany?: string;
   };
+}
+
+/** Resolves exactly one Company Agent owned by this user; an unknown or ambiguous agent fails the goal action. */
+async function resolveGoalAgent(store: WorkspaceStore, auth: AuthContext, agent: string, companyName?: string): Promise<string> {
+  const wanted = agent.trim().toLocaleLowerCase(), company = companyName?.trim().toLocaleLowerCase();
+  const matches: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await store.listCompanies(auth, 100, cursor);
+    for (const item of page.items.filter((entry) => !company || entry.name.toLocaleLowerCase() === company))
+      matches.push(...(await store.listCompanyAgentsPage(auth, item.id, 100)).items
+        .filter((entry) => entry.id === agent.trim() || entry.name.toLocaleLowerCase() === wanted).map((entry) => entry.id));
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+  if (matches.length !== 1) throw new Error(matches.length ? "Several Company Agents match this goal assignee; name the company" : "The goal assignee is not an agent of an owned company");
+  return matches[0]!;
 }
 
 function normalizeBusinessStage(val?: string): "idea" | "starting" | "operating" | "growing" | "scaling" {
@@ -108,7 +128,7 @@ export class BusinessActionHandler {
           .flatMap((entry) =>
             entry.goals.map(
               (g) =>
-                `- [Business: "${entry.businessName}", BusinessID: "${entry.businessId}"] Goal ID: "${g.id}", Title: "${g.title}", Status: "${g.status}", Priority: P${g.priority}${g.targetValue ? `, Target: ${g.currentValue ?? 0}/${g.targetValue} ${g.targetUnit || ''}` : ''}${g.targetDate ? `, Due: ${g.targetDate.slice(0, 10)}` : ''}`
+                `- [Business: "${entry.businessName}", BusinessID: "${entry.businessId}"] Goal ID: "${g.id}", Title: "${g.title}", Status: "${g.status}", Priority: P${g.priority}${g.assignedAgentId ? `, Assigned agent ID: "${g.assignedAgentId}"` : ''}${g.targetValue ? `, Target: ${g.currentValue ?? 0}/${g.targetValue} ${g.targetUnit || ''}` : ''}${g.targetDate ? `, Due: ${g.targetDate.slice(0, 10)}` : ''}`
             )
           )
           .join("\n")
@@ -231,7 +251,7 @@ Proactively prompt the user for **Крок 2 (Step 2)**: setting measurable Goal
 
 ==================================================
 STEP 2 - GOALS & OBJECTIVES (CREATION, EDITING & DELETION):
-Business Goals currently have no agent-assignment field or assignment API. If the user asks to assign a Goal to a Company agent, explain this limitation in the user's language; do not emit a fake assignment directive or claim an assignee was saved. Preserve the Goal and its Business link. Delegating a Company task is a separate operation and does not create a Goal assignee.
+A Goal can be assigned to one Company Agent owned by this user: set goal.assignedAgent to the agent's exact name or ID and goal.assignedCompany to its company name, and use null to remove the assignment. Assignment records responsibility only; it does not run or delegate work. Report an assignment as saved only after the directive succeeds.
 ==================================================
 When the user asks to create, add, or edit a Goal (e.g., "поставити ціль", "створи ціль", "додай ціль", "зміни ціль", "відредагуй ціль", "познач ціль як виконану", etc.):
 1. Each goal belongs to a business. Determine the target business from context, name, or businessId (if none specified, use the user's active/latest business).
@@ -511,6 +531,8 @@ You can emit BOTH \`\`\`business-action\`\`\` and \`\`\`goal-action\`\`\` in the
               ...(g.currentValue !== undefined && g.currentValue !== null && g.currentValue !== "" ? { currentValue: Number(g.currentValue) } : {}),
               ...(g.targetUnit !== undefined ? { targetUnit: String(g.targetUnit).trim() } : {}),
               ...(g.targetDate !== undefined ? { targetDate: String(g.targetDate).trim() } : {}),
+              ...(g.assignedAgent !== undefined ? { assignedAgentId: g.assignedAgent === null || !String(g.assignedAgent).trim() ? null
+                : await resolveGoalAgent(workspaceStore, auth, String(g.assignedAgent), g.assignedCompany) } : {}),
             };
 
             let goal: Goal;

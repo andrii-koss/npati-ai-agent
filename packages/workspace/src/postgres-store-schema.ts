@@ -177,7 +177,7 @@ export const businessColumns = `id, workspace_id AS "workspaceId", owner_user_id
 export const goalColumns = `id, workspace_id AS "workspaceId", business_id AS "businessId", created_by_user_id AS "createdByUserId",
   title, description, status, target_value::float AS "targetValue", target_unit AS "targetUnit",
   current_value::float AS "currentValue", target_date::text AS "targetDate", priority,
-  created_at AS "createdAt", updated_at AS "updatedAt"`;
+  assigned_agent_id AS "assignedAgentId", created_at AS "createdAt", updated_at AS "updatedAt"`;
 export const memoryColumns = `id, workspace_id AS "workspaceId", business_id AS "businessId", user_id AS "userId",
   type, title, content, source, confidence::float, created_at AS "createdAt", updated_at AS "updatedAt"`;
 export const conversationColumns = `id, workspace_id AS "workspaceId", business_id AS "businessId", user_id AS "userId",

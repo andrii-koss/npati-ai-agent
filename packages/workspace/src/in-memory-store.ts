@@ -213,6 +213,11 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       memories: this.memories,
       assertBusiness: this.assertBusiness.bind(this),
       assertCompanyAgent: this.assertCompanyAgent.bind(this),
+      assertOwnedAgent: (context, agentId) => {
+        const agent = this.companyAgents.get(agentId);
+        if (!agent) throw new WorkspaceAccessError("Assigned agent is not available");
+        return this.assertCompanyAgent(context, agent.companyId, agentId);
+      },
     };
   }
 

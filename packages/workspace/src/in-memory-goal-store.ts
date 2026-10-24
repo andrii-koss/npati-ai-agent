@@ -10,6 +10,7 @@ export interface InMemoryGoalState {
   memories: any
   assertBusiness: (context: AuthContext, businessId: string) => any
   assertCompanyAgent: (context: AuthContext, companyId: string, agentId: string) => any
+  assertOwnedAgent: (context: AuthContext, agentId: string) => any
 }
 
 export async function setCompanyAgentParent(host: InMemoryGoalState, context: AuthContext, companyId: string, childAgentId: string, parentAgentId: string | null) {
@@ -42,6 +43,7 @@ export async function listGoals(host: InMemoryGoalState, context: AuthContext, b
 
 export async function createGoal(host: InMemoryGoalState, context: AuthContext, businessId: string, input: GoalInput) {
     host.assertBusiness(context, businessId);
+    if (input.assignedAgentId) host.assertOwnedAgent(context, input.assignedAgentId);
     const timestamp = now();
     const goal: Goal = { id: randomUUID(), workspaceId: context.workspaceId, businessId, createdByUserId: context.userId, status: input.status ?? "active", priority: input.priority ?? 3, createdAt: timestamp, updatedAt: timestamp, ...input, title: input.title.trim() };
     if (!goal.title) throw new Error("Goal title is required");
@@ -53,6 +55,7 @@ export async function updateGoal(host: InMemoryGoalState, context: AuthContext, 
     host.assertBusiness(context, businessId);
     const goal = host.goals.get(goalId);
     if (!goal || goal.workspaceId !== context.workspaceId || goal.businessId !== businessId) throw new WorkspaceAccessError("Goal is not available for this business");
+    if (input.assignedAgentId) host.assertOwnedAgent(context, input.assignedAgentId);
     const updated = { ...goal, ...input, updatedAt: now() };
     host.goals.set(goalId, updated);
     return updated;

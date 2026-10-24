@@ -97,6 +97,8 @@ export interface Goal {
   id: string; workspaceId: string; businessId: string; createdByUserId: string; title: string; description?: string;
   status: GoalStatus; targetValue?: number; targetUnit?: string; currentValue?: number; targetDate?: string;
   priority: number; createdAt: string; updatedAt: string;
+  /** Company Agent responsible for the goal; it must belong to a company owned by the same user. */
+  assignedAgentId?: string | null;
 }
 export type GoalInput = Partial<Omit<Goal, "id" | "workspaceId" | "businessId" | "createdByUserId" | "createdAt" | "updatedAt">> & { title: string };
 
