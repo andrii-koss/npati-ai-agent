@@ -435,3 +435,26 @@ it("uses the existing engine's non-thinking DeepSeek plan without the A2A inner 
   expect(result.run.totalTokens).toBe(170);
   expect(result.toolAudit.filter(entry => entry.toolName === "ai.inference")).toHaveLength(2);
 });
+
+it("repairs an invalid DeepSeek agent selection through the same non-thinking engine path", async () => {
+  const store = new InMemoryWorkspaceStore();
+  const ctx = { workspaceId: "deepseek-repair-ws", userId: "deepseek-repair-owner", permissions: ["workspace:read", "business:manage"] };
+  let company = await store.createCompany(ctx, { name: "DeepSeek Repair" }, "deepseek-repair-company");
+  const main = await store.createCompanyAgent(ctx, company.id, { name: "Designer", role: "Lead", modelId: "deepseek/deepseek-flash", tools: [] }, "deepseek-repair-main");
+  const reviewer = await store.createCompanyAgent(ctx, company.id, { name: "Reviewer", role: "QA", modelId: "deepseek/deepseek-flash", tools: [] }, "deepseek-repair-reviewer");
+  company = await store.setCompanyMainAgent(ctx, company.id, main.id, company.revision);
+  const a2aSend = vi.fn(async () => { throw Error("The opaque 30s A2A transport must not run"); });
+  const plans = [["Unknown Auditor"], [reviewer.id]];
+  const planning: import("@npati/omniroute-adapter").ChatRequest[] = [];
+  const chat = vi.fn(async (request: import("@npati/omniroute-adapter").ChatRequest) => {
+    if (request.reasoningMode !== "disabled") return { content: "Reviewed.", model: "deepseek-flash" };
+    planning.push(request);
+    return { content: JSON.stringify({ mode: "single", agentIds: plans.shift() ?? [], toolRequests: [] }), model: "deepseek-flash" };
+  });
+  const result = await new CompanyDelegationRuntime(store, engine({ chat, a2aSend })).execute(ctx, company.id, { task: "Review the homepage", mode: "single" }, "deepseek-repair-run");
+  expect(result.run.status).toBe("completed");
+  expect(result.run.selectedAgentIds).toContain(reviewer.id);
+  expect(a2aSend).not.toHaveBeenCalled();
+  expect(planning.map(request => request.model)).toEqual(["deepseek/deepseek-flash", "deepseek/deepseek-flash"]);
+  expect(plans).toHaveLength(0);
+});

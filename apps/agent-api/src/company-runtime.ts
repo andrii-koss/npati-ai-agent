@@ -303,10 +303,11 @@ export class CompanyDelegationRuntime {
           totalCost += measured.costUsd; totalTokens += measured.totalTokens;
           return { content: result.content, taskId: undefined, metadata: {} };
         }
-        if (!a2aReady) { await this.ai.ensureA2AEnabled(); a2aReady = true; }
+        if (!a2aReady) { await this.ai.ensureA2AEnabled!(); a2aReady = true; }
         return this.ai.a2aSend!(request);
       };
       let plan: Plan;
+      let plannedModel = planningRequest.model;
       if (pendingState) {
         plan = pendingState.plan;
       } else {
@@ -315,7 +316,6 @@ export class CompanyDelegationRuntime {
           if (!planningCandidates.includes("auto")) planningCandidates.push("auto");
           if (!planningCandidates.includes("auto/smart")) planningCandidates.push("auto/smart");
         }
-        let plannedModel = planningRequest.model;
         const planned = await (async () => {
           let lastError: unknown;
           for (const model of planningCandidates.length ? planningCandidates : [planningRequest.model, "auto"]) {
@@ -372,14 +372,14 @@ export class CompanyDelegationRuntime {
       plan.agentIds = plan.agentIds.map((id) => resolveAgentId(id)!);
       plan.reviewerAgentId = resolveAgentId(plan.reviewerAgentId);
       plan.toolRequests = plan.toolRequests.map((request) => ({ ...request, agentId: resolveAgentId(request.agentId)! }));
-      if (plan.agentIds.some((id) => !byId.has(id)) && !options.preferredAgentId && this.ai.a2aSend) {
+      if (plan.agentIds.some((id) => !byId.has(id)) && !options.preferredAgentId) {
         // One repair of the agent selection: the plan named agents this company does not have. The repaired plan is
         // validated exactly like the first one, so a second invalid selection still fails the run.
         if (options.callBudget && --options.callBudget.remaining < 0)
           throw new CompanyRuntimeError("MODEL_CALL_BUDGET_EXCEEDED", "Project model call limit reached", 429);
         const roster = candidates.map((agent) => ({ id: agent.id, name: agent.name, role: agent.role }));
         const repaired = await sendPlanningRequest({
-          ...planningRequest,
+          ...planningRequest, model: plannedModel,
           idempotencyKey: `${created.run.id}:selection-repair`,
           messages: [
             ...planningRequest.messages,
@@ -399,12 +399,12 @@ export class CompanyDelegationRuntime {
         const agent = agentFor(request.agentId);
         return agent && !agent.tools.map(toolName).includes(toolName(request.tool));
       });
-      if (forbiddenRequests(plan).length && !options.preferredAgentId && this.ai.a2aSend) {
+      if (forbiddenRequests(plan).length && !options.preferredAgentId) {
         if (options.callBudget && --options.callBudget.remaining < 0)
           throw new CompanyRuntimeError("MODEL_CALL_BUDGET_EXCEEDED", "Project model call limit reached", 429);
         const permitted = [main, ...candidates.filter((agent) => agent.id !== main.id)].map((agent) => ({ id: agent.id, name: agent.name, tools: agent.tools.map(toolName) }));
         const repaired = await sendPlanningRequest({
-          ...planningRequest,
+          ...planningRequest, model: plannedModel,
           idempotencyKey: `${created.run.id}:tool-repair`,
           messages: [
             ...planningRequest.messages,
