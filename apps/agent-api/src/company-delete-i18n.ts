@@ -83,6 +83,16 @@ export function companyDeleteCompletedAll(language: CompanyChatLanguage, values:
 }
 
 /** A quoted name is data, not an instruction: «Temp Delete Co» must not read as a deletion request. */
+/**
+ * The company itself is the deleted object ("Delete only test company X", "видали компанію X"), not merely the place of
+ * the deletion ("У компанії X видали агента Y"): the company noun follows the verb within three words, none of which
+ * names another object.
+ */
+export function deletesCompanyItself(message: string): boolean {
+  const match = /(?:видали|видалити|видаліть|удали|удалить|delete|remove|exclua|excluir|elimina|eliminar|lösche|löschen|supprime|supprimer)((?:\s+[\p{L}'’-]+){0,3}?)\s+(?:компані\p{L}*|компани\p{L}*|compan\p{L}*|empresa|unternehmen|firma|entreprise|azienda)/iu.exec(withoutQuotedNames(message));
+  return Boolean(match && !/(?:агент|agent|webhook|вебхук|automat|автомат|project|проєкт|проект|projeto|proyecto|template|шаблон|memor|пам|goal|ціл|цел|row|рядок|строк|table|таблиц|field|поле|contact|контакт|site|сайт)/iu.test(match[1] ?? ""));
+}
+
 export function withoutQuotedNames(message: string): string {
   return message.replace(/«[^»\n]{1,120}»|“[^”\n]{1,120}”|„[^“”\n]{1,120}[“”]|"[^"\n]{1,120}"/gu, "«…»");
 }

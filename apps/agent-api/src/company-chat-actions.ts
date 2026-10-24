@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { AuthContext, Company, CompanyAgent, CompanyAgentInput, CompanyInput, WorkspaceStore } from "@npati/workspace";
 import { companyChatCopy, detectCompanyChatLanguage, insertCompanyName, isLocalizedCompanyManagementRequest, type CompanyChatLanguage } from "./company-chat-i18n";
 import { defaultLocalizedAgentProfiles } from "./company-agent-profile-i18n";
-import { companyDeleteCopy, deleteIsTheAction, isCompanyDeleteConfirmed, withoutQuotedNames } from "./company-delete-i18n";
+import { companyDeleteCopy, deleteIsTheAction, deletesCompanyItself, isCompanyDeleteConfirmed, withoutQuotedNames } from "./company-delete-i18n";
 
 type CompanyOperation = "create" | "update" | "delete";
 type AgentOperation = CompanyOperation;
@@ -456,7 +456,8 @@ export class CompanyChatActions {
 
   static async deleteConfirmationMessage(auth: AuthContext, store: WorkspaceStore, message: string, selectedCompanyId?: string, responseLanguage?: CompanyChatLanguage): Promise<string | undefined> {
     const deleteRequest = deleteMutationSignal.test(withoutQuotedNames(message)) && deleteIsTheAction(withoutQuotedNames(message))
-      && (/(?:компан|compan)/iu.test(message) || selectedDeleteReferenceSignal.test(message));
+      // "У компанії X видали агента Y" deletes an agent: the company must be the deleted object, not its location.
+      && (deletesCompanyItself(message) || selectedDeleteReferenceSignal.test(message));
     const confirmed = isCompanyDeleteConfirmed(message);
     if (!deleteRequest || confirmed) return undefined;
     const language = responseLanguage ?? detectCompanyChatLanguage(message);

@@ -1000,3 +1000,18 @@ describe("read-only company switch in several languages", () => {
     expect(CompanyChatActions.isManagementRequest('Cambia a la empresa "Stress Bakery" y nombra su agente principal.')).toBe(false);
   });
 });
+
+describe("company deletion target", () => {
+  it("asks to confirm only when the company itself is deleted, never for an agent inside it", async () => {
+    const { deletesCompanyItself } = await import("../apps/agent-api/src/company-delete-i18n");
+    expect(deletesCompanyItself("У компанії «Stress Studio» видали лише тестового агента Accessibility Reviewer через штатне підтвердження. Не чіпай Designer і Reviewer.")).toBe(false);
+    expect(deletesCompanyItself('In company "Stress Studio", delete the agent Accessibility Reviewer.')).toBe(false);
+    expect(deletesCompanyItself('Delete the agent of company "Stress Studio".')).toBe(false);
+    expect(deletesCompanyItself('Delete only test company "Stress Studio" through the normal approval flow, including its remaining test agents.')).toBe(true);
+    expect(deletesCompanyItself("Видали компанію «Stress Studio»")).toBe(true);
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(alice, { name: "Stress Studio" }, "delete-target-company");
+    expect(await CompanyChatActions.deleteConfirmationMessage(alice, store, "У компанії «Stress Studio» видали лише тестового агента Accessibility Reviewer.", company.id)).toBeUndefined();
+    expect(await CompanyChatActions.deleteConfirmationMessage(alice, store, "Видали компанію «Stress Studio»", company.id)).toContain("Stress Studio");
+  });
+});
