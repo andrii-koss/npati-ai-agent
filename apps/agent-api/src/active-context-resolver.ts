@@ -24,6 +24,11 @@ export interface ResolvedActiveContext {
 }
 
 const nameWords = (value: string) => value.toLocaleLowerCase().match(/[\p{L}]+/gu) ?? [];
+/** A proper name as written (case-sensitive) and as whole words: "add" or "new" in ordinary text never names "Add" or "New". */
+const mentions = (text: string, name: string) => {
+  const trimmed = name.trim();
+  return trimmed.length > 2 && new RegExp(`(?<![\\p{L}\\p{N}])${trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "u").test(text);
+};
 
 /**
  * The one owned company a message names, when it is not the active one: "build a landing page for Nordic Fit" while
@@ -60,11 +65,9 @@ export class ActiveContextResolver {
     } while (cursor && owned.length < 500);
     // A loose (stem or agent-name) match may only select a company this conversation has already dealt with; any other
     // company needs its full name in the message. "Delete the bakery webhook" must not jump to another "… Bakery".
-    const lowerMessage = message.toLocaleLowerCase(), lowerConversation = conversationText.toLocaleLowerCase();
-    const companies = owned.filter((company) => {
-      const name = company.name.trim().toLocaleLowerCase();
-      return company.id === (current.company?.id ?? current.project?.companyId) || (name.length > 2 && (lowerMessage.includes(name) || lowerConversation.includes(name)));
-    });
+    const lowerMessage = message.toLocaleLowerCase();
+    const companies = owned.filter((company) => company.id === (current.company?.id ?? current.project?.companyId)
+      || mentions(message, company.name) || mentions(conversationText, company.name));
     const creating = decision?.intent === "CREATE_WEBSITE" || decision?.intent === "CREATE_PROJECT";
     // "Create X" names X as the thing to create, not as the place to work ("create NovaScale" when it exists is a
     // duplicate request for the company actions); only a new project for a named company switches.
@@ -82,19 +85,19 @@ export class ActiveContextResolver {
       if (project) return this.resolve(auth, { contextType: "project", companyId: project.companyId, projectId: project.id });
     }
     const activeId = current.company?.id ?? current.project?.companyId ?? null;
-    const exactCompanies = companies.filter(company => company.name.trim().length > 2 && lowerMessage.includes(company.name.trim().toLocaleLowerCase()));
+    const exactCompanies = companies.filter(company => mentions(message, company.name));
     // An explicitly named current company must never be replaced by a coincidental agent-name match ("mark").
     if (exactCompanies.length > 1 || exactCompanies[0]?.id === activeId) return undefined;
     let named = exactCompanies[0] ?? companyNamedInMessage(companies, message, activeId);
     if (!named) {
       // No company name, but an agent's full name that belongs to exactly one company ("have Coach Ana delegate to Leo").
-      const lower = message.toLocaleLowerCase();
       // Bounded to the 20 most recently updated companies (the ones the user works with), read in parallel.
       const recent = [...companies].sort((a, b) => new Date(b.updatedAt as unknown as string).getTime() - new Date(a.updatedAt as unknown as string).getTime()).slice(0, 20);
       const owners = new Set<string>();
       await Promise.all(recent.map(async (company) => {
         const agents = (await this.store.listCompanyAgentsPage(auth, company.id, 50).catch(() => ({ items: [] }))).items;
-        if (agents.some((agent) => agent.name.trim().length >= 3 && lower.includes(agent.name.trim().toLocaleLowerCase()))) owners.add(company.id);
+        // Only a distinctive name (several words or 5+ letters) addresses an agent; "Add" or "Mark" are ordinary verbs.
+        if (agents.some((agent) => (/\s/.test(agent.name.trim()) || agent.name.trim().length >= 5) && mentions(message, agent.name))) owners.add(company.id);
       }));
       const owner = owners.size === 1 ? [...owners][0] : undefined;
       if (owner && owner !== activeId) named = companies.find((company) => company.id === owner);

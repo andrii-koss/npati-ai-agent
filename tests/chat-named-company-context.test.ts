@@ -129,3 +129,15 @@ it("keeps an explicitly named current company when a verb coincides with another
   const current = await resolver.resolve(auth, { contextType: "company", companyId: bakery.id });
   expect(await resolver.resolveNamedCompany(auth, current, 'In company "Stress Bakery", mark test contact as blacklisted.', { intent: "CHAT" } as never, "We previously worked in Other Company.")).toBeUndefined();
 });
+
+it("does not switch to a company whose name or agent name is an ordinary word in the message or history", async () => {
+  const store = new InMemoryWorkspaceStore();
+  const auth: AuthContext = { userId: "common-word-owner", workspaceId: "common-word-workspace", permissions: ["workspace:read", "business:manage"] };
+  const bakery = await store.createCompany(auth, { name: "Stress Bakery" }, "common-word-bakery");
+  const other = await store.createCompany(auth, { name: "New" }, "common-word-new");
+  await store.createCompanyAgent(auth, other.id, { name: "Add", role: "Helper" }, "common-word-add");
+  const resolver = new ActiveContextResolver(store);
+  const current = await resolver.resolve(auth, { contextType: "company", companyId: bakery.id });
+  const message = 'Update goal "Stress Launch" priority to 1 and add an acceptance condition: database updates must appear on the website.';
+  expect(await resolver.resolveNamedCompany(auth, current, message, { intent: "CHAT" } as never, "We added a new acceptance check and a new page.")).toBeUndefined();
+});
