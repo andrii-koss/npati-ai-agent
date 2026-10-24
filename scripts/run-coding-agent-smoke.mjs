@@ -25,15 +25,15 @@ const USER_ID = "e2e-smoke-user";
 const WORKSPACE_ID = "workspace:e2e-smoke-user";
 const COMPANY_ID = "f9d8b13c-a3ec-48b6-950f-660ad1d052d1";
 const REPORT_DIR = path.resolve(process.cwd(), "test-results", "coding-agent");
-const RUNNER_SECRET = "156ab248804dbe155cd37b99242e539afcd8fc1813ac874f18a736b6a7f36d5b";
+const RUNNER_SECRET = process.env.NPATI_SANDBOX_RUNNER_SECRET ?? "";
 
 const KNOWN_SECRETS = [
   JWT_SECRET,
-  "b1f58d50ff5b81c16b62ba8a306d179bc5bdb1a959b38b0c0442946c2469f090",
-  "266ca161651fb5ab434e072ee9766051dfc11f685b7b12971ccd65a67cbb0623",
+  process.env.POSTGRES_PASSWORD ?? "",
+  process.env.OMNIROUTE_API_KEY ?? "",
   RUNNER_SECRET,
   "e2e-preview-secret-test-32-chars-long-abcdef",
-];
+].filter(Boolean);
 
 function base64url(str) {
   const buf = typeof str === "string" ? Buffer.from(str, "utf8") : str;

@@ -15,11 +15,11 @@ export const defaultConfig: E2EConfig = {
   workspaceId: "workspace:e2e-smoke-user",
   knownSecrets: [
     "e2e-test-jwt-secret-at-least-32-chars-long-123456",
-    "b1f58d50ff5b81c16b62ba8a306d179bc5bdb1a959b38b0c0442946c2469f090",
-    "266ca161651fb5ab434e072ee9766051dfc11f685b7b12971ccd65a67cbb0623",
-    "156ab248804dbe155cd37b99242e539afcd8fc1813ac874f18a736b6a7f36d5b",
+    process.env.POSTGRES_PASSWORD ?? "",
+    process.env.OMNIROUTE_API_KEY ?? "",
+    process.env.NPATI_SANDBOX_RUNNER_SECRET ?? "",
     "e2e-preview-secret-test-32-chars-long-abcdef",
-  ],
+  ].filter(Boolean),
 };
 
 function base64url(str: string | Buffer): string {

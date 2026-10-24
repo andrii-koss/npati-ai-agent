@@ -12,7 +12,7 @@ const BASE_URL = defaultConfig.baseUrl;
 const COMPANY_ID = "f9d8b13c-a3ec-48b6-950f-660ad1d052d1";
 const WORKSPACE_ID = "workspace:e2e-smoke-user";
 const USER_ID = "e2e-smoke-user";
-const RUNNER_SECRET = "156ab248804dbe155cd37b99242e539afcd8fc1813ac874f18a736b6a7f36d5b";
+const RUNNER_SECRET = process.env.NPATI_SANDBOX_RUNNER_SECRET ?? "";
 
 let testProjectId = "";
 let initialFileRevision = "";
