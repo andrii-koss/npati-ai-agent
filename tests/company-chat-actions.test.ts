@@ -1018,3 +1018,19 @@ describe("company deletion target", () => {
     expect(CompanyChatActions.isManagementRequest('In "Stress Next Shop" delete only row TEST_SCRATCH_735 from dev stress_scratch, then read the table to prove it is empty.')).toBe(false);
   });
 });
+
+describe("named company deletion target", () => {
+  it("asks about and deletes the named company, never the selected one the request preserves", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const bakery = await store.createCompany(alice, { name: "Stress Bakery" }, "named-delete-bakery");
+    const studio = await store.createCompany(alice, { name: "Stress Studio" }, "named-delete-studio");
+    const request = 'Delete only test company "Stress Studio" through the normal approval flow, including its remaining test agents. Preserve "Stress Bakery".';
+    const question = await CompanyChatActions.deleteConfirmationMessage(alice, store, request, bakery.id);
+    expect(question).toContain("Stress Studio");
+    expect(question).not.toContain("Stress Bakery");
+    const action = await CompanyChatActions.buildDeterministicAction(alice, store, "Yes, delete company Stress Studio", bakery.id);
+    expect(action).toContain(studio.id);
+    expect(action).not.toContain(bakery.id);
+    expect(await CompanyChatActions.deleteConfirmationMessage(alice, store, 'Delete company "Stress Studio" and company "Stress Bakery".', bakery.id)).not.toContain("**Stress Bakery**?");
+  });
+});

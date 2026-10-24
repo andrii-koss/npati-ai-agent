@@ -162,6 +162,25 @@ const numberWordMap: Record<string, number> = {
 };
 
 /** Ignore prohibited operations when deciding whether the user requested a company mutation. */
+/**
+ * The owned company a delete request or its confirmation names (exact name, whole words): undefined when none is
+ * named, null when the target is ambiguous. "Delete X ... Preserve Y" targets X, the one named before the keep clause.
+ */
+async function namedDeleteCompany(auth: AuthContext, store: WorkspaceStore, message: string): Promise<Company | null | undefined> {
+  const owned: Company[] = [];
+  let cursor: string | undefined;
+  do { const page = await store.listCompanies(auth, 100, cursor); owned.push(...page.items); cursor = page.nextCursor ?? undefined; } while (cursor && owned.length < 500);
+  const at = (name: string) => {
+    const match = new RegExp(`(?<![\\p{L}\\p{N}])${name.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "u").exec(message);
+    return match ? match.index : -1;
+  };
+  const named = owned.map((company) => ({ company, at: company.name.trim().length > 2 ? at(company.name) : -1 })).filter((entry) => entry.at >= 0).sort((a, b) => a.at - b.at);
+  if (!named.length) return undefined;
+  if (named.length === 1) return named[0]!.company;
+  const keep = message.search(/(?:\bkeep\b|\bpreserve\b|\bretain\b|залиш|збереж|не\s+чіпай|сохрани|оставь|mant[eé]n|conserv|behalte)/iu);
+  return keep >= 0 && named[0]!.at < keep && named[1]!.at > keep ? named[0]!.company : null;
+}
+
 function companyMutationText(message: string): string {
   return message.replace(/\b(?:do\s+not|don't|never)\s+(?:create|add|edit|update|change|rename|delete|remove|configure|assign|build|set\s+up)\b/giu, " ");
 }
@@ -462,8 +481,10 @@ export class CompanyChatActions {
     if (!deleteRequest || confirmed) return undefined;
     const language = responseLanguage ?? detectCompanyChatLanguage(message);
     const labels = companyDeleteCopy(language);
-    if (selectedCompanyId) {
-      const company = await store.getCompany(auth, selectedCompanyId);
+    // An explicitly named company is the target, never the selected one ("Delete Studio ... Preserve Bakery").
+    const named = await namedDeleteCompany(auth, store, message);
+    if (named || (named === undefined && selectedCompanyId)) {
+      const company = named ?? await store.getCompany(auth, selectedCompanyId!);
       return companyDeleteCopy(language, safeMarkdown(company.name)).selected;
     }
     const companies = (await store.listCompanies(auth, 100)).items;
@@ -475,9 +496,11 @@ export class CompanyChatActions {
   static async buildDeterministicAction(auth: AuthContext, store: WorkspaceStore, message: string, selectedCompanyId?: string, responseLanguage?: CompanyChatLanguage): Promise<string | undefined> {
     const language = responseLanguage ?? detectCompanyChatLanguage(message);
     const confirmedDelete = isCompanyDeleteConfirmed(message);
-    if (selectedCompanyId && confirmedDelete) {
-      const company = await store.getCompany(auth, selectedCompanyId);
-      return `\`\`\`company-action\n${JSON.stringify({ action: "delete", companyId: company.id })}\n\`\`\``;
+    if (confirmedDelete) {
+      // The confirmation names the company it confirms; only an unnamed confirmation applies to the selected company.
+      const named = await namedDeleteCompany(auth, store, message);
+      const company = named ?? (named === undefined && selectedCompanyId ? await store.getCompany(auth, selectedCompanyId) : undefined);
+      if (company) return `\`\`\`company-action\n${JSON.stringify({ action: "delete", companyId: company.id })}\n\`\`\``;
     }
     const createCompany = /(?:створ|созда|create)\p{L}*/iu.test(message) && /(?:компан|compan)/iu.test(message);
     const testCompany = /(?:тест|test)/iu.test(message);
