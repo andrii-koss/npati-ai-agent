@@ -72,7 +72,7 @@ function normalizedLanguageText(value: string): string {
   // Quoted names ("Stress Bakery", «Пекарня») and codes (PICKUP_ORANGE_734, DS1023) are not evidence of the user's language.
   return value.normalize("NFKC")
     .replace(/"[^"\n]{1,160}"|«[^»\n]{1,160}»|“[^”\n]{1,160}”|„[^“”\n]{1,160}[“”]/gu, " ")
-    .replace(/[\p{L}\p{N}]*[\p{N}_][\p{L}\p{N}_]*/gu, " ")
+    .replace(/[A-Za-z0-9]*[0-9_][A-Za-z0-9_]*/g, " ")
     .toLocaleLowerCase().replace(/https?:\/\/\S+|```[\s\S]*?```|`[^`]*`/gu, " ").replace(/[^\p{L}\p{M}]+/gu, " ").replace(/\s+/g, " ").trim();
 }
 
