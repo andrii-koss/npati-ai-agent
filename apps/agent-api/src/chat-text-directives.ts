@@ -10,7 +10,13 @@ export function isSpreadsheetEditRequest(message: string): boolean {
   return edit && spreadsheet;
 }
 
+/** Explicit per-turn network restriction, separate from semantic intent classification. */
+export function forbidsNewWebResearch(message: string): boolean {
+  return /(?:\b(?:do not|don't|without|never)\s+(?:(?:repeat|new|another|any|web|online|internet)\s+)*(?:search\w*|research\w*|brows\w*|crawl\w*|fetch\w*)|\bsin\s+(?:volver\s+a\s+)?(?:buscar|investigar|navegar)|\bno\s+(?:busques|investigues)|\bsem\s+(?:(?:nova|novamente)\s+)?(?:pesquis\w*|busc\w*)|\bohne\s+(?:erneut\w*\s+|neu\w*\s+)?(?:suche|recherche)|\bnicht\s+(?:erneut\s+)?(?:suchen|recherchieren)|\u0431\u0435\u0437\s+(?:\u043d\u043e\u0432\p{L}*\s+|\u043f\u043e\u0432\u0442\u043e\u0440\p{L}*\s+)?(?:\u043f\u043e\u0448\u0443\u043a\p{L}*|\u0434\u043e\u0441\u043b\u0456\u0434\p{L}*)|\u043d\u0435\s+(?:\u0448\u0443\u043a\p{L}*|\u043f\u043e\u0432\u0442\u043e\u0440\p{L}*\s+(?:\u043f\u043e\u0448\u0443\u043a\p{L}*|\u0432\u0435\u0431\p{L}*\s*\u0434\u043e\u0441\u043b\u0456\u0434\p{L}*)))/iu.test(message);
+}
+
 export function explicitlyRequestsWebResearch(message: string, options: { requireOperation?: boolean } = {}): boolean {
+  if (forbidsNewWebResearch(message)) return false;
   if (options.requireOperation && !extractTargetUrlOrDomain(message)) {
     return message.split(/[.!?;\n]/u).some(clause =>
       !/^\s*(?:do not|don't|never|no |ne |nicht )/iu.test(clause)

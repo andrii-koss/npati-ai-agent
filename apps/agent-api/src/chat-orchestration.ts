@@ -15,7 +15,7 @@ import { ChatAttachmentInput, prepareChatAttachments } from "./chat-attachments"
 import { conversationTitle, isCompositeBusinessCompanyCreation, isShortAffirmativeReply, normalizeNewBusinessDirective, requestsBusinessGoal, requestsBusinessMemory, requestsCompositeCompanyDeletionIntent, requestsNewBusinessIdea, resolveContextualCompanyFollowUp } from "./chat-intent-helpers";
 import { attachResearchSources } from "./chat-public-errors";
 import { StructuredChatPlan, businessPlanComplete, companyPlanComplete, planStructuredChatRequest } from "./chat-task-plan";
-import { addColumnDirectiveFromMarkdown, explicitlyRequestsWebResearch, isSpreadsheetEditRequest, mapColumnDirectiveFromProposal, spreadsheetEditedMessage } from "./chat-text-directives";
+import { addColumnDirectiveFromMarkdown, forbidsNewWebResearch, explicitlyRequestsWebResearch, isSpreadsheetEditRequest, mapColumnDirectiveFromProposal, spreadsheetEditedMessage } from "./chat-text-directives";
 import { CHAT_TOOL_SELECTION_INSTRUCTION, CORE_CHAT_TOOLS, ChatToolExecutionResult, runChatToolLoop } from "./chat-tool-orchestrator";
 import { createCodeRunAdmission } from "./code-run-admission";
 import { CompanyChatActions } from "./company-chat-actions";
@@ -196,7 +196,7 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
     const hasAttachedEvidence = media.images.length > 0 || media.extractedDocs.length > 0;
     const workspaceSettingsRequest = WorkspaceChatActions.isManagementRequest(safePrompt);
     const emailSettingsRequest = EmailChatActions.isManagementRequest(safePrompt);
-    const imageResearchRequested = !nativeToolCalling && (!hasAttachedEvidence || explicitlyRequestsWebResearch(message))
+    const imageResearchRequested = !forbidsNewWebResearch(message) && !nativeToolCalling && (!hasAttachedEvidence || explicitlyRequestsWebResearch(message))
       && ((!workspaceSettingsRequest && !emailSettingsRequest) || explicitlyRequestsWebResearch(message, { requireOperation: true }));
     if (imageResearchRequested && webResearch?.shouldResearch(safePrompt)) {
       const scope = { workspaceId: auth.workspaceId, businessId, userId: auth.userId };

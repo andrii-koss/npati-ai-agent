@@ -1,3 +1,4 @@
+import { forbidsNewWebResearch, explicitlyRequestsWebResearch } from "../apps/agent-api/src/chat-text-directives";
 import { describe, expect, it, vi } from "vitest";
 import type { AIEngine, ChatRequest, ChatToolCall, OmniRouteMarketplace } from "@npati/omniroute-adapter";
 import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
@@ -459,5 +460,46 @@ describe("a web search request survives a provider that refuses forced tool_choi
     } finally {
       await app.close();
     }
+  });
+});
+
+
+describe("explicit research recall restrictions", () => {
+  const requests = [
+    "Return to the earlier Apple analysis, without searching again.",
+    "Vuelve al analisis anterior. Sin buscar otra vez, resume dos decisiones.",
+    "Use o estudo anterior, sem pesquisar novamente.",
+    "Nutze die vorherige Analyse, ohne neue Recherche.",
+    "\u0412\u0438\u043a\u043e\u0440\u0438\u0441\u0442\u0430\u0439 \u043f\u043e\u043f\u0435\u0440\u0435\u0434\u043d\u0456\u0439 \u0430\u043d\u0430\u043b\u0456\u0437, \u0431\u0435\u0437 \u043d\u043e\u0432\u043e\u0433\u043e \u043f\u043e\u0448\u0443\u043a\u0443.",
+  ];
+  it.each(requests)("recognizes a current-turn restriction: %s", message => {
+    expect(forbidsNewWebResearch(message)).toBe(true);
+    expect(explicitlyRequestsWebResearch(message + " https://apple.com")).toBe(false);
+  });
+  it.each([true, false])("does not call research with native tools=%s even when heuristics request it", async native => {
+    const observed: ChatRequest[] = [];
+    const webResearch = researchService();
+    const ai: AIEngine = {
+      supportsNativeTools: () => native,
+      chat: async request => {
+        if (String(request.messages[0]?.content).startsWith("Classify the user's primary intent")) return { content: JSON.stringify({ intent: "CHAT", confidence: 1, targets: [] }) };
+        observed.push(request);
+        return { content: "Prior analysis: preserve short navigation and a visible catalog." };
+      },
+      async *stream(request) { observed.push(request); yield "Prior analysis: short navigation."; },
+    };
+    const app = buildApp({ workspaceStore: new InMemoryWorkspaceStore(), authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace, webResearch });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: requests[1], contextType: "none" } });
+      expect(response.statusCode).toBe(200);
+      expect(webResearch.run).not.toHaveBeenCalled();
+      expect(observed.length).toBeGreaterThan(0);
+      expect(observed.flatMap(request => request.tools ?? []).some(tool => ["web_search", "web_fetch"].includes(tool.function.name))).toBe(false);
+      expect(streamResult(response.body).message).toContain("Prior analysis");
+    } finally { await app.close(); }
+  });
+  it("continues to allow an explicit fresh research request", () => {
+    expect(forbidsNewWebResearch("Research https://apple.com again and compare the changes.")).toBe(false);
+    expect(explicitlyRequestsWebResearch("Research https://apple.com again and compare the changes.")).toBe(true);
   });
 });

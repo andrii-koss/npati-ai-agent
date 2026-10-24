@@ -6,7 +6,7 @@ import { ChatAttachmentInput, prepareChatAttachments } from "./chat-attachments"
 import { conversationTitle, isCompositeBusinessCompanyCreation, isShortAffirmativeReply, normalizeNewBusinessDirective, requestsBusinessGoal, requestsBusinessMemory, requestsCompositeCompanyDeletionIntent, requestsNewBusinessIdea, resolveContextualCompanyFollowUp } from "./chat-intent-helpers";
 import { attachResearchSources, unreachablePageMessage, webResearchFailedMessage } from "./chat-public-errors";
 import { StructuredChatPlan, businessPlanComplete, companyPlanComplete, planStructuredChatRequest } from "./chat-task-plan";
-import { addColumnDirectiveFromMarkdown, explicitlyRequestsWebResearch, isSpreadsheetEditRequest, mapColumnDirectiveFromProposal, spreadsheetEditedMessage } from "./chat-text-directives";
+import { addColumnDirectiveFromMarkdown, forbidsNewWebResearch, explicitlyRequestsWebResearch, isSpreadsheetEditRequest, mapColumnDirectiveFromProposal, spreadsheetEditedMessage } from "./chat-text-directives";
 import { CHAT_TOOL_SELECTION_INSTRUCTION, CORE_CHAT_TOOLS, ChatToolExecutionResult, runChatToolLoop } from "./chat-tool-orchestrator";
 import { CompanyChatActions } from "./company-chat-actions";
 import { CompanyChatLanguage, chatLanguageInstruction, companyChatCopy, detectCompanyChatLanguage, resolveConversationLanguage } from "./company-chat-i18n";
@@ -244,7 +244,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
     let research: ResearchOutcome | undefined;
     let researchJob: { id: string } | undefined;
     const hasAttachedEvidence = media.images.length > 0 || media.extractedDocs.length > 0 || Boolean(previousSpreadsheet);
-    const webResearchRequested = !nativeToolCalling && (!hasAttachedEvidence || explicitlyRequestsWebResearch(message)) && (
+    const webResearchRequested = !forbidsNewWebResearch(message) && !nativeToolCalling && (!hasAttachedEvidence || explicitlyRequestsWebResearch(message)) && (
       (!companySettingsRequest && !workspaceSettingsRequest && !emailSettingsRequest) || explicitlyRequestsWebResearch(message, { requireOperation: true })
     );
     const namedPage = companySettingsRequest ? undefined : extractTargetUrlOrDomain(message) ?? undefined;
@@ -474,7 +474,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
         log.warn({ err: error, model: ai.model }, "Native chat tool loop failed; using prompt-compatible fallback");
         // The fallback has no tools. A page the user named, or a web search the user asked for, is still run, so the
         // answer rests on actual content (or states why it could not be retrieved) instead of the model's memory.
-        if (!research && !companySettingsRequest && (namedPage || explicitlyRequestsWebResearch(message)) && webResearch?.shouldResearch(safePrompt)) {
+        if (!research && !forbidsNewWebResearch(message) && !companySettingsRequest && (namedPage || explicitlyRequestsWebResearch(message)) && webResearch?.shouldResearch(safePrompt)) {
           // A search request is searched as written; the free-form heuristics turned it into "<word> official website".
           await runWebResearch(webResearch, namedPage ? {} : { mode: "search" });
           if (research) chatRequest.messages.splice(1, 0, { role: "system", content: researchInstructionFor(research) });

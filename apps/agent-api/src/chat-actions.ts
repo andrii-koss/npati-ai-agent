@@ -13,7 +13,7 @@ import { ChatAttachmentInput, prepareChatAttachments } from "./chat-attachments"
 import { conversationTitle, isCompositeBusinessCompanyCreation, isShortAffirmativeReply, normalizeNewBusinessDirective, requestsBusinessGoal, requestsBusinessMemory, requestsCompositeCompanyDeletionIntent, requestsNewBusinessIdea, resolveContextualCompanyFollowUp } from "./chat-intent-helpers";
 import { attachResearchSources } from "./chat-public-errors";
 import { StructuredChatPlan, businessPlanComplete, companyPlanComplete, planStructuredChatRequest } from "./chat-task-plan";
-import { addColumnDirectiveFromMarkdown, explicitlyRequestsWebResearch, isSpreadsheetEditRequest, mapColumnDirectiveFromProposal, spreadsheetEditedMessage } from "./chat-text-directives";
+import { addColumnDirectiveFromMarkdown, forbidsNewWebResearch, explicitlyRequestsWebResearch, isSpreadsheetEditRequest, mapColumnDirectiveFromProposal, spreadsheetEditedMessage } from "./chat-text-directives";
 import { CHAT_TOOL_SELECTION_INSTRUCTION, CORE_CHAT_TOOLS, ChatToolExecutionResult, runChatToolLoop } from "./chat-tool-orchestrator";
 import { createCodeRunAdmission } from "./code-run-admission";
 import { CompanyChatActions } from "./company-chat-actions";
@@ -367,7 +367,7 @@ ${localized.next}`;
   async function availableCoreChatTools(auth: AuthContext, message = "", projectScope?:{companyId:string;projectId:string;capabilityIds:string[]}): Promise<ChatToolDefinition[]> {
     if(projectScope)return companyRuntime.chatProjectTools(auth,projectScope.companyId,projectScope.projectId,projectScope.capabilityIds);
     const internal = CompanyChatActions.isManagementRequest(message) || WorkspaceChatActions.isManagementRequest(message) || EmailChatActions.isManagementRequest(message);
-    const allowResearch = !internal || explicitlyRequestsWebResearch(message, { requireOperation: true });
+    const allowResearch = !forbidsNewWebResearch(message) && (!internal || explicitlyRequestsWebResearch(message, { requireOperation: true }));
     return [...CORE_CHAT_TOOLS, BUSINESS_PROFILE_TOOL].filter((tool) => {
       if (tool.function.name === "npati_company_action" || tool.function.name === "npati_business_profile") return auth.permissions.includes("business:manage");
       if (tool.function.name === "web_search" || tool.function.name === "web_fetch") return Boolean(webResearch) && allowResearch;
@@ -379,10 +379,10 @@ ${localized.next}`;
     const availableToolNames = tools.map((tool) => tool.function.name);
     const directUrl = extractTargetUrlOrDomain(message);
     const semanticExternalIntent = Boolean(webResearch?.shouldResearch(message));
-    const companyManagementIntent = !WorkspaceChatActions.isManagementRequest(message) && !EmailChatActions.isManagementRequest(message) && CompanyChatActions.isManagementRequest(message);
+    const primaryInstruction = message.split(String.fromCharCode(10)).map((line) => line.trim()).filter(Boolean).slice(0, 3).join(" ");
+    const companyManagementIntent = !WorkspaceChatActions.isManagementRequest(primaryInstruction) && !EmailChatActions.isManagementRequest(primaryInstruction) && CompanyChatActions.isManagementRequest(message);
     const internalManagementIntent = companyManagementIntent || WorkspaceChatActions.isManagementRequest(message) || EmailChatActions.isManagementRequest(message);
     const explicitWebIntent = explicitlyRequestsWebResearch(message, { requireOperation: internalManagementIntent });
-    const primaryInstruction = message.split(String.fromCharCode(10)).map((line) => line.trim()).filter(Boolean).slice(0, 3).join(" ");
     const primaryExplicitWebIntent = explicitlyRequestsWebResearch(primaryInstruction, { requireOperation: internalManagementIntent });
     const explicitExternalIntent = Boolean(directUrl) || (
       internalManagementIntent
@@ -507,6 +507,7 @@ ${localized.next}`;
     }
 
     if (input.call.function.name === "web_search" || input.call.function.name === "web_fetch") {
+      if (forbidsNewWebResearch(input.requestMessage)) throw new Error("New web research is forbidden by the current request. Use authorized prior evidence only.");
       if (!webResearch) throw new Error("Web research is not configured");
       const query = input.call.function.name === "web_fetch"
         ? [String(input.args.url ?? "").trim(), String(input.args.goal ?? input.requestMessage).trim()].filter(Boolean).join(" ")
