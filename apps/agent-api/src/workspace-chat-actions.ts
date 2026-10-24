@@ -87,102 +87,7 @@ const demoWebsites: BrowserCampaignTargetInput[] = [
   },
 ];
 
-const actionSignals = [
-  /\b(?:create|add|schedule|run|start|save|remember|generate|write|prepare|configure|edit|update|change|delete|remove|pause|resume|cancel|disable|enable|deactivate|activate|turn\s+(?:on|off))\b/iu,
-  /(?:створ|дод|заплан|запуст|почн|збереж|запам.?ят|генер|напиш|підгот|налашт|редаг|змін|онов|видал|приб|призуп|віднов|скас|вимкн|увімкн|вмикн|деактив)/iu,
-  /(?:cré\p{L}*|ajout\p{L}*|planifi\p{L}*|lanc\p{L}*|enregistr\p{L}*|mémoris\p{L}*|génér\p{L}*|écri\p{L}*|configur\p{L}*|modifi\p{L}*|mettr\p{L}* à jour|supprim\p{L}*|retir\p{L}*|suspend\p{L}*|repren\p{L}*|annul\p{L}*)/iu,
-  /(?:erstell\p{L}*|hinzufüg\p{L}*|plan\p{L}*|start\p{L}*|speicher\p{L}*|merk\p{L}*|generier\p{L}*|schreib\p{L}*|konfigurier\p{L}*|bearbeit\p{L}*|aktualisier\p{L}*|änder\p{L}*|lösch\p{L}*|entfern\p{L}*|pausier\p{L}*|fortsetz\p{L}*|abbrech\p{L}*)/iu,
-  /(?:crea\p{L}*|añad\p{L}*|program\p{L}*|inici\p{L}*|guard\p{L}*|record\p{L}*|gener\p{L}*|escri\p{L}*|configur\p{L}*|edit\p{L}*|actualiz\p{L}*|cambi\p{L}*|elimin\p{L}*|borr\p{L}*|paus\p{L}*|reanud\p{L}*|cancel\p{L}*)/iu,
-  /(?:crea\p{L}*|aggiung\p{L}*|pianific\p{L}*|avvi\p{L}*|salv\p{L}*|ricord\p{L}*|gener\p{L}*|scriv\p{L}*|configur\p{L}*|modific\p{L}*|aggiorn\p{L}*|cambi\p{L}*|elimin\p{L}*|rimuov\p{L}*|sospend\p{L}*|riprend\p{L}*|annull\p{L}*)/iu,
-  /(?:utwórz|dodaj|zaplanuj|uruchom|zapisz|zapamiętaj|wygeneruj|napisz|skonfiguruj|edytuj|zaktualizuj|zmień|usuń|wstrzymaj|wznów|anuluj)/iu,
-  /(?:cri\p{L}*|adicion\p{L}*|agend\p{L}*|inici\p{L}*|salv\p{L}*|lembr\p{L}*|ger\p{L}*|escrev\p{L}*|configur\p{L}*|edit\p{L}*|atualiz\p{L}*|alter\p{L}*|exclu\p{L}*|remov\p{L}*|paus\p{L}*|retom\p{L}*|cancel\p{L}*)/iu,
-  /(?:maak|maken|toevoeg\p{L}*|plan\p{L}*|start\p{L}*|opsla\p{L}*|onthoud\p{L}*|genere\p{L}*|schrijf\p{L}*|configure\p{L}*|bewerk\p{L}*|werk\p{L}* bij|wijzig\p{L}*|verwijder\p{L}*|pauzeer\p{L}*|hervat\p{L}*|annuleer\p{L}*)/iu,
-  /(?:oluştur|ekle|planla|başlat|kaydet|hatırla|üret|yaz|yapılandır|düzenle|güncelle|değiştir|sil|kaldır|duraklat|sürdür|iptal)/iu,
-  /(?:созда|добав|заплан|запуст|сохран|запом|сгенер|напиш|настро|редакт|измен|обнов|удал|приостанов|возобнов|отмен)/iu,
-  /(?:创建|新增|添加|安排|运行|开始|保存|记住|生成|撰写|配置|编辑|更新|修改|删除|移除|暂停|恢复|取消)/u,
-  /(?:作成|追加|予定|実行|開始|保存|記憶|生成|書いて|設定|編集|更新|変更|削除|一時停止|再開|キャンセル)/u,
-  /(?:생성|추가|예약|실행|시작|저장|기억|작성|설정|편집|업데이트|변경|삭제|제거|일시 중지|재개|취소)/u,
-  /(?:أنشئ|إنشاء|أضف|جدول|شغل|ابدأ|احفظ|تذكر|اكتب|كوّن|حرر|حدث|غيّر|احذف|أزل|أوقف|استأنف|ألغ)/u,
-  /(?:बनाएं|बनाओ|जोड़ें|शेड्यूल|चलाएं|शुरू|सहेजें|याद|लिखें|कॉन्फ़िगर|संपादित|अपडेट|बदलें|हटाएं|रोकें|फिर शुरू|रद्द)/u,
-];
-
-const resourceSignals = [
-  /\b(?:activit(?:y|ies)|run trace|execution trace|automation|scheduled task|cron job|content hub|article|seo blueprint|social draft|business memory|memory item|memory|brand voice|audience profile)\b/iu,
-  /(?:активност|трасуван|запуск|автоматизац|запланован.*завдан|контент|статт|seo|соціальн.*допис|пам.?ят|мемор|тон.*бренд|аудитор)/iu,
-  /(?:activité|trace d.exécution|automatisation|tâche planifiée|contenu|article|mémoire|voix de marque|audience)/iu,
-  /(?:aktivität|ausführungsspur|automatisierung|geplante aufgabe|inhalt|artikel|gedächtnis|markenstimme|zielgruppe)/iu,
-  /(?:actividad|traza de ejecución|automatización|tarea programada|contenido|artículo|memoria|voz de marca|audiencia)/iu,
-  /(?:attività|traccia di esecuzione|automazione|attività pianificata|contenuto|articolo|memoria|voce del marchio|pubblico)/iu,
-  /(?:aktywno\p{L}*|ślad wykonania|automatyza\p{L}*|zaplanowane zadanie|treś\p{L}*|artyku\p{L}*|pamię\p{L}*|głos marki|odbiorcy)/iu,
-  /(?:atividade|rastreamento de execução|automação|tarefa agendada|conteúdo|artigo|memória|voz da marca|público)/iu,
-  /(?:activiteit|uitvoeringstrace|automatisering|geplande taak|inhoud|artikel|geheugen|merkstem|doelgroep)/iu,
-  /(?:etkinlik|çalıştırma izi|otomasyon|zamanlanmış görev|içerik|makale|hafıza|marka sesi|hedef kitle)/iu,
-  /(?:активност|трассиров|запуск|автоматизац|запланирован.*задач|контент|стать|памят|голос.*бренд|аудитор)/iu,
-  /(?:活动|运行跟踪|执行跟踪|自动化|定时任务|内容|文章|记忆|品牌语气|受众)/u,
-  /(?:アクティビティ|実行トレース|自動化|スケジュール.*タスク|コンテンツ|記事|メモリ|ブランドボイス|対象者)/u,
-  /(?:활동|실행 추적|자동화|예약 작업|콘텐츠|기사|메모리|브랜드 보이스|대상 고객)/u,
-  /(?:نشاط|تتبع التنفيذ|أتمتة|مهمة مجدولة|محتوى|مقال|ذاكرة|صوت العلامة|الجمهور)/u,
-  /(?:गतिविधि|निष्पादन ट्रेस|ऑटोमेशन|निर्धारित कार्य|सामग्री|लेख|मेमोरी|ब्रांड वॉइस|दर्शक)/u,
-];
-
-const mutationSignals = [
-  /\b(?:edit|update|change|delete|remove|pause|resume|cancel)\b/iu,
-  /(?:редаг|змін|онов|видал|приб|призуп|віднов|скас)/iu,
-  /(?:modifi|mettre à jour|supprim|retir|suspend|repren|annul)/iu,
-  /(?:bearbeit|aktualisier|änder|lösch|entfern|pausier|fortsetz|abbrech)/iu,
-  /(?:edit|actualiz|cambi|elimin|borr|paus|reanud|cancel)/iu,
-  /(?:modific|aggiorn|cambi|elimin|rimuov|sospend|riprend|annull)/iu,
-  /(?:edytuj|zaktualizuj|zmień|usuń|wstrzymaj|wznów|anuluj)/iu,
-  /(?:edit|atualiz|alter|exclu|remov|paus|retom|cancel)/iu,
-  /(?:bewerk|werk.*bij|wijzig|verwijder|pauzeer|hervat|annuleer)/iu,
-  /(?:düzenle|güncelle|değiştir|sil|kaldır|duraklat|sürdür|iptal)/iu,
-  /(?:редакт|измен|обнов|удал|приостанов|возобнов|отмен)/iu,
-  /(?:编辑|更新|修改|删除|移除|暂停|恢复|取消)/u,
-  /(?:編集|更新|変更|削除|一時停止|再開|キャンセル)/u,
-  /(?:편집|업데이트|변경|삭제|제거|일시 중지|재개|취소)/u,
-  /(?:حرر|حدث|غيّر|احذف|أزل|أوقف|استأنف|ألغ)/u,
-  /(?:संपादित|अपडेट|बदलें|हटाएं|रोकें|फिर शुरू|रद्द)/u,
-];
-const referenceSignals = [
-  /\b(?:it|this|that|one|last|previous)\b/iu,
-  /(?:її|його|це|цю|цей|останн|попередн)/iu,
-  /\b(?:le|la|les|ceci|cela|dernier|précédent)\b/iu,
-  /\b(?:es|dies|diese|letzte|vorherige)\b/iu,
-  /\b(?:lo|la|esto|esta|últim|anterior)\b/iu,
-  /\b(?:lo|la|quest|ultim|precedent)\b/iu,
-  /\b(?:to|ten|ta|ostatni|poprzedni)\b/iu,
-  /\b(?:isso|isto|este|esta|últim|anterior)\b/iu,
-  /\b(?:het|dit|deze|laatste|vorige)\b/iu,
-  /\b(?:onu|bunu|şunu|son|önceki)\b/iu,
-  /(?:её|его|это|эту|этот|последн|предыдущ)/iu,
-  /(?:它|这个|这条|最后|上一个)/u,
-  /(?:それ|これ|この|最後|前の)/u,
-  /(?:그것|이것|이 항목|마지막|이전)/u,
-  /(?:إياه|إياها|هذا|هذه|الأخير|السابق)/u,
-  /(?:इसे|यह|इसको|अंतिम|पिछल)/u,
-];
-
-// Brand voice and audience are also Company / Business Profile fields: they only name a memory resource when the
-// request is not about a company or business profile ("Create company X. Brand tone: warm" creates a company).
-const profileFieldTerms = /(?:brand\s+(?:voice|tone)|audience(?:\s+profile)?|тон\p{L}*\s+бренд\p{L}*|аудитор\p{L}*|voix de marque|markenstimme|zielgruppe|voz de marca|audiencia|voce del marchio|pubblico|głos marki|odbiorcy|voz da marca|público|merkstem|doelgroep|marka sesi|hedef kitle|голос\p{L}*\s+бренд\p{L}*|品牌语气|受众)/giu;
-const profileEntitySignal = /(?:компан\p{L}*|бізнес[- ]?профіл\p{L}*|бизнес[- ]?профил\p{L}*|\bcompan(?:y|ies)\b|business\s+profile|entreprise|unternehmen|empresa|azienda|perfil\s+de\s+neg[óo]cio|bedrijf|şirket|公司)/iu;
-
-// An imperative "Remember ..." is a memory action by its verb alone (Ukrainian "запам'ятай" already contains "пам'ят");
-// "Do you remember ...?" is a question, not an action.
-const memoryVerbSignal = /(?:^|[.!?;:]\s+)(?:please\s+|por favor,?\s+|bitte\s+)?(?:remember|merk(?:e|t)?\s+dir|merken?\s+sie|recuerd[ae]|lembr[ae](?:-?se)?|m[ée]morise|ricorda|zapamiętaj|onthoud|hatırla|запомни)(?![\p{L}])/iu;
-
-/** Researching or analysing websites is reading them, not managing the campaign's website targets. */
-const researchVerbSignal = /(?:\bresearch\b|recherch\p{L}*|pesquis\p{L}*|investiga\p{L}*|\bsearch\b|\banaly[sz]e\b|analysier\p{L}*|\bcompare\b|vergleich\p{L}*|досліди\p{L}*|дослідж\p{L}*|проаналізуй|порівня\p{L}*|знайди\s+в\s+інтернеті)/iu;
-
-const automationReadSignals = [
-  /\b(?:list|show|which|when|status|history|runs?|tasks?|websites?|sites?)\b/iu,
-  /(?:покажи|перегля|список|який|яка|які|коли|статус|історі|запуск|завдан|сайт)/iu,
-];
-const websiteResourceSignals = [
-  /\b(?:website registration|website publishing|browser campaign|campaign sites?|websites|sites)\b/iu,
-  /(?:реєстрац\p{L}*.*сайт|публікац\p{L}*.*сайт|сайт\p{L}*.*(?:реєстрац|публікац)|сайти|сайтів|вебсайти|вебсайтів)/iu,
-  /(?:автоматизац\p{L}*|запланован\p{L}*.*завдан|агент\p{L}*.*завдан)/iu,
-];
+import { actionSignals, resourceSignals, mutationSignals, referenceSignals, profileFieldTerms, profileEntitySignal, conversationScopedRemember, memoryVerbSignal, researchVerbSignal, automationReadSignals, websiteResourceSignals } from "./workspace-chat-signals";
 
 function clean(value: unknown, max = 12_000): string {
   if (typeof value !== "string") return "";
@@ -476,7 +381,7 @@ To edit or delete an existing record, use the exact owned ID from the supplied d
 If the user refers to the record on Settings > Memory or says "it" and exactly one owned Business Memory record exists, use that record's exact memoryId and businessId. If several records could match, ask for the title instead of guessing.
 - Webhook (inbound integration that starts a company agent run): webhook.list with companyId; webhook.create with companyId and webhook {name, promptTemplate describing what the agent does with the incoming data, optional agentId, optional isActive preserving a requested disabled state}; webhook.update with webhookId (or exact webhookName) and webhook {isActive} to enable or disable it; webhook.delete with webhookId or exact webhookName. Never reveal a webhook secret or its URL in chat; point to Settings > Integrations.
 - Activity: to show recent company runs (status, agents, duration, failures and their reasons) use activity.list with companyId and optional historyLimit (default 10). Completed run traces are immutable audit records and cannot be edited or deleted. An active run may be cancelled with action activity.cancel, companyId, and activity.runId. If asked to alter a completed result, offer a new activity instead.
-Use activity.run when the user asks the company agents to perform work and wants a trace. Use content.create for a durable article, SEO blueprint, social draft, brief, or strategy in Content Hub. Never save guesses as Memory. In a multi-step request whose primary outcome is a Business Profile, memory is a dependent record linked to that profile; never treat memory creation as completion of the whole request. If the user asks for recommendations, recommend missing durable categories from the supplied memory summary (business facts, audience, brand voice, products, channels, decisions, experiments/results) in the user's language; create one only when explicitly requested. Keep intro concise, put the verified details in the server-rendered card, and end followUp with a useful next question.`;
+Use activity.run when the user asks the company agents to perform work and wants a trace. Use content.create for a durable article, SEO blueprint, social draft, brief, or strategy in Content Hub. Never save guesses as Memory. A request to remember something only for this conversation or chat (a checkpoint, "in this chat") is not a Memory write: do not emit memory.create for it. In a multi-step request whose primary outcome is a Business Profile, memory is a dependent record linked to that profile; never treat memory creation as completion of the whole request. If the user asks for recommendations, recommend missing durable categories from the supplied memory summary (business facts, audience, brand voice, products, channels, decisions, experiments/results) in the user's language; create one only when explicitly requested. Keep intro concise, put the verified details in the server-rendered card, and end followUp with a useful next question.`;
   }
 
   static async buildActionPlannerPrompt(auth: AuthContext, deps: WorkspaceChatActionDependencies, message: string, selectedCompanyId?: string, selectedBusinessId?: string): Promise<string> {
@@ -500,6 +405,10 @@ Use activity.run when the user asks the company agents to perform work and wants
       const key = idempotency(auth, conversationId, options.requestMessage ?? matches[0][0], directive.action);
       const labels = workspaceCardCopy(options.requestMessage);
 
+      if (directive.action === "memory.create" && conversationScopedRemember.test(options.requestMessage ?? "")) {
+        // "Remember X as this conversation's checkpoint" belongs to the chat history, not to durable Business Memory.
+        return { cleanText: text.replace(matches[0]![0], "").trim() };
+      }
       if (directive.action.startsWith("memory.")) {
         let targetBusinessId = directive.businessId || options.selectedBusinessId;
         if (directive.action !== "memory.create" && !targetBusinessId && !directive.businessName) {

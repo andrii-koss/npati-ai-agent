@@ -436,3 +436,17 @@ it.each([
     expect(await store.listMemory(alice, business.id)).toHaveLength(1);
   } finally { await app.close(); }
 });
+
+it("does not persist a conversation-scoped checkpoint as Business Memory", async () => {
+  const { InMemoryWorkspaceStore: Store } = await import("@npati/workspace");
+  const store = new Store();
+  const owner = { userId: "scoped-memory-owner", workspaceId: "scoped-memory-ws", permissions: ["workspace:read", "business:manage"] };
+  const business = await store.createBusiness(owner, { name: "Scoped Business", businessStage: "operating" });
+  const deps = { store, automations: new CompanyAutomationsRepository(), content: new ContentLibraryStore(store) } as never;
+  const directive = "Checkpoint saved.\n```workspace-action\n" + JSON.stringify({ action: "memory.create", businessId: business.id, memory: { type: "other", title: "Checkpoint", content: "CHAT_B_PLUM_642" } }) + "\n```";
+  const result = await WorkspaceChatActions.extractAndExecute(owner, directive, deps, "conversation-b", { requestMessage: "Independent Chat B. Remember only CHAT_B_PLUM_642 as this conversation checkpoint." });
+  expect(result.workspaceAction).toBeUndefined();
+  expect(await store.listMemory(owner, business.id)).toEqual([]);
+  await WorkspaceChatActions.extractAndExecute(owner, directive, deps, "conversation-b", { requestMessage: "Remember CHAT_B_PLUM_642 for the business." });
+  expect((await store.listMemory(owner, business.id)).map((item) => item.content)).toEqual(["CHAT_B_PLUM_642"]);
+});
