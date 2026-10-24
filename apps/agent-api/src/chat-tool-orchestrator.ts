@@ -1,3 +1,4 @@
+import { providerContinuationFor } from "@npati/omniroute-adapter";
 import type { AIEngine, ChatRequest, ChatResult, ChatToolCall, ChatToolDefinition } from "@npati/omniroute-adapter";
 
 export const CHAT_TOOL_SELECTION_INSTRUCTION = `
@@ -130,6 +131,8 @@ export async function runChatToolLoop(input: {
   recoveryCall?: ChatToolCall;
 }): Promise<ChatToolLoopResult> {
   const messages = [...input.request.messages];
+  // Keep the provider mode stable across tool continuations, including forced -> auto steps.
+  const reasoningMode = typeof input.request.toolChoice === "object" ? "disabled" : input.request.reasoningMode;
   const traces: ChatToolTrace[] = [];
   const metadata: Record<string, unknown>[] = [];
   const maxSteps = Math.max(1, Math.min(input.maxSteps ?? 8, 16));
@@ -178,14 +181,14 @@ export async function runChatToolLoop(input: {
       try {
         result = await input.ai.chat({ ...input.request, messages: [...messages], tools, toolChoice,
           // DeepSeek thinking rejects a named tool. The adapter applies this only to that supported model.
-          reasoningMode: typeof toolChoice === "object" ? "disabled" : input.request.reasoningMode });
+          reasoningMode });
       } catch (error) {
         // Thinking models (DeepSeek) refuse a forced tool_choice. The same step is asked once with "auto", and the
         // model is remembered so later requests do not spend a failed call on it.
         if (!relaxable || typeof toolChoice !== "object" || !/does not support this tool_choice/i.test(String((error as Error)?.message ?? error))) throw error;
         modelsRejectingForcedToolChoice.add(modelKey);
         toolChoice = "auto";
-        result = await input.ai.chat({ ...input.request, messages: [...messages], tools, toolChoice });
+        result = await input.ai.chat({ ...input.request, messages: [...messages], tools, toolChoice, reasoningMode });
       }
     } catch (error) {
       if (hasPersistedPrimary() && (!input.primaryOutcomeComplete || input.primaryOutcomeComplete(metadata))) {
@@ -211,7 +214,7 @@ export async function runChatToolLoop(input: {
       continue;
     }
 
-    messages.push({ role: "assistant", content: result.content || null, tool_calls: result.toolCalls });
+    messages.push({ ...providerContinuationFor(result), role: "assistant", content: result.content || null, tool_calls: result.toolCalls });
     for (const call of result.toolCalls) {
       const requested: ChatToolTrace = { step, toolName: call.function.name, callId: call.id, status: "requested" };
       try {
