@@ -143,7 +143,9 @@ export class ContextCompactor {
             reasoningMode: "disabled",
             signal,
             messages: [
-              { role: "system", content: "Merge these conversation summaries without losing decisions, identifiers, figures, constraints, attribution or unresolved questions. Do not invent information. Return only the merged summary." },
+              // Unbounded merges ran to the provider's output cap (31 s) and were then cut at 12,000 characters, dropping
+              // the most recent history; a stated budget keeps the merge short and the latest state intact.
+              { role: "system", content: "Merge these conversation summaries without losing decisions, identifiers, figures, constraints, attribution or unresolved questions. Do not invent information. Use at most 1,400 words; when space is short, keep current state and the most recent decisions over superseded details. Return only the merged summary." },
               { role: "user", content: summary },
             ],
           });
