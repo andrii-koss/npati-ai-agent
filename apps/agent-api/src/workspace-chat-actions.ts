@@ -469,7 +469,7 @@ Use activity.run when the user asks the company agents to perform work and wants
   }
 
   static async buildActionPlannerPrompt(auth: AuthContext, deps: WorkspaceChatActionDependencies, message: string, selectedCompanyId?: string, selectedBusinessId?: string): Promise<string> {
-    return `${await this.buildSystemPrompt(auth, deps.store, message, selectedCompanyId, selectedBusinessId, deps)}\n\nDecide what the latest user message asks for. If it only asks to read, show, list, summarize or explain existing records and requests no change, return exactly READ_ONLY. Otherwise return ONLY one complete workspace-action block for the requested change, without stating that it succeeded, or exactly NO_ACTION when required data is missing or the target is ambiguous.`;
+    return `${await this.buildSystemPrompt(auth, deps.store, message, selectedCompanyId, selectedBusinessId, deps)}\n\nDecide what the latest user message asks for. If it requests no stored change, return exactly READ_ONLY: it only asks to read, show, list, summarize or explain existing records, or to keep a fact in this conversation rather than saved Memory. Otherwise return ONLY one complete workspace-action block for the requested change, without stating that it succeeded, or exactly NO_ACTION when required data is missing or the target is ambiguous.`;
   }
 
   static async extractAndExecute(auth: AuthContext, text: string, deps: WorkspaceChatActionDependencies, conversationId: string, options: { requestMessage?: string; selectedCompanyId?: string; selectedBusinessId?: string; onError?: (error: unknown) => void } = {}): Promise<WorkspaceChatActionResult> {
