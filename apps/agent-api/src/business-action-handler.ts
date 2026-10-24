@@ -120,7 +120,7 @@ export class BusinessActionHandler {
     goalsByBusiness: Array<{ businessId: string; businessName: string; goals: Goal[] }> = []
   ): string {
     const businessList = userBusinesses.length > 0
-      ? userBusinesses.map((b) => `- ID: "${b.id}", Name: "${b.name}", Stage: "${b.businessStage || 'starting'}", Industry: "${b.industry || '-'}", Niche: "${b.niche || '-'}", Legal name: "${b.legalName || '-'}", Contact email: "${b.contactEmail || '-'}", Contact phone: "${b.contactPhone || '-'}", Postal address: "${b.postalAddress || '-'}", Logo file ID present: ${Boolean(b.logoFileId)}`).join("\n")
+      ? userBusinesses.map((b) => `- ID: "${b.id}", Name: "${b.name}", Stage: "${b.businessStage || 'starting'}", Industry: "${b.industry || '-'}", Niche: "${b.niche || '-'}", Legal name: "${b.legalName || '-'}", Contact email: "${b.contactEmail || '-'}", Contact phone: "${b.contactPhone || '-'}", Postal address: "${b.postalAddress || '-'}", Logo file ID present: ${Boolean(b.logoFileId)}, Country: "${b.country || '-'}", Market: "${b.market || '-'}", Audience: "${(b.audienceSummary || '-').slice(0, 300)}", Products/services: "${(b.productsServicesSummary || '-').slice(0, 300)}", Description: "${(b.description || '-').slice(0, 400)}"`).join("\n")
       : "(No existing business profiles for this user yet)";
 
     const goalsList = goalsByBusiness.length > 0 && goalsByBusiness.some((entry) => entry.goals.length > 0)

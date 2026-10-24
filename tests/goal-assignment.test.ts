@@ -43,3 +43,10 @@ describe("Goal agent assignment", () => {
     expect(viaChat.goalAction).toBeUndefined();
   });
 });
+
+it("shows stored market, audience and services of owned businesses to the chat model", () => {
+  const prompt = BusinessActionHandler.buildSystemPrompt([{ id: "b1", name: "Profile Biz", businessStage: "operating", market: "Kyiv", country: "Ukraine", audienceSummary: "local families and small offices", productsServicesSummary: "sourdough bread, coffee, office catering" } as never]);
+  expect(prompt).toContain('Market: "Kyiv"');
+  expect(prompt).toContain("office catering");
+  expect(prompt).toContain("small offices");
+});
