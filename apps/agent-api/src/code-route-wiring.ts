@@ -386,7 +386,7 @@ export function registerCodeRouteWiring(app: FastifyInstance, deps: CodeRouteDep
       preferences: (ctx) => aiPreferences.get(ctx),
       activeModelId: async (ctx) => (await deps.codePreferences?.get(ctx))?.activeModelId ?? null,
       configuredVisionModel: config.omnirouteVisionModel,
-      candidates: (configured, added) => confirmedVisionInferenceCandidates(configured, added, deps.marketplace ? provider => deps.marketplace!.models(provider) : undefined),
+      candidates: (configured, added) => confirmedVisionInferenceCandidates(configured, added, deps.marketplace),
     }),
     schemas: CODE_TOOL_SCHEMAS,
 

@@ -21,12 +21,12 @@ describe("coding chat image model selection", () => {
 it("rejects a stale stored vision flag when the live provider catalog says text only", async () => {
   const added = [model("deepseek/deepseek-flash", ["chat", "text", "vision"])];
   const calls: string[] = [];
-  expect(await confirmedVisionInferenceCandidates([added[0]!.id], added, async provider => { calls.push(provider); return [model(added[0]!.id, ["chat", "text"])]; })).toEqual([]);
+  expect(await confirmedVisionInferenceCandidates([added[0]!.id], added, { models: async (provider, _added, refresh) => { expect(refresh).toBe(true); calls.push(provider); return [model(added[0]!.id, ["chat", "text"])]; } })).toEqual([]);
   expect(calls).toEqual(["deepseek"]);
 });
 it("fails closed on unavailable metadata and keeps a confirmed selected image model", async () => {
   const added = [model("connected/vision", ["chat", "vision"])];
-  expect(await confirmedVisionInferenceCandidates([added[0]!.id], added, async () => { throw Error("offline"); })).toEqual([]);
-  expect(await confirmedVisionInferenceCandidates([added[0]!.id], added, async () => added)).toEqual([added[0]!.id]);
+  expect(await confirmedVisionInferenceCandidates([added[0]!.id], added, { models: async () => { throw Error("offline"); } })).toEqual([]);
+  expect(await confirmedVisionInferenceCandidates([added[0]!.id], added, { models: async () => added })).toEqual([added[0]!.id]);
   expect(await confirmedVisionInferenceCandidates([added[0]!.id], added)).toEqual([]);
 });

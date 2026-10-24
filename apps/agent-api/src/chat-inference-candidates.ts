@@ -1,4 +1,4 @@
-import { isChatCapableModel, type AIModelSummary, type ModelInfo } from "@npati/omniroute-adapter";
+import { isChatCapableModel, type AIModelSummary, type ModelInfo, type OmniRouteMarketplace } from "@npati/omniroute-adapter";
 
 /** Models eligible for the chat inference interface, ordered by user preference. */
 export function chatInferenceCandidates(
@@ -28,11 +28,11 @@ export function visionInferenceCandidates(configured: Array<string | null | unde
 /** Revalidate stored image claims against the existing provider catalog before sending any image bytes. */
 export async function confirmedVisionInferenceCandidates(
   configured: Array<string | null | undefined>, added: AIModelSummary[],
-  loadModels?: (providerId: string) => Promise<AIModelSummary[]>,
+  catalog?: Pick<OmniRouteMarketplace, "models">,
 ): Promise<string[]> {
-  if (!loadModels) return [];
+  if (!catalog) return [];
   const providers = [...new Set(added.filter(model => model.capabilities.includes("vision") || configured.includes(model.id)).map(model => model.providerId))];
-  const fresh = (await Promise.all(providers.map(provider => loadModels(provider).catch(() => [])))).flat();
+  const fresh = (await Promise.all(providers.map(provider => catalog.models(provider, [], true).catch(() => [])))).flat();
   return visionInferenceCandidates(configured, added, fresh)
     .filter(id => fresh.some(model => model.id === id && model.capabilities.includes("vision")));
 }

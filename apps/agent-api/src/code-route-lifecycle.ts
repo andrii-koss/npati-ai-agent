@@ -329,7 +329,7 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
       const codePrefs = await codePreferences?.get(ctx).catch(() => null);
       if (input.images?.length) {
         const preferences = await aiPreferences.get(ctx);
-        const candidates = await confirmedVisionInferenceCandidates([codePrefs?.activeModelId, preferences.routing.defaultModelId, config.omnirouteVisionModel], preferences.addedModels, marketplace ? provider => marketplace.models(provider) : undefined);
+        const candidates = await confirmedVisionInferenceCandidates([codePrefs?.activeModelId, preferences.routing.defaultModelId, config.omnirouteVisionModel], preferences.addedModels, marketplace);
         for (const id of candidates) {
           const model = preferences.addedModels.find(item => item.id === id);
           if (model && (!marketplace || (await marketplace.provider(model.providerId).catch(() => null))?.connected)) return id;
