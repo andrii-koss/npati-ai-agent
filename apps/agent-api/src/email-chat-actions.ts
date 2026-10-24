@@ -274,6 +274,14 @@ Return ONLY one complete email-action block for the latest request. Omit every u
       if (!auth.permissions.includes("business:manage")) throw new Error("Missing permission to manage email settings");
       const actions: NonNullable<EmailChatActionResult["emailActions"]> = [];
       const notices: string[] = [];
+      // Validate the whole batch before a model-selected scope can cause any write.
+      if (options.selectedCompanyId && options.selectedCompanyId !== "personal" && !options.selectedCompanyId.startsWith("personal:") && options.requestMessage) {
+        const selected = await store.getCompany(auth, options.selectedCompanyId);
+        if (options.requestMessage.toLocaleLowerCase().includes(selected.name.trim().toLocaleLowerCase())
+          && directives.some(directive => directive.companyId && directive.companyId !== selected.id)) {
+          throw new Error("Email action company does not match the explicitly requested company");
+        }
+      }
       for (const directive of directives) {
         const companyId = await resolveScope(auth, store, directive.companyId || options.selectedCompanyId);
         const accounts = async () => repo.listAccounts(auth, companyId);

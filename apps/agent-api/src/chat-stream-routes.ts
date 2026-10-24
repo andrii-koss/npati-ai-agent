@@ -133,7 +133,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
       });
       // The request names another owned company than the selected one: work there instead of the open project.
       const namedContext = await activeContextResolver.resolveNamedCompany(auth, resolved, message, semantic?.decision, history.map((item) => item.content).join("\n"))
-        .catch((err) => { request.log.warn({ err }, "named_company_resolution_failed"); return undefined; });
+        .catch((err) => { request.log.warn({ err }, "named_company_resolution_failed"); throw err; });
       if (namedContext) resolved = namedContext;
 
       let activeProjectId = resolved.project?.id ?? null;

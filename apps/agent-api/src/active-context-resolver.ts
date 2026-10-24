@@ -71,8 +71,21 @@ export class ActiveContextResolver {
     if (!creating && /^\s*(?:please\s+)?(?:create|створи|створіть|создай|crie|cria|crea|erstelle|crée|maak)(?![\p{L}])/iu.test(message)) return undefined;
     // Deleting a company names its target, not a place to continue working (the chat would be left inside it).
     if (/^\s*(?:please\s+)?(?:delete|remove|видали|видаліть|удали|exclua|elimina|lösche|supprime)(?![\p{L}])/iu.test(message)) return undefined;
+    // An exact owned project named by a code task takes precedence over the previous chat card.
+    // Search only authorized companies already selected or named in this conversation.
+    if (decision && decision.intent !== "CHAT" && !creating) {
+      const candidates = (await Promise.all(companies.map(company => this.store.listProjects(auth, company.id)))).flat()
+        .filter(project => !["archived", "soft_deleted", "purging", "deleted"].includes(project.status)
+          && project.name.trim().length >= 3 && lowerMessage.includes(project.name.trim().toLocaleLowerCase()));
+      if (candidates.length > 1) throw new ContextValidationError("More than one owned project is named; specify a single project for this action");
+      const project = candidates[0];
+      if (project) return this.resolve(auth, { contextType: "project", companyId: project.companyId, projectId: project.id });
+    }
     const activeId = current.company?.id ?? current.project?.companyId ?? null;
-    let named = companyNamedInMessage(companies, message, activeId);
+    const exactCompanies = companies.filter(company => company.name.trim().length > 2 && lowerMessage.includes(company.name.trim().toLocaleLowerCase()));
+    // An explicitly named current company must never be replaced by a coincidental agent-name match ("mark").
+    if (exactCompanies.length > 1 || exactCompanies[0]?.id === activeId) return undefined;
+    let named = exactCompanies[0] ?? companyNamedInMessage(companies, message, activeId);
     if (!named) {
       // No company name, but an agent's full name that belongs to exactly one company ("have Coach Ana delegate to Leo").
       const lower = message.toLocaleLowerCase();

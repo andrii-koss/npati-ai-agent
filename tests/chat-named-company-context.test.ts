@@ -84,3 +84,48 @@ describe("a loose company match", () => {
     expect((await resolver.resolveNamedCompany(auth, current, "Show the Stress DS1023 Bakery site", undefined, history))?.context.companyId).not.toBe(fit.id);
   });
 });
+
+
+describe("an exact project target overrides the previous project context", () => {
+  it("selects the named Vite project across owned companies and refuses ambiguous duplicates", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const auth: AuthContext = { userId: "project-target-owner", workspaceId: "project-target-workspace", permissions: ["workspace:read", "business:manage"] };
+    const bakery = await store.createCompany(auth, { name: "Stress Bakery" }, "target-bakery");
+    const studio = await store.createCompany(auth, { name: "Stress Studio" }, "target-studio");
+    const { project: next } = await store.createProject(auth, bakery.id, { name: "Stress Next Shop", type: "website" } as never, "target-next");
+    const { project: vite } = await store.createProject(auth, studio.id, { name: "Stress Vite", type: "website" } as never, "target-vite");
+    const resolver = new ActiveContextResolver(store);
+    const current = await resolver.resolve(auth, { contextType: "project", companyId: bakery.id, projectId: next.id });
+    const decision = { intent: "EDIT_WEBSITE" } as never;
+    const message = 'Im Projekt "Stress Vite" aendere die Ueberschrift.';
+    const history = "We created Stress Studio and Stress Vite.";
+    expect((await resolver.resolveNamedCompany(auth, current, message, decision, history))?.context).toMatchObject({ companyId: studio.id, projectId: vite.id });
+    // The selected company's own older project must also beat its most recently updated one.
+    const sameCompany = await resolver.resolve(auth, { contextType: "company", companyId: studio.id });
+    expect((await resolver.resolveNamedCompany(auth, sameCompany, message, decision, history))?.context.projectId).toBe(vite.id);
+    await store.createProject(auth, bakery.id, { name: "Stress Vite", type: "website" } as never, "duplicate-target-vite");
+    await expect(resolver.resolveNamedCompany(auth, current, message, decision, history)).rejects.toThrow("More than one owned project");
+  });
+  it("does not search a different company from a loose project reference outside this conversation", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const auth: AuthContext = { userId: "scoped-project-owner", workspaceId: "scoped-project-workspace", permissions: ["workspace:read", "business:manage"] };
+    const selected = await store.createCompany(auth, { name: "Selected Company" }, "selected-project-company");
+    const other = await store.createCompany(auth, { name: "Unmentioned Company" }, "other-project-company");
+    await store.createProject(auth, other.id, { name: "Other Vite", type: "website" } as never, "other-project");
+    const resolver = new ActiveContextResolver(store);
+    const current = await resolver.resolve(auth, { contextType: "company", companyId: selected.id });
+    expect(await resolver.resolveNamedCompany(auth, current, 'Edit "Other Vite"', { intent: "EDIT_WEBSITE" } as never)).toBeUndefined();
+  });
+});
+
+
+it("keeps an explicitly named current company when a verb coincides with another company's agent name", async () => {
+  const store = new InMemoryWorkspaceStore();
+  const auth: AuthContext = { userId: "agent-name-owner", workspaceId: "agent-name-workspace", permissions: ["workspace:read", "business:manage"] };
+  const bakery = await store.createCompany(auth, { name: "Stress Bakery" }, "agent-name-bakery");
+  const other = await store.createCompany(auth, { name: "Other Company" }, "agent-name-other");
+  await store.createCompanyAgent(auth, other.id, { name: "Mark", role: "Lead" }, "agent-mark");
+  const resolver = new ActiveContextResolver(store);
+  const current = await resolver.resolve(auth, { contextType: "company", companyId: bakery.id });
+  expect(await resolver.resolveNamedCompany(auth, current, 'In company "Stress Bakery", mark test contact as blacklisted.', { intent: "CHAT" } as never, "We previously worked in Other Company.")).toBeUndefined();
+});

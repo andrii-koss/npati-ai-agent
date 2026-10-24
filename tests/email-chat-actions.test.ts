@@ -202,3 +202,19 @@ it("creates an email account through chat without sending its address to the mod
   const app=buildApp({workspaceStore:store,authProvider:{authenticate:async()=>auth},aiEngine:ai,marketplace:{marketplace:async()=>({overview:{connectedProviders:1}})} as unknown as OmniRouteMarketplace});
   try{const r=await app.inject({method:"POST",url:"/chat/stream",payload:{message:"Create email account opaque-fixture@npati.test, display name Opaque Fixture, leave SMTP unconfigured.",contextType:"company",companyId:company.id}});expect(r.statusCode).toBe(200);const accounts=await app.inject({method:"GET",url:"/companies/"+company.id+"/email-accounts"});expect(accounts.json().accounts[0]?.emailAddress).toBe("opaque-fixture@npati.test");expect(JSON.stringify(captured)).not.toContain("opaque-fixture@npati.test");expect(SecurityPolicyEngine.protectText("opaque-fixture@npati.test").sanitized).toContain("[REDACTED_EMAIL]");}finally{await app.close();}
 });
+
+
+it("rejects a whole email batch that replaces an explicitly named company with another owned company", async () => {
+  const store = new InMemoryWorkspaceStore(), repo = new EmailInboxRepository();
+  const bakery = await store.createCompany(auth, { name: "Stress Bakery" }, "email-scope-bakery");
+  const other = await store.createCompany(auth, { name: "Other Company" }, "email-scope-other");
+  let failure: unknown;
+  const result = await EmailChatActions.extractAndExecute(auth, directive({ actions: [
+    { action: "contact.upsert", companyId: bakery.id, fields: { email: "spammer@npati.test", isBlacklisted: true } },
+    { action: "contact.upsert", companyId: other.id, fields: { email: "spammer@npati.test", isBlacklisted: true } },
+  ] }), store, repo, { onError: error => { failure = error; }, selectedCompanyId: bakery.id, requestMessage: 'In company "Stress Bakery", mark spammer@npati.test as blacklisted.' });
+  expect((failure as Error)?.message).toContain("explicitly requested company");
+  expect(result.emailAction).toBeUndefined();
+  expect(await repo.listContacts(auth, bakery.id)).toHaveLength(0);
+  expect(await repo.listContacts(auth, other.id)).toHaveLength(0);
+});
