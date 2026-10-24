@@ -43,43 +43,8 @@ import type { CodeRunCancellationRegistry } from "./code-run-cancellation";
 import type { CodeSessionRunExecutor } from "./code-session-run-executor";
 import { readIntentHistory } from "./chat-project-intent";
 
-export interface ChatStreamRouteDeps {
-  aiEngine: import("@npati/omniroute-adapter").AIEngine;
-  projectMediaService?: import("./project-media-service").ProjectMediaService;
-  chatFiles?: ReturnType<typeof createCoreServices>["chatFiles"];
-  resolveProjectIntent?: import("./chat-project-intent").ChatProjectIntentResolver;
-  config: AppConfig;
-  log: FastifyBaseLogger;
-  activeChatStreams: Map<string,{controller:AbortController;workspaceId:string;userId:string}>;
-  activeContextResolver: ReturnType<typeof createCoreServices>["activeContextResolver"];
-  activeSessionRegistry: ActiveSessionRegistry;
-  agent: ReturnType<typeof createCoreServices>["agent"];
-  aiPreferences: ReturnType<typeof createCoreServices>["aiPreferences"];
-  codePreferences?: ReturnType<typeof createCoreServices>["codePreferences"];
-  authProvider: ReturnType<typeof createCoreServices>["authProvider"];
-  codeBackgroundRuns: CodeBackgroundRunRegistry;
-  codeRunAdmission: ReturnType<typeof createCodeRunAdmission>;
-  codeRunCancellation: CodeRunCancellationRegistry;
-  codeRunQueueLimits: ReturnType<typeof resolveCodeRunQueueLimits>;
-  codeService: CodeService;
-  codeSessionInbox: CodeSessionInboxService;
-  codeSessionRunExecutor: CodeSessionRunExecutor;
-  companyRuntime: CompanyDelegationRuntime;
-  featureFlagService: FeatureFlagService;
-  getAIContext: (auth: AuthContext) => Promise<{ model: string }>;
-  marketplace: ReturnType<typeof createCoreServices>["marketplace"];
-  notifyMessagingConnections: (input: { workspaceId: string; userId: string; companyId: string; agentId?: string | null; kind: "automation" | "background_run" | "approval"; title: string; detail: string }) => Promise<void>;
-  persistAutomaticCompanyMemory: (auth: AuthContext, companyId: string, runId: string, prompt: string, runStatus: string, noMemory: boolean) => Promise<unknown>;
-  projectOrchestrator: ProjectOrchestrator;
-  projectPreviewService: ProjectPreviewService;
-  projectSandbox: ProjectSandboxService | undefined;
-  projectService: ProjectService;
-  runBusinessMessage: (auth: AuthContext, businessId: string, message: string, conversationId: string | undefined, log: { warn(value: unknown, message?: string): void }, progress?: ResearchProgressListener, attachments?: ChatAttachmentInput[], memoryPolicy?: NoMemoryEvaluationResult, signal?: AbortSignal) => Promise<{ message: string; companyAction?: { companyId: string; action: string } }>;
-  runNeutralMessage: (auth: AuthContext, message: string, conversationId: string | undefined, attachments?: ChatAttachmentInput[], progress?: ResearchProgressListener, memoryPolicy?: NoMemoryEvaluationResult, onDelta?: (chunk: string) => void, signal?: AbortSignal, managementCompany?: { id: string; name: string }, projectContext?: Pick<import("@npati/workspace").Project, "id" | "name" | "description" | "framework"> & { capabilityIds?: string[] }) => Promise<{ message: string; companyAction?: { companyId: string; action: string } }>;
-  chatDevelopment?: import("./chat-development-service").ChatDevelopmentService;
-  workspaceStore: ReturnType<typeof createCoreServices>["workspaceStore"];
-  boundedResponseChunks: (value: string, maxCharacters?: number) => Iterable<string>;
-}
+export type { ChatStreamRouteDeps } from "./chat-stream-route-types";
+import type { ChatStreamRouteDeps } from "./chat-stream-route-types";
 
 export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamRouteDeps): void {
   const { activeChatStreams, activeContextResolver, activeSessionRegistry, agent, aiPreferences, codePreferences, authProvider, codeBackgroundRuns, codeRunAdmission, codeRunCancellation, codeRunQueueLimits, codeService, codeSessionInbox, codeSessionRunExecutor, companyRuntime, featureFlagService, getAIContext, marketplace, notifyMessagingConnections, persistAutomaticCompanyMemory, projectOrchestrator, projectPreviewService, projectSandbox, projectService, runBusinessMessage, runNeutralMessage, workspaceStore, boundedResponseChunks } = deps;
