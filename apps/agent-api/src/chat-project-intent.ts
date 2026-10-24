@@ -82,7 +82,7 @@ export function createChatProjectIntentResolver(deps: {
       const constraints = frameworkConstraints(message);
       const safeTargets = targets.filter(target => !constraints.forbidden.includes(target.framework));
       for (const target of safeTargets) target.technologySelection = { source: explicit ? "user_explicit" : "policy_fallback", reason: explicit ? "Explicit user technology: " + explicit : "AI planning unavailable; conservative static fallback, not an optimized architecture decision.", criteria: [explicit ? "user_constraint" : "planner_unavailable"] };
-      if (!explicit && /магазин|store|shop|crm|saas|api/iu.test(message)) {
+      if (["CREATE_WEBSITE", "CREATE_PROJECT"].includes(decision.intent) && !explicit && /магазин|store|shop|crm|saas|api/iu.test(message)) {
         decision.needsClarification = true;
         decision.clarificationPrompt = "Technology planning is unavailable. Retry with a connected AI provider or specify the technology.";
         return { decision, targets: [], source: "deterministic" as const };
