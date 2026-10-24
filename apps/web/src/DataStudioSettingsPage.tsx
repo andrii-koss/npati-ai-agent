@@ -10,6 +10,7 @@ import {
   MAX_TABLE_COUNT_BACKENDS,
   apiFetch,
   dataStudioUnavailableMessage,
+  summarizeDatabaseStats,
   errorCode,
   DatabaseDetailView,
   DatabasesListView,
@@ -579,25 +580,8 @@ export function DataStudioSettingsPage() {
     [companyFilter, projects],
   );
 
-  const stats = useMemo(() => {
-    const readyEnvironments = companyBackends.reduce((total, backend) => {
-      const list = environments[backend.id] ?? [];
-      return total + list.filter((env) => env.status === "ready").length;
-    }, 0);
-    const totalEnvironments = companyBackends.reduce((total, backend) => total + Math.max((environments[backend.id] ?? []).length, 0), 0);
-    const known = companyBackends
-      .map((backend) => tableCounts[backend.id])
-      .filter((count): count is number => typeof count === "number");
-    return {
-      total: companyBackends.length,
-      ready: companyBackends.filter((backend) => backend.status === "ready").length,
-      attention: companyBackends.filter((backend) => backend.status !== "ready").length,
-      readyEnvironments,
-      totalEnvironments: totalEnvironments || companyBackends.length * 2,
-      tables: known.length ? known.reduce((total, count) => total + count, 0) : null,
-      attachedProjects: companyProjects.filter((item) => item.dataBackendId).length,
-    };
-  }, [companyBackends, companyProjects, environments, tableCounts]);
+  const stats = useMemo(() => summarizeDatabaseStats(companyBackends, companyProjects, environments, tableCounts),
+    [companyBackends, companyProjects, environments, tableCounts]);
 
   const filteredBackends = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();

@@ -1,3 +1,4 @@
+import type { BackendSummary, BackendEnvironment, ProjectSummary } from "./types";
 import { getStoredAuthToken } from "../AuthContext";
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -55,4 +56,25 @@ export function formatBytes(bytes: number | undefined): string {
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
   return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+/** Aggregate the visible company databases without treating unknown table counts as zero. */
+export function summarizeDatabaseStats(companyBackends: BackendSummary[], companyProjects: ProjectSummary[], environments: Record<string, BackendEnvironment[]>, tableCounts: Record<string, number | null>) {
+  const readyEnvironments = companyBackends.reduce((total, backend) => {
+    const list = environments[backend.id] ?? [];
+    return total + list.filter((env) => env.status === "ready").length;
+  }, 0);
+  const totalEnvironments = companyBackends.reduce((total, backend) => total + Math.max((environments[backend.id] ?? []).length, 0), 0);
+  const known = companyBackends
+    .map((backend) => tableCounts[backend.id])
+    .filter((count): count is number => typeof count === "number");
+  return {
+    total: companyBackends.length,
+    ready: companyBackends.filter((backend) => backend.status === "ready").length,
+    attention: companyBackends.filter((backend) => backend.status !== "ready").length,
+    readyEnvironments,
+    totalEnvironments: totalEnvironments || companyBackends.length * 2,
+    tables: known.length ? known.reduce((total, count) => total + count, 0) : null,
+    attachedProjects: companyProjects.filter((item) => item.dataBackendId).length,
+  };
 }
