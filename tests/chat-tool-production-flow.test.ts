@@ -470,6 +470,10 @@ describe("explicit research recall restrictions", () => {
     "Vuelve al analisis anterior. Sin buscar otra vez, resume dos decisiones.",
     "Use o estudo anterior, sem pesquisar novamente.",
     "Nutze die vorherige Analyse, ohne neue Recherche.",
+    "Verwende die frühere Analyse von Apple, Samsung und Google. Keine neue Websuche und keine Codeänderung.",
+    "Use the earlier comparison; no new web search.",
+    "Usa el análisis anterior, ninguna búsqueda nueva.",
+    "Use a análise anterior, nenhuma nova pesquisa.",
     "\u0412\u0438\u043a\u043e\u0440\u0438\u0441\u0442\u0430\u0439 \u043f\u043e\u043f\u0435\u0440\u0435\u0434\u043d\u0456\u0439 \u0430\u043d\u0430\u043b\u0456\u0437, \u0431\u0435\u0437 \u043d\u043e\u0432\u043e\u0433\u043e \u043f\u043e\u0448\u0443\u043a\u0443.",
   ];
   it.each(requests)("recognizes a current-turn restriction: %s", message => {
@@ -502,4 +506,8 @@ describe("explicit research recall restrictions", () => {
     expect(forbidsNewWebResearch("Research https://apple.com again and compare the changes.")).toBe(false);
     expect(explicitlyRequestsWebResearch("Research https://apple.com again and compare the changes.")).toBe(true);
   });
+});
+
+it("does not read an ordinary 'no' sentence as a research restriction", () => {
+  expect(forbidsNewWebResearch("Search the web for bakery trends; no payment is required.")).toBe(false);
 });
