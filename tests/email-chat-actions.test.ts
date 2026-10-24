@@ -141,6 +141,22 @@ describe("EmailChatActions", () => {
     expect(await repo.getThread(auth, company.id, threadId)).toBeNull();
   });
 
+  it("approves the only draft of a subject-named thread without a message ID and refuses an ambiguous thread", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const repo = new EmailInboxRepository();
+    const company = await store.createCompany(auth, { name: "Draft Subject" }, "email-chat-draft-subject");
+    const account = await repo.createAccount(auth, company.id, { emailAddress: "drafts@example.com", testMode: true });
+    const draftThread = async (subject: string) => (await EmailChatActions.extractAndExecute(auth, directive({ action: "inbox.compose", companyId: company.id, accountId: account.id,
+      fields: { toAddresses: ["receiver@example.net"], subject, bodyText: "Reserve one loaf", isDraft: true } }), store, repo)).emailAction!.resourceId;
+    const single = await draftThread("STRESS_ORDER_731"), several = await draftThread("STRESS_ORDER_732");
+    await EmailChatActions.extractAndExecute(auth, directive({ action: "inbox.reply", companyId: company.id, threadId: several, fields: { bodyText: "Second draft", isDraft: true } }), store, repo);
+    const ambiguous = await EmailChatActions.extractAndExecute(auth, directive({ action: "draft.approve", companyId: company.id, threadSubject: "STRESS_ORDER_732" }), store, repo);
+    expect(ambiguous.cleanText).toContain("several drafts");
+    expect((await repo.listMessages(auth, company.id, several)).every((item) => item.isDraft)).toBe(true);
+    await EmailChatActions.extractAndExecute(auth, directive({ action: "draft.approve", companyId: company.id, threadSubject: "STRESS_ORDER_731" }), store, repo);
+    expect((await repo.listMessages(auth, company.id, single)).map((item) => item.isDraft)).toEqual([false]);
+  });
+
   it("blocks cross-user company access and isolates personal mailboxes", async () => {
     const store = new InMemoryWorkspaceStore();
     const repo = new EmailInboxRepository();
