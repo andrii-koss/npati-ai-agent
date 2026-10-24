@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AuthContext } from "@npati/workspace";
 import type { AIEngine } from "@npati/omniroute-adapter";
 import { ResilientEmbeddingPipeline, ResilientRerankPipeline } from "../apps/agent-api/src/resilient-inference-pipeline";
@@ -241,6 +241,23 @@ describe("P0.2 Production Suite: Company Knowledge & Long-Term Agent Memory", ()
       expect(result.preservedMessages).toEqual(messages.slice(-6));
       expect(result.summary).toContain("product-732; EUR 74.25");
       expect(requests[0].messages[1].content).toContain("BEGIN UNTRUSTED CONVERSATION");
+    });
+
+    it("reuses block summaries from the shared store after a process restart", async () => {
+      const shared = new Map<string, string>();
+      const messages = Array.from({ length: 20 }, (_, index) => ({ role: index % 2 ? "assistant" : "user", content: "restart-block-" + index }));
+      let calls = 0;
+      const ai = { chat: async () => ({ content: "Decision RESTART_732 kept." + ++calls }) } as unknown as AIEngine;
+      const run = async () => {
+        vi.resetModules();
+        const fresh = await import("../apps/agent-api/src/context-compactor");
+        fresh.setCompactionSummaryStore({ get: async (key) => shared.get(key), set: async (key, value) => shared.set(key, value) });
+        return fresh.ContextCompactor.compactWithModel({ ai, model: "restart/model", messages });
+      };
+      const first = await run(), second = await run();
+      expect(calls).toBe(1);
+      expect(second.summary).toBe(first.summary);
+      expect([...shared.keys()]).toHaveLength(1);
     });
 
     it("summarizes a cold history in bounded parallel blocks while keeping their order", async () => {

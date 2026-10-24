@@ -8,16 +8,22 @@ const COMPACTION_CONCURRENCY = 4;
 const summaryCache = new Map<string, string>();
 const SUMMARY_CACHE_LIMIT = 1_000;
 
+/** Optional shared store (Redis) so a restarted process reuses block summaries; failures fall back to summarizing. */
+export interface CompactionSummaryStore { get(key: string): Promise<string | null | undefined>; set(key: string, summary: string): Promise<unknown> }
+let durableSummaries: CompactionSummaryStore | undefined;
+export function setCompactionSummaryStore(store: CompactionSummaryStore | undefined) { durableSummaries = store; }
+
 /** A block's summary is computed once per process; the least recently used entries are dropped past the limit. */
 async function cachedSummary(content: string, summarize: () => Promise<string>): Promise<string> {
   const key = createHash("sha256").update(content).digest("hex");
-  const cached = summaryCache.get(key);
+  const cached = summaryCache.get(key) ?? await durableSummaries?.get(key).catch(() => undefined) ?? undefined;
   if (cached !== undefined) {
     summaryCache.delete(key);
     summaryCache.set(key, cached);
     return cached;
   }
   const summary = await summarize();
+  await durableSummaries?.set(key, summary).catch(() => undefined);
   summaryCache.set(key, summary);
   if (summaryCache.size > SUMMARY_CACHE_LIMIT) summaryCache.delete(summaryCache.keys().next().value as string);
   return summary;

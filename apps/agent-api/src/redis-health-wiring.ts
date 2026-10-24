@@ -5,6 +5,7 @@ import { withHealthTimeout } from "./backend-health-probe";
 import { InMemoryActiveSessionRegistry, RedisActiveSessionRegistry } from "./distributed-session-registry";
 import { ServiceHealth } from "@npati/shared";
 import { createClient } from "redis";
+import { setCompactionSummaryStore } from "./context-compactor";
 
 export interface CreateRedisHealthWiringDeps {
   config: AppConfig;
@@ -45,7 +46,13 @@ export function createRedisHealthWiring(deps: CreateRedisHealthWiringDeps) {
     }
   };
   const redisHealthCheck = config.redisHealthCheck ?? defaultRedisHealthCheck;
+  // Chat compaction block summaries survive API restarts; keys are content hashes and expire after 7 days.
+  if (config.redisUrl) setCompactionSummaryStore({
+    get: async (key) => (await withHealthTimeout(getRedisHealthClient(), 2_500)).get("npati:compaction:v1:" + key),
+    set: async (key, summary) => (await withHealthTimeout(getRedisHealthClient(), 2_500)).set("npati:compaction:v1:" + key, summary, { EX: 7 * 24 * 3600 }),
+  });
   app.addHook("onClose", async () => {
+    setCompactionSummaryStore(undefined);
     await activeSessionRegistry.close();
     if (redisHealthClient?.isOpen) await redisHealthClient.quit().catch(() => redisHealthClient?.destroy());
   });
