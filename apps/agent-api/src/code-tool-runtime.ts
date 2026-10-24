@@ -211,8 +211,9 @@ export class CodeToolRuntime {
       // (3) Tool resolution and version pinning.
       const candidates = this.schemas.filter((tool) => tool.name === input.tool);
       if (!candidates.length) throw new CodeToolError("unknown_tool", `Unknown tool: ${input.tool}`, 404, "resolve", false, input.tool);
+      // An unpinned call gets the newest active version (schema.apply@2 since manifest v16), never a frozen older one.
       const tool = input.toolVersion === undefined
-        ? candidates.find((candidate) => candidate.status === "active") ?? candidates[0]!
+        ? [...candidates].sort((a, b) => b.version - a.version).find((candidate) => candidate.status === "active") ?? candidates[0]!
         : candidates.find((candidate) => candidate.version === input.toolVersion);
       if (!tool) throw new CodeToolError("unknown_tool_version", `Unknown version ${input.toolVersion} for ${input.tool}`, 404, "resolve", false, input.tool);
       if (tool.status !== "active") throw new CodeToolError("tool_deprecated", `Tool ${input.tool}@${tool.version} is deprecated`, 409, "resolve", false, input.tool);

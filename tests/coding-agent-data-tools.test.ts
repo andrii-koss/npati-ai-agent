@@ -40,21 +40,30 @@ describe("Coding Agent project database tools", () => {
     expect(resolveManifestForSession(12).checksum).toBe("caf264774bbf481acb49317361fd79495045380bc46516708b0571863e017a9a");
     expect(resolveManifestForSession(13).tools).toHaveLength(49);
     for (const name of ["code.data.schema.inspect", "code.data.schema.apply"]) {
-      const tool = CODE_TOOL_SCHEMAS.find(t => t.name === name)!;
+      // Manifest v16 publishes schema.apply@2 (relations, required expectedBackendId); v1 stays frozen for older sessions.
+      const tool = CODE_TOOL_SCHEMAS.filter(t => t.name === name).sort((a, b) => b.version - a.version)[0]!;
       expect(CODE_TOOL_SCHEMA_MIRROR[name]).toEqual({ inputSchema: tool.inputSchema, outputSchema: tool.outputSchema });
       expect(defaultCapabilityRegistry.get(name)).toBeDefined();
     }
+    expect(CODE_TOOL_SCHEMAS.filter(t => t.name === "code.data.schema.apply").map(t => t.version).sort()).toEqual([1, 2]);
   });
   it("inspects and applies a schema using server-selected context and revision", async () => {
     const f = await fixture();
     expect((await f.invoke("code.data.schema.inspect")).ok).toBe(true);
     expect(f.projectData.inspectSchema).toHaveBeenCalledWith(ctx, f.company.id, "selected-site");
-    const args = { operation, expectedFingerprint: "before" };
+    const args = { operation, expectedFingerprint: "before", expectedBackendId: "db" };
     expect((await f.invoke("code.data.schema.apply", args)).ok).toBe(true);
     expect(f.projectData.applySchema).toHaveBeenCalledWith(ctx, f.company.id, "selected-site", operation, expect.objectContaining({ expectedFingerprint: "before", approved: false }));
   });
   it.each([{ operation }, { operation, expectedFingerprint: "before", projectId: "other" }, { operation, expectedFingerprint: "before", environment: "prod" }, { operation, expectedFingerprint: "before", approved: true }, { operation: { kind: "drop_collection", collection: "products" }, expectedFingerprint: "before" }])("rejects missing revision, target substitution, self-approval or destructive arguments: %j", async args => {
     const f = await fixture(); expect((await f.invoke("code.data.schema.apply", args)).ok).toBe(false);
+    expect(f.projectData.applySchema).not.toHaveBeenCalled();
+  });
+  it("resolves an unpinned call to the newest active schema and keeps @1 for pinned older sessions", async () => {
+    const f = await fixture();
+    const unpinned = await f.invoke("code.data.schema.apply", { operation, expectedFingerprint: "before" });
+    expect(unpinned).toMatchObject({ ok: false, error: { code: "invalid_arguments" } });
+    expect(String((unpinned as { error?: { message?: string } }).error?.message)).toContain("expectedBackendId");
     expect(f.projectData.applySchema).not.toHaveBeenCalled();
   });
   it("allows inspection in plan mode and refuses database changes", async () => {
@@ -71,11 +80,11 @@ describe("Coding Agent project database tools", () => {
   it("returns missing backend and stale-schema errors without claiming success", async () => {
     const f = await fixture();
     f.projectData.applySchema.mockRejectedValue(new DataStudioError(409, "apply", "Schema changed concurrently", false, "STALE_SCHEMA"));
-    expect(await f.invoke("code.data.schema.apply", { operation, expectedFingerprint: "before" })).toMatchObject({ ok: false, error: { code: "project_data_error", details: { dataCode: "STALE_SCHEMA" } } });
+    expect(await f.invoke("code.data.schema.apply", { operation, expectedFingerprint: "before", expectedBackendId: "db" })).toMatchObject({ ok: false, error: { code: "project_data_error", details: { dataCode: "STALE_SCHEMA" } } });
   });
   it("never turns a Data Studio approval request into a successful migration", async () => {
     const f = await fixture(); f.projectData.applySchema.mockResolvedValue({ approvalRequired: true });
-    expect(await f.invoke("code.data.schema.apply", { operation, expectedFingerprint: "before" })).toMatchObject({ ok: false, error: { code: "approval_required" } });
+    expect(await f.invoke("code.data.schema.apply", { operation, expectedFingerprint: "before", expectedBackendId: "db" })).toMatchObject({ ok: false, error: { code: "approval_required" } });
   });
 });
 

@@ -101,7 +101,7 @@ describe("security-gate: C4 sandbox execution capabilities", () => {
     expect(CAPABILITY_CATALOG.length).toBe(408);
     expect(callable.length).toBe(144);
     expect(CAPABILITY_CATALOG.length - callable.length).toBe(264);
-    expect(CODE_TOOL_MANIFEST_VERSION).toBe(15);
+    expect(CODE_TOOL_MANIFEST_VERSION).toBe(16); // v16 publishes code.data.schema.apply@2; the capability count is unchanged.
   });
 
   it("never exposes a sandbox tool without a manifest version and a versioned schema", () => {

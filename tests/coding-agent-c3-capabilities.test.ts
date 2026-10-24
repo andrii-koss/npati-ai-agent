@@ -149,7 +149,7 @@ describe("security-gate: C3 tool manifest and flag gating", () => {
   it("keeps manifest v3 frozen and resolvable while the current manifest publishes every tool", () => {
     // C4 bumped the manifest to v4; v3 must keep resolving with exactly its 13 tools and frozen checksum.
     expect(CODE_TOOL_MANIFEST_VERSION).toBeGreaterThanOrEqual(4);
-    expect(CODE_TOOL_SCHEMAS.length).toBe(60); // Manifest v12 adds two project database tools.
+    expect(CODE_TOOL_SCHEMAS.length).toBe(61); // Manifest v12 adds two project database tools; v16 adds schema.apply@2 beside the frozen @1.
     expect(PUBLISHED_TOOL_SCHEMA_CHECKSUM).toBe(toolSchemaChecksum(CODE_TOOL_SCHEMAS));
 
     const v1 = resolveManifestForSession(1);
@@ -187,7 +187,8 @@ describe("security-gate: C3 tool manifest and flag gating", () => {
     // Every published version is unique and immutable-looking: one entry per `name@version`.
     const keys = CODE_TOOL_SCHEMAS.map((tool) => `${tool.name}@${tool.version}`);
     expect(new Set(keys).size).toBe(keys.length);
-    expect(keys.filter((key) => !key.endsWith("@1"))).toEqual([]);
+    // The only second version so far is the deliberate v16 schema.apply@2 (relations); any other bump fails here.
+    expect(keys.filter((key) => !key.endsWith("@1"))).toEqual(["code.data.schema.apply@2"]);
   });
 
   it("maps every code capability to the flag that actually governs it", () => {
