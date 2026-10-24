@@ -8,7 +8,7 @@ import { detectCompanyChatLanguage, type CompanyChatLanguage } from "./company-c
 const deleteVerb = /^\s*(?:(?:please|будь\s+ласка|por\s+favor|bitte)[,\s]+)?(?:видали(?:ти)?|видаліть|прибери|удали(?:ть)?|delete|remove|exclua|apague|elimina|borra|lösche|entferne|supprime)(?![\p{L}])/iu;
 const projectNoun = /(?:сайт\p{L}*|проєкт\p{L}*|проект\p{L}*|\bwebsite\b|\bsite\b|\bproject\b|\bprojeto\b|\bproyecto\b|\bsitio\b|\bprojekt\b|\bwebseite\b)/iu;
 /** Parts of a site ("delete the /about page", "remove the hero section") are code edits, not project deletion. */
-const sitePart = /(?:сторінк\p{L}*|розділ\p{L}*|секці\p{L}*|блок\p{L}*|файл\p{L}*|кнопк\p{L}*|форм\p{L}*|компонент\p{L}*|меню|\bpages?\b|\bsection\b|\bblock\b|\bfiles?\b|\bbutton\b|\bform\b|\bcomponent\b|\bmenu\b|\/[a-z0-9-]+)/iu;
+const sitePart = /(?:сторінк\p{L}*|розділ\p{L}*|секці\p{L}*|блок\p{L}*|файл\p{L}*|кнопк\p{L}*|форм\p{L}*|компонент\p{L}*|меню|\bpages?\b|\bsection\b|\bblock\b|\bfiles?\b|\bbutton\b|\bform\b|\bcomponent\b|\bmenu\b|(?:^|\s)\/[a-z0-9-]+)/iu;
 
 export function isProjectDeleteRequest(message: string): boolean {
   return deleteVerb.test(message) && projectNoun.test(message) && !sitePart.test(message);

@@ -101,6 +101,8 @@ describe("deleting a website from chat", () => {
     const { isProjectDeleteRequest } = await import("../apps/agent-api/src/chat-project-delete");
     expect(isProjectDeleteRequest("Видали сайт Nordic Fit — він більше не потрібен.")).toBe(true);
     expect(isProjectDeleteRequest("Видали сторінку /about з сайту")).toBe(false);
+    expect(isProjectDeleteRequest("Delete /about from the website")).toBe(false);
+    expect(isProjectDeleteRequest('Delete only the test React/Vite project "Stress Vite"')).toBe(true);
     const context: AuthContext = { workspaceId: "workspace-site-delete", userId: "owner", permissions: ["workspace:read", "workspace:write", "business:manage", "chat:use"] };
     const store = new InMemoryWorkspaceStore();
     const aiEngine: AIEngine = {
@@ -122,6 +124,33 @@ describe("deleting a website from chat", () => {
     const confirmed = await app.inject({ method: "POST", url: "/chat/stream", payload: { ...payload, conversationId, message: "Так, підтверджую видалення." } });
     expect(confirmed.body).toContain("видалено");
     expect(await store.listProjects(context, company.id)).toHaveLength(0);
+  });
+});
+
+describe("deleting a site of another named company", () => {
+  it("finds the site in the company the request names, confirms it, and deletes only that site", async () => {
+    const context: AuthContext = { workspaceId: "workspace-other-delete", userId: "owner", permissions: ["workspace:read", "workspace:write", "business:manage", "chat:use"] };
+    const store = new InMemoryWorkspaceStore();
+    const aiEngine: AIEngine = {
+      chat: vi.fn(async () => ({ content: "Neutral answer" })), async *stream() { yield "Neutral answer"; },
+      listModels: async () => [], getModel: async () => undefined, executeTool: async () => ({}),
+      searchMemory: async () => [], saveMemory: async () => undefined, getCapabilities: async () => ["chat"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => ({ ...context }) }, aiEngine, marketplace });
+    apps.push(app);
+    const shop = await store.createCompany(context, { name: "Stress Bakery" }, "other-delete-bakery");
+    const studio = await store.createCompany(context, { name: "Stress Studio" }, "other-delete-studio");
+    const { project: next } = await store.createProject(context, shop.id, { name: "Stress Next Shop", type: "website" } as never, "other-delete-next");
+    await store.createProject(context, studio.id, { name: "Stress Vite", type: "website" } as never, "other-delete-vite");
+    const payload = { contextType: "project", companyId: shop.id, projectId: next.id };
+    const asked = await app.inject({ method: "POST", url: "/chat/stream", payload: { ...payload, message: 'Delete only the test React/Vite project "Stress Vite" in company "Stress Studio" through the normal confirmation flow.' } });
+    expect(asked.body).toContain("Yes, delete website Stress Vite");
+    const conversationId = /"conversationId":"([^"]+)"/.exec(asked.body)?.[1];
+    const confirmed = await app.inject({ method: "POST", url: "/chat/stream", payload: { ...payload, conversationId, message: "Yes, delete website Stress Vite" } });
+    expect(confirmed.body).toContain("was deleted");
+    expect(await store.listProjects(context, studio.id)).toHaveLength(0);
+    expect(await store.listProjects(context, shop.id)).toHaveLength(1);
   });
 });
 

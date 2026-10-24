@@ -271,10 +271,16 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         const previousAssistant = [...history].reverse().find((item) => item.role === "assistant")?.content ?? "";
         const confirmedName = confirmedProjectDeletion(message, previousAssistant);
         if (activeCompanyId && (confirmedName || isProjectDeleteRequest(message))) {
-          const projects = await workspaceStore.listProjects(auth, activeCompanyId).catch(() => []);
-          const target = projectDeleteTarget(projects, message, confirmedName, activeProjectId);
+          // The site may belong to another owned company the request names explicitly; a confirmation names the site
+          // exactly, so it is looked up across owned companies and must be unique.
+          const others = (confirmedName ? await activeContextResolver.ownedCompanies(auth) : await activeContextResolver.companiesNamedIn(auth, message))
+            .filter((company) => company.id !== activeCompanyId);
+          const projects = (await Promise.all([activeCompanyId, ...others.map((company) => company.id)]
+            .map((companyId) => workspaceStore.listProjects(auth, companyId).catch(() => [])))).flat();
+          const confirmedMatches = confirmedName ? projects.filter((project) => project.name === confirmedName) : [];
+          const target = confirmedName && confirmedMatches.length !== 1 ? undefined : projectDeleteTarget(projects, message, confirmedName, activeProjectId);
           if (target) {
-            if (confirmedName) await projectService.delete(auth, activeCompanyId, target.id);
+            if (confirmedName) await projectService.delete(auth, target.companyId, target.id);
             const answer = confirmedName ? projectDeletedMessage(message, target.name) : projectDeleteQuestion(message, target);
             const conversation = await chatConversation();
             if (conversation) {

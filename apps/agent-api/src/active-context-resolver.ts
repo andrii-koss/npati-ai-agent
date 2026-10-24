@@ -55,6 +55,22 @@ export class ActiveContextResolver {
    * Switches the chat context to another owned company the message names (see companyNamedInMessage): that company's
    * most recently updated project for follow-up work, or the company itself for a new project.
    */
+  async ownedCompanies(auth: AuthContext): Promise<Company[]> {
+    const owned: Company[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await this.store.listCompanies(auth, 100, cursor);
+      owned.push(...page.items);
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor && owned.length < 500);
+    return owned;
+  }
+
+  /** Owned companies whose exact name the message contains (case-sensitive whole words). */
+  async companiesNamedIn(auth: AuthContext, message: string): Promise<Company[]> {
+    return (await this.ownedCompanies(auth)).filter((company) => mentions(message, company.name));
+  }
+
   async resolveNamedCompany(auth: AuthContext, current: ResolvedActiveContext, message: string, decision?: import("@npati/shared").ProjectIntentDecision, conversationText = ""): Promise<ResolvedActiveContext | undefined> {
     const owned: Company[] = [];
     let cursor: string | undefined;
