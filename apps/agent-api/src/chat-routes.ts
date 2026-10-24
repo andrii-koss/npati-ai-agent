@@ -194,7 +194,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
       const activeProjId = resolved.project?.id ?? null;
       const activeCompId = requestedContext.companyId ?? resolved.company?.id ?? resolved.project?.companyId ?? null;
 
-      if(semantic?.rowCapability&&resolved.project&&resolved.company){
+      if(semantic?.rowCapability&&resolved.project?.dataBackendId&&resolved.company){
         const result=await runNeutralMessage(auth,prompt??"",request.body.conversationId,request.body.attachments,undefined,memoryPolicy,undefined,undefined,{id:resolved.company.id,name:resolved.company.name},{...resolved.project,capabilityIds:rowTaskCapabilities(semantic.rowCapability)});
         return reply.send({...result,activeContext:resolved.context});
       }

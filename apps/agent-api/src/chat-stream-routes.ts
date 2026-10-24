@@ -302,7 +302,8 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
           ? await projectService.get(auth, activeCompanyId, effectiveProjectId).catch(() => null)
           : null;
         const codeProjectKind = codeProject ? ((codeProject as { type?: string }).type === "code_project" ? "code_project" : "website") : null;
-        if (semantic?.rowCapability && resolved.project && activeCompanyId) {
+        // Row capabilities need the project's development database; without one the request is not a row task.
+        if (semantic?.rowCapability && resolved.project?.dataBackendId && activeCompanyId) {
           const result=await runNeutralMessage(auth,message,request.body.conversationId,request.body.attachments,progress,memoryPolicy,delta=>send("delta",{delta}),streamController.signal,{id:resolved.company!.id,name:resolved.company!.name},{...resolved.project,capabilityIds:rowTaskCapabilities(semantic.rowCapability)});
           send("result",{...result,activeContext:resolved.context});clearInterval(heartbeat);if(!reply.raw.writableEnded)reply.raw.end();return;
         }
