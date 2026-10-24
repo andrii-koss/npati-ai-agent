@@ -474,7 +474,13 @@ Use activity.run when the user asks the company agents to perform work and wants
 
   static async extractAndExecute(auth: AuthContext, text: string, deps: WorkspaceChatActionDependencies, conversationId: string, options: { requestMessage?: string; selectedCompanyId?: string; selectedBusinessId?: string; onError?: (error: unknown) => void } = {}): Promise<WorkspaceChatActionResult> {
     const matches = fenced(text);
-    if (!matches[0]) return /```workspace-action/i.test(text) ? { cleanText: this.noActionMessage(options.requestMessage ?? "") } : { cleanText: text };
+    if (!matches[0]) {
+      if (!/```workspace-action/i.test(text)) return { cleanText: text };
+      // Logged as a classification only (marker word or invalid JSON), never the model text.
+      const body = /```workspace-action\s*([\s\S]*?)(?:```|$)/i.exec(text)?.[1]?.trim() ?? "";
+      options.onError?.(new Error("Unexecutable workspace-action block: " + (/^[A-Z_]{2,40}$/.test(body) ? body : "invalid directive")));
+      return { cleanText: this.noActionMessage(options.requestMessage ?? "") };
+    }
     try {
       if (!auth.permissions.includes("business:manage")) throw new Error("Permission denied");
       if (matches.length !== 1) throw new Error("Use one action per response");
