@@ -52,6 +52,27 @@ describe("business and goal mutations through production chat", () => {
       expect(await store.listUserBusinesses(auth)).toHaveLength(0);
     } finally { await app.close(); }
   });
+  it("keeps a grounded read-only answer when the workspace planner returns READ_ONLY, and refuses on NO_ACTION", async () => {
+    const message = 'Lies das Profil "Read Profile" und nenne dessen Markt und aktualisierte Zielgruppe. Keine Änderungen.';
+    const answer = "Markt: Kyiv. Zielgruppe: Familien und kleine Büros.";
+    const reply = async (planner: string) => {
+      const store = new InMemoryWorkspaceStore();
+      await store.createBusiness(auth, { name: "Read Profile", businessStage: "operating", market: "Kyiv" });
+      const ai: AIEngine = {
+        chat: async () => ({ content: planner }),
+        async *stream() { yield answer; },
+        listModels: async () => [], getModel: async () => undefined, executeTool: async () => undefined,
+        searchMemory: async () => [], saveMemory: async () => undefined,
+        getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
+      };
+      const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace });
+      try { return result((await app.inject({ method: "POST", url: "/chat/stream", payload: { message, contextType: "none" } })).body).message as string; }
+      finally { await app.close(); }
+    };
+    expect(await reply("READ_ONLY")).toContain("Kyiv");
+    expect(await reply("NO_ACTION")).toContain("nicht sicher ausgeführt");
+  });
+
   it("finishes business idea and memory creation when the memory planner returns NO_ACTION", async () => {
     const store = new InMemoryWorkspaceStore();
     const message = "\u0421\u0442\u0432\u043e\u0440\u0438 \u0431\u0456\u0437\u043d\u0435\u0441, \u0456\u0434\u0435\u044e, \u0456 \u043c\u0435\u043c\u043e\u0440\u0456, \u043f\u0440\u043e\u0441\u0442\u043e \u0434\u043b\u044f \u0442\u0435\u0441\u0442\u0430";

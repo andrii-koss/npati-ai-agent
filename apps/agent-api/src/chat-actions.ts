@@ -576,7 +576,7 @@ ${localized.next}`;
         return result;
       },
     };
-    let actionText = content;
+    let actionText = content, readOnly = false;
     if (!/```workspace-action/i.test(actionText) && managementRequest && auth.permissions.includes("business:manage")) {
       try {
         const prompt = await WorkspaceChatActions.buildActionPlannerPrompt(auth, dependencies, requestMessage!, route?.selectedCompanyId, route?.selectedBusinessId);
@@ -589,12 +589,14 @@ ${localized.next}`;
           messages: [{ role: "system", content: prompt }, { role: "user", content: requestMessage! }],
         });
         actionText = planned.content;
+        // A management-looking read ("read the profile … no changes") keeps the grounded answer instead of a refusal.
+        readOnly = /^\s*READ_ONLY\s*$/.test(planned.content);
       } catch (error) {
         log.warn({ err: error }, "Workspace action planning failed");
       }
     }
     if (!/```workspace-action/i.test(actionText)) return {
-      cleanText: managementRequest ? WorkspaceChatActions.noActionMessage(requestMessage ?? "") : content,
+      cleanText: managementRequest && !readOnly ? WorkspaceChatActions.noActionMessage(requestMessage ?? "") : content,
       workspaceAction: undefined,
       companyRunId: undefined,
     };
