@@ -636,7 +636,7 @@ export function buildApp(config: AppConfig = {}) {
   mcpIntegrationSourceForRuntime = companyAutomationsWiring.mcpIntegrationSourceForRuntime;
 
   const chatOrchestrationWiring = createAppChatOrchestration({
-    config,
+    config, marketplace,
     log: app.log,
     agent,
     aiEngine,

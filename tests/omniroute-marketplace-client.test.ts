@@ -138,3 +138,20 @@ describe("OmniRoute marketplace client", () => {
     expect(result.providers[0]?.id).toBe("openai");
   });
 });
+
+it("keeps manifest capability metadata when a connection refresh lists only id and name (A040)", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+    const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
+    if (url.pathname === "/api/v1/provider-plugin-manifest") return json({ providers: [{ id: "ollama-cloud", auth: { type: "apikey" },
+      models: [{ id: "minimax-m3", name: "MiniMax M3", supportsVision: true }, { id: "gemma4:31b", name: "Gemma 4 31B" }] }] });
+    if (url.pathname === "/api/monitoring/health") return json({ version: "3.8.49", providerSummary: { catalogCount: 1 }, localProviders: {} });
+    if (url.pathname === "/api/providers" && (!init?.method || init.method === "GET")) return json({ connections: [{ id: "c1", provider: "ollama-cloud", isActive: true, testStatus: "active" }] });
+    if (url.pathname === "/api/providers/c1/models") return json({ models: [{ id: "minimax-m3", name: "MiniMax M3" }, { id: "gemma4:31b", name: "Gemma 4 31B" }, { id: "new-model", name: "New" }] });
+    return json({ error: "Not found" });
+  }));
+  const models = await new OmniRouteMarketplace({ baseUrl: "http://omniroute" }).models("ollama-cloud", [], true);
+  expect(models.find((model) => model.id === "ollama-cloud/minimax-m3")?.capabilities).toContain("vision");
+  expect(models.find((model) => model.id === "ollama-cloud/gemma4:31b")?.capabilities).not.toContain("vision");
+  expect(models.map((model) => model.id)).toContain("ollama-cloud/new-model");
+});

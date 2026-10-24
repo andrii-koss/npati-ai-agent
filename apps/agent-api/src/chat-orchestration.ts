@@ -47,6 +47,8 @@ import { AIEngine, ChatContentPart, ChatRequest, ChatToolCall, ChatToolDefinitio
 import { defaultSkillRegistry } from "@npati/skills";
 import { ResearchOutcome, ResearchProgressListener, extractTargetUrlOrDomain } from "@npati/web-research";
 import { researchEvidenceContext, researchEvidenceInput } from "./chat-research-evidence";
+import { resolveConfirmedVisionModel } from "./chat-inference-candidates";
+import { visionUnavailableMessage } from "./company-chat-i18n";
 import { AuthContext, Business } from "@npati/workspace";
 import type { AgentAIContext } from "@npati/agent";
 import { applyChatTelemetryHeaders } from "./chat-telemetry";
@@ -84,6 +86,7 @@ export interface ChatOrchestrationDeps {
   scopedMemory: ReturnType<typeof createCoreServices>["scopedMemory"];
   webResearch: ReturnType<typeof createCoreServices>["webResearch"];
   workspaceStore: ReturnType<typeof createCoreServices>["workspaceStore"];
+  marketplace?: import("@npati/omniroute-adapter").OmniRouteMarketplace;
 }
 
 export interface ChatOrchestration {
@@ -179,7 +182,15 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
     }
     if (media.images.length > 0) {
       const preferences = await aiPreferences.get(auth);
-      const visionModel = config.omnirouteVisionModel?.trim() || preferences.routing.defaultModelId || "openai/gpt-5.6-luna";
+      // Image bytes only go to a model the refreshed catalog of a connected provider confirms can see (A040).
+      const visionModel = deps.marketplace
+        ? await resolveConfirmedVisionModel([config.omnirouteVisionModel, preferences.routing.defaultModelId], preferences.addedModels, deps.marketplace)
+        : config.omnirouteVisionModel?.trim() || preferences.routing.defaultModelId || "openai/gpt-5.6-luna";
+      if (!visionModel) {
+        const reply = visionUnavailableMessage(safePrompt);
+        if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendMessage(auth, businessId, conversation.id, "assistant", reply);
+        return { message: reply, suggestedActions: [], conversationId: conversation?.id };
+      }
       context = { ...context, ai: { ...context.ai, model: visionModel, fallbackModel: undefined } };
     }
     if (memoryPolicy.writeAllowed && conversation) {
@@ -358,6 +369,7 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
   }
 
   const { runNeutralMessage } = createChatTurn({
+    marketplace: deps.marketplace,
     admissionFor,
     agent,
     aiEngine,

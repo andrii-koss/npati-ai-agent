@@ -55,6 +55,8 @@ export interface AppChatOrchestrationDeps {
   scopedMemory: ScopedMemoryEngine;
   webResearch: ReturnType<typeof createCoreServices>["webResearch"];
   workspaceStore: WorkspaceStore;
+  /** Refreshed provider catalogs confirm which connected model may receive image bytes. */
+  marketplace?: import("@npati/omniroute-adapter").OmniRouteMarketplace;
 }
 
 export function createAppChatOrchestration(deps: AppChatOrchestrationDeps) {
@@ -132,6 +134,7 @@ export function createAppChatOrchestration(deps: AppChatOrchestrationDeps) {
 
   const chatOrchestration = createChatOrchestration({
     config,
+    marketplace: deps.marketplace,
     log,
     admissionFor,
     agent,

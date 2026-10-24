@@ -364,7 +364,12 @@ export class OmniRouteMarketplace {
     if (connection) {
       const suffix = refresh ? "?refresh=true" : "";
       const payload = await this.request<{ models?: Json[] }>(`/api/providers/${encodeURIComponent(connection.id)}/models${suffix}`, {}, { management: true, timeoutMs: 30_000 });
-      if (Array.isArray(payload.models)) rawModels = payload.models;
+      // A connection's refreshed list carries only id and name; keep the manifest's capability metadata (for
+      // example supportsVision) for the same model, or a refresh would erase every capability claim.
+      if (Array.isArray(payload.models)) {
+        const manifestById = new Map(rawModels.map((model) => [String(model.id ?? ""), model]));
+        rawModels = payload.models.map((model) => ({ ...(manifestById.get(String(model.id ?? "")) ?? {}), ...model }));
+      }
     }
     return normalizeModels(provider, rawModels, new Set(addedModelIds));
   }

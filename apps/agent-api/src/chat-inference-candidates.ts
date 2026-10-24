@@ -25,14 +25,33 @@ export function visionInferenceCandidates(configured: Array<string | null | unde
     && known.get(id)?.capabilities?.includes("vision") === true);
 }
 
-/** Revalidate stored image claims against the existing provider catalog before sending any image bytes. */
+/**
+ * Vision models confirmed by the refreshed catalog of every provider the user connected (not only providers whose
+ * stored models claim vision): the configured models first, then added ones, then the remaining confirmed models.
+ * A stored or configured claim alone never qualifies, so image bytes only reach a model the provider says can see.
+ */
 export async function confirmedVisionInferenceCandidates(
   configured: Array<string | null | undefined>, added: AIModelSummary[],
   catalog?: Pick<OmniRouteMarketplace, "models">,
 ): Promise<string[]> {
   if (!catalog) return [];
-  const providers = [...new Set(added.filter(model => model.capabilities.includes("vision") || configured.includes(model.id)).map(model => model.providerId))];
+  const providerOf = (id: string) => added.find(model => model.id === id)?.providerId ?? id.split("/")[0]!;
+  const providers = [...new Set([...added.map(model => model.providerId), ...configured.filter((id): id is string => !!id).map(providerOf)])].filter(Boolean);
   const fresh = (await Promise.all(providers.map(provider => catalog.models(provider, [], true).catch(() => [])))).flat();
-  return visionInferenceCandidates(configured, added, fresh)
-    .filter(id => fresh.some(model => model.id === id && model.capabilities.includes("vision")));
+  const confirmed = new Set(fresh.filter(model => model.capabilities.includes("vision") && isChatCapableModel(model)).map(model => model.id));
+  return [...new Set([...configured, ...added.map(model => model.id), ...fresh.map(model => model.id)])]
+    .filter((id): id is string => !!id && confirmed.has(id));
+}
+
+/** The confirmed vision model of a connected provider that receives image bytes, or undefined when there is none. */
+export async function resolveConfirmedVisionModel(
+  configured: Array<string | null | undefined>, added: AIModelSummary[],
+  catalog?: Pick<OmniRouteMarketplace, "models" | "provider">,
+): Promise<string | undefined> {
+  if (!catalog) return undefined;
+  for (const id of await confirmedVisionInferenceCandidates(configured, added, catalog)) {
+    const providerId = added.find(model => model.id === id)?.providerId ?? id.split("/")[0]!;
+    if ((await catalog.provider(providerId).catch(() => null))?.connected) return id;
+  }
+  return undefined;
 }

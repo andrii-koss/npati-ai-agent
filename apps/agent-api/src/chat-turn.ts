@@ -22,6 +22,8 @@ import { WorkspaceChatActions } from "./workspace-chat-actions";
 import { AIEngine, ChatContentPart, ChatRequest, ChatToolCall, ChatToolDefinition, isChatCapableModel } from "@npati/omniroute-adapter";
 import { ResearchOutcome, ResearchProgressListener, extractTargetUrlOrDomain } from "@npati/web-research";
 import { researchEvidenceContext, researchEvidenceInput } from "./chat-research-evidence";
+import { resolveConfirmedVisionModel } from "./chat-inference-candidates";
+import { visionUnavailableMessage } from "./company-chat-i18n";
 import { AuthContext, Business, type Project } from "@npati/workspace";
 import { createChatActions } from "./chat-actions";
 import type { ChatOrchestrationDeps } from "./chat-orchestration";
@@ -59,6 +61,7 @@ export interface ChatTurnDeps {
   researchBundle: ChatOrchestrationDeps["researchBundle"];
   webResearch: ChatOrchestrationDeps["webResearch"];
   workspaceStore: ChatOrchestrationDeps["workspaceStore"];
+  marketplace?: ChatOrchestrationDeps["marketplace"];
 }
 
 export function createChatTurn(deps: ChatTurnDeps) {
@@ -236,7 +239,16 @@ export function createChatTurn(deps: ChatTurnDeps) {
     const ai = await getAIContext(auth);
     if (media.images.length > 0) {
       const preferences = await aiPreferences.get(auth);
-      const visionModel = config.omnirouteVisionModel?.trim() || preferences.routing.defaultModelId || "openai/gpt-5.6-luna";
+      // Image bytes only go to a model the refreshed catalog of a connected provider confirms can see (A040).
+      const visionModel = deps.marketplace
+        ? await resolveConfirmedVisionModel([config.omnirouteVisionModel, preferences.routing.defaultModelId], preferences.addedModels, deps.marketplace)
+        : config.omnirouteVisionModel?.trim() || preferences.routing.defaultModelId || "openai/gpt-5.6-luna";
+      if (!visionModel) {
+        const message = visionUnavailableMessage(safeUserRequest);
+        if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", message);
+        return { message, suggestedActions: [], conversationId: conversation?.id, noMemory: memoryPolicy.noMemoryActive,
+          contextCompaction: { applied: false, originalCount: existing.messages.length, preservedCount: existing.messages.length } };
+      }
       ai.model = visionModel;
       ai.fallbackModel = undefined;
     }

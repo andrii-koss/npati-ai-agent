@@ -266,3 +266,15 @@ const cardCopies: Record<string, CardCopy> = {
 export function workspaceCardCopy(message = ""): CardCopy {
   return cardCopies[detectCompanyChatLanguage(message)] ?? cardCopies.en!;
 }
+
+const visionUnavailableCopy: Partial<Record<CompanyChatLanguage, string>> = {
+  uk: "Для роботи з фото потрібна підключена модель із підтримкою зображень. Оберіть її в налаштуваннях AI.",
+  ru: "Для работы с фото нужна подключённая модель с поддержкой изображений. Выберите её в настройках AI.",
+  de: "Für Fotos wird ein verbundenes Modell mit Bildunterstützung benötigt. Wählen Sie es in den AI-Einstellungen aus.",
+  es: "Para trabajar con fotos se necesita un modelo conectado que admita imágenes. Elígelo en la configuración de IA.",
+  pt: "Para trabalhar com fotos é necessário um modelo conectado com suporte a imagens. Escolha-o nas configurações de IA.",
+};
+/** The reply when no connected provider confirms a model that can read the attached image. */
+export function visionUnavailableMessage(message = ""): string {
+  return visionUnavailableCopy[detectCompanyChatLanguage(message)] ?? "Working with photos needs a connected model that supports images. Choose one in AI settings.";
+}

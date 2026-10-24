@@ -1,5 +1,5 @@
 import { analyzeWebsiteReference, reviewWebsiteReference } from "./website-visual-acceptance";
-import { confirmedVisionInferenceCandidates } from "./chat-inference-candidates";
+import { resolveConfirmedVisionModel } from "./chat-inference-candidates";
 import { rememberWebsiteEdit } from "./website-style-context";
 
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
@@ -329,11 +329,8 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
       const codePrefs = await codePreferences?.get(ctx).catch(() => null);
       if (input.images?.length) {
         const preferences = await aiPreferences.get(ctx);
-        const candidates = await confirmedVisionInferenceCandidates([codePrefs?.activeModelId, preferences.routing.defaultModelId, config.omnirouteVisionModel], preferences.addedModels, marketplace);
-        for (const id of candidates) {
-          const model = preferences.addedModels.find(item => item.id === id);
-          if (model && (!marketplace || (await marketplace.provider(model.providerId).catch(() => null))?.connected)) return id;
-        }
+        const id = await resolveConfirmedVisionModel([codePrefs?.activeModelId, preferences.routing.defaultModelId, config.omnirouteVisionModel], preferences.addedModels, marketplace);
+        if (id) return id;
         throw new Error("vision_model_unavailable: Для роботи з фото потрібна підключена модель із підтримкою зображень. Оберіть її в налаштуваннях AI.");
       }
       if (codePrefs && codePrefs.activeAgentId && codePrefs.activeAgentId !== "npati") {
