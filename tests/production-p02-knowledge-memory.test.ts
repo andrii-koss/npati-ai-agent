@@ -212,6 +212,7 @@ describe("P0.2 Production Suite: Company Knowledge & Long-Term Agent Memory", ()
       expect(result.preservedMessages).toHaveLength(4);
       expect(result.summary).toContain("use PostgreSQL");
       expect(requests).toHaveLength(1);
+      expect(requests[0]).toMatchObject({ reasoningMode: "disabled" });
 
       // A later turn reuses the summary of the same older block instead of summarizing it again.
       const later = await ContextCompactor.compactWithModel({ ai, model: "provider/model", messages: [...messages, { role: "user", content: "Message 15" }, { role: "assistant", content: "Message 16" }], keepRecentTurns: 4 });
@@ -225,6 +226,21 @@ describe("P0.2 Production Suite: Company Knowledge & Long-Term Agent Memory", ()
       expect(fallback.compacted).toBe(false);
       expect(fallback.preservedMessages).toEqual(other);
       expect(fallback.failureReason).toContain("provider unavailable");
+    });
+
+    it("disables reasoning for every block and the final merge without changing retained context", async () => {
+      const messages = Array.from({ length: 46 }, (_, index) => ({ role: index % 2 ? "assistant" : "user", content: "merge-regression-" + index }));
+      const requests: Array<{ reasoningMode?: string; messages: Array<{ content: string }> }> = [];
+      const ai = { chat: async (request: typeof requests[number]) => {
+        requests.push(request);
+        return { content: requests.length <= 4 ? "Preserve ID product-732, EUR 74.25, https://example.test/source. ".repeat(80) : "Product product-732; EUR 74.25; source https://example.test/source." };
+      } } as unknown as AIEngine;
+      const result = await ContextCompactor.compactWithModel({ ai, model: "merge-regression/model", messages });
+      expect(requests).toHaveLength(5);
+      expect(requests.every(request => request.reasoningMode === "disabled")).toBe(true);
+      expect(result.preservedMessages).toEqual(messages.slice(-6));
+      expect(result.summary).toContain("product-732; EUR 74.25");
+      expect(requests[0].messages[1].content).toContain("BEGIN UNTRUSTED CONVERSATION");
     });
 
     it("compacts older dialogue while keeping recent turns intact", () => {

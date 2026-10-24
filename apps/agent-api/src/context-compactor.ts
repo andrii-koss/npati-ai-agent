@@ -102,6 +102,8 @@ export class ContextCompactor {
           const result = await ai.chat({
             model,
             fallbackModel,
+            // Faithful transcript compression does not require a reasoning trace.
+            reasoningMode: "disabled",
             signal,
             messages: [
               {
@@ -123,6 +125,8 @@ export class ContextCompactor {
           const consolidated = await ai.chat({
             model,
             fallbackModel,
+            // Faithful transcript compression does not require a reasoning trace.
+            reasoningMode: "disabled",
             signal,
             messages: [
               { role: "system", content: "Merge these conversation summaries without losing decisions, identifiers, figures, constraints, attribution or unresolved questions. Do not invent information. Return only the merged summary." },
