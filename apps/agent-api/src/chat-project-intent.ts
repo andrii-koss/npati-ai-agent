@@ -89,6 +89,9 @@ export function createChatProjectIntentResolver(deps: {
         decision.clarificationPrompt = "Technology planning is unavailable. Retry with a connected AI provider or specify the technology.";
         return { decision, targets: [], source: "deterministic" as const };
       }
+      // Without the semantic router only an explicit creation intent creates a project: "I want to open an online
+      // store" is a business description (CHAT), not an executable website order.
+      if (!["CREATE_WEBSITE", "CREATE_PROJECT"].includes(decision.intent)) return { decision, targets: [], source: "deterministic" as const };
       if (safeTargets.length) { decision.intent = "CREATE_WEBSITE"; decision.isProjectIntent = true; decision.executable = true; decision.isExecutableInStep5 = true; decision.targetDetails = { ...decision.targetDetails, framework: safeTargets[0]!.framework, technologySelection: safeTargets[0]!.technologySelection }; }
       return { decision, targets: safeTargets, source: "deterministic" as const };
     };
