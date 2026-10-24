@@ -4,6 +4,7 @@ import { AutomaticMemoryExtractor } from "./automatic-memory-extractor";
 
 /** Messages per summarized block of older chat history. */
 export const COMPACTION_BLOCK_MESSAGES = 10;
+const COMPACTION_CONCURRENCY = 4;
 const summaryCache = new Map<string, string>();
 const SUMMARY_CACHE_LIMIT = 1_000;
 
@@ -93,11 +94,18 @@ export class ContextCompactor {
     const preservedMessages = messages.slice(splitIndex);
 
     try {
-      const summaries: string[] = [];
-      for (let index = 0; index < olderMessages.length; index += COMPACTION_BLOCK_MESSAGES) {
-        const block = olderMessages.slice(index, index + COMPACTION_BLOCK_MESSAGES)
-          .map((message) => (message.role === "user" ? "USER" : "ASSISTANT") + ": " + String(message.content ?? "").slice(0, 8_000) + "\n").join("");
-        summaries.push(await cachedSummary(model + "\n" + block, async () => {
+      const blocks: string[] = [];
+      for (let index = 0; index < olderMessages.length; index += COMPACTION_BLOCK_MESSAGES)
+        blocks.push(olderMessages.slice(index, index + COMPACTION_BLOCK_MESSAGES)
+          .map((message) => (message.role === "user" ? "USER" : "ASSISTANT") + ": " + String(message.content ?? "").slice(0, 8_000) + "\n").join(""));
+      // Blocks are independent, so a cold cache (e.g. after a restart) summarizes up to COMPACTION_CONCURRENCY at a time.
+      const summaries: string[] = new Array(blocks.length);
+      let next = 0;
+      await Promise.all(Array.from({ length: Math.min(COMPACTION_CONCURRENCY, blocks.length) }, async () => {
+        for (let index = next++; index < blocks.length; index = next++) summaries[index] = await summarizeBlock(blocks[index]!);
+      }));
+      async function summarizeBlock(block: string) {
+        return cachedSummary(model + "\n" + block, async () => {
           if (signal?.aborted) throw signal.reason ?? new DOMException("Cancelled", "AbortError");
           const result = await ai.chat({
             model,
@@ -116,7 +124,7 @@ export class ContextCompactor {
           const summary = result.content.trim();
           if (!summary) throw new Error("The context summary was empty");
           return summary.slice(0, 4_000);
-        }));
+        });
       }
 
       let summary = summaries.join("\n\n");

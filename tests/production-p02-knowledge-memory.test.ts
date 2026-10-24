@@ -243,6 +243,20 @@ describe("P0.2 Production Suite: Company Knowledge & Long-Term Agent Memory", ()
       expect(requests[0].messages[1].content).toContain("BEGIN UNTRUSTED CONVERSATION");
     });
 
+    it("summarizes a cold history in bounded parallel blocks while keeping their order", async () => {
+      const messages = Array.from({ length: 96 }, (_, index) => ({ role: index % 2 ? "assistant" : "user", content: "cold-order-" + index }));
+      let active = 0, peak = 0;
+      const ai = { chat: async (request: { messages: Array<{ content: string }> }) => {
+        active++; peak = Math.max(peak, active);
+        await new Promise(resolve => setTimeout(resolve, 5));
+        active--;
+        return { content: "block " + /cold-order-(\d+)/.exec(request.messages[1]!.content)![1] };
+      } } as unknown as AIEngine;
+      const result = await ContextCompactor.compactWithModel({ ai, model: "cold-order/model", messages });
+      expect(peak).toBe(4);
+      expect(result.summary!.match(/block \d+/g)).toEqual(Array.from({ length: 9 }, (_, index) => "block " + index * 10));
+    });
+
     it("compacts older dialogue while keeping recent turns intact", () => {
       const messages = Array.from({ length: 14 }, (_, i) => ({
         role: i % 2 === 0 ? "user" : "assistant",
