@@ -458,3 +458,27 @@ it("repairs an invalid DeepSeek agent selection through the same non-thinking en
   expect(planning.map(request => request.model)).toEqual(["deepseek/deepseek-flash", "deepseek/deepseek-flash"]);
   expect(plans).toHaveLength(0);
 });
+
+it("lets a listing-only review plan request bounded read-only project file reads once", async () => {
+  const store = new InMemoryWorkspaceStore();
+  const ctx = { workspaceId: "review-read-ws", userId: "review-read-owner", permissions: ["workspace:read", "workspace:write", "business:manage"] };
+  let company = await store.createCompany(ctx, { name: "Review Reads" }, "review-read-company");
+  const tools = ["project.files.list", "project.files.read"];
+  const designer = await store.createCompanyAgent(ctx, company.id, { name: "Designer", role: "Lead", tools }, "review-read-designer");
+  const reviewer = await store.createCompanyAgent(ctx, company.id, { name: "Reviewer", role: "QA", tools }, "review-read-reviewer");
+  company = await store.setCompanyMainAgent(ctx, company.id, designer.id, company.revision);
+  const listing = { agentId: designer.id, tool: "project.files.list", input: { projectId: "vite-1" } };
+  const reads = [{ agentId: reviewer.id, tool: "project.files.read", input: { projectId: "vite-1", path: "src/App.jsx" } },
+    { agentId: reviewer.id, tool: "project.files.delete", input: { projectId: "vite-1", path: "src/App.jsx" } }];
+  const plans = [{ mode: "pipeline", agentIds: [designer.id, reviewer.id], toolRequests: [listing] }, { mode: "pipeline", agentIds: [designer.id, reviewer.id], toolRequests: reads }];
+  const a2aSend = vi.fn(async () => ({ taskId: "review-plan", content: JSON.stringify(plans.shift()), metadata: {} }));
+  const execute = vi.fn(async (_ctx: AuthContext, _company: unknown, tool: string, input: Record<string, unknown>) =>
+    tool === "project.files.list" ? { files: [{ path: "src/App.jsx" }] } : { path: input.path, content: "<h1>STRESS_VITE_UPDATED</h1>" });
+  const finalChat = vi.fn(async () => ({ content: "Two-point review", model: "auto" }));
+  const runtime = new CompanyDelegationRuntime(store, engine({ a2aSend, chat: finalChat }), 5_000, { execute } as unknown as import("../apps/agent-api/src/company-tool-runtime").CompanyToolExecutor);
+  const result = await runtime.execute(ctx, company.id, { task: "Review the homepage accessibility", mode: "pipeline" }, "review-read-run");
+  expect(result.run.status).toBe("completed");
+  expect(a2aSend).toHaveBeenCalledTimes(2);
+  expect(execute.mock.calls.map(call => call[2])).toEqual(["project.files.list", "project.files.read"]);
+  expect(JSON.stringify(finalChat.mock.calls)).toContain("STRESS_VITE_UPDATED");
+});

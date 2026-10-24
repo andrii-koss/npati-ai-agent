@@ -450,7 +450,32 @@ export class CompanyDelegationRuntime {
         return { ...request, input: SecurityPolicyEngine.protectObject(request.input, guardrailPolicy) };
       });
       const rawEvidence = options.suppressTools ? "" : await this.tools(ctx, company, created.run.id, normalizedToolRequests, byId, signal, knowledge, options.noMemory === true, options.approvalId, options.allowedProjectPaths, options.allowedProjectId ?? existing.run.projectId, existing.run.projectId, async (nextToolIndex, evidence) => { await this.store.setCompanyRunPendingPlan(ctx, companyId, created.run.id, { plan, nextToolIndex, evidence }); }, pendingState?.evidence, pendingState?.nextToolIndex ?? 0, existing.run.requestedMode, options.onTool);
-      const evidence = rawEvidence ? protect(rawEvidence) : rawEvidence;
+      // A plan cannot name files before it has listed them. When project evidence holds only a listing or search, one
+      // bounded follow-up planning call may request read-only project.files.read (at most 5) for the selected agents.
+      const readers = [main, ...selected.filter((agent) => agent.id !== main.id)].filter((agent) => agent.tools.map(toolName).includes("project.files.read"));
+      const plannedTool = (name: string) => plan.toolRequests.some((request) => toolName(request.tool) === name);
+      let followUpEvidence = "";
+      if (rawEvidence && !pendingState && !options.suppressTools && readers.length && !plannedTool("project.files.read")
+        && (plannedTool("project.files.list") || plannedTool("project.files.search"))) {
+        if (options.callBudget && --options.callBudget.remaining < 0)
+          throw new CompanyRuntimeError("MODEL_CALL_BUDGET_EXCEEDED", "Project model call limit reached", 429);
+        const followUp = await sendPlanningRequest({
+          ...planningRequest, model: plannedModel,
+          idempotencyKey: `${created.run.id}:read-follow-up`,
+          messages: [
+            ...planningRequest.messages,
+            { role: "user", content: protect(`Verified tool evidence:\n${rawEvidence.slice(0, 12_000)}\n\nKeep the same mode and agentIds. Return the JSON plan with toolRequests containing only project.files.read for the listed files this task needs (at most 5, exact projectId and path), by one of these agents: ${json(readers.map((agent) => ({ id: agent.id, name: agent.name })), 2_000)}. Use an empty toolRequests array when no file must be read.`) },
+          ],
+        });
+        let reads: ToolPlan[] = [];
+        try { reads = parsePlan(followUp.content, plan.mode).toolRequests; }
+        catch (error) { if (!(error instanceof CompanyRuntimeError)) throw error; }
+        reads = reads.map((request) => ({ ...request, agentId: resolveAgentId(request.agentId)!, input: SecurityPolicyEngine.protectObject(request.input, guardrailPolicy) }))
+          .filter((request) => toolName(request.tool) === "project.files.read" && readers.some((agent) => agent.id === request.agentId)).slice(0, 5);
+        if (reads.length) followUpEvidence = await this.tools(ctx, company, created.run.id, reads, new Map([...byId, [main.id, main]]), signal, knowledge, options.noMemory === true, undefined, options.allowedProjectPaths, options.allowedProjectId ?? existing.run.projectId, existing.run.projectId, undefined, undefined, 0, existing.run.requestedMode, options.onTool);
+      }
+      const combinedEvidence = [rawEvidence, followUpEvidence].filter(Boolean).join("\n\n");
+      const evidence = combinedEvidence ? protect(combinedEvidence) : combinedEvidence;
       const knowledgeContext = [
         knowledge.memories.length ? "Relevant Company Memory:\n" + knowledge.memories.map(item => item.content).join("\n") : "",
         knowledge.chunks.length ? "Authoritative Relevant Company Knowledge (use exact facts; do not invent replacements):\n" + knowledge.chunks.map(item => item.content).join("\n\n---\n\n") : "",
