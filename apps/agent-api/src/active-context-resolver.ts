@@ -78,7 +78,8 @@ export class ActiveContextResolver {
     if (!removesProjectData && /^\s*(?:please\s+)?(?:delete|remove|видали|видаліть|удали|exclua|elimina|lösche|supprime)(?![\p{L}])/iu.test(message)) return undefined;
     // An exact owned project named by a code task takes precedence over the previous chat card.
     // Search only authorized companies already selected or named in this conversation.
-    if (decision && decision.intent !== "CHAT" && !creating) {
+    // A question or record task can name the project too ("delete row X in Next Shop"), so CHAT does not skip it.
+    if (decision && !creating) {
       const candidates = (await Promise.all(companies.map(company => this.store.listProjects(auth, company.id)))).flat()
         .filter(project => !["archived", "soft_deleted", "purging", "deleted"].includes(project.status)
           && project.name.trim().length >= 3 && lowerMessage.includes(project.name.trim().toLocaleLowerCase()));

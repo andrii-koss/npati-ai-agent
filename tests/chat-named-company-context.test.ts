@@ -154,3 +154,16 @@ it("targets the named project when a request removes data inside it", async () =
   expect(resolved?.context).toMatchObject({ contextType: "project", projectId: shop.id });
   expect(await resolver.resolveNamedCompany(auth, current, 'Delete only the test project "Stress Next Shop".', { intent: "EDIT_PROJECT" } as never)).toBeUndefined();
 });
+
+it("targets an exactly named project for a record task classified as CHAT", async () => {
+  const store = new InMemoryWorkspaceStore();
+  const auth: AuthContext = { userId: "chat-project-owner", workspaceId: "chat-project-workspace", permissions: ["workspace:read", "workspace:write", "business:manage"] };
+  const bakery = await store.createCompany(auth, { name: "Stress Bakery" }, "chat-project-bakery");
+  const studio = await store.createCompany(auth, { name: "Stress Studio" }, "chat-project-studio");
+  const { project: vite } = await store.createProject(auth, studio.id, { name: "Stress Vite", type: "website" } as never, "chat-project-vite");
+  const { project: shop } = await store.createProject(auth, bakery.id, { name: "Stress Next Shop", type: "website" } as never, "chat-project-shop");
+  const resolver = new ActiveContextResolver(store);
+  const current = await resolver.resolve(auth, { contextType: "project", companyId: studio.id, projectId: vite.id });
+  const resolved = await resolver.resolveNamedCompany(auth, current, 'In "Stress Next Shop" delete only row TEST_SCRATCH_735 from dev stress_scratch.', { intent: "CHAT" } as never, "We built Stress Next Shop for Stress Bakery.");
+  expect(resolved?.context).toMatchObject({ contextType: "project", projectId: shop.id });
+});
