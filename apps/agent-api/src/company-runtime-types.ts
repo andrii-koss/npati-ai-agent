@@ -234,3 +234,14 @@ export function parsePlan(content: string, requested: CompanyRunMode): Plan {
   }) : [];
   return { mode, agentIds: [...new Set(agentIds)], reviewerAgentId, toolRequests };
 }
+
+
+/** Filter only static contract lines; task/roster/context lines are kept intact. Authorization stays in the executor. */
+export function companyPlanningGuidanceAllowed(line: string, allowedTools: string[]): boolean {
+  const contract = /^([a-z][a-z0-9_.]*(?:\/[a-z0-9_]+)*)(?:[ (][^:]{0,80})?:/.exec(line)?.[1];
+  if (!contract) return true;
+  const first = contract.split("/")[0]!;
+  if (!contract.includes("/")) return allowedTools.some(tool => line.includes(tool + ":"));
+  const prefix = first.slice(0, first.lastIndexOf(".") + 1);
+  return allowedTools.some(tool => prefix ? tool.startsWith(prefix) : tool === first);
+}

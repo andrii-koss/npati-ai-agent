@@ -13,6 +13,7 @@ import { CostTelemetry } from "./cost-telemetry";
 import type { AuditRepository } from "./audit-repository";
 import { chatLanguageInstruction } from "./company-chat-i18n";
 import {
+  companyPlanningGuidanceAllowed,
   MAX_CANDIDATES,
   MAX_SELECTED,
   DEFAULT_TIMEOUT,
@@ -266,7 +267,7 @@ export class CompanyDelegationRuntime {
               options.noMemory ? "NO-MEMORY IS ACTIVE: toolRequests must not contain knowledge, files, or storage.company_memory." : "",
               "Populate required input fields with concrete values. Omit a tool request if you cannot supply its required input; never emit an empty input for web.search, web.fetch or web.crawl.",
               "Use pipeline for dependent work and fusion for independent parallel perspectives.",
-            ].filter(Boolean).join("\n\n")),
+            ].filter(Boolean).filter(line => companyPlanningGuidanceAllowed(line, candidates.flatMap(agent => agent.tools.map(toolName)).filter(tool => !options.noMemory || !["knowledge", "files", "storage.company_memory"].includes(tool)))).join("\n\n")),
           },
         ],
       };

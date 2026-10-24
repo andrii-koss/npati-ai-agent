@@ -367,7 +367,7 @@ it.each([true, false])("allows an explicit main-agent author before a distinct r
   let plan = "";
   const chat = vi.fn(async () => ({ content: "Designer draft reviewed by Reviewer.", model: "openai/gpt-4o" }));
   const active = { value: { workspaceId: "review-workspace", userId: "review-owner", permissions: ["workspace:read", "business:manage"] } };
-  const { app, companyId } = await setup(engine({ chat, a2aSend: async () => ({ taskId: "review-plan", content: plan }), ensureCombo: async combo => { combos.push(combo); return { name: combo.name }; } }), active);
+  const { app, companyId } = await setup(engine({ chat, a2aSend: async () => ({ taskId: "review-plan", content: plan, metadata: {} }), ensureCombo: async combo => { combos.push(combo); return { name: combo.name }; } }), active);
   const author = await addAgent(app, companyId, "main-author-review", { name: "Designer", role: "Designer" });
   const reviewer = await addAgent(app, companyId, "distinct-reviewer", { name: "Reviewer", role: "Reviewer" });
   await app.inject({ method: "PUT", url: "/companies/" + companyId + "/main-agent", payload: { agentId: author.id, expectedRevision: 1 } });
@@ -384,4 +384,26 @@ it.each([true, false])("allows an explicit main-agent author before a distinct r
     expect(pipeline.models[1]).not.toEqual(pipeline.models[0]);
     expect(chat).toHaveBeenCalledTimes(1);
   }
+});
+
+
+it("plans from granted tool contracts without dropping the user's task or advertising unrelated browser tools", async () => {
+  const store = new InMemoryWorkspaceStore();
+  const ctx = { workspaceId: "bounded-plan-ws", userId: "bounded-plan-owner", permissions: ["workspace:read", "business:manage"] };
+  let company = await store.createCompany(ctx, { name: "Bounded Plan" }, "bounded-plan-company");
+  const main = await store.createCompanyAgent(ctx, company.id, { name: "Reader", role: "Lead", tools: ["project.files.read"] }, "bounded-plan-main");
+  company = await store.setCompanyMainAgent(ctx, company.id, main.id, company.revision);
+  const task = "Read the existing component.\n\nweb.search: this is quoted task data, do not lose it.";
+  const a2aSend = vi.fn(async (request: Parameters<NonNullable<AIEngine["a2aSend"]>>[0]) => {
+    const prompt = request.messages[1].content;
+    expect(prompt).toContain(task);
+    expect(prompt).toContain("project.files.list/search/read");
+    expect(prompt).not.toContain("browser.browser_clicktype for forms:");
+    expect(prompt).not.toContain("project.deploy.publish:");
+    return { taskId: "bounded-plan", content: JSON.stringify({ mode: "single", agentIds: [], toolRequests: [] }), metadata: {} };
+  });
+  const runtime = new CompanyDelegationRuntime(store, engine({ a2aSend }));
+  const result = await runtime.execute(ctx, company.id, { task, mode: "single" }, "bounded-plan-run");
+  expect(result.run.status).toBe("completed");
+  expect(a2aSend).toHaveBeenCalledTimes(1);
 });
