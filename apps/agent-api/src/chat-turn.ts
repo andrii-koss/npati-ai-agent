@@ -438,6 +438,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
     let nativeCompanyPrimary = false;
     let nativeBusinessMessage = "";
     let nativeBusinessAction: { action: "create" | "update"; business: import("@npati/workspace").Business; businessId: string } | undefined;
+    let nativeGoalAction: { action: "create" | "update" | "delete"; goal?: import("@npati/workspace").Goal; goalId?: string; businessName?: string } | undefined;
     let businessCreateRequestKey: string = crypto.randomUUID();
     if (nativeToolCalling) {
       try {
@@ -489,6 +490,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
             const outcome = item.outcome as { action: "create" | "update"; businessId: string };
             nativeBusinessAction = { action: outcome.action, business: await workspaceStore.getUserBusiness(auth, outcome.businessId), businessId: outcome.businessId };
           }
+          if (item.kind === "goal_action" && item.outcome) nativeGoalAction = item.outcome as typeof nativeGoalAction;
           if (item.kind === "company" && item.companyAction) {
             nativeCompanyAction = item.companyAction as typeof nativeCompanyAction;
             nativeCompanyCleanText = typeof item.cleanText === "string" ? item.cleanText : "";
@@ -627,7 +629,9 @@ export function createChatTurn(deps: ChatTurnDeps) {
       }
     }
 
-    const executedAction = await BusinessActionHandler.extractAndExecute(auth, normalizeNewBusinessDirective(content, safeUserRequest), workspaceStore, log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); }, {
+    // The native goal tool already persisted this turn's goal; a goal directive the model also wrote would duplicate it.
+    const directiveContent = nativeGoalAction ? content.replace(/```(?:goal-action|goal-profile)\s*[\s\S]*?```/gi, "").trim() : content;
+    const executedAction = await BusinessActionHandler.extractAndExecute(auth, normalizeNewBusinessDirective(directiveContent, safeUserRequest), workspaceStore, log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); }, {
       logoAttachments: media.decoded.filter((item) => item.kind === "image").map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data, kind: item.kind })),
       persistBusinessLogo,
     });
@@ -652,7 +656,8 @@ export function createChatTurn(deps: ChatTurnDeps) {
     const createdBusiness = createdBusinessAction?.action === "create" ? createdBusinessAction.business : undefined;
     const goalCompletion = await completeCreatedBusinessGoal(auth, safeUserRequest, createdBusiness, executedAction.cleanText);
     const initialWorkspaceAction = nativeBusinessAction || nativeCompanyAction || companySettingsRequest
-      || (executedAction.goalAction && !WorkspaceChatActions.isManagementRequest(safeUserRequest, { includeGoals: false }))
+      // A goal already persisted this turn (directive or native tool) must not be planned again as a workspace action.
+      || ((executedAction.goalAction || nativeGoalAction) && !WorkspaceChatActions.isManagementRequest(safeUserRequest, { includeGoals: false }))
       ? { cleanText: companyAction.cleanText, workspaceAction: undefined, companyRunId: undefined }
       : await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safeUserRequest, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id, selectedBusinessId: createdBusiness?.id });
     const workspaceAction = await completeCreatedBusinessMemory(auth, safeUserRequest, conversation?.id, createdBusiness, goalCompletion.reply, initialWorkspaceAction);
@@ -672,7 +677,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
       message: content,
       suggestedActions: [],
       businessAction: nativeBusinessAction ?? executedAction.businessAction,
-      goalAction: goalCompletion.goalAction ?? executedAction.goalAction,
+      goalAction: goalCompletion.goalAction ?? executedAction.goalAction ?? nativeGoalAction,
       emailAction: emailAction.emailAction,
       emailActions: emailAction.emailActions,
       companyAction: companyAction.companyAction,

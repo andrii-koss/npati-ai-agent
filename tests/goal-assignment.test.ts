@@ -93,3 +93,29 @@ it.each(["/chat", "/chat/stream"])("persists native-tool assignment through %s",
   expect((await store.listGoals(auth, business.id))[0]?.assignedAgentId).toBe(agent.id);
  } finally { await app.close(); }
 });
+
+it.each(["/chat", "/chat/stream"])("creates a goal once when the native goal tool already persisted it over %s", async (url) => {
+ const auth = { ...alice, permissions: ["workspace:read", "workspace:write", "business:manage"] };
+ const store = new InMemoryWorkspaceStore();
+ const business = await store.createBusiness(auth, { name: "Once Business", businessStage: "starting" });
+ const company = await store.createCompany(auth, { name: "Once Company" }, "once-company");
+ let afterTool = 0, toolDone = false;
+ const ai = {
+  supportsNativeTools: () => true,
+  chat: async (request: import("@npati/omniroute-adapter").ChatRequest) => {
+   if (String(request.messages[0]?.content).startsWith("Classify")) return { content: JSON.stringify({ intent: "CHAT", confidence: 1, targets: [] }) };
+   if (toolDone) { afterTool++; return { content: JSON.stringify({ operations: [{ kind: "goal", action: "create", businessId: business.id, goal: { title: "Temp Goal" } }] }) }; }
+   if (request.messages.at(-1)?.role === "tool") { toolDone = true; return { content: "The goal Temp Goal has been created.\n" + directive({ action: "create", businessId: business.id, goal: { title: "Temp Goal", description: "Disposable test", priority: 3 } }) }; }
+   return { content: "", toolCalls: [{ id: "native-goal-create", type: "function", function: { name: "npati_goal_action", arguments: JSON.stringify({ action: "create", businessId: business.id, goal: { title: "Temp Goal", description: "Disposable test", priority: 3 } }) } }] };
+  },
+  healthCheck: async () => ({ status: "ok" }),
+ } as unknown as import("@npati/omniroute-adapter").AIEngine;
+ const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai,
+  marketplace: { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as import("@npati/omniroute-adapter").OmniRouteMarketplace });
+ try {
+  const response = await app.inject({ method: "POST", url, payload: { message: 'For Business "Once Business", create a temporary goal "Temp Goal", description "Disposable test", priority 3.', contextType: "company", companyId: company.id } });
+  expect(response.statusCode).toBe(200);
+  expect((await store.listGoals(auth, business.id)).map(goal => goal.title)).toEqual(["Temp Goal"]);
+  expect(afterTool).toBe(0);
+ } finally { await app.close(); }
+});
