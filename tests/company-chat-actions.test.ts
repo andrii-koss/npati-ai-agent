@@ -1034,3 +1034,16 @@ describe("named company deletion target", () => {
     expect(await CompanyChatActions.deleteConfirmationMessage(alice, store, 'Delete company "Stress Studio" and company "Stress Bakery".', bakery.id)).not.toContain("**Stress Bakery**?");
   });
 });
+
+it("lists a named company's projects in the chat context instead of relying on conversation history", async () => {
+  const auth: AuthContext = { userId: "inventory-owner", workspaceId: "inventory-ws", permissions: ["business:manage", "workspace:read", "workspace:write"] };
+  const store = new InMemoryWorkspaceStore();
+  const bakery = await store.createCompany(auth, { name: "Inventory Bakery" }, "inventory-bakery");
+  const studio = await store.createCompany(auth, { name: "Inventory Studio" }, "inventory-studio");
+  await store.createProject(auth, studio.id, { name: "Studio Vite", type: "code_project" }, "inventory-vite");
+  await store.createProject(auth, bakery.id, { name: "Bakery Shop", type: "code_project" }, "inventory-shop");
+  const prompt = await CompanyChatActions.buildSystemPrompt(auth, store, 'List only projects and agents of "Inventory Studio".', bakery.id);
+  const summaries = JSON.parse(/Relevant agents and projects: (\[.*?\])\. My Models/s.exec(prompt)![1]!) as Array<{ companyId: string; projects: Array<{ name: string }> }>;
+  expect(summaries.find(entry => entry.companyId === studio.id)?.projects.map(project => project.name)).toEqual(["Studio Vite"]);
+  expect(summaries.find(entry => entry.companyId === bakery.id)?.projects.map(project => project.name)).toEqual(["Bakery Shop"]);
+});
