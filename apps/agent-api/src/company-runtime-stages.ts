@@ -29,8 +29,9 @@ export async function executeAgentStages(input: {
       });
       input.signal.throwIfAborted();
       if (!result.content.trim()) throw new Error("Agent returned empty output");
-      for (const match of result.content.matchAll(/\brun(?:[ _-]?id)?\s*[:=]\s*["`]?([a-z0-9][a-z0-9:._-]*)/gi)) {
-        if (match[1] !== input.runId) throw new Error("runtime_run_identifier_mismatch");
+      const identityText = result.content.replace(/[*`_"']/g, "");
+      for (const match of identityText.matchAll(/\brun[ -]?id\s*[:=]\s*([a-z0-9][a-z0-9:._-]*)/gi)) {
+        if (match[1]!.replace(/\.$/, "") !== input.runId) throw new Error("runtime_run_identifier_mismatch");
       }
       await input.completed(agent.id, result);
       completedAgents.push(agent.id);

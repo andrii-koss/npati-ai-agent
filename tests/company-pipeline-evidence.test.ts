@@ -44,12 +44,12 @@ describe("auditable agent stages", () => {
   });
 });
 
-it("supplies runtime identity to each agent and rejects fabricated run identifiers", async () => {
+it.each(["Run ID: STRESS-DS1023-RUN-FAKE", "**Run ID:** `RUN-20260509-DS1023-TAGLINE-002`", '{"runId":"forged-run"}'])("rejects a fabricated run identifier including formatted metadata: %s", async forged => {
  const { executeAgentStages } = await import("../apps/agent-api/src/company-runtime-stages");
  const f = await fixture();
  let system = "";
  const completed = vi.fn(); const failed = vi.fn();
- const ai = { chat: async (request: ChatRequest) => { system = String(request.messages[0]?.content); return { content: "Run ID: STRESS-DS1023-RUN-FAKE" }; } } as unknown as AIEngine;
+ const ai = { chat: async (request: ChatRequest) => { system = String(request.messages[0]?.content); return { content: forged }; } } as unknown as AIEngine;
  await expect(executeAgentStages({ ai, main: f.agents[0]!, selected: [], mainAssignedWork: false, mode: "single", agentModels: {}, signal: new AbortController().signal, timeoutMs: 1000, task: "Show the run ID", evidence: "", managerInstruction: "Report", knowledgeContext: "", runId: "runtime-authoritative-id", admission: undefined, before: async () => {}, completed, failed })).rejects.toThrow("runtime_run_identifier_mismatch");
  expect(system).toContain('"runId":"runtime-authoritative-id"');
  expect(completed).not.toHaveBeenCalled(); expect(failed).toHaveBeenCalledOnce();
