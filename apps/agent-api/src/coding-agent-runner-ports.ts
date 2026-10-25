@@ -648,7 +648,7 @@ export interface CodingAgentRunnerPorts {
 
   replayBundle?: CodeRunReplayPort;
 
-  logger?: { warn(message: string, meta?: Record<string, unknown>): void };
+  logger?: { warn(message: string, meta?: Record<string, unknown>): void; info?(message: string, meta?: Record<string, unknown>): void };
   limits?: Partial<CodeAgentLimits>;
 
   asyncProcessesEnabled?: (ctx: AuthContext, companyId: string, projectId: string) => Promise<boolean>;

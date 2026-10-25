@@ -647,6 +647,8 @@ export class CodingAgentRunner {
       }
       await record({ kind: "turn", companyId, projectId, sessionId, runId: input.runId, turn: steps, bytes: tokens });
 
+      this.ports.logger?.info?.("code_settlement_boundary", { runId: stateRunId, stage: "response_recorded", turn: steps });
+
       // Account for a completed provider response even when cancellation arrived in flight. Never execute its calls.
       if (await cancelled()) {
         if ((input.signal?.reason as { code?: string } | undefined)?.code === "feature_disabled") return suspendByFlag();
@@ -716,6 +718,7 @@ export class CodingAgentRunner {
 
       // Final answer for a reply without tool calls or a successful `code.finish`; `null` keeps the loop going.
       const settleTurn = async (finalText: string, turnOpened: boolean): Promise<CodingAgentRunResult | null> => {
+        this.ports.logger?.info?.("code_settlement_boundary", { runId: stateRunId, stage: "turn_closing", turn: steps });
         if (!turnOpened) await openTurn();
         if (stateRunId && this.ports.runState) {
           await writeState(() => this.ports.runState!.appendTurn({
@@ -726,11 +729,13 @@ export class CodingAgentRunner {
 
         reviewCoordinator!.applyTurnSummary();
 
+        this.ports.logger?.info?.("code_settlement_boundary", { runId: stateRunId, stage: "collect_started", turn: steps });
         const barrierResult = await reviewCoordinator!.handleCollectBarrier({
           startedAt, stateRunId, stateOwner, inboxOpened: inboxManager!.isOpened,
           cancelled, admitInbox: () => inboxManager!.admitInbox(steps),
         });
 
+        this.ports.logger?.info?.("code_settlement_boundary", { runId: stateRunId, stage: "collect_finished", turn: steps, action: barrierResult.action });
         if (barrierResult.action === "stopped") return barrierResult.result;
         if (barrierResult.action === "input_collected") return null;
 
@@ -744,6 +749,7 @@ export class CodingAgentRunner {
           }
         }
 
+        this.ports.logger?.info?.("code_settlement_boundary", { runId: stateRunId, stage: "review_started", turn: steps });
         const reviewOutcome = await reviewCoordinator!.finalizeOrReviewTurn({ steps, prompt, assistantText: finalText, stateRunId });
         if (reviewOutcome.action === "completed" || reviewOutcome.action === "stopped") return reviewOutcome.result;
         return null;

@@ -603,7 +603,7 @@ export function registerCodeRouteWiring(app: FastifyInstance, deps: CodeRouteDep
         logger: { warn: (message, meta) => log.warn(meta ?? {}, message) },
       }),
     },
-    logger: { warn: (message, meta) => log.warn(meta ?? {}, message) },
+    logger: { warn: (message, meta) => log.warn(meta ?? {}, message), info: (message, meta) => log.info(meta ?? {}, message) },
 
     runEvents: { append: async (entry) => entry },
   });
