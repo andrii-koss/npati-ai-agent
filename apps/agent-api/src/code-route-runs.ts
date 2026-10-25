@@ -466,7 +466,7 @@ export function registerCodeRunRoutes(app: FastifyInstance, input: RegisterCodeR
           sink: {
             signal: registration.signal,
 
-            emitResult: () => {},
+            emitResult: (result) => registration.emitResult(result),
             emitTerminal: () => {},
           },
           abort: (reason?: unknown) => { registration.abort(reason instanceof Error ? reason.message : undefined); },

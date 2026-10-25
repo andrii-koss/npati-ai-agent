@@ -993,3 +993,18 @@ describe("security-gate: C15 one loop — the chat path and the run-start route 
     expect(read.events.map((event) => event.event)).toEqual(["result", "terminal"]);
   });
 });
+
+it.each(["completed", "cancelled", "failed"] as const)("publishes CLI %s from the settled outcome even when execution only emits its result", async status => {
+ const harness = await runStartHarness({ execute: async ({ registration, onSettled }) => {
+  registration.emitResult({ status, message: "Authoritative result" });
+  await onSettled({ terminalStatus: status, reason: status === "completed" ? null : status, needsApproval: false });
+ } });
+ const state = await callRunStart(harness, { projectId: PROJECT, prompt: "Check the project" });
+ const body = state.body as { run: { runId: string } };
+ await new Promise(resolve => setTimeout(resolve, 0));
+ const view = harness.registry.read(body.run.runId);
+ expect(view.kind).toBe("finished");
+ expect(view.snapshot.status).toBe(status);
+ expect(view.events.map(event => event.event)).toEqual(["result", "terminal"]);
+ expect(harness.releases()).toBe(1);
+});

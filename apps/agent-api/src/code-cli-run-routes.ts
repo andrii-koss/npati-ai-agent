@@ -445,7 +445,11 @@ export async function registerCodeCliRunRoutes(instance: FastifyInstance, deps: 
               readOnlyIntent: parsed.readOnly,
               registration,
               releaseSlot: settle,
-              onSettled: () => { settle(); },
+              onSettled: (outcome) => {
+                const status = outcome.terminalStatus === "completed" ? "completed" : outcome.terminalStatus === "cancelled" ? "cancelled" : "failed";
+                registration.emitTerminal(status, outcome.reason);
+                settle();
+              },
             });
           } catch (error) {
             // `execute` is expected to report a failure as a terminal status. Reaching here means the run died
