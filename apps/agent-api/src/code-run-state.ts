@@ -604,14 +604,17 @@ export class CodeRunStateLog {
   ): Promise<CodeRunStateRecord> {
     const first = this.nextSeq(runId);
     const stored = await this.store.applyCodeRunStateEvent({ ...patch, seq: first } as ApplyCodeRunStateEventInput);
-    if (stored.lastEventSeq === first) {
+    // An equal sequence proves the write only when it also carries this patch's status: another process may have
+    // used the same number first, and a terminal write lost that way left the run "running" until its lease expired.
+    if (stored.lastEventSeq === first && (patch.status === undefined || stored.status === patch.status)) {
       this.observe(runId, stored.lastEventSeq);
       return stored;
     }
-    if (stored.lastEventSeq > first) {
+    if (stored.lastEventSeq >= first) {
+      this.observe(runId, stored.lastEventSeq);
       const retried = await this.store.applyCodeRunStateEvent({
         ...patch,
-        seq: stored.lastEventSeq + 1,
+        seq: this.nextSeq(runId),
       } as ApplyCodeRunStateEventInput);
       this.observe(runId, retried.lastEventSeq);
       this.logger?.warn({ runId, attempted: first, observed: stored.lastEventSeq }, "code_run_state_seq_race");
@@ -621,8 +624,11 @@ export class CodeRunStateLog {
     return stored;
   }
 
+  /** Reserves the number at once, so two writes of one run in this process (a heartbeat and a terminal write) never share it. */
   private nextSeq(runId: string): number {
-    return (this.seqs.get(runId) ?? 0) + 1;
+    const next = (this.seqs.get(runId) ?? 0) + 1;
+    this.seqs.set(runId, next);
+    return next;
   }
 
   private observe(runId: string, seq: number): void {

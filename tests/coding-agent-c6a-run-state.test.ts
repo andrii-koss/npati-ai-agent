@@ -596,3 +596,26 @@ describe("security-gate: C6a runner — durable state while the loop runs", () =
     expect((await harness.store.getCodeRunState("company-1", "run-lease"))?.status).toBe("interrupted");
   }, 15_000);
 });
+
+describe("terminal state survives a concurrent heartbeat", () => {
+  it("does not lose markFinished when a lease renewal of the same run is in flight", async () => {
+    const { store, log } = setup();
+    const started = await log.startRun({ ctx, companyId: "company-1", projectId: "project-1", sessionId: "session-1", owner: "worker-a" });
+    await Promise.all([
+      log.renewLease({ companyId: "company-1", runId: started.runId, owner: "worker-a" }),
+      log.markFinished({ companyId: "company-1", runId: started.runId, status: "completed", reason: "completed" }),
+    ]);
+    const stored = await store.getCodeRunState("company-1", started.runId);
+    expect(stored?.status).toBe("completed");
+    expect(stored?.finishedAt).not.toBeNull();
+  });
+
+  it("re-applies a terminal write whose sequence another process already used", async () => {
+    const { store, log } = setup();
+    const started = await log.startRun({ ctx, companyId: "company-1", projectId: "project-1", sessionId: "session-1", owner: "worker-a" });
+    const other = new CodeRunStateLog({ store: store as unknown as CodeRunStateStorePort });
+    await other.markHeartbeat({ companyId: "company-1", runId: started.runId });
+    await log.markFinished({ companyId: "company-1", runId: started.runId, status: "completed", reason: "completed" });
+    expect((await store.getCodeRunState("company-1", started.runId))?.status).toBe("completed");
+  });
+});
