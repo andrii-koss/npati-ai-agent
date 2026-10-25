@@ -234,7 +234,12 @@ export function applyCodeInbox(
     }
   } else if (command.kind === "open") {
     if (live(command.runId)?.owner !== command.owner) throw new CodeInboxError("inbox_lease_lost");
-    if (["reserved", "sealed", "settled"].includes(state.phase) && state.runId !== command.runId) throw new CodeInboxError("session_run_held");
+    // A sealed or settled epoch holds the session until its cleanup releases it (`release-task`, terminal runs only).
+    // An interrupted run whose lease expired is neither live nor terminal, so nothing would ever release it: its
+    // closed epoch must not block every later run of the session.
+    const prior = leases.find((lease) => lease.runId === state.runId);
+    const abandoned = state.phase === "settled" && prior !== undefined && !prior.live && !prior.terminal;
+    if (["reserved", "sealed", "settled"].includes(state.phase) && state.runId !== command.runId && !abandoned) throw new CodeInboxError("session_run_held");
     /**
      * N1: the fence refuses a second driver of one session — a run that is live and has **not** yielded. A run
      * that yielded (the pause path, a resume that only rebuilt the continuation prompt) is not driving anything,

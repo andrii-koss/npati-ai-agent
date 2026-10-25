@@ -296,3 +296,19 @@ describe("async inbox: API security", () => {
     } finally { await app.close(); }
   });
 });
+
+describe("a closed epoch of a run that is no longer live", () => {
+  it("lets the next run of the session open the inbox, while a live run's closed epoch still fences it", async () => {
+    const { applyCodeInbox, emptyCodeInbox } = await import("@npati/workspace");
+    const now = new Date("2026-10-25T10:52:58.000Z");
+    const opened = applyCodeInbox(emptyCodeInbox(), { kind: "open", runId: "run-a", owner: "w" }, [{ runId: "run-a", owner: "w", live: true, terminal: false }], now).state;
+    const settled = applyCodeInbox(opened, { kind: "close", runId: "run-a", owner: "w" }, [{ runId: "run-a", owner: "w", live: true, terminal: false }], now).state;
+    expect(settled.phase).toBe("settled");
+    // run-a was interrupted when its lease expired: not live and not terminal (it could still be resumed).
+    const next = applyCodeInbox(settled, { kind: "open", runId: "run-b", owner: "w" },
+      [{ runId: "run-a", owner: null, live: false, terminal: false }, { runId: "run-b", owner: "w", live: true, terminal: false }], now);
+    expect(next.state).toMatchObject({ phase: "running", runId: "run-b" });
+    expect(() => applyCodeInbox(settled, { kind: "open", runId: "run-b", owner: "w" },
+      [{ runId: "run-a", owner: "w", live: true, terminal: false }, { runId: "run-b", owner: "w", live: true, terminal: false }], now)).toThrow("session_run_held");
+  });
+});
