@@ -32,7 +32,7 @@ describe("Context-Relay Routing Strategy", () => {
 });
 
 describe("Atomic RPM Rolling Lease Manager", () => {
-  it("grants atomic leases within capacity, rejects exceeding requests, and releases leases", () => {
+  it("retains lease lifecycle without imposing an RPM allowance", () => {
     const manager = new AtomicRpmLeaseManager(1000);
 
     const l1 = manager.acquireLease({ provider: "anthropic", maxRpm: 5, tokens: 3 });
@@ -45,8 +45,8 @@ describe("Atomic RPM Rolling Lease Manager", () => {
 
     // Over capacity
     const l3 = manager.acquireLease({ provider: "anthropic", maxRpm: 5, tokens: 1 });
-    expect(l3.granted).toBe(false);
-    expect(l3.reason).toContain("RPM limit exceeded");
+    expect(l3.granted).toBe(true);
+    expect(l3.reason).toContain("Granted rolling lease");
 
     // Release l1 (3 tokens freed)
     const released = manager.releaseLease(l1.leaseId!);

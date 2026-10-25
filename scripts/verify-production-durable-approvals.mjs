@@ -32,9 +32,9 @@ try{
   if(memories.memories.some(item=>item.id===memory.id))throw new Error("Approved delete did not execute");
   const replay=await user("/companies/"+companyId+"/runs/"+queued.run.id+"/resume","POST",{approvalId:approval.id},409);
   const runs=await user("/companies/"+companyId+"/runs");
-  if(!runs.response.headers.get("x-ratelimit-tier"))throw new Error("Route tier headers missing");
+  if(runs.response.headers.get("retry-after"))throw new Error("Unexpected platform usage-quota refusal");
   const inspector=(await user("/capabilities/inspect")).value;
   console.log(JSON.stringify({restartRecovery:true,approvalCreated:true,humanDecision:true,approvedActionExecuted:true,
-    replayDenied:replay.value.run?.errorCode==="APPROVAL_ALREADY_USED",routeTier:runs.response.headers.get("x-ratelimit-tier"),
+    replayDenied:replay.value.run?.errorCode==="APPROVAL_ALREADY_USED",usageQuotaHeadersAbsent:!runs.response.headers.get("x-ratelimit-limit"),
     statuses:(inspector.capabilities??inspector.items??[]).filter(item=>[39,49,54].includes(item.id??item.capability?.id)).map(item=>item.status??item.effectiveStatus)},null,2));
 }finally{if(companyId)await user("/companies/"+companyId,"DELETE").catch(()=>undefined);}

@@ -1,3 +1,4 @@
+import { usageQuotasEnabled } from "./usage-quota-policy";
 /**
  * R1 (section A, item 1) — the **periodic** rate limit on code-run starts, per user and per Company.
  *
@@ -119,6 +120,7 @@ export interface CodeRunRateLimitStateRow {
 }
 
 export interface CodeRunRateLimitState {
+  enabled?: boolean;
   limits: CodeRunRateLimitConfig;
   windows: CodeRunRateLimitStateRow[];
 }
@@ -149,6 +151,7 @@ export class CodeRunRateLimiter {
 
   /** The counters as they stand, without recording anything. Never throws. */
   check(ticket: { userId: string; companyId: string }): CodeRunRateLimitVerdict {
+    if (!usageQuotasEnabled()) return { allowed: true };
     const now = this.now();
     const userRefusal = this.refusalFor(this.userWindows.get(ticket.userId), this.limits.maxRunsPerUserPerPeriod, now);
     if (userRefusal) return { allowed: false, scope: "user", limit: this.limits.maxRunsPerUserPerPeriod, ...userRefusal };
@@ -170,6 +173,7 @@ export class CodeRunRateLimiter {
    * user's allowance for the period.
    */
   record(ticket: { userId: string; companyId: string }): void {
+    if (!usageQuotasEnabled()) return;
     const now = this.now();
     this.push(this.userWindows, ticket.userId, now);
     this.push(this.companyWindows, ticket.companyId, now);
@@ -193,7 +197,7 @@ export class CodeRunRateLimiter {
     collect(this.userWindows, "user", this.limits.maxRunsPerUserPerPeriod);
     collect(this.companyWindows, "company", this.limits.maxRunsPerCompanyPerPeriod);
     rows.sort((a, b) => b.used - a.used || a.scope.localeCompare(b.scope) || a.id.localeCompare(b.id));
-    return { limits: { ...this.limits }, windows: rows };
+    return { enabled: usageQuotasEnabled(), limits: { ...this.limits }, windows: rows };
   }
 
   /** Drops empty keys and expired timestamps. Idempotent; a limit that nobody is near costs no memory. */

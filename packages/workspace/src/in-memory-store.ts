@@ -421,6 +421,11 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   }
     async updateCompanyAgentRun(context: AuthContext, companyId: string, runId: string, patch: Partial<CompanyAgentRun>) { return updateCompanyAgentRun(this.companyState(), context, companyId, runId, patch); }
 
+  async updateCompanyAgentRunStep(context: AuthContext, companyId: string, runId: string, agentId: string, status: CompanyAgentRunStep["status"]) {
+    await this.getCompanyAgentRun(context, companyId, runId);
+    for (const [id, step] of this.companyRunSteps) if (step.runId === runId && step.agentId === agentId)
+      this.companyRunSteps.set(id, { ...step, status, updatedAt: new Date().toISOString() });
+  }
   async replaceCompanyAgentRunSteps(context: AuthContext, companyId: string, runId: string, steps: Array<Pick<CompanyAgentRunStep, "agentId" | "stepOrder" | "lane" | "role" | "status" | "modelId">>) { return replaceCompanyAgentRunSteps(this.companyState(), context, companyId, runId, steps); }
   async appendCompanyAgentToolAudit(context: AuthContext, companyId: string, runId: string, entry: Pick<CompanyAgentToolAudit, "agentId" | "toolName" | "decision" | "status" | "inputSummary" | "errorMessage"> & Partial<Pick<CompanyAgentToolAudit, "latencyMs" | "cost" | "tokens" | "reasonCode" | "sequenceNumber">>) { return appendCompanyAgentToolAudit(this.companyState(), context, companyId, runId, entry); }
   async appendCompanyAgentRunEvent(context: AuthContext, companyId: string, runId: string, entry: Pick<CompanyAgentRunEvent, "eventKey" | "eventType" | "runStatus" | "message"> & Partial<Pick<CompanyAgentRunEvent, "workerId" | "attemptCount" | "details">>) { return appendCompanyAgentRunEvent(this.companyState(), context, companyId, runId, entry); }
@@ -457,7 +462,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   async deleteNeutralConversation(context: AuthContext, conversationId: string) { return deleteNeutralConversation(this.collaborationState(), context, conversationId); }
   async appendNeutralMessage(context: AuthContext, conversationId: string, role: ConversationMessage["role"], content: string) { return appendNeutralMessage(this.collaborationState(), context, conversationId, role, content); }
   private readonly conversationResearch = new InMemoryConversationResearch(this.conversations);
-  async appendConversationResearch(context: AuthContext, conversationId: string, input: ConversationResearchInput) { return this.conversationResearch.append(context, conversationId, input); }
+  async appendConversationResearch(context: AuthContext, conversationId: string, input: ConversationResearchInput) { if (input.companyId) await this.getCompany(context, input.companyId); return this.conversationResearch.append(context, conversationId, input); }
   async listConversationResearch(context: AuthContext, conversationId: string, limit?: number) { return this.conversationResearch.list(context, conversationId, limit); }
   async listOnboardings(context: AuthContext) { return listOnboardings(this.collaborationState(), context); }
   async getOnboarding(context: AuthContext, businessId?: string) { return getOnboarding(this.collaborationState(), context, businessId); }

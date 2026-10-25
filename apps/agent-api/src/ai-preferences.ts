@@ -38,9 +38,9 @@ const defaultRouting = (): AIRoutingPreferences => ({
   fallbackOnFailure: false,
   balanceQualityCost: true,
   compression: 'stacked',
-  monthlyBudgetUsd: 20,
+  monthlyBudgetUsd: 0,
   warningPercent: 80,
-  stopPaidWhenLimitReached: true,
+  stopPaidWhenLimitReached: false,
 });
 
 const initialPreferences = (): AIPreferences => ({ addedModels: [], routing: defaultRouting() });
@@ -78,7 +78,8 @@ function normalize(value: unknown): AIPreferences {
     compression: parsed.routing?.compression === 'off' ? 'off' : 'stacked',
     monthlyBudgetUsd,
     warningPercent,
-    stopPaidWhenLimitReached: typeof parsed.routing?.stopPaidWhenLimitReached === 'boolean' ? parsed.routing.stopPaidWhenLimitReached : defaults.stopPaidWhenLimitReached,
+    // Persisted legacy preferences cannot reactivate platform usage quotas.
+    stopPaidWhenLimitReached: false,
   } };
 }
 

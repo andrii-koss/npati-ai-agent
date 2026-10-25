@@ -1,8 +1,11 @@
+// Retired quota algorithms only: activation is confined to this isolated test file.
+// Real release-policy and HTTP coverage: usage-quotas-disabled.test.ts.
+vi.mock("../apps/agent-api/src/usage-quota-policy", () => ({ usageQuotasEnabled: () => true }));
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it , vi } from "vitest";
 import {
   CODE_RUN_RATE_LIMIT_MAX_PERIOD_MS,
   CODE_RUN_RATE_LIMIT_MAX_RUNS_PER_COMPANY,

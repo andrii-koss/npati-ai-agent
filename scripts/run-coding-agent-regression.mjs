@@ -613,32 +613,21 @@ const SCENARIOS = [
   },
   {
     id: "R012",
-    name: "quota-and-token-budget-enforcement",
+    name: "usage-quotas-disabled",
     category: "Component Integration",
-    description: "Verifies session token budget cap (1,000,000 local / 100,000 prod) and active quota rejection semantics",
+    description: "Verifies 305 sequential admissions and retained recursion protection without platform usage quotas",
     run: async () => {
-      const testCode = `
-        const { resolveCodeRunDailyBudget, resolveCodeRunBudget, DEFAULT_CODE_RUN_BUDGET } = require('./apps/agent-api/src/code-run-quota.ts');
-        const daily = resolveCodeRunDailyBudget();
-        const runBudget = resolveCodeRunBudget();
-        console.log(JSON.stringify({
-          maxTokensPerUserPerDay: daily.maxTokensPerUserPerDay,
-          maxTokensPerUserPerSession: daily.maxTokensPerUserPerSession,
-          defaultRunTokens: DEFAULT_CODE_RUN_BUDGET.maxTokens,
-          resolvedRunTokens: runBudget.maxTokens,
-        }));
-      `;
-      const outputRaw = await runHostTs(testCode);
-      const budget = JSON.parse(outputRaw);
-      if (budget.maxTokensPerUserPerSession !== 1_000_000) {
-        throw new Error(`Expected session budget 1,000,000, got ${budget.maxTokensPerUserPerSession}`);
-      }
-      return {
-        sessionTokenCap: budget.maxTokensPerUserPerSession,
-        dailyTokenCap: budget.maxTokensPerUserPerDay,
-        runBudget: budget.resolvedRunTokens,
-        quotaProtectionVerified: true,
-      };
+      const outputRaw = await runHostTs(        "const { CodeRunRateLimiter } = require('./apps/agent-api/src/code-run-rate-limit.ts');" +
+        "const { A2AQuotaManager } = require('./apps/agent-api/src/a2a-protocol-extensions.ts');" +
+        "const limiter = new CodeRunRateLimiter({maxRunsPerUserPerPeriod:1,maxRunsPerCompanyPerPeriod:1});" +
+        "const ticket={userId:'test-user',companyId:'test-company'};" +
+        "for(let i=0;i<305;i++){limiter.assertWithinLimit(ticket);limiter.record(ticket);}" +
+        "const manager=new A2AQuotaManager();manager.setSessionBudget('test-session',1,.001,2);manager.recordUsage('test-session',1000000,100);" +
+        "console.log(JSON.stringify({usageQuotasEnabled:limiter.state().enabled,allowed:manager.checkAllowance('test-session',1000000,100,1).allowed,depthBlocked:!manager.checkAllowance('test-session',1,0,3).allowed}));"
+      );
+      const result = JSON.parse(outputRaw);
+      if(result.usageQuotasEnabled!==false || !result.allowed || !result.depthBlocked) throw new Error("Usage/recursion policy mismatch");
+      return result;
     },
   },
   {

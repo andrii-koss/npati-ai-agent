@@ -194,14 +194,14 @@ describe("Project API gateway over HTTP (D5)", () => {
     expect(h.statements.some((s) => s.env === "prod" || s.backend === "bB")).toBe(false);
   });
 
-  it("returns 429 once the per-key rate limit is exceeded", async () => {
+  it("allows 305 requests despite a persisted per-key allowance of two", async () => {
     h.rateLimits["bA:dev"] = 2;
     const send = () => app.inject({ method: "GET", url: "/v1/projects/pA/data/products", headers: { "x-project-key": pk() } });
     expect((await send()).statusCode).toBe(200);
     expect((await send()).statusCode).toBe(200);
     const limited = await send();
-    expect(limited.statusCode).toBe(429);
-    expect(limited.json().error.code).toBe("RATE_LIMIT_EXCEEDED");
+    expect(limited.statusCode).toBe(200);
+    for(let i=0;i<302;i++) expect((await send()).statusCode).toBe(200);
   });
 
   it("rejects SQL injection through sort, fields, filters and collection names", async () => {

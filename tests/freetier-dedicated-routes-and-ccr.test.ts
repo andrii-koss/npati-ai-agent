@@ -6,7 +6,7 @@ import {
 } from "../apps/agent-api/src/freetier-dedicated-routes-and-ccr";
 
 describe("Free-Tier Catalog Manager (Free-tier catalog)", () => {
-  it("manages zero-cost model catalog and enforces daily quota thresholds", () => {
+  it("manages zero-cost model catalog without imposing daily usage quotas", () => {
     const manager = new FreeTierCatalogManager();
 
     const models = manager.listFreeModels();
@@ -19,7 +19,7 @@ describe("Free-Tier Catalog Manager (Free-tier catalog)", () => {
     // Record high usage
     manager.recordUsage("google/gemini-2.0-flash-free", 999_000);
     const isAvailAfter = manager.isQuotaAvailable("google/gemini-2.0-flash-free", 5000);
-    expect(isAvailAfter).toBe(false);
+    expect(isAvailAfter).toBe(true);
   });
 });
 

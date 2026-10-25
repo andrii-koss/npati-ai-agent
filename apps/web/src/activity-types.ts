@@ -2,6 +2,7 @@ export interface ToolAuditItem {
   id: string;
   agentId: string;
   toolName: string;
+  inputSummary?: Record<string, unknown>;
   decision: "allowed" | "denied";
   status: string;
   latencyMs?: number;

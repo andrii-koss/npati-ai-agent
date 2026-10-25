@@ -1,3 +1,4 @@
+import { conversationScopedRemember } from "./workspace-chat-signals";
 import type { AIEngine } from "@npati/omniroute-adapter";
 import { createHash } from "node:crypto";
 import { AutomaticMemoryExtractor } from "./automatic-memory-extractor";
@@ -60,7 +61,8 @@ export class ContextCompactor {
 
   static extractMemoriesToFlush(messages: Array<{ role: string; content: string }>): string[] {
     return AutomaticMemoryExtractor.extractFacts(messages)
-      .filter((fact) => fact.provenance.role === "user")
+      .filter((fact) => fact.provenance.role === "user"
+        && !conversationScopedRemember.test(messages[fact.provenance.messageIndex]?.content ?? ""))
       .map((fact) => fact.content);
   }
 

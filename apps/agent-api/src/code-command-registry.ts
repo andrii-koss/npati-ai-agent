@@ -1,3 +1,4 @@
+import { usageQuotasEnabled } from "./usage-quota-policy";
 import type { AuthContext } from "@npati/workspace";
 import { createHash } from "node:crypto";
 import {
@@ -625,7 +626,7 @@ export function createCodeCommandRegistry(deps: CodeCommandRegistryDeps): CodeCo
       assertNoSecretInTemplate(id || "unknown", input.template);
       const parsed = parseCodeCommandDeclaration(input.declaration, input.template);
       const existing = sessionCommands.get(input.sessionId);
-      if (!existing && sessionCommands.size >= 1_000) {
+      if (usageQuotasEnabled() && !existing && sessionCommands.size >= 1_000) {
         throw new CodeCommandError("command_not_allowed", "Too many sessions hold registered commands", 429);
       }
       const bucket = existing ?? new Map<string, RegisteredSessionCommand>();

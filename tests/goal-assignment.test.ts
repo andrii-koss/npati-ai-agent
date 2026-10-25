@@ -50,3 +50,17 @@ it("shows stored market, audience and services of owned businesses to the chat m
   expect(prompt).toContain("office catering");
   expect(prompt).toContain("small offices");
 });
+
+it("clears assignees when an agent or company is deleted, matching migration 093", async () => {
+ const store = new InMemoryWorkspaceStore();
+ const business = await store.createBusiness(alice, { name: "Deletion FK", businessStage: "operating" });
+ const company = await store.createCompany(alice, { name: "Deleted company" }, "delete-company");
+ const agent = await store.createCompanyAgent(alice, company.id, { name: "Assignee", role: "Worker" }, "delete-agent");
+ const goal = await store.createGoal(alice, business.id, { title: "Surviving goal", assignedAgentId: agent.id });
+ await store.deleteCompanyAgent(alice, company.id, agent.id, agent.revision);
+ expect((await store.listGoals(alice, business.id)).find(item => item.id === goal.id)?.assignedAgentId).toBeNull();
+ const other = await store.createCompanyAgent(alice, company.id, { name: "Other", role: "Worker" }, "other-agent");
+ await store.updateGoal(alice, business.id, goal.id, { assignedAgentId: other.id });
+ await store.deleteCompany(alice, company.id);
+ expect((await store.listGoals(alice, business.id)).find(item => item.id === goal.id)?.assignedAgentId).toBeNull();
+});

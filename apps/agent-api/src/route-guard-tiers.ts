@@ -1,3 +1,4 @@
+import { usageQuotasEnabled } from "./usage-quota-policy";
 export type RouteTier = "free" | "pro" | "enterprise" | "custom";
 
 export interface TierConfig {
@@ -61,6 +62,7 @@ export class RouteGuardTiers {
    */
   checkRateLimit(clientId: string, customTier?: RouteTier): RateLimitStatus {
     const tier = customTier ?? this.getClientTier(clientId);
+    if (!usageQuotasEnabled()) return { allowed: true, tier, limit: 0, remaining: 0, resetSeconds: 0 };
     const config = this.tierConfigs[tier] ?? this.tierConfigs.free;
     const now = Date.now();
     const windowStart = now - 60_000; // 1 minute sliding window
@@ -110,6 +112,7 @@ export class RouteGuardTiers {
    * Format standard rate limiting headers
    */
   static formatHeaders(status: RateLimitStatus): Record<string, string> {
+    if (!usageQuotasEnabled()) return {};
     const headers: Record<string, string> = {
       "X-RateLimit-Tier": status.tier,
       "X-RateLimit-Limit": String(status.limit),

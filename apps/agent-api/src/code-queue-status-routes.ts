@@ -1,3 +1,4 @@
+import { usageQuotasEnabled } from "./usage-quota-policy";
 /**
  * R1 (section A, item 3, "видимий стан у UI"): the read-only **status surface** for the code-run queue.
  *
@@ -39,6 +40,7 @@ export interface CodeQueueStatusView {
   queue: CodeRunQueueEntry[];
   /** R1 A.1: the periodic limit as it stands for this user and this Company. */
   rateLimits: {
+    enabled?: boolean;
     limits: CodeRunRateLimitState["limits"];
     user: { used: number; limit: number; resetAt: string | null };
     company: { used: number; limit: number; resetAt: string | null };
@@ -73,6 +75,7 @@ export function buildCodeQueueStatusView(
     userActive: userRow?.active ?? 0,
     queue: state.queue.filter((entry) => entry.companyId === principal.companyId),
     rateLimits: {
+      enabled: usageQuotasEnabled(),
       limits: { ...rateLimits.limits },
       user: rateRow("user", principal.userId, rateLimits.limits.maxRunsPerUserPerPeriod),
       company: rateRow("company", principal.companyId, rateLimits.limits.maxRunsPerCompanyPerPeriod),

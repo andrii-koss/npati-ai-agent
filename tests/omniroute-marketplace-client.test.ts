@@ -155,3 +155,13 @@ it("keeps manifest capability metadata when a connection refresh lists only id a
   expect(models.find((model) => model.id === "ollama-cloud/gemma4:31b")?.capabilities).not.toContain("vision");
   expect(models.map((model) => model.id)).toContain("ollama-cloud/new-model");
 });
+it("never installs a monthly allowance from legacy stop-paid preferences", async () => {
+ const requests: Array<{path:string;body:Record<string,unknown>}> = [];
+ vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+  const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+  requests.push({path:url.pathname,body:JSON.parse(String(init?.body ?? "{}"))});
+  return new Response(JSON.stringify({ok:true}), {headers:{"content-type":"application/json"}});
+ }));
+ await new OmniRouteMarketplace({baseUrl:"http://omniroute"}).configureRuntimePolicy({compression:"off",monthlyBudgetUsd:1,warningPercent:80,stopPaidWhenLimitReached:true});
+ expect(requests.find(r=>r.path==="/api/usage/budget")?.body).toMatchObject({dailyLimitUsd:0,weeklyLimitUsd:0,monthlyLimitUsd:0});
+});

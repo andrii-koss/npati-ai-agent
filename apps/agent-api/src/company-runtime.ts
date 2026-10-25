@@ -31,6 +31,8 @@ import {
   instruction,
   parsePlan,
 } from "./company-runtime-types";
+import { executeChatCapability } from "./company-runtime-chat-capability";
+import { executeAgentStages } from "./company-runtime-stages";
 import { executeCompanyRunTools } from "./company-runtime-tool-executor";
 
 export * from "./company-runtime-types";
@@ -82,18 +84,19 @@ export class CompanyDelegationRuntime {
     const created=await this.create(ctx,companyId,{task,projectId,mode:"single"},key);
     if(created.run.task!==task)throw new CompanyRuntimeError("IDEMPOTENCY_CONFLICT","Tool call identity was reused with different arguments",409);
     if(!created.created){const previous=await this.store.getCompanyAgentRun(ctx,companyId,created.run.id);if(previous.run.status!=="completed")throw new CompanyRuntimeError("RUN_NOT_COMPLETED","Previous capability execution did not complete; inspect its run trace",409);return{output:JSON.parse(previous.run.result??"null"),runId:previous.run.id};}
-    const runId=created.run.id,controller=new AbortController(),started=Date.now();this.controllers.set(runId,controller);
-    const bound=AbortSignal.any([controller.signal,AbortSignal.timeout(this.timeoutMs),...(signal?[signal]:[])]);
-    const plan:Plan={mode:"single",agentIds:[main.id],toolRequests:[{agentId:main.id,tool,input:args}]};let output:unknown;
-    try{
-      await this.store.updateCompanyAgentRun(ctx,companyId,runId,{status:"running",executionMode:"single",selectedAgentIds:[main.id]});
-      await executeCompanyRunTools({ctx,company,runId,plans:plan.toolRequests,agents:new Map([[main.id,main]]),signal:bound,knowledge:{chunks:[],memories:[]},noMemory,allowedProjectId:projectId,runProjectId:projectId,store:this.store,toolRuntime:this.toolRuntime,capabilityResolver:this.capabilityResolver,riskApprovalService:this.riskApprovalService,durableApprovals:this.durableApprovals,telemetry:this.telemetry,onResult:(_name,value)=>{output=value;},onApprovalPending:async(nextToolIndex,evidence)=>{await this.store.setCompanyRunPendingPlan(ctx,companyId,runId,{plan,nextToolIndex,evidence});}});
-      const detail=await this.store.getCompanyAgentRun(ctx,companyId,runId);if(detail.toolAudit.some(item=>item.status==="failed"||item.status==="blocked"))throw new CompanyRuntimeError("CAPABILITY_EXECUTION_FAILED","The requested capability failed; inspect its run trace",502);
-      const policy=await this.guardrailPolicyResolver?.(ctx,companyId);const safe=SecurityPolicyEngine.protectObject(SecurityPolicyEngine.redactObject(output,policy),policy);
-      await this.store.updateCompanyAgentRun(ctx,companyId,runId,{status:"completed",result:json(safe),totalDurationMs:Date.now()-started,totalTokens:0,totalCost:0});
-      return{output:safe,runId};
-    }catch(error){const code=(error as {code?:string}).code??"CAPABILITY_EXECUTION_FAILED";await this.store.updateCompanyAgentRun(ctx,companyId,runId,{status:code==="APPROVAL_REQUIRED"?"awaiting_approval":bound.aborted?"cancelled":"failed",errorCode:code,errorMessage:"Chat capability did not complete: "+code,totalDurationMs:Date.now()-started});throw error;}
-    finally{this.controllers.delete(runId);}
+    const plan: Plan = { mode: "single", agentIds: [main.id], toolRequests: [{ agentId: main.id, tool, input: args }] };
+    return this.runChatCapability(ctx, company, created.run.id, plan, signal, noMemory);
+  }
+
+  private async runChatCapability(ctx: AuthContext, company: Company, runId: string, plan: Plan, parentSignal?: AbortSignal, noMemory = false, approvalId?: string) {
+    const controller = new AbortController(); this.controllers.set(runId, controller);
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(this.timeoutMs), ...(parentSignal ? [parentSignal] : [])]);
+    try {
+      return await executeChatCapability({ ctx, company, runId, plan, signal, noMemory, approvalId,
+        store: this.store, toolRuntime: this.toolRuntime, capabilityResolver: this.capabilityResolver,
+        riskApprovalService: this.riskApprovalService, durableApprovals: this.durableApprovals, telemetry: this.telemetry,
+        policy: await this.guardrailPolicyResolver?.(ctx, company.id) });
+    } finally { this.controllers.delete(runId); }
   }
 
   async create(ctx: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode; projectId?: string }, key: string) {
@@ -110,8 +113,21 @@ export class CompanyDelegationRuntime {
     const existing = await this.store.getCompanyAgentRun(ctx, companyId, runId);
     if (options.approvalId && existing.run.status !== "awaiting_approval") throw new CompanyRuntimeError("APPROVAL_INVALID", "Run is not awaiting approval", 409);
     if (!options.approvalId && ["completed", "cancelled", "failed", "awaiting_approval"].includes(existing.run.status)) return existing;
-    const pendingState = options.approvalId ? await this.store.getCompanyRunPendingPlan(ctx, companyId, runId) as { plan: Plan; nextToolIndex: number; evidence: string } | null : null;
+    const pendingState = options.approvalId ? await this.store.getCompanyRunPendingPlan(ctx, companyId, runId) as { plan: Plan; nextToolIndex: number; evidence: string; noMemory?: boolean } | null : null;
     if (options.approvalId && (!pendingState || !pendingState.plan || !Number.isInteger(pendingState.nextToolIndex))) throw new CompanyRuntimeError("APPROVAL_INVALID", "Pending run plan is unavailable", 409);
+    if (pendingState?.noMemory) options = { ...options, noMemory: true };
+    if (options.approvalId && pendingState && existing.run.task.startsWith("Chat capability: ")) {
+      const request = pendingState.plan.toolRequests[0];
+      if (pendingState.plan.toolRequests.length !== 1 || !request || !existing.run.projectId
+        || request.input.projectId !== existing.run.projectId
+        || existing.run.task !== "Chat capability: " + request.tool + " #" + sha256(canonicalJson(request.input)))
+        throw new CompanyRuntimeError("APPROVAL_INVALID", "Pending capability does not match its run", 409);
+      const offered = await this.chatProjectTools(ctx, companyId, existing.run.projectId, [request.tool]);
+      if (!offered.length) throw new CompanyRuntimeError("TOOL_FORBIDDEN", "Capability permission was revoked", 403);
+      validateArguments(chatCapabilityParameters(request.tool), request.input, request.tool);
+      await this.runChatCapability(ctx, await this.store.getCompany(ctx, companyId), runId, pendingState.plan, options.signal, options.noMemory, options.approvalId);
+      return this.store.getCompanyAgentRun(ctx, companyId, runId);
+    }
     const created = { run: existing.run };
     const input = { task: existing.run.task, mode: existing.run.requestedMode };
     const controller = new AbortController(), timeout = AbortSignal.timeout(this.timeoutMs);
@@ -449,7 +465,7 @@ export class CompanyDelegationRuntime {
         }
         return { ...request, input: SecurityPolicyEngine.protectObject(request.input, guardrailPolicy) };
       });
-      const rawEvidence = options.suppressTools ? "" : await this.tools(ctx, company, created.run.id, normalizedToolRequests, byId, signal, knowledge, options.noMemory === true, options.approvalId, options.allowedProjectPaths, options.allowedProjectId ?? existing.run.projectId, existing.run.projectId, async (nextToolIndex, evidence) => { await this.store.setCompanyRunPendingPlan(ctx, companyId, created.run.id, { plan, nextToolIndex, evidence }); }, pendingState?.evidence, pendingState?.nextToolIndex ?? 0, existing.run.requestedMode, options.onTool);
+      const rawEvidence = options.suppressTools ? "" : await this.tools(ctx, company, created.run.id, normalizedToolRequests, byId, signal, knowledge, options.noMemory === true, options.approvalId, options.allowedProjectPaths, options.allowedProjectId ?? existing.run.projectId, existing.run.projectId, async (nextToolIndex, evidence) => { await this.store.setCompanyRunPendingPlan(ctx, companyId, created.run.id, { plan, nextToolIndex, evidence, noMemory: options.noMemory === true }); }, pendingState?.evidence, pendingState?.nextToolIndex ?? 0, existing.run.requestedMode, options.onTool);
       // A plan cannot name files before it has listed them. When project evidence holds only a listing or search, one
       // bounded follow-up planning call may request read-only project.files.read (at most 5) for the selected agents.
       const readers = [main, ...selected.filter((agent) => agent.id !== main.id)].filter((agent) => agent.tools.map(toolName).includes("project.files.read"));
@@ -495,17 +511,28 @@ export class CompanyDelegationRuntime {
         { status: "running", executionMode: execution.mode, selectedAgentIds: ids, omnirouteComboName: execution.model });
       if ((await this.store.getCompanyAgentRun(ctx, companyId, created.run.id)).run.cancelRequested)
         throw new DOMException("Cancelled", "AbortError");
-      if (options.callBudget && --options.callBudget.remaining < 0) throw new CompanyRuntimeError("MODEL_CALL_BUDGET_EXCEEDED", "Project model call limit reached", 429);
-      let result = await this.ai.chat({
-        model: execution.model, signal, timeoutMs: this.timeoutMs, admission: { tenantId: ctx.workspaceId, tier: ctx.permissions.includes("admin:all") ? "enterprise" : "pro" }, idempotencyKey: `${created.run.id}:final`,
-        messages: [
-          { role: "system", content: protect(instruction(company, main, true, !options.noMemory, linked) + chatLanguageInstruction(input.task) + (existing.run.projectId ? "\nThis final response cannot execute tools or save files. Summarize only verified tool results in at most 120 words. Do not output source code, patches, proposed edits or claim that unexecuted changes were saved. Build and Preview are handled by the project pipeline after this response." : "")) },
-          { role: "user", content: protect([protectedTask, knowledgeContext, evidence && `Verified tool evidence:\n${evidence}`].filter(Boolean).join("\n\n")) },
-        ],
+      let inferenceSequence = 10_001;
+      let result = await executeAgentStages({ ai: this.ai, main, selected, reviewer, mainAssignedWork, mode: plan.mode,
+        agentModels: execution.agentModels, signal, timeoutMs: this.timeoutMs, task: protectedTask, evidence,
+        managerInstruction: protect(instruction(company, main, true, !options.noMemory, linked) + chatLanguageInstruction(input.task)
+          + (existing.run.projectId ? "\nSummarize only verified tool results in at most 120 words. This response cannot execute tools or save files." : "")),
+        knowledgeContext, runId: created.run.id, admission: { tenantId: ctx.workspaceId, tier: ctx.permissions.includes("admin:all") ? "enterprise" : "pro" },
+        before: async () => {
+          if (options.callBudget && --options.callBudget.remaining < 0) throw new CompanyRuntimeError("MODEL_CALL_BUDGET_EXCEEDED", "Project model call limit reached", 429);
+          signal.throwIfAborted();
+        },
+        completed: async (agentId, answer) => {
+          answer.content = SecurityPolicyEngine.protectText(SecurityPolicyEngine.redactText(answer.content, guardrailPolicy), guardrailPolicy).sanitized;
+          const measured = await this.recordInference(ctx, companyId, created.run.id, agentId, "agent-result", execution.mode, answer, inferenceSequence++);
+          totalCost += measured.costUsd; totalTokens += measured.totalTokens;
+          await this.store.updateCompanyAgentRunStep(ctx, companyId, created.run.id, agentId, "completed");
+        },
+        failed: async (agentId, error) => {
+          await this.store.updateCompanyAgentRunStep(ctx, companyId, created.run.id, agentId, signal.aborted ? "cancelled" : "failed");
+          await this.store.appendCompanyAgentToolAudit(ctx, companyId, created.run.id, { agentId, toolName: "ai.inference", decision: "allowed", status: "failed", inputSummary: { phase: "agent-result" }, errorMessage: "Agent inference did not complete" });
+        },
       });
-      let measured = await this.recordInference(ctx, companyId, created.run.id, main.id, "final", execution.mode, result, 10_001);
-      totalCost += measured.costUsd;
-      totalTokens += measured.totalTokens;
+      let measured: Awaited<ReturnType<CompanyDelegationRuntime["recordInference"]>>;
       if (knowledgeContext) {
         if (options.callBudget && --options.callBudget.remaining < 0) throw new CompanyRuntimeError("MODEL_CALL_BUDGET_EXCEEDED", "Project model call limit reached", 429);
         result = await this.ai.chat({
@@ -515,7 +542,7 @@ export class CompanyDelegationRuntime {
             { role: "user", content: protect([protectedTask, knowledgeContext, `Delegated draft to verify:\n${result.content}`, "Return only the corrected, knowledge-grounded final answer."].join("\n\n")) },
           ],
         });
-        measured = await this.recordInference(ctx, companyId, created.run.id, main.id, "grounded-final", execution.mode, result, 10_002);
+        measured = await this.recordInference(ctx, companyId, created.run.id, main.id, "grounded-final", execution.mode, result, inferenceSequence++);
         totalCost += measured.costUsd;
         totalTokens += measured.totalTokens;
       }
@@ -541,6 +568,8 @@ export class CompanyDelegationRuntime {
         totalTokens,
         totalDurationMs: Math.max(0, Date.now() - runStartedAt),
       });
+      if (!awaitingApproval) for (const step of current.steps.filter(step => step.status === "delegated" || step.status === "selected"))
+        await this.store.updateCompanyAgentRunStep(ctx, companyId, created.run.id, step.agentId, "cancelled");
       if (!awaitingApproval) await this.store.setCompanyRunPendingPlan(ctx, companyId, created.run.id, null);
     } finally { this.controllers.delete(created.run.id); }
     return this.store.getCompanyAgentRun(ctx, companyId, created.run.id);
@@ -604,6 +633,7 @@ export class CompanyDelegationRuntime {
     const providerId = result.telemetry?.provider ?? modelId.split("/", 1)[0] ?? "unknown";
     const inputSummary = {
       phase,
+      ...(phase === "agent-result" ? { result: result.content } : {}),
       requestId: result.telemetry?.requestId,
       providerId,
       modelId,
@@ -728,11 +758,12 @@ export class CompanyDelegationRuntime {
       }, signal);
       names.set(agent.id, name);
     }
+    const agentModels = Object.fromEntries(names);
     const workers = selected.filter((agent) => agent.id !== main.id && agent.id !== reviewer?.id);
     // A main agent explicitly selected as an author produces a draft before a distinct reviewer.
     if (mainAssignedWork && reviewer && reviewer.id !== main.id) workers.unshift(main);
     if (mode === "single" && !workers.length && (!reviewer || reviewer.id === main.id))
-      return { model: names.get(main.id)!, mode: "single" as const };
+      return { model: names.get(main.id)!, mode: "single" as const, agentModels };
     const signature = digest(json({ company: company.id, mode, mainAssignedWork, agents: unique.map((agent) => [agent.id, names.get(agent.id)]), reviewer: reviewer?.id, judgeModel: this.strictInferenceRouting ? inferenceModels?.[0] : comboModel(main.modelId) }));
     if (mode === "fusion" && workers.length >= 2) {
       const fusion = `npati/f/${signature}`;
@@ -744,7 +775,7 @@ export class CompanyDelegationRuntime {
           fusionTuning: { minPanel: 2, stragglerGraceMs: 4_000, panelHardTimeoutMs: Math.min(90_000, this.timeoutMs), maxPanel: MAX_SELECTED }
         }
       }, signal);
-      if (!reviewer || reviewer.id === main.id) return { model: fusion, mode: "fusion" as const };
+      if (!reviewer || reviewer.id === main.id) return { model: fusion, mode: "fusion" as const, agentModels };
       const final = `npati/p/${digest(signature + ":review")}`;
       await this.ai.ensureCombo({
         name: final, strategy: "pipeline", models: [
@@ -752,7 +783,7 @@ export class CompanyDelegationRuntime {
           { kind: "combo-ref", comboName: names.get(main.id)! }],
         config: { nestedComboMode: "execute", maxRetries: 2, retryDelayMs: 500, failoverBeforeRetry: true, timeoutMs: this.timeoutMs }
       }, signal);
-      return { model: final, mode: "fusion" as const };
+      return { model: final, mode: "fusion" as const, agentModels };
     }
     const chain = [...workers];
     if (reviewer && reviewer.id !== main.id && !chain.some((agent) => agent.id === reviewer.id)) chain.push(reviewer);
@@ -763,6 +794,6 @@ export class CompanyDelegationRuntime {
       models: chain.map((agent) => ({ kind: "combo-ref", comboName: names.get(agent.id)! })),
       config: { nestedComboMode: "execute", maxRetries: 2, retryDelayMs: 500, failoverBeforeRetry: true, timeoutMs: this.timeoutMs }
     }, signal);
-    return { model: pipeline, mode: mode === "single" ? "single" as const : "pipeline" as const };
+    return { model: pipeline, mode: mode === "single" ? "single" as const : "pipeline" as const, agentModels };
   }
 }

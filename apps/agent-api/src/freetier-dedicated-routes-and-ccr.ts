@@ -1,3 +1,4 @@
+import { usageQuotasEnabled } from "./usage-quota-policy";
 export interface FreeTierModelInfo {
   id: string;
   provider: string;
@@ -80,7 +81,7 @@ export class FreeTierCatalogManager {
     const model = this.catalog.get(modelId);
     if (!model) return false;
 
-    return model.usedTokensToday + expectedTokens <= model.tokensPerDayLimit;
+    return !usageQuotasEnabled() || model.usedTokensToday + expectedTokens <= model.tokensPerDayLimit;
   }
 }
 

@@ -1,3 +1,4 @@
+import { usageQuotasEnabled } from "./usage-quota-policy";
 import type { AuthContext } from "@npati/workspace";
 import { createHash, randomUUID } from "node:crypto";
 import { createClient } from "redis";
@@ -30,6 +31,7 @@ export class RedisStorageProtection implements StorageProtection {
     return this.connecting;
   }
   async consume(context:AuthContext,action:StorageRateAction,cost=1){
+    if (!usageQuotasEnabled()) return;
     const rule=this.limits[action],tenant=createHash("sha256").update(context.workspaceId+"\0"+context.userId).digest("hex").slice(0,32);
     const result=await (await this.get()).eval(rateScript,{keys:[`npati:storage:rate:v1:${tenant}:${action}`],arguments:[String(Math.max(1,cost)),String(rule.windowMs)]}) as [number,number];
     if(Number(result[0])>rule.limit)throw new StorageRateLimitError(Math.max(1,Number(result[1])));
@@ -44,7 +46,7 @@ export class RedisStorageProtection implements StorageProtection {
 export class InMemoryStorageProtection implements StorageProtection {
   private counts=new Map<string,{value:number;expires:number}>();private leases=new Set<string>();
   constructor(private readonly limits:StorageRateLimits=defaultStorageRateLimits){}
-  async consume(context:AuthContext,action:StorageRateAction,cost=1){const key=context.workspaceId+":"+context.userId+":"+action,now=Date.now(),rule=this.limits[action],old=this.counts.get(key),value=!old||old.expires<=now?{value:cost,expires:now+rule.windowMs}:{value:old.value+cost,expires:old.expires};this.counts.set(key,value);if(value.value>rule.limit)throw new StorageRateLimitError(value.expires-now);}
+  async consume(context:AuthContext,action:StorageRateAction,cost=1){if (!usageQuotasEnabled()) return;const key=context.workspaceId+":"+context.userId+":"+action,now=Date.now(),rule=this.limits[action],old=this.counts.get(key),value=!old||old.expires<=now?{value:cost,expires:now+rule.windowMs}:{value:old.value+cost,expires:old.expires};this.counts.set(key,value);if(value.value>rule.limit)throw new StorageRateLimitError(value.expires-now);}
   async withLease<T>(name:string,_ttlMs:number,task:()=>Promise<T>){if(this.leases.has(name))return {acquired:false};this.leases.add(name);try{return {acquired:true,result:await task()};}finally{this.leases.delete(name);}}
   async close(){}
 }

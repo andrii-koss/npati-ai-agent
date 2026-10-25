@@ -150,7 +150,7 @@ export function applyCodeProcess(state: CodeProcessProjectState, scope: CodeProc
       if (existing.payloadHash !== command.payloadHash || existing.runId !== command.runId || existing.sessionId !== scope.sessionId) throw new CodeProcessStoreError("process_request_conflict");
     } else {
       if (next.cleanupToken) throw new CodeProcessStoreError("sandbox_cleanup_in_progress");
-      if (next.operations.filter((op) => op.sessionId === scope.sessionId && activeCodeProcess(op)).length >= 10 || next.operations.length >= 1000) throw new CodeProcessStoreError("process_limit", 429);
+      if (next.operations.filter((op) => op.sessionId === scope.sessionId && activeCodeProcess(op)).length >= 10) throw new CodeProcessStoreError("process_limit", 429);
       const op: DurableCodeProcess = {
         ...scope, operationId: command.operationId, processId: command.processId, executionKey: command.executionKey,
         runId: command.runId, owner: command.owner, generation: 1, payloadHash: command.payloadHash, agentId: command.agentId,
@@ -234,7 +234,7 @@ export function applyCodeProcess(state: CodeProcessProjectState, scope: CodeProc
           }
         }
       }
-      if (next.operations.filter((op) => op.sessionId === scope.sessionId && activeCodeProcess(op)).length >= 10 || next.operations.length >= 1000) {
+      if (next.operations.filter((op) => op.sessionId === scope.sessionId && activeCodeProcess(op)).length >= 10) {
         throw new CodeProcessStoreError("process_limit", 429);
       }
       const op: DurableCodeProcess = {
@@ -261,7 +261,6 @@ export function applyCodeProcess(state: CodeProcessProjectState, scope: CodeProc
       const lease = leases.find((l) => l.runId === command.childRunId && l.sessionId === (op.child?.sessionId ?? scope.sessionId) && l.live && l.owner === command.owner);
       if (!lease || op.completion || op.child.stopRequested || !["interrupted", "running", "unknown_outcome"].includes(op.state)) throw new CodeProcessStoreError("process_lease_lost");
       const previousRequests = op.child.continueRequestIds ?? (op.child.continueRequestId ? [op.child.continueRequestId] : []);
-      if (previousRequests.length >= 256) throw new CodeProcessStoreError("process_operation_limit");
       op.child.owner = command.owner; op.child.continueRequestId = command.requestId;
       op.child.continueRequestIds = [...previousRequests, command.requestId];
       op.cancelRequested = false; op.state = "running"; claimed = true; journal(op, "subagent.continued");

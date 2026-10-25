@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+// Retired quota algorithms only: activation is confined to this isolated test file.
+// Real release-policy and HTTP coverage: usage-quotas-disabled.test.ts.
+vi.mock("../apps/agent-api/src/usage-quota-policy", () => ({ usageQuotasEnabled: () => true }));
+import { describe, expect, it , vi } from "vitest";
 import {
   QuotaShareRouter,
   RoutingTransparencyLogger,

@@ -262,7 +262,7 @@ function RoutingPanel({ routing, models, onChange }: { routing: Routing | null; 
     fallbackOnFailure: false,
     balanceQualityCost: true,
     compression: "stacked",
-    monthlyBudgetUsd: 20,
+    monthlyBudgetUsd: 0,
     warningPercent: 80,
     stopPaidWhenLimitReached: false,
   };
@@ -318,7 +318,7 @@ function RoutingPanel({ routing, models, onChange }: { routing: Routing | null; 
         <p className="section-kicker">{t("aiMarketplace.budget.kicker")}</p>
         <label><span>{t("aiMarketplace.budget.monthlyBudget")}</span><input type="number" min="0" step="1" value={monthlyBudget} onChange={(event) => setMonthlyBudget(event.target.value)} /></label>
         <label><span>{t("aiMarketplace.budget.warningPercent")}</span><input type="number" min="1" max="100" step="1" value={warningPercent} onChange={(event) => setWarningPercent(event.target.value)} /></label>
-        <label className="budget-stop"><input type="checkbox" checked={activeRouting.stopPaidWhenLimitReached} disabled={saving} onChange={(event) => save({ stopPaidWhenLimitReached: event.target.checked })} /><span>{t("aiMarketplace.budget.stopPaid")}</span></label>
+        <label className="budget-stop"><input type="checkbox" checked={false} disabled onChange={(event) => save({ stopPaidWhenLimitReached: event.target.checked })} /><span>{t("aiMarketplace.budget.stopPaid")}</span></label>
         <button className="button-secondary" disabled={saving}>{t("aiMarketplace.budget.save")}</button>
         <small>{t("aiMarketplace.budget.note")}</small>
       </form>

@@ -1,3 +1,4 @@
+import { usageQuotasEnabled } from "./usage-quota-policy";
 import { randomUUID } from "node:crypto";
 
 export interface TenantQuotaShare {
@@ -58,6 +59,7 @@ export class QuotaShareRouter {
     currentGlobalRpm: number,
     maxGlobalRpm: number
   ): { admitted: boolean; reason: string } {
+    if (!usageQuotasEnabled()) return { admitted: true, reason: "Platform usage quotas are disabled." };
     const tenant = this.shares.get(tenantId);
     const globalSaturation = maxGlobalRpm > 0 ? currentGlobalRpm / maxGlobalRpm : 0;
 

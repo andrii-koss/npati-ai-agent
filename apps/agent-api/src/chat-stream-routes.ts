@@ -204,39 +204,6 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         return reply.code(409).send({ error: { code: "BUSINESS_REQUIRED", message: "Complete business setup before starting a streamed research chat." } });
       }
 
-      if (activeCompanyId && activeProjectId) {
-        let backgroundAllowed = false;
-        try {
-          await featureFlagService.assertEnabled(auth, "code.background_runs", { companyId: activeCompanyId, userId: auth.userId });
-          backgroundAllowed = true;
-        } catch {
-          backgroundAllowed = false;
-        }
-        const waitController = new AbortController();
-        const abandonWait = () => waitController.abort(new Error("Client disconnected while queued"));
-        request.raw.once("close", abandonWait);
-        streamController.signal.addEventListener("abort", abandonWait, { once: true });
-        if (streamController.signal.aborted) abandonWait();
-        let lease: Awaited<ReturnType<CodeRunQueue["acquire"]>>;
-        try {
-
-          lease = await codeRunAdmission.admit(
-            {
-              workspaceId: auth.workspaceId,
-              userId: auth.userId,
-              companyId: activeCompanyId,
-              sessionId: request.body.conversationId ?? `${activeCompanyId}:${activeProjectId}`,
-            },
-            { timeoutMs: codeRunQueueLimits.queueTimeoutMs, signal: waitController.signal },
-          );
-        } finally {
-
-          request.raw.off("close", abandonWait);
-          streamController.signal.removeEventListener("abort", abandonWait);
-        }
-        reservedCodeRunSlot = { background: backgroundAllowed, lease };
-      }
-
       streamController.signal.throwIfAborted();
       reply.hijack();
       reply.raw.writeHead(200, {
@@ -366,20 +333,13 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
             const runKey = `${codeSession.id}:${Date.now().toString(36)}`;
             if (await codeSessionInbox.isEnabled(auth, codeSession.companyId)) await codeSessionInbox.recoverTerminalTask(codeSession);
 
-            const reserved = reservedCodeRunSlot;
-            reservedCodeRunSlot = null;
-            const backgroundEnabled = reserved
-              ? reserved.background
-              : await featureFlagService.assertEnabled(auth, "code.background_runs", { companyId: activeCompanyId!, userId: auth.userId })
-                .then(() => true).catch(() => false);
-
-            const lease = reserved
-              ? reserved.lease
-              : codeRunAdmission.canAdmit({ userId: auth.userId, companyId: activeCompanyId! })
-                ? await codeRunAdmission.admit({
-                  workspaceId: auth.workspaceId, userId: auth.userId, companyId: activeCompanyId!, sessionId: codeSession.id,
-                })
-                : (() => { throw new CodeRunRefusedError("queue_timeout", "The code run queue is full for this user or Company; the run was not started."); })();
+            const backgroundEnabled = await featureFlagService.assertEnabled(auth, "code.background_runs", { companyId: activeCompanyId!, userId: auth.userId })
+              .then(() => true).catch(() => false);
+            const lease = await codeRunAdmission.admit({
+              workspaceId: auth.workspaceId, userId: auth.userId, companyId: activeCompanyId!, sessionId: codeSession.id,
+            }, { timeoutMs: codeRunQueueLimits.queueTimeoutMs, signal: streamController.signal });
+            // Keep ownership until the route's finally, including failures before executor startup.
+            reservedCodeRunSlot = { background: backgroundEnabled, lease };
             const backgroundSink = backgroundEnabled
               ? codeBackgroundRuns.start({
                   runId: runKey,
@@ -727,8 +687,6 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         send("error", { error: { code: expected ? (error as any).code ?? "ERROR" : "AGENT_UNAVAILABLE", message: detail } });
       } finally {
 
-        reservedCodeRunSlot?.lease.release();
-        reservedCodeRunSlot = null;
         clearInterval(heartbeat);
         reply.raw.end();
       }

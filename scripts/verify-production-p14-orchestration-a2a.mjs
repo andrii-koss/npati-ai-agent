@@ -208,8 +208,8 @@ async function run() {
     estimatedCostUsd: 0.5,
     currentDepth: 1,
   });
-  assert(qChkExceed.status === 400, "Exceeded quota rejected with 400");
-  assert(qChkExceed.data.error?.code === "A2A_QUOTA_EXCEEDED", "Error code A2A_QUOTA_EXCEEDED");
+  assert(qChkExceed.ok && qChkExceed.data.allowed === true, "Legacy token/cost allowance cannot block execution");
+  assert(!qChkExceed.data.error, "No platform quota error");
 
   // 12. A2A Provider Discovery (#121)
   console.log("\n[12/18] Verifying A2A Provider Discovery (#121)...");

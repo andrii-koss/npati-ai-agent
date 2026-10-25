@@ -795,3 +795,11 @@
   border: 1px solid #e4e4e7;
   color: #3f3f46;
 }
+
+.chat-approval-card { border: 1px solid #d4d4d8; border-radius: 12px; padding: 16px; margin: 12px 0; }
+.chat-approval-card-title { font-weight: 600; margin-bottom: 8px; }
+.chat-approval-card-action, .chat-approval-card-status { overflow-wrap: anywhere; margin: 8px 0; }
+.chat-approval-card-actions { display: flex; gap: 8px; }
+.chat-approval-card-actions button { border: 1px solid #71717a; border-radius: 6px; padding: 8px 12px; cursor: pointer; }
+.chat-approval-card-error { color: #b91c1c; margin-top: 8px; }
+.chat-approval-result, .trace-agent-result { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24rem; overflow: auto; }

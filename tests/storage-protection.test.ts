@@ -23,10 +23,10 @@ describe("storage production protections",()=>{
     expect(await repository.listPendingCleanup(10)).toHaveLength(1);
   });
 
-  it("enforces tenant-scoped distributed-style counters and a single reconciliation lease",async()=>{
+  it("ignores usage counters while retaining a single reconciliation lease",async()=>{
     const protection=new InMemoryStorageProtection(limits);
     await protection.consume(context,"upload");await protection.consume(context,"upload");
-    await expect(protection.consume(context,"upload")).rejects.toBeInstanceOf(StorageRateLimitError);
+    await expect(protection.consume(context,"upload")).resolves.toBeUndefined();
     await expect(protection.consume({...context,userId:"another-user"},"upload")).resolves.toBeUndefined();
     let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve});
     const first=protection.withLease("scan",60_000,()=>held);

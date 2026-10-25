@@ -1,3 +1,4 @@
+import { usageQuotasEnabled } from "./usage-quota-policy";
 import { randomUUID } from "node:crypto";
 
 export interface RollingLease {
@@ -51,7 +52,7 @@ export class AtomicRpmLeaseManager {
       }
     }
 
-    if (usedTokens + tokens > params.maxRpm) {
+    if (usageQuotasEnabled() && usedTokens + tokens > params.maxRpm) {
       return {
         granted: false,
         provider: params.provider,

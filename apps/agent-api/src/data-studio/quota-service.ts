@@ -1,3 +1,4 @@
+import { usageQuotasEnabled } from "../usage-quota-policy";
 import type { AuthContext } from "@npati/workspace";
 import { DataStudioError } from "./identifier";
 import type { DataBackendRepository } from "./repository";
@@ -13,6 +14,7 @@ export interface QuotaLimits {
 }
 
 export interface QuotaReport {
+  usageQuotasEnabled?: boolean;
   environment: DataEnvironmentName;
   usage: ProjectDatabaseUsage;
   limits: QuotaLimits;
@@ -83,11 +85,12 @@ export class QuotaService {
     const limits = this.resolveLimits(environment, env.limits);
     const usage = await this.usage(backend, environment);
     const databasePercent = limits.maxDatabaseBytes > 0 ? Math.round((usage.bytes / limits.maxDatabaseBytes) * 100) : 0;
-    const exceeded = usage.bytes >= limits.maxDatabaseBytes;
-    const warning = !exceeded && databasePercent >= QUOTA_WARNING_RATIO * 100;
+    const exceeded = usageQuotasEnabled() && usage.bytes >= limits.maxDatabaseBytes;
+    const warning = usageQuotasEnabled() && !exceeded && databasePercent >= QUOTA_WARNING_RATIO * 100;
     const connectionExceeded = usage.connections > limits.maxConnections;
     return {
       environment,
+      usageQuotasEnabled: usageQuotasEnabled(),
       usage,
       limits,
       state: exceeded || connectionExceeded ? "exceeded" : warning ? "warning" : "ok",
@@ -105,6 +108,7 @@ export class QuotaService {
 
   /** Throws before a write when the environment exceeded its database quota. */
   async assertWritesAllowed(backend: DataBackend, environment: DataEnvironmentName): Promise<void> {
+    if (!usageQuotasEnabled()) return;
     const env = await this.repository.environment({
       workspaceId: backend.workspaceId, userId: backend.createdBy, permissions: ["workspace:read"],
     }, backend.companyId, backend.id, environment);

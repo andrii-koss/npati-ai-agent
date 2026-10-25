@@ -415,7 +415,7 @@ describe("P1.4 — Multi-agent, MCP & A2A Control Plane", () => {
   // Capabilities #120, #121, #122, #123: Quota, Discovery, Cost & Capabilities
   // -------------------------------------------------------------
 
-  it("23. #120 security.a2a_quota_management: enforces session token, cost, and recursion depth limits", () => {
+  it("23. #120 security.a2a_quota_management: tracks usage without token/cost quotas and preserves recursion depth", () => {
     const quota = new A2AQuotaManager();
     quota.setSessionBudget("sess-quota", 10_000, 0.5, 3);
 
@@ -433,13 +433,13 @@ describe("P1.4 — Multi-agent, MCP & A2A Control Plane", () => {
 
     // Token quota exhaustion
     const chkToken = quota.checkAllowance("sess-quota", 1_000, 0.01, 2);
-    expect(chkToken.allowed).toBe(false);
-    expect(chkToken.error).toContain("A2A_TOKEN_QUOTA_EXCEEDED");
+    expect(chkToken.allowed).toBe(true);
+    expect(chkToken.error).toBeUndefined();
 
     // Cost quota exhaustion
     const chkCost = quota.checkAllowance("sess-quota", 100, 0.1, 2);
-    expect(chkCost.allowed).toBe(false);
-    expect(chkCost.error).toContain("A2A_COST_QUOTA_EXCEEDED");
+    expect(chkCost.allowed).toBe(true);
+    expect(chkCost.error).toBeUndefined();
   });
 
   it("24. #121 orchestration.a2a_provider_discovery: registers agents and queries by capability and health", () => {

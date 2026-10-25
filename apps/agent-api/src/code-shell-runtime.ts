@@ -1,3 +1,4 @@
+import { usageQuotasEnabled } from "./usage-quota-policy";
 import { randomUUID } from "node:crypto";
 import type { AuthContext } from "@npati/workspace";
 import { resolveCodeAgentLimits, type CodeAgentLimits } from "./code-agent-config";
@@ -463,7 +464,7 @@ export class CodeShellRuntime {
       if (this.now() - existing.updatedAt > this.sessionTtlMs) this.sessions.delete(input.sessionId);
       else return existing;
     }
-    if (this.sessions.size >= this.maxSessions) throw new ShellRuntimeError("shell_session_limit", "Too many shell sessions", 429, true);
+    if (usageQuotasEnabled() && this.sessions.size >= this.maxSessions) throw new ShellRuntimeError("shell_session_limit", "Too many shell sessions", 429, true);
     const created: CodeShellSession = {
       sessionId: input.sessionId, workspaceId: context.workspaceId, userId: context.userId, companyId: input.companyId, projectId: input.projectId,
       cwd: input.cwd?.trim() || "/workspace", env: {}, updatedAt: this.now(), turnCount: 0,

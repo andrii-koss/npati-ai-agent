@@ -11,6 +11,7 @@ import { BrowserCredentialsRepository } from "./browser-credentials-repository";
 import { BusinessActionHandler } from "./business-action-handler";
 import { BUSINESS_PROFILE_TOOL, executeBusinessProfileTool, reconcilePlannedBusinessArgs } from "./business-profile-native";
 import { summarizeBusinessProfileChat } from "./business-profile-response";
+import { inferenceImagesForRequest } from "./chat-image-purpose";
 import { ChatAttachmentInput, prepareChatAttachments } from "./chat-attachments";
 import { conversationTitle, isCompositeBusinessCompanyCreation, isShortAffirmativeReply, normalizeNewBusinessDirective, requestsBusinessGoal, requestsBusinessMemory, requestsCompositeCompanyDeletionIntent, requestsNewBusinessIdea, resolveContextualCompanyFollowUp } from "./chat-intent-helpers";
 import { attachResearchSources } from "./chat-public-errors";
@@ -145,6 +146,7 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
   ) {
     if(signal?.aborted)throw signal.reason??new DOMException("Cancelled","AbortError");
     const media = await prepareChatAttachments(aiEngine, message, attachments, progress);
+    const inferenceImages = inferenceImagesForRequest(message, media.images);
     const safePrompt=SecurityPolicyEngine.protectText(media.prompt).sanitized;
     let conversation = memoryPolicy.noMemoryActive
       ? undefined
@@ -180,12 +182,12 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
         createdAt: userDocument.updatedAt, updatedAt: userDocument.updatedAt,
       }] };
     }
-    if (media.images.length > 0) {
+    if (inferenceImages.length > 0) {
       const preferences = await aiPreferences.get(auth);
       // Image bytes only go to a model the refreshed catalog of a connected provider confirms can see (A040).
       const visionModel = deps.marketplace
         ? await resolveConfirmedVisionModel([config.omnirouteVisionModel, preferences.routing.defaultModelId], preferences.addedModels, deps.marketplace)
-        : config.omnirouteVisionModel?.trim() || preferences.routing.defaultModelId || "openai/gpt-5.6-luna";
+        : undefined;
       if (!visionModel) {
         const reply = visionUnavailableMessage(safePrompt);
         if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendMessage(auth, businessId, conversation.id, "assistant", reply);
@@ -228,7 +230,7 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
           progress,
         )) ?? undefined;
         if(signal?.aborted)throw signal.reason??new DOMException("Cancelled","AbortError");
-        if (research?.sources.length) researchRecords.push({ tool: "web_research", query: safePrompt, outcome: research });
+        if (research) researchRecords.push({ tool: "web_research", query: safePrompt, outcome: research });
         if (researchJob) {
           await researchBundle?.jobs.update(scope, researchJob.id, {
             status: "completed",
@@ -247,7 +249,7 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
       ? existing.messages.map((item) => ({ ...item, content: SecurityPolicyEngine.protectText(item.content).sanitized }))
       : [];
     const priorResearch = memoryPolicy.readAllowed && conversation
-      ? researchEvidenceContext(await workspaceStore.listConversationResearch?.(auth, conversation.id, 12).catch(() => []) ?? [])
+      ? researchEvidenceContext((await workspaceStore.listConversationResearch?.(auth, conversation.id, 100) ?? []).filter(entry => entry.companyId === null))
       : undefined;
     const compaction = await ContextCompactor.compactWithModel({
       ai: aiEngine,
@@ -303,7 +305,7 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
         for (const item of loop.metadata) {
           if (item.kind === "research" && item.research) {
             research = item.research as ResearchOutcome;
-            if (research.sources.length) researchRecords.push({ tool: String(item.tool ?? "web_research"), query: String(item.query ?? safePrompt), outcome: research });
+            researchRecords.push({ tool: String(item.tool ?? "web_research"), query: String(item.query ?? safePrompt), outcome: research });
           }
           if (item.kind === "business_profile" && item.outcome) {
             const outcome = item.outcome as { action: "create" | "update"; businessId: string };
@@ -330,9 +332,9 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
       message: safePrompt,
       context,
       history: compaction.preservedMessages as typeof existing.messages,
-      contextSummary: [compaction.compacted ? compaction.summary : undefined, priorResearch].filter(Boolean).join("\n\n") || undefined,
+      contextSummary: [compaction.compacted ? compaction.summary : undefined, priorResearch ? SecurityPolicyEngine.protectText(priorResearch).sanitized : undefined].filter(Boolean).join("\n\n") || undefined,
       research: research ? SecurityPolicyEngine.protectObject(research) : undefined,
-      images: media.images,
+      images: inferenceImages,
       businessActionInstruction,
       signal,
       chat: nativeChat,
@@ -363,8 +365,7 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
     progress?.({ type: "final_generation_completed" });
     if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendMessage(auth, businessId, conversation.id, "assistant", result.message);
     if (memoryPolicy.writeAllowed && conversation) for (const record of researchRecords)
-      await workspaceStore.appendConversationResearch?.(auth, conversation.id, researchEvidenceInput(record.tool, record.query, record.outcome, null))
-        .catch((error: unknown) => log.warn({ err: error }, "Conversation research evidence could not be recorded"));
+      await workspaceStore.appendConversationResearch?.(auth, conversation.id, researchEvidenceInput(record.tool, record.query, record.outcome, null));
     return { ...result, businessAction: nativeBusinessAction ?? executedAction.businessAction, goalAction: goalCompletion.goalAction ?? executedAction.goalAction, emailAction: emailAction.emailAction, emailActions: emailAction.emailActions, companyAction: companyAction.companyAction, workspaceAction: workspaceAction.workspaceAction, companyRunId: workspaceAction.companyRunId, memoryCandidate: memoryPolicy.writeAllowed ? result.memoryCandidate : undefined, conversationId: conversation?.id, researchJobId: researchJob?.id, noMemory: memoryPolicy.noMemoryActive, contextCompaction: { applied: compaction.compacted, originalCount: compaction.originalCount, preservedCount: compaction.preservedMessages.length, failureReason: compaction.failureReason, automaticMemoryFlush } };
   }
 

@@ -40,3 +40,19 @@ it("does not take the row-only path in a project without a development database"
  const app=buildApp({workspaceStore:f.store,authProvider:{authenticate:async()=>auth},aiEngine:ai,marketplace:{marketplace:async()=>({overview:{connectedProviders:1}})} as unknown as OmniRouteMarketplace});
  try{const r=await app.inject({method:"POST",url:"/chat/stream",payload:{message:"Update the Lead agent's role to Senior QA.",contextType:"project",companyId:f.company.id,projectId:site.id}});expect(r.body).not.toContain("structured project capability");expect(execute).not.toHaveBeenCalled();}finally{execute.mockRestore();await app.close();}
 });
+
+it("resumes the exact pending chat deletion without planning and rejects replay", async () => {
+ const f = await fixture();
+ const args = { projectId: f.project.id, collection: "scratch", ids: ["row-1"] };
+ let pending: { runId?: string } = {};
+ try { await f.runtime.executeChatProjectTool(auth, f.company.id, f.project.id, "project.data.rows.delete", args, "resume-delete", undefined, true); }
+ catch (error) { pending = error as typeof pending; }
+ expect(pending.runId).toBeTruthy();
+ const resumed = await f.runtime.process(auth, f.company.id, pending.runId!, { approvalId: "approval-exact" });
+ expect(resumed.run.status).toBe("completed");
+ expect(f.execute).toHaveBeenCalledOnce();
+ expect(f.inference).not.toHaveBeenCalled();
+ expect(f.approvals.consumeApproved).toHaveBeenCalledWith(auth, f.company.id, "approval-exact", expect.objectContaining({ runId: pending.runId, toolName: "project.data.rows.delete", inputPayload: args }));
+ await expect(f.runtime.process(auth, f.company.id, pending.runId!, { approvalId: "approval-exact" })).rejects.toMatchObject({ code: "APPROVAL_INVALID" });
+ expect(f.execute).toHaveBeenCalledOnce();
+});

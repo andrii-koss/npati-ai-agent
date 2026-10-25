@@ -138,7 +138,7 @@ describe("Automatic Token Refresh (TokenRefreshManager)", () => {
 });
 
 describe("Route Guard Tiers (RouteGuardTiers)", () => {
-  it("enforces tier-based rate limits and sliding window bounds", () => {
+  it("keeps tiers as metadata without enforcing request quotas", () => {
     const guard = new RouteGuardTiers({
       free: { maxRequestsPerMinute: 3, burstAllowance: 1 },
       pro: { maxRequestsPerMinute: 10, burstAllowance: 2 },
@@ -154,15 +154,15 @@ describe("Route Guard Tiers (RouteGuardTiers)", () => {
     expect(r3.allowed).toBe(true);
     expect(r3.remaining).toBe(0);
 
-    // 4th request exceeds limit
+    // Legacy limits are inactive for every tier.
     const r4 = guard.checkRateLimit(clientId);
-    expect(r4.allowed).toBe(false);
-    expect(r4.retryAfterSeconds).toBeGreaterThan(0);
+    expect(r4.allowed).toBe(true);
+    expect(r4.retryAfterSeconds).toBeUndefined();
 
     const headers = RouteGuardTiers.formatHeaders(r4);
-    expect(headers["X-RateLimit-Tier"]).toBe("free");
-    expect(headers["X-RateLimit-Remaining"]).toBe("0");
-    expect(headers["Retry-After"]).toBeDefined();
+    expect(headers["X-RateLimit-Tier"]).toBeUndefined();
+    expect(headers["X-RateLimit-Remaining"]).toBeUndefined();
+    expect(headers["Retry-After"]).toBeUndefined();
   });
 
   it("allows higher request throughput for pro tier clients", () => {

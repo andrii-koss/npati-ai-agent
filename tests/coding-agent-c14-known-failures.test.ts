@@ -185,28 +185,9 @@ describe("[C14] [security-gate] known-failures.json is the recorded baseline, no
     expect(loaded.errors).toEqual([]);
     expect(loaded.ok).toBe(true);
     const entries = loaded.manifest?.entries ?? [];
-    expect(entries).toHaveLength(BASELINE_FAILURES.length);
-
-    const declared = entries.map((item) => failureKey(item.file, item.title)).sort();
-    // Both directions in one assertion: a missing entry AND an extra entry fail it. `toEqual` on the set is the
-    // non-vacuous form — `expect(declared).toContain(...)` per entry would pass with 30 entries.
-    expect(declared).toEqual(baselineKeys);
-    expect(new Set(declared).size).toBe(declared.length);
-
-    // Company-runtime's four previous failures passed on 2026-10-09 and are no longer quarantined.
-    const perFile = new Map<string, number>();
-    for (const item of entries) perFile.set(item.file, (perFile.get(item.file) ?? 0) + 1);
-    expect(Object.fromEntries([...perFile].sort())).toEqual({
-      "tests/advanced-memory-production.test.ts": 1,
-      "tests/chat-entity-mutations.test.ts": 1,
-      "tests/company-orchestration.test.ts": 2,
-      "tests/data-studio-d5-completion.test.ts": 1,
-      "tests/long-ai-company-chat.test.ts": 2,
-      "tests/manual-product-e2e-web.test.ts": 1,
-      "tests/per-request-no-memory-production.test.ts": 1,
-      "tests/production-durable-approvals.test.ts": 1,
-      "tests/production-wasm-exec.test.ts": 1,
-    });
+    // The final audit verified that all 11 quarantined test identities now pass.
+    // Keep the historical BASELINE_FAILURES below/above as synthetic input for negative gate tests.
+    expect(entries).toEqual([]);
   });
 
   it("gives every entry a reason, an owner and an expiry that is after it was added", () => {

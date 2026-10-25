@@ -22,6 +22,8 @@
     "allowJs": true
   },
   "include": [
+    "tests/usage-quotas-disabled.test.ts",
+    "tests/omniroute-marketplace-client.test.ts",
     "tests/project-purge-failure-recovery.test.ts",
     "tests/project-media-route-authorization.test.ts",
     "scripts/verify-coding-agent-data.ts",

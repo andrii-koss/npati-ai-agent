@@ -295,7 +295,8 @@ export class OmniRouteMarketplace {
         apiKeyId: "env-key",
         dailyLimitUsd: 0,
         weeklyLimitUsd: 0,
-        monthlyLimitUsd: input.stopPaidWhenLimitReached ? input.monthlyBudgetUsd : 0,
+        // NPATI does not impose a monthly usage allowance in any deployment.
+        monthlyLimitUsd: 0,
         warningThreshold: input.warningPercent / 100,
         resetInterval: "monthly",
         resetTime: "00:00",

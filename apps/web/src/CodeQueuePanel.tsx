@@ -25,6 +25,7 @@ export interface CodeQueueStatusView {
   userActive: number;
   queue: Array<{ sessionId: string; companyId: string; userId: string; position: number; waitedMs: number }>;
   rateLimits: {
+    enabled?: boolean;
     limits: { maxRunsPerUserPerPeriod: number; maxRunsPerCompanyPerPeriod: number; periodMs: number };
     user: { used: number; limit: number; resetAt: string | null };
     company: { used: number; limit: number; resetAt: string | null };
@@ -231,7 +232,7 @@ export function CodeQueuePanel({ companyId, isUk }: { companyId: string; isUk: b
                   whiteSpace: "nowrap",
                 }}
               >
-                {`${status.rateLimits?.user?.used ?? 0}/${status.rateLimits?.user?.limit ?? 0} · ${status.rateLimits?.company?.used ?? 0}/${status.rateLimits?.company?.limit ?? 0}`}
+                {status.rateLimits?.enabled === false ? (isUk ? "Без квот використання" : "No usage quotas") : `${status.rateLimits?.user?.used ?? 0}/${status.rateLimits?.user?.limit ?? 0} · ${status.rateLimits?.company?.used ?? 0}/${status.rateLimits?.company?.limit ?? 0}`}
               </span>
             </div>
 

@@ -25,13 +25,13 @@ describe("Project API gateway security", () => {
     expect(gateway.isOriginAllowed("*", allowed, "project-a")).toBe(false);
   });
 
-  it("limits each key and IP independently", () => {
+  it("does not impose a platform request allowance on keys or IPs", () => {
     const limiter = new ProjectApiRateLimiter();
     expect(limiter.check("key:a", 1).allowed).toBe(true);
-    expect(limiter.check("key:a", 1).allowed).toBe(false);
+    expect(limiter.check("key:a", 1).allowed).toBe(true);
     expect(limiter.check("key:b", 1).allowed).toBe(true);
     expect(limiter.check("ip:a", 1).allowed).toBe(true);
-    expect(limiter.check("ip:a", 1).allowed).toBe(false);
+    expect(limiter.check("ip:a", 1).allowed).toBe(true);
   });
 
   it("binds runtime transaction context and filter values", async () => {

@@ -286,6 +286,10 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   async getCompanyRunPendingPlan(context: AuthContext, companyId: string, runId: string): Promise<unknown | null> { return company.getCompanyRunPendingPlan(this.pool, context, companyId, runId); }
   async setCompanyRunPendingPlan(context: AuthContext, companyId: string, runId: string, plan: unknown | null): Promise<void> { return company.setCompanyRunPendingPlan(this.pool, context, companyId, runId, plan); }
   async updateCompanyAgentRun(context: AuthContext, companyId: string, runId: string, patch: Partial<CompanyAgentRun>) { return company.updateCompanyAgentRun(this.pool, context, companyId, runId, patch); }
+  async updateCompanyAgentRunStep(context: AuthContext, companyId: string, runId: string, agentId: string, status: CompanyAgentRunStep["status"]) {
+    await this.getCompanyAgentRun(context, companyId, runId);
+    await this.pool.query('UPDATE company_agent_run_steps SET status=$5,updated_at=now() WHERE workspace_id=$1 AND company_id=$2 AND run_id=$3 AND agent_id=$4', [context.workspaceId, companyId, runId, agentId, status]);
+  }
   async replaceCompanyAgentRunSteps(context: AuthContext, companyId: string, runId: string, steps: Array<Pick<CompanyAgentRunStep, "agentId" | "stepOrder" | "lane" | "role" | "status" | "modelId">>) { return company.replaceCompanyAgentRunSteps(this.pool, context, companyId, runId, steps); }
   async appendCompanyAgentToolAudit(context: AuthContext, companyId: string, runId: string, entry: Pick<CompanyAgentToolAudit, "agentId" | "toolName" | "decision" | "status" | "inputSummary" | "errorMessage"> & Partial<Pick<CompanyAgentToolAudit, "latencyMs" | "cost" | "tokens" | "reasonCode" | "sequenceNumber">>) { return company.appendCompanyAgentToolAudit(this.pool, context, companyId, runId, entry); }
   async appendCompanyAgentRunEvent(context: AuthContext, companyId: string, runId: string, entry: Pick<CompanyAgentRunEvent, "eventKey" | "eventType" | "runStatus" | "message"> & Partial<Pick<CompanyAgentRunEvent, "workerId" | "attemptCount" | "details">>) { return company.appendCompanyAgentRunEvent(this.pool, context, companyId, runId, entry); }
@@ -317,7 +321,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   async updateNeutralConversation(context: AuthContext, conversationId: string, title: string) { return collab.updateNeutralConversation(this.pool, context, conversationId, title); }
   async deleteNeutralConversation(context: AuthContext, conversationId: string) { return collab.deleteNeutralConversation(this.pool, context, conversationId); }
   async appendNeutralMessage(context: AuthContext, conversationId: string, role: ConversationMessage["role"], content: string) { return collab.appendNeutralMessage(this.pool, context, conversationId, role, content); }
-  async appendConversationResearch(context: AuthContext, conversationId: string, input: ConversationResearchInput) { return research.appendConversationResearch(this.pool, context, conversationId, input); }
+  async appendConversationResearch(context: AuthContext, conversationId: string, input: ConversationResearchInput) { if (input.companyId) await this.getCompany(context, input.companyId); return research.appendConversationResearch(this.pool, context, conversationId, input); }
   async listConversationResearch(context: AuthContext, conversationId: string, limit?: number) { return research.listConversationResearch(this.pool, context, conversationId, limit); }
   async getCompanyMembership(companyId: string, userId: string): Promise<CompanyMember | null> { return company.getCompanyMembership(this.pool, companyId, userId); }
   async listCompanyMembers(companyId: string): Promise<CompanyMember[]> { return company.listCompanyMembers(this.pool, companyId); }

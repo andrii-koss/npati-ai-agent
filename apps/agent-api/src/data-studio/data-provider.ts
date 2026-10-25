@@ -1,3 +1,4 @@
+import { usageQuotasEnabled } from "../usage-quota-policy";
 import { createHash } from "node:crypto";
 import { Pool, type PoolClient } from "pg";
 import { DataStudioError, bindFilter, quoteIdentifier, validateIdentifier } from "./identifier";
@@ -73,6 +74,7 @@ export class PostgresDataProvider implements DataProvider {
   }
 
   assertLimits(operation: string, current: SchemaSnapshot, usageBytes: number, target?: string): void {
+    if (!usageQuotasEnabled()) return;
     if (usageBytes >= this.maxDatabaseBytes) throw new DataStudioError(409, "quota", "Database size limit reached", false, "DATABASE_QUOTA");
     if (operation === "add_field" && (current.tables.find((table) => table.name === target)?.columns.length ?? 0) >= this.maxFields) {
       throw new DataStudioError(409, "quota", "Field limit reached", false, "FIELD_QUOTA");
@@ -83,6 +85,7 @@ export class PostgresDataProvider implements DataProvider {
   }
 
   private countQuery(backend: DataBackend, environment: DataEnvironmentName): void {
+    if (!usageQuotasEnabled()) return;
     const key = backend.id + ":" + environment;
     const minute = Math.floor(Date.now() / 60000);
     const previous = this.requestCounts.get(key);

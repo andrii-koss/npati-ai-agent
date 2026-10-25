@@ -116,13 +116,13 @@ export interface ConversationMessage {
   id: string; conversationId: string; role: "user" | "assistant" | "system"; content: string; createdAt: string;
 }
 /** Web research performed in one conversation, kept verbatim so a later turn recalls exact sources instead of a summary. */
-export interface ConversationResearchSource { url: string; title?: string }
+export interface ConversationResearchSource { url: string; title?: string; accessedAt?: string }
 export interface ConversationResearchEvidence {
   id: string; workspaceId: string; userId: string; conversationId: string; companyId: string | null;
   tool: string; kind: string; query: string; sources: ConversationResearchSource[]; sourceCount: number;
-  evidenceExcerpt: string; degraded?: string; createdAt: string;
+  evidenceExcerpt: string; pageCount?: number; degraded?: string; createdAt: string;
 }
-export type ConversationResearchInput = Pick<ConversationResearchEvidence, "companyId" | "tool" | "kind" | "query" | "sources" | "evidenceExcerpt"> & { degraded?: string };
+export type ConversationResearchInput = Pick<ConversationResearchEvidence, "companyId" | "tool" | "kind" | "query" | "sources" | "evidenceExcerpt"> & { degraded?: string; pageCount?: number };
 export interface WorkspaceOverview {
   user: { id: string; displayName: string };
   workspace: { id: string; name: string; role: string };

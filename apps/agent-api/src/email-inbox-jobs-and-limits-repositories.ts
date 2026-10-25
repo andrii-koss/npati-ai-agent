@@ -1,3 +1,4 @@
+import { usageQuotasEnabled } from "./usage-quota-policy";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import type { AuthContext } from "@npati/workspace";
@@ -15,6 +16,8 @@ export async function checkRateLimit(host: EmailInboxJobsHost,
     account: CompanyEmailAccount,
     recipientEmail: string
   ): Promise<{ allowed: boolean; reason?: string }> {
+
+    if (!usageQuotasEnabled()) return { allowed: true };
 
     const normalizedRecipient = recipientEmail.trim().toLowerCase();
     if (host.pool) {
@@ -135,6 +138,8 @@ export async function reserveSendQuota(host: EmailInboxJobsHost,
     account: CompanyEmailAccount,
     recipientEmail: string
   ): Promise<{ allowed: boolean; reason?: string }> {
+
+    if (!usageQuotasEnabled()) return { allowed: true };
 
     if (!host.pool) {
       const result = await checkRateLimit(host, companyId, account, recipientEmail);

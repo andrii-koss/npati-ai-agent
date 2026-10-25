@@ -1,3 +1,4 @@
+import { usageQuotasEnabled } from "./usage-quota-policy";
 import {
   CODE_SUBAGENT_MAX_NODE_DEPTH,
   clampCodeSubagentRegistryDepth,
@@ -93,7 +94,7 @@ export class A2AQuotaManager {
       };
     }
 
-    if (budget.usedTokens + requestedTokens > budget.maxTokens) {
+    if (usageQuotasEnabled() && budget.usedTokens + requestedTokens > budget.maxTokens) {
       return {
         allowed: false,
         remainingTokens: Math.max(0, budget.maxTokens - budget.usedTokens),
@@ -102,7 +103,7 @@ export class A2AQuotaManager {
       };
     }
 
-    if (budget.usedCostUsd + estimatedCostUsd > budget.maxCostUsd) {
+    if (usageQuotasEnabled() && budget.usedCostUsd + estimatedCostUsd > budget.maxCostUsd) {
       return {
         allowed: false,
         remainingTokens: Math.max(0, budget.maxTokens - budget.usedTokens),

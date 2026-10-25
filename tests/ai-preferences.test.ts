@@ -74,7 +74,7 @@ describe('NPATI AI preferences', () => {
       monthlyBudgetUsd: 35, warningPercent: 75, stopPaidWhenLimitReached: false,
     });
     expect((await store.get(owner)).routing).toMatchObject({ mode: 'manual', defaultModelId: model.id, fallbackOnFailure: false, monthlyBudgetUsd: 35 });
-    expect(await store.get(otherTenant)).toMatchObject({ addedModels: [], routing: { automaticModel: 'auto', monthlyBudgetUsd: 20 } });
+    expect(await store.get(otherTenant)).toMatchObject({ addedModels: [], routing: { automaticModel: 'auto', monthlyBudgetUsd: 0, stopPaidWhenLimitReached: false } });
   });
 
   it('19. isolates users inside the same workspace', async () => {

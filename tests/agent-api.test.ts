@@ -411,7 +411,11 @@ describe("Agent API", () => {
       executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
       getCapabilities: async () => ["chat", "vision", "audio.transcription"], healthCheck: async () => ({ status: "ok" }),
     };
-    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const marketplace = {
+      marketplace: async () => ({ overview: { connectedProviders: 1 } }),
+      models: async () => [{ id: "openai/gpt-5.6-luna", providerId: "openai", name: "Vision fixture", capabilities: ["chat", "vision"] }],
+      provider: async () => ({ connected: true }),
+    } as unknown as OmniRouteMarketplace;
     const dataDirectory = await mkdtemp(path.join(tmpdir(), "npati-attachments-"));
     tempDirectories.push(dataDirectory);
     const app = buildApp({

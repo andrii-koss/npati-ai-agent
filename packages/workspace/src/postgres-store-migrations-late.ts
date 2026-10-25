@@ -639,4 +639,18 @@ export async function runPostgresMigrationsPost086(pool: Pool): Promise<void> {
       } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
     }
 
+    const pageCountMigration = await pool.query("SELECT 1 FROM schema_migrations WHERE version='095_research_page_count'");
+    if (!pageCountMigration.rowCount) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT pg_advisory_xact_lock(hashtext('095_research_page_count'))");
+        const { runMigration095 } = await import("./migration-095");
+        await runMigration095(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('095_research_page_count') ON CONFLICT DO NOTHING");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
+
 }

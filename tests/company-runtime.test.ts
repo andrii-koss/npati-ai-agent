@@ -2,7 +2,7 @@ import { buildApp } from "../apps/agent-api/src/app";
 import { CompanyDelegationRuntime } from "../apps/agent-api/src/company-runtime";
 import { AIPreferencesStore } from "../apps/agent-api/src/ai-preferences";
 import type { AuthProvider } from "../apps/agent-api/src/auth";
-import type { AIEngine, OmniRouteComboInput } from "@npati/omniroute-adapter";
+import type { AIEngine, ChatRequest, OmniRouteComboInput } from "@npati/omniroute-adapter";
 import type { AuthContext } from "@npati/workspace";
 import { InMemoryWorkspaceStore } from "@npati/workspace";
 import type { OmniRouteMarketplace } from "@npati/omniroute-adapter";
@@ -156,7 +156,7 @@ describe("Company delegation runtime", () => {
 
   it("uses A2A planning, OmniRoute Pipeline, the Settings default, tool enforcement and idempotency", async () => {
     const combos: OmniRouteComboInput[] = [];
-    const chat = vi.fn(async () => ({
+    const chat = vi.fn(async (_request: ChatRequest) => ({
       content: "Reviewed final answer",
       model: "openai/gpt-4o",
       usage: { promptTokens: 120, completionTokens: 30, totalTokens: 150, cachedTokens: 80 },
@@ -199,15 +199,18 @@ describe("Company delegation runtime", () => {
       JSON.stringify(combo.models) === JSON.stringify(["openai/gpt-4o"]))).toBe(true);
     expect(combos.filter((combo) => combo.strategy === "priority").every((combo) =>
       combo.config?.maxRetries === 2 && combo.config?.failoverBeforeRetry === true)).toBe(true);
-    expect(chat).toHaveBeenCalledWith(expect.objectContaining({ model: expect.stringMatching(/^npati\/p\//) }));
-    expect(completed.headers["x-npati-cost-usd"]).toBe("0.0042");
-    expect(completed.headers["x-npati-tokens-total"]).toBe("150");
+    expect(chat).toHaveBeenCalledTimes(3);
+    expect(chat.mock.calls.every(([request]) => /^npati\/a\//.test(request.model ?? ""))).toBe(true);
+    expect(completed.headers["x-npati-cost-usd"]).toBe("0.0126");
+    expect(completed.headers["x-npati-tokens-total"]).toBe("450");
     expect(completed.headers["x-npati-routing-strategy"]).toBe("pipeline");
     expect(completed.headers["x-npati-cache-hit"]).toBe("true");
-    expect(completed.headers["x-npati-cache-savings-usd"]).toBe("0.0018");
+    expect(completed.headers["x-npati-cache-savings-usd"]).toBe("0.0054");
     const details = await app.inject({ method: "GET", url: `/companies/${companyId}/runs/${runId}` });
-    expect(details.json().run).toMatchObject({ status: "completed", executionMode: "pipeline", result: "Reviewed final answer", totalCost: 0.0042, totalTokens: 150 });
+    expect(details.json().run).toMatchObject({ status: "completed", executionMode: "pipeline", result: "Reviewed final answer", totalCost: expect.closeTo(0.0126, 6), totalTokens: 450 });
     expect(details.json().steps).toHaveLength(3);
+    expect(details.json().steps.every((step: { status: string }) => step.status === "completed")).toBe(true);
+    expect(details.json().toolAudit.filter((entry: { inputSummary: { phase?: string } }) => entry.inputSummary.phase === "agent-result")).toHaveLength(3);
     expect(details.json().toolAudit.filter((entry: { toolName: string }) => entry.toolName !== "ai.inference").map((entry: { status: string }) => entry.status)).toEqual(["requested", "succeeded", "requested", "succeeded"]);
     expect(details.json().toolAudit).toEqual(expect.arrayContaining([expect.objectContaining({
       toolName: "ai.inference", latencyMs: 240, cost: 0.0042, tokens: 150, reasonCode: "routing_decision",
@@ -382,7 +385,8 @@ it.each([true, false])("allows an explicit main-agent author before a distinct r
     expect(pipeline.models).toHaveLength(3);
     expect(pipeline.models[0]).toEqual(pipeline.models[2]);
     expect(pipeline.models[1]).not.toEqual(pipeline.models[0]);
-    expect(chat).toHaveBeenCalledTimes(1);
+    expect(chat).toHaveBeenCalledTimes(3);
+    expect(response.json().steps.every((step: { status: string }) => step.status === "completed")).toBe(true);
   }
 });
 

@@ -1,3 +1,4 @@
+import * as usageQuotaPolicy from "../apps/agent-api/src/usage-quota-policy";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Fastify from "fastify";
 import { InMemoryWorkspaceStore, type AuthContext, type CodeSession } from "@npati/workspace";
@@ -17,7 +18,7 @@ const session: CodeSession = { id: "s", companyId: "c", projectId: "p", workspac
 const scope = { companyId: "c", projectId: "p", sessionId: "s" };
 const durableScope = { ...scope, dataClassification: session.dataClassification, retentionClass: session.retentionClass };
 const closes: Array<() => Promise<unknown>> = [];
-afterEach(async () => { for (const close of closes.splice(0).reverse()) await close(); });
+afterEach(async () => { vi.restoreAllMocks(); for (const close of closes.splice(0).reverse()) await close(); });
 async function setup() {
   const store = new InMemoryWorkspaceStore(), log = new CodeRunStateLog({ store });
   await log.startRun({ ctx, ...scope, runId: "root", owner: "worker" });
@@ -95,7 +96,9 @@ describe("Step 8 durable workspace projection and recovery drills", () => {
     expect(producer).not.toHaveBeenCalled(); expect(await h.store.codeProcesses!.transact(durableScope, { kind: "read" })).toEqual(before);
   });
 
-  it("two concurrent real child runners spend one root allowance and stop before another model call", async () => {
+  it("retired budget algorithm: concurrent children share one root allowance", async () => {
+    // Exercise the retained algorithm explicitly; release policy has no runtime activation switch.
+    vi.spyOn(usageQuotaPolicy, "usageQuotasEnabled").mockReturnValue(true);
     const store = new InMemoryWorkspaceStore(), log = new CodeRunStateLog({ store });
     const manager = new A2AQuotaManager(), quota = new CodeRunSharedQuota(manager, { limits: { maxTokens: 12_000, maxCostUsd: 1, maxDepth: 2 } });
     const childSessions = ["child-a", "child-b"].map(id => ({ ...session, id, parentSessionId: session.id }));

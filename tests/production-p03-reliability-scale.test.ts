@@ -184,7 +184,7 @@ describe("P0.3 Production Suite: Runtime Reliability, Streaming, Observability &
 
   // 7. #189 Atomic RPM Rolling Leases
   describe("#189 Atomic RPM Rolling Leases (system.atomic_rpm_rolling_leases)", () => {
-    it("grants atomic leases within capacity, rejects exceeding requests, and releases leases", () => {
+    it("retains lease lifecycle without imposing an RPM allowance", () => {
       const manager = new AtomicRpmLeaseManager(1000);
 
       const l1 = manager.acquireLease({ provider: "anthropic", maxRpm: 5, tokens: 3 });
@@ -197,8 +197,8 @@ describe("P0.3 Production Suite: Runtime Reliability, Streaming, Observability &
 
       // Over capacity
       const l3 = manager.acquireLease({ provider: "anthropic", maxRpm: 5, tokens: 1 });
-      expect(l3.granted).toBe(false);
-      expect(l3.reason).toContain("RPM limit exceeded");
+      expect(l3.granted).toBe(true);
+      expect(l3.reason).toContain("Granted rolling lease");
 
       // Release l1
       manager.releaseLease(l1.leaseId!);
@@ -209,7 +209,7 @@ describe("P0.3 Production Suite: Runtime Reliability, Streaming, Observability &
 
   // 8. #190 Quota-Share Routing
   describe("#190 Quota-Share Routing (security.quota-share_routing)", () => {
-    it("enforces guaranteed quota share for enterprise tenants under cluster saturation", () => {
+    it("admits all tenant tiers without local usage quota shares", () => {
       const router = new QuotaShareRouter();
       router.setTenantShare("tenant-enterprise", "enterprise", 60);
       router.setTenantShare("tenant-free", "starter", 10);
@@ -220,12 +220,12 @@ describe("P0.3 Production Suite: Runtime Reliability, Streaming, Observability &
 
       // Saturated load (85% of system max)
       const satFree = router.isAdmitted("tenant-free", 85, 100);
-      expect(satFree.admitted).toBe(false);
-      expect(satFree.reason).toContain("throttled to preserve fair share");
+      expect(satFree.admitted).toBe(true);
+      expect(satFree.reason).toContain("quotas are disabled");
 
       const satEnterprise = router.isAdmitted("tenant-enterprise", 85, 100);
       expect(satEnterprise.admitted).toBe(true);
-      expect(satEnterprise.reason).toContain("guaranteed quota share");
+      expect(satEnterprise.reason).toContain("quotas are disabled");
     });
   });
 

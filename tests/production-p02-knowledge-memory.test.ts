@@ -494,3 +494,20 @@ describe("compaction keeps user-stated facts", () => {
     expect(result.summary).toContain("CHAT_A_PIN_731");
   });
 });
+
+
+describe("conversation-only facts never enter shared durable memory", () => {
+  const statements = ["Remember only in this chat: PRIVATE_CHAT_PIN_731.", "\u0417\u0430\u043f\u0430\u043c'\u044f\u0442\u0430\u0439 \u0443 \u0446\u044c\u043e\u043c\u0443 \u0447\u0430\u0442\u0456: PRIVATE_CHAT_PIN_731."];
+  it.each(statements)("excludes a chat-only fact from Business compaction flush: %s", (content) => {
+    const messages = [{role:"user",content}, {role:"user",content:"Our budget is 15000 USD."}];
+    expect(AutomaticMemoryExtractor.extractFacts(messages).some(fact => fact.content.includes("PRIVATE_CHAT_PIN_731"))).toBe(true);
+    const flushed = ContextCompactor.extractMemoriesToFlush(messages);
+    expect(flushed.some(fact => fact.includes("PRIVATE_CHAT_PIN_731"))).toBe(false);
+    expect(flushed.some(fact => fact.includes("15000"))).toBe(true);
+  });
+  it.each(statements)("excludes a chat-only fact from automatic Company memory: %s", async (content) => {
+    const addMemory=vi.fn();const repo={memories:async()=>[],addMemory} as unknown as CompanyKnowledgeRepository;
+    const saved=await AutomaticMemoryExtractor.autoExtractAndPersist({repo,auth:{workspaceId:"private-ws",userId:"private-user",permissions:["business:manage"]},companyId:"private-company",messages:[{role:"user",content}]});
+    expect(saved).toEqual([]);expect(addMemory).not.toHaveBeenCalled();
+  });
+});

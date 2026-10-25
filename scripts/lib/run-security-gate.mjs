@@ -953,6 +953,8 @@ export const SECURITY_GATE_TESTS = [
   // exactly at both boundaries, the provider applies both **before** any Docker call and releases the Company's
   // capacity when a creation fails, and the Company-run gate in `app.ts` is pinned as untouched. Neither suite
   // needs Docker, PostgreSQL or a port.
+  // Current release: no usage quotas; concurrency, permissions and approvals remain enforced.
+  "tests/usage-quotas-disabled.test.ts",
   "tests/coding-agent-r1a-limits-and-quotas.test.ts",
   "tests/coding-agent-r1a-sandbox-quotas.test.ts",
   // Tool visibility tiers: a read-only analysis or plan run offers no write, shell or data-write tool at all, a

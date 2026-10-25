@@ -25,6 +25,19 @@ describe("conversation research evidence store", () => {
     await expect(store.listConversationResearch!(alice, chatA.id)).rejects.toThrow();
   });
 
+  it("preserves every URL, timestamp, full evidence and page count without mutable aliases", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const chat = await store.createNeutralConversation(alice, "Lossless evidence");
+    const sources = Array.from({ length: 32 }, (_, index) => ({ url: "https://example.com/page/" + index, title: "Page " + index, accessedAt: "2026-10-24T00:00:00Z" }));
+    const full = "Evidence\n".repeat(500);
+    const saved = await store.appendConversationResearch!(alice, chat.id, { ...evidence, sources, evidenceExcerpt: full, pageCount: 29 });
+    saved.sources.length = 0;
+    const [actual] = await store.listConversationResearch!(alice, chat.id);
+    expect(actual).toMatchObject({ sourceCount: 32, sources, evidenceExcerpt: full, pageCount: 29 });
+    actual!.sources.length = 0;
+    expect((await store.listConversationResearch!(alice, chat.id))[0]!.sources).toHaveLength(32);
+  });
+
   it("formats exact sources and counts, newest last, within a bounded block", () => {
     const now = new Date().toISOString();
     const text = researchEvidenceContext([

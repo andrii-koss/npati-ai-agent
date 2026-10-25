@@ -371,6 +371,7 @@ export class WebResearchService {
     const degraded = [...failures, ...available.flatMap(value => value.degraded ? [value.degraded] : [])];
     return {
       kind: "url_analysis",
+      ...(available.every(value => value.pageCount !== undefined) ? { pageCount: available.reduce((sum, value) => sum + value.pageCount!, 0) } : {}),
       sources: available.flatMap(value => value.sources).filter((source, index, sources) => sources.findIndex(item => item.url === source.url) === index),
       context: ["Explicit research targets: " + urls.join(", "), "Use retrieved evidence only. Missing targets cannot be presented as analyzed.", ...available.map(value => value.context.slice(0, budget)), ...(failures.length ? ["Incomplete coverage: " + failures.join("; ")] : [])].join("\n\n").slice(0, this.limits.maxContentCharacters),
       degraded: degraded.length ? degraded.join("; ") : undefined,
@@ -446,7 +447,7 @@ export class WebResearchService {
       ...pages.map((page) => pageEvidence(page, perPage)),
     ].join("\n\n");
     report(progress, { type: "research_completed", sourceCount: sources.length, pageCount: pages.length });
-    return { kind: "url_analysis", context, sources, degraded };
+    return { kind: "url_analysis", context, sources, degraded, pageCount: pages.length };
   }
 
   private async analyzeCompetitors(business: BusinessResearchContext, refresh: boolean, progress?: ResearchProgressListener): Promise<ResearchOutcome> {
@@ -541,6 +542,7 @@ export class WebResearchService {
     report(progress, { type: "research_completed", sourceCount: sources.length, pageCount: [...pagesByDomain.values()].reduce((count, pages) => count + pages.length, 0) });
     return {
       kind: "competitor_analysis",
+      pageCount: [...pagesByDomain.values()].reduce((count, pages) => count + pages.length, 0),
       context,
       sources,
       degraded: candidates.length === 0 ? "No sufficiently relevant competitor candidates were validated." : degraded,
@@ -622,6 +624,7 @@ export class WebResearchService {
     report(progress, { type: "research_completed", sourceCount: sources.length, pageCount: pages.length });
     return {
       kind: "web_search",
+      pageCount: pages.length,
       context,
       sources,
       degraded: candidates.length === 0 ? "No relevant public search results were found." : degraded,

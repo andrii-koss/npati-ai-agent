@@ -1,3 +1,4 @@
+import { conversationScopedRemember } from "./workspace-chat-signals";
 import type { AuthContext } from "@npati/workspace";
 import type { CompanyKnowledgeRepository, CompanyMemory } from "./company-knowledge";
 
@@ -83,7 +84,8 @@ export class AutomaticMemoryExtractor {
     if (deps.noMemory) return [];
     const authContext = deps.ctx ?? deps.auth;
     if (!authContext) throw new Error("AuthContext is required for memory persistence");
-    const candidates = this.extractFacts(deps.messages).filter((candidate) => candidate.confidence >= (deps.minConfidence ?? 0.8));
+    const candidates = this.extractFacts(deps.messages).filter((candidate) => candidate.confidence >= (deps.minConfidence ?? 0.8)
+      && !conversationScopedRemember.test(deps.messages[candidate.provenance.messageIndex]?.content ?? ""));
     if (candidates.length === 0) return [];
     const uniqueCandidates = this.deduplicate(candidates, await deps.repo.memories(authContext, deps.companyId));
     const created: CompanyMemory[] = [];

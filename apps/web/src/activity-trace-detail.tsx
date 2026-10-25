@@ -223,6 +223,7 @@ export function ActivityTraceDetail({
                   <span className={`step-status-badge ${step.status}`}>{step.status}</span>
                   <code className="trace-agent-id">{t("activity.trace.agentPrefix", { id: step.agentId.slice(0, 10) })}...</code>
                 </div>
+                {activeRunDetails.toolAudit?.filter(tool => tool.agentId === step.agentId && tool.inputSummary?.phase === "agent-result" && typeof tool.inputSummary.result === "string").map(tool => <pre key={tool.id} className="trace-agent-result">{String(tool.inputSummary!.result)}</pre>)}
                 <div className="trace-step-meta">
                   <span>{t("activity.trace.modelPrefix")} <strong>{step.modelId || "auto"}</strong></span>
                   {step.lane !== undefined && <span>{t("activity.trace.lanePrefix", { lane: step.lane })}</span>}

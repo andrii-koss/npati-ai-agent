@@ -14,6 +14,7 @@ import {
 import { AudioAttachmentPlayer, SynthesizedVoiceAudioPlayer } from "./chat-message-audio";
 import { RenderedCodeBlock, RenderedTableBlock } from "./chat-message-code-table";
 import { codingStopCopy } from "./coding-stop-copy";
+import { approvalLine, ChatApprovalCard } from "./chat-approval-card";
 
 export { collectSourceTitles, isSourceCitationLine, toTrackedChatUrl };
 
@@ -486,6 +487,12 @@ export function ChatMessageContent({ content }: { content: string }) {
 
   while (i < lines.length) {
     const line = lines[i]!;
+    const approval = approvalLine.exec(line.trim());
+    if (approval) {
+      elements.push(<ChatApprovalCard key={`approval-${i}`} companyId={approval[1]!} runId={approval[2]!} approvalId={approval[3]!} toolName={approval[4]!} />);
+      i++;
+      continue;
+    }
 
     // 1. Code blocks: ```lang
     if (line.trim().startsWith("```")) {

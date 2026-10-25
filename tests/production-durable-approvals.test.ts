@@ -89,16 +89,16 @@ describe("Production durable approvals and route tiers",()=>{
       expect(response.json()).toMatchObject({ run: { status: "failed", errorCode: code } });
     } finally { await app.close(); }
   });
-  it("enforces the configured route tier and emits standard rate-limit headers",async()=>{
+  it("ignores legacy route quotas without emitting allowance headers",async()=>{
     const app=Fastify();
     const runtime={list:vi.fn(async()=>[])} as unknown as CompanyDelegationRuntime;
     const authProvider={authenticate:vi.fn(async()=>auth)};
     const guard=new RouteGuardTiers({pro:{maxRequestsPerMinute:1,burstAllowance:0}});
     registerCompanyRuntimeRoutes(app,runtime,authProvider,undefined,guard);
     const first=await app.inject({method:"GET",url:"/companies/company-1/runs"});
-    expect(first.statusCode).toBe(200);expect(first.headers["x-ratelimit-tier"]).toBe("pro");
+    expect(first.statusCode).toBe(200);expect(first.headers["x-ratelimit-tier"]).toBeUndefined();
     const limited=await app.inject({method:"GET",url:"/companies/company-1/runs"});
-    expect(limited.statusCode).toBe(429);expect(limited.headers["retry-after"]).toBeDefined();
+    expect(limited.statusCode).toBe(200);expect(limited.headers["retry-after"]).toBeUndefined();
     await app.close();
   });
 

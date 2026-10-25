@@ -357,7 +357,7 @@ describe("P0.1 Production Security, Auth & Guardrails Suite", () => {
       // Tenant B has default preferences and knows nothing about Tenant A
       const prefB = await store.get(tenantB);
       expect(prefB.routing.preferFree).toBe(true);
-      expect(prefB.routing.monthlyBudgetUsd).toBe(20);
+      expect(prefB.routing.monthlyBudgetUsd).toBe(0);
       expect(prefB.addedModels).toEqual([]);
     });
   });

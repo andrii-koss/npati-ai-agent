@@ -135,7 +135,7 @@ export function applyCodeInbox(
     const existing = state.messages.find((m) => m.completion?.eventId === notice.eventId);
     if (existing) delivered.push(existing);
     else {
-      if (state.messages.length >= 1000 || pending("next-turn").length + pending("next-step").length >= 100) throw new CodeInboxError("inbox_full", 429);
+      if (pending("next-turn").length + pending("next-step").length >= 100) throw new CodeInboxError("inbox_full", 429);
       const target = state.phase === "running" && state.runId === notice.parentRunId && live(state.runId)?.owner === notice.parentOwner ? "next-step" : "next-turn";
       const message: CodeInboxMessage = { id: `completion-${notice.eventId}`, requestId: `completion-${notice.eventId}`, authorId: command.authorId,
         text: `Process ${notice.processId} settled: ${notice.status}. Result: ${notice.resultRef}`, completion: structuredClone(notice),
@@ -155,8 +155,8 @@ export function applyCodeInbox(
     } else {
       if (command.expectedRevision !== undefined && command.expectedRevision !== state.revision) throw new CodeInboxError("inbox_revision_conflict");
       if (!command.text.trim() || command.text.length > 16_000 || !command.requestId || command.requestId.length > 128) throw new CodeInboxError("invalid_arguments", 400);
-      if (pending("next-turn").length + pending("next-step").length >= 100 || state.messages.length >= 1_000
-        || state.messages.reduce((size, m) => size + m.text.length, command.text.length) > 2_000_000) throw new CodeInboxError("inbox_full", 429);
+      if (pending("next-turn").length + pending("next-step").length >= 100
+        || state.messages.filter(m => m.status === "pending" || m.status === "claimed").reduce((size, m) => size + m.text.length, command.text.length) > 2_000_000) throw new CodeInboxError("inbox_full", 429);
       const target = command.mode === "steer" && state.phase === "running" && live(state.runId) ? "next-step" : "next-turn";
       const message: CodeInboxMessage = { id: command.id, requestId: command.requestId, requestFingerprint, authorId: command.authorId, mode: command.mode,
         text: command.text, target, status: "pending", runId: null, turnIndex: null, revision: 1, createdAt: now.toISOString() };
@@ -170,7 +170,7 @@ export function applyCodeInbox(
     if (message.revision !== command.expectedRevision) throw new CodeInboxError("inbox_revision_conflict");
     if (command.kind === "edit") {
       if (!command.text.trim() || command.text.length > 16_000) throw new CodeInboxError("invalid_arguments", 400);
-      if (state.messages.reduce((size, m) => size + (m.id === message.id ? command.text.length : m.text.length), 0) > 2_000_000) throw new CodeInboxError("inbox_full", 429);
+      if (state.messages.filter(m => m.status === "pending" || m.status === "claimed").reduce((size, m) => size + (m.id === message.id ? command.text.length : m.text.length), 0) > 2_000_000) throw new CodeInboxError("inbox_full", 429);
       message.text = command.text;
       event("input.updated", message.id);
     } else {

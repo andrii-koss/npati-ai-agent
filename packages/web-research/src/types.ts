@@ -147,6 +147,8 @@ export interface ResearchJob {
 }
 
 export interface ResearchOutcome {
+  /** Retrieved pages, distinct from discovered/search-only sources. Undefined means unavailable. */
+  pageCount?: number;
   kind: "url_analysis" | "web_search" | "competitor_analysis";
   context: string;
   sources: ResearchSource[];

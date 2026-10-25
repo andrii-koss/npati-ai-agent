@@ -116,6 +116,8 @@ export async function updateCompany(host: InMemoryCompanyState, context: AuthCon
 
 export async function deleteCompany(host: InMemoryCompanyState, context: AuthContext, companyId: string) {
     assertCompany(host, context, companyId);
+    const removedAgentIds = new Set([...host.companyAgents.values()].filter(agent => agent.companyId === companyId).map(agent => agent.id));
+    for (const [id, goal] of host.goals) if (removedAgentIds.has(goal.assignedAgentId)) host.goals.set(id, { ...goal, assignedAgentId: null });
     host.companies.delete(companyId);
     for (const [id, project] of host.projects) if (project.companyId === companyId) host.projects.delete(id);
     for (const [id, agent] of host.companyAgents) if (agent.companyId === companyId) host.companyAgents.delete(id);
@@ -186,6 +188,7 @@ export async function deleteCompanyAgent(host: InMemoryCompanyState, context: Au
     if (!agent || agent.workspaceId !== context.workspaceId || agent.companyId !== companyId) return false;
     if (agent.revision !== expectedRevision) throw new Error("Agent was changed by another request. Reload and try again.");
     host.companyAgents.delete(agentId);
+    for (const [id, goal] of host.goals) if (goal.assignedAgentId === agentId) host.goals.set(id, { ...goal, assignedAgentId: null });
     for (const [id, edge] of host.companyEdges) if (edge.parentAgentId === agentId || edge.childAgentId === agentId) host.companyEdges.delete(id);
     if (company.mainAgentId === agentId) host.companies.set(companyId, { ...company, mainAgentId: undefined, revision: company.revision + 1, updatedAt: now() });
     return true;

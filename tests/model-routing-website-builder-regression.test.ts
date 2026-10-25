@@ -561,22 +561,25 @@ describe("Settings default model changes", () => {
       ensureA2AEnabled:async()=>{},
       ensureCombo:async(input:any)=>{if(!registry.has(input.name))registry.set(input.name,structuredClone(input));return {name:input.name};},
       a2aSend:async(request:any)=>{expect(request.model).toBe(expected);return {taskId:"plan",content:JSON.stringify({mode:"single",agentIds:[worker.id],toolRequests:[]})};},
-      chat:async(request:any)=>{executed.push(request.model);expect(resolve(request.model)).toEqual([expected,expected]);return {content:"Completed"};},
+      chat:async(request:any)=>{executed.push(request.model);expect(resolve(request.model)).toEqual([expected]);return {content:"Completed"};},
     } as unknown as AIEngine;
     const runtime=new CompanyDelegationRuntime(store,ai,5000,undefined,undefined,undefined,undefined,undefined,undefined,undefined,undefined,
       async ctx=>{const prefs=await preferences.get(ctx);return prefs.addedModels.filter(model=>model.id===prefs.routing.defaultModelId);},true);
     const first=await runtime.execute(auth,company.id,{task:"Create a site",mode:"single",preferredAgentId:worker.id},"switch-first");
     expect(first.run.status).toBe("completed");
+    expect(executed).toHaveLength(2);
     expected=newModel;
     await preferences.setDefault(auth,newModel);
     const second=await runtime.execute(auth,company.id,{task:"Create a site",mode:"single",preferredAgentId:worker.id},"switch-second");
     expect(second.run.status).toBe("completed");
     expect(second.steps.every(step=>step.modelId===newModel)).toBe(true);
     expect((await store.getCompanyAgent(auth,company.id,worker.id)).revision).toBe(worker.revision);
-    expect(executed[1]).not.toBe(executed[0]);
+    expect(executed).toHaveLength(4);
+    expect(executed.slice(2, 4)).not.toEqual(executed.slice(0, 2));
     const third=await runtime.execute(auth,company.id,{task:"Create a site",mode:"single",preferredAgentId:worker.id},"switch-third");
     expect(third.run.status).toBe("completed");
-    expect(executed[2]).toBe(executed[1]);
+    expect(executed).toHaveLength(6);
+    expect(executed.slice(4, 6)).toEqual(executed.slice(2, 4));
   });
   it("classifies empty provider responses as model failures", () => {
     expect(isModelError(new Error("NPATI AI chat failed with HTTP 502: [ollama-cloud/gemma4:31b] Provider returned empty content (reset after 3s)"))).toBe(true);

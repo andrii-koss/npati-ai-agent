@@ -369,7 +369,7 @@ describe("D7 — backups and restore", () => {
 });
 
 describe("D7 — quotas", () => {
-  it("reports ok/warning/exceeded states and blocks writes at the hard limit", async () => {
+  it("reports usage without enforcing persisted database allowances", async () => {
     const state = fakeState();
     state.environments.prod.limits = { maxDatabaseBytes: 1000 };
     const { provisioner } = fakeProvisioner(state);
@@ -383,14 +383,15 @@ describe("D7 — quotas", () => {
 
     process.env.__TEST_USAGE_BYTES = "900";
     const warning = await quotas.report(owner, state.backend.companyId, state.backend.id, "prod");
-    expect(warning.state).toBe("warning");
+    expect(warning.state).toBe("ok");
     expect(warning.writesBlocked).toBe(false);
 
     process.env.__TEST_USAGE_BYTES = "1200";
     const exceeded = await quotas.report(owner, state.backend.companyId, state.backend.id, "prod");
-    expect(exceeded.state).toBe("exceeded");
-    expect(exceeded.writesBlocked).toBe(true);
-    await expect(quotas.assertWritesAllowed(state.backend, "prod")).rejects.toMatchObject({ code: "QUOTA_EXCEEDED", status: 507 });
+    expect(exceeded.state).toBe("ok");
+    expect(exceeded.usageQuotasEnabled).toBe(false);
+    expect(exceeded.writesBlocked).toBe(false);
+    await expect(quotas.assertWritesAllowed(state.backend, "prod")).resolves.toBeUndefined();
     delete process.env.__TEST_USAGE_BYTES;
   });
 });

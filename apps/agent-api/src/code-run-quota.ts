@@ -1,3 +1,4 @@
+import { usageQuotasEnabled } from "./usage-quota-policy";
 /**
  * C12 + R1 (section A, item 2): the coding agent's budget, expressed as the port the runner already calls.
  *
@@ -277,6 +278,7 @@ export class CodeRunSharedQuota implements CodeRunQuotaPort {
       };
     }
 
+    if (!usageQuotasEnabled()) return { allowed: true };
     const dailyScopes: Array<{ scope: "user_daily" | "company_daily"; key: string; subjectId: string; label: string }> = [];
     if (scope.userId) {
       dailyScopes.push({
@@ -332,6 +334,7 @@ export class CodeRunSharedQuota implements CodeRunQuotaPort {
     const key = this.budgetKey(sessionId);
     this.ensureBudget(key);
     this.manager.recordUsage(key, tokens, costUsd);
+    if (!usageQuotasEnabled()) return;
     this.reportThreshold(key, "session", undefined, scope);
     if (scope.userId) {
       const userKey = this.dailyKey("user", scope.userId);
@@ -361,7 +364,7 @@ export class CodeRunSharedQuota implements CodeRunQuotaPort {
 
   private reportThreshold(key: string, scope: CodeRunBudgetScope, subjectId?: string, tenant: { userId?: string; companyId?: string } = {}): void {
     const listener = this.options.onThreshold;
-    if (!listener) return;
+    if (!listener || !usageQuotasEnabled()) return;
     const budget = this.manager.getBudget(key);
     if (!budget) return;
     const ratio = Math.max(

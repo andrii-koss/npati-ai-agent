@@ -558,7 +558,7 @@ describe("CodingAgentToolWaves argument error recovery semantics", () => {
     expect(capturedCmd).not.toContain("--follow");
   });
 
-  it("token budget semantics: independent local session cap (1M) vs daily user limit (2M)", () => {
+  it("legacy budget metadata never activates session or daily usage enforcement", () => {
     // 1. In local / self-hosted mode: session limit is 1,000,000 (50% of user daily budget)
     const localSessionBudget = resolveCodeRunBudget({ NPATI_SANDBOX_RUNNER_MODE: "local" } as any);
     expect(localSessionBudget.maxTokens).toBe(1_000_000);
@@ -591,8 +591,8 @@ describe("CodingAgentToolWaves argument error recovery semantics", () => {
 
     // Exceeds remaining budget (9000 + 2000 > 10000) -> rejected
     const fail = quota.checkQuota("sess-1", 2_000, 0.02, 1);
-    expect(fail.allowed).toBe(false);
-    expect(fail.error).toContain("A2A_TOKEN_QUOTA_EXCEEDED");
+    expect(fail.allowed).toBe(true);
+    expect(fail.error).toBeUndefined();
   });
 
   it("argument recovery alternation: alternating invalid -> valid -> invalid cannot loop indefinitely", async () => {

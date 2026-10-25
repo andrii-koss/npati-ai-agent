@@ -378,3 +378,12 @@ describe("[C13] [security-gate] Skills load lazily and their body is a typed sys
     expect(JSON.stringify(recorded)).not.toContain("A body");
   });
 });
+
+it("allows 305 sequential skill load/unload operations in the same session", async () => {
+ const h = skillHarness({ skills: [builtinSkill("a")], bodies: { a: { body: "A body", version: 1, source: "builtin", trusted: true } } });
+ for (let i = 0; i < 305; i++) {
+  await h.service.load({ ctx: owner, companyId: COMPANY, projectId: PROJECT, sessionId: "unlimited-loads", id: "a", version: 1 });
+  expect(h.service.unload("unlimited-loads", "a")).toBe(true);
+ }
+ expect(h.readBody).toHaveBeenCalledTimes(305);
+});

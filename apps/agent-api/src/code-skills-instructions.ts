@@ -1,3 +1,4 @@
+import { usageQuotasEnabled } from "./usage-quota-policy";
 import { createHash } from "node:crypto";
 import type { AuthContext, DataClassification } from "@npati/workspace";
 import { scanTextForSecrets } from "./code-secret-scanner";
@@ -208,7 +209,7 @@ export function createCodeSkillsService(deps: CodeSkillsDeps): CodeSkillsService
 
   function ensureBudget(sessionId: string): void {
     const used = loads.get(sessionId) ?? 0;
-    if (used >= MAX_SKILL_LOADS_PER_SESSION) {
+    if (usageQuotasEnabled() && used >= MAX_SKILL_LOADS_PER_SESSION) {
       throw new CodeSkillError("skill_limit_reached", `This session has loaded ${MAX_SKILL_LOADS_PER_SESSION} skill bodies; the lazy-load budget is spent`, 429, {
         sessionId, limit: MAX_SKILL_LOADS_PER_SESSION,
       });
@@ -394,7 +395,7 @@ export function createCodeSkillsService(deps: CodeSkillsDeps): CodeSkillsService
         chars: read.body.length,
       };
       sessions.set(input.sessionId, [...activeOf(input.sessionId), { instructions }]);
-      loads.set(input.sessionId, (loads.get(input.sessionId) ?? 0) + 1);
+      if (usageQuotasEnabled()) loads.set(input.sessionId, (loads.get(input.sessionId) ?? 0) + 1);
       await recordActivity({
         ctx: input.ctx, companyId: input.companyId, sessionId: input.sessionId,
         ...(input.projectId ? { projectId: input.projectId } : {}),

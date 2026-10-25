@@ -579,3 +579,11 @@ describe("[C13] [security-gate] slash commands expand a stored template — no c
   });
 });
 
+it("registers commands in 1005 sequential sessions without a cumulative session quota", async () => {
+ const h=commandHarness({trusted:true});
+ for(let i=0;i<1005;i++) await h.registry.registerSessionCommand({ctx:owner,companyId:COMPANY,sessionId:"registered-"+i,declaration:REVIEW_DECLARATION,template:"session body"});
+ for(const i of [0,1004]) {
+  const result=await h.registry.expand({ctx:owner,companyId:COMPANY,projectId:PROJECT,sessionId:"registered-"+i,id:"review"});
+  expect(result.expansion!.text).toContain("session body");
+ }
+});

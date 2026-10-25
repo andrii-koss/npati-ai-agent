@@ -109,7 +109,7 @@ export function BusinessChatComposer({
         placeholder={business ? t("chat.businessPlaceholder") : t("chat.placeholder")}
       />
       <div>
-        {(sending || developmentActive) ? (
+        {((sending || developmentActive) && !(codeInbox.active && input.trim())) ? (
           <button
             type="button"
             className="chat-stop-btn"

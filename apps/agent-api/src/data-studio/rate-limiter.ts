@@ -1,3 +1,4 @@
+import { usageQuotasEnabled } from "../usage-quota-policy";
 export interface RateLimitCheckResult {
   allowed: boolean;
   limit: number;
@@ -17,6 +18,7 @@ export class ProjectApiRateLimiter {
    * Checks and consumes one rate limit token.
    */
   check(identifier: string, limit: number): RateLimitCheckResult {
+    if (!usageQuotasEnabled()) return { allowed: true, limit: 0, remaining: 0, resetMs: 0 };
     const now = Date.now();
     this.maybeCleanup(now);
 

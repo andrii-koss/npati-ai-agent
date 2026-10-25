@@ -24,6 +24,7 @@ describe.skipIf(!databaseUrl || process.env.NPATI_SECURITY_GATE_DB !== "1")("web
     let nextInstalled = false;
     const childCalls = new Map<string, number>();
     const engine: AIEngine = { chat: async request => {
+      if (request.idempotencyKey?.startsWith("self-review:")) return { content: "```npati-self-review\n{\"status\":\"clean\",\"findings\":[]}\n```" };
       // Intent classification shares this engine but must not consume scripted coding tool steps.
       if (String(request.messages[0]?.content ?? "").startsWith("Classify the user\u0027s primary intent")) {
         return { content: "Website updated." };
@@ -66,6 +67,8 @@ describe.skipIf(!databaseUrl || process.env.NPATI_SECURITY_GATE_DB !== "1")("web
         await store.setFeatureFlag(ctx, { scope: "company", scopeId: company.id, flagKey, stage: "internal", enabled: true });
       }
       app = buildTestApp();
+      // Static sites are authored by the agent; this real-tool fixture must provide its initial authoring call.
+      script = [call("code.fs.write", { path: "index.html", content: "<!doctype html><html><head><title>Audit shop</title></head><body><h1>Audit shop</h1></body></html>" })];
       const first = await app.inject({ method: "POST", url: "/chat/stream", payload: { companyId: company.id, contextType: "company", message: "Створи тестовий сайт на HTML/CSS" } });
       expect(first.statusCode, first.body).toBe(200);
       const created = finalResult(first.body);
@@ -82,7 +85,7 @@ describe.skipIf(!databaseUrl || process.env.NPATI_SECURITY_GATE_DB !== "1")("web
       // A real model is mocked; tools, RBAC, audit, conversation storage and file edits are real.
       // Preview must report its missing sandbox rather than invent a running website.
       if (!liveSandbox) {
-        expect(edited.run.status).toBe("failed"); expect(edited.projectCard.previewUrl).toBeUndefined();
+        expect(edited.run.status, JSON.stringify(edited.run)).toBe("failed"); expect(edited.projectCard.previewUrl).toBeUndefined();
       } else {
         expect(edited.run.status, second.body).toBe("completed");
         const preview = await app.inject({ method: "GET", url: edited.projectCard.previewUrl.replace(/^\/api/, "") });

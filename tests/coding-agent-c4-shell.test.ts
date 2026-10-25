@@ -309,3 +309,11 @@ describe("security-gate: C4 authenticated shell ownership", () => {
     expect(result.durationMs).toBe(43);
   });
 });
+
+it("allows 305 sequential shell sessions without a cumulative session quota and retains their context", async () => {
+ const fake = sandbox(); const runtime=makeRuntime({sandbox:fake.port,flags:allowAllFlags,maxSessions:1});
+ for(let i=0;i<305;i++) await runtime.exec(context,{companyId:"c1",projectId:"p1",sessionId:"sequential-"+i,toolCallId:"t-"+i,command:"pwd"});
+ expect(fake.calls).toHaveLength(305);
+ expect(runtime.session("sequential-0")).not.toBeNull();
+ await expect(runtime.exec({...context,userId:"other"},{companyId:"c1",projectId:"p1",sessionId:"sequential-0",toolCallId:"foreign",command:"pwd"})).rejects.toMatchObject({code:"session_mismatch",httpStatus:403});
+});
