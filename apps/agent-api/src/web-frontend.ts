@@ -33,9 +33,9 @@ export function registerWebFrontend(app: FastifyInstance, directory: string): vo
     cacheControl: false,
     dotfiles: "deny",
     setHeaders(response, filename) {
-      response.setHeader("X-Content-Type-Options", "nosniff");
+      response.header("X-Content-Type-Options", "nosniff");
       const normalized = filename.replaceAll("\\", "/");
-      response.setHeader("Cache-Control", normalized.endsWith("/index.html")
+      response.header("Cache-Control", normalized.endsWith("/index.html")
         ? "no-cache"
         : normalized.includes("/assets/")
           ? "public, max-age=31536000, immutable"
