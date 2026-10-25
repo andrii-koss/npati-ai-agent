@@ -280,3 +280,25 @@ const visionUnavailableCopy: Partial<Record<CompanyChatLanguage, string>> = {
 export function visionUnavailableMessage(message = ""): string {
   return visionUnavailableCopy[detectCompanyChatLanguage(message)] ?? "Working with photos needs a connected model that supports images. Choose one in AI settings.";
 }
+
+const capabilityAgentCopy: Partial<Record<CompanyChatLanguage, (tool: string, company: string) => string>> = {
+  uk: (tool, company) => `Жоден активний агент компанії «${company}» не має інструмента \`${tool}\`, тож я нічого не змінював у даних. Власник може видати цей інструмент агентові на сторінці агентів компанії й повторити запит.`,
+  ru: (tool, company) => `Ни у одного активного агента компании «${company}» нет инструмента \`${tool}\`, поэтому я ничего не менял в данных. Владелец может выдать этот инструмент агенту на странице агентов компании и повторить запрос.`,
+  de: (tool, company) => `Kein aktiver Agent der Firma „${company}“ hat das Werkzeug \`${tool}\`, daher habe ich keine Daten geändert. Der Inhaber kann es einem Agenten auf der Agentenseite der Firma zuweisen und die Anfrage wiederholen.`,
+  es: (tool, company) => `Ningún agente activo de la empresa «${company}» tiene la herramienta \`${tool}\`, así que no cambié ningún dato. El propietario puede asignarla a un agente en la página de agentes de la empresa y repetir la solicitud.`,
+  pt: (tool, company) => `Nenhum agente ativo da empresa «${company}» tem a ferramenta \`${tool}\`, por isso não alterei nenhum dado. O proprietário pode atribuí-la a um agente na página de agentes da empresa e repetir o pedido.`,
+};
+const capabilityModelCopy: Partial<Record<CompanyChatLanguage, string>> = {
+  uk: "Обрана модель не вміє викликати структуровані інструменти, тож я нічого не змінював у даних. Оберіть модель із підтримкою tool calling у налаштуваннях AI.",
+  ru: "Выбранная модель не умеет вызывать структурированные инструменты, поэтому я ничего не менял в данных. Выберите модель с поддержкой tool calling в настройках AI.",
+  de: "Das gewählte Modell kann keine strukturierten Werkzeuge aufrufen, daher habe ich keine Daten geändert. Wählen Sie in den AI-Einstellungen ein Modell mit Tool-Calling.",
+  es: "El modelo elegido no puede llamar herramientas estructuradas, así que no cambié ningún dato. Elige un modelo con tool calling en la configuración de IA.",
+  pt: "O modelo escolhido não consegue chamar ferramentas estruturadas, por isso não alterei nenhum dado. Escolha um modelo com tool calling nas configurações de IA.",
+};
+/** The reply when a structured project capability has no authorized executor; nothing is executed and no rights are granted. */
+export function projectCapabilityUnavailableMessage(input: { message: string; tool: string; company: string; modelLacksTools: boolean }): string {
+  const language = detectCompanyChatLanguage(input.message);
+  if (input.modelLacksTools) return capabilityModelCopy[language] ?? "The selected model cannot call structured tools, so I did not change any data. Choose a model with tool calling in AI settings.";
+  return capabilityAgentCopy[language]?.(input.tool, input.company)
+    ?? `No active agent of company "${input.company}" has the \`${input.tool}\` tool, so I did not change any data. The owner can grant this tool to an agent on the company's Agents page and repeat the request.`;
+}

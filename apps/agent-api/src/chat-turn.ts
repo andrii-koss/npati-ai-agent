@@ -24,7 +24,7 @@ import { AIEngine, ChatContentPart, ChatRequest, ChatToolCall, ChatToolDefinitio
 import { ResearchOutcome, ResearchProgressListener, extractTargetUrlOrDomain } from "@npati/web-research";
 import { researchEvidenceContext, researchEvidenceInput } from "./chat-research-evidence";
 import { resolveConfirmedVisionModel } from "./chat-inference-candidates";
-import { visionUnavailableMessage } from "./company-chat-i18n";
+import { projectCapabilityUnavailableMessage, visionUnavailableMessage } from "./company-chat-i18n";
 import { AuthContext, Business, type Project } from "@npati/workspace";
 import { createChatActions } from "./chat-actions";
 import type { ChatOrchestrationDeps } from "./chat-orchestration";
@@ -257,7 +257,14 @@ export function createChatTurn(deps: ChatTurnDeps) {
     const nativeToolCalling = aiEngine.supportsNativeTools?.(ai.model) === true;
     const projectCapabilityScope=projectContext?.capabilityIds&&effectiveManagementCompany?{companyId:effectiveManagementCompany.id,projectId:projectContext.id,capabilityIds:projectContext.capabilityIds}:undefined;
     const projectCapabilityTools=projectCapabilityScope?await availableCoreChatTools(auth,safeUserRequest,projectCapabilityScope):undefined;
-    if(projectCapabilityScope&&(!nativeToolCalling||!projectCapabilityTools?.some(tool=>tool.function.name===projectCapabilityScope.capabilityIds[0])))throw Object.assign(new Error("The selected Company main agent or model cannot execute this structured project capability"),{code:"project_capability_unavailable",status:403});
+    if (projectCapabilityScope && (!nativeToolCalling || !projectCapabilityTools?.some(tool => tool.function.name === projectCapabilityScope.capabilityIds[0]))) {
+      // No authorized executor: answer honestly instead of failing the stream, and grant nothing.
+      const message = projectCapabilityUnavailableMessage({ message: safeUserRequest, tool: projectCapabilityScope.capabilityIds[0]!,
+        company: effectiveManagementCompany?.name ?? "", modelLacksTools: !nativeToolCalling });
+      if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", message);
+      return { message, suggestedActions: [], conversationId: conversation?.id, noMemory: memoryPolicy.noMemoryActive,
+        contextCompaction: { applied: false, originalCount: existing.messages.length, preservedCount: existing.messages.length } };
+    }
     let research: ResearchOutcome | undefined;
     // Every research result of this turn, recorded verbatim for later recall in this conversation (A098).
     const researchRecords: Array<{ tool: string; query: string; outcome: ResearchOutcome }> = [];

@@ -40,6 +40,16 @@ it("does not take the row-only path in a project without a development database"
  const app=buildApp({workspaceStore:f.store,authProvider:{authenticate:async()=>auth},aiEngine:ai,marketplace:{marketplace:async()=>({overview:{connectedProviders:1}})} as unknown as OmniRouteMarketplace});
  try{const r=await app.inject({method:"POST",url:"/chat/stream",payload:{message:"Update the Lead agent's role to Senior QA.",contextType:"project",companyId:f.company.id,projectId:site.id}});expect(r.body).not.toContain("structured project capability");expect(execute).not.toHaveBeenCalled();}finally{execute.mockRestore();await app.close();}
 });
+it.each(["/chat/stream","/chat"])("answers honestly over %s when no company agent holds the row capability, granting nothing",async url=>{
+ const f=await fixture([]);const planned:ChatRequest[]=[];
+ const ai={supportsNativeTools:()=>true,chat:async(r:ChatRequest):Promise<ChatResult>=>{if(String(r.messages[0]?.content).startsWith("Classify"))return{content:JSON.stringify({intent:"EDIT_DATA_MODEL",confidence:.99,targets:[],rowCapability:"project.data.rows.update"})};planned.push(r);return{content:"Updated."};},async *stream(){throw Error("No model turn is expected without an authorized executor");},listModels:async()=>[],getModel:async()=>undefined,executeTool:async()=>undefined,searchMemory:async()=>[],saveMemory:async()=>undefined,getCapabilities:async()=>["chat","native_tools"],healthCheck:async()=>({status:"ok"})} as AIEngine;
+ const execute=vi.spyOn(CompanyDelegationRuntime.prototype,"executeChatProjectTool");
+ const app=buildApp({workspaceStore:f.store,authProvider:{authenticate:async()=>auth},aiEngine:ai,marketplace:{marketplace:async()=>({overview:{connectedProviders:1}})} as unknown as OmniRouteMarketplace});
+ try{const r=await app.inject({method:"POST",url,payload:{message:"Update the existing dev product name to UPDATED and verify the stored record.",contextType:"project",companyId:f.company.id,projectId:f.project.id}});
+  expect(r.statusCode).toBe(200);expect(r.body).toContain("project.data.rows.update");expect(r.body).toContain("Capability Company");expect(r.body).not.toContain("code_chat_failed");expect(r.body).not.toContain("event: error");
+  expect(execute).not.toHaveBeenCalled();expect(planned).toHaveLength(0);expect((await f.store.getCompanyAgent(auth,f.company.id,f.agent.id)).tools).toEqual([]);
+ }finally{execute.mockRestore();await app.close();}
+});
 
 it("resumes the exact pending chat deletion without planning and rejects replay", async () => {
  const f = await fixture();
