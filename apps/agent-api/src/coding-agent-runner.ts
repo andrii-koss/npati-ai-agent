@@ -1,3 +1,4 @@
+import { settleCodingTurn } from "./coding-agent-turn-settlement";
 import { createHash, randomUUID } from "node:crypto";
 import { CODE_AGENT_MASTER_FLAG } from "./feature-flags";
 import { emitCodingActivity } from "./coding-agent-runner-contracts";
@@ -717,43 +718,10 @@ export class CodingAgentRunner {
       };
 
       // Final answer for a reply without tool calls or a successful `code.finish`; `null` keeps the loop going.
-      const settleTurn = async (finalText: string, turnOpened: boolean): Promise<CodingAgentRunResult | null> => {
-        this.ports.logger?.info?.("code_settlement_boundary", { runId: stateRunId, stage: "turn_closing", turn: steps });
-        if (!turnOpened) await openTurn();
-        if (stateRunId && this.ports.runState) {
-          await writeState(() => this.ports.runState!.appendTurn({
-            companyId, runId: stateRunId!, turnIndex: steps, status: "finished", outcome: "ok",
-            checkpointId: reviewCoordinator!.turnCheckpointId(steps),
-          }));
-        }
-
-        reviewCoordinator!.applyTurnSummary();
-
-        this.ports.logger?.info?.("code_settlement_boundary", { runId: stateRunId, stage: "collect_started", turn: steps });
-        const barrierResult = await reviewCoordinator!.handleCollectBarrier({
-          startedAt, stateRunId, stateOwner, inboxOpened: inboxManager!.isOpened,
-          cancelled, admitInbox: () => inboxManager!.admitInbox(steps),
-        });
-
-        this.ports.logger?.info?.("code_settlement_boundary", { runId: stateRunId, stage: "collect_finished", turn: steps, action: barrierResult.action });
-        if (barrierResult.action === "stopped") return barrierResult.result;
-        if (barrierResult.action === "input_collected") return null;
-
-        if (inboxManager!.isOpened && stateRunId) {
-          try {
-            if (await inboxManager!.admitInbox(steps)) return null;
-            const sealed = await inboxManager!.sealInbox();
-            if (!sealed) return null;
-          } catch {
-            return stop("interrupted", "interrupted", "Stopped: the inbox finalization cutoff could not be recorded.");
-          }
-        }
-
-        this.ports.logger?.info?.("code_settlement_boundary", { runId: stateRunId, stage: "review_started", turn: steps });
-        const reviewOutcome = await reviewCoordinator!.finalizeOrReviewTurn({ steps, prompt, assistantText: finalText, stateRunId });
-        if (reviewOutcome.action === "completed" || reviewOutcome.action === "stopped") return reviewOutcome.result;
-        return null;
-      };
+      const settleTurn = (finalText: string, turnOpened: boolean) => settleCodingTurn({
+        ports: this.ports, companyId, stateRunId, stateOwner, startedAt, steps, prompt,
+        inboxManager: inboxManager!, reviewCoordinator: reviewCoordinator!, openTurn, writeState, cancelled, stop,
+      }, finalText, turnOpened);
 
       if (!callsToRun.length && !normalized.rejected.length) {
         if (needsImplementation) {
