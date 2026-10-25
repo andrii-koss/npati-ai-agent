@@ -68,9 +68,14 @@ async function resolveGoalAgent(store: WorkspaceStore, auth: AuthContext, agent:
   let cursor: string | undefined;
   do {
     const page = await store.listCompanies(auth, 100, cursor);
-    for (const item of page.items.filter((entry) => !company || entry.name.toLocaleLowerCase() === company))
-      matches.push(...(await store.listCompanyAgentsPage(auth, item.id, 100)).items
-        .filter((entry) => entry.id === agent.trim() || entry.name.toLocaleLowerCase() === wanted).map((entry) => entry.id));
+    for (const item of page.items.filter((entry) => !company || entry.id.toLocaleLowerCase() === company || entry.name.toLocaleLowerCase() === company)) {
+      let agentCursor: string | undefined;
+      do {
+        const agents = await store.listCompanyAgentsPage(auth, item.id, 100, agentCursor);
+        matches.push(...agents.items.filter((entry) => entry.id === agent.trim() || entry.name.toLocaleLowerCase() === wanted).map((entry) => entry.id));
+        agentCursor = agents.nextCursor ?? undefined;
+      } while (agentCursor);
+    }
     cursor = page.nextCursor ?? undefined;
   } while (cursor);
   if (matches.length !== 1) throw new Error(matches.length ? "Several Company Agents match this goal assignee; name the company" : "The goal assignee is not an agent of an owned company");

@@ -1,3 +1,4 @@
+import { buildApp } from "../apps/agent-api/src/app";
 import { describe, expect, it } from "vitest";
 import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
 import { BusinessActionHandler } from "../apps/agent-api/src/business-action-handler";
@@ -63,4 +64,32 @@ it("clears assignees when an agent or company is deleted, matching migration 093
  await store.updateGoal(alice, business.id, goal.id, { assignedAgentId: other.id });
  await store.deleteCompany(alice, company.id);
  expect((await store.listGoals(alice, business.id)).find(item => item.id === goal.id)?.assignedAgentId).toBeNull();
+});
+
+it.each(["/chat", "/chat/stream"])("persists native-tool assignment through %s", async (url) => {
+ const auth = { ...alice, permissions: ["workspace:read", "workspace:write", "business:manage"] };
+ const store = new InMemoryWorkspaceStore();
+ const business = await store.createBusiness(auth, { name: "Native Business", businessStage: "starting" });
+ const goal = await store.createGoal(auth, business.id, { title: "Launch" });
+ const company = await store.createCompany(auth, { name: "Native Company" }, "native-company");
+ const agent = await store.createCompanyAgent(auth, company.id, { name: "Lead", role: "Manager", tools: [] }, "native-agent");
+ let offered = false;
+ const ai = {
+  supportsNativeTools: () => true,
+  chat: async (request: import("@npati/omniroute-adapter").ChatRequest) => {
+   if (String(request.messages[0]?.content).startsWith("Classify")) return { content: JSON.stringify({ intent: "CHAT", confidence: 1, targets: [] }) };
+   if (request.messages.at(-1)?.role === "tool") return { content: "Assignment saved." };
+   offered = Boolean(request.tools?.some(tool => tool.function.name === "npati_goal_action"));
+   return { content: "", toolCalls: [{ id: "native-goal-call", type: "function", function: { name: "npati_goal_action", arguments: JSON.stringify({ action: "update", businessId: business.id, goalId: goal.id, goal: { assignedAgent: agent.id, assignedCompany: company.id } }) } }] };
+  },
+  healthCheck: async () => ({ status: "ok" }),
+ } as unknown as import("@npati/omniroute-adapter").AIEngine;
+ const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai,
+  marketplace: { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as import("@npati/omniroute-adapter").OmniRouteMarketplace });
+ try {
+  const response = await app.inject({ method: "POST", url, payload: { message: 'Assign Business Goal "Launch" to agent Lead in company "Native Company".', contextType: "company", companyId: company.id } });
+  expect(response.statusCode).toBe(200);
+  expect(offered).toBe(true);
+  expect((await store.listGoals(auth, business.id))[0]?.assignedAgentId).toBe(agent.id);
+ } finally { await app.close(); }
 });
