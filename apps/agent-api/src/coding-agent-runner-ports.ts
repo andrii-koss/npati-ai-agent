@@ -76,6 +76,7 @@ export interface CodeRunRuntimeCapabilitiesPort {
       agentId?: string;
       signal?: AbortSignal;
 
+
       readOnlyIntent?: boolean;
 
       approvalId?: string;
@@ -109,6 +110,8 @@ export interface CodeRunToolRuntimePort {
       turnId?: string;
       /** Internal run identity, independent of per-model-turn checkpoint IDs. */
       runScopeId?: string;
+      signal?: AbortSignal;
+      onApprovalRequested?: (approval: { approvalId: string }) => Promise<void>;
       runId?: string;
       agentId?: string;
     },

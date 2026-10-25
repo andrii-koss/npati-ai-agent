@@ -195,7 +195,7 @@ export interface CodeToolRuntimeOptions {
    */
   approvalDecision?: {
     timeoutMs: number;
-    wait(input: { ctx: AuthContext; companyId: string; approvalId: string; action: string }):
+    wait(input: { ctx: AuthContext; companyId: string; approvalId: string; action: string; signal?: AbortSignal }):
       Promise<{ status: "approved" | "rejected" | "pending"; comment?: string | null } | null>;
     onTimeout?(input: { approvalId: string; waitedMs: number; action: string }): Promise<void> | void;
   };

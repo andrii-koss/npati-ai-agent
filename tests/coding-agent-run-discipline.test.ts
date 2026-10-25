@@ -175,3 +175,13 @@ describe("creating several tables in a row is not a tool-call cycle", () => {
     expect(outcome.reason, outcome.message).not.toBe("loop_detected");
   });
 });
+
+it("cancels a pending approval wait promptly and never returns an allow after Stop", async () => {
+ const { waitForApprovalDecision } = await import("../apps/agent-api/src/code-approval-scope");
+ const controller = new AbortController();
+ const read = vi.fn(async () => ({ status: "pending" }));
+ const waiting = waitForApprovalDecision(read, 30 * 60_000, { signal: controller.signal, intervalMs: 1000 });
+ controller.abort(new Error("Stopped by user"));
+ await expect(waiting).rejects.toThrow("Stopped by user");
+ expect(read).toHaveBeenCalledOnce();
+});

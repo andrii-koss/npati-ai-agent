@@ -322,8 +322,14 @@ export class CodingAgentToolWaves {
         cwd: typeof call.arguments.cwd === "string" ? call.arguments.cwd : undefined,
         agentId: input.agentId ?? "NPATI Coding Agent",
       };
+      ports.logger?.info?.("code_settlement_boundary", { runId: stateRunId, stage: "tool_projection_started", tool: call.name });
       await publishActivity({ ...activityStart, status: "running" });
+      ports.logger?.info?.("code_settlement_boundary", { runId: stateRunId, stage: "tool_projection_finished", tool: call.name });
       const invokeInput = {
+        onApprovalRequested: async ({ approvalId }: { approvalId: string }) => {
+          await publishActivity({ ...activityStart, stage: "approval", status: "awaiting_approval", result: JSON.stringify({ approvalId, companyId, projectId, runId: stateRunId, toolName: call.name }) });
+        },
+        signal: input.signal,
         leaseOwner: stateOwner,
         companyId,
         projectId,

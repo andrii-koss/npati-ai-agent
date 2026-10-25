@@ -180,6 +180,8 @@ export class CodeToolRuntime {
     turnId?: string;
     /** Stable server-side identity when the runner has no durable run row. */
     runScopeId?: string;
+    signal?: AbortSignal;
+    onApprovalRequested?: (approval: { approvalId: string }) => Promise<void>;
     approvalId?: string;
     runId?: string; agentId?: string; leaseOwner?: string;
     snapshotId?: string;

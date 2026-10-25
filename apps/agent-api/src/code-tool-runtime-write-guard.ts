@@ -121,7 +121,7 @@ export class CodeToolWriteGuard {
    */
   async assertApproved(
     authCtx: AuthContext,
-    input: { companyId: string; projectId: string; approvalId?: string; runId?: string; agentId?: string },
+    input: { companyId: string; projectId: string; approvalId?: string; runId?: string; agentId?: string; signal?: AbortSignal; onApprovalRequested?: (approval: { approvalId: string }) => Promise<void> },
     tool: CodeToolSchema,
     targets: Array<{ path: string; exists: boolean }>,
     sessionId: string,
@@ -202,7 +202,7 @@ export class CodeToolWriteGuard {
    */
   async requestApprovalDecision(
     authCtx: AuthContext,
-    input: { companyId: string; projectId: string; approvalId?: string; runId?: string; agentId?: string },
+    input: { companyId: string; projectId: string; approvalId?: string; runId?: string; agentId?: string; signal?: AbortSignal; onApprovalRequested?: (approval: { approvalId: string }) => Promise<void> },
     tool: CodeToolSchema,
     reason: string,
     summary: string,
@@ -214,11 +214,14 @@ export class CodeToolWriteGuard {
       toolName: tool.name, actionSummary: summary, inputPayload: payload,
       ttlMs: this.ctx.approvalPolicy.ttlMs, riskLevel: reason === "delete" ? "high" : "medium",
     });
+    await input.onApprovalRequested?.({ approvalId: created.approvalId });
+    input.signal?.throwIfAborted();
     const channel = this.ctx.options.approvalDecision;
     if (channel) {
       const outcome = await channel.wait({
-        ctx: authCtx, companyId: input.companyId, approvalId: created.approvalId, action: tool.name,
-      }).catch(() => null);
+        ctx: authCtx, companyId: input.companyId, approvalId: created.approvalId, action: tool.name, ...(input.signal ? { signal: input.signal } : {}),
+      }).catch(() => { input.signal?.throwIfAborted(); return null; });
+      input.signal?.throwIfAborted();
       if (!outcome || outcome.status === "pending") {
         const waitedMs = channel.timeoutMs;
         await channel.onTimeout?.({ approvalId: created.approvalId, waitedMs, action: tool.name });

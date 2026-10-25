@@ -209,8 +209,8 @@ export function createCodeToolRuntimeWiring(deps: CodeToolRuntimeWiringDeps) {
 
     approvalDecision: approvalsRepo ? {
       timeoutMs: resolveApprovalTimeoutMs(process.env),
-      wait: async ({ ctx, companyId, approvalId }) => {
-        const report = await waitForApprovalDecision(() => approvalsRepo!.get(ctx, companyId, approvalId).catch(() => null), resolveApprovalTimeoutMs(process.env));
+      wait: async ({ ctx, companyId, approvalId, signal }) => {
+        const report = await waitForApprovalDecision(() => approvalsRepo!.get(ctx, companyId, approvalId).catch(() => null), resolveApprovalTimeoutMs(process.env), { signal });
         if (!report) return null;
         if (report.status === "approved") return { status: "approved" as const };
         if (report.status === "rejected") return { status: "rejected" as const, comment: report.decisionNotes ?? null };

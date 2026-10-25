@@ -157,3 +157,24 @@ describe("on-demand project databases",()=>{
   expect(resolveManifestForSession(14).tools.some(t=>t.name==="code.data.backend.create")).toBe(true);
  });
 });
+
+it("interrupts an approval-gated write on Stop without executing or consuming it, then accepts new work", async () => {
+ const { waitForApprovalDecision } = await import("../apps/agent-api/src/code-approval-scope");
+ const controller = new AbortController();
+ const request = vi.fn(async () => ({ approvalId: "pending-approval" }));
+ const consume = vi.fn(async () => {}); const execute = vi.fn(async () => ({ applied: true }));
+ const notice = vi.fn(async () => {});
+ let entered!: () => void; const started = new Promise<void>(resolve => { entered = resolve; });
+ const runtime = new CodeToolRuntime({ flags: { assertEnabled: async () => true } as unknown as FeatureFlagService,
+  approvals: { request, consume }, toPort: () => port, executors: { "code.data.rows.seed": execute },
+  approvalDecision: { timeoutMs: 1800000, wait: async ({ signal }) => { entered(); return waitForApprovalDecision(async () => ({ status: "pending" as const }), 1800000, { signal }); } },
+ });
+ const args = { expectedBackendId: "backend", collection: "products", rows: [{ title: "TEST_ONLY" }], dryRun: false };
+ const operation = runtime.invoke(ctx, { companyId: "company", projectId: "project", runId: "run", tool: "code.data.rows.seed", args, toolCallId: "call", signal: controller.signal, onApprovalRequested: notice });
+ await started; controller.abort(new Error("Stopped by user"));
+ const result = await operation;
+ expect(result.ok).toBe(false); expect(request).toHaveBeenCalledOnce(); expect(notice).toHaveBeenCalledWith({ approvalId: "pending-approval" });
+ expect(consume).not.toHaveBeenCalled(); expect(execute).not.toHaveBeenCalled();
+ expect((await runtime.invoke(ctx, { companyId: "company", projectId: "project", tool: "code.data.rows.seed", args: { ...args, dryRun: true }, toolCallId: "next-call" })).ok).toBe(true);
+ expect(execute).toHaveBeenCalledOnce();
+});

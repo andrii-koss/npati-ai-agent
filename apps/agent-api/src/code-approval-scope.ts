@@ -584,14 +584,23 @@ export function buildApprovalTimeoutError(input: { approvalId?: string; waitedMs
 export async function waitForApprovalDecision<T extends { status: string }>(
   read: () => Promise<T | null>,
   timeoutMs: number,
-  options: { intervalMs?: number; sleep?: (ms: number) => Promise<void>; now?: () => number } = {},
+  options: { intervalMs?: number; sleep?: (ms: number) => Promise<void>; now?: () => number; signal?: AbortSignal } = {},
 ): Promise<T | null> {
   const now = options.now ?? Date.now;
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const deadline = now() + timeoutMs;
   for (;;) {
+    options.signal?.throwIfAborted();
     const report = await read();
     if (!report || report.status !== "pending" || now() >= deadline) return report;
-    await sleep(Math.min(options.intervalMs ?? 1_000, Math.max(0, deadline - now())));
+    const delay = Math.min(options.intervalMs ?? 1_000, Math.max(0, deadline - now()));
+    if (!options.signal) await sleep(delay);
+    else await new Promise<void>((resolve, reject) => {
+      const signal = options.signal!;
+      const abort = () => { signal.removeEventListener("abort", abort); reject(signal.reason ?? new Error("Approval wait cancelled")); };
+      signal.addEventListener("abort", abort, { once: true });
+      if (signal.aborted) { abort(); return; }
+      sleep(delay).then(() => { signal.removeEventListener("abort", abort); resolve(); }, error => { signal.removeEventListener("abort", abort); reject(error); });
+    });
   }
 }
