@@ -350,7 +350,7 @@ Supported directives:
 \`\`\`workspace-action
 {"action":"activity.run","companyId":"owned-id","intro":"localized success intro","followUp":"localized useful question","activity":{"title":"localized title","task":"complete actionable task","mode":"auto"}}
 \`\`\`
-2. Create an automation. cronExpression is standard five-part cron and timezone is an IANA timezone:
+2. Create an automation. Set automation.status to "paused" when the user requests a paused automation; never create it active first. status defaults to "active". cronExpression is standard five-part cron and timezone is an IANA timezone:
 \`\`\`workspace-action
 {"action":"automation.create","companyId":"owned-id","intro":"localized success intro","followUp":"localized useful question","automation":{"name":"localized name","description":"localized description","prompt":"complete recurring task","cronExpression":"0 9 * * 1","timezone":"Europe/Kyiv","agentId":"optional-owned-agent-id"}}
 \`\`\`
@@ -622,10 +622,10 @@ Use activity.run when the user asks the company agents to perform work and wants
           entry.name === automationName && entry.prompt === automationPrompt && entry.cronExpression === cronExpression
         ) ?? await deps.automations.create(auth, company.id, {
           name: automationName, description: clean(item.description, 2000) || undefined, prompt: automationPrompt,
-          cronExpression, timezone, agentId: item.agentId ?? undefined,
+          cronExpression, timezone, agentId: item.agentId ?? undefined, status: item.status === "paused" ? "paused" : "active",
           nextRunAt: computeNextCronDate(cronExpression, new Date(), timezone).toISOString(),
         });
-        const card = `\`\`\`card:${clean(created.name, 300)}\n**${labels.company}:** ${clean(company.name, 300)}\n**${labels.status}:** ${labels.active}\n**${labels.schedule}:** \`${created.cronExpression}\`\n**${labels.timezone}:** ${clean(created.timezone, 100)}\n**${labels.nextRun}:** ${created.nextRunAt}\n\n${clean(created.description) || clean(created.prompt)}\n\n[${labels.openAutomations}](${automationSettingsUrl(company.id)})\n\`\`\``;
+        const card = `\`\`\`card:${clean(created.name, 300)}\n**${labels.company}:** ${clean(company.name, 300)}\n**${labels.status}:** ${created.status === "paused" ? labels.paused : labels.active}\n**${labels.schedule}:** \`${created.cronExpression}\`\n**${labels.timezone}:** ${clean(created.timezone, 100)}\n**${labels.nextRun}:** ${created.nextRunAt}\n\n${clean(created.description) || clean(created.prompt)}\n\n[${labels.openAutomations}](${automationSettingsUrl(company.id)})\n\`\`\``;
         return { cleanText: finish(directive, card), workspaceAction: { action: directive.action, resourceId: created.id, companyId: company.id } };
       }
 

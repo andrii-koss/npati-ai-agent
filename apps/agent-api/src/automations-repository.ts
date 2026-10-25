@@ -40,6 +40,7 @@ export interface CompanyAutomationRun {
 }
 
 export interface CreateAutomationInput {
+  status?: "active" | "paused";
   name: string;
   description?: string;
   prompt: string;
@@ -139,8 +140,8 @@ export class CompanyAutomationsRepository {
       const result = await this.pool.query<CompanyAutomation>(
         `INSERT INTO company_automations (
            id, workspace_id, company_id, user_id, agent_id, name, description,
-           prompt, cron_expression, timezone, next_run_at
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+           prompt, cron_expression, timezone, next_run_at, status
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          RETURNING ${autoCols}`,
         [
           id,
@@ -154,6 +155,7 @@ export class CompanyAutomationsRepository {
           input.cronExpression.trim(),
           input.timezone || "Europe/Kyiv",
           input.nextRunAt || now,
+          input.status ?? "active",
         ]
       );
       return result.rows[0]!;
@@ -170,7 +172,7 @@ export class CompanyAutomationsRepository {
       prompt: input.prompt.trim(),
       cronExpression: input.cronExpression.trim(),
       timezone: input.timezone || "Europe/Kyiv",
-      status: "active",
+      status: input.status ?? "active",
       lastRunAt: null,
       nextRunAt: input.nextRunAt || now,
       workerId: null,

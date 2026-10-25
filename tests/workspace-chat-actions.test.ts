@@ -450,3 +450,14 @@ it("does not persist a conversation-scoped checkpoint as Business Memory", async
   await WorkspaceChatActions.extractAndExecute(owner, directive, deps, "conversation-b", { requestMessage: "Remember CHAT_B_PLUM_642 for the business." });
   expect((await store.listMemory(owner, business.id)).map((item) => item.content)).toEqual(["CHAT_B_PLUM_642"]);
 });
+
+it("creates a requested paused automation atomically and renders its actual status", async () => {
+ const store = new InMemoryWorkspaceStore();
+ const company = await store.createCompany(alice, { name: "Paused Company" }, "paused-company");
+ const automations = new CompanyAutomationsRepository();
+ const deps = dependencies(store, automations, async (_auth, companyId, input) => completedRun(companyId, input.task));
+ const result = await WorkspaceChatActions.extractAndExecute(alice, directive({ action: "automation.create", companyId: company.id, automation: { name: "Paused weekly", prompt: "Report only", cronExpression: "0 9 * * 1", timezone: "Europe/Kyiv", status: "paused" } }), deps, "paused-chat", { requestMessage: "Create a paused automation" });
+ expect(result.workspaceAction?.action).toBe("automation.create");
+ expect((await automations.list(alice, company.id))[0]?.status).toBe("paused");
+ expect(result.cleanText).toContain("Paused");
+});

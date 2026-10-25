@@ -263,8 +263,10 @@ const cardCopies: Record<string, CardCopy> = {
   hi: { type: "प्रकार", business: "व्यवसाय", confidence: "विश्वसनीयता", company: "कंपनी", status: "स्थिति", active: "सक्रिय", completed: "पूर्ण", schedule: "समय-सारणी", timezone: "समय क्षेत्र", nextRun: "अगला रन", mode: "मोड", steps: "चरण", toolCalls: "टूल कॉल", duration: "अवधि", openMemory: "व्यवसाय मेमोरी खोलें", openAutomations: "ऑटोमेशन खोलें", openActivity: "गतिविधि और रन ट्रेस खोलें", openContent: "कंटेंट हब खोलें" },
 };
 
-export function workspaceCardCopy(message = ""): CardCopy {
-  return cardCopies[detectCompanyChatLanguage(message)] ?? cardCopies.en!;
+export function workspaceCardCopy(message = ""): CardCopy & { paused: string } {
+  const language = detectCompanyChatLanguage(message);
+  const paused: Partial<Record<CompanyChatLanguage, string>> = { en: "Paused", uk: "Призупинено", ru: "Приостановлено", de: "Pausiert", es: "Pausada", pt: "Pausada", fr: "En pause", it: "In pausa", pl: "Wstrzymano" };
+  return { ...(cardCopies[language] ?? cardCopies.en!), paused: paused[language] ?? "Paused" };
 }
 
 const visionUnavailableCopy: Partial<Record<CompanyChatLanguage, string>> = {
