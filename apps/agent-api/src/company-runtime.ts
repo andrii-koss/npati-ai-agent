@@ -63,23 +63,37 @@ export class CompanyDelegationRuntime {
   }
 
   /** The chat loop selects a canonical tool; this runtime keeps its existing authorization, approval and audit boundary. */
+  private async chatCapabilityExecutor(ctx: AuthContext, companyId: string, capabilityId: string) {
+    const company = await this.store.getCompany(ctx, companyId);
+    if (company.status === "inactive") return undefined;
+    const agents = await this.store.listCompanyAgents(ctx, companyId);
+    const candidates = [...agents].sort((a, b) => Number(b.id === company.mainAgentId) - Number(a.id === company.mainAgentId) || a.id.localeCompare(b.id));
+    return candidates.find(agent => agent.isActive && agent.tools.map(toolName).includes(capabilityId)
+      && this.capabilityResolver.canExecute({ auth: ctx, activeContext: { contextType: "company", companyId, businessId: null },
+        company: { id: company.id, revision: company.revision }, agent: { id: agent.id, revision: agent.revision, tools: agent.tools.map(toolName) } }, capabilityId).allowed);
+  }
+
   async chatProjectTools(ctx: AuthContext, companyId: string, projectId: string, requested: string[]): Promise<ChatToolDefinition[]> {
-    const company=await this.store.getCompany(ctx,companyId);const project=await this.store.getProject(ctx,companyId,projectId);
-    if(project.status==="archived")return[];
-    if(company.status==="inactive"||!company.mainAgentId)return[];
-    const main=await this.store.getCompanyAgent(ctx,companyId,company.mainAgentId);if(!main.isActive)return[];
-    const supported=new Set<string>(["project.data.schema.inspect",...CHAT_ROW_CAPABILITIES]);
-    return requested.filter(id=>supported.has(id)&&main.tools.map(toolName).includes(id)&&this.capabilityResolver.canExecute({auth:ctx,activeContext:{contextType:"company",companyId,businessId:null},company:{id:company.id,revision:company.revision},agent:{id:main.id,revision:main.revision,tools:main.tools.map(toolName)}},id).allowed).map(id=>{
-      const cap=defaultCapabilityRegistry.get(id)!;return{type:"function",function:{name:id,description:cap.description,parameters:chatCapabilityParameters(id)}};
-    });
+    const project = await this.store.getProject(ctx, companyId, projectId);
+    if (project.status === "archived") return [];
+    const supported = new Set<string>(["project.data.schema.inspect", ...CHAT_ROW_CAPABILITIES]);
+    const tools: ChatToolDefinition[] = [];
+    for (const id of requested) {
+      if (!supported.has(id) || !await this.chatCapabilityExecutor(ctx, companyId, id)) continue;
+      const cap = defaultCapabilityRegistry.get(id)!;
+      tools.push({ type: "function", function: { name: id, description: cap.description, parameters: chatCapabilityParameters(id) } });
+    }
+    return tools;
   }
 
   async executeChatProjectTool(ctx: AuthContext, companyId: string, projectId: string, tool: string, args: Record<string,unknown>, key: string, signal?: AbortSignal, noMemory=false): Promise<{output:unknown;runId:string}> {
     const offered=await this.chatProjectTools(ctx,companyId,projectId,[tool]);
-    if(!offered.length)throw new CompanyRuntimeError("TOOL_FORBIDDEN","This Company main agent is not authorized for the requested capability",403);
+    if(!offered.length)throw new CompanyRuntimeError("TOOL_FORBIDDEN","No active Company agent is authorized for the requested capability",403);
     validateArguments(chatCapabilityParameters(tool),args,tool);
     if(args.projectId!==projectId)throw new CompanyRuntimeError("PROJECT_SCOPE_MISMATCH","Tool targets another project",403);
-    const company=await this.store.getCompany(ctx,companyId), main=await this.store.getCompanyAgent(ctx,companyId,company.mainAgentId!);
+    const company = await this.store.getCompany(ctx, companyId);
+    const main = await this.chatCapabilityExecutor(ctx, companyId, tool);
+    if (!main) throw new CompanyRuntimeError("TOOL_FORBIDDEN", "No active Company agent is authorized for this capability", 403);
     const task="Chat capability: "+tool+" #"+sha256(canonicalJson(args));
     const created=await this.create(ctx,companyId,{task,projectId,mode:"single"},key);
     if(created.run.task!==task)throw new CompanyRuntimeError("IDEMPOTENCY_CONFLICT","Tool call identity was reused with different arguments",409);

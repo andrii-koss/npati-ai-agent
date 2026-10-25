@@ -56,3 +56,14 @@ it("resumes the exact pending chat deletion without planning and rejects replay"
  await expect(f.runtime.process(auth, f.company.id, pending.runId!, { approvalId: "approval-exact" })).rejects.toMatchObject({ code: "APPROVAL_INVALID" });
  expect(f.execute).toHaveBeenCalledOnce();
 });
+
+it("routes to an existing authorized specialist without granting the main agent permissions", async () => {
+ const f = await fixture([]);
+ const specialist = await f.store.createCompanyAgent(auth, f.company.id, { name: "Data specialist", role: "Data", tools: ["project.data.rows.update"], isActive: true }, "data-specialist");
+ const args = { projectId: f.project.id, collection: "products", id: "row-1", row: { name: "Updated" } };
+ const result = await f.runtime.executeChatProjectTool(auth, f.company.id, f.project.id, "project.data.rows.update", args, "specialist-update");
+ const details = await f.store.getCompanyAgentRun(auth, f.company.id, result.runId);
+ expect(details.run.selectedAgentIds).toEqual([specialist.id]);
+ expect((await f.store.getCompanyAgent(auth, f.company.id, f.agent.id)).tools).toEqual([]);
+ expect(f.execute).toHaveBeenCalledOnce();
+});
