@@ -9,10 +9,11 @@ import {
 import { spawn } from "node:child_process";
 
 const BASE_URL = defaultConfig.baseUrl;
-const COMPANY_ID = "f9d8b13c-a3ec-48b6-950f-660ad1d052d1";
-const WORKSPACE_ID = "workspace:e2e-smoke-user";
-const USER_ID = "e2e-smoke-user";
-const RUNNER_SECRET = process.env.NPATI_SANDBOX_RUNNER_SECRET ?? "";
+let COMPANY_ID = "";
+const WORKSPACE_ID = process.env.NPATI_E2E_WORKSPACE_ID ?? "";
+const USER_ID = process.env.NPATI_E2E_USER_ID ?? "";
+const API_CONTAINER = process.env.NPATI_E2E_API_CONTAINER ?? "";
+const POSTGRES_CONTAINER = process.env.NPATI_E2E_POSTGRES_CONTAINER ?? "";
 
 let testProjectId = "";
 let initialFileRevision = "";
@@ -22,7 +23,7 @@ let e2eProjectId = "";
 
 function runInContainer(code: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn("docker", ["exec", "-i", "npati-e2e-smoke-agent-api", "node"], {
+    const child = spawn("docker", ["exec", "-i", API_CONTAINER, "node"], {
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
@@ -41,7 +42,8 @@ function runInContainer(code: string): Promise<string> {
 async function callSandboxRunner(operation: string, payload: any): Promise<any> {
   const script = `
     const crypto = require("node:crypto");
-    const secret = "${RUNNER_SECRET}";
+    const secret = process.env.NPATI_SANDBOX_RUNNER_SECRET;
+    if (!secret) throw new Error("Runner secret is unavailable in the isolated API");
     const timestamp = String(Date.now());
     const nonce = crypto.randomUUID();
     const body = JSON.stringify({ operation: ${JSON.stringify(operation)}, payload: ${JSON.stringify(payload)} });
@@ -65,6 +67,17 @@ async function callSandboxRunner(operation: string, payload: any): Promise<any> 
   return JSON.parse(raw);
 }
 
+
+async function authorizedPreviewUrl(projectId: string, token: string): Promise<string> {
+  const endpoint = BASE_URL + "/companies/" + COMPANY_ID + "/projects/" + projectId + "/preview";
+  const response = await fetch(endpoint + "/token", { headers: { authorization: "Bearer " + token } });
+  expect(response.status).toBe(200);
+  const data = await response.json();
+  expect(typeof data.token).toBe("string");
+  expect(data.token.length).toBeGreaterThan(0);
+  return endpoint + "/proxy/?token=" + encodeURIComponent(data.token);
+}
+
 function queryPostgres(sql: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(
@@ -72,12 +85,12 @@ function queryPostgres(sql: string): Promise<string> {
       [
         "exec",
         "-i",
-        "npati-isolated-source-20261011-postgres-1",
+        POSTGRES_CONTAINER,
         "psql",
         "-U",
         "npati",
         "-d",
-        "npati_e2e_smoke",
+        process.env.NPATI_E2E_DATABASE ?? "npati",
         "-t",
         "-A",
         "-F",
@@ -103,6 +116,16 @@ describe("Coding Agent E2E Smoke Suite (Stage 2 Extended)", () => {
 
   beforeAll(async () => {
     if (!validToken) throw new Error("BLOCKED: live smoke requires a legitimate test-user session via NPATI_E2E_ACCESS_TOKEN; manually signed test JWTs are not accepted for this local audit.");
+    const target = new URL(BASE_URL);
+    if (process.env.NPATI_E2E_ISOLATED !== "true" || !["localhost", "127.0.0.1"].includes(target.hostname)
+      || !/^npati-stress-v2-(?:stage-a|final)-[0-9]+-agent-api-1$/.test(API_CONTAINER)
+      || !/^npati-stress-v2-(?:stage-a|final)-[0-9]+-postgres-1$/.test(POSTGRES_CONTAINER)
+      || !USER_ID || !WORKSPACE_ID) throw new Error("BLOCKED: explicit isolated E2E fixture configuration is required");
+    const created = await fetch(BASE_URL + "/companies", { method: "POST", headers: { authorization: "Bearer " + validToken, "content-type": "application/json", "idempotency-key": "v2-live-smoke-company" }, body: JSON.stringify({ name: "E2E Smoke V2 disposable" }) });
+    expect([200, 201]).toContain(created.status);
+    const company = await created.json();
+    COMPANY_ID = company.id ?? company.company?.id;
+    expect(COMPANY_ID).toBeTruthy();
     // Preflight health check
     const healthRes = await fetch(`${BASE_URL}/health`);
     expect(healthRes.status).toBe(200);
@@ -503,16 +526,17 @@ describe("Coding Agent E2E Smoke Suite (Stage 2 Extended)", () => {
       });
       const pStatus = await pStatusRes.json();
       if (pStatus?.previewUrl) {
-        previewProxyUrl = `${BASE_URL}${pStatus.previewUrl.replace("/api/", "/")}`;
+        previewProxyUrl = await authorizedPreviewUrl(e2eProjectId, validToken);
       } else {
         const startRes = await fetch(`${BASE_URL}/companies/${COMPANY_ID}/projects/${capturedProjectId}/preview/start`, {
           method: "POST",
           headers: { authorization: `Bearer ${validToken}`, "content-type": "application/json" },
         });
         const started = await startRes.json();
-        if (started?.previewUrl) previewProxyUrl = `${BASE_URL}${started.previewUrl.replace("/api/", "/")}`;
+        if (started?.previewUrl) previewProxyUrl = await authorizedPreviewUrl(e2eProjectId, validToken);
       }
 
+      expect(previewProxyUrl).toBeTruthy();
       if (previewProxyUrl) {
         const domResult = await testLivePreviewDom(previewProxyUrl);
         expect(domResult.buttonFound).toBe(true);
@@ -556,6 +580,7 @@ describe("Coding Agent E2E Smoke Suite (Stage 2 Extended)", () => {
         if (started?.previewUrl) previewProxyUrl = `${BASE_URL}${started.previewUrl.replace("/api/", "/")}`;
       }
 
+      expect(previewProxyUrl).toBeTruthy();
       if (previewProxyUrl) {
         const domResult = await testLivePreviewResetDom(previewProxyUrl);
         expect(domResult.buttonFound).toBe(true);

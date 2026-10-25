@@ -1,8 +1,6 @@
-import crypto from "node:crypto";
 
 export interface E2EConfig {
   baseUrl: string;
-  jwtSecret: string;
   userId: string;
   workspaceId: string;
   knownSecrets: string[];
@@ -10,7 +8,6 @@ export interface E2EConfig {
 
 export const defaultConfig: E2EConfig = {
   baseUrl: process.env.AGENT_API_URL ?? "http://127.0.0.1:13002",
-  jwtSecret: process.env.NPATI_JWT_SECRET ?? "e2e-test-jwt-secret-at-least-32-chars-long-123456",
   userId: "e2e-smoke-user",
   workspaceId: "workspace:e2e-smoke-user",
   knownSecrets: [
@@ -21,41 +18,6 @@ export const defaultConfig: E2EConfig = {
     "e2e-preview-secret-test-32-chars-long-abcdef",
   ].filter(Boolean),
 };
-
-function base64url(str: string | Buffer): string {
-  const buf = typeof str === "string" ? Buffer.from(str, "utf8") : str;
-  return buf.toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
-}
-
-export function createJwtToken(options: {
-  userId?: string;
-  workspaceId?: string;
-  role?: string;
-  permissions?: string[];
-  expSeconds?: number;
-  secret?: string;
-} = {}): string {
-  const secret = options.secret ?? defaultConfig.jwtSecret;
-  const header = base64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
-  const payload = base64url(
-    JSON.stringify({
-      userId: options.userId ?? defaultConfig.userId,
-      workspaceId: options.workspaceId ?? defaultConfig.workspaceId,
-      role: options.role ?? "owner",
-      permissions: options.permissions ?? ["*"],
-      exp: Math.floor(Date.now() / 1000) + (options.expSeconds ?? 3600),
-    }),
-  );
-  const signature = crypto
-    .createHmac("sha256", secret)
-    .update(`${header}.${payload}`)
-    .digest("base64")
-    .replace(/=/g, "")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_");
-
-  return `${header}.${payload}.${signature}`;
-}
 
 export interface ChatStreamEvent {
   event: string;
@@ -83,7 +45,8 @@ export async function sendChatStream(input: {
 }): Promise<ChatStreamOutcome> {
   const start = Date.now();
   const baseUrl = input.baseUrl ?? defaultConfig.baseUrl;
-  const token = input.token ?? createJwtToken();
+  const token = input.token ?? process.env.NPATI_E2E_ACCESS_TOKEN;
+  if (!token) throw new Error("A legitimate NPATI_E2E_ACCESS_TOKEN is required for live chat");
   const timeoutMs = input.timeoutMs ?? 120_000;
 
   const controller = new AbortController();
