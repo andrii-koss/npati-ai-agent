@@ -71,3 +71,18 @@ it("explains a rejected run identity instead of blaming the AI model", async () 
  const message = publicCompanyRunMessage(null, 'An agent reported run ID "RUN-FAKE", which the runtime did not issue, so its result was rejected.', "Run Designer then Reviewer", "RUN_IDENTITY_MISMATCH");
  expect(message).toContain("RUN-FAKE"); expect(message).not.toMatch(/temporarily unavailable/i);
 });
+
+it("asks the agent once to restate its result with the runtime run ID and counts both calls", async () => {
+ const { executeAgentStages } = await import("../apps/agent-api/src/company-runtime-stages");
+ const f = await fixture();
+ const requests: ChatRequest[] = []; const completed = vi.fn(); const failed = vi.fn();
+ const ai = { chat: async (request: ChatRequest) => { requests.push(request); return requests.length === 1
+  ? { content: "Tagline ready. Run ID: RUN-DS1023-20260507-001", usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 } }
+  : { content: "Tagline ready. Run ID: runtime-authoritative-id", usage: { promptTokens: 20, completionTokens: 6, totalTokens: 26 } }; } } as unknown as AIEngine;
+ const result = await executeAgentStages({ ai, main: f.agents[0]!, selected: [], mainAssignedWork: false, mode: "single", agentModels: {}, signal: new AbortController().signal, timeoutMs: 1000, task: "Include a run ID", evidence: "", managerInstruction: "Report", knowledgeContext: "", runId: "runtime-authoritative-id", admission: undefined, before: async () => {}, completed, failed, isRuntimeRunId: async () => false });
+ expect(result.content).toBe("Tagline ready. Run ID: runtime-authoritative-id");
+ expect(result.usage).toMatchObject({ promptTokens: 30, completionTokens: 11, totalTokens: 41 });
+ expect(requests).toHaveLength(2); expect(String(requests[1]!.messages.at(-1)?.content)).toContain("RUN-DS1023-20260507-001");
+ expect(requests[1]!.idempotencyKey).not.toBe(requests[0]!.idempotencyKey);
+ expect(completed).toHaveBeenCalledOnce(); expect(failed).not.toHaveBeenCalled();
+});
