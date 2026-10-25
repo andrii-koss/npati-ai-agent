@@ -50,7 +50,24 @@ it.each(["Run ID: STRESS-DS1023-RUN-FAKE", "**Run ID:** `RUN-20260509-DS1023-TAG
  let system = "";
  const completed = vi.fn(); const failed = vi.fn();
  const ai = { chat: async (request: ChatRequest) => { system = String(request.messages[0]?.content); return { content: forged }; } } as unknown as AIEngine;
- await expect(executeAgentStages({ ai, main: f.agents[0]!, selected: [], mainAssignedWork: false, mode: "single", agentModels: {}, signal: new AbortController().signal, timeoutMs: 1000, task: "Show the run ID", evidence: "", managerInstruction: "Report", knowledgeContext: "", runId: "runtime-authoritative-id", admission: undefined, before: async () => {}, completed, failed })).rejects.toThrow("runtime_run_identifier_mismatch");
+ await expect(executeAgentStages({ ai, main: f.agents[0]!, selected: [], mainAssignedWork: false, mode: "single", agentModels: {}, signal: new AbortController().signal, timeoutMs: 1000, task: "Show the run ID", evidence: "", managerInstruction: "Report", knowledgeContext: "", runId: "runtime-authoritative-id", admission: undefined, before: async () => {}, completed, failed, isRuntimeRunId: async () => false })).rejects.toMatchObject({ code: "RUN_IDENTITY_MISMATCH" });
  expect(system).toContain('"runId":"runtime-authoritative-id"');
  expect(completed).not.toHaveBeenCalled(); expect(failed).toHaveBeenCalledOnce();
+});
+
+it.each(["Designer result (Run ID: runtime-authoritative-id):", "Run ID: runtime-authoritative-id, stage worker", "Earlier review run id: 6a5e312f-bce1-4aaf-a0e7-13f981afb7a1. Current Run ID: runtime-authoritative-id."])("accepts the runtime ID with sentence punctuation and earlier runtime-issued runs: %s", async text => {
+ const { executeAgentStages } = await import("../apps/agent-api/src/company-runtime-stages");
+ const f = await fixture();
+ const completed = vi.fn(); const failed = vi.fn(); const looked: string[] = [];
+ const ai = { chat: async () => ({ content: text }) } as unknown as AIEngine;
+ const result = await executeAgentStages({ ai, main: f.agents[0]!, selected: [], mainAssignedWork: false, mode: "single", agentModels: {}, signal: new AbortController().signal, timeoutMs: 1000, task: "Show the run ID", evidence: "", managerInstruction: "Report", knowledgeContext: "", runId: "runtime-authoritative-id", admission: undefined, before: async () => {}, completed, failed,
+  isRuntimeRunId: async id => { looked.push(id); return id === "6a5e312f-bce1-4aaf-a0e7-13f981afb7a1"; } });
+ expect(result.content).toBe(text); expect(completed).toHaveBeenCalledOnce(); expect(failed).not.toHaveBeenCalled();
+ expect(looked.every(id => id === "6a5e312f-bce1-4aaf-a0e7-13f981afb7a1")).toBe(true);
+});
+
+it("explains a rejected run identity instead of blaming the AI model", async () => {
+ const { publicCompanyRunMessage } = await import("../apps/agent-api/src/chat-public-errors");
+ const message = publicCompanyRunMessage(null, 'An agent reported run ID "RUN-FAKE", which the runtime did not issue, so its result was rejected.', "Run Designer then Reviewer", "RUN_IDENTITY_MISMATCH");
+ expect(message).toContain("RUN-FAKE"); expect(message).not.toMatch(/temporarily unavailable/i);
 });

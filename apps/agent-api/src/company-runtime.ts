@@ -511,7 +511,9 @@ export class CompanyDelegationRuntime {
         agentModels: execution.agentModels, signal, timeoutMs: this.timeoutMs, task: protectedTask, evidence,
         managerInstruction: protect(instruction(company, main, true, !options.noMemory, linked) + chatLanguageInstruction(input.task)
           + (existing.run.projectId ? "\nSummarize only verified tool results in at most 120 words. This response cannot execute tools or save files." : "")),
-        knowledgeContext, runId: created.run.id, admission: { tenantId: ctx.workspaceId, tier: ctx.permissions.includes("admin:all") ? "enterprise" : "pro" },
+        knowledgeContext, runId: created.run.id,
+        isRuntimeRunId: id => this.store.getCompanyAgentRun(ctx, companyId, id).then(() => true, () => false),
+        admission: { tenantId: ctx.workspaceId, tier: ctx.permissions.includes("admin:all") ? "enterprise" : "pro" },
         before: async () => {
           if (options.callBudget && --options.callBudget.remaining < 0) throw new CompanyRuntimeError("MODEL_CALL_BUDGET_EXCEEDED", "Project model call limit reached", 429);
           signal.throwIfAborted();
@@ -524,7 +526,7 @@ export class CompanyDelegationRuntime {
         },
         failed: async (agentId, error) => {
           await this.store.updateCompanyAgentRunStep(ctx, companyId, created.run.id, agentId, signal.aborted ? "cancelled" : "failed");
-          await this.store.appendCompanyAgentToolAudit(ctx, companyId, created.run.id, { agentId, toolName: "ai.inference", decision: "allowed", status: "failed", inputSummary: { phase: "agent-result" }, errorMessage: "Agent inference did not complete" });
+          await this.store.appendCompanyAgentToolAudit(ctx, companyId, created.run.id, { agentId, toolName: "ai.inference", decision: "allowed", status: "failed", inputSummary: { phase: "agent-result" }, errorMessage: error instanceof CompanyRuntimeError ? error.message : "Agent inference did not complete" });
         },
       });
       let measured: Awaited<ReturnType<CompanyDelegationRuntime["recordInference"]>>;

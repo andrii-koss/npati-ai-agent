@@ -1,12 +1,15 @@
 ﻿import type { AIEngine, ChatRequest, ChatResult } from "@npati/omniroute-adapter";
 import { chatLanguageInstruction } from "./company-chat-i18n";
 import type { CompanyAgent } from "@npati/workspace";
+import { CompanyRuntimeError } from "./company-runtime-types";
 
 /** Execute existing agent priority combos explicitly so no intermediate answer disappears inside an opaque pipeline. */
 export async function executeAgentStages(input: {
   ai: AIEngine; main: CompanyAgent; selected: CompanyAgent[]; reviewer?: CompanyAgent; mainAssignedWork: boolean;
   mode: string; agentModels: Record<string, string>; signal: AbortSignal; timeoutMs: number;
   task: string; evidence: string; managerInstruction: string; knowledgeContext: string; runId: string;
+  /** True for an earlier run ID this company's runtime issued; such a reference is not an invented identifier. */
+  isRuntimeRunId?(runId: string): Promise<boolean>;
   admission: ChatRequest["admission"]; before(): Promise<void>;
   completed(agentId: string, result: ChatResult): Promise<void>;
   failed(agentId: string, error: unknown): Promise<void>;
@@ -31,7 +34,10 @@ export async function executeAgentStages(input: {
       if (!result.content.trim()) throw new Error("Agent returned empty output");
       const identityText = result.content.replace(/[*`_"']/g, "");
       for (const match of identityText.matchAll(/\brun[ -]?id\s*[:=]\s*([a-z0-9][a-z0-9:._-]*)/gi)) {
-        if (match[1]!.replace(/\.$/, "") !== input.runId) throw new Error("runtime_run_identifier_mismatch");
+        // Trailing punctuation belongs to the sentence; any other run ID must be one the runtime itself issued.
+        const claimed = match[1]!.replace(/[.:,;]+$/, "");
+        if (claimed !== input.runId && !await input.isRuntimeRunId?.(claimed))
+          throw new CompanyRuntimeError("RUN_IDENTITY_MISMATCH", `An agent reported run ID "${claimed.slice(0, 80)}", which the runtime did not issue, so its result was rejected.`, 502);
       }
       await input.completed(agent.id, result);
       completedAgents.push(agent.id);
