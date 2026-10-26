@@ -2,7 +2,7 @@ import { Pool } from "pg";
 import { assertCompany, getProject } from "./postgres-store-support";
 import { randomUUID } from "node:crypto";
 import type { ApplyCodeRunStateEventInput, AuthContext, CodeActivityEventRecord, CodeContextSummaryRecord, CodeRunRequestRecord, CodeRunScanPage, CodeRunStateRecord, CodeRunStateScanInput, CodeRunTurnRecord, CodeRunTurnScanInput, CreateCheckpointInput, CreateCodeActivityEventInput, CreateCodeContextSummaryInput, CreateCodeRunStateInput, CreateDeploymentInput, CreateProjectQaReportInput, DataClassification, ListCodeActivityEventsInput, ListCodeContextSummariesInput, ListCodeRunStatesInput, Project, ProjectCheckpoint, ProjectCodeSettings, ProjectCodeTrust, ProjectDeployment, ProjectInput, ProjectMountedFolder, ProjectQaReport, RetentionClass } from "./types";
-import { CodeRunStateStoreError, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, WorkspaceNotFoundError, clampScanLimit, codeRunRequestStatus, decodeCodeActivityCursor, decodeCodeRunScanCursor, encodeCodeRunScanCursor } from "./types";
+import { CodeRunStateStoreError, defaultProjectKind, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, WorkspaceNotFoundError, clampScanLimit, codeRunRequestStatus, decodeCodeActivityCursor, decodeCodeRunScanCursor, encodeCodeRunScanCursor } from "./types";
 import { codeActivityEventColumns, codeContextSummaryColumns, codeRunStateColumns, codeRunTurnColumns, projectCheckpointColumns, projectCodeTrustColumns, projectColumns, projectDeploymentColumns, projectMountedFolderColumns, projectQaReportColumns } from "./postgres-store-schema";
 import { mapCodeActivityEventRow, mapCodeContextSummaryRow } from "./postgres-store-support";
 import { assertProjectAgent } from "./postgres-company-repositories";
@@ -15,14 +15,14 @@ export async function createProject(pool: Pool, context: AuthContext, companyId:
     await assertCompany(pool, context, companyId);
     const created = await pool.query<Project>(`INSERT INTO projects
       (id,workspace_id,company_id,created_by,name,description,type,create_request_key,data_backend_id,app_scheme,
-       data_classification,retention_class,default_branch,toolchain)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       data_classification,retention_class,default_branch,toolchain,kind)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
       ON CONFLICT (workspace_id,company_id,created_by,create_request_key) DO NOTHING
       RETURNING ${projectColumns}`,
       [randomUUID(), context.workspaceId, companyId, context.userId, input.name, input.description ?? null, input.type, idempotencyKey,
         input.dataBackendId ?? null, input.appScheme ?? null,
         input.dataClassification ?? DEFAULT_DATA_CLASSIFICATION, input.retentionClass ?? DEFAULT_RETENTION_CLASS,
-        input.defaultBranch ?? null, input.toolchain ? JSON.stringify(input.toolchain) : null]);
+        input.defaultBranch ?? null, input.toolchain ? JSON.stringify(input.toolchain) : null, input.kind ?? defaultProjectKind(input.type)]);
     if (created.rows[0]) return { project: created.rows[0], created: true };
     const existing = await pool.query<Project>(`SELECT ${projectColumns} FROM projects
       WHERE workspace_id=$1 AND company_id=$2 AND created_by=$3 AND create_request_key=$4`,

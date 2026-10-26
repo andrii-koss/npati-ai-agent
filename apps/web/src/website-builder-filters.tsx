@@ -1,10 +1,14 @@
-import type { websiteBuilderCopy } from "./website-builder-constants";
+import { PROJECT_KIND_LABELS, type websiteBuilderCopy } from "./website-builder-constants";
+import { PROJECT_KINDS } from "@npati/shared";
 
 export interface WebsiteFiltersBarProps {
   searchQuery: string;
   setSearchQuery: (val: string) => void;
   frameworkFilter: string;
   setFrameworkFilter: (val: string) => void;
+  kindFilter: string;
+  setKindFilter: (val: string) => void;
+  language: string;
   statusFilter: "all" | "active" | "archived";
   setStatusFilter: (val: "all" | "active" | "archived") => void;
   t: (typeof websiteBuilderCopy)["en"];
@@ -15,6 +19,9 @@ export function WebsiteFiltersBar({
   setSearchQuery,
   frameworkFilter,
   setFrameworkFilter,
+  kindFilter,
+  setKindFilter,
+  language,
   statusFilter,
   setStatusFilter,
   t,
@@ -59,6 +66,28 @@ export function WebsiteFiltersBar({
       </div>
 
       <select
+        value={kindFilter}
+        onChange={(e) => setKindFilter(e.target.value)}
+        aria-label={t.filterKindAll}
+        style={{
+          height: "44px",
+          padding: "0 14px",
+          background: "var(--npati-gray-50)",
+          border: "1px solid var(--npati-gray-100)",
+          borderRadius: "12px",
+          color: "#111111",
+          fontSize: "13.5px",
+          fontWeight: 500,
+          cursor: "pointer",
+          outline: "none",
+        }}
+      >
+        <option value="all">{t.filterKindAll}</option>
+        {PROJECT_KINDS.map((kind) => (
+          <option key={kind} value={kind}>{language === "uk" ? PROJECT_KIND_LABELS[kind].uk : PROJECT_KIND_LABELS[kind].en}</option>
+        ))}
+      </select>
+      <select
         value={frameworkFilter}
         onChange={(e) => setFrameworkFilter(e.target.value)}
         style={{
@@ -79,6 +108,7 @@ export function WebsiteFiltersBar({
         <option value="nextjs">Next.js</option>
         <option value="vite">Vite</option>
         <option value="astro">Astro</option>
+        <option value="expo">Expo</option>
       </select>
 
       <select

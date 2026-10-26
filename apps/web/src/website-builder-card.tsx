@@ -10,7 +10,8 @@ import {
   Trash2,
 } from "lucide-react";
 import { apiFetch, type WebsiteProject } from "./website-builder-cache";
-import type { websiteBuilderCopy } from "./website-builder-constants";
+import { PROJECT_KIND_LABELS, type websiteBuilderCopy } from "./website-builder-constants";
+import { projectKindOf } from "@npati/shared";
 
 export interface WebsiteProjectCardProps {
   site: WebsiteProject;
@@ -609,6 +610,10 @@ export const WebsiteProjectCard = React.memo(function WebsiteProjectCard({
         >
           {site.name}
         </h3>
+        <small className="website-card-kind" style={{ display: "block", marginTop: "4px", color: "#667085", fontSize: "12.5px" }}>
+          {PROJECT_KIND_LABELS[projectKindOf(site)][language === "uk" ? "uk" : "en"]}
+          {site.framework ? ` · ${site.framework}` : ""}
+        </small>
       </div>
 
       {/* 3. Action Buttons Row */}

@@ -7,6 +7,9 @@ import { useTranslation } from "./i18n";
 import {
   createDefaultWebsiteDocument,
   createMobileAppScaffold,
+  createGameScaffold,
+  projectKindOf,
+  type ProjectKind,
   defaultAppScheme,
   slugifyProjectName,
   getWebsiteAdapter,
@@ -59,6 +62,7 @@ export function WebsiteBuilderDashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "archived">("active");
   const [frameworkFilter, setFrameworkFilter] = useState<string>("all");
+  const [kindFilter, setKindFilter] = useState<string>("all");
 
   // Create Modal State
   const [modalOpen, setModalOpen] = useState(false);
@@ -67,6 +71,7 @@ export function WebsiteBuilderDashboard() {
   const [description, setDescription] = useState(FRAMEWORK_STARTERS[0]?.defaultDesc ?? "Clean responsive website");
   const [framework, setFramework] = useState<string>("HTML/CSS");
   const [type, setType] = useState<"website" | "landing_page" | "web_app" | "mobile_app">("website");
+  const [kind, setKind] = useState<ProjectKind>("website");
   const [domain, setDomain] = useState("");
   const [internalPath, setInternalPath] = useState("/");
   const [stripPath, setStripPath] = useState(false);
@@ -143,7 +148,8 @@ export function WebsiteBuilderDashboard() {
       const res = await apiFetch<{ projects: WebsiteProject[] }>(
         `/companies/${encodeURIComponent(id)}/projects?includeArchived=true`
       );
-      const nextProjects = (res.projects || []).filter(site => site.type !== "code_project" || /^(Next\.js|HTML\/CSS|React|Vite)$/i.test(site.framework ?? ""));
+      // Every project belongs here: websites, web apps, games, mobile apps and APIs, whatever the framework.
+      const nextProjects = res.projects || [];
       lastFetchedWebsites.set(id, Date.now());
       setWebsites(nextProjects);
       updateCachedWebsites(id, nextProjects);
@@ -168,7 +174,8 @@ export function WebsiteBuilderDashboard() {
     setContainerPort(fw.defaultPort);
     setName(language === "uk" ? fw.defaultNameUk : fw.defaultName);
     setDescription(language === "uk" ? fw.defaultDescUk : fw.defaultDesc);
-    setType((current) => current === "mobile_app" ? current : fw.defaultType);
+    setType(fw.defaultType);
+    setKind(fw.kind);
   };
 
   const filteredWebsites = useMemo(() => {
@@ -181,6 +188,7 @@ export function WebsiteBuilderDashboard() {
       }
       if (statusFilter === "active" && site.status === "archived") return false;
       if (statusFilter === "archived" && site.status !== "archived") return false;
+      if (kindFilter !== "all" && projectKindOf(site) !== kindFilter) return false;
 
       if (frameworkFilter !== "all") {
         const fw = (site.framework || "").toLowerCase();
@@ -188,10 +196,11 @@ export function WebsiteBuilderDashboard() {
         if (frameworkFilter === "nextjs" && !fw.includes("next")) return false;
         if (frameworkFilter === "vite" && !fw.includes("vite")) return false;
         if (frameworkFilter === "astro" && !fw.includes("astro")) return false;
+        if (frameworkFilter === "expo" && !fw.includes("expo")) return false;
       }
       return true;
     });
-  }, [websites, searchQuery, statusFilter, frameworkFilter]);
+  }, [websites, searchQuery, statusFilter, frameworkFilter, kindFilter]);
 
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
@@ -229,6 +238,7 @@ export function WebsiteBuilderDashboard() {
             name: name.trim(),
             description: description.trim(),
             type,
+            kind,
             deploymentUrl: `https://${finalDomain}`,
             previewUrl: `https://${finalDomain}`,
             previewPort: domainConfig.port,
@@ -264,7 +274,9 @@ export function WebsiteBuilderDashboard() {
 
       const files: Record<string, string> = isMobileApp
         ? createMobileAppScaffold({ name: name.trim(), slug: slugifyProjectName(name.trim()), scheme: defaultAppScheme(name.trim()) }).files
-        : getWebsiteAdapter(doc.framework).scaffoldProject(doc);
+        : kind === "game"
+          ? createGameScaffold({ name: name.trim() }).files
+          : getWebsiteAdapter(doc.framework).scaffoldProject(doc);
 
       // Save domain and deployment configuration file in project files
       if (!isMobileApp) {
@@ -303,17 +315,19 @@ export function WebsiteBuilderDashboard() {
         }
       ).catch(() => {});
 
-      const promptText = language === "uk"
-        ? `Розгорни та налаштуй проєкт на базі ${framework}`
-        : `Deploy and setup ${framework} project`;
+      const promptText = kind === "game"
+        ? (language === "uk" ? "Запусти цю гру в Live Preview і запропонуй, як її розвинути" : "Start this game in Live Preview and suggest how to develop it")
+        : language === "uk"
+          ? `Розгорни та налаштуй проєкт на базі ${framework}`
+          : `Deploy and setup ${framework} project`;
 
       setModalOpen(false);
       navigate(
-        `/settings/websites/${encodeURIComponent(companyId)}/${encodeURIComponent(created.id)}`,
+        `/settings/projects/${encodeURIComponent(companyId)}/${encodeURIComponent(created.id)}`,
         { state: { prompt: promptText } }
       );
     } catch (err: any) {
-      setError(err.message || "Failed to create website");
+      setError(err.message || "Failed to create project");
     } finally {
       setBusy(false);
     }
@@ -350,7 +364,7 @@ export function WebsiteBuilderDashboard() {
       );
       await loadWebsites(companyId, { force: true });
       if (res?.project?.id) {
-        navigate(`/settings/websites/${encodeURIComponent(companyId)}/${encodeURIComponent(res.project.id)}`);
+        navigate(`/settings/projects/${encodeURIComponent(companyId)}/${encodeURIComponent(res.project.id)}`);
       }
     } catch (err: any) {
       alert(err.message || "Failed to duplicate website");
@@ -460,6 +474,9 @@ export function WebsiteBuilderDashboard() {
         setSearchQuery={setSearchQuery}
         frameworkFilter={frameworkFilter}
         setFrameworkFilter={setFrameworkFilter}
+        kindFilter={kindFilter}
+        setKindFilter={setKindFilter}
+        language={language}
         statusFilter={statusFilter}
         setStatusFilter={setStatusFilter}
         t={t}

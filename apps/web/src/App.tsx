@@ -396,7 +396,7 @@ function SettingsPage() {
       description: t("settings.cards.company.desc"),
     },
     {
-      to: "/settings/websites",
+      to: "/settings/projects",
       icon: (
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <circle cx="12" cy="12" r="10" />
@@ -404,8 +404,8 @@ function SettingsPage() {
           <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
         </svg>
       ),
-      title: "Websites",
-      description: language === "uk" ? "Створюйте та редагуйте сайти на Next.js та за допомогою AI." : "Create, customize, and manage responsive websites with Next.js and AI.",
+      title: language === "uk" ? "Проєкти" : "Projects",
+      description: language === "uk" ? "Сайти, вебзастосунки, ігри та мобільні застосунки, які створює й редагує AI." : "Websites, web apps, games and mobile apps created and edited with AI.",
     },
     {
       to: "/settings/code",
@@ -567,8 +567,8 @@ function LegacyProjectRedirect() {
   const { projectId = "" } = useParams();
   const { overview } = useWorkspace();
   const companyId = overview?.currentBusiness?.id || overview?.businesses[0]?.id || "";
-  if (!companyId) return <Navigate to="/settings/websites" replace />;
-  return <Navigate to={`/settings/websites/${encodeURIComponent(companyId)}/${encodeURIComponent(projectId)}`} replace />;
+  if (!companyId) return <Navigate to="/settings/projects" replace />;
+  return <Navigate to={`/settings/projects/${encodeURIComponent(companyId)}/${encodeURIComponent(projectId)}`} replace />;
 }
 
 export function App() {
@@ -587,7 +587,10 @@ export function App() {
             <Route path="/settings/business/:businessId" element={<Workspace><BusinessPage /></Workspace>} />
             <Route path="/company" element={<Workspace><CompanyPage /></Workspace>} />
             <Route path="/settings/company" element={<Workspace><CompanyPage /></Workspace>} />
-            <Route path="/settings/websites" element={<Workspace><WebsiteBuilderDashboard /></Workspace>} />
+            <Route path="/settings/projects" element={<Workspace><WebsiteBuilderDashboard /></Workspace>} />
+            <Route path="/settings/projects/:companyId/:projectId" element={<WebsiteChatRoute />} />
+            {/* Websites became Projects; old bookmarks and chat links keep working. */}
+            <Route path="/settings/websites" element={<Navigate to="/settings/projects" replace />} />
             <Route path="/settings/websites/:companyId/:projectId" element={<WebsiteChatRoute />} />
             <Route path="/projects/:companyId/:projectId" element={<WebsiteChatRoute />} />
             <Route path="/companies/:companyId/projects/:projectId/data" element={<Workspace><DataStudioPage /></Workspace>} />

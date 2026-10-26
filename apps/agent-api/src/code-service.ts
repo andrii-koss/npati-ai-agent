@@ -1,4 +1,4 @@
-import type { AuthContext, CodeSession, CodeSessionInput, CodeSessionStatus, CodeToolchain, DataClassification, Project, ProjectCodeSettings, RetentionClass, WorkspaceStore } from "@npati/workspace";
+import type { AuthContext, CodeSession, ProjectKind, CodeSessionInput, CodeSessionStatus, CodeToolchain, DataClassification, Project, ProjectCodeSettings, RetentionClass, WorkspaceStore } from "@npati/workspace";
 import { DATA_CLASSIFICATIONS, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, RETENTION_CLASSES, isClassificationAtLeast } from "@npati/workspace";
 import type { ProjectService } from "./project-service";
 import type { ProjectWorkspace } from "./project-workspace";
@@ -22,6 +22,8 @@ export class CodeError extends Error {
 export interface CreateCodeProjectInput {
   name: string;
   description?: string;
+  /** What the project is for (website, game, ...); defaults to a website. */
+  kind?: ProjectKind;
   repositoryUrl?: string;
   branch?: string;
   credentialId?: string;
@@ -172,7 +174,7 @@ export class CodeService {
       { phase: "before_create" });
 
     const created = await this.projects.create(ctx, companyId, {
-      name, type: "code_project", description: input.description?.trim() || undefined,
+      name, type: "code_project", kind: input.kind, description: input.description?.trim() || undefined,
       dataClassification, retentionClass, defaultBranch: input.branch?.trim() || undefined,
     }, idempotencyKey ?? `code-${ctx.userId}-${name}-${repositoryUrl || "empty"}`);
 

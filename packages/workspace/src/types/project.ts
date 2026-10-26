@@ -2,6 +2,13 @@ import type { DataClassification, RetentionClass } from "./retention";
 
 export type ProjectType = "website" | "web_app" | "landing_page" | "mobile_app" | "code_project";
 export const PROJECT_TYPES: readonly ProjectType[] = ["website", "web_app", "landing_page", "mobile_app", "code_project"] as const;
+/** What the project is for; mirrors `PROJECT_KINDS` in @npati/shared. Code projects keep `type: "code_project"`. */
+export type ProjectKind = "website" | "web_app" | "game" | "mobile_app" | "api";
+export const PROJECT_KINDS: readonly ProjectKind[] = ["website", "web_app", "game", "mobile_app", "api"] as const;
+/** The kind a new project gets when the caller does not state one. */
+export function defaultProjectKind(type: ProjectType): ProjectKind {
+  return type === "mobile_app" ? "mobile_app" : type === "web_app" ? "web_app" : "website";
+}
 export type ProjectStatus = "creating" | "ready" | "working" | "building" | "previewing" | "failed" | "archived" | "soft_deleted" | "purging" | "deleted";
 
 
@@ -26,7 +33,7 @@ export interface ProjectCodeSettings {
 
 export interface Project {
   id: string; companyId: string; workspaceId: string; createdBy: string;
-  name: string; description?: string; type: ProjectType; status: ProjectStatus;
+  name: string; description?: string; type: ProjectType; kind: ProjectKind; status: ProjectStatus;
   framework?: string; runtime?: string; repositoryProvider?: string; repositoryUrl?: string; repositoryBranch?: string;
   sandboxId?: string; previewUrl?: string; previewPort?: number; lastRunId?: string; lastBuildStatus?: string;
   deploymentUrl?: string; deploymentStatus?: string; lastDeployedAt?: string;
@@ -45,7 +52,7 @@ export interface Project {
   revision: number; createdAt: string; updatedAt: string;
 }
 export interface ProjectInput {
-  name: string; description?: string; type: ProjectType; dataBackendId?: string; appScheme?: string;
+  name: string; description?: string; type: ProjectType; kind?: ProjectKind; dataBackendId?: string; appScheme?: string;
   /** C1: optional overrides; the store applies the defaults when omitted. */
   dataClassification?: DataClassification;
   retentionClass?: RetentionClass;

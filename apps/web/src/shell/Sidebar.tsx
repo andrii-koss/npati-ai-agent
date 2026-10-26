@@ -125,7 +125,7 @@ export function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose
           )}
         </div>
         {navigation.map((item) => {
-          const href = item === "Websites" ? "/settings/websites" : `/${item.toLowerCase()}`;
+          const href = item === "Projects" ? "/settings/projects" : `/${item.toLowerCase()}`;
           return (
             <Link
               key={item}
@@ -133,7 +133,7 @@ export function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose
               to={href}
               onClick={onClose}
             >
-              {item === "Settings" ? t("common.settings") : item === "Websites" ? "Websites" : item}
+              {item === "Settings" ? t("common.settings") : item === "Projects" ? "Projects" : item}
             </Link>
           );
         })}

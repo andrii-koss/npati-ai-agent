@@ -26,7 +26,7 @@ export function CodeWorkspaceHeader({ isUk, sessionId, runId, selectSession, ses
             <p className="eyebrow">{isUk ? "Кодовий агент та розробка" : "Code Agent & Workspace"}</p>
             <h1>
               <Link
-                to="/settings/websites"
+                to="/settings/projects"
                 className="marketplace-back-button"
                 aria-label={isUk ? "Назад" : "Back"}
                 title={isUk ? "Повернутися назад" : "Go back"}

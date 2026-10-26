@@ -60,7 +60,7 @@ export function ActivityTraceDetail({
               </span>
             )}
             {activeRunDetails.run.projectId && (
-              <Link to={`/settings/websites/${activeRunDetails.run.companyId}/${activeRunDetails.run.projectId}`} className="button-secondary open-project-from-activity-btn">
+              <Link to={`/settings/projects/${activeRunDetails.run.companyId}/${activeRunDetails.run.projectId}`} className="button-secondary open-project-from-activity-btn">
                 🌐 {language === "uk" ? "Відкрити проєкт" : "Open Project"}
               </Link>
             )}

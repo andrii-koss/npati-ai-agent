@@ -1,4 +1,5 @@
 import React from "react";
+import type { ProjectKind } from "@npati/shared";
 
 export function FrameworkIcon({ id }: { id: string }) {
   if (id === "html-css") {
@@ -64,19 +65,39 @@ export function FrameworkIcon({ id }: { id: string }) {
       </svg>
     );
   }
+  if (id === "game") {
+    return (
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ffcf4a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="2" y="6" width="20" height="12" rx="6" />
+        <path d="M6 12h4M8 10v4" />
+        <circle cx="15.5" cy="11" r="1" fill="#ffcf4a" />
+        <circle cx="18" cy="13" r="1" fill="#ffcf4a" />
+      </svg>
+    );
+  }
+  if (id === "expo") {
+    return (
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="6" y="2" width="12" height="20" rx="3" />
+        <path d="M11 18h2" />
+      </svg>
+    );
+  }
   return null;
 }
 
 export interface FrameworkStarterOption {
-  id: "html-css" | "nextjs" | "vite" | "astro";
-  frameworkKey: "HTML/CSS" | "Next.js" | "Vite" | "Astro";
+  id: "html-css" | "nextjs" | "vite" | "astro" | "game" | "expo";
+  frameworkKey: "HTML/CSS" | "Next.js" | "Vite" | "Astro" | "Expo";
+  /** What the starter creates; shown and filtered on the Projects page. */
+  kind: ProjectKind;
   name: string;
   runtimeLabel: string;
   runtimeLabelUk: string;
   verifiedLabel: string;
   tags: string[];
   defaultPort: number;
-  defaultType: "website" | "landing_page" | "web_app";
+  defaultType: "website" | "landing_page" | "web_app" | "mobile_app";
   defaultName: string;
   defaultNameUk: string;
   defaultDesc: string;
@@ -94,6 +115,7 @@ export const FRAMEWORK_STARTERS: FrameworkStarterOption[] = [
     tags: ["HTML5", "CSS3", "JavaScript", "Instant Preview", "Static Build"],
     defaultPort: 3000,
     defaultType: "website",
+    kind: "website",
     defaultName: "Modern HTML/CSS Website",
     defaultNameUk: "Сучасний HTML/CSS сайт",
     defaultDesc: "Clean, responsive static website with modern HTML5, CSS3 layout, and instant live preview.",
@@ -109,6 +131,7 @@ export const FRAMEWORK_STARTERS: FrameworkStarterOption[] = [
     tags: ["App Router", "React 18", "TypeScript", "Server Actions", "API Routes"],
     defaultPort: 3000,
     defaultType: "website",
+    kind: "website",
     defaultName: "Next.js Web Platform",
     defaultNameUk: "Веб-платформа Next.js",
     defaultDesc: "Full-stack web application powered by Next.js 14 App Router, TypeScript, and server components.",
@@ -124,6 +147,7 @@ export const FRAMEWORK_STARTERS: FrameworkStarterOption[] = [
     tags: ["React 18", "Vite HMR", "TypeScript", "SPA", "Tailwind CSS"],
     defaultPort: 5173,
     defaultType: "web_app",
+    kind: "web_app",
     defaultName: "Vite React Studio",
     defaultNameUk: "Vite React Студія",
     defaultDesc: "Ultra-fast single page application with instant Vite HMR, React 18, and modular components.",
@@ -139,27 +163,70 @@ export const FRAMEWORK_STARTERS: FrameworkStarterOption[] = [
     tags: ["Islands", "Zero JS", "Markdown / MDX", "Content Collections", "Multi-page"],
     defaultPort: 4321,
     defaultType: "website",
+    kind: "website",
     defaultName: "Astro Content Hub",
     defaultNameUk: "Контент-хаб на Astro",
     defaultDesc: "High-performance content website with Astro islands architecture and zero unnecessary JavaScript.",
     defaultDescUk: "Високопродуктивний сайт з острівною архітектурою Astro та мінімальним завантаженням JS.",
   },
+  {
+    id: "game",
+    frameworkKey: "HTML/CSS",
+    kind: "game",
+    name: "Game · HTML5 Canvas",
+    runtimeLabel: "Browser game, shared NPATI Sandbox runtime",
+    runtimeLabelUk: "Браузерна гра, спільне середовище NPATI Sandbox",
+    verifiedLabel: "Verified",
+    tags: ["Canvas", "Game loop", "Keyboard", "Touch", "No dependencies"],
+    defaultPort: 3000,
+    defaultType: "website",
+    defaultName: "Arcade Game",
+    defaultNameUk: "Аркадна гра",
+    defaultDesc: "A playable 2D browser game: catch stars, dodge rocks, score and lives. Extend it in chat.",
+    defaultDescUk: "Готова 2D-гра в браузері: ловіть зірки, уникайте каміння, рахунок і життя. Розвивайте її в чаті.",
+  },
+  {
+    id: "expo",
+    frameworkKey: "Expo",
+    kind: "mobile_app",
+    name: "Mobile app · Expo",
+    runtimeLabel: "React Native with web preview",
+    runtimeLabelUk: "React Native з веб-превʼю",
+    verifiedLabel: "Verified",
+    tags: ["Expo", "React Native", "iOS", "Android", "Web preview"],
+    defaultPort: 3000,
+    defaultType: "mobile_app",
+    defaultName: "Mobile App",
+    defaultNameUk: "Мобільний застосунок",
+    defaultDesc: "An Expo / React Native app with a web preview, connected to the project data backend.",
+    defaultDescUk: "Застосунок на Expo / React Native з веб-превʼю та підключенням до даних проєкту.",
+  },
 ];
+
+/** Projects page labels for each project kind. */
+export const PROJECT_KIND_LABELS: Record<ProjectKind, { en: string; uk: string }> = {
+  website: { en: "Website", uk: "Сайт" },
+  web_app: { en: "Web app", uk: "Вебзастосунок" },
+  game: { en: "Game", uk: "Гра" },
+  mobile_app: { en: "Mobile app", uk: "Мобільний застосунок" },
+  api: { en: "API / backend", uk: "API / бекенд" },
+};
 
 export const websiteBuilderCopy = {
   en: {
-    eyebrow: "Website Studio",
-    title: "Websites",
-    subtitle: "Create and edit websites with Coding Agent in chat and view changes in Live Preview.",
-    newWebsite: "Create Website",
-    searchPlaceholder: "Search websites by name or purpose...",
+    eyebrow: "Project Studio",
+    title: "Projects",
+    subtitle: "Create and edit websites, web apps, games and mobile apps with Coding Agent in chat and view changes in Live Preview.",
+    newWebsite: "Create Project",
+    searchPlaceholder: "Search projects by name or purpose...",
     filterAll: "All Frameworks",
+    filterKindAll: "All Types",
     filterStatusAll: "All Statuses",
     statusActive: "Active Only",
     statusArchived: "Archived Only",
-    emptyTitle: "No websites created yet",
-    emptySubtitle: "Create your first website with our pre-built Next.js block templates or ask the AI agent in Chat.",
-    createNow: "Create Your First Website",
+    emptyTitle: "No projects created yet",
+    emptySubtitle: "Create your first website, game or mobile app from a starter, or ask the AI agent in Chat.",
+    createNow: "Create Your First Project",
     openBuilder: "Edit in chat",
     preview: "Live Preview",
     duplicate: "Duplicate",
@@ -167,14 +234,14 @@ export const websiteBuilderCopy = {
     archive: "Archive",
     delete: "Delete",
     restore: "Restore",
-    loadError: "Failed to load website projects",
-    renamePrompt: "Enter new website name:",
-    archivePrompt: "Archive this website? It will remain accessible under archived filter.",
-    deletePrompt: "Permanently delete this website project and all its files? This action cannot be undone.",
-    drawerKicker: "WEBSITE STARTER",
-    drawerTitle: "Create New Website",
-    drawerSubtitle: "Select a framework runtime to deploy and customize your project details.",
-    sectionTemplate: "1. Choose Framework & Runtime",
+    loadError: "Failed to load projects",
+    renamePrompt: "Enter new project name:",
+    archivePrompt: "Archive this project? It will remain accessible under archived filter.",
+    deletePrompt: "Permanently delete this project and all its files? This action cannot be undone.",
+    drawerKicker: "PROJECT STARTER",
+    drawerTitle: "Create New Project",
+    drawerSubtitle: "Choose a website, game or mobile app starter and customize your project details.",
+    sectionTemplate: "1. Choose Project Starter",
     sectionDomain: "2. Domain & SSL / Network",
     domainTitle: "Domain",
     domainDesc: "In this section you can edit a domain",
@@ -192,7 +259,7 @@ export const websiteBuilderCopy = {
     sslLabel: "Automatically provision SSL Certificate.",
     letsEncryptTitle: "Let's Encrypt",
     letsEncryptDesc: "Let's Encrypt auto-provisions a certificate automatically for this host.",
-    nameLabel: "Website Name",
+    nameLabel: "Project Name",
     descLabel: "Purpose & Description",
     frameworkLabel: "Framework",
     typeLabel: "Project Type",
@@ -201,7 +268,7 @@ export const websiteBuilderCopy = {
     typeWebApp: "Web Application",
     typeMobileApp: "Mobile app (Expo / React Native)",
     cancel: "Cancel",
-    createBtn: "Create Website & Edit in chat →",
+    createBtn: "Create Project & Edit in chat →",
     creating: "Creating Project & Files...",
     pages: "pages",
     updated: "Updated",
@@ -210,18 +277,19 @@ export const websiteBuilderCopy = {
     buildingStatus: "Building...",
   },
   uk: {
-    eyebrow: "Студія сайтів",
-    title: "Сайти",
-    subtitle: "Створюйте й редагуйте сайти через Coding Agent у чаті та переглядайте зміни в Live Preview.",
-    newWebsite: "Створити сайт",
-    searchPlaceholder: "Пошук сайтів за назвою чи описом...",
+    eyebrow: "Студія проєктів",
+    title: "Проєкти",
+    subtitle: "Створюйте й редагуйте сайти, вебзастосунки, ігри та мобільні застосунки через Coding Agent у чаті й переглядайте зміни в Live Preview.",
+    newWebsite: "Створити проєкт",
+    searchPlaceholder: "Пошук проєктів за назвою чи описом...",
     filterAll: "Усі фреймворки",
+    filterKindAll: "Усі типи",
     filterStatusAll: "Усі статуси",
     statusActive: "Тільки активні",
     statusArchived: "Тільки архівні",
-    emptyTitle: "Сайтів ще не створено",
-    emptySubtitle: "Створіть свій перший сайт із готових блоків Next.js або попросіть AI агента у Chat командою «Створи сайт».",
-    createNow: "Створити перший сайт",
+    emptyTitle: "Проєктів ще не створено",
+    emptySubtitle: "Створіть перший сайт, гру чи мобільний застосунок зі стартового шаблону або попросіть AI агента в Chat, наприклад «Створи гру змійка».",
+    createNow: "Створити перший проєкт",
     openBuilder: "Редагувати в чаті",
     preview: "Live Preview",
     duplicate: "Дублювати",
@@ -229,14 +297,14 @@ export const websiteBuilderCopy = {
     archive: "Архівувати",
     delete: "Видалити",
     restore: "Відновити",
-    loadError: "Не вдалося завантажити проєкти сайтів",
-    renamePrompt: "Введіть нову назву сайту:",
-    archivePrompt: "Архівувати цей сайт? Його можна буде переглянути через фільтр архівних.",
-    deletePrompt: "Назавжди видалити цей сайт і всі його файли? Цю дію неможливо скасувати.",
-    drawerKicker: "СТАРТОВИЙ САЙТ",
-    drawerTitle: "Створити новий сайт",
-    drawerSubtitle: "Оберіть фреймворк для розгортання в ізольованому середовищі.",
-    sectionTemplate: "1. Оберіть фреймворк та середовище",
+    loadError: "Не вдалося завантажити проєкти",
+    renamePrompt: "Введіть нову назву проєкту:",
+    archivePrompt: "Архівувати цей проєкт? Його можна буде переглянути через фільтр архівних.",
+    deletePrompt: "Назавжди видалити цей проєкт і всі його файли? Цю дію неможливо скасувати.",
+    drawerKicker: "СТАРТОВИЙ ПРОЄКТ",
+    drawerTitle: "Створити новий проєкт",
+    drawerSubtitle: "Оберіть стартовий шаблон сайту, гри чи мобільного застосунку.",
+    sectionTemplate: "1. Оберіть стартовий шаблон",
     sectionDomain: "2. Домен, порт та SSL-сертифікат",
     domainTitle: "Домен",
     domainDesc: "У цьому розділі ви можете налаштувати прив'язку домену",
@@ -254,7 +322,7 @@ export const websiteBuilderCopy = {
     sslLabel: "Автоматично згенерувати SSL-сертифікат.",
     letsEncryptTitle: "Let's Encrypt",
     letsEncryptDesc: "Let's Encrypt автоматично генерує та оновлює сертифікат для цього хоста.",
-    nameLabel: "Назва сайту",
+    nameLabel: "Назва проєкту",
     descLabel: "Призначення та опис",
     frameworkLabel: "Фреймворк",
     typeLabel: "Тип проєкту",
@@ -263,7 +331,7 @@ export const websiteBuilderCopy = {
     typeWebApp: "Вебзастосунок",
     typeMobileApp: "Мобільний застосунок (Expo / React Native)",
     cancel: "Скасувати",
-    createBtn: "Створити сайт і редагувати в чаті →",
+    createBtn: "Створити проєкт і редагувати в чаті →",
     creating: "Створення проєкту та файлів...",
     pages: "стор.",
     updated: "Оновлено",

@@ -188,7 +188,7 @@ export const companyColumns = `id, workspace_id AS "workspaceId", user_id AS "us
   company_instructions AS "companyInstructions", knowledge, memory, main_agent_id AS "mainAgentId", status, revision,
   created_at AS "createdAt", updated_at AS "updatedAt"`;
 export const projectColumns = `id, workspace_id AS "workspaceId", company_id AS "companyId", created_by AS "createdBy",
-  name, description, type, status, framework, runtime, repository_provider AS "repositoryProvider",
+  name, description, type, kind, status, framework, runtime, repository_provider AS "repositoryProvider",
   repository_url AS "repositoryUrl", repository_branch AS "repositoryBranch", sandbox_id AS "sandboxId",
   preview_url AS "previewUrl", preview_port AS "previewPort", last_run_id AS "lastRunId",
   last_build_status AS "lastBuildStatus", deployment_url AS "deploymentUrl", deployment_status AS "deploymentStatus",

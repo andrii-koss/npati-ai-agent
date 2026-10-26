@@ -46,7 +46,7 @@ export interface ProjectIntentDecision {
     actionDescription?: string;
     entityName?: string;
     /** D6: a mobile app project shares an existing DataBackend with the website. */
-    projectType?: "website" | "mobile_app";
+    projectType?: "website" | "mobile_app" | "game";
     dataBackendId?: string;
   };
 }
@@ -64,7 +64,10 @@ export function isMobileAppRequest(message: string): boolean {
 
 const EXPLANATION_REGEX = /^(?:що таке|як працює|поясни|розкажи про|різниця між|чому|what is|how does|how do|explain|tell me about|difference between|why is)\b/i;
 
-const CREATE_PROJECT_REGEX = /(?:створи|зроби|розроби|створити|запусти|згенеруй|create|build|make|generate|start|new)(?:\s+[\p{L}\d_-]+){0,5}\s+(?:сайт|веб-?сайт|лендінг|проєкт|проект|додаток|застосун\p{L}*|апп|сторінк[уа]|website|web\s*site|landing(?:\s*page)?|project|app|web\s*app)/iu;
+const CREATE_PROJECT_REGEX = /(?:створи|зроби|розроби|створити|запусти|згенеруй|create|build|make|generate|start|new)(?:\s+[\p{L}\d_-]+){0,5}\s+(?:сайт|веб-?сайт|лендінг|проєкт|проект|додаток|застосун\p{L}*|апп|сторінк[уа]|гр[уа](?![\p{L}])|ігр\p{L}*|website|web\s*site|landing(?:\s*page)?|project|app|web\s*app|games?\b)/iu;
+/** A browser game, not a mobile one: "гра", "ігри", "game" as whole words, so "програма" or "групу" never match. */
+const GAME_REQUEST_REGEX = /(?:\bgames?\b|(?<![\p{L}])(?:гр[уаи]|ігр\p{L}*|игр\p{L}*)(?![\p{L}]))/iu;
+export const isGameRequest = (text: string) => !isMobileAppRequest(text) && GAME_REQUEST_REGEX.test(text);
 
 const EDIT_ACTION_REGEX = /(?:зроби|зміни|додай|видали|поправ|онови|перепиши|пофарбуй|розмісти|збільш|зменш|налаштуй|make|change|add|update|edit|modify|fix|move|enlarge|shrink|customize|color|style|darker|lighter|bigger|smaller)\s+(?:кнопк|хедер|футер|текст|шрифт|колір|секці|банер|форму|дизайн|стил|меню|лого|button|header|footer|text|font|color|section|banner|form|design|style|menu|hero|logo)/i;
 
@@ -250,9 +253,10 @@ export function classifyProjectIntent(rawInput: ProjectIntentInput | string): Pr
     && (CREATE_PROJECT_REGEX.test(opening) || CREATE_STORE_REGEX.test(opening))
     && !componentRequest && !EXPLANATION_REGEX.test(opening)) {
     const isMobileApp = isMobileAppRequest(opening);
+    const isGame = isGameRequest(opening);
     const isWebsite = !isMobileApp && /сайт|лендінг|магазин|website|web\s*site|landing|store|shop/iu.test(opening);
     // A page/component inside an existing project remains an edit.
-    if (isWebsite || isMobileApp || /про[єе]кт|\bproject\b/iu.test(opening)) {
+    if (isWebsite || isMobileApp || isGame || /про[єе]кт|\bproject\b/iu.test(opening)) {
       return buildDecision({
         intent: isWebsite ? "CREATE_WEBSITE" : "CREATE_PROJECT",
         confidence: 0.96,
@@ -260,9 +264,9 @@ export function classifyProjectIntent(rawInput: ProjectIntentInput | string): Pr
         needsClarification: false,
         targetDetails: {
           topic: text,
-          framework: isMobileApp ? "Expo" : extractFramework(text),
+          framework: isMobileApp ? "Expo" : extractFramework(text) ?? (isGame ? "HTML/CSS" : undefined),
           entityName: extractEntityName(text),
-          projectType: isMobileApp ? "mobile_app" : "website",
+          projectType: isMobileApp ? "mobile_app" : isGame ? "game" : "website",
         },
       });
     }
@@ -337,6 +341,7 @@ export function classifyProjectIntent(rawInput: ProjectIntentInput | string): Pr
   // A new site/app must win over ancillary build, preview and data requests.
   if (CREATE_PROJECT_REGEX.test(text) && (/створи|створити|зроби|розроби|згенеруй|create|generate|make|build\s+(?:a|an)\s/iu.test(text) || !PREVIEW_REGEX.test(text) && !BUILD_REGEX.test(text) && !TEST_REGEX.test(text)) || CREATE_STORE_REGEX.test(text) && !/таблиц|колекці|схем|table|collection|schema/iu.test(text)) {
     const isMobileApp = isMobileAppRequest(text);
+    const isGame = isGameRequest(text);
     const isWebsite = !isMobileApp && /сайт|веб-?сайт|лендінг|магазин|website|web\s*site|landing|store|shop/iu.test(text);
     return buildDecision({
       intent: isWebsite ? "CREATE_WEBSITE" : "CREATE_PROJECT",
@@ -345,9 +350,9 @@ export function classifyProjectIntent(rawInput: ProjectIntentInput | string): Pr
       needsClarification: false,
       targetDetails: {
         topic: text,
-        framework: isMobileApp ? "Expo" : extractFramework(text),
+        framework: isMobileApp ? "Expo" : extractFramework(text) ?? (isGame ? "HTML/CSS" : undefined),
         entityName: extractEntityName(text),
-        projectType: isMobileApp ? "mobile_app" : "website",
+        projectType: isMobileApp ? "mobile_app" : isGame ? "game" : "website",
       },
     });
   }
@@ -430,6 +435,7 @@ export function classifyProjectIntent(rawInput: ProjectIntentInput | string): Pr
   // 11. Create Project / Create Website / Create Mobile App (D6)
   if (CREATE_PROJECT_REGEX.test(text)) {
     const isMobileApp = isMobileAppRequest(text);
+    const isGame = isGameRequest(text);
     const isWebsite = !isMobileApp && /сайт|веб-?сайт|лендінг|website|web\s*site|landing/i.test(text);
     return buildDecision({
       intent: isWebsite ? "CREATE_WEBSITE" : "CREATE_PROJECT",
@@ -438,9 +444,9 @@ export function classifyProjectIntent(rawInput: ProjectIntentInput | string): Pr
       needsClarification: false,
       targetDetails: {
         topic: text,
-        framework: isMobileApp ? "Expo" : extractFramework(text),
+        framework: isMobileApp ? "Expo" : extractFramework(text) ?? (isGame ? "HTML/CSS" : undefined),
         entityName: extractEntityName(text),
-        projectType: isMobileApp ? "mobile_app" : "website",
+        projectType: isMobileApp ? "mobile_app" : isGame ? "game" : "website",
       },
     });
   }

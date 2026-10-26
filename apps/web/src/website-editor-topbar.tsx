@@ -79,7 +79,7 @@ export function WebsiteEditorTopbar({
     <header className="npati-builder-topbar">
       {/* Left: Back button, Website name, Framework badge, Saved status */}
       <div className="npati-builder-topbar-left">
-        <Link to="/settings/websites" className="npati-builder-back-btn" title="Back to Websites">
+        <Link to="/settings/projects" className="npati-builder-back-btn" title="Back to Projects">
           <IconBack />
         </Link>
 
@@ -376,7 +376,7 @@ export function WebsiteEditorTopbar({
 
         {/* Close button matching project style */}
         <Link
-          to="/settings/websites"
+          to="/settings/projects"
           className="npati-builder-close-btn"
           title={language === "uk" ? "Закрити" : "Close"}
           aria-label="Close"

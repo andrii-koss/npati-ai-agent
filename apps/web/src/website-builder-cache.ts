@@ -6,6 +6,7 @@ export interface WebsiteProject {
   name: string;
   description?: string;
   type: "website" | "web_app" | "landing_page" | "mobile_app" | "code_project";
+  kind?: "website" | "web_app" | "game" | "mobile_app" | "api";
   status: string;
   framework?: string;
   repositoryBranch?: string;

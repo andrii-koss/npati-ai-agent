@@ -1,7 +1,7 @@
 import { createProjectImplementationPrompt } from "./project-creation-prompt";
 import { resolveCodingConversationLanguage, codingChatResponseInstruction, chatLanguageInstruction } from "./company-chat-i18n";
 import { randomUUID } from "node:crypto";
-import { DEVELOPMENT_PROCESS_SETTINGS_KEY, sanitizeExecutionTrace, developmentIsActive, planChatDevelopment, type DevelopmentProcess, type DevelopmentTarget } from "@npati/shared";
+import { DEVELOPMENT_PROCESS_SETTINGS_KEY, sanitizeExecutionTrace, developmentIsActive, planChatDevelopment, developmentTargetKind, type DevelopmentProcess, type DevelopmentTarget } from "@npati/shared";
 import { WorkspaceNotFoundError, WorkspaceAccessError, type AuthContext, type Project, type WorkspaceStore } from "@npati/workspace";
 import type { CodeService } from "./code-service";
 import type { FeatureFlagService } from "./feature-flags";
@@ -402,7 +402,7 @@ export class ChatDevelopmentService {
       if (!plainHtml) await this.update(ctx, process.id, { conversationId: process.conversationId }, { stage: "project", title: "Preparing project workspace", details: { tool: "code.workspace", status: "running", agentId: "System" } });
       ensureActive();
       const { project: raw } = await this.d.projects.create(ctx, process.companyId, {
-        name: process.name, type: target.kind === "mobile_app" ? "mobile_app" : "code_project", description: message.slice(0, 5000),
+        name: process.name, type: target.kind === "mobile_app" ? "mobile_app" : "code_project", kind: developmentTargetKind(target.kind), description: message.slice(0, 5000),
       }, "chat-development:" + process.id, { attachDataBackend: false });
       process.projectId = raw.id;
       if (plainHtml) await this.patch(ctx, process.id, { projectId: raw.id, conversationId: process.conversationId });

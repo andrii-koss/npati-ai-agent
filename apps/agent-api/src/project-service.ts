@@ -1,4 +1,4 @@
-import { PROJECT_TYPES, type AuthContext, type ProjectCodeSettings, type ProjectInput, type ProjectStatus, type WorkspaceStore } from "@npati/workspace";
+import { PROJECT_KINDS, PROJECT_TYPES, type AuthContext, type ProjectCodeSettings, type ProjectInput, type ProjectStatus, type WorkspaceStore } from "@npati/workspace";
 import { defaultAppScheme, isValidAppScheme } from "@npati/shared";
 
 const projectTypes = new Set<string>(PROJECT_TYPES);
@@ -23,6 +23,7 @@ export class ProjectService {
     const name = typeof input?.name === "string" ? input.name.trim() : "";
     if (!name || name.length > 200) throw new Error("Project name must be between 1 and 200 characters");
     if (!projectTypes.has(input?.type)) throw new Error("Invalid project type");
+    if (input.kind !== undefined && !PROJECT_KINDS.includes(input.kind)) throw new Error("Invalid project kind");
     if (input.description !== undefined && (typeof input.description !== "string" || input.description.length > 5000)) {
       throw new Error("Project description must be at most 5000 characters");
     }
@@ -35,7 +36,7 @@ export class ProjectService {
       throw new Error("App scheme is only supported for mobile_app projects");
     }
     const created = await this.store.createProject(context, companyId, {
-      name, type: input.type, description: input.description?.trim() || undefined,
+      name, type: input.type, kind: input.kind, description: input.description?.trim() || undefined,
       dataBackendId: input.dataBackendId, appScheme,
       toolchain: input.toolchain, defaultBranch: input.defaultBranch,
       dataClassification: input.dataClassification, retentionClass: input.retentionClass,

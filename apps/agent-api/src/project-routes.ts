@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { WorkspaceAccessError, WorkspaceNotFoundError, type ProjectInput } from "@npati/workspace";
+import { PROJECT_KINDS, WorkspaceAccessError, WorkspaceNotFoundError, type ProjectInput } from "@npati/workspace";
 import { AuthenticationError, type AuthProvider } from "./auth";
 import { ProjectService } from "./project-service";
 
@@ -41,6 +41,7 @@ export function registerProjectRoutes(app: FastifyInstance, service: ProjectServ
   app.post<{ Params: { companyId: string }; Body: ProjectInput }>("/companies/:companyId/projects", {
     schema: { body: { type: "object", additionalProperties: false, required: ["name", "type"], properties: {
       name: { type: "string" }, type: { type: "string", enum: ["website", "web_app", "landing_page", "mobile_app", "code_project"] },
+      kind: { type: "string", enum: [...PROJECT_KINDS] },
       description: { type: "string" },
       // Mobile projects (D6) attach to an existing DataBackend instead of copying a database.
       dataBackendId: { type: "string" },
@@ -97,6 +98,7 @@ export function registerProjectRoutes(app: FastifyInstance, service: ProjectServ
       const result = await service.create(context, companyId, {
         name: newName,
         type: source.type,
+        kind: source.kind,
         description: source.description,
       }, idempotency);
 

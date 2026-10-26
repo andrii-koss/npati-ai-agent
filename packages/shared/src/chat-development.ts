@@ -1,7 +1,7 @@
 export const DEVELOPMENT_PROCESS_SETTINGS_KEY = "chat-development-processes:v1";
 import { classifyProjectIntent, extractFramework, isBackendProjectFramework } from "./project-intent";
 /** Shared deterministic routing: creation requests only, never ordinary project edits. */
-export type DevelopmentTarget = { name: string; kind: "website" | "blog" | "store" | "crm" | "mobile_app" | "api"; framework: string; technologySelection?: { source: "user_explicit" | "ai_planner" | "policy_fallback"; reason: string; criteria: string[] } };
+export type DevelopmentTarget = { name: string; kind: "website" | "blog" | "store" | "crm" | "mobile_app" | "game" | "api"; framework: string; technologySelection?: { source: "user_explicit" | "ai_planner" | "policy_fallback"; reason: string; criteria: string[] } };
 export type ModelTurnUsage = { id: string; turn: number; totalTokens?: number; inputTokens?: number; outputTokens?: number; costUsd?: number; model?: string; provider?: string; toolCallIds: string[]; durationMs?: number; /** Provider-reported cached prompt tokens, when it reports them. */ cachedTokens?: number };
 export type DevelopmentProcessProgressItem = {
   modelUsage?: ModelTurnUsage;
@@ -72,10 +72,12 @@ export function planChatDevelopment(message: string, activeProjectId?: string): 
   }
   if (/(?:mobile\s+app|мобільн|мобильн)/iu.test(message)) kinds.push("mobile_app");
   if (/(?:\bcrm\b|срм)/iu.test(message)) kinds.push("crm");
+  // A game becomes its own project; a mobile game stays a mobile app (Expo).
+  if (!kinds.includes("mobile_app") && /(?:\bgames?\b|(?<![\p{L}])(?:гр[уаи]|ігр\p{L}*|игр\p{L}*)(?![\p{L}]))/iu.test(message)) kinds.push("game");
   // A backend prompt need not contain the word "website": creating an Express/FastAPI service
   // is still a code project and must enter the coding-agent path rather than a generic chat.
   if (!kinds.length && isBackendProjectFramework(requestedFramework)) kinds.push("api");
-  const names = { website: "Company website", blog: "Blog", store: "Online store", mobile_app: "Mobile app", crm: "CRM", api: "API service" };
+  const names = { website: "Company website", blog: "Blog", store: "Online store", mobile_app: "Mobile app", game: "Game", crm: "CRM", api: "API service" };
   const count = kinds.length === 1 ? Number(/(?:create|build|make|створи|зроби|создай)\s+(?:мені\s+)?(\d+)/iu.exec(message)?.[1] ?? 1) : kinds.length;
   if (count > 4 || kinds.length > 4) throw new Error("A chat can start up to four development projects at once.");
   const targets = kinds.length === 1 ? Array.from({ length: Math.max(1, count) }, () => kinds[0]!) : kinds;
@@ -94,6 +96,7 @@ export function createDevelopmentAssistantIntro(message: string, targets: Develo
       if (t.name === "Company website") return "Вебсайт компанії";
       if (t.name === "Blog") return "Блог";
       if (t.name === "Mobile app") return "Мобільний застосунок";
+      if (t.name === "Game") return "Гра";
       if (t.name === "CRM") return "CRM-система";
       if (t.name === "API service") return "API-сервіс";
     }

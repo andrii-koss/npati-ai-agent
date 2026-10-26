@@ -197,7 +197,7 @@ export function DatabaseDetailView({
       {detailProjects.length === 0 && unattachedProjects.length === 0 && (
         <div className="data-studio-alert info" role="status">
           {isUk ? "У цій компанії ще немає проєктів." : "This company has no projects yet."}{" "}
-          <Link to="/settings/websites">{isUk ? "Створити сайт" : "Create a site"}</Link>
+          <Link to="/settings/projects">{isUk ? "Створити проєкт" : "Create a project"}</Link>
         </div>
       )}
 

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { AuthContext, Project, ProjectCheckpoint, CreateCheckpointInput, ProjectDeployment, CreateDeploymentInput, ProjectQaReport, CreateProjectQaReportInput, ProjectInput, ProjectStatus, ProjectCodeSettings, ProjectCodeTrust, ProjectCodeTrustInput, ProjectMountedFolder, ProjectMountedFolderInput, ProjectDataPolicyRecord } from "./types";
-import { WorkspaceNotFoundError, WorkspaceAccessError, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS } from "./types";
+import { WorkspaceNotFoundError, WorkspaceAccessError, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, defaultProjectKind } from "./types";
 import { now } from "./in-memory-clock";
 
 export interface InMemoryProjectState {
@@ -23,7 +23,7 @@ export async function createProject(host: InMemoryProjectState, context: AuthCon
     const timestamp = now();
     const project: Project = {
       id: randomUUID(), workspaceId: context.workspaceId, companyId, createdBy: context.userId,
-      name: input.name, description: input.description, type: input.type ?? "website", status: "ready",
+      name: input.name, description: input.description, type: input.type ?? "website", kind: input.kind ?? defaultProjectKind(input.type ?? "website"), status: "ready",
       dataBackendId: input.dataBackendId, appScheme: input.appScheme,
       toolchain: input.toolchain ?? null, defaultBranch: input.defaultBranch ?? null,
       dataClassification: input.dataClassification ?? DEFAULT_DATA_CLASSIFICATION,

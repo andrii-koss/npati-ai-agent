@@ -207,6 +207,7 @@ export function toProjectSummary(project: Project, session: CodeSession | undefi
     projectId: project.id,
     name: project.name,
     type: project.type,
+    kind: project.kind,
     status: project.status,
     revision: project.revision,
     dataClassification: project.dataClassification,

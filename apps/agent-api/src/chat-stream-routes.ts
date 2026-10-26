@@ -35,7 +35,7 @@ import { AdmissionError } from "./resilience-admission-queue";
 import { SecurityPolicyViolation } from "./security-guardrails";
 import { StorageRateLimitError } from "./storage-protection";
 import { WorkspaceChatActions } from "./workspace-chat-actions";
-import { isWebsiteReferenceEdit, ContextValidationError, PROJECT_CARD_DATA_VERSION, ProjectCardData, canonicalFrameworkName, codeIntentIsReadOnly, defaultHybridRouter, extractFramework } from "@npati/shared";
+import { isWebsiteReferenceEdit, ContextValidationError, PROJECT_CARD_DATA_VERSION, ProjectCardData, canonicalFrameworkName, codeIntentIsReadOnly, defaultHybridRouter, extractFramework, isGameRequest } from "@npati/shared";
 import { ResearchProgressEvent, ResearchProgressListener } from "@npati/web-research";
 import { AuthContext, CodeSession, WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
 import type { CodeRunCancellationRegistry } from "./code-run-cancellation";
@@ -173,7 +173,9 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         }
         if (creatingChatWebsite && !projectIntent.needsClarification && !projectIntent.unsupportedIntentMessage) {
           let project = await codeService.createProject(auth, activeCompanyId,
-            { name: extractCleanProjectName(message, projectIntent.targetDetails?.entityName), description: message.slice(0, 5000) },
+            { name: extractCleanProjectName(message, projectIntent.targetDetails?.entityName), description: message.slice(0, 5000),
+              // The planner may file a game under website; an unmistakable game request still becomes a game.
+              ...(projectIntent.targetDetails?.projectType === "game" || isGameRequest(message) ? { kind: "game" as const } : {}) },
             `chat-website:${auth.userId}:${request.headers["idempotency-key"] ?? streamId ?? crypto.randomUUID()}`);
           const framework = canonicalFrameworkName(projectIntent.targetDetails?.framework)
             ?? extractFramework(message)
