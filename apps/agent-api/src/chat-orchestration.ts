@@ -1,3 +1,4 @@
+import { readChatActiveContext, chatEntityReferencesPrompt } from "./project-chat-cards";
 
 import { createChatTurn } from "./chat-turn";
 import { createChatActions } from "./chat-actions";
@@ -167,6 +168,10 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
         ].filter(Boolean).join(String.fromCharCode(10, 10))
       : media.display;
     const existing = conversation ? await workspaceStore.getConversation(auth, businessId, conversation.id) : { messages: [] };
+    const confirmedEntity = conversation ? await readChatActiveContext(workspaceStore, auth, conversation.id, businessId) : null;
+    const companyMemoryTarget = !memoryPolicy.noMemoryActive ? await WorkspaceChatActions.companyInstructionTarget(auth, workspaceStore, safePrompt) : undefined;
+    const confirmedCompanyId = companyMemoryTarget?.id ?? (confirmedEntity?.lastConfirmedAction.companyId
+      ? await workspaceStore.getCompany(auth, confirmedEntity.lastConfirmedAction.companyId).then(company => company.id).catch(() => undefined) : undefined);
     const languageSource = message.trim() ? SecurityPolicyEngine.protectText(message).sanitized : safePrompt;
     const activeConversationLanguage = resolveConversationLanguage(languageSource, existing.messages);
     if (!memoryPolicy.noMemoryActive && conversation && existing.messages.length === 0 && conversation.title.trim().toLowerCase() === "new conversation") {
@@ -210,7 +215,7 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
     // Every research result of this turn, recorded verbatim for later recall in this conversation (A098).
     const researchRecords: Array<{ tool: string; query: string; outcome: ResearchOutcome }> = [];
     const hasAttachedEvidence = media.images.length > 0 || media.extractedDocs.length > 0;
-    const workspaceSettingsRequest = WorkspaceChatActions.isManagementRequest(safePrompt) || await WorkspaceChatActions.namesOwnedAutomation(auth, workspaceStore, safePrompt, automationsRepo);
+    const workspaceSettingsRequest = !companyMemoryTarget && (WorkspaceChatActions.isManagementRequest(safePrompt) || await WorkspaceChatActions.namesOwnedAutomation(auth, workspaceStore, safePrompt, automationsRepo));
     const emailSettingsRequest = EmailChatActions.isManagementRequest(safePrompt);
     const imageResearchRequested = !forbidsNewWebResearch(message) && !nativeToolCalling && (!hasAttachedEvidence || explicitlyRequestsWebResearch(message))
       && ((!workspaceSettingsRequest && !emailSettingsRequest) || explicitlyRequestsWebResearch(message, { requireOperation: true }));
@@ -267,18 +272,21 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
         return { businessId: b.id, businessName: b.name, goals };
       })
     );
-    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, /агент|agent|модел|model/iu.test(safePrompt) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, businessId, { automations: automationsRepo, content: contentLibrary, browserTargets: browserCredentials, email: emailInboxRepo, webhooks: integrationsRepo, memoryReadAllowed: memoryPolicy.readAllowed }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safePrompt, undefined, apiKeysRepo) + chatLanguageInstruction(safePrompt, existing.messages, activeConversationLanguage) + (nativeToolCalling ? CHAT_TOOL_SELECTION_INSTRUCTION : "");
+    const businessActionInstruction = BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, confirmedCompanyId, /агент|agent|модел|model/iu.test(safePrompt) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safePrompt, undefined, businessId, { automations: automationsRepo, content: contentLibrary, browserTargets: browserCredentials, email: emailInboxRepo, webhooks: integrationsRepo, memoryReadAllowed: memoryPolicy.readAllowed }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safePrompt, undefined, apiKeysRepo) + chatLanguageInstruction(safePrompt, existing.messages, activeConversationLanguage) + (nativeToolCalling ? CHAT_TOOL_SELECTION_INSTRUCTION : "") + chatEntityReferencesPrompt(conversation?.id, { contextType: "business", companyId: null, businessId }, confirmedEntity?.lastConfirmedAction);
     let nativeCompanyAction: { action: "create" | "update" | "delete"; companyId: string; companyName: string; agentCount: number } | undefined;
     let nativeCompanyCleanText = "";
     let nativeCompanyPrimary = false;
+    let nativeWorkspaceResult: Awaited<ReturnType<typeof executeWorkspaceChatAction>> | undefined;
+    let nativeEmailResult: Awaited<ReturnType<typeof executeEmailChatAction>> | undefined;
     let nativeBusinessMessage = "";
     let nativeBusinessAction: { action: "create" | "update"; business: import("@npati/workspace").Business; businessId: string } | undefined;
     const businessCreateRequestKey = crypto.randomUUID();
     const nativeChat = nativeToolCalling ? async (request: ChatRequest) => {
       try {
-        const tools = await availableCoreChatTools(auth, safePrompt);
+        const companyManagement = Boolean(companyMemoryTarget || confirmedCompanyId && !workspaceSettingsRequest && !EmailChatActions.isManagementRequest(safePrompt) && CompanyChatActions.isPotentialMutationRequest(safePrompt));
+        const tools = await availableCoreChatTools(auth, safePrompt, undefined, companyManagement);
         const plan = await planStructuredChatRequest(aiEngine, request, safePrompt);
-        const routing = coreChatRoutingDecision(safePrompt, tools, hasAttachedEvidence);
+        const routing = coreChatRoutingDecision(safePrompt, tools, hasAttachedEvidence, companyManagement);
         const businessPrimary = plan?.primary_action === "create_business_profile";
         const companyPrimary = plan?.primary_action === "create_company";
         nativeCompanyPrimary = companyPrimary;
@@ -298,11 +306,13 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
             ? { id: "planned-company-recovery", type: "function", function: { name: "npati_company_action", arguments: JSON.stringify({ action: "create", fields: {}, agents: [] }) } } : undefined,
           primaryOutcomeComplete: businessPrimary ? (metadata) => businessPlanComplete(plan, metadata) : companyPrimary ? (metadata) => companyPlanComplete(plan, metadata) : undefined,
           execute: (call, args) => executeCoreChatTool({ auth, call, args, requestMessage: safePrompt,
-            conversationId: conversation?.id, model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, progress, responseLanguage: activeConversationLanguage, plannedBusinessFields: businessPrimary ? plan?.provided_fields : undefined, primaryBusinessCreation: businessPrimary, businessCreateKey: businessCreateRequestKey, companyPlan: companyPrimary ? plan : undefined, logoAttachments: media.decoded.filter((item) => item.kind === "image").map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data, kind: item.kind })) }),
+            conversationId: conversation?.id, selectedCompanyId: confirmedCompanyId, selectedBusinessId: businessId, noMemory: memoryPolicy.noMemoryActive, model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, progress, responseLanguage: activeConversationLanguage, plannedBusinessFields: businessPrimary ? plan?.provided_fields : undefined, primaryBusinessCreation: businessPrimary, businessCreateKey: businessCreateRequestKey, companyPlan: companyPrimary ? plan : undefined, logoAttachments: media.decoded.filter((item) => item.kind === "image").map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data, kind: item.kind })) }),
           onTrace: ({ arguments: _arguments, ...trace }) => logToolSelectionTrace(trace, { model: context.ai.model, conversationId: conversation?.id }, "Business chat tool selection"),
           onModelStep: (event) => logToolModelStep(event, { model: context.ai.model, conversationId: conversation?.id, contextType: "business" }),
         });
         for (const item of loop.metadata) {
+          if (item.kind === "workspace_action" && item.outcome) nativeWorkspaceResult = item.outcome as NonNullable<typeof nativeWorkspaceResult>;
+          if (item.kind === "email_action" && item.outcome) nativeEmailResult = item.outcome as NonNullable<typeof nativeEmailResult>;
           if (item.kind === "research" && item.research) {
             research = item.research as ResearchOutcome;
             researchRecords.push({ tool: String(item.tool ?? "web_research"), query: String(item.query ?? safePrompt), outcome: research });
@@ -347,10 +357,10 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
       logoAttachments: media.decoded.filter((item) => item.kind === "image").map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data, kind: item.kind })),
       persistBusinessLogo,
     });
-    const emailAction = workspaceSettingsRequest ? { cleanText: executedAction.cleanText, emailAction: undefined, emailActions: undefined } : await executeEmailChatAction(auth, executedAction.cleanText, safePrompt, {
+    const emailAction = nativeEmailResult ?? (workspaceSettingsRequest ? { cleanText: executedAction.cleanText, emailAction: undefined, emailActions: undefined } : await executeEmailChatAction(auth, executedAction.cleanText, safePrompt, {
       model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal,
       attachments: media.decoded.map((item) => ({ filename: item.name, contentType: item.mimeType, sizeBytes: item.data.length, contentBase64: item.data.toString("base64") })),
-    });
+    }));
     const companyAction = nativeCompanyAction
       ? { cleanText: result.message || nativeCompanyCleanText, companyAction: nativeCompanyAction }
       : nativeBusinessAction || EmailChatActions.isManagementRequest(safePrompt) || workspaceSettingsRequest
@@ -359,7 +369,7 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
     const createdBusinessAction = nativeBusinessAction ?? executedAction.businessAction;
     const createdBusiness = createdBusinessAction?.action === "create" ? createdBusinessAction.business : undefined;
     const goalCompletion = await completeCreatedBusinessGoal(auth, safePrompt, createdBusiness, executedAction.cleanText);
-    const initialWorkspaceAction = nativeBusinessAction || nativeCompanyAction ? { cleanText: companyAction.cleanText, workspaceAction: undefined, companyRunId: undefined } : await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, selectedBusinessId: createdBusiness?.id ?? businessId });
+    const initialWorkspaceAction = nativeWorkspaceResult ?? (nativeBusinessAction || nativeCompanyAction ? { cleanText: companyAction.cleanText, workspaceAction: undefined, companyRunId: undefined } : await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safePrompt, { model: context.ai.model, fallbackModel: context.ai.fallbackModel, signal, selectedBusinessId: createdBusiness?.id ?? businessId }));
     const workspaceAction = await completeCreatedBusinessMemory(auth, safePrompt, conversation?.id, createdBusiness, goalCompletion.reply, initialWorkspaceAction);
     result.message = workspaceAction.cleanText;
     progress?.({ type: "final_generation_completed" });

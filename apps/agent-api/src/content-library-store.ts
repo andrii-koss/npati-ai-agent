@@ -4,6 +4,7 @@ export type ContentLibraryType = "article" | "seo_structure" | "social_post" | "
 export interface ContentLibraryOverride {
   runId: string;
   companyId: string;
+  businessId?: string;
   title?: string;
   type?: ContentLibraryType;
   content?: string;
@@ -20,7 +21,7 @@ function parse(value: unknown): Record<string, ContentLibraryOverride> {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue;
     const candidate = item as Partial<ContentLibraryOverride>;
     if (candidate.runId !== key || typeof candidate.companyId !== "string") continue;
-    result[key] = { runId: key, companyId: candidate.companyId, title: candidate.title, type: candidate.type, content: candidate.content, deleted: candidate.deleted === true, updatedAt: String(candidate.updatedAt ?? "") };
+    result[key] = { runId: key, companyId: candidate.companyId, businessId: candidate.businessId, title: candidate.title, type: candidate.type, content: candidate.content, deleted: candidate.deleted === true, updatedAt: String(candidate.updatedAt ?? "") };
   }
   return result;
 }
@@ -47,10 +48,12 @@ export class ContentLibraryStore {
     throw new Error("Content library was updated concurrently. Please try again.");
   }
 
-  async update(context: AuthContext, runId: string, companyId: string, input: { title?: string; type?: ContentLibraryType; content?: string }): Promise<ContentLibraryOverride> {
+  async update(context: AuthContext, runId: string, companyId: string, input: { title?: string; type?: ContentLibraryType; content?: string; businessId?: string }): Promise<ContentLibraryOverride> {
+    if (input.businessId) await this.store.getUserBusiness(context, input.businessId);
     return this.mutate(context, runId, (current) => ({
       runId,
       companyId,
+      businessId: input.businessId ?? current?.businessId,
       title: input.title !== undefined ? input.title.trim().slice(0, 300) : current?.title,
       type: input.type !== undefined ? input.type : current?.type,
       content: input.content !== undefined ? input.content.slice(0, 200_000) : current?.content,
@@ -63,6 +66,7 @@ export class ContentLibraryStore {
     return this.mutate(context, runId, (current) => ({
       runId,
       companyId,
+      businessId: current?.businessId,
       title: current?.title,
       type: current?.type,
       content: current?.content,

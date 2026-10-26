@@ -1,3 +1,4 @@
+import { companyChatEntityReferencesPrompt } from "./project-chat-cards";
 import {canonicalJson,sha256} from "@npati/workspace";
 import {defaultCapabilityRegistry} from "@npati/shared";
 import type {ChatToolDefinition} from "@npati/omniroute-adapter";
@@ -34,9 +35,7 @@ import {
 import { executeChatCapability, authorizedChatProjectTools, chatCapabilityExecutor } from "./company-runtime-chat-capability";
 import { executeAgentStages } from "./company-runtime-stages";
 import { executeCompanyRunTools } from "./company-runtime-tool-executor";
-
 export * from "./company-runtime-types";
-
 export class CompanyDelegationRuntime {
   private readonly controllers = new Map<string, AbortController>();
   private readonly toolRuntime: CompanyToolExecutor;
@@ -61,12 +60,10 @@ export class CompanyDelegationRuntime {
     this.capabilityResolver = capabilityResolver ?? defaultEffectiveCapabilityResolver;
     this.riskApprovalService = riskApprovalService ?? defaultRiskApprovalService;
   }
-
   /** The chat loop selects a canonical tool; this runtime keeps its existing authorization, approval and audit boundary. */
   async chatProjectTools(ctx: AuthContext, companyId: string, projectId: string, requested: string[]): Promise<ChatToolDefinition[]> {
     return authorizedChatProjectTools(ctx, companyId, projectId, requested, { store: this.store, capabilityResolver: this.capabilityResolver });
   }
-
   async executeChatProjectTool(ctx: AuthContext, companyId: string, projectId: string, tool: string, args: Record<string,unknown>, key: string, signal?: AbortSignal, noMemory=false): Promise<{output:unknown;runId:string}> {
     const offered=await this.chatProjectTools(ctx,companyId,projectId,[tool]);
     if(!offered.length)throw new CompanyRuntimeError("TOOL_FORBIDDEN","No active Company agent is authorized for the requested capability",403);
@@ -82,7 +79,6 @@ export class CompanyDelegationRuntime {
     const plan: Plan = { mode: "single", agentIds: [main.id], toolRequests: [{ agentId: main.id, tool, input: args }] };
     return this.runChatCapability(ctx, company, created.run.id, plan, signal, noMemory);
   }
-
   private async runChatCapability(ctx: AuthContext, company: Company, runId: string, plan: Plan, parentSignal?: AbortSignal, noMemory = false, approvalId?: string) {
     const controller = new AbortController(); this.controllers.set(runId, controller);
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(this.timeoutMs), ...(parentSignal ? [parentSignal] : [])]);
@@ -93,23 +89,21 @@ export class CompanyDelegationRuntime {
         policy: await this.guardrailPolicyResolver?.(ctx, company.id) });
     } finally { this.controllers.delete(runId); }
   }
-
   async create(ctx: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode; projectId?: string }, key: string) {
     return this.store.createCompanyAgentRun(ctx, companyId, { task: input.task, requestedMode: input.mode ?? "auto", projectId: input.projectId }, key);
   }
-
-  async execute(ctx: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode; noMemory?: boolean; memoryScope?: MemoryScope; preferredAgentId?: string; projectId?: string; suppressTools?: boolean; callBudget?: { remaining: number }; allowedProjectPaths?: string[]; allowedProjectId?: string; onTool?: (tool: string, path?: string) => void }, key: string, signal?: AbortSignal): Promise<CompanyAgentRunDetails> {
+  async execute(ctx: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode; noMemory?: boolean; conversationId?: string; memoryScope?: MemoryScope; preferredAgentId?: string; projectId?: string; suppressTools?: boolean; callBudget?: { remaining: number }; allowedProjectPaths?: string[]; allowedProjectId?: string; onTool?: (tool: string, path?: string) => void }, key: string, signal?: AbortSignal): Promise<CompanyAgentRunDetails> {
     const created = await this.create(ctx, companyId, input, key);
     if (!created.created) return this.store.getCompanyAgentRun(ctx, companyId, created.run.id);
-    return this.process(ctx, companyId, created.run.id, { noMemory: input.noMemory === true, memoryScope: input.memoryScope, preferredAgentId: input.preferredAgentId, suppressTools: input.suppressTools, callBudget: input.callBudget, allowedProjectPaths: input.allowedProjectPaths, allowedProjectId: input.allowedProjectId, onTool: input.onTool, signal });
+    return this.process(ctx, companyId, created.run.id, { noMemory: input.noMemory === true, conversationId: input.conversationId, memoryScope: input.memoryScope, preferredAgentId: input.preferredAgentId, suppressTools: input.suppressTools, callBudget: input.callBudget, allowedProjectPaths: input.allowedProjectPaths, allowedProjectId: input.allowedProjectId, onTool: input.onTool, signal });
   }
-
-  async process(ctx: AuthContext, companyId: string, runId: string, options: { noMemory?: boolean; memoryScope?: MemoryScope; preferredAgentId?: string; approvalId?: string; suppressTools?: boolean; callBudget?: { remaining: number }; allowedProjectPaths?: string[]; allowedProjectId?: string; onTool?: (tool: string, path?: string) => void; signal?: AbortSignal } = {}): Promise<CompanyAgentRunDetails> {
+  async process(ctx: AuthContext, companyId: string, runId: string, options: { noMemory?: boolean; conversationId?: string; memoryScope?: MemoryScope; preferredAgentId?: string; approvalId?: string; suppressTools?: boolean; callBudget?: { remaining: number }; allowedProjectPaths?: string[]; allowedProjectId?: string; onTool?: (tool: string, path?: string) => void; signal?: AbortSignal } = {}): Promise<CompanyAgentRunDetails> {
     const existing = await this.store.getCompanyAgentRun(ctx, companyId, runId);
     if (options.approvalId && existing.run.status !== "awaiting_approval") throw new CompanyRuntimeError("APPROVAL_INVALID", "Run is not awaiting approval", 409);
     if (!options.approvalId && ["completed", "cancelled", "failed", "awaiting_approval"].includes(existing.run.status)) return existing;
-    const pendingState = options.approvalId ? await this.store.getCompanyRunPendingPlan(ctx, companyId, runId) as { plan: Plan; nextToolIndex: number; evidence: string; noMemory?: boolean } | null : null;
+    const pendingState = options.approvalId ? await this.store.getCompanyRunPendingPlan(ctx, companyId, runId) as { plan: Plan; nextToolIndex: number; evidence: string; noMemory?: boolean; conversationId?: string } | null : null;
     if (options.approvalId && (!pendingState || !pendingState.plan || !Number.isInteger(pendingState.nextToolIndex))) throw new CompanyRuntimeError("APPROVAL_INVALID", "Pending run plan is unavailable", 409);
+    if (pendingState?.conversationId) options = { ...options, conversationId: pendingState.conversationId };
     if (pendingState?.noMemory) options = { ...options, noMemory: true };
     if (options.approvalId && pendingState && existing.run.task.startsWith("Chat capability: ")) {
       const request = pendingState.plan.toolRequests[0];
@@ -143,9 +137,7 @@ export class CompanyDelegationRuntime {
         });
         throw new CompanyRuntimeError("PERMISSION_REVOKED", "User permissions were revoked before run execution", 403);
       }
-
       await this.store.updateCompanyAgentRun(ctx, companyId, created.run.id, { status: "planning" });
-
       let company: Company;
       try {
         company = await this.store.getCompany(ctx, companyId);
@@ -157,7 +149,6 @@ export class CompanyDelegationRuntime {
         });
         throw new CompanyRuntimeError("CONTEXT_DELETED", `Company context "${companyId}" was deleted or unavailable`, 404);
       }
-
       if (company.status === "inactive") {
         await this.store.updateCompanyAgentRun(ctx, companyId, created.run.id, {
           status: "failed",
@@ -188,7 +179,6 @@ export class CompanyDelegationRuntime {
       const guardrailPolicy = await this.guardrailPolicyResolver?.(ctx, companyId);
       const protect = (text: string) => SecurityPolicyEngine.protectText(text, guardrailPolicy).sanitized;
       const protectedTask = protect(input.task.trim());
-
       let main: CompanyAgent;
       try {
         main = await this.store.getCompanyAgent(ctx, companyId, created.run.mainAgentId);
@@ -200,7 +190,6 @@ export class CompanyDelegationRuntime {
         });
         throw new CompanyRuntimeError("MAIN_AGENT_INACTIVE", `Main agent was deleted or unavailable`, 404);
       }
-
       if (!main.isActive) {
         await this.store.updateCompanyAgentRun(ctx, companyId, created.run.id, {
           status: "failed",
@@ -209,6 +198,7 @@ export class CompanyDelegationRuntime {
         });
         throw new CompanyRuntimeError("MAIN_AGENT_INACTIVE", `Main agent "${main.name}" is inactive`, 400);
       }
+      const entityContext = !options.noMemory && options.conversationId ? await companyChatEntityReferencesPrompt(this.store, ctx, options.conversationId, companyId, existing.run.projectId ?? undefined) : "";
       const mainTools = main.tools.map(toolName);
       const knowledgeRequested =
         /\b(?:find|search|look\s+up|read|extract|summari[sz]e)\b[^.\n]{0,80}\b(?:uploaded|company)\s+(?:document|documents|file|files|spreadsheet)\b|\b(?:excel|xlsx)\b|(?:знайд|пошук|прочита|витяг|проаналіз)[^.\n]{0,80}(?:у|в|із|з)\s+(?:завантажен\w*\s+)?(?:документ|файл|таблиц)\w*|\bексел\w*/iu.test(
@@ -244,7 +234,7 @@ export class CompanyDelegationRuntime {
         model: planningModels[0] ?? (main.modelId && isChatCapableModel({ id: main.modelId }) ? main.modelId : "auto"), timeoutMs: Math.min(60_000, this.timeoutMs), signal,
         idempotencyKey: `${created.run.id}:plan`,
         messages: [
-          { role: "system", content: protect(instruction(company, main, true, !options.noMemory, linked) + (actionPlanningContext ? "\n\nMandatory action-sensitive rules:\n" + actionPlanningContext : "")) },
+          { role: "system", content: protect(instruction(company, main, true, !options.noMemory, linked) + entityContext + (actionPlanningContext ? "\n\nMandatory action-sensitive rules:\n" + actionPlanningContext : "")) },
           {
             role: "user", content: protect([
               `Task: ${protectedTask}`, `Requested mode: ${input.mode ?? "auto"}`,
@@ -263,6 +253,7 @@ export class CompanyDelegationRuntime {
               "Uploaded Company document questions are retrieved through knowledge. Never request files for document-content search; use files only when the agent explicitly has files and the task asks to list objects or read a known file key.",
               'storage.company_memory: {"operation":"list|search|get|create|update|delete","query":"for search","id":"for get/update/delete","content":"for create/update"}.',
               'project.files.list/search/read/create/write/edit/move/delete: input must include projectId (an actual Project ID in this Company). Path is workspace-relative. read/create/write/edit/move/delete need path (delete may use paths); search needs query; create/write need content; write/edit/move need expectedRevision returned by read/create; edit needs find and replacement; move needs to. Never request protected secret files. Delete always requires approval.',
+              'A review of an existing Project requires its actual source evidence: list/search the selected Project, then read the relevant files using an authorized agent. Prior assistant descriptions are not source evidence. When no selected agent can read those files, report that exact limitation; do not claim to have reviewed the implementation.',
               'project.media.upload/list/get/delete: manage website media assets (photos, videos, logos, assets) stored in isolated object storage. upload accepts {projectId, name, base64Data, mimeType?, targetDir?}; list accepts {projectId, prefix?}; get accepts {projectId, path}; delete accepts {projectId, path}. Returns public/preview URL for website pages and Live Preview.',
               'project.terminal.exec: {"projectId":"authorized Project ID","command":"sandbox command","environmentReferences":{"NAME":{"id":"Company vault credential UUID","field":"field name"}}}. project.terminal.process: {"projectId":"authorized Project ID","action":"start|status|logs|stop","command":"for start","processId":"for status/logs/stop"}. Commands run only in the remote Project sandbox. Use short, specific commands; unknown, destructive or shell-composed commands require approval. Never include secret values in commands or prompts; use vault references.',
               'project.preview.start: {"projectId":"authorized Project ID","command":"optional dev command","port":optional port}. project.preview.stop: {"projectId":"authorized Project ID"}. project.preview.status: {"projectId":"authorized Project ID"}. Used to launch, stop, and inspect the project preview dev server.',
@@ -287,7 +278,7 @@ export class CompanyDelegationRuntime {
       if (projectWorker) {
         planningRequest.messages = [
           { role: "system", content: protect(
-            instruction(company, main, true, !options.noMemory, linked) +
+            instruction(company, main, true, !options.noMemory, linked) + entityContext +
             "\n\nPlan this single Project task. Return exactly one valid JSON object with no markdown. " +
             "Use the assigned agent only. Never invent tool names, Project IDs, file revisions, or file contents."
           ) },
@@ -436,7 +427,6 @@ export class CompanyDelegationRuntime {
       const reviewer = plan.reviewerAgentId ? byId.get(plan.reviewerAgentId) : undefined;
       if (plan.reviewerAgentId && !reviewer) throw new CompanyRuntimeError("INVALID_REVIEWER", "Reviewer is not active in this company", 502);
       if (reviewer && reviewer.id !== main.id && !selected.some((agent) => agent.id === reviewer.id)) selected.push(reviewer);
-
       // Cycle and loop protection
       if (plan.toolRequests.length > 20) {
         throw new CompanyRuntimeError("TOOL_LOOP_DETECTED", "Too many tool requests in delegation plan", 400);
@@ -460,7 +450,7 @@ export class CompanyDelegationRuntime {
         }
         return { ...request, input: SecurityPolicyEngine.protectObject(request.input, guardrailPolicy) };
       });
-      const rawEvidence = options.suppressTools ? "" : await this.tools(ctx, company, created.run.id, normalizedToolRequests, byId, signal, knowledge, options.noMemory === true, options.approvalId, options.allowedProjectPaths, options.allowedProjectId ?? existing.run.projectId, existing.run.projectId, async (nextToolIndex, evidence) => { await this.store.setCompanyRunPendingPlan(ctx, companyId, created.run.id, { plan, nextToolIndex, evidence, noMemory: options.noMemory === true }); }, pendingState?.evidence, pendingState?.nextToolIndex ?? 0, existing.run.requestedMode, options.onTool);
+      const rawEvidence = options.suppressTools ? "" : await this.tools(ctx, company, created.run.id, normalizedToolRequests, byId, signal, knowledge, options.noMemory === true, options.approvalId, options.allowedProjectPaths, options.allowedProjectId ?? existing.run.projectId, existing.run.projectId, async (nextToolIndex, evidence) => { await this.store.setCompanyRunPendingPlan(ctx, companyId, created.run.id, { plan, nextToolIndex, evidence, noMemory: options.noMemory === true, conversationId: options.conversationId }); }, pendingState?.evidence, pendingState?.nextToolIndex ?? 0, existing.run.requestedMode, options.onTool);
       // A plan cannot name files before it has listed them. When project evidence holds only a listing or search, one
       // bounded follow-up planning call may request read-only project.files.read (at most 5) for the selected agents.
       const readers = [main, ...selected.filter((agent) => agent.id !== main.id)].filter((agent) => agent.tools.map(toolName).includes("project.files.read"));
@@ -509,9 +499,9 @@ export class CompanyDelegationRuntime {
       let inferenceSequence = 10_001;
       let result = await executeAgentStages({ ai: this.ai, main, selected, reviewer, mainAssignedWork, mode: plan.mode,
         agentModels: execution.agentModels, signal, timeoutMs: this.timeoutMs, task: protectedTask, evidence,
-        managerInstruction: protect(instruction(company, main, true, !options.noMemory, linked) + chatLanguageInstruction(input.task)
+        managerInstruction: protect(instruction(company, main, true, !options.noMemory, linked) + entityContext + chatLanguageInstruction(input.task)
           + (existing.run.projectId ? "\nSummarize only verified tool results in at most 120 words. This response cannot execute tools or save files." : "")),
-        knowledgeContext, runId: created.run.id,
+        knowledgeContext, entityContext, runId: created.run.id,
         isRuntimeRunId: id => this.store.getCompanyAgentRun(ctx, companyId, id).then(() => true, () => false),
         admission: { tenantId: ctx.workspaceId, tier: ctx.permissions.includes("admin:all") ? "enterprise" : "pro" },
         before: async () => {
@@ -535,7 +525,7 @@ export class CompanyDelegationRuntime {
         result = await this.ai.chat({
           model: this.strictInferenceRouting ? inferenceModels[0] : comboModel(main.modelId), fallbackModel: this.strictInferenceRouting ? undefined : comboModel(main.fallbackModelId), signal, timeoutMs: this.timeoutMs, admission: { tenantId: ctx.workspaceId, tier: ctx.permissions.includes("admin:all") ? "enterprise" : "pro" }, idempotencyKey: `${created.run.id}:grounded-final`,
           messages: [
-            { role: "system", content: protect(instruction(company, main, true, !options.noMemory, linked) + "\n\nYou are the final grounding verifier. Use the authoritative Company Knowledge below as the source of truth. Preserve exact relevant values. Remove unsupported claims. Never omit the direct answer requested by the user." + chatLanguageInstruction(input.task) + (existing.run.projectId ? "\nSummarize only verified tool results in at most 120 words. Do not output source code or proposed edits. This response cannot save files; Build and Preview are handled by the project pipeline." : "")) },
+            { role: "system", content: protect(instruction(company, main, true, !options.noMemory, linked) + entityContext + "\n\nYou are the final grounding verifier. Use the authoritative Company Knowledge below as the source of truth. Preserve exact relevant values. Remove unsupported claims. Never omit the direct answer requested by the user." + chatLanguageInstruction(input.task) + (existing.run.projectId ? "\nSummarize only verified tool results in at most 120 words. Do not output source code or proposed edits. This response cannot save files; Build and Preview are handled by the project pipeline." : "")) },
             { role: "user", content: protect([protectedTask, knowledgeContext, `Delegated draft to verify:\n${result.content}`, "Return only the corrected, knowledge-grounded final answer."].join("\n\n")) },
           ],
         });
@@ -571,19 +561,15 @@ export class CompanyDelegationRuntime {
     } finally { this.controllers.delete(created.run.id); }
     return this.store.getCompanyAgentRun(ctx, companyId, created.run.id);
   }
-
   async list(ctx: AuthContext, companyId: string, limit = 50) {
     return this.store.listCompanyAgentRuns(ctx, companyId, limit);
   }
-
   async get(ctx: AuthContext, companyId: string, runId: string) {
     return this.store.getCompanyAgentRun(ctx, companyId, runId);
   }
-
   async recordBackgroundEvent(ctx: AuthContext, companyId: string, runId: string, entry: Parameters<WorkspaceStore["appendCompanyAgentRunEvent"]>[3]) {
     return this.store.appendCompanyAgentRunEvent(ctx, companyId, runId, entry);
   }
-
   async cancel(ctx: AuthContext, companyId: string, runId: string) {
     const current = await this.store.getCompanyAgentRun(ctx, companyId, runId);
     if (["completed", "failed", "cancelled"].includes(current.run.status)) return current;
@@ -610,7 +596,6 @@ export class CompanyDelegationRuntime {
     });
     return cancelling;
   }
-
   private async recordInference(
     ctx: AuthContext,
     companyId: string,
@@ -682,7 +667,6 @@ export class CompanyDelegationRuntime {
     }
     return { costUsd, totalTokens: usage.totalTokens };
   }
-
   private async tools(
     ctx: AuthContext,
     company: Company,
@@ -728,7 +712,6 @@ export class CompanyDelegationRuntime {
       telemetry: this.telemetry,
     });
   }
-
   private async combos(company: Company, main: CompanyAgent, selected: CompanyAgent[], reviewer: CompanyAgent | undefined, mode: Mode, signal: AbortSignal, includeMemory = true, linked?: LinkedBusinessContext, inferenceModels?: string[], mainAssignedWork = false) {
     if (!this.ai.ensureCombo) throw new CompanyRuntimeError("OMNIROUTE_COMBOS_UNAVAILABLE", "NPATI AI routing combinations are unavailable", 503);
     const unique = [...new Map([...selected, main].map((agent) => [agent.id, agent])).values()], names = new Map<string, string>();

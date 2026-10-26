@@ -7,6 +7,7 @@ import type { AuthContext } from "@npati/workspace";
 import { InMemoryWorkspaceStore } from "@npati/workspace";
 import type { OmniRouteMarketplace } from "@npati/omniroute-adapter";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { persistChatResultContext } from "../apps/agent-api/src/project-chat-cards";
 
 const apps: Array<ReturnType<typeof buildApp>> = [];
 afterEach(async () => { await Promise.all(apps.splice(0).map((app) => app.close())); });
@@ -27,6 +28,40 @@ function engine(overrides: Partial<AIEngine> = {}): AIEngine {
   };
 }
 const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+
+it("keeps the confirmed Company referent separate from the speaking Main Agent and supplies current owned projects across execution stages", async () => {
+  const store = new InMemoryWorkspaceStore();
+  const ctx = { userId: "runtime-context-owner", workspaceId: "runtime-context-workspace", permissions: ["workspace:read", "workspace:write", "business:manage"] };
+  let company = await store.createCompany(ctx, { name: "Context Studio", description: "COMPANY_DESCRIPTION", companyInstructions: "Latest code: CURRENT_CHECKPOINT" }, "context-studio");
+  const main = await store.createCompanyAgent(ctx, company.id, { name: "Lead", role: "coordinator", description: "AGENT_DESCRIPTION", tools: [] }, "context-lead");
+  company = await store.setCompanyMainAgent(ctx, company.id, main.id, company.revision);
+  const { project } = await store.createProject(ctx, company.id, { name: "Owned Portal", description: "PROJECT_DESCRIPTION", type: "code_project" }, "owned-portal");
+  const chat = await store.createNeutralConversation(ctx, "Company context");
+  const other = await store.createNeutralConversation(ctx, "Independent agent chat");
+  await persistChatResultContext(store, ctx, { conversationId: chat.id, companyAction: { action: "update", companyId: company.id } });
+  await persistChatResultContext(store, ctx, { conversationId: other.id, companyAction: { action: "update", companyId: company.id, agentId: main.id, agentAction: "update" } });
+  const assertContext = (request: ChatRequest) => {
+    const system = request.messages.filter(message => message.role === "system").map(message => message.content).join("\n");
+    expect(system).toContain('"conversationId":"' + chat.id + '"');
+    expect(system).toContain('"entityType":"company","entityId":"' + company.id + '"');
+    expect(system).toContain("The executing agent is the speaker");
+    expect(system).toContain("COMPANY_DESCRIPTION");
+    expect(system).toContain("CURRENT_CHECKPOINT");
+    expect(system).toContain(project.id);
+    expect(system).toContain("Owned Portal");
+    expect(system).not.toContain(other.id);
+    expect(system).not.toContain('"entityType":"agent"');
+  };
+  const planning = vi.fn(async (request: ChatRequest) => { assertContext(request); return { taskId: "context-plan", content: JSON.stringify({ mode: "single", agentIds: [main.id], toolRequests: [] }), metadata: {} }; });
+  const chatCall = vi.fn(async (request: ChatRequest) => { assertContext(request); return { content: "COMPANY_DESCRIPTION" }; });
+  const runtime = new CompanyDelegationRuntime(store, engine({ a2aSend: planning, chat: chatCall }));
+  const result = await runtime.execute(ctx, company.id, { task: "What is its description?", conversationId: chat.id, memoryScope: { sessionId: "not-a-conversation-id" } }, "context-read");
+  expect(result.run.status).toBe("completed");
+  expect(result.run.result).toBe("COMPANY_DESCRIPTION");
+  expect(planning).toHaveBeenCalledOnce();
+  expect(chatCall).toHaveBeenCalled();
+  expect((await store.getCompanyAgent(ctx, company.id, main.id)).tools).toEqual([]);
+});
 
 async function setup(ai: AIEngine, active: { value: AuthContext }, companyRunTimeoutMs = 5_000) {
   const store = new InMemoryWorkspaceStore();

@@ -314,6 +314,7 @@ export class CodingAgentReviewPhases {
     runChanges: () => Array<{ path: string; tool: string; status?: string; diff?: string }>;
     verificationForReview: () => string;
     testIntegrityForReview: () => string;
+    runtimeEvidence?: string;
     boundedDiff: (limit: number) => string;
     writeSelfReviewSummary: () => void;
     setSelfReviewVerdict: (verdict: SelfReviewVerdict) => void;
@@ -351,6 +352,7 @@ export class CodingAgentReviewPhases {
         })),
         verification: verificationForReview(),
         testIntegrity: testIntegrityForReview(),
+        runtimeEvidence: args.runtimeEvidence,
       },
       reviewRequest: state.request(),
       chat: async (request) => {

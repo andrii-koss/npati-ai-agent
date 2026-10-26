@@ -1,4 +1,6 @@
+import { isInformationalOrCapabilityQuery } from "./company-chat-actions";
 import { requestsBusinessGoal } from "./chat-intent-helpers";
+import { ActiveContextResolver } from "./active-context-resolver";
 import { createHash } from "node:crypto";
 import type { AuthContext, Business, Company, CompanyAgentRunDetails, CompanyRunMode, MemoryInput, WorkspaceStore } from "@npati/workspace";
 import type { CompanyAutomation, CompanyAutomationsRepository } from "./automations-repository";
@@ -18,6 +20,7 @@ type WorkspaceDirective = {
   action: WorkspaceActionKind;
   companyId?: string;
   companyName?: string;
+  projectId?: string;
   businessId?: string;
   businessName?: string;
   automationId?: string;
@@ -44,7 +47,7 @@ type WorkspaceDirective = {
 
 export type WorkspaceChatActionResult = {
   cleanText: string;
-  workspaceAction?: { action: WorkspaceActionKind; resourceId: string; companyId?: string; businessId?: string };
+  workspaceAction?: { action: WorkspaceActionKind; resourceId: string; companyId?: string; businessId?: string; projectId?: string };
   companyRunId?: string;
 };
 
@@ -52,7 +55,7 @@ export type WorkspaceChatActionDependencies = {
   store: WorkspaceStore;
   automations: CompanyAutomationsRepository;
   content: ContentLibraryStore;
-  runCompany: (auth: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode }, idempotencyKey: string) => Promise<CompanyAgentRunDetails>;
+  runCompany: (auth: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode; projectId?: string }, idempotencyKey: string) => Promise<CompanyAgentRunDetails>;
   cancelCompanyRun: (auth: AuthContext, companyId: string, runId: string) => Promise<CompanyAgentRunDetails>;
   runAutomation?: (auth: AuthContext, automation: CompanyAutomation) => Promise<{ runId: string; result: string; durationMs: number }>;
   browserTargets?: Pick<BrowserCredentialsRepository, "listTargets" | "createTarget" | "updateTarget" | "deleteTarget">;
@@ -111,9 +114,9 @@ async function companies(store: WorkspaceStore, auth: AuthContext): Promise<Comp
 
 async function resolveCompany(store: WorkspaceStore, auth: AuthContext, directive: WorkspaceDirective, selectedCompanyId?: string): Promise<Company> {
   if (directive.companyId) return store.getCompany(auth, directive.companyId);
-  if (selectedCompanyId) return store.getCompany(auth, selectedCompanyId);
   const all = await companies(store, auth);
   const name = directive.companyName?.trim().toLocaleLowerCase();
+  if (!name && selectedCompanyId) return store.getCompany(auth, selectedCompanyId);
   const matches = name ? all.filter((item) => item.name.toLocaleLowerCase() === name) : all;
   if (matches.length !== 1) throw new Error(matches.length ? "Specify which company to use" : "Create a company before using this action");
   return matches[0]!;
@@ -122,7 +125,7 @@ async function resolveCompany(store: WorkspaceStore, auth: AuthContext, directiv
 async function resolveAutomation(deps: WorkspaceChatActionDependencies, auth: AuthContext, companyId: string, directive: WorkspaceDirective, item?: Partial<BrowserCampaignTargetInput>): Promise<CompanyAutomation> {
   const available = await deps.automations.list(auth, companyId);
   const id = item?.automationId || directive.automationId;
-  const name = directive.automationName?.trim().toLocaleLowerCase();
+  const name = (directive.automationName ?? (directive.action === "automation.run" || directive.action === "automation.history" ? directive.automation?.name : undefined))?.trim().toLocaleLowerCase();
   const matches = id
     ? available.filter((entry) => entry.id === id)
     : available.filter((entry) => entry.name.toLocaleLowerCase() === name);
@@ -162,9 +165,9 @@ function requestedStartAt(value?: string): string | undefined {
 
 async function resolveBusiness(store: WorkspaceStore, auth: AuthContext, directive: WorkspaceDirective, selectedBusinessId?: string): Promise<Business> {
   if (directive.businessId) return store.getUserBusiness(auth, directive.businessId);
-  if (selectedBusinessId) return store.getUserBusiness(auth, selectedBusinessId);
   const all = await store.listUserBusinesses(auth);
   const name = directive.businessName?.trim().toLocaleLowerCase();
+  if (!name && selectedBusinessId) return store.getUserBusiness(auth, selectedBusinessId);
   const matches = name ? all.filter((item) => item.name.toLocaleLowerCase() === name) : all;
   if (matches.length !== 1) throw new Error(matches.length ? "Specify which business to use" : "Create a business profile before adding memory");
   return matches[0]!;
@@ -212,14 +215,28 @@ export class WorkspaceChatActions {
   }
 
   static isManagementRequest(message: string, options: { includeGoals?: boolean } = {}): boolean {
+    const informational = isInformationalOrCapabilityQuery(message);
     const subject = profileEntitySignal.test(message) ? message.replace(profileFieldTerms, " ") : message;
     // "Research two bakery websites …" reads websites; it does not manage the browser campaign's website targets.
     const websiteTargets = websiteResourceSignals.some((pattern) => pattern.test(subject)) && !researchVerbSignal.test(message);
     const resource = resourceSignals.some((pattern) => pattern.test(subject)) || websiteTargets || webhookResourceSignal.test(subject);
+    // Reading an actual workspace resource still uses its existing list/history action;
+    // historical verbs in other questions must not enter the mutation planner.
     // A question about the goals ("Welche Ziele hat die Bäckerei?") is answered, not planned as a goal action.
     const question = /\?\s*$/u.test(message.trim())
       && /^(?:[^:?]{0,40}:\s*)?(?:які|який|яка|скільки|що|чи|какие|сколько|what|which|how\s+many|do\s+we|does|welche|welcher|was|wie\s+viele|quais|qual|quantos|cuáles|cuál|cuántos|quelles?|quels?)(?![\p{L}])/iu.test(message.trim());
-    return (options.includeGoals !== false && requestsBusinessGoal(message) && !question) || memoryVerbSignal.test(subject) || resource && (actionSignals.some((pattern) => pattern.test(message)) || automationReadSignals.some((pattern) => pattern.test(message)));
+    const goalRequest = options.includeGoals !== false && requestsBusinessGoal(message) && !question;
+    if (informational) return goalRequest || resource && automationReadSignals.some((pattern) => pattern.test(message));
+    return goalRequest || memoryVerbSignal.test(subject) || resource && (actionSignals.some((pattern) => pattern.test(message)) || automationReadSignals.some((pattern) => pattern.test(message)));
+  }
+
+  /** A Company fact belongs to its existing instructions; Business Memory needs a Business target. */
+  static async companyInstructionTarget(auth: AuthContext, store: WorkspaceStore, message: string, selectedCompanyId?: string): Promise<Company | undefined> {
+    if (!memoryVerbSignal.test(message) || conversationScopedRemember.test(message)) return undefined;
+    const resolver = new ActiveContextResolver(store);
+    const namedCompanies = await resolver.companiesNamedIn(auth, message);
+    if ((await resolver.businessesNamedIn(auth, message)).length || namedCompanies.length > 1) return undefined;
+    return namedCompanies[0] ?? (selectedCompanyId ? store.getCompany(auth, selectedCompanyId) : undefined);
   }
 
   /** "Run Stress Weekly Revised once" names an automation without the word "automation": its exact name counts as the resource. */
@@ -292,6 +309,7 @@ export class WorkspaceChatActions {
       name: company.name,
       businessId: company.businessId,
       mainAgentId: company.mainAgentId,
+      projects: (await store.listProjects(auth, company.id)).slice(0, 30).map(project => ({ id: project.id, name: project.name, type: project.type })),
       agents: (await store.listCompanyAgentsPage(auth, company.id, 50)).items.map((agent) => ({ id: agent.id, name: agent.name, role: agent.role, active: agent.isActive })),
     })));
     const linkedBusinessId = ownedCompanies.find(company => company.id === selectedCompanyId)?.businessId;
@@ -366,7 +384,7 @@ For Website registration and publishing:
 - Registration and publishing URLs must be HTTPS and remain on the same safe public domain. Never accept or expose site passwords in chat; passwords are generated and encrypted by the server.
 3. Produce Content Hub content through a real company run:
 \`\`\`workspace-action
-{"action":"content.create","companyId":"owned-id","intro":"localized success intro","followUp":"localized useful question","content":{"title":"localized title","type":"article","task":"complete content brief","mode":"auto"}}
+{"action":"content.create","companyId":"owned-id","intro":"localized success intro","followUp":"localized useful question","content":{"title":"localized title","type":"article","task":"complete content brief","mode":"single"}}
 \`\`\`
 Valid content types: article, seo_blueprint, social_post, brief, strategy, other.
 4. Save durable Business Memory:
@@ -381,14 +399,14 @@ To edit or delete an existing record, use the exact owned ID from the supplied d
 If the user refers to the record on Settings > Memory or says "it" and exactly one owned Business Memory record exists, use that record's exact memoryId and businessId. If several records could match, ask for the title instead of guessing.
 - Webhook (inbound integration that starts a company agent run): webhook.list with companyId; webhook.create with companyId and webhook {name, promptTemplate describing what the agent does with the incoming data, optional agentId, optional isActive preserving a requested disabled state}; webhook.update with webhookId (or exact webhookName) and webhook {isActive} to enable or disable it; webhook.delete with webhookId or exact webhookName. Never reveal a webhook secret or its URL in chat; point to Settings > Integrations.
 - Activity: to show recent company runs (status, agents, duration, failures and their reasons) use activity.list with companyId and optional historyLimit (default 10). Completed run traces are immutable audit records and cannot be edited or deleted. An active run may be cancelled with action activity.cancel, companyId, and activity.runId. If asked to alter a completed result, offer a new activity instead.
-Use activity.run when the user asks the company agents to perform work and wants a trace. Use content.create for a durable article, SEO blueprint, social draft, brief, or strategy in Content Hub. Never save guesses as Memory. A request to remember something only for this conversation or chat (a checkpoint, "in this chat") is not a Memory write: do not emit memory.create for it. In a multi-step request whose primary outcome is a Business Profile, memory is a dependent record linked to that profile; never treat memory creation as completion of the whole request. If the user asks for recommendations, recommend missing durable categories from the supplied memory summary (business facts, audience, brand voice, products, channels, decisions, experiments/results) in the user's language; create one only when explicitly requested. Keep intro concise, put the verified details in the server-rendered card, and end followUp with a useful next question.`;
+Use activity.run when the user asks the company agents to perform work and wants a trace. For a Project review include its owned projectId from the supplied Company projects; the selected agents must inspect actual project files before making source claims. Use content.create for a durable article, SEO blueprint, social draft, brief, or strategy in Content Hub. Never save guesses as Memory. A request to remember something only for this conversation or chat (a checkpoint, "in this chat") is not a Memory write: do not emit memory.create for it. In a multi-step request whose primary outcome is a Business Profile, memory is a dependent record linked to that profile; never treat memory creation as completion of the whole request. If the user asks for recommendations, recommend missing durable categories from the supplied memory summary (business facts, audience, brand voice, products, channels, decisions, experiments/results) in the user's language; create one only when explicitly requested. Keep intro concise, put the verified details in the server-rendered card, and end followUp with a useful next question.`;
   }
 
   static async buildActionPlannerPrompt(auth: AuthContext, deps: WorkspaceChatActionDependencies, message: string, selectedCompanyId?: string, selectedBusinessId?: string): Promise<string> {
     return `${await this.buildSystemPrompt(auth, deps.store, message, selectedCompanyId, selectedBusinessId, deps)}\n\nDecide what the latest user message asks for. If it requests no stored change, return exactly READ_ONLY: it only asks to read, show, list, summarize or explain existing records, or to keep a fact in this conversation rather than saved Memory. Otherwise return ONLY one complete workspace-action block for the requested change, without stating that it succeeded, or exactly NO_ACTION when required data is missing or the target is ambiguous.`;
   }
 
-  static async extractAndExecute(auth: AuthContext, text: string, deps: WorkspaceChatActionDependencies, conversationId: string, options: { requestMessage?: string; selectedCompanyId?: string; selectedBusinessId?: string; onError?: (error: unknown) => void } = {}): Promise<WorkspaceChatActionResult> {
+  static async extractAndExecute(auth: AuthContext, text: string, deps: WorkspaceChatActionDependencies, conversationId: string, options: { requestMessage?: string; selectedCompanyId?: string; selectedBusinessId?: string; selectedProjectId?: string; onError?: (error: unknown) => void } = {}): Promise<WorkspaceChatActionResult> {
     const matches = fenced(text);
     if (!matches[0]) {
       if (!/```workspace-action/i.test(text)) return { cleanText: text };
@@ -656,12 +674,14 @@ Use activity.run when the user asks the company agents to perform work and wants
       if (directive.action === "activity.run") {
         const item = directive.activity;
         if (!item || !clean(item.task) || (item.mode && !runModes.has(item.mode))) throw new Error("Invalid activity");
-        const details = await deps.runCompany(auth, company.id, { task: clean(item.task), mode: item.mode ?? "auto" }, `chat-activity:${key}`);
+        const projectId = directive.projectId ?? options.selectedProjectId;
+        if (projectId) await deps.store.getProject(auth, company.id, projectId);
+        const details = await deps.runCompany(auth, company.id, { task: clean(item.task), mode: item.mode ?? "auto", projectId }, `chat-activity:${key}`);
         const run = details.run;
         if (run.status !== "completed") throw new Error(run.errorMessage || "Company run did not complete");
         const title = clean(item.title, 300) || clean(run.task, 300);
         const card = `\`\`\`card:${title}\n**${labels.company}:** ${clean(company.name, 300)}\n**${labels.status}:** ${labels.completed}\n**${labels.mode}:** ${run.executionMode ?? run.requestedMode}\n**${labels.steps}:** ${details.steps.length}\n**${labels.toolCalls}:** ${details.toolAudit.length}\n**${labels.duration}:** ${run.totalDurationMs ?? 0} ms\n\n${clean(run.result) || "✓"}\n\n[${labels.openActivity}](/settings/activity)\n\`\`\``;
-        return { cleanText: finish(directive, card), workspaceAction: { action: directive.action, resourceId: run.id, companyId: company.id }, companyRunId: run.id };
+        return { cleanText: finish(directive, card), workspaceAction: { action: directive.action, resourceId: run.id, companyId: company.id, ...(projectId ? { projectId } : {}) }, companyRunId: run.id };
       }
 
       const item = directive.content;
@@ -695,10 +715,11 @@ Use activity.run when the user asks the company agents to perform work and wants
       }
       if (!item || !clean(item.title, 300) || !contentTypes.has(item.type as ContentType) || !clean(item.task) || (item.mode && !runModes.has(item.mode))) throw new Error("Invalid content request");
       const task = `[NPATI_CONTENT:${item.type}:${Buffer.from(clean(item.title, 300), "utf8").toString("base64url")}] ${clean(item.task)}`;
-      const details = await deps.runCompany(auth, company.id, { task, mode: item.mode ?? "auto" }, `chat-content:${key}`);
+      const business = directive.businessId || directive.businessName ? await resolveBusiness(deps.store, auth, directive, options.selectedBusinessId) : undefined;
+      const details = await deps.runCompany(auth, company.id, { task, mode: item.mode ?? "single" }, `chat-content:${key}`);
       const run = details.run;
       if (run.status !== "completed" || !clean(run.result)) throw new Error(run.errorMessage || "Content generation did not complete");
-      await deps.content.update(auth, run.id, company.id, { title: clean(item.title, 300), type: contentType(item.type!), content: clean(run.result, 200_000) });
+      await deps.content.update(auth, run.id, company.id, { title: clean(item.title, 300), type: contentType(item.type!), content: clean(run.result, 200_000), businessId: business?.id });
       const card = `\`\`\`card:${clean(item.title, 300)}\n${clean(run.result)}\n\n[${labels.openContent}](/settings/content)\n\`\`\``;
       return { cleanText: finish(directive, card), workspaceAction: { action: directive.action, resourceId: run.id, companyId: company.id }, companyRunId: run.id };
     } catch (error) {

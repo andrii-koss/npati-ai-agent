@@ -98,6 +98,7 @@ function digestInput(input: SelfReviewInput): string {
   feed(input.finalDiff ?? "");
   feed(input.verification ?? "");
   feed(input.testIntegrity ?? "");
+  feed(input.runtimeEvidence ?? "");
   for (const change of input.changedFiles ?? []) feed(`${change.path}:${change.tool}:${change.status ?? ""}`);
   return hash.toString(16).padStart(8, "0");
 }
@@ -116,6 +117,7 @@ export function createSelfReview(create: CreateSelfReviewInput): SelfReviewState
     changedFiles: create.input.changedFiles ?? [],
     verification: create.input.verification ?? "",
     testIntegrity: create.input.testIntegrity ?? "",
+    runtimeEvidence: create.input.runtimeEvidence,
   };
   const maxIterations = resolveSelfReviewFixIterations(create.maxFixIterations ?? CODE_SELF_REVIEW_MAX_FIX_ITERATIONS);
   const enabled = create.enabled !== false;
@@ -132,6 +134,7 @@ export function createSelfReview(create: CreateSelfReviewInput): SelfReviewState
     changedFiles: late?.changedFiles ?? create.input.changedFiles ?? [],
     verification: late?.verification ?? create.input.verification ?? "",
     testIntegrity: late?.testIntegrity ?? create.input.testIntegrity ?? "",
+    runtimeEvidence: late?.runtimeEvidence ?? create.input.runtimeEvidence,
   });
 
   const buildRequest = (source: SelfReviewInput): SelfReviewRequest => {

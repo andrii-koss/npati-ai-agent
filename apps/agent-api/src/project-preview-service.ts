@@ -693,9 +693,11 @@ export class ProjectPreviewService {
     if (!this.sandbox) return reply.code(503).send({ error: "Sandbox runner unavailable" });
     const cookiePath = `/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/preview/proxy`;
     const secureCookie = (request.headers["x-forwarded-proto"] ?? request.protocol) === "https";
-    const previewCookie = request.query.token
-      ? `${cookieName}=${token}; Path=${cookiePath}; HttpOnly; SameSite=Lax; Max-Age=900${secureCookie ? "; Secure" : ""}`
-      : null;
+    // Both supported API aliases serve relative parser-loaded assets. Keep the same signed
+    // session scoped to this Project on each alias; a /api cookie cannot authorize /companies.
+    const previewCookies = request.query.token
+      ? [cookiePath, cookiePath.slice(4)].map(path => `${cookieName}=${token}; Path=${path}; HttpOnly; SameSite=Lax; Max-Age=900${secureCookie ? "; Secure" : ""}`)
+      : [];
     const subpath = "/" + (request.params["*"] ?? "");
     const query = new URL(request.url, "http://localhost").searchParams;
     query.delete("token");
@@ -761,7 +763,7 @@ export class ProjectPreviewService {
             : [String(setCookieRaw)];
         rewritten = cookieList.map((c) => rewriteSetCookieHeader(c, projectPrefix, prefix));
       }
-      const cookies = previewCookie ? [previewCookie, ...rewritten] : rewritten;
+      const cookies = [...previewCookies, ...rewritten];
       if (cookies.length) reply.header("set-cookie", cookies);
       let body = Buffer.from(result.body, "base64");
       if (String(result.headers["content-type"] ?? "").includes("text/html")) {

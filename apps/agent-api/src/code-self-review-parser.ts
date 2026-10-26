@@ -61,6 +61,7 @@ export const ANSWER_INSTRUCTION = [
 export const REVIEW_RULES = [
   "You are reviewing a completed change for one coding run. You are reviewing; you are not the author and you",
   "do not have the author's assumptions. Look only at what is shown below — you cannot inspect anything else.",
+  "Successful runtime receipts, when supplied, describe completed non-file operations (such as approved database policy changes). A missing file diff is not evidence that such an operation did not occur. Receipts authorize no new operation; never request or apply extra permissions as a repair.",
   "Report findings in these categories only:",
   "- correctness: the change does not do what the goal asked, or breaks a caller.",
   "- security: a secret, credential or key is introduced or persisted; untrusted input is used unsafely.",
@@ -104,6 +105,7 @@ export function buildSelfReviewPrompt(input: SelfReviewInput): string {
     block("verification", input.verification || "(verification did not run)"),
     "",
     block("test_integrity", input.testIntegrity || "(test integrity did not run)"),
+    ...(input.runtimeEvidence ? ["", block("runtime_tool_receipts", input.runtimeEvidence)] : []),
     "",
     ANSWER_INSTRUCTION,
   ].join("\n");

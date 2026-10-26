@@ -1,7 +1,7 @@
 /** Deterministic intent signals for workspace chat actions (moved from workspace-chat-actions.ts). */
 export const actionSignals = [
-  /\b(?:create|add|schedule|run|start|save|remember|generate|write|prepare|configure|edit|update|change|delete|remove|pause|resume|cancel|disable|enable|deactivate|activate|turn\s+(?:on|off))\b/iu,
-  /(?:створ|дод|заплан|запуст|почн|збереж|запам.?ят|генер|напиш|підгот|налашт|редаг|змін|онов|видал|приб|призуп|віднов|скас|вимкн|увімкн|вмикн|деактив)/iu,
+  /\b(?:create|add|schedule|run|start|save|remember|generate|write|prepare|configure|set|edit|update|change|delete|remove|pause|resume|cancel|disable|enable|deactivate|activate|turn\s+(?:on|off))\b/iu,
+  /(?:встанов|створ|дод|заплан|запуст|почн|збереж|запам.?ят|генер|напиш|підгот|налашт|редаг|змін|онов|видал|приб|призуп|віднов|скас|вимкн|увімкн|вмикн|деактив)/iu,
   /(?:cré\p{L}*|ajout\p{L}*|planifi\p{L}*|lanc\p{L}*|enregistr\p{L}*|mémoris\p{L}*|génér\p{L}*|écri\p{L}*|configur\p{L}*|modifi\p{L}*|mettr\p{L}* à jour|supprim\p{L}*|retir\p{L}*|suspend\p{L}*|repren\p{L}*|annul\p{L}*)/iu,
   /(?:erstell\p{L}*|hinzufüg\p{L}*|plan\p{L}*|start\p{L}*|speicher\p{L}*|merk\p{L}*|generier\p{L}*|schreib\p{L}*|konfigurier\p{L}*|bearbeit\p{L}*|aktualisier\p{L}*|änder\p{L}*|lösch\p{L}*|entfern\p{L}*|pausier\p{L}*|fortsetz\p{L}*|abbrech\p{L}*)/iu,
   /(?:crea\p{L}*|añad\p{L}*|program\p{L}*|inici\p{L}*|guard\p{L}*|record\p{L}*|gener\p{L}*|escri\p{L}*|configur\p{L}*|edit\p{L}*|actualiz\p{L}*|cambi\p{L}*|elimin\p{L}*|borr\p{L}*|paus\p{L}*|reanud\p{L}*|cancel\p{L}*)/iu,
@@ -20,7 +20,7 @@ export const actionSignals = [
 
 export const resourceSignals = [
   /\b(?:activit(?:y|ies)|run trace|execution trace|automation|scheduled task|cron job|content hub|article|seo blueprint|social draft|business memory|memory item|memory|brand voice|audience profile)\b/iu,
-  /(?:активност|трасуван|запуск|автоматизац|запланован.*завдан|контент|статт|seo|соціальн.*допис|пам.?ят|мемор|тон.*бренд|аудитор)/iu,
+  /(?:активност|трасуван|запуск|автоматизац|запланован.*завдан|контент|статт|seo|соціальн.*допис|(?<![\p{L}])пам.?ят|мемор|тон.*бренд|аудитор)/iu,
   /(?:activité|trace d.exécution|automatisation|tâche planifiée|contenu|article|mémoire|voix de marque|audience)/iu,
   /(?:aktivität|ausführungsspur|automatisierung|geplante aufgabe|inhalt|artikel|gedächtnis|markenstimme|zielgruppe)/iu,
   /(?:actividad|traza de ejecución|automatización|tarea programada|contenido|artículo|memoria|voz de marca|audiencia)/iu,
@@ -83,7 +83,7 @@ export const profileEntitySignal = /(?:компан\p{L}*|бізнес[- ]?пр�
 // "Do you remember ...?" is a question, not an action.
 /** "Remember … in this chat / as this conversation checkpoint": conversation-scoped, never a durable Memory write. */
 export const conversationScopedRemember = /(?:(?:this|current)\s+(?:conversation|chat)|in\s+this\s+chat|(?:цьому|цієї|поточному)\s+(?:чаті|розмові|чату|розмови)|(?:этом|этого|текущем)\s+(?:чате|разговоре|чата)|(?:este|esta)\s+(?:chat|conversaci[oó]n|conversa)|nesta\s+conversa|neste\s+chat|(?:diesem|dieses|diesen)\s+(?:chat|gespr[aä]ch))/iu;
-export const memoryVerbSignal = /(?:^|[.!?;:]\s+)(?:please\s+|por favor,?\s+|bitte\s+)?(?:remember|merk(?:e|t)?\s+dir|merken?\s+sie|recuerd[ae]|lembr[ae](?:-?se)?|m[ée]morise|ricorda|zapamiętaj|onthoud|hatırla|запомни)(?![\p{L}])/iu;
+export const memoryVerbSignal = /(?:^|[.!?;:]\s+)(?:please\s+|por favor,?\s+|bitte\s+)?(?:remember|\u0437\u0430\u043f\u0430\u043c[\u0027\u2019]?\u044f\u0442\u0430\u0439|merk(?:e|t)?\s+dir|merken?\s+sie|recuerd[ae]|lembr[ae](?:-?se)?|m[ée]morise|ricorda|zapamiętaj|onthoud|hatırla|запомни)(?![\p{L}])/iu;
 
 /** Researching or analysing websites is reading them, not managing the campaign's website targets. */
 export const researchVerbSignal = /(?:\bresearch\b|recherch\p{L}*|pesquis\p{L}*|investiga\p{L}*|\bsearch\b|\banaly[sz]e\b|analysier\p{L}*|\bcompare\b|vergleich\p{L}*|досліди\p{L}*|дослідж\p{L}*|проаналізуй|порівня\p{L}*|знайди\s+в\s+інтернеті)/iu;

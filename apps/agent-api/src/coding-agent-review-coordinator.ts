@@ -1,19 +1,4 @@
-import type { ChatMessage } from "@npati/omniroute-adapter";
-import type { AuthContext, CodeSession } from "@npati/workspace";
-import { sha256Hex, type CodeToolInvokeFailure, type CodeToolInvokeResult } from "./code-tool-runtime";
-import {
-  VERIFICATION_APPROVAL_REQUIRED,
-  VERIFICATION_REPAIR_EXHAUSTED,
-  VERIFICATION_UNAVAILABLE,
-  createVerificationLoop,
-  verificationChecks,
-  formatRepairInstruction,
-  type VerificationCheckReport,
-  type VerificationLoop,
-  type VerificationReport,
-} from "./code-verification-loop";
-import type { TestIntegrityVerdict } from "./code-test-integrity-guard";
-import type { ScopeGuardResult } from "./code-scope-guard";
+import type { ChatMessage } from "@npati/omniroute-adapter";import type { AuthContext, CodeSession } from "@npati/workspace";import { sha256Hex, type CodeToolInvokeFailure, type CodeToolInvokeResult } from "./code-tool-runtime";import {  VERIFICATION_APPROVAL_REQUIRED,  VERIFICATION_REPAIR_EXHAUSTED,  VERIFICATION_UNAVAILABLE,  createVerificationLoop,  verificationChecks,  formatRepairInstruction,  type VerificationCheckReport,  type VerificationLoop,  type VerificationReport,} from "./code-verification-loop";import type { TestIntegrityVerdict } from "./code-test-integrity-guard";import type { ScopeGuardResult } from "./code-scope-guard";
 import {
   planVerification,
   verificationFingerprint,
@@ -76,6 +61,12 @@ export interface ReviewCoordinatorHost {
 const VERIFICATION_CACHE_LIMIT = 4;
 
 export class CodingAgentReviewCoordinator {
+  private readonly runtimeReceipts: string[] = [];
+  recordRuntimeResult(result: CodeToolInvokeResult): void {
+    if (result.tool !== "code.data.policies.apply") return;
+    this.runtimeReceipts.push(JSON.stringify({ tool: result.tool, toolVersion: result.toolVersion, schemaVersion: result.schemaVersion, result: result.result }).slice(0, 4000));
+    if (this.runtimeReceipts.length > 8) this.runtimeReceipts.shift();
+  }
   private readonly verificationTools: readonly string[];
   private readonly verificationLoop: VerificationLoop;
   readonly verificationDisabled: boolean;
@@ -399,6 +390,7 @@ export class CodingAgentReviewCoordinator {
       runChanges: () => this.runChanges(),
       verificationForReview: () => this.verificationForReview(),
       testIntegrityForReview: () => this.testIntegrityForReview(),
+      runtimeEvidence: this.runtimeReceipts.join("\n"),
       boundedDiff: (limit) => this.boundedDiff(limit),
       writeSelfReviewSummary: () => this.writeSelfReviewSummary(),
       setSelfReviewVerdict: (value) => { this.selfReviewVerdict = value; },

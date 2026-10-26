@@ -51,6 +51,9 @@ describe("company deletion confirmation through production chat", () => {
       supportsNativeTools: () => true,
       async chat(request) {
         if (!request.tools?.length) return { content: "" };
+        if (request.tools.some(tool => tool.function.name === "npati_classify_chat_intent")) {
+          return { content: "", toolCalls: [{ id: "classify-company-update", type: "function", function: { name: "npati_classify_chat_intent", arguments: JSON.stringify({ intent: "CHAT", confidence: 1, targets: [], entityRead: null }) } }] };
+        }
         if (request.messages.at(-1)?.role === "tool") return { content: "The company website was updated." };
         toolCalls++;
         return { content: "", toolCalls: [{ id: "update-company-website", type: "function", function: { name: "npati_company_action", arguments: JSON.stringify({ action: "update", companyId: company.id, fields: { website: "https://new.example" } }) } }] };

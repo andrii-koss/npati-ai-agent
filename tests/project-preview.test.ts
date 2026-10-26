@@ -663,6 +663,32 @@ describe("Step 4 — Project Preview & Changes", () => {
       expect(second.headers["set-cookie"]).toBeUndefined();
     });
 
+    it("executes a relative counter script through the direct API preview with a browser cookie jar", async () => {
+      const { chromium } = await import("playwright");
+      const { preview, workspace, sandbox, company, project } = await fixture();
+      await workspace.createFile(owner, company.id, project.id, "index.html", "<html><head></head><body>Preview</body></html>");
+      const started = await preview.startPreview(owner, company.id, project.id);
+      vi.spyOn(sandbox, "proxyPreview").mockImplementation(async (_scope, _sandbox, input) => ({
+        status: 200, headers: { "content-type": input.path === "/script.js" ? "application/javascript" : "text/html" },
+        body: Buffer.from(input.path === "/script.js"
+          ? 'document.getElementById("increment").onclick=()=>{document.getElementById("counter").textContent="1";};'
+          : '<html><head></head><body><button id="increment">Click Me</button><span id="counter">0</span><script src="script.js"></script></body></html>').toString("base64"),
+      }));
+      const app = Fastify();
+      registerProjectPreviewRoutes(app, preview, workspace, new LocalDevAuthProvider(owner));
+      const base = await app.listen({ host: "127.0.0.1", port: 0 });
+      const browser = await chromium.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        const scriptResponse = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/script.js"));
+        await page.goto(`${base}/companies/${company.id}/projects/${project.id}/preview/proxy/?token=${started.token}`);
+        expect((await scriptResponse).status()).toBe(200);
+        expect(await page.locator("#counter").innerText()).toBe("0");
+        await page.getByRole("button", { name: "Click Me" }).click();
+        expect(await page.locator("#counter").innerText()).toBe("1");
+      } finally { await browser.close(); await app.close(); }
+    });
+
     it("displays error card instead of blank page when dev server failed", async () => {
       const { preview, workspace, company, project } = await fixture();
       const app = Fastify();

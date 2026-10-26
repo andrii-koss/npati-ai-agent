@@ -8,7 +8,6 @@ import { prepareChatAttachments, ChatAttachmentInput } from "./chat-attachments"
 import { conversationTitle, isShortAffirmativeReply, requestsCompositeCompanyDeletionIntent } from "./chat-intent-helpers";
 import { publicChatError, publicCompanyRunMessage } from "./chat-public-errors";
 import { explicitlyRequestsWebResearch } from "./chat-text-directives";
-import { readCodeActiveContext } from "./code-active-context-store";
 import { CodeBackgroundRunRegistry } from "./code-background-run-registry";
 import { canUseStylePreview, hasCodeChatPreview, isCodeChatWebsite, websiteConversationContext, websiteReferenceInstructions, isWebsiteReferenceRedesign, storeWebsiteReferenceAssets } from "./code-chat-website";
 import { namesExternalPage, resolveChatCodeIntent } from "./code-intent-routing";
@@ -26,7 +25,7 @@ import { ChatStreamLeaseError, reserveChatStream } from "./chat-stream-lease";
 import { EmailChatActions } from "./email-chat-actions";
 import { NoMemoryEvaluationResult, PerRequestNoMemoryGate } from "./ephemeral-no-memory-and-rtk";
 import { CODE_AGENT_MASTER_FLAG, FeatureFlagService } from "./feature-flags";
-import { publicCodeChatReply, getLatestChatProjectCard, saveChatProjectCard } from "./project-chat-cards";
+import { publicCodeChatReply, getLatestChatProjectCard, saveChatProjectCard, readChatActiveContext, persistChatResultContext, focusedChatEntity, executeChatEntityRead } from "./project-chat-cards";
 import { confirmedProjectDeletion, isProjectDeleteRequest, noWebsiteToChangeMessage, projectDeleteQuestion, projectDeletedMessage, projectDeleteTarget } from "./chat-project-delete";
 import { ProjectOrchestrationError, ProjectOrchestrator, extractCleanProjectName } from "./project-orchestrator";
 import { ProjectPreviewService } from "./project-preview-service";
@@ -104,7 +103,10 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         : undefined;
       const conversationCard = request.body.conversationId && !memoryPolicy.noMemoryActive
         ? await getLatestChatProjectCard(workspaceStore, auth, request.body.conversationId, requestedContext.businessId ?? undefined) : null;
-      if (!requestedContext.projectId && conversationCard?.companyId) {
+      const confirmedContext = request.body.conversationId && !memoryPolicy.noMemoryActive
+        ? await readChatActiveContext(workspaceStore, auth, request.body.conversationId, requestedContext.businessId) : null;
+      if (!request.body.projectId && !request.body.companyId && !request.body.businessId && confirmedContext) Object.assign(requestedContext, confirmedContext.context);
+      if (!confirmedContext && !requestedContext.projectId && !requestedContext.companyId && !requestedContext.businessId && conversationCard?.companyId) {
         requestedContext.projectId = conversationCard.projectId ?? conversationCard.id;
         requestedContext.companyId = conversationCard.companyId;
         requestedContext.contextType = "project";
@@ -113,6 +115,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         ? await readIntentHistory(workspaceStore, auth, request.body.conversationId, requestedContext.businessId) : [];
       const semantic = await deps.resolveProjectIntent?.(auth, {
         message, activeCompanyId: requestedContext.companyId, activeProjectId: requestedContext.projectId,
+        focusedEntityType: focusedChatEntity(requestedContext, confirmedContext).entityType,
         attachmentNames: request.body.attachments?.flatMap(item => typeof item?.name === "string" ? [item.name] : []),
         conversationHistory: history, signal: streamController.signal,
       });
@@ -147,7 +150,8 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
       let creatingChatWebsite = (projectIntent.intent === "CREATE_WEBSITE" || projectIntent.intent === "CREATE_PROJECT")
         && projectIntent.targetDetails?.projectType !== "mobile_app";
 
-      const boundCard = !creatingChatWebsite && !namedContext && !staleContext ? conversationCard : null;
+      const boundCard = !creatingChatWebsite && !staleContext && resolved.context.contextType === "project"
+        && conversationCard?.companyId === resolved.company?.id && (conversationCard?.projectId ?? conversationCard?.id) === resolved.project?.id ? conversationCard : null;
       if (boundCard && !request.body.projectId) {
         activeCompanyId = boundCard.companyId;
         activeProjectId = boundCard.projectId ?? boundCard.id;
@@ -223,7 +227,8 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
 
         if(codeBackgroundRunId) request.log.info({ runId: codeBackgroundRunId }, "code_background_run_detached");
       });
-      const send = (event: "progress" | "delta" | "result" | "error" | "code_session" | "code_inbox", data: unknown) => {
+      const send = async (event: "progress" | "delta" | "result" | "error" | "code_session" | "code_inbox", data: unknown) => {
+        if (event === "result" && !memoryPolicy.noMemoryActive) data = await persistChatResultContext(workspaceStore, auth, data, { replaceSelection: isReadOnlyCompanySwitch(message) });
         if (reply.raw.destroyed) return;
         sequence += 1;
         reply.raw.write(`id: ${sequence}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -236,6 +241,12 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
       try {
         // Deleting a whole site is a confirmed project deletion through ProjectService, never a Coding Agent run.
         const previousAssistant = [...history].reverse().find((item) => item.role === "assistant")?.content ?? "";
+        const metadataRead = projectIntent.intent === "CHAT" && semantic?.entityRead && !request.body.attachments?.length
+          ? await executeChatEntityRead(workspaceStore, auth, resolved, semantic.entityRead, message, request.body.conversationId, confirmedContext, memoryPolicy.noMemoryActive) : null;
+        if (metadataRead) {
+          send("delta", { delta: metadataRead.message }); await send("result", metadataRead);
+          clearInterval(heartbeat); if (!reply.raw.writableEnded) reply.raw.end(); return;
+        }
         const confirmedName = confirmedProjectDeletion(message, previousAssistant);
         if (activeCompanyId && (confirmedName || isProjectDeleteRequest(message))) {
           // The site may belong to another owned company the request names explicitly; a confirmation names the site
@@ -255,7 +266,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
               await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", answer);
             }
             send("delta", { delta: answer });
-            send("result", { message: answer, suggestedActions: [], conversationId: conversation?.id,
+            await send("result", { message: answer, suggestedActions: [], conversationId: conversation?.id,
               activeContext: confirmedName ? { contextType: "none", companyId: null, businessId: null } : resolved.context });
             clearInterval(heartbeat);
             if (!reply.raw.writableEnded) reply.raw.end();
@@ -266,11 +277,9 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
           ? await featureFlagService.isEnabled(auth, CODE_AGENT_MASTER_FLAG, { companyId: activeCompanyId, userId: auth.userId }).catch(() => false)
           : false;
 
-        const storedActiveContext = codingEnabled && activeCompanyId && !activeProjectId
-          ? await readCodeActiveContext(workspaceStore, auth, activeCompanyId).catch(() => null)
-          : null;
-        const effectiveProjectId = activeProjectId ?? storedActiveContext?.projectId ?? null;
-        const effectiveSessionId = activeProjectId ? undefined : storedActiveContext?.sessionId ?? undefined;
+        const effectiveProjectId = activeProjectId ?? null;
+        const effectiveSessionId = conversationCard?.companyId === activeCompanyId && (conversationCard.projectId ?? conversationCard.id) === effectiveProjectId
+          ? conversationCard.sessionId ?? undefined : undefined;
         const codeProject = codingEnabled && activeCompanyId && effectiveProjectId
           ? await projectService.get(auth, activeCompanyId, effectiveProjectId).catch(() => null)
           : null;
@@ -278,7 +287,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         // Row capabilities need the project's development database; without one the request is not a row task.
         if (semantic?.rowCapability && resolved.project?.dataBackendId && activeCompanyId) {
           const result=await runNeutralMessage(auth,message,request.body.conversationId,request.body.attachments,progress,memoryPolicy,delta=>send("delta",{delta}),streamController.signal,{id:resolved.company!.id,name:resolved.company!.name},{...resolved.project,capabilityIds:rowTaskCapabilities(semantic.rowCapability)});
-          send("result",{...result,activeContext:resolved.context});clearInterval(heartbeat);if(!reply.raw.writableEnded)reply.raw.end();return;
+          await send("result",{...result,activeContext:resolved.context});clearInterval(heartbeat);if(!reply.raw.writableEnded)reply.raw.end();return;
         }
         const codeDecision = resolveChatCodeIntent({
           message,
@@ -292,7 +301,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
           sessionBound: !!preparedChatSession,
         });
         if (codeDecision.mode === "clarify") {
-          send("result", { routed: "clarify", intent: codeDecision.intent, message: codeDecision.message });
+          await send("result", { routed: "clarify", intent: codeDecision.intent, message: codeDecision.message });
           clearInterval(heartbeat);
           if (!reply.raw.writableEnded) reply.raw.end();
           return;
@@ -307,7 +316,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
             ? storedSession
             : codeSessions[0] ?? null);
           if (!codeSession) {
-            send("result", { routed: "clarify", intent: codeDecision.intent, message: "Which project should I work in? Create or select a code session first." });
+            await send("result", { routed: "clarify", intent: codeDecision.intent, message: "Which project should I work in? Create or select a code session first." });
           } else {
             let languageHistory = !memoryPolicy.noMemoryActive && request.body.conversationId ? (await workspaceStore.getNeutralConversation(auth, request.body.conversationId).catch(() => ({ messages: [] }))).messages : [];
             if (!memoryPolicy.noMemoryActive && await codeSessionInbox.isEnabled(auth, codeSession.companyId)) {
@@ -414,7 +423,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
               toolContext: { userMessage: message, dataBackendAttached: Boolean((codeProject as { dataBackendId?: string | null }).dataBackendId) },
               sink: {
                 signal: isBackground ? backgroundSink!.signal : streamController.signal,
-                emitResult: (result) => { send("result", { routed: "code_runner", intent: codeDecision.intent, run: result }); },
+                emitResult: async (result) => { await send("result", { routed: "code_runner", intent: codeDecision.intent, run: result }); },
                 emitTerminal: (status, reason) => { backgroundSink?.finish(status, reason); },
                 /**
                  * Step 5: the assistant answer as it is generated. It goes through the same SSE writer and the same
@@ -504,7 +513,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
                 request.log.warn({ err: error }, "code_chat_card_store_failed");
               }
             }
-            send("result", {
+            await send("result", {
               routed: "code_runner",
               intent: codeDecision.intent,
               run: runResult,
@@ -532,9 +541,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
        * not answered by the neutral chat model playing those agents. */
       const addressesCompanyAgent = async (company?: { id: string }) => {
         if (!company) return false;
-        const lower = message.toLocaleLowerCase();
-        const agents = (await workspaceStore.listCompanyAgentsPage(auth, company.id, 50).catch(() => ({ items: [] }))).items;
-        return agents.some((agent) => agent.isActive && agent.name.trim().length >= 3 && lower.includes(agent.name.trim().toLocaleLowerCase()));
+        return CompanyChatActions.addressesOwnedAgent(auth, workspaceStore, company.id, message);
       };
       try {
         // A review of an external page is answered by chat with Web Research, not by the project pipeline.
@@ -604,13 +611,13 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
               };
             }
           }
-          send("result", projectResponse);
+          await send("result", projectResponse);
         } else if (resolved.context.contextType === "project" && !(await addressesCompanyAgent(resolved.company))) {
           const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal, resolved.company ? { id: resolved.company.id, name: resolved.company.name } : undefined, resolved.project);
-          send("result", { ...result, activeContext: resolved.context });
+          await send("result", { ...result, activeContext: resolved.context });
         } else if (resolved.context.contextType === "none") {
           const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy,(delta)=>send("delta",{delta}),streamController.signal);
-          send("result", { ...result, activeContext: resolved.context });
+          await send("result", { ...result, activeContext: resolved.context });
         } else if (resolved.context.contextType === "company" || resolved.context.contextType === "project") {
           // Project context reaches this branch only when the message addresses one of the company's agents by name.
           const company = resolved.company!;
@@ -625,15 +632,18 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
             : false;
           if (managementRequest || isReadOnlyCompanySwitch(message) || explicitCoreWebRequest || !runnableMainAgent) {
             const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal, { id: resolved.company!.id, name: resolved.company!.name });
-            send("result", { ...result, activeContext: resolved.context });
+            await send("result", { ...result, activeContext: resolved.context });
           } else {
+          const delegationProjectId = delegatesWork ? resolved.project?.id ?? requestedContext.projectId
+            ?? (conversationCard?.companyId === company.id ? conversationCard.projectId ?? conversationCard.id : undefined) : undefined;
+          const delegationProject = delegationProjectId ? await workspaceStore.getProject(auth, company.id, delegationProjectId).catch(() => undefined) : undefined;
           const conversation = await chatConversation();
           if (conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", message);
           progress({ type: "final_generation_started" });
           const runResult = await companyRuntime.execute(
             auth,
             resolved.company!.id,
-            { task: message, noMemory: memoryPolicy.noMemoryActive, memoryScope:{sessionId:conversation?.id} },
+            { task: message, noMemory: memoryPolicy.noMemoryActive, memoryScope:{sessionId:conversation?.id}, conversationId: conversation?.id, projectId: delegationProject?.id },
             (request.headers["idempotency-key"] as string) || `stream-${Date.now()}`,
             streamController.signal,
           );
@@ -652,7 +662,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
             const responseMessage=publicCompanyRunMessage(runResult.run.result, runResult.run.errorMessage, message, runResult.run.errorCode);
             if (conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", responseMessage);
             for(const delta of boundedResponseChunks(responseMessage))send("delta",{delta});
-            send("result", {
+            await send("result", {
               message: responseMessage,
               suggestedActions: [],
               conversationId: conversation?.id,
@@ -676,7 +686,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
             streamController.signal,
           );
           for(const delta of boundedResponseChunks(result.message))send("delta",{delta});
-          send("result", { ...result, activeContext: resolved.context });
+          await send("result", { ...result, activeContext: resolved.context });
         }
       } catch (error) {
         request.log.error(error);

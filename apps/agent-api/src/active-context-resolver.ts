@@ -71,6 +71,14 @@ export class ActiveContextResolver {
     return (await this.ownedCompanies(auth)).filter((company) => mentions(message, company.name));
   }
 
+  async businessesNamedIn(auth: AuthContext, message: string): Promise<Business[]> {
+    return (await this.store.listUserBusinesses(auth)).filter((business) => mentions(message, business.name));
+  }
+
+  async agentsNamedIn(auth: AuthContext, companyId: string, message: string) {
+    return (await this.store.listCompanyAgentsPage(auth, companyId, 50)).items.filter(agent => mentions(message, agent.name));
+  }
+
   async resolveNamedCompany(auth: AuthContext, current: ResolvedActiveContext, message: string, decision?: import("@npati/shared").ProjectIntentDecision, conversationText = ""): Promise<ResolvedActiveContext | undefined> {
     const owned: Company[] = [];
     let cursor: string | undefined;
@@ -95,7 +103,7 @@ export class ActiveContextResolver {
     // An exact owned project named by a code task takes precedence over the previous chat card.
     // Search only authorized companies already selected or named in this conversation.
     // A question or record task can name the project too ("delete row X in Next Shop"), so CHAT does not skip it.
-    if (decision && !creating) {
+    if (!creating) {
       const candidates = (await Promise.all(companies.map(company => this.store.listProjects(auth, company.id)))).flat()
         .filter(project => !["archived", "soft_deleted", "purging", "deleted"].includes(project.status)
           && project.name.trim().length >= 3 && lowerMessage.includes(project.name.trim().toLocaleLowerCase()));
@@ -106,7 +114,12 @@ export class ActiveContextResolver {
     const activeId = current.company?.id ?? current.project?.companyId ?? null;
     const exactCompanies = companies.filter(company => mentions(message, company.name));
     // An explicitly named current company must never be replaced by a coincidental agent-name match ("mark").
-    if (exactCompanies.length > 1 || exactCompanies[0]?.id === activeId) return undefined;
+    if (exactCompanies.length > 1) return undefined;
+    if (exactCompanies[0]?.id === activeId) {
+      // A Company is a first-class selection. Naming it in a chat/read/management task must not retain an
+      // unrelated historical Project merely because that Project belongs to the same Company.
+      return decision?.intent === "CHAT" && current.project ? this.resolve(auth, { contextType: "company", companyId: activeId }) : undefined;
+    }
     let named = exactCompanies[0] ?? companyNamedInMessage(companies, message, activeId);
     if (!named) {
       // No company name, but an agent's full name that belongs to exactly one company ("have Coach Ana delegate to Leo").
@@ -122,11 +135,9 @@ export class ActiveContextResolver {
       if (owner && owner !== activeId) named = companies.find((company) => company.id === owner);
     }
     if (!named) return undefined;
-    const projects = creating ? [] : (await this.store.listProjects(auth, named.id)).filter((project) => project.status !== "archived");
-    const latest = projects.sort((a, b) => new Date(b.updatedAt as unknown as string).getTime() - new Date(a.updatedAt as unknown as string).getTime())[0];
-    return latest
-      ? this.resolve(auth, { contextType: "project", companyId: named.id, projectId: latest.id })
-      : this.resolve(auth, { contextType: "company", companyId: named.id });
+    // Updated-at ordering is not evidence of the user's intended entity. A Project is selected only by its
+    // explicit owned reference above or by this conversation's validated selection, never by Company recency.
+    return this.resolve(auth, { contextType: "company", companyId: named.id });
   }
 
   /** A new Project request must not validate or reuse the previous chat's Project. */
@@ -175,7 +186,7 @@ export class ActiveContextResolver {
         return this.resolve(auth, {
           contextType: "company",
           companyId: company.id,
-          businessId: company.businessId ?? null,
+          businessId: null,
         });
       }
       if (project.status === "archived") {
@@ -185,7 +196,7 @@ export class ActiveContextResolver {
         return this.resolve(auth, {
           contextType: "company",
           companyId: company.id,
-          businessId: company.businessId ?? null,
+          businessId: null,
         });
       }
       let business: Business | undefined;
@@ -211,7 +222,7 @@ export class ActiveContextResolver {
         context: {
           contextType: "project",
           companyId: company.id,
-          businessId: company.businessId ?? null,
+          businessId: null,
           projectId: project.id,
           workspaceId: auth.workspaceId,
         },
@@ -256,7 +267,7 @@ export class ActiveContextResolver {
         context: {
           contextType: "company",
           companyId: company.id,
-          businessId: company.businessId ?? null,
+          businessId: null,
         },
         company,
         business,

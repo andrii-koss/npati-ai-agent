@@ -510,13 +510,15 @@ describe("Coding Agent E2E Smoke Suite (Stage 2 Extended)", () => {
       expect(conversationId).toBeTruthy();
       activeConversationId = conversationId;
 
-      // Check PostgreSQL trace for tool calls
+      const capturedProjectId = outcome.resultEvent?.projectCard?.projectId ?? outcome.resultEvent?.projectCard?.id
+        ?? outcome.resultEvent?.activeContext?.projectId ?? outcome.resultEvent?.projectId;
+      expect(capturedProjectId).toMatch(/^[0-9a-f-]{36}$/i);
+      // Verify this request's project, never another chat's most recent trace.
       const recentTrace = await queryPostgres(
-        `SELECT kind, payload->>'eventType' as ev_type, payload->>'tool' as tool, project_id FROM code_activity_events WHERE created_at > now() - interval '3 minutes' ORDER BY created_at DESC LIMIT 10;`
+        `SELECT kind, payload->>'eventType' as ev_type, payload->>'tool' as tool, project_id FROM code_activity_events WHERE company_id = '${COMPANY_ID}' AND project_id = '${capturedProjectId}' AND created_at > now() - interval '3 minutes' ORDER BY created_at DESC LIMIT 10;`
       );
       expect(recentTrace.length).toBeGreaterThan(0);
 
-      const capturedProjectId = outcome.resultEvent?.projectId || recentTrace.split("\n")[0]?.split("\t")[3] || testProjectId;
       e2eProjectId = capturedProjectId;
 
       // Start preview and verify via Playwright
@@ -542,6 +544,11 @@ describe("Coding Agent E2E Smoke Suite (Stage 2 Extended)", () => {
         expect(domResult.buttonFound).toBe(true);
         expect(domResult.headerText).toContain("NPATI Test");
         expect(domResult.afterClickCounterText).not.toBe(domResult.initialCounterText);
+        const initialCount = domResult.initialCounterText.match(/\d+/g)?.at(-1);
+        const clickedCount = domResult.afterClickCounterText.match(/\d+/g)?.at(-1);
+        expect(initialCount).toBeDefined();
+        expect(clickedCount).toBeDefined();
+        expect(Number(clickedCount)).toBe(Number(initialCount) + 1);
       }
     }, 120_000);
 

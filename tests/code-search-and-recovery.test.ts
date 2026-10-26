@@ -287,6 +287,7 @@ describe("CodingAgentToolWaves argument error recovery semantics", () => {
       replayRecorder: undefined,
       pendingApprovals: [],
       reviewCoordinator: {
+        recordRuntimeResult: vi.fn(),
         readVerificationRevision: vi.fn(),
         onVerifyToolExecuted: vi.fn(),
       } as any,

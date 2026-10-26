@@ -14,7 +14,7 @@ import { ContextCompactor } from "./context-compactor";
 import { createCoreServices } from "./core-services";
 import { EmailChatActions } from "./email-chat-actions";
 import { NoMemoryEvaluationResult, PerRequestNoMemoryGate } from "./ephemeral-no-memory-and-rtk";
-import { saveChatProjectCard } from "./project-chat-cards";
+import { saveChatProjectCard, readChatActiveContext, persistChatResultContext, focusedChatEntity, executeChatEntityRead } from "./project-chat-cards";
 import { ProjectOrchestrationError, ProjectOrchestrator } from "./project-orchestrator";
 import { AdmissionError } from "./resilience-admission-queue";
 import { SecurityPolicyViolation } from "./security-guardrails";
@@ -122,6 +122,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
     noMemory?: boolean;
     ephemeral?: boolean;
   } }>("/chat", {
+    preSerialization: async (request, reply, payload) => reply.statusCode >= 400 || PerRequestNoMemoryGate.evaluate(request.headers, request.body).noMemoryActive
+      ? payload : persistChatResultContext(workspaceStore, await authProvider.authenticate(request), payload, { replaceSelection: isReadOnlyCompanySwitch(request.body.message ?? "") }),
     schema: {
       body: {
         type: "object",
@@ -183,16 +185,21 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
       };
 
       const prompt = chatBody.message?.trim();
+      const confirmedContext = request.body.conversationId && !memoryPolicy.noMemoryActive
+        ? await readChatActiveContext(workspaceStore, auth, request.body.conversationId, requestedContext.businessId) : null;
+      if (!chatBody.projectId && !chatBody.companyId && !chatBody.businessId && confirmedContext) Object.assign(requestedContext, confirmedContext.context);
       const history = !memoryPolicy.noMemoryActive
         ? await readIntentHistory(workspaceStore, auth, request.body.conversationId, requestedContext.businessId) : [];
       const semantic = await deps.resolveProjectIntent?.(auth, {
         message: prompt ?? "", activeCompanyId: requestedContext.companyId, activeProjectId: requestedContext.projectId,
+        focusedEntityType: focusedChatEntity(requestedContext, confirmedContext).entityType,
         attachmentNames: request.body.attachments?.flatMap(item => typeof item?.name === "string" ? [item.name] : []),
         conversationHistory: history,
       });
-      const resolved = await activeContextResolver.resolveChat(auth, requestedContext, prompt ?? "", semantic?.decision);
+      let resolved = await activeContextResolver.resolveChat(auth, requestedContext, prompt ?? "", semantic?.decision);
+      resolved = await activeContextResolver.resolveNamedCompany(auth, resolved, prompt ?? "", semantic?.decision, history.map(item => item.content).join("\n")) ?? resolved;
       const activeProjId = resolved.project?.id ?? null;
-      const activeCompId = requestedContext.companyId ?? resolved.company?.id ?? resolved.project?.companyId ?? null;
+      const activeCompId = resolved.company?.id ?? resolved.project?.companyId ?? null;
 
       if(semantic?.rowCapability&&resolved.project?.dataBackendId&&resolved.company){
         const result=await runNeutralMessage(auth,prompt??"",request.body.conversationId,request.body.attachments,undefined,memoryPolicy,undefined,undefined,{id:resolved.company.id,name:resolved.company.name},{...resolved.project,capabilityIds:rowTaskCapabilities(semantic.rowCapability)});
@@ -205,6 +212,9 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
         hasWorkspace: Boolean(overview.currentBusiness || resolved.company || resolved.project),
       });
 
+      const metadataRead = intentDecision.intent === "CHAT" && semantic?.entityRead && !request.body.attachments?.length
+        ? await executeChatEntityRead(workspaceStore, auth, resolved, semantic.entityRead, prompt ?? "", request.body.conversationId, confirmedContext, memoryPolicy.noMemoryActive) : null;
+      if (metadataRead) return metadataRead;
       if (intentDecision.unsupportedIntentMessage) {
         return {
           message: intentDecision.unsupportedIntentMessage,
@@ -327,10 +337,13 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
             : await workspaceStore.createNeutralConversation(auth, conversationTitle(prompt || "Analyze company state"))
           : undefined;
         if (conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", prompt || "Analyze company state");
+        const delegationProjectId = await CompanyChatActions.addressesOwnedAgent(auth, workspaceStore, company.id, prompt ?? "")
+          ? requestedContext.projectId : undefined;
+        const delegationProject = delegationProjectId ? await workspaceStore.getProject(auth, company.id, delegationProjectId).catch(() => undefined) : undefined;
         const runResult = await companyRuntime.execute(
           auth,
           company.id,
-          { task: prompt || "Analyze company state", noMemory: memoryPolicy.noMemoryActive, memoryScope:{sessionId:conversation?.id} },
+          { task: prompt || "Analyze company state", noMemory: memoryPolicy.noMemoryActive, memoryScope:{sessionId:conversation?.id}, conversationId: conversation?.id, projectId: delegationProject?.id },
           (request.headers["idempotency-key"] as string) || `chat-${Date.now()}`
         );
         for (const [name, value] of Object.entries(companyRunTelemetryHeaders(runResult))) reply.header(name, value);

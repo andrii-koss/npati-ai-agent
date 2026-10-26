@@ -191,17 +191,16 @@ export async function testLivePreviewDom(url: string): Promise<DomInteractionRes
     const buttonFound = Boolean(clickBtn);
 
     // Initial counter text
-    const counterEl =
-      (await page.$("#counter, #count, .counter, .count, p:has-text('0'), span:has-text('0')")) ||
-      (await page.$("p, span"));
-    const initialCounterText = counterEl ? (await counterEl.innerText()).trim() : "";
+    const counters = page.locator("#counter, #count, .counter, .count, [role='status'], [aria-live]");
+    const counterEl = await counters.count() ? counters.first() : page.locator("p, span").filter({ hasText: /0/ }).first();
+    const initialCounterText = await counterEl.innerText();
 
     if (clickBtn) {
       await clickBtn.click();
-      await page.waitForTimeout(300);
+      for (let attempt = 0; attempt < 30 && (await counterEl.innerText()).trim() === initialCounterText.trim(); attempt++) await page.waitForTimeout(100);
     }
 
-    const afterClickCounterText = counterEl ? (await counterEl.innerText()).trim() : "";
+    const afterClickCounterText = await counterEl.innerText();
 
     return {
       title,

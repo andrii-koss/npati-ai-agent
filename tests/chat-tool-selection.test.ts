@@ -3,6 +3,9 @@ import type { AIEngine, ChatRequest, ChatToolCall, OmniRouteMarketplace } from "
 import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
 import { buildApp } from "../apps/agent-api/src/app";
 import { CORE_CHAT_TOOLS, runChatToolLoop } from "../apps/agent-api/src/chat-tool-orchestrator";
+import { CompanyDelegationRuntime } from "../apps/agent-api/src/company-runtime";
+import { ProjectService } from "../apps/agent-api/src/project-service";
+import { saveChatProjectCard, persistChatResultContext } from "../apps/agent-api/src/project-chat-cards";
 
 const auth: AuthContext = {
   userId: "tool-selection-user",
@@ -36,6 +39,220 @@ function engine(chat: AIEngine["chat"]): AIEngine {
 const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
 
 describe("native chat tool selection", () => {
+  it.each(["/chat", "/chat/stream"])("keeps a recalled fact plus an answer-format clause out of the write planner: %s", async url => {
+    const store = new InMemoryWorkspaceStore();
+    let company = await store.createCompany(auth, { name: "Recall Studio", companyInstructions: "STORED_DECISION_CODE" }, "recall-studio");
+    const main = await store.createCompanyAgent(auth, company.id, { name: "Lead", role: "Coordinator", tools: [] }, "recall-main");
+    company = await store.setCompanyMainAgent(auth, company.id, main.id, company.revision);
+    const ai = engine(async () => { throw new Error("A stored fact read must not enter the write planner"); });
+    const classify = vi.fn(async (request: ChatRequest) => {
+      expect(request.toolChoice).toEqual({ type: "function", function: { name: "npati_classify_chat_intent" } });
+      return { content: "", toolCalls: [toolCall("recall-classification", "npati_classify_chat_intent", { intent: "CHAT", confidence: 1, targets: [], entityRead: { field: "instructions", entityType: "company" } })] };
+    });
+    ai.chat = classify;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace });
+    try {
+      const response = await app.inject({ method: "POST", url, payload: { message: "Який останній факт ти запам'ятав для «Recall Studio»? Назви лише значення.", contextType: "company", companyId: company.id } });
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toContain("STORED_DECISION_CODE");
+      expect(response.body).not.toContain("event: error");
+      expect(classify).toHaveBeenCalledOnce();
+      expect((await store.getCompany(auth, company.id)).companyInstructions).toBe("STORED_DECISION_CODE");
+      expect(await store.listUserBusinesses(auth)).toEqual([]);
+    } finally { await app.close(); }
+  });
+  it.each(["/chat", "/chat/stream"].flatMap(url => ["What is its description? Keep it short.", "¿Cuál es su descripción? Sé breve.", "Qual é a descrição dela? Seja breve.", "Wie lautet ihre Beschreibung? Kurz bitte.", "Який її опис? Відповідай коротко."].map(message => ({ url, message }))))(
+    "answers a typed metadata read from storage without speaking as Lead: $url $message", async ({ url, message }) => {
+      const store = new InMemoryWorkspaceStore();
+      let company = await store.createCompany(auth, { name: "Typed Metadata Studio", description: "AUTHORITATIVE_COMPANY_DESCRIPTION" }, "typed-metadata");
+      const lead = await store.createCompanyAgent(auth, company.id, { name: "Lead", role: "Coordinator", description: "WRONG_AGENT_DESCRIPTION", tools: [] }, "typed-lead");
+      company = await store.setCompanyMainAgent(auth, company.id, lead.id, company.revision);
+      const { project } = await store.createProject(auth, company.id, { name: "Old site", description: "WRONG_PROJECT_DESCRIPTION", type: "code_project" }, "typed-project");
+      const conversation = await store.createNeutralConversation(auth, "Long metadata chat");
+      for (let i = 0; i < 40; i++) await store.appendNeutralMessage(auth, conversation.id, "assistant", "Old summary describes Lead or the site, not the Company.");
+      const last = (await store.getNeutralConversation(auth, conversation.id)).messages.at(-1)!;
+      await saveChatProjectCard(store, auth, conversation.id, last.id, { id: project.id, projectId: project.id, companyId: company.id, name: project.name } as never);
+      await persistChatResultContext(store, auth, { conversationId: conversation.id, companyAction: { action: "update", companyId: company.id } });
+      const ai = engine(async () => { throw new Error("Metadata values must not come from model generation"); });
+      const classify = vi.fn(async (request: ChatRequest) => {
+        expect(String(request.messages[0]?.content).startsWith("Classify")).toBe(true);
+        expect(JSON.parse(request.messages[1]!.content as string).focusedEntityType).toBe("company");
+        return { content: JSON.stringify({ intent: "CHAT", confidence: 1, targets: [], entityRead: { field: "description", entityType: "focused" } }) };
+      });
+      ai.chat = classify;
+      const activity = vi.spyOn(CompanyDelegationRuntime.prototype, "execute");
+      const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace });
+      try {
+        const response = await app.inject({ method: "POST", url, payload: { message, contextType: "company", companyId: company.id, conversationId: conversation.id } });
+        expect(response.statusCode).toBe(200);
+        const result = url === "/chat" ? response.json() : JSON.parse(response.body.split("\n\n").find(frame => frame.includes("event: result"))!.split("\n").find(line => line.startsWith("data:"))!.slice(5));
+        expect(result.message).toBe("AUTHORITATIVE_COMPANY_DESCRIPTION");
+        expect(result.entityRead).toMatchObject({ entityType: "company", entityId: company.id, field: "description", source: "workspace_store" });
+        expect(classify).toHaveBeenCalledOnce();
+        expect(activity).not.toHaveBeenCalled();
+        const history = await store.getNeutralConversation(auth, conversation.id);
+        expect(history.messages.slice(-2).map(item => item.content)).toEqual([message, "AUTHORITATIVE_COMPANY_DESCRIPTION"]);
+      } finally { activity.mockRestore(); await app.close(); }
+    });
+  it.each(["/chat", "/chat/stream"].flatMap(url => [
+    'Remember for company "Memory Studio": verified reference SAVED_COMPANY_FACT.',
+    'Merke dir für die Firma "Memory Studio": bestätigte Referenz SAVED_COMPANY_FACT.',
+    'Recuerda para la empresa "Memory Studio": referencia confirmada SAVED_COMPANY_FACT.',
+    'Lembre para a empresa "Memory Studio": referência confirmada SAVED_COMPANY_FACT.',
+    'Запам’ятай для компанії «Memory Studio»: підтверджене значення SAVED_COMPANY_FACT.',
+  ].map(message => ({ url, message }))))("persists Company remember through its existing executor: $url $message", async ({ url, message }) => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(auth, { name: "Memory Studio", description: "UNCHANGED_COMPANY_DESCRIPTION" }, "memory-studio");
+    const ai = engine(async request => {
+      if (!request.messages.some(item => item.role === "tool")) {
+        expect(request.toolChoice).toEqual({ type: "function", function: { name: "npati_company_action" } });
+        return { content: "", toolCalls: [toolCall("remember-company-fact", "npati_company_action", { action: "update", companyId: company.id, fields: { companyInstructions: "Verified reference SAVED_COMPANY_FACT" } })] };
+      }
+      return { content: "Saved the verified Company reference." };
+    });
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace });
+    try {
+      const response = await app.inject({ method: "POST", url, payload: { message, contextType: "company", companyId: company.id } });
+      expect(response.statusCode).toBe(200);
+      expect(response.body).not.toContain("event: error");
+      const saved = await store.getCompany(auth, company.id);
+      expect(saved.companyInstructions).toBe("Verified reference SAVED_COMPANY_FACT");
+      expect(saved.description).toBe("UNCHANGED_COMPANY_DESCRIPTION");
+      expect(await store.listUserBusinesses(auth)).toEqual([]);
+    } finally { await app.close(); }
+  });
+  it("keeps the original user request intact and supplies typed references through system context", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(auth, { name: "Context contract", description: "AUTHORITATIVE_DESCRIPTION" }, "context-contract");
+    const message = "What is its description?";
+    const ai = engine(async request => {
+      expect(request.messages.at(-1)).toEqual({ role: "user", content: message });
+      const system = request.messages.filter(item => item.role === "system").map(item => item.content).join("\n");
+      expect(system).toContain("Confirmed conversation entity references");
+      expect(system).toContain(company.id);
+      expect(system).toContain("AUTHORITATIVE_DESCRIPTION");
+      return { content: "AUTHORITATIVE_DESCRIPTION" };
+    });
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message, contextType: "company", companyId: company.id } });
+      expect(response.body).toContain("AUTHORITATIVE_DESCRIPTION");
+      expect(response.body).not.toContain("event: error");
+    } finally { await app.close(); }
+  });
+  it("binds direct named-agent work to its owned Project while a later Company pronoun ignores the historical card", async () => {
+    const store = new InMemoryWorkspaceStore();
+    let company = await store.createCompany(auth, { name: "Source studio", description: "COMPANY_DESCRIPTION" }, "source-studio");
+    const designer = await store.createCompanyAgent(auth, company.id, { name: "Designer", role: "Designer", isActive: true }, "source-designer");
+    await store.createCompanyAgent(auth, company.id, { name: "Reviewer", role: "Reviewer", isActive: true }, "source-reviewer");
+    company = await store.setCompanyMainAgent(auth, company.id, designer.id, company.revision);
+    const { project } = await store.createProject(auth, company.id, { name: "Review site", type: "code_project", description: "PROJECT_DESCRIPTION" }, "source-site");
+    const execute = vi.spyOn(CompanyDelegationRuntime.prototype, "execute").mockImplementation(async (ctx, id, input, key) => {
+      const created = await store.createCompanyAgentRun(ctx, id, { task: input.task, projectId: input.projectId, requestedMode: "single" }, key);
+      await store.updateCompanyAgentRun(ctx, id, created.run.id, { status: "completed", result: input.projectId ? "Verified source review." : "COMPANY_DESCRIPTION", selectedAgentIds: [designer.id] });
+      return store.getCompanyAgentRun(ctx, id, created.run.id);
+    });
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: engine(async () => ({ content: "[]" })), marketplace });
+    let projectRead: ReturnType<typeof vi.spyOn> | undefined;
+    try {
+      const delegated = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: 'For company "Source studio", ask Designer and Reviewer to collaborate on a source review. Delegate using the existing company runtime. No external writes.', contextType: "project", companyId: company.id, projectId: project.id } });
+      expect(delegated.statusCode).toBe(200);
+      expect(execute).toHaveBeenCalledOnce();
+      expect(execute.mock.calls[0]![2].projectId).toBe(project.id);
+      const frame = delegated.body.split("\n\n").find(value => value.includes("event: result"))!;
+      const result = JSON.parse(frame.split("\n").find(value => value.startsWith("data:"))!.slice(5));
+      expect((await store.getCompanyAgentRun(auth, company.id, result.companyRunId)).run.projectId).toBe(project.id);
+      const history = await store.getNeutralConversation(auth, result.conversationId);
+      const assistant = history.messages.find(message => message.role === "assistant")!;
+      await saveChatProjectCard(store, auth, result.conversationId, assistant.id, { id: project.id, projectId: project.id, companyId: company.id, name: project.name } as never);
+      projectRead = vi.spyOn(ProjectService.prototype, "get");
+      const described = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "What is its description?", contextType: "company", companyId: company.id, conversationId: result.conversationId } });
+      expect(described.body).toContain("COMPANY_DESCRIPTION");
+      expect(execute.mock.calls[1]![2].projectId).toBeUndefined();
+      expect(projectRead).not.toHaveBeenCalled();
+    } finally { projectRead?.mockRestore(); execute.mockRestore(); await app.close(); }
+  });
+  it("deletes the named Company Agent while a site is selected and preserves its peers", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(auth, { name: "Review studio" }, "review-studio");
+    const designer = await store.createCompanyAgent(auth, company.id, { name: "Designer", role: "Designer" }, "designer");
+    const reviewer = await store.createCompanyAgent(auth, company.id, { name: "Reviewer", role: "Reviewer" }, "reviewer");
+    const target = await store.createCompanyAgent(auth, company.id, { name: "Accessibility Reviewer", role: "QA" }, "accessibility-reviewer");
+    await store.createProject(auth, company.id, { name: "Review site", type: "code_project" }, "review-site");
+    const project = (await store.listProjects(auth, company.id))[0]!;
+    let calls = 0;
+    const ai = engine(async request => {
+      calls++;
+      if (calls === 1) {
+        expect(request.toolChoice).toEqual({ type: "function", function: { name: "npati_company_action" } });
+        expect(request.tools?.map(tool => tool.function.name)).not.toContain("web_search");
+        return { content: "", toolCalls: [toolCall("delete-agent", "npati_company_action", { action: "update", companyId: company.id, agents: [{ action: "delete", agentId: target.id }] })] };
+      }
+      return { content: "Deleted only Accessibility Reviewer." };
+    });
+    const research = { shouldResearch: () => true, run: vi.fn() };
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace, webResearch: research as any });
+    try {
+      const result = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: 'In company "Review studio", delete only the agent Accessibility Reviewer. Keep Designer and Reviewer.', contextType: "project", companyId: company.id, projectId: project.id } });
+      expect(result.statusCode).toBe(200);
+      expect(result.body).not.toContain('"routed":"code_runner"');
+      expect((await store.listCompanyAgents(auth, company.id)).map(agent => agent.id).sort()).toEqual([designer.id, reviewer.id].sort());
+      expect(research.run).not.toHaveBeenCalled();
+    } finally { await app.close(); }
+  });
+  it("deletes only the exact named reply template through the native email executor", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(auth, { name: "Inbox team" }, "inbox-team");
+    let calls = 0;
+    const ai = engine(async request => {
+      calls++;
+      if (calls === 1) {
+        expect(request.toolChoice).toEqual({ type: "function", function: { name: "npati_email_action" } });
+        expect(request.tools?.map(tool => tool.function.name)).not.toContain("web_search");
+        return { content: "", toolCalls: [toolCall("delete-template", "npati_email_action", { action: "template.delete", companyId: company.id, templateTitle: "Test Reply" })] };
+      }
+      return { content: "Deleted the requested reply template." };
+    });
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace });
+    try {
+      const path = `/companies/${company.id}/email-inbox/templates`;
+      for (const title of ["Test Reply", "Keep Reply"]) {
+        const created = await app.inject({ method: "POST", url: path, payload: { title, bodyTemplate: "Controlled response" } });
+        expect(created.statusCode).toBe(201);
+      }
+      const result = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: 'Delete only the test reply template "Test Reply" from "Inbox team" through normal controls.', contextType: "company", companyId: company.id } });
+      expect(result.statusCode).toBe(200);
+      expect(result.body).toContain('"action":"template.delete"');
+      const saved = await app.inject({ method: "GET", url: path });
+      expect(saved.json().templates.map((template: { title: string }) => template.title)).toEqual(["Keep Reply"]);
+      expect(calls).toBe(2);
+    } finally { await app.close(); }
+  });
+  it("persists a native workspace operation once and returns its server receipt", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(auth, { name: "Operations team" }, "operations-team");
+    let calls = 0;
+    const ai = engine(async request => {
+      calls++;
+      if (calls === 1) {
+        expect(request.toolChoice).toBe("auto");
+        expect(request.tools?.map(tool => tool.function.name)).not.toContain("web_search");
+        return { content: "", toolCalls: [toolCall("schedule", "npati_workspace_action", { action: "automation.create", companyId: company.id,
+          automation: { name: "Morning check", prompt: "Prepare a brief", cronExpression: "0 9 * * 1", timezone: "UTC", status: "paused" } })] };
+      }
+      expect(request.messages.some(message => message.role === "tool" && message.content.includes("automation.create"))).toBe(true);
+      return { content: "Created the paused automation." };
+    });
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Create a paused automation called Morning check for Operations team every Monday at 09:00 UTC.", contextType: "company", companyId: company.id } });
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toContain('"action":"automation.create"');
+      const saved = await app.inject({ method: "GET", url: `/companies/${company.id}/automations` });
+      expect(saved.json().automations).toEqual([expect.objectContaining({ name: "Morning check", status: "paused" })]);
+      expect(calls).toBe(2);
+    } finally { await app.close(); }
+  });
   it("feeds each tool result back to the model and permits a different next tool", async () => {
     const calls: ChatRequest[] = [];
     const executed: string[] = [];
@@ -69,7 +286,7 @@ describe("native chat tool selection", () => {
     let researchCalls = 0;
     const ai = engine(async (request) => {
       modelCalls += 1;
-      expect(request.tools?.map((item) => item.function.name)).toEqual(["npati_company_action", "npati_business_profile"]);
+      expect(request.tools?.map((item) => item.function.name)).toEqual(["npati_company_action", "npati_business_profile", "npati_goal_action"]);
       if(modelCalls===1)expect(request.reasoningMode).toBe("disabled");
       expect(request.toolChoice).toEqual(modelCalls === 1
         ? { type: "function", function: { name: "npati_company_action" } }
@@ -143,7 +360,7 @@ describe("native chat tool selection", () => {
   it("does not execute write tools for informational questions", async () => {
     const store = new InMemoryWorkspaceStore();
     const ai = engine(async (request) => {
-      expect(request.tools).toHaveLength(4);
+      expect(request.tools).toHaveLength(5);
       return { content: "Yes. I can create companies when you explicitly ask me to do so." };
     });
     const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace, webResearch: { shouldResearch: () => true, run: vi.fn() } as any });

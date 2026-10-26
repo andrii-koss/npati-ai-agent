@@ -403,6 +403,7 @@ export class CodingAgentToolWaves {
         }));
       }
 
+      if (result.ok && call.arguments.dryRun !== true) reviewCoordinator.recordRuntimeResult(result);
       if (call.name === "code.verify.run" && result.ok) {
         await reviewCoordinator.onVerifyToolExecuted(beforeVerification, result);
         const envelope = (result.result as Record<string, unknown>)?.data ?? (result.result as Record<string, unknown>);

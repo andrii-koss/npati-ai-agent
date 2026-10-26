@@ -38,7 +38,8 @@
     "security-gate:db": "node scripts/run-security-gate.mjs --db",
     "mutation:branch": "node scripts/security-gate-mutation-branch.mjs",
     "revalidate:306": "node scripts/revalidate-306-capabilities.mjs",
-    "docker:config": "docker compose config --quiet"
+    "docker:config": "docker compose config --quiet",
+    "postinstall": "node scripts/patch-minio-jsonl.mjs"
   },
   "engines": {
     "node": ">=22.22.2 <23 || >=24.0.0 <27"
@@ -50,6 +51,7 @@
   },
   "overrides": {
     "query-string": "9.5.1",
-    "uuid": "11.1.1"
+    "uuid": "11.1.1",
+    "stream-json": "3.7.0"
   }
 }

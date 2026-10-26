@@ -58,6 +58,8 @@ export interface SelfReviewInput {
   verification: string;
   /** 6. The test-integrity outcome, as text. */
   testIntegrity: string;
+  /** Canonical successful non-file tool receipts of this run, supplied by the runtime rather than assistant text. */
+  runtimeEvidence?: string;
 }
 
 export interface SelfReviewFinding {

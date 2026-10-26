@@ -27,6 +27,7 @@ import { resolveConfirmedVisionModel } from "./chat-inference-candidates";
 import { projectCapabilityUnavailableMessage, visionUnavailableMessage } from "./company-chat-i18n";
 import { AuthContext, Business, type Project } from "@npati/workspace";
 import { createChatActions } from "./chat-actions";
+import { readChatActiveContext, chatEntityReferencesPrompt } from "./project-chat-cards";
 import type { ChatOrchestrationDeps } from "./chat-orchestration";
 
 export interface ChatTurnDeps {
@@ -124,6 +125,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
         ? priorExisting!.conversation
         : await workspaceStore.createNeutralConversation(auth, conversationTitle(media.prompt));
     const existing = priorExisting ?? (conversation ? await workspaceStore.getNeutralConversation(auth, conversation.id) : { messages: [] });
+    const confirmedEntity = conversation ? await readChatActiveContext(workspaceStore, auth, conversation.id) : null;
     const activeConversationLanguage = resolveConversationLanguage(safeUserRequest, existing.messages);
     let previousSpreadsheet: { name: string; mimeType: string; data: Buffer; kind: "document" } | undefined;
     let promptWithAttachmentContext = media.prompt;
@@ -161,15 +163,18 @@ export function createChatTurn(deps: ChatTurnDeps) {
       + JSON.stringify({ id: projectContext.id, name: projectContext.name.slice(0, 200),
         description: projectContext.description?.slice(0, 4000), framework: projectContext.framework?.slice(0, 100), availableCapabilities:projectContext.capabilityIds })
       + "\nEND UNTRUSTED SELECTED PROJECT DATA" : "";
+    const entityContext = chatEntityReferencesPrompt(conversation?.id, { contextType: projectContext ? "project" : effectiveManagementCompany ? "company" : "none", companyId: effectiveManagementCompany?.id ?? null, businessId: null, projectId: projectContext?.id }, confirmedEntity?.lastConfirmedAction);
     const safePrompt=SecurityPolicyEngine.protectText(protectEmailOperands(promptWithAttachmentContext + selectedProject)).sanitized;
     const spreadsheetEditRequested = isSpreadsheetEditRequest(safeUserRequest)
       && Boolean(previousSpreadsheet || media.decoded.some((item) => /\.(xlsx|xlsm|xlsb|xls|csv)$/i.test(item.name)));
-    const contextualCompanyRequest = effectiveMessage !== message;
+    const companyMemoryTarget = !memoryPolicy.noMemoryActive ? await WorkspaceChatActions.companyInstructionTarget(auth, workspaceStore, safeUserRequest, projectContext ? undefined : effectiveManagementCompany?.id) : undefined;
+    if (companyMemoryTarget) effectiveManagementCompany = companyMemoryTarget;
+    const contextualCompanyRequest = effectiveMessage !== message || Boolean(companyMemoryTarget);
     const workspaceSettingsRequest = !contextualCompanyRequest && (WorkspaceChatActions.isManagementRequest(safeUserRequest)
       || await WorkspaceChatActions.namesOwnedAutomation(auth, workspaceStore, safeUserRequest, automationsRepo));
     const emailSettingsRequest = !contextualCompanyRequest && !workspaceSettingsRequest && EmailChatActions.isManagementRequest(safeUserRequest);
     const companySettingsRequest = !emailSettingsRequest && !workspaceSettingsRequest && (
-      effectiveMessage !== message ||
+      contextualCompanyRequest ||
       CompanyChatActions.isManagementRequest(safeUserRequest)
       || Boolean(effectiveManagementCompany && (CompanyChatActions.isPotentialMutationRequest(safeUserRequest) || requestsCompositeCompanyDeletionIntent(safeUserRequest)))
     );
@@ -412,7 +417,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
         return { businessId: b.id, businessName: b.name, goals };
       })
     );
-    const businessActionInstruction = (projectCapabilityScope ? "Use only the offered canonical project data tools for this authorized project. Read rows before changing them, preserve unspecified fields, and verify the persisted result. Do not use shell, SQL, migrations or static fallback data for a row task." : BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, /агент|agent|модел|model/iu.test(safeUserRequest) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, undefined, { automations: automationsRepo, content: contentLibrary, browserTargets: browserCredentials, email: emailInboxRepo, webhooks: integrationsRepo, memoryReadAllowed: memoryPolicy.readAllowed }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safeUserRequest, effectiveManagementCompany?.id, apiKeysRepo)) + chatLanguageInstruction(safeUserRequest, existing.messages, activeConversationLanguage) + (nativeToolCalling ? CHAT_TOOL_SELECTION_INSTRUCTION : "");
+    const businessActionInstruction = (projectCapabilityScope ? "Use only the offered canonical project data tools for this authorized project. Read rows before changing them, preserve unspecified fields, and verify the persisted result. Do not use shell, SQL, migrations or static fallback data for a row task." : BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, /агент|agent|модел|model/iu.test(safeUserRequest) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, undefined, { automations: automationsRepo, content: contentLibrary, browserTargets: browserCredentials, email: emailInboxRepo, webhooks: integrationsRepo, memoryReadAllowed: memoryPolicy.readAllowed }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safeUserRequest, effectiveManagementCompany?.id, apiKeysRepo)) + chatLanguageInstruction(safeUserRequest, existing.messages, activeConversationLanguage) + (nativeToolCalling ? CHAT_TOOL_SELECTION_INSTRUCTION : "") + entityContext;
     const chatRequest: ChatRequest = {
       ...(projectCapabilityScope?{reasoningMode:"disabled" as const}:{}),
       model: ai.model,
@@ -439,12 +444,14 @@ export function createChatTurn(deps: ChatTurnDeps) {
     let nativeBusinessMessage = "";
     let nativeBusinessAction: { action: "create" | "update"; business: import("@npati/workspace").Business; businessId: string } | undefined;
     let nativeGoalAction: { action: "create" | "update" | "delete"; goal?: import("@npati/workspace").Goal; goalId?: string; businessName?: string } | undefined;
+    let nativeWorkspaceResult: Awaited<ReturnType<typeof executeWorkspaceChatAction>> | undefined;
+    let nativeEmailResult: Awaited<ReturnType<typeof executeEmailChatAction>> | undefined;
     let businessCreateRequestKey: string = crypto.randomUUID();
     if (nativeToolCalling) {
       try {
-        const tools = projectCapabilityTools ?? await availableCoreChatTools(auth, safeUserRequest);
+        const tools = projectCapabilityTools ?? await availableCoreChatTools(auth, safeUserRequest, undefined, companySettingsRequest);
         const plan = await planStructuredChatRequest(aiEngine, chatRequest, safeUserRequest);
-        const routing = coreChatRoutingDecision(safeUserRequest, tools, hasAttachedEvidence);
+        const routing = coreChatRoutingDecision(safeUserRequest, tools, hasAttachedEvidence, companySettingsRequest);
         const businessPrimary = plan?.primary_action === "create_business_profile";
         if (businessPrimary) {
           // Retrying the same structured setup must retain its durable creation identity.
@@ -471,6 +478,8 @@ export function createChatTurn(deps: ChatTurnDeps) {
             ? { id: "planned-company-recovery", type: "function", function: { name: "npati_company_action", arguments: JSON.stringify({ action: "create", fields: {}, agents: [] }) } } : undefined,
           primaryOutcomeComplete: businessPrimary ? (metadata) => businessPlanComplete(plan, metadata) : companyPrimary ? (metadata) => companyPlanComplete(plan, metadata) : undefined,
           execute: (call, args) => executeCoreChatTool({ auth, call, args, requestMessage: safeUserRequest, projectCapabilityScope, noMemory:memoryPolicy.noMemoryActive,
+            emailAddressReferences: emailReferences.addresses,
+            selectedProjectId: projectContext?.id,
             conversationId: conversation?.id, selectedCompanyId: effectiveManagementCompany?.id,
             model: ai.model, fallbackModel: ai.fallbackModel, signal, progress, responseLanguage: activeConversationLanguage, plannedBusinessFields: businessPrimary ? plan?.provided_fields : undefined, primaryBusinessCreation: businessPrimary, businessCreateKey: businessCreateRequestKey, companyPlan: companyPrimary ? plan : undefined, logoAttachments: media.decoded.filter((item) => item.kind === "image").map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data, kind: item.kind })) }),
           onTrace: ({ arguments: _arguments, ...trace }) => logToolSelectionTrace(trace, { model: ai.model, conversationId: conversation?.id }, "Chat tool selection"),
@@ -481,6 +490,8 @@ export function createChatTurn(deps: ChatTurnDeps) {
         chatResult = loop.result;
         content = loop.result.content.replace(/[\u2014\u2013]/g, " - ");
         for (const item of loop.metadata) {
+          if (item.kind === "workspace_action" && item.outcome) nativeWorkspaceResult = item.outcome as typeof nativeWorkspaceResult;
+          if (item.kind === "email_action" && item.outcome) nativeEmailResult = item.outcome as typeof nativeEmailResult;
           if (item.kind === "approval" && item.approval) pendingApprovals.push(item.approval as (typeof pendingApprovals)[number]);
           if (item.kind === "research" && item.research) {
             research = item.research as ResearchOutcome;
@@ -635,11 +646,11 @@ export function createChatTurn(deps: ChatTurnDeps) {
       logoAttachments: media.decoded.filter((item) => item.kind === "image").map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data, kind: item.kind })),
       persistBusinessLogo,
     });
-    const emailAction = workspaceSettingsRequest ? { cleanText: executedAction.cleanText, emailAction: undefined, emailActions: undefined } : await executeEmailChatAction(auth, executedAction.cleanText, safeUserRequest, {
+    const emailAction = nativeEmailResult ?? (workspaceSettingsRequest ? { cleanText: executedAction.cleanText, emailAction: undefined, emailActions: undefined } : await executeEmailChatAction(auth, executedAction.cleanText, safeUserRequest, {
       model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id,
       addressReferences: emailReferences.addresses,
       attachments: media.decoded.map((item) => ({ filename: item.name, contentType: item.mimeType, sizeBytes: item.data.length, contentBase64: item.data.toString("base64") })),
-    });
+    }));
     const companyAction = nativeCompanyAction
       ? { cleanText: content || nativeCompanyCleanText, companyAction: nativeCompanyAction }
       : nativeBusinessAction || emailSettingsRequest || workspaceSettingsRequest
@@ -655,11 +666,11 @@ export function createChatTurn(deps: ChatTurnDeps) {
     const createdBusinessAction = nativeBusinessAction ?? executedAction.businessAction;
     const createdBusiness = createdBusinessAction?.action === "create" ? createdBusinessAction.business : undefined;
     const goalCompletion = await completeCreatedBusinessGoal(auth, safeUserRequest, createdBusiness, executedAction.cleanText);
-    const initialWorkspaceAction = nativeBusinessAction || nativeCompanyAction || companySettingsRequest
+    const initialWorkspaceAction = nativeWorkspaceResult ?? (nativeBusinessAction || nativeCompanyAction || companySettingsRequest
       // A goal already persisted this turn (directive or native tool) must not be planned again as a workspace action.
       || ((executedAction.goalAction || nativeGoalAction) && !WorkspaceChatActions.isManagementRequest(safeUserRequest, { includeGoals: false }))
       ? { cleanText: companyAction.cleanText, workspaceAction: undefined, companyRunId: undefined }
-      : await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safeUserRequest, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id, selectedBusinessId: createdBusiness?.id });
+      : await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safeUserRequest, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id, selectedBusinessId: createdBusiness?.id, selectedProjectId: projectContext?.id }));
     const workspaceAction = await completeCreatedBusinessMemory(auth, safeUserRequest, conversation?.id, createdBusiness, goalCompletion.reply, initialWorkspaceAction);
     content = workspaceAction.cleanText;
     // Persist server-issued references so approval cards survive chat reloads.

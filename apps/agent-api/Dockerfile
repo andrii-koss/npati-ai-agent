@@ -6,6 +6,7 @@ RUN --mount=type=cache,id=npati-project-web-npm,target=/root/.npm node /tmp/npat
 FROM node:24-alpine AS web-build
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
+COPY scripts/patch-minio-jsonl.mjs ./scripts/patch-minio-jsonl.mjs
 COPY apps/web ./apps/web
 COPY packages ./packages
 RUN npm ci
@@ -14,6 +15,7 @@ RUN npm run build --workspace @npati/web
 FROM node:24-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
+COPY scripts/patch-minio-jsonl.mjs ./scripts/patch-minio-jsonl.mjs
 COPY apps/agent-api/package.json ./apps/agent-api/package.json
 COPY packages ./packages
 RUN apk add --no-cache python3 make g++

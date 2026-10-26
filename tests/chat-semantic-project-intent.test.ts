@@ -13,6 +13,54 @@ function fixture(value: unknown) {
 const creation = { intent: "CREATE_WEBSITE", confidence: 0.98, targets: [{ name: "Portfolio", kind: "website", framework: "HTML/CSS", reason: "Static presentation does not require a framework", criteria: ["static_content"] }] };
 
 describe("semantic project routing", () => {
+  it("uses the existing native transport as a classification-only schema with an explicit nullable metadata descriptor", async () => {
+    const chat = vi.fn(async (request: ChatRequest) => {
+      expect(request.tools?.map(tool => tool.function.name)).toEqual(["npati_classify_chat_intent"]);
+      expect(request.toolChoice).toEqual({ type: "function", function: { name: "npati_classify_chat_intent" } });
+      expect(request.tools![0]!.function.parameters.required).toContain("entityRead");
+      return { content: "", toolCalls: [{ id: "classification", type: "function" as const, function: { name: "npati_classify_chat_intent", arguments: JSON.stringify({ intent: "CHAT", confidence: 1, targets: [], entityRead: { field: "projects", entityType: "company" } }) } }] };
+    });
+    const resolve = createChatProjectIntentResolver({ engine: { chat, supportsNativeTools: () => true }, getAIContext: async () => ({}), log: { warn: vi.fn() } });
+    expect(await resolve(auth, { message: "List only this company's projects.", activeCompanyId: "owned-company", focusedEntityType: "company" })).toMatchObject({ decision: { intent: "CHAT" }, entityRead: { field: "projects", entityType: "company" } });
+    expect(chat).toHaveBeenCalledOnce();
+  });
+  it.each([
+    { field: "apiKey", entityType: "company" },
+    { field: "description", entityType: "company", entityId: "model-invented-id" },
+    { field: "description", entityType: "foreign-tenant" },
+  ])("rejects unbounded model metadata references: %j", async entityRead => {
+    const f = fixture({ intent: "CHAT", confidence: 1, targets: [], entityRead });
+    const result = await f.resolve(auth, { message: "What is its description?", activeCompanyId: "owned-company", focusedEntityType: "company" });
+    expect(result).not.toHaveProperty("entityRead");
+    expect(result.decision.intent).toBe("CHAT");
+  });
+  it("resolves a named owned Project before classification so editing it from Company context needs no new-project clarification", async () => {
+    const namedProject = vi.fn(async () => "owned-project");
+    const chat = vi.fn(async (request: ChatRequest) => {
+      const data = JSON.parse(request.messages[1]!.content as string);
+      expect(data.hasActiveProject).toBe(true);
+      return { content: JSON.stringify({ intent: "EDIT_WEBSITE", confidence: 1, targets: [] }) };
+    });
+    const resolve = createChatProjectIntentResolver({ engine: { chat }, getAIContext: async () => ({}), log: { warn: vi.fn() }, resolveNamedProject: namedProject });
+    const message = 'In "Owned Portal" of company "Studio" change its heading. Keep the paragraph.';
+    const result = await resolve(auth, { message, activeCompanyId: "owned-company" });
+    expect(namedProject).toHaveBeenCalledWith(auth, message, "owned-company");
+    expect(result).toMatchObject({ source: "semantic", decision: { intent: "EDIT_WEBSITE", needsClarification: false, executable: true }, targets: [] });
+    expect(chat).toHaveBeenCalledOnce();
+  });
+  it("keeps an owned named Agent deletion on management while a Project is selected", async () => {
+    const chat = vi.fn(async () => ({ content: JSON.stringify({ intent: "EDIT_PROJECT", confidence: 1, targets: [] }) }));
+    const resolve = createChatProjectIntentResolver({ engine: { chat }, getAIContext: async () => ({}), log: { warn: vi.fn() }, listAgentNames: async () => ["Designer", "Reviewer", "Accessibility Reviewer"] });
+    const result = await resolve(auth, { message: 'Delete only the agent Accessibility Reviewer from company Studio. Keep Designer and Reviewer.', activeCompanyId: "studio", activeProjectId: "site" });
+    expect(result).toMatchObject({ source: "guard", decision: { intent: "CHAT" }, targets: [] });
+    expect(chat).not.toHaveBeenCalled();
+  });
+  it("does not treat an ordinary action word as a named Agent mutation", async () => {
+    const chat = vi.fn(async () => ({ content: JSON.stringify({ intent: "EDIT_PROJECT", confidence: 1, targets: [] }) }));
+    const resolve = createChatProjectIntentResolver({ engine: { chat }, getAIContext: async () => ({}), log: { warn: vi.fn() }, listAgentNames: async () => ["Add", "Review"] });
+    expect((await resolve(auth, { message: "Add navigation to the current website.", activeCompanyId: "studio", activeProjectId: "site" })).decision.intent).toBe("EDIT_PROJECT");
+    expect(chat).toHaveBeenCalledOnce();
+  });
   it("finishes cancellation even when the routing provider ignores its signal", async () => {
     const f = fixture(creation), controller = new AbortController();
     f.chat.mockImplementationOnce(() => new Promise(() => undefined));
@@ -179,4 +227,4 @@ it("does not turn a capability question into a row mutation",async()=>{const f=f
 it("keeps a new table with test rows on the schema executor instead of the row-only path",async()=>{const f=fixture({intent:"ADD_DATA_MODEL",confidence:.99,targets:[],rowCapability:"project.data.rows.create"});const r=await f.resolve(auth,{message:"Create a disposable table stress_scratch with id UUID and note text. Insert TEST_SCRATCH_731 and read it back.",activeProjectId:"project"});expect(r.decision.intent).toBe("ADD_DATA_MODEL");expect(r.rowCapability).toBeUndefined();});
 it("routes an existing-row update labelled EDIT_PROJECT to the row capability the coding executor lacks",async()=>{const f=fixture({intent:"EDIT_PROJECT",confidence:.99,targets:[],rowCapability:"project.data.rows.update"});const r=await f.resolve(auth,{message:"In the dev DB set test_note of STRESS_PRODUCT_UPDATED_732 to NOTE_CONTEXT_733.",activeProjectId:"project"});expect(r.rowCapability).toBe("project.data.rows.update");});
 it("keeps a schema field removal on the schema executor even with a row capability attached",async()=>{const f=fixture({intent:"EDIT_PROJECT",confidence:.99,targets:[],schemaChange:true,rowCapability:"project.data.rows.update"});expect((await f.resolve(auth,{message:"Remove only field test_note from dev products using schema tools and dry-run. Preserve rows.",activeProjectId:"project"})).rowCapability).toBeUndefined();});
-it("tells the classifier which owned Company Agents the message names",async()=>{const chat=vi.fn(async(_r:ChatRequest)=>({content:JSON.stringify({intent:"CHAT",confidence:.99,targets:[]})} as ChatResult));const resolve=createChatProjectIntentResolver({engine:{chat},getAIContext:async()=>({model:"m"}),log:{warn:vi.fn()},listAgentNames:async()=>["Accessibility Reviewer","Designer","Add"]});const r=await resolve(auth,{message:"In \"Stress Studio\", update Accessibility Reviewer's role to Senior QA and retain its Designer parent.",activeProjectId:"project"});expect(r.decision.intent).toBe("CHAT");const payload=JSON.parse(String(chat.mock.calls[0]![0].messages[1]!.content));expect(payload.mentionedCompanyAgents).toEqual(["Accessibility Reviewer","Designer"]);});
+it("tells the classifier which owned Company Agents the message names",async()=>{const chat=vi.fn(async(_r:ChatRequest)=>({content:JSON.stringify({intent:"CHAT",confidence:.99,targets:[]})} as ChatResult));const resolve=createChatProjectIntentResolver({engine:{chat},getAIContext:async()=>({model:"m"}),log:{warn:vi.fn()},listAgentNames:async()=>["Accessibility Reviewer","Designer","Add"]});const r=await resolve(auth,{message:"In \"Stress Studio\", explain how Accessibility Reviewer and Designer collaborate on project reviews.",activeProjectId:"project"});expect(r.decision.intent).toBe("CHAT");const payload=JSON.parse(String(chat.mock.calls[0]![0].messages[1]!.content));expect(payload.mentionedCompanyAgents).toEqual(["Accessibility Reviewer","Designer"]);});

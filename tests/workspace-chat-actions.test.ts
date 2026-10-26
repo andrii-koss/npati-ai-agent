@@ -28,6 +28,57 @@ function dependencies(store: InMemoryWorkspaceStore, automations: CompanyAutomat
 }
 
 describe("workspace resources from chat", () => {
+  it("resolves a manual run by its existing nested name without activating its paused schedule", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(alice, { name: "Scheduled team" }, "scheduled-team");
+    const automations = new CompanyAutomationsRepository();
+    const automation = await automations.create(alice, company.id, { name: "Weekly revised", prompt: "Report only", cronExpression: "0 9 * * 1", timezone: "UTC", status: "paused" });
+    const executed: string[] = [];
+    const deps = { ...dependencies(store, automations, async (_auth, id, input) => completedRun(id, input.task)), runAutomation: async (_auth: AuthContext, current: typeof automation) => { executed.push(current.id); return { runId: "manual-run", result: "ACTUAL_AUTOMATION_RESULT", durationMs: 1 }; } };
+    const result = await WorkspaceChatActions.extractAndExecute(alice, directive({ action: "automation.run", companyId: company.id, automation: { name: "Weekly revised" } }), deps, "manual-weekly", { requestMessage: 'Run "Weekly revised" manually once.' });
+    expect(executed).toEqual([automation.id]);
+    expect(result.workspaceAction).toMatchObject({ action: "automation.run", resourceId: automation.id });
+    expect(result.cleanText).toContain("ACTUAL_AUTOMATION_RESULT");
+    expect((await automations.list(alice, company.id))[0]?.status).toBe("paused");
+  });
+  it("binds an activity to an owned Project and rejects a Project from another Company before delegation", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(alice, { name: "Review team" }, "review-owner");
+    const other = await store.createCompany(alice, { name: "Other team" }, "other-review-owner");
+    await store.createProject(alice, company.id, { name: "Review site", type: "code_project" }, "review-site");
+    const project = (await store.listProjects(alice, company.id))[0]!;
+    const calls: unknown[] = [];
+    const deps = dependencies(store, new CompanyAutomationsRepository(), async (_auth, id, input) => { calls.push(input); return completedRun(id, input.task); });
+    const activity = { task: "Inspect the site sources together", mode: "pipeline" };
+    const denied = await WorkspaceChatActions.extractAndExecute(alice, directive({ action: "activity.run", companyId: other.id, projectId: project.id, activity }), deps, "foreign-review");
+    expect(denied.companyRunId).toBeUndefined();
+    expect(calls).toEqual([]);
+    const result = await WorkspaceChatActions.extractAndExecute(alice, directive({ action: "activity.run", companyId: company.id, projectId: project.id, activity }), deps, "owned-review");
+    expect(result.companyRunId).toBeTruthy();
+    expect(calls).toEqual([{ task: activity.task, mode: "pipeline", projectId: project.id }]);
+  });
+  it("validates the explicit Business before generating one persisted content item", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(alice, { name: "Content team" }, "content-owner");
+    const business = await store.createBusiness(alice, { name: "Editorial business", businessStage: "operating" });
+    const calls: Array<{ mode?: string }> = [];
+    const deps = dependencies(store, new CompanyAutomationsRepository(), async (_auth, id, input) => {
+      calls.push(input);
+      return completedRun(id, input.task, "Verified strategy text");
+    });
+    const request = { action: "content.create", companyId: company.id, businessId: business.id,
+      content: { title: "Editorial strategy", type: "brief", task: "Write the strategy" } };
+    const denied = await WorkspaceChatActions.extractAndExecute(alice, directive({ ...request, businessId: "foreign-or-missing" }), deps, "invalid-content");
+    expect(denied.workspaceAction).toBeUndefined();
+    expect(calls).toHaveLength(0);
+    const result = await WorkspaceChatActions.extractAndExecute(alice, directive(request), deps, "valid-content");
+    expect(calls).toEqual([expect.objectContaining({ mode: "single" })]);
+    expect(result.workspaceAction?.action).toBe("content.create");
+    const saved = await deps.content.get(alice, result.workspaceAction!.resourceId);
+    expect(saved).toMatchObject({ companyId: company.id, businessId: business.id, title: "Editorial strategy", content: "Verified strategy text", deleted: false });
+    await deps.content.delete(alice, saved!.runId, company.id);
+    expect(await deps.content.get(alice, saved!.runId)).toMatchObject({ businessId: business.id, deleted: true });
+  });
   it("recognizes explicit requests across supported scripts", () => {
     for (const message of [
       "Create an automation for my company",
