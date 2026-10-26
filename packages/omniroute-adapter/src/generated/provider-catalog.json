@@ -1,9 +1,12 @@
 {
-  "sourceVersion": "v3.8.50",
-  "sourceCommit": "5458026c216f77a3da68ea49152dc33470cfe2cb",
+  "sourceVersion": "v3.8.52",
+  "sourceCommit": "ad6f33f66bda34eba98645d3bfdabbde294bc843",
   "providers": [
     {
       "id": "360ai",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "360ai",
       "name": "360 AI",
       "icon": "auto_awesome",
@@ -23,6 +26,7 @@
     },
     {
       "id": "9router",
+      "serviceKinds": [],
       "alias": "nr",
       "name": "9router",
       "icon": "router",
@@ -43,6 +47,9 @@
     },
     {
       "id": "adapta-web",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "adp-web",
       "name": "Adapta.org (Adapta One Web)",
       "icon": "auto_awesome",
@@ -54,7 +61,6 @@
       "authHint": "Paste your __client cookie value from .clerk.agent.adapta.one (DevTools → Application → Cookies)",
       "toolCalling": "emulated",
       "category": "web-cookie",
-      "iconAsset": "/providers/adapta-web.png",
       "iconFallbackIds": [
         "adapta-web",
         "adp-web",
@@ -64,6 +70,7 @@
     },
     {
       "id": "adobe-firefly",
+      "serviceKinds": [],
       "alias": "firefly",
       "name": "Adobe Firefly (Image/Video)",
       "icon": "auto_awesome",
@@ -83,6 +90,9 @@
     },
     {
       "id": "agentrouter",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "agentrouter",
       "name": "AgentRouter",
       "icon": "router",
@@ -94,13 +104,15 @@
       "freeNote": "$200 free credits on signup - multi-model routing gateway",
       "apiHint": "Get $200 free credits at https://agentrouter.org/register — no credit card required.",
       "category": "api-key",
-      "iconAsset": "/providers/agentrouter.png",
       "iconFallbackIds": [
         "agentrouter"
       ]
     },
     {
       "id": "agnes",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "agnes",
       "name": "Agnes AI",
       "icon": "auto_awesome",
@@ -118,7 +130,33 @@
       ]
     },
     {
+      "id": "agnes-cn",
+      "serviceKinds": [
+        "llm"
+      ],
+      "alias": "agnescn",
+      "name": "Agnes AI (China)",
+      "icon": "auto_awesome",
+      "color": "#047857",
+      "textIcon": "AC",
+      "website": "https://api.agnes-ai.cn",
+      "hasFree": true,
+      "freeNote": "Permanently free, no API credit card required.",
+      "authHint": "Get API key from the Agnes CN site.",
+      "category": "api-key",
+      "iconAsset": "/providers/agnes.png",
+      "iconFallbackIds": [
+        "agnes-cn",
+        "agnescn",
+        "agnes",
+        "agnes-ai-china"
+      ]
+    },
+    {
       "id": "agy",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "agy",
       "name": "Antigravity CLI",
       "icon": "terminal",
@@ -139,6 +177,9 @@
     },
     {
       "id": "ai21",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "ai21",
       "name": "AI21 Labs",
       "icon": "psychology_alt",
@@ -183,6 +224,9 @@
     },
     {
       "id": "aimlapi",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "aiml",
       "name": "AI/ML API",
       "icon": "hub",
@@ -193,7 +237,6 @@
       "freeNote": "Free tier paused (2026) — AI/ML API is now pay-as-you-go only (min $20 top-up); no recurring free credits.",
       "passthroughModels": true,
       "category": "api-key",
-      "iconAsset": "/providers/aimlapi.png",
       "iconFallbackIds": [
         "aimlapi",
         "aiml",
@@ -202,6 +245,9 @@
     },
     {
       "id": "ainative",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "ainative",
       "name": "AINative Studio",
       "icon": "hub",
@@ -222,6 +268,9 @@
     },
     {
       "id": "aion",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "aion",
       "name": "Aion Labs",
       "icon": "hub",
@@ -242,6 +291,9 @@
     },
     {
       "id": "alibaba",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "ali",
       "name": "Alibaba Cloud Model Studio",
       "icon": "cloud_queue",
@@ -260,6 +312,9 @@
     },
     {
       "id": "alibaba-cn",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "ali-cn",
       "name": "Alibaba (China)",
       "icon": "cloud_queue",
@@ -279,6 +334,9 @@
     },
     {
       "id": "amazon-q",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "aq",
       "name": "Amazon Q",
       "icon": "cloud",
@@ -297,6 +355,9 @@
     },
     {
       "id": "ant-ling",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "ling",
       "name": "Ant Ling / Ring (inclusionAI)",
       "icon": "auto_awesome",
@@ -334,6 +395,9 @@
     },
     {
       "id": "antigravity",
+      "serviceKinds": [
+        "llm"
+      ],
       "name": "Antigravity",
       "icon": "rocket_launch",
       "color": "#F59E0B",
@@ -347,6 +411,9 @@
     },
     {
       "id": "anyapi",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "anyapi",
       "name": "AnyAPI AI",
       "icon": "hub",
@@ -365,7 +432,30 @@
       ]
     },
     {
+      "id": "anysearch-search",
+      "alias": "anysearch",
+      "name": "AnySearch",
+      "icon": "travel_explore",
+      "color": "#0D9488",
+      "textIcon": "AS",
+      "website": "https://anysearch.com",
+      "hasFree": true,
+      "authHint": "Optional API key from anysearch.com (as_sk_...) - free 1000/day; keyless tier has lower limits",
+      "serviceKinds": [
+        "webSearch",
+        "webFetch"
+      ],
+      "category": "search",
+      "iconFallbackIds": [
+        "anysearch-search",
+        "anysearch"
+      ]
+    },
+    {
       "id": "api-airforce",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "af",
       "name": "Api.airforce",
       "icon": "flight",
@@ -376,14 +466,33 @@
       "freeNote": "55 free tier models including Grok-3, Claude 3.7, Qwen3, Kimi-K2, Gemini 2.5 Flash, DeepSeek-V3",
       "apiHint": "Get your API key from https://panel.api.airforce — OpenAI-compatible endpoint at https://api.airforce/v1",
       "category": "api-key",
-      "iconAsset": "/providers/api-airforce.svg",
       "iconFallbackIds": [
         "api-airforce",
         "af"
       ]
     },
     {
+      "id": "apmix",
+      "serviceKinds": [
+        "llm"
+      ],
+      "alias": "apmix",
+      "name": "Apmix",
+      "icon": "hub",
+      "color": "#7C3AED",
+      "textIcon": "AP",
+      "website": "https://apmix.ai",
+      "apiHint": "Get your API key from the Apmix dashboard (apmix.ai/dashboard).",
+      "category": "api-key",
+      "iconFallbackIds": [
+        "apmix"
+      ]
+    },
+    {
       "id": "arcee-ai",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "arcee",
       "name": "Arcee AI",
       "icon": "auto_awesome",
@@ -403,6 +512,7 @@
     },
     {
       "id": "assemblyai",
+      "serviceKinds": [],
       "alias": "aai",
       "name": "AssemblyAI",
       "icon": "record_voice_over",
@@ -445,6 +555,9 @@
     },
     {
       "id": "auriko",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "auriko",
       "name": "Auriko",
       "icon": "hub",
@@ -463,6 +576,7 @@
     },
     {
       "id": "auto",
+      "serviceKinds": [],
       "alias": "auto",
       "name": "Auto (Zero-Config)",
       "icon": "auto_awesome",
@@ -479,6 +593,7 @@
     },
     {
       "id": "aws-polly",
+      "serviceKinds": [],
       "alias": "polly",
       "name": "AWS Polly",
       "icon": "record_voice_over",
@@ -496,6 +611,9 @@
     },
     {
       "id": "azure-ai",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "azure-ai",
       "name": "Azure AI Foundry",
       "icon": "cloud",
@@ -516,6 +634,9 @@
     },
     {
       "id": "azure-openai",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "azure",
       "name": "Azure OpenAI",
       "icon": "cloud",
@@ -534,6 +655,9 @@
     },
     {
       "id": "bai",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "bai",
       "name": "b.ai",
       "icon": "hub",
@@ -551,6 +675,9 @@
     },
     {
       "id": "baichuan",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "baichuan",
       "name": "Baichuan",
       "icon": "auto_awesome",
@@ -569,6 +696,9 @@
     },
     {
       "id": "baidu",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "baidu",
       "name": "Baidu (ERNIE)",
       "icon": "auto_awesome",
@@ -588,6 +718,9 @@
     },
     {
       "id": "bailian-coding-plan",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "bcp",
       "name": "Alibaba Token Plan",
       "icon": "code",
@@ -607,6 +740,9 @@
     },
     {
       "id": "baseten",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "baseten",
       "name": "Baseten",
       "icon": "deployed_code",
@@ -623,6 +759,9 @@
     },
     {
       "id": "bazaarlink",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "bzl",
       "name": "BazaarLink",
       "icon": "storefront",
@@ -634,14 +773,35 @@
       "authHint": "Use your BazaarLink API key (starts with sk-bl-) in Authorization: Bearer <key>. OpenAI SDK works with base URL https://bazaarlink.ai/api/v1. Models use provider/model-name format.",
       "apiHint": "Create a free API key at https://bazaarlink.ai — model 'auto:free' routes to zero-cost inference. All models use the provider/model-name format, e.g. xiaomi/mimo-v2.5-pro.",
       "category": "api-key",
-      "iconAsset": "/providers/bazaarlink.svg",
       "iconFallbackIds": [
         "bazaarlink",
         "bzl"
       ]
     },
     {
+      "id": "beatapi",
+      "serviceKinds": [
+        "llm"
+      ],
+      "alias": "beatapi",
+      "name": "BeatAPI",
+      "icon": "hub",
+      "color": "#2563EB",
+      "textIcon": "BA",
+      "passthroughModels": true,
+      "website": "https://beatapi.io",
+      "authHint": "Create an API key at https://beatapi.io/dashboard/apikeys, then paste it here.",
+      "apiHint": "OpenAI-compatible base URL: https://api.beatapi.io/v1. Available models depend on your account; check the live model list before selecting one.",
+      "category": "api-key",
+      "iconFallbackIds": [
+        "beatapi"
+      ]
+    },
+    {
       "id": "bedrock",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "bedrock",
       "name": "Amazon Bedrock",
       "icon": "cloud",
@@ -659,7 +819,29 @@
       ]
     },
     {
+      "id": "bigmodel",
+      "serviceKinds": [
+        "llm"
+      ],
+      "alias": "bigmodel",
+      "name": "BigModel.cn (Zhipu)",
+      "icon": "psychology",
+      "color": "#2563EB",
+      "textIcon": "BM",
+      "website": "https://open.bigmodel.cn",
+      "apiHint": "Create an API key at https://bigmodel.cn/usercenter/proj-mgmt/apikeys. OmniRoute uses BigModel.cn's OpenAI-compatible chat API.",
+      "passthroughModels": true,
+      "category": "api-key",
+      "iconAsset": "/providers/zhipu.svg",
+      "iconFallbackIds": [
+        "bigmodel",
+        "zhipu",
+        "bigmodel-cn-zhipu"
+      ]
+    },
+    {
       "id": "black-forest-labs",
+      "serviceKinds": [],
       "alias": "bfl",
       "name": "Black Forest Labs",
       "icon": "image",
@@ -675,6 +857,9 @@
     },
     {
       "id": "blackbox",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "bb",
       "name": "Blackbox AI",
       "icon": "view_in_ar",
@@ -688,7 +873,6 @@
       "deprecated": true,
       "deprecationReason": "api.blackbox.ai returns HTTP 404 on every path variant (sweep 2026-08-21); the public inference surface has moved to the gated enterprise.blackbox.ai/v1 endpoint.",
       "category": "api-key",
-      "iconAsset": "/providers/blackbox.png",
       "iconFallbackIds": [
         "blackbox",
         "bb",
@@ -697,6 +881,9 @@
     },
     {
       "id": "blackbox-web",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "bb-web",
       "name": "Blackbox Web (Subscription)",
       "icon": "view_in_ar",
@@ -708,7 +895,6 @@
       "riskNoticeVariant": "webCookie",
       "toolCalling": "emulated",
       "category": "web-cookie",
-      "iconAsset": "/providers/blackbox-web.png",
       "iconFallbackIds": [
         "blackbox-web",
         "bb-web",
@@ -718,6 +904,9 @@
     },
     {
       "id": "bluesminds",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "bm",
       "name": "BluesMinds",
       "icon": "psychology",
@@ -736,16 +925,18 @@
     },
     {
       "id": "brave-search",
+      "serviceKinds": [
+        "webSearch"
+      ],
       "alias": "brave-search",
       "name": "Brave Search",
       "icon": "travel_explore",
       "color": "#FB542B",
       "textIcon": "BR",
       "website": "https://brave.com/search/api",
-      "hasFree": true,
+      "hasFree": false,
       "authHint": "Subscription token from Brave Search API dashboard",
       "category": "search",
-      "iconAsset": "/providers/brave-search.svg",
       "iconFallbackIds": [
         "brave-search",
         "brave"
@@ -768,7 +959,6 @@
         "llm"
       ],
       "category": "api-key",
-      "iconAsset": "/providers/byteplus.svg",
       "iconFallbackIds": [
         "byteplus",
         "bpm",
@@ -777,6 +967,9 @@
     },
     {
       "id": "bytez",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "bytez",
       "name": "Bytez",
       "icon": "api",
@@ -793,6 +986,7 @@
     },
     {
       "id": "cartesia",
+      "serviceKinds": [],
       "alias": "cartesia",
       "name": "Cartesia",
       "icon": "spatial_audio",
@@ -800,13 +994,15 @@
       "textIcon": "CA",
       "website": "https://cartesia.ai",
       "category": "audio",
-      "iconAsset": "/providers/cartesia.svg",
       "iconFallbackIds": [
         "cartesia"
       ]
     },
     {
       "id": "cerebras",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "cerebras",
       "name": "Cerebras",
       "icon": "memory",
@@ -814,7 +1010,7 @@
       "textIcon": "CB",
       "website": "https://inference.cerebras.ai",
       "hasFree": true,
-      "freeNote": "Free Trial: 1M tokens/day, 30K TPM, 5 RPM — no credit card.",
+      "freeNote": "One-time $5 signup credit (30-day validity); a payment method is required. Not a recurring free tier.",
       "category": "api-key",
       "iconAsset": "/providers/cerebras.svg",
       "iconFallbackIds": [
@@ -823,6 +1019,9 @@
     },
     {
       "id": "charm-hyper",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "charm-hyper",
       "name": "Charm Hyper",
       "icon": "router",
@@ -841,6 +1040,9 @@
     },
     {
       "id": "chat-oripe",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "chat-oripe",
       "name": "Chat Oripe",
       "icon": "router",
@@ -859,6 +1061,9 @@
     },
     {
       "id": "chatanywhere",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "chatanywhere",
       "name": "ChatAnywhere",
       "icon": "router",
@@ -877,28 +1082,32 @@
     },
     {
       "id": "chatgpt-web",
-      "alias": "cgpt-web",
-      "name": "ChatGPT Web (Plus/Pro)",
+      "serviceKinds": [
+        "llm"
+      ],
+      "name": "ChatGPT Web (Clean Room)",
       "icon": "auto_awesome",
       "color": "#10A37F",
       "textIcon": "CG",
       "website": "https://chatgpt.com",
-      "authHint": "Paste your __Secure-next-auth.session-token cookie value from chatgpt.com",
+      "authHint": "Paste Playwright-compatible storage-state JSON exported from a logged-in chatgpt.com browser context. Cookie headers and individual token values are not accepted.",
       "subscriptionRisk": true,
       "riskNoticeVariant": "webCookie",
-      "toolCalling": "emulated",
+      "toolCalling": "none",
       "category": "web-cookie",
       "iconAsset": "/providers/openai.svg",
       "iconFallbackIds": [
         "chatgpt-web",
-        "cgpt-web",
         "openai",
         "chatgpt",
-        "chatgpt-web-plus-pro"
+        "chatgpt-web-clean-room"
       ]
     },
     {
       "id": "chatgpt-web-codex",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "cgpt-codex",
       "name": "ChatGPT Web (Codex)",
       "icon": "terminal",
@@ -919,6 +1128,9 @@
     },
     {
       "id": "cheaperinference",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "cinf",
       "name": "Cheaper Inference",
       "icon": "savings",
@@ -928,7 +1140,6 @@
       "apiHint": "Create an API key at https://cheaperinference.com/?utm_source=omniroute (needs the `inference` scope), then paste the ir_live_… token here.",
       "passthroughModels": true,
       "category": "api-key",
-      "iconAsset": "/providers/cheaperinference.svg",
       "iconFallbackIds": [
         "cheaperinference",
         "cinf",
@@ -937,6 +1148,9 @@
     },
     {
       "id": "chenzk",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "chenzk",
       "name": "Chenzk API",
       "icon": "hub",
@@ -949,29 +1163,6 @@
       "iconFallbackIds": [
         "chenzk",
         "chenzk-api"
-      ]
-    },
-    {
-      "id": "chipotle",
-      "alias": "pepper",
-      "name": "Chipotle Pepper AI (Free)",
-      "icon": "restaurant",
-      "color": "#C41230",
-      "textIcon": "🌯",
-      "website": "https://amelia.chipotle.com",
-      "noAuth": true,
-      "hasFree": true,
-      "serviceKinds": [
-        "llm"
-      ],
-      "freeNote": "Free — Chipotle's Pepper AI (IPsoft Amelia). Anonymous sessions, no API key. Rate-limited.",
-      "authHint": "No credentials required. Uses Chipotle's public support chatbot via reverse-engineered SockJS/STOMP protocol.",
-      "category": "noauth",
-      "iconAsset": "/providers/chipotle.svg",
-      "iconFallbackIds": [
-        "chipotle",
-        "pepper",
-        "chipotle-pepper-ai-free"
       ]
     },
     {
@@ -999,6 +1190,9 @@
     },
     {
       "id": "clarifai",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "clarifai",
       "name": "Clarifai",
       "icon": "hub",
@@ -1009,13 +1203,15 @@
       "apiHint": "Clarifai exposes OpenAI-compatible chat, responses and /models on /v2/ext/openai/v1. Public/community models typically require a PAT; app-scoped keys only work for resources inside that app.",
       "passthroughModels": true,
       "category": "api-key",
-      "iconAsset": "/providers/clarifai.svg",
       "iconFallbackIds": [
         "clarifai"
       ]
     },
     {
       "id": "claude",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "cc",
       "name": "Claude Code",
       "icon": "smart_toy",
@@ -1033,6 +1229,9 @@
     },
     {
       "id": "claude-web",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "cw",
       "name": "Claude Web",
       "icon": "auto_awesome",
@@ -1053,6 +1252,9 @@
     },
     {
       "id": "cline",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "cl",
       "name": "Cline",
       "icon": "smart_toy",
@@ -1060,6 +1262,7 @@
       "textIcon": "CL",
       "subscriptionRisk": true,
       "riskNoticeVariant": "oauth",
+      "authHint": "Sign in with your Cline account (OAuth), or paste a direct API key from app.cline.bot → Settings → API Keys. Multiple API keys are supported and rotated automatically — add each as a separate connection.",
       "category": "oauth",
       "iconAsset": "/providers/cline.svg",
       "iconFallbackIds": [
@@ -1069,6 +1272,9 @@
     },
     {
       "id": "clinepass",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "cp",
       "name": "ClinePass",
       "icon": "smart_toy",
@@ -1088,6 +1294,7 @@
     },
     {
       "id": "cliproxyapi",
+      "serviceKinds": [],
       "alias": "cpa",
       "name": "CLIProxyAPI",
       "icon": "proxy",
@@ -1101,7 +1308,6 @@
       "binaryName": "cli-proxy-api",
       "githubRepo": "router-for-me/CLIProxyAPI",
       "category": "upstream-proxy",
-      "iconAsset": "/providers/cliproxyapi.png",
       "iconFallbackIds": [
         "cliproxyapi",
         "cpa"
@@ -1109,6 +1315,9 @@
     },
     {
       "id": "cloudcode-one",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "cloudcode-one",
       "name": "CloudCode.ONE",
       "icon": "router",
@@ -1127,6 +1336,9 @@
     },
     {
       "id": "cloudflare-ai",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "cf",
       "name": "Cloudflare Workers AI",
       "icon": "cloud",
@@ -1134,7 +1346,7 @@
       "textIcon": "CF",
       "website": "https://developers.cloudflare.com/workers-ai",
       "hasFree": true,
-      "freeNote": "Free 10K Neurons/day: ~150 LLM responses or 500s Whisper audio — edge inference globally",
+      "freeNote": "Free 10K Neurons/day: ~150 LLM responses, 500s Whisper audio, or ~500 FLUX.1 Schnell images at 1024x1024 (4.80 Neurons per 512x512 tile) — edge inference globally",
       "authHint": "Requires API Token AND Account ID (found at dash.cloudflare.com)",
       "category": "api-key",
       "iconAsset": "/providers/cloudflare.svg",
@@ -1159,6 +1371,8 @@
       "serviceKinds": [
         "llm"
       ],
+      "toolCalling": "emulated",
+      "browserBacked": true,
       "freeNote": "Free — Cloudflare's AI Playground: GLM 5.2, Kimi K2.7 Code, DeepSeek V4 Pro, gpt-oss-120B and 16 more. No account, no API key.",
       "authHint": "No credentials required — anonymous browser sessions over a reverse-engineered cf_agent WebSocket protocol (Playwright transport).",
       "notice": {
@@ -1174,13 +1388,16 @@
     },
     {
       "id": "clova-studio",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "clova",
       "name": "Naver CLOVA Studio",
       "icon": "auto_awesome",
       "color": "#03C75A",
       "textIcon": "CS",
       "website": "https://api.ncloud-docs.com/docs/en/ai-naver-clovastudio-summary",
-      "apiHint": "CLOVA Studio (HyperCLOVA X) is OpenAI-compatible on /v1/openai. OmniRoute probes /v1/openai/models and routes chat traffic to /v1/openai/chat/completions. Uses the current clovastudio.stream.ntruss.com host — the legacy clovastudio.apigw.ntruss.com endpoint is being deprecated.",
+      "apiHint": "OmniRoute routes chat traffic to the native Chat Completions v3 API (/v3/chat-completions/{model}), not the OpenAI-compatibility shim. All three v3 models are served: HCX-007 (reasoning, text only), HCX-005 (vision — accepts both public image URLs and inline base64 images), and HCX-DASH-002 (lightweight, text only). Requests stream upstream and are accumulated into a JSON body when the client asks for a non-streaming response.",
       "category": "api-key",
       "iconAsset": "/providers/clova-studio.png",
       "iconFallbackIds": [
@@ -1191,6 +1408,9 @@
     },
     {
       "id": "codebuddy-cn",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "cbcn",
       "name": "CodeBuddy CN",
       "icon": "smart_toy",
@@ -1210,7 +1430,32 @@
       ]
     },
     {
+      "id": "codebuddy-intl",
+      "serviceKinds": [
+        "llm"
+      ],
+      "alias": "cbai",
+      "name": "CodeBuddy Intl",
+      "icon": "smart_toy",
+      "color": "#006EFF",
+      "textIcon": "CB",
+      "website": "https://www.codebuddy.ai",
+      "subscriptionRisk": true,
+      "riskNoticeVariant": "oauth",
+      "authHint": "CodeBuddy International (codebuddy.ai). Sign in via the device-code flow, or paste a direct API key (sent as Authorization: Bearer). Catalog: GLM / Kimi / MiniMax / DeepSeek / Hunyuan.",
+      "category": "oauth",
+      "iconAsset": "/providers/tencent.svg",
+      "iconFallbackIds": [
+        "codebuddy-intl",
+        "cbai",
+        "tencent"
+      ]
+    },
+    {
       "id": "codestral",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "codestral",
       "name": "Codestral",
       "icon": "terminal",
@@ -1226,6 +1471,9 @@
     },
     {
       "id": "codex",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "cx",
       "name": "OpenAI Codex",
       "icon": "code",
@@ -1268,6 +1516,7 @@
     },
     {
       "id": "codex-cloud",
+      "serviceKinds": [],
       "alias": "codex-cloud",
       "name": "Codex Cloud",
       "icon": "cloud",
@@ -1284,6 +1533,9 @@
     },
     {
       "id": "cohere",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "cohere",
       "name": "Cohere",
       "icon": "hub",
@@ -1300,6 +1552,7 @@
     },
     {
       "id": "comfyui",
+      "serviceKinds": [],
       "alias": "comfyui",
       "name": "ComfyUI",
       "icon": "account_tree",
@@ -1317,6 +1570,9 @@
     },
     {
       "id": "command-code",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "cmd",
       "name": "Command Code",
       "icon": "terminal",
@@ -1326,7 +1582,6 @@
       "authHint": "Use a Command Code API key. Requests are sent to Command Code's /provider/v1/chat/completions endpoint.",
       "apiHint": "Create or copy an API key from Command Code, then paste it here as a Bearer token.",
       "category": "api-key",
-      "iconAsset": "/providers/command-code.svg",
       "iconFallbackIds": [
         "command-code",
         "cmd"
@@ -1334,6 +1589,9 @@
     },
     {
       "id": "conol-web",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "cnl",
       "name": "Conol (Unofficial/Experimental)",
       "icon": "auto_awesome",
@@ -1375,6 +1633,9 @@
     },
     {
       "id": "copilot-m365-web",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "m365copilot",
       "name": "Microsoft 365 Copilot (BizChat)",
       "icon": "business_center",
@@ -1396,6 +1657,9 @@
     },
     {
       "id": "copilot-web",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "copilot",
       "name": "Microsoft Copilot Web",
       "icon": "auto_awesome",
@@ -1415,6 +1679,9 @@
     },
     {
       "id": "coze",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "coze",
       "name": "Coze",
       "icon": "smart_toy",
@@ -1433,6 +1700,9 @@
     },
     {
       "id": "crof",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "crof",
       "name": "CrofAI",
       "icon": "auto_awesome",
@@ -1448,6 +1718,9 @@
     },
     {
       "id": "cursor",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "cu",
       "name": "Cursor IDE",
       "icon": "edit_note",
@@ -1464,6 +1737,9 @@
     },
     {
       "id": "cursor-api",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "cua",
       "name": "Cursor API",
       "icon": "edit_note",
@@ -1484,6 +1760,9 @@
     },
     {
       "id": "dahl",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "dahl",
       "name": "Dahl",
       "icon": "dahl",
@@ -1501,13 +1780,33 @@
         "text": "Dahl auto-generates tokens via https://inference.dahl.global/tokens. No signup needed. Rate limits apply. You can also add your own API key."
       },
       "category": "api-key",
-      "iconAsset": "/providers/dahl.png",
       "iconFallbackIds": [
         "dahl"
       ]
     },
     {
+      "id": "daoxe",
+      "serviceKinds": [
+        "llm"
+      ],
+      "alias": "daoxe",
+      "name": "DaoXE",
+      "icon": "hub",
+      "color": "#0F766E",
+      "textIcon": "DX",
+      "passthroughModels": true,
+      "website": "https://daoxe.com",
+      "apiHint": "Create an API token at https://daoxe.com/token, then paste it here as a Bearer token. OpenAI-compatible base URL: https://api.daoxe.com/v1.",
+      "category": "api-key",
+      "iconFallbackIds": [
+        "daoxe"
+      ]
+    },
+    {
       "id": "databricks",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "databricks",
       "name": "Databricks",
       "icon": "table_chart",
@@ -1523,6 +1822,9 @@
     },
     {
       "id": "datarobot",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "datarobot",
       "name": "DataRobot",
       "icon": "precision_manufacturing",
@@ -1540,6 +1842,7 @@
     },
     {
       "id": "deepai",
+      "serviceKinds": [],
       "alias": "deepai",
       "name": "DeepAI",
       "icon": "psychology",
@@ -1556,6 +1859,7 @@
     },
     {
       "id": "deepgram",
+      "serviceKinds": [],
       "alias": "dg",
       "name": "Deepgram",
       "icon": "mic",
@@ -1571,6 +1875,9 @@
     },
     {
       "id": "deepinfra",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "deepinfra",
       "name": "DeepInfra",
       "icon": "hub",
@@ -1587,6 +1894,9 @@
     },
     {
       "id": "deepseek",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "ds",
       "name": "DeepSeek",
       "icon": "bolt",
@@ -1604,6 +1914,9 @@
     },
     {
       "id": "deepseek-web",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "ds-web",
       "name": "DeepSeek Web",
       "icon": "auto_awesome",
@@ -1623,7 +1936,27 @@
       ]
     },
     {
+      "id": "demonroute",
+      "serviceKinds": [
+        "llm"
+      ],
+      "alias": "demonroute",
+      "name": "Demon Route",
+      "icon": "hub",
+      "color": "#6D28D9",
+      "textIcon": "DR",
+      "passthroughModels": true,
+      "website": "https://demonroute.com",
+      "apiHint": "Create an API key at https://demonroute.com, then paste it here as a Bearer token. OpenAI-compatible base URL: https://api.demonroute.com/v1.",
+      "category": "api-key",
+      "iconFallbackIds": [
+        "demonroute",
+        "demon-route"
+      ]
+    },
+    {
       "id": "devin",
+      "serviceKinds": [],
       "alias": "devin",
       "name": "Devin",
       "icon": "smart_toy",
@@ -1639,6 +1972,9 @@
     },
     {
       "id": "devin-cli",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "dv",
       "name": "Devin CLI",
       "icon": "terminal",
@@ -1683,6 +2019,9 @@
     },
     {
       "id": "devin-desktop",
+      "serviceKinds": [
+        "llm"
+      ],
       "name": "Devin Desktop",
       "icon": "terminal",
       "color": "#6366F1",
@@ -1700,6 +2039,9 @@
     },
     {
       "id": "dgrid",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "dgrid",
       "name": "DGrid",
       "icon": "router",
@@ -1716,6 +2058,9 @@
     },
     {
       "id": "dify",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "dify",
       "name": "Dify",
       "icon": "smart_toy",
@@ -1750,13 +2095,15 @@
         "llm"
       ],
       "category": "api-key",
-      "iconAsset": "/providers/digitalocean.svg",
       "iconFallbackIds": [
         "digitalocean"
       ]
     },
     {
       "id": "dit",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "dai",
       "name": "DIT.ai",
       "icon": "hub",
@@ -1775,6 +2122,9 @@
     },
     {
       "id": "docker-model-runner",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "dmr",
       "name": "Docker Model Runner",
       "icon": "inventory_2",
@@ -1785,7 +2135,6 @@
       "localDefault": "http://localhost:12434/v1",
       "passthroughModels": true,
       "category": "local",
-      "iconAsset": "/providers/docker-model-runner.svg",
       "iconFallbackIds": [
         "docker-model-runner",
         "dmr"
@@ -1793,6 +2142,9 @@
     },
     {
       "id": "doubao",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "doubao",
       "name": "Doubao",
       "icon": "auto_awesome",
@@ -1811,6 +2163,9 @@
     },
     {
       "id": "doubao-web",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "db",
       "name": "Dola Web (ByteDance)",
       "icon": "auto_awesome",
@@ -1845,8 +2200,8 @@
       "freeNote": "Free — anonymous access to multiple AI models via DuckDuckGo.",
       "authHint": "No credentials required — DuckDuckGo AI Chat is anonymous and free.",
       "toolCalling": "emulated",
+      "browserBacked": true,
       "category": "noauth",
-      "iconAsset": "/providers/duckduckgo-web.svg",
       "iconFallbackIds": [
         "duckduckgo-web",
         "ddgw",
@@ -1856,6 +2211,9 @@
     },
     {
       "id": "dxnt",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "dxnt",
       "name": "DXNT / DX Token",
       "icon": "hub",
@@ -1875,6 +2233,9 @@
     },
     {
       "id": "electronhub",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "electronhub",
       "name": "Electron Hub",
       "icon": "hub",
@@ -1894,6 +2255,7 @@
     },
     {
       "id": "elevenlabs",
+      "serviceKinds": [],
       "alias": "el",
       "name": "ElevenLabs",
       "icon": "record_voice_over",
@@ -1909,6 +2271,9 @@
     },
     {
       "id": "empower",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "empower",
       "name": "Empower",
       "icon": "hub",
@@ -1919,9 +2284,27 @@
       "apiHint": "Empower exposes OpenAI-compatible chat on https://app.empower.dev/api/v1 with tool-calling support on empower-functions.",
       "passthroughModels": true,
       "category": "api-key",
-      "iconAsset": "/providers/empower.png",
       "iconFallbackIds": [
         "empower"
+      ]
+    },
+    {
+      "id": "eurouter",
+      "serviceKinds": [
+        "llm"
+      ],
+      "alias": "eurouter",
+      "name": "EURouter",
+      "icon": "router",
+      "color": "#1D4ED8",
+      "textIcon": "EUR",
+      "passthroughModels": true,
+      "website": "https://eurouter.ai",
+      "hasFree": false,
+      "apiHint": "Create an EURouter API key, then use https://api.eurouter.ai/v1 as the OpenAI-compatible base URL. Models are served by third-party upstreams listed per model in the EURouter catalog; check each upstream jurisdiction, privacy and data-transfer terms before use.",
+      "category": "api-key",
+      "iconFallbackIds": [
+        "eurouter"
       ]
     },
     {
@@ -1947,6 +2330,9 @@
     },
     {
       "id": "factory",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "factory",
       "name": "Factory",
       "icon": "smart_toy",
@@ -1964,6 +2350,7 @@
     },
     {
       "id": "fal-ai",
+      "serviceKinds": [],
       "alias": "fal",
       "name": "Fal.ai",
       "icon": "image",
@@ -1979,6 +2366,9 @@
     },
     {
       "id": "fastrouter",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "fastrouter",
       "name": "FastRouter",
       "icon": "speed",
@@ -1997,13 +2387,16 @@
     },
     {
       "id": "featherless-ai",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "featherless",
       "name": "Featherless AI",
       "icon": "flutter_dash",
       "color": "#EA580C",
       "textIcon": "FL",
       "website": "https://featherless.ai",
-      "hasFree": true,
+      "hasFree": false,
       "freeNote": "Free tier available — no credit card required",
       "category": "api-key",
       "iconAsset": "/providers/featherless-ai.png",
@@ -2013,32 +2406,10 @@
       ]
     },
     {
-      "id": "felo-web",
-      "alias": "felo",
-      "name": "Felo",
-      "icon": "travel_explore",
-      "color": "#5B7FFF",
-      "textIcon": "FL",
-      "website": "https://felo.ai",
-      "noAuth": true,
-      "hasFree": true,
+      "id": "fenayai",
       "serviceKinds": [
         "llm"
       ],
-      "freeNote": "Free — anonymous access to Felo's chat/search-agent aggregator. No API key.",
-      "authHint": "No credentials required — Felo is a free, no-signup chat/search aggregator.",
-      "notice": {
-        "text": "Felo uses a reverse-engineered public endpoint (no official API). No signup or API key needed. Behavior may change without notice if Felo updates its frontend."
-      },
-      "category": "noauth",
-      "iconAsset": "/providers/felo-web.jpg",
-      "iconFallbackIds": [
-        "felo-web",
-        "felo"
-      ]
-    },
-    {
-      "id": "fenayai",
       "alias": "fenayai",
       "name": "FenayAI",
       "icon": "hub",
@@ -2080,6 +2451,9 @@
     },
     {
       "id": "fireworks",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "fireworks",
       "name": "Fireworks AI",
       "icon": "local_fire_department",
@@ -2097,6 +2471,7 @@
     },
     {
       "id": "fishaudio",
+      "serviceKinds": [],
       "alias": "fishaudio",
       "name": "Fish Audio",
       "icon": "graphic_eq",
@@ -2112,6 +2487,9 @@
     },
     {
       "id": "free-ai",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "free-ai",
       "name": "Free.ai",
       "icon": "hub",
@@ -2131,6 +2509,9 @@
     },
     {
       "id": "freeaiapikey",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "faik",
       "name": "FreeAIAPIKey",
       "icon": "vpn_key",
@@ -2157,18 +2538,21 @@
       "serviceKinds": [
         "llm"
       ],
-      "authHint": "Enter Freebuff / Codebuff Auth Token (obtained via CLI login or automated harvester).",
-      "freeNote": "Free Codebuff / Freebuff AI models.",
-      "apiHint": "Token is authenticated against Codebuff upstream session pool.",
+      "subscriptionRisk": true,
+      "riskNoticeVariant": "official-client-only",
+      "authHint": "Enter your Freebuff / Codebuff auth token from the CLI login.",
+      "freeNote": "Free Freebuff models (official client only); paid API: freebuff.com/account/api.",
       "passthroughModels": true,
       "category": "api-key",
-      "iconAsset": "/providers/freebuff.svg",
       "iconFallbackIds": [
         "freebuff"
       ]
     },
     {
       "id": "freeinference",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "freeinference",
       "name": "FreeInference",
       "icon": "science",
@@ -2187,6 +2571,9 @@
     },
     {
       "id": "freemodel-dev",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "fmd",
       "name": "FreeModel.dev",
       "icon": "auto_awesome",
@@ -2205,16 +2592,19 @@
     },
     {
       "id": "freetheai",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "fta",
       "name": "FreeTheAi",
       "icon": "hub",
       "color": "#22C55E",
       "textIcon": "FTA",
-      "website": "https://freetheai.xyz",
+      "website": "https://freetheai.org",
       "hasFree": true,
-      "freeNote": "Free OpenAI-compatible gateway — sign up via Discord for an API key.",
+      "freeNote": "Free OpenAI-compatible gateway — sign up at freetheai.org for a free API key; a daily check-in unlocks the free models.",
       "passthroughModels": true,
-      "authHint": "Join the FreeTheAi Discord to get your free API key.",
+      "authHint": "Sign up at https://freetheai.org/signup for a free API key. A daily check-in unlocks the free models; linking Discord is optional and only raises the daily limit.",
       "category": "api-key",
       "iconAsset": "/providers/freetheai.svg",
       "iconFallbackIds": [
@@ -2224,6 +2614,9 @@
     },
     {
       "id": "friendliai",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "friendli",
       "name": "FriendliAI",
       "icon": "handshake",
@@ -2241,6 +2634,9 @@
     },
     {
       "id": "g4f-gemini",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "g4fgem",
       "name": "g4f.space — Gemini",
       "icon": "bolt",
@@ -2248,9 +2644,13 @@
       "textIcon": "G4F",
       "website": "https://g4f.space",
       "hasFree": false,
-      "freeNote": "No-key reverse proxy to Gemini (gpt4free project) — the anonymous free tier is gone; keyless calls return insufficient_credits until you bake proof-of-work credits. A g4f.dev member key is required.",
+      "freeNote": "Anonymous access to Gemini requires proof-of-work cake credits from g4f.dev/chat; alternatively, use a g4f.dev member API key. Limits vary.",
       "passthroughModels": true,
-      "authHint": "Anonymous use now needs proof-of-work credits baked at g4f.dev/chat — sign up at g4f.dev/members.html for a member key.",
+      "authHint": "Bake anonymous cake credits at g4f.dev/chat, or use a g4f.dev member key (create one at g4f.dev/members.html).",
+      "notice": {
+        "text": "Remote third-party gateway: prompts and request metadata leave OmniRoute and are handled by g4f.space. Its Terms and Privacy links were unavailable when last verified on 2026-08-27.",
+        "apiKeyUrl": "https://g4f.dev/members.html"
+      },
       "category": "api-key",
       "iconAsset": "/providers/g4f-gemini.svg",
       "iconFallbackIds": [
@@ -2261,6 +2661,9 @@
     },
     {
       "id": "g4f-groq",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "g4fgroq",
       "name": "g4f.space — Groq",
       "icon": "bolt",
@@ -2268,9 +2671,13 @@
       "textIcon": "G4F",
       "website": "https://g4f.space",
       "hasFree": false,
-      "freeNote": "No-key reverse proxy to Groq (gpt4free project) — the anonymous free tier is gone; keyless calls return insufficient_credits until you bake proof-of-work credits. A g4f.dev member key is required.",
+      "freeNote": "Anonymous access to Groq requires proof-of-work cake credits from g4f.dev/chat; alternatively, use a g4f.dev member API key. Limits vary.",
       "passthroughModels": true,
-      "authHint": "Anonymous use now needs proof-of-work credits baked at g4f.dev/chat — sign up at g4f.dev/members.html for a member key.",
+      "authHint": "Bake anonymous cake credits at g4f.dev/chat, or use a g4f.dev member key (create one at g4f.dev/members.html).",
+      "notice": {
+        "text": "Remote third-party gateway: prompts and request metadata leave OmniRoute and are handled by g4f.space. Its Terms and Privacy links were unavailable when last verified on 2026-08-27.",
+        "apiKeyUrl": "https://g4f.dev/members.html"
+      },
       "category": "api-key",
       "iconAsset": "/providers/g4f-groq.svg",
       "iconFallbackIds": [
@@ -2281,6 +2688,9 @@
     },
     {
       "id": "g4f-nvidia",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "g4fnv",
       "name": "g4f.space — NVIDIA",
       "icon": "bolt",
@@ -2288,9 +2698,13 @@
       "textIcon": "G4F",
       "website": "https://g4f.space",
       "hasFree": false,
-      "freeNote": "No-key reverse proxy to NVIDIA NIM (gpt4free project) — the anonymous free tier is gone; keyless calls return insufficient_credits until you bake proof-of-work credits. A g4f.dev member key is required.",
+      "freeNote": "Anonymous access to NVIDIA NIM requires proof-of-work cake credits from g4f.dev/chat; alternatively, use a g4f.dev member API key. Limits vary.",
       "passthroughModels": true,
-      "authHint": "Anonymous use now needs proof-of-work credits baked at g4f.dev/chat — sign up at g4f.dev/members.html for a member key.",
+      "authHint": "Bake anonymous cake credits at g4f.dev/chat, or use a g4f.dev member key (create one at g4f.dev/members.html).",
+      "notice": {
+        "text": "Remote third-party gateway: prompts and request metadata leave OmniRoute and are handled by g4f.space. Its Terms and Privacy links were unavailable when last verified on 2026-08-27.",
+        "apiKeyUrl": "https://g4f.dev/members.html"
+      },
       "category": "api-key",
       "iconAsset": "/providers/g4f-nvidia.svg",
       "iconFallbackIds": [
@@ -2301,6 +2715,9 @@
     },
     {
       "id": "g4f-ollama",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "g4foll",
       "name": "g4f.space — Ollama",
       "icon": "bolt",
@@ -2308,9 +2725,13 @@
       "textIcon": "G4F",
       "website": "https://g4f.space",
       "hasFree": false,
-      "freeNote": "No-key hosted Ollama gateway (gpt4free project) — the anonymous free tier is gone; keyless calls return insufficient_credits until you bake proof-of-work credits. A g4f.dev member key is required.",
+      "freeNote": "Anonymous access to hosted Ollama requires proof-of-work cake credits from g4f.dev/chat; alternatively, use a g4f.dev member API key. Limits vary.",
       "passthroughModels": true,
-      "authHint": "Anonymous use now needs proof-of-work credits baked at g4f.dev/chat — sign up at g4f.dev/members.html for a member key.",
+      "authHint": "Bake anonymous cake credits at g4f.dev/chat, or use a g4f.dev member key (create one at g4f.dev/members.html).",
+      "notice": {
+        "text": "Remote third-party gateway: prompts and request metadata leave OmniRoute and are handled by g4f.space. Its Terms and Privacy links were unavailable when last verified on 2026-08-27.",
+        "apiKeyUrl": "https://g4f.dev/members.html"
+      },
       "category": "api-key",
       "iconAsset": "/providers/g4f-ollama.svg",
       "iconFallbackIds": [
@@ -2321,6 +2742,9 @@
     },
     {
       "id": "g4f-pollinations",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "g4fpol",
       "name": "g4f.space — Pollinations",
       "icon": "bolt",
@@ -2328,9 +2752,13 @@
       "textIcon": "G4F",
       "website": "https://g4f.space",
       "hasFree": false,
-      "freeNote": "No-key reverse proxy to Pollinations (gpt4free project) — the anonymous free tier is gone; keyless calls return insufficient_credits until you bake proof-of-work credits. A g4f.dev member key is required.",
+      "freeNote": "Anonymous access to Pollinations requires proof-of-work cake credits from g4f.dev/chat; alternatively, use a g4f.dev member API key. Limits vary.",
       "passthroughModels": true,
-      "authHint": "Anonymous use now needs proof-of-work credits baked at g4f.dev/chat — sign up at g4f.dev/members.html for a member key.",
+      "authHint": "Bake anonymous cake credits at g4f.dev/chat, or use a g4f.dev member key (create one at g4f.dev/members.html).",
+      "notice": {
+        "text": "Remote third-party gateway: prompts and request metadata leave OmniRoute and are handled by g4f.space. Its Terms and Privacy links were unavailable when last verified on 2026-08-27.",
+        "apiKeyUrl": "https://g4f.dev/members.html"
+      },
       "category": "api-key",
       "iconAsset": "/providers/g4f-pollinations.svg",
       "iconFallbackIds": [
@@ -2341,6 +2769,9 @@
     },
     {
       "id": "galadriel",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "galadriel",
       "name": "Galadriel",
       "icon": "auto_awesome",
@@ -2379,34 +2810,17 @@
       ]
     },
     {
-      "id": "gemini-business",
-      "alias": "gembiz",
-      "name": "Gemini Business (Enterprise)",
-      "icon": "business_center",
-      "color": "#4285F4",
-      "textIcon": "GB",
-      "website": "https://business.gemini.google",
-      "hasFree": true,
-      "freeNote": "Free for Google Workspace enterprise accounts — enterprise Gemini models (Pro, Flash, image, video) via direct StreamGenerate HTTP API. No subscription required, just enterprise SSO.",
-      "authHint": "From your enterprise account: open business.gemini.google/home/cid/{your-cid}, then copy __Secure-1PSID and __Secure-1PSIDTS cookies from DevTools → Application → Cookies. Paste as a cookie header below.",
-      "category": "web-cookie",
-      "iconAsset": "/providers/gemini.svg",
-      "iconFallbackIds": [
-        "gemini-business",
-        "gembiz",
-        "gemini",
-        "gemini-business-enterprise"
-      ]
-    },
-    {
       "id": "gemini-web",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "gweb",
       "name": "Gemini Web (Free)",
       "icon": "auto_awesome",
       "color": "#4285F4",
       "textIcon": "GWeb",
       "website": "https://gemini.google.com",
-      "authHint": "Paste your __Secure-1PSID cookie value from gemini.google.com. Optionally add __Secure-1PSIDTS separated by semicolon.",
+      "authHint": "Paste the full cookie header, the __Secure-1PSID value, or the JSON export containing cookies from gemini.google.com. Include __Secure-1PSIDTS and __Secure-1PSIDCC when available.",
       "subscriptionRisk": true,
       "riskNoticeVariant": "webCookie",
       "toolCalling": "emulated",
@@ -2421,6 +2835,9 @@
     },
     {
       "id": "getgoapi",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "ggo",
       "name": "GoAPI",
       "icon": "rocket_launch",
@@ -2438,6 +2855,9 @@
     },
     {
       "id": "ghe-copilot",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "ghe-copilot",
       "name": "GitHub Enterprise Copilot",
       "icon": "code",
@@ -2455,6 +2875,9 @@
     },
     {
       "id": "gigachat",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "gigachat",
       "name": "GigaChat (Sber)",
       "icon": "lock_person",
@@ -2462,7 +2885,6 @@
       "textIcon": "GC",
       "website": "https://developers.sber.ru",
       "category": "api-key",
-      "iconAsset": "/providers/gigachat.png",
       "iconFallbackIds": [
         "gigachat",
         "gigachat-sber"
@@ -2470,6 +2892,9 @@
     },
     {
       "id": "github",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "gh",
       "name": "GitHub Copilot",
       "icon": "code",
@@ -2485,6 +2910,9 @@
     },
     {
       "id": "gitlab",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "gitlab",
       "name": "GitLab Duo PAT",
       "icon": "hub",
@@ -2493,7 +2921,6 @@
       "website": "https://docs.gitlab.com/user/duo_agent_platform/code_suggestions/",
       "authHint": "GitLab personal access token for the public Code Suggestions API. Configure a self-hosted base URL when not using gitlab.com.",
       "category": "api-key",
-      "iconAsset": "/providers/gitlab.svg",
       "iconFallbackIds": [
         "gitlab",
         "gitlab-duo-pat"
@@ -2501,6 +2928,9 @@
     },
     {
       "id": "gitlab-duo",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "gitlab-duo",
       "name": "GitLab Duo",
       "icon": "hub",
@@ -2508,13 +2938,15 @@
       "textIcon": "GL",
       "website": "https://docs.gitlab.com/user/duo_agent_platform/code_suggestions/",
       "category": "oauth",
-      "iconAsset": "/providers/gitlab-duo.svg",
       "iconFallbackIds": [
         "gitlab-duo"
       ]
     },
     {
       "id": "gitlawb",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "glb",
       "name": "Gitlawb Opengateway (MiMo)",
       "icon": "hub",
@@ -2534,6 +2966,9 @@
     },
     {
       "id": "gitlawb-gmi",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "glb-gmi",
       "name": "Gitlawb Opengateway (GMI Cloud)",
       "icon": "hub",
@@ -2553,6 +2988,7 @@
     },
     {
       "id": "gladia",
+      "serviceKinds": [],
       "alias": "gladia",
       "name": "Gladia",
       "icon": "record_voice_over",
@@ -2567,6 +3003,9 @@
     },
     {
       "id": "glm",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "glm",
       "name": "GLM Coding",
       "icon": "code",
@@ -2583,6 +3022,9 @@
     },
     {
       "id": "glm-cn",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "glmcn",
       "name": "GLM Coding (China)",
       "icon": "code",
@@ -2601,6 +3043,9 @@
     },
     {
       "id": "glmt",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "glmt",
       "name": "GLM Thinking",
       "icon": "psychology",
@@ -2618,6 +3063,9 @@
     },
     {
       "id": "google-pse-search",
+      "serviceKinds": [
+        "webSearch"
+      ],
       "alias": "google-pse",
       "name": "Google Programmable Search",
       "icon": "travel_explore",
@@ -2635,7 +3083,30 @@
       ]
     },
     {
+      "id": "greenpt",
+      "serviceKinds": [
+        "llm"
+      ],
+      "alias": "greenpt",
+      "name": "GreenPT",
+      "icon": "eco",
+      "color": "#15803D",
+      "textIcon": "GPT",
+      "passthroughModels": true,
+      "website": "https://greenpt.com",
+      "hasFree": false,
+      "freeNote": "API subscription is free to create; inference is billed per token. No free inference allowance is published.",
+      "apiHint": "Create a GreenPT API key, then use https://api.greenpt.ai/v1 as the OpenAI-compatible base URL. Review jurisdiction, privacy and regional data-transfer requirements before use.",
+      "category": "api-key",
+      "iconFallbackIds": [
+        "greenpt"
+      ]
+    },
+    {
       "id": "grok-cli",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "gc",
       "name": "Grok Build",
       "icon": "bolt",
@@ -2654,6 +3125,9 @@
     },
     {
       "id": "grok-web",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "gw",
       "name": "Grok Web (Subscription)",
       "icon": "auto_awesome",
@@ -2681,7 +3155,7 @@
       "textIcon": "GQ",
       "website": "https://groq.com",
       "hasFree": true,
-      "freeNote": "Free tier: 30 RPM / 14.4K RPD — no credit card",
+      "freeNote": "Free plan: per-model caps (200K tokens/day per chat model; see console.groq.com/docs/rate-limits for RPM/RPD) — no payment method on file.",
       "serviceKinds": [
         "llm",
         "imageToText"
@@ -2693,25 +3167,8 @@
       ]
     },
     {
-      "id": "hailuo-web",
-      "alias": "hailuo-web",
-      "name": "Hailuo Web (MiniMax)",
-      "icon": "auto_awesome",
-      "color": "#5B21B6",
-      "textIcon": "HL",
-      "website": "https://chat.minimax.io",
-      "subscriptionRisk": true,
-      "riskNoticeVariant": "webCookie",
-      "category": "web-cookie",
-      "iconAsset": "/providers/hailuo-web.svg",
-      "iconFallbackIds": [
-        "hailuo-web",
-        "hailuo",
-        "hailuo-web-minimax"
-      ]
-    },
-    {
       "id": "haiper",
+      "serviceKinds": [],
       "alias": "hp",
       "name": "Haiper",
       "icon": "videocam",
@@ -2720,7 +3177,6 @@
       "website": "https://haiper.ai",
       "authHint": "Get API key at haiper.ai/haiper-api",
       "category": "api-key",
-      "iconAsset": "/providers/haiper.svg",
       "iconFallbackIds": [
         "haiper",
         "hp"
@@ -2728,6 +3184,9 @@
     },
     {
       "id": "hcnsec",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "hcnsec",
       "name": "Huancheng Public API",
       "icon": "security",
@@ -2747,6 +3206,9 @@
     },
     {
       "id": "helixmind",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "helixmind",
       "name": "HelixMind",
       "icon": "hub",
@@ -2765,6 +3227,9 @@
     },
     {
       "id": "helyxai",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "helyxai",
       "name": "Helyx AI",
       "icon": "hub",
@@ -2784,6 +3249,9 @@
     },
     {
       "id": "heroku",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "heroku",
       "name": "Heroku AI",
       "icon": "cloud_upload",
@@ -2799,6 +3267,9 @@
     },
     {
       "id": "huggingchat",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "huggingchat",
       "name": "HuggingChat (Free)",
       "icon": "auto_awesome",
@@ -2819,6 +3290,9 @@
     },
     {
       "id": "huggingface",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "hf",
       "name": "HuggingFace",
       "icon": "face",
@@ -2836,6 +3310,9 @@
     },
     {
       "id": "hyperagent",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "ha",
       "name": "HyperAgent (Unofficial/Experimental)",
       "icon": "auto_awesome",
@@ -2855,6 +3332,9 @@
     },
     {
       "id": "hyperbolic",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "hyp",
       "name": "Hyperbolic",
       "icon": "bolt",
@@ -2872,6 +3352,7 @@
     },
     {
       "id": "ideogram",
+      "serviceKinds": [],
       "alias": "ideo",
       "name": "Ideogram",
       "icon": "image",
@@ -2880,7 +3361,6 @@
       "website": "https://ideogram.ai",
       "authHint": "Get API key at ideogram.ai/docs/api",
       "category": "api-key",
-      "iconAsset": "/providers/ideogram.svg",
       "iconFallbackIds": [
         "ideogram",
         "ideo"
@@ -2888,6 +3368,9 @@
     },
     {
       "id": "iflytek",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "iflytek",
       "name": "iFlytek Spark",
       "icon": "auto_awesome",
@@ -2907,6 +3390,9 @@
     },
     {
       "id": "inception",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "inception",
       "name": "Inception",
       "icon": "auto_awesome",
@@ -2924,6 +3410,9 @@
     },
     {
       "id": "inference-net",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "inet",
       "name": "Inference.net",
       "icon": "dns",
@@ -2942,6 +3431,9 @@
     },
     {
       "id": "inner-ai",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "in-ai",
       "name": "Inner.ai (Subscription)",
       "icon": "auto_awesome",
@@ -2953,7 +3445,6 @@
       "authHint": "Paste your token cookie and email separated by a space: open DevTools → Application → Cookies → .innerai.com, copy the token value, then append a space and your Inner.ai login email. Example: eyJhbG... user@example.com",
       "toolCalling": "emulated",
       "category": "web-cookie",
-      "iconAsset": "/providers/inner-ai.png",
       "iconFallbackIds": [
         "inner-ai",
         "in-ai",
@@ -2963,6 +3454,9 @@
     },
     {
       "id": "internlm",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "internlm",
       "name": "InternLM (Intern-S1)",
       "icon": "auto_awesome",
@@ -2980,6 +3474,7 @@
     },
     {
       "id": "inworld",
+      "serviceKinds": [],
       "alias": "inworld",
       "name": "Inworld",
       "icon": "voice_chat",
@@ -2987,13 +3482,13 @@
       "textIcon": "IW",
       "website": "https://inworld.ai",
       "category": "audio",
-      "iconAsset": "/providers/inworld.svg",
       "iconFallbackIds": [
         "inworld"
       ]
     },
     {
       "id": "jina-ai",
+      "serviceKinds": [],
       "alias": "jina",
       "name": "Jina AI (Foundation API)",
       "icon": "sort",
@@ -3038,6 +3533,7 @@
     },
     {
       "id": "jules",
+      "serviceKinds": [],
       "alias": "jules",
       "name": "Google Jules",
       "icon": "engineering",
@@ -3054,6 +3550,9 @@
     },
     {
       "id": "kenari",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "kenari",
       "name": "Kenari",
       "icon": "hub",
@@ -3071,6 +3570,7 @@
     },
     {
       "id": "kie",
+      "serviceKinds": [],
       "alias": "kie",
       "name": "KIE.AI",
       "icon": "hub",
@@ -3078,7 +3578,6 @@
       "textIcon": "KIE",
       "website": "https://kie.ai",
       "category": "api-key",
-      "iconAsset": "/providers/kie.png",
       "iconFallbackIds": [
         "kie",
         "kie-ai"
@@ -3086,6 +3585,9 @@
     },
     {
       "id": "kilo-gateway",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "kg",
       "name": "Kilo Gateway",
       "icon": "hub",
@@ -3094,7 +3596,6 @@
       "website": "https://kilo.ai",
       "passthroughModels": true,
       "category": "api-key",
-      "iconAsset": "/providers/kilo-gateway.svg",
       "iconFallbackIds": [
         "kilo-gateway",
         "kg"
@@ -3102,6 +3603,9 @@
     },
     {
       "id": "kilocode",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "kc",
       "name": "Kilo Code",
       "icon": "code",
@@ -3110,8 +3614,8 @@
       "subscriptionRisk": true,
       "riskNoticeVariant": "oauth",
       "anonymousFallback": true,
+      "authHint": "Sign in with your Kilo Code account (device-code OAuth), or paste a direct API key from app.kilo.ai → Settings → API Keys. Multiple API keys are supported and rotated automatically — add each as a separate connection. Without any connection, free anonymous models are available via the anonymousFallback.",
       "category": "oauth",
-      "iconAsset": "/providers/kilocode.svg",
       "iconFallbackIds": [
         "kilocode",
         "kc",
@@ -3120,6 +3624,9 @@
     },
     {
       "id": "kimi",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "kimi",
       "name": "Kimi (Legacy Moonshot API)",
       "icon": "psychology",
@@ -3136,12 +3643,15 @@
     },
     {
       "id": "kimi-coding",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "kmc",
       "name": "Kimi Code CLI",
       "icon": "psychology",
       "color": "#1E40AF",
       "textIcon": "KC",
-      "website": "https://www.kimi.com/code?aff=omniroute",
+      "website": "https://www.kimi.ai/code?aff=omniroute",
       "subscriptionRisk": true,
       "riskNoticeVariant": "oauth",
       "authHint": "Sign in with the same Kimi account used by Kimi Code CLI. OmniRoute uses the CLI OAuth flow and Kimi Coding Plan endpoints.",
@@ -3156,12 +3666,15 @@
     },
     {
       "id": "kimi-coding-apikey",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "kmca",
       "name": "Kimi Code API Key",
       "icon": "psychology",
       "color": "#1E40AF",
       "textIcon": "KC",
-      "website": "https://www.kimi.com/code?aff=omniroute",
+      "website": "https://www.kimi.ai/code?aff=omniroute",
       "hiddenFromDashboard": true,
       "category": "api-key",
       "iconAsset": "/providers/kimi.svg",
@@ -3175,6 +3688,9 @@
     },
     {
       "id": "kimi-web",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "kimi-web",
       "name": "Kimi Web",
       "icon": "auto_awesome",
@@ -3193,6 +3709,9 @@
     },
     {
       "id": "kiro",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "kr",
       "name": "Kiro AI",
       "icon": "psychology_alt",
@@ -3211,6 +3730,9 @@
     },
     {
       "id": "lambda-ai",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "lambda",
       "name": "Lambda AI",
       "icon": "bolt",
@@ -3226,6 +3748,9 @@
     },
     {
       "id": "laozhang",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "lz",
       "name": "LaoZhang AI",
       "icon": "hub",
@@ -3243,6 +3768,10 @@
     },
     {
       "id": "lemonade",
+      "serviceKinds": [
+        "llm",
+        "embedding"
+      ],
       "alias": "lemonade",
       "name": "Lemonade Server",
       "icon": "bolt",
@@ -3253,7 +3782,6 @@
       "localDefault": "http://localhost:13305/api/v1",
       "passthroughModels": true,
       "category": "local",
-      "iconAsset": "/providers/lemonade.png",
       "iconFallbackIds": [
         "lemonade",
         "lemonade-server"
@@ -3261,6 +3789,7 @@
     },
     {
       "id": "leonardo",
+      "serviceKinds": [],
       "alias": "leo",
       "name": "Leonardo AI",
       "icon": "palette",
@@ -3269,7 +3798,6 @@
       "website": "https://leonardo.ai",
       "authHint": "Get API key at leonardo.ai/developer",
       "category": "api-key",
-      "iconAsset": "/providers/leonardo.svg",
       "iconFallbackIds": [
         "leonardo",
         "leo",
@@ -3278,6 +3806,9 @@
     },
     {
       "id": "linkup-search",
+      "serviceKinds": [
+        "webSearch"
+      ],
       "alias": "linkup",
       "name": "Linkup Search",
       "icon": "public",
@@ -3286,7 +3817,6 @@
       "website": "https://docs.linkup.so",
       "authHint": "Bearer API key from the Linkup dashboard",
       "category": "search",
-      "iconAsset": "/providers/linkup-search.png",
       "iconFallbackIds": [
         "linkup-search",
         "linkup"
@@ -3294,6 +3824,9 @@
     },
     {
       "id": "liquid",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "liquid",
       "name": "Liquid AI",
       "icon": "water_drop",
@@ -3313,6 +3846,9 @@
     },
     {
       "id": "literouter",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "literouter",
       "name": "LiteRouter",
       "icon": "router",
@@ -3331,6 +3867,10 @@
     },
     {
       "id": "llama-cpp",
+      "serviceKinds": [
+        "llm",
+        "embedding"
+      ],
       "alias": "llamacpp",
       "name": "llama.cpp",
       "icon": "memory",
@@ -3349,6 +3889,9 @@
     },
     {
       "id": "llamafile",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "llamafile",
       "name": "Llamafile",
       "icon": "article",
@@ -3359,13 +3902,15 @@
       "localDefault": "http://127.0.0.1:8080/v1",
       "passthroughModels": true,
       "category": "local",
-      "iconAsset": "/providers/llamafile.png",
       "iconFallbackIds": [
         "llamafile"
       ]
     },
     {
       "id": "llamagate",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "llamagate",
       "name": "LlamaGate",
       "icon": "gate",
@@ -3373,13 +3918,15 @@
       "textIcon": "LG",
       "website": "https://llamagate.ai",
       "category": "api-key",
-      "iconAsset": "/providers/llamagate.png",
       "iconFallbackIds": [
         "llamagate"
       ]
     },
     {
       "id": "llm-kiwi",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "llmkiwi",
       "name": "LLM.Kiwi",
       "icon": "hub",
@@ -3399,6 +3946,9 @@
     },
     {
       "id": "llm7",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "llm7",
       "name": "LLM7.io",
       "icon": "hub",
@@ -3418,6 +3968,9 @@
     },
     {
       "id": "llmgateway",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "llmgateway",
       "name": "LLM Gateway",
       "icon": "router",
@@ -3437,6 +3990,9 @@
     },
     {
       "id": "lm-studio",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "lmstudio",
       "name": "LM Studio",
       "icon": "server",
@@ -3455,6 +4011,9 @@
     },
     {
       "id": "lmarena",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "lma",
       "name": "Arena (Free)",
       "icon": "auto_awesome",
@@ -3466,7 +4025,6 @@
       "authHint": "Paste the full Cookie header from arena.ai (DevTools → Network → request → Cookie). Include arena-auth-prod-v1.0/.1… and cf_clearance/__cf_bm when present. OmniRoute uses Chrome TLS impersonation; if Arena still 403s, set providerSpecificData.recaptchaV3Token from a live browser session.",
       "riskNoticeVariant": "webCookie",
       "category": "web-cookie",
-      "iconAsset": "/providers/arena-light.svg",
       "iconFallbackIds": [
         "lmarena",
         "lma",
@@ -3475,6 +4033,9 @@
     },
     {
       "id": "logfare",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "logfare",
       "name": "Logfare",
       "icon": "auto_awesome",
@@ -3487,13 +4048,15 @@
       "apiHint": "Create a free API key at https://logfare.ai/register, then use https://logfare.ai/v1 as the OpenAI-compatible base URL. Note the request-logging policy: prompts, completions and metadata are logged for research (opt out at https://logfare.ai/consent).",
       "passthroughModels": true,
       "category": "api-key",
-      "iconAsset": "/providers/logfare.png",
       "iconFallbackIds": [
         "logfare"
       ]
     },
     {
       "id": "longcat",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "lc",
       "name": "LongCat AI",
       "icon": "auto_awesome",
@@ -3511,7 +4074,28 @@
       ]
     },
     {
+      "id": "lyceum",
+      "serviceKinds": [
+        "llm"
+      ],
+      "alias": "lyceum",
+      "name": "Lyceum",
+      "icon": "router",
+      "color": "#4F46E5",
+      "textIcon": "LY",
+      "passthroughModels": true,
+      "website": "https://lyceum.technology",
+      "hasFree": true,
+      "freeNote": "Includes monthly free credits toward serverless inference usage.",
+      "apiHint": "Create a Lyceum API key (lk_…), then use https://api.lyceum.technology/openai/v1 as the OpenAI-compatible base URL.",
+      "category": "api-key",
+      "iconFallbackIds": [
+        "lyceum"
+      ]
+    },
+    {
       "id": "magnific",
+      "serviceKinds": [],
       "alias": "freepik",
       "name": "Magnific",
       "icon": "image",
@@ -3530,6 +4114,9 @@
     },
     {
       "id": "maritalk",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "maritalk",
       "name": "Maritalk",
       "icon": "translate",
@@ -3537,13 +4124,34 @@
       "textIcon": "MT",
       "website": "https://www.maritaca.ai",
       "category": "api-key",
-      "iconAsset": "/providers/maritalk.png",
       "iconFallbackIds": [
         "maritalk"
       ]
     },
     {
+      "id": "maxai",
+      "serviceKinds": [
+        "llm"
+      ],
+      "alias": "mx",
+      "name": "MaxAI",
+      "icon": "auto_awesome",
+      "color": "#6D28D9",
+      "textIcon": "MX",
+      "website": "https://www.maxai.co",
+      "toolCalling": "emulated",
+      "authHint": "Sign in once (email code or browser) to mint a MaxAI access token. OmniRoute signs each request, routes it through residential egress, and refreshes the token browserlessly, so a connection stays valid for about a year without re-login.",
+      "category": "web-cookie",
+      "iconFallbackIds": [
+        "maxai",
+        "mx"
+      ]
+    },
+    {
       "id": "meganova-ai",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "meganova-ai",
       "name": "MegaNova AI",
       "icon": "router",
@@ -3563,6 +4171,9 @@
     },
     {
       "id": "meta-llama",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "meta",
       "name": "Meta Llama API",
       "icon": "smart_toy",
@@ -3578,27 +4189,10 @@
       ]
     },
     {
-      "id": "microsoft-designer-web",
-      "alias": "msdesigner",
-      "name": "Microsoft Designer (Image Generation)",
-      "icon": "auto_awesome",
-      "color": "#0078D4",
-      "textIcon": "MSD",
-      "website": "https://designer.microsoft.com",
-      "authHint": "Sign in at designer.microsoft.com, then open DevTools → Network, generate an image, and find the request to DallE.ashx?action=GetDallEImagesCogSci. Copy the value of its Authorization: Bearer header (the access_token — no 'Bearer ' prefix). The token is short-lived; this is an unofficial, reverse-engineered integration.",
-      "subscriptionRisk": true,
-      "riskNoticeVariant": "webCookie",
-      "category": "web-cookie",
-      "iconAsset": "/providers/microsoft-designer-web.png",
-      "iconFallbackIds": [
-        "microsoft-designer-web",
-        "msdesigner",
-        "microsoft-designer",
-        "microsoft-designer-image-generation"
-      ]
-    },
-    {
       "id": "minimax",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "minimax",
       "name": "Minimax Coding",
       "icon": "memory",
@@ -3614,6 +4208,9 @@
     },
     {
       "id": "minimax-cn",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "minimax-cn",
       "name": "Minimax (China)",
       "icon": "memory",
@@ -3650,6 +4247,7 @@
     },
     {
       "id": "mixedbread",
+      "serviceKinds": [],
       "alias": "mxbai",
       "name": "Mixedbread AI",
       "icon": "hub",
@@ -3669,6 +4267,9 @@
     },
     {
       "id": "mixlayer",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "mixlayer",
       "name": "Mixlayer",
       "icon": "router",
@@ -3687,6 +4288,9 @@
     },
     {
       "id": "mlx-gemma",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "mlx-gemma",
       "name": "MLX Gemma 26B",
       "icon": "memory",
@@ -3705,6 +4309,9 @@
     },
     {
       "id": "mlx-qwen",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "mlx-qwen",
       "name": "MLX Qwen 3.8 27B",
       "icon": "memory",
@@ -3723,6 +4330,9 @@
     },
     {
       "id": "mnn-ai",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "mnn-ai",
       "name": "MNN AI",
       "icon": "hub",
@@ -3742,6 +4352,9 @@
     },
     {
       "id": "modal",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "mdl",
       "name": "Modal",
       "icon": "cloud_queue",
@@ -3754,7 +4367,6 @@
       "freeNote": "$30/month free credits for new accounts",
       "passthroughModels": true,
       "category": "api-key",
-      "iconAsset": "/providers/modal.svg",
       "iconFallbackIds": [
         "modal",
         "mdl"
@@ -3762,6 +4374,9 @@
     },
     {
       "id": "modelscope",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "ms",
       "name": "ModelScope",
       "icon": "cloud",
@@ -3771,7 +4386,6 @@
       "hasFree": true,
       "freeNote": "Free tier via ModelScope API-Inference — Alibaba account required.",
       "category": "api-key",
-      "iconAsset": "/providers/modelscope.svg",
       "iconFallbackIds": [
         "modelscope",
         "ms"
@@ -3779,6 +4393,9 @@
     },
     {
       "id": "monsterapi",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "monster",
       "name": "MonsterAPI",
       "icon": "cloud",
@@ -3800,6 +4417,9 @@
     },
     {
       "id": "moonshot",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "moonshot",
       "name": "Kimi",
       "icon": "rocket_launch",
@@ -3815,6 +4435,9 @@
     },
     {
       "id": "morph",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "morph",
       "name": "Morph",
       "icon": "auto_fix_high",
@@ -3831,26 +4454,33 @@
     },
     {
       "id": "muse-code",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "mc",
       "name": "Muse Code (Meta)",
       "icon": "auto_awesome",
       "color": "#0866FF",
       "textIcon": "MC",
-      "website": "https://github.com/meta-llama/llama-stack",
-      "authHint": "Use your META_API_KEY env var as a Bearer token. Muse Code CLI uses the OpenAI Responses API wire format (POST /responses).",
-      "apiHint": "Muse Code is OpenAI-compatible. OmniRoute routes chat traffic through the Responses API and exposes the proprietary model catalog at /v1/muse-code/models.",
+      "website": "https://ai.developer.meta.com/docs/muse-code/auth",
+      "subscriptionRisk": true,
+      "riskNoticeVariant": "oauth",
       "passthroughModels": true,
-      "hasFree": false,
-      "category": "api-key",
+      "authHint": "Sign in with the Muse Code device flow (same as `muse login` / CLIProxyAPI `-meta-login`) to use a Muse subscription, or paste a META_API_KEY. Device login keeps the durable dca token and mints the inference key; a 401 remints that key. Wire format is OpenAI Responses (POST /responses).",
+      "category": "oauth",
       "iconAsset": "/providers/muse-code.svg",
       "iconFallbackIds": [
         "muse-code",
         "mc",
+        "metaai",
         "muse-code-meta"
       ]
     },
     {
       "id": "muse-spark-web",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "ms-web",
       "name": "Muse Spark Web (Meta AI)",
       "icon": "auto_awesome",
@@ -3872,6 +4502,9 @@
     },
     {
       "id": "naga-ac",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "naga",
       "name": "Naga.ac",
       "icon": "bolt",
@@ -3892,6 +4525,9 @@
     },
     {
       "id": "naga-ai",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "naga-ai",
       "name": "Naga AI",
       "icon": "router",
@@ -3910,7 +4546,33 @@
       ]
     },
     {
+      "id": "nan",
+      "serviceKinds": [
+        "llm",
+        "imageToText",
+        "embedding",
+        "stt",
+        "tts",
+        "image"
+      ],
+      "alias": "nan",
+      "name": "NaN.Builders",
+      "icon": "hub",
+      "color": "#6D5EF3",
+      "textIcon": "NaN",
+      "website": "https://nan.builders",
+      "apiHint": "Create an API key at https://cloud.nan.builders, then paste it here as a Bearer token. OpenAI-compatible base URL: https://api.nan.builders/v1.",
+      "category": "api-key",
+      "iconFallbackIds": [
+        "nan",
+        "nan-builders"
+      ]
+    },
+    {
       "id": "nanogpt",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "nanogpt",
       "name": "NanoGPT",
       "icon": "chat",
@@ -3918,13 +4580,15 @@
       "textIcon": "NG",
       "website": "https://nano-gpt.com",
       "category": "api-key",
-      "iconAsset": "/providers/nanogpt.png",
       "iconFallbackIds": [
         "nanogpt"
       ]
     },
     {
       "id": "nara",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "nara",
       "name": "NaraRouter",
       "icon": "hub",
@@ -3933,8 +4597,8 @@
       "passthroughModels": true,
       "website": "https://bynara.id",
       "hasFree": true,
-      "freeNote": "Free tier is a shared 5M tokens/day pool; some models are gated behind credit/plan.",
-      "authHint": "Get a free API key via NaraRouter's Telegram channel, then paste it here as a Bearer token.",
+      "freeNote": "Free plan: one 7M tokens/day bucket per account (15 req/min) across the plan's 8 models; others need credit.",
+      "authHint": "Create a free NaraRouter account, link your Telegram (required before /v1 answers), then paste the key here as a Bearer token.",
       "apiHint": "OpenAI-compatible endpoint at https://router.bynara.id/v1. Free-tier models are pinned; others need credit.",
       "category": "api-key",
       "iconAsset": "/providers/nara.svg",
@@ -3945,6 +4609,9 @@
     },
     {
       "id": "navy",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "navy",
       "name": "NavyAI",
       "icon": "hub",
@@ -3963,6 +4630,9 @@
     },
     {
       "id": "nebius",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "nebius",
       "name": "Nebius AI",
       "icon": "cloud",
@@ -3979,7 +4649,29 @@
       ]
     },
     {
+      "id": "nimble-search",
+      "alias": "nimble",
+      "name": "Nimble Search",
+      "icon": "travel_explore",
+      "color": "#6D28D9",
+      "textIcon": "NB",
+      "website": "https://docs.nimbleway.com/nimble-sdk/web-tools/search",
+      "authHint": "Bearer API key from the Nimble dashboard",
+      "serviceKinds": [
+        "webSearch",
+        "webFetch"
+      ],
+      "category": "search",
+      "iconFallbackIds": [
+        "nimble-search",
+        "nimble"
+      ]
+    },
+    {
       "id": "nlpcloud",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "nlpc",
       "name": "NLP Cloud",
       "icon": "psychology",
@@ -3991,7 +4683,6 @@
       "hasFree": true,
       "freeNote": "Trial credits for new accounts",
       "category": "api-key",
-      "iconAsset": "/providers/nlpcloud.svg",
       "iconFallbackIds": [
         "nlpcloud",
         "nlpc",
@@ -4000,6 +4691,7 @@
     },
     {
       "id": "nomic",
+      "serviceKinds": [],
       "alias": "nomic",
       "name": "Nomic",
       "icon": "hub",
@@ -4018,6 +4710,9 @@
     },
     {
       "id": "notion-web",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "nw",
       "name": "Notion AI Web (Unofficial/Experimental)",
       "icon": "auto_awesome",
@@ -4037,6 +4732,9 @@
     },
     {
       "id": "nous-research",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "nous",
       "name": "Nous Research",
       "icon": "hub",
@@ -4057,6 +4755,9 @@
     },
     {
       "id": "novita",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "novita",
       "name": "Novita AI",
       "icon": "auto_awesome",
@@ -4075,6 +4776,9 @@
     },
     {
       "id": "nscale",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "nscale",
       "name": "nScale",
       "icon": "token",
@@ -4084,13 +4788,15 @@
       "hasFree": true,
       "freeNote": "$5 free credits on signup for inference testing",
       "category": "api-key",
-      "iconAsset": "/providers/nscale.png",
       "iconFallbackIds": [
         "nscale"
       ]
     },
     {
       "id": "nube",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "nube",
       "name": "Nube.sh",
       "icon": "cloud",
@@ -4111,6 +4817,9 @@
     },
     {
       "id": "nvidia",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "nvidia",
       "name": "NVIDIA NIM",
       "icon": "developer_board",
@@ -4128,6 +4837,9 @@
     },
     {
       "id": "oci",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "oci",
       "name": "OCI Generative AI",
       "icon": "cloud",
@@ -4138,7 +4850,6 @@
       "apiHint": "OCI exposes OpenAI-compatible chat and responses endpoints. Project ID is optional in OmniRoute but may be required for Responses and agentic workflows.",
       "passthroughModels": true,
       "category": "api-key",
-      "iconAsset": "/providers/oci.svg",
       "iconFallbackIds": [
         "oci",
         "oci-generative-ai"
@@ -4146,6 +4857,9 @@
     },
     {
       "id": "ofoxai",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "ofoxai",
       "name": "OfoxAI",
       "icon": "router",
@@ -4164,6 +4878,9 @@
     },
     {
       "id": "ollama-cloud",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "ollamacloud",
       "name": "Ollama Cloud",
       "icon": "cloud",
@@ -4181,6 +4898,9 @@
     },
     {
       "id": "ollama-local",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "ollama",
       "name": "Ollama",
       "icon": "pets",
@@ -4199,6 +4919,9 @@
     },
     {
       "id": "ollama-search",
+      "serviceKinds": [
+        "webSearch"
+      ],
       "alias": "ollama-search",
       "name": "Ollama Search",
       "icon": "search",
@@ -4214,7 +4937,31 @@
       ]
     },
     {
+      "id": "oneminai",
+      "serviceKinds": [
+        "llm"
+      ],
+      "alias": "1min",
+      "name": "1min.AI",
+      "icon": "hub",
+      "color": "#6366F1",
+      "textIcon": "1M",
+      "website": "https://1min.ai",
+      "authHint": "Create an API key at https://docs.1min.ai/docs/api/create-api-key, then paste it here.",
+      "apiHint": "1min.ai uses a proprietary chat API (single prompt string + SSE) instead of OpenAI chat/completions. OmniRoute flattens OpenAI messages into a labeled prompt and translates the SSE stream.",
+      "passthroughModels": true,
+      "category": "api-key",
+      "iconFallbackIds": [
+        "oneminai",
+        "1min",
+        "1min-ai"
+      ]
+    },
+    {
       "id": "oobabooga",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "ooba",
       "name": "oobabooga",
       "icon": "dns",
@@ -4233,6 +4980,9 @@
     },
     {
       "id": "openadapter",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "oad",
       "name": "OpenAdapter",
       "icon": "hub",
@@ -4269,41 +5019,17 @@
       ]
     },
     {
-      "id": "opencode",
-      "alias": "oc",
-      "name": "OpenCode Free",
-      "icon": "terminal",
-      "color": "#E87040",
-      "textIcon": "OC",
-      "website": "https://opencode.ai",
-      "noAuth": true,
-      "hasFree": true,
+      "id": "opencode-go",
       "serviceKinds": [
         "llm"
       ],
-      "authHint": "No API key required — uses OpenCode's public free endpoint.",
-      "freeNote": "No API key required — public OpenCode endpoint with Kimi, GLM, Qwen, MiMo, MiniMax models.",
-      "notice": {
-        "text": "OpenCode Free uses the public OpenCode endpoint (https://opencode.ai/zen/v1). No signup or API key needed. Rate limits apply."
-      },
-      "category": "noauth",
-      "iconAsset": "/providers/opencode.svg",
-      "iconFallbackIds": [
-        "opencode",
-        "oc",
-        "opencode-free"
-      ]
-    },
-    {
-      "id": "opencode-go",
       "alias": "opencode-go",
       "name": "OpenCode Go",
       "icon": "opencode",
       "color": "#6366f1",
       "website": "https://opencode.ai/go",
-      "anonymousFallback": true,
+      "passthroughModels": true,
       "category": "api-key",
-      "iconAsset": "/providers/opencode.svg",
       "iconFallbackIds": [
         "opencode-go",
         "opencode"
@@ -4311,14 +5037,16 @@
     },
     {
       "id": "opencode-zen",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "opencode-zen",
       "name": "OpenCode Zen",
       "icon": "opencode",
       "color": "#6366f1",
       "website": "https://opencode.ai/zen",
-      "anonymousFallback": true,
+      "passthroughModels": true,
       "category": "api-key",
-      "iconAsset": "/providers/opencode.svg",
       "iconFallbackIds": [
         "opencode-zen",
         "opencode"
@@ -4326,6 +5054,9 @@
     },
     {
       "id": "openference",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "of",
       "name": "Openference",
       "icon": "openference",
@@ -4333,10 +5064,9 @@
       "textIcon": "OF",
       "website": "https://openference.com",
       "hasFree": true,
-      "freeNote": "Free plan: 3-day trial with open-source models — no credit card required",
-      "authHint": "Sign in with your Openference account to route requests through api.openference.com. An active plan is required for inference — OAuth may authenticate but return 402 without one.",
+      "freeNote": "Free tier: includes Qwen3.8 27b and Llama 3.2 3B — see openference.com/pricing for current terms",
+      "authHint": "Sign in with your Openference account to route requests through api.openference.com. Includes free-tier access to Qwen3.8 27b and Llama 3.2 3B — see openference.com/pricing for current plan terms.",
       "category": "oauth",
-      "iconAsset": "/providers/openference.svg",
       "iconFallbackIds": [
         "openference",
         "of"
@@ -4344,6 +5074,9 @@
     },
     {
       "id": "openference-api",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "ofa",
       "name": "Openference API",
       "icon": "openference",
@@ -4351,9 +5084,8 @@
       "textIcon": "OF",
       "website": "https://openference.com",
       "hasFree": true,
-      "freeNote": "Free plan: 3-day trial with open-source models — no credit card required",
+      "freeNote": "Free tier: includes Qwen3.8 27b and Llama 3.2 3B — see openference.com/pricing for current terms",
       "category": "api-key",
-      "iconAsset": "/providers/openference.svg",
       "iconFallbackIds": [
         "openference-api",
         "ofa",
@@ -4383,6 +5115,9 @@
     },
     {
       "id": "openvecta",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "openvecta",
       "name": "OpenVecta",
       "icon": "vector_polygon",
@@ -4392,13 +5127,33 @@
       "hasFree": true,
       "freeNote": "Free credits on signup for OpenAI-compatible inference across LLMs, embeddings, and reasoning models",
       "category": "api-key",
-      "iconAsset": "/providers/openvecta.svg",
       "iconFallbackIds": [
         "openvecta"
       ]
     },
     {
+      "id": "opper",
+      "serviceKinds": [
+        "llm"
+      ],
+      "alias": "opper",
+      "name": "Opper",
+      "icon": "router",
+      "color": "#6366F1",
+      "textIcon": "OP",
+      "passthroughModels": true,
+      "website": "https://opper.ai",
+      "category": "api-key",
+      "iconAsset": "/providers/opper.svg",
+      "iconFallbackIds": [
+        "opper"
+      ]
+    },
+    {
       "id": "orcarouter",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "orcarouter",
       "name": "OrcaRouter",
       "icon": "router",
@@ -4415,6 +5170,9 @@
     },
     {
       "id": "ovhcloud",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "ovh",
       "name": "OVHcloud AI",
       "icon": "cloud",
@@ -4430,7 +5188,29 @@
       ]
     },
     {
+      "id": "parallel-search",
+      "alias": "parallel",
+      "name": "Parallel Search",
+      "icon": "travel_explore",
+      "color": "#0F172A",
+      "textIcon": "PA",
+      "website": "https://parallel.ai",
+      "authHint": "API key from platform.parallel.ai (sent as x-api-key)",
+      "serviceKinds": [
+        "webSearch",
+        "webFetch"
+      ],
+      "category": "search",
+      "iconFallbackIds": [
+        "parallel-search",
+        "parallel"
+      ]
+    },
+    {
       "id": "perplexity",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "pplx",
       "name": "Perplexity",
       "icon": "search",
@@ -4445,7 +5225,30 @@
       ]
     },
     {
+      "id": "perplexity-agent",
+      "alias": "pplx-agent",
+      "name": "Perplexity Agent",
+      "icon": "search",
+      "color": "#20808D",
+      "textIcon": "PA",
+      "website": "https://www.perplexity.ai",
+      "authHint": "Use your Perplexity API key. OmniRoute routes Agent API model IDs through Perplexity's Responses-compatible endpoint.",
+      "apiHint": "Use Agent API model IDs with the pplx-agent/ prefix, for example pplx-agent/openai/gpt-5.6-sol or pplx-agent/anthropic/claude-opus-4-5.",
+      "passthroughModels": true,
+      "serviceKinds": [
+        "llm"
+      ],
+      "category": "api-key",
+      "iconFallbackIds": [
+        "perplexity-agent",
+        "pplx-agent"
+      ]
+    },
+    {
       "id": "perplexity-search",
+      "serviceKinds": [
+        "webSearch"
+      ],
       "alias": "pplx-search",
       "name": "Perplexity Search",
       "icon": "search",
@@ -4463,6 +5266,9 @@
     },
     {
       "id": "perplexity-web",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "pplx-web",
       "name": "Perplexity Web (Pro/Max)",
       "icon": "search",
@@ -4484,6 +5290,9 @@
     },
     {
       "id": "piapi",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "pi",
       "name": "PiAPI",
       "icon": "api",
@@ -4492,7 +5301,6 @@
       "website": "https://piapi.ai",
       "passthroughModels": true,
       "category": "api-key",
-      "iconAsset": "/providers/piapi.png",
       "iconFallbackIds": [
         "piapi",
         "pi"
@@ -4507,12 +5315,11 @@
       "textIcon": "PN",
       "website": "https://pioneer.ai",
       "notice": {
-        "text": "Pioneer AI by Fastino Labs. Free $75 usage credits, no credit card required. Use API key auth with a pio_sk_... key. Only open-tier models (Qwen3, Llama, Gemma, SmolLM) work directly — gated models (Claude/GPT/Gemini) require prior fine-tuning via the Pioneer platform.",
+        "text": "Pioneer AI by Fastino Labs. Use API key auth with a pio_sk_... key. Only open-tier models (Qwen3, Llama, Gemma, SmolLM) work directly — gated models (Claude/GPT/Gemini) require prior fine-tuning via the Pioneer platform. No free tier — paid plans start with $40 of platform credits.",
         "apiKeyUrl": "https://agent.pioneer.ai/settings/api-keys",
         "signupUrl": "https://agent.pioneer.ai/auth"
       },
-      "hasFree": true,
-      "freeNote": "$75 free usage credits — no credit card required",
+      "hasFree": false,
       "serviceKinds": [
         "llm"
       ],
@@ -4526,6 +5333,9 @@
     },
     {
       "id": "plamo",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "plamo",
       "name": "PLaMo",
       "icon": "public",
@@ -4542,6 +5352,7 @@
     },
     {
       "id": "playht",
+      "serviceKinds": [],
       "alias": "playht",
       "name": "PlayHT",
       "icon": "play_circle",
@@ -4549,13 +5360,15 @@
       "textIcon": "PH",
       "website": "https://play.ht",
       "category": "audio",
-      "iconAsset": "/providers/playht.svg",
       "iconFallbackIds": [
         "playht"
       ]
     },
     {
       "id": "poe",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "poe",
       "name": "Poe",
       "icon": "hub",
@@ -4573,6 +5386,9 @@
     },
     {
       "id": "poe-web",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "poe",
       "name": "Poe Web (Subscription)",
       "icon": "auto_awesome",
@@ -4592,6 +5408,9 @@
     },
     {
       "id": "poixe-ai",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "poixe-ai",
       "name": "Poixe AI",
       "icon": "router",
@@ -4611,6 +5430,9 @@
     },
     {
       "id": "pollinations",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "pol",
       "name": "Pollinations AI",
       "icon": "local_florist",
@@ -4631,6 +5453,9 @@
     },
     {
       "id": "poolside",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "poolside",
       "name": "Poolside",
       "icon": "memory",
@@ -4649,6 +5474,9 @@
     },
     {
       "id": "predibase",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "predibase",
       "name": "Predibase",
       "icon": "deployed_code_history",
@@ -4662,13 +5490,15 @@
       "deprecated": true,
       "deprecationReason": "serving.app.predibase.com no longer resolves (sweep 2026-06-19); the managed serving API appears discontinued.",
       "category": "api-key",
-      "iconAsset": "/providers/predibase.png",
       "iconFallbackIds": [
         "predibase"
       ]
     },
     {
       "id": "promptql",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "pql",
       "name": "PromptQL (Unofficial/Experimental)",
       "icon": "auto_awesome",
@@ -4688,6 +5518,9 @@
     },
     {
       "id": "publicai",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "publicai",
       "name": "PublicAI",
       "icon": "public",
@@ -4704,6 +5537,9 @@
     },
     {
       "id": "qianfan",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "qianfan",
       "name": "Baidu Qianfan",
       "icon": "cloud",
@@ -4712,7 +5548,6 @@
       "website": "https://cloud.baidu.com/product-s/qianfan_home",
       "apiHint": "Use a Qianfan API key from Baidu AI Cloud. The default endpoint is OpenAI-compatible v2.",
       "category": "api-key",
-      "iconAsset": "/providers/qianfan.svg",
       "iconFallbackIds": [
         "qianfan",
         "baidu-qianfan"
@@ -4720,6 +5555,9 @@
     },
     {
       "id": "qiniu",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "qiniu",
       "name": "Qiniu",
       "icon": "cloud",
@@ -4728,15 +5566,18 @@
       "passthroughModels": true,
       "website": "https://www.qiniu.com",
       "category": "api-key",
-      "iconAsset": "/providers/qiniu.svg",
       "iconFallbackIds": [
         "qiniu"
       ]
     },
     {
       "id": "qoder",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "if",
       "name": "Qoder",
+      "authHint": "PAT (pt-): requires local qodercli; plain chat only, no caller tools, buffered streaming and a 45-second chat limit. HTTP keys use DashScope; browser OAuth requires administrator configuration.",
       "icon": "water_drop",
       "color": "#6366F1",
       "subscriptionRisk": true,
@@ -4751,6 +5592,9 @@
     },
     {
       "id": "qwen-cloud",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "qwc",
       "name": "Qwen Cloud",
       "icon": "cloud",
@@ -4759,7 +5603,7 @@
       "website": "https://www.qwencloud.com/",
       "apiHint": "Use a Qwen Cloud API key and select its Global or Beijing region.",
       "category": "api-key",
-      "iconAsset": "/providers/qwencloud.svg",
+      "iconAsset": "/providers/qwen.svg",
       "iconFallbackIds": [
         "qwen-cloud",
         "qwc",
@@ -4769,6 +5613,9 @@
     },
     {
       "id": "qwen-cloud-token-plan",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "qct",
       "name": "Qwen Cloud Token Plan",
       "icon": "cloud",
@@ -4777,7 +5624,6 @@
       "website": "https://www.qwencloud.com/pricing/token-plan",
       "apiHint": "Use a Qwen Cloud Token Plan key and select its Singapore or Beijing region.",
       "category": "api-key",
-      "iconAsset": "/providers/qwencloud.svg",
       "iconFallbackIds": [
         "qwen-cloud-token-plan",
         "qct",
@@ -4786,45 +5632,8 @@
       ]
     },
     {
-      "id": "qwen-web",
-      "alias": "qwen-web",
-      "name": "Qwen Web (Free)",
-      "icon": "auto_awesome",
-      "color": "#10B981",
-      "textIcon": "QW",
-      "website": "https://chat.qwen.ai",
-      "hasFree": true,
-      "freeNote": "Free — Qwen models via chat.qwen.ai with login token. No subscription required.",
-      "toolCalling": "emulated",
-      "category": "web-cookie",
-      "iconAsset": "/providers/qwen.svg",
-      "iconFallbackIds": [
-        "qwen-web",
-        "qwen",
-        "qwen-web-free"
-      ]
-    },
-    {
-      "id": "raycast",
-      "alias": "rc",
-      "name": "Raycast Pro AI",
-      "icon": "terminal",
-      "color": "#FF6363",
-      "textIcon": "RC",
-      "website": "https://raycast.com/ai",
-      "subscriptionRisk": true,
-      "riskNoticeVariant": "oauth",
-      "authHint": "Unofficial integration — uses your Raycast Pro subscription via credentials from the macOS app (Auto-Import or manual capture). May break on Raycast updates. Not for redistribution; personal use only.",
-      "category": "oauth",
-      "iconAsset": "/providers/raycast.svg",
-      "iconFallbackIds": [
-        "raycast",
-        "rc",
-        "raycast-pro-ai"
-      ]
-    },
-    {
       "id": "recraft",
+      "serviceKinds": [],
       "alias": "recraft",
       "name": "Recraft",
       "icon": "image",
@@ -4839,6 +5648,9 @@
     },
     {
       "id": "regolo",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "regolo",
       "name": "Regolo AI",
       "icon": "hub",
@@ -4857,6 +5669,9 @@
     },
     {
       "id": "reka",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "reka",
       "name": "Reka",
       "icon": "auto_awesome",
@@ -4868,13 +5683,15 @@
       "hasFree": true,
       "freeNote": "$10/month recurring free API credits",
       "category": "api-key",
-      "iconAsset": "/providers/reka.png",
       "iconFallbackIds": [
         "reka"
       ]
     },
     {
       "id": "requesty",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "requesty",
       "name": "Requesty",
       "icon": "router",
@@ -4892,6 +5709,7 @@
     },
     {
       "id": "rev-ai",
+      "serviceKinds": [],
       "alias": "revai",
       "name": "Rev AI",
       "icon": "record_voice_over",
@@ -4908,6 +5726,9 @@
     },
     {
       "id": "routeway",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "routeway",
       "name": "Routeway",
       "icon": "hub",
@@ -4927,6 +5748,7 @@
     },
     {
       "id": "runwayml",
+      "serviceKinds": [],
       "alias": "runway",
       "name": "Runway",
       "icon": "movie",
@@ -4944,6 +5766,9 @@
     },
     {
       "id": "sambanova",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "samba",
       "name": "SambaNova",
       "icon": "memory",
@@ -4961,6 +5786,9 @@
     },
     {
       "id": "sap",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "sap",
       "name": "SAP Generative AI Hub",
       "icon": "business",
@@ -4971,7 +5799,6 @@
       "apiHint": "Model discovery uses /v2/lm/scenarios/foundation-models/models on AI_API_URL. Chat requests use deploymentUrl/chat/completions and require AI-Resource-Group.",
       "passthroughModels": true,
       "category": "api-key",
-      "iconAsset": "/providers/sap.svg",
       "iconFallbackIds": [
         "sap",
         "sap-generative-ai-hub"
@@ -4979,6 +5806,9 @@
     },
     {
       "id": "sarvam",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "sarvam",
       "name": "Sarvam AI",
       "icon": "public",
@@ -4997,6 +5827,9 @@
     },
     {
       "id": "scaleway",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "scw",
       "name": "Scaleway AI",
       "icon": "cloud",
@@ -5006,7 +5839,6 @@
       "hasFree": true,
       "freeNote": "1M free tokens for new accounts — EU/GDPR compliant (Paris), Qwen3 235B & Llama 70B",
       "category": "api-key",
-      "iconAsset": "/providers/scaleway.svg",
       "iconFallbackIds": [
         "scaleway",
         "scw",
@@ -5015,6 +5847,7 @@
     },
     {
       "id": "sdwebui",
+      "serviceKinds": [],
       "alias": "sdwebui",
       "name": "SD WebUI",
       "icon": "brush",
@@ -5034,6 +5867,9 @@
     },
     {
       "id": "sealion",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "sealion",
       "name": "SEA-LION",
       "icon": "public",
@@ -5052,6 +5888,9 @@
     },
     {
       "id": "searchapi-search",
+      "serviceKinds": [
+        "webSearch"
+      ],
       "alias": "searchapi",
       "name": "SearchAPI",
       "icon": "manage_search",
@@ -5068,6 +5907,9 @@
     },
     {
       "id": "searxng-search",
+      "serviceKinds": [
+        "webSearch"
+      ],
       "alias": "searxng",
       "name": "SearXNG Search",
       "icon": "search",
@@ -5077,14 +5919,36 @@
       "hasFree": true,
       "authHint": "API key is optional. Set your SearXNG base URL. Some instances may require a bearer token for access.",
       "category": "search",
-      "iconAsset": "/providers/searxng-search.svg",
       "iconFallbackIds": [
         "searxng-search",
         "searxng"
       ]
     },
     {
+      "id": "seekai",
+      "serviceKinds": [
+        "llm"
+      ],
+      "alias": "ska",
+      "name": "SeekAi",
+      "icon": "hub",
+      "color": "#0D9488",
+      "textIcon": "SK",
+      "passthroughModels": true,
+      "website": "https://seekai.cc",
+      "hasFree": true,
+      "freeNote": "Signup credit toward available models; amount and eligibility are set by SeekAi, not OmniRoute.",
+      "authHint": "Create an API key at https://seekai.cc, then paste it here as a Bearer token.",
+      "apiHint": "Create an API key at https://seekai.cc, then paste it here as a Bearer token. OpenAI-compatible base URL: https://seekai.cc/v1.",
+      "category": "api-key",
+      "iconFallbackIds": [
+        "seekai",
+        "ska"
+      ]
+    },
+    {
       "id": "segmind",
+      "serviceKinds": [],
       "alias": "segmind",
       "name": "Segmind",
       "icon": "image",
@@ -5103,6 +5967,9 @@
     },
     {
       "id": "sensenova",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "sensenova",
       "name": "SenseNova",
       "icon": "auto_awesome",
@@ -5137,7 +6004,6 @@
         "webSearch"
       ],
       "category": "search",
-      "iconAsset": "/providers/serper-search.svg",
       "iconFallbackIds": [
         "serper-search",
         "serper"
@@ -5145,6 +6011,9 @@
     },
     {
       "id": "siliconflow",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "siliconflow",
       "name": "SiliconFlow",
       "icon": "cloud_queue",
@@ -5162,6 +6031,9 @@
     },
     {
       "id": "snowflake",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "snowflake",
       "name": "Snowflake Cortex",
       "icon": "ac_unit",
@@ -5177,6 +6049,7 @@
     },
     {
       "id": "soniox",
+      "serviceKinds": [],
       "alias": "sx",
       "name": "Soniox",
       "icon": "mic",
@@ -5184,7 +6057,6 @@
       "textIcon": "SX",
       "website": "https://soniox.com",
       "category": "audio",
-      "iconAsset": "/providers/soniox.svg",
       "iconFallbackIds": [
         "soniox",
         "sx"
@@ -5192,6 +6064,9 @@
     },
     {
       "id": "sparkdesk",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "sparkdesk",
       "name": "SparkDesk",
       "icon": "auto_awesome",
@@ -5210,6 +6085,7 @@
     },
     {
       "id": "speechmatics",
+      "serviceKinds": [],
       "alias": "sm",
       "name": "Speechmatics",
       "icon": "record_voice_over",
@@ -5227,6 +6103,9 @@
     },
     {
       "id": "speka",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "speka",
       "name": "Speka AI",
       "icon": "router",
@@ -5246,6 +6125,7 @@
     },
     {
       "id": "stability-ai",
+      "serviceKinds": [],
       "alias": "stability",
       "name": "Stability AI",
       "icon": "image",
@@ -5261,6 +6141,9 @@
     },
     {
       "id": "stepfun",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "stepfun",
       "name": "StepFun",
       "icon": "auto_awesome",
@@ -5272,7 +6155,7 @@
       "passthroughModels": true,
       "authHint": "Get API key at platform.stepfun.com",
       "notice": {
-        "text": "This connects to StepFun's China platform (platform.stepfun.com), whose sign-up appears to require a Chinese phone number. Users outside mainland China can instead register at the global StepFun Open Platform (platform.stepfun.ai, operated by Sparkling AI Pte. Ltd., Singapore) with email/Google/Discord login.",
+        "text": "This connects to StepFun's China platform (platform.stepfun.com), whose sign-up appears to require a Chinese phone number. Users outside mainland China can instead register at the global StepFun Open Platform (platform.stepfun.ai, operated by Sparkling AI Pte. Ltd., Singapore) with email/Google/Discord login. Keys are not interchangeable between the two platforms — with an international key, set this connection's custom base URL to https://api.stepfun.ai/v1.",
         "signupUrl": "https://platform.stepfun.ai"
       },
       "category": "api-key",
@@ -5283,6 +6166,9 @@
     },
     {
       "id": "sumopod",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "sumopod",
       "name": "SumoPod",
       "icon": "router",
@@ -5299,22 +6185,10 @@
       ]
     },
     {
-      "id": "suno",
-      "alias": "suno",
-      "name": "Suno",
-      "icon": "music_note",
-      "color": "#F59E0B",
-      "textIcon": "SU",
-      "website": "https://suno.ai",
-      "authHint": "Paste session cookie from suno.ai (Clerk auth)",
-      "category": "api-key",
-      "iconAsset": "/providers/suno.svg",
-      "iconFallbackIds": [
-        "suno"
-      ]
-    },
-    {
       "id": "synthetic",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "synthetic",
       "name": "Synthetic",
       "icon": "verified_user",
@@ -5323,13 +6197,37 @@
       "website": "https://synthetic.new",
       "passthroughModels": true,
       "category": "api-key",
-      "iconAsset": "/providers/synthetic.svg",
       "iconFallbackIds": [
         "synthetic"
       ]
     },
     {
+      "id": "syntx",
+      "serviceKinds": [
+        "llm"
+      ],
+      "alias": "stx",
+      "name": "SYNTX.ai (Unofficial/Experimental)",
+      "icon": "auto_awesome",
+      "color": "#FF4D00",
+      "textIcon": "SX",
+      "website": "https://syntx.ai",
+      "subscriptionRisk": true,
+      "riskNoticeVariant": "webCookie",
+      "toolCalling": "emulated",
+      "authHint": "Paste the Authorization Bearer JWT from syntx.ai (DevTools → Network → api.syntx.ai → Request Headers). Chat, models, Limits, and media use this token.",
+      "category": "web-cookie",
+      "iconFallbackIds": [
+        "syntx",
+        "stx",
+        "syntx-ai-unofficial-experimental"
+      ]
+    },
+    {
       "id": "t3-web",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "t3chat",
       "name": "t3.chat (Pro/Free)",
       "icon": "auto_awesome",
@@ -5350,6 +6248,9 @@
     },
     {
       "id": "tabitoken",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "tabitoken",
       "name": "TabiToken",
       "icon": "hub",
@@ -5387,6 +6288,9 @@
     },
     {
       "id": "tencent",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "tencent",
       "name": "Tencent Hunyuan",
       "icon": "auto_awesome",
@@ -5406,6 +6310,9 @@
     },
     {
       "id": "tencent-aistudio-web",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "tasw",
       "name": "Tencent AI Studio (Free)",
       "icon": "auto_awesome",
@@ -5427,6 +6334,9 @@
     },
     {
       "id": "thebai",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "thebai",
       "name": "TheB.AI",
       "icon": "hub",
@@ -5443,30 +6353,10 @@
       ]
     },
     {
-      "id": "theoldllm",
-      "alias": "tllm",
-      "name": "The Old LLM (Free)",
-      "icon": "auto_awesome",
-      "color": "#8B5CF6",
-      "textIcon": "TL",
-      "website": "https://theoldllm.vercel.app",
-      "noAuth": true,
-      "hasFree": true,
+      "id": "tinycms-web",
       "serviceKinds": [
         "llm"
       ],
-      "freeNote": "Free — GPT-5.4, Claude 4.6 Opus/Sonnet/Haiku, + more. No API key — tokens auto-generated via browser.",
-      "authHint": "No credentials required. The executor auto-generates access tokens via an embedded Playwright browser instance.",
-      "category": "noauth",
-      "iconAsset": "/providers/theoldllm.svg",
-      "iconFallbackIds": [
-        "theoldllm",
-        "tllm",
-        "the-old-llm-free"
-      ]
-    },
-    {
-      "id": "tinycms-web",
       "alias": "tcw",
       "name": "TinyCMS Web (Free/Sub)",
       "icon": "layers",
@@ -5511,6 +6401,9 @@
     },
     {
       "id": "together",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "together",
       "name": "Together AI",
       "icon": "group_work",
@@ -5531,6 +6424,9 @@
     },
     {
       "id": "token-kiosk",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "tk",
       "name": "Token Kiosk",
       "icon": "hub",
@@ -5547,7 +6443,30 @@
       ]
     },
     {
+      "id": "tokenmarket",
+      "serviceKinds": [
+        "llm"
+      ],
+      "alias": "tokenmarket",
+      "name": "Token Market",
+      "icon": "hub",
+      "color": "#2563EB",
+      "textIcon": "TM",
+      "passthroughModels": true,
+      "website": "https://www.tokensmarket.ai",
+      "authHint": "Create an API key in the Token Market console, then paste it here as a Bearer token.",
+      "apiHint": "Token Market provides an OpenAI-compatible API at https://api.tokensmarket.ai/v1 and discovers its current model catalog from /v1/models.",
+      "category": "api-key",
+      "iconFallbackIds": [
+        "tokenmarket",
+        "token-market"
+      ]
+    },
+    {
       "id": "tokenreply",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "tokenreply",
       "name": "TokenReply",
       "icon": "router",
@@ -5566,6 +6485,9 @@
     },
     {
       "id": "tokenrouter",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "trk",
       "name": "TokenRouter",
       "icon": "hub",
@@ -5585,6 +6507,7 @@
     },
     {
       "id": "topaz",
+      "serviceKinds": [],
       "alias": "topaz",
       "name": "Topaz",
       "icon": "image",
@@ -5600,6 +6523,9 @@
     },
     {
       "id": "trae",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "tr",
       "name": "Trae",
       "icon": "edit_square",
@@ -5616,6 +6542,9 @@
     },
     {
       "id": "triton",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "triton",
       "name": "NVIDIA Triton",
       "icon": "developer_board",
@@ -5634,7 +6563,49 @@
       ]
     },
     {
+      "id": "twinmind",
+      "serviceKinds": [
+        "llm"
+      ],
+      "alias": "tm",
+      "name": "Twinmind (Unofficial/Experimental)",
+      "icon": "auto_awesome",
+      "color": "#4F46E5",
+      "textIcon": "TM",
+      "website": "https://app.twinmind.com",
+      "subscriptionRisk": true,
+      "riskNoticeVariant": "webCookie",
+      "toolCalling": "emulated",
+      "authHint": "Paste the stsTokenManager JSON from app.twinmind.com IndexedDB (accessToken + refreshToken). Chat uses accessToken; refreshToken mints a new JWT when it expires.",
+      "category": "web-cookie",
+      "iconFallbackIds": [
+        "twinmind",
+        "tm",
+        "twinmind-unofficial-experimental"
+      ]
+    },
+    {
+      "id": "typesafe",
+      "serviceKinds": [],
+      "alias": "typesafe",
+      "name": "TypeSafe AI",
+      "icon": "psychology",
+      "color": "#4F46E5",
+      "textIcon": "TS",
+      "website": "https://docs.typesafe.ai",
+      "authHint": "Bearer API key for api.typesafe.ai. OmniRoute uses it for System One evaluation (Jev) — not chat completions. Store the key here; the jev combo strategy reads it at request time.",
+      "apiHint": "TypeSafe System One answers typed questions (noul / choice / score) against a state. OmniRoute does not expose TypeSafe models in chat pickers or combos.",
+      "category": "api-key",
+      "iconFallbackIds": [
+        "typesafe",
+        "typesafe-ai"
+      ]
+    },
+    {
       "id": "typhoon",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "typhoon",
       "name": "Typhoon",
       "icon": "public",
@@ -5651,7 +6622,48 @@
       ]
     },
     {
+      "id": "uc",
+      "serviceKinds": [
+        "llm"
+      ],
+      "alias": "ucn",
+      "name": "UC (uncensored.com)",
+      "icon": "auto_awesome",
+      "color": "#111827",
+      "textIcon": "UC",
+      "website": "https://uncensored.com",
+      "toolCalling": "emulated",
+      "authHint": "Sign in once with an email code to bootstrap a UC (uncensored.com) subscription session. OmniRoute mints a fresh short-lived token per request browserlessly, so the connection renews on its own; you only re-run the email login about once a month when the subscription session rolls over.",
+      "category": "web-cookie",
+      "iconFallbackIds": [
+        "uc",
+        "ucn",
+        "uc-uncensored-com"
+      ]
+    },
+    {
+      "id": "uc-direct",
+      "alias": "ucd",
+      "name": "UC Direct (uncensored.com)",
+      "icon": "auto_awesome",
+      "color": "#111827",
+      "textIcon": "UD",
+      "website": "https://uncensored.com",
+      "authHint": "Use your uncensored.com Developer API key (uai_sk_live_...). OmniRoute sends it as the X-api-key header to the OpenAI-compatible https://api.uncensored.com/api/v1 endpoint. The key never expires. This is the metered/credits surface; the un-metered subscription chat is the separate 'uc' provider.",
+      "apiHint": "UC Direct is OpenAI-compatible on /api/v1. OmniRoute probes /api/v1/models (public) and routes chat traffic to /api/v1/chat/completions. Errors: 402 out of credits, 403 moderation/scope, 429 rate limit.",
+      "serviceKinds": [
+        "llm"
+      ],
+      "category": "api-key",
+      "iconFallbackIds": [
+        "uc-direct",
+        "ucd",
+        "uc-direct-uncensored-com"
+      ]
+    },
+    {
       "id": "udio",
+      "serviceKinds": [],
       "alias": "udio",
       "name": "Udio",
       "icon": "music_note",
@@ -5679,7 +6691,8 @@
       "serviceKinds": [
         "llm"
       ],
-      "authHint": "No auth required. API accepts any non-empty string as key for identification. If older built-in models return 404, use Available Models → Import from /models or Auto-Sync; verified live model: solidrust/Hermes-3-Llama-3.1-8B-AWQ.",
+      "toolCalling": "emulated",
+      "authHint": "No auth required. API accepts any non-empty string as key for identification. If older built-in models return 404, use Available Models → Import from /models or Auto-Sync; verified live model: turboderp/Qwen3.8-27B-exl3.",
       "freeNote": "Free forever — no signup, no credit card. OpenAI-compatible endpoints.",
       "notice": {
         "text": "UncloseAI needs no API key. API accepts any non-empty string as key for identification. If older built-in models return 404, use Available Models → Import from /models or Auto-Sync."
@@ -5693,6 +6706,9 @@
     },
     {
       "id": "unorouter",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "unorouter",
       "name": "UnoRouter",
       "icon": "unorouter",
@@ -5704,13 +6720,15 @@
       "website": "https://unorouter.ai",
       "apiHint": "Create an API key at https://unorouter.ai, then paste it here as a Bearer token.",
       "category": "api-key",
-      "iconAsset": "/providers/unorouter.svg",
       "iconFallbackIds": [
         "unorouter"
       ]
     },
     {
       "id": "upstage",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "upstage",
       "name": "Upstage",
       "icon": "trending_up",
@@ -5725,6 +6743,9 @@
     },
     {
       "id": "v0-vercel",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "v0",
       "name": "v0 (Vercel)",
       "icon": "code_blocks",
@@ -5740,6 +6761,9 @@
     },
     {
       "id": "v0-vercel-web",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "v0-vercel-web",
       "name": "v0 Vercel Web (Code Gen)",
       "icon": "auto_awesome",
@@ -5758,6 +6782,9 @@
     },
     {
       "id": "venice",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "venice",
       "name": "Venice.ai",
       "icon": "travel_explore",
@@ -5773,13 +6800,16 @@
     },
     {
       "id": "venice-web",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "ven",
       "name": "Venice Web (Privacy)",
       "icon": "auto_awesome",
       "color": "#22C55E",
       "textIcon": "VW",
       "website": "https://venice.ai",
-      "authHint": "Paste your session cookie from venice.ai (DevTools → Application → Cookies)",
+      "authHint": "Paste your __client cookie value from .clerk.venice.ai (DevTools → Application → Cookies)",
       "riskNoticeVariant": "webCookie",
       "category": "web-cookie",
       "iconAsset": "/providers/venice-web.svg",
@@ -5816,11 +6846,15 @@
     },
     {
       "id": "vercel-ai-gateway",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "vag",
       "name": "Vercel AI Gateway",
       "icon": "route",
       "color": "#111827",
       "textIcon": "VAI",
+      "passthroughModels": true,
       "website": "https://vercel.com/docs/ai-gateway",
       "category": "api-key",
       "iconAsset": "/providers/vercel.svg",
@@ -5832,6 +6866,9 @@
     },
     {
       "id": "vertex",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "vertex",
       "name": "Vertex AI",
       "icon": "cloud",
@@ -5839,7 +6876,7 @@
       "textIcon": "VA",
       "website": "https://cloud.google.com/vertex-ai",
       "hasFree": true,
-      "authHint": "Provide Service Account JSON or OAuth access_token",
+      "authHint": "Provide Service Account JSON, an OAuth access token, a Vertex Express API key, or a service-account-bound authorization key. Express mode supports Gemini only; partner models require project-scoped credentials.",
       "category": "api-key",
       "iconAsset": "/providers/vertex.svg",
       "iconFallbackIds": [
@@ -5850,13 +6887,16 @@
     },
     {
       "id": "vertex-partner",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "vp",
       "name": "Vertex AI Partners",
       "icon": "cloud",
       "color": "#34A853",
       "textIcon": "VP",
       "website": "https://cloud.google.com/vertex-ai",
-      "authHint": "Provide the same Service Account JSON used for Vertex AI partner models.",
+      "authHint": "Provide Service Account JSON or OAuth credentials. A service-account-bound authorization key also supports discovery, but partner inference additionally requires its Google Cloud project ID. Standard Express keys support Gemini only.",
       "category": "api-key",
       "iconAsset": "/providers/vertex-partner.svg",
       "iconFallbackIds": [
@@ -5868,6 +6908,9 @@
     },
     {
       "id": "vllm",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "vllm",
       "name": "vLLM",
       "icon": "memory",
@@ -5885,6 +6928,9 @@
     },
     {
       "id": "void-ai",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "void-ai",
       "name": "Void AI",
       "icon": "science",
@@ -5904,6 +6950,9 @@
     },
     {
       "id": "volcengine",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "volcengine",
       "name": "Volcengine",
       "icon": "local_fire_department",
@@ -5918,6 +6967,9 @@
     },
     {
       "id": "volcengine-agent-plan",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "veap",
       "name": "Volcengine Ark Agent Plan",
       "icon": "local_fire_department",
@@ -5936,6 +6988,9 @@
     },
     {
       "id": "volcengine-coding-plan",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "vecp",
       "name": "Volcengine Ark Coding Plan",
       "icon": "code",
@@ -5955,6 +7010,7 @@
     },
     {
       "id": "voyage-ai",
+      "serviceKinds": [],
       "alias": "voyage",
       "name": "Voyage AI",
       "icon": "blur_on",
@@ -5973,6 +7029,9 @@
     },
     {
       "id": "wafer",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "wafer",
       "name": "Wafer AI",
       "icon": "layers",
@@ -5989,6 +7048,9 @@
     },
     {
       "id": "wandb",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "wandb",
       "name": "Weights & Biases Inference",
       "icon": "monitoring",
@@ -5996,7 +7058,6 @@
       "textIcon": "WB",
       "website": "https://wandb.ai",
       "category": "api-key",
-      "iconAsset": "/providers/wandb.svg",
       "iconFallbackIds": [
         "wandb",
         "weights-biases-inference"
@@ -6004,6 +7065,9 @@
     },
     {
       "id": "watsonx",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "watsonx",
       "name": "IBM watsonx.ai Gateway",
       "icon": "hub",
@@ -6022,7 +7086,30 @@
       ]
     },
     {
+      "id": "workbuddy",
+      "serviceKinds": [
+        "llm"
+      ],
+      "alias": "wb",
+      "name": "WorkBuddy",
+      "icon": "smart_toy",
+      "color": "#1A73E8",
+      "textIcon": "WB",
+      "website": "https://www.workbuddy.ai",
+      "subscriptionRisk": true,
+      "riskNoticeVariant": "oauth",
+      "authHint": "Tencent WorkBuddy (www.workbuddy.ai). Authorize the CLI device flow in the popup; OmniRoute then polls for the token and attaches the required X-Product: SaaS header. The model roster is served by the authenticated catalogue, so it is discovered live rather than listed here. WorkBuddy only accepts streaming requests, which OmniRoute accumulates back into a JSON response for non-streaming callers.",
+      "category": "oauth",
+      "iconFallbackIds": [
+        "workbuddy",
+        "wb"
+      ]
+    },
+    {
       "id": "writer",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "writer",
       "name": "Writer",
       "icon": "auto_awesome",
@@ -6061,6 +7148,9 @@
     },
     {
       "id": "x5lab",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "x5lab",
       "name": "X5Lab",
       "icon": "router",
@@ -6101,6 +7191,9 @@
     },
     {
       "id": "xai-oauth",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "xao",
       "name": "xAI OAuth (Grok)",
       "icon": "auto_awesome",
@@ -6122,6 +7215,9 @@
     },
     {
       "id": "xiaomi-mimo",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "mimo",
       "name": "Xiaomi MiMo",
       "icon": "devices",
@@ -6138,12 +7234,16 @@
     },
     {
       "id": "xiaomi-mimo-token-plan",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "mimotp",
       "name": "Xiaomi MiMo Token Plan",
       "icon": "devices",
       "color": "#EA580C",
       "textIcon": "MT",
       "website": "https://mimo.mi.com",
+      "apiHint": "Use a Token Plan key (tp-…) and select the cluster (Singapore, Amsterdam, or China) that issued it.",
       "category": "api-key",
       "iconAsset": "/providers/xiaomi-mimo-token-plan.svg",
       "iconFallbackIds": [
@@ -6154,6 +7254,9 @@
     },
     {
       "id": "xinference",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "xinference",
       "name": "XInference",
       "icon": "hub",
@@ -6170,7 +7273,71 @@
       ]
     },
     {
+      "id": "xkiro",
+      "serviceKinds": [
+        "llm"
+      ],
+      "alias": "xkiro",
+      "name": "xKiro",
+      "icon": "hub",
+      "color": "#0EA5E9",
+      "textIcon": "XK",
+      "passthroughModels": true,
+      "website": "https://xkiro.com",
+      "hasFree": true,
+      "freeNote": "Free plan: 5M tokens/day per account across 40 upstream free models — 39 pinned here (Qwen, MiniMax, DeepSeek, Mistral, SenseNova) — no card; past the daily allowance free requests get a 429 until the reset. RPM not published.",
+      "authHint": "Create a free account at xkiro.com and paste the key here (Bearer; x-api-key also accepted).",
+      "apiHint": "OpenAI-compatible endpoint at https://api.xkiro.com/v1. Public /v1/models tags free rows with access_tier=free; paid models are rejected on the free plan.",
+      "category": "api-key",
+      "iconFallbackIds": [
+        "xkiro"
+      ]
+    },
+    {
+      "id": "xquik-search",
+      "alias": "xquik",
+      "name": "Xquik X Search",
+      "icon": "tag",
+      "color": "#111827",
+      "textIcon": "XQ",
+      "website": "https://docs.xquik.com",
+      "authHint": "Xquik API key (xq_...). Search is metered per returned post; the catalog estimate uses 5 results.",
+      "serviceKinds": [
+        "webSearch"
+      ],
+      "category": "search",
+      "iconFallbackIds": [
+        "xquik-search",
+        "xquik",
+        "xquik-x-search"
+      ]
+    },
+    {
+      "id": "y-api",
+      "serviceKinds": [
+        "llm"
+      ],
+      "alias": "y-api",
+      "name": "Y-API",
+      "icon": "router",
+      "color": "#0891B2",
+      "textIcon": "YA",
+      "passthroughModels": true,
+      "website": "https://y-api.bestvirtualgoods.com",
+      "hasFree": true,
+      "freeNote": "4 of its 20 catalog models (deepseek/deepseek-v4-flash, minimax/minimax-m2.7, tencent/hy3, xiaomi/mimo-v2.5) are priced at 0 credit in the publisher's 2026-10-04 snapshot; the rest bill against prepaid credit, and signup grants a small credit whose amount is Y-API's to set. Y-API can withdraw a free model at any time — re-check https://y-api.bestvirtualgoods.com/pricing.json.",
+      "apiHint": "Create an API key at https://y-api.bestvirtualgoods.com, then use https://api.y-api.bestvirtualgoods.com/v1 as the OpenAI-compatible base URL. Models are served by this gateway from the third-party upstream vendors named per model in its catalog; check each upstream jurisdiction, privacy and data-transfer terms before use.",
+      "category": "api-key",
+      "iconFallbackIds": [
+        "y-api",
+        "y"
+      ]
+    },
+    {
       "id": "yi",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "yi",
       "name": "Yi (01.AI)",
       "icon": "auto_awesome",
@@ -6190,6 +7357,9 @@
     },
     {
       "id": "yolo-auto",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "yolo-auto",
       "name": "Yolo-Auto",
       "icon": "auto_awesome",
@@ -6208,6 +7378,9 @@
     },
     {
       "id": "youcom-search",
+      "serviceKinds": [
+        "webSearch"
+      ],
       "alias": "youcom-search",
       "name": "You.com Search",
       "icon": "travel_explore",
@@ -6216,7 +7389,6 @@
       "website": "https://you.com/business/api/",
       "authHint": "X-API-Key from the You.com platform dashboard",
       "category": "search",
-      "iconAsset": "/providers/youcom-search.svg",
       "iconFallbackIds": [
         "youcom-search",
         "youcom",
@@ -6225,6 +7397,9 @@
     },
     {
       "id": "yuanbao-web",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "ybw",
       "name": "Tencent Yuanbao (Free)",
       "icon": "auto_awesome",
@@ -6246,13 +7421,16 @@
     },
     {
       "id": "zai",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "zai",
       "name": "Z.AI",
       "icon": "psychology",
       "color": "#2563EB",
       "textIcon": "ZA",
-      "website": "https://open.bigmodel.cn",
-      "apiHint": "API key from https://open.bigmodel.cn/usercenter/apikeys",
+      "website": "https://z.ai/model-api",
+      "apiHint": "Create an API key at https://z.ai/manage-apikey/apikey-list.",
       "category": "api-key",
       "iconAsset": "/providers/zai.svg",
       "iconFallbackIds": [
@@ -6262,6 +7440,9 @@
     },
     {
       "id": "zai-web",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "zw",
       "name": "Z.ai Web",
       "icon": "auto_awesome",
@@ -6310,6 +7491,9 @@
     },
     {
       "id": "zed",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "zd",
       "name": "Zed IDE",
       "icon": "code",
@@ -6327,6 +7511,9 @@
     },
     {
       "id": "zed-hosted",
+      "serviceKinds": [
+        "llm"
+      ],
       "name": "Zed Hosted Models",
       "icon": "code_blocks",
       "color": "#101010",
@@ -6344,6 +7531,9 @@
     },
     {
       "id": "zenmux",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "zm",
       "name": "ZenMux",
       "icon": "neurology",
@@ -6363,6 +7553,9 @@
     },
     {
       "id": "zenmux-free",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "zmf",
       "name": "ZenMux Free (Web)",
       "icon": "bolt",
@@ -6382,6 +7575,9 @@
     },
     {
       "id": "zerolimitai",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "zerolimitai",
       "name": "ZeroLimitAI",
       "icon": "router",
@@ -6400,6 +7596,9 @@
     },
     {
       "id": "zylo-api",
+      "serviceKinds": [
+        "llm"
+      ],
       "alias": "zylo",
       "name": "Zylo API",
       "icon": "hub",

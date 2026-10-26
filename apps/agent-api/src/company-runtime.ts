@@ -728,13 +728,16 @@ export class CompanyDelegationRuntime {
       }
       // OmniRoute keeps an existing combo unchanged. Include its effective routing
       // and prompt in the identity so a Settings change cannot reuse an old provider.
+      // Since OmniRoute 3.8.52 a step is bounded only by `targetTimeoutMs`, not by `timeoutMs`. These calls do not
+      // stream, so it bounds the whole step: with a fallback model a hung first step gets half the request budget,
+      // leaving the other half for the next model instead of the request timing out first.
       const systemMessage = instruction(company, agent, agent.id === main.id, includeMemory, linked);
       const name = `npati/a/${digest(JSON.stringify({ workspace: company.workspaceId, company: company.id, agent: agent.id, revision: agent.revision, models: comboCandidateModels, systemMessage, tools: allowed, timeoutMs: this.timeoutMs }))}`;
       await this.ai.ensureCombo({
         name, strategy: "priority", models: comboCandidateModels,
         description: `NPATI Company agent ${agent.name}`, system_message: systemMessage,
         tool_filter_regex: allowed.length ? `^(?:${allowed.join("|")})$` : "a^",
-        config: { maxRetries: 2, retryDelayMs: 500, failoverBeforeRetry: true, timeoutMs: this.timeoutMs }
+        config: { maxRetries: 2, retryDelayMs: 500, failoverBeforeRetry: true, timeoutMs: this.timeoutMs, targetTimeoutMs: comboCandidateModels.length > 1 ? Math.floor(this.timeoutMs / 2) : this.timeoutMs }
       }, signal);
       names.set(agent.id, name);
     }
@@ -761,7 +764,7 @@ export class CompanyDelegationRuntime {
         name: final, strategy: "pipeline", models: [
           { kind: "combo-ref", comboName: fusion }, { kind: "combo-ref", comboName: names.get(reviewer.id)! },
           { kind: "combo-ref", comboName: names.get(main.id)! }],
-        config: { nestedComboMode: "execute", maxRetries: 2, retryDelayMs: 500, failoverBeforeRetry: true, timeoutMs: this.timeoutMs }
+        config: { nestedComboMode: "execute", maxRetries: 2, retryDelayMs: 500, failoverBeforeRetry: true, timeoutMs: this.timeoutMs, targetTimeoutMs: this.timeoutMs }
       }, signal);
       return { model: final, mode: "fusion" as const, agentModels };
     }
@@ -772,7 +775,7 @@ export class CompanyDelegationRuntime {
     await this.ai.ensureCombo({
       name: pipeline, strategy: "pipeline",
       models: chain.map((agent) => ({ kind: "combo-ref", comboName: names.get(agent.id)! })),
-      config: { nestedComboMode: "execute", maxRetries: 2, retryDelayMs: 500, failoverBeforeRetry: true, timeoutMs: this.timeoutMs }
+      config: { nestedComboMode: "execute", maxRetries: 2, retryDelayMs: 500, failoverBeforeRetry: true, timeoutMs: this.timeoutMs, targetTimeoutMs: this.timeoutMs }
     }, signal);
     return { model: pipeline, mode: mode === "single" ? "single" as const : "pipeline" as const, agentModels };
   }

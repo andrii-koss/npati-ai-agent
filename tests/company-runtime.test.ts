@@ -234,6 +234,12 @@ describe("Company delegation runtime", () => {
       JSON.stringify(combo.models) === JSON.stringify(["openai/gpt-4o"]))).toBe(true);
     expect(combos.filter((combo) => combo.strategy === "priority").every((combo) =>
       combo.config?.maxRetries === 2 && combo.config?.failoverBeforeRetry === true)).toBe(true);
+    // OmniRoute 3.8.52 bounds a step only by targetTimeoutMs: a lone model keeps the whole request budget, a combo
+    // with a fallback gives the first step half, and every pipeline stage is bounded by the request budget.
+    for (const combo of combos.filter((item) => item.strategy !== "fusion")) {
+      const budget = combo.config?.timeoutMs as number;
+      expect(combo.config?.targetTimeoutMs).toBe(combo.strategy === "priority" && combo.models.length > 1 ? Math.floor(budget / 2) : budget);
+    }
     expect(chat).toHaveBeenCalledTimes(3);
     expect(chat.mock.calls.every(([request]) => /^npati\/a\//.test(request.model ?? ""))).toBe(true);
     expect(completed.headers["x-npati-cost-usd"]).toBe("0.0126");

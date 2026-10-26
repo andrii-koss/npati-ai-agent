@@ -2022,8 +2022,8 @@ export const de: TranslationSchema = {
     services: {
       omniroute: {
         name: "NPATI KI-Routing",
-        desc: "A2A-Orchestrierung, Combo-Routing, Fusion, Pipeline & Einbettungs-Engine (v3.8.50).",
-        details: "v3.8.50 Core",
+        desc: "A2A-Orchestrierung, Combo-Routing, Fusion, Pipeline & Einbettungs-Engine (v3.8.52).",
+        details: "v3.8.52 Core",
         versionPrefix: "Version",
       },
       postgres: {

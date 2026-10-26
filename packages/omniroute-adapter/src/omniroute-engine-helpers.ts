@@ -117,6 +117,15 @@ export function numericHeader(headers: Headers, ...names: string[]) {
   return undefined;
 }
 
+/**
+ * OmniRoute's own response cost (`X-OmniRoute-Response-Cost`, USD). It reports `0` for a model it has no price for,
+ * so only a positive value is a real price; anything else stays undefined and NPATI keeps its budget estimate.
+ */
+export function upstreamCostUsd(headers: Headers) {
+  const cost = numericHeader(headers, "x-omniroute-response-cost", "x-omniroute-cost-usd", "x-cost-usd");
+  return cost !== undefined && cost > 0 ? cost : undefined;
+}
+
 export function textHeader(headers: Headers, ...names: string[]) {
   for (const name of names) {
     const value = headers.get(name)?.trim();

@@ -3,14 +3,14 @@ import { describe, expect, it } from "vitest";
 
 const manifest = [
   { id: "openai", auth: { type: "apikey" }, models: [{ id: "gpt-5", name: "GPT 5", supportsReasoning: true }] },
-  { id: "opencode", auth: { type: "none" }, models: [{ id: "claude-free", name: "Claude Free" }] },
+  { id: "aihorde", auth: { type: "none" }, models: [{ id: "horde-free", name: "Horde Free" }] },
 ];
 const connection = [{ id: "connection-1", providerId: "openai", active: true, status: "connected" as const, healthy: true }];
 
 describe("AI marketplace normalization", () => {
   it("1. loads the provider catalog from the pinned OmniRoute registry", () => {
-    expect(PINNED_PROVIDER_CATALOG.sourceVersion).toBe("v3.8.50");
-    expect(PINNED_PROVIDER_CATALOG.providers).toHaveLength(352);
+    expect(PINNED_PROVIDER_CATALOG.sourceVersion).toBe("v3.8.52");
+    expect(PINNED_PROVIDER_CATALOG.providers).toHaveLength(371);
   });
 
   it("2. normalizes provider auth, model counts, and capabilities", () => {
@@ -36,7 +36,7 @@ describe("AI marketplace normalization", () => {
   it("4. filters only providers with actual free metadata", () => {
     const providers = normalizeCatalog(manifest, connection);
     const free = filterProviders(providers, manifest, { tab: "free" });
-    expect(free.some((provider) => provider.id === "opencode" && provider.freeStatus === "free")).toBe(true);
+    expect(free.some((provider) => provider.id === "aihorde" && provider.freeStatus === "free")).toBe(true);
     expect(free.some((provider) => provider.id === "openai")).toBe(false);
   });
 
@@ -47,12 +47,12 @@ describe("AI marketplace normalization", () => {
   });
 
   it("6. keeps the full registry for All", () => {
-    expect(filterProviders(normalizeCatalog(manifest, connection), manifest, { tab: "all" })).toHaveLength(352);
+    expect(filterProviders(normalizeCatalog(manifest, connection), manifest, { tab: "all" })).toHaveLength(371);
   });
 
   it("7. searches by provider and model metadata", () => {
     const providers = normalizeCatalog(manifest, connection);
-    expect(filterProviders(providers, manifest, { search: "Claude Free" }).map((provider) => provider.id)).toEqual(["opencode"]);
+    expect(filterProviders(providers, manifest, { search: "Horde Free" }).map((provider) => provider.id)).toEqual(["aihorde"]);
     expect(filterProviders(providers, manifest, { search: "openai" }).some((provider) => provider.id === "openai")).toBe(true);
   });
 
@@ -69,13 +69,13 @@ describe("AI marketplace normalization", () => {
   });
 
   it("10. keeps verified no-auth adapters connectable", () => {
-    const provider = normalizeCatalog(manifest, connection).find((item) => item.id === "opencode");
+    const provider = normalizeCatalog(manifest, connection).find((item) => item.id === "aihorde");
     expect(provider).toMatchObject({ connectionMode: "no_auth", availability: "ready", connectable: true });
   });
 
   it("11. does not offer a generic connection for unavailable no-auth adapters", () => {
-    const runtimeManifest = [...manifest, { id: "chipotle", auth: { type: "none" }, models: [] }];
-    const provider = normalizeCatalog(runtimeManifest, connection).find((item) => item.id === "chipotle");
+    const runtimeManifest = [...manifest, { id: "duckduckgo-web", auth: { type: "none" }, models: [] }];
+    const provider = normalizeCatalog(runtimeManifest, connection).find((item) => item.id === "duckduckgo-web");
     expect(provider).toMatchObject({ connectionMode: "no_auth", availability: "unavailable", connectable: false });
   });
 
@@ -98,7 +98,7 @@ describe("AI marketplace normalization", () => {
     const providers = normalizeCatalog(manifest, connection);
     const visible = filterProviders(providers, manifest, { connectableOnly: true });
     expect(visible.map((provider) => provider.id)).toContain("openai");
-    expect(visible.map((provider) => provider.id)).toContain("opencode");
+    expect(visible.map((provider) => provider.id)).toContain("aihorde");
     expect(visible.map((provider) => provider.id)).toContain("agy");
     expect(visible.map((provider) => provider.id)).not.toContain("adobe-firefly");
     expect(visible.map((provider) => provider.id)).not.toContain("9router");

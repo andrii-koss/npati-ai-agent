@@ -155,6 +155,27 @@ it("keeps manifest capability metadata when a connection refresh lists only id a
   expect(models.find((model) => model.id === "ollama-cloud/gemma4:31b")?.capabilities).not.toContain("vision");
   expect(models.map((model) => model.id)).toContain("ollama-cloud/new-model");
 });
+it("shows tool calling, reasoning and the context window from OmniRoute's model catalog", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+    const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
+    if (url.pathname === "/api/v1/provider-plugin-manifest") return json({ providers: [{ id: "deepseek", auth: { type: "apikey" }, models: [] }] });
+    if (url.pathname === "/api/monitoring/health") return json({ version: "3.8.52", localProviders: {} });
+    if (url.pathname === "/api/providers" && (!init?.method || init.method === "GET")) return json({ connections: [{ id: "c1", provider: "deepseek", isActive: true, testStatus: "active" }] });
+    // The shapes OmniRoute 3.8.52 returns: the connection list has ids only, /v1/models has the capability record.
+    if (url.pathname === "/api/providers/c1/models") return json({ models: [{ id: "deepseek-flash", supportsVision: true }, { id: "deepseek-v4-pro" }] });
+    if (url.pathname === "/api/v1/models") return json({ data: [
+      { id: "deepseek/deepseek-flash", capabilities: { vision: true, tool_calling: true, reasoning: true, thinking: true }, context_length: 1_000_000, max_output_tokens: 384_000 },
+      { id: "openai/gpt-5", capabilities: { tool_calling: true } },
+    ] });
+    return json({ error: "Not found" });
+  }));
+  const models = await new OmniRouteMarketplace({ baseUrl: "http://omniroute" }).models("deepseek", [], true);
+  const flash = models.find((model) => model.id === "deepseek/deepseek-flash");
+  expect(flash?.capabilities).toEqual(expect.arrayContaining(["tools", "reasoning", "vision"]));
+  expect(flash).toMatchObject({ contextWindow: 1_000_000, maxOutputTokens: 384_000 });
+  expect(models.find((model) => model.id === "deepseek/deepseek-v4-pro")?.capabilities).not.toContain("tools");
+});
 it("never installs a monthly allowance from legacy stop-paid preferences", async () => {
  const requests: Array<{path:string;body:Record<string,unknown>}> = [];
  vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {

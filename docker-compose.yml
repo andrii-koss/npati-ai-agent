@@ -215,7 +215,7 @@ services:
 
   omniroute:
     container_name: npati-agent-omniroute
-    image: docker.io/diegosouzapw/omniroute:3.8.50
+    image: docker.io/diegosouzapw/omniroute:3.8.52@sha256:b08a12e876baa8a5ccadd1ebbe346fe7267dba3b1c9f4fd6bb02070fae41ab6c
     restart: unless-stopped
     stop_grace_period: 40s
     environment:
@@ -228,6 +228,10 @@ services:
       REDIS_URL: redis://redis:6379
       OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:-npati-agent-internal-local}
       OMNIROUTE_API_KEY_ID: env-key
+      # Every /v1 caller must present OMNIROUTE_API_KEY (the 3.8.52 image default, stated so a rollback keeps it).
+      REQUIRE_API_KEY: "true"
+      # Never resume a cut stream after a tool call was emitted, should mid-stream continuation ever be enabled.
+      STREAM_RECOVERY_TOOLCALL_ORDER_FIX: "true"
       JINA_AI_API_KEY: ${JINA_AI_API_KEY:-}
       COHERE_API_KEY: ${COHERE_API_KEY:-}
       VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}

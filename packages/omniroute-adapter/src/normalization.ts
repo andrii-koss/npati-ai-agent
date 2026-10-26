@@ -23,14 +23,16 @@ type ManifestProvider = Record<string, unknown> & {
 // These adapters were verified against the generic provider endpoint exposed by
 // the pinned OmniRoute runtime. Other no-auth catalog records need their own
 // adapter/service lifecycle and must not be presented as ordinary connections.
-const GENERIC_NO_AUTH_PROVIDER_IDS = new Set(["aihorde", "opencode"]);
+// OmniRoute 3.8.52 retired the keyless "OpenCode Free" provider (`opencode`); only AI Horde remains.
+const GENERIC_NO_AUTH_PROVIDER_IDS = new Set(["aihorde"]);
 
 export const RECOMMENDED_PROVIDER_IDS = [
-  "openai", "gemini", "groq", "mistral", "ollama-local", "anthropic", "opencode", "openrouter",
+  "openai", "gemini", "groq", "mistral", "ollama-local", "anthropic", "openrouter",
 ] as const;
 
+// OpenCode stays recommended through its authenticated Zen provider, which 3.8.52 keeps.
 export const RECOMMENDED_CODING_AGENT_IDS = [
-  "codex", "claude", "cursor", "github", "opencode", "zed", "kiro", "trae", "antigravity",
+  "codex", "claude", "cursor", "github", "opencode-zen", "zed", "kiro", "trae", "antigravity",
 ] as const;
 
 export const EXCLUDED_GENERAL_AI_PROVIDER_IDS = new Set([

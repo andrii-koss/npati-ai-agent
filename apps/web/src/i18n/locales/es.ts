@@ -2191,8 +2191,8 @@ export const es: TranslationSchema = {
     services: {
       omniroute: {
         name: "Enrutamiento NPATI AI",
-        desc: "Orquestación A2A, enrutamiento combinado, fusión, canalizaciones y motor de incrustaciones vectoriales (v3.8.50).",
-        details: "v3.8.50 Núcleo",
+        desc: "Orquestación A2A, enrutamiento combinado, fusión, canalizaciones y motor de incrustaciones vectoriales (v3.8.52).",
+        details: "v3.8.52 Núcleo",
         versionPrefix: "Versión",
       },
       postgres: {

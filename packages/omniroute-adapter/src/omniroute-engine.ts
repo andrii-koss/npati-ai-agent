@@ -16,6 +16,7 @@ import {
   boundedTextChunks,
   numericHeader,
   textHeader,
+  upstreamCostUsd,
   chatUsage,
   normalizeM4aContainer,
   withExplicitPromptCache,
@@ -23,6 +24,7 @@ import {
 
 export class OmniRouteEngine implements AIEngine {
   private readonly chatModelMetadata = new Map<string, ModelInfo>();
+  private readonly reconciledCombos = new Set<string>();
   private readonly baseUrl?: string;
   private readonly apiKey?: string;
   private readonly timeoutMs: number;
@@ -154,11 +156,12 @@ export class OmniRouteEngine implements AIEngine {
           provider: textHeader(response.headers, "x-omniroute-provider", "x-provider") ?? payload.provider,
           routingStrategy: textHeader(response.headers, "x-omniroute-routing-strategy", "x-routing-strategy") ?? (model === "auto" ? "auto" : "manual"),
           latencyMs: numericHeader(response.headers, "x-omniroute-latency-ms", "x-response-time-ms") ?? Math.max(0, Date.now() - startedAt),
-          costUsd: numericHeader(response.headers, "x-omniroute-cost-usd", "x-cost-usd"),
-          costSource: numericHeader(response.headers, "x-omniroute-cost-usd", "x-cost-usd") != null ? "upstream" : undefined,
+          costUsd: upstreamCostUsd(response.headers),
+          costSource: upstreamCostUsd(response.headers) != null ? "upstream" : undefined,
           cacheHit: textHeader(response.headers, "x-omniroute-cache-hit", "x-cache-hit") === "true" || (chatUsage(payload)?.cachedTokens ?? 0) > 0,
-          cacheSavingsUsd: numericHeader(response.headers, "x-omniroute-cache-savings-usd", "x-cache-savings-usd"),
-          failoverCount: numericHeader(response.headers, "x-omniroute-failover-count", "x-failover-count") ?? index,
+          cacheSavingsUsd: numericHeader(response.headers, "x-omniroute-cost-saved", "x-omniroute-cache-savings-usd", "x-cache-savings-usd"),
+          // OmniRoute's in-combo fallbacks plus NPATI's own candidate fallbacks before this response.
+          failoverCount: (numericHeader(response.headers, "x-omniroute-fallback-attempts", "x-omniroute-failover-count", "x-failover-count") ?? 0) + index,
         },
       }, useResponses ? undefined : payload.choices?.[0]?.message);
     }
@@ -446,15 +449,46 @@ export class OmniRouteEngine implements AIEngine {
       body: JSON.stringify(input),
       signal: requestSignal(signal, Math.max(this.timeoutMs, 15_000)),
     });
-    if (response.ok) return { name: input.name };
+    if (response.ok) { this.reconciledCombos.add(input.name); return { name: input.name }; }
     const detail = await response.text().catch(() => "");
-    if (response.status === 400 && /already exists/i.test(detail)) return { name: input.name };
+    if (response.status === 400 && /already exists/i.test(detail)) {
+      await this.reconcileComboConfig(input, signal);
+      return { name: input.name };
+    }
     let message = detail.slice(0, 300);
     try {
       const payload = JSON.parse(detail) as { error?: string | { message?: string } };
       message = typeof payload.error === "string" ? payload.error : payload.error?.message ?? message;
     } catch { /* keep safe response text */ }
     throw new Error(`OmniRoute combo setup failed with HTTP ${response.status}${message ? `: ${message}` : ""}`);
+  }
+
+  /**
+   * A combo created before a config field existed (for example `targetTimeoutMs`) keeps its old config, because
+   * creation stops at "already exists". Once per combo and process, the stored config is brought up to the requested
+   * one. The combo still works with its old config, so a failed sync never fails the request.
+   */
+  private async reconcileComboConfig(input: OmniRouteComboInput, signal?: AbortSignal) {
+    if (!input.config || this.reconciledCombos.has(input.name)) return;
+    try {
+      const list = await fetch(this.baseUrl + "/api/combos", { headers: this.headers(), signal: requestSignal(signal, Math.max(this.timeoutMs, 15_000)) });
+      if (!list.ok) return;
+      const payload = await list.json() as { combos?: Array<{ id?: string; name?: string; config?: Record<string, unknown> }> } | Array<{ id?: string; name?: string; config?: Record<string, unknown> }>;
+      const stored = (Array.isArray(payload) ? payload : payload.combos ?? []).find((combo) => combo.name === input.name);
+      if (!stored?.id) return;
+      const current = stored.config ?? {};
+      const stale = Object.entries(input.config).some(([key, value]) => JSON.stringify(current[key]) !== JSON.stringify(value));
+      if (stale) {
+        const update = await fetch(`${this.baseUrl}/api/combos/${encodeURIComponent(stored.id)}`, {
+          method: "PUT", headers: this.headers(), body: JSON.stringify({ config: { ...current, ...input.config } }),
+          signal: requestSignal(signal, Math.max(this.timeoutMs, 15_000)),
+        });
+        if (!update.ok) return;
+      }
+      this.reconciledCombos.add(input.name);
+    } catch {
+      // Keep serving with the stored config; the next process retries the sync.
+    }
   }
 
   async listModels(): Promise<ModelInfo[]> {

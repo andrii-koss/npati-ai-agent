@@ -50,7 +50,7 @@ let gateFailed = false;
 
 // 1. Upstream Version Compatibility Check
 console.log("\n[1/5] Checking OmniRoute Version Compatibility...");
-const supportedRange = { min: "3.8.49", max: "3.9.99", current: "3.8.50" };
+const supportedRange = { min: "3.8.49", max: "3.9.99", current: "3.8.52" };
 console.log(`  • Upstream Target: OmniRoute v${supportedRange.current} (Supported range: >= ${supportedRange.min} < 4.0.0)`);
 console.log("  ✓ Upstream version is within supported semantic version window.");
 

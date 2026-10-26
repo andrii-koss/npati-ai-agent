@@ -8,7 +8,7 @@ import { getLocalizedProviderDescription } from "./i18n/providerDescriptions";
 
 const tabs = ["all", "recommended", "free", "connected"] as const;
 const RECOMMENDED_ORDER = [
-  "openai", "gemini", "groq", "mistral", "ollama-local", "anthropic", "opencode", "openrouter",
+  "openai", "gemini", "groq", "mistral", "ollama-local", "anthropic", "openrouter",
 ] as const;
 
 function sortRecommended(list: Provider[]): Provider[] {

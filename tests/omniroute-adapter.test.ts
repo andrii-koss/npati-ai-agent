@@ -270,6 +270,63 @@ describe("OmniRoute adapter", () => {
     });
   });
 
+  it("reads the response headers OmniRoute actually sends and keeps the estimate for an unpriced model", async () => {
+    const reply = (headers: Record<string, string>) => new Response(JSON.stringify({
+      model: "anthropic/claude-sonnet-5",
+      choices: [{ message: { content: "ok" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+    }), { status: 200, headers: { "content-type": "application/json", "x-request-id": "req-real", ...headers } });
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(reply({ "X-OmniRoute-Response-Cost": "0.0031000000", "X-OmniRoute-Cost-Saved": "0.0012000000", "X-OmniRoute-Fallback-Attempts": "2", "X-OmniRoute-Latency-Ms": "310" }))
+      // DeepSeek has no OmniRoute price: the header is a literal zero, which is not a price.
+      .mockResolvedValueOnce(reply({ "X-OmniRoute-Response-Cost": "0.0000000000", "X-OmniRoute-Latency-Ms": "120" })));
+    const engine = new OmniRouteEngine({ baseUrl: "http://omniroute:20128" });
+
+    const priced = await engine.chat({ model: "anthropic/claude-sonnet-5", messages: [{ role: "user", content: "hi" }] });
+    expect(priced.telemetry).toMatchObject({ costUsd: 0.0031, costSource: "upstream", cacheSavingsUsd: 0.0012, failoverCount: 2, latencyMs: 310 });
+
+    const unpriced = await engine.chat({ model: "deepseek/deepseek-flash", messages: [{ role: "user", content: "hi" }] });
+    expect(unpriced.telemetry?.costUsd).toBeUndefined();
+    expect(unpriced.telemetry?.costSource).toBeUndefined();
+    expect(unpriced.telemetry?.failoverCount).toBe(0);
+  });
+
+  it("brings an existing combo's config up to date once instead of keeping the stale one", async () => {
+    const calls: Array<{ method: string; path: string; body?: string }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      calls.push({ method: init?.method ?? "GET", path: url.pathname, body: typeof init?.body === "string" ? init.body : undefined });
+      if (url.pathname === "/api/combos" && init?.method === "POST") return new Response(JSON.stringify({ error: "Combo name already exists" }), { status: 400 });
+      if (url.pathname === "/api/combos") return new Response(JSON.stringify({ combos: [
+        { id: "c-stale", name: "npati/a/stale", config: { maxRetries: 2, timeoutMs: 120000, legacy: true } },
+        { id: "c-fresh", name: "npati/a/fresh", config: { maxRetries: 2, timeoutMs: 120000, targetTimeoutMs: 120000 } },
+      ] }));
+      return new Response(JSON.stringify({ ok: true }));
+    }));
+    const engine = new OmniRouteEngine({ baseUrl: "http://omniroute:20128" });
+    const config = { maxRetries: 2, timeoutMs: 120000, targetTimeoutMs: 120000 };
+
+    await engine.ensureCombo({ name: "npati/a/stale", strategy: "priority", models: [], config });
+    await engine.ensureCombo({ name: "npati/a/stale", strategy: "priority", models: [], config });
+    await engine.ensureCombo({ name: "npati/a/fresh", strategy: "priority", models: [], config });
+
+    const updates = calls.filter((call) => call.method === "PUT");
+    expect(updates).toHaveLength(1);
+    expect(updates[0]!.path).toBe("/api/combos/c-stale");
+    expect(JSON.parse(updates[0]!.body!)).toEqual({ config: { maxRetries: 2, timeoutMs: 120000, legacy: true, targetTimeoutMs: 120000 } });
+    // The second call for the same combo is answered from the process cache: one POST, no second listing.
+    expect(calls.filter((call) => call.method === "GET" && call.path === "/api/combos")).toHaveLength(2);
+  });
+
+  it("keeps serving an existing combo when its config cannot be synced", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === "POST") return new Response(JSON.stringify({ error: "Combo name already exists" }), { status: 400 });
+      return new Response("unavailable", { status: 503 });
+    }));
+    await expect(new OmniRouteEngine({ baseUrl: "http://omniroute:20128" }).ensureCombo({ name: "npati/a/x", strategy: "priority", models: [], config: { targetTimeoutMs: 1 } }))
+      .resolves.toEqual({ name: "npati/a/x" });
+  });
+
   it("streams chat-completion deltas from split upstream SSE frames", async () => {
     const encoder = new TextEncoder();
     const upstream = [

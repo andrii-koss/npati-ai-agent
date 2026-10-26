@@ -358,6 +358,30 @@ export class OmniRouteMarketplace {
     });
   }
 
+  /**
+   * Per-model capability records from OmniRoute's `/api/v1/models` (tool calling, reasoning, vision, context window),
+   * keyed by the global model id. A connection's model list carries only ids and names, so without these a connected
+   * model shows no tool support. Older runtimes without the record simply contribute nothing.
+   */
+  private async modelCatalog(refresh = false) {
+    return this.cached("model-catalog", refresh, async () => {
+      const payload = await this.request<{ data?: Json[] }>("/api/v1/models");
+      const index = new Map<string, Json>();
+      for (const model of payload.data ?? []) {
+        const capabilities = model.capabilities;
+        if (typeof model.id !== "string" || !capabilities || typeof capabilities !== "object") continue;
+        index.set(model.id, {
+          ...(typeof capabilities.tool_calling === "boolean" ? { toolCalling: capabilities.tool_calling } : {}),
+          ...(typeof capabilities.reasoning === "boolean" ? { supportsReasoning: capabilities.reasoning } : {}),
+          ...(typeof capabilities.vision === "boolean" ? { supportsVision: capabilities.vision } : {}),
+          ...(typeof model.context_length === "number" ? { contextLength: model.context_length } : {}),
+          ...(typeof model.max_output_tokens === "number" ? { maxOutputTokens: model.max_output_tokens } : {}),
+        });
+      }
+      return index;
+    });
+  }
+
   async models(providerId: string, addedModelIds: string[] = [], refresh = false): Promise<AIModelSummary[]> {
     const [provider, manifest] = await Promise.all([this.provider(providerId, refresh), this.getManifest(refresh)]);
     let rawModels = manifest.find((item) => item.id === providerId)?.models ?? [];
@@ -371,6 +395,9 @@ export class OmniRouteMarketplace {
         const manifestById = new Map(rawModels.map((model) => [String(model.id ?? ""), model]));
         rawModels = payload.models.map((model) => ({ ...(manifestById.get(String(model.id ?? "")) ?? {}), ...model }));
       }
+      // Fill capabilities the list does not state; an explicit field on the model still wins.
+      const catalog = await this.modelCatalog(refresh).catch(() => new Map<string, Json>());
+      rawModels = rawModels.map((model) => ({ ...(catalog.get(`${providerId}/${String(model.id ?? "")}`) ?? {}), ...model }));
     }
     return normalizeModels(provider, rawModels, new Set(addedModelIds));
   }

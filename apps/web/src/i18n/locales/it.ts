@@ -2189,8 +2189,8 @@ export const it: TranslationSchema = {
     services: {
       omniroute: {
         name: "Routing NPATI AI",
-        desc: "Orchestrazione A2A, routing combinato, fusione, pipeline e motore di embedding vettoriali (v3.8.50).",
-        details: "v3.8.50 Core",
+        desc: "Orchestrazione A2A, routing combinato, fusione, pipeline e motore di embedding vettoriali (v3.8.52).",
+        details: "v3.8.52 Core",
         versionPrefix: "Versione",
       },
       postgres: {
