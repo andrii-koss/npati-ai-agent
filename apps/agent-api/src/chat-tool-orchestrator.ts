@@ -83,9 +83,11 @@ export interface ChatToolTrace {
   step: number;
   toolName: string;
   callId: string;
-  status: "requested" | "succeeded" | "failed";
+  status: "requested" | "succeeded" | "failed" | "deduplicated";
   arguments?: Record<string, unknown>;
   error?: string;
+  /** For `deduplicated`: the call in the same assistant turn whose result this call reuses. */
+  duplicateOf?: string;
 }
 
 export interface ChatToolLoopResult {
@@ -114,6 +116,16 @@ function toolArguments(call: ChatToolCall): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
+/** Name plus arguments with sorted keys, so key order cannot hide an identical call. */
+function callSignature(call: ChatToolCall): string {
+  let args: unknown;
+  try { args = JSON.parse(call.function.arguments || "{}"); } catch { return `${call.function.name}\u0000${call.function.arguments}`; }
+  const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
+    : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical((value as Record<string, unknown>)[key])]))
+    : value;
+  return `${call.function.name}\u0000${JSON.stringify(canonical(args))}`;
+}
+
 function toolOutput(value: unknown): string {
   const serialized = typeof value === "string" ? value : JSON.stringify(value);
   return serialized.length <= 40_000 ? serialized : serialized.slice(0, 40_000) + "\n[tool output truncated]";
@@ -129,15 +141,21 @@ export async function runChatToolLoop(input: {
   onModelStep?: (event: ChatToolModelStep) => void;
   primaryOutcomeComplete?: (metadata: Record<string, unknown>[]) => boolean;
   recoveryCall?: ChatToolCall;
+  /** Capabilities the semantic route attributed to this request; a model that stops before trying one is reminded once. */
+  requiredTools?: string[];
 }): Promise<ChatToolLoopResult> {
   const messages = [...input.request.messages];
   // Keep the provider mode stable across tool continuations, including forced -> auto steps.
   const reasoningMode = typeof input.request.toolChoice === "object" ? "disabled" : input.request.reasoningMode;
+  // Steps are streamed (counters only, no text reaches the caller) so a silent provider is cut off by the stream idle
+  // timeout instead of holding the whole request budget; non-streamed calls only end at the request timeout.
+  const onGenerationProgress = input.request.onGenerationProgress ?? (() => undefined);
   const traces: ChatToolTrace[] = [];
   const metadata: Record<string, unknown>[] = [];
   const maxSteps = Math.max(1, Math.min(input.maxSteps ?? 8, 16));
   let result: ChatResult = { content: "" };
   let completionReminders = 0;
+  let requiredReminded = false;
   const hasPersistedPrimary = () => metadata.some((item) =>
     item.kind === "business_profile" && (item.outcome as { businessId?: string } | undefined)?.businessId
     || item.kind === "company" && (item.companyAction as { companyId?: string } | undefined)?.companyId);
@@ -179,7 +197,7 @@ export async function runChatToolLoop(input: {
     if (relaxable && modelsRejectingForcedToolChoice.has(modelKey)) toolChoice = "auto";
     try {
       try {
-        result = await input.ai.chat({ ...input.request, messages: [...messages], tools, toolChoice,
+        result = await input.ai.chat({ ...input.request, messages: [...messages], tools, toolChoice, onGenerationProgress,
           // DeepSeek thinking rejects a named tool. The adapter applies this only to that supported model.
           reasoningMode });
       } catch (error) {
@@ -188,7 +206,7 @@ export async function runChatToolLoop(input: {
         if (!relaxable || typeof toolChoice !== "object" || !/does not support this tool_choice/i.test(String((error as Error)?.message ?? error))) throw error;
         modelsRejectingForcedToolChoice.add(modelKey);
         toolChoice = "auto";
-        result = await input.ai.chat({ ...input.request, messages: [...messages], tools, toolChoice, reasoningMode });
+        result = await input.ai.chat({ ...input.request, messages: [...messages], tools, toolChoice, onGenerationProgress, reasoningMode });
       }
     } catch (error) {
       if (hasPersistedPrimary() && (!input.primaryOutcomeComplete || input.primaryOutcomeComplete(metadata))) {
@@ -201,6 +219,14 @@ export async function runChatToolLoop(input: {
     }
     input.onModelStep?.({ step, tools, toolChoice, result });
     if (!result.toolCalls?.length) {
+      // A failed attempt is not retried here: only a capability the model never tried in this turn is missing.
+      const untried = (input.requiredTools ?? []).filter((name) => tools.some((tool) => tool.function.name === name)
+        && !traces.some((trace) => trace.toolName === name));
+      if (untried.length && !requiredReminded) {
+        requiredReminded = true;
+        messages.push({ role: "system", content: `The original user request also requires ${untried.join(", ")}, which is available and was not called in this turn. Call it now for that part of the request, or report the concrete error it returns. Do not claim it is unavailable.` });
+        continue;
+      }
       if (!input.primaryOutcomeComplete || input.primaryOutcomeComplete(metadata)) return { result, messages, traces, metadata };
       completionReminders += 1;
       if (completionReminders >= 2) {
@@ -215,7 +241,19 @@ export async function runChatToolLoop(input: {
     }
 
     messages.push({ ...providerContinuationFor(result), role: "assistant", content: result.content || null, tool_calls: result.toolCalls });
+    // A provider can repeat one call within a turn (same name and arguments, new id). Executing it twice would
+    // duplicate a side effect such as a created company or a sent email, so the repeat reuses the first result.
+    const executedInTurn = new Map<string, { callId: string; content: string }>();
     for (const call of result.toolCalls) {
+      const signature = callSignature(call);
+      const first = executedInTurn.get(signature);
+      if (first) {
+        const deduplicated: ChatToolTrace = { step, toolName: call.function.name, callId: call.id, status: "deduplicated", duplicateOf: first.callId };
+        traces.push(deduplicated);
+        input.onTrace?.(deduplicated);
+        messages.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content: first.content });
+        continue;
+      }
       const requested: ChatToolTrace = { step, toolName: call.function.name, callId: call.id, status: "requested" };
       try {
         const args = toolArguments(call);
@@ -227,7 +265,9 @@ export async function runChatToolLoop(input: {
         const succeeded: ChatToolTrace = { ...requested, status: "succeeded" };
         traces.push(succeeded);
         input.onTrace?.(succeeded);
-        messages.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content: toolOutput(executed.output) });
+        const content = toolOutput(executed.output);
+        executedInTurn.set(signature, { callId: call.id, content });
+        messages.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         const failed: ChatToolTrace = { ...requested, status: "failed", error: message };
@@ -237,7 +277,10 @@ export async function runChatToolLoop(input: {
         const instruction = /^web_(fetch|search)$/.test(call.function.name)
           ? "No page content was retrieved. Tell the user it could not be opened and why. Do not describe or analyse the page from memory or general knowledge."
           : undefined;
-        messages.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content: JSON.stringify({ error: message, ...(instruction ? { instruction } : {}) }) });
+        const content = JSON.stringify({ error: message, ...(instruction ? { instruction } : {}) });
+        // A failed call may still have partly acted; repeating it in the same turn is not a retry the model chose.
+        executedInTurn.set(signature, { callId: call.id, content });
+        messages.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content });
       }
     }
   }

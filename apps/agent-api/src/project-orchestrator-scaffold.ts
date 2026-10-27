@@ -130,7 +130,7 @@ export async function ensureMobileAppAgent(workspaceStore: WorkspaceStore, ctx: 
 }
 
 /**
- * Resolves the DataBackend a mobile project must share with the website (D6).
+ * Resolves an optional DataBackend shared with a website (D6).
  * Never copies a database: one backend, several projects.
  */
 export async function resolveMobileDataBackend(
@@ -142,18 +142,14 @@ export async function resolveMobileDataBackend(
   if (!dataBackends) return { backendId: undefined };
   const backends = await dataBackends.list(ctx, companyId);
   const usable = backends.filter((backend) => backend.status === "ready");
-  if (!usable.length) {
-    throw new ProjectOrchestrationError(
-      "DATA_BACKEND_REQUIRED",
-      "This Company has no DataBackend yet. Create Data and a schema for the website first (Data Studio), then the mobile app can share them.",
-      400,
-    );
-  }
   if (requested.dataBackendId) {
     const match = usable.find((backend) => backend.id === requested.dataBackendId);
     if (!match) throw new ProjectOrchestrationError("DATA_BACKEND_NOT_FOUND", "The requested DataBackend is not available for this Company", 404);
     return { backendId: match.id };
   }
+  // A standalone app may use local persistence. Attaching a backend stays optional, as in ProjectService;
+  // an explicitly requested backend above must still be owned, ready and available in this Company.
+  if (!usable.length) return { backendId: undefined };
   if (usable.length === 1) return { backendId: usable[0]!.id };
   const prompt = (requested.prompt ?? "").toLowerCase();
   const named = usable.filter((backend) => backend.name && prompt.includes(backend.name.toLowerCase()));

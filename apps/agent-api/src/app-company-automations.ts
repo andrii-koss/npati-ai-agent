@@ -1,6 +1,6 @@
 import type { FastifyBaseLogger } from "fastify";
 import type { WorkspaceStore } from "@npati/workspace";
-import { type AIEngine, isChatCapableModel } from "@npati/omniroute-adapter";
+import type { AIEngine } from "@npati/omniroute-adapter";
 import type { AppConfig } from "./app";
 import type { createCoreServices } from "./core-services";
 import type { createDataBackendServices } from "./data-backend-services";
@@ -17,7 +17,7 @@ import type { EmailAttachmentStorage } from "./email-attachment-storage";
 import type { GuardrailPolicyRepository } from "./guardrail-policy-repository";
 import type { CompanyApprovalsRepository } from "./approvals-repository";
 import type { AuditRepository } from "./audit-repository";
-import type { AIPreferencesStore } from "./ai-preferences";
+import { selectedCompanyInferenceModels, type AIPreferencesStore } from "./ai-preferences";
 import type { ScopedMemoryEngine } from "./scoped-memory";
 import type { CodeVerifyRunnerPort } from "./code-tool-executors";
 import type { AgentDataStudioService } from "./data-studio/agent-data-service";
@@ -219,11 +219,7 @@ export function createAppCompanyAutomationsWiring(deps: AppCompanyAutomationsDep
     approvalsRepo,
     auditRepo,
     async (ctx) => (await memoryDocuments.getUserDocument(ctx))?.markdown,
-    async (ctx) => {
-      const prefs = await aiPreferences.get(ctx);
-      const selected = prefs.addedModels.find((model) => model.id === prefs.routing.defaultModelId);
-      return selected && isChatCapableModel(selected) ? [selected] : [];
-    },
+    selectedCompanyInferenceModels(aiPreferences),
     true,
   );
 

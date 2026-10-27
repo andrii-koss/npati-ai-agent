@@ -22,7 +22,7 @@ const args = {
   memories: [{ type: "brand", title: "Brand voice", content: "Our brand voice is clear, practical, and trustworthy.", confidence: 1 }],
 };
 function engine(chat: AIEngine["chat"]): AIEngine {
-  return { supportsNativeTools: () => true, chat, async *stream() { throw new Error("No stream fallback expected"); }, listModels: async () => [], getModel: async () => undefined, executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined, getCapabilities: async () => ["chat", "native_tools"], healthCheck: async () => ({ status: "ok" }) };
+  return { supportsNativeTools: () => true, chat: request => request.tools?.[0]?.function.name === "npati_classify_chat_intent" ? Promise.reject(new Error("Semantic routing unavailable in this fixture")) : chat(request), async *stream() { throw new Error("No stream fallback expected"); }, listModels: async () => [], getModel: async () => undefined, executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined, getCapabilities: async () => ["chat", "native_tools"], healthCheck: async () => ({ status: "ok" }) };
 }
 
 describe("long Business Profile production chat path", () => {

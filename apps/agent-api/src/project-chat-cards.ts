@@ -10,7 +10,7 @@ export interface ChatEntityContext {
   lastConfirmedAction: { entityType: string; entityId: string | null; companyId: string | null; projectId: string | null; action: string };
 }
 const contextKey = (conversationId: string) => `chat-active-context:${conversationId}`;
-export type ChatEntityRead = { field: "name" | "description" | "instructions" | "projects" | "role"; entityType: "focused" | "company" | "business" | "project" | "agent" };
+export type ChatEntityRead = { field: "name" | "description" | "instructions" | "projects" | "role" | "agents"; entityType: "focused" | "company" | "business" | "project" | "agent" };
 export function focusedChatEntity(context: Partial<ActiveContext>, confirmed?: ChatEntityContext | null) {
   const selected = { entityType: context.contextType ?? "none", entityId: context.projectId ?? context.companyId ?? context.businessId ?? null,
     companyId: context.companyId ?? null, projectId: context.projectId ?? null, action: "select" };
@@ -59,6 +59,7 @@ export async function executeChatEntityRead(store: WorkspaceStore, auth: AuthCon
   else if (request.field === "instructions" && type === "company") value = (record as import("@npati/workspace").Company).companyInstructions ?? undefined;
   else if (request.field === "instructions" && type === "agent") value = (record as import("@npati/workspace").CompanyAgent).systemInstruction ?? undefined;
   else if (request.field === "role" && type === "agent") value = (record as import("@npati/workspace").CompanyAgent).role;
+  else if (request.field === "agents" && type === "company") value = record.name + "\n" + (await store.listCompanyAgents(auth, id)).map(agent => agent.name + ": " + agent.role).join("\n");
   else if (request.field === "projects" && type === "company") value = (await store.listProjects(auth, id))
     .filter(project => !["archived", "soft_deleted", "purging", "deleted"].includes(project.status)).slice(0, 30).map(project => project.name).join("\n");
   else return null;

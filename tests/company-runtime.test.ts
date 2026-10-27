@@ -29,6 +29,25 @@ function engine(overrides: Partial<AIEngine> = {}): AIEngine {
 }
 const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
 
+it("executes an unconfigured company agent without an ambiguous bare auto combo step", async () => {
+  const store = new InMemoryWorkspaceStore();
+  const ctx = { userId: "default-model-owner", workspaceId: "default-model-workspace", permissions: ["workspace:read", "workspace:write", "business:manage"] };
+  let company = await store.createCompany(ctx, { name: "Default model company" });
+  const main = await store.createCompanyAgent(ctx, company.id, { name: "Lead", role: "coordinator", tools: [] });
+  company = await store.setCompanyMainAgent(ctx, company.id, main.id, company.revision);
+  const combos: OmniRouteComboInput[] = [];
+  const ai = engine({ ensureCombo: async input => {
+    // OmniRoute 3.8.52 rejects this at combo validation, before inference.
+    if (input.models.includes("auto")) throw new Error("Ambiguous model auto");
+    combos.push(input);
+    return { name: input.name };
+  } });
+  const result = await new CompanyDelegationRuntime(store, ai).execute(ctx, company.id, { task: "Summarize the company", mode: "single" }, "default-model-run");
+  expect(result.run.status).toBe("completed");
+  expect(combos.some(combo => combo.models.includes("auto/smart"))).toBe(true);
+  expect(combos.every(combo => !combo.models.includes("auto"))).toBe(true);
+});
+
 it("keeps the confirmed Company referent separate from the speaking Main Agent and supplies current owned projects across execution stages", async () => {
   const store = new InMemoryWorkspaceStore();
   const ctx = { userId: "runtime-context-owner", workspaceId: "runtime-context-workspace", permissions: ["workspace:read", "workspace:write", "business:manage"] };

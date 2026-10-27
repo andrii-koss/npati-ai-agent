@@ -6,11 +6,14 @@ import { compositeCreationCopy } from "../apps/agent-api/src/composite-chat-i18n
 import { defaultLocalizedAgentProfiles } from "../apps/agent-api/src/company-agent-profile-i18n";
 import { stripInternalChatActions } from "../apps/web/src/ChatMessageContent";
 import { buildApp } from "../apps/agent-api/src/app";
-import type { AIEngine, OmniRouteMarketplace } from "@npati/omniroute-adapter";
+import type { AIEngine, OmniRouteMarketplace, ChatRequest } from "@npati/omniroute-adapter";
 
 const alice: AuthContext = { userId: "alice", workspaceId: "shared", permissions: ["workspace:read", "business:manage"] };
 const bob: AuthContext = { userId: "bob", workspaceId: "shared", permissions: ["workspace:read", "business:manage"] };
 const directive = (value: object) => `Done.\n\n\`\`\`company-action\n${JSON.stringify(value)}\n\`\`\``;
+
+/** The semantic routing classifier is consulted for record requests; it is not the action planner these tests exclude. */
+const isIntentRouting = (request: ChatRequest) => String(request.messages[0]?.content).startsWith("Classify the user's primary intent");
 
 describe("company management from chat", () => {
   it("checks long localized settings messages linearly while preserving line boundaries", () => {
@@ -278,7 +281,7 @@ describe("company management from chat", () => {
     let chatCalls = 0;
     let streamCalls = 0;
     const aiEngine: AIEngine = {
-      chat: async () => { chatCalls += 1; throw new Error("The model planner must not handle deterministic test-company creation"); }, async *stream() { streamCalls += 1; throw new Error("The general chat model must not handle deterministic test-company creation"); },
+      chat: async (request: ChatRequest) => { if (isIntentRouting(request)) throw new Error("Semantic routing unavailable"); chatCalls += 1; throw new Error("The model planner must not handle deterministic test-company creation"); }, async *stream() { streamCalls += 1; throw new Error("The general chat model must not handle deterministic test-company creation"); },
       listModels: async () => [], getModel: async () => undefined,
       executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
       getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
@@ -308,7 +311,7 @@ describe("company management from chat", () => {
     let chatCalls = 0;
     let streamCalls = 0;
     const aiEngine: AIEngine = {
-      chat: async () => { chatCalls += 1; throw new Error("Composite creation must not depend on an external model"); },
+      chat: async (request: ChatRequest) => { if (isIntentRouting(request)) throw new Error("Semantic routing unavailable"); chatCalls += 1; throw new Error("Composite creation must not depend on an external model"); },
       async *stream() { streamCalls += 1; throw new Error("Composite creation must not depend on an external model"); },
       listModels: async () => [], getModel: async () => undefined,
       executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
@@ -605,7 +608,7 @@ describe("company management from chat", () => {
     await store.setCompanyMainAgent(alice, company.id, lead.id, company.revision);
     let chatCalls = 0;
     const aiEngine: AIEngine = {
-      chat: async () => { chatCalls += 1; throw new Error("The model planner must not handle this deterministic settings follow-up"); }, async *stream() { throw new Error("The general company runtime must not handle this settings follow-up"); },
+      chat: async (request: ChatRequest) => { if (isIntentRouting(request)) throw new Error("Semantic routing unavailable"); chatCalls += 1; throw new Error("The model planner must not handle this deterministic settings follow-up"); }, async *stream() { throw new Error("The general company runtime must not handle this settings follow-up"); },
       listModels: async () => [], getModel: async () => undefined,
       executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
       getCapabilities: async () => ["chat", "streaming"], healthCheck: async () => ({ status: "ok" }),
@@ -668,7 +671,7 @@ describe("company management from chat", () => {
     const conversation = await store.createNeutralConversation(alice, "Комплексне видалення");
     let chatCalls = 0;
     const aiEngine: AIEngine = {
-      chat: async () => { chatCalls += 1; throw new Error("Selected-company deletion must be deterministic"); },
+      chat: async (request: ChatRequest) => { if (isIntentRouting(request)) throw new Error("Semantic routing unavailable"); chatCalls += 1; throw new Error("Selected-company deletion must be deterministic"); },
       async *stream() { chatCalls += 1; throw new Error("Selected-company deletion must be deterministic"); },
       listModels: async () => [], getModel: async () => undefined,
       executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
@@ -721,7 +724,7 @@ describe("company management from chat", () => {
     const conversation = await store.createNeutralConversation(alice, "Комплексне видалення");
     let chatCalls = 0;
     const aiEngine: AIEngine = {
-      chat: async () => { chatCalls += 1; throw new Error("Compound deletion must not call an AI model"); },
+      chat: async (request: ChatRequest) => { if (isIntentRouting(request)) throw new Error("Semantic routing unavailable"); chatCalls += 1; throw new Error("Compound deletion must not call an AI model"); },
       async *stream() { chatCalls += 1; throw new Error("Compound deletion must not call an AI model"); },
       listModels: async () => [], getModel: async () => undefined,
       executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,
@@ -764,7 +767,7 @@ describe("company management from chat", () => {
     const conversation = await store.createNeutralConversation(alice, "Видалення без повторного створення");
     let chatCalls = 0;
     const aiEngine: AIEngine = {
-      chat: async () => { chatCalls += 1; throw new Error("Delete confirmation must not call an AI model"); },
+      chat: async (request: ChatRequest) => { if (isIntentRouting(request)) throw new Error("Semantic routing unavailable"); chatCalls += 1; throw new Error("Delete confirmation must not call an AI model"); },
       async *stream() { chatCalls += 1; throw new Error("Delete confirmation must not call an AI model"); },
       listModels: async () => [], getModel: async () => undefined,
       executeTool: async () => undefined, searchMemory: async () => [], saveMemory: async () => undefined,

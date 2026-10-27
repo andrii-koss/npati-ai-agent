@@ -38,6 +38,7 @@ describe("exact NovaScale Labs production chat regression", () => {
     const ai: AIEngine = {
       supportsNativeTools: () => true,
       async chat(request) {
+        if (request.tools?.[0]?.function.name === "npati_classify_chat_intent") throw new Error("Semantic routing unavailable in this fixture");
         modelRequests.push(request);
         if (!request.tools?.length) return { content: JSON.stringify({ primary_action: "create_business_profile", entity: "NovaScale Labs", provided_fields: rawPlanFields, secondary_actions: ["resolve_goal", "resolve_memory"], dependencies: ["create_business_profile", "link_goal", "link_memory"], completion_criteria: ["profile and links saved"], requires_external_research: false }) };
         if (request.messages.at(-1)?.role === "tool") {
@@ -79,6 +80,7 @@ describe("exact NovaScale Labs production chat regression", () => {
     const ai: AIEngine = {
       supportsNativeTools: () => true,
       async chat(request) {
+        if (request.tools?.[0]?.function.name === "npati_classify_chat_intent") throw new Error("Semantic routing unavailable in this fixture");
         if (!request.tools?.length) return { content: JSON.stringify({ primary_action: "create_business_profile", entity: "NovaScale Labs", provided_fields: rawPlanFields, secondary_actions: ["resolve_goal", "resolve_memory"], dependencies: [], completion_criteria: ["profile saved"], requires_external_research: false }) };
         if (request.messages.at(-1)?.role === "tool") throw new Error("Final response failed after saving the profile");
         return { content: "", toolCalls: [{ id: "business-context", type: "function", function: { name: "npati_business_profile", arguments: JSON.stringify(args) } }] };
@@ -110,6 +112,7 @@ describe("exact NovaScale Labs production chat regression", () => {
     const ai: AIEngine = {
       supportsNativeTools: () => true,
       async chat(request) {
+        if (request.tools?.[0]?.function.name === "npati_classify_chat_intent") throw new Error("Semantic routing unavailable in this fixture");
         if (!request.tools?.length) return { content: JSON.stringify({ primary_action: "create_business_profile", entity: "NovaScale Labs", provided_fields: rawPlanFields, secondary_actions: ["resolve_goal", "resolve_memory"], dependencies: [], completion_criteria: ["profile saved"], requires_external_research: false }) };
         if (toolCalled) return { content: "Done." };
         toolCalled = true;
@@ -138,6 +141,7 @@ describe("exact NovaScale Labs production chat regression", () => {
     const ai: AIEngine = {
       supportsNativeTools: () => true,
       async chat(request) {
+        if (request.tools?.[0]?.function.name === "npati_classify_chat_intent") throw new Error("Semantic routing unavailable in this fixture");
         if (!request.tools?.length) return { content: JSON.stringify({ primary_action: "create_business_profile", entity: "NovaScale Labs", provided_fields: rawPlanFields, secondary_actions: ["resolve_goal", "resolve_memory"], dependencies: [], completion_criteria: ["profile saved"] }) };
         nativeChoices.push(request.toolChoice);
         if (request.messages.at(-1)?.role === "tool") return { content: "Done." };

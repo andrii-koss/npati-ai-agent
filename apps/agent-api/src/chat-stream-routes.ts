@@ -175,7 +175,8 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
           let project = await codeService.createProject(auth, activeCompanyId,
             { name: extractCleanProjectName(message, projectIntent.targetDetails?.entityName), description: message.slice(0, 5000),
               // The planner may file a game under website; an unmistakable game request still becomes a game.
-              ...(projectIntent.targetDetails?.projectType === "game" || isGameRequest(message) ? { kind: "game" as const } : {}) },
+              ...(projectIntent.targetDetails?.projectKind ? { kind: projectIntent.targetDetails.projectKind }
+                : projectIntent.targetDetails?.projectType === "game" || isGameRequest(message) ? { kind: "game" as const } : {}) },
             `chat-website:${auth.userId}:${request.headers["idempotency-key"] ?? streamId ?? crypto.randomUUID()}`);
           const framework = canonicalFrameworkName(projectIntent.targetDetails?.framework)
             ?? extractFramework(message)
@@ -614,11 +615,11 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
             }
           }
           await send("result", projectResponse);
-        } else if (resolved.context.contextType === "project" && !(await addressesCompanyAgent(resolved.company))) {
-          const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal, resolved.company ? { id: resolved.company.id, name: resolved.company.name } : undefined, resolved.project);
+        } else if (resolved.context.contextType === "project" && !semantic?.coreRoute?.delegate && !(await addressesCompanyAgent(resolved.company))) {
+          const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal, resolved.company ? { id: resolved.company.id, name: resolved.company.name } : undefined, resolved.project, semantic?.coreRoute);
           await send("result", { ...result, activeContext: resolved.context });
         } else if (resolved.context.contextType === "none") {
-          const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy,(delta)=>send("delta",{delta}),streamController.signal);
+          const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy,(delta)=>send("delta",{delta}),streamController.signal,undefined,undefined,semantic?.coreRoute);
           await send("result", { ...result, activeContext: resolved.context });
         } else if (resolved.context.contextType === "company" || resolved.context.contextType === "project") {
           // Project context reaches this branch only when the message addresses one of the company's agents by name.
@@ -632,8 +633,8 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
           const runnableMainAgent = company.mainAgentId
             ? await workspaceStore.getCompanyAgent(auth, company.id, company.mainAgentId).then((agent) => agent.isActive).catch(() => false)
             : false;
-          if (managementRequest || isReadOnlyCompanySwitch(message) || explicitCoreWebRequest || !runnableMainAgent) {
-            const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal, { id: resolved.company!.id, name: resolved.company!.name });
+          if ((semantic?.coreRoute ? !semantic.coreRoute.delegate : semantic?.coreCapability || managementRequest || isReadOnlyCompanySwitch(message) || explicitCoreWebRequest) || !runnableMainAgent) {
+            const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal, { id: resolved.company!.id, name: resolved.company!.name }, undefined, semantic?.coreRoute);
             await send("result", { ...result, activeContext: resolved.context });
           } else {
           const delegationProjectId = delegatesWork ? resolved.project?.id ?? requestedContext.projectId

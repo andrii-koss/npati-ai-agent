@@ -26,7 +26,8 @@ function failedAttempt(modelId: string, error: unknown): InferenceRouteAttempt {
 
 export function isRetryableInferenceFailure(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  return /HTTP (?:400|401|403|404|408|409|429|5\d\d)|quota|rate.?limit|timeout|timed out|unavailable|overload|unsupported|model.*(?:missing|disabled|locked|does not support|invalid)|ECONNRESET|ECONNREFUSED|fetch failed/i.test(message);
+  // provider_stream_error: an upstream error frame inside an open stream, the streamed form of a failed response.
+  return /HTTP (?:400|401|403|404|408|409|429|5\d\d)|quota|rate.?limit|timeout|timed out|unavailable|overload|unsupported|model.*(?:missing|disabled|locked|does not support|invalid)|ECONNRESET|ECONNREFUSED|fetch failed|provider_stream_error/i.test(message);
 }
 
 class AsyncChunkChannel {

@@ -723,7 +723,8 @@ export class CompanyDelegationRuntime {
       const allowed = agent.tools.map(toolName).map((item) => item.replace(/[^a-z0-9.]/gi, ""));
       const comboCandidateModels = agentModels?.length ? [...agentModels] : [...new Set([primary, fallback])];
       if (!this.strictInferenceRouting) {
-        if (!comboCandidateModels.includes("auto")) comboCandidateModels.push("auto");
+        // Bare "auto" is ambiguous inside an OmniRoute combo, even when
+        // auto/smart is a valid primary. Keep the qualified automatic route.
         if (!comboCandidateModels.includes("auto/smart")) comboCandidateModels.push("auto/smart");
       }
       // OmniRoute keeps an existing combo unchanged. Include its effective routing

@@ -39,6 +39,7 @@ describe("long AI Company creation through production chat", () => {
     const ai: AIEngine = {
       supportsNativeTools: () => true,
       async chat(request) {
+        if (request.tools?.[0]?.function.name === "npati_classify_chat_intent") throw new Error("Semantic routing unavailable in this fixture");
         if (!request.tools?.length) return { content: JSON.stringify(plan) };
         nativeChoices.push(request.toolChoice);
         const last = request.messages.at(-1);
@@ -91,6 +92,7 @@ describe("long AI Company creation through production chat", () => {
     const ai: AIEngine = {
       supportsNativeTools: () => true,
       async chat(request) {
+        if (request.tools?.[0]?.function.name === "npati_classify_chat_intent") throw new Error("Semantic routing unavailable in this fixture");
         if (!request.tools?.length) return { content: JSON.stringify(plan) };
         toolModelCalls++;
         return { content: "```memory-action\n{\"action\":\"create\",\"memory\":{\"type\":\"brand\",\"title\":\"Wrong secondary action\",\"content\":\"Not requested\"}}\n```" };

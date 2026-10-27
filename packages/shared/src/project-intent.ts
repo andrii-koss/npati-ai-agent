@@ -47,6 +47,8 @@ export interface ProjectIntentDecision {
     entityName?: string;
     /** D6: a mobile app project shares an existing DataBackend with the website. */
     projectType?: "website" | "mobile_app" | "game";
+    /** Purpose of a universal project, independent of its legacy storage type. */
+    projectKind?: import("./project-kind").ProjectKind;
     dataBackendId?: string;
   };
 }

@@ -1,5 +1,5 @@
 import type { ServiceHealth } from "@npati/shared";
-import { isChatCapableModel } from "./normalization";
+import { isChatCapableModel, isNonChatSpecialtyModel } from "./normalization";
 import { providerToolNames } from "./provider-tool-names";
 import { retainProviderContinuation } from "./provider-continuation";
 import { readChatStream } from "./chat-stream";
@@ -8,6 +8,9 @@ import type { A2AMessageRequest, A2AMessageResult, AIEngine, AudioTranscriptionI
 
 import {
   requestSignal,
+  PROVIDER_STREAM_IDLE_TIMEOUT_MS,
+  readBeforeIdle,
+  streamErrorMessage,
   mcpJson,
   requiresResponsesApi,
   responsesText,
@@ -68,7 +71,11 @@ export class OmniRouteEngine implements AIEngine {
     const canonicalCandidates = candidates.map((model) => /^deepseek\/(?:DeepSeek-V4\.1-Flash|deepseek-v4\.1-flash|deepseek-v4-flash)$/i.test(model)
       ? "deepseek/deepseek-flash"
       : model);
-    const compatible = [...new Set(canonicalCandidates)].filter((id) => id !== "auto" && !id.startsWith("auto/") && ((requested.includes(id) && id.startsWith("npati/")) || isChatCapableModel(metadata.get(id) ?? { id })));
+    // A model the caller names explicitly is refused only when the catalog marks it as a specialty interface. OmniRoute
+    // 3.8.52 lists feature flags (tool_calling, reasoning, vision) instead of chat/text, so requiring a chat flag
+    // would reject the user's own model as soon as the catalog has been loaded. Discovered models keep the strict test.
+    const explicit = (id: string) => requested.includes(id) && (id.startsWith("npati/") || !isNonChatSpecialtyModel((metadata.get(id) ?? { id }) as Parameters<typeof isNonChatSpecialtyModel>[0]));
+    const compatible = [...new Set(canonicalCandidates)].filter((id) => id !== "auto" && !id.startsWith("auto/") && (explicit(id) || isChatCapableModel(metadata.get(id) ?? { id })));
     if (!compatible.length) throw new Error("model_unavailable: no chat-compatible model supports the requested inference interface");
     return compatible;
   }
@@ -207,24 +214,26 @@ export class OmniRouteEngine implements AIEngine {
       let pending = "";
       let yieldedAny = false;
       let streamError: Error | null = null;
+      let lastProgressAt = Date.now();
+      const idleMs = request.streamIdleTimeoutMs ?? PROVIDER_STREAM_IDLE_TIMEOUT_MS;
       const emitLine = function* (line: string) {
         if (!line.startsWith("data:")) return;
         const data = line.slice(5).trim();
         if (!data || data === "[DONE]") return;
         let payload: any;
         try { payload = JSON.parse(data); } catch { return; }
-        if (payload?.error) {
-          const message = typeof payload.error === "string" ? payload.error : payload.error.message || JSON.stringify(payload.error);
-          throw new Error(message);
-        }
+        if (payload?.error) throw new Error(streamErrorMessage(payload.error));
         const delta = useResponses
           ? payload.type === "response.output_text.delta" ? payload.delta : payload.output_text?.delta
           : payload.choices?.[0]?.delta?.content ?? payload.choices?.[0]?.text;
+        // Reasoning precedes the answer on thinking models; it is progress even though it is not yielded.
+        const thinking = payload.choices?.[0]?.delta?.reasoning_content || payload.choices?.[0]?.delta?.reasoning_text;
+        if ((typeof delta === "string" && delta) || thinking) lastProgressAt = Date.now();
         if (typeof delta === "string" && delta) yield* boundedTextChunks(delta);
       };
       try {
         while (true) {
-          const { done, value } = await reader.read();
+          const { done, value } = await readBeforeIdle(reader, lastProgressAt, idleMs);
           if (done) break;
           pending += decoder.decode(value, { stream: true });
           const lines = pending.split(/\r?\n/);
@@ -245,6 +254,8 @@ export class OmniRouteEngine implements AIEngine {
         }
       } catch (err) {
         streamError = err instanceof Error ? err : new Error(String(err));
+        // Close the upstream connection too, so OmniRoute stops waiting on a provider nobody reads.
+        await reader.cancel().catch(() => undefined);
       } finally {
         reader.releaseLock();
       }

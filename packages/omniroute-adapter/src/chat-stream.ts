@@ -1,4 +1,5 @@
 import type { ChatRequest, ChatToolCall } from "./types";
+import { PROVIDER_STREAM_IDLE_TIMEOUT_MS, readBeforeIdle, streamErrorMessage } from "./omniroute-engine-helpers";
 
 /** Assemble complete calls before execution; progress exposes counters only, never provider text. */
 export async function readChatStream(response: Response, request: ChatRequest, started = Date.now()) {
@@ -11,12 +12,14 @@ export async function readChatStream(response: Response, request: ChatRequest, s
   let pending = "", bytes = 0, completed = false, finishReason: string | undefined;
   let model: string | undefined, usage: Record<string, unknown> | undefined;
   let firstTokenMs: number | undefined, outputCharacters = 0, lastNotice = 0, lastPhase = "";
+  let lastProgressAt = Date.now();
+  const idleMs = request.streamIdleTimeoutMs ?? PROVIDER_STREAM_IDLE_TIMEOUT_MS;
   const consume = async (frame: string) => {
     const data = frame.split("\n").filter(line => line.startsWith("data:")).map(line => line.slice(5).trimStart()).join("\n");
     if (!data) return;
     if (data.trim() === "[DONE]") { completed = true; return; }
     const payload = JSON.parse(data);
-    if (payload.error) throw new Error("provider_stream_error");
+    if (payload.error) throw new Error(streamErrorMessage(payload.error));
     model = payload.model ?? model;
     usage = payload.usage ?? usage;
     const choice = payload.choices?.find((item: {index?: number}) => !item.index);
@@ -45,6 +48,7 @@ export async function readChatStream(response: Response, request: ChatRequest, s
     }
     const meaningful = toolCharacters || delta.content?.length || delta.reasoning_content?.length || delta.reasoning_text?.length;
     if (!meaningful) return;
+    lastProgressAt = Date.now();
     firstTokenMs ??= Date.now() - started;
     outputCharacters += toolCharacters + (typeof delta.content === "string" ? delta.content.length : 0);
     const phase = toolCharacters || lastPhase === "tool_arguments" ? "tool_arguments" : "response";
@@ -56,7 +60,7 @@ export async function readChatStream(response: Response, request: ChatRequest, s
   };
   try {
     while (!completed) {
-      const chunk = await reader.read();
+      const chunk = await readBeforeIdle(reader, lastProgressAt, idleMs);
       if (chunk.done) { pending += decoder.decode(); break; }
       bytes += chunk.value.byteLength;
       if (bytes > 32 * 1024 * 1024) throw new Error("provider_stream_too_large");

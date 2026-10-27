@@ -64,6 +64,8 @@ export interface ChatRequest {
   compression?: "off" | "default" | "engine:rtk";
   signal?: AbortSignal;
   timeoutMs?: number;
+  /** Longest gap without model output in a streamed response (keepalives excluded); default 90 s. */
+  streamIdleTimeoutMs?: number;
   idempotencyKey?: string;
   admission?: {
     tier?: "critical-orchestration" | "enterprise" | "pro" | "free";

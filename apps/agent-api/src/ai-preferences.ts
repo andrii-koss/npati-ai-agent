@@ -83,6 +83,18 @@ function normalize(value: unknown): AIPreferences {
   } };
 }
 
+/**
+ * Company runs infer only with the user's selected My Models default (strict routing). The API process and the
+ * Company worker must resolve it the same way, or queued runs fall back to the raw OmniRoute catalog.
+ */
+export function selectedCompanyInferenceModels(preferences: AIPreferencesStore) {
+  return async (ctx: AuthContext): Promise<AIModelSummary[]> => {
+    const prefs = await preferences.get(ctx);
+    const selected = prefs.addedModels.find((model) => model.id === prefs.routing.defaultModelId);
+    return selected && isChatCapableModel(selected) ? [selected] : [];
+  };
+}
+
 export class AIPreferencesStore {
   private readonly legacyFile?: string;
   private readonly updateQueues = new Map<string, Promise<void>>();

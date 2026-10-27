@@ -5,6 +5,37 @@ export function requestSignal(signal: AbortSignal | undefined, timeoutMs: number
   return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
+/**
+ * OmniRoute answers a streamed request at once and then sends empty keepalive chunks while the upstream is silent,
+ * so a hung provider never closes the connection. Only answer text, reasoning or tool arguments count as progress;
+ * without any for this long the read fails with a retryable timeout instead of holding the whole request budget.
+ */
+export const PROVIDER_STREAM_IDLE_TIMEOUT_MS = 90_000;
+
+export async function readBeforeIdle<T>(reader: ReadableStreamDefaultReader<T>, lastProgressAt: number, idleMs: number) {
+  const idle = () => new Error(`provider_stream_idle_timeout: no model output for ${Math.round(idleMs / 1000)} s`);
+  const remaining = lastProgressAt + idleMs - Date.now();
+  if (remaining <= 0) throw idle();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([reader.read(), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(idle()), remaining); })]);
+  } finally { clearTimeout(timer); }
+}
+
+/**
+ * In stream mode OmniRoute reports an upstream failure (after its own retries) as an SSE error frame inside an
+ * HTTP 200 response, e.g. a 429 cooldown or a `[502]` gateway error. Name its status the way a failed HTTP response
+ * is named, so fallback and retry decisions treat both forms alike. Frames without a status (OmniRoute sends
+ * "No active credentials" where a plain request gets HTTP 401) keep the `provider_stream_error` marker.
+ */
+export function streamErrorMessage(error: unknown): string {
+  const detail = (typeof error === "string" ? { message: error } : error ?? {}) as { message?: unknown; type?: unknown; code?: unknown; status?: unknown };
+  const message = String(detail.message ?? JSON.stringify(error)).slice(0, 300);
+  const status = Number(detail.status) || Number(detail.code) || Number(/\[(\d{3})\]/.exec(message)?.[1])
+    || (/rate.?limit|cooldown/i.test(`${detail.type} ${detail.code}`) ? 429 : /server_error/i.test(String(detail.type)) ? 500 : 0);
+  return `provider_stream_error: OmniRoute stream failed${status ? ` with HTTP ${status}` : ""}: ${message}`;
+}
+
 export function mcpJson(text: string) {
   const data = text.split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).join("");
   const source = data || text;

@@ -262,6 +262,7 @@ export class ProjectOrchestrator {
         name,
         description: params.prompt,
         type: projectType,
+        kind: params.intentDecision.targetDetails?.projectKind,
         dataBackendId,
       }, params.idempotencyKey || `create-proj-${Date.now()}`);
       project = await this.projectService.updatePreview(ctx, params.companyId, created.id, {

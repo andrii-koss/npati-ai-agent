@@ -39,6 +39,28 @@ function engine(chat: AIEngine["chat"]): AIEngine {
 const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
 
 describe("native chat tool selection", () => {
+  it.each(["/chat", "/chat/stream"])("persists Business Profile creation instead of delegating to the active company: %s", async url => {
+    const store = new InMemoryWorkspaceStore();
+    let company = await store.createCompany(auth, { name: "Bakery" });
+    const lead = await store.createCompanyAgent(auth, company.id, { name: "Lead", role: "Coordinator", tools: [] });
+    company = await store.setCompanyMainAgent(auth, company.id, lead.id, company.revision);
+    const ai = engine(async request => request.messages.some(message => message.role === "tool")
+      ? { content: "Business Profile saved." }
+      : { content: "", toolCalls: [toolCall("create-business", "npati_business_profile", { action: "create", profile: { name: "Stress DS1023 Business", businessStage: "operating", market: "Kyiv", country: "Ukraine", productsServicesSummary: "sourdough bread and coffee", audienceSummary: "local families" } })] });
+    const chat = ai.chat;
+    ai.chat = request => String(request.messages[0]?.content).startsWith("Classify the user's primary intent")
+      ? Promise.resolve({ content: JSON.stringify({ intent: "CHAT", confidence: 1, targets: [], entityRead: null, coreCapability: "npati_business_profile" }) }) : chat(request);
+    const delegation = vi.spyOn(CompanyDelegationRuntime.prototype, "execute").mockRejectedValue(new Error("Business creation must use its own capability"));
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace });
+    try {
+      const response = await app.inject({ method: "POST", url, payload: { message: 'Create a Business Profile named "Stress DS1023 Business". Stage: operating; market: Kyiv; country: Ukraine; services: sourdough bread and coffee; audience: local families. This is a Business Profile, not a new AI company.', contextType: "company", companyId: company.id } });
+      expect(response.statusCode).toBe(200);
+      expect(response.body).not.toContain("event: error");
+      expect(await store.listUserBusinesses(auth)).toEqual([expect.objectContaining({ name: "Stress DS1023 Business", market: "Kyiv", businessStage: "operating" })]);
+      expect(delegation).not.toHaveBeenCalled();
+      expect((await store.listCompanies(auth)).items).toHaveLength(1);
+    } finally { delegation.mockRestore(); await app.close(); }
+  });
   it.each(["/chat", "/chat/stream"])("keeps a recalled fact plus an answer-format clause out of the write planner: %s", async url => {
     const store = new InMemoryWorkspaceStore();
     let company = await store.createCompany(auth, { name: "Recall Studio", companyInstructions: "STORED_DECISION_CODE" }, "recall-studio");

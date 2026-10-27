@@ -12,7 +12,34 @@ function fixture(value: unknown) {
 }
 const creation = { intent: "CREATE_WEBSITE", confidence: 0.98, targets: [{ name: "Portfolio", kind: "website", framework: "HTML/CSS", reason: "Static presentation does not require a framework", criteria: ["static_content"] }] };
 
+it("honors a complete semantic project decision when the company is the location, not the object to create", async () => {
+  const f = fixture({ ...creation, coreCapability: null });
+  const result = await f.resolve(auth, {
+    message: 'У тестовій компанії «Audit RESUME» створи звичайний HTML/CSS/JavaScript сайт «V3 HTML» із заголовком V3_HTML. Запусти його.',
+    activeCompanyId: "owned-company",
+  });
+  expect(result).toMatchObject({ source: "semantic", decision: { intent: "CREATE_WEBSITE", executable: true }, targets: [{ name: "Portfolio", framework: "HTML/CSS" }] });
+  expect(result).not.toHaveProperty("coreCapability");
+});
+
+it.each(["api", "game", "mobile_app"] as const)("preserves the semantic universal Project kind %s independently of legacy projectType", async kind => {
+  const f = fixture({ ...creation, coreCapability: null, targets: [{ ...creation.targets[0], kind, framework: kind === "mobile_app" ? "Expo" : "HTML/CSS" }] });
+  expect(await f.resolve(auth, { message: "Please create the requested software project", activeCompanyId: "owned-company" })).toMatchObject({
+    source: "semantic", decision: { targetDetails: { projectKind: kind } }, targets: [{ kind }],
+  });
+});
+
 describe("semantic project routing", () => {
+  it("keeps a Business Profile request on its native capability inside Company context", async () => {
+    const f = fixture({ intent: "CHAT", confidence: 1, targets: [], entityRead: null, coreCapability: "npati_business_profile" });
+    const result = await f.resolve(auth, { message: 'Create a Business Profile named "Stress DS1023 Business". Stage: operating; market: Kyiv; country: Ukraine; services: sourdough bread and coffee; audience: local families. This is a Business Profile, not a new AI company.', activeCompanyId: "owned-company" });
+    expect(result).toMatchObject({ source: "semantic", decision: { intent: "CHAT" }, coreCapability: "npati_business_profile" });
+  });
+  it("does not accept invented core capabilities or let them override a coding intent", async () => {
+    for (const value of [{ intent: "CHAT", confidence: 1, targets: [], coreCapability: "arbitrary.shell" }, { ...creation, coreCapability: "npati_business_profile" }]) {
+      expect(await fixture(value).resolve(auth, { message: "Please prepare the requested result", activeCompanyId: "owned-company" })).not.toHaveProperty("coreCapability");
+    }
+  });
   it("uses the existing native transport as a classification-only schema with an explicit nullable metadata descriptor", async () => {
     const chat = vi.fn(async (request: ChatRequest) => {
       expect(request.tools?.map(tool => tool.function.name)).toEqual(["npati_classify_chat_intent"]);
@@ -53,7 +80,8 @@ describe("semantic project routing", () => {
     const resolve = createChatProjectIntentResolver({ engine: { chat }, getAIContext: async () => ({}), log: { warn: vi.fn() }, listAgentNames: async () => ["Designer", "Reviewer", "Accessibility Reviewer"] });
     const result = await resolve(auth, { message: 'Delete only the agent Accessibility Reviewer from company Studio. Keep Designer and Reviewer.', activeCompanyId: "studio", activeProjectId: "site" });
     expect(result).toMatchObject({ source: "guard", decision: { intent: "CHAT" }, targets: [] });
-    expect(chat).not.toHaveBeenCalled();
+    // The classifier names the owning record, but its EDIT_PROJECT answer cannot turn the guarded request into code work.
+    expect(chat).toHaveBeenCalledOnce();
   });
   it("does not treat an ordinary action word as a named Agent mutation", async () => {
     const chat = vi.fn(async () => ({ content: JSON.stringify({ intent: "EDIT_PROJECT", confidence: 1, targets: [] }) }));
@@ -112,11 +140,12 @@ describe("semantic project routing", () => {
     expect(f.log.warn).not.toHaveBeenCalled();
   });
 
-  it("handles large Business specifications without an extra routing request", async () => {
+  it("sends only the opening of a large guarded Business specification to the classifier", async () => {
     const f = fixture(creation);
     const message = "Create a business profile named Context Studio\n" + "Background data. ".repeat(6250);
     expect((await f.resolve(auth, { message })).decision.intent).toBe("CHAT");
-    expect(f.chat).not.toHaveBeenCalled();
+    expect(f.chat).toHaveBeenCalledOnce();
+    expect(JSON.stringify(f.chat.mock.calls[0]![0].messages).length).toBeLessThan(20_000);
   });
 
   it("redacts credentials and personal data from the routing request and history", async () => {
@@ -137,12 +166,12 @@ describe("semantic project routing", () => {
     "Now add a goal to this business: Reach 100 customers",
     "Fill Recommended Prompts for the selected company's agents",
     "Delete everything that was just created",
-  ])("preserves recognized settings requests without a routing model call: %s", async message => {
+  ])("keeps recognized settings requests on CHAT even when the classifier answers with a project: %s", async message => {
     const f = fixture(creation);
     expect(await f.resolve(auth, { message })).toMatchObject({
       source: "guard", decision: { intent: "CHAT", isProjectIntent: false }, targets: [],
     });
-    expect(f.chat).not.toHaveBeenCalled();
+    expect(f.chat).toHaveBeenCalledOnce();
   });
 
   it("keeps an automation request inside a website conversation out of the Coding Agent", async () => {
@@ -153,6 +182,28 @@ describe("semantic project routing", () => {
     // The route passes a guard decision on, and a CHAT decision is never turned into a run by a session binding.
     expect(resolveChatCodeIntent({ message, projectIntent: result.decision.intent, codingEnabled: true, companyId: "company", projectId: "project", projectKind: "website", sessionBound: true })).toEqual({ mode: "chat" });
     expect(resolveChatCodeIntent({ message, codingEnabled: true, companyId: "company", projectId: "project", projectKind: "website", sessionBound: true })).toMatchObject({ mode: "run" });
+  });
+
+  it("binds an owned Company named in the message for the classifier, separately from Business Profiles", async () => {
+    const chat = vi.fn(async (_request: ChatRequest) => ({ content: JSON.stringify({ intent: "CHAT", confidence: 1, targets: [], entityRead: null, coreCapability: "npati_company_action", coreMutation: true }) } as ChatResult));
+    const resolve = createChatProjectIntentResolver({ engine: { chat }, getAIContext: async () => ({}), log: { warn: vi.fn() },
+      listCompanyNames: async () => ["R3 Логістика", "Other Co"], listBusinessNames: async () => ["R3 Пекарня"] });
+    const result = await resolve(auth, { message: "Зміни опис компанії «R3 Логістика» на «Швидка доставка».", activeCompanyId: "company" });
+    const request = chat.mock.calls[0]![0];
+    const payload = JSON.parse(String(request.messages[1]!.content));
+    expect(payload).toMatchObject({ mentionedCompanies: ["R3 Логістика"], mentionedBusinesses: [] });
+    expect(String(request.messages[0]!.content)).toContain("mentionedCompanies are owned AI Company names");
+    expect(result).toMatchObject({ coreRoute: { capability: "npati_company_action", mutation: true } });
+  });
+
+  it("keeps a Business Memory read out of the Coding Agent of an active, session-bound code Project", async () => {
+    const f = fixture({ intent: "CHAT", confidence: 0.97, targets: [], entityRead: null, coreCapability: "npati_workspace_action", coreMutation: false, assignsWorkToCompanyAgent: false });
+    const message = 'Welchen Lieferantencode haben wir für das Business "Nordbrot" gespeichert? Antworte auf Deutsch.';
+    const result = await f.resolve(auth, { message, activeCompanyId: "company", activeProjectId: "project" });
+    expect(result).toMatchObject({ decision: { intent: "CHAT" }, coreRoute: { capability: "npati_workspace_action", mutation: false } });
+    const system = String(f.chat.mock.calls[0]![0].messages[0]!.content);
+    expect(system).toContain("the active Project's files and database do not hold Business Memory");
+    expect(resolveChatCodeIntent({ message, projectIntent: result.decision.intent, codingEnabled: true, companyId: "company", projectId: "project", projectKind: "code_project", sessionBound: true })).toEqual({ mode: "chat" });
   });
 
   it.each([

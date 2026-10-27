@@ -284,7 +284,8 @@ describe("security-gate: C5b the guard is wired into the outbound call sites", (
       globalThis.fetch = fetchSpy as unknown as typeof fetch;
       try {
         const provider = new Crawl4AIProvider("http://crawler.local:11235", new SafeUrlValidator(), crawlLimits, undefined, crawlGuardPort);
-        expect(await refusalCode(() => provider.fetch({ url: `https://example.com/page?token=${GITHUB_TOKEN}` })))
+        // Use a public IP literal: this unit test exercises the real URL policy and outbound guard without DNS.
+        expect(await refusalCode(() => provider.fetch({ url: `https://93.184.216.34/page?token=${GITHUB_TOKEN}` })))
           .toBe("outbound_secret_denied");
         expect(fetchSpy).not.toHaveBeenCalled();
       } finally {
@@ -298,7 +299,7 @@ describe("security-gate: C5b the guard is wired into the outbound call sites", (
       let seen = "";
       const fetchSpy = vi.fn(async (url: string, init?: RequestInit) => {
         seen = `${url} ${String(init?.body ?? "")}`;
-        return new Response(JSON.stringify({ results: [{ url: "https://example.com/page", markdown: "# Page" }] }), {
+        return new Response(JSON.stringify({ results: [{ url: "https://93.184.216.34/page", markdown: "# Page" }] }), {
           status: 200, headers: { "content-type": "application/json" },
         });
       });
@@ -306,10 +307,10 @@ describe("security-gate: C5b the guard is wired into the outbound call sites", (
       globalThis.fetch = fetchSpy as unknown as typeof fetch;
       try {
         const provider = new Crawl4AIProvider("http://crawler.local:11235", new SafeUrlValidator(), crawlLimits, undefined, crawlGuardPort);
-        const page = await provider.fetch({ url: "https://example.com/page" });
+        const page = await provider.fetch({ url: "https://93.184.216.34/page" });
         expect(fetchSpy).toHaveBeenCalledTimes(1);
-        expect(seen).toContain("https://example.com/page");
-        expect(page.url).toBe("https://example.com/page");
+        expect(seen).toContain("https://93.184.216.34/page");
+        expect(page.url).toBe("https://93.184.216.34/page");
       } finally {
         globalThis.fetch = originalFetch;
       }

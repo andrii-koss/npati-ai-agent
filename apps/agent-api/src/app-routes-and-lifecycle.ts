@@ -1,5 +1,6 @@
 import { createOllamaChatHandler } from "./runtime-compat-routes";
 import { WorkspaceChatActions } from "./workspace-chat-actions";
+import { CompanyChatActions } from "./company-chat-actions";
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { WorkspaceStore, AuthContext } from "@npati/workspace";
 import type { AIEngine, OmniRouteMarketplace } from "@npati/omniroute-adapter";
@@ -280,6 +281,9 @@ export function registerAppRoutesAndLifecycle(deps: AppRoutesAndLifecycleDeps) {
       return current ? (await activeContextResolver.resolveNamedCompany(auth, current, message))?.project?.id : undefined;
     },
     namesOwnedManagementRecord: (auth, message) => WorkspaceChatActions.namesOwnedAutomation(auth, workspaceStore, message, automationsRepo),
+    listBusinessNames: async (auth) => (await workspaceStore.listUserBusinesses(auth)).map(business => business.name),
+    listCompanyNames: async (auth) => (await workspaceStore.listCompanies(auth, 100)).items.map(company => company.name),
+    companyDeletionNeedsConfirmation: async (auth, message, companyId) => Boolean(await CompanyChatActions.deleteConfirmationMessage(auth, workspaceStore, message, companyId ?? undefined)),
     // The 20 most recent owned companies, read in parallel, as in the named-company context resolver.
     listAgentNames: async (auth) => {
       const owned: Awaited<ReturnType<typeof workspaceStore.listCompanies>>["items"] = [];

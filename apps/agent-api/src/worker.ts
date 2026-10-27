@@ -4,6 +4,7 @@ import { OmniRouteEngine } from "@npati/omniroute-adapter";
 import { PostgresWorkspaceStore } from "@npati/workspace";
 import { createWebResearch } from "@npati/web-research";
 import { CompanyDelegationRuntime } from "./company-runtime";
+import { AIPreferencesStore, selectedCompanyInferenceModels } from "./ai-preferences";
 import { CompanyRunQueueWorker } from "./company-run-queue";
 import { CompanyToolRuntime } from "./company-tool-runtime";
 import { MinioObjectStorage } from "./object-storage";
@@ -84,7 +85,7 @@ const projectSandbox = runnerUrl && runnerSecret ? new ProjectSandboxService(pro
 }) : undefined;
 const idleTimer = projectSandbox ? setInterval(() => { void projectSandbox.stopInactive(); }, 60_000) : undefined;
 idleTimer?.unref();
-const runtime=new CompanyDelegationRuntime(store,ai,Number.parseInt(process.env.NPATI_COMPANY_RUN_TIMEOUT_MS??"120000",10),new CompanyToolRuntime(ai,research?.provider,attachments,chatFiles,knowledge,new WasmExecSandbox(),emailTools,browserTool,projectWorkspace,store,projectSandbox),(ctx,companyId,query)=>knowledgeProcessor.retrieveContext(ctx,companyId,query),undefined,undefined,(ctx,companyId)=>guardrails.get(ctx,companyId),approvals,audit);
+const runtime=new CompanyDelegationRuntime(store,ai,Number.parseInt(process.env.NPATI_COMPANY_RUN_TIMEOUT_MS??"120000",10),new CompanyToolRuntime(ai,research?.provider,attachments,chatFiles,knowledge,new WasmExecSandbox(),emailTools,browserTool,projectWorkspace,store,projectSandbox),(ctx,companyId,query)=>knowledgeProcessor.retrieveContext(ctx,companyId,query),undefined,undefined,(ctx,companyId)=>guardrails.get(ctx,companyId),approvals,audit,undefined,selectedCompanyInferenceModels(new AIPreferencesStore(store)),true);
 const runWorker=new CompanyRunQueueWorker(redisUrl,store,runtime,{concurrency:Number.parseInt(process.env.NPATI_COMPANY_WORKER_CONCURRENCY??"2",10),leaseMs:Number.parseInt(process.env.NPATI_COMPANY_RUN_LEASE_MS??"180000",10),recoveryMs:Number.parseInt(process.env.NPATI_COMPANY_RECOVERY_INTERVAL_MS??"30000",10)});
 const knowledgeWorker=new CompanyKnowledgeWorker(redisUrl,knowledge,knowledgeProcessor);
 for(const signal of ["SIGTERM","SIGINT"] as const)process.once(signal,()=>{ if (idleTimer) clearInterval(idleTimer); void Promise.all([runWorker.stop(),knowledgeWorker.stop(),approvals.close(),audit.close(),emailRepo.close(),browserCredentials.close(),chatFiles.close()]); });

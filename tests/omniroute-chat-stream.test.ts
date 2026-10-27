@@ -57,3 +57,65 @@ it("disables thinking only for the explicitly requested DeepSeek Flash creation 
  await engine.chat({model:"other/model",messages:[],reasoningMode:"disabled"});
  expect(bodies[0].thinking).toEqual({type:"disabled"});expect(bodies[1].thinking).toBeUndefined();expect(bodies[2].thinking).toBeUndefined();
 });
+
+/** Emits OmniRoute-style empty keepalive chunks (optionally after some frames) until the reader cancels. */
+function keepaliveStream(prefix = "", everyMs = 10) {
+ let timer: ReturnType<typeof setInterval> | undefined; const state = { cancelled: false };
+ const body = new ReadableStream({
+  start(controller) { if (prefix) controller.enqueue(new TextEncoder().encode(prefix)); timer = setInterval(() => controller.enqueue(new TextEncoder().encode(event({id:"chatcmpl-keepalive",model:"keepalive",choices:[{index:0,delta:{},finish_reason:null}]}))), everyMs); },
+  cancel() { state.cancelled = true; clearInterval(timer); },
+ });
+ return { response: new Response(body, { headers: { "content-type": "text/event-stream" } }), state };
+}
+it("fails a stream that only receives keepalives with a retryable idle timeout and closes it",async()=>{
+ const { response: stalled, state } = keepaliveStream(event({choices:[{index:0,delta:{content:"Partial"}}]}));
+ const started = Date.now();
+ await expect(readChatStream(stalled,{messages:[],streamIdleTimeoutMs:150})).rejects.toThrow(/provider_stream_idle_timeout/);
+ expect(Date.now() - started).toBeLessThan(2_000);
+ expect(state.cancelled).toBe(true);
+});
+it("keeps a slow stream whose reasoning and answer keep arriving within the idle window",async()=>{
+ const frames = [event({choices:[{index:0,delta:{reasoning_content:"think"}}]}), event({choices:[{index:0,delta:{reasoning_content:" more"}}]}), event({choices:[{index:0,delta:{content:"Done"},finish_reason:"stop"}]}), "data: [DONE]\n\n"];
+ const body = new ReadableStream({ async start(controller) { for (const frame of frames) { await new Promise(r => setTimeout(r, 80)); controller.enqueue(new TextEncoder().encode(frame)); } controller.close(); } });
+ const payload = await readChatStream(new Response(body,{headers:{"content-type":"text/event-stream"}}),{messages:[],streamIdleTimeoutMs:150});
+ expect(payload.choices[0].message.content).toBe("Done");
+});
+it("moves a text stream to the fallback model when the first model only sends keepalives",async()=>{
+ const stalled = keepaliveStream();
+ const models: string[] = [];
+ vi.stubGlobal("fetch",vi.fn(async(_url,init)=>{ const body=JSON.parse(String(init!.body)); models.push(body.model);
+  return body.model === "test/stalled" ? stalled.response : response(event({choices:[{index:0,delta:{content:"Fallback answer"}}]})+"data: [DONE]\n\n"); }));
+ const chunks: string[] = [];
+ for await (const chunk of new OmniRouteEngine({baseUrl:"http://test"}).stream({model:"test/stalled",fallbackModel:"test/healthy",messages:[{role:"user",content:"hi"}],streamIdleTimeoutMs:150})) chunks.push(chunk);
+ expect(chunks.join("")).toBe("Fallback answer");
+ expect(models).toEqual(["test/stalled","test/healthy"]);
+ expect(stalled.state.cancelled).toBe(true);
+});
+it("names the HTTP status of an SSE error frame so a cooldown or gateway failure stays retryable",async()=>{
+ const { isRetryableInferenceFailure } = await import("../apps/agent-api/src/production-resilient-ai-engine");
+ const cooldown = readChatStream(response(event({error:{message:"All credentials for model m are cooling down",type:"rate_limit_error",code:"model_cooldown"}})),{messages:[]});
+ await expect(cooldown).rejects.toThrow(/provider_stream_error: OmniRoute stream failed with HTTP 429/);
+ const gateway = await readChatStream(response(event({error:{message:"[node/m] [502]: bad gateway (reset after 1s)"}})),{messages:[]}).catch(error=>error as Error);
+ expect(String(gateway.message)).toMatch(/HTTP 502/);
+ expect(isRetryableInferenceFailure(gateway)).toBe(true);
+});
+it("falls back to the next model when a streamed request ends in an SSE error frame",async()=>{
+ const { createProductionResilientAIEngine } = await import("../apps/agent-api/src/production-resilient-ai-engine");
+ const models: string[] = [];
+ vi.stubGlobal("fetch",vi.fn(async(_url,init)=>{ const body=JSON.parse(String(init!.body)); models.push(body.model);
+  return body.model === "test/cooling" ? response(event({error:{message:"All credentials for model test/cooling are cooling down",type:"rate_limit_error",code:"model_cooldown"}}))
+   : response(event({model:body.model,choices:[{index:0,delta:{content:"Fallback answer"},finish_reason:"stop"}]})+"data: [DONE]\n\n"); }));
+ const engine = createProductionResilientAIEngine(new OmniRouteEngine({baseUrl:"http://test"}));
+ const chunks: string[] = [];
+ for await (const chunk of engine.stream({model:"test/cooling",fallbackModel:"test/healthy",messages:[{role:"user",content:"hi"}]})) chunks.push(chunk);
+ expect(chunks.join("")).toBe("Fallback answer");
+ const streamed = await engine.chat({model:"test/cooling",fallbackModel:"test/healthy",messages:[{role:"user",content:"hi"}],onGenerationProgress:()=>undefined});
+ expect(streamed.content).toBe("Fallback answer");
+ expect(models).toEqual(["test/cooling","test/healthy","test/cooling","test/healthy"]);
+});
+it("treats a status-less SSE error frame (deactivated credentials) as a retryable provider failure",async()=>{
+ const { isRetryableInferenceFailure } = await import("../apps/agent-api/src/production-resilient-ai-engine");
+ const error = await readChatStream(response(event({error:{message:"No active credentials for provider: node-1."}})),{messages:[]}).catch(e=>e as Error);
+ expect(String(error.message)).toMatch(/^provider_stream_error: OmniRoute stream failed: No active credentials/);
+ expect(isRetryableInferenceFailure(error)).toBe(true);
+});

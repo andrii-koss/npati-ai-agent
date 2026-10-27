@@ -41,7 +41,7 @@ export interface ChatRouteDeps {
   persistAutomaticCompanyMemory: (auth: AuthContext, companyId: string, runId: string, prompt: string, runStatus: string, noMemory: boolean) => Promise<unknown>;
   projectOrchestrator: ProjectOrchestrator;
   runBusinessMessage: (auth: AuthContext, businessId: string, message: string, conversationId: string | undefined, log: { warn(value: unknown, message?: string): void }, progress?: ResearchProgressListener, attachments?: ChatAttachmentInput[], memoryPolicy?: NoMemoryEvaluationResult, signal?: AbortSignal) => Promise<Parameters<typeof applyChatTelemetryHeaders>[1] & { message: string; companyAction?: { companyId: string; action: string } }>;
-  runNeutralMessage: (auth: AuthContext, message: string, conversationId: string | undefined, attachments?: ChatAttachmentInput[], progress?: ResearchProgressListener, memoryPolicy?: NoMemoryEvaluationResult, onDelta?: (chunk: string) => void, signal?: AbortSignal, managementCompany?: { id: string; name: string }, projectContext?: Pick<import("@npati/workspace").Project, "id" | "name" | "description" | "framework"> & { capabilityIds?: string[] }) => Promise<Parameters<typeof applyChatTelemetryHeaders>[1] & { message: string; companyAction?: { companyId: string; action: string } }>;
+  runNeutralMessage: (auth: AuthContext, message: string, conversationId: string | undefined, attachments?: ChatAttachmentInput[], progress?: ResearchProgressListener, memoryPolicy?: NoMemoryEvaluationResult, onDelta?: (chunk: string) => void, signal?: AbortSignal, managementCompany?: { id: string; name: string }, projectContext?: Pick<import("@npati/workspace").Project, "id" | "name" | "description" | "framework"> & { capabilityIds?: string[] }, coreRoute?: import("./chat-project-intent").CoreChatRoute) => Promise<Parameters<typeof applyChatTelemetryHeaders>[1] & { message: string; companyAction?: { companyId: string; action: string } }>;
   workspaceStore: ReturnType<typeof createCoreServices>["workspaceStore"];
   boundedResponseChunks: (value: string, maxCharacters?: number) => Iterable<string>;
 }
@@ -311,7 +311,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
         if (!prompt && !request.body.attachments?.length) {
           return reply.code(400).send({ error: { code: "MESSAGE_REQUIRED", message: "Enter a message or attach a photo or voice message." } });
         }
-        const result = await runNeutralMessage(auth, prompt || "", request.body.conversationId, request.body.attachments, undefined, memoryPolicy, undefined, undefined);
+        const result = await runNeutralMessage(auth, prompt || "", request.body.conversationId, request.body.attachments, undefined, memoryPolicy, undefined, undefined, undefined, undefined, semantic?.coreRoute);
         applyChatTelemetryHeaders(reply, result);
         return { ...result, activeContext: resolved.context };
       }
@@ -326,8 +326,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
         const runnableMainAgent = company.mainAgentId
           ? await workspaceStore.getCompanyAgent(auth, company.id, company.mainAgentId).then((agent) => agent.isActive).catch(() => false)
           : false;
-        if (managementRequest || isReadOnlyCompanySwitch(prompt ?? "") || !runnableMainAgent) {
-          const result = await runNeutralMessage(auth, prompt || "", request.body.conversationId, request.body.attachments, undefined, memoryPolicy, undefined, undefined, { id: company.id, name: company.name });
+        if ((semantic?.coreRoute ? !semantic.coreRoute.delegate : semantic?.coreCapability || managementRequest || isReadOnlyCompanySwitch(prompt ?? "")) || !runnableMainAgent) {
+          const result = await runNeutralMessage(auth, prompt || "", request.body.conversationId, request.body.attachments, undefined, memoryPolicy, undefined, undefined, { id: company.id, name: company.name }, undefined, semantic?.coreRoute);
           applyChatTelemetryHeaders(reply, result);
           return { ...result, activeContext: resolved.context };
         }

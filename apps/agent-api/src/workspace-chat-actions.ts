@@ -45,6 +45,9 @@ type WorkspaceDirective = {
   memory?: { type?: MemoryInput["type"]; title?: string; content?: string; confidence?: number };
 } & Omit<WebhookDirective, "action">;
 
+/** Workspace actions that only read stored records. */
+export const WORKSPACE_READ_ACTIONS: ReadonlySet<string> = new Set(["activity.list", "automation.list", "automation.history", "website.list", "webhook.list"]);
+
 export type WorkspaceChatActionResult = {
   cleanText: string;
   workspaceAction?: { action: WorkspaceActionKind; resourceId: string; companyId?: string; businessId?: string; projectId?: string };
@@ -724,7 +727,8 @@ Use activity.run when the user asks the company agents to perform work and wants
       return { cleanText: finish(directive, card), workspaceAction: { action: directive.action, resourceId: run.id, companyId: company.id }, companyRunId: run.id };
     } catch (error) {
       options.onError?.(error);
-      return { cleanText: this.noActionMessage(options.requestMessage ?? "") };
+      // As in the email executor, the validation reason is kept so a native tool call can be corrected.
+      return { cleanText: `${this.noActionMessage(options.requestMessage ?? "")} ${error instanceof Error ? clean(error.message, 400) : ""}`.trim() };
     }
   }
 }
