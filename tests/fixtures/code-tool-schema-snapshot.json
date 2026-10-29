@@ -1,6 +1,6 @@
 {
-  "manifestVersion": 16,
-  "checksum": "8e7ba87add7d4c3e1e23a83aa4920622378ced1030724ac177ab9b7373cd2bd2",
+  "manifestVersion": 18,
+  "checksum": "629199a9ce1c794a1c0f621687cd0563839621a0a065dd966a8d4088cb853492",
   "tools": [
     {
       "key": "code.agent.continue@1",
@@ -339,11 +339,25 @@
       "checksum": "6d6589ab5a1368b92298305a9215ac0f5317e630f3e351d3b38df9fa3b2beec5"
     },
     {
+      "key": "code.preview.restart@1",
+      "name": "code.preview.restart",
+      "version": 1,
+      "status": "active",
+      "checksum": "3b5965fbfdbd3436ba1d3da77eaf8ed1190f1dae7e9c411de9fb70616c4b692e"
+    },
+    {
       "key": "code.preview.screenshot@1",
       "name": "code.preview.screenshot",
       "version": 1,
       "status": "active",
       "checksum": "719869c8985b1cd161f663213e1bc38bb0fb8639a816b97cb72fd859d087c6f2"
+    },
+    {
+      "key": "code.preview.screenshot@2",
+      "name": "code.preview.screenshot",
+      "version": 2,
+      "status": "active",
+      "checksum": "5cb600f3ea38df1aaeb107f5e6276ae89f447e7477990f409dbd456facd923d5"
     },
     {
       "key": "code.project.info@1",

@@ -1,4 +1,4 @@
-import {rowTaskCapabilities} from "./chat-project-data-capabilities";
+import {rowTaskCapabilities,takesRowCapabilityPath} from "./chat-project-data-capabilities";
 import { isOllamaChatPayload } from "./runtime-compat-routes";
 
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
@@ -201,7 +201,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
       const activeProjId = resolved.project?.id ?? null;
       const activeCompId = resolved.company?.id ?? resolved.project?.companyId ?? null;
 
-      if(semantic?.rowCapability&&resolved.project?.dataBackendId&&resolved.company){
+      if(semantic?.rowCapability&&resolved.project?.dataBackendId&&resolved.company&&await takesRowCapabilityPath(semantic.rowCapability,async()=>(await companyRuntime.chatProjectTools(auth,resolved.company!.id,resolved.project!.id,[semantic.rowCapability!])).length>0)){
         const result=await runNeutralMessage(auth,prompt??"",request.body.conversationId,request.body.attachments,undefined,memoryPolicy,undefined,undefined,{id:resolved.company.id,name:resolved.company.name},{...resolved.project,capabilityIds:rowTaskCapabilities(semantic.rowCapability)});
         return reply.send({...result,activeContext:resolved.context});
       }

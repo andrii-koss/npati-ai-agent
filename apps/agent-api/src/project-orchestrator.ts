@@ -123,7 +123,14 @@ export class ProjectOrchestrator {
     return initSharedProjectContext(this.projectWorkspace, ctx, companyId, projectId, details);
   }
 
-  async prepareCodingMobile(ctx: AuthContext, project: Project, prompt: string): Promise<Project> {
+  async prepareCodingMobile(ctx: AuthContext, project: Project, prompt: string, requestedFramework?: string): Promise<Project> {
+    const framework = canonicalFrameworkName(requestedFramework ?? project.framework) ?? "Expo";
+    if (framework === "Flutter") {
+      await this.scaffoldWebsiteProject(ctx, project.companyId, project.id, project.name, framework, prompt);
+      await this.projectService.updatePreview(ctx, project.companyId, project.id, { framework, runtime: "flutter" });
+      await this.initSharedProjectContext(ctx, project.companyId, project.id, { name: project.name, description: prompt, framework, projectType: "mobile_app" });
+      return this.projectService.get(ctx, project.companyId, project.id);
+    }
     const scheme = project.appScheme ?? defaultAppScheme(project.name);
     await this.scaffoldMobileAppProject(ctx, project.companyId, project.id, project.name, scheme);
     await this.registerMobileRedirects(ctx, project.companyId, project.id, scheme);
@@ -255,7 +262,7 @@ export class ProjectOrchestrator {
           );
         }
         dataBackendId = selection.backendId;
-        framework = "Expo";
+        framework = framework === "Flutter" ? "Flutter" : "Expo";
       }
 
       const { project: created } = await this.projectService.create(ctx, params.companyId, {
@@ -267,13 +274,14 @@ export class ProjectOrchestrator {
       }, params.idempotencyKey || `create-proj-${Date.now()}`);
       project = await this.projectService.updatePreview(ctx, params.companyId, created.id, {
         framework,
-        ...(isMobileApp ? { runtime: "expo" } : {}),
+        ...(isMobileApp ? { runtime: framework === "Flutter" ? "flutter" : "expo" } : {}),
       });
 
       if (isMobileApp) {
         const scheme = project.appScheme || defaultAppScheme(project.name);
         report("files", "active", framework);
-        await this.scaffoldMobileAppProject(ctx, params.companyId, project.id, project.name, scheme);
+        if (framework === "Flutter") await this.scaffoldWebsiteProject(ctx, params.companyId, project.id, project.name, framework, params.prompt);
+        else await this.scaffoldMobileAppProject(ctx, params.companyId, project.id, project.name, scheme);
         await this.registerMobileRedirects(ctx, params.companyId, project.id, scheme);
       } else if (framework !== "Expo") {
         report("files", "active", framework);
@@ -302,8 +310,8 @@ export class ProjectOrchestrator {
       project.dataBackendId ? "A DataBackend is attached. Inspect its schema and available SDK, preserving existing bindings. Do not assume auth pages or form components have been generated. Never simulate form success with alert or local-only storage." : "",
       project.framework === "HTML/CSS" ? "4. This is a static HTML/CSS website. Edit its .html files directly and do not introduce Next.js or a package manager unless the user asks for it." : "",
       project.framework === "Next.js" ? "4. The Next.js project structure, package.json, and layout are ALREADY scaffolded in the workspace. Do not run create-next-app or re-scaffold; inspect and edit the existing files directly." : "",
-      project.type === "mobile_app" ? "4. This is an Expo (React Native) app. Minimal Expo configuration exists; implement the requested screens. Do not assume a database or auth/SDK screens exist. Use only a public publishable key when data access is needed; never add PROJECT_SECRET_KEY, DATABASE_URL or any database credentials to the app." : "",
-      "5. Focus ONLY on inspecting, creating, and modifying project source files. Do NOT execute 'npm run build', terminal commands, or preview tools (`project.terminal.exec`, `project.preview.start`) manually — the system automatically installs dependencies, executes production build verification, and launches Live Preview immediately after this step.",
+      project.type === "mobile_app" ? "4. This is a native mobile app; preserve its recorded framework (Flutter or Expo/React Native). Minimal Expo configuration exists; implement the requested screens. Do not assume a database or auth/SDK screens exist. Use only a public publishable key when data access is needed; never add PROJECT_SECRET_KEY, DATABASE_URL or any database credentials to the app." : "",
+      project.type === "mobile_app" ? "5. Implement native source and tests. Run supported dependency/static/unit checks with actual exit codes. Native build requires its SDK/JDK; report BLOCKED if absent. Never treat Expo Web as Android build/install/device E2E." : "5. Focus ONLY on inspecting, creating, and modifying project source files. Do NOT execute 'npm run build', terminal commands, or preview tools (`project.terminal.exec`, `project.preview.start`) manually — the system automatically installs dependencies, executes production build verification, and launches Live Preview immediately after this step.",
       sharedContext ? `\n[Shared Project Context (PROJECT.md)]:\n${sharedContext.slice(0, 2000)}` : "",
       `\nUser Task: ${params.prompt}`,
     ].filter(Boolean).join("\n");
@@ -541,7 +549,7 @@ export class ProjectOrchestrator {
     let buildErrorSummary = "";
     let repairAttempts = 0;
 
-    const needsBuild = !isDataTask && (isCreate
+    const needsBuild = project.type !== "mobile_app" && !isDataTask && (isCreate
       || params.intentDecision.intent === "BUILD_PROJECT"
       || params.intentDecision.intent.startsWith("EDIT_")
       || params.intentDecision.intent === "DEBUG_PROJECT");

@@ -1,7 +1,9 @@
 import { normalizeBrowserDiagnostic } from "../browser-qa-diagnostics.mjs";
+import { assertBrowserQaActions } from "../browser-qa-actions.mjs";
 import { SandboxProviderError, type SandboxBrowserQaOptions, type SandboxBrowserQaResult } from "./sandbox-provider";
 
 export function assertBrowserQaOptions(options: SandboxBrowserQaOptions): void {
+  try { assertBrowserQaActions(options.actions); } catch { throw new SandboxProviderError("invalid_qa_options", "Invalid browser actions", 400, "browser_qa", "project.qa.inspect"); }
   if (options?.screenshotMode !== undefined && !["layout", "visual"].includes(options.screenshotMode)) throw new SandboxProviderError("invalid_qa_options", "Invalid screenshot mode", 400, "browser_qa", "project.qa.inspect");
   if (!options || !Number.isInteger(options.port) || options.port < 1 || options.port > 65535 ||
       typeof options.path !== "string" || !/^\/(?!\/)[A-Za-z0-9/_~.%-]*$/.test(options.path) || options.path.includes("..") || options.path.length > 512 ||
@@ -27,6 +29,16 @@ export function parseBrowserQaResult(stdout: string): SandboxBrowserQaResult {
     if (Array.isArray(result.consoleDiagnostics)) result.consoleDiagnostics =
       result.consoleDiagnostics.slice(0, Math.min(5, result.consoleErrorCount)).map(normalizeBrowserDiagnostic);
     else delete result.consoleDiagnostics;
+    if(result.interactionTrace!==undefined){
+      if(!Array.isArray(result.interactionTrace)||result.interactionTrace.length>16)throw new Error("invalid_interaction_trace");
+      assertBrowserQaActions(result.interactionTrace.map(step=>step.action));
+      for(const step of result.interactionTrace){
+        if(!["completed","failed"].includes(step.status))throw new Error("invalid_interaction_trace");
+        for(const view of [step.before,step.after])if(!view||typeof view.text!=="string"||view.text.length>1400||!Array.isArray(view.buttons)||view.buttons.length>32
+          ||view.buttons.some(button=>typeof button.label!=="string"||button.label.length>100||typeof button.disabled!=="boolean")
+          ||view.canvasHash!==undefined&&!/^[a-f0-9]{1,8}$/.test(view.canvasHash))throw new Error("invalid_interaction_trace");
+      }
+    }
     return result;
   } catch {
     throw new SandboxProviderError("qa_invalid_result", "Browser QA runner returned invalid output", 503, "browser_qa", "project.qa.inspect");

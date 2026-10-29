@@ -50,7 +50,9 @@ export class CodeToolSchemaError extends Error {
  */
 export const CODE_TOOL_SCHEMAS: readonly CodeToolSchema[] = authoredSchemas as unknown as readonly CodeToolSchema[];
 // All pre-v16 sessions retain schema.apply@1 exactly as published.
-const LEGACY_TOOL_SCHEMAS = CODE_TOOL_SCHEMAS.filter(tool => tool.name !== "code.data.schema.apply" || tool.version === 1);
+const V17_TOOL_SCHEMAS = CODE_TOOL_SCHEMAS.filter(tool => tool.name !== "code.preview.screenshot" || tool.version === 1);
+const V16_TOOL_SCHEMAS = V17_TOOL_SCHEMAS.filter(tool => tool.name !== "code.preview.restart");
+const LEGACY_TOOL_SCHEMAS = V16_TOOL_SCHEMAS.filter(tool => tool.name !== "code.data.schema.apply" || tool.version === 1);
 
 /**
  * The C2 published subset (read/search only). Kept as a named constant because manifest v2 must keep
@@ -211,7 +213,7 @@ export const V12_TOOL_SCHEMAS = LEGACY_TOOL_SCHEMAS.filter(tool => !V15_ADDED_TO
 export const V13_TOOL_SCHEMAS = LEGACY_TOOL_SCHEMAS.filter(tool => !V15_ADDED_TOOL_NAMES.includes(tool.name) && tool.name !== "code.data.backend.create");
 export const V14_TOOL_SCHEMAS = LEGACY_TOOL_SCHEMAS.filter(tool => !V15_ADDED_TOOL_NAMES.includes(tool.name));
 export const V15_TOOL_SCHEMAS = LEGACY_TOOL_SCHEMAS;
-export const CODE_TOOL_MANIFEST_VERSION = 16;
+export const CODE_TOOL_MANIFEST_VERSION = 18;
 
 /* Step 6 publishes additive controls and spawn_async in v11; spawn@1 and manifests v1?v10 stay frozen. */
 
@@ -230,7 +232,7 @@ export const CODE_TOOL_MANIFEST_VERSION = 16;
  * places that report the artifact as stale, while `assertManifestConsistent()` — and therefore the manifest
  * the application publishes — is already satisfied.
  */
-export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "8e7ba87add7d4c3e1e23a83aa4920622378ced1030724ac177ab9b7373cd2bd2";
+export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "629199a9ce1c794a1c0f621687cd0563839621a0a065dd966a8d4088cb853492";
 
 /**
  * Checksum of the v8 published set (36 tools: everything through the eleven `code.git.*` tools). Frozen for
@@ -406,6 +408,8 @@ export const KNOWN_TOOL_MANIFESTS: readonly CodeToolManifest[] = [
   toolManifest(V13_TOOL_SCHEMAS, 13),
   toolManifest(V14_TOOL_SCHEMAS, 14),
   toolManifest(V15_TOOL_SCHEMAS, 15),
+  toolManifest(V16_TOOL_SCHEMAS, 16),
+  toolManifest(V17_TOOL_SCHEMAS, 17),
   toolManifest(CODE_TOOL_SCHEMAS, CODE_TOOL_MANIFEST_VERSION),
 ];
 

@@ -1,7 +1,8 @@
+import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { WorkspaceAccessError, type WorkspaceStore } from "@npati/workspace";
 import type { AuthProvider } from "./auth";
-import type { IntegrationsRepository } from "./integrations-repository";
+import type { CompanyWebhook, IntegrationsRepository } from "./integrations-repository";
 import { PromptInjectionGuard, CredentialMasker } from "./security-guardrails";
 
 function hasPermission(scope: any, permission: string): boolean {
@@ -39,7 +40,8 @@ export function registerIntegrationsRoutes(
     auth: AuthProvider;
     store: WorkspaceStore;
     repo: IntegrationsRepository;
-    triggerRun?: (companyId: string, prompt: string, agentId?: string) => Promise<unknown>;
+    /** Runs the webhook's Company Agent; `deliveryKey` makes a redelivered event reuse the same run. */
+    triggerRun?: (webhook: CompanyWebhook, prompt: string, deliveryKey: string) => Promise<unknown>;
   }
 ) {
   const { auth, store, repo, triggerRun } = deps;
@@ -161,9 +163,9 @@ export function registerIntegrationsRoutes(
 
       await repo.recordWebhookTrigger(webhook.id);
 
-      if (triggerRun) {
-        void triggerRun(webhook.companyId, renderedPrompt, webhook.agentId || undefined).catch(() => undefined);
-      }
+      if (!triggerRun) throw Object.assign(new Error("Webhook agent runs are unavailable on this server."), { status: 503 });
+      const delivery = String(r.headers["idempotency-key"] ?? r.headers["x-delivery-id"] ?? "").trim().slice(0, 200) || randomUUID();
+      void triggerRun(webhook, renderedPrompt, delivery).catch((error: unknown) => r.log.warn({ err: error, webhookId: webhook.id }, "Webhook agent run failed"));
 
       return reply.code(202).send({
         status: "accepted",

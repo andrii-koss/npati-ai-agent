@@ -161,7 +161,8 @@ describe("chat development lifecycle with the real store, queue and executor", (
     await vi.waitFor(async () => expect((await f.service.list(owner)).map(p => p.status)).toEqual(["completed", "failed", "completed", "completed"]));
     const projects = await f.projects.list(owner, f.company.id);
     expect(projects.find(p => p.type === "mobile_app")?.framework).toBe("Expo");
-    expect(projects.filter(p => p.previewUrl)).toHaveLength(3); // Only verified runs publish a preview.
+    expect(projects.filter(p => p.previewUrl)).toHaveLength(2); // Native source completion does not require a web Preview.
+    expect(projects.find(p => p.type === "mobile_app")?.previewUrl).toBeFalsy();
     expect((await getLatestChatProjectCard(f.store, owner, live[0]!.conversationId!))?.sessionId).toBe(live[0]!.sessionId);
   });
   it("isolates stop and hide, preserves projects, and restores their chats after deletion", async () => {

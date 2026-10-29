@@ -3,6 +3,8 @@ import type { AIEngine, ChatRequest, ChatToolCall, OmniRouteMarketplace } from "
 import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
 import { buildApp } from "../apps/agent-api/src/app";
 import { CompanyDelegationRuntime } from "../apps/agent-api/src/company-runtime";
+import { decideCoreChatRouting } from "../apps/agent-api/src/chat-core-routing";
+import { CORE_CHAT_TOOLS } from "../apps/agent-api/src/chat-tool-orchestrator";
 
 const auth: AuthContext = { userId: "core-route-user", workspaceId: "core-route-workspace", permissions: ["workspace:read", "workspace:write", "business:manage", "tools:execute"] };
 const toolCall = (id: string, name: string, args: Record<string, unknown>): ChatToolCall => ({ id, type: "function", function: { name, arguments: JSON.stringify(args) } });
@@ -78,8 +80,10 @@ it.each(["/chat", "/chat/stream"])("reads Company name and agents together throu
   const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace });
   try {
     const response = await app.inject({ method: "POST", url, payload: { message: 'Switch to company "Route Logistics". Tell me its exact name and agent names; do not create anything.', contextType: "company", companyId: company.id } });
-    expect(response.body).toContain("Route Logistics");
-    expect(response.body).toContain("Lead Dispatcher");
+    expect(response.body).toContain("Route Logistics — 2");
+    // The stored Main Agent is marked, not inferred from role text.
+    expect(response.body).toContain("★ Lead Dispatcher");
+    expect(response.body).not.toContain("★ Аналітик Маршрутів");
     expect(response.body).toContain("Аналітик Маршрутів");
     expect(requests).toHaveLength(0);
   } finally { await app.close(); }
@@ -116,6 +120,98 @@ it.each(["/chat", "/chat/stream"])("does not let a write planner's refusal repla
     expect(result.message).toContain("RECIPE_RECALL_42");
     expect(requests.some(request => String(request.messages[0]?.content).includes("Decide what the latest user message asks for"))).toBe(false);
   } finally { await app.close(); }
+});
+
+it.each(["/chat", "/chat/stream"])("shows the server's deletion confirmation verbatim and runs nothing else that turn: %s", async url => {
+  const store = new InMemoryWorkspaceStore();
+  const { company } = await companyWithAgents(store);
+  const business = await store.createBusiness(auth, { name: "Linked Bakery", market: "Kyiv" }, "linked-bakery");
+  const before = await store.getUserBusiness(auth, business.id);
+  const requests: ChatRequest[] = [];
+  // Live shape: the classifier also names Business and Memory capabilities, and the model would go on to "update" the Business.
+  const ai = engine({ intent: "CHAT", coreCapability: "npati_company_action", coreMutation: true, additionalCoreCapabilities: ["npati_business_profile", "npati_workspace_action"] }, async request =>
+    String(request.messages[0]?.content).includes("Decide what the latest user message asks for") ? { content: "NO_ACTION" }
+    : request.messages.some(message => message.role === "tool")
+    ? { content: "", toolCalls: [toolCall("empty-business", "npati_business_profile", { action: "update", businessId: business.id, profile: {} })] }
+    : { content: "", toolCalls: [toolCall("delete-company", "npati_company_action", { action: "delete", companyId: company.id })] }, requests);
+  const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace });
+  try {
+    const response = await app.inject({ method: "POST", url, payload: { message: "Видали компанію «Route Logistics» разом з її бізнес-ідеєю, цілями та пам'яттю.", contextType: "none" } });
+    const result = url === "/chat" ? JSON.parse(response.body) : JSON.parse(/event: result\ndata: (.*)/.exec(response.body)![1]!);
+    expect(result.message).toContain("**Так, видали компанію Route Logistics**");
+    expect(await store.getCompany(auth, company.id)).toMatchObject({ name: "Route Logistics" });
+    expect(await store.getUserBusiness(auth, business.id)).toEqual(before);
+    expect(requests.filter(request => request.tools?.length)).toHaveLength(1);
+  } finally { await app.close(); }
+});
+
+it.each(["/chat", "/chat/stream"])("keeps the model's explanation of a refused native company change instead of a planner's generic failure: %s", async url => {
+  const store = new InMemoryWorkspaceStore();
+  const { company, analyst } = await companyWithAgents(store);
+  const requests: ChatRequest[] = [];
+  const ai = engine({ intent: "CHAT", coreCapability: "npati_company_action", coreMutation: true }, async request => request.messages.some(message => message.role === "tool")
+    ? { content: "The tool teleport.magic is not supported, so the agent was not changed." }
+    : { content: "", toolCalls: [toolCall("grant", "npati_company_action", { action: "update", companyId: company.id, agents: [{ action: "update", agentId: analyst.id, fields: { tools: ["teleport.magic"] } }] })] }, requests);
+  const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace });
+  try {
+    const response = await app.inject({ method: "POST", url, payload: { message: "Онови агента «Аналітик Маршрутів» у компанії «Route Logistics»: додай йому інструмент «teleport.magic».", contextType: "company", companyId: company.id } });
+    const result = url === "/chat" ? JSON.parse(response.body) : JSON.parse(/event: result\ndata: (.*)/.exec(response.body)![1]!);
+    expect(result.message).toContain("teleport.magic is not supported");
+    expect((await store.getCompanyAgent(auth, company.id, analyst.id)).tools).toEqual([]);
+    // The legacy company planner must not re-plan a capability the model already called this turn.
+    expect(requests.some(request => String(request.messages[0]?.content).includes("The user's latest message is an explicit company settings request"))).toBe(false);
+  } finally { await app.close(); }
+});
+
+it("deletes a named, unselected company together with its business idea after the composite confirmation", async () => {
+  const store = new InMemoryWorkspaceStore();
+  const business = await store.createBusiness(auth, { name: "Composite Bakery" }, "composite-bakery");
+  const { company } = await companyWithAgents(store);
+  await store.updateCompany(auth, company.id, { businessId: business.id }, (await store.getCompany(auth, company.id)).revision);
+  const ai = engine({ intent: "CHAT", coreCapability: "npati_company_action", coreMutation: true }, async () => ({ content: "Model must not answer a composite deletion." }), []);
+  const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace });
+  try {
+    const ask = await app.inject({ method: "POST", url: "/chat", payload: { message: "Видали компанію «Route Logistics» разом з її бізнес-ідеєю, цілями та пам'яттю.", contextType: "none" } });
+    const question = JSON.parse(ask.body).message as string;
+    expect(question).toContain("Composite Bakery");
+    expect(await store.listUserBusinesses(auth)).toHaveLength(1);
+    const phrase = /\*\*([^*]+)\*\*\.?\s*$/u.exec(question.trim())?.[1] ?? [...question.matchAll(/\*\*([^*]+)\*\*/gu)].at(-1)?.[1];
+    const done = await app.inject({ method: "POST", url: "/chat", payload: { message: phrase, contextType: "none" } });
+    expect(JSON.parse(done.body).message).toContain("Composite Bakery");
+    expect(await store.listUserBusinesses(auth)).toEqual([]);
+    await expect(store.getCompany(auth, company.id)).rejects.toThrow();
+  } finally { await app.close(); }
+});
+
+it.each(["/chat", "/chat/stream"])("deletes a Business Profile only after the user writes the server's exact confirmation: %s", async url => {
+  const store = new InMemoryWorkspaceStore();
+  const business = await store.createBusiness(auth, { name: "Doomed Bakery" }, "doomed-bakery");
+  const kept = await store.createBusiness(auth, { name: "Kept Bakery" }, "kept-bakery");
+  const ai = engine({ intent: "CHAT", coreCapability: "npati_business_profile", coreMutation: true }, async request => request.messages.some(message => message.role === "tool")
+    ? { content: "Business Profile deleted." }
+    : { content: "", toolCalls: [toolCall("delete", "npati_business_profile", { action: "delete", businessId: business.id, profile: {} })] }, []);
+  const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace });
+  const send = async (message: string) => {
+    const response = await app.inject({ method: "POST", url, payload: { message, contextType: "none" } });
+    return (url === "/chat" ? JSON.parse(response.body) : JSON.parse(/event: result\ndata: (.*)/.exec(response.body)![1]!)).message as string;
+  };
+  try {
+    const question = await send("Видали бізнес-профіль «Doomed Bakery».");
+    expect(question).toContain("**Так, видали бізнес-профіль Doomed Bakery**");
+    expect((await store.listUserBusinesses(auth)).map(item => item.name).sort()).toEqual(["Doomed Bakery", "Kept Bakery"]);
+    // A model claim is not a confirmation: only the user's exact phrase deletes.
+    expect(await send("Так, видали бізнес-профіль Doomed Bakery")).toContain("видалено");
+    expect((await store.listUserBusinesses(auth)).map(item => item.id)).toEqual([kept.id]);
+  } finally { await app.close(); }
+});
+
+it("lets the classifier's research decision outrank web keywords and tool IDs written like domains", () => {
+  const tools = [...CORE_CHAT_TOOLS, { type: "function" as const, function: { name: "npati_company_action", description: "", parameters: {} } }];
+  const message = "Дай агенту «Дослідник» інструмент веб-пошуку web.search.";
+  const route = { capability: "npati_company_action" as const, mutation: true };
+  expect(decideCoreChatRouting(message, tools, false, true, { ...route, research: false }).toolChoice).toEqual({ type: "function", function: { name: "npati_company_action" } });
+  // Without the classifier's answer the keyword fallback still prefers explicit web work.
+  expect(decideCoreChatRouting(message, tools, false, true, route).toolChoice).toMatchObject({ function: { name: expect.stringMatching(/^web_/) } });
 });
 
 /** The classifier answers with `decision`; every other model call is recorded and answered by `chat`. */

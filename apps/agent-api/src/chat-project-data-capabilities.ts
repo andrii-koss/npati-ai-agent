@@ -4,6 +4,11 @@ export const CHAT_ROW_CAPABILITIES = ["project.data.rows.list", "project.data.ro
 export type ChatRowCapability = typeof CHAT_ROW_CAPABILITIES[number];
 export function isChatRowCapability(value: unknown): value is ChatRowCapability { return typeof value === "string" && (CHAT_ROW_CAPABILITIES as readonly string[]).includes(value); }
 export function rowTaskCapabilities(requested: ChatRowCapability): string[] { return [...new Set([requested, "project.data.schema.inspect", "project.data.rows.list", "project.data.rows.read"])]; }
+/** Row reads and inserts also have the project's approval-gated coding executor (code.data.query.read/rows.seed); only
+ * update and delete are Company-capability-only. Without a granted Company agent such a task falls through to coding. */
+export async function takesRowCapabilityPath(requested: ChatRowCapability, granted: () => Promise<boolean>): Promise<boolean> {
+ return !["project.data.rows.list","project.data.rows.read","project.data.rows.create"].includes(requested) || await granted();
+}
 export function chatCapabilityParameters(id: string): Record<string,unknown> {
  const capability=defaultCapabilityRegistry.get(id);if(!capability?.inputSchema)throw new Error("Unknown canonical capability");
  return {...capability.inputSchema,additionalProperties:false};

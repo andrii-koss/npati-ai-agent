@@ -15,8 +15,15 @@ import {
   parseChatContentTask,
 } from "./content-page-types";
 import { ContentPageViewer } from "./content-page-viewer";
+import { listProjectCompanies } from "./website-builder-cache";
 
 export type { ContentItem };
+
+/** Download name of a Content Hub document; keeps letters of every script ("Хліб дня" must not become "-.md"). */
+export function contentExportFileName(title: string): string {
+  const safeTitle = title.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+  return `${safeTitle || "content-draft"}.md`;
+}
 
 export function ContentPage() {
   const { t, language } = useTranslation();
@@ -42,10 +49,9 @@ export function ContentPage() {
     const token = getStoredAuthToken();
     if (token) headers["authorization"] = `Bearer ${token}`;
 
-    fetch("/api/companies?limit=10", { headers })
-      .then((res) => (res.ok ? res.json() : { companies: [] }))
-      .then(async (data: { companies?: Array<{ id: string; name: string }> }) => {
-        const companies = data.companies ?? [];
+    // Every company page: content of a company beyond the first ones must stay visible, editable and exportable.
+    listProjectCompanies()
+      .then(async (companies) => {
         const deletedIds = new Set(getDeletedIds());
         const editsMap = getEditsMap();
         const overridesResponse = await fetch("/api/content/overrides", { headers });
@@ -53,7 +59,7 @@ export function ContentPage() {
           ? ((await overridesResponse.json()) as { overrides?: Record<string, { title?: string; type?: ContentItem["type"]; content?: string; deleted?: boolean }> }).overrides ?? {}
           : {};
 
-        const runPromises = companies.slice(0, 5).map(async (company) => {
+        const loadCompanyContent = async (company: { id: string; name: string }) => {
           try {
             const runRes = await fetch(`/api/companies/${company.id}/runs?limit=20`, { headers });
             if (!runRes.ok) return [];
@@ -93,9 +99,12 @@ export function ContentPage() {
           } catch {
             return [];
           }
-        });
+        };
 
-        const allResults = await Promise.all(runPromises);
+        const allResults: ContentItem[][] = [];
+        for (let offset = 0; offset < companies.length; offset += 4) {
+          allResults.push(...await Promise.all(companies.slice(offset, offset + 4).map(loadCompanyContent)));
+        }
         const contentRows = allResults.flat();
 
         setItems(contentRows);
@@ -181,9 +190,8 @@ export function ContentPage() {
     const blob = new Blob([selectedItem.content], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    const safeTitle = selectedItem.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40);
     link.href = url;
-    link.download = `${safeTitle || "content-draft"}.md`;
+    link.download = contentExportFileName(selectedItem.title);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

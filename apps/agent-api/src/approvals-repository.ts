@@ -239,9 +239,9 @@ export class CompanyApprovalsRepository {
     const payloadHash = this.risk.computePayloadHash(approvalPayloadForHash(params.inputPayload));
     const result = await this.pool.query<CompanyApproval>(`UPDATE company_approvals SET consumed_at=now()
       WHERE id=$1 AND workspace_id=$2 AND company_id=$3 AND user_id=$4
-        AND run_id=$5 AND agent_id=$6 AND tool_name=$7 AND payload_hash=$8
+        AND run_id IS NOT DISTINCT FROM $5 AND agent_id IS NOT DISTINCT FROM $6 AND tool_name=$7 AND payload_hash=$8
         AND status='approved' AND consumed_at IS NULL AND expires_at>now()
-      RETURNING ${appCols}`, [id, ctx.workspaceId, companyId, ctx.userId, params.runId, params.agentId, params.toolName, payloadHash]);
+      RETURNING ${appCols}`, [id, ctx.workspaceId, companyId, ctx.userId, params.runId || null, params.agentId || null, params.toolName, payloadHash]);
     if (result.rows[0]) return result.rows[0];
     const current = await this.get(ctx, companyId, id);
     const reason = current.consumedAt ? "Approval has already been consumed"

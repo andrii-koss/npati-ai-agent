@@ -77,6 +77,7 @@ COPY apps/agent-api/project-runtime-launcher.mjs apps/agent-api/project-runtime-
 RUN apk add --no-cache libseccomp-dev chromium font-noto
 RUN npm install --prefix /opt/npati-qa --omit=dev --ignore-scripts --no-audit --no-fund playwright@1.63.0
 COPY apps/agent-api/browser-qa-runner.mjs /opt/npati-qa/browser-qa-runner.mjs
+COPY apps/agent-api/browser-qa-actions.mjs /opt/npati-qa/browser-qa-actions.mjs
 COPY apps/agent-api/browser-qa-diagnostics.mjs /opt/npati-qa/browser-qa-diagnostics.mjs
 RUN cc -O2 -Wall -Wextra -Werror /tmp/project-runtime-guard.c -lseccomp -o /usr/local/bin/npati-project-exec \
   && /usr/local/bin/npati-project-exec --emit-filter /opt/npati-runtime/project-command.seccomp \

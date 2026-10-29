@@ -80,6 +80,10 @@ export type CodeToolErrorCode =
   | "command_hard_denied"
   | "interactive_command_not_supported"
   | "command_timeout"
+  | "command_failed"
+  | "command_not_found"
+  | "install_failed"
+  | "build_failed"
   | "process_not_found"
   /** C11: the session's resolved intent is read-only, so this tool cannot run (owner decision 10). */
   | "review_code_read_only"
@@ -121,6 +125,7 @@ export type CodeToolErrorCode =
 
 /** Codes thrown by the canonical modules; they are mapped onto the runtime's failure shape. */
 export const CANONICAL_ERROR_CODES: ReadonlySet<string> = new Set<string>([
+  "command_failed", "command_not_found", "command_timeout", "install_failed", "build_failed",
   "file_too_large",
   "runtime_recovery_required", "runtime_state_invalid", "process_termination_unconfirmed", "process_cleanup_failed", "workspace_busy", "workspace_lock_unavailable", "transaction_recovery_required", "invalid_path", "path_outside_workspace", "null_byte", "symlink_escape", "sensitive_file_denied",
   "not_a_file", "not_a_directory", "too_large", "read_failed", "search_failed", "invalid_argument",

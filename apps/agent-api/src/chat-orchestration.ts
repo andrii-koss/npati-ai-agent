@@ -301,7 +301,10 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
         const loop = await runChatToolLoop({
           ai: aiEngine,
           request: routedRequest,
+          responseLanguage: activeConversationLanguage,
           tools: () => tools,
+          // Their deterministic planners below execute a change the model only described.
+          deferredTools: ["npati_company_action", "npati_email_action", "npati_workspace_action"],
           recoveryCall: companyPrimary && !needsResearch && plan?.entity?.trim() && (plan.company_agent_count === undefined || plan.company_agents?.length === plan.company_agent_count)
             ? { id: "planned-company-recovery", type: "function", function: { name: "npati_company_action", arguments: JSON.stringify({ action: "create", fields: {}, agents: [] }) } } : undefined,
           primaryOutcomeComplete: businessPrimary ? (metadata) => businessPlanComplete(plan, metadata) : companyPrimary ? (metadata) => companyPlanComplete(plan, metadata) : undefined,
@@ -331,6 +334,11 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
           nativeBusinessMessage = businessSummary.message;
           nativeBusinessAction = { action: businessSummary.createdThisTurn ? "create" : businessSummary.outcome.action, business: await workspaceStore.getUserBusiness(auth, businessSummary.outcome.businessId), businessId: businessSummary.outcome.businessId };
         }
+        // A server confirmation request ends the turn and is shown verbatim.
+        const confirmation = loop.metadata.find((item) => item.kind === "confirmation_required");
+        if (typeof confirmation?.message === "string") return { ...loop.result, content: confirmation.message };
+        const deletedBusiness = loop.metadata.find((item) => item.kind === "business_deleted");
+        if (typeof deletedBusiness?.message === "string") return { ...loop.result, content: deletedBusiness.message };
         return loop.result;
       } catch (error) {
         if (nativeCompanyPrimary || (error as { code?: string }).code === "TOOL_PRIMARY_INCOMPLETE") throw error;

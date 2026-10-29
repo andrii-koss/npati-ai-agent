@@ -149,10 +149,23 @@ export async function assertMember(pool: Pool, context: AuthContext) {
 
 export async function getBusiness(pool: Pool, context: AuthContext, businessId: string) {
   await assertMember(pool, context);
-  const result = await pool.query<Business>(`SELECT ${businessColumns} FROM businesses WHERE id=$1 AND workspace_id=$2`, [businessId, context.workspaceId]);
+  // Business Profiles belong to their owner, like companies: another member of the same workspace cannot reach them.
+  const result = await pool.query<Business>(`SELECT ${businessColumns} FROM businesses WHERE id=$1 AND workspace_id=$2 AND owner_user_id=$3`, [businessId, context.workspaceId, context.userId]);
   if (!result.rowCount) throw new WorkspaceAccessError("Business is not available in this workspace");
+  await assertBusinessInCredentialScope(pool, context, businessId);
   return result.rows[0]!;
 }
+
+/** A company-scoped credential (API key, remote token) reaches only the Business linked to its own company. */
+export async function assertBusinessInCredentialScope(pool: Pool, context: AuthContext, businessId: string) {
+  if (!context.companyId) return;
+  const linked = await pool.query<{ businessId: string | null }>(`SELECT business_id AS "businessId" FROM companies WHERE id=$1 AND workspace_id=$2 AND user_id=$3`,
+    [context.companyId, context.workspaceId, context.userId]);
+  if (linked.rows[0]?.businessId !== businessId) throw new WorkspaceAccessError("This credential is limited to the Business of its company");
+}
+
+/** List filter for the same rule; `param` is the position of `context.companyId ?? null`. */
+export const businessCredentialScopeSql = (param: number) => `($${param}::text IS NULL OR id=(SELECT business_id FROM companies WHERE id=$${param}))`;
 
 export async function assertCompany(pool: Pool, context: AuthContext, companyId: string) {
   if (context.companyId && context.companyId !== companyId) throw new WorkspaceAccessError("API key is not valid for this company");

@@ -1,5 +1,5 @@
 export const DEVELOPMENT_PROCESS_SETTINGS_KEY = "chat-development-processes:v1";
-import { classifyProjectIntent, extractFramework, isBackendProjectFramework } from "./project-intent";
+import { classifyProjectIntent, extractFramework, isBackendProjectFramework, isMobileProjectFramework } from "./project-intent";
 /** Shared deterministic routing: creation requests only, never ordinary project edits. */
 export type DevelopmentTarget = { name: string; kind: "website" | "blog" | "store" | "crm" | "mobile_app" | "game" | "api"; framework: string; technologySelection?: { source: "user_explicit" | "ai_planner" | "policy_fallback"; reason: string; criteria: string[] } };
 export type ModelTurnUsage = { id: string; turn: number; totalTokens?: number; inputTokens?: number; outputTokens?: number; costUsd?: number; model?: string; provider?: string; toolCallIds: string[]; durationMs?: number; /** Provider-reported cached prompt tokens, when it reports them. */ cachedTokens?: number };
@@ -70,7 +70,7 @@ export function planChatDevelopment(message: string, activeProjectId?: string): 
     if (kinds.includes("website") && !/(?:company|компан)/iu.test(message)) kinds.splice(kinds.indexOf("website"), 1);
     kinds.push("store");
   }
-  if (/(?:mobile\s+app|мобільн|мобильн)/iu.test(message)) kinds.push("mobile_app");
+  if (/(?:mobile\s+app|мобільн|мобильн|\bexpo\b|\bflutter\b|react[\s-]*native|android)/iu.test(message)) kinds.push("mobile_app");
   if (/(?:\bcrm\b|срм)/iu.test(message)) kinds.push("crm");
   // A game becomes its own project; a mobile game stays a mobile app (Expo).
   if (!kinds.includes("mobile_app") && /(?:\bgames?\b|(?<![\p{L}])(?:гр[уаи]|ігр\p{L}*|игр\p{L}*)(?![\p{L}]))/iu.test(message)) kinds.push("game");
@@ -84,7 +84,7 @@ export function planChatDevelopment(message: string, activeProjectId?: string): 
   return targets.map((kind, index) => ({
     kind,
     name: names[kind] + (count > 1 && kinds.length === 1 ? " " + (index + 1) : ""),
-    framework: kind === "mobile_app" ? "Expo" : requestedFramework ?? "HTML/CSS",
+    framework: kind === "mobile_app" ? isMobileProjectFramework(requestedFramework) ? requestedFramework! : "Expo" : requestedFramework ?? "HTML/CSS",
   }));
 }
 

@@ -1,4 +1,5 @@
 import { normalizeBrowserDiagnostic } from "../browser-qa-diagnostics.mjs";
+import { assertBrowserQaActions, type BrowserQaAction } from "../browser-qa-actions.mjs";
 import { randomUUID } from "node:crypto";
 import type { AuthContext, BrowserQaIssue, BrowserQaMetrics, BrowserQaScreenshot, BrowserQaStatus, ProjectQaReport, WorkspaceStore } from "@npati/workspace";
 import type { ProjectPreviewService } from "./project-preview-service";
@@ -7,6 +8,7 @@ import type { ProjectService } from "./project-service";
 import type { SandboxBrowserQaResult } from "./sandbox-provider";
 
 export interface BrowserQaInspectOptions {
+  actions?: BrowserQaAction[];
   projectId: string;
   path?: string;
   viewport?: "desktop" | "tablet" | "mobile";
@@ -54,6 +56,7 @@ export class ProjectBrowserQaService {
   ) {}
 
   async inspect(ctx: AuthContext, companyId: string, options: BrowserQaInspectOptions): Promise<BrowserQaReportResult> {
+    try { assertBrowserQaActions(options.actions); } catch { throw new BrowserQaError("invalid_actions", "Browser actions exceed the supported input bounds", 400); }
     if (!options.projectId || typeof options.projectId !== "string") throw new BrowserQaError("invalid_project_id", "Project ID is required", 400);
     const project = await this.projects.get(ctx, companyId, options.projectId);
     if (project.status === "archived") throw new BrowserQaError("project_archived", "Archived projects cannot be inspected", 409);
@@ -75,7 +78,7 @@ export class ProjectBrowserQaService {
     if ((!previewStatus.isRunning && project.status !== "previewing") || !previewPort) throw new BrowserQaError("preview_not_running", "Start the project preview before Browser QA", 409);
     const result: SandboxBrowserQaResult = await this.sandbox.inspectBrowser(ctx, companyId, project.id, {
       port: previewPort, path, viewport, timeoutMs, maxScreenshotBytes,
-      maxBrokenLinks: bounded(options.maxBrokenLinksToCheck, 20, 1, 50),
+      maxBrokenLinks: bounded(options.maxBrokenLinksToCheck, 20, 1, 50), actions: options.actions,
       screenshot: enabled.has("screenshot"), ...(options.screenshotMode ? { screenshotMode: options.screenshotMode } : {}), agentId: options.agentId,
     });
     const consoleErrors = enabled.has("console")
@@ -89,6 +92,8 @@ export class ProjectBrowserQaService {
     const brokenLinks = enabled.has("links") ? result.brokenLinks.slice(0, 50).map((link, index) => ({ href: `local link ${index + 1}`, status: link.status, error: link.error ? "Local link request failed" : undefined })) : [];
     const violations = enabled.has("a11y") ? result.accessibility.slice(0, 100).map(item => ({ rule: /^[a-z-]{1,40}$/.test(item.rule) ? item.rule : "unknown", impact: item.impact, selector: undefined })) : [];
     const issues: BrowserQaIssue[] = [];
+    if(options.actions?.length && (result.interactionTrace?.length!==options.actions.length||result.interactionTrace.some(step=>step.status!=="completed")))
+      issues.push(issue("console_error","error","Browser interaction actions did not complete","Inspect the recorded interaction trace."));
     if (result.statusCode >= 400) issues.push(issue("console_error", "error", `Preview returned HTTP ${result.statusCode}`, "Fix the preview route."));
     if (consoleErrors.length) issues.push(issue("console_error", "error", `${consoleErrors.length} browser console errors`, "Inspect the application console in the local preview."));
     for (const entry of diagnostics) issues.push(issue("console_error", "error", diagnosticMessage(entry),
@@ -110,6 +115,7 @@ export class ProjectBrowserQaService {
     }
     const status: BrowserQaStatus = issues.some(item => item.severity === "error") ? "failed" : issues.length ? "warning" : "passed";
     const metrics: BrowserQaMetrics = {
+      ...(result.interactionTrace?.length?{interactionTrace:result.interactionTrace}:{}),
       loadTimeMs: result.loadTimeMs, domContentLoadedMs: result.domContentLoadedMs,
       resourceCount: result.resourceCount, totalSizeBytes: result.totalSizeBytes,
       brokenLinksCount: brokenLinks.length, consoleErrorsCount: consoleErrors.length,

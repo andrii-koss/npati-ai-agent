@@ -35,8 +35,19 @@ it("does not force a retry of an attempted capability or remind more than once",
 
   let silent = 0;
   const stubborn = { chat: async () => { silent += 1; return { content: "No." }; } } as unknown as AIEngine;
-  await runChatToolLoop({ ai: stubborn, request, tools: () => tools, requiredTools: ["npati_workspace_action"], execute: async () => ({ output: {} }) });
+  await expect(runChatToolLoop({ ai: stubborn, request, tools: () => tools, requiredTools: ["npati_workspace_action"], execute: async () => ({ output: {} }) })).rejects.toMatchObject({ code: "TOOL_PRIMARY_INCOMPLETE" });
   expect(silent).toBe(2);
+});
+
+it("ends the turn when an executor asks the user to confirm, so no later step can run", async () => {
+  let steps = 0;
+  const ai = { chat: async () => { steps += 1; return steps === 1 ? { content: "", toolCalls: [call("delete", "npati_goal_action"), call("other", "npati_workspace_action")] } : { content: "Changed something else." }; } } as unknown as AIEngine;
+  const executed: string[] = [];
+  const result = await runChatToolLoop({ ai, request, tools: () => tools,
+    execute: async (toolCall) => { executed.push(toolCall.id); return toolCall.id === "delete" ? { output: { awaitingConfirmation: true }, metadata: { kind: "confirmation_required", message: "Confirm?" }, stop: true } : { output: {} }; } });
+  expect(executed).toEqual(["delete"]);
+  expect(steps).toBe(1);
+  expect(result.metadata).toEqual([{ kind: "confirmation_required", message: "Confirm?" }]);
 });
 
 it("ignores a required capability that is not offered", async () => {

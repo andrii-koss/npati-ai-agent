@@ -54,7 +54,7 @@ export interface ProjectIntentDecision {
 }
 
 /** Requests that ask for a mobile app (Expo / React Native) rather than a website. */
-const MOBILE_APP_REGEX = /(?:мобільн\p{L}*|мобильн\p{L}*|mobile|android|ios|expo|react\s*native|react-native|смартфон\p{L}*|застосун\p{L}*|апп|додаток для (?:телефон|смартфон)|native app)/iu;
+const MOBILE_APP_REGEX = /(?:мобільн\p{L}*|мобильн\p{L}*|mobile|android|ios|expo|flutter|react\s*native|react-native|смартфон\p{L}*|застосун\p{L}*|апп|додаток для (?:телефон|смартфон)|native app)/iu;
 
 export function isMobileAppRequest(message: string): boolean {
   if (!message) return false;
@@ -82,6 +82,12 @@ const REVIEW_REGEX = /(?:зроби рев['ʼ]?ю|перевір код|код 
 const IMPROVE_REGEX = /(?:покращ(?:ити)?|оптимізуй|рефакторинг|improve|optimize|refactor)\s+(?:проєкт|код|сайт|швидкість|архітектуру|project|website|code|performance)/i;
 
 const TEST_REGEX = /(?:запусти тести|протестуй|проведи тести|run (?:the )?(?:project |website |unit )?tests?|execute tests?|test (?:the )?(?:project|site|app|suite))/i;
+/** An explicit request to inspect installed runtime availability, never an explanation about SDKs. */
+export function isRuntimeToolchainCheck(message: string): boolean {
+  return /^(?:перевір(?:те)?|check|verify|inspect)(?=\s|$)/iu.test(message.trim())
+    && /(?:\bSDK\b|\bJDK\b|\btoolchain\b|\bemulator\b|емулятор)/iu.test(message)
+    && /(?:доступн|availab|installed|sandbox|toolchain)/iu.test(message);
+}
 
 const BROWSER_QA_REGEX = /(?:browser qa|headless|qa inspect|перевір (?:в )?браузері|перевір верстку|протестуй сайт|тест сторінки|check links|accessibility|a11y|broken links|audit website)/i;
 
@@ -127,8 +133,14 @@ export const SUPPORTED_PROJECT_FRAMEWORKS = [
   "Laravel",
   "HTML/CSS",
   "Expo",
+  "Flutter",
+  "Pygame",
 ] as const;
 export type SupportedProjectFramework = typeof SUPPORTED_PROJECT_FRAMEWORKS[number];
+
+/** Desktop deliverables use the existing Code/Sandbox tools, never an HTTP Preview. */
+export function isDesktopProjectFramework(value: unknown): boolean { return value === "Pygame"; }
+export function isMobileProjectFramework(value: unknown): boolean { return value === "Expo" || value === "Flutter"; }
 
 /** Frameworks whose primary deliverable is an HTTP API/server, not a browser-rendered site. */
 export const BACKEND_PROJECT_FRAMEWORKS = ["Express", "Fastify", "NestJS", "FastAPI", "Django", "Flask", "Laravel"] as const;
@@ -148,6 +160,8 @@ export function isSupportedProjectFramework(value: unknown): value is SupportedP
 export function canonicalFrameworkName(value: string | null | undefined): SupportedProjectFramework | undefined {
   if (!value) return undefined;
   const lower = value.toLowerCase();
+  if (/\bflutter\b/.test(lower)) return "Flutter";
+  if (/\bpygame\b/.test(lower)) return "Pygame";
   if (lower.includes("expo") || lower.includes("react native") || lower.includes("react-native")) return "Expo";
   if (lower.includes("next")) return "Next.js";
   if (lower.includes("nuxt")) return "Nuxt";
@@ -184,6 +198,8 @@ export function extractFramework(message: string): string | undefined {
   const constraints = frameworkConstraints(message);
   if (constraints.noFramework) return "HTML/CSS";
   const lower = constraints.positive.toLowerCase();
+  if (/\bflutter\b/.test(lower)) return "Flutter";
+  if (/\bpygame\b/.test(lower)) return "Pygame";
   if (/\b(?:fast\s*api|fastapi)\b/.test(lower)) return "FastAPI";
   if (/\bdjango\b/.test(lower)) return "Django";
   if (/\bflask\b/.test(lower)) return "Flask";
@@ -266,7 +282,7 @@ export function classifyProjectIntent(rawInput: ProjectIntentInput | string): Pr
         needsClarification: false,
         targetDetails: {
           topic: text,
-          framework: isMobileApp ? "Expo" : extractFramework(text) ?? (isGame ? "HTML/CSS" : undefined),
+          framework: isMobileApp ? extractFramework(text) ?? "Expo" : extractFramework(text) ?? (isGame ? "HTML/CSS" : undefined),
           entityName: extractEntityName(text),
           projectType: isMobileApp ? "mobile_app" : isGame ? "game" : "website",
         },
@@ -352,7 +368,7 @@ export function classifyProjectIntent(rawInput: ProjectIntentInput | string): Pr
       needsClarification: false,
       targetDetails: {
         topic: text,
-        framework: isMobileApp ? "Expo" : extractFramework(text) ?? (isGame ? "HTML/CSS" : undefined),
+        framework: isMobileApp ? extractFramework(text) ?? "Expo" : extractFramework(text) ?? (isGame ? "HTML/CSS" : undefined),
         entityName: extractEntityName(text),
         projectType: isMobileApp ? "mobile_app" : isGame ? "game" : "website",
       },
@@ -384,7 +400,7 @@ export function classifyProjectIntent(rawInput: ProjectIntentInput | string): Pr
   }
 
   // 9. Test Project / Browser QA
-  if (BROWSER_QA_REGEX.test(text) || TEST_REGEX.test(text)) {
+  if (BROWSER_QA_REGEX.test(text) || TEST_REGEX.test(text) || isRuntimeToolchainCheck(text)) {
     const isBrowserQa = BROWSER_QA_REGEX.test(text);
     return buildDecision({
       intent: "TEST_PROJECT",
@@ -446,7 +462,7 @@ export function classifyProjectIntent(rawInput: ProjectIntentInput | string): Pr
       needsClarification: false,
       targetDetails: {
         topic: text,
-        framework: isMobileApp ? "Expo" : extractFramework(text) ?? (isGame ? "HTML/CSS" : undefined),
+        framework: isMobileApp ? extractFramework(text) ?? "Expo" : extractFramework(text) ?? (isGame ? "HTML/CSS" : undefined),
         entityName: extractEntityName(text),
         projectType: isMobileApp ? "mobile_app" : isGame ? "game" : "website",
       },

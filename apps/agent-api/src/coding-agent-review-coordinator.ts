@@ -1,7 +1,7 @@
 import type { ChatMessage } from "@npati/omniroute-adapter";import type { AuthContext, CodeSession } from "@npati/workspace";import { sha256Hex, type CodeToolInvokeFailure, type CodeToolInvokeResult } from "./code-tool-runtime";import {  VERIFICATION_APPROVAL_REQUIRED,  VERIFICATION_REPAIR_EXHAUSTED,  VERIFICATION_UNAVAILABLE,  createVerificationLoop,  verificationChecks,  formatRepairInstruction,  type VerificationCheckReport,  type VerificationLoop,  type VerificationReport,} from "./code-verification-loop";import type { TestIntegrityVerdict } from "./code-test-integrity-guard";import type { ScopeGuardResult } from "./code-scope-guard";
 import {
   planVerification,
-  verificationFingerprint,
+  verificationFingerprint,  VERIFICATION_PLAN_VERSION,
   type VerificationPlan,
 } from "./code-verification-plan";
 import { decideSelfReview, type SelfReviewRiskDecision } from "./code-self-review-risk";
@@ -25,6 +25,7 @@ import {
   emitCodingActivity,
 } from "./coding-agent-runner-contracts";
 import type { CodingAgentReviewPhases } from "./coding-agent-review-phases";
+import { CredentialMasker } from "./security-guardrails";
 
 import type { CodeAgentLimits } from "./code-agent-config";
 
@@ -63,8 +64,13 @@ const VERIFICATION_CACHE_LIMIT = 4;
 export class CodingAgentReviewCoordinator {
   private readonly runtimeReceipts: string[] = [];
   recordRuntimeResult(result: CodeToolInvokeResult): void {
-    if (result.tool !== "code.data.policies.apply") return;
-    this.runtimeReceipts.push(JSON.stringify({ tool: result.tool, toolVersion: result.toolVersion, schemaVersion: result.schemaVersion, result: result.result }).slice(0, 4000));
+    let receipt: unknown = result.result;
+    if (result.tool === "code.shell.exec") {
+      const data = (result.result as { data?: { exitCode?: number; stdout?: string; durationMs?: number; truncated?: boolean } })?.data;
+      if (data?.exitCode !== 0) return;
+      receipt = { exitCode: 0, stdout: CredentialMasker.mask(String(data.stdout ?? "")).slice(-3000), durationMs: data.durationMs, truncated: data.truncated || String(data.stdout ?? "").length > 3000 };
+    } else if (result.tool !== "code.data.policies.apply") return;
+    this.runtimeReceipts.push(JSON.stringify({ tool: result.tool, toolVersion: result.toolVersion, schemaVersion: result.schemaVersion, result: receipt }).slice(0, 4000));
     if (this.runtimeReceipts.length > 8) this.runtimeReceipts.shift();
   }
   private readonly verificationTools: readonly string[];
@@ -613,6 +619,8 @@ export class CodingAgentReviewCoordinator {
         this.verificationLoop.record(checks);
         this.verifiedSignature = this.currentChangeSignature();
         this.verifiedRevision = beforeVerification;
+        // A no-change run (inspect/test only) has no backend verification phase: summarize this proven pass (P025).
+        this.lastVerificationPlan ??= { version: VERIFICATION_PLAN_VERSION, tools: checks.map((check) => check.tool), skipped: [], changeKinds: [], reason: "no_changes" }; this.writeVerificationSummary();
         /**
          * Step 2: a pass the model itself produced is evidence for exactly this revision. Remembering it lets the
          * backend decision reuse it instead of paying for the same build twice. Only the full requested set is

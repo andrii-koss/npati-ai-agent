@@ -8,6 +8,24 @@ export class DataStudioError extends Error {
   ) { super(message); this.name = "DataStudioError"; }
 }
 
+/** Known PostgreSQL input failures are caller errors; never expose raw SQL, row values or connection details. */
+export function normalizeDataQueryError(error: unknown): unknown {
+  if (error instanceof DataStudioError) return error;
+  const code = error && typeof error === "object" ? (error as { code?: unknown }).code : undefined;
+  const failures: Record<string, [number, string, string]> = {
+    "42501": [403, "POLICY_DENIED", "The requested operation is not permitted"],
+    "23502": [400, "REQUIRED_FIELD", "A required field is missing or null"],
+    "23503": [409, "FOREIGN_KEY_CONSTRAINT", "The row conflicts with a referenced record"],
+    "23505": [409, "UNIQUE_CONSTRAINT", "A unique value already exists"],
+    "23514": [400, "CHECK_CONSTRAINT", "A field violates a validation constraint"],
+    "22P02": [400, "INVALID_VALUE", "A field or identifier has an invalid value"],
+    "22003": [400, "VALUE_OUT_OF_RANGE", "A numeric value is out of range"],
+    "22001": [400, "VALUE_TOO_LONG", "A field value is too long"],
+  };
+  const known = typeof code === "string" ? failures[code] : undefined;
+  return known ? new DataStudioError(known[0], "query", known[2], false, known[1]) : error;
+}
+
 const reserved = new Set([
   "all", "and", "as", "asc", "by", "case", "check", "column", "constraint", "create", "cross",
   "current_user", "date", "default", "delete", "desc", "distinct", "drop", "else", "end", "except",

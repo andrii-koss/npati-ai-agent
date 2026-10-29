@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
 import { AuthenticationError, type AuthProvider } from "../auth";
-import { DataStudioError } from "./identifier";
+import { DataStudioError, normalizeDataQueryError } from "./identifier";
 import type { DataBackendService } from "./service";
 import type { PromoteService } from "./promote-service";
 import type { BackupService } from "./backup-service";
@@ -9,6 +9,7 @@ import type { QuotaService } from "./quota-service";
 import type { DataEnvironmentName } from "./types";
 
 export function fail(reply: FastifyReply, error: unknown) {
+  error = normalizeDataQueryError(error);
   if (error instanceof AuthenticationError) return reply.code(error.status).send({ error: { code: error.code, message: error.message } });
   if (error instanceof DataStudioError) return reply.code(error.status).send({ error: { code: error.code, message: error.message, step: error.step, retryable: error.retryable } });
   if (error instanceof WorkspaceAccessError) return reply.code(403).send({ error: { code: error.code, message: error.message } });

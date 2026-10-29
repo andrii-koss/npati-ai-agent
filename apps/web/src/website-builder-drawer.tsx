@@ -11,6 +11,9 @@ export interface CreateWebsiteDrawerProps {
   onClose: () => void;
   t: (typeof websiteBuilderCopy)["en"];
   language: string;
+  companies: Array<{ id: string; name: string }>;
+  companyId: string;
+  setCompanyId: (id: string) => void;
   handleCreate: (e: FormEvent) => void | Promise<void>;
   error: string;
   selectedFramework: string;
@@ -39,6 +42,9 @@ export function CreateWebsiteDrawer({
   onClose,
   t,
   language,
+  companies,
+  companyId,
+  setCompanyId,
   handleCreate,
   error,
   selectedFramework,
@@ -91,6 +97,13 @@ export function CreateWebsiteDrawer({
         </header>
 
         <form onSubmit={(e) => void handleCreate(e)}>
+          <section>
+            <label>{language === "uk" ? "Компанія" : "Company"}
+              <select value={companyId} onChange={event => setCompanyId(event.target.value)}>
+                {companies.map(company => <option key={company.id} value={company.id}>{company.name}</option>)}
+              </select>
+            </label>
+          </section>
           {error && (
             <p role="alert" className="project-error" style={{ margin: "16px 26px 0 26px" }}>
               {error}

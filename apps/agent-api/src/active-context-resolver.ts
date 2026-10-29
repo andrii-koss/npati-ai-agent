@@ -20,9 +20,13 @@ export interface ResolvedActiveContext {
   company?: Company;
   business?: Business;
   project?: Project;
+  /** Bounded same-company read/preview batch; never an ambiguous source-write target. */
+  projects?: Project[];
   snapshot: RunContextSnapshot;
 }
 
+/** A clause that keeps a project unchanged ("не змінюй", "preserve", "keep", "no cambies") names it as context, not as the target. */
+const preservingClause = /(?:не\s+(?:змінюй|чіпай|редагуй|меняй|трогай)|збережи|залиш|сохрани|оставь|don'?t\s+(?:change|touch|edit|modify)|do\s+not\s+(?:change|touch|edit|modify)|\bkeep\b|\bpreserve\b|\bleave\b|nicht\s+ändern|no\s+(?:cambies|toques)|não\s+(?:altere|mude|toque)|mantén|mantenha|conserva|preserva)/iu;
 const nameWords = (value: string) => value.toLocaleLowerCase().match(/[\p{L}]+/gu) ?? [];
 /** A proper name as written (case-sensitive) and as whole words: "add" or "new" in ordinary text never names "Add" or "New". */
 const mentions = (text: string, name: string) => {
@@ -79,7 +83,7 @@ export class ActiveContextResolver {
     return (await this.store.listCompanyAgentsPage(auth, companyId, 50)).items.filter(agent => mentions(message, agent.name));
   }
 
-  async resolveNamedCompany(auth: AuthContext, current: ResolvedActiveContext, message: string, decision?: import("@npati/shared").ProjectIntentDecision, conversationText = ""): Promise<ResolvedActiveContext | undefined> {
+  async resolveNamedCompany(auth: AuthContext, current: ResolvedActiveContext, message: string, decision?: import("@npati/shared").ProjectIntentDecision, conversationText = "", options?: { deferProjectAmbiguity?: boolean }): Promise<ResolvedActiveContext | undefined> {
     const owned: Company[] = [];
     let cursor: string | undefined;
     do {
@@ -104,10 +108,37 @@ export class ActiveContextResolver {
     // Search only authorized companies already selected or named in this conversation.
     // A question or record task can name the project too ("delete row X in Next Shop"), so CHAT does not skip it.
     if (!creating) {
-      const candidates = (await Promise.all(companies.map(company => this.store.listProjects(auth, company.id)))).flat()
+      const ownedProjects = (await Promise.all(companies.map(company => this.store.listProjects(auth, company.id)))).flat();
+      // An explicit location is authoritative even if the named project has been deleted. Never fall back to
+      // the active sibling. Quoted replacement text (e.g. change heading to "Welcome") is not a location.
+      if (["EDIT_WEBSITE", "EDIT_PROJECT", "ADD_FEATURE", "FIX_BUG", "ADD_DATA_MODEL", "EDIT_DATA_MODEL", "PREVIEW_PROJECT", "REVIEW_PROJECT", "TEST_PROJECT"].includes(decision?.intent ?? "")) {
+        const references = [...message.matchAll(/(?:^\s*in\s+|\b(?:project|website|site)\s+|(?:проєкт[іу]?|сайт[іу]?)\s+)[«"“]([^»"”\n]+)[»"”]/giu)].map(match => match[1]!.trim());
+        for (const name of references) {
+          if (owned.some(company => company.name.toLocaleLowerCase() === name.toLocaleLowerCase())) continue;
+          if (!ownedProjects.some(project => project.name.toLocaleLowerCase() === name.toLocaleLowerCase()
+            && !["archived", "soft_deleted", "purging", "deleted"].includes(project.status))) {
+            throw new ContextValidationError("Explicitly named project not found or unavailable: " + name + ". Select an existing project before continuing.");
+          }
+        }
+      }
+      let candidates = ownedProjects
         .filter(project => !["archived", "soft_deleted", "purging", "deleted"].includes(project.status)
           && project.name.trim().length >= 3 && lowerMessage.includes(project.name.trim().toLocaleLowerCase()));
-      if (candidates.length > 1) throw new ContextValidationError("More than one owned project is named; specify a single project for this action");
+      // "Add a bonus to «Game»; do not change «Site»": a project named only where the request preserves it is not the target (P037).
+      const clauses = lowerMessage.split(/[.;!?\n]+/u);
+      const targets = candidates.filter(project => clauses.some(clause => clause.includes(project.name.trim().toLocaleLowerCase()) && !preservingClause.test(clause)));
+      if (candidates.length > 1 && targets.length === 1) candidates = targets;
+      if (candidates.length > 1) {
+        // The preliminary lookup only supplies a unique project to the semantic router.
+        // Resolve ambiguity after that router has classified the complete request.
+        if (options?.deferProjectAmbiguity) return undefined;
+        if (["PREVIEW_PROJECT", "REVIEW_PROJECT", "TEST_PROJECT"].includes(decision?.intent ?? "") && candidates.length <= 4
+          && new Set(candidates.map(p => p.companyId)).size === 1
+          && new Set(candidates.map(p => p.name.trim().toLocaleLowerCase())).size === candidates.length) {
+          return { ...await this.resolve(auth, { contextType: "company", companyId: candidates[0]!.companyId }), projects: candidates };
+        }
+        throw new ContextValidationError("More than one owned project is named; specify a single project for this action");
+      }
       const project = candidates[0];
       if (project) return this.resolve(auth, { contextType: "project", companyId: project.companyId, projectId: project.id });
     }

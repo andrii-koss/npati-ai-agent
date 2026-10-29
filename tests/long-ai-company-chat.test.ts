@@ -56,13 +56,14 @@ describe("long AI Company creation through production chat", () => {
     const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace });
     try {
       for (let attempt = 0; attempt < 2; attempt++) {
+        const firstNativeChoice = nativeChoices.length;
         const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: prompt, contextType: "none" } });
         expect(response.statusCode).toBe(200);
         const result = resultEvent(response.body);
         expect(result.message).toContain("NovaScale Labs");
         expect(result.message).toContain("```card:");
         expect(result.message).not.toContain("Open Business Memory");
-        expect(nativeChoices[attempt * 3]).toEqual({ type: "function", function: { name: "npati_company_action" } });
+        expect(nativeChoices[firstNativeChoice]).toEqual({ type: "function", function: { name: "npati_company_action" } });
         const companies = (await store.listCompanies(auth)).items;
         expect(companies).toHaveLength(1);
         const company = companies[0]!;

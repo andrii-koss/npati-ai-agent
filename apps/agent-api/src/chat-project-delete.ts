@@ -10,8 +10,13 @@ const projectNoun = /(?:сайт\p{L}*|проєкт\p{L}*|проект\p{L}*|\bw
 /** Parts of a site ("delete the /about page", "remove the hero section") are code edits, not project deletion. */
 const sitePart = /(?:сторінк\p{L}*|розділ\p{L}*|секці\p{L}*|блок\p{L}*|файл\p{L}*|кнопк\p{L}*|форм\p{L}*|компонент\p{L}*|меню|\bpages?\b|\bsection\b|\bblock\b|\bfiles?\b|\bbutton\b|\bform\b|\bcomponent\b|\bmenu\b|(?:^|\s)\/[a-z0-9-]+)/iu;
 
-export function isProjectDeleteRequest(message: string): boolean {
-  return deleteVerb.test(message) && projectNoun.test(message) && !sitePart.test(message);
+export function requestsDeletion(message: string): boolean { return deleteVerb.test(message); }
+
+/** Only the deletion clause decides: "keep Site and its files" names what is preserved; an exact owned name is a noun (P040). */
+export function isProjectDeleteRequest(message: string, ownedProjectNames: readonly string[] = []): boolean {
+  const clause = message.split(/[.;!?\n]+/u)[0] ?? message;
+  const named = ownedProjectNames.some(name => name.trim().length > 2 && clause.toLocaleLowerCase().includes(name.trim().toLocaleLowerCase()));
+  return deleteVerb.test(clause) && (projectNoun.test(clause) || named) && !sitePart.test(clause);
 }
 
 const copy: Record<"uk" | "en" | "pt" | "es" | "de" | "ru", { ask: string; done: string; confirmWord: string }> = {

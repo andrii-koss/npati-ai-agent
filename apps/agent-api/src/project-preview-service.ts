@@ -12,6 +12,7 @@ import type { ProjectWorkspace } from "./project-workspace";
 import type { ProjectSandboxService } from "./project-sandbox-service";
 import { SandboxProviderError } from "./sandbox-provider";
 import { projectRuntimeCommandPort } from "./shared-project-runtime-provider";
+import { isDesktopProjectFramework } from "@npati/shared";
 
 /** Stable across API/worker instances; the encryption key is never used directly as a signing key. */
 export function resolvePreviewSecret(secret?: string, env: NodeJS.ProcessEnv = process.env): string {
@@ -272,7 +273,7 @@ export class ProjectPreviewService {
     ctx: AuthContext,
     companyId: string,
     projectId: string,
-    options: { command?: string; port?: number; agentId?: string; signal?: AbortSignal; callerOrigin?: string; verifiedBuild?: boolean } = {},
+    options: { command?: string; port?: number; agentId?: string; signal?: AbortSignal; callerOrigin?: string; verifiedBuild?: boolean; forceRestart?: boolean } = {},
   ): Promise<{
     status: string;
     previewUrl: string;
@@ -290,6 +291,8 @@ export class ProjectPreviewService {
       });
     }
     const project = await this.projects.get(ctx, companyId, projectId);
+    if (isDesktopProjectFramework(project.framework)) throw new PreviewError("desktop_preview_unsupported", "Desktop projects require a supported display runtime; HTTP Preview is not a GUI window", 409);
+    if (project.framework === "Flutter") throw new PreviewError("native_preview_unsupported", "Flutter native runtime requires its SDK and an authorized device; HTTP Preview is not a native application", 409);
     if (project.status === "archived") throw new PreviewError("project_archived", "Archived project cannot run preview", 409);
     if (project.status === "soft_deleted" || project.status === "purging" || project.status === "deleted") {
       throw new PreviewError("project_deleted", "Deleted project cannot run preview", 409);
@@ -307,7 +310,7 @@ export class ProjectPreviewService {
       || (verifiedBuild && detected.productionCommand ? detected.productionCommand : detected.command);
     let devPort = options.port && Number.isInteger(options.port) ? options.port : extractPortFromCommand(devCommand, detected.port);
 
-    const reused = canReusePreviewSession({ verifiedBuild: options.verifiedBuild, command: options.command, port: options.port, framework: detected.framework })
+    const reused = canReusePreviewSession({ verifiedBuild: options.verifiedBuild, command: options.command, port: options.port, framework: detected.framework, forceRestart: options.forceRestart })
       ? await reuseDevelopmentPreview(ctx, project, devCommand, devPort, detected.framework, this.sandbox, this.projects, scope => this.generateToken(scope), options.signal) : null;
     if (reused) { this.sessions.set(projectId, reused.session); return reused.result; }
     // Stop existing session process if running

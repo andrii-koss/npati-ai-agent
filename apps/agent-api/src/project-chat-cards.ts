@@ -59,7 +59,11 @@ export async function executeChatEntityRead(store: WorkspaceStore, auth: AuthCon
   else if (request.field === "instructions" && type === "company") value = (record as import("@npati/workspace").Company).companyInstructions ?? undefined;
   else if (request.field === "instructions" && type === "agent") value = (record as import("@npati/workspace").CompanyAgent).systemInstruction ?? undefined;
   else if (request.field === "role" && type === "agent") value = (record as import("@npati/workspace").CompanyAgent).role;
-  else if (request.field === "agents" && type === "company") value = record.name + "\n" + (await store.listCompanyAgents(auth, id)).map(agent => agent.name + ": " + agent.role).join("\n");
+  else if (request.field === "agents" && type === "company") {
+    // The count and the actual Main Agent come from storage, not from role text that may merely say "lead".
+    const agents = await store.listCompanyAgents(auth, id), mainAgentId = (record as import("@npati/workspace").Company).mainAgentId;
+    value = record.name + " — " + agents.length + "\n" + agents.map(agent => (agent.id === mainAgentId ? "★ " : "") + agent.name + ": " + agent.role).join("\n");
+  }
   else if (request.field === "projects" && type === "company") value = (await store.listProjects(auth, id))
     .filter(project => !["archived", "soft_deleted", "purging", "deleted"].includes(project.status)).slice(0, 30).map(project => project.name).join("\n");
   else return null;

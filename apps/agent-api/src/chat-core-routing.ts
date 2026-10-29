@@ -21,7 +21,9 @@ export function decideCoreChatRouting(message: string, tools: ChatToolDefinition
   const internalManagementIntent = companyManagementIntent || availableToolNames.includes("npati_workspace_action") || availableToolNames.includes("npati_email_action") || WorkspaceChatActions.isManagementRequest(message) || EmailChatActions.isManagementRequest(message);
   const explicitWebIntent = explicitlyRequestsWebResearch(message, { requireOperation: internalManagementIntent });
   const primaryExplicitWebIntent = explicitlyRequestsWebResearch(primaryInstruction, { requireOperation: internalManagementIntent });
-  const explicitExternalIntent = Boolean(directUrl) || (internalManagementIntent ? primaryExplicitWebIntent : explicitWebIntent || (!hasAttachedEvidence && semanticExternalIntent));
+  // The classifier's research decision is binding: "give the agent web.search" names a capability, it is not a lookup.
+  const explicitExternalIntent = route?.research === false ? false
+    : Boolean(directUrl) || (internalManagementIntent ? primaryExplicitWebIntent : explicitWebIntent || (!hasAttachedEvidence && semanticExternalIntent));
   let toolChoice: ChatRequest["toolChoice"] = tools.length ? "auto" : "none";
   if (explicitExternalIntent && directUrl && availableToolNames.includes("web_fetch")) {
     toolChoice = { type: "function", function: { name: "web_fetch" } };

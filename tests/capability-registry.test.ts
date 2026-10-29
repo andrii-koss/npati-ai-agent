@@ -43,7 +43,7 @@ describe("PHASE 2: Capability Registry for all 306 Inventory Items", () => {
       // agent-callable git tools on ids 374-384 and C12 added the delegation tool on id 385, so it grew to
       // **387**, including async execution and process wait. The assertion is kept exact on purpose: it is what proves the catalog has no uncovered
       // inventory id, and relaxing it to a range would stop proving that.
-      expect(validation.coveredInventoryCount).toBe(408);
+      expect(validation.coveredInventoryCount).toBe(409);
       expect(validation.missingInventoryIds).toEqual([]);
     });
 
@@ -70,7 +70,7 @@ describe("PHASE 2: Capability Registry for all 306 Inventory Items", () => {
       const callable = defaultCapabilityRegistry.listAgentCallable();
       // 106 + the three C9 code tools (ids 371–373) + C11's eleven git tools + C12's delegation tool. Only
       // `tool`-type capabilities may be callable, which the loop below still checks one by one.
-      expect(callable.length).toBe(144);
+      expect(callable.length).toBe(145);
 
       for (const cap of callable) {
         expect(cap.type).toBe("tool");
@@ -91,7 +91,7 @@ describe("PHASE 2: Capability Registry for all 306 Inventory Items", () => {
   describe("Registry API, Filtering and Startup Performance", () => {
     it("filters capabilities accurately by type, domain and risk", () => {
       const tools = defaultCapabilityRegistry.list({ type: "tool" });
-      expect(tools.length).toBe(144); // 106 + C9's three code tools + C11's eleven git tools + C12's delegation tool
+      expect(tools.length).toBe(145); // 106 + C9's three code tools + C11's eleven git tools + C12's delegation tool
 
       const runtimes = defaultCapabilityRegistry.list({ type: "runtime" });
       expect(runtimes.length).toBe(160);
@@ -114,8 +114,8 @@ describe("PHASE 2: Capability Registry for all 306 Inventory Items", () => {
       const item306 = defaultCapabilityRegistry.getByInventoryId(306);
       const durationMs = performance.now() - start;
 
-      expect(all.length).toBe(408); // C11's eleven git tools (374-384) and C12's delegation tool (385)
-      expect(callable.length).toBe(144);
+      expect(all.length).toBe(409); // C11's eleven git tools (374-384) and C12's delegation tool (385)
+      expect(callable.length).toBe(145);
       expect(item100).toBeDefined();
       expect(item306).toBeDefined();
       expect(durationMs).toBeLessThan(50); // Well within sub-50ms bound
@@ -129,12 +129,12 @@ describe("PHASE 2: Capability Registry for all 306 Inventory Items", () => {
       const res = await app.inject({ method: "GET", url: "/capabilities?type=tool" });
       expect(res.statusCode).toBe(200);
       const data = res.json();
-      expect(data.length).toBe(144);
+      expect(data.length).toBe(145);
       expect(data.every((c: any) => c.type === "tool")).toBe(true);
 
       const callableOnly = await app.inject({ method: "GET", url: "/capabilities?callable=true" });
       expect(callableOnly.statusCode).toBe(200);
-      expect(callableOnly.json().length).toBe(144);
+      expect(callableOnly.json().length).toBe(145);
 
       await app.close();
     }, 40_000);

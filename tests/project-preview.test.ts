@@ -907,6 +907,23 @@ it("replaces a recorded dev process that has exited instead of reporting reused 
  expect(provider.calls.slice(count)).toContain("process:npm run dev");
 });
 
+it("forces replacement of a healthy static preview across service instances when restart is explicit", async () => {
+ const {preview,sandbox,workspace,provider,projects,store,company,project}=await fixture();
+ await workspace.createFile(owner,company.id,project.id,"index.html","<h1>Restart proof</h1>");
+ vi.spyOn(sandbox,"supportsPreviewProxy").mockReturnValue(true);
+ vi.spyOn(sandbox,"proxyPreview").mockResolvedValue({status:200,headers:{},body:""});
+ const start=vi.spyOn(provider,"startProcess");
+ await preview.startPreview(owner,company.id,project.id);
+ const restored=new ProjectPreviewService(projects,store,workspace,sandbox,"test-preview-secret-key-32chars!");
+ const stop=vi.spyOn(provider,"stopProcess");
+ await restored.startPreview(owner,company.id,project.id);
+ expect(start).toHaveBeenCalledTimes(1);
+ expect(stop).not.toHaveBeenCalled();
+ await restored.startPreview(owner,company.id,project.id,{forceRestart:true});
+ expect(start).toHaveBeenCalledTimes(2);
+ expect(stop).toHaveBeenCalledWith(expect.objectContaining({companyId:company.id,projectId:project.id}),expect.any(String),expect.any(String));
+});
+
 it("explicitly stops the durable worker preview after the API session map is lost", async () => {
  const {preview,sandbox,workspace,provider,projects,store,company,project,events}=await fixture();
  await workspace.createFile(owner,company.id,project.id,"index.html","<h1>Recorded</h1>");

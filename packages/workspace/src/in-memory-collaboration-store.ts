@@ -20,6 +20,12 @@ export interface InMemoryCollaborationState {
   current: Map<string, string>;
   initialize: (context?: AuthContext) => Promise<void>;
   updateMemory: (ctx: AuthContext, businessId: string, memoryId: string, input: Partial<MemoryInput>) => Promise<MemoryItem>;
+  linkedBusinessId?: (companyId: string) => string | null | undefined;
+}
+
+/** A company-scoped credential (API key, remote token) reaches only the Business linked to its own company. */
+export function inCredentialScope(context: AuthContext, businessId: string, linkedBusinessId?: (companyId: string) => string | null | undefined): boolean {
+  return !context.companyId || linkedBusinessId?.(context.companyId) === businessId;
 }
 
 export async function ensure(host: InMemoryCollaborationState, context: AuthContext) {
@@ -30,7 +36,9 @@ export async function ensure(host: InMemoryCollaborationState, context: AuthCont
 
 export function assertBusiness(host: InMemoryCollaborationState, context: AuthContext, businessId: string): Business {
   const business = host.businesses.get(businessId);
-  if (!business || business.workspaceId !== context.workspaceId) throw new WorkspaceAccessError("Business is not available in this workspace");
+  // Business Profiles belong to their owner, like companies: another member of the same workspace cannot reach them.
+  if (!business || business.workspaceId !== context.workspaceId || business.ownerUserId !== context.userId) throw new WorkspaceAccessError("Business is not available in this workspace");
+  if (!inCredentialScope(context, businessId, host.linkedBusinessId)) throw new WorkspaceAccessError("This credential is limited to the Business of its company");
   return business;
 }
 
@@ -39,6 +47,7 @@ export function assertUserBusiness(host: InMemoryCollaborationState, context: Au
   if (!business || business.workspaceId !== context.workspaceId || business.ownerUserId !== context.userId) {
     throw new WorkspaceAccessError("Business is not available or not owned by this user");
   }
+  if (!inCredentialScope(context, businessId, host.linkedBusinessId)) throw new WorkspaceAccessError("This credential is limited to the Business of its company");
   return business;
 }
 
@@ -68,7 +77,7 @@ export async function setCurrentBusiness(host: InMemoryCollaborationState, conte
 
 export async function listBusinesses(host: InMemoryCollaborationState, context: AuthContext): Promise<Business[]> {
   return [...host.businesses.values()]
-    .filter((business) => business.workspaceId === context.workspaceId && business.activationStatus === "active")
+    .filter((business) => business.workspaceId === context.workspaceId && business.ownerUserId === context.userId && business.activationStatus === "active" && inCredentialScope(context, business.id, host.linkedBusinessId))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
 }
 
@@ -87,6 +96,7 @@ export async function getBusiness(host: InMemoryCollaborationState, context: Aut
 }
 
 export async function createBusiness(host: InMemoryCollaborationState, context: AuthContext, input: BusinessInput, idempotencyKey?: string): Promise<Business> {
+  if (context.companyId) throw new WorkspaceAccessError("Company-scoped API keys cannot create businesses");
   await ensure(host, context);
   const requestKey = idempotencyKey ? `${context.workspaceId}:${context.userId}:${idempotencyKey}` : null;
   const existingId = requestKey ? host.businessCreateRequests.get(requestKey) : undefined;

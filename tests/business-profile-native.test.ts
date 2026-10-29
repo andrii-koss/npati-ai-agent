@@ -31,6 +31,17 @@ describe("Native Business Profile creation identity", () => {
     }
   });
 
+  it("refuses an update that changes nothing instead of reporting a verified change", async () => {
+    const { store, create } = await fixture();
+    const first = await create("only", "Kept idea");
+    const before = await store.getUserBusiness(auth, first.businessId);
+    await expect(executeBusinessProfileTool({ store, auth, args: { action: "update", businessId: first.businessId, profile: {} } })).rejects.toThrow(/nothing was updated/);
+    // Re-sending the stored name (seen live for a deletion request) is not a change either.
+    await expect(executeBusinessProfileTool({ store, auth, args: { action: "update", businessId: first.businessId, profile: { name: "Same model name" } } })).rejects.toThrow(/nothing was updated/);
+    expect(await store.getUserBusiness(auth, first.businessId)).toEqual(before);
+    await expect(executeBusinessProfileTool({ store, auth, args: { action: "update", businessId: first.businessId, profile: { market: "Lviv" } } })).resolves.toMatchObject({ complete: true });
+  });
+
   it("reuses the same durable request key without duplicating business, goals or memory", async () => {
     const { store, create } = await fixture();
     const first = await create("same-request", "One idea");

@@ -185,7 +185,7 @@ describe("semantic project routing", () => {
   });
 
   it("binds an owned Company named in the message for the classifier, separately from Business Profiles", async () => {
-    const chat = vi.fn(async (_request: ChatRequest) => ({ content: JSON.stringify({ intent: "CHAT", confidence: 1, targets: [], entityRead: null, coreCapability: "npati_company_action", coreMutation: true }) } as ChatResult));
+    const chat = vi.fn(async (_request: ChatRequest) => ({ content: JSON.stringify({ intent: "CHAT", confidence: 1, targets: [], entityRead: null, coreCapability: "npati_company_action", coreMutation: true, externalResearch: false }) } as ChatResult));
     const resolve = createChatProjectIntentResolver({ engine: { chat }, getAIContext: async () => ({}), log: { warn: vi.fn() },
       listCompanyNames: async () => ["R3 Логістика", "Other Co"], listBusinessNames: async () => ["R3 Пекарня"] });
     const result = await resolve(auth, { message: "Зміни опис компанії «R3 Логістика» на «Швидка доставка».", activeCompanyId: "company" });
@@ -193,7 +193,10 @@ describe("semantic project routing", () => {
     const payload = JSON.parse(String(request.messages[1]!.content));
     expect(payload).toMatchObject({ mentionedCompanies: ["R3 Логістика"], mentionedBusinesses: [] });
     expect(String(request.messages[0]!.content)).toContain("mentionedCompanies are owned AI Company names");
-    expect(result).toMatchObject({ coreRoute: { capability: "npati_company_action", mutation: true } });
+    expect(result).toMatchObject({ coreRoute: { capability: "npati_company_action", mutation: true, research: false } });
+    expect(String(request.messages[0]!.content)).toContain("Remembering a fact for an AI Company (not for a Business Profile) is also npati_company_action");
+    expect(String(request.messages[0]!.content)).toContain('returns npati_business_profile with additionalCoreCapabilities ["npati_company_action"]');
+    expect(String(request.messages[0]!.content)).toContain("Deleting a Business Profile on its own is npati_business_profile with coreMutation true");
   });
 
   it("keeps a Business Memory read out of the Coding Agent of an active, session-bound code Project", async () => {

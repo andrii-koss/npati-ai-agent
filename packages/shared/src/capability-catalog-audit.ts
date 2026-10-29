@@ -23,6 +23,7 @@
  * This module is bundled into the web app (`@npati/shared`), so it deliberately imports no Node builtins.
  */
 import { CODE_DATA_SCHEMA_APPLY_V1 } from "./code-data-schema-apply-v1";
+import { CODE_PREVIEW_SCREENSHOT_V1 } from "./code-preview-screenshot-v1";
 import { CAPABILITY_CATALOG } from "./capability-catalog";
 import { CAPABILITY_MATRIX, type CapabilityMatrixEntry } from "./capability-matrix";
 import { defaultCapabilityRegistry, type CapabilityDefinition } from "./capabilities";
@@ -297,7 +298,9 @@ export function checkStaticManifestParity(
     // A legacy contract must match an explicitly retained immutable schema, never any arbitrary older version.
     const capability = current.version === tool.version ? current
       : tool.name === CODE_DATA_SCHEMA_APPLY_V1.id && tool.version === CODE_DATA_SCHEMA_APPLY_V1.version
-        ? CODE_DATA_SCHEMA_APPLY_V1 : current;
+        ? CODE_DATA_SCHEMA_APPLY_V1
+        : tool.name === CODE_PREVIEW_SCREENSHOT_V1.id && tool.version === CODE_PREVIEW_SCREENSHOT_V1.version
+          ? CODE_PREVIEW_SCREENSHOT_V1 : current;
     if (capability.version !== tool.version) {
       versionIssues.push(`${tool.name}: catalog=${capability.version} manifest=${tool.version}`);
     }

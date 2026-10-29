@@ -234,5 +234,5 @@ export function verificationChecks(outcome: import("./code-tool-runtime").CodeTo
   return requested.map(tool=>{const value=reports.map(object).find(row=>(row.tool??row.name)===tool);
     if(!value)return {tool,state:"unavailable",code:"verification_result_missing"};
     const passed=value.ok===true||value.passed===true||value.state==="passed"||value.status==="passed";
-    return {tool,state:passed?"passed":value.state==="unavailable"?"unavailable":"failed",...(typeof value.code==="string"?{code:value.code}:{})};});
+    return {tool,state:passed?"passed":value.state==="unavailable"?"unavailable":value.state==="approval_required"?"approval_required":"failed",...(typeof value.code==="string"?{code:value.code}:{})};});
 }

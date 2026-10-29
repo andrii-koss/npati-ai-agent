@@ -2,15 +2,25 @@ import { VisionBridgeGuardrail } from "./security-guardrails-and-tokens";
 import { createHash } from "node:crypto";
 import type { ProjectMediaService } from "./project-media-service";
 import { emitCodingActivity } from "./coding-agent-runner-contracts";
-import type { AuthContext, Project } from "@npati/workspace";
+import type { AuthContext, Project, CodeSession } from "@npati/workspace";
 import type { CodeSessionRunInput } from "./code-session-run-executor";
-import { isSupportedProjectFramework, isWebsiteReferenceEdit } from "@npati/shared";
+import { isSupportedProjectFramework, isWebsiteReferenceEdit, isDesktopProjectFramework, isBackendProjectFramework } from "@npati/shared";
+import type { CodeService } from "./code-service";
+import { CODE_TOOL_MANIFEST_VERSION } from "./code-tool-registry";
+import { contextualToolMatches } from "./code-tool-visibility";
+
+/** Main Chat may start a current Preview-capable session; existing published pins remain immutable. */
+export async function refreshChatPreviewSession(ctx: AuthContext, project: Pick<Project,"id"|"companyId"|"type"|"framework">, session: CodeSession | null,
+  message: string, code: Pick<CodeService,"createSession">): Promise<CodeSession | null> {
+  if(!session || session.toolManifestVersion===CODE_TOOL_MANIFEST_VERSION || !isCodeChatWebsite(project))return session;
+  if(!contextualToolMatches({userMessage:message,sessionMode:session.mode,websiteEdit:true}).has("code.preview.screenshot"))return session;
+  return code.createSession(ctx,project.companyId,project.id,{mode:session.mode});
+}
 
 /** Website chat uses the existing code loop and preview runtime; no second agent or queue. */
 export function isCodeChatWebsite(project: Pick<Project, "type" | "framework">): boolean {
   return ["website", "web_app", "landing_page"].includes(project.type)
-    || (project.type === "mobile_app" && project.framework === "Expo")
-    || (project.type === "code_project" && isSupportedProjectFramework(project.framework));
+    || (project.type === "code_project" && isSupportedProjectFramework(project.framework) && !isDesktopProjectFramework(project.framework) && !isBackendProjectFramework(project.framework));
 }
 
 /** Current request owns visual scope; historical palette edits must not narrow a redesign. */
@@ -70,6 +80,11 @@ export function websiteConversationContext(history: readonly { role: string; con
   return kept.length ? "\n\nPrevious messages in this same website chat (historical context, not tasks to repeat). Use them to resolve references such as main color or earlier research results; implement only the current request above:\n" + JSON.stringify(kept) : "";
 }
 
+/** Native audits retain the same bounded history without treating previous prose as fresh execution evidence. */
+export function nativeMobileConversationContext(history: readonly { role: string; content: unknown }[]): string {
+  return websiteConversationContext(history).replace("same website chat", "same project chat")
+    + "\nPrior messages are historical reports, not fresh tool evidence. In an audit distinguish earlier reported checks from commands executed in this turn. Workspace listings can hide ignored node_modules, dist and .test-build: their absence does not prove installation, build or tests never ran. Do not claim an attempted command without its actual tool result. If a read-only session cannot inspect execution receipts, mark that history unverified rather than never executed. Preserve approval and read-only restrictions.\n";
+}
 export function hasCodeChatPreview(result: unknown): boolean {
   return !!result && typeof result === "object" && (result as { websitePreview?: { status?: string } }).websitePreview?.status === "running";
 }
@@ -83,6 +98,12 @@ export async function finishCodeChatWebsite(input: CodeSessionRunInput, result: 
   if (run?.status !== "completed" || input.readOnlyIntent || input.session.mode === "plan") return result;
   const { companyId, projectId } = input.session;
   const project = await ports.getProject(input.ctx, companyId, projectId);
+  // Backend readiness is established by the existing Preview service, separately from frontend build/Browser QA.
+  if (project.type === "code_project" && isBackendProjectFramework(project.framework)) {
+    if (!input.requireImplementation && Array.isArray(run.summary?.filesChanged) && run.summary.filesChanged.length === 0) return result;
+    const preview = await ports.startPreview(input.ctx, companyId, projectId, input.sink?.signal, { development: true });
+    return { ...run, backendPreview: preview };
+  }
   if (!isCodeChatWebsite(project)) return result;
   const stylePreview = input.allowStylePreview && run.summary?.stylePreview === true
     && project.framework === "Next.js" && Array.isArray(run.summary.filesChanged)

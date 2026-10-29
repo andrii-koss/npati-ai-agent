@@ -91,6 +91,8 @@ export interface PolicyRequest {
   tool: string;
   toolVersion?: number;
   command?: string;
+  /** Exact shell execution context, hashed into durable approvals without exposing environment values. */
+  shellExecution?: { cwd?: string; env?: Record<string, string> };
   paths?: string[];
   sessionMode?: CodeSessionModeName;
   approved?: boolean;

@@ -79,6 +79,7 @@ export interface AppCodeToolRuntimeWiringDeps {
   codeSubagentOperationsRef?: (() => CodeSubagentOperationService) | undefined;
   /** Manifest v15: the existing Browser QA service (created after this wiring) and the web-research provider. */
   getProjectBrowserQaService?: () => import("./project-browser-qa-service").ProjectBrowserQaService | undefined;
+  projectPreviewService?: import("./project-preview-service").ProjectPreviewService;
   webResearchProvider?: import("./code-tool-executors-assist").CodeAssistToolOptions["webResearch"];
 }
 
@@ -149,6 +150,7 @@ export function createAppCodeToolRuntimeWiring(deps: AppCodeToolRuntimeWiringDep
     projectWorkspace,
     secretLeases,
     trackedProcesses,
+    resolveVerifyCommands: (ctx, companyId, projectId) => codeService.resolveVerifyCommands(ctx,companyId,projectId),
   });
   const {
     codeReaper,
@@ -213,6 +215,7 @@ export function createAppCodeToolRuntimeWiring(deps: AppCodeToolRuntimeWiringDep
     trackedProcesses,
     workspaceStore,
     ...(deps.getProjectBrowserQaService ? { getProjectBrowserQaService: deps.getProjectBrowserQaService } : {}),
+    ...(deps.projectPreviewService ? { projectPreviewService: deps.projectPreviewService } : {}),
     ...(deps.webResearchProvider ? { webResearchProvider: deps.webResearchProvider } : {}),
   });
   const { codeToolRuntime } = codeToolRuntimeWiring;

@@ -134,3 +134,28 @@ export function isCompanyDeleteIntent(message: string): boolean {
 export function isCompanyDeleteConfirmed(message: string): boolean {
   return /(?:так[\s\S]{0,50}видал|підтвердж\p{L}*[\s\S]{0,50}видал|да[\s\S]{0,50}удал|подтвержд\p{L}*[\s\S]{0,50}удал|\byes\b[\s\S]{0,50}(?:delete|remove)|\bconfirm\p{L}*[\s\S]{0,50}(?:delete|remove)|oui[\s\S]{0,50}supprim|ja[\s\S]{0,50}(?:lösch|entfern|verwijder)|s[ií][\s\S]{0,50}(?:elimin|borr)|s[ìi][\s\S]{0,50}(?:elimin|rimuov)|tak[\s\S]{0,50}(?:usuń|skasuj)|sim[\s\S]{0,50}(?:exclu|remov|apag)|evet[\s\S]{0,50}(?:sil|kaldır)|(?:是的|确认)[\s\S]{0,30}删除|(?:はい[\s\S]{0,30}削除|削除[\s\S]{0,30}確認)|(?:예[\s\S]{0,30}삭제|확인[\s\S]{0,30}삭제)|نعم[\s\S]{0,50}(?:احذف|إزالة)|हाँ[\s\S]{0,50}हटा)/iu.test(message);
 }
+
+/** "Company «X» was not found … Nothing was changed." for every Chat language (V5-D74; was 6 of 16). */
+export const namedCompanyNotFoundCopy: Record<CompanyChatLanguage, string> = {
+  en: "Company «{name}» was not found among your companies (it may have been deleted). Nothing was changed.",
+  uk: "Компанію «{name}» не знайдено серед ваших компаній (можливо, її видалено). Нічого не змінено.",
+  fr: "L’entreprise «{name}» est introuvable parmi vos entreprises (elle a peut-être été supprimée). Rien n’a été modifié.",
+  de: "Das Unternehmen «{name}» wurde nicht gefunden (vielleicht gelöscht). Nichts wurde geändert.",
+  es: "No se encontró la empresa «{name}» (quizá se eliminó). No se cambió nada.",
+  it: "L’azienda «{name}» non è stata trovata tra le tue aziende (forse è stata eliminata). Non è stato modificato nulla.",
+  pl: "Nie znaleziono firmy «{name}» wśród Twoich firm (mogła zostać usunięta). Niczego nie zmieniono.",
+  pt: "A empresa «{name}» não foi encontrada (talvez tenha sido excluída). Nada foi alterado.",
+  nl: "Het bedrijf «{name}» is niet gevonden bij je bedrijven (misschien is het verwijderd). Er is niets gewijzigd.",
+  tr: "«{name}» şirketi şirketleriniz arasında bulunamadı (silinmiş olabilir). Hiçbir şey değiştirilmedi.",
+  ru: "Компания «{name}» не найдена среди ваших компаний (возможно, она удалена). Ничего не изменено.",
+  zh: "在您的公司中未找到「{name}」（可能已被删除）。未做任何更改。",
+  ja: "会社「{name}」はあなたの会社の中に見つかりませんでした（削除された可能性があります）。何も変更していません。",
+  ko: "회사 「{name}」을(를) 찾을 수 없습니다(삭제되었을 수 있습니다). 아무것도 변경하지 않았습니다.",
+  ar: "لم يتم العثور على الشركة «{name}» ضمن شركاتك (ربما حُذفت). لم يتم تغيير أي شيء.",
+  hi: "आपकी कंपनियों में «{name}» नाम की कंपनी नहीं मिली (शायद वह हटा दी गई है)। कुछ भी नहीं बदला गया।",
+};
+
+/** The first quoted name of a request, in any of the quote styles the Chat languages use. */
+export function firstQuotedName(message: string): string | undefined {
+  return /«([^»\n]{2,120})»|“([^”\n]{2,120})”|„([^“”\n]{2,120})[“”]|"([^"\n]{2,120})"|「([^」\n]{2,120})」/u.exec(message)?.slice(1).find(Boolean)?.trim();
+}

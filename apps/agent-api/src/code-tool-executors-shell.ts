@@ -19,7 +19,7 @@ export interface CodeShellRuntimePort {
     ctx: CodeToolExecutionContext["ctx"]; companyId: string; projectId: string; sessionId: string;
     runId: string; leaseOwner: string; toolCallId: string; agentId?: string;
     command: string; cwd?: string; env?: Record<string, string>; timeoutMs: number;
-    waitTimeoutMs: number; background: boolean; secretRefs?: string[]; approved: boolean;
+    waitTimeoutMs: number; background: boolean; secretRefs?: string[]; approved: boolean; approvalId?: string;
   }): Promise<import("./code-async-process").AsyncProcessReceipt>;
   waitProcess?(input: {
     ctx: CodeToolExecutionContext["ctx"];
@@ -44,6 +44,9 @@ export interface CodeShellRuntimePort {
     timeoutMs: number;
     secretRefs?: string[];
     approved: boolean;
+    approvalId?: string;
+    runId?: string;
+    agentId?: string;
   }): Promise<{ exitCode: number | null; stdout: string; stderr: string; durationMs: number; truncated?: boolean; risk?: "low" | "medium" | "high" }>;
   startProcess?(input: {
     ctx: CodeToolExecutionContext["ctx"];
@@ -140,6 +143,7 @@ export function canonicalShellExecutors(options: CanonicalShellExecutorOptions =
           background: input.args.background === true,
           secretRefs: stringListArg(input.args.secretRefs),
           approved: input.approved === true,
+          approvalId: input.approvalId,
         });
       } catch (error) { rethrowCanonical(error); }
     },
@@ -184,6 +188,9 @@ export function canonicalShellExecutors(options: CanonicalShellExecutorOptions =
           sessionId: input.sessionId,
           sessionMode: input.sessionMode,
           turnId: input.turnId,
+          approvalId: input.approvalId,
+          runId: input.runId,
+          agentId: input.agentId,
           command,
           cwd: stringArg(input.args, ["cwd", "workingDirectory"]) ?? undefined,
           env: envArg(input.args.env),

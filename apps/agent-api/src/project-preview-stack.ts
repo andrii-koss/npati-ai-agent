@@ -107,11 +107,11 @@ export async function detectProjectStack(
     }
     if (hasFastify) {
       const command = pkg.scripts?.start ? `${packageManager} run start` : "node dist/server.js";
-      return { packageManager, framework: "fastify", command, port: 3000, productionCommand: "node dist/server.js" };
+      return { packageManager, framework: "fastify", command, port: 3000, productionCommand: command };
     }
     if (hasExpress) {
       const command = pkg.scripts?.start ? `${packageManager} run start` : "node dist/server.js";
-      return { packageManager, framework: "express", command, port: 3000, productionCommand: "node dist/server.js" };
+      return { packageManager, framework: "express", command, port: 3000, productionCommand: command };
     }
     if (hasVite) {
       const framework = deps["vue"] ? "vue" : "vite";
@@ -138,6 +138,8 @@ export async function detectProjectStack(
     if (pathSet.has("main.py")) {
       const entry = await readFile("main.py").catch(() => "");
       fastapi = /FastAPI\s*\(|from\s+fastapi\b/.test(entry);
+      // Packaged ASGI apps commonly re-export app from main.py; the dependency remains authoritative.
+      if (!fastapi) fastapi = /^\s*fastapi(?:\[[^\]\r\n]+\])?\s*(?:[=<>!~;]|$)/im.test(await readFile("requirements.txt").catch(() => ""));
     }
     if (fastapi) {
       const command = ".venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port $PORT";

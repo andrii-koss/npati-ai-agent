@@ -108,7 +108,10 @@ export function registerCodeRoutes(app: FastifyInstance, auth: AuthProvider, ser
         if (kind !== undefined && kind !== "import_repository" && repositoryUrl) {
           throw new CodeProjectRouteError("invalid_arguments", "repositoryUrl is only accepted when kind is import_repository", 400, { field: "repositoryUrl" });
         }
-        const project = await service.createProject(ctx, request.params.companyId, request.body as never);
+        // This route's kind describes the creation flow, while CodeService.kind is the persisted category.
+        const projectInput = { ...request.body };
+        delete projectInput.kind;
+        const project = await service.createProject(ctx, request.params.companyId, projectInput as never);
         return reply.code(201).send(project);
       } catch (error) { return fail(reply, error); }
     },

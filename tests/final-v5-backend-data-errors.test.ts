@@ -1,0 +1,12 @@
+import Fastify from 'fastify';import {expect,it} from 'vitest';
+import {registerDataStudioRoutes} from '../apps/agent-api/src/data-studio/studio-routes';
+import {registerProjectApiGatewayRoutes} from '../apps/agent-api/src/data-studio/gateway-routes';
+it.each([['23502',400,'REQUIRED_FIELD'],['23503',409,'FOREIGN_KEY_CONSTRAINT'],['23505',409,'UNIQUE_CONSTRAINT'],['22P02',400,'INVALID_VALUE']] as const)('returns a sanitized caller error for PostgreSQL %s instead of retryable outage',async(code,status,errorCode)=>{
+ const app=Fastify();registerDataStudioRoutes(app,{authenticate:async()=>({workspaceId:'w',userId:'u',permissions:['business:manage']})} as never,{createRow:async()=>{throw Object.assign(Error('private postgres detail and row contents'),{code});}} as never);
+ try{const response=await app.inject({method:'POST',url:'/companies/c/projects/p/data-studio/dev/collections/items/rows',payload:{row:{name:null}}});expect(response.statusCode).toBe(status);expect(response.json().error).toMatchObject({code:errorCode,retryable:false});expect(response.body).not.toContain('private postgres');}finally{await app.close();}
+});
+it('keeps unexpected database/connection failures generic and retryable',async()=>{const app=Fastify();registerDataStudioRoutes(app,{authenticate:async()=>({permissions:['business:manage']})} as never,{createRow:async()=>{throw Object.assign(Error('private connection password'),{code:'28P01'});}} as never);try{const r=await app.inject({method:'POST',url:'/companies/c/projects/p/data-studio/dev/collections/items/rows',payload:{row:{}}});expect(r.statusCode).toBe(503);expect(r.body).not.toContain('password');}finally{await app.close();}});
+it.each([['23503',409,'FOREIGN_KEY_CONSTRAINT'],['42501',403,'POLICY_DENIED']] as const)('normalizes PostgreSQL %s at the authenticated Project API gateway boundary',async(code,status,errorCode)=>{
+ const app=Fastify();registerProjectApiGatewayRoutes(app,{authenticateRequest:async()=>({project:{id:'p'},backend:{id:'b'},environment:'dev',keyType:'secret'}),createRow:async()=>{throw Object.assign(Error('private offending row'),{code});},recordLog(){}} as never);
+ try{const r=await app.inject({method:'POST',url:'/v1/projects/p/data/items',payload:{name:'test'}});expect(r.statusCode).toBe(status);expect(r.json().error.code).toBe(errorCode);expect(r.body).not.toContain('private offending');}finally{await app.close();}
+});

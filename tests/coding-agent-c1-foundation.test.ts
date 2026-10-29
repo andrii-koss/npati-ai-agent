@@ -48,6 +48,22 @@ async function harness(files: Record<string, string> = {}, importer?: CodeServic
 
 type ImportFn = ConstructorParameters<typeof CodeService>[3];
 
+describe("code project API creation flow versus stored category", () => {
+  it.each(["empty", "upload", "import_repository"])("creates the %s flow without persisting it as a ProjectKind", async (kind) => {
+    const { service, company, projects } = await harness();
+    const app = Fastify();
+    registerCodeRoutes(app, { authenticate: async () => owner }, service, allowAllFlags);
+    try {
+      const response = await app.inject({ method: "POST", url: `/companies/${company.id}/code/projects`, payload: {
+        name: "Flow " + kind, kind, ...(kind === "import_repository" ? { repositoryUrl: "https://example.com/repo.git" } : {}),
+      } });
+      expect(response.statusCode).toBe(201);
+      expect(response.json()).toMatchObject({ type: "code_project", kind: "website" });
+      expect((await projects.list(owner, company.id)).map(p => p.id)).toEqual([response.json().id]);
+    } finally { await app.close(); }
+  });
+});
+
 describe("C1 — toolchain detection", () => {
   it("detects a Node project with the package manager taken from the lockfile", () => {
     const detection = detectToolchain({ files: {

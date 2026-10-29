@@ -1,6 +1,6 @@
 import { registerProjectApiControlClient } from "../project-api-control-channel";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { DataStudioError } from "./identifier";
+import { DataStudioError, normalizeDataQueryError } from "./identifier";
 import type { ProjectApiGatewayService, GatewayAuthResult } from "./gateway-service";
 import type { ProjectAuthService } from "./auth-service";
 
@@ -61,6 +61,7 @@ export function registerProjectApiGatewayRoutes(
       statusCode = reply.statusCode || 200;
       return result;
     } catch (error: any) {
+      error = normalizeDataQueryError(error);
       const status = error instanceof DataStudioError ? error.status : error.statusCode || 500;
       const code = error instanceof DataStudioError ? error.code : error.code || "INTERNAL_ERROR";
       const message = error instanceof DataStudioError ? error.message : "Internal Server Error";

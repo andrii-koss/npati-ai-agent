@@ -100,16 +100,23 @@ function profileSimilarity(left: Map<string, number>, right: Map<string, number>
   return leftSize && rightSize ? dot / Math.sqrt(leftSize * rightSize) : 0;
 }
 
+/** Ukrainian and Russian words without the letters that tell the languages apart ("Який код ми зберегли для X?"). */
+const cyrillicFunctionWords: Record<"uk" | "ru", Set<string>> = {
+  uk: new Set(["який", "яка", "яке", "якого", "якому", "що", "щоб", "та", "або", "чи", "ще", "коли", "зараз", "хто", "вона", "вони", "воно", "треба", "щодо", "зберегли", "нагадай", "покажи", "перелічи", "створи", "додай", "видали", "зміни", "поміняй", "зроби", "знайди", "постав", "перейди", "збережи", "будь", "його", "її", "мені", "потрібно", "бізнесу", "цей", "ця", "шо"]),
+  ru: new Set(["какой", "какая", "какое", "какого", "что", "чтобы", "или", "где", "сейчас", "кто", "она", "они", "оно", "нужно", "когда", "сохранили", "напомни", "покажи", "перечисли", "создай", "добавь", "удали", "измени", "поменяй", "сделай", "найди", "поставь", "переключись", "сохрани", "пожалуйста", "его", "мне", "надо", "бизнеса", "этот", "эта", "чё", "поищи", "запомни", "какие", "новая"]),
+};
+const latinOnlyLetters: Partial<Record<CompanyChatLanguage, RegExp>> = { pl: /[ąćęłńśźż]/u, tr: /[ğış]/u, pt: /[ãõ]/u, es: /[ñ]/u, de: /[ßä]/u, fr: /[œîïû]/u };
+
 const functionWords: Record<"en" | "fr" | "de" | "es" | "it" | "pl" | "pt" | "nl" | "tr", Set<string>> = {
-  en: new Set(["the", "and", "for", "from", "with", "every", "our", "my", "your", "have", "has", "is", "are", "this", "that", "please", "show", "what", "which", "how", "me", "it", "of", "to", "by", "at", "on", "an"]),
-  fr: new Set(["le", "les", "et", "pour", "avec", "une", "est", "dans", "des", "du", "nous", "vous", "sur", "pas", "qui", "au", "aux"]),
-  de: new Set(["der", "die", "das", "und", "mit", "für", "ist", "nicht", "ein", "eine", "auf", "bitte", "wir", "ich", "zu", "den", "dem"]),
-  es: new Set(["el", "los", "las", "y", "para", "con", "una", "es", "está", "por", "qué", "cómo", "del", "al", "tiene"]),
-  it: new Set(["il", "gli", "per", "una", "è", "che", "non", "sono", "della", "alla", "nel", "degli"]),
-  pl: new Set(["w", "z", "na", "się", "jest", "nie", "dla", "oraz", "że", "jak"]),
-  pt: new Set(["o", "os", "as", "para", "com", "uma", "é", "está", "não", "você", "do", "da", "em", "no", "na", "dos", "das"]),
-  nl: new Set(["het", "een", "van", "met", "voor", "niet", "wij", "ik", "naar", "ook"]),
-  tr: new Set(["ve", "bir", "bu", "için", "ile", "çok", "gibi"]),
+  en: new Set(["the", "and", "for", "from", "with", "every", "our", "my", "your", "have", "has", "is", "are", "this", "that", "please", "show", "what", "which", "how", "me", "it", "of", "to", "by", "at", "on", "an", "its", "did", "we", "do", "does", "now", "you", "new", "be", "can", "there", "whats", "pls", "wkly"]),
+  fr: new Set(["le", "les", "et", "pour", "avec", "une", "est", "dans", "des", "du", "nous", "vous", "sur", "pas", "qui", "au", "aux", "chaque", "quel", "quelle", "notre", "nos", "mets", "ajoute", "crée", "nouvelle", "hebdo", "son", "sa"]),
+  de: new Set(["der", "die", "das", "und", "mit", "für", "ist", "nicht", "ein", "eine", "auf", "bitte", "wir", "ich", "zu", "den", "dem", "welche", "welchen", "welcher", "dieser", "haben", "hat", "jetzt", "unser", "unsere"]),
+  es: new Set(["el", "los", "las", "y", "para", "con", "una", "es", "está", "por", "qué", "cómo", "del", "al", "tiene", "cada", "antes", "cuál", "hay", "ahora", "guardamos", "sus", "pon", "añade", "anade", "su", "nueva", "semanal", "informe", "cuántas", "cuántos"]),
+  it: new Set(["il", "gli", "per", "una", "è", "che", "non", "sono", "della", "alla", "nel", "degli", "di", "dell", "nella", "alle", "ogni", "sul", "quale", "abbiamo", "delle", "dei", "c", "tramite", "suo", "sua", "nuova", "ore", "metti", "aggiungi", "progetto", "questa", "questo", "quante", "quanti", "sue", "suoi"]),
+  pl: new Set(["w", "z", "na", "się", "jest", "nie", "dla", "oraz", "że", "jak", "do", "to", "jaki", "jaka", "każdy", "naszego", "przez", "co", "tam", "masz", "jej", "ten", "zmień", "dodaj", "utwórz", "jakie", "ma", "ją", "codziennie"]),
+  pt: new Set(["o", "os", "as", "para", "com", "uma", "é", "está", "não", "você", "do", "da", "em", "no", "na", "dos", "das", "ao", "nosso", "nossa", "toda", "até", "qual", "agora", "tem", "adicione", "crie", "dados", "dele", "dela"]),
+  nl: new Set(["het", "een", "van", "met", "voor", "niet", "wij", "ik", "naar", "ook", "op", "om", "elke", "welke", "je", "er", "nu", "toe", "zet", "wat", "staat", "zoek", "noem", "zijn", "wijzig"]),
+  tr: new Set(["ve", "bir", "bu", "için", "ile", "çok", "gibi", "her", "olarak", "hangi", "şu", "ne", "var", "yap", "ekle", "değiştir", "oluştur", "içinde", "deki"]),
 };
 
 function detectedLanguage(message: string): { language: CompanyChatLanguage; confidence: number; letters: number } {
@@ -127,13 +134,24 @@ function detectedLanguage(message: string): { language: CompanyChatLanguage; con
   const candidates = /\p{Script=Cyrillic}/u.test(normalized)
     ? (["uk", "ru"] as const)
     : (["en", "fr", "de", "es", "it", "pl", "pt", "nl", "tr"] as const);
+  if (candidates[0] === "uk") {
+    const words = normalized.split(" ");
+    const uk = words.filter((word) => cyrillicFunctionWords.uk.has(word)).length, ru = words.filter((word) => cyrillicFunctionWords.ru.has(word)).length;
+    if (uk !== ru) return { language: uk > ru ? "uk" : "ru", confidence: 1, letters };
+  }
   if (candidates[0] === "en") {
+    // Letters that only one supported Latin-script language uses decide what the small trigram samples misread (V5-D75).
+    const lettered = Object.entries(latinOnlyLetters).filter(([, pattern]) => pattern.test(normalized)).map(([language]) => language as CompanyChatLanguage);
+    if (lettered.length === 1) return { language: lettered[0]!, confidence: 1, letters };
     // Function words decide short Latin-script messages, which the small trigram samples misread
     // ("Remember for Nordic Fit: classes start every hour from 7am to 9pm." scored as French).
     const words = normalized.split(" ");
     const hits = Object.entries(functionWords).map(([language, set]) => ({ language: language as CompanyChatLanguage, count: words.filter((word) => set.has(word)).length }))
       .sort((left, right) => right.count - left.count);
-    if (hits[0]!.count >= 2 && hits[0]!.count > hits[1]!.count) return { language: hits[0]!.language, confidence: 1, letters };
+    // Very short utterances may have only one distinguishing function word. Longer abbreviations still use profiles.
+    if ((hits[0]!.count >= 2 || (letters < 18 && hits[0]!.count === 1)) && hits[0]!.count > hits[1]!.count) {
+      return { language: hits[0]!.language, confidence: hits[0]!.count === 1 ? 0.1 : 1, letters };
+    }
   }
   const input = ngramProfile(normalized);
   const ranked = candidates.map((language) => ({ language, score: profileSimilarity(input, profiles[language]) })).sort((left, right) => right.score - left.score);
@@ -188,6 +206,8 @@ function explicitlyRequestedLanguage(message: string): CompanyChatLanguage | und
   return undefined;
 }
 
+const languageScript = (language: CompanyChatLanguage): string => ({ uk: "cyrillic", ru: "cyrillic", zh: "han", ja: "kana", ko: "hangul", ar: "arabic", hi: "devanagari" } as Partial<Record<CompanyChatLanguage, string>>)[language] ?? "latin";
+
 export function resolveConversationLanguage(
   message = "",
   history: Array<{ role: string; content: string | null | unknown[] }> = [],
@@ -208,6 +228,12 @@ export function resolveConversationLanguage(
       continue;
     }
     if (candidate.language === active) continue;
+    // A message in another script cannot continue the active language, however short ("Cambia su rol a X" after Arabic) (V5-D77).
+    if (candidate.letters >= 3 && languageScript(candidate.language) !== languageScript(active)) {
+      // A script change alone is not a language switch: transliteration and technical terms may be weak Latin matches.
+      if (candidate.confidence >= 0.04) active = candidate.language;
+      continue;
+    }
     const clearSwitch = candidate.letters >= 18 && candidate.confidence >= 0.025
       || candidate.letters >= 8 && candidate.confidence >= 0.09;
     if (clearSwitch) active = candidate.language;

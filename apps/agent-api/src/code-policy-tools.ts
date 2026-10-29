@@ -120,6 +120,7 @@ export const REVIEW_SAFE_GIT_TOOLS = new Set(["code.git.status", "code.git.diff"
 
 export const SHELL_TOOLS = new Set(["code.shell.exec_async", "code.shell.exec", "code.shell.process.start", "code.shell.process.stop"]);
 export const WRITE_TOOLS = new Set([
+  "code.preview.restart",
   "code.data.rows.seed",
   "code.data.policies.apply",
   "code.data.backend.create",
@@ -139,6 +140,7 @@ export function subFlagForTool(tool: string): string {
   // Every shell capability (including the read-only process list/logs) is gated by the dedicated
   // `code.shell` sub-flag, so an operator can forbid command execution while still allowing edits.
   if (tool.startsWith("code.shell.")) return SHELL_FLAG;
+  if (tool === "code.preview.restart") return SHELL_FLAG;
   if (SHELL_TOOLS.has(tool)) return SHELL_FLAG;
   // C11: a git write is gated by the git sub-flag, not by `code.write`. Both are off by default, but
   // they are different blast radii: enabling file edits must not enable pushing to a remote.

@@ -250,8 +250,8 @@ export async function listCompanyAgentsPage(pool: Pool, context: AuthContext, co
     const limit = companyPageLimit(requestedLimit), after = decodeBusinessCursor(cursor);
     const result = await pool.query<CompanyAgent>(`SELECT ${companyAgentColumns} FROM company_agents
       WHERE workspace_id=$1 AND company_id=$2
-        AND ($3::timestamptz IS NULL OR (created_at,id) > ($3::timestamptz,$4::text))
-      ORDER BY created_at,id LIMIT $5`, [context.workspaceId, companyId, after?.createdAt ?? null, after?.id ?? "", limit + 1]);
+        AND ($3::timestamptz IS NULL OR (date_trunc('milliseconds',created_at),id) > ($3::timestamptz,$4::text))
+      ORDER BY date_trunc('milliseconds',created_at),id LIMIT $5`, [context.workspaceId, companyId, after?.createdAt ?? null, after?.id ?? "", limit + 1]);
     const items = result.rows.slice(0, limit), last = items.at(-1);
     return { items, nextCursor: result.rows.length > limit && last ? encodeBusinessCursor({ createdAt: last.createdAt, id: last.id }) : null };
   }
@@ -625,8 +625,8 @@ export async function listCompanies(pool: Pool, context: AuthContext, requestedL
     const limit = companyPageLimit(requestedLimit), after = decodeBusinessCursor(cursor);
     const result = await pool.query<Company>(`SELECT ${companyColumns} FROM companies
       WHERE workspace_id=$1 AND user_id=$2 AND ($3::text IS NULL OR id=$3)
-        AND ($4::timestamptz IS NULL OR (created_at,id) > ($4::timestamptz,$5::text))
-      ORDER BY created_at,id LIMIT $6`, [context.workspaceId, context.userId, context.companyId ?? null, after?.createdAt ?? null, after?.id ?? "", limit + 1]);
+        AND ($4::timestamptz IS NULL OR (date_trunc('milliseconds',created_at),id) > ($4::timestamptz,$5::text))
+      ORDER BY date_trunc('milliseconds',created_at),id LIMIT $6`, [context.workspaceId, context.userId, context.companyId ?? null, after?.createdAt ?? null, after?.id ?? "", limit + 1]);
     const items = result.rows.slice(0, limit), last = items.at(-1);
     return { items, nextCursor: result.rows.length > limit && last ? encodeBusinessCursor({ createdAt: last.createdAt, id: last.id }) : null };
   }

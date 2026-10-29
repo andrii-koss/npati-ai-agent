@@ -249,6 +249,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       current: this.current,
       initialize: this.initialize.bind(this),
       updateMemory: this.updateMemory.bind(this),
+      linkedBusinessId: (companyId: string) => this.companies.get(companyId)?.businessId ?? null,
     };
   }
 

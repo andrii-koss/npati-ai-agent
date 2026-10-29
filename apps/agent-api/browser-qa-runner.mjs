@@ -1,5 +1,6 @@
 import { chromium } from "playwright";
 import { captureBrowserDiagnostic } from "./browser-qa-diagnostics.mjs";
+import { assertBrowserQaActions, runBrowserQaActions } from "./browser-qa-actions.mjs";
 
 let stage = "input";
 const fail = (code) => {
@@ -13,6 +14,7 @@ try {
     if (Buffer.concat(chunks).length > 4096) throw new Error("invalid_input");
   }
   const input = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  assertBrowserQaActions(input.actions);
   const { host, port, path, viewport, timeoutMs, maxScreenshotBytes, maxBrokenLinks, screenshot, screenshotMode = "layout" } = input;
   const shared = process.argv.includes("--shared-runtime");
   // The launcher gives every command a private /tmp; short paths fit Unix sockets.
@@ -34,10 +36,12 @@ try {
       let url;
       try { url = new URL(route.request().url()); } catch { return route.abort(); }
       if (url.origin !== origin || url.username || url.password) return route.abort();
+      if(input.actions?.length && !['GET','HEAD'].includes(route.request().method()))return route.abort();
       return route.continue();
     });
     const page = await context.newPage();
     await page.routeWebSocket("**/*", socket => {
+      if(input.actions?.length){socket.close();return;}
       try {
         const url = new URL(socket.url());
         if (url.origin === origin.replace(/^http:/, "ws:") && !url.username && !url.password) {
@@ -60,6 +64,7 @@ try {
     const response = await page.goto(origin + path, { waitUntil: "domcontentloaded", timeout: timeoutMs });
     await page.waitForLoadState("networkidle", { timeout: Math.min(3000, Math.max(500, timeoutMs - (Date.now() - started))) }).catch(() => undefined);
     const loadTimeMs = Date.now() - started;
+    const interactionTrace = await runBrowserQaActions(page,input.actions);
     stage = "inspection";
     const observations = await page.evaluate(() => {
       const violations = [];
@@ -139,7 +144,7 @@ try {
     }    process.stdout.write(JSON.stringify({
       statusCode: response?.status() ?? 0, loadTimeMs, domContentLoadedMs: Math.round(observations.domContentLoadedMs),
       resourceCount: observations.resourceCount, totalSizeBytes: observations.totalSizeBytes,
-      consoleErrorCount: Math.min(consoleErrorCount, 100), consoleDiagnostics, brokenLinks, accessibility: observations.violations,
+      consoleErrorCount: Math.min(consoleErrorCount, 100), consoleDiagnostics, brokenLinks, accessibility: observations.violations, interactionTrace,
       screenshot: captured,
     }));
     await context.close();

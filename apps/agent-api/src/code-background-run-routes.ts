@@ -287,6 +287,12 @@ export async function registerCodeBackgroundRunRoutes(instance: FastifyInstance,
       await authorize(request, companyId, CODE_BACKGROUND_RUN_ACTIONS.abort);
       const body = (request as { body?: Record<string, unknown> }).body ?? {};
       requireExpectedRunId(body.expectedRunId, runId);
+      // Bind the mutation to the same company as reads before signalling the run. A finished foreign run
+      // must also use the unknown-run response instead of exposing its snapshot via already_finished.
+      const snapshot = deps.registry.startSnapshot(runId);
+      if (!snapshot || snapshot.companyId !== companyId) {
+        throw new CodeBackgroundRunRouteError("background_run_not_found", "Background run not found", 404, {});
+      }
       const aborted = deps.registry.abort(runId);
       if (!aborted) {
         const known = deps.registry.startSnapshot(runId);

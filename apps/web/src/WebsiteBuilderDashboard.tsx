@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import { writeProjectFile } from "./project-files-client";
@@ -21,13 +21,15 @@ import {
   readActiveCompanyId,
   readCachedCompanies,
   writeActiveCompanyId,
+  writeCachedCompanies,
 } from "./active-company";
 
 import {
   type WebsiteProject,
   apiFetch,
   getCachedWebsites,
-  updateCachedWebsites,
+  listProjectCompanies,
+  listCompanyProjects,
 } from "./website-builder-cache";
 import {
   websiteBuilderCopy as copy,
@@ -38,24 +40,19 @@ import { CreateWebsiteDrawer } from "./website-builder-drawer";
 import { WebsiteFiltersBar } from "./website-builder-filters";
 import { WebsiteProjectCard, invalidateWebsitePreviewCache } from "./website-builder-card";
 
-const WEBSITES_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-const lastFetchedWebsites = new Map<string, number>();
-
 export function WebsiteBuilderDashboard() {
   const navigate = useNavigate();
   const { language } = useTranslation();
   const t = language === "uk" ? copy.uk : copy.en;
 
-  const initialCompanyId = useMemo(() => {
-    const cached = readCachedCompanies();
-    const active = readActiveCompanyId();
-    return chooseAvailableCompanyId(cached, { requested: active });
-  }, []);
   const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>(() => readCachedCompanies());
-  const [companyId, setCompanyId] = useState<string>(initialCompanyId);
-  const initialWebsites = useMemo(() => getCachedWebsites(initialCompanyId), [initialCompanyId]);
-  const [websites, setWebsites] = useState<WebsiteProject[]>(() => initialWebsites ?? []);
-  const [loading, setLoading] = useState(() => initialWebsites === null);
+  const [companyId, setCompanyId] = useState(""); // Empty scope means all companies; always the initial view.
+  const [creationCompanyId, setCreationCompanyId] = useState("");
+  const loadSequence = useRef(0);
+  const selectedCompany = useRef(companyId);
+  selectedCompany.current = companyId;
+  const [websites, setWebsites] = useState<WebsiteProject[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   // Filters & Search
@@ -101,22 +98,19 @@ export function WebsiteBuilderDashboard() {
         const cached = readCachedCompanies();
         if (cached.length > 0 && active) {
           setCompanies(cached);
-          const initialId = chooseAvailableCompanyId(cached, { requested: readActiveCompanyId() });
-          if (initialId) setCompanyId((prev) => prev || initialId);
         }
 
-        const res = await apiFetch<{ companies: Array<{ id: string; name: string }> }>("/companies");
+        const list = await listProjectCompanies();
         if (!active) return;
-        const list = res.companies || [];
         setCompanies(list);
+        writeCachedCompanies(list);
         if (list.length === 0) {
           setWebsites([]);
           setLoading(false);
           return;
         }
         const resolved = chooseAvailableCompanyId(list, { requested: readActiveCompanyId() });
-        setCompanyId(resolved);
-        writeActiveCompanyId(resolved);
+        setCreationCompanyId(list.some(company => company.id === resolved) ? resolved : list[0]!.id);
       } catch (err: any) {
         if (active) {
           setError(err.message || t.loadError);
@@ -131,40 +125,40 @@ export function WebsiteBuilderDashboard() {
   }, []);
 
   // Load Websites for Company
-  const loadWebsites = useCallback(async (targetCompanyId?: string, options?: { force?: boolean }) => {
+  const loadWebsites = useCallback(async (targetCompanyId?: string) => {
     const id = targetCompanyId ?? companyId;
-    if (!id) {
+    if (companies.length === 0) {
       return;
     }
 
-    const last = lastFetchedWebsites.get(id) ?? 0;
-    const now = Date.now();
-    // Throttle website list reload: if not forced and last fetch was < 5 min ago, skip
-    if (!options?.force && now - last < WEBSITES_CACHE_TTL_MS && websites.length > 0) {
-      return;
-    }
-
+    const sequence = ++loadSequence.current;
     try {
-      const res = await apiFetch<{ projects: WebsiteProject[] }>(
-        `/companies/${encodeURIComponent(id)}/projects?includeArchived=true`
-      );
       // Every project belongs here: websites, web apps, games, mobile apps and APIs, whatever the framework.
-      const nextProjects = res.projects || [];
-      lastFetchedWebsites.set(id, Date.now());
+      const nextProjects = await listCompanyProjects(id ? [id] : companies.map(company => company.id));
+      if (sequence !== loadSequence.current || selectedCompany.current !== id) return;
       setWebsites(nextProjects);
-      updateCachedWebsites(id, nextProjects);
       setError("");
     } catch (err: any) {
-      setError(err.message || t.loadError);
+      if (sequence === loadSequence.current && selectedCompany.current === id) setError(err.message || t.loadError);
     } finally {
-      setLoading(false);
+      if (sequence === loadSequence.current && selectedCompany.current === id) setLoading(false);
     }
-  }, [companyId, t.loadError, websites.length]);
+  }, [companyId, companies, t.loadError]);
 
   useEffect(() => {
-    if (companyId) {
+    if (companies.length > 0) {
+      setWebsites(companyId ? getCachedWebsites(companyId) ?? [] : []);
+      setLoading(true);
       void loadWebsites(companyId);
     }
+    const refresh = () => { if (companies.length > 0 && document.visibilityState !== "hidden") void loadWebsites(companyId); };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      ++loadSequence.current;
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
   }, [companyId, loadWebsites]);
 
   // When framework selection changes in drawer, update suggested values.
@@ -204,6 +198,7 @@ export function WebsiteBuilderDashboard() {
 
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
+    const companyId = creationCompanyId;
     if (!name.trim() || !companyId || busy) return;
     setBusy(true);
     try {
@@ -338,14 +333,14 @@ export function WebsiteBuilderDashboard() {
     if (!next || !next.trim() || next.trim() === site.name) return;
     try {
       await apiFetch(
-        `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(site.id)}`,
+        `/companies/${encodeURIComponent(site.companyId)}/projects/${encodeURIComponent(site.id)}`,
         {
           method: "PATCH",
           body: JSON.stringify({ name: next.trim(), expectedRevision: site.revision }),
         }
       );
-      invalidateWebsitePreviewCache(companyId, site.id);
-      await loadWebsites(companyId, { force: true });
+      invalidateWebsitePreviewCache(site.companyId, site.id);
+      await loadWebsites(companyId);
     } catch (err: any) {
       alert(err.message || "Failed to rename website");
     }
@@ -355,16 +350,16 @@ export function WebsiteBuilderDashboard() {
     try {
       setLoading(true);
       const res = await apiFetch<{ project: WebsiteProject }>(
-        `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(site.id)}/duplicate`,
+        `/companies/${encodeURIComponent(site.companyId)}/projects/${encodeURIComponent(site.id)}/duplicate`,
         {
           method: "POST",
           headers: { "Idempotency-Key": crypto.randomUUID() },
           body: JSON.stringify({ name: `${site.name} (Copy)` }),
         }
       );
-      await loadWebsites(companyId, { force: true });
+      await loadWebsites(companyId);
       if (res?.project?.id) {
-        navigate(`/settings/projects/${encodeURIComponent(companyId)}/${encodeURIComponent(res.project.id)}`);
+        navigate(`/settings/projects/${encodeURIComponent(site.companyId)}/${encodeURIComponent(res.project.id)}`);
       }
     } catch (err: any) {
       alert(err.message || "Failed to duplicate website");
@@ -377,14 +372,14 @@ export function WebsiteBuilderDashboard() {
     if (!(await confirmModal({ message: t.archivePrompt }))) return;
     try {
       await apiFetch(
-        `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(site.id)}/archive`,
+        `/companies/${encodeURIComponent(site.companyId)}/projects/${encodeURIComponent(site.id)}/archive`,
         {
           method: "POST",
           body: JSON.stringify({ expectedRevision: site.revision }),
         }
       );
-      invalidateWebsitePreviewCache(companyId, site.id);
-      await loadWebsites(companyId, { force: true });
+      invalidateWebsitePreviewCache(site.companyId, site.id);
+      await loadWebsites(companyId);
     } catch (err: any) {
       alert(err.message || "Failed to archive website");
     }
@@ -394,11 +389,11 @@ export function WebsiteBuilderDashboard() {
     if (!(await confirmModal({ message: t.deletePrompt, isDanger: true }))) return;
     try {
       await apiFetch(
-        `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(site.id)}`,
+        `/companies/${encodeURIComponent(site.companyId)}/projects/${encodeURIComponent(site.id)}`,
         { method: "DELETE" }
       );
-      invalidateWebsitePreviewCache(companyId, site.id);
-      await loadWebsites(companyId, { force: true });
+      invalidateWebsitePreviewCache(site.companyId, site.id);
+      await loadWebsites(companyId);
     } catch (err: any) {
       alert(err.message || "Failed to delete website");
     }
@@ -423,20 +418,26 @@ export function WebsiteBuilderDashboard() {
           </div>
 
           <div className="automations-header-actions" style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-            {companies.length > 1 && (
+            {companies.length > 0 && (
               <select
+                aria-label={language === "uk" ? "Компанія" : "Company"}
                 value={companyId}
                 onChange={(e) => {
                   const nextCompanyId = e.target.value;
                   setCompanyId(nextCompanyId);
-                  writeActiveCompanyId(nextCompanyId);
-                  const cached = getCachedWebsites(nextCompanyId);
-                  if (cached !== null) {
-                    setWebsites(cached);
+                  if (nextCompanyId) {
+                    writeActiveCompanyId(nextCompanyId);
+                    setCreationCompanyId(nextCompanyId);
                   }
+                  const cached = nextCompanyId ? getCachedWebsites(nextCompanyId) : null;
+                  setWebsites(cached ?? []);
+                  setLoading(true);
                 }}
                 className="company-select"
+                title={companyId ? companies.find(c => c.id === companyId)?.name : language === "uk" ? "Усі" : "All"}
                 style={{
+                  width: "130px", minWidth: "130px", maxWidth: "130px", flex: "0 0 130px",
+                  boxSizing: "border-box", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                   padding: "9px 14px",
                   borderRadius: "10px",
                   border: "1px solid var(--npati-gray-200, #e2e8f0)",
@@ -447,8 +448,9 @@ export function WebsiteBuilderDashboard() {
                   cursor: "pointer",
                 }}
               >
+                <option value="">{language === "uk" ? "Усі" : "All"}</option>
                 {companies.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
+                  <option key={c.id} value={c.id} title={c.name}>{Array.from(c.name).length > 16 ? Array.from(c.name).slice(0, 15).join("") + "…" : c.name}</option>
                 ))}
               </select>
             )}
@@ -521,7 +523,7 @@ export function WebsiteBuilderDashboard() {
             <WebsiteProjectCard
               key={site.id}
               site={site}
-              companyId={companyId}
+              companyId={site.companyId}
               language={language}
               t={t}
               handleDuplicate={handleDuplicate}
@@ -537,6 +539,9 @@ export function WebsiteBuilderDashboard() {
         onClose={() => setModalOpen(false)}
         t={t}
         language={language}
+        companies={companies}
+        companyId={creationCompanyId}
+        setCompanyId={setCreationCompanyId}
         handleCreate={handleCreate}
         error={error}
         selectedFramework={selectedFramework}

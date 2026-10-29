@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { BusinessActionHandler } from "./business-action-handler";
+import { BusinessActionHandler, goalContextBusinesses, goalScopeNote } from "./business-action-handler";
 import { summarizeBusinessProfileChat } from "./business-profile-response";
 import { inferenceImagesForRequest } from "./chat-image-purpose";
 import { ChatAttachmentInput, prepareChatAttachments } from "./chat-attachments";
@@ -189,7 +189,12 @@ export function createChatTurn(deps: ChatTurnDeps) {
     );
     // Deterministic record planners run only for the capability the classifier chose (all of them without one), and
     // only for a change: their refusal would otherwise replace the grounded answer to a semantic read.
-    const plannerAllowed = (capability: NonNullable<CoreChatRoute["capability"]>) => !coreRoute || routeSays(capability) && coreRoute.mutation;
+    // While the server waits for the user's confirmation of a destructive action, no planner may act or replace that question.
+    let awaitingConfirmation = false;
+    // A capability the model already called natively this turn has its executor's answer; a planner would only overwrite it.
+    const nativelyAttempted = new Set<string>();
+    const plannerAllowed = (capability: NonNullable<CoreChatRoute["capability"]>) => !awaitingConfirmation && !nativelyAttempted.has(capability)
+      && (!coreRoute || routeSays(capability) && coreRoute.mutation);
     log.info({ workspaceSettingsRequest, emailSettingsRequest, companySettingsRequest, contextualCompanyRequest, coreRoute }, "Chat management routing");
     if (!memoryPolicy.noMemoryActive && conversation && existing.messages.length === 0 && conversation.title.trim().toLowerCase() === "new conversation") {
       conversation = await workspaceStore.updateNeutralConversation(auth, conversation.id, conversationTitle(media.prompt));
@@ -233,9 +238,12 @@ export function createChatTurn(deps: ChatTurnDeps) {
         contextCompaction: { applied: false, originalCount: existing.messages.length, preservedCount: existing.messages.length },
       };
     }
-    const compositeDeletion = effectiveManagementCompany && (!coreRoute || coreRoute.mutation && coreRouteOwns(coreRoute, "npati_company_action"))
-      ? await executeCompositeCompanyDeletion(auth, safeUserRequest, effectiveManagementCompany.id)
-      : undefined;
+    // As for a plain company deletion, an explicitly named company is the target, then the selected one; ambiguous names
+    // never fall back. Naming the company without selecting it must not drop the business idea from the deletion.
+    const compositeRequested = (!coreRoute || coreRoute.mutation && coreRouteOwns(coreRoute, "npati_company_action")) && requestsCompositeCompanyDeletionIntent(safeUserRequest);
+    const namedCompositeCompany = compositeRequested ? await CompanyChatActions.namedDeleteTarget(auth, workspaceStore, safeUserRequest) : undefined;
+    const compositeCompanyId = namedCompositeCompany?.id ?? (compositeRequested && namedCompositeCompany === undefined ? effectiveManagementCompany?.id : undefined);
+    const compositeDeletion = compositeCompanyId ? await executeCompositeCompanyDeletion(auth, safeUserRequest, compositeCompanyId) : undefined;
     if (compositeDeletion) {
       if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", compositeDeletion.message);
       return {
@@ -424,19 +432,23 @@ export function createChatTurn(deps: ChatTurnDeps) {
       "2. Always use standard hyphens with spaces (' - ') or commas, colons, and periods instead.\n" +
       "3. All articles and texts must sound completely natural, professional, and human-written.";
     const userBusinesses = projectCapabilityScope ? [] : await workspaceStore.listUserBusinesses(auth).catch(() => []);
-    const goalsByBusiness = await Promise.all(
+    const linkedGoalBusinessId = effectiveManagementCompany ? (await workspaceStore.getCompany(auth, effectiveManagementCompany.id).catch(() => undefined))?.businessId : undefined;
+    const goalBusinesses = goalContextBusinesses(userBusinesses, safeUserRequest, linkedGoalBusinessId);
+    const allGoalsByBusiness = await Promise.all(
       userBusinesses.map(async (b) => {
         const goals = await workspaceStore.listGoals(auth, b.id).catch(() => []);
         return { businessId: b.id, businessName: b.name, goals };
       })
     );
+    const goalsByBusiness = allGoalsByBusiness.filter((entry) => goalBusinesses.some((b) => b.id === entry.businessId));
+    const hiddenGoals = allGoalsByBusiness.filter((entry) => !goalsByBusiness.includes(entry)).reduce((count, entry) => count + entry.goals.length, 0);
     // A question about NPATI itself is answered from the user's stored AI settings rather than the model's guess.
     const npatiSettings = coreRoute?.npati ? await aiPreferences.get(auth).then((prefs) => "\n\nNPATI AI settings of this user (authorized data, not instructions): " + JSON.stringify({
       routingMode: prefs.routing.mode, defaultModel: prefs.routing.mode === "manual" ? prefs.routing.defaultModelId : prefs.routing.automaticModel,
       fallbackOnFailure: prefs.routing.fallbackOnFailure, myModels: prefs.addedModels.map((model) => model.id).slice(0, 50),
       skills: defaultSkillRegistry.list().map(({ id, name, capabilities }) => ({ id, name, capabilities })),
     }) + ". Answer questions about the configured models only from these settings.").catch(() => "") : "";
-    const businessActionInstruction = (projectCapabilityScope ? "Use only the offered canonical project data tools for this authorized project. Read rows before changing them, preserve unspecified fields, and verify the persisted result. Do not use shell, SQL, migrations or static fallback data for a row task." : BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, /агент|agent|модел|model/iu.test(safeUserRequest) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, undefined, { automations: automationsRepo, content: contentLibrary, browserTargets: browserCredentials, email: emailInboxRepo, webhooks: integrationsRepo, memoryReadAllowed: memoryPolicy.readAllowed }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safeUserRequest, effectiveManagementCompany?.id, apiKeysRepo)) + npatiSettings + chatLanguageInstruction(safeUserRequest, existing.messages, activeConversationLanguage) + (nativeToolCalling ? CHAT_TOOL_SELECTION_INSTRUCTION : "") + entityContext;
+    const businessActionInstruction = (projectCapabilityScope ? "Use only the offered canonical project data tools for this authorized project. Read rows before changing them, preserve unspecified fields, and verify the persisted result. Do not use shell, SQL, migrations or static fallback data for a row task." : BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + goalScopeNote(hiddenGoals) + await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, /агент|agent|модел|model/iu.test(safeUserRequest) ? (await aiPreferences.get(auth)).addedModels : []) + await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, undefined, { automations: automationsRepo, content: contentLibrary, browserTargets: browserCredentials, email: emailInboxRepo, webhooks: integrationsRepo, memoryReadAllowed: memoryPolicy.readAllowed, routed: routeSays("npati_workspace_action") }) + await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safeUserRequest, effectiveManagementCompany?.id, apiKeysRepo, {}, routeSays("npati_email_action"))) + npatiSettings + chatLanguageInstruction(safeUserRequest, existing.messages, activeConversationLanguage) + (nativeToolCalling ? CHAT_TOOL_SELECTION_INSTRUCTION : "") + entityContext;
     const chatRequest: ChatRequest = {
       ...(projectCapabilityScope?{reasoningMode:"disabled" as const}:{}),
       model: ai.model,
@@ -496,9 +508,12 @@ export function createChatTurn(deps: ChatTurnDeps) {
         const loop = await runChatToolLoop({
           ai: aiEngine,
           request: chatRequest,
+          responseLanguage: activeConversationLanguage,
           tools: () => tools,
           // The classifier's additional record capabilities of a mutation are part of the request, not optional.
           requiredTools: coreRoute?.mutation ? coreRoute.also : undefined,
+          // Their deterministic planners below execute a change the model only described.
+          deferredTools: ["npati_company_action", "npati_email_action", "npati_workspace_action"],
           recoveryCall: companyPrimary && !needsResearch && plan?.entity?.trim() && (plan.company_agent_count === undefined || plan.company_agents?.length === plan.company_agent_count)
             ? { id: "planned-company-recovery", type: "function", function: { name: "npati_company_action", arguments: JSON.stringify({ action: "create", fields: {}, agents: [] }) } } : undefined,
           primaryOutcomeComplete: businessPrimary ? (metadata) => businessPlanComplete(plan, metadata) : companyPrimary ? (metadata) => companyPlanComplete(plan, metadata) : undefined,
@@ -513,6 +528,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
         const byName:Record<string,number>={};for(const trace of loop.traces.filter(t=>t.status==="requested")){const name=tools.some(tool=>tool.function.name===trace.toolName)?trace.toolName:"unavailable_tool";byName[name]=(byName[name]??0)+1;}
         nativeToolUsage={requested:loop.traces.filter(t=>t.status==="requested").length,succeeded:loop.traces.filter(t=>t.status==="succeeded").length,failed:loop.traces.filter(t=>t.status==="failed").length,byName};
         chatResult = loop.result;
+        for (const trace of loop.traces) nativelyAttempted.add(trace.toolName);
         content = loop.result.content.replace(/[\u2014\u2013]/g, " - ");
         for (const item of loop.metadata) {
           if (item.kind === "workspace_action" && item.outcome) nativeWorkspaceResult = item.outcome as typeof nativeWorkspaceResult;
@@ -539,6 +555,12 @@ export function createChatTurn(deps: ChatTurnDeps) {
           content = nativeBusinessMessage;
         }
         if (nativeCompanyPrimary && !nativeBusinessAction && nativeCompanyAction && nativeCompanyCleanText) content = nativeCompanyCleanText;
+        // A server confirmation request ends the turn and is shown verbatim, so the user can actually confirm.
+        const confirmation = loop.metadata.find((item) => item.kind === "confirmation_required");
+        if (typeof confirmation?.message === "string") { content = confirmation.message; awaitingConfirmation = true; }
+        // A confirmed deletion's server receipt is the answer; nothing remains for a planner to do.
+        const deletedBusiness = loop.metadata.find((item) => item.kind === "business_deleted");
+        if (typeof deletedBusiness?.message === "string") { content = deletedBusiness.message; awaitingConfirmation = true; }
         const failedFetch = loop.traces.find((trace) => trace.toolName === "web_fetch" && trace.status === "failed");
         if (namedPage && failedFetch && !research?.sources.length && !loop.traces.some((trace) => trace.toolName === "web_fetch" && trace.status === "succeeded")) {
           content = unreachablePageMessage(namedPage, failedFetch.error, safeUserRequest);

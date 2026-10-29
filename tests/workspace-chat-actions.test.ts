@@ -152,7 +152,7 @@ describe("workspace resources from chat", () => {
     const deps = dependencies(store, automations, async (_auth, companyId, input) => completedRun(companyId, input.task));
     const result = await WorkspaceChatActions.extractAndExecute(alice, directive({
       action: "automation.create", companyId: company.id, intro: "Готово, автоматизацію створено.", followUp: "Створити ще щотижневий звіт?",
-      automation: { name: "Ранковий звіт", prompt: "Підготуй звіт", cronExpression: "0 9 * * 1", timezone: "Europe/Kyiv" },
+      automation: { name: "Ранковий звіт", prompt: "Підготуй звіт", cronExpression: "0 9 * * 1", timezone: "Europe/Kyiv", status: "active" },
     }), deps, "conversation-automation", { requestMessage: "Створи автоматизацію" });
     expect(result.workspaceAction).toEqual(expect.objectContaining({ action: "automation.create", companyId: company.id }));
     expect(result.cleanText).toContain("```card:Ранковий звіт");
@@ -313,7 +313,7 @@ describe("workspace resources from chat", () => {
     const company = await store.createCompany(alice, { name: "Stream Workspace" }, "stream-workspace-company");
     const output = directive({
       action: "automation.create", companyId: company.id, intro: "Automation created.", followUp: "Would you like a weekly version?",
-      automation: { name: "Daily report", prompt: "Prepare the daily report", cronExpression: "0 9 * * *", timezone: "Europe/Kyiv" },
+      automation: { name: "Daily report", prompt: "Prepare the daily report", cronExpression: "0 9 * * *", timezone: "Europe/Kyiv", status: "active" },
     });
     const aiEngine: AIEngine = {
       chat: async () => ({ content: output }), async *stream() { yield output.slice(0, 30); yield output.slice(30); },
@@ -343,7 +343,7 @@ describe("workspace resources from chat", () => {
       action: "automation.create",
       intro: "Готово, тестову автоматизацію створено.",
       followUp: "Бажаєте змінити час запуску?",
-      automation: { name: "Тестова автоматизація", prompt: "Підготуй тестовий звіт", cronExpression: "0 9 * * *", timezone: "Europe/Kyiv" },
+      automation: { name: "Тестова автоматизація", prompt: "Підготуй тестовий звіт", cronExpression: "0 9 * * *", timezone: "Europe/Kyiv", status: "active" },
     });
     const aiEngine: AIEngine = {
       chat: async () => ({ content: output }), async *stream() { yield "Готово, я створив автоматизацію."; },

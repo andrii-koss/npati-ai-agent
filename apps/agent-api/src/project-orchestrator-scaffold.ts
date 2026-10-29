@@ -18,6 +18,7 @@ import {
   isDataCapabilityPermitted,
   DATA_CAPABILITY_GROUPS,
   canonicalFrameworkName,
+  isDesktopProjectFramework,
 } from "@npati/shared";
 import { createFrameworkScaffold } from "./project-framework-scaffold";
 import { ProjectOrchestrationError } from "./project-orchestrator-types";
@@ -117,8 +118,8 @@ export async function ensureMobileAppAgent(workspaceStore: WorkspaceStore, ctx: 
   const agent = await workspaceStore.createCompanyAgent(ctx, companyId, {
     name: "Mobile App Builder",
     role: "Mobile app developer",
-    description: "Builds Expo (React Native) apps that use the project Project API and Project Auth.",
-    systemInstruction: "Inspect the mobile project files, implement the requested screens with the vendored SDK, and verify the Expo Web preview.",
+    description: "Builds native mobile source using the requested Expo/React Native or Flutter framework.",
+    systemInstruction: "Inspect the mobile project files and preserve the requested framework. Implement screens and supported static/unit checks. Report Source, Dependencies, Native Build, Installed and Device E2E separately. Expo Web is not Android evidence; unavailable SDKs or devices are BLOCKED.",
     modelId: main?.modelId,
     tools: [...WEBSITE_FILE_TOOLS, ...PROJECT_PREVIEW_TOOLS],
     isActive: true,
@@ -236,11 +237,20 @@ export async function initSharedProjectContext(
   details: { name: string; description?: string; framework?: string; purpose?: string; projectType?: "website" | "mobile_app" | "code_project" },
 ): Promise<string> {
   const isMobileApp = details.projectType === "mobile_app";
-  const content = isMobileApp
+  const content = isDesktopProjectFramework(details.framework)
+    ? [`# ${details.name}`, "", "Framework: Python / Pygame. This is a desktop game, not a website.",
+      details.description ?? "", "Use a project-local .venv for Python dependencies; preserve Sandbox isolation and dependency policy.",
+      "Implement the requested game and unit/headless tests. Keep game rules testable independently of a display.",
+      "Run supported tests and report actual exit codes. SDL dummy/headless rendering is not real GUI input.",
+      "Only claim a real GUI window and keyboard input when an authorized display backend is available. Otherwise report GUI BLOCKED; never substitute a browser mock.",
+      "Inspect current files before edits; preserve the Project ID and existing rules except the requested change."].join("\n")
+    : isMobileApp
     ? [
         "# " + details.name,
         "",
-        "Framework: Expo / React Native. Minimal app configuration and App.tsx are prepared.",
+        `Framework: ${details.framework ?? "Expo"}. Preserve this native mobile stack; never replace Flutter with Expo.`,
+        "Source, dependencies, static analysis, unit tests, native build, installed/launched and device E2E are separate statuses. Expo Web Preview is not an Android build or a device.",
+        "Implement native screens and tests. Run available checks with actual exit codes. Report missing Flutter/Android SDK/JDK/Gradle/device as BLOCKED; do not install host SDKs or claim an APK/AAB without an actual artifact.",
         "Implement the requested screens. Do not assume a database, authentication screens or SDK bindings exist.",
         "Use code.data.backend.create only when the request requires persistent shared data; otherwise no database is needed.",
         "For later edits, read current source and preserve existing functionality.",

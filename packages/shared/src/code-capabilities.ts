@@ -52,6 +52,7 @@ export const CODE_TOOL_FLAG_KEYS: Record<string, string> = Object.fromEntries(
 );
 
 export const CODE_TOOL_FLAG_OVERRIDES: Record<string, string> = Object.fromEntries([
+  ["code.preview.restart", "code.shell"],
   ...CODE_ASYNC_PROCESS_CAPABILITIES.map((capability) => [capability.id, "code.shell"] as const),
   ...CODE_SHELL_CAPABILITIES
     .filter((capability) => capability.id.startsWith("code.shell."))

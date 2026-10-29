@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { AuthContext, WorkspaceStore } from "@npati/workspace";
 import type { ApiKeysRepository } from "./api-keys-repository";
+import { companyNamedInMessage } from "./active-context-resolver";
 import { detectCompanyChatLanguage } from "./company-chat-i18n";
 import { EmailConnectionTester } from "./email-connection-tester";
 import { EmailDnsVerifier } from "./email-dns-verifier";
@@ -17,6 +18,9 @@ type EmailActionKind =
   | "inbox.list" | "inbox.read" | "inbox.compose" | "inbox.reply"
   | "draft.update" | "draft.approve" | "thread.update" | "thread.delete";
 
+/** Email directives that only read records; a read-only Chat request may run them (V5-D69). */
+export const EMAIL_READ_ACTIONS: ReadonlySet<string> = new Set(["account.list", "rule.list", "template.list", "contact.list", "permission.list", "inbox.list", "inbox.read"]);
+
 type EmailDirective = {
   action: EmailActionKind;
   companyId?: string;
@@ -29,6 +33,7 @@ type EmailDirective = {
   threadId?: string;
   threadSubject?: string;
   messageId?: string;
+  contactEmail?: string;
   permissionId?: string;
   fields?: Record<string, unknown>;
 };
@@ -178,6 +183,7 @@ export class EmailChatActions {
       return references[value];
     };
     if (directive.accountEmail !== undefined) directive.accountEmail = restore(directive.accountEmail) as string;
+    if (directive.contactEmail !== undefined) directive.contactEmail = restore(directive.contactEmail) as string;
     if (!directive.fields) return;
     for (const key of ["emailAddress", "email"]) if (directive.fields[key] !== undefined) directive.fields[key] = restore(directive.fields[key]);
     for (const key of ["toAddresses", "ccAddresses", "bccAddresses"]) if (Array.isArray(directive.fields[key])) directive.fields[key] = directive.fields[key].map(restore);
@@ -208,16 +214,22 @@ export class EmailChatActions {
     return copy[detectCompanyChatLanguage(message)] ?? "I could not safely determine the requested email action. Specify the company or personal mailbox, target item, and exact operation.";
   }
 
-  static async buildSystemPrompt(auth: AuthContext, store: WorkspaceStore, repo: EmailInboxRepository, message: string, selectedCompanyId?: string, apiKeys?: ApiKeysRepository, addressReferences: Record<string, string> = {}): Promise<string> {
-    if (!auth.permissions.includes("business:manage") || !this.isManagementRequest(message)) return "";
-    const companies = (await store.listCompanies(auth, 100)).items;
+  static async buildSystemPrompt(auth: AuthContext, store: WorkspaceStore, repo: EmailInboxRepository, message: string, selectedCompanyId?: string, apiKeys?: ApiKeysRepository, addressReferences: Record<string, string> = {}, routed = false): Promise<string> {
+    // `routed`: the semantic route already chose Email ("which new letters arrived?" names no keyword) (V5-D68).
+    if (!auth.permissions.includes("business:manage") || !routed && !this.isManagementRequest(message)) return "";
+    const companies = [];
+    for (let cursor: string | undefined, page = 0; page === 0 || cursor && page < 5; page++) {
+      const listed = await store.listCompanies(auth, 100, cursor); companies.push(...listed.items); cursor = listed.nextCursor ?? undefined;
+    }
     const requestsPersonal = /(?:\bpersonal\b|особист(?:а|у|ої|ій)?\s+(?:пошт|скрин)|приватн(?:а|у|ої|ій)?\s+(?:пошт|скрин))/iu.test(message);
     const requestedScope = requestsPersonal ? "personal" : selectedCompanyId;
+    // An owned company the request names explicitly outranks the active one (A018: "In company X, save a draft").
+    const named = requestedScope === "personal" ? undefined : companyNamedInMessage(companies, message, selectedCompanyId);
     let company = requestedScope === "personal"
       ? undefined
-      : requestedScope
+      : named ?? (requestedScope
         ? await store.getCompany(auth, requestedScope)
-        : companies.length === 1 ? companies[0] : undefined;
+        : companies.length === 1 ? companies[0] : undefined);
     // "A complaint came from e2e-test@example.com": when the selected company has no mail from that address but
     // exactly one other owned company does, that company's inbox is the one meant.
     const addresses = [...new Set([
@@ -225,7 +237,7 @@ export class EmailChatActions {
       // The planner sees masked EMAIL_REF_* placeholders; their addresses are resolved locally.
       ...Object.entries(addressReferences).filter(([reference]) => message.includes(reference)).map(([, address]) => address),
     ].map((value) => value.toLowerCase()))];
-    if (requestedScope !== "personal" && addresses.length) {
+    if (requestedScope !== "personal" && !named && addresses.length) {
       const hasMail = async (companyId: string) => (await repo.listThreads(auth, companyId, { limit: 100 }).catch(() => []))
         .some((thread) => addresses.includes(thread.customerEmail.toLowerCase()));
       if (!company || !await hasMail(company.id)) {
@@ -343,7 +355,9 @@ Return ONLY one complete email-action block for the latest request. Omit every u
         } else if (directive.action === "contact.list") {
           const items = await repo.listContacts(auth, companyId); notice = items.length ? items.map((item) => `- **${safeMarkdown(item.email)}**${item.name ? ` — ${safeMarkdown(item.name)}` : ""}${item.isVip ? " — VIP" : ""}${item.isBlacklisted ? " — blocked" : ""}`).join("\n") : "No contacts are configured.";
         } else if (directive.action === "contact.upsert") {
-          const fields = validateObject(directive.fields, contactFields); if (typeof fields.email !== "string" || !fields.email.trim()) throw new Error("Contact email is required");
+          // The native tool names the contact in contactEmail; fields.email remains accepted (A038).
+          const fields = validateObject(directive.fields, contactFields); if (fields.email === undefined && typeof directive.contactEmail === "string") fields.email = directive.contactEmail;
+          if (typeof fields.email !== "string" || !fields.email.trim()) throw new Error("Contact email is required");
           const item = await repo.upsertContact(auth, companyId, fields as any); resourceId = item.id; notice = `Contact **${safeMarkdown(item.email)}** saved.`;
         } else if (directive.action === "permission.list") {
           if (!options.apiKeys || companyId.startsWith("personal:")) throw new Error("Permissions are available only for company email");
@@ -360,7 +374,8 @@ Return ONLY one complete email-action block for the latest request. Omit every u
           const item = await thread(); const messages = await repo.listMessages(auth, companyId, item.id); resourceId = item.id;
           notice = `### ${safeMarkdown(item.subject)}\n\n${messages.slice(-20).map((entry) => `**${entry.direction === "inbound" ? "From" : "To"}:** ${safeMarkdown(entry.direction === "inbound" ? entry.fromAddress : entry.toAddresses.join(", "))}\n${safeMarkdown(entry.bodyText)}`).join("\n\n---\n\n") || "This thread has no messages."}`;
         } else if (directive.action === "inbox.compose") {
-          const sender = await account(); const fields = validateObject(directive.fields, composeFields); const to = normalizedAddresses(fields.toAddresses), cc = normalizedAddresses(fields.ccAddresses), bcc = normalizedAddresses(fields.bccAddresses);
+          // A company with exactly one mailbox has one possible sender; the planner may omit it (A018 retest).
+          const owned = await accounts(); const sender = !directive.accountId && !directive.accountEmail && owned.length === 1 ? owned[0]! : await account(); const fields = validateObject(directive.fields, composeFields); const to = normalizedAddresses(fields.toAddresses), cc = normalizedAddresses(fields.ccAddresses), bcc = normalizedAddresses(fields.bccAddresses);
           const subject = String(fields.subject || "").trim(), bodyText = String(fields.bodyText || "").trim(), isDraft = fields.isDraft === true;
           if (!to.length || !subject || !bodyText) throw new Error("Recipient, subject, and message body are required");
           if (!isDraft && !sender.testMode && (sender.status !== "connected" || sender.smtpConfig.lastError)) throw new Error("SMTP sending is unavailable. Test the SMTP connection first.");

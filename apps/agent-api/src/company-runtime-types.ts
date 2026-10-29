@@ -70,7 +70,9 @@ export function toolName(value: string) {
   return ({
     "websearch": "web.search", "web.search": "web.search", "webfetch": "web.fetch", "web.fetch": "web.fetch",
     crawler: "web.crawl", "web.crawl": "web.crawl", "text-to-speech": "audio.speech", tts: "audio.speech", "audio.speech": "audio.speech",
-    mcp: "mcp", files: "files", knowledge: "knowledge", exec: "exec", code: "exec", "company.memory": "storage.company_memory", "storage.company.memory": "storage.company_memory"
+    mcp: "mcp", files: "files", knowledge: "knowledge", exec: "exec", code: "exec", "company.memory": "storage.company_memory", "storage.company.memory": "storage.company_memory",
+    // Catalog IDs saved by the Company UI and chat (research.web_search, ...) name the same runtime tools.
+    "research.web.search": "web.search", "browser.web.fetch": "web.fetch", "system.text.to.speech": "audio.speech", "storage.agent.knowledge.retrieval": "knowledge"
   } as Record<string, string>)[key] ?? key;
 }
 

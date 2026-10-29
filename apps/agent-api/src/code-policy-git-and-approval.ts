@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { canonicalJson } from "@npati/workspace";
 import type {
   PolicyRequest,
   PolicyResult,
@@ -187,11 +189,19 @@ export async function evaluatePolicyApproval(
   // A `PolicyRequest` structurally satisfies `McpApprovalSubject`, which is what lets the run path and this
   // phase build the material from the same values with the same function.
   const mcpPayload = mcpApprovalPayloadFor(request);
-  const runtimeApprovalFields = mcpPayload
+  const shellPayload = request.tool === "code.shell.exec" ? {
+    tool: request.tool, projectId: request.projectId ?? null, sessionId: request.sessionId ?? null,
+    executionHash: createHash("sha256").update(canonicalJson({ command: request.command ?? null,
+      cwd: request.shellExecution?.cwd ?? null, env: request.shellExecution?.env ?? {} })).digest("hex"),
+  } : null;
+  // The durable store must receive the same canonical material and identity when requesting and redeeming.
+  const boundPayload = mcpPayload ?? shellPayload;
+  const runtimeApprovalFields = boundPayload
     ? {
         toolName: request.tool,
-        actionSummary: `Runtime MCP tool ${request.tool} requires an approval for this exact call`,
-        inputPayload: mcpPayload,
+        actionSummary: mcpPayload ? `Runtime MCP tool ${request.tool} requires an approval for this exact call`
+          : `${request.tool} requires an approval for this exact call`,
+        inputPayload: boundPayload,
         runId: request.runId ?? "",
         agentId: request.agentId ?? "",
         riskLevel: "high" as const,
@@ -203,14 +213,14 @@ export async function evaluatePolicyApproval(
     const expected = payloadHashFor(request);
     try {
       await approvals.consumeApproved(request.ctx, request.companyId, String(request.approvalId ?? request.toolCallId ?? ""), {
-        ...(mcpPayload
+        ...(boundPayload
           ? {
               // The consuming side of the same material: `run_id`, `agent_id`, `tool_name` and the payload
               // hash are all matched by the store's own atomic statement.
               runId: request.runId ?? "",
               agentId: request.agentId ?? "",
               toolName: request.tool,
-              inputPayload: mcpPayload,
+              inputPayload: boundPayload,
             }
           : {}),
         payloadHash: expected, tool: request.tool, toolCallId: request.toolCallId,

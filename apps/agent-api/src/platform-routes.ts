@@ -60,6 +60,7 @@ import { FeatureFlagService } from "./feature-flags";
 import { registerGuardrailPolicyRoutes } from "./guardrail-policy-routes";
 import { IntegrationsRepository } from "./integrations-repository";
 import { registerIntegrationsRoutes } from "./integrations-routes";
+import { serviceIdentityForAutomation } from "./code-service-identity";
 import { McpApprovalReleaseReason, mcpApprovalRunIdOf, releaseMcpApprovalPause } from "./mcp-approval";
 import { registerMcpPolicyRoutes } from "./mcp-policy-routes";
 import { applyMcpRiskOverride } from "./mcp-risk-override";
@@ -419,7 +420,10 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
       ),
     },
   });
-  if (integrationsRepo) registerIntegrationsRoutes(app, { auth: authProvider, store: workspaceStore, repo: integrationsRepo });
+  // A webhook is an unattended trigger like a schedule: it runs under the same restricted service identity (V5-D70).
+  if (integrationsRepo) registerIntegrationsRoutes(app, { auth: authProvider, store: workspaceStore, repo: integrationsRepo,
+    triggerRun: (webhook, prompt, delivery) => companyRuntime.execute(serviceIdentityForAutomation({ companyId: webhook.companyId, automationId: webhook.id, workspaceId: webhook.workspaceId, ownerUserId: webhook.userId }).auth,
+      webhook.companyId, { task: prompt, mode: webhook.agentId ? "single" : "auto", preferredAgentId: webhook.agentId ?? undefined }, `webhook:${webhook.id}:${delivery}`) });
   const messagingResultAttachments=async(auth:AuthContext,message:string):Promise<GatewayOutboundAttachment[]>=>{
     if(!chatFiles)return[];const output:GatewayOutboundAttachment[]=[],seen=new Set<string>();
     for(const match of message.matchAll(/\[\[npati-attachment:(image|document|file|audio):([0-9a-f-]{36}):([^\]]+)\]\]/gi)){

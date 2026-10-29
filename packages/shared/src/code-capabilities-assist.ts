@@ -1,3 +1,4 @@
+import { CODE_PREVIEW_RESTART_CAPABILITY } from "./code-capabilities-preview";
 import type { CapabilityDefinition } from "./capabilities";
 import type { CapabilityMatrixEntry } from "./capability-matrix";
 
@@ -197,7 +198,7 @@ export const CODE_ASSIST_CAPABILITIES: (CapabilityDefinition & { inputSchema: Re
     "type": "tool",
     "domain": "code",
     "name": "code.preview.screenshot",
-    "description": "Take a screenshot of this project's running Live Preview. WHEN: you need to see how a page actually renders after an edit, or compare it with a reference. NOT WHEN: the preview is not running yet (the system starts it after successful edits), or a source file answers the question. RETURNS: viewport and page status; with a vision model the screenshot is attached to your next input, otherwise a text description or a clear error.",
+    "description": "Inspect the running project Preview and optionally exercise real mouse/keyboard actions before the screenshot. WHEN: checking game input, a win/draw/game-over, disabled moves, counters or Restart. Read current source to choose CSS selectors. Put the complete sequence in one actions array: each call opens a fresh browser. RETURNS: persisted reportId, qaSummary and interactionTrace with observed before/after visible text, button disabled states and canvas fingerprints. These are observations, not inferred success. No arbitrary JavaScript, credential typing, non-GET network writes or cross-project destinations. A screenshot or source review alone never proves input worked.",
     "useWhen": [
       "You need to see the rendered page of a website project."
     ],
@@ -213,7 +214,7 @@ export const CODE_ASSIST_CAPABILITIES: (CapabilityDefinition & { inputSchema: Re
     "requiredPermissions": [
       "workspace:read"
     ],
-    "version": 1,
+    "version": 2,
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -237,6 +238,87 @@ export const CODE_ASSIST_CAPABILITIES: (CapabilityDefinition & { inputSchema: Re
           "type": "string",
           "maxLength": 500,
           "description": "What to check; used for the text description when the model has no vision."
+        },
+        "actions": {
+          "type": "array",
+          "maxItems": 16,
+          "description": "Real ephemeral browser input in order; max 8000ms total. Fresh browser per call. No script execution, typing credentials, cross-origin requests or non-GET network writes.",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "selector"
+                ],
+                "properties": {
+                  "type": {
+                    "const": "click"
+                  },
+                  "selector": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "key"
+                ],
+                "properties": {
+                  "type": {
+                    "const": "key"
+                  },
+                  "key": {
+                    "type": "string",
+                    "enum": [
+                      "ArrowUp",
+                      "ArrowDown",
+                      "ArrowLeft",
+                      "ArrowRight",
+                      "Space",
+                      "Enter",
+                      "Tab",
+                      "KeyW",
+                      "KeyA",
+                      "KeyS",
+                      "KeyD",
+                      "KeyR"
+                    ]
+                  },
+                  "durationMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 2000,
+                    "default": 80
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "durationMs"
+                ],
+                "properties": {
+                  "type": {
+                    "const": "wait"
+                  },
+                  "durationMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 2000
+                  }
+                }
+              }
+            ]
+          }
         }
       }
     },
@@ -465,6 +547,8 @@ export const CODE_ASSIST_CAPABILITIES: (CapabilityDefinition & { inputSchema: Re
     }
   }
 ];
+
+CODE_ASSIST_CAPABILITIES.push(CODE_PREVIEW_RESTART_CAPABILITY);
 
 export const CODE_ASSIST_MATRIX: CapabilityMatrixEntry[] = CODE_ASSIST_CAPABILITIES.map((c) => ({
   id: c.inventoryIds[0]!, capabilityId: c.id, name: c.name, type: "tool", domain: "code", agentCallable: true, risk: c.risk,

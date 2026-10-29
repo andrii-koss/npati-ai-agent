@@ -61,6 +61,21 @@ export interface GoalActionDirective {
   };
 }
 
+/** Tells the model that goalContextBusinesses() left goals out, so it does not deny goals it cannot see. */
+export function goalScopeNote(hiddenGoals: number): string {
+  return hiddenGoals ? `\n\nOnly the goals of the Business(es) in scope for this request are listed above. ${hiddenGoals} goal(s) of other Businesses exist and are not shown: never state that they do not exist or were not saved, and show them only if the user names that Business.` : "";
+}
+
+/**
+ * Goals shown to the model follow the Business Memory scope: the Businesses named in the request, else the selected
+ * Company's linked Business, else all of them. Another Company's goals must not surface while a Company is selected.
+ */
+export function goalContextBusinesses<T extends { id: string; name: string }>(businesses: T[], request: string, linkedBusinessId?: string | null): T[] {
+  const lower = request.toLocaleLowerCase();
+  const named = businesses.filter((business) => lower.includes(business.name.toLocaleLowerCase()));
+  return named.length ? named : linkedBusinessId ? businesses.filter((business) => business.id === linkedBusinessId) : businesses;
+}
+
 /** Resolves exactly one Company Agent owned by this user; an unknown or ambiguous agent fails the goal action. */
 async function resolveGoalAgent(store: WorkspaceStore, auth: AuthContext, agent: string, companyName?: string): Promise<string> {
   const wanted = agent.trim().toLocaleLowerCase(), company = companyName?.trim().toLocaleLowerCase();

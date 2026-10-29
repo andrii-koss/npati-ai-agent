@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
+import { assertBrowserQaActions, runBrowserQaActions } from "../apps/agent-api/browser-qa-actions.mjs";
 import { SharedProjectRuntimeProvider } from "../apps/agent-api/src/shared-project-runtime-provider";
 import { assertBrowserQaOptions, parseBrowserQaResult, browserQaFailure } from "../apps/agent-api/src/sandbox-browser-qa";
 import type { SandboxBrowserQaOptions, SandboxScope } from "../apps/agent-api/src/sandbox-provider";
@@ -84,10 +85,11 @@ describe("security-gate: shared Browser QA", () => {
 });
 
 describe("Browser QA WebSocket destination isolation", () => {
-  it("executes the runner and admits only the current project's WebSocket origin", async () => {
+  it.each([false,true])("executes the runner with interactions=%s and confines sockets and network writes", async interactions => {
     const source = readFileSync(new URL("../apps/agent-api/browser-qa-runner.mjs", import.meta.url), "utf8")
       .replace('import { chromium } from "playwright";', "")
-      .replace('import { captureBrowserDiagnostic } from "./browser-qa-diagnostics.mjs";', "");
+      .replace('import { captureBrowserDiagnostic } from "./browser-qa-diagnostics.mjs";', "")
+      .replace('import { assertBrowserQaActions, runBrowserQaActions } from "./browser-qa-actions.mjs";', "");
     let handler: ((socket: { url(): string; connectToServer(): void; close(): void }) => void) | undefined;
     const page = {
       routeWebSocket: vi.fn(async (_pattern: string, callback: typeof handler) => { handler = callback; }),
@@ -97,7 +99,7 @@ describe("Browser QA WebSocket destination isolation", () => {
     const context = { route: vi.fn(), newPage: vi.fn(async () => page) };
     const close = vi.fn();
     const chromium = { launch: vi.fn(async () => ({ newContext: vi.fn(async () => context), close })) };
-    const input = JSON.stringify({ ...options, host: "10.0.2.2" });
+    const input = JSON.stringify({ ...options, host: "10.0.2.2", ...(interactions?{actions:[{type:"wait",durationMs:0}]}:{}) });
     const output = vi.fn();
     const processMock = {
       argv: ["node", "runner", "--shared-runtime"], env: {},
@@ -105,7 +107,7 @@ describe("Browser QA WebSocket destination isolation", () => {
       stdout: { write: output }, exitCode: 0,
     };
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-    await new AsyncFunction("chromium", "process", source)(chromium, processMock);
+    await new AsyncFunction("chromium", "process", "assertBrowserQaActions", "runBrowserQaActions", source)(chromium, processMock, assertBrowserQaActions, runBrowserQaActions);
     expect(handler).toBeTypeOf("function");
     for (const [url, allowed] of [
       ["ws://10.0.2.2:3002/?token=fixture", true],
@@ -119,8 +121,8 @@ describe("Browser QA WebSocket destination isolation", () => {
     ] as const) {
       const socket = { url: () => url, connectToServer: vi.fn(), close: vi.fn() };
       handler!(socket);
-      expect(socket.connectToServer).toHaveBeenCalledTimes(allowed ? 1 : 0);
-      expect(socket.close).toHaveBeenCalledTimes(allowed ? 0 : 1);
+      expect(socket.connectToServer).toHaveBeenCalledTimes(allowed && !interactions ? 1 : 0);
+      expect(socket.close).toHaveBeenCalledTimes(allowed && !interactions ? 0 : 1);
     }
     expect(close).toHaveBeenCalledOnce();
     expect(output).toHaveBeenCalledWith(JSON.stringify({ error: "browser_qa_failed", stage: "navigation" }));

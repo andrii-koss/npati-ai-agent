@@ -20,6 +20,7 @@ export interface SandboxScope { workspaceId: string; userId: string; companyId: 
 export interface SandboxStatus { id: string; state: SandboxState; createdAt: string; lastActivityAt: string; }
 export interface SandboxFile { path: string; content: string; revision?: string; encoding?: "base64"; }
 export interface SandboxBrowserQaResult {
+  interactionTrace?: import("../browser-qa-actions.mjs").BrowserQaInteraction[];
   statusCode: number; loadTimeMs: number; domContentLoadedMs: number; resourceCount: number; totalSizeBytes: number;
   consoleDiagnostics?: import("../browser-qa-diagnostics.mjs").BrowserDiagnostic[];
   consoleErrorCount: number; brokenLinks: Array<{ href: string; status?: number; error?: string }>;
@@ -27,6 +28,7 @@ export interface SandboxBrowserQaResult {
   screenshot?: { mimeType: "image/png"; base64Data: string; sizeBytes: number; redacted: true; captureMode?: "layout" | "visual" };
 }
 export interface SandboxBrowserQaOptions {
+  actions?: import("../browser-qa-actions.mjs").BrowserQaAction[];
   port: number; path: string; viewport: { width: number; height: number }; timeoutMs: number;
   maxScreenshotBytes: number; maxBrokenLinks: number; screenshot: boolean; screenshotMode?: "layout" | "visual";
 }

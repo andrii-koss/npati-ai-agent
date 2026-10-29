@@ -1,7 +1,7 @@
 import { createProjectImplementationPrompt } from "./project-creation-prompt";
 import { resolveCodingConversationLanguage, codingChatResponseInstruction, chatLanguageInstruction } from "./company-chat-i18n";
 import { randomUUID } from "node:crypto";
-import { DEVELOPMENT_PROCESS_SETTINGS_KEY, sanitizeExecutionTrace, developmentIsActive, planChatDevelopment, developmentTargetKind, type DevelopmentProcess, type DevelopmentTarget } from "@npati/shared";
+import { DEVELOPMENT_PROCESS_SETTINGS_KEY, sanitizeExecutionTrace, developmentIsActive, isDesktopProjectFramework, planChatDevelopment, developmentTargetKind, type DevelopmentProcess, type DevelopmentTarget } from "@npati/shared";
 import { WorkspaceNotFoundError, WorkspaceAccessError, type AuthContext, type Project, type WorkspaceStore } from "@npati/workspace";
 import type { CodeService } from "./code-service";
 import type { FeatureFlagService } from "./feature-flags";
@@ -412,7 +412,7 @@ export class ChatDevelopmentService {
       if (target.technologySelection) await this.report(ctx, process.id, "technology_selection", target.framework + ": " + target.technologySelection.reason, { agentId: target.technologySelection.source === "ai_planner" ? "AI Planner" : "System", status: "completed", result: JSON.stringify(target.technologySelection) });
       if (!plainHtml) await this.report(ctx, process.id, "scaffold", "Preparing minimal " + target.framework + " configuration", { tool: "code.scaffold", status: "running", agentId: "System" });
       const project = target.kind === "mobile_app"
-        ? await this.d.preparer.prepareCodingMobile(ctx, raw, message)
+        ? await this.d.preparer.prepareCodingMobile(ctx, raw, message, target.framework)
         : await this.d.preparer.prepareCodingWebsite(ctx, raw, message, target.framework);
       ensureActive();
       if (!plainHtml) await this.report(ctx, process.id, "scaffold", "Framework configuration prepared", { tool: "code.scaffold", status: "completed", agentId: "System" });
@@ -436,7 +436,7 @@ export class ChatDevelopmentService {
       await this.patch(ctx, process.id, { status: "running" });
       sink = this.d.background.start({ runId: process.runId, sessionId: session.id, companyId: process.companyId, userId: ctx.userId, projectId: project.id });
       controller.signal.addEventListener("abort", () => this.d.background.abort(process.runId!, "Stopped by request"), { once: true });
-      if (this.d.preview && !plainHtml) {
+      if (this.d.preview && !plainHtml && !isDesktopProjectFramework(target.framework) && target.kind !== "mobile_app") {
         await this.d.flags.assertEnabled(ctx, "code.shell", { companyId: process.companyId });
         let reports = Promise.resolve();
         await this.d.preview.buildProject(ctx, process.companyId, project.id, (stage, details) => {
@@ -461,12 +461,13 @@ export class ChatDevelopmentService {
       });
       runResult = outcome.result;
       const finished = await this.d.projects.get(ctx, process.companyId, project.id);
-      const ready = hasCodeChatPreview(outcome.result);
+      const desktop = isDesktopProjectFramework(target.framework) || target.kind === "mobile_app";
+      const ready = desktop ? outcome.terminalStatus === "completed" : hasCodeChatPreview(outcome.result);
       const result = outcome.result as { message?: string } | null;
       const status = controller.signal.aborted ? "cancelled" : outcome.needsApproval ? "awaiting_approval"
         : outcome.terminalStatus === "completed" && !ready ? "failed" : outcome.terminalStatus;
       await this.settleProgress(ctx, process.id, status);
-      await this.patch(ctx, process.id, { status, detail: outcome.reason ?? (ready ? "Build passed · Live Preview" : "Live Preview has not started"), previewUrl: ready ? finished.previewUrl ?? undefined : undefined });
+      await this.patch(ctx, process.id, { status, detail: outcome.reason ?? (desktop ? "Native source/test result; GUI/device/build require a supported toolchain" : ready ? "Build passed · Live Preview" : "Live Preview has not started"), previewUrl: ready && !desktop ? finished.previewUrl ?? undefined : undefined });
       await this.report(ctx, process.id, status, result?.message || outcome.reason || (ready ? "Verified build and Live Preview are ready" : "Development stopped before verified completion"), {
         tool: "code.verification",
         status: status === "completed" ? "completed" : status === "failed" ? "failed" : status === "cancelled" ? "cancelled" : "waiting_for_approval",

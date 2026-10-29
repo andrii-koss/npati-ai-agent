@@ -237,6 +237,11 @@ const BUILDERS: Record<string, (name: string, framework: string) => Record<strin
   "Flask": flask,
   "Laravel": laravel,
   "HTML/CSS": staticHtml,
+  "Flutter": () => ({
+    "pubspec.yaml": "name: npati_mobile\ndescription: NPATI Flutter application\npublish_to: none\nversion: 1.0.0+1\nenvironment:\n  sdk: '>=3.4.0 <4.0.0'\ndependencies:\n  flutter:\n    sdk: flutter\ndev_dependencies:\n  flutter_test:\n    sdk: flutter\nflutter:\n  uses-material-design: true\n",
+    "lib/main.dart": 'import "package:flutter/material.dart";\nvoid main() => runApp(const MaterialApp(home: Scaffold(body: SizedBox.shrink())));\n',
+  }),
+  "Pygame": () => ({ "requirements.txt": "pygame\n", "main.py": '"""Implement the requested Python/Pygame desktop game here."""\n' }),
 };
 
 export function frameworkScaffoldSupported(value: string): boolean {
@@ -254,6 +259,8 @@ export function createFrameworkScaffold(input: FrameworkScaffoldInput): Record<s
   const files = BUILDERS[canonical]!(input.projectName, canonical);
   // The project context is written separately; a README makes the starter self-describing.
   files["README.md"] = `# ${input.projectName}\n\nFramework: **${canonical}**\n\nThis project was scaffolded by the NPATI Coding Agent. Build and preview commands are managed by the platform.\n\n## Request\n\n${input.prompt}\n`;
+  if(canonical === "Pygame") files["README.md"] = `# ${input.projectName}\n\nPython/Pygame desktop project. Use a project-local virtual environment and supported unit/headless tests. Real GUI/input needs an available, authorized display backend; report BLOCKED when absent. HTTP/browser Preview is not a desktop window.\n\n## Request\n${input.prompt}\n`;
+  if(canonical === "Flutter") files["README.md"] = `# ${input.projectName}\n\nFlutter source project. Implement the requested screens and widget tests. Use flutter pub get, flutter analyze and flutter test only when the Flutter SDK is available. Android build requires JDK and Android SDK; report BLOCKED when absent. Source, build, install and device E2E are separate. No APK/AAB is supplied by this scaffold.\n\n## Request\n${input.prompt}\n`;
   return finalizeMinimalScaffold(files, canonical);
 }
 

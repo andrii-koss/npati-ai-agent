@@ -126,7 +126,12 @@ function detectPhp(files: Record<string, string | undefined>, evidence: string[]
   return { languages: ["php"], packageManagers: ["composer"], verifyCommands: commands };
 }
 
-const DETECTORS = [detectNode, detectPython, detectGo, detectRust, detectJava, detectPhp];
+function detectFlutter(files: Record<string, string | undefined>, evidence: string[]): Partial<ToolchainDetection> {
+  if (!/\bflutter\s*:/m.test(files["pubspec.yaml"] ?? "")) return {};
+  evidence.push("pubspec.yaml");
+  return { languages: ["dart"], packageManagers: ["pub"], verifyCommands: { lint: "flutter analyze", test: "flutter test" } };
+}
+const DETECTORS = [detectNode, detectPython, detectGo, detectRust, detectJava, detectPhp, detectFlutter];
 
 /**
  * Detects languages, package managers and verify commands from manifest files.
@@ -168,6 +173,7 @@ export function detectToolchain(input: ToolchainDetectionInput): ToolchainDetect
 
 /** Manifest files the workspace reader should load before calling `detectToolchain`. */
 export const TOOLCHAIN_MANIFEST_FILES: readonly string[] = [
+  "pubspec.yaml",
   "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "tsconfig.json",
   "pyproject.toml", "requirements.txt", "poetry.lock", "uv.lock", "pytest.ini", "tests/__init__.py", "setup.cfg", "ruff.toml", ".ruff.toml", "mypy.ini",
   "go.mod", ".golangci.yml", ".golangci.yaml",

@@ -41,6 +41,39 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 export const WEBSITES_CACHE_PREFIX = "npati_websites_cache_v1_";
 export const WEBSITES_LATEST_CACHE_KEY = "npati_websites_cache_latest_v1";
 
+/** Projects remain company-scoped; fetch every company page so the selector does not hide older projects. */
+export async function listProjectCompanies(): Promise<Array<{ id: string; name: string }>> {
+  const companies = new Map<string, { id: string; name: string }>();
+  const cursors = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    const page = await apiFetch<{ companies: Array<{ id: string; name: string }>; pagination?: { nextCursor?: string | null } }>(
+      `/companies?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+    );
+    for (const company of page.companies ?? []) companies.set(company.id, company);
+    cursor = page.pagination?.nextCursor || undefined;
+    if (cursor && cursors.has(cursor)) throw new Error("Company pagination did not advance");
+    if (cursor) cursors.add(cursor);
+  } while (cursor);
+  return [...companies.values()];
+}
+
+export async function listCompanyProjects(companyIds: string[]): Promise<WebsiteProject[]> {
+  const projects: WebsiteProject[] = [];
+  // Bound parallel reads when the catalogue covers many companies.
+  for (let offset = 0; offset < companyIds.length; offset += 4) {
+    const pages = await Promise.all(companyIds.slice(offset, offset + 4).map(async companyId => {
+      const page = await apiFetch<{ projects: WebsiteProject[] }>(`/companies/${encodeURIComponent(companyId)}/projects?includeArchived=true`);
+      return { companyId, projects: page.projects ?? [] };
+    }));
+    for (const page of pages) {
+      updateCachedWebsites(page.companyId, page.projects);
+      projects.push(...page.projects);
+    }
+  }
+  return projects;
+}
+
 export function getCachedWebsites(companyId?: string): WebsiteProject[] | null {
   try {
     if (companyId) {
@@ -50,6 +83,7 @@ export function getCachedWebsites(companyId?: string): WebsiteProject[] | null {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) return parsed;
       }
+      return null;
     }
     const latest = sessionStorage.getItem(WEBSITES_LATEST_CACHE_KEY)
       || localStorage.getItem(WEBSITES_LATEST_CACHE_KEY);

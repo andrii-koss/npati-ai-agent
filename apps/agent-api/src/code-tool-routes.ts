@@ -38,6 +38,8 @@ const ERROR_STATUS: Record<string, number> = {
   limit_exceeded: 429,
   workspace_error: 502,
   tool_failed: 500,
+  install_failed: 409,
+  build_failed: 409,
   // C3: write path
   read_before_write_required: 409,
   revision_conflict: 409,
@@ -49,6 +51,8 @@ const ERROR_STATUS: Record<string, number> = {
   checkpoint_not_found: 409,
   approval_required: 403,
   approval_invalid: 409,
+  APPROVAL_INVALID: 409,
+  APPROVAL_ALREADY_USED: 409,
   approval_unavailable: 503,
   /**
    * C13: a `PreToolUse` project hook refused the call. Without this entry the route would rewrite the
@@ -73,7 +77,7 @@ const ERROR_STATUS: Record<string, number> = {
   verify_unavailable: 503,
   verify_failed: 502,
   command_timeout: 504,
-  command_failed: 502,
+  command_failed: 409,
   command_not_found: 404,
   // C4a: dependency path. The verdict codes mirror the dependency guard; the audit codes mirror the
   // audit module so the model always gets the same code the guard produced.

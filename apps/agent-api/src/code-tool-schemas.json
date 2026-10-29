@@ -4511,4 +4511,216 @@
     "version": 2,
     "status": "active"
   }
+,
+  {
+    "name": "code.preview.restart",
+    "version": 1,
+    "status": "active",
+    "description": "Restart this project's Live Preview through the existing scoped runtime, replacing the running process even for static or development servers. WHEN: the user asks to restart Preview. NOT WHEN: only checking a page or making an ordinary edit. No source changes, arbitrary commands, or other projects are accepted. RETURNS: actual runtime status, port and framework. Call code.preview.screenshot afterwards to verify loading; never claim restart from a screenshot alone.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": [
+        "kind",
+        "tool",
+        "toolVersion",
+        "schemaVersion",
+        "trust",
+        "note",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "code_tool_result"
+        },
+        "tool": {
+          "const": "code.preview.restart"
+        },
+        "toolVersion": {
+          "type": "integer"
+        },
+        "schemaVersion": {
+          "type": "integer"
+        },
+        "trust": {
+          "const": "untrusted_data"
+        },
+        "note": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "truncation": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "data": {
+          "type": "object"
+        }
+      }
+    }
+  }
+,
+  {
+    "name": "code.preview.screenshot",
+    "version": 2,
+    "status": "active",
+    "description": "Inspect the running project Preview and optionally exercise real mouse/keyboard actions before the screenshot. WHEN: checking game input, a win/draw/game-over, disabled moves, counters or Restart. Read current source to choose CSS selectors. Put the complete sequence in one actions array: each call opens a fresh browser. RETURNS: persisted reportId, qaSummary and interactionTrace with observed before/after visible text, button disabled states and canvas fingerprints. These are observations, not inferred success. No arbitrary JavaScript, credential typing, non-GET network writes or cross-project destinations. A screenshot or source review alone never proves input worked.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^/(?!/)[A-Za-z0-9/_~.%-]{0,511}$",
+          "default": "/",
+          "description": "Local preview path, for example /about."
+        },
+        "viewport": {
+          "type": "string",
+          "enum": [
+            "desktop",
+            "tablet",
+            "mobile"
+          ],
+          "default": "desktop"
+        },
+        "question": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "What to check; used for the text description when the model has no vision."
+        },
+        "actions": {
+          "type": "array",
+          "maxItems": 16,
+          "description": "Real ephemeral browser input in order; max 8000ms total. Fresh browser per call. No script execution, typing credentials, cross-origin requests or non-GET network writes.",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "selector"
+                ],
+                "properties": {
+                  "type": {
+                    "const": "click"
+                  },
+                  "selector": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "key"
+                ],
+                "properties": {
+                  "type": {
+                    "const": "key"
+                  },
+                  "key": {
+                    "type": "string",
+                    "enum": [
+                      "ArrowUp",
+                      "ArrowDown",
+                      "ArrowLeft",
+                      "ArrowRight",
+                      "Space",
+                      "Enter",
+                      "Tab",
+                      "KeyW",
+                      "KeyA",
+                      "KeyS",
+                      "KeyD",
+                      "KeyR"
+                    ]
+                  },
+                  "durationMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 2000,
+                    "default": 80
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type",
+                  "durationMs"
+                ],
+                "properties": {
+                  "type": {
+                    "const": "wait"
+                  },
+                  "durationMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 2000
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": [
+        "kind",
+        "tool",
+        "toolVersion",
+        "schemaVersion",
+        "trust",
+        "note",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "code_tool_result"
+        },
+        "tool": {
+          "const": "code.preview.screenshot"
+        },
+        "toolVersion": {
+          "type": "integer"
+        },
+        "schemaVersion": {
+          "type": "integer"
+        },
+        "trust": {
+          "const": "untrusted_data"
+        },
+        "note": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "truncation": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "data": {
+          "type": "object"
+        }
+      }
+    }
+  }
 ]

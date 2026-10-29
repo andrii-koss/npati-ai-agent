@@ -697,6 +697,7 @@ export class CompanyToolRuntime implements CompanyToolExecutor {
       case "project.qa.inspect": {
         const result = await this.projectQa.inspect(context, company.id, {
           projectId,
+          ...(Array.isArray(input.actions)?{actions:input.actions as import("../browser-qa-actions.mjs").BrowserQaAction[]}:{}),
           path: typeof input.path === "string" ? input.path : undefined,
           viewport: (input.viewport as any) || "desktop",
           checks: Array.isArray(input.checks) ? (input.checks as any) : undefined,

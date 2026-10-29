@@ -63,8 +63,10 @@ describe("business workspace repository", () => {
     await expect(store.listMemory(outsider, business.id)).rejects.toBeInstanceOf(WorkspaceAccessError);
     const conversation = await store.createConversation(owner, business.id, "Owner thread");
     await store.appendMessage(owner, business.id, conversation.id, "user", "Private message");
+    // Business Profiles belong to their owner, like companies: a colleague in the same workspace cannot open them at all.
     const colleague = { ...owner, userId: "user-c" };
-    expect(await store.listConversations(colleague, business.id)).toEqual([]);
+    await expect(store.getBusiness(colleague, business.id)).rejects.toBeInstanceOf(WorkspaceAccessError);
+    await expect(store.listConversations(colleague, business.id)).rejects.toBeInstanceOf(WorkspaceAccessError);
     await expect(store.getConversation(colleague, business.id, conversation.id)).rejects.toBeInstanceOf(WorkspaceAccessError);
   });
 

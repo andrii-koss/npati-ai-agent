@@ -72,6 +72,7 @@ export interface BrowserQaIssue {
 }
 
 export interface BrowserQaMetrics {
+  interactionTrace?: BrowserQaInteraction[];
   loadTimeMs: number;
   domContentLoadedMs: number;
   resourceCount: number;
@@ -81,6 +82,10 @@ export interface BrowserQaMetrics {
   a11yViolationsCount: number;
   performanceIssuesCount: number;
 }
+
+export type BrowserQaAction = {type:"click";selector:string}|{type:"key";key:string;durationMs?:number}|{type:"wait";durationMs:number};
+export interface BrowserQaObservation {text:string;buttons:Array<{label:string;disabled:boolean}>;canvasHash?:string}
+export interface BrowserQaInteraction {action:BrowserQaAction;status:"completed"|"failed";before:BrowserQaObservation;after:BrowserQaObservation}
 
 export interface BrowserQaScreenshot {
   captureMode?: "layout" | "visual";

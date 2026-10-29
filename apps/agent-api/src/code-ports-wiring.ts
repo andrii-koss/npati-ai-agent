@@ -49,6 +49,7 @@ export interface CreateCodePortsWiringDeps {
   projectWorkspace: MountedWorkspaceProvider;
   secretLeases: SecretLeaseProvider;
   trackedProcesses: CodeAsyncProcessService | undefined;
+  resolveVerifyCommands?: import("./code-service").CodeService["resolveVerifyCommands"];
 }
 
 export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
@@ -142,11 +143,7 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
       if (!trackedProcesses) throw new CodeToolError("process_promotion_unavailable", "Tracked processes are unavailable", 503, "execute", false);
       return trackedProcesses.wait(input.ctx, input);
     },
-    exec: async (input: {
-      ctx: AuthContext; companyId: string; projectId: string; sessionId?: string; turnId?: string;
-      command: string; cwd?: string;
-      env?: Record<string, string>; timeoutMs: number; secretRefs?: string[]; approved: boolean;
-    }) => {
+    exec: async (input: Parameters<import("./code-tool-executors").CodeShellRuntimePort["exec"]>[0]) => {
       const sessionId = input.sessionId ?? `${input.companyId}:${input.projectId}`;
 
       const toolCallId = `${sessionId}:${input.turnId ?? "no-turn"}:${fnv1a(`code.shell.exec:${input.command}`)}`;
@@ -165,6 +162,7 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
           companyId: input.companyId, projectId: input.projectId, sessionId, command: input.command,
           cwd: input.cwd, env: input.env, timeoutMs: input.timeoutMs, secretLeaseIds: leaseIds,
           toolCallId, approved: input.approved,
+          approvalId: input.approvalId, runId: input.runId, agentId: input.agentId, sessionMode: input.sessionMode,
         });
         return {
           exitCode: result.exitCode,
@@ -208,13 +206,15 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
     }) => {
       const project = (await projectService.get(input.ctx, input.companyId, input.projectId)) as
         { toolchain?: { verifyCommands?: Record<string, string | undefined> } | null } | null;
-      const commands = project?.toolchain?.verifyCommands ?? {};
+      const commands = deps.resolveVerifyCommands
+        ? await deps.resolveVerifyCommands(input.ctx,input.companyId,input.projectId)
+        : project?.toolchain?.verifyCommands ?? {};
       const startedAll = Date.now();
-      const results: Array<{ tool: "lint" | "typecheck" | "test" | "build"; ok: boolean; summary: string; findings: string[]; raw?: string; exitCode?: number | null; stdout?: string; stderr?: string; timedOut?: boolean; durationMs?: number; command?: string }> = [];
+      const results: Array<{ tool: "lint" | "typecheck" | "test" | "build"; ok: boolean; state?: "unavailable" | "approval_required"; code?: string; summary: string; findings: string[]; raw?: string; exitCode?: number | null; stdout?: string; stderr?: string; timedOut?: boolean; durationMs?: number; command?: string }> = [];
       for (const tool of input.tools) {
         const command = commands[tool];
         if (!command) {
-          results.push({ tool, ok: false, summary: `No ${tool} command is configured for this project`, findings: [] });
+          results.push({ tool, ok: false, state: "unavailable", code: "tool_not_configured", summary: `No ${tool} command is configured for this project`, findings: [] });
           continue;
         }
         const started = Date.now();
@@ -226,7 +226,10 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
           }) as { stdout?: string; stderr?: string; output?: string; exitCode?: number | null; status?: string };
         } catch (error) {
           const errMsg = error instanceof Error ? error.message : String(error);
-          results.push({ tool, ok: false, summary: `${tool} execution failed: ${errMsg}`, findings: [errMsg], raw: errMsg, command, exitCode: null, durationMs: Date.now() - started });
+          const failure = error as { code?: string; details?: { exitCode?: number | null } };
+          const state = failure.code === "command_not_found" || failure.code === "tool_not_configured" ? "unavailable" as const
+            : failure.code === "approval_required" ? "approval_required" as const : undefined;
+          results.push({ tool, ok: false, ...(state ? {state,code:failure.code} : {}), summary: `${tool} execution failed: ${errMsg}`, findings: [errMsg], raw: errMsg, command, exitCode: failure.details?.exitCode ?? null, durationMs: Date.now() - started });
           continue;
         }
         const stdout = result?.stdout ?? result?.output ?? "";

@@ -1,9 +1,10 @@
 import { actionSignals } from "./workspace-chat-signals";
+import { assertRequestedBusinessLink } from "./company-business-link";
 import { createHash } from "node:crypto";
 import type { AuthContext, Company, CompanyAgent, CompanyAgentInput, CompanyInput, WorkspaceStore } from "@npati/workspace";
 import { companyChatCopy, detectCompanyChatLanguage, insertCompanyName, isLocalizedCompanyManagementRequest, type CompanyChatLanguage } from "./company-chat-i18n";
 import { defaultLocalizedAgentProfiles } from "./company-agent-profile-i18n";
-import { companyDeleteCopy, deleteIsTheAction, deletesCompanyItself, isCompanyDeleteConfirmed, namesOtherDeleteTarget, withoutQuotedNames } from "./company-delete-i18n";
+import { companyDeleteCopy, deleteIsTheAction, deletesCompanyItself, firstQuotedName, isCompanyDeleteConfirmed, namedCompanyNotFoundCopy, namesOtherDeleteTarget, withoutQuotedNames } from "./company-delete-i18n";
 
 type CompanyOperation = "create" | "update" | "delete";
 type AgentOperation = CompanyOperation;
@@ -39,13 +40,15 @@ const toolAliases = new Map([
   ["files", "files"],
   ["text to speech", "system.text-to-speech"],
   ["code mode exec", "exec"],
+  // Runtime IDs used by the Company planner (web.search, web.fetch, audio.speech) name the same tools.
+  ["audio speech", "system.text-to-speech"],
 ]);
 
 const deleteMutationSignal = /(?:видал|приб|удал|убер|\bdelete\b|\bremove\b|supprim|effac|lösch|entfern|elimin|borr|usuń|skasuj|exclu|apagar|verwijder|\bsil\b|kaldır|删除|削除|삭제|احذف|إزالة|हटा)/iu;
 const selectedDeleteReferenceSignal = /(?:її|його|їх|це\s+все|все\s+це|усе\s+це|щойно\s+створен\p{L}*|ее|его|их|это\s+вс[её]|вс[её](?:\s+это|\s*,?\s*что)|только\s+что\s+создан\p{L}*|\bit\b|\bthis\s+one\b|\beverything\b|\ball\s+(?:of\s+it|this)\b|what\s+(?:you|was)\s+just\s+created|tout\s+(?:cela|ça|ce\s+que)|alles|todo\s+(?:esto|lo\s+que)|tutto\s+(?:questo|ciò)|wszystko|tudo\s+(?:isso|o\s+que)|dit\s+allemaal|hepsini|tümünü|her\s+şeyi|全部|这一切|すべて|全て|모두|전부|모든\s+것|كل\s+(?:شيء|هذا|ما)|सब\s+(?:कुछ|चीज़ें)|यह\s+सब)/iu;
 
 function normalizedLabel(value: string): string {
-  return value.trim().toLocaleLowerCase().replace(/[\s_\-/]+/g, " ").replace(/[^\p{L}\p{N} .]+/gu, "").trim();
+  return value.trim().toLocaleLowerCase().replace(/[\s_\-/.]+/g, " ").replace(/[^\p{L}\p{N} .]+/gu, "").trim();
 }
 
 function normalizeTool(value: string): string {
@@ -127,9 +130,10 @@ function normalizeAgentFields(value: unknown): unknown {
     if (key === "tools" && typeof item === "string") {
       item = item.split(/\r?\n|,/).map((part) => part.trim()).filter(Boolean);
     }
+    // Unknown tools are kept so validation refuses them: dropping them silently saved [] and reported success.
     if (key === "tools" && Array.isArray(item)) item = item
       .map((part) => typeof part === "string" ? normalizeTool(part) : part)
-      .filter((part): part is string => typeof part === "string" && toolIds.has(part));
+      .filter((part): part is string => typeof part === "string");
     result[key] = item;
   }
   return result;
@@ -369,7 +373,8 @@ function fields(value: unknown, allowed: Set<string>, kind: string): Record<stri
       throw new Error(`Invalid ${key}`);
     }
   }
-  if (Array.isArray(input.tools) && input.tools.some((id) => !toolIds.has(id))) throw new Error("Use only supported agent tools");
+  const unsupported = Array.isArray(input.tools) ? input.tools.filter((id) => !toolIds.has(id)) : [];
+  if (unsupported.length) throw new Error(`Unsupported agent tools: ${unsupported.join(", ")}. Supported: ${[...toolIds].join(", ")}`);
   return input;
 }
 
@@ -391,14 +396,6 @@ class NamedCompanyNotFoundError extends Error {
   constructor(readonly companyName: string) { super(`Company "${companyName}" was not found in your account`); }
 }
 
-const namedCompanyNotFoundCopy: Partial<Record<CompanyChatLanguage, string>> = {
-  uk: "Компанію «{name}» не знайдено серед ваших компаній (можливо, її видалено). Нічого не змінено.",
-  ru: "Компания «{name}» не найдена среди ваших компаний (возможно, она удалена). Ничего не изменено.",
-  pt: "A empresa «{name}» não foi encontrada (talvez tenha sido excluída). Nada foi alterado.",
-  es: "No se encontró la empresa «{name}» (quizá se eliminó). No se cambió nada.",
-  de: "Das Unternehmen «{name}» wurde nicht gefunden (vielleicht gelöscht). Nichts wurde geändert.",
-  en: "Company «{name}» was not found among your companies (it may have been deleted). Nothing was changed.",
-};
 
 /** Whether the request names a different company than `company` (case-insensitive prefix match either way). */
 function requestNamesOtherCompany(message: string, company: Pick<Company, "name">): boolean {
@@ -483,6 +480,11 @@ export class CompanyChatActions {
     return mutation && companyField || deleteReference;
   }
 
+  /** The single owned company a deletion request names explicitly (null when the names are ambiguous). */
+  static namedDeleteTarget(auth: AuthContext, store: WorkspaceStore, message: string): Promise<Company | null | undefined> {
+    return namedDeleteCompany(auth, store, message);
+  }
+
   static async deleteConfirmationMessage(auth: AuthContext, store: WorkspaceStore, message: string, selectedCompanyId?: string, responseLanguage?: CompanyChatLanguage): Promise<string | undefined> {
     const deleteRequest = deleteMutationSignal.test(withoutQuotedNames(message)) && deleteIsTheAction(withoutQuotedNames(message))
       // "У компанії X видали агента Y" deletes an agent: the company must be the deleted object, not its location.
@@ -493,6 +495,9 @@ export class CompanyChatActions {
     const labels = companyDeleteCopy(language);
     // An explicitly named company is the target, never the selected one ("Delete Studio ... Preserve Bakery").
     const named = await namedDeleteCompany(auth, store, message);
+    // A quoted name that is no owned company is "not found", never the selected company or a list of all (V5-D74).
+    const quoted = named === undefined ? firstQuotedName(message) : undefined;
+    if (quoted && !(await store.listCompanies(auth, 100)).items.some((company) => company.name.trim().toLocaleLowerCase() === quoted.toLocaleLowerCase())) return namedCompanyNotFoundCopy[language].replace("{name}", safeMarkdown(quoted));
     if (named || (named === undefined && selectedCompanyId)) {
       const company = named ?? await store.getCompany(auth, selectedCompanyId!);
       return companyDeleteCopy(language, safeMarkdown(company.name)).selected;
@@ -581,6 +586,9 @@ export class CompanyChatActions {
   static async buildSystemPrompt(auth: AuthContext, store: WorkspaceStore, message = "", selectedCompanyId?: string, addedModels: Array<{ id: string; name?: string }> = []): Promise<string> {
     if (!auth.permissions.includes("business:manage")) return "";
     const page = await store.listCompanies(auth, 30);
+    // A company the message names beyond the first page must be visible too (A095: the 190th company "did not exist").
+    for (let cursor = page.nextCursor ?? undefined, pages = 0, next; message && cursor && pages < 10; pages++, cursor = next.nextCursor ?? undefined)
+      page.items.push(...(next = await store.listCompanies(auth, 100, cursor)).items.filter((company) => company.name.trim().length > 2 && message.toLocaleLowerCase().includes(company.name.trim().toLocaleLowerCase())));
     if (selectedCompanyId && !page.items.some((company) => company.id === selectedCompanyId)) {
       page.items.push(await store.getCompany(auth, selectedCompanyId));
     }
@@ -609,6 +617,7 @@ For update, include only fields that should change. To change only agents, use a
     allowedModelIds?: string[];
     beforeDeleteCompany?: (companyId: string) => Promise<void>;
     requestMessage?: string;
+    /** A Business the server itself created for this request (composite creation), never a model-chosen ID. */ serverBusinessId?: string;
     responseLanguage?: CompanyChatLanguage;
     selectedCompanyId?: string;
     preserveResponseText?: boolean;
@@ -628,7 +637,8 @@ For update, include only fields that should change. To change only agents, use a
       const companyPatch = fields(directive.fields, companyFields, "company") as Partial<CompanyInput>;
       if (directive.action === "update" && !Object.keys(companyPatch).length && !directive.agents?.length && directive.mainAgentId === undefined && directive.mainAgentName === undefined) throw new Error("No company or agent changes were specified");
       if (directive.action === "delete" && (Object.keys(companyPatch).length || directive.agents?.length || directive.mainAgentId !== undefined || directive.mainAgentName !== undefined)) throw new Error("Do not combine company deletion with edits");
-      if (companyPatch.businessId) await store.getUserBusiness(auth, companyPatch.businessId);
+      if (companyPatch.businessId) await assertRequestedBusinessLink(store, auth, await store.getUserBusiness(auth, companyPatch.businessId), options.requestMessage, [options.serverBusinessId,
+        directive.action === "update" ? (await ownedCompany(store, auth, directive, options.selectedCompanyId).catch(() => undefined))?.businessId : undefined]);
       const allowedModels = new Set(options.allowedModelIds ?? []);
       for (const operation of directive.agents ?? []) {
         if (!operation || !["create", "update", "delete"].includes(operation.action)) throw new Error("Invalid agent action");
@@ -672,6 +682,8 @@ For update, include only fields that should change. To change only agents, use a
             cursor = page.nextCursor ?? undefined;
           } while (!duplicate && cursor);
           if (duplicate) {
+            // Only a request naming this company may turn "create" into changes; a replayed earlier creation must not (V5-D62).
+            if (options.requestMessage && !request.includes(duplicate.name.trim().toLocaleLowerCase())) throw new Error(`Company "${duplicate.name}" already exists and this request does not ask to create or change it. Do not repeat earlier requests.`);
             company = duplicate;
             actualAction = "update";
             alreadyExisted = true;
@@ -775,11 +787,11 @@ For update, include only fields that should change. To change only agents, use a
       options.onError?.(error);
       if (error instanceof NamedCompanyNotFoundError) {
         const language = options.responseLanguage ?? detectCompanyChatLanguage(options.requestMessage ?? "");
-        return { cleanText: (namedCompanyNotFoundCopy[language] ?? namedCompanyNotFoundCopy.en!).replace("{name}", safeMarkdown(error.companyName)) };
+        return { cleanText: namedCompanyNotFoundCopy[language].replace("{name}", safeMarkdown(error.companyName)) };
       }
       const labels = companyChatCopy(options.requestMessage, options.responseLanguage);
       // A business rule that refused the change (e.g. data backends still owned by the company) is the user's to act on.
-      const rule = error instanceof Error && /cannot be deleted while/iu.test(error.message) ? `: ${error.message}` : ".";
+      const rule = error instanceof Error && /cannot be deleted while|Unsupported agent tools/iu.test(error.message) ? `: ${error.message}` : ".";
       return { cleanText: `${labels.failed}${rule} ${changed ? labels.partial : labels.unchanged}` };
     }
   }

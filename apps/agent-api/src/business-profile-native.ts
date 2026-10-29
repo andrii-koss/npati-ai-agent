@@ -1,5 +1,7 @@
 import type { ChatToolDefinition } from "@npati/omniroute-adapter";
 import type { AuthContext, Business, BusinessInput, GoalInput, MemoryInput, WorkspaceStore } from "@npati/workspace";
+import { businessDeleteDone, businessDeleteQuestion, confirmsBusinessDeletion } from "./business-delete-i18n";
+import type { CompanyChatLanguage } from "./company-chat-i18n";
 
 export const profileFields = ["name", "businessType", "businessStage", "industry", "niche", "country", "market", "teamType", "presenceType", "businessModel", "website", "legalName", "contactEmail", "contactPhone", "postalAddress", "description", "productsServicesSummary", "audienceSummary", "registrationDetails"] as const;
 const textFields = Object.fromEntries(profileFields.map((name) => [name, { type: "string", description: `User-supplied ${name}; preserve the exact applicable value. Never invent legal or contact values.` }]));
@@ -34,11 +36,11 @@ export const BUSINESS_PROFILE_TOOL: ChatToolDefinition = {
   type: "function",
   function: {
     name: "npati_business_profile",
-    description: "Create or update an NPATI Business Profile. Use when the user's primary request is to create or configure a business, business idea, or Business Profile, even when a long structured request also contains goals, memory, products, audience, registration details, or logo instructions. Preserve every supplied field. Resolve dependent goals and memories against this profile. Do not substitute a secondary memory, goal, company, or web action for this primary action. A separate AI Company with agents uses npati_company_action instead.",
+    description: "Create or update an NPATI Business Profile. Use when the user's primary request is to create or configure a business, business idea, or Business Profile, even when a long structured request also contains goals, memory, products, audience, registration details, or logo instructions. Preserve every supplied field. Resolve dependent goals and memories against this profile. Do not substitute a secondary memory, goal, company, or web action for this primary action. A separate AI Company with agents uses npati_company_action instead. To delete a Business Profile use action delete with its exact owned businessId: the server asks the user to confirm and deletes it, with its goals and memory, only after that confirmation.",
     parameters: {
       type: "object", additionalProperties: false, required: ["action", "profile"],
       properties: {
-        action: { type: "string", enum: ["create", "update"] },
+        action: { type: "string", enum: ["create", "update", "delete"] },
         businessId: { type: "string", description: "Owned Business Profile ID for an update or contextual follow-up." },
         profile: { type: "object", additionalProperties: false, properties: { ...textFields, businessStage: { type: "string", enum: ["idea", "starting", "operating", "growing", "scaling"], description: "Map the user-supplied stage to this UI value." }, teamType: { type: "string", enum: ["solo", "team"], description: "Map the user-supplied team field to this UI value." }, presenceType: { type: "string", enum: ["online", "local", "both"], description: "Map the user-supplied presence field to this UI value." }, logoAttachmentName: { type: "string", description: "Exact filename of a user-attached image; omit when no matching image exists." } } },
         goals: { type: "array", description: "Goals explicitly requested as dependent steps. Find an existing matching goal before creating one; link to the profile above.", items: { type: "object", additionalProperties: false, required: ["title"], properties: { title: { type: "string" }, description: { type: "string" }, priority: { type: "integer" }, status: { type: "string", enum: ["active", "completed", "paused", "cancelled"] }, targetValue: { type: "number" }, currentValue: { type: "number" }, targetUnit: { type: "string" }, targetDate: { type: "string" } } } },
@@ -47,6 +49,24 @@ export const BUSINESS_PROFILE_TOOL: ChatToolDefinition = {
     },
   },
 };
+
+/** Deletion needs the exact owned record and the user's written confirmation of its name, as for a Company. */
+export async function executeBusinessProfileDeletion(input: {
+  store: WorkspaceStore; auth: AuthContext; businessId: unknown; requestMessage: string; language: CompanyChatLanguage;
+  deleteFiles: (businessId: string) => Promise<void>;
+}) {
+  if (!input.auth.permissions.includes("business:manage")) throw new Error("Business management permission is required");
+  const target = (await input.store.listUserBusinesses(input.auth)).find((business) => business.id === input.businessId);
+  if (!target) throw new Error("Deleting a Business Profile needs the exact ID of an owned Business Profile");
+  if (!confirmsBusinessDeletion(input.requestMessage, target.name)) {
+    const message = businessDeleteQuestion(input.language, target.name);
+    return { output: { message, awaitingConfirmation: true }, metadata: { kind: "confirmation_required", message }, stop: true };
+  }
+  await input.deleteFiles(target.id);
+  await input.store.deleteBusiness(input.auth, target.id);
+  const message = businessDeleteDone(input.language, target.name);
+  return { output: { message, deleted: true, businessId: target.id }, metadata: { kind: "business_deleted", businessId: target.id, message } };
+}
 
 export async function executeBusinessProfileTool(input: {
   store: WorkspaceStore; auth: AuthContext; args: Record<string, unknown>;
@@ -94,6 +114,10 @@ export async function executeBusinessProfileTool(input: {
     const businessId = typeof args.businessId === "string" ? args.businessId : "";
     const target = businessId ? owned.find((item) => item.id === businessId) : owned.length === 1 ? owned[0] : undefined;
     if (!target) throw new Error("Owned Business Profile target is missing or ambiguous");
+    // An update that changes no stored value must not be reported as a verified change (a delete request is not an update).
+    const changes = Object.entries(profile).filter(([key, value]) => String((target as unknown as Record<string, unknown>)[key] ?? "") !== value);
+    if (!changes.length && !logoName && !(Array.isArray(args.goals) && args.goals.length) && !(Array.isArray(args.memories) && args.memories.length))
+      throw new Error("No Business Profile value would change, so nothing was updated. Deleting a Business Profile uses action delete.");
     alreadyExisted = true;
     business = await store.updateUserBusiness(auth, target.id, profile as Partial<BusinessInput>);
   }

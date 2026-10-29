@@ -38,6 +38,7 @@ export interface CodeDepsPort {
     source?: string;
     approved: boolean;
     toolCallId?: string;
+    sessionId?: string;
   }): Promise<{ manager: string; name: string; version: string | null; source: string; verdict: "added" | "require_approval" | "denied"; reasons: string[]; metadata?: Record<string, unknown>; approvalId?: string | null }>;
 }
 
@@ -98,6 +99,7 @@ export function canonicalDepsExecutors(options: CanonicalDepsExecutorOptions = {
           companyId: input.companyId,
           projectId: input.projectId,
           name,
+          sessionId: input.sessionId,
           ...(typeof input.args.version === "string" ? { version: input.args.version } : {}),
           ...(typeof input.args.manager === "string" ? { manager: input.args.manager } : {}),
           ...(typeof input.args.dev === "boolean" ? { dev: input.args.dev } : {}),

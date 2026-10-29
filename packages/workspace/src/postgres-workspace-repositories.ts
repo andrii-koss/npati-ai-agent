@@ -10,7 +10,7 @@ import { codeChildSessionId } from "./code-child-session-id";
 import type { CodeProjectRefScanInput, CodeProjectRefScanPage, CodeSession, CodeSessionInput, CodeSessionMode, CodeSessionStatus } from "./types";
 import { WorkspaceAccessError, isClassificationAtLeast } from "./types";
 import { codeSessionColumns } from "./postgres-store-schema";
-import { assertMember, ensureIdentity, getBusiness } from "./postgres-store-support";
+import { assertBusinessInCredentialScope, assertMember, businessCredentialScopeSql, ensureIdentity, getBusiness } from "./postgres-store-support";
 import type { Business, BusinessInput, BusinessOnboardingSession } from "./types";
 import { ONBOARDING_FLOWS, onboardingBusinessPatch } from "./onboarding";
 import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from "./pagination";
@@ -618,24 +618,27 @@ export async function getUserBusiness(pool: Pool, context: AuthContext, business
     await assertMember(pool, context);
     const result = await pool.query<Business>(`SELECT ${businessColumns} FROM businesses WHERE id=$1 AND workspace_id=$2 AND owner_user_id=$3`, [businessId, context.workspaceId, context.userId]);
     if (!result.rowCount) throw new WorkspaceAccessError("Business is not available or not owned by this user");
+    await assertBusinessInCredentialScope(pool, context, businessId);
     return result.rows[0]!;
   }
 export async function listBusinesses(pool: Pool, context: AuthContext) {
     await assertMember(pool, context);
-    return (await pool.query<Business>(`SELECT ${businessColumns} FROM businesses WHERE workspace_id=$1 AND activation_status='active' ORDER BY created_at`, [context.workspaceId])).rows;
+    return (await pool.query<Business>(`SELECT ${businessColumns} FROM businesses WHERE workspace_id=$1 AND owner_user_id=$3 AND activation_status='active' AND ${businessCredentialScopeSql(2)} ORDER BY created_at`,
+      [context.workspaceId, context.companyId ?? null, context.userId])).rows;
   }
 export async function listUserBusinesses(pool: Pool, context: AuthContext) {
     await assertMember(pool, context);
-    return (await pool.query<Business>(`SELECT ${businessColumns} FROM businesses WHERE workspace_id=$1 AND owner_user_id=$2 AND activation_status='active' ORDER BY updated_at DESC`, [context.workspaceId, context.userId])).rows;
+    return (await pool.query<Business>(`SELECT ${businessColumns} FROM businesses WHERE workspace_id=$1 AND owner_user_id=$2 AND activation_status='active' AND ${businessCredentialScopeSql(3)} ORDER BY updated_at DESC`,
+      [context.workspaceId, context.userId, context.companyId ?? null])).rows;
   }
 export async function listBusinessesPage(pool: Pool, context: AuthContext, requestedLimit = 20, cursor?: string) {
     await assertMember(pool, context);
     const limit = companyPageLimit(requestedLimit);
     const after = decodeBusinessCursor(cursor);
     const result = await pool.query<Business>(`SELECT ${businessColumns} FROM businesses
-      WHERE workspace_id=$1 AND activation_status='active'
-        AND ($2::timestamptz IS NULL OR (created_at,id) > ($2::timestamptz,$3::text))
-      ORDER BY created_at,id LIMIT $4`, [context.workspaceId, after?.createdAt ?? null, after?.id ?? '', limit + 1]);
+      WHERE workspace_id=$1 AND owner_user_id=$6 AND activation_status='active' AND ${businessCredentialScopeSql(5)}
+        AND ($2::timestamptz IS NULL OR (date_trunc('milliseconds',created_at),id) > ($2::timestamptz,$3::text))
+      ORDER BY date_trunc('milliseconds',created_at),id LIMIT $4`, [context.workspaceId, after?.createdAt ?? null, after?.id ?? '', limit + 1, context.companyId ?? null, context.userId]);
     const hasMore = result.rows.length > limit;
     const items = result.rows.slice(0, limit);
     const last = items.at(-1);
@@ -648,6 +651,7 @@ export async function setCurrentBusiness(pool: Pool, context: AuthContext, busin
     return business;
   }
 export async function createBusiness(pool: Pool, context: AuthContext, input: BusinessInput, idempotencyKey?: string) {
+    if (context.companyId) throw new WorkspaceAccessError("Company-scoped API keys cannot create businesses");
     await assertMember(pool, context);
     const id = randomUUID();
     const values = [id, context.workspaceId, context.userId, input.name.trim(), input.businessType ?? null, input.industry ?? null, input.niche ?? null, input.country ?? null, input.market ?? null, input.website ?? null, input.businessStage ?? "starting", input.teamType ?? null, input.businessModel ?? null, input.presenceType ?? null, input.description ?? null, input.audienceSummary ?? null, input.productsServicesSummary ?? null, input.legalName ?? null, input.contactEmail ?? null, input.contactPhone ?? null, input.postalAddress ?? null, input.registrationDetails ?? null, input.logoFileId || null, idempotencyKey ?? null];

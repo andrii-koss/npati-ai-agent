@@ -83,6 +83,8 @@ export interface CodeShellExecInput {
   secretLeaseIds?: string[];
   toolCallId: string;
   approved?: boolean;
+  approvalId?: string;
+  sessionMode?: "plan" | "edit" | "ask" | "auto" | "auto_edit" | "full_auto" | "full_auto_sandbox";
   runId?: string;
 }
 
@@ -304,6 +306,7 @@ export class CodeShellRuntime {
       agentId: extended.agentId,
       tool: "code.shell.exec",
       command: input.command,
+      shellExecution: { cwd: input.cwd, env: input.env },
       sessionMode: extended.sessionMode,
       approved: input.approved,
       approvalId: extended.approvalId,
@@ -340,6 +343,9 @@ export class CodeShellRuntime {
       );
     }
 
+    // Carry the engine's consumed, payload-bound approval to the downstream terminal gate.
+    // A caller-supplied ID alone is never evidence of authorization.
+    const sandboxApproved = input.approved === true || decision.reasons?.includes("approval:consumed") === true;
     const session = this.sessionFor(context, input);
     const cwd = input.cwd?.trim() || session.cwd;
     const environment = { ...session.env, ...(input.env ?? {}) };
@@ -398,7 +404,7 @@ export class CodeShellRuntime {
       if (!Number.isSafeInteger(waitTimeoutMs) || waitTimeoutMs < 0 || waitTimeoutMs > 300000) throw new ShellRuntimeError("invalid_wait_timeout", "Invalid foreground wait", 400);
       let op = await processes.start(context, { companyId: input.companyId, projectId: input.projectId, sessionId: input.sessionId,
         runId: input.runId ?? "", leaseOwner: input.leaseOwner ?? "", toolCallId: input.toolCallId, agentId: input.agentId,
-        command, cwd, timeoutMs, approved: input.approved });
+        command, cwd, timeoutMs, approved: sandboxApproved });
       const result = await processes.wait(context, { companyId: input.companyId, projectId: input.projectId, sessionId: input.sessionId,
         processId: op.processId, waitTimeoutMs, leaseOwner: input.leaseOwner });
       if (result.kind === "running-process-receipt") op = await processes.promote(context, input, op);
@@ -413,7 +419,7 @@ export class CodeShellRuntime {
         context, companyId: input.companyId, projectId: input.projectId,
         agentId: input.agentId ?? "code-shell-runtime", command, cwd,
         environmentReferences: Object.keys(references).length ? references : undefined,
-        approved: input.approved === true, timeoutMs, runId: input.runId,
+        approved: sandboxApproved, timeoutMs, runId: input.runId,
       });
     } finally {
       // The lease never outlives the call, whatever happened.

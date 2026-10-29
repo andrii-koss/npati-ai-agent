@@ -142,6 +142,20 @@ export class CodeService {
   }
 
   /** Detects the toolchain of a workspace and persists it as project metadata. */
+  async resolveVerifyCommands(ctx: AuthContext, companyId: string, projectId: string): Promise<CodeToolchain["verifyCommands"]> {
+    const project = await this.projects.get(ctx, companyId, projectId);
+    if(project.toolchain?.source === "manual") return { ...project.toolchain.verifyCommands };
+    // Generated manifests change after project creation. Verify current source, not the initial empty starter.
+    const detection = detectToolchain({files:await this.readManifests(ctx,companyId,projectId)});
+    const commands = { ...detection.verifyCommands };
+    // These Python scaffolds provision a project-local venv; verification must use the same dependencies as runtime.
+    if(["Pygame", "FastAPI", "Django", "Flask"].includes(project.framework ?? "")) for(const key of Object.keys(commands) as Array<keyof typeof commands>) {
+      if(commands[key]?.startsWith("python ")) commands[key] = commands[key]!.replace(/^python /,".venv/bin/python ");
+    }
+    return commands;
+  }
+
+  /** Detects the toolchain of a workspace and persists it as project metadata. */
   async detectAndPersist(ctx: AuthContext, companyId: string, projectId: string): Promise<Project> {
     const project = await this.projects.get(ctx, companyId, projectId);
     const files = await this.readManifests(ctx, companyId, projectId);

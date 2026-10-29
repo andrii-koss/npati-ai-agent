@@ -1,4 +1,5 @@
 import { providerContinuationFor } from "@npati/omniroute-adapter";
+import { chatLanguageInstruction, type CompanyChatLanguage } from "./company-chat-i18n";
 import type { AIEngine, ChatRequest, ChatResult, ChatToolCall, ChatToolDefinition } from "@npati/omniroute-adapter";
 
 export const CHAT_TOOL_SELECTION_INSTRUCTION = `
@@ -77,6 +78,8 @@ const modelsRejectingForcedToolChoice = new Set<string>();
 export interface ChatToolExecutionResult {
   output: unknown;
   metadata?: Record<string, unknown>;
+  /** The executor needs the user's answer (a destructive-action confirmation); no further step may run this turn. */
+  stop?: boolean;
 }
 
 export interface ChatToolTrace {
@@ -134,6 +137,7 @@ function toolOutput(value: unknown): string {
 export async function runChatToolLoop(input: {
   ai: AIEngine;
   request: ChatRequest;
+  responseLanguage?: CompanyChatLanguage;
   tools?: () => ChatToolDefinition[] | Promise<ChatToolDefinition[]>;
   execute(call: ChatToolCall, args: Record<string, unknown>): Promise<ChatToolExecutionResult>;
   maxSteps?: number;
@@ -143,8 +147,16 @@ export async function runChatToolLoop(input: {
   recoveryCall?: ChatToolCall;
   /** Capabilities the semantic route attributed to this request; a model that stops before trying one is reminded once. */
   requiredTools?: string[];
+  /** Capabilities the caller settles after the loop with its deterministic record planner when the model did not call them. */
+  deferredTools?: string[];
 }): Promise<ChatToolLoopResult> {
   const messages = [...input.request.messages];
+  // Some providers silently discard named tool_choice (MiMo supports auto only). The requested
+  // capability still needs an actual executor receipt; assistant prose cannot stand in for it.
+  const namedPrimary = typeof input.request.toolChoice === "object" && input.request.toolChoice.function.name.startsWith("npati_") ? input.request.toolChoice.function.name : undefined;
+  // A caller-supplied completion check already verifies the primary outcome with its own reminders and recovery.
+  const requiredTools = [...new Set([...(input.requiredTools ?? []), ...(namedPrimary && !input.primaryOutcomeComplete ? [namedPrimary] : [])])];
+  if (namedPrimary) messages.push({ role: "system", content: `This turn requires calling ${namedPrimary} with arguments grounded in the user's request. A tool selection setting may be ignored by the provider. Do not claim the action succeeded without its executor result. If essential arguments are missing, explain what is missing instead of inventing values.` });
   // Keep the provider mode stable across tool continuations, including forced -> auto steps.
   const reasoningMode = typeof input.request.toolChoice === "object" ? "disabled" : input.request.reasoningMode;
   // Steps are streamed (counters only, no text reaches the caller) so a silent provider is cut off by the stream idle
@@ -195,9 +207,17 @@ export async function runChatToolLoop(input: {
     // caller's fallback, which runs the research itself. Only NPATI record actions are relaxed to "auto".
     const relaxable = typeof toolChoice === "object" && !["web_search", "web_fetch"].includes(toolChoice.function.name);
     if (relaxable && modelsRejectingForcedToolChoice.has(modelKey)) toolChoice = "auto";
+    const stepMessages = [...messages];
+    if (step > 0 && input.responseLanguage) {
+      // Keep the assistant/tool exchange contiguous and preserve its final tool message for provider compatibility.
+      let position = stepMessages.length;
+      while (position > 0 && stepMessages[position - 1]?.role === "tool") position -= 1;
+      if (position > 0 && stepMessages[position - 1]?.role === "assistant") position -= 1;
+      stepMessages.splice(position, 0, { role: "system", content: chatLanguageInstruction("", [], input.responseLanguage) });
+    }
     try {
       try {
-        result = await input.ai.chat({ ...input.request, messages: [...messages], tools, toolChoice, onGenerationProgress,
+        result = await input.ai.chat({ ...input.request, messages: stepMessages, tools, toolChoice, onGenerationProgress,
           // DeepSeek thinking rejects a named tool. The adapter applies this only to that supported model.
           reasoningMode });
       } catch (error) {
@@ -206,7 +226,7 @@ export async function runChatToolLoop(input: {
         if (!relaxable || typeof toolChoice !== "object" || !/does not support this tool_choice/i.test(String((error as Error)?.message ?? error))) throw error;
         modelsRejectingForcedToolChoice.add(modelKey);
         toolChoice = "auto";
-        result = await input.ai.chat({ ...input.request, messages: [...messages], tools, toolChoice, onGenerationProgress, reasoningMode });
+        result = await input.ai.chat({ ...input.request, messages: stepMessages, tools, toolChoice, onGenerationProgress, reasoningMode });
       }
     } catch (error) {
       if (hasPersistedPrimary() && (!input.primaryOutcomeComplete || input.primaryOutcomeComplete(metadata))) {
@@ -220,12 +240,18 @@ export async function runChatToolLoop(input: {
     input.onModelStep?.({ step, tools, toolChoice, result });
     if (!result.toolCalls?.length) {
       // A failed attempt is not retried here: only a capability the model never tried in this turn is missing.
-      const untried = (input.requiredTools ?? []).filter((name) => tools.some((tool) => tool.function.name === name)
+      const untried = requiredTools.filter((name) => tools.some((tool) => tool.function.name === name)
         && !traces.some((trace) => trace.toolName === name));
       if (untried.length && !requiredReminded) {
         requiredReminded = true;
         messages.push({ role: "system", content: `The original user request also requires ${untried.join(", ")}, which is available and was not called in this turn. Call it now for that part of the request, or report the concrete error it returns. Do not claim it is unavailable.` });
         continue;
+      }
+      // The caller's semantic-plan recovery and completion check still apply; only without them is prose rejected here.
+      if (untried.some((name) => !input.deferredTools?.includes(name)) && !input.primaryOutcomeComplete) {
+        const recovered = await recoverPrimary();
+        if (recovered) return recovered;
+        throw Object.assign(new Error(`Required tools were not called: ${untried.join(", ")}; no completion is verified`), { code: "TOOL_PRIMARY_INCOMPLETE" });
       }
       if (!input.primaryOutcomeComplete || input.primaryOutcomeComplete(metadata)) return { result, messages, traces, metadata };
       completionReminders += 1;
@@ -268,6 +294,7 @@ export async function runChatToolLoop(input: {
         const content = toolOutput(executed.output);
         executedInTurn.set(signature, { callId: call.id, content });
         messages.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content });
+        if (executed.stop) return { result: { content: "" }, messages, traces, metadata };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         const failed: ChatToolTrace = { ...requested, status: "failed", error: message };

@@ -1,4 +1,5 @@
 import { normalizeBrowserDiagnostic, type BrowserDiagnostic } from "../browser-qa-diagnostics.mjs";
+import { assertBrowserQaActions, type BrowserQaAction, type BrowserQaInteraction } from "../browser-qa-actions.mjs";
 import type { AuthContext } from "@npati/workspace";
 import { CodeToolError } from "./code-tool-runtime-errors";
 import type { CodeToolExecutionContext } from "./code-tool-runtime";
@@ -26,14 +27,16 @@ export const CODE_IMAGE_ATTACHMENT_KEY = "imageAttachment";
 export const MAX_TOOL_IMAGE_BYTES = 2_000_000;
 
 export interface CodeAssistToolOptions {
+  /** Restarts only the selected project's existing Preview through the normal runtime service. */
+  previewRestart?: (input: { ctx: AuthContext; companyId: string; projectId: string }) => Promise<{ status: string; port: number; framework: string }>;
   /** Reads a workspace file with its exact bytes (`contentBase64` for binary files). */
   readWorkspaceFile?: (input: { ctx: AuthContext; companyId: string; projectId: string; path: string }) => Promise<{
     binary?: boolean; contentBase64?: string; size?: number; mimeGuess?: string;
   }>;
   /** Existing Browser QA capture of the running Live Preview. */
   previewScreenshot?: (input: {
-    ctx: AuthContext; companyId: string; projectId: string; path: string; viewport: "desktop" | "tablet" | "mobile"; runId?: string;
-  }) => Promise<{ mimeType: string; base64Data: string; sizeBytes: number; statusCode?: number; issues?: number; functionalQaPassed?: boolean; consoleDiagnostics?: BrowserDiagnostic[] }>;
+    ctx: AuthContext; companyId: string; projectId: string; path: string; viewport: "desktop" | "tablet" | "mobile"; runId?: string; actions?: BrowserQaAction[];
+  }) => Promise<{ mimeType: string; base64Data: string; sizeBytes: number; reportId?: string; interactionTrace?: BrowserQaInteraction[]; qaSummary?: { status: string; brokenLinksCount: number; a11yViolationsCount: number; warningCount: number; errorCount: number }; statusCode?: number; issues?: number; functionalQaPassed?: boolean; consoleDiagnostics?: BrowserDiagnostic[] }>;
   /** Existing web-research provider (search + SSRF-safe fetch). */
   webResearch?: {
     search(input: { query: string; maxResults?: number }): Promise<Array<{ title?: string; url: string; snippet?: string }>>;
@@ -90,6 +93,10 @@ export function canonicalAssistExecutors(options: CodeAssistToolOptions = {}): R
     };
   }
 
+  if (options.previewRestart) {
+    const restart = options.previewRestart;
+    executors["code.preview.restart"] = input => restart({ ctx: input.ctx, companyId: input.companyId, projectId: input.projectId });
+  }
   if (options.previewScreenshot) {
     const previewScreenshot = options.previewScreenshot;
     executors["code.preview.screenshot"] = async (input) => {
@@ -98,13 +105,17 @@ export function canonicalAssistExecutors(options: CodeAssistToolOptions = {}): R
         throw new CodeToolError("invalid_arguments", "path must be a local preview path such as /about", 400, "validate_arguments", true, input.tool.name);
       }
       const viewport = (["desktop", "tablet", "mobile"] as const).find((value) => value === input.args.viewport) ?? "desktop";
-      const shot = await previewScreenshot({ ctx: input.ctx, companyId: input.companyId, projectId: input.projectId, path, viewport, ...(input.runId ? { runId: input.runId } : {}) });
+      try { assertBrowserQaActions(input.args.actions); } catch { throw new CodeToolError("invalid_arguments","Invalid bounded browser actions",400,"validate_arguments",true,input.tool.name); }
+      const shot = await previewScreenshot({ ctx: input.ctx, companyId: input.companyId, projectId: input.projectId, path, viewport, ...(input.args.actions?{actions:input.args.actions as BrowserQaAction[]}:{}), ...(input.runId ? { runId: input.runId } : {}) });
       const bytes = Buffer.from(shot.base64Data, "base64");
       const mimeType = detectToolImageType(bytes);
       if (!mimeType) throw new CodeToolError("visual_screenshot_unavailable", "The preview runner returned no usable image", 503, "execute", true, input.tool.name);
       const question = stringArg(input.args, "question");
       return {
         path, viewport, mimeType, bytes: bytes.length,
+        ...(shot.reportId ? { reportId: shot.reportId } : {}),
+        ...(shot.interactionTrace ? { interactionTrace: shot.interactionTrace } : {}),
+        ...(shot.qaSummary ? { qaSummary: shot.qaSummary } : {}),
         ...(shot.statusCode !== undefined ? { statusCode: shot.statusCode } : {}),
         ...(shot.issues !== undefined ? { issues: shot.issues } : {}),
         ...(shot.functionalQaPassed !== undefined ? { functionalQaPassed: shot.functionalQaPassed } : {}),

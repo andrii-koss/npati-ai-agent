@@ -477,6 +477,9 @@ export class CompanyDelegationRuntime {
       }
       const combinedEvidence = [rawEvidence, followUpEvidence].filter(Boolean).join("\n\n");
       const evidence = combinedEvidence ? protect(combinedEvidence) : combinedEvidence;
+      // A project run whose agents read nothing must not present a source review as done (A041); no tool is granted.
+      const sourceLimitation = existing.run.projectId && !combinedEvidence
+        ? "\n\nRuntime note: no project source or data was read in this run (no selected agent holds a project read tool). Do not report findings about the project's code or data; state that the result is not based on its source." : "";
       const knowledgeContext = [
         knowledge.memories.length ? "Relevant Company Memory:\n" + knowledge.memories.map(item => item.content).join("\n") : "",
         knowledge.chunks.length ? "Authoritative Relevant Company Knowledge (use exact facts; do not invent replacements):\n" + knowledge.chunks.map(item => item.content).join("\n\n---\n\n") : "",
@@ -498,7 +501,7 @@ export class CompanyDelegationRuntime {
         throw new DOMException("Cancelled", "AbortError");
       let inferenceSequence = 10_001;
       let result = await executeAgentStages({ ai: this.ai, main, selected, reviewer, mainAssignedWork, mode: plan.mode,
-        agentModels: execution.agentModels, signal, timeoutMs: this.timeoutMs, task: protectedTask, evidence,
+        agentModels: execution.agentModels, signal, timeoutMs: this.timeoutMs, task: protectedTask + sourceLimitation, evidence,
         managerInstruction: protect(instruction(company, main, true, !options.noMemory, linked) + entityContext + chatLanguageInstruction(input.task)
           + (existing.run.projectId ? "\nSummarize only verified tool results in at most 120 words. This response cannot execute tools or save files." : "")),
         knowledgeContext, entityContext, runId: created.run.id,

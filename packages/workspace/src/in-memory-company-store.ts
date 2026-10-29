@@ -3,6 +3,7 @@ import type { AuthContext, Business, BusinessInput, BusinessToCompanyInput, Comp
 import { WorkspaceAccessError, WorkspaceNotFoundError, ProviderDataPolicyStoreError } from "./types";
 import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from "./pagination";
 import { now } from "./in-memory-clock";
+import { inCredentialScope } from "./in-memory-collaboration-store";
 import type { StoredUserSetting } from "./in-memory-store";
 
 export interface InMemoryCompanyState {
@@ -46,7 +47,8 @@ export async function setUserSetting(host: InMemoryCompanyState, context: AuthCo
 
 export async function listUserBusinesses(host: InMemoryCompanyState, context: AuthContext) {
     return [...host.businesses.values()]
-      .filter((business) => business.workspaceId === context.workspaceId && business.ownerUserId === context.userId && business.activationStatus === "active")
+      .filter((business) => business.workspaceId === context.workspaceId && business.ownerUserId === context.userId && business.activationStatus === "active"
+        && inCredentialScope(context, business.id, (companyId) => host.companies.get(companyId)?.businessId))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.createdAt.localeCompare(a.createdAt));
   }
 

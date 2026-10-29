@@ -40,7 +40,7 @@ const TOOL_NAMES = [
   "code.data.backend.create",
   "code.data.schema.inspect", "code.data.schema.apply",
   // Manifest v15: completion, viewing, documentation lookup and the Data Studio additions.
-  "code.finish", "code.image.view", "code.preview.screenshot", "code.web.fetch", "code.web.search",
+  "code.finish", "code.image.view", "code.preview.screenshot", "code.preview.restart", "code.web.fetch", "code.web.search",
   "code.data.query.read", "code.data.rows.seed", "code.data.migrations.list", "code.data.policies.inspect", "code.data.policies.apply",
   "code.agent.spawn_async", "code.agent.continue", "code.agent.send_message", "code.agent.interrupt",
   "code.shell.exec_async", "code.shell.process.wait",
@@ -174,6 +174,7 @@ const APPROVAL_REQUIRED_TOOLS = new Set([
 
 /** C3/C4 risk contract: reads are low, mutations medium, deletion and command launch high. */
 const EXPECTED_RISK: Record<string, "low" | "medium" | "high"> = {
+  "code.preview.restart": "medium",
   "code.data.schema.modify": "high",
   "code.data.rows.list": "low",
   "code.data.rows.transfer": "high",
@@ -247,7 +248,7 @@ describe("security-gate: C2 tool schema parity", () => {
     expect([...capabilityById.keys()].sort()).toEqual([...TOOL_NAMES].sort());
     // No hardcoded count: the three sources must agree, whichever step published the last tool.
     expect(CODE_CAPABILITIES).toHaveLength(TOOL_NAMES.length);
-    expect(CODE_TOOL_SCHEMAS).toHaveLength(TOOL_NAMES.length + 1); // schema.apply@1 remains available
+    expect(CODE_TOOL_SCHEMAS).toHaveLength(TOOL_NAMES.length + 2); // schema.apply@1 remains available
   });
 
   it("keeps argument schemas identical field by field for every tool", () => {
@@ -286,7 +287,7 @@ describe("security-gate: C2 tool schema parity", () => {
     for (const name of TOOL_NAMES) {
       const tool = toolByName.get(name)!;
       const capability = capabilityById.get(name)!;
-      expect(tool.version, `${name} registry version`).toBe(name === "code.data.schema.apply" ? 2 : 1);
+      expect(tool.version, `${name} registry version`).toBe(["code.data.schema.apply", "code.preview.screenshot"].includes(name) ? 2 : 1);
       expect(tool.status).toBe("active");
       expect(capability.version, `${name} capability version must equal the tool version`).toBe(tool.version);
       expect(capability.type, `${name} capability type`).toBe("tool");

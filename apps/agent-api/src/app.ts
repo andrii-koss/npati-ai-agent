@@ -549,7 +549,7 @@ export function buildApp(config: AppConfig = {}) {
     projectGitService,
     subagentChildRunnerWithAck,
     codeSubagentOperationsRef,
-    getProjectBrowserQaService: () => projectBrowserQaService, webResearchProvider: researchBundle?.provider, // v15 viewing/docs tools
+    getProjectBrowserQaService: () => projectBrowserQaService, webResearchProvider: researchBundle?.provider, projectPreviewService,
   });
   const {
     codeDataRetention,

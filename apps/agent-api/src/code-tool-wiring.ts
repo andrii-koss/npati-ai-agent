@@ -248,14 +248,14 @@ export function createCodeToolWiring(deps: CodeToolWiringDeps) {
       }
       throw new CodeToolError("audit_unavailable", `No audit command is known for ${target.manager}`, 503, "configure", false, "code.deps.audit");
     },
-    add: async ({ ctx, companyId, projectId, name, version, manager: requestedManager, dev, source, approved }: { ctx: AuthContext; companyId: string; projectId: string; name: string; version?: string; manager?: string; dev?: boolean; source?: string; approved: boolean }) => {
+    add: async ({ ctx, companyId, projectId, name, version, manager: requestedManager, dev, source, approved, sessionId }: { ctx: AuthContext; companyId: string; projectId: string; name: string; version?: string; manager?: string; dev?: boolean; source?: string; approved: boolean; sessionId?: string }) => {
       const target = await resolveDepsTarget(ctx, companyId, projectId, requestedManager);
       const manager = (target?.manager ?? "npm") as Parameters<typeof classifyDependencySource>[0]["manager"];
       const spec = version ? `${name}@${version}` : name;
       const resolvedSource = (source ?? classifyDependencySource({ manager, spec })) as Parameters<typeof sourceRequiresApproval>[0];
       const reasons: string[] = [];
       if (sourceRequiresApproval(resolvedSource) && !approved) reasons.push("deps:source_requires_approval");
-      const registryHost = registryFromConfig({}).registryHosts[0] ?? "registry.npmjs.org";
+      const registryHost = manager === "pip" ? "pypi.org" : registryFromConfig({}).registryHosts[0] ?? "registry.npmjs.org";
       if (!isRegistryAllowed(registryHost, resolveDepsGuardPolicy().allowedRegistries)) reasons.push("deps:registry_not_allowed");
       const typosquat = findTyposquatTarget(name, resolveDepsGuardPolicy().popularPackages, 2);
       if (typosquat) reasons.push(`deps:typosquat_suspected:${typosquat}`);
@@ -273,7 +273,8 @@ export function createCodeToolWiring(deps: CodeToolWiringDeps) {
       const runner = {
         supportsNetworkIsolation: false,
         run: async (command: string) => {
-          const executed = await codeShellRuntimePort!.exec({ ctx, companyId, projectId, command, timeoutMs: config.codeAgentLimits?.installBuildTimeoutMs ?? 600_000, approved });
+          if (manager === "pip") command = command.replace(/^pip /,".venv/bin/python -m pip ");
+          const executed = await codeShellRuntimePort!.exec({ ctx, companyId, projectId, sessionId, command, timeoutMs: config.codeAgentLimits?.installBuildTimeoutMs ?? 600_000, approved });
           return { exitCode: executed.exitCode ?? 1, stdout: executed.stdout, stderr: executed.stderr };
         },
       };

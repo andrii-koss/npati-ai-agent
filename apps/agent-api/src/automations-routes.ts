@@ -20,7 +20,7 @@ import {
   type WebhookDeliveryPayload,
 } from "./evaluation-and-webhook-retries";
 import { PromptInjectionGuard, CredentialMasker } from "./security-guardrails";
-import { validateWebhookDestination } from "./webhook-destination-policy";
+import { deliverWebhook, validateWebhookDestination } from "./webhook-destination-policy";
 import type { ResolverPort } from "./ssrf-policy";
 
 /** Real DNS resolver used for webhook destination validation inside this route module. */
@@ -39,6 +39,18 @@ const webhookResolver: ResolverPort = async (host) => {
  */
 async function validateAdHocWebhookDestination(url: string): Promise<void> {
   await validateWebhookDestination(url, { resolve: webhookResolver, allowInsecureHttp: false });
+}
+
+/**
+ * Real delivery through the shared SSRF-safe client (DNS re-check, no redirects, exfiltration guard). A delivery is
+ * successful only when the endpoint answers 2xx; it used to be reported as delivered without any request (V5-D72).
+ */
+function adHocWebhookSender(companyId: string, eventType?: string) {
+  return async (url: string, data: Record<string, unknown>): Promise<boolean> => {
+    const response = await deliverWebhook(url, { resolve: webhookResolver, allowInsecureHttp: false, storedEndpoints: [url], timeoutMs: 10_000,
+      headers: { "content-type": "application/json" }, body: JSON.stringify({ eventType, data }), policyContext: { companyId } });
+    return response.status >= 200 && response.status < 300;
+  };
 }
 
 // Shared singletons for in-process automation engines
@@ -511,8 +523,7 @@ export function registerCompanyAutomationsRoutes(
         data: data || {},
       };
 
-      // Sender function: simulates failure if simulateFailure is true, otherwise performs delivery
-      const sender = async () => !simulateFailure;
+      const sender = simulateFailure ? async () => false : adHocWebhookSender(r.params.companyId, eventType);
 
       const result = await globalWebhookRetryEngine.dispatchWithRetry(payload, sender, { maxRetries, validateDestination: validateAdHocWebhookDestination });
       return reply.code(200).send({ result });
@@ -529,12 +540,11 @@ export function registerCompanyAutomationsRoutes(
       const c = await ctx(auth, r, "business:manage");
       await store.getCompany(c, r.params.companyId);
       const item = globalWebhookRetryEngine.getDlqItem(r.params.dlqId);
-      if (!item) {
+      if (!item || item.payload.companyId !== r.params.companyId) {
         return reply.code(404).send({ error: { code: "DLQ_ITEM_NOT_FOUND", message: "DLQ item not found." } });
       }
 
-      // Replay sender succeeds
-      const success = await globalWebhookRetryEngine.replayDlq(r.params.dlqId, async () => true, { validateDestination: validateAdHocWebhookDestination });
+      const success = await globalWebhookRetryEngine.replayDlq(r.params.dlqId, adHocWebhookSender(r.params.companyId, item.payload.eventType), { validateDestination: validateAdHocWebhookDestination });
       return reply.code(200).send({ replayed: success, dlqId: r.params.dlqId });
     } catch (e) {
       return err(reply, e);

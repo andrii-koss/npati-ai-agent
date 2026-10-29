@@ -49,6 +49,8 @@ export function normalizeTerminalCommand(input: string | TerminalCommandSpec): N
 export function classifyTerminalCommand(input: string | TerminalCommandSpec): TerminalCommandDecision {
   const normalized = normalizeTerminalCommand(input);
   const clean = normalized.command;
+  if (/^(?:python|python3) (?:--version|-V)$/.test(clean)) return result("safe", "Read Python version");
+  if (/^java (?:--version|-version)$/.test(clean)) return result("safe", "Read Java version");
   if (/[;&|`$<>\r\n\\(){}\[\]*?!#'"~]/.test(clean)) return result("approval", "Shell syntax or expansion requires approval");
   const words = [normalized.executable, ...normalized.args];
   const [program, action, ...args] = words;

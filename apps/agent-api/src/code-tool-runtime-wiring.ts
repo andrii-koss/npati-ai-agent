@@ -71,6 +71,7 @@ export interface CodeToolRuntimeWiringDeps {
   trackedProcesses: CodeAsyncProcessService | undefined;
   workspaceStore: ReturnType<typeof createCoreServices>["workspaceStore"];
   getProjectBrowserQaService?: () => ProjectBrowserQaService | undefined;
+  projectPreviewService?: import("./project-preview-service").ProjectPreviewService;
   webResearchProvider?: CodeAssistToolOptions["webResearch"];
 }
 
@@ -87,6 +88,11 @@ export function createCodeToolRuntimeWiring(deps: CodeToolRuntimeWiringDeps) {
       // Manifest v15: viewing and documentation tools over the existing workspace, Browser QA and web research.
       readWorkspaceFile: ({ ctx, companyId, projectId, path }) => projectWorkspace.readFile(ctx, companyId, projectId, path) as never,
       ...(deps.getProjectBrowserQaService ? { previewScreenshot: previewScreenshotPort(deps.getProjectBrowserQaService, featureFlagService) } : {}),
+      ...(deps.projectPreviewService ? { previewRestart: async ({ ctx, companyId, projectId }: { ctx: AuthContext; companyId: string; projectId: string }) => {
+        await featureFlagService.assertEnabled(ctx, "code.shell", { companyId });
+        const preview = await deps.projectPreviewService!.startPreview(ctx, companyId, projectId, { forceRestart: true });
+        return { status: preview.status, port: preview.port, framework: preview.framework };
+      } } : {}),
       ...(deps.webResearchProvider ? { webResearch: deps.webResearchProvider } : {}),
       projectData: deps.agentDataStudioService,
       dataPolicy: enrichedPolicyEngine,
@@ -282,17 +288,20 @@ function previewScreenshotPort(
   getService: () => ProjectBrowserQaService | undefined,
   flags: Pick<FeatureFlagService, "assertEnabled">,
 ): NonNullable<CodeAssistToolOptions["previewScreenshot"]> {
-  return async ({ ctx, companyId, projectId, path, viewport, runId }) => {
+  return async ({ ctx, companyId, projectId, path, viewport, runId, actions }) => {
     const service = getService();
     if (!service) throw new CodeToolError("visual_screenshot_unavailable", "Browser QA is not configured in this deployment", 503, "configure", false, "code.preview.screenshot");
     await flags.assertEnabled(ctx, "code.shell", { companyId });
     try {
       const report = await service.inspect(ctx, companyId, {
-        projectId, path, viewport, checks: ["screenshot", "console", "links"], screenshotMode: "visual", maxScreenshotBytes: 2_000_000, agentId: "system", ...(runId ? { runId } : {}),
+        projectId, path, viewport, actions, checks: ["screenshot", "console", "links", "a11y"], screenshotMode: "visual", maxScreenshotBytes: 2_000_000, agentId: "system", ...(runId ? { runId } : {}),
       });
       const shot = report.screenshots[0];
       if (!shot) throw new CodeToolError("visual_screenshot_unavailable", "The preview runner returned no screenshot", 503, "execute", true, "code.preview.screenshot");
-      return { mimeType: shot.mimeType, base64Data: shot.base64Data, sizeBytes: shot.sizeBytes, issues: report.issues.length,
+      return { mimeType: shot.mimeType, base64Data: shot.base64Data, sizeBytes: shot.sizeBytes, reportId: report.report.id, issues: report.issues.length,
+        interactionTrace: report.metrics.interactionTrace,
+        qaSummary: { status: report.report.status, brokenLinksCount: report.metrics.brokenLinksCount, a11yViolationsCount: report.metrics.a11yViolationsCount,
+          warningCount: report.issues.filter(issue => issue.severity === "warning").length, errorCount: report.issues.filter(issue => issue.severity === "error").length },
         functionalQaPassed: report.success, consoleDiagnostics: report.consoleErrors.slice(0, 5).map(normalizeBrowserDiagnostic) };
     } catch (error) {
       if (error instanceof BrowserQaError) {

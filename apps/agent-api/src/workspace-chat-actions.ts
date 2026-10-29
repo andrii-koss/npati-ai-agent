@@ -46,6 +46,14 @@ type WorkspaceDirective = {
 } & Omit<WebhookDirective, "action">;
 
 /** Workspace actions that only read stored records. */
+/** A run or schedule time in UTC and in the automation's own timezone, so the model never converts offsets itself (V5-D71). */
+function zonedTime(value: unknown, timezone: string): string {
+  const date = new Date(value as string);
+  if (!value || Number.isNaN(date.getTime())) return String(value || "never");
+  const local = new Intl.DateTimeFormat("sv-SE", { timeZone: timezone || "UTC", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
+  return `${local} ${timezone || "UTC"} (${date.toISOString()})`;
+}
+
 export const WORKSPACE_READ_ACTIONS: ReadonlySet<string> = new Set(["activity.list", "automation.list", "automation.history", "website.list", "webhook.list"]);
 
 export type WorkspaceChatActionResult = {
@@ -66,7 +74,9 @@ export type WorkspaceChatActionDependencies = {
   webhooks?: Pick<IntegrationsRepository, "listWebhooks" | "createWebhook" | "deleteWebhook" | "setWebhookActive">;
 };
 type WorkspacePromptResources = Pick<WorkspaceChatActionDependencies, "automations" | "content"> &
-  Partial<Pick<WorkspaceChatActionDependencies, "browserTargets" | "email" | "webhooks">> & { memoryReadAllowed?: boolean };
+  Partial<Pick<WorkspaceChatActionDependencies, "browserTargets" | "email" | "webhooks">> & { memoryReadAllowed?: boolean;
+  /** The semantic route already chose workspace records (for example a Memory recall without the word "memory"). */
+  routed?: boolean };
 
 const memoryTypes = new Set<MemoryInput["type"]>(["business_fact", "audience", "brand", "preference", "decision", "product", "channel", "experiment", "result", "other"]);
 const contentTypes = new Set<ContentType>(["article", "seo_blueprint", "social_post", "brief", "strategy", "other"]);
@@ -294,7 +304,7 @@ export class WorkspaceChatActions {
 
   static async buildSystemPrompt(auth: AuthContext, store: WorkspaceStore, message: string, selectedCompanyId?: string, selectedBusinessId?: string, resources?: WorkspacePromptResources): Promise<string> {
     if (!auth.permissions.includes("business:manage")) return "";
-    if (!resourceSignals.some((pattern) => pattern.test(message)) && !websiteResourceSignals.some((pattern) => pattern.test(message)) && !memoryVerbSignal.test(message) && !webhookResourceSignal.test(message) && !((selectedCompanyId || selectedBusinessId) && this.isPotentialMutationRequest(message))
+    if (!resources?.routed && !resourceSignals.some((pattern) => pattern.test(message)) && !websiteResourceSignals.some((pattern) => pattern.test(message)) && !memoryVerbSignal.test(message) && !webhookResourceSignal.test(message) && !((selectedCompanyId || selectedBusinessId) && this.isPotentialMutationRequest(message))
       && !await this.namesOwnedAutomation(auth, store, message, resources?.automations)) return "";
     // Only the first 30 records reach the prompt: the selected one, then those named in the request, then the most
     // recently updated - not the oldest 30, which hid the company the user had just created.
@@ -371,9 +381,9 @@ Supported directives:
 \`\`\`workspace-action
 {"action":"activity.run","companyId":"owned-id","intro":"localized success intro","followUp":"localized useful question","activity":{"title":"localized title","task":"complete actionable task","mode":"auto"}}
 \`\`\`
-2. Create an automation. Set automation.status to "paused" when the user requests a paused automation; never create it active first. status defaults to "active". cronExpression is standard five-part cron and timezone is an IANA timezone:
+2. Create an automation. Always explicitly send automation.status. Set it to "paused" when the user requests a paused automation in any language; never create it active first. A paused name, intro or description does not pause the stored schedule. Use "active" only when the user did not request pausing. For updates omit status unless the user asked to change it. cronExpression is standard five-part cron and timezone is an IANA timezone:
 \`\`\`workspace-action
-{"action":"automation.create","companyId":"owned-id","intro":"localized success intro","followUp":"localized useful question","automation":{"name":"localized name","description":"localized description","prompt":"complete recurring task","cronExpression":"0 9 * * 1","timezone":"Europe/Kyiv","agentId":"optional-owned-agent-id"}}
+{"action":"automation.create","companyId":"owned-id","intro":"localized success intro","followUp":"localized useful question","automation":{"name":"localized name","description":"localized description","prompt":"complete recurring task","cronExpression":"0 9 * * 1","timezone":"Europe/Kyiv","status":"active","agentId":"optional-owned-agent-id"}}
 \`\`\`
 To list automations and show which agent owns each task, status, lastRunAt, and nextRunAt, use automation.list with companyId.
 To show the run ledger for one automation, use automation.history with companyId, automationId, and optional historyLimit.
@@ -452,6 +462,12 @@ Use activity.run when the user asks the company agents to perform work and wants
             : available.length === 1 ? available : [];
           if (matches.length !== 1) throw new Error("Memory target is missing or ambiguous");
           const current = matches[0]!;
+          // A copied ID of a sibling record must not change or delete it: "delete only Delivery, keep Recipe" (A086).
+          const request = options.requestMessage?.toLocaleLowerCase() ?? "";
+          const named = available.filter((entry) => entry.title.trim().length > 2 && request.includes(entry.title.trim().toLocaleLowerCase()))
+            .filter((entry, _, all) => !all.some((other) => other !== entry && other.title.toLocaleLowerCase().includes(entry.title.toLocaleLowerCase())));
+          if (named.length === 1 && named[0]!.id !== current.id)
+            throw new Error(`This request names the memory "${named[0]!.title}" (ID ${named[0]!.id}), not "${current.title}". Use that memoryId.`);
           if (directive.action === "memory.delete") {
             await deps.store.deleteMemory(auth, business.id, current.id);
             const card = `\`\`\`card:${clean(current.title, 300)}\n**${labels.business}:** ${clean(business.name, 300)}\n\n[${labels.openMemory}](/settings/memory)\n\`\`\``;
@@ -495,7 +511,7 @@ Use activity.run when the user asks the company agents to perform work and wants
               "**Automation:** " + clean(automation?.name || "not selected", 300),
               "**Agent:** " + clean(agent?.name || "automatic selection", 300),
               "**Company email:** " + clean(account?.emailAddress || "not selected", 320),
-              "**Next run:** " + (automation?.nextRunAt || "not scheduled"),
+              "**Next run:** " + (automation?.nextRunAt ? zonedTime(automation.nextRunAt, automation.timezone) : "not scheduled"),
               "**Registration:** " + clean(target.registrationUrl, 2000),
               target.publishUrl ? "**Publishing:** " + clean(target.publishUrl, 2000) : "",
               target.resultUrl ? "**Result:** " + clean(target.resultUrl, 2000) : "",
@@ -572,8 +588,8 @@ Use activity.run when the user asks the company agents to perform work and wants
               "**Status:** " + automation.status,
               "**Agent:** " + clean(agent?.name || "automatic selection", 300),
               "**Schedule:** " + automation.cronExpression + " (" + clean(automation.timezone, 100) + ")",
-              "**Last run:** " + (automation.lastRunAt || "never"),
-              "**Next run:** " + automation.nextRunAt,
+              "**Last run:** " + zonedTime(automation.lastRunAt, automation.timezone),
+              "**Next run:** " + zonedTime(automation.nextRunAt, automation.timezone),
               clean(automation.description) || clean(automation.prompt),
             ].join("\n");
           }).join("\n\n") : "No automations are configured.";
@@ -584,7 +600,7 @@ Use activity.run when the user asks the company agents to perform work and wants
           if (directive.action === "automation.history") {
             const runs = await deps.automations.listRuns(auth, company.id, current.id, Math.min(50, Math.max(1, directive.historyLimit ?? 10)));
             const lines = runs.length ? runs.map((run) =>
-              "- " + run.startedAt + " — " + run.status + " (" + run.durationMs + " ms)" +
+              "- " + zonedTime(run.startedAt, current.timezone) + " — " + run.status + " (" + run.durationMs + " ms)" +
               (run.errorMessage ? ": " + clean(run.errorMessage, 500) : "") +
               (run.result ? "\n  " + clean(run.result, 1000).replace(/\n/g, "\n  ") : "")
             ).join("\n") : "This automation has no runs yet.";
@@ -627,7 +643,7 @@ Use activity.run when the user asks the company agents to perform work and wants
           };
           if (!Object.keys(update).length || (item.name !== undefined && !update.name) || (item.prompt !== undefined && !update.prompt)) throw new Error("Invalid automation changes");
           const updated = await deps.automations.update(auth, company.id, current.id, update);
-          const card = `\`\`\`card:${clean(updated.name, 300)}\n**${labels.company}:** ${clean(company.name, 300)}\n**${labels.status}:** ${updated.status}\n**${labels.schedule}:** \`${updated.cronExpression}\`\n**${labels.timezone}:** ${clean(updated.timezone, 100)}\n**${labels.nextRun}:** ${updated.nextRunAt}\n\n${clean(updated.description) || clean(updated.prompt)}\n\n[${labels.openAutomations}](${automationSettingsUrl(company.id)})\n\`\`\``;
+          const card = `\`\`\`card:${clean(updated.name, 300)}\n**${labels.company}:** ${clean(company.name, 300)}\n**${labels.status}:** ${updated.status}\n**${labels.schedule}:** \`${updated.cronExpression}\`\n**${labels.timezone}:** ${clean(updated.timezone, 100)}\n**${labels.nextRun}:** ${zonedTime(updated.nextRunAt, updated.timezone)}\n\n${clean(updated.description) || clean(updated.prompt)}\n\n[${labels.openAutomations}](${automationSettingsUrl(company.id)})\n\`\`\``;
           return { cleanText: finish(directive, card), workspaceAction: { action: directive.action, resourceId: updated.id, companyId: company.id } };
         }
         if (!item || !clean(item.name, 300) || !clean(item.prompt) || !item.cronExpression || !isValidCronExpression(item.cronExpression)) throw new Error("Invalid automation");
@@ -635,6 +651,8 @@ Use activity.run when the user asks the company agents to perform work and wants
           const agents = await deps.store.listCompanyAgents(auth, company.id);
           if (!agents.some((agent) => agent.id === item.agentId)) throw new Error("Agent is not owned by this company");
         }
+        // A missing status used to create an active automation while the model reported a paused one (V5-D78).
+        if (item.status !== "active" && item.status !== "paused") throw new Error('automation.status is required: "paused" when the user asked for a paused automation, otherwise "active"');
         const automationName = clean(item.name, 300);
         const automationPrompt = clean(item.prompt);
         const cronExpression = item.cronExpression.trim();
@@ -646,7 +664,7 @@ Use activity.run when the user asks the company agents to perform work and wants
           cronExpression, timezone, agentId: item.agentId ?? undefined, status: item.status === "paused" ? "paused" : "active",
           nextRunAt: computeNextCronDate(cronExpression, new Date(), timezone).toISOString(),
         });
-        const card = `\`\`\`card:${clean(created.name, 300)}\n**${labels.company}:** ${clean(company.name, 300)}\n**${labels.status}:** ${created.status === "paused" ? labels.paused : labels.active}\n**${labels.schedule}:** \`${created.cronExpression}\`\n**${labels.timezone}:** ${clean(created.timezone, 100)}\n**${labels.nextRun}:** ${created.nextRunAt}\n\n${clean(created.description) || clean(created.prompt)}\n\n[${labels.openAutomations}](${automationSettingsUrl(company.id)})\n\`\`\``;
+        const card = `\`\`\`card:${clean(created.name, 300)}\n**${labels.company}:** ${clean(company.name, 300)}\n**${labels.status}:** ${created.status === "paused" ? labels.paused : labels.active}\n**${labels.schedule}:** \`${created.cronExpression}\`\n**${labels.timezone}:** ${clean(created.timezone, 100)}\n**${labels.nextRun}:** ${zonedTime(created.nextRunAt, created.timezone)}\n\n${clean(created.description) || clean(created.prompt)}\n\n[${labels.openAutomations}](${automationSettingsUrl(company.id)})\n\`\`\``;
         return { cleanText: finish(directive, card), workspaceAction: { action: directive.action, resourceId: created.id, companyId: company.id } };
       }
 

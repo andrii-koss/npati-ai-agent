@@ -278,11 +278,17 @@ export function registerAppRoutesAndLifecycle(deps: AppRoutesAndLifecycleDeps) {
   const resolveProjectIntent = createChatProjectIntentResolver({ engine: aiEngine, getAIContext, log,
     resolveNamedProject: async (auth, message, companyId) => {
       const current = await activeContextResolver.resolve(auth, { contextType: companyId ? "company" : "none", companyId: companyId ?? null, businessId: null }).catch(() => undefined);
-      return current ? (await activeContextResolver.resolveNamedCompany(auth, current, message))?.project?.id : undefined;
+      return current ? (await activeContextResolver.resolveNamedCompany(auth, current, message, undefined, "", { deferProjectAmbiguity: true }))?.project?.id : undefined;
     },
     namesOwnedManagementRecord: (auth, message) => WorkspaceChatActions.namesOwnedAutomation(auth, workspaceStore, message, automationsRepo),
     listBusinessNames: async (auth) => (await workspaceStore.listUserBusinesses(auth)).map(business => business.name),
-    listCompanyNames: async (auth) => (await workspaceStore.listCompanies(auth, 100)).items.map(company => company.name),
+    // Every owned company: a name past the first page is still an owned record to the classifier (A077).
+    listCompanyNames: async (auth) => {
+      const names: string[] = [];
+      let cursor: string | undefined;
+      do { const page = await workspaceStore.listCompanies(auth, 100, cursor); names.push(...page.items.map(company => company.name)); cursor = page.nextCursor ?? undefined; } while (cursor && names.length < 500);
+      return names;
+    },
     companyDeletionNeedsConfirmation: async (auth, message, companyId) => Boolean(await CompanyChatActions.deleteConfirmationMessage(auth, workspaceStore, message, companyId ?? undefined)),
     // The 20 most recent owned companies, read in parallel, as in the named-company context resolver.
     listAgentNames: async (auth) => {

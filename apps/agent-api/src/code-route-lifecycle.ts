@@ -9,6 +9,7 @@ import { DEFAULT_CODE_AGENT_LIMITS } from "./code-agent-config";
 import { registerCodeAgentControlRoutes } from "./code-agent-controls";
 import { CodeAsyncWorkspaceService, registerCodeAsyncWorkspaceRoutes } from "./code-async-workspace";
 import { finishCodeChatWebsite, isCodeChatWebsite } from "./code-chat-website";
+import { verifyWebsiteRuntime } from "./website-runtime-acceptance";
 import { registerCodeIntentRoutes } from "./code-intent-routing";
 import { collectCodeMetrics } from "./code-metrics";
 import { registerCodeMetricsRoutes } from "./code-metrics-routes";
@@ -312,6 +313,13 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
         },
         markFailed: (ctx, companyId, projectId) => projectService.updatePreview(ctx, companyId, projectId, { status: "failed", lastBuildStatus: "failed" }),
         });
+      finished = await verifyWebsiteRuntime(input, finished, async () => {
+        if (!inputDeps.projectBrowserQaService) throw new Error("Browser QA is not configured");
+        await featureFlagService.assertEnabled(input.ctx, "code.shell", { companyId: input.session.companyId });
+        return inputDeps.projectBrowserQaService.inspect(input.ctx, input.session.companyId, {
+          projectId: input.session.projectId, runId: input.runId, checks: ["console", "links"], agentId: "system",
+        });
+      });
       finished = await reviewWebsiteReference(input, finished, {
         inspect: async () => {
           if (!inputDeps.projectBrowserQaService) throw new Error("visual_screenshot_unavailable");

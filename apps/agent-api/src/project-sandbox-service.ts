@@ -428,7 +428,9 @@ export class ProjectSandboxService {
       terminalEventAttempted = true;
       await this.events.append(ctx, companyId, request.projectId, { runId: request.runId, agentId: request.agentId, sandboxId, processId: raw.processId, commandSummary: decision.requiresApproval ? "Approved command (" + createHash("sha256").update(command).digest("hex").slice(0, 12) + ")" : redactTerminalText(command, secrets), riskLevel: decision.level, status: raw.status, exitCode: raw.exitCode, output, durationMs: raw.durationMs, errorCode: ["failed", "timed_out"].includes(raw.status) ? failureCode : undefined });
       if (raw.status !== "completed" && !startProcess) {
-        throw new SandboxProviderError(failureCode, failureMessage, raw.status === "timed_out" ? 504 : 409, stepOf(decision), tool, false);
+        throw Object.assign(new SandboxProviderError(failureCode, failureMessage, raw.status === "timed_out" ? 504 : 409, stepOf(decision), tool, false), {
+          details: { exitCode: raw.exitCode, status: raw.status, durationMs: raw.durationMs },
+        });
       }
       return { ...raw, stdout: redactTerminalText(raw.stdout, secrets).slice(0, this.limits.outputLimitBytes), stderr: redactTerminalText(raw.stderr, secrets).slice(0, this.limits.outputLimitBytes), sandboxId, riskLevel: decision.level };
       };

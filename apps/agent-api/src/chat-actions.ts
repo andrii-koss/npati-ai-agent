@@ -1,4 +1,5 @@
 import { GOAL_ACTION_TOOL } from "./goal-action-native";
+import { assertNamedBusinessTarget } from "./named-business-target";
 import { WORKSPACE_ACTION_TOOL, EMAIL_ACTION_TOOL } from "./chat-productivity-tools";
 
 import type { FastifyBaseLogger } from "fastify";
@@ -9,7 +10,7 @@ import { computeNextCronDate } from "./automation-scheduler";
 import { CompanyAutomationsRepository } from "./automations-repository";
 import { BrowserCredentialsRepository } from "./browser-credentials-repository";
 import { BusinessActionHandler } from "./business-action-handler";
-import { BUSINESS_PROFILE_TOOL, executeBusinessProfileTool, reconcilePlannedBusinessArgs } from "./business-profile-native";
+import { BUSINESS_PROFILE_TOOL, executeBusinessProfileDeletion, executeBusinessProfileTool, reconcilePlannedBusinessArgs } from "./business-profile-native";
 import { summarizeBusinessProfileChat } from "./business-profile-response";
 import { ChatAttachmentInput, prepareChatAttachments } from "./chat-attachments";
 import { conversationTitle, isCompositeBusinessCompanyCreation, isShortAffirmativeReply, normalizeNewBusinessDirective, requestsBusinessGoal, requestsBusinessMemory, requestsCompositeCompanyDeletionIntent, requestsNewBusinessIdea, resolveContextualCompanyFollowUp } from "./chat-intent-helpers";
@@ -34,7 +35,7 @@ import { createCoreServices } from "./core-services";
 import { createDataBackendServices } from "./data-backend-services";
 import { extractDocumentText } from "./document-extractor";
 import { EmailAttachmentStorage } from "./email-attachment-storage";
-import { EmailChatActions } from "./email-chat-actions";
+import { EMAIL_READ_ACTIONS, EmailChatActions } from "./email-chat-actions";
 import { EmailInboxRepository } from "./email-inbox-repository";
 import { EmailInboxWorker } from "./email-worker";
 import { NoMemoryEvaluationResult, PerRequestNoMemoryGate } from "./ephemeral-no-memory-and-rtk";
@@ -214,6 +215,7 @@ export function createChatActions(deps: ChatActionDeps) {
     })}\n\`\`\``;
     const companyResult = await CompanyChatActions.extractAndExecute(auth, companyText, workspaceStore, conversationId, {
       requestMessage: message,
+      serverBusinessId: business.id,
       beforeDeleteCompany: (companyId) => beforeDeleteCompany(auth, companyId),
       onError: (error) => log.warn({ err: error }, "Composite company creation failed"),
     });
@@ -317,7 +319,7 @@ ${localized.next}`;
     const deleteConfirmation = requestMessage && managementRequest
       ? await CompanyChatActions.deleteConfirmationMessage(auth, workspaceStore, requestMessage, route?.selectedCompanyId, route?.responseLanguage)
       : undefined;
-    if (deleteConfirmation) return { cleanText: deleteConfirmation, companyAction: undefined };
+    if (deleteConfirmation) return { cleanText: deleteConfirmation, companyAction: undefined, awaitingConfirmation: true };
     const addedModels = (await aiPreferences.get(auth)).addedModels.filter((m) => isChatCapableModel(m));
     let actionText = /```company-action/i.test(content)
       ? content
@@ -466,8 +468,8 @@ ${localized.next}`;
     }
     const coreTool = ["npati_company_action", "npati_business_profile", "npati_goal_action", "npati_workspace_action", "npati_email_action"].includes(input.call.function.name);
     if (input.coreRoute && coreTool) {
-      const readOnly = input.call.function.name === "npati_workspace_action"
-        && WORKSPACE_READ_ACTIONS.has(String(input.args.action));
+      const readOnly = input.call.function.name === "npati_workspace_action" && WORKSPACE_READ_ACTIONS.has(String(input.args.action))
+        || input.call.function.name === "npati_email_action" && EMAIL_READ_ACTIONS.has(String(input.args.action));
       if (!coreRouteOwns(input.coreRoute, input.call.function.name as NonNullable<CoreChatRoute["capability"]>) || !input.coreRoute.mutation && !readOnly) {
         throw new Error("This operation is outside the user's semantically selected capability or is a write on a read-only request");
       }
@@ -492,6 +494,7 @@ ${localized.next}`;
       if (!receipt.workspaceAction && !receipt.emailAction) throw new Error(outcome.cleanText);
       return { output: outcome, metadata: { kind: workspace ? "workspace_action" : "email_action", outcome } };
     }
+    if (input.call.function.name === "npati_goal_action" || input.call.function.name === "npati_business_profile") await assertNamedBusinessTarget(workspaceStore, input.auth, input.requestMessage, input.args.businessId);
     if (input.call.function.name === "npati_goal_action") {
       if (!input.auth.permissions.includes("business:manage")) throw new Error("Goal management permission is required");
       const directive = "\x60\x60\x60goal-action\n" + JSON.stringify(input.args) + "\n\x60\x60\x60";
@@ -499,6 +502,9 @@ ${localized.next}`;
       if (!executed.goalAction) throw new Error("Goal action did not persist; do not report success");
       return { output: executed.goalAction, metadata: { kind: "goal_action", outcome: executed.goalAction } };
     }
+    if (input.call.function.name === "npati_business_profile" && input.args.action === "delete") return executeBusinessProfileDeletion({ store: workspaceStore, auth: input.auth,
+      businessId: input.args.businessId, requestMessage: input.requestMessage, language: input.responseLanguage ?? detectCompanyChatLanguage(input.requestMessage),
+      deleteFiles: async (businessId) => { await chatFiles?.deleteBusiness(input.auth, businessId); } });
     if (input.call.function.name === "npati_business_profile") {
       const plannedArgs = input.plannedBusinessFields ? reconcilePlannedBusinessArgs(input.args, input.plannedBusinessFields, Boolean(input.primaryBusinessCreation)) : input.args;
       const profile = plannedArgs.profile as Record<string, unknown> | undefined;
@@ -528,6 +534,9 @@ ${localized.next}`;
         selectedCompanyId: input.selectedCompanyId,
         responseLanguage: input.responseLanguage,
       });
+      // The server's confirmation request is this turn's answer, not a failure for the model to work around.
+      if (!executed.companyAction && "awaitingConfirmation" in executed && executed.awaitingConfirmation)
+        return { output: { message: executed.cleanText, awaitingConfirmation: true }, metadata: { kind: "confirmation_required", message: executed.cleanText }, stop: true };
       if (!executed.companyAction) throw new Error("Company action did not complete: " + executed.cleanText);
       const verification = input.companyPlan?.primary_action === "create_company"
         ? await verifyPlannedCompany(workspaceStore, input.auth, executed.companyAction.companyId, input.companyPlan)

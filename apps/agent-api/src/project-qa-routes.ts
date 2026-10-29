@@ -56,6 +56,7 @@ export function registerProjectQaRoutes(
         const body = request.body || {};
         const result = await qaService.inspect(ctx, request.params.companyId, {
           path: body.path,
+          actions: body.actions,
           viewport: body.viewport,
           checks: body.checks,
           timeoutMs: body.timeoutMs,

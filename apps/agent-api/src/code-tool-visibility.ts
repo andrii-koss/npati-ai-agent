@@ -48,7 +48,7 @@ export const DEFAULT_CODE_TOOL_VISIBILITY: CodeToolVisibilityPolicy = Object.fre
     "code.fs.edit", "code.fs.apply_patch", "code.fs.write", "code.fs.diff",
     "code.shell.exec", "code.verify.run", "code.finish",
   ]),
-  contextual: Object.freeze(["code.image.view", "code.web.fetch", "code.web.search", "code.preview.screenshot", "code.ask_user"]),
+  contextual: Object.freeze(["code.image.view", "code.web.fetch", "code.web.search", "code.preview.screenshot", "code.preview.restart", "code.ask_user"]),
   intentGroups: CODE_TOOL_INTENT_GROUPS,
 });
 
@@ -63,7 +63,7 @@ export const MINIMAL_CODE_TOOL_VISIBILITY: CodeToolVisibilityPolicy = Object.fre
     "code.fs.edit", "code.fs.write",
     "code.shell.exec", "code.verify.run", "code.finish",
   ]),
-  contextual: Object.freeze(["code.image.view", "code.web.fetch", "code.preview.screenshot", "code.ask_user"]),
+  contextual: Object.freeze(["code.image.view", "code.web.fetch", "code.preview.screenshot", "code.preview.restart", "code.ask_user"]),
   intentGroups: Object.freeze(["git", "deps", "data", "planning", "workspace", "mcp"] as CodeToolIntentGroup[]),
 });
 
@@ -133,12 +133,14 @@ function wordCount(text: string): number {
 /** Contextual signals, evaluated on the user's words and the run input only. */
 export function contextualToolMatches(context: CodeToolVisibilityContext): Set<string> {
   const message = context.userMessage ?? "";
+  const runtimeRequested = BROWSER_QA_PATTERN.test(message) || /(?:\brestart\b|перезапус\p{L}*|runtime[-\s]*(?:errors?|помил\p{L}*)|зіграй|новий\s+раунд)/iu.test(message);
   const matched = new Set<string>();
   const hasImages = (context.imageCount ?? 0) > 0;
   if (hasImages || IMAGE_PATTERN.test(message)) matched.add("code.image.view");
   if (URL_PATTERN.test(message)) matched.add("code.web.fetch");
   if (DOCS_PATTERN.test(message)) { matched.add("code.web.search"); matched.add("code.web.fetch"); }
-  if (context.websiteEdit && (hasImages || VISUAL_PATTERN.test(message) || BROWSER_QA_PATTERN.test(message))) matched.add("code.preview.screenshot");
+  if (context.websiteEdit && (hasImages || VISUAL_PATTERN.test(message) || runtimeRequested)) matched.add("code.preview.screenshot");
+  if (context.websiteEdit && runtimeRequested && !context.readOnlyIntent && context.sessionMode !== "plan") matched.add("code.preview.restart");
   // A question is worth pausing a run for only when the request is genuinely open: a creation request, an
   // explicit "ask me", or a message too short to name a target. A concrete edit must not stop to ask.
   if (context.requireImplementation || ASK_PATTERN.test(message) || wordCount(message) <= 3) matched.add("code.ask_user");
@@ -222,7 +224,7 @@ export function validateCodeToolVisibilityPolicy(policy: unknown, profileId: str
 }
 
 /** Tool families a website edit or a creation run may be offered; git, sub-agents and admin tools are not. */
-export const WEBSITE_EDIT_TOOL_PATTERN = /^code\.(fs\.|deps\.|shell\.|verify\.|web\.|data\.|plan\.|project\.info$|ask_user$|finish$|image\.view$|preview\.screenshot$)/;
+export const WEBSITE_EDIT_TOOL_PATTERN = /^code\.(fs\.|deps\.|shell\.|verify\.|web\.|data\.|plan\.|project\.info$|ask_user$|finish$|image\.view$|preview\.(?:screenshot|restart)$)/;
 
 /** Gates whether the `code.data.*` family is offered to the model at all (a view, never a permission). */
 export const CODE_DATA_STUDIO_FLAG = "code.data_studio";

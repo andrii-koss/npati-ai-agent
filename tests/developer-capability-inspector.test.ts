@@ -12,21 +12,21 @@ describe("Section 15: Developer / Capability Inspector", () => {
     it("returns correct aggregate counts matching the extended 387-item catalog", () => {
       const report = inspector.inspect("all");
 
-      expect(report.counts.all).toBe(408);
-      expect(report.counts.agentCallable).toBe(144);
+      expect(report.counts.all).toBe(409);
+      expect(report.counts.agentCallable).toBe(145);
       expect(report.counts.runtimeOnly).toBe(264);
-      expect(report.counts.userVisible).toBe(144);
+      expect(report.counts.userVisible).toBe(145);
       expect(report.counts.automatic).toBeGreaterThan(0);
       expect(report.counts.requiresApproval).toBeGreaterThan(0);
       expect(report.counts.destructive).toBeGreaterThan(0);
       expect(report.counts.missingTest).toBe(0);
       expect(report.counts.missingUi).toBe(264);
-      expect(report.items.length).toBe(408);
+      expect(report.items.length).toBe(409);
     });
 
     it("filters precisely by agent-callable slice (123 tools)", () => {
       const report = inspector.inspect("agent-callable");
-      expect(report.items.length).toBe(144);
+      expect(report.items.length).toBe(145);
       for (const item of report.items) {
         expect(item.agentCallable).toBe(true);
       }
@@ -172,9 +172,9 @@ describe("Section 15: Developer / Capability Inspector", () => {
       expect(res.statusCode).toBe(200);
 
       const body = JSON.parse(res.body);
-      expect(body.counts.all).toBe(408);
-      expect(body.counts.agentCallable).toBe(144);
-      expect(body.items.length).toBe(144);
+      expect(body.counts.all).toBe(409);
+      expect(body.counts.agentCallable).toBe(145);
+      expect(body.items.length).toBe(145);
       expect(body.activeSlice).toBe("agent-callable");
 
       await app.close();
@@ -193,9 +193,10 @@ describe("Section 15: Developer / Capability Inspector", () => {
     const SUBAGENT_IDS = ["code.agent.spawn"];
     const ALL_CODE_IDS = [...CODE_IDS, ...PLAN_AND_QUESTION_IDS, ...GIT_IDS, ...SUBAGENT_IDS, "code.shell.exec_async", "code.shell.process.wait", "code.agent.spawn_async", "code.agent.continue", "code.agent.send_message", "code.agent.interrupt", "code.data.schema.inspect", "code.data.schema.apply", "code.data.schema.modify", "code.data.rows.list", "code.data.rows.transfer", "code.data.backend.attach", "code.data.backend.create",
       // Manifest v15 (inventory ids 399-408).
-      "code.finish", "code.image.view", "code.preview.screenshot", "code.web.fetch", "code.web.search",
+      "code.finish", "code.image.view", "code.preview.screenshot", "code.preview.restart", "code.web.fetch", "code.web.search",
       "code.data.query.read", "code.data.rows.seed", "code.data.migrations.list", "code.data.policies.inspect", "code.data.policies.apply"];
     const EXPECTED_RISK: Record<string, string> = {
+  "code.preview.restart": "medium",
       "code.fs.list": "low", "code.fs.read": "low", "code.fs.grep": "low", "code.fs.tree": "low",
       "code.symbols.outline": "low", "code.project.info": "low", "code.fs.diff": "low",
       "code.shell.process.list": "low", "code.shell.process.logs": "low", "code.deps.inspect": "low",
@@ -239,7 +240,7 @@ describe("Section 15: Developer / Capability Inspector", () => {
       // The code domain is additive and grows with every Coding Agent step: assert the invariant
     // (the registered set matches the contract lists) instead of a hardcoded step number.
     expect(byDomain.code).toBe(ALL_CODE_IDS.length);
-      expect(report.counts.all).toBe(408);
+      expect(report.counts.all).toBe(409);
     });
 
     it("never reports a code capability as allowed when no flag source is available", () => {
@@ -279,8 +280,8 @@ describe("Section 15: Developer / Capability Inspector", () => {
         expect(["off", "unknown"], `${item.capabilityId} must not be on when its flag is missing`).toContain(item.flagState);
       }
       // Dark launch default: the flags are off, and the capability list itself is unchanged (Step 3: 387 entries).
-      expect(off.counts.all).toBe(408);
-      expect(on.counts.all).toBe(408);
+      expect(off.counts.all).toBe(409);
+      expect(on.counts.all).toBe(409);
     });
   });
 });
