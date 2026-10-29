@@ -84,3 +84,19 @@ it("refuses layout-only captures when actual visual pixels were requested", asyn
   await expect(f.qa.inspect(owner, f.company.id, { projectId: f.project.id, screenshotMode: "visual" })).rejects.toMatchObject({ code: "visual_screenshot_unavailable" });
   expect(await f.qa.listReports(owner, f.company.id, f.project.id)).toEqual([]);
 });
+
+it("reports a missing image as a capture limit failure rather than a layout-only capture", async () => {
+  const f = await fixture();
+  await expect(f.qa.inspect(owner, f.company.id, { projectId: f.project.id, screenshotMode: "visual" })).rejects.toMatchObject({
+    code: "visual_screenshot_unavailable", message: "The runner returned no screenshot within the capture size limit.",
+  });
+  expect(await f.qa.listReports(owner, f.company.id, f.project.id)).toEqual([]);
+});
+
+it("distinguishes an actual layout-only screenshot from a missing screenshot", async () => {
+  const f = await fixture();
+  f.inspect.mockResolvedValueOnce({ ...result, screenshot: { captureMode: "layout", mimeType: "image/png", base64Data: "fixture", sizeBytes: 7, redacted: true } });
+  await expect(f.qa.inspect(owner, f.company.id, { projectId: f.project.id, screenshotMode: "visual" })).rejects.toMatchObject({
+    message: "The runner returned a layout image instead of a visual screenshot.",
+  });
+});

@@ -1,9 +1,8 @@
 import { brandConfig } from "@npati/branding";
+import { chatOpenData } from "./chat-open";
 import type { HealthResponse } from "@npati/shared";
-import { ReactNode, useEffect, useRef, useState } from "react";
+import { ComponentType, ReactNode, Suspense, lazy, useEffect, useRef, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
-import { ActivityPage } from "./ActivityPage";
-import { AIProviderMarketplace, OAuthCallback } from "./AIProviderMarketplace";
 import {
   authFetch,
   authHeaders,
@@ -15,7 +14,6 @@ import {
   Sidebar,
 } from "./shell";
 import { AuthProvider, useAuth } from "./AuthContext";
-import { AutomationsPage } from "./AutomationsPage";
 import {
   BusinessPage,
   BusinessSwitcher,
@@ -23,24 +21,33 @@ import {
   useWorkspace,
   WorkspaceProvider,
 } from "./BusinessWorkspace";
-import { CapabilityInspectorPage } from "./CapabilityInspectorPage";
-import { CodeAgentsPage } from "./CodeAgentsPage";
-import { CodeWorkspacePage } from "./CodeWorkspacePage";
-import { CompanyPage } from "./CompanyPage";
 import { ConfirmDialogContainer, alertModal } from "./ConfirmDialog";
-import { ConnectionsPage } from "./ConnectionsPage";
-import { ContentPage } from "./ContentPage";
 import { ConversationalChat } from "./ConversationalChat";
-import { DataStudioPage } from "./DataStudioPage";
-import { DataStudioSettingsPage } from "./DataStudioSettingsPage";
-import { EmailInboxPage } from "./EmailInboxPage";
-import { EmailSettingsPage } from "./EmailSettingsPage";
-import { GoalsPage } from "./GoalsPage";
 import { I18nProvider, useTranslation } from "./i18n";
-import { IntegrationsPage } from "./IntegrationsPage";
-import { MemoryPage } from "./MemoryPage";
-import { ProjectPage } from "./ProjectPage";
-import { WebsiteBuilderDashboard } from "./WebsiteBuilderDashboard";
+
+// Pages other than the chat load when first opened: the chat page does not download and parse their code.
+function lazyPage<K extends string>(load: () => Promise<Record<K, ComponentType<any>>>, name: K) {
+  return lazy(() => load().then((module) => ({ default: module[name] })));
+}
+const ActivityPage = lazyPage(() => import("./ActivityPage"), "ActivityPage");
+const AutomationsPage = lazyPage(() => import("./AutomationsPage"), "AutomationsPage");
+const CapabilityInspectorPage = lazyPage(() => import("./CapabilityInspectorPage"), "CapabilityInspectorPage");
+const CodeAgentsPage = lazyPage(() => import("./CodeAgentsPage"), "CodeAgentsPage");
+const CodeWorkspacePage = lazyPage(() => import("./CodeWorkspacePage"), "CodeWorkspacePage");
+const CompanyPage = lazyPage(() => import("./CompanyPage"), "CompanyPage");
+const ConnectionsPage = lazyPage(() => import("./ConnectionsPage"), "ConnectionsPage");
+const ContentPage = lazyPage(() => import("./ContentPage"), "ContentPage");
+const DataStudioPage = lazyPage(() => import("./DataStudioPage"), "DataStudioPage");
+const DataStudioSettingsPage = lazyPage(() => import("./DataStudioSettingsPage"), "DataStudioSettingsPage");
+const EmailInboxPage = lazyPage(() => import("./EmailInboxPage"), "EmailInboxPage");
+const EmailSettingsPage = lazyPage(() => import("./EmailSettingsPage"), "EmailSettingsPage");
+const GoalsPage = lazyPage(() => import("./GoalsPage"), "GoalsPage");
+const IntegrationsPage = lazyPage(() => import("./IntegrationsPage"), "IntegrationsPage");
+const MemoryPage = lazyPage(() => import("./MemoryPage"), "MemoryPage");
+const ProjectPage = lazyPage(() => import("./ProjectPage"), "ProjectPage");
+const WebsiteBuilderDashboard = lazyPage(() => import("./WebsiteBuilderDashboard"), "WebsiteBuilderDashboard");
+const AIProviderMarketplace = lazyPage(() => import("./AIProviderMarketplace"), "AIProviderMarketplace");
+const OAuthCallback = lazyPage(() => import("./AIProviderMarketplace"), "OAuthCallback");
 
 export { authFetch, authHeaders, BrandMark, NpatiAgentLogo };
 
@@ -289,8 +296,12 @@ function CanonicalChatRoute() {
         setResolved(true);
         return;
       }
-      const neutralResponse = await authFetch(`/api/conversations/${conversationId}`);
-      if (neutralResponse.ok) {
+      // The chat page's single open request tells whether this is a neutral chat (it carries its latest messages).
+      const opened = chatOpenData(conversationId);
+      const neutral = opened
+        ? Boolean((await opened.catch(() => null))?.conversation)
+        : (await authFetch(`/api/conversations/${encodeURIComponent(conversationId)}/messages?limit=1`)).ok;
+      if (neutral) {
         if (!cancelled) {
           setNeutralChat(true);
           setResolved(true);
@@ -577,6 +588,7 @@ export function App() {
       <AuthProvider>
         <WorkspaceProvider>
           <ConfirmDialogContainer />
+          <Suspense fallback={<div className="workspace" />}>
           <Routes>
             <Route path="/" element={<Home userMenu={<ChatUserMenu />} logo={<NpatiAgentLogo />} />} />
             <Route path="/chat" element={<LegacyChatRoute />} />
@@ -627,6 +639,7 @@ export function App() {
             <Route path="/settings/ai/oauth/callback" element={<OAuthCallback />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          </Suspense>
         </WorkspaceProvider>
       </AuthProvider>
     </I18nProvider>

@@ -1,12 +1,14 @@
 import type { DevelopmentProcess } from "@npati/shared";
 import { getStoredAuthToken } from "./AuthContext";
 /** Stream notifications use server projections; GET remains the recovery source. */
-export async function watchDevelopmentTrace(signal: AbortSignal, onChange: (processes?: DevelopmentProcess[]) => void) {
+export async function watchDevelopmentTrace(signal: AbortSignal, onChange: (processes?: DevelopmentProcess[]) => void, conversationId?: string) {
   let delay = 1000;
   while (!signal.aborted) {
     try {
       const token = getStoredAuthToken();
-      const response = await fetch("/api/chat/development/processes/stream", { signal, headers: token ? { authorization: "Bearer " + token } : {} });
+      // A chat watches only its own and running processes; a project link (no conversation filter) sees all.
+      const url = "/api/chat/development/processes/stream" + (conversationId !== undefined ? "?conversationId=" + encodeURIComponent(conversationId) : "");
+      const response = await fetch(url, { signal, headers: token ? { authorization: "Bearer " + token } : {} });
       if (response.status === 401 || response.status === 403) return;
       if (!response.ok || !response.body) throw new Error("Trace stream unavailable");
       const reader = response.body.getReader(), decoder = new TextDecoder();

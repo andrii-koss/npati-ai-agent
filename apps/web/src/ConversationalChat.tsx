@@ -1,4 +1,5 @@
 import { getStoredAuthToken, useAuth } from "./AuthContext";
+import { chatOpenData, isChatPage } from "./chat-open";
 import { useTranslation } from "./i18n";
 import { readActiveCompanyId, writeActiveCompanyId } from "./active-company";
 import type { AgentReply } from "@npati/shared";
@@ -380,52 +381,62 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
     return "none";
   });
   const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
-  const knownCompanyIdsRef = useRef<Set<string> | null>(null);
-  const companyLoadVersionRef = useRef(0);
+  const companyListLoadedRef = useRef(false);
+  const companyListLoadingRef = useRef<Promise<void> | null>(null);
   const [error, setError] = useState("");
   const [switching, setSwitching] = useState(false);
 
+  // The full Company list loads only when the user opens the switcher; a chat shows just the selected Company.
+  function ensureCompanyList() {
+    if (companyListLoadedRef.current || companyListLoadingRef.current) return companyListLoadingRef.current ?? Promise.resolve();
+    companyListLoadingRef.current = request<{ companies: Array<{ id: string; name: string }> }>("/companies?limit=100")
+      .then((value) => {
+        companyListLoadedRef.current = true;
+        setCompanies((current) => [...value.companies, ...current.filter((company) => !value.companies.some((item) => item.id === company.id))]);
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : "Could not load companies"))
+      .finally(() => { companyListLoadingRef.current = null; });
+    return companyListLoadingRef.current;
+  }
+
   useEffect(() => {
     let active = true;
-    const loadCompanies = async (preferredCompanyId?: string) => {
-      const version = ++companyLoadVersionRef.current;
-      const value = await request<{ companies: Array<{ id: string; name: string }> }>("/companies?limit=100");
-      if (!active || version !== companyLoadVersionRef.current) return;
-      const knownIds = knownCompanyIdsRef.current;
-      const newCompanies = knownIds ? value.companies.filter((company) => !knownIds.has(company.id)) : [];
-      knownCompanyIdsRef.current = new Set(value.companies.map((company) => company.id));
-      setCompanies(value.companies);
+    // On a chat page the selected Company arrives with the page's single open request; elsewhere one Company is read.
+    const loadSelected = async (companyId?: string) => {
+      const stored = companyId ? `company:${companyId}` : readStoredSelection();
+      const id = stored?.startsWith("company:") ? stored.slice(8) : "";
+      if (!id) return;
+      const opened = !companyId && isChatPage() ? chatOpenData() : null;
+      const company = opened ? (await opened).company
+        : await request<{ id: string; name: string }>(`/companies/${encodeURIComponent(id)}`).catch(() => null);
+      if (!active) return;
+      if (company) setCompanies((current) => current.some((item) => item.id === company.id) ? current : [{ id: company.id, name: company.name }, ...current]);
       if (businessRoute || businessSetup) return;
-      setSelection((current) => {
-        const newCompanyId = newCompanies.length === 1 ? newCompanies[0]?.id : undefined;
-        const preferred = preferredCompanyId ? `company:${preferredCompanyId}` : newCompanyId ? `company:${newCompanyId}` : "";
-        if (preferred && current === "none" && value.companies.some((company) => `company:${company.id}` === preferred)) {
-          persistSelection(preferred);
-          return preferred;
-        }
-        if (current.startsWith("company:") && value.companies.some((company) => `company:${company.id}` === current)) {
-          persistSelection(current);
-          return current;
-        }
-        const stored = readStoredSelection();
-        if (stored?.startsWith("company:") && value.companies.some((company) => `company:${company.id}` === stored)) {
-          persistSelection(stored);
-          return stored;
-        }
-        const fallback = "none";
-        persistSelection(fallback);
-        return fallback;
-      });
+      const value = company ? `company:${company.id}` : "none";
+      persistSelection(value);
+      setSelection(value);
     };
     const handleCompanyChanged = (event: Event) => {
       const detail = (event as CustomEvent<{ action?: string; companyId?: string }>).detail;
-      void loadCompanies(detail?.action === "create" ? detail.companyId : undefined).catch((e) => {
-        if (active) setError(e instanceof Error ? e.message : "Could not refresh companies");
-      });
+      if (detail?.action === "create" && detail.companyId) {
+        void loadSelected(detail.companyId).catch((e) => { if (active) setError(e instanceof Error ? e.message : "Could not refresh companies"); });
+        return;
+      }
+      if (detail?.action === "delete" && detail.companyId) {
+        setCompanies((current) => current.filter((company) => company.id !== detail.companyId));
+        setSelection((current) => {
+          if (current !== `company:${detail.companyId}`) return current;
+          persistSelection("none");
+          return "none";
+        });
+        return;
+      }
+      // Other changes (each chat turn sends "refresh") re-read the list only once the user has opened it.
+      if (companyListLoadedRef.current) { companyListLoadedRef.current = false; void ensureCompanyList(); }
     };
     window.addEventListener("npati:company-changed", handleCompanyChanged);
     if (userId) {
-      void loadCompanies()
+      void loadSelected()
         .catch((e) => {
           if (active) setError(e.message);
         });
@@ -470,7 +481,7 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
   );
 
   const switcher = (
-    <div className="composer-context-switcher" title={activeCompanyName || "Active context"}>
+    <div className="composer-context-switcher" title={activeCompanyName || "Active context"} onPointerEnter={() => void ensureCompanyList()} onFocusCapture={() => void ensureCompanyList()}>
       <div className="composer-context-trigger" aria-hidden="true">
         <span className="composer-context-text">
           {activeCompanyName || "No company"}

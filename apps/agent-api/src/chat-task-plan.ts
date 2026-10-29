@@ -27,6 +27,8 @@ export async function planStructuredChatRequest(ai: AIEngine, request: ChatReque
     ],
     tools: undefined,
     toolChoice: "none",
+    // The plan is internal JSON; it must never reach the user's live text stream.
+    onTextDelta: undefined,
   });
   try {
     const parsed = JSON.parse(response.content.replace(/^```(?:json)?\s*|\s*```$/g, "").trim()) as Partial<StructuredChatPlan>;

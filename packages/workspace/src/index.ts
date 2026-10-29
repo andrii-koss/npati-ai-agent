@@ -1,4 +1,5 @@
 export * from "./types";
+export * from "./project-catalog";
 export * from "./code-session-inbox";
 export * from "./code-process-store";
 export * from "./mounted-folder";

@@ -232,6 +232,9 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   async listCompanyAgentsPage(context: AuthContext, companyId: string, requestedLimit = 50, cursor?: string) { return company.listCompanyAgentsPage(this.pool, context, companyId, requestedLimit, cursor); }
   async createProject(context: AuthContext, companyId: string, input: ProjectInput, idempotencyKey: string) { return project.createProject(this.pool, context, companyId, input, idempotencyKey); }
   async listProjects(context: AuthContext, companyId: string, includeArchived = false) { return project.listProjects(this.pool, context, companyId, includeArchived); }
+  async listProjectCatalog(context: AuthContext, input: import("./project-catalog").ProjectCatalogInput) {
+    return (await import("./postgres-project-catalog")).listProjectCatalog(this.pool, context, input);
+  }
   async getProject(context: AuthContext, companyId: string, projectId: string) { return support.getProject(this.pool, context, companyId, projectId); }
   async updateProject(context: AuthContext, companyId: string, projectId: string, input: { name?: string; expectedRevision: number; code?: ProjectCodeSettings }) { return project.updateProject(this.pool, context, companyId, projectId, input); }
   async setProjectSandbox(context: AuthContext, companyId: string, projectId: string, sandboxId: string | null, expectedSandboxId: string | null) { return project.setProjectSandbox(this.pool, context, companyId, projectId, sandboxId, expectedSandboxId); }

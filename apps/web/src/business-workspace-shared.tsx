@@ -1,6 +1,7 @@
 import { getStoredAuthToken, useAuth } from "./AuthContext";
 import { ReactNode, createContext, useContext, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { chatOpen, isChatPage } from "./chat-open";
 
 export type Business = {
   id: string; name: string; businessType?: string; industry?: string; niche?: string; country?: string;
@@ -78,12 +79,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [overview, setOverview] = useState<WorkspaceOverview | null>(getInitialWorkspaceOverview);
   const [loading, setLoading] = useState(() => getInitialWorkspaceOverview() === null);
   const [error, setError] = useState("");
-  async function refresh() {
+  async function refresh(initial = false) {
     if (!overview && !cachedWorkspaceOverview) {
       setLoading(true);
     }
     try {
-      const nextOverview = await api<WorkspaceOverview>("/workspace/context");
+      // Opening a chat page reads the overview from its single open request instead of a request of its own.
+      const opened = initial && isChatPage() ? await chatOpen().catch(() => null) : null;
+      const nextOverview = opened?.overview ?? await api<WorkspaceOverview>("/workspace/context");
       updateCachedWorkspaceOverview(nextOverview);
       setOverview((prev) => {
         if (prev && JSON.stringify(prev) === JSON.stringify(nextOverview)) {
@@ -98,7 +101,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }
   useEffect(() => {
     if (authLoading || !token) return;
-    void refresh();
+    void refresh(true);
     const handleBusinessChanged = () => { void refresh(); };
     window.addEventListener("npati:business-changed", handleBusinessChanged);
     return () => window.removeEventListener("npati:business-changed", handleBusinessChanged);

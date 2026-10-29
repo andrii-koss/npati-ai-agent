@@ -871,3 +871,27 @@
   }
 }
 
+.website-catalog-pagination {
+  display: flex;
+  justify-content: center;
+  margin: 24px 0;
+}
+
+.website-catalog-pagination .website-catalog-load-more {
+  min-width: 144px;
+  min-height: 44px;
+  padding: 10px 24px;
+  border: 1px solid #000;
+  border-radius: 10px;
+  background: #000;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.website-catalog-pagination .website-catalog-load-more:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+

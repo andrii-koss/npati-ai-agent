@@ -99,6 +99,11 @@ export interface ChatSchema {
     placeholder: string;
     businessEmptySubtitle: string;
     businessPlaceholder: string;
+    workModeLabel: string;
+    workModeChat: string;
+    workModeCode: string;
+    codeModeNeedsProject: string;
+    thinking: string;
     noCompany: string;
     stopGenerating: string;
     showHistory: string;

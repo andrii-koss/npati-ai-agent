@@ -2,7 +2,7 @@ import { getStoredAuthToken } from "./AuthContext";
 import { useTranslation } from "./i18n";
 import type { AgentReply, ProjectCardData } from "@npati/shared";
 import { defaultHybridRouter } from "@npati/shared/hybrid-router";
-import { FormEvent, Fragment, KeyboardEvent as ReactKeyboardEvent, ReactNode, SyntheticEvent, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, Fragment, KeyboardEvent as ReactKeyboardEvent, ReactNode, SyntheticEvent, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { createPortal } from "react-dom";
 import { ChatMessageContent, projectChatText, stripInternalChatActions } from "./ChatMessageContent";
@@ -21,7 +21,9 @@ import { useChatResearchProgress } from "./use-chat-research-progress";
 import { chatTimeline, mergeConversationMessages, nearChatBottom } from "./chat-timeline";
 import { ChatDevelopmentProgress } from "./ChatDevelopmentProgress";
 import { useChatDevelopment } from "./use-chat-development";
-import { BusinessChatComposer } from "./business-workspace-composer";
+import { BusinessChatComposer, ChatWorkModeSwitch } from "./business-workspace-composer";
+import { chatOpenData } from "./chat-open";
+import { ChatMessageRow, useChatRowActions } from "./chat-message-row";
 import { confirmModal, alertModal } from "./ConfirmDialog";
 import { detectChatMutationOperation, mutationProgressTargets } from "./chat-mutation-progress";
 import { Business, Goal, MemoryItem, Company, api, blankBusiness, Notice, useWorkspace, Skill, getCachedSkills, updateCachedSkills, PageIntro, EmptyBusiness } from "./business-workspace-shared";
@@ -29,11 +31,6 @@ import { BusinessForm, ProjectChatCard, AssistantMessageToolbar, FloatingNotice,
 export * from "./business-workspace-page-views";
 export * from "./business-workspace-cards";
 export * from "./business-workspace-shared";
-type Conversation = { id: string; title: string; updatedAt: string };
-function messageHasImage(message: Message) {
-  return message.attachments?.some((attachment) => attachment.kind === "image")
-    || message.content.includes("[[npati-attachment:image:");
-}
 
 export const ChatContextSwitcherContext = createContext<ReactNode>(null);
 
@@ -52,12 +49,9 @@ export function BusinessSwitcher() {
 }
 
 
-const businessThinkingSteps = [
-  "Thinking…",
-  "Reviewing your business context…",
-  "Checking goals and memory…",
-  "Preparing a response…",
-];
+
+// Earlier messages load before the top is reached, so the view never stops at the very top while they arrive.
+const EARLIER_MESSAGES_THRESHOLD_PX = 600;
 
 function expandDeleteConfirmationReply(message: string, history: Message[]): string {
   if (!/^(?:так|так,|підтверджую|да|да,|подтверждаю|yes|yes,|confirm)$/iu.test(message.trim())) return message;
@@ -92,12 +86,21 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     }).catch(error => { if (!controller.signal.aborted) setNotice(error instanceof Error ? error.message : "Project unavailable"); });
     return () => controller.abort();
   }, [selectedProject]);
-  const [conversations, setConversations] = useState<Conversation[]>([]); const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(null); const [earlierMessages, setEarlierMessages] = useState(0);
+  const loadingEarlierRef = useRef(false);
+  // Earlier messages load on the user's own scroll, not on the scroll that opens the chat at its end.
+  const userScrolledRef = useRef(false);
+  const earlierAnchorRef = useRef<{ id: string; offset: number } | null>(null);
+  // The oldest loaded message id: the history cursor for the next earlier page.
+  const earlierCursorRef = useRef<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]); const [input, setInput] = useState(initialPrompt);
   const [attachments, setAttachments] = useState<ChatAttachmentInput[]>([]);
   const [chatMode, setChatMode] = useState<"none" | "private" | "tts">("none");
   const noMemory = chatMode === "private";
   const ttsEnabled = chatMode === "tts";
+  // Work mode is a per-tab convenience; Chat is the default when storage is unavailable.
+  const [workMode, setWorkMode] = useState<"chat" | "code">(() => { try { return sessionStorage.getItem("npati_work_mode") === "code" ? "code" : "chat"; } catch { return "chat"; } });
+  const changeWorkMode = (mode: "chat" | "code") => { setWorkMode(mode); try { sessionStorage.setItem("npati_work_mode", mode); } catch {} };
 
   useEffect(() => {
     try {
@@ -105,7 +108,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     } catch {}
   }, []);
 
-  const [sending, setSending] = useState(false); const [thinkingStep, setThinkingStep] = useState(0);
+  const [sending, setSending] = useState(false); const [slowReply, setSlowReply] = useState(false);
   const codeInbox = useCodeInbox(selected, sending);
   useEffect(() => {
     if (codeInbox.session && codeInbox.snapshot?.phase === "settled") {
@@ -243,31 +246,58 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const selectedRef = useRef(selected);
   const historyLoadVersionRef = useRef(0);
   selectedRef.current = selected;
+  const { rowActions, rowStateRef } = useChatRowActions({ setInput, setSelectedProject, selectedRef, latestMessageRef, activeTurnRef });
+
+  /** Prepends the previous page of the open chat and keeps the visible message in place. */
+  async function loadEarlierMessages() {
+    const id = selectedRef.current, stream = messageStreamRef.current;
+    if (!id || business || earlierMessages <= 0 || loadingEarlierRef.current || !stream) return;
+    loadingEarlierRef.current = true;
+    try {
+      const page = await api<{ messages: Message[]; earlier: number; cursor: string | null }>(`/conversations/${id}/messages?before=${encodeURIComponent(earlierCursorRef.current ?? String(earlierMessages))}`);
+      if (selectedRef.current !== id) return;
+      // The first visible message keeps its place on screen. Only the shift left after the browser's own scroll
+      // anchoring is corrected (none at the very top, where browsers do not anchor), so the view never moves twice.
+      const top = stream.getBoundingClientRect().top;
+      const first = [...stream.querySelectorAll<HTMLElement>("[data-message-id]")].find((element) => element.getBoundingClientRect().bottom > top);
+      earlierAnchorRef.current = first ? { id: first.dataset.messageId!, offset: first.getBoundingClientRect().top - top } : null;
+      followBottomRef.current = false;
+      setMessages((current) => [...page.messages.filter((message) => !current.some((item) => item.id === message.id)), ...current]);
+      setEarlierMessages(page.earlier);
+      earlierCursorRef.current = page.cursor ?? earlierCursorRef.current;
+    } catch {
+      // The loaded page stays as it is; scrolling up again retries.
+    } finally {
+      loadingEarlierRef.current = false;
+    }
+  }
 
   async function loadConversations(preferred?: string, preserveActiveTurn = false) {
     const loadVersion = ++historyLoadVersionRef.current;
     const base = business ? `/businesses/${business.id}/conversations` : "/conversations";
-    let rows: Conversation[] = [];
-    try {
-      rows = await api<Conversation[]>(base);
-    } catch {
-      if (base !== "/conversations") {
-        try { rows = await api<Conversation[]>("/conversations"); } catch {}
-      }
-    }
     if (loadVersion !== historyLoadVersionRef.current) return [] as Message[];
-    setConversations(rows);
     const next = preferred ?? null; setSelected(next);
     if (next) {
       let loaded: Message[] = [];
       try {
-        loaded = (await api<{ messages: Message[] }>(`${base}/${next}`)).messages;
-      } catch {
-        if (base !== "/conversations") {
-          try {
-            loaded = (await api<{ messages: Message[] }>(`/conversations/${next}`)).messages;
-          } catch {}
+        if (business) loaded = (await api<{ messages: Message[] }>(`${base}/${next}`)).messages;
+        else {
+          // A chat opens with its latest messages from the page's single open request; a refresh after a turn
+          // reads only the latest page. Earlier messages load when the user scrolls up.
+          const opened = preserveActiveTurn ? null : chatOpenData(next);
+          const page = opened ? (await opened).conversation : await api<{ messages: Message[]; earlier: number; cursor?: string | null }>(`/conversations/${next}/messages`);
+          loaded = (page?.messages ?? []) as Message[];
+          setEarlierMessages(page?.earlier ?? 0);
+          // A refresh after a turn keeps the earlier pages already shown and their cursor.
+          if (!preserveActiveTurn || earlierCursorRef.current === null) earlierCursorRef.current = page?.cursor ?? (loaded[0]?.id ?? null);
         }
+      } catch {
+        try {
+          // Without the combined open request the chat still shows its latest page.
+          const page = await api<{ messages: Message[]; earlier?: number }>(`/conversations/${next}${business ? "" : "/messages"}`);
+          loaded = page.messages;
+          setEarlierMessages(page.earlier ?? 0);
+        } catch {}
       }
       if (loadVersion !== historyLoadVersionRef.current) return [] as Message[];
       if (loaded.length > 0) {
@@ -326,9 +356,10 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     }
   }, [business?.id, initialConversationId]);
   useEffect(() => {
-    if (!sending) { setThinkingStep(0); return; }
-    const timer = window.setInterval(() => setThinkingStep((step) => Math.min(step + 1, businessThinkingSteps.length - 1)), 1200);
-    return () => window.clearInterval(timer);
+    // The thinking indicator appears only when an answer is actually slow; a fast answer is shown without it.
+    if (!sending) { setSlowReply(false); return; }
+    const timer = window.setTimeout(() => setSlowReply(true), 1000);
+    return () => window.clearTimeout(timer);
   }, [sending]);
   useEffect(() => {
     const handleImageLoaded = () => {
@@ -339,6 +370,15 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     window.addEventListener("npati:chat-image-loaded", handleImageLoaded);
     return () => window.removeEventListener("npati:chat-image-loaded", handleImageLoaded);
   }, [activeTurn, scrollToBottom]);
+  useLayoutEffect(() => {
+    const anchor = earlierAnchorRef.current, stream = messageStreamRef.current;
+    if (!anchor || !stream) return;
+    earlierAnchorRef.current = null;
+    const element = stream.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(anchor.id)}"]`);
+    const shift = element ? element.getBoundingClientRect().top - stream.getBoundingClientRect().top - anchor.offset : 0;
+    // Instant: the chat area scrolls smoothly by default, and an animated correction would leave the view at the top.
+    if (Math.abs(shift) > 1) stream.scrollTo({ top: stream.scrollTop + shift, behavior: "instant" as ScrollBehavior });
+  }, [messages]);
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => scrollToBottom("auto"));
     return () => window.cancelAnimationFrame(frame);
@@ -434,7 +474,6 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     const mutationTargets = pendingMutation
       ? mutationProgressTargets(requestMessage, mutationContext)
       : [];
-    const mutationStartedAt = Date.now();
     setActiveTurn(optimisticContent);
     const optimisticMessage: Message = { id: optimisticId, role: "user", content: optimisticContent, createdAt: new Date().toISOString(), attachments: sentAttachments };
     setMessages((current) => [...current, optimisticMessage]);
@@ -454,8 +493,19 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
 
     const deltaBuffer: string[] = [];
 
+    // Streamed text is applied at most once per frame: many small deltas would otherwise re-render the list each.
+    let deltaFrame = 0;
     const appendDelta = (chunk: string) => {
       rawAssistantContent += chunk;
+      if (!deltaFrame) deltaFrame = window.requestAnimationFrame(commitDelta);
+    };
+    const settleDelta = () => {
+      if (!deltaFrame) return;
+      window.cancelAnimationFrame(deltaFrame);
+      commitDelta();
+    };
+    const commitDelta = () => {
+      deltaFrame = 0;
       const visibleContent = stripInternalChatActions(rawAssistantContent, true);
       if (!visibleContent.trim()) return;
       if (!receivedDelta) {
@@ -507,6 +557,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         contextType: activeProjectId ? "project" : companyId ? "company" : (business ? "business" : "none"),
         ...(activeCompanyForRequest && (companyId || activeProjectId) ? { companyId: activeCompanyForRequest } : {}),
         ...(activeProjectId ? { projectId: activeProjectId } : {}),
+        ...(workMode === "code" && activeProjectId ? { mode: "code" as const } : {}),
         noMemory: privateRequest,
         streamId,
       }, enqueueProgress, {
@@ -514,7 +565,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         onCodeSession: (session) => { if (streamControllerRef.current?.controller === controller && selectedChatRef.current === conversationAtSubmit) codeInbox.accept(session, conversationAtSubmit); },
         onCodeInbox: (sessionId) => { if (streamControllerRef.current?.controller === controller) codeInbox.refresh(sessionId); },
         onDelta: (delta) => {
-          if (!progressCompleteRef.current && progressEventsRef.current.length > 0) {
+          if (!progressCompleteRef.current && progressEventsRef.current.some((event) => !event.type.startsWith("final_generation"))) {
             deltaBuffer.push(delta);
             return;
           }
@@ -524,13 +575,10 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           appendDelta(delta);
         },
       });
-      if (pendingMutation) {
-        const remaining = 2_000 - (Date.now() - mutationStartedAt);
-        if (remaining > 0) await new Promise<void>((resolve) => window.setTimeout(resolve, remaining));
-      }
       const finalMutationTarget = mutationTargets.at(-1);
       if (finalMutationTarget) enqueueProgress({ type: "action_completed", ...finalMutationTarget, timestamp: new Date().toISOString() });
       flushDeltas();
+      settleDelta();
       setReplyMeta(result);
       const cleanedMessage = stripInternalChatActions(result.message ?? "").trim();
       if ((result as any)?.businessAction) {
@@ -592,6 +640,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       markComplete();
     } catch (reason) {
       flushDeltas();
+      settleDelta();
       const typed = reason as Error & { code?: string };
       if (typed.message?.includes("Project not found") || (typed as any).code === "WORKSPACE_NOT_FOUND" || (typed as any).status === 404) {
         try { sessionStorage.removeItem("npati_active_project"); } catch {}
@@ -642,6 +691,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     }
   }
   const displayMessages = mergeConversationMessages(messages,development.project?.conversationMessages);
+  rowStateRef.current = { displayMessages, activeTurn };
   const timeline = chatTimeline(displayMessages, development.project?.progress, selected, development.project);
   return (
     <>
@@ -654,7 +704,10 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         />
       )}
       <div className="onboarding-live-chat standard-live-chat">
-        <div className="message-stream" ref={messageStreamRef} onScroll={() => { if (messageStreamRef.current) followBottomRef.current = nearChatBottom(messageStreamRef.current); }}>
+        <div className="message-stream" ref={messageStreamRef} onScroll={() => { if (!messageStreamRef.current) return; followBottomRef.current = nearChatBottom(messageStreamRef.current); if (userScrolledRef.current && messageStreamRef.current.scrollTop < EARLIER_MESSAGES_THRESHOLD_PX) void loadEarlierMessages(); }}
+          onWheel={() => { userScrolledRef.current = true; }} onTouchMove={() => { userScrolledRef.current = true; }} onKeyDown={() => { userScrolledRef.current = true; }}>
+          <ChatWorkModeSwitch mode={workMode} onChange={changeWorkMode} disabled={sending} t={t}
+            projectSelected={Boolean(development.project?.projectId ?? codeInbox.session?.projectId ?? (selectedProject?.conversationId === selected ? selectedProject?.projectId : undefined))} />
           {entryProjectCard && !selected && <ProjectChatCard card={entryProjectCard} onActivate={(card) => setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected })} />}
           {messages.length === 0 && !selected && !initialConversationId && !loadingHistory && (
             <div className="chat-welcome">
@@ -680,35 +733,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
                     failed={!sending && progressFailed}
                   />
                 )}
-                <article
-                  ref={(el) => {
-                    if (index === displayMessages.length - 1) {
-                      latestMessageRef.current = el;
-                    }
-                    if (message.role === "user" && message.content === activeTurn && !displayMessages.slice(index + 1).some((item) => item.role === "user" && item.content === activeTurn)) {
-                      activeTurnRef.current = el;
-                    }
-                  }}
-                  className={`${message.role}${message.role === "user" && messageHasImage(message) ? " image-message" : ""}`}
-                  aria-label={message.role === "user" ? "Your message" : "NPATI Agent message"}
-                >
-                  <PendingMessageAttachments value={message.attachments ?? []} />
-                  {message.role === "user" ? <UserPromptMessage content={message.content} onEdit={(prompt) => { setInput(prompt); window.requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".onboarding-live-composer textarea")?.focus()); }} /> : <ChatMessageContent content={projectChatText(message.content, message.projectCard,development.project?.responseLanguage ?? language)} />}
-                  {messageCard && <ProjectChatCard card={messageCard} previewOnly={messageCard.kind === "code_project"} showPreviewTrigger={messageCard.kind !== "code_project" || !!messageCard.previewUrl && ["completed", "ready", "previewing"].includes(messageCard.status)} onActivate={(card) => { setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected }); }} />}
-                  {message.role === "assistant" && !sending && (
-                    <AssistantMessageToolbar
-                      content={message.content}
-                      onRegenerate={() => {
-                        for (let k = index - 1; k >= 0; k--) {
-                          if (displayMessages[k]?.role === "user") {
-                            setInput(displayMessages[k]!.content);
-                            break;
-                          }
-                        }
-                      }}
-                    />
-                  )}
-                </article>
+                <ChatMessageRow message={message} card={messageCard} showToolbar={message.role === "assistant" && !sending}
+                  responseLanguage={development.project?.responseLanguage ?? language} actions={rowActions} />
               </Fragment>
             );
           })}
@@ -721,7 +747,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
               failed={!sending && progressFailed}
             />
           )}
-          {!development.isActive && sending && !streamingResponse && !progressEvents.some((event) => !event.type.startsWith("final_generation")) && <article className="assistant thinking thinking-status" aria-label="NPATI Agent is working"><p>{isWebsiteAnalysisRequest(activeTurn) ? "Analyzing website and sources…" : businessThinkingSteps[thinkingStep]}</p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span></article>}
+          {!development.isActive && sending && slowReply && !streamingResponse && !progressEvents.some((event) => !event.type.startsWith("final_generation")) && <article className="assistant research-progress chat-thinking" role="status" aria-label="NPATI Agent is working"><div className="research-generation-row active"><span className="research-progress-state" aria-hidden="true">●</span><span className="research-active-text">{isWebsiteAnalysisRequest(activeTurn) ? "Analyzing website and sources…" : t("chat.thinking")}</span></div></article>}
           {(development.submitting && !development.project && !progressEvents.some(event => !event.type.startsWith("final_generation"))) && <article className="assistant thinking thinking-status" role="status" aria-label="NPATI Agent is working"><p>{language === "uk" ? "\u041f\u0440\u0430\u0446\u044e\u044e \u043d\u0430\u0434 \u043f\u0440\u043e\u0454\u043a\u0442\u043e\u043c" : "Working on the project"}</p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span></article>}
           {development.preview}
           {messages.length > 0 && <div className="chat-scroll-spacer" aria-hidden="true" />}

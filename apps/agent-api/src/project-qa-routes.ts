@@ -1,8 +1,9 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { WorkspaceNotFoundError, type AuthContext } from "@npati/workspace";
+import { WorkspaceAccessError, WorkspaceNotFoundError, type AuthContext } from "@npati/workspace";
 import { SandboxProviderError } from "./sandbox-provider";
 import { AuthenticationError, type AuthProvider } from "./auth";
 import { BrowserQaError, ProjectBrowserQaService, type BrowserQaInspectOptions } from "./project-browser-qa-service";
+import { screenshotHasDetail } from "./project-screenshot-content";
 
 interface ProjectParams {
   companyId: string;
@@ -29,6 +30,7 @@ export function registerProjectQaRoutes(
   };
 
   const handleError = (error: unknown, reply: FastifyReply) => {
+    if (error instanceof WorkspaceAccessError) return reply.code(403).send({ error: { code: "FORBIDDEN", message: "Project is not available" } });
     if (error instanceof BrowserQaError) {
       return reply.code(error.status).send({
         error: {
@@ -41,6 +43,33 @@ export function registerProjectQaRoutes(
     if (error instanceof SandboxProviderError) return reply.code(error.status).send({ error: { code: error.code, message: error.message } });
     return reply.code(500).send({ error: { code: "INTERNAL_ERROR", message: "Browser QA request failed" } });
   };
+
+  // Reading a saved visual image never starts Preview or visits the project.
+  app.get<{ Params: ProjectParams }>("/companies/:companyId/projects/:projectId/qa/thumbnail", async (request, reply) => {
+    const ctx = await authenticate(request, reply);
+    if (!ctx) return;
+    if (!ctx.permissions.includes("workspace:read")) return reply.code(403).send({ error: { code: "FORBIDDEN", message: "Insufficient permissions" } });
+    try {
+      reply.header("Cache-Control", "private, no-store");
+      const report = await qaService.getLatestReport(ctx, request.params.companyId, request.params.projectId);
+      const screenshot = report?.screenshots.find(image => image.captureMode === "visual" && image.mimeType === "image/png" && image.sizeBytes <= 2_000_000);
+      if (screenshot && !screenshotHasDetail(Buffer.from(screenshot.base64Data, "base64"))) return { thumbnail: null };
+      return { thumbnail: screenshot ? { dataUrl: "data:image/png;base64," + screenshot.base64Data, capturedAt: report!.createdAt } : null };
+    } catch (error) { return handleError(error, reply); }
+  });
+
+  // Explicit user action. Reuse the existing sandbox browser and persisted QA images.
+  app.post<{ Params: ProjectParams }>("/companies/:companyId/projects/:projectId/qa/thumbnail", async (request, reply) => {
+    const ctx = await authenticate(request, reply);
+    if (!ctx) return;
+    if (!ctx.permissions.includes("business:manage")) return reply.code(403).send({ error: { code: "FORBIDDEN", message: "Insufficient permissions" } });
+    try {
+      const result = await qaService.inspect(ctx, request.params.companyId, { projectId: request.params.projectId, viewport: "desktop", checks: ["screenshot"], screenshotMode: "visual", maxScreenshotBytes: 2_000_000 });
+      const screenshot = result.screenshots.find(image => image.captureMode === "visual");
+      if (!screenshot) throw new BrowserQaError("visual_screenshot_unavailable", "A real project screenshot could not be captured", 503);
+      return { thumbnail: { dataUrl: "data:image/png;base64," + screenshot.base64Data, capturedAt: result.report.createdAt } };
+    } catch (error) { return handleError(error, reply); }
+  });
 
   // POST /companies/:companyId/projects/:projectId/qa/inspect
   app.post<{ Params: ProjectParams; Body: Partial<BrowserQaInspectOptions> }>(
@@ -59,6 +88,7 @@ export function registerProjectQaRoutes(
           actions: body.actions,
           viewport: body.viewport,
           checks: body.checks,
+          screenshotMode: body.screenshotMode,
           timeoutMs: body.timeoutMs,
           maxScreenshotBytes: body.maxScreenshotBytes,
           maxBrokenLinksToCheck: body.maxBrokenLinksToCheck,

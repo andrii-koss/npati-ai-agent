@@ -8,7 +8,6 @@ import {
   createDefaultWebsiteDocument,
   createMobileAppScaffold,
   createGameScaffold,
-  projectKindOf,
   type ProjectKind,
   defaultAppScheme,
   slugifyProjectName,
@@ -27,9 +26,7 @@ import {
 import {
   type WebsiteProject,
   apiFetch,
-  getCachedWebsites,
   listProjectCompanies,
-  listCompanyProjects,
 } from "./website-builder-cache";
 import {
   websiteBuilderCopy as copy,
@@ -38,7 +35,8 @@ import {
 } from "./website-builder-constants";
 import { CreateWebsiteDrawer } from "./website-builder-drawer";
 import { WebsiteFiltersBar } from "./website-builder-filters";
-import { WebsiteProjectCard, invalidateWebsitePreviewCache } from "./website-builder-card";
+import { WebsiteProjectCard } from "./website-builder-card";
+import { cachedCatalog, requestCatalog } from "./project-catalog-client";
 
 export function WebsiteBuilderDashboard() {
   const navigate = useNavigate();
@@ -48,18 +46,21 @@ export function WebsiteBuilderDashboard() {
   const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>(() => readCachedCompanies());
   const [companyId, setCompanyId] = useState(""); // Empty scope means all companies; always the initial view.
   const [creationCompanyId, setCreationCompanyId] = useState("");
-  const loadSequence = useRef(0);
-  const selectedCompany = useRef(companyId);
-  selectedCompany.current = companyId;
-  const [websites, setWebsites] = useState<WebsiteProject[]>([]);
+  const [websites, setWebsites] = useState<WebsiteProject[]>(() => cachedCatalog({ companyId: "", search: "", status: "all", framework: "all", kind: "all" })?.projects ?? []);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "archived">("active");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "archived">("all");
   const [frameworkFilter, setFrameworkFilter] = useState<string>("all");
   const [kindFilter, setKindFilter] = useState<string>("all");
+  const [search, setSearch] = useState("");
+  useEffect(() => { const timer = setTimeout(() => setSearch(searchQuery.trim()), 250); return () => clearTimeout(timer); }, [searchQuery]);
+  const filters = useMemo(() => ({ companyId, search, status: statusFilter, framework: frameworkFilter, kind: kindFilter }), [companyId, search, statusFilter, frameworkFilter, kindFilter]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const catalogGeneration = useRef(0);
+  const requests = useRef(new Set<ReturnType<typeof requestCatalog>>());
 
   // Create Modal State
   const [modalOpen, setModalOpen] = useState(false);
@@ -104,11 +105,7 @@ export function WebsiteBuilderDashboard() {
         if (!active) return;
         setCompanies(list);
         writeCachedCompanies(list);
-        if (list.length === 0) {
-          setWebsites([]);
-          setLoading(false);
-          return;
-        }
+        if (list.length === 0) return;
         const resolved = chooseAvailableCompanyId(list, { requested: readActiveCompanyId() });
         setCreationCompanyId(list.some(company => company.id === resolved) ? resolved : list[0]!.id);
       } catch (err: any) {
@@ -124,42 +121,46 @@ export function WebsiteBuilderDashboard() {
     };
   }, []);
 
-  // Load Websites for Company
-  const loadWebsites = useCallback(async (targetCompanyId?: string) => {
-    const id = targetCompanyId ?? companyId;
-    if (companies.length === 0) {
-      return;
+  const loadWebsites = useCallback(async (_companyId?: string, cursor?: string) => {
+    if (!cursor) {
+      ++catalogGeneration.current;
+      for (const request of requests.current) request.release();
+      requests.current.clear();
     }
-
-    const sequence = ++loadSequence.current;
+    const generation = catalogGeneration.current;
+    const request = requestCatalog(filters, cursor);
+    requests.current.add(request);
+    setLoading(true);
     try {
-      // Every project belongs here: websites, web apps, games, mobile apps and APIs, whatever the framework.
-      const nextProjects = await listCompanyProjects(id ? [id] : companies.map(company => company.id));
-      if (sequence !== loadSequence.current || selectedCompany.current !== id) return;
-      setWebsites(nextProjects);
+      const page = await request.promise;
+      if (generation !== catalogGeneration.current) return;
+      setWebsites(previous => cursor ? [...new Map([...previous, ...page.projects].map(item => [item.id, item])).values()] : page.projects);
+      setNextCursor(page.pagination?.nextCursor ?? null);
       setError("");
     } catch (err: any) {
-      if (sequence === loadSequence.current && selectedCompany.current === id) setError(err.message || t.loadError);
+      if (generation === catalogGeneration.current && err.name !== "AbortError") setError(err.message || t.loadError);
     } finally {
-      if (sequence === loadSequence.current && selectedCompany.current === id) setLoading(false);
+      requests.current.delete(request); request.release();
+      if (generation === catalogGeneration.current) setLoading(false);
     }
-  }, [companyId, companies, t.loadError]);
+  }, [filters, t.loadError]);
 
   useEffect(() => {
-    if (companies.length > 0) {
-      setWebsites(companyId ? getCachedWebsites(companyId) ?? [] : []);
-      setLoading(true);
-      void loadWebsites(companyId);
-    }
-    const refresh = () => { if (companies.length > 0 && document.visibilityState !== "hidden") void loadWebsites(companyId); };
+    const cached = cachedCatalog(filters);
+    setWebsites(cached?.projects ?? []);
+    setNextCursor(cached?.pagination?.nextCursor ?? null);
+    void loadWebsites();
+    const refresh = () => { if (document.visibilityState !== "hidden" && requests.current.size === 0) void loadWebsites(); };
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", refresh);
     return () => {
-      ++loadSequence.current;
+      ++catalogGeneration.current;
+      for (const request of requests.current) request.release();
+      requests.current.clear();
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", refresh);
     };
-  }, [companyId, loadWebsites]);
+  }, [filters, loadWebsites]);
 
   // When framework selection changes in drawer, update suggested values.
   const handleSelectFramework = (fw: FrameworkStarterOption) => {
@@ -172,29 +173,7 @@ export function WebsiteBuilderDashboard() {
     setKind(fw.kind);
   };
 
-  const filteredWebsites = useMemo(() => {
-    return websites.filter((site) => {
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        const matchesName = site.name.toLowerCase().includes(q);
-        const matchesDesc = (site.description || "").toLowerCase().includes(q);
-        if (!matchesName && !matchesDesc) return false;
-      }
-      if (statusFilter === "active" && site.status === "archived") return false;
-      if (statusFilter === "archived" && site.status !== "archived") return false;
-      if (kindFilter !== "all" && projectKindOf(site) !== kindFilter) return false;
-
-      if (frameworkFilter !== "all") {
-        const fw = (site.framework || "").toLowerCase();
-        if (frameworkFilter === "static" && !fw.includes("static") && !fw.includes("html")) return false;
-        if (frameworkFilter === "nextjs" && !fw.includes("next")) return false;
-        if (frameworkFilter === "vite" && !fw.includes("vite")) return false;
-        if (frameworkFilter === "astro" && !fw.includes("astro")) return false;
-        if (frameworkFilter === "expo" && !fw.includes("expo")) return false;
-      }
-      return true;
-    });
-  }, [websites, searchQuery, statusFilter, frameworkFilter, kindFilter]);
+  const filteredWebsites = websites;
 
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
@@ -339,7 +318,6 @@ export function WebsiteBuilderDashboard() {
           body: JSON.stringify({ name: next.trim(), expectedRevision: site.revision }),
         }
       );
-      invalidateWebsitePreviewCache(site.companyId, site.id);
       await loadWebsites(companyId);
     } catch (err: any) {
       alert(err.message || "Failed to rename website");
@@ -378,7 +356,6 @@ export function WebsiteBuilderDashboard() {
           body: JSON.stringify({ expectedRevision: site.revision }),
         }
       );
-      invalidateWebsitePreviewCache(site.companyId, site.id);
       await loadWebsites(companyId);
     } catch (err: any) {
       alert(err.message || "Failed to archive website");
@@ -392,7 +369,6 @@ export function WebsiteBuilderDashboard() {
         `/companies/${encodeURIComponent(site.companyId)}/projects/${encodeURIComponent(site.id)}`,
         { method: "DELETE" }
       );
-      invalidateWebsitePreviewCache(site.companyId, site.id);
       await loadWebsites(companyId);
     } catch (err: any) {
       alert(err.message || "Failed to delete website");
@@ -429,9 +405,6 @@ export function WebsiteBuilderDashboard() {
                     writeActiveCompanyId(nextCompanyId);
                     setCreationCompanyId(nextCompanyId);
                   }
-                  const cached = nextCompanyId ? getCachedWebsites(nextCompanyId) : null;
-                  setWebsites(cached ?? []);
-                  setLoading(true);
                 }}
                 className="company-select"
                 title={companyId ? companies.find(c => c.id === companyId)?.name : language === "uk" ? "Усі" : "All"}
@@ -491,7 +464,7 @@ export function WebsiteBuilderDashboard() {
       )}
 
       {/* Grid of Website Projects */}
-      {websites.length === 0 ? (
+      {loading && websites.length === 0 ? null : websites.length === 0 && !search && statusFilter === "all" && frameworkFilter === "all" && kindFilter === "all" ? (
         <div className="automations-empty-card">
           <div className="automations-empty-icon">🌐</div>
           <h3>{t.emptyTitle}</h3>
@@ -512,7 +485,7 @@ export function WebsiteBuilderDashboard() {
           <button
             type="button"
             className="button-secondary"
-            onClick={() => { setSearchQuery(""); setStatusFilter("all"); setFrameworkFilter("all"); }}
+            onClick={() => { setSearchQuery(""); setStatusFilter("all"); setFrameworkFilter("all"); setKindFilter("all"); }}
           >
             {language === "uk" ? "Скинути фільтри" : "Clear filters"}
           </button>
@@ -533,6 +506,8 @@ export function WebsiteBuilderDashboard() {
           ))}
         </div>
       )}
+
+      {nextCursor && <div className="website-catalog-pagination"><button type="button" className="website-catalog-load-more" disabled={loading} onClick={() => void loadWebsites(undefined, nextCursor)}>{language === "uk" ? "Показати ще" : "Load more"}</button></div>}
 
       <CreateWebsiteDrawer
         isOpen={modalOpen}

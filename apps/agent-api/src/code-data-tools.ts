@@ -11,6 +11,14 @@ export interface CodeDataToolOptions {
   dataPolicy?: Pick<PolicyEngine, "evaluate">;
 }
 
+/** Minimal valid `operation` values of code.data.schema.apply, quoted in its argument refusal. */
+export const SCHEMA_OPERATION_EXAMPLES: Array<[string, Record<string, unknown>]> = [
+  ["create_collection", { kind: "create_collection", collection: "categories", fields: [{ name: "name", type: "string", required: true }] }],
+  ["add_field", { kind: "add_field", collection: "products", field: { name: "price", type: "decimal", required: true } }],
+  ["create_index", { kind: "create_index", collection: "products", field: { name: "name", type: "string" }, unique: false }],
+  ["create_relation", { kind: "create_relation", collection: "products", target: "categories", name: "category", field: "category_id", cardinality: "many-to-one" }],
+];
+
 export function codeDataExecutors(options: CodeDataToolOptions) {
   async function extended(input: CodeToolExecutionContext) {
     const service = options.projectData;
@@ -61,7 +69,8 @@ export function codeDataExecutors(options: CodeDataToolOptions) {
       if (!apply) return await options.projectData.inspectSchema(input.ctx, input.companyId, input.projectId);
       const operation = input.args.operation as SchemaOperation;
       const allowedKinds = ["create_collection", "add_field", "create_index", ...(input.tool.version >= 2 ? ["create_relation"] : [])];
-      if (!operation || !allowedKinds.includes(operation.kind)) throw new CodeToolError("invalid_arguments", `Only ${allowedKinds.join(", ")} are available; destructive changes and raw SQL are not supported`, 400, "schema", false, input.tool.name);
+      // The refusal shows one valid operation of each kind, so a model can correct its call instead of repeating it.
+      if (!operation || !allowedKinds.includes(operation.kind)) throw new CodeToolError("invalid_arguments", `Only ${allowedKinds.join(", ")} are available; destructive changes and raw SQL are not supported. Send one operation per call, for example ${SCHEMA_OPERATION_EXAMPLES.filter(([kind]) => allowedKinds.includes(kind)).map(([, example]) => JSON.stringify(example)).join(" or ")}`, 400, "schema", false, input.tool.name);
       if (input.tool.version >= 2) {
         const branches = (input.tool.inputSchema.properties as Record<string, { oneOf: Record<string, unknown>[] }>).operation!.oneOf;
         validateArguments(branches[operation.kind === "create_relation" ? 1 : 0]!, operation, input.tool.name);

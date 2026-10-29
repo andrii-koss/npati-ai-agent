@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { chatOpenData, currentChatConversationId, isChatPage } from "./chat-open";
 import { developmentIsActive, requestsDevelopmentRestore, planChatDevelopment, createDevelopmentAssistantIntro, type DevelopmentProcess, type DevelopmentTarget } from "@npati/shared";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "./business-workspace-shared";
@@ -30,19 +31,43 @@ export function useChatDevelopment(options: {
   const sending = useRef(false); const alive = useRef(true);
   const snapshotGeneration = useRef(0);
   const refreshing = useRef<Promise<void> | undefined>(undefined);
-  async function refresh() {
-    if (refreshing.current) return refreshing.current;
+  const firstRead = useRef(true);
+  const readFor = useRef<string | null | undefined>(undefined);
+  async function refresh(): Promise<void> {
+    // A read already running for the same chat is shared; a read for another chat waits for it and then runs.
+    if (refreshing.current) {
+      if (readFor.current === (callbacks.current.conversationId ?? currentChatConversationId())) return refreshing.current;
+      await refreshing.current.catch(() => {});
+      return refresh();
+    }
     const generation = snapshotGeneration.current;
     const task = async () => {
-    const data = await api<{ processes: DevelopmentProcess[] }>("/chat/development/processes");
+    // The chat page's single open request already carries this chat's processes; later reads ask only for this
+    // chat's and running processes. A project link still needs the full list to find that project's chat.
+    const conversationId = callbacks.current.conversationId ?? currentChatConversationId();
+    readFor.current = conversationId;
+    const shared = firstRead.current && conversationId && isChatPage() && !queryProjectId ? chatOpenData(conversationId) : null;
+    const opened = shared ? await shared.catch(() => null) : null;
+    firstRead.current = false;
+    const data = opened ? { processes: opened.processes }
+      : await api<{ processes: DevelopmentProcess[] }>(queryProjectId ? "/chat/development/processes" : `/chat/development/processes?conversationId=${encodeURIComponent(conversationId ?? "")}`);
     if (alive.current && generation === snapshotGeneration.current) setProcesses(data.processes);
     };
     refreshing.current = task();
     try { await refreshing.current; } finally { refreshing.current = undefined; }
   }
   const anyActive = processes.some(developmentIsActive);
+  // A project chat keeps live updates (a new run starts after the previous one finished); a chat without processes has none.
+  const live = anyActive || processes.some(p => p.conversationId === options.conversationId || p.parentConversationId === options.conversationId);
   useEffect(() => {
     alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
+  // The chat id arriving after the first read of the same page chat needs no second read.
+  useEffect(() => { if (readFor.current === undefined || readFor.current !== options.conversationId) void refresh().catch(() => {}); }, [options.conversationId]);
+  useEffect(() => {
+    // A chat without development processes needs no polling and no live stream; a started process turns them on.
+    if (!live) return;
     const poll = () => { if (!document.hidden) void refresh().catch(() => {}); };
     let controller: AbortController | undefined;
     const visibility = () => {
@@ -57,15 +82,14 @@ export function useChatDevelopment(options: {
           if (stream.signal.aborted) return;
           if (snapshot) { snapshotGeneration.current++; setProcesses(snapshot); }
           else poll();
-        });
+        }, queryProjectId ? undefined : callbacks.current.conversationId ?? currentChatConversationId() ?? "");
       }
     };
     visibility();
     document.addEventListener("visibilitychange", visibility);
-    const intervalMs = anyActive ? 5000 : 10000;
-    const timer = window.setInterval(poll, intervalMs);
-    return () => { alive.current = false; controller?.abort(); window.clearInterval(timer); document.removeEventListener("visibilitychange", visibility); };
-  }, [anyActive]);
+    const timer = window.setInterval(poll, anyActive ? 5000 : 10000);
+    return () => { controller?.abort(); window.clearInterval(timer); document.removeEventListener("visibilitychange", visibility); };
+  }, [live, anyActive]);
   useEffect(() => {
     // Websites links recover a dedicated development chat, even after its previous chat was deleted.
     const companyId = search.get("company");

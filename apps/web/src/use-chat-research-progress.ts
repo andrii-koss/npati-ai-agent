@@ -52,7 +52,8 @@ export function useChatResearchProgress(flushDeltasRef: React.MutableRefObject<(
       }
       progressQueueRef.current.shift();
       setVisibleProgressCount((count) => count + 1);
-      nextProgressRevealRef.current = Date.now() + (next.type === "search_results_received" ? 0 : 800);
+      // Only research steps are paced for reading; the answer's own generation events never hold its text.
+      nextProgressRevealRef.current = Date.now() + (next.type === "search_results_received" || next.type.startsWith("final_generation") ? 0 : 800);
       progressTimerRef.current = null;
       if (progressQueueRef.current.length > 0) {
         drainProgressQueue();

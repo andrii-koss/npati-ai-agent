@@ -66,6 +66,13 @@ export function goalScopeNote(hiddenGoals: number): string {
   return hiddenGoals ? `\n\nOnly the goals of the Business(es) in scope for this request are listed above. ${hiddenGoals} goal(s) of other Businesses exist and are not shown: never state that they do not exist or were not saved, and show them only if the user names that Business.` : "";
 }
 
+/** A turn without a record route gets the Business names only, so it neither invents nor denies stored records. */
+export function unloadedRecordsNote(businesses: Business[]): string {
+  if (!businesses.length) return "";
+  const names = businesses.slice(0, 20).map((business) => JSON.stringify(business.name.slice(0, 80))).join(", ");
+  return `\n\nThe user owns ${businesses.length} Business Profile(s): ${names}${businesses.length > 20 ? ", ..." : ""}. Their fields, goals, companies and other stored records are not loaded for this message: do not state their details or claim any change to them; if the user asks about them, ask them to name the record and what they need.`;
+}
+
 /**
  * Goals shown to the model follow the Business Memory scope: the Businesses named in the request, else the selected
  * Company's linked Business, else all of them. Another Company's goals must not surface while a Company is selected.

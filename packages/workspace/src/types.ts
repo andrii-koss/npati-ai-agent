@@ -281,6 +281,7 @@ export interface WorkspaceStore {
   setCompanyMainAgent(context: AuthContext, companyId: string, agentId: string | null, expectedRevision: number): Promise<Company>;
   createProject(context: AuthContext, companyId: string, input: ProjectInput, idempotencyKey: string): Promise<{ project: Project; created: boolean }>;
   listProjects(context: AuthContext, companyId: string, includeArchived?: boolean): Promise<Project[]>;
+  listProjectCatalog(context: AuthContext, input: import("./project-catalog").ProjectCatalogInput): Promise<import("./project-catalog").ProjectCatalogPage>;
   getProject(context: AuthContext, companyId: string, projectId: string): Promise<Project>;
   updateProject(context: AuthContext, companyId: string, projectId: string, input: { name?: string; expectedRevision: number; code?: ProjectCodeSettings }): Promise<Project>;
   archiveProject(context: AuthContext, companyId: string, projectId: string, expectedRevision: number): Promise<Project>;

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { LanguageSwitcher } from "../LanguageSwitcher";
 import { NpatiAgentLogo } from "./brand";
@@ -20,6 +21,7 @@ export function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose
     hasLoaded,
     pinnedChats,
     unpinnedChats,
+    loadMoreConversations,
     menuTarget,
     setMenuTarget,
     toast,
@@ -34,6 +36,12 @@ export function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose
     deleteConversation,
     deleteBusiness,
   } = useSidebarState(onClose);
+
+  // Each route renders its own shell: keep the open chat visible in the list after navigation.
+  const chatListRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    chatListRef.current?.querySelector<HTMLElement>(".sidebar-history-row.active")?.scrollIntoView({ block: "nearest" });
+  }, [location.pathname, chatOpen]);
 
   function renderConversationRow(conversation: SidebarConversation, isPinned: boolean) {
     const isMenuOpen = menuTarget?.type === "chat" && menuTarget.id === conversation.id;
@@ -107,7 +115,10 @@ export function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose
             />
           </div>
           {chatOpen && (
-            <div className="sidebar-dropdown">
+            <div className="sidebar-dropdown" ref={chatListRef} onScroll={(event) => {
+              const list = event.currentTarget;
+              if (list.scrollHeight - list.scrollTop - list.clientHeight < 60) void loadMoreConversations();
+            }}>
               {!hasSavedChats && hasLoaded && <small className="sidebar-empty">{t("sidebar.noSavedChats")}</small>}
               {pinnedChats.length > 0 && (
                 <>

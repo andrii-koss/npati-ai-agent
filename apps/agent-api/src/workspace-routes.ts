@@ -6,7 +6,7 @@ import { AuthenticationError, type AuthProvider } from "./auth";
 import { isChatCapableModel } from "@npati/omniroute-adapter";
 import type { AIPreferencesStore } from "./ai-preferences";
 
-function errorReply(reply: FastifyReply, error: unknown) {
+export function errorReply(reply: FastifyReply, error: unknown) {
   if (error instanceof AuthenticationError) return reply.code(error.status).send({ error: { code: error.code, message: error.message } });
   if (error instanceof WorkspaceAccessError) return reply.code(403).send({ error: { code: error.code, message: error.message } });
   if (error instanceof WorkspaceNotFoundError) return reply.code(404).send({ error: { code: error.code, message: error.message } });
@@ -259,6 +259,17 @@ export function registerWorkspaceRoutes(app: FastifyInstance, store: WorkspaceSt
     }
   });
 
+  // The sidebar lists every Business conversation; one request replaces one HTTP request per Business.
+  app.get("/business-conversations", async (request, reply) => {
+    try {
+      reply.header("cache-control", "private, no-store");
+      const context = await auth.authenticate(request);
+      const businesses = await store.listUserBusinesses(context);
+      const rows = await Promise.all(businesses.map(async (business) => (await store.listConversations(context, business.id))
+        .map((conversation) => ({ ...conversation, businessId: business.id, businessName: business.name }))));
+      return rows.flat();
+    } catch (error) { return errorReply(reply, error); }
+  });
   app.get<{ Params: { businessId: string } }>("/businesses/:businessId/conversations", async (request, reply) => {
     try { reply.header("cache-control", "private, no-store"); return await store.listConversations(await auth.authenticate(request), request.params.businessId); } catch (error) { return errorReply(reply, error); }
   });

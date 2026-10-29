@@ -42,7 +42,7 @@ import { ResearchProgressEvent, ResearchProgressListener } from "@npati/web-rese
 import { AuthContext, CodeSession, WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
 import type { CodeRunCancellationRegistry } from "./code-run-cancellation";
 import type { CodeSessionRunExecutor } from "./code-session-run-executor";
-import { readIntentHistory } from "./chat-project-intent";
+import { codeModeDecision, readIntentHistory } from "./chat-project-intent";
 
 export type { ChatStreamRouteDeps } from "./chat-stream-route-types";
 import type { ChatStreamRouteDeps } from "./chat-stream-route-types";
@@ -60,6 +60,8 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
     projectId?: string;
     noMemory?: boolean;
     ephemeral?: boolean;
+    /** "code": the user chose project work on the selected project, so no classifier call is made. */
+    mode?: "chat" | "code";
   } }>("/chat/stream", async (request, reply) => {
 
     let reservedCodeRunSlot: { lease: Awaited<ReturnType<CodeRunQueue["acquire"]>>; background: boolean } | null = null;
@@ -115,7 +117,11 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
       }
       const history = !memoryPolicy.noMemoryActive
         ? await readIntentHistory(workspaceStore, auth, request.body.conversationId, requestedContext.businessId) : [];
-      const semantic = await deps.resolveProjectIntent?.(auth, {
+      // In Code mode the selected project's operation comes from the deterministic router, and anything it reads as
+      // conversation is an edit of that project; record modules stay out of the prompt (no record route).
+      const codeMode = request.body.mode === "code" && Boolean(requestedContext.projectId);
+      const semantic = codeMode ? codeModeDecision(defaultHybridRouter.classifyProject({ message, activeCompanyId: requestedContext.companyId,
+        activeProjectId: requestedContext.projectId, hasWorkspace: true })) : await deps.resolveProjectIntent?.(auth, {
         message, activeCompanyId: requestedContext.companyId, activeProjectId: requestedContext.projectId,
         focusedEntityType: focusedChatEntity(requestedContext, confirmedContext).entityType,
         attachmentNames: request.body.attachments?.flatMap(item => typeof item?.name === "string" ? [item.name] : []),

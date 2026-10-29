@@ -38,13 +38,16 @@ describe("WebsiteProjectCard", () => {
     expect(markup).toContain("Інтернет-магазин");
 
     // Preview viewport is rendered
-    expect(markup).toContain("website-preview-viewport");
+    expect(markup).toContain("website-card-placeholder");
+    expect(markup).not.toContain("<iframe");
 
     // "Edit in chat" button is present
     expect(markup).toContain("Редагувати в чаті");
 
     // Compact icon buttons are present: Open Preview, Code, Duplicate, Rename, Delete
     expect(markup).toContain("Відкрити Preview");
+    expect(markup).toContain("aspect-ratio:16 / 10");
+    expect(markup).not.toContain("height:180px");
     expect(markup).toContain("Код");
     expect(markup).toContain("Дублювати");
     expect(markup).toContain("Перейменувати");

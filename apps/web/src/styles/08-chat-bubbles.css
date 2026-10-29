@@ -661,3 +661,81 @@ article.user .chat-message-attachment.document {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+/* Chat / Code work mode switch, centred at the top of the conversation. */
+.chat-work-mode {
+  position: sticky;
+  top: 12px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin: 4px auto 16px;
+  pointer-events: none;
+}
+
+.chat-work-mode-switch {
+  display: inline-flex;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--npati-gray-100, #f0f0f0);
+  pointer-events: auto;
+}
+
+.chat-work-mode-option {
+  min-width: 112px;
+  height: 40px;
+  padding: 0 24px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--npati-gray-600, #525252);
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.chat-work-mode-option.active {
+  background: var(--npati-white, #ffffff);
+  color: var(--npati-black, #181818);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.chat-work-mode-option:focus-visible {
+  outline: 2px solid var(--npati-black, #181818);
+  outline-offset: 2px;
+}
+
+.chat-work-mode-option:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.chat-work-mode-hint {
+  margin: 0;
+  padding: 4px 12px;
+  border-radius: 8px;
+  background: var(--npati-white, #ffffff);
+  color: var(--npati-gray-500, #737373);
+  font-size: 12px;
+  text-align: center;
+  pointer-events: auto;
+}
+
+@media (max-width: 480px) {
+  .chat-work-mode-option {
+    min-width: 88px;
+    height: 36px;
+    padding: 0 16px;
+    font-size: 14px;
+  }
+}
+
+/* Timeline rendering virtualization: messages and activity outside the viewport are neither laid out nor painted.
+ * They stay in the DOM, so scroll anchoring when earlier messages load, text selection and in-page search keep working.
+ * "auto" keeps the last rendered height, so a message measured once never changes the scroll height again. */
+.message-stream > article {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 160px;
+}

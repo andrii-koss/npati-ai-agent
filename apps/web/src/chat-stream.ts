@@ -49,6 +49,7 @@ export async function streamChat<T>(
     noMemory?: boolean;
     ephemeral?: boolean;
     streamId?:string;
+    mode?: "chat" | "code";
   },
   onProgress: (event: ChatProgressEvent) => void,
   options: { onDelta?: (delta:string)=>void; signal?:AbortSignal;

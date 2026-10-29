@@ -29,6 +29,16 @@ export const SIDEBAR_CONVERSATIONS_CACHE_KEY = "npati_sidebar_conversations_cach
 let cachedSidebarConversations: SidebarConversation[] | null = null;
 let isSidebarConversationsLoaded = false;
 let activeSidebarConversationsFetch: Promise<SidebarConversation[]> | null = null;
+// Whether the server has more sidebar pages; kept for this page session so a remounted shell continues the list.
+let cachedSidebarMore = false;
+
+export function getCachedSidebarMore(): boolean {
+  return cachedSidebarMore;
+}
+
+export function setCachedSidebarMore(more: boolean) {
+  cachedSidebarMore = more;
+}
 
 let cachedChatOpen = true;
 let cachedBusinessOpen = true;
@@ -174,10 +184,35 @@ export function areSidebarConversationsEqual(a: SidebarConversation[], b: Sideba
   return true;
 }
 
+export const SIDEBAR_PAGE_SIZE = 20;
+
+/** One page of the sidebar, newest first: neutral and Business conversations merged by the server. */
+export async function fetchSidebarPage(offset: number, limit = SIDEBAR_PAGE_SIZE): Promise<{ items: SidebarConversation[]; more: boolean }> {
+  const response = await authFetch(`/api/chat/sidebar?offset=${offset}&limit=${limit}`, { cache: "no-store" });
+  if (!response.ok) throw new Error(`Request failed with HTTP ${response.status}`);
+  return (await response.json()) as { items: SidebarConversation[]; more: boolean };
+}
+
 export async function fetchAllSidebarConversations(
   businesses: Array<{ id: string; name: string }>
 ): Promise<SidebarConversation[]> {
   const neutralRequest = authFetch("/api/conversations", { cache: "no-store" });
+  // One request for every Business: a request per Business queued the next chat message behind the browser's
+  // per-host connection limit. A server without the combined route falls back to the per-Business requests.
+  const combined = await authFetch("/api/business-conversations", { cache: "no-store" }).catch(() => undefined);
+  if (combined?.ok) {
+    const known = new Map(businesses.map((business) => [business.id, business.name]));
+    const businessRows = ((await combined.json()) as SidebarConversation[])
+      .filter((conversation) => conversation.businessId && known.has(conversation.businessId))
+      .map((conversation) => ({ ...conversation, businessName: known.get(conversation.businessId!) ?? conversation.businessName }));
+    const neutralResponse = await neutralRequest;
+    const neutralRows = neutralResponse.ok
+      ? ((await neutralResponse.json()) as Omit<SidebarConversation, "businessId" | "businessName">[]).map(
+          (conversation) => ({ ...conversation, businessId: null, businessName: "" })
+        )
+      : [];
+    return [...neutralRows, ...businessRows].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  }
   const businessRequests = businesses.map(async (business) => {
     const response = await authFetch(`/api/businesses/${business.id}/conversations`, { cache: "no-store" });
     if (!response.ok) return [] as SidebarConversation[];

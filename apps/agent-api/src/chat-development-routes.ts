@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { AuthProvider } from "./auth";
+import { chatProcess, registerChatOpenRoutes } from "./chat-open-routes";
 import { AuthenticationError } from "./auth";
 import { ChatDevelopmentService, DevelopmentError, type DevelopmentPorts } from "./chat-development-service";
 import { registerCodeMonitorRoutes } from "./code-monitor-routes";
@@ -11,6 +12,7 @@ function fail(reply: FastifyReply, error: unknown) {
 export function registerChatDevelopmentRoutes(app: FastifyInstance, deps: DevelopmentPorts & { auth: AuthProvider }) {
   registerCodeMonitorRoutes(app, deps);
   const service = new ChatDevelopmentService(deps);
+  registerChatOpenRoutes(app, { auth: deps.auth, store: deps.store, listProcesses: (context, conversationId) => service.listForChat(context, conversationId) });
   const streams = new Set<() => void>();
   app.post<{ Body: { message: string; companyId?: string; projectId?: string; conversationId?: string; businessId?: string } }>("/chat/development/plan",
     { schema: { body: { type: "object", additionalProperties: false, required: ["message"], properties: {
@@ -22,10 +24,15 @@ export function registerChatDevelopmentRoutes(app: FastifyInstance, deps: Develo
     });
   app.addHook("preClose", async () => { for (const close of streams) close(); await service.close(); });
   // Transport only: snapshots use the existing persisted runtime records.
-  app.get("/chat/development/processes/stream", async (request, reply) => {
+  app.get<{ Querystring: { conversationId?: string } }>("/chat/development/processes/stream", async (request, reply) => {
     try {
       const ctx = await deps.auth.authenticate(request);
-      const initial = await service.list(ctx);
+      // A chat's live stream carries only its own and running processes; without the parameter the full list is kept.
+      const conversationId = request.query.conversationId;
+      const list = async () => conversationId !== undefined
+        ? (await service.listForChat(ctx, conversationId || undefined)).filter((process) => chatProcess(process, conversationId || undefined))
+        : service.list(ctx);
+      const initial = await list();
       reply.hijack();
       reply.raw.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
       let closed = false, polling = false, pending = false, signature = "", timer: ReturnType<typeof setTimeout>;
@@ -41,7 +48,7 @@ export function registerChatDevelopmentRoutes(app: FastifyInstance, deps: Develo
         let delayed = false;
         try {
           if (reply.raw.writableNeedDrain) delayed = true;
-          else { const processes = await service.list(ctx); if (!closed) publish(processes); }
+          else { const processes = await list(); if (!closed) publish(processes); }
         } catch { close(); }
         finally {
           polling = false;
@@ -59,8 +66,15 @@ export function registerChatDevelopmentRoutes(app: FastifyInstance, deps: Develo
       publish(initial); timer = setTimeout(poll, 3000);
     } catch (error) { return fail(reply, error); }
   });
-  app.get("/chat/development/processes", async (request, reply) => {
-    try { return { processes: await service.list(await deps.auth.authenticate(request)) }; } catch (error) { return fail(reply, error); }
+  app.get<{ Querystring: { conversationId?: string } }>("/chat/development/processes", async (request, reply) => {
+    try {
+      const context = await deps.auth.authenticate(request);
+      // A chat asks only for its own processes and running ones; without the parameter the full list is kept.
+      const conversationId = request.query.conversationId;
+      return { processes: conversationId !== undefined
+        ? (await service.listForChat(context, conversationId || undefined)).filter((process) => chatProcess(process, conversationId || undefined))
+        : await service.list(context) };
+    } catch (error) { return fail(reply, error); }
   });
   app.post<{ Body: { companyId: string; message: string; targets?: import("@npati/shared").DevelopmentTarget[]; conversationId?: string; businessId?: string; requestId: string } }>("/chat/development/processes",
     { schema: { body: { type: "object", additionalProperties: false, required: ["companyId", "message", "requestId"], properties: {

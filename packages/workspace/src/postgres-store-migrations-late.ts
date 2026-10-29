@@ -667,4 +667,17 @@ export async function runPostgresMigrationsPost086(pool: Pool): Promise<void> {
       finally { client.release(); }
     }
 
+    const catalogMigration = await pool.query("SELECT 1 FROM schema_migrations WHERE version='097_project_catalog'");
+    if (!catalogMigration.rowCount) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT pg_advisory_xact_lock(hashtext('097_project_catalog'))");
+        const { runMigration097 } = await import("./migration-097");
+        await runMigration097(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('097_project_catalog') ON CONFLICT DO NOTHING");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
 }

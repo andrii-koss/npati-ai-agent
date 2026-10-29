@@ -160,3 +160,27 @@ export function BusinessChatComposer({
     </form>
   );
 }
+
+/** Chat: the router decides what the message is. Code: work on the selected project without a routing call. */
+export function ChatWorkModeSwitch({ mode, onChange, projectSelected, disabled, t }: {
+  mode: "chat" | "code";
+  onChange: (mode: "chat" | "code") => void;
+  projectSelected: boolean;
+  disabled: boolean;
+  t: (key: string) => string;
+}) {
+  return (
+    <div className="chat-work-mode">
+      <div className="chat-work-mode-switch" role="radiogroup" aria-label={t("chat.workModeLabel")}>
+        {(["chat", "code"] as const).map((option) => (
+          <button key={option} type="button" role="radio" aria-checked={mode === option}
+            className={mode === option ? "chat-work-mode-option active" : "chat-work-mode-option"}
+            disabled={disabled} onClick={() => onChange(option)}>
+            {t(option === "chat" ? "chat.workModeChat" : "chat.workModeCode")}
+          </button>
+        ))}
+      </div>
+      {mode === "code" && !projectSelected && <p className="chat-work-mode-hint">{t("chat.codeModeNeedsProject")}</p>}
+    </div>
+  );
+}

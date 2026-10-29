@@ -16,14 +16,16 @@ it.each(["/c/child?company=company&project=project&developmentRoot=parent", "/c/
   Object.defineProperty(HTMLElement.prototype,"scrollTo",{configurable:true,value:vi.fn()});
   const process: DevelopmentProcess = { id:"process",companyId:"company",projectId:"project",sessionId:"session",runId:"run",parentConversationId:"parent",conversationId:"child",name:"Company website",framework:"Next.js",inboxEnabled:true,status:"completed",previewUrl:"/preview/project",hidden:false,createdAt:"",updatedAt:"",progress:[{id:"build",stage:"build",title:"Building project",status:"completed",at:""}] };
   const card = { id:"project",projectId:"project",companyId:"company",name:process.name,status:"completed",kind:"code_project",previewUrl:process.previewUrl,lastBuildStatus:"ready" };
-  mocks.api.mockImplementation(async (url: string) => url === "/chat/development/processes" ? {processes:[process]} : url === "/conversations" ? [] : url === "/conversations/child" ? {messages:[{id:"card",role:"assistant",content:process.name,projectCard:card,createdAt:""}]} : {});
+  const childMessages = () => [{id:"card",role:"assistant",content:process.name,projectCard:card,createdAt:""}];
+  mocks.api.mockImplementation(async (url: string) => url.startsWith("/chat/development/processes") ? {processes:[process]} : url === "/conversations" ? [] : url.startsWith("/conversations/child") ? {messages:childMessages(),earlier:0} : {});
   const requests: Record<string,unknown>[] = [];
   let releaseFirstResponse: () => void;
   const firstResponse = new Promise<void>(resolve => { releaseFirstResponse = resolve; });
   let changes: ReadableStreamDefaultController<Uint8Array>;
   let inboxPhase="settled";const queuedRequests: Record<string,unknown>[]=[];
   vi.stubGlobal("fetch",vi.fn(async (url: string, init?:RequestInit) => {
-    if(url === "/api/chat/development/processes/stream") return new Response(new ReadableStream({start(c){changes=c;init?.signal?.addEventListener("abort",()=>c.close(),{once:true});}}));
+    if(url.startsWith("/api/chat/development/processes/stream")) return new Response(new ReadableStream({start(c){changes=c;init?.signal?.addEventListener("abort",()=>c.close(),{once:true});}}));
+    if(url.startsWith("/api/chat/open")) return new Response(JSON.stringify({overview:null,conversation:{id:"child",title:"",messages:childMessages(),earlier:0},company:null,chats:{items:[],more:false},processes:[process]}));
     if(url.includes("/code/sessions/session/messages")) {
       if(init?.method === "POST") { const request=JSON.parse(String(init.body));queuedRequests.push(request);const receipt={id:"queued",requestId:request.requestId,text:request.text,target:"next-turn",status:"pending",revision:2,runId:null,createdAt:new Date().toISOString()};return new Response(JSON.stringify({revision:2,phase:"sealed",runId:"run",lastError:null,messages:[receipt],receipt}),{status:202}); }
       return new Response(JSON.stringify({revision:1,phase:inboxPhase,runId:"run",lastError:null,messages:[]}));
@@ -90,7 +92,7 @@ it.each(["/c/child?company=company&project=project&developmentRoot=parent", "/c/
   expect(queuedRequests).toHaveLength(1);expect(queuedRequests[0]).toMatchObject({mode:"queue",text:"Make the footer red"});expect(requests).toHaveLength(3);
   expect(host.querySelector("article.user:last-of-type")?.textContent ?? host.textContent).toContain("Make the footer red");
   expect(host.querySelector(".code-pending-messages")).toBeNull();
-  const traceCalls = () => vi.mocked(fetch).mock.calls.filter(([url])=>url==="/api/chat/development/processes/stream");
+  const traceCalls = () => vi.mocked(fetch).mock.calls.filter(([url])=>String(url).startsWith("/api/chat/development/processes/stream"));
   const activeTrace = traceCalls().at(-1)![1]!.signal!;
   const hidden = vi.spyOn(document,"hidden","get").mockReturnValue(true);
   await act(async()=>document.dispatchEvent(new Event("visibilitychange")));
@@ -110,12 +112,14 @@ it("keeps Preview outside user messages before and after reloading persisted cha
  let releaseProcesses:()=>void=()=>{};
  let loaded:Promise<void>;
  mocks.api.mockImplementation(async(url:string)=>{
-  if(url==="/chat/development/processes"){await loaded;return {processes:[process]};}
+  if(url.startsWith("/chat/development/processes")){await loaded;return {processes:[process]};}
   if(url==="/conversations")return [];
-  if(url==="/conversations/reload-chat")return {messages:JSON.parse(JSON.stringify(messages))};
+  if(url.startsWith("/conversations/reload-chat"))return {messages:JSON.parse(JSON.stringify(messages)),earlier:0};
   return {};
  });
- vi.stubGlobal("fetch",vi.fn(async(_url:string,init?:RequestInit)=>new Response(new ReadableStream({start(c){init?.signal?.addEventListener("abort",()=>c.close(),{once:true});}}))));
+ vi.stubGlobal("fetch",vi.fn(async(url:string,init?:RequestInit)=>String(url).startsWith("/api/chat/open")
+  ? new Response(JSON.stringify({overview:null,conversation:{id:"reload-chat",title:"",messages:JSON.parse(JSON.stringify(messages)),earlier:0},company:null,chats:{items:[],more:false},processes:[]}))
+  : new Response(new ReadableStream({start(c){init?.signal?.addEventListener("abort",()=>c.close(),{once:true});}}))));
  const host=document.createElement("div");document.body.append(host);
  for(let reload=0;reload<2;reload++){
   loaded=new Promise<void>(resolve=>{releaseProcesses=resolve;});

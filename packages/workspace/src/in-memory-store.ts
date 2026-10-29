@@ -313,6 +313,22 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     async createProject(context: AuthContext, companyId: string, input: ProjectInput, idempotencyKey: string) { return createProject(this.projectState(), context, companyId, input, idempotencyKey); }
 
     async listProjects(context: AuthContext, companyId: string, includeArchived = false) { return listProjects(this.projectState(), context, companyId, includeArchived); }
+    async listProjectCatalog(context: AuthContext, input: import("./project-catalog").ProjectCatalogInput) {
+      const { catalogCursor, catalogPage, catalogFramework } = await import("./project-catalog");
+      const cursor = catalogCursor(context, input);
+      if (input.companyId) this.assertCompany(context, input.companyId);
+      const rows = [...this.projects.values()].filter(project => {
+        if (project.workspaceId !== context.workspaceId || project.createdBy !== context.userId || (context.companyId && project.companyId !== context.companyId) || (input.companyId && project.companyId !== input.companyId)) return false;
+        try { this.assertCompany(context, project.companyId); } catch { return false; }
+        if (["soft_deleted", "purging", "deleted"].includes(project.status)) return false;
+        if (input.status === "active" && project.status === "archived" || input.status === "archived" && project.status !== "archived") return false;
+        if (input.kind && input.kind !== "all" && project.kind !== input.kind) return false;
+        if (!catalogFramework(project.framework ?? "", input.framework ?? "all")) return false;
+        if (input.search && !(project.name + " " + (project.description ?? "")).toLowerCase().includes(input.search.toLowerCase())) return false;
+        return !cursor || project.updatedAt < cursor.time || project.updatedAt === cursor.time && project.id > cursor.id;
+      }).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
+      return catalogPage(context, input, rows);
+    }
 
     async getProject(context: AuthContext, companyId: string, projectId: string) { return getProject(this.projectState(), context, companyId, projectId); }
 

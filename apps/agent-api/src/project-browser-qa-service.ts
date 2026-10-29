@@ -6,6 +6,7 @@ import type { ProjectPreviewService } from "./project-preview-service";
 import type { ProjectSandboxService } from "./project-sandbox-service";
 import type { ProjectService } from "./project-service";
 import type { SandboxBrowserQaResult } from "./sandbox-provider";
+import { screenshotHasDetail } from "./project-screenshot-content";
 
 export interface BrowserQaInspectOptions {
   actions?: BrowserQaAction[];
@@ -105,13 +106,17 @@ export class ProjectBrowserQaService {
       issues.push(issue("performance", "warning", `Page load took ${result.loadTimeMs} ms`, "Review page loading and resource usage."));
     if (enabled.has("performance") && result.totalSizeBytes > 1_000_000)
       issues.push(issue("performance", "warning", "Rendered HTML exceeds 1 MB", "Reduce inlined page content."));
-    if (options.screenshotMode === "visual" && result.screenshot?.captureMode !== "visual") throw new BrowserQaError("visual_screenshot_unavailable", "The runner did not return a real visual capture; layout-only screenshots cannot verify a reference.", 503);
+    if (options.screenshotMode === "visual" && !result.screenshot) throw new BrowserQaError("visual_screenshot_unavailable", "The runner returned no screenshot within the capture size limit.", 503);
+    if (options.screenshotMode === "visual" && result.screenshot?.captureMode !== "visual") throw new BrowserQaError("visual_screenshot_unavailable", "The runner returned a layout image instead of a visual screenshot.", 503);
     const screenshots: BrowserQaScreenshot[] = [];
     if (enabled.has("screenshot") && result.screenshot) {
       const bytes = Buffer.from(result.screenshot.base64Data, "base64");
       if (result.screenshot.redacted === true && result.screenshot.mimeType === "image/png" && bytes.length <= maxScreenshotBytes &&
           bytes.length === result.screenshot.sizeBytes && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])))
         screenshots.push({ name: options.viewport ?? "desktop", viewport, mimeType: "image/png", base64Data: result.screenshot.base64Data, sizeBytes: bytes.length, captureMode: result.screenshot.captureMode ?? "layout" });
+    }
+    if (options.screenshotMode === "visual" && screenshots.some(image => !screenshotHasDetail(Buffer.from(image.base64Data, "base64")))) {
+      throw new BrowserQaError("preview_empty", "The project renders an empty screen. A screenshot requires visible project content.", 409);
     }
     const status: BrowserQaStatus = issues.some(item => item.severity === "error") ? "failed" : issues.length ? "warning" : "passed";
     const metrics: BrowserQaMetrics = {

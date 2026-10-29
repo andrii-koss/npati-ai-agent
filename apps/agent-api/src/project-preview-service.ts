@@ -169,6 +169,7 @@ export class ProjectPreviewService {
   private readonly secret: string;
   private readonly sessions = new Map<string, ActivePreviewSession>();
   private readonly recoveries = new Map<string, Promise<unknown>>();
+  private readonly starts = new Map<string, ReturnType<ProjectPreviewService["launchPreview"]>>();
 
   constructor(
     private readonly projects: ProjectService,
@@ -270,6 +271,21 @@ export class ProjectPreviewService {
   }
 
   async startPreview(
+    ctx: AuthContext, companyId: string, projectId: string,
+    options: { command?: string; port?: number; agentId?: string; signal?: AbortSignal; callerOrigin?: string; verifiedBuild?: boolean; forceRestart?: boolean } = {},
+  ): ReturnType<ProjectPreviewService["launchPreview"]> {
+    // Browser actions can overlap a status recovery. Keep one identical launch in flight.
+    if (options.signal || options.forceRestart) return this.launchPreview(ctx, companyId, projectId, options);
+    const key = JSON.stringify([ctx.workspaceId, ctx.userId, ctx.companyId, companyId, projectId, options.command, options.port, options.verifiedBuild, options.agentId]);
+    const pending = this.starts.get(key);
+    if (pending) return pending;
+    const start = this.launchPreview(ctx, companyId, projectId, options);
+    this.starts.set(key, start);
+    try { return await start; }
+    finally { if (this.starts.get(key) === start) this.starts.delete(key); }
+  }
+
+  private async launchPreview(
     ctx: AuthContext,
     companyId: string,
     projectId: string,
@@ -344,7 +360,7 @@ export class ProjectPreviewService {
     for (const command of previousCommands) await this.sandbox.stopRecordedPreview(ctx, companyId, projectId, command);
 
     // Ensure dependencies are installed before starting the dev server for node/framework projects
-    if (options.verifiedBuild !== true && options.verifiedBuild !== false && detected.framework !== "static" && files.some((f) => f.path === "package.json")) {
+    if (!verifiedBuild && options.verifiedBuild !== false && detected.framework !== "static" && files.some((f) => f.path === "package.json")) {
       const paths = new Set(files.map((f) => f.path));
       const installCmd = detected.packageManager === "pnpm" && paths.has("pnpm-lock.yaml")
         ? "pnpm install"
@@ -512,15 +528,21 @@ export class ProjectPreviewService {
     error: string | null;
     restartCount: number;
   }> {
-    const project = await this.projects.get(ctx, companyId, projectId);
+    let project = await this.projects.get(ctx, companyId, projectId);
     const session = this.sessions.get(projectId);
 
     if (!session || !this.sandbox) {
       // Database state survives a restart; the site's HTTP process may not.
-      if (this.sandbox?.supportsPreviewProxy() && project.status === "previewing" && project.sandboxId && project.previewPort) {
+      if (this.sandbox?.supportsPreviewProxy() && ["previewing", "failed"].includes(project.status) && project.sandboxId && project.previewPort) {
         const scope = { workspaceId: ctx.workspaceId, userId: ctx.userId, companyId, projectId };
         const response = await this.sandbox.proxyPreview(scope, project.sandboxId,
           { port: project.previewPort, path: "/", method: "GET", headers: {} }).catch(() => null);
+        if (response && response.status >= 200 && response.status < 400 && project.status === "failed") {
+          project = await this.projects.updatePreview(ctx, companyId, projectId, { status: "previewing" });
+        } else if (project.status === "failed") {
+          return { status: project.status, previewUrl: project.previewUrl, port: project.previewPort, framework: project.framework,
+            lastBuildStatus: project.lastBuildStatus, isRunning: false, error: "Preview server is not running", restartCount: 0 };
+        }
         if (!response || response.status >= 500) {
           const key = JSON.stringify(scope);
           let recovery = this.recoveries.get(key);

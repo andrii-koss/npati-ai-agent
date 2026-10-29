@@ -31,6 +31,19 @@ function key(request: FastifyRequest) {
 import type { ProjectWorkspace } from "./project-workspace";
 
 export function registerProjectRoutes(app: FastifyInstance, service: ProjectService, auth: AuthProvider, workspace?: ProjectWorkspace) {
+  app.get<{ Querystring: import("@npati/workspace").ProjectCatalogInput }>("/projects/catalog", {
+    schema: { querystring: { type: "object", additionalProperties: false, properties: {
+      companyId: { type: "string", minLength: 1, maxLength: 100 }, search: { type: "string", maxLength: 200 },
+      status: { type: "string", enum: ["all", "active", "archived"] },
+      framework: { type: "string", enum: ["all", "static", "nextjs", "vite", "astro", "expo"] },
+      kind: { type: "string", enum: ["all", ...PROJECT_KINDS] }, cursor: { type: "string", maxLength: 4096 },
+    } } },
+  }, async (request, reply) => {
+    try {
+      reply.header("Cache-Control", "private, no-store");
+      return await service.catalog(await authorize(auth, request, "workspace:read"), request.query);
+    } catch (error) { return fail(reply, error); }
+  });
   app.get<{ Params: { companyId: string }; Querystring: { includeArchived?: string } }>("/companies/:companyId/projects", async (request, reply) => {
     try {
       if (request.query.includeArchived && !["true", "false"].includes(request.query.includeArchived)) throw new Error("Invalid includeArchived");

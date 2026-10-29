@@ -57,6 +57,10 @@ export class ProjectService {
     return this.store.listProjects(context, companyId, includeArchived);
   }
 
+  async catalog(context: AuthContext, input: import("@npati/workspace").ProjectCatalogInput) {
+    return this.store.listProjectCatalog(context, input);
+  }
+
   async get(context: AuthContext, companyId: string, projectId: string) {
     await this.company(context, companyId);
     return this.store.getProject(context, companyId, projectId);

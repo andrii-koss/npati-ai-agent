@@ -599,7 +599,7 @@ export function ChatMessageContent({ content }: { content: string }) {
       elements.push(
         kind === "image" ? (
           <figure className="chat-message-attachment image" key={`att-${elements.length}`}>
-            <img src={src} alt={name} loading="eager" onLoad={() => window.dispatchEvent(new CustomEvent("npati:chat-image-loaded"))} />
+            <img src={src} alt={name} loading="lazy" decoding="async" onLoad={() => window.dispatchEvent(new CustomEvent("npati:chat-image-loaded"))} />
             <figcaption>{name}</figcaption>
           </figure>
         ) : kind === "audio" ? (

@@ -121,8 +121,18 @@ export class ChatDevelopmentService {
     try { return await task; }
     finally { if (this.projections.get(key) === task) this.projections.delete(key); }
   }
-  private async listOwned(ctx: AuthContext, includeTrace = true): Promise<DevelopmentProcess[]> {
-    const items = await this.entries(ctx);
+  /**
+   * The processes one chat needs: its own and those not yet finished. Other entries are dropped before the projection,
+   * which reads companies, run states and projects for every entry it keeps.
+   */
+  async listForChat(ctx: AuthContext, conversationId?: string): Promise<DevelopmentProcess[]> {
+    await this.flushActivities(ctx);
+    const finished = new Set(["completed", "failed", "cancelled", "interrupted"]);
+    return this.listOwned(ctx, true, (entry) => !finished.has(entry.status)
+      || Boolean(conversationId) && (entry.conversationId === conversationId || entry.parentConversationId === conversationId));
+  }
+  private async listOwned(ctx: AuthContext, includeTrace = true, keep?: (entry: Entry) => boolean): Promise<DevelopmentProcess[]> {
+    const items = (await this.entries(ctx)).filter((entry) => !keep || keep(entry));
     const companyIds = [...new Set(items.map(p => p.companyId))];
     const accessible = new Set((await Promise.all(companyIds.map(async companyId => {
       return await this.d.store.getCompany(ctx, companyId).then(() => companyId, () => null);

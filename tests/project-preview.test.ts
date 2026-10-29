@@ -843,6 +843,36 @@ it("stops an older recorded preview even when a newer matching preview is alread
  expect(process.mock.calls[0]![2]).toMatchObject({action:"stop",processId:"44444444-4444-4444-8444-444444444444"});
 });
 
+it("coalesces concurrent browser starts instead of competing for the workspace guard", async () => {
+ const {preview,workspace,provider,company,project}=await fixture();
+ await workspace.createFile(owner,company.id,project.id,"index.html","<h1>Concurrent Preview</h1>");
+ const launch=vi.spyOn(provider,"startProcess");
+ const [a,b]=await Promise.all([preview.startPreview(owner,company.id,project.id),preview.startPreview(owner,company.id,project.id)]);
+ expect(launch).toHaveBeenCalledTimes(1);expect(a.token).toBe(b.token);
+});
+
+it("opens a healthy persisted preview after a conflicting start marked its project failed", async () => {
+ const {preview,projects,store,workspace,sandbox,provider,company,project}=await fixture();
+ await workspace.createFile(owner,company.id,project.id,"index.html","<h1>Still serving</h1>");
+ await preview.startPreview(owner,company.id,project.id);
+ await projects.updatePreview(owner,company.id,project.id,{status:"failed"});
+ vi.spyOn(sandbox,"supportsPreviewProxy").mockReturnValue(true);
+ vi.spyOn(sandbox,"proxyPreview").mockResolvedValue({status:200,headers:{},body:""});
+ const launch=vi.spyOn(provider,"startProcess");
+ const restored=new ProjectPreviewService(projects,store,workspace,sandbox,"test-preview-secret-key-32chars!");
+ expect((await restored.getPreviewStatus(owner,company.id,project.id)).isRunning).toBe(true);
+ expect((await projects.get(owner,company.id,project.id)).status).toBe("previewing");expect(launch).not.toHaveBeenCalled();
+});
+
+it("does not run dependency installation again when opening an already verified build", async () => {
+ const {preview,projects,workspace,sandbox,company,project}=await fixture();
+ await workspace.createFile(owner,company.id,project.id,"package.json",JSON.stringify({scripts:{dev:"next dev",start:"next start",build:"next build"},dependencies:{next:"14.2.35"}}));
+ await projects.updatePreview(owner,company.id,project.id,{lastBuildStatus:"ready"});
+ const install=vi.spyOn(sandbox,"execute");
+ await preview.startPreview(owner,company.id,project.id);
+ expect(install).not.toHaveBeenCalled();
+});
+
 it("shares Preview signatures across API/worker without a dedicated preview secret",async()=>{
  const env={NPATI_ENCRYPTION_KEY:"installation-encryption-key-for-preview-tests"};
  expect(resolvePreviewSecret(undefined,env)).toBe(resolvePreviewSecret(undefined,env));

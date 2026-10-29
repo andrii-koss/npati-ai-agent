@@ -4,11 +4,11 @@ import { useWorkspace } from "../BusinessWorkspace";
 import { alertModal, confirmModal, promptModal } from "../ConfirmDialog";
 import { useTranslation } from "../i18n";
 import { authFetch } from "./auth-helpers";
+import { chatOpen as loadChatOpen, isChatPage } from "../chat-open";
 import {
   areSidebarConversationsEqual,
   clearLegacyLocalChatsOnce,
-  fetchAllSidebarConversations,
-  getActiveSidebarConversationsFetch,
+  fetchSidebarPage,
   getCachedBusinessOpen,
   getCachedChatOpen,
   getCachedSidebarBusinesses,
@@ -17,7 +17,9 @@ import {
   getInitialSidebarBusinesses,
   getInitialSidebarConversations,
   getIsSidebarConversationsLoaded,
-  setActiveSidebarConversationsFetch,
+  getCachedSidebarMore,
+  setCachedSidebarMore,
+  SIDEBAR_PAGE_SIZE,
   setCachedBusinessOpen,
   setCachedChatOpen,
   type SidebarConversation,
@@ -45,6 +47,11 @@ export function useSidebarState(onClose?: () => void) {
   const [conversations, setConversations] = useState<SidebarConversation[]>(getInitialSidebarConversations);
   const [hasLoaded, setHasLoaded] = useState(() => getIsSidebarConversationsLoaded() || getCachedSidebarConversations() !== null);
   const conversationLoadVersionRef = useRef(0);
+  // Each route renders its own shell: a remounted sidebar continues from the pages loaded in this page session.
+  const loadedCountRef = useRef(getIsSidebarConversationsLoaded() ? getInitialSidebarConversations().length : 0);
+  const loadingMoreRef = useRef(false);
+  const [moreConversations, setMoreConversationsState] = useState(getCachedSidebarMore);
+  const setMoreConversations = (more: boolean) => { setCachedSidebarMore(more); setMoreConversationsState(more); };
   const initialBusinesses = useRef(getInitialSidebarBusinesses());
   const drafts = overview?.onboardings ?? getCachedSidebarDrafts() ?? initialBusinesses.current.drafts;
   const businesses = overview?.businesses ?? getCachedSidebarBusinesses() ?? initialBusinesses.current.businesses;
@@ -186,22 +193,18 @@ export function useSidebarState(onClose?: () => void) {
   }, [overview]);
 
   async function loadConversations(force = false, optimisticConversation?: SidebarConversation) {
+    // Moving between chats keeps the pages already loaded (and the user's place in the list); only a change
+    // (a new message, rename or deletion) re-reads them, at their full loaded length.
+    if (!force && loadedCountRef.current > 0) return;
     const loadVersion = ++conversationLoadVersionRef.current;
-    const businessItems = overview?.businesses ?? [];
     try {
-      let activeFetch = getActiveSidebarConversationsFetch();
-      if (!activeFetch || force) {
-        const request = fetchAllSidebarConversations(businessItems);
-        const trackedRequest = request.finally(() => {
-          if (getActiveSidebarConversationsFetch() === trackedRequest) {
-            setActiveSidebarConversationsFetch(null);
-          }
-        });
-        setActiveSidebarConversationsFetch(trackedRequest);
-        activeFetch = trackedRequest;
-      }
-      let nextRows = await activeFetch;
+      // The first page comes with the chat page's single open request; a refresh re-reads the pages already shown.
+      const page = !force && isChatPage() ? (await loadChatOpen()).chats as { items: SidebarConversation[]; more: boolean }
+        : await fetchSidebarPage(0, Math.max(SIDEBAR_PAGE_SIZE, loadedCountRef.current));
+      let nextRows = page.items;
       if (loadVersion !== conversationLoadVersionRef.current) return;
+      setMoreConversations(page.more);
+      loadedCountRef.current = nextRows.length;
       if (optimisticConversation && !nextRows.some((item) => item.id === optimisticConversation.id)) {
         nextRows = [optimisticConversation, ...nextRows];
       }
@@ -214,6 +217,26 @@ export function useSidebarState(onClose?: () => void) {
     } catch {
       setHasLoaded(true);
       if (getCachedSidebarConversations() === null) setConversations([]);
+    }
+  }
+
+  /** Appends the next sidebar page when the user scrolls to the end of the chat list. */
+  async function loadMoreConversations() {
+    if (!moreConversations || loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
+    try {
+      const page = await fetchSidebarPage(loadedCountRef.current);
+      setMoreConversations(page.more);
+      setConversations((current) => {
+        const nextRows = [...current, ...page.items.filter((item) => !current.some((row) => row.id === item.id))];
+        loadedCountRef.current = nextRows.length;
+        updateCachedSidebarConversations(nextRows);
+        return nextRows;
+      });
+    } catch {
+      // The list keeps what is loaded; scrolling to the end again retries.
+    } finally {
+      loadingMoreRef.current = false;
     }
   }
 
@@ -366,6 +389,7 @@ export function useSidebarState(onClose?: () => void) {
     openNewChat,
     hasSavedChats,
     hasLoaded,
+    loadMoreConversations,
     pinnedChats,
     unpinnedChats,
     menuTarget,
