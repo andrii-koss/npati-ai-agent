@@ -657,9 +657,21 @@
   stroke-linejoin: round;
 }
 
+.chat-attachment-actions-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  pointer-events: auto;
+}
+
 .onboarding-live-composer .chat-attachment-actions .microphone {
   margin-left: auto;
   pointer-events: auto;
+}
+
+.chat-attachment-actions-right .microphone {
+  margin-left: 0;
 }
 
 .onboarding-live-composer .chat-attachment-actions .microphone.recording {

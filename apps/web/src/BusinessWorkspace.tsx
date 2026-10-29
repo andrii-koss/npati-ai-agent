@@ -706,8 +706,6 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       <div className="onboarding-live-chat standard-live-chat">
         <div className="message-stream" ref={messageStreamRef} onScroll={() => { if (!messageStreamRef.current) return; followBottomRef.current = nearChatBottom(messageStreamRef.current); if (userScrolledRef.current && messageStreamRef.current.scrollTop < EARLIER_MESSAGES_THRESHOLD_PX) void loadEarlierMessages(); }}
           onWheel={() => { userScrolledRef.current = true; }} onTouchMove={() => { userScrolledRef.current = true; }} onKeyDown={() => { userScrolledRef.current = true; }}>
-          <ChatWorkModeSwitch mode={workMode} onChange={changeWorkMode} disabled={sending} t={t}
-            projectSelected={Boolean(development.project?.projectId ?? codeInbox.session?.projectId ?? (selectedProject?.conversationId === selected ? selectedProject?.projectId : undefined))} />
           {entryProjectCard && !selected && <ProjectChatCard card={entryProjectCard} onActivate={(card) => setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected })} />}
           {messages.length === 0 && !selected && !initialConversationId && !loadingHistory && (
             <div className="chat-welcome">
@@ -781,6 +779,9 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           t={t}
           setNotice={setNotice}
           streamControllerRef={streamControllerRef}
+          workMode={workMode}
+          onWorkModeChange={changeWorkMode}
+          projectSelected={Boolean(development.project?.projectId ?? codeInbox.session?.projectId ?? (selectedProject?.conversationId === selected ? selectedProject?.projectId : undefined))}
         />
       </div>
     </>

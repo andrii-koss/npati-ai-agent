@@ -1,4 +1,5 @@
 import React, { FormEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
+import { MessageCircle, CodeXml } from "lucide-react";
 import { SPEECH_VOICES } from "./speech-voices";
 import { ChatAttachments, type ChatAttachmentInput } from "./ChatAttachments";
 import { AutoResizeChatTextarea } from "./AutoResizeChatTextarea";
@@ -31,6 +32,9 @@ export interface BusinessChatComposerProps {
   streamControllerRef: React.MutableRefObject<{ controller: AbortController; streamId: string } | null>;
   developmentActive?: boolean;
   onStopDevelopment?: () => void | Promise<void>;
+  workMode?: "chat" | "code";
+  onWorkModeChange?: (mode: "chat" | "code") => void;
+  projectSelected?: boolean;
 }
 
 export function BusinessChatComposer({
@@ -59,6 +63,9 @@ export function BusinessChatComposer({
   streamControllerRef,
   developmentActive = false,
   onStopDevelopment,
+  workMode,
+  onWorkModeChange,
+  projectSelected,
 }: BusinessChatComposerProps) {
   return (
     <form className="onboarding-live-composer" onSubmit={(event) => void submit(event)}>
@@ -98,6 +105,17 @@ export function BusinessChatComposer({
         inputText={input}
         onGenerateSpeech={generateSpeechForInput}
         isGeneratingSpeech={isGeneratingSpeech}
+        beforeMicrophone={
+          onWorkModeChange && workMode ? (
+            <ChatWorkModeSwitch
+              mode={workMode}
+              onChange={onWorkModeChange}
+              projectSelected={Boolean(projectSelected)}
+              disabled={sending}
+              t={t}
+            />
+          ) : undefined
+        }
       />
       <AutoResizeChatTextarea
         value={input}
@@ -165,22 +183,42 @@ export function BusinessChatComposer({
 export function ChatWorkModeSwitch({ mode, onChange, projectSelected, disabled, t }: {
   mode: "chat" | "code";
   onChange: (mode: "chat" | "code") => void;
-  projectSelected: boolean;
-  disabled: boolean;
-  t: (key: string) => string;
+  projectSelected?: boolean;
+  disabled?: boolean;
+  t?: (key: string) => string;
 }) {
   return (
-    <div className="chat-work-mode">
-      <div className="chat-work-mode-switch" role="radiogroup" aria-label={t("chat.workModeLabel")}>
-        {(["chat", "code"] as const).map((option) => (
-          <button key={option} type="button" role="radio" aria-checked={mode === option}
-            className={mode === option ? "chat-work-mode-option active" : "chat-work-mode-option"}
-            disabled={disabled} onClick={() => onChange(option)}>
-            {t(option === "chat" ? "chat.workModeChat" : "chat.workModeCode")}
-          </button>
-        ))}
-      </div>
-      {mode === "code" && !projectSelected && <p className="chat-work-mode-hint">{t("chat.codeModeNeedsProject")}</p>}
+    <div
+      className="chat-work-mode-switch"
+      role="radiogroup"
+      aria-label={t ? t("chat.workModeLabel") : "Work mode"}
+      data-mode={mode}
+    >
+      <div className={`chat-work-mode-thumb ${mode}`} aria-hidden="true" />
+      <button
+        type="button"
+        role="radio"
+        aria-checked={mode === "chat"}
+        className={`chat-work-mode-btn ${mode === "chat" ? "active" : ""}`}
+        disabled={disabled}
+        onClick={() => onChange("chat")}
+        title="Chat"
+        aria-label={t ? t("chat.workModeChat") : "Chat"}
+      >
+        <MessageCircle size={20} strokeWidth={2} />
+      </button>
+      <button
+        type="button"
+        role="radio"
+        aria-checked={mode === "code"}
+        className={`chat-work-mode-btn ${mode === "code" ? "active" : ""}`}
+        disabled={disabled}
+        onClick={() => onChange("code")}
+        title="Code"
+        aria-label={t ? t("chat.workModeCode") : "Code"}
+      >
+        <CodeXml size={20} strokeWidth={2} />
+      </button>
     </div>
   );
 }

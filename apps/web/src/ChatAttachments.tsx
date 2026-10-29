@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { SPEECH_VOICES } from "./speech-voices";
 
 export type ChatAttachmentInput = {
@@ -225,6 +225,7 @@ export function ChatAttachments({
   inputText,
   onGenerateSpeech,
   isGeneratingSpeech,
+  beforeMicrophone,
 }: {
   value: ChatAttachmentInput[];
   onChange(value: ChatAttachmentInput[]): void;
@@ -239,6 +240,7 @@ export function ChatAttachments({
   inputText?: string;
   onGenerateSpeech?(): Promise<void>;
   isGeneratingSpeech?: boolean;
+  beforeMicrophone?: ReactNode;
 }) {
   const imageInput = useRef<HTMLInputElement>(null);
   const attachmentRoot = useRef<HTMLElement>(null);
@@ -572,14 +574,17 @@ function inferClientMimeType(name: string, type?: string): string {
           )}
         </div>}
       </div>
-      <button type="button" className={"chat-icon-button microphone" + (recording ? " recording" : "")}
-        disabled={disabled || (!recording && value.length >= 3)}
-        onClick={() => void toggleRecording()} title={recording ? "Stop recording" : "Record voice message"}
-        aria-label={recording ? "Stop voice recording" : "Record voice message"}>
-        {recording
-          ? <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="8" height="8" rx="1" /></svg>
-          : <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" /></svg>}
-      </button>
+      <div className="chat-attachment-actions-right">
+        {beforeMicrophone}
+        <button type="button" className={"chat-icon-button microphone" + (recording ? " recording" : "")}
+          disabled={disabled || (!recording && value.length >= 3)}
+          onClick={() => void toggleRecording()} title={recording ? "Stop recording" : "Record voice message"}
+          aria-label={recording ? "Stop voice recording" : "Record voice message"}>
+          {recording
+            ? <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="8" height="8" rx="1" /></svg>
+            : <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" /></svg>}
+        </button>
+      </div>
       <input ref={imageInput} type="file" accept="image/jpeg,image/png,image/webp,image/gif"
         multiple hidden onChange={(event) => void pick(event)} />
       <input ref={audioInput} type="file"
