@@ -6,6 +6,7 @@ import type { ProjectCardData } from "@npati/shared";
 import { getStoredAuthToken } from "./AuthContext";
 import { I18nContextRef } from "./i18n";
 import { persistedModeLabel } from "./code-workspace/actions";
+import { LivePreviewHeader, type DeviceMode } from "./LivePreviewHeader";
 
 export type ProjectVariantType = "website" | "mobile_app" | "game" | "other";
 export type PreviewRuntimeStatus = "running" | "starting" | "stopped" | "failed" | "unavailable";
@@ -194,16 +195,24 @@ export function ChatProjectPreviewCard({
     return "starting";
   });
 
+  const [deviceMode, setDeviceMode] = useState<DeviceMode>("desktop");
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [iframeKey, setIframeKey] = useState(0);
+
   const dropdownRef = useRef<HTMLDivElement>(null);
   const isCodeProject = card.kind === "code_project";
   const projectType = resolveChatProjectType(card);
 
   // URLs for navigation
-  const codeWorkspaceUrl = card.companyId && card.projectId
-    ? `/settings/code/${encodeURIComponent(card.companyId)}/${encodeURIComponent(card.projectId)}${card.sessionId ? `?session=${encodeURIComponent(card.sessionId)}` : ""}`
+  const projectIdVal = card.projectId ?? card.id;
+  const codeWorkspaceUrl = card.companyId && projectIdVal
+    ? `/settings/code/${encodeURIComponent(card.companyId)}/${encodeURIComponent(projectIdVal)}${card.sessionId ? `?session=${encodeURIComponent(card.sessionId)}` : ""}`
     : null;
   const codeChangesUrl = codeWorkspaceUrl
     ? `${codeWorkspaceUrl}${codeWorkspaceUrl.includes("?") ? "&" : "?"}tab=changes`
+    : null;
+  const terminalUrl = codeWorkspaceUrl
+    ? `${codeWorkspaceUrl}${codeWorkspaceUrl.includes("?") ? "&" : "?"}tab=terminal`
     : null;
 
   // Title: technology/framework or project name
@@ -519,7 +528,7 @@ export function ChatProjectPreviewCard({
           disabled={runtimeStatus === "unavailable"}
           aria-label={isUk ? "Відкрити Live Preview" : "Open Live Preview"}
         >
-          <ExternalLink size={15} aria-hidden="true" />
+          <ExternalLink size={15} aria-hidden="true" strokeWidth={2.3} />
           <span>{isUk ? "Open" : "Open"}</span>
         </button>
 
@@ -532,7 +541,7 @@ export function ChatProjectPreviewCard({
             aria-haspopup="true"
             aria-expanded={dropdownOpen}
           >
-            <ChevronDown size={16} aria-hidden="true" />
+            <ChevronDown size={16} aria-hidden="true" strokeWidth={2.5} />
           </button>
         )}
 
@@ -631,43 +640,61 @@ export function ChatProjectPreviewCard({
 
       {/* Live Preview Modal / Drawer */}
       {previewOpen && createPortal(
-        <div className="project-chat-preview-layer">
-          <aside className="project-chat-preview-drawer" role="complementary" aria-label={`Preview of ${card.name}`}>
-            <header className="project-chat-preview-header">
-              <div>
-                <strong>{card.name}</strong>
-                <span>{isUk ? "Live Preview" : "Live Preview"}</span>
-              </div>
-              <div className="project-chat-preview-header-actions">
-                {previewUrl && (
-                  <a href={previewUrl} target="_blank" rel="noreferrer">
-                    {isUk ? "Відкрити в новій вкладці ↗" : "Open in new tab ↗"}
-                  </a>
+        <div className={`project-chat-preview-layer ${isFullscreen ? "is-fullscreen" : ""}`}>
+          <aside
+            className={`project-chat-preview-drawer ${isFullscreen ? "is-fullscreen" : ""}`}
+            role="complementary"
+            aria-label={`Preview of ${card.name}`}
+          >
+            <LivePreviewHeader
+              projectName={card.name}
+              runtimeStatus={runtimeStatus}
+              statusLabel={statusLabels[runtimeStatus]}
+              previewUrl={previewUrl}
+              isUk={isUk}
+              codeWorkspaceUrl={codeWorkspaceUrl}
+              terminalUrl={terminalUrl}
+              deviceMode={deviceMode}
+              setDeviceMode={setDeviceMode}
+              isFullscreen={isFullscreen}
+              setIsFullscreen={setIsFullscreen}
+              onRefresh={() => {
+                setIframeKey((k) => k + 1);
+                if (isStatic) {
+                  void loadStaticPreviewPage("index.html");
+                } else {
+                  void openPreview();
+                }
+              }}
+              onClose={() => setPreviewOpen(false)}
+            />
+            <div className="project-chat-preview-body" data-device-mode={deviceMode}>
+              <div className="project-chat-preview-viewport" data-device-mode={deviceMode}>
+                {previewHtml ? (
+                  <iframe
+                    key={iframeKey}
+                    title={`${card.name} preview`}
+                    srcDoc={previewHtml}
+                    sandbox="allow-same-origin"
+                    onLoad={handleStaticPreviewLoad}
+                    className="project-chat-preview-frame"
+                  />
+                ) : previewUrl ? (
+                  <iframe
+                    key={iframeKey}
+                    title={`${card.name} preview`}
+                    src={previewUrl}
+                    className="project-chat-preview-frame"
+                  />
+                ) : (
+                  <div className="project-chat-preview-empty" role="status">
+                    {previewLoading
+                      ? (isUk ? "Запуск Live Preview…" : "Starting preview…")
+                      : previewError || (isUk ? "Прев'ю недоступне." : "Preview is unavailable.")}
+                  </div>
                 )}
-                <button type="button" aria-label={isUk ? "Закрити" : "Close preview"} onClick={() => setPreviewOpen(false)}>×</button>
               </div>
-            </header>
-            {previewHtml ? (
-              <iframe
-                title={`${card.name} preview`}
-                srcDoc={previewHtml}
-                sandbox="allow-same-origin"
-                onLoad={handleStaticPreviewLoad}
-                className="project-chat-preview-frame"
-              />
-            ) : previewUrl ? (
-              <iframe
-                title={`${card.name} preview`}
-                src={previewUrl}
-                className="project-chat-preview-frame"
-              />
-            ) : (
-              <div className="project-chat-preview-empty" role="status">
-                {previewLoading
-                  ? (isUk ? "Запуск Live Preview…" : "Starting preview…")
-                  : previewError || (isUk ? "Прев'ю недоступне." : "Preview is unavailable.")}
-              </div>
-            )}
+            </div>
           </aside>
         </div>,
         document.body
