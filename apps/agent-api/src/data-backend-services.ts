@@ -93,7 +93,7 @@ export function createDataBackendServices(input: DataBackendServicesInput) {
     : undefined;
 
   const backupTimer = backupService && (process.env.NPATI_DATA_BACKUP_DISABLED !== "true")
-    ? setInterval(() => { void backupService.runScheduled().catch((error) => { log.error({ err: error }, "data_backup_tick_failed"); }); }, Math.max(60_000, (Number(process.env.NPATI_DATA_BACKUP_TICK_SECONDS) || 300) * 1000))
+    ? setInterval(() => { void backupService.runScheduled().then((result) => { if (result.failures?.length) log.error({ failures: result.failures, created: result.created }, "data_backup_tick_partial_failure"); }).catch((error) => { log.error({ err: error }, "data_backup_tick_failed"); }); }, Math.max(60_000, (Number(process.env.NPATI_DATA_BACKUP_TICK_SECONDS) || 300) * 1000))
     : undefined;
   backupTimer?.unref();
 

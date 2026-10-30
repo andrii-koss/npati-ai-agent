@@ -139,6 +139,8 @@ describe("C7 [security-gate]: only the adapter may build a files URL", () => {
     expect(dashboard).toContain("./website-builder-card");
     const card = readFileSync(join(ROOT, "apps", "web", "src", "website-builder-card.tsx"), "utf8");
     expect(card).toContain("/settings/code/");
-    expect(card).toContain("./project-files-client");
+    expect(dashboard).toContain("./project-files-client");
+    expect(dashboard).toContain("await writeProjectFile(");
+    expect(FILE_URL_PATTERN.test(card), "the presentational card must not build file URLs").toBe(false);
   });
 });

@@ -61,7 +61,10 @@ describe("semantic project routing", () => {
     expect(result).not.toHaveProperty("entityRead");
     expect(result.decision.intent).toBe("CHAT");
   });
-  it("resolves a named owned Project before classification so editing it from Company context needs no new-project clarification", async () => {
+  it.each([
+    { conversationHistory: [], conversationText: "" },
+    { conversationHistory: [{ role: "user" as const, content: "Open the owned portal in Studio." }], conversationText: "Open the owned portal in Studio." },
+  ])("resolves a named owned Project before classification so editing it from Company context needs no new-project clarification: %j", async ({ conversationHistory, conversationText }) => {
     const namedProject = vi.fn(async () => "owned-project");
     const chat = vi.fn(async (request: ChatRequest) => {
       const data = JSON.parse(request.messages[1]!.content as string);
@@ -70,8 +73,8 @@ describe("semantic project routing", () => {
     });
     const resolve = createChatProjectIntentResolver({ engine: { chat }, getAIContext: async () => ({}), log: { warn: vi.fn() }, resolveNamedProject: namedProject });
     const message = 'In "Owned Portal" of company "Studio" change its heading. Keep the paragraph.';
-    const result = await resolve(auth, { message, activeCompanyId: "owned-company" });
-    expect(namedProject).toHaveBeenCalledWith(auth, message, "owned-company");
+    const result = await resolve(auth, { message, activeCompanyId: "owned-company", conversationHistory });
+    expect(namedProject).toHaveBeenCalledWith(auth, message, "owned-company", conversationText);
     expect(result).toMatchObject({ source: "semantic", decision: { intent: "EDIT_WEBSITE", needsClarification: false, executable: true }, targets: [] });
     expect(chat).toHaveBeenCalledOnce();
   });

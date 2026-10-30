@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import {
   sendChatStream,
   defaultConfig,
@@ -7,6 +7,7 @@ import {
   testLivePreviewResetDom,
 } from "./e2e-client.js";
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 
 const BASE_URL = defaultConfig.baseUrl;
 let COMPANY_ID = "";
@@ -112,15 +113,28 @@ function queryPostgres(sql: string): Promise<string> {
 }
 
 describe("Coding Agent E2E Smoke Suite (Stage 2 Extended)", () => {
-  const validToken = process.env.NPATI_E2E_ACCESS_TOKEN ?? "";
+  let validToken = process.env.NPATI_E2E_ACCESS_TOKEN ?? "";
+  const sessionCookieFile = process.env.NPATI_E2E_SESSION_COOKIE_FILE;
+  async function renewTestSession() {
+    if (!sessionCookieFile) return;
+    const cookie = readFileSync(sessionCookieFile, "utf8").trim().replace(/^npati_agent_session=/, "");
+    const response = await fetch(BASE_URL + "/api/auth/installation/session", { method: "POST", headers: { cookie: "npati_agent_session=" + cookie }, signal: AbortSignal.timeout(20_000) });
+    const session = await response.json();
+    if (!response.ok || !session.data?.accessToken || session.data.user?.id !== USER_ID) throw new Error("BLOCKED: normal test-user installation sign-in failed");
+    validToken = session.data.accessToken;
+  }
 
   beforeAll(async () => {
-    if (!validToken) throw new Error("BLOCKED: live smoke requires a legitimate test-user session via NPATI_E2E_ACCESS_TOKEN; manually signed test JWTs are not accepted for this local audit.");
+
     const target = new URL(BASE_URL);
+    const v5Stand = target.port === "13001" && API_CONTAINER === "npati-isolated-source-20261011-agent-api-1"
+      && POSTGRES_CONTAINER === "npati-isolated-source-20261011-postgres-1";
     if (process.env.NPATI_E2E_ISOLATED !== "true" || !["localhost", "127.0.0.1"].includes(target.hostname)
-      || !/^npati-stress-v2-(?:stage-a|final)-[0-9]+-agent-api-1$/.test(API_CONTAINER)
-      || !/^npati-stress-v2-(?:stage-a|final)-[0-9]+-postgres-1$/.test(POSTGRES_CONTAINER)
+      || !(v5Stand || /^npati-stress-v2-(?:stage-a|final)-[0-9]+-agent-api-1$/.test(API_CONTAINER)
+        && /^npati-stress-v2-(?:stage-a|final)-[0-9]+-postgres-1$/.test(POSTGRES_CONTAINER))
       || !USER_ID || !WORKSPACE_ID) throw new Error("BLOCKED: explicit isolated E2E fixture configuration is required");
+    await renewTestSession();
+    if (!validToken) throw new Error("BLOCKED: live smoke requires a legitimate test-user session via NPATI_E2E_ACCESS_TOKEN; manually signed test JWTs are not accepted for this local audit.");
     const created = await fetch(BASE_URL + "/companies", { method: "POST", headers: { authorization: "Bearer " + validToken, "content-type": "application/json", "idempotency-key": "v2-live-smoke-company" }, body: JSON.stringify({ name: "E2E Smoke V2 disposable" }) });
     expect([200, 201]).toContain(created.status);
     const company = await created.json();
@@ -134,6 +148,8 @@ describe("Coding Agent E2E Smoke Suite (Stage 2 Extended)", () => {
     expect(health.services?.omniroute).toBe("ok");
     expect(health.services?.database).toBe("ok");
   });
+
+  beforeEach(renewTestSession);
 
   // ==========================================
   // Category 1: API Integration (Direct REST)

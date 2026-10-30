@@ -179,32 +179,37 @@ export class BackupService {
    * Scheduler tick: automatic snapshots for due environments, retention pruning, and the
    * purge of DataBackends whose removal deadline passed.
    */
-  async runScheduled(now = new Date()): Promise<{ created: number; pruned: number; purged: number }> {
+  async runScheduled(now = new Date()): Promise<{ created: number; pruned: number; purged: number; failures?: Array<{ backendId: string; environment: DataEnvironmentName; code: string }> }> {
     let created = 0;
+    const failures: Array<{ backendId: string; environment: DataEnvironmentName; code: string }> = [];
     const backends = await this.repository.allBackends();
     for (const { backend, environments } of backends) {
       if (backend.status !== "ready") continue;
       for (const environment of environments) {
         if (environment.status !== "ready") continue;
-        const policy = policyFromEnv(environment.environment, environment.backupPolicy ?? null);
-        if (!policy.intervalMinutes) continue;
-        const snapshots = await this.repository.listSnapshots(backend.id, environment.environment, 200);
-        const lastScheduled = snapshots.filter((snapshot) => snapshot.kind === "scheduled")[0];
-        const dueAt = lastScheduled ? Date.parse(lastScheduled.createdAt) + policy.intervalMinutes * 60_000 : 0;
-        if (!lastScheduled || dueAt <= now.getTime()) {
-          await this.snapshot(backend, environment.environment, "scheduled", "Scheduled backup", backend.createdBy);
-          created += 1;
-        }
-        const surplus = await this.repository.surplusScheduledSnapshots(backend.id, environment.environment, policy.keep);
-        for (const snapshot of surplus) {
-          if (await this.storage.exists(snapshot)) await this.storage.remove(snapshot);
-          await this.repository.deleteSnapshotRecord(snapshot.id);
+        try {
+          const policy = policyFromEnv(environment.environment, environment.backupPolicy ?? null);
+          if (!policy.intervalMinutes) continue;
+          const snapshots = await this.repository.listSnapshots(backend.id, environment.environment, 200);
+          const lastScheduled = snapshots.filter((snapshot) => snapshot.kind === "scheduled")[0];
+          const dueAt = lastScheduled ? Date.parse(lastScheduled.createdAt) + policy.intervalMinutes * 60_000 : 0;
+          if (!lastScheduled || dueAt <= now.getTime()) {
+            await this.snapshot(backend, environment.environment, "scheduled", "Scheduled backup", backend.createdBy);
+            created += 1;
+          }
+          const surplus = await this.repository.surplusScheduledSnapshots(backend.id, environment.environment, policy.keep);
+          for (const snapshot of surplus) {
+            if (await this.storage.exists(snapshot)) await this.storage.remove(snapshot);
+            await this.repository.deleteSnapshotRecord(snapshot.id);
+          }
+        } catch (error) {
+          failures.push({ backendId: backend.id, environment: environment.environment, code: error instanceof DataStudioError ? error.code : "BACKUP_TICK_FAILED" });
         }
       }
     }
     const pruned = (await this.prune()).deleted;
     const purged = await this.purgeDueBackends();
-    return { created, pruned, purged };
+    return { created, pruned, purged, ...(failures.length ? { failures } : {}) };
   }
 
   /**

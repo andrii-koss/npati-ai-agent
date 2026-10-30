@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
 import { PromoteService } from "../apps/agent-api/src/data-studio/promote-service";
+import { DataStudioError } from "../apps/agent-api/src/data-studio/identifier";
 import { BackupService } from "../apps/agent-api/src/data-studio/backup-service";
 import { QuotaService } from "../apps/agent-api/src/data-studio/quota-service";
 import { DataBackendService } from "../apps/agent-api/src/data-studio/service";
@@ -341,6 +342,24 @@ describe("D7 — backups and restore", () => {
     state.snapshots.push({ id: "old-2", backendId: state.backend.id, environment: "prod", path: "/tmp/old-2.dump", createdAt: new Date(Date.now() - 3600_000).toISOString(), kind: "scheduled" });
     await backups.runScheduled(new Date());
     expect(state.snapshots.filter((snapshot) => snapshot.kind === "scheduled")).toHaveLength(2);
+  });
+
+  it("reports a failed environment and still backs up the next healthy environment", async () => {
+    const state = fakeState();
+    state.environments.dev.backupPolicy = { intervalMinutes: 60, keep: 2 };
+    state.environments.prod.backupPolicy = { intervalMinutes: 60, keep: 2 };
+    const { provisioner, calls } = fakeProvisioner(state);
+    const original = provisioner.snapshot.bind(provisioner);
+    provisioner.snapshot = async (backend, environment) => {
+      if (environment === "dev") throw new DataStudioError(500, "pg_dump", "PostgreSQL backup utility failed", false, "BACKUP_FAILED");
+      return original(backend, environment);
+    };
+    const backups = new BackupService(fakeRepository(state), provisioner, fakeProvider(), memoryStorage);
+    await expect(backups.runScheduled()).resolves.toMatchObject({ created: 1, pruned: 0, purged: 0,
+      failures: [{ backendId: state.backend.id, environment: "dev", code: "BACKUP_FAILED" }] });
+    expect(calls).toContain("snapshot:prod");
+    expect(state.snapshots.filter(snapshot => snapshot.kind === "scheduled")).toHaveLength(1);
+    expect(state.snapshots[0]!.environment).toBe("prod");
   });
 
   it("updates the backup policy per environment", async () => {
