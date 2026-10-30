@@ -725,7 +725,8 @@ body:has(.project-chat-preview-layer) .workspace-content.chat-workspace-content 
 
 body:has(.project-chat-preview-layer) .chat-workspace-content .standard-live-chat,
 body:has(.project-chat-preview-layer) .chat-workspace-content .onboarding-live-chat {
-  width: calc(36vw - 20px);
+  width: calc(var(--chat-split-ratio, 40%) - 16px);
+  max-width: calc(var(--chat-split-ratio, 40%) - 16px);
   margin-right: 0;
 }
 
@@ -740,12 +741,13 @@ body:has(.project-chat-preview-layer) .chat-workspace-content .onboarding-live-c
 .project-chat-preview-drawer {
   top: 12px;
   right: 12px;
-  width: calc(64vw - 16px);
+  width: calc(var(--preview-split-ratio, 60%) - 16px);
+  max-width: calc(var(--preview-split-ratio, 60%) - 16px);
   height: calc(100% - 24px);
   pointer-events: auto;
   border: 1px solid #dedede;
   border-radius: 16px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 @media (max-width: 800px) {

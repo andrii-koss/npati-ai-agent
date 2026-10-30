@@ -7,6 +7,7 @@ import { getStoredAuthToken } from "./AuthContext";
 import { I18nContextRef } from "./i18n";
 import { persistedModeLabel } from "./code-workspace/actions";
 import { LivePreviewHeader, type DeviceMode } from "./LivePreviewHeader";
+import { LivePreviewSplitResizer } from "./LivePreviewSplitResizer";
 
 export type ProjectVariantType = "website" | "mobile_app" | "game" | "other";
 export type PreviewRuntimeStatus = "running" | "starting" | "stopped" | "failed" | "unavailable";
@@ -664,6 +665,7 @@ export function ChatProjectPreviewCard({
             role="complementary"
             aria-label={`Preview of ${card.name}`}
           >
+            {!isFullscreen && <LivePreviewSplitResizer />}
             <LivePreviewHeader
               projectName={card.name}
               runtimeStatus={runtimeStatus}

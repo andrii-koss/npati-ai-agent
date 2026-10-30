@@ -1071,14 +1071,36 @@
 
 
 /* ==========================================================================
-   Live Preview Layout Proportions and Shadow Normalization
+   Live Preview Layout Proportions and Resizable Split View
    ========================================================================== */
+
+:root {
+  --chat-split-ratio: 40%;
+  --preview-split-ratio: 60%;
+}
 
 body:has(.project-chat-preview-layer) .chat-workspace-content .standard-live-chat,
 body:has(.project-chat-preview-layer) .chat-workspace-content .onboarding-live-chat {
-  width: calc(36vw - 24px) !important;
-  max-width: calc(36vw - 24px) !important;
+  width: calc(var(--chat-split-ratio, 40%) - 16px) !important;
+  max-width: calc(var(--chat-split-ratio, 40%) - 16px) !important;
+  min-width: 25% !important;
   margin-right: 0 !important;
+  box-sizing: border-box !important;
+  overflow-x: hidden !important;
+  transition: width 0.05s ease-out;
+}
+
+body.is-resizing:has(.project-chat-preview-layer) .chat-workspace-content .standard-live-chat,
+body.is-resizing:has(.project-chat-preview-layer) .chat-workspace-content .onboarding-live-chat,
+body.is-resizing .project-chat-preview-drawer {
+  transition: none !important;
+  user-select: none !important;
+}
+
+body:has(.project-chat-preview-layer) .chat-composer-container,
+body:has(.project-chat-preview-layer) .composer-unified-card,
+body:has(.project-chat-preview-layer) .message-stream {
+  max-width: 100% !important;
   box-sizing: border-box !important;
 }
 
@@ -1095,17 +1117,88 @@ body:has(.project-chat-preview-layer) .chat-workspace-content .onboarding-live-c
 }
 
 .project-chat-preview-drawer {
+  position: fixed !important;
   top: 12px !important;
   right: 12px !important;
-  width: calc(64vw - 16px) !important;
-  max-width: calc(64vw - 16px) !important;
+  width: calc(var(--preview-split-ratio, 60%) - 16px) !important;
+  max-width: calc(var(--preview-split-ratio, 60%) - 16px) !important;
+  min-width: 25% !important;
   height: calc(100% - 24px) !important;
   pointer-events: auto !important;
   border: 1px solid #eaeaec !important;
   border-radius: 16px !important;
-  overflow: hidden !important;
+  overflow: visible !important;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04) !important;
   background-color: #ffffff !important;
+  transition: width 0.05s ease-out;
+}
+
+/* Vertical resizer divider between chat and preview */
+.project-chat-preview-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -9px;
+  width: 18px;
+  z-index: 50;
+  cursor: col-resize;
+  user-select: none;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  outline: none;
+}
+
+.project-chat-preview-resizer:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+
+.project-chat-preview-resizer-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background-color: #eaeaec;
+  transform: translateX(-50%);
+  transition: background-color 0.15s ease, width 0.15s ease;
+}
+
+.project-chat-preview-resizer-grip {
+  position: relative;
+  width: 4px;
+  height: 36px;
+  border-radius: 9999px;
+  background-color: transparent;
+  transition: background-color 0.15s ease, transform 0.15s ease;
+  z-index: 2;
+}
+
+.project-chat-preview-resizer:hover .project-chat-preview-resizer-line,
+.project-chat-preview-resizer.is-dragging .project-chat-preview-resizer-line {
+  background-color: #cbd5e1;
+  width: 2px;
+}
+
+.project-chat-preview-resizer:hover .project-chat-preview-resizer-grip,
+.project-chat-preview-resizer.is-dragging .project-chat-preview-resizer-grip {
+  background-color: #94a3b8;
+  transform: scaleY(1.1);
+}
+
+.project-chat-preview-iframe-drag-shield {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: transparent;
+  cursor: col-resize;
+}
+
+.project-chat-preview-drawer.is-fullscreen .project-chat-preview-resizer {
+  display: none !important;
 }
 
 @media (max-width: 860px) {
@@ -1121,5 +1214,8 @@ body:has(.project-chat-preview-layer) .chat-workspace-content .onboarding-live-c
     max-width: 100% !important;
     height: 100% !important;
     border-radius: 0 !important;
+  }
+  .project-chat-preview-resizer {
+    display: none !important;
   }
 }
