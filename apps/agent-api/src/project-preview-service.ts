@@ -13,14 +13,12 @@ import type { ProjectSandboxService } from "./project-sandbox-service";
 import { SandboxProviderError } from "./sandbox-provider";
 import { projectRuntimeCommandPort } from "./shared-project-runtime-provider";
 import { isDesktopProjectFramework } from "@npati/shared";
-
 /** Stable across API/worker instances; the encryption key is never used directly as a signing key. */
 export function resolvePreviewSecret(secret?: string, env: NodeJS.ProcessEnv = process.env): string {
   if (secret || env.NPATI_PREVIEW_SECRET) return (secret || env.NPATI_PREVIEW_SECRET)!;
   if (env.NPATI_ENCRYPTION_KEY) return createHmac("sha256", env.NPATI_ENCRYPTION_KEY).update("npati/project-preview/v1").digest("hex");
   return randomBytes(32).toString("hex");
 }
-
 
 export interface PreviewTokenPayload {
   workspaceId?: string;
@@ -30,7 +28,6 @@ export interface PreviewTokenPayload {
   sandboxId: string;
   expiresAt: number;
 }
-
 export interface ActivePreviewSession {
   projectId: string;
   companyId: string;
@@ -47,22 +44,18 @@ export interface ActivePreviewSession {
   workspaceId: string;
   userId: string;
 }
-
 const sandboxInfrastructureErrors = new Set(["sandbox_image_not_found", "docker_cli_missing", "docker_daemon_unavailable", "docker_socket_permission_denied", "sandbox_network_not_found", "sandbox_container_start_failed", "sandbox_workspace_permission_denied", "sandbox_storage_full", "runner_unavailable"]);
 export class PreviewError extends Error {
   constructor(public readonly code: string, message: string, public readonly status = 400) {
     super(message);
   }
 }
-
 function base64UrlEncode(data: string): string {
   return Buffer.from(data, "utf8").toString("base64url");
 }
-
 function base64UrlDecode(data: string): string {
   return Buffer.from(data, "base64url").toString("utf8");
 }
-
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
@@ -72,9 +65,7 @@ function escapeHtml(text: string): string {
     .replace(/'/g, "&#039;");
 }
 
-
 export type PreviewOriginRegistrar = (ctx: AuthContext, companyId: string, projectId: string, origin: string) => Promise<void>;
-
 export function parseExactHttpOrigin(raw?: string | null): string | null {
   if (!raw || typeof raw !== "string") return null;
   const trimmed = raw.trim();
@@ -88,7 +79,6 @@ export function parseExactHttpOrigin(raw?: string | null): string | null {
     return null;
   }
 }
-
 export function rewriteSetCookieHeader(
   cookieStr: string,
   projectPrefix: string,
@@ -103,7 +93,6 @@ export function rewriteSetCookieHeader(
   const attributes: string[] = [`${newName}=${val}`];
   let pathSet = false;
   let sameSiteSet = false;
-
   for (let i = 1; i < parts.length; i++) {
     const part = parts[i];
     if (!part) continue;
@@ -123,17 +112,14 @@ export function rewriteSetCookieHeader(
     }
     attributes.push(part);
   }
-
   if (!pathSet) {
     attributes.push(`Path=${proxyPath}`);
   }
   if (!sameSiteSet) {
     attributes.push("SameSite=Lax");
   }
-
   return attributes.join("; ");
 }
-
 export function filterIncomingCookies(
   rawCookieHeader: string | undefined,
   projectPrefix: string,
@@ -149,12 +135,10 @@ export function filterIncomingCookies(
   }
   return upstreamCookies.length > 0 ? upstreamCookies.join("; ") : undefined;
 }
-
 /** Project-scoped, HttpOnly preview session cookie. It is never forwarded to the project server. */
 export function previewAuthCookieName(projectId: string): string {
   return `_npati_preview_${projectId.replace(/[^A-Za-z0-9]/g, "").slice(0, 8)}`;
 }
-
 export function readCookieValue(rawCookieHeader: string | undefined, name: string): string | undefined {
   if (!rawCookieHeader) return undefined;
   for (const part of rawCookieHeader.split(";")) {
@@ -164,13 +148,11 @@ export function readCookieValue(rawCookieHeader: string | undefined, name: strin
   }
   return undefined;
 }
-
 export class ProjectPreviewService {
   private readonly secret: string;
   private readonly sessions = new Map<string, ActivePreviewSession>();
   private readonly recoveries = new Map<string, Promise<unknown>>();
   private readonly starts = new Map<string, ReturnType<ProjectPreviewService["launchPreview"]>>();
-
   constructor(
     private readonly projects: ProjectService,
     private readonly workspaceStore: WorkspaceStore,
@@ -181,7 +163,6 @@ export class ProjectPreviewService {
   ) {
     this.secret = resolvePreviewSecret(secret);
   }
-
   async buildProject(ctx: AuthContext, companyId: string, projectId: string, onStage?: (stage: "dependencies" | "build", details?: { command: string; status: "running" | "completed" | "failed"; stdout?: string; stderr?: string; exitCode?: number; durationMs?: number }) => void, options: { dependenciesOnly?: boolean } = {}): Promise<void> {
     if (!this.sandbox) throw new PreviewError("sandbox_unavailable", "Sandbox runner is not configured", 503);
     const files = await this.workspace.listFiles(ctx, companyId, projectId);
@@ -233,7 +214,6 @@ export class ProjectPreviewService {
     const signature = createHmac("sha256", this.secret).update(body).digest("base64url");
     return { token: `${body}.${signature}`, expiresAt };
   }
-
   verifyToken(token: string): PreviewTokenPayload {
     if (typeof token !== "string" || !token.includes(".")) {
       throw new PreviewError("invalid_token", "Invalid preview token format", 401);
@@ -257,7 +237,6 @@ export class ProjectPreviewService {
     }
     return payload;
   }
-
   validateTokenForRequest(
     token: string,
     companyId: string,
@@ -269,7 +248,6 @@ export class ProjectPreviewService {
     }
     return payload;
   }
-
   async startPreview(
     ctx: AuthContext, companyId: string, projectId: string,
     options: { command?: string; port?: number; agentId?: string; signal?: AbortSignal; callerOrigin?: string; verifiedBuild?: boolean; forceRestart?: boolean } = {},
@@ -284,7 +262,6 @@ export class ProjectPreviewService {
     try { return await start; }
     finally { if (this.starts.get(key) === start) this.starts.delete(key); }
   }
-
   private async launchPreview(
     ctx: AuthContext,
     companyId: string,
@@ -313,19 +290,16 @@ export class ProjectPreviewService {
     if (project.status === "soft_deleted" || project.status === "purging" || project.status === "deleted") {
       throw new PreviewError("project_deleted", "Deleted project cannot run preview", 409);
     }
-
     const files = await this.workspace.listFiles(ctx, companyId, projectId);
     const detected = await detectProjectStack(files, async (p) => (await this.workspace.readFile(ctx, companyId, projectId, p)).content);
     if (detected.framework === "static" && (!options.command || project.framework === "HTML/CSS")) {
       try { await validateStaticProjectResources(files, async p => (await this.workspace.readFile(ctx, companyId, projectId, p)).content); }
       catch (error) { throw new PreviewError("preview_resources_missing", error instanceof Error ? error.message : "Static resource validation failed", 409); }
     }
-
     const verifiedBuild = options.verifiedBuild ?? project.lastBuildStatus === "ready";
     let devCommand = options.command?.trim()
       || (verifiedBuild && detected.productionCommand ? detected.productionCommand : detected.command);
     let devPort = options.port && Number.isInteger(options.port) ? options.port : extractPortFromCommand(devCommand, detected.port);
-
     const reused = canReusePreviewSession({ verifiedBuild: options.verifiedBuild, command: options.command, port: options.port, framework: detected.framework, forceRestart: options.forceRestart })
       ? await reuseDevelopmentPreview(ctx, project, devCommand, devPort, detected.framework, this.sandbox, this.projects, scope => this.generateToken(scope), options.signal) : null;
     if (reused) { this.sessions.set(projectId, reused.session); return reused.result; }
@@ -343,7 +317,6 @@ export class ProjectPreviewService {
       }).catch(() => undefined);
       this.sessions.delete(projectId);
     }
-
     // Expose port on sandbox runner
     const exposed = await this.sandbox.exposePort(ctx, companyId, projectId, devPort);
     if (exposed && exposed.port !== devPort) {
@@ -353,12 +326,10 @@ export class ProjectPreviewService {
     const updatedProject = await this.projects.get(ctx, companyId, projectId);
     const sandboxId = updatedProject.sandboxId;
     if (!sandboxId) throw new PreviewError("sandbox_failed", "Failed to obtain sandbox ID", 500);
-
     // API and worker session maps can disagree; stop every recorded listener before replacement.
     const previousCommands = new Set([projectRuntimeCommandPort(detected.command, devPort), devCommand]);
     if (detected.productionCommand) previousCommands.add(projectRuntimeCommandPort(detected.productionCommand, devPort));
     for (const command of previousCommands) await this.sandbox.stopRecordedPreview(ctx, companyId, projectId, command);
-
     // Ensure dependencies are installed before starting the dev server for node/framework projects
     if (!verifiedBuild && options.verifiedBuild !== false && detected.framework !== "static" && files.some((f) => f.path === "package.json")) {
       const paths = new Set(files.map((f) => f.path));
@@ -378,7 +349,6 @@ export class ProjectPreviewService {
         console.warn(`[startPreview] Dependency preparation warning for project ${projectId}:`, installErr);
       }
     }
-
     // Start process in sandbox
     options.signal?.throwIfAborted();
     const result = await this.sandbox.process(ctx, companyId, {
@@ -388,10 +358,8 @@ export class ProjectPreviewService {
       agentId: options.agentId || "system",
       approved: true,
     });
-
     const processId = result.processId;
     if (!processId) throw new PreviewError("process_failed", "Failed to start preview dev server process", 500);
-
     // Starting a process does not mean its HTTP server (or first compilation) is ready.
     if (this.sandbox.supportsPreviewProxy()) {
       const deadline = Date.now() + 90_000;
@@ -417,7 +385,6 @@ export class ProjectPreviewService {
         throw error;
       }
     }
-
     if (options.signal?.aborted) {
       await this.sandbox.process(ctx, companyId, { projectId, action: "stop", processId, agentId: options.agentId || "system" }).catch(() => undefined);
       options.signal.throwIfAborted();
@@ -430,9 +397,7 @@ export class ProjectPreviewService {
       projectId,
       sandboxId,
     });
-
     const previewUrl = `/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/preview/proxy/?token=${encodeURIComponent(token)}`;
-
     // Store active preview session
     const session: ActivePreviewSession = {
       projectId,
@@ -450,7 +415,6 @@ export class ProjectPreviewService {
       userId: ctx.userId,
     };
     this.sessions.set(projectId, session);
-
     // Update project state in DB
     const finalFramework = project.framework || detected.framework;
     await this.projects.updatePreview(ctx, companyId, projectId, {
@@ -460,7 +424,6 @@ export class ProjectPreviewService {
       framework: finalFramework,
       lastBuildStatus: verifiedBuild ? "ready" : detected.framework === "nextjs" ? null : "ready",
     });
-
     return {
       status: "running",
       previewUrl,
@@ -475,7 +438,6 @@ export class ProjectPreviewService {
       throw error;
     }
   }
-
   async stopPreview(
     ctx: AuthContext,
     companyId: string,
@@ -493,7 +455,6 @@ export class ProjectPreviewService {
       });
       this.sessions.delete(projectId);
     }
-
     // The listener may belong to a worker or a previous API instance. Reuse the
     // durable Terminal journal just as replacement startup already does.
     if (this.sandbox && project.sandboxId && project.previewPort) {
@@ -504,16 +465,13 @@ export class ProjectPreviewService {
       if (existing?.command) commands.add(existing.command);
       for (const command of commands) await this.sandbox.stopRecordedPreview(ctx, companyId, projectId, command);
     }
-
     await this.projects.updatePreview(ctx, companyId, projectId, {
       status: "ready",
       previewUrl: null,
       previewPort: null,
     });
-
     return { status: "stopped", projectId };
   }
-
   async getPreviewStatus(
     ctx: AuthContext,
     companyId: string,
@@ -530,7 +488,6 @@ export class ProjectPreviewService {
   }> {
     let project = await this.projects.get(ctx, companyId, projectId);
     const session = this.sessions.get(projectId);
-
     if (!session || !this.sandbox) {
       // Database state survives a restart; the site's HTTP process may not.
       if (this.sandbox?.supportsPreviewProxy() && ["previewing", "failed"].includes(project.status) && project.sandboxId && project.previewPort) {
@@ -573,7 +530,6 @@ export class ProjectPreviewService {
         restartCount: 0,
       };
     }
-
     // Monitor process status
     try {
       const procStatus = await this.sandbox.process(ctx, companyId, {
@@ -583,7 +539,6 @@ export class ProjectPreviewService {
         agentId: "system",
       });
       const statusValue = (procStatus as any).status;
-
       if (statusValue === "failed" || statusValue === "completed" || statusValue === "timed_out" || statusValue === "stopped") {
         // Dev server exited
         const logData = await this.sandbox.process(ctx, companyId, {
@@ -592,18 +547,15 @@ export class ProjectPreviewService {
           processId: session.processId,
           agentId: "system",
         }).catch(() => ({ output: "" }));
-
         const rawLog = (logData as any)?.output ?? "";
         if (rawLog.includes("EADDRINUSE") || rawLog.includes("address already in use")) {
           session.lastError = `Port ${session.port} is already in use`;
         } else if (rawLog.trim()) {
           session.lastError = rawLog.trim().slice(-2000);
         }
-
         if (session.restartCount < session.maxRestarts) {
           session.restartCount++;
           session.status = "restarting";
-
           // Auto-restart
           const restartResult = await this.sandbox.process(ctx, companyId, {
             projectId,
@@ -612,7 +564,6 @@ export class ProjectPreviewService {
             agentId: "system",
             approved: true,
           }) as any;
-
           if (restartResult?.processId) {
             session.processId = restartResult.processId;
             session.status = "running";
@@ -632,7 +583,6 @@ export class ProjectPreviewService {
       session.status = "failed";
       session.lastError = cause instanceof Error ? cause.message : "Failed to inspect process";
     }
-
     return {
       status: session.status === "failed" ? "failed" : project.status,
       previewUrl: project.previewUrl,
@@ -644,19 +594,15 @@ export class ProjectPreviewService {
       restartCount: session.restartCount,
     };
   }
-
   getSession(projectId: string): ActivePreviewSession | undefined {
     return this.sessions.get(projectId);
   }
-
   async assertProjectAccess(ctx: AuthContext, companyId: string, projectId: string): Promise<Project> {
     return this.projects.get(ctx, companyId, projectId);
   }
-
   setSession(projectId: string, session: ActivePreviewSession): void {
     this.sessions.set(projectId, session);
   }
-
   async handleProxy(
     request: FastifyRequest<{ Params: { companyId: string; projectId: string; "*": string }; Querystring: { token?: string } }>,
     reply: FastifyReply,
@@ -667,7 +613,6 @@ export class ProjectPreviewService {
       || (request.headers.authorization?.replace(/^Bearer\s+/i, ""))
       || readCookieValue(request.headers.cookie, cookieName)
       || "";
-
     let tokenPayload: PreviewTokenPayload;
     try {
       tokenPayload = this.validateTokenForRequest(token, companyId, projectId);
@@ -675,14 +620,12 @@ export class ProjectPreviewService {
       const known = error instanceof PreviewError ? error : new PreviewError("access_denied", "Unauthorized preview token", 403);
       return reply.code(known.status).send({ error: { code: known.code, message: known.message } });
     }
-
     const scope = { workspaceId: tokenPayload.workspaceId ?? this.sessions.get(projectId)?.workspaceId ?? "", userId: tokenPayload.userId, permissions: ["workspace:read"] };
     try {
       const project = await this.projects.get(scope, companyId, projectId);
       if (project.status === "building") return reply.code(503).header("retry-after", "1").send({ error: { code: "preview_starting", message: "Preview is restarting; its upstream is not ready yet." } });
       if (project.status === "failed") return reply.code(502).send({ error: { code: "preview_failed", message: "Preview failed to start. Inspect the build or runtime error before restarting." } });
     } catch { return reply.code(403).send({ error: { code: "preview_access_denied", message: "Preview project is unavailable." } }); }
-
     let session: Pick<ActivePreviewSession, "workspaceId" | "userId" | "sandboxId" | "port" | "status" | "lastError"> | undefined = this.sessions.get(projectId);
     // Worker-created previews and API restarts have no local session; authorize the signed scope again.
     if (!session && tokenPayload.workspaceId && this.sandbox) {
@@ -701,9 +644,7 @@ export class ProjectPreviewService {
         <body><div class="card"><h2>Preview server is not running</h2><p>Click "Start Preview" in the Project header to launch the site.</p></div></body></html>
       `);
     }
-
     if (session.status === "starting" || session.status === "restarting") return reply.code(503).header("retry-after", "1").send({ error: { code: "preview_starting", message: "Preview upstream is not ready yet." } });
-
     if (session.status === "failed") {
       return reply.code(502).type("text/html").send(`
         <!DOCTYPE html><html><head><meta charset="utf-8"><title>Preview Error</title>
@@ -714,7 +655,6 @@ export class ProjectPreviewService {
         <body><div class="card"><h1>Build / Runtime Error</h1><p>The preview dev server exited with an error:</p><pre><code>${escapeHtml(session.lastError || "Unknown error")}</code></pre></div></body></html>
       `);
     }
-
     if (!this.sandbox) return reply.code(503).send({ error: "Sandbox runner unavailable" });
     const cookiePath = `/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/preview/proxy`;
     const secureCookie = (request.headers["x-forwarded-proto"] ?? request.protocol) === "https";
@@ -746,7 +686,6 @@ export class ProjectPreviewService {
       const value = request.headers[name];
       if (typeof value === "string") headers[name] = value;
     }
-
     const authHeader = request.headers.authorization;
     if (typeof authHeader === "string" && authHeader.trim()) {
       const bearer = authHeader.replace(/^Bearer\s+/i, "").trim();
@@ -755,13 +694,11 @@ export class ProjectPreviewService {
         headers["authorization"] = authHeader;
       }
     }
-
     const projectPrefix = `_npati_p_${projectId.slice(0, 8)}_`;
     const filteredCookies = filterIncomingCookies(request.headers.cookie, projectPrefix);
     if (filteredCookies) {
       headers["cookie"] = filteredCookies;
     }
-
     const payload = request.body === undefined ? undefined
       : Buffer.from(typeof request.body === "string" ? request.body : JSON.stringify(request.body)).toString("base64");
     try {
@@ -777,7 +714,6 @@ export class ProjectPreviewService {
           reply.header(name, name.toLowerCase() === "location" && value.startsWith("/") && !value.startsWith("//") ? routed(value) : value);
         }
       }
-
       const setCookieRaw = result.headers["set-cookie"] || result.headers["Set-Cookie"];
       let rewritten: string[] = [];
       if (setCookieRaw) {

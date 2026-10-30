@@ -316,7 +316,7 @@ ${localized.next}`;
     const managementRequest = Boolean(requestMessage && (CompanyChatActions.isManagementRequest(requestMessage) || (route?.selectedCompanyId && CompanyChatActions.isPotentialMutationRequest(requestMessage))));
     const aiRefinement = Boolean(requestMessage && CompanyChatActions.isDetailedAgentRefinementRequest(requestMessage));
     if (!/```company-action/i.test(content) && !managementRequest) return { cleanText: content, companyAction: undefined };
-    const deleteConfirmation = requestMessage && managementRequest
+    const deleteConfirmation = requestMessage && (managementRequest || /```company-action/i.test(content))
       ? await CompanyChatActions.deleteConfirmationMessage(auth, workspaceStore, requestMessage, route?.selectedCompanyId, route?.responseLanguage)
       : undefined;
     if (deleteConfirmation) return { cleanText: deleteConfirmation, companyAction: undefined, awaitingConfirmation: true };

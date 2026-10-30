@@ -123,13 +123,13 @@ export function createChatProjectIntentResolver(deps: {
   listCompanyNames?(auth: AuthContext): Promise<string[]>;
   namesOwnedManagementRecord?(auth: AuthContext, message: string): Promise<boolean>;
   companyDeletionNeedsConfirmation?(auth: AuthContext, message: string, companyId?: string | null): Promise<boolean>;
-  resolveNamedProject?(auth: AuthContext, message: string, activeCompanyId?: string | null): Promise<string | undefined>;
+  resolveNamedProject?(auth: AuthContext, message: string, activeCompanyId?: string | null, conversationText?: string): Promise<string | undefined>;
 }): ChatProjectIntentResolver {
   return async (auth, input) => {
     input.signal?.throwIfAborted();
     const message = input.message ?? input.prompt ?? "";
     if (!input.activeProjectId && deps.resolveNamedProject) {
-      const projectId = await deps.resolveNamedProject(auth, message, input.activeCompanyId);
+      const projectId = await deps.resolveNamedProject(auth, message, input.activeCompanyId, (input.conversationHistory ?? []).map(item => item.content).join("\n"));
       if (projectId) input = { ...input, activeProjectId: projectId };
     }
     if (isRuntimeToolchainCheck(message)) return { decision: classifyProjectIntent(input), targets: [], source: "guard" };

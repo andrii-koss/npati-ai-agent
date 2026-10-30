@@ -51,9 +51,10 @@ export function CatalogProjectThumbnail({ companyId, projectId, name, language, 
     } catch (cause) { setError(cause instanceof Error ? cause.message : uk ? "Не вдалося створити знімок" : "Could not capture screenshot"); }
     finally { setBusy(false); }
   }
+  const previewHref = "/settings/projects/" + encodeURIComponent(companyId) + "/" + encodeURIComponent(projectId);
   return <div ref={container}>
     <div className="website-preview-viewport" style={{ position: "relative", width: "100%", aspectRatio: "16 / 10", borderRadius: 14, overflow: "hidden", background: "#f8fafc", border: "1px solid #eaecf0" }}>
-      <a href={`/settings/projects/${encodeURIComponent(companyId)}/${encodeURIComponent(projectId)}`} aria-label={`Preview ${name}`} onClick={event => { event.preventDefault(); onPreview(); }} style={{ position: "absolute", inset: 0, display: "block", cursor: "pointer" }}>
+      <a href={previewHref} aria-label={`Preview ${name}`} onClick={event => { event.preventDefault(); onPreview(); }} style={{ position: "absolute", inset: 0, display: "block", cursor: "pointer" }}>
         {thumbnail ? <img src={thumbnail.dataUrl} alt={uk ? `Вигляд проєкту ${name}` : `${name} project screenshot`} loading="lazy" style={{ display: "block", width: "100%", height: "100%", objectFit: "cover", objectPosition: "top" }} />
           : <div className="website-card-placeholder" style={{ display: "grid", placeItems: "center", height: "100%", color: "#667085" }}><Camera size={32} /></div>}
       </a>

@@ -276,9 +276,9 @@ export function registerAppRoutesAndLifecycle(deps: AppRoutesAndLifecycleDeps) {
   });
 
   const resolveProjectIntent = createChatProjectIntentResolver({ engine: aiEngine, getAIContext, log,
-    resolveNamedProject: async (auth, message, companyId) => {
+    resolveNamedProject: async (auth, message, companyId, conversationText = "") => {
       const current = await activeContextResolver.resolve(auth, { contextType: companyId ? "company" : "none", companyId: companyId ?? null, businessId: null }).catch(() => undefined);
-      return current ? (await activeContextResolver.resolveNamedCompany(auth, current, message, undefined, "", { deferProjectAmbiguity: true }))?.project?.id : undefined;
+      return current ? (await activeContextResolver.resolveNamedCompany(auth, current, message, undefined, conversationText, { deferProjectAmbiguity: true }))?.project?.id : undefined;
     },
     namesOwnedManagementRecord: (auth, message) => WorkspaceChatActions.namesOwnedAutomation(auth, workspaceStore, message, automationsRepo),
     listBusinessNames: async (auth) => (await workspaceStore.listUserBusinesses(auth)).map(business => business.name),
