@@ -1,4 +1,5 @@
 import { Monitor } from "lucide-react";
+import { ChatProjectPreviewCard } from "./ChatProjectPreviewCard";
 import { getStoredAuthToken } from "./AuthContext";
 import { useTranslation } from "./i18n";
 import type { ProjectCardData } from "@npati/shared";
@@ -257,7 +258,9 @@ export function BusinessForm({ initial, mode, onCancel, onSaved }: { initial?: B
     </form>
   );
 }
+export { ChatProjectPreviewCard } from "./ChatProjectPreviewCard";
 export function ProjectChatCard({ card, onActivate, previewOnly = false, showPreviewTrigger = true }: { card: ProjectCardData; onActivate?: (card: ProjectCardData) => void; previewOnly?: boolean; showPreviewTrigger?: boolean }) {
+
   const navigate = useNavigate();
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState(card.previewUrl ?? "");

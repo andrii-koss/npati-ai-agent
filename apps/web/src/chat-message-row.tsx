@@ -3,7 +3,7 @@ import type { ProjectCardData } from "@npati/shared";
 import { ChatMessageContent, projectChatText } from "./ChatMessageContent";
 import { UserPromptMessage } from "./UserPromptMessage";
 import { PendingMessageAttachments } from "./ChatAttachments";
-import { AssistantMessageToolbar, ProjectChatCard, type Message } from "./business-workspace-cards";
+import { AssistantMessageToolbar, ProjectChatCard, ChatProjectPreviewCard, type Message } from "./business-workspace-cards";
 
 export function messageHasImage(message: Message) {
   return message.attachments?.some((attachment) => attachment.kind === "image")
@@ -45,9 +45,7 @@ export const ChatMessageRow = memo(function ChatMessageRow({ message, card, show
       {message.role === "user"
         ? <UserPromptMessage content={message.content} onEdit={actions.edit} />
         : <ChatMessageContent content={projectChatText(message.content, message.projectCard, responseLanguage)} />}
-      {card && <ProjectChatCard card={card} previewOnly={card.kind === "code_project"}
-        showPreviewTrigger={card.kind !== "code_project" || !!card.previewUrl && ["completed", "ready", "previewing"].includes(card.status)}
-        onActivate={actions.activateCard} />}
+      {card && <ChatProjectPreviewCard card={card} onActivate={actions.activateCard} />}
       {showToolbar && <AssistantMessageToolbar content={message.content} onRegenerate={() => actions.regenerate(message.id)} />}
     </article>
   );

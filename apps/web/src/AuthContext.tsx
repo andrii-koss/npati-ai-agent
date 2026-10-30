@@ -42,7 +42,7 @@ const STORAGE_REFRESH_KEY = "npati_agent_refresh_token";
 const STORAGE_USER_KEY = "npati_agent_user";
 const PENDING_PAIRING_KEY = "npati_agent_pending_pairing";
 const SSO_SUPPRESSED_KEY = "npati_agent_sso_suppressed";
-const NPATI_CENTRAL_API_URL = (import.meta.env.VITE_NPATI_BACKEND_URL || "https://api.npati.com").replace(/\/+$/, "");
+const NPATI_CENTRAL_API_URL = ((typeof import.meta !== "undefined" && import.meta.env?.VITE_NPATI_BACKEND_URL) || "https://api.npati.com").replace(/\/+$/, "");
 
 type PendingPairing = { deviceCode: string; verificationUriComplete: string; expiresAt: number };
 
