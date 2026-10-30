@@ -5,13 +5,14 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebsiteBuilderDashboard } from "./WebsiteBuilderDashboard";
 import { getCachedWebsites, updateCachedWebsites } from "./website-builder-cache";
-vi.mock("./AuthContext", () => ({ getStoredAuthToken: () => "test", getStoredAuthUser: () => ({ id: "test" }) }));
+const authState = vi.hoisted(() => ({ token: "test", serial: 0 }));
+vi.mock("./AuthContext", () => ({ getStoredAuthToken: () => authState.token, getStoredAuthUser: () => ({ id: "test" }) }));
 vi.mock("./i18n", () => ({ useTranslation: () => ({ language: "en", t: (s: string) => s }) }));
 vi.mock("./website-builder-card", () => ({ WebsiteProjectCard: ({ site, companyId }: { site: { name: string }; companyId: string }) => <article data-project data-company={companyId}>{site.name}</article>, invalidateWebsitePreviewCache: vi.fn() }));
 vi.mock("./website-builder-drawer", () => ({ CreateWebsiteDrawer: () => null }));
 let root: Root, host: HTMLDivElement;
-beforeEach(() => { localStorage.clear(); sessionStorage.clear(); host = document.createElement("div"); document.body.append(host); root = createRoot(host); Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); });
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
+beforeEach(() => { authState.token = "test-" + ++authState.serial; localStorage.clear(); sessionStorage.clear(); host = document.createElement("div"); document.body.append(host); root = createRoot(host); Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); });
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 const project = (id: string, companyId: string) => ({ id, companyId, name: id, type: "code_project" as const, status: "ready", revision: 1, updatedAt: "2026-10-27" });
 const render = () => act(async () => { root.render(<MemoryRouter><WebsiteBuilderDashboard /></MemoryRouter>); });
 
@@ -54,12 +55,17 @@ describe("Projects catalog company scope and freshness", () => {
     expect(host.querySelector('option[value="page-b"]')?.getAttribute("title")).toBe("Second page company");
   });
   it("refreshes new projects on focus instead of keeping the old list for five minutes", async () => {
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
     let rows = [project("focus-original", "focus-company")];
     vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url.includes("/projects") ? { projects: rows }
       : { companies: [{ id: "focus-company", name: "Focus company" }], pagination: { nextCursor: null } }), { headers: { "content-type": "application/json" } })));
     await render();
     expect(host.querySelectorAll("[data-project]")).toHaveLength(1);
     rows = [...rows, project("created-in-chat", "focus-company")];
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
+    expect(host.querySelectorAll("[data-project]")).toHaveLength(1);
+    now += 3001;
     await act(async () => { window.dispatchEvent(new Event("focus")); });
     expect(host.querySelectorAll("[data-project]")).toHaveLength(2);
   });

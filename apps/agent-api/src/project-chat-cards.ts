@@ -10,7 +10,7 @@ export interface ChatEntityContext {
   lastConfirmedAction: { entityType: string; entityId: string | null; companyId: string | null; projectId: string | null; action: string };
 }
 const contextKey = (conversationId: string) => `chat-active-context:${conversationId}`;
-export type ChatEntityRead = { field: "name" | "description" | "instructions" | "projects" | "role" | "agents"; entityType: "focused" | "company" | "business" | "project" | "agent" };
+export type ChatEntityRead = { field: "name" | "description" | "instructions" | "projects" | "role" | "agents" | "memory"; entityType: "focused" | "company" | "business" | "project" | "agent" };
 export function focusedChatEntity(context: Partial<ActiveContext>, confirmed?: ChatEntityContext | null) {
   const selected = { entityType: context.contextType ?? "none", entityId: context.projectId ?? context.companyId ?? context.businessId ?? null,
     companyId: context.companyId ?? null, projectId: context.projectId ?? null, action: "select" };
@@ -24,7 +24,7 @@ export function focusedChatEntity(context: Partial<ActiveContext>, confirmed?: C
 export async function executeChatEntityRead(store: WorkspaceStore, auth: AuthContext, resolved: ResolvedActiveContext, request: ChatEntityRead,
   message: string, conversationId?: string, confirmed?: ChatEntityContext | null, noMemory = false) {
   if (confirmed && conversationId && confirmed.conversationId !== conversationId) throw new Error("Entity references belong to another conversation");
-  if (noMemory && request.field === "instructions") return null;
+  if (noMemory && (request.field === "instructions" || request.field === "memory")) return null;
   const focus = focusedChatEntity(resolved.context, confirmed);
   let type = request.entityType === "focused" ? focus.entityType : request.entityType;
   let id = focus.entityType === type ? focus.entityId : null;
@@ -56,6 +56,11 @@ export async function executeChatEntityRead(store: WorkspaceStore, auth: AuthCon
   if (!record) return null;
   let value: string | undefined;
   if (request.field === "name" || request.field === "description") value = record[request.field] ?? undefined;
+  else if (request.field === "memory" && type === "company") {
+    const company = record as import("@npati/workspace").Company;
+    const facts = Object.keys(company.memory ?? {}).length ? JSON.stringify(company.memory, null, 2) : undefined;
+    value = [company.companyInstructions?.trim(), facts].filter(Boolean).join("\n\n") || undefined;
+  }
   else if (request.field === "instructions" && type === "company") value = (record as import("@npati/workspace").Company).companyInstructions ?? undefined;
   else if (request.field === "instructions" && type === "agent") value = (record as import("@npati/workspace").CompanyAgent).systemInstruction ?? undefined;
   else if (request.field === "role" && type === "agent") value = (record as import("@npati/workspace").CompanyAgent).role;

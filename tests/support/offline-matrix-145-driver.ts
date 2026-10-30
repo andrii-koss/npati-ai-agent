@@ -1,3 +1,4 @@
+import { managedWorkspaceBaseResolver } from "../../apps/agent-api/src/workspace-base-resolver";
 import fs from "node:fs";
 import path from "node:path";
 import type { AIEngine, ChatRequest, ChatResult, ChatToolCall } from "@npati/omniroute-adapter";
@@ -72,7 +73,7 @@ export function createOfflineMatrixDriver(input: {
   }
 
   function writeProjectFiles(companyId: string, projectId: string, files: Record<string, string>) {
-    const root = path.join(tempDir, "project-workspaces", auth.workspaceId, companyId, projectId);
+    const root = managedWorkspaceBaseResolver(path.join(tempDir, "project-workspaces")).managedBase(companyId, projectId);
     fs.mkdirSync(root, { recursive: true });
     for (const [rel, content] of Object.entries(files)) {
       const full = path.join(root, rel);
@@ -82,7 +83,7 @@ export function createOfflineMatrixDriver(input: {
   }
 
   function readProjectFiles(companyId: string, projectId: string): Record<string, string> {
-    const root = path.join(tempDir, "project-workspaces", auth.workspaceId, companyId, projectId);
+    const root = managedWorkspaceBaseResolver(path.join(tempDir, "project-workspaces")).managedBase(companyId, projectId);
     if (!fs.existsSync(root)) return {};
     const out: Record<string, string> = {};
     const walk = (dir: string, prefix = "") => {
@@ -379,7 +380,7 @@ export function createOfflineMatrixDriver(input: {
           content: {
             title: cStrategy,
             type: "strategy",
-            content: "Strategy for audience (local families and small offices), offer (sourdough & coffee) and two measurable experiments.",
+            task: "Strategy for audience (local families and small offices), offer (sourdough & coffee) and two measurable experiments.",
           },
         });
       case "A038":
