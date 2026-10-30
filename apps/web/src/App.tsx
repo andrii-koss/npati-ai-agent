@@ -23,6 +23,7 @@ import {
 } from "./BusinessWorkspace";
 import { ConfirmDialogContainer, alertModal } from "./ConfirmDialog";
 import { ConversationalChat } from "./ConversationalChat";
+import { prefetchProjectCatalog } from "./project-catalog-client";
 import { I18nProvider, useTranslation } from "./i18n";
 
 // Pages other than the chat load when first opened: the chat page does not download and parse their code.
@@ -554,7 +555,7 @@ function SettingsPage() {
 
       <div className="settings-card-grid">
         {cards.map((card) => (
-          <Link className="settings-ai-card" to={card.to} key={card.to}>
+          <Link className="settings-ai-card" to={card.to} key={card.to} onMouseEnter={() => { if (card.to === "/settings/projects") prefetchProjectCatalog(); }} onFocus={() => { if (card.to === "/settings/projects") prefetchProjectCatalog(); }}>
             <span className="provider-avatar" aria-hidden="true">{card.icon}</span>
             <span>
               <strong>{card.title}</strong>

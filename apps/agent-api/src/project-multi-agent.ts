@@ -351,6 +351,7 @@ export class ProjectMultiAgentService {
               let browserQaSummary = "Browser QA was not configured.";
               if (this.qaService) {
                 try {
+                  await this.qaService.inspect(ctx, companyId, { projectId, checks: ["screenshot"], screenshotMode: "visual", maxScreenshotBytes: 2_000_000 }).catch(() => undefined);
                   const qaResult = await this.qaService.inspect(ctx, companyId, { projectId });
                   browserQaSummary = [qaResult.report.summary, ...qaResult.issues.slice(0, 20).map((item) => `[${item.type}] ${item.message}`)].join("\n").slice(0, 4000);
                   if (qaResult.issues.length > 0) {

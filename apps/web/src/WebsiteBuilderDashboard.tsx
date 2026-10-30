@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
-import { writeProjectFile } from "./project-files-client";
+import { readProjectFile, writeProjectFile } from "./project-files-client";
 import { confirmModal, promptModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
 import {
@@ -9,6 +9,7 @@ import {
   createMobileAppScaffold,
   createGameScaffold,
   type ProjectKind,
+  projectKindOf,
   defaultAppScheme,
   slugifyProjectName,
   getWebsiteAdapter,
@@ -36,7 +37,7 @@ import {
 import { CreateWebsiteDrawer } from "./website-builder-drawer";
 import { WebsiteFiltersBar } from "./website-builder-filters";
 import { WebsiteProjectCard } from "./website-builder-card";
-import { cachedCatalog, requestCatalog } from "./project-catalog-client";
+import { cachedCatalog, invalidateProjectCatalog, requestCatalog } from "./project-catalog-client";
 
 export function WebsiteBuilderDashboard() {
   const navigate = useNavigate();
@@ -60,10 +61,12 @@ export function WebsiteBuilderDashboard() {
   const filters = useMemo(() => ({ companyId, search, status: statusFilter, framework: frameworkFilter, kind: kindFilter }), [companyId, search, statusFilter, frameworkFilter, kindFilter]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const catalogGeneration = useRef(0);
+  const lastCatalogFetchAt = useRef(0);
   const requests = useRef(new Set<ReturnType<typeof requestCatalog>>());
 
   // Create Modal State
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingProject, setEditingProject] = useState<WebsiteProject | null>(null);
   const [selectedFramework, setSelectedFramework] = useState<FrameworkStarterOption["id"]>("html-css");
   const [name, setName] = useState(FRAMEWORK_STARTERS[0]?.defaultName ?? "Modern HTML/CSS Website");
   const [description, setDescription] = useState(FRAMEWORK_STARTERS[0]?.defaultDesc ?? "Clean responsive website");
@@ -81,7 +84,7 @@ export function WebsiteBuilderDashboard() {
 
   // Sync default container port with framework selection
   useEffect(() => {
-    const fw = framework.toLowerCase();
+    if (editingProject) return; const fw = framework.toLowerCase();
     if (fw.includes("vite")) {
       setContainerPort(5173);
     } else if (fw.includes("astro")) {
@@ -89,7 +92,7 @@ export function WebsiteBuilderDashboard() {
     } else {
       setContainerPort(3000);
     }
-  }, [framework]);
+  }, [framework, editingProject]);
 
   // Load Companies
   useEffect(() => {
@@ -128,6 +131,7 @@ export function WebsiteBuilderDashboard() {
       requests.current.clear();
     }
     const generation = catalogGeneration.current;
+    lastCatalogFetchAt.current = Date.now();
     const request = requestCatalog(filters, cursor);
     requests.current.add(request);
     setLoading(true);
@@ -150,7 +154,7 @@ export function WebsiteBuilderDashboard() {
     setWebsites(cached?.projects ?? []);
     setNextCursor(cached?.pagination?.nextCursor ?? null);
     void loadWebsites();
-    const refresh = () => { if (document.visibilityState !== "hidden" && requests.current.size === 0) void loadWebsites(); };
+    const refresh = () => { if (document.visibilityState !== "hidden" && requests.current.size === 0 && Date.now() - lastCatalogFetchAt.current > 3000) void loadWebsites(); };
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", refresh);
     return () => {
@@ -201,6 +205,63 @@ export function WebsiteBuilderDashboard() {
           : ["web", "websecure"],
         sslCertificate: autoSsl,
         certificateProvider: autoSsl ? "letsencrypt" : "none",
+      };
+
+      if (editingProject) {
+        const deploymentConfigData = JSON.stringify(
+          {
+            domain: finalDomain,
+            isTechnicalDomain: isTechnical,
+            path: domainConfig.path,
+            stripPath: domainConfig.stripPath,
+            port: domainConfig.port,
+            entrypoints: domainConfig.entrypoints,
+            ssl: domainConfig.sslCertificate ? "Let's Encrypt" : "Disabled",
+            updatedAt: new Date().toISOString(),
+          },
+          null,
+          2
+        );
+
+        try {
+          await writeProjectFile(
+            { companyId: editingProject.companyId, projectId: editingProject.id },
+            "deployment.json",
+            deploymentConfigData
+          );
+        } catch {
+          // ignore if workspace not initialized
+        }
+
+        await apiFetch(
+          `/companies/${encodeURIComponent(editingProject.companyId)}/projects/${encodeURIComponent(editingProject.id)}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({
+              name: name.trim() || editingProject.name,
+              expectedRevision: editingProject.revision,
+              deploymentUrl: `https://${finalDomain}`,
+              deploymentStatus: "deployed",
+              previewUrl: `https://${finalDomain}`,
+              previewPort: domainConfig.port,
+              framework,
+            }),
+          }
+        );
+
+        void apiFetch(
+          `/companies/${encodeURIComponent(editingProject.companyId)}/projects/${encodeURIComponent(editingProject.id)}/preview/start`,
+          {
+            method: "POST",
+            body: JSON.stringify({ port: domainConfig.port }),
+          }
+        ).catch(() => {});
+
+        invalidateProjectCatalog();
+        await loadWebsites(companyId);
+        setModalOpen(false);
+        setEditingProject(null);
+        return;
       };
 
       const created = await apiFetch<WebsiteProject>(
@@ -287,7 +348,10 @@ export function WebsiteBuilderDashboard() {
           method: "POST",
           body: JSON.stringify({ port: domainConfig.port }),
         }
-      ).catch(() => {});
+      ).then(() => apiFetch(
+        `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(created.id)}/qa/thumbnail`,
+        { method: "POST", body: "{}" },
+      )).catch(() => {});
 
       const promptText = kind === "game"
         ? (language === "uk" ? "Запусти цю гру в Live Preview і запропонуй, як її розвинути" : "Start this game in Live Preview and suggest how to develop it")
@@ -307,22 +371,68 @@ export function WebsiteBuilderDashboard() {
     }
   };
 
-  const handleRename = useCallback(async (site: WebsiteProject) => {
-    const next = await promptModal({ message: t.renamePrompt, defaultValue: site.name });
-    if (!next || !next.trim() || next.trim() === site.name) return;
-    try {
-      await apiFetch(
-        `/companies/${encodeURIComponent(site.companyId)}/projects/${encodeURIComponent(site.id)}`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({ name: next.trim(), expectedRevision: site.revision }),
+  const handleRename = useCallback((site: WebsiteProject) => {
+    setEditingProject(site);
+    setCreationCompanyId(site.companyId);
+    setName(site.name);
+    setDescription(site.description ?? "");
+    const starter = FRAMEWORK_STARTERS.find(s =>
+      (site.framework && (s.id.toLowerCase() === site.framework.toLowerCase() || s.frameworkKey.toLowerCase() === site.framework.toLowerCase())) ||
+      (site.kind && s.kind === site.kind) ||
+      (site.type && s.defaultType === site.type)
+    ) || FRAMEWORK_STARTERS[0]!;
+    setSelectedFramework(starter.id);
+    setFramework(site.framework || starter.frameworkKey);
+    const resolvedType = (site.type === "code_project" ? "web_app" : site.type) || starter.defaultType;
+    setType(resolvedType);
+    setKind((site.kind ?? projectKindOf(site)) || starter.kind);
+    const rawDomain = (site.deploymentUrl || site.previewUrl || "").replace(/^https?:\/\//, "").replace(/\/.*$/, "").trim();
+    const isTechnical = !rawDomain || rawDomain.endsWith(".preview.npati.com");
+    setDomain(isTechnical ? "" : rawDomain);
+    setInternalPath("/");
+    setStripPath(false);
+    setContainerPort(site.previewPort || starter.defaultPort || 3000);
+    setUseCustomEntrypoint(false);
+    setCustomEntrypoint("web, websecure");
+    setAutoSsl(true);
+    setError("");
+    setModalOpen(true);
+    void readProjectFile({ companyId: site.companyId, projectId: site.id }, "deployment.json").then(file => {
+      if (!file?.content) return;
+      try {
+        const parsed = JSON.parse(file.content);
+        if (parsed.domain && !parsed.isTechnicalDomain) setDomain(parsed.domain);
+        if (parsed.path) setInternalPath(parsed.path);
+        if (typeof parsed.stripPath === "boolean") setStripPath(parsed.stripPath);
+        if (parsed.port) setContainerPort(Number(parsed.port));
+        if (Array.isArray(parsed.entrypoints) && parsed.entrypoints.length > 0) {
+          setCustomEntrypoint(parsed.entrypoints.join(", "));
+          setUseCustomEntrypoint(true);
         }
-      );
-      await loadWebsites(companyId);
-    } catch (err: any) {
-      alert(err.message || "Failed to rename website");
-    }
-  }, [companyId, loadWebsites, t.renamePrompt]);
+        if (parsed.ssl) setAutoSsl(parsed.ssl !== "Disabled");
+      } catch {}
+    }).catch(() => {});
+  }, []);
+
+  const handleOpenCreateModal = useCallback(() => {
+    setEditingProject(null);
+    setError("");
+    const initial = FRAMEWORK_STARTERS[0]!;
+    setSelectedFramework(initial.id);
+    setName(language === "uk" ? initial.defaultNameUk : initial.defaultName);
+    setDescription(language === "uk" ? initial.defaultDescUk : initial.defaultDesc);
+    setFramework(initial.frameworkKey);
+    setType(initial.defaultType);
+    setKind(initial.kind);
+    setDomain("");
+    setInternalPath("/");
+    setStripPath(false);
+    setContainerPort(initial.defaultPort);
+    setUseCustomEntrypoint(false);
+    setCustomEntrypoint("web, websecure");
+    setAutoSsl(true);
+    setModalOpen(true);
+  }, [language]);
 
   const handleDuplicate = useCallback(async (site: WebsiteProject) => {
     try {
@@ -431,10 +541,7 @@ export function WebsiteBuilderDashboard() {
             <button
               type="button"
               className="button-primary"
-              onClick={() => {
-                setError("");
-                setModalOpen(true);
-              }}
+              onClick={handleOpenCreateModal}
               style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
             >
               <span style={{ fontSize: "16px", lineHeight: 1 }}>+</span>
@@ -472,7 +579,7 @@ export function WebsiteBuilderDashboard() {
           <button
             type="button"
             className="button-primary automations-action-primary"
-            onClick={() => setModalOpen(true)}
+            onClick={handleOpenCreateModal}
           >
             + {t.createNow}
           </button>
@@ -511,7 +618,7 @@ export function WebsiteBuilderDashboard() {
 
       <CreateWebsiteDrawer
         isOpen={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={() => { setModalOpen(false); setEditingProject(null); }}
         t={t}
         language={language}
         companies={companies}

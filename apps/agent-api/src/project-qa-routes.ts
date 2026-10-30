@@ -53,8 +53,10 @@ export function registerProjectQaRoutes(
       reply.header("Cache-Control", "private, no-store");
       const report = await qaService.getLatestReport(ctx, request.params.companyId, request.params.projectId);
       const screenshot = report?.screenshots.find(image => image.captureMode === "visual" && image.mimeType === "image/png" && image.sizeBytes <= 2_000_000);
-      if (screenshot && !screenshotHasDetail(Buffer.from(screenshot.base64Data, "base64"))) return { thumbnail: null };
-      return { thumbnail: screenshot ? { dataUrl: "data:image/png;base64," + screenshot.base64Data, capturedAt: report!.createdAt } : null };
+      const visualReport = report && !screenshot ? await qaService.getLatestVisualReport(ctx, request.params.companyId, request.params.projectId) : report;
+      const activeScreenshot = screenshot ?? visualReport?.screenshots.find(image => image.captureMode === "visual" && image.mimeType === "image/png" && image.sizeBytes <= 2_000_000);
+      if (activeScreenshot && !screenshotHasDetail(Buffer.from(activeScreenshot.base64Data, "base64"))) return { thumbnail: null };
+      return { thumbnail: activeScreenshot ? { dataUrl: "data:image/png;base64," + activeScreenshot.base64Data, capturedAt: visualReport!.createdAt } : null };
     } catch (error) { return handleError(error, reply); }
   });
 

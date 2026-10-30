@@ -72,7 +72,7 @@ export function createOfflineMatrixDriver(input: {
   }
 
   function writeProjectFiles(companyId: string, projectId: string, files: Record<string, string>) {
-    const root = path.join(tempDir, "project-workspaces", companyId, projectId);
+    const root = path.join(tempDir, "project-workspaces", auth.workspaceId, companyId, projectId);
     fs.mkdirSync(root, { recursive: true });
     for (const [rel, content] of Object.entries(files)) {
       const full = path.join(root, rel);
@@ -82,7 +82,7 @@ export function createOfflineMatrixDriver(input: {
   }
 
   function readProjectFiles(companyId: string, projectId: string): Record<string, string> {
-    const root = path.join(tempDir, "project-workspaces", companyId, projectId);
+    const root = path.join(tempDir, "project-workspaces", auth.workspaceId, companyId, projectId);
     if (!fs.existsSync(root)) return {};
     const out: Record<string, string> = {};
     const walk = (dir: string, prefix = "") => {
@@ -379,7 +379,7 @@ export function createOfflineMatrixDriver(input: {
           content: {
             title: cStrategy,
             type: "strategy",
-            task: "Strategy for audience (local families and small offices), offer (sourdough & coffee) and two measurable experiments.",
+            content: "Strategy for audience (local families and small offices), offer (sourdough & coffee) and two measurable experiments.",
           },
         });
       case "A038":
@@ -702,7 +702,7 @@ export function createOfflineMatrixDriver(input: {
       return {
         kind: "web_search",
         context: `Verified evidence for ${query}: Example Domain and navigation patterns for ${hosts.join(", ")}.`,
-        sources: hosts.map((url) => ({ url, title: url.includes("example") ? "Example Domain" : url, snippet: `Snippet for ${url}` })),
+        sources: hosts.map((url) => ({ url, title: url.includes("example") ? "Example Domain" : url, accessedAt: "2026-01-01T00:00:00.000Z" })),
       };
     },
   } as unknown as WebResearchService;

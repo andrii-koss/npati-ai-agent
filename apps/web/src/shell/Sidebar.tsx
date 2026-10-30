@@ -7,6 +7,7 @@ import { IconClose } from "./sidebar-icons";
 import { SidebarActionMenu } from "./SidebarActionMenu";
 import { ConversationRow } from "./SidebarItemRows";
 import { useSidebarState } from "./use-sidebar-state";
+import { prefetchProjectCatalog } from "../project-catalog-client";
 
 const navigation = ["Settings"];
 
@@ -142,6 +143,8 @@ export function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose
               key={item}
               className={`sidebar-settings-link ${location.pathname === href || location.pathname.startsWith(`${href}/`) ? "active" : ""}`}
               to={href}
+              onMouseEnter={() => { if (href === "/settings/projects") prefetchProjectCatalog(); }}
+              onFocus={() => { if (href === "/settings/projects") prefetchProjectCatalog(); }}
               onClick={onClose}
             >
               {item === "Settings" ? t("common.settings") : item === "Projects" ? "Projects" : item}

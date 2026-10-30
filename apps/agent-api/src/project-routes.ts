@@ -59,10 +59,26 @@ export function registerProjectRoutes(app: FastifyInstance, service: ProjectServ
       // Mobile projects (D6) attach to an existing DataBackend instead of copying a database.
       dataBackendId: { type: "string" },
       appScheme: { type: "string" },
+      deploymentUrl: { type: "string", maxLength: 500 },
+      previewUrl: { type: "string", maxLength: 500 },
+      previewPort: { type: "integer", minimum: 1, maximum: 65535 },
+      framework: { type: "string", maxLength: 100 },
     } } },
   }, async (request, reply) => {
     try {
-      const result = await service.create(await authorize(auth, request, "business:manage"), request.params.companyId, request.body, key(request));
+      const ctx = await authorize(auth, request, "business:manage");
+      const result = await service.create(ctx, request.params.companyId, request.body, key(request));
+      const bodyAny = request.body as unknown as Record<string, unknown>;
+      if (bodyAny.deploymentUrl !== undefined || bodyAny.previewUrl !== undefined || bodyAny.previewPort !== undefined || bodyAny.framework !== undefined) {
+        const updated = await service.updatePreview(ctx, request.params.companyId, result.project.id, {
+          deploymentUrl: typeof bodyAny.deploymentUrl === "string" ? bodyAny.deploymentUrl : undefined,
+          deploymentStatus: typeof bodyAny.deploymentUrl === "string" && bodyAny.deploymentUrl ? "deployed" : undefined,
+          previewUrl: typeof bodyAny.previewUrl === "string" ? bodyAny.previewUrl : undefined,
+          previewPort: typeof bodyAny.previewPort === "number" ? bodyAny.previewPort : undefined,
+          framework: typeof bodyAny.framework === "string" ? bodyAny.framework : undefined,
+        });
+        return reply.code(result.created ? 201 : 200).send(updated);
+      }
       return reply.code(result.created ? 201 : 200).send(result.project);
     } catch (error) { return fail(reply, error); }
   });
@@ -75,9 +91,28 @@ export function registerProjectRoutes(app: FastifyInstance, service: ProjectServ
   app.patch<{ Params: { companyId: string; projectId: string }; Body: { name: string; expectedRevision: number } }>("/companies/:companyId/projects/:projectId", {
     schema: { body: { type: "object", additionalProperties: false, required: ["name", "expectedRevision"], properties: {
       name: { type: "string" }, expectedRevision: { type: "integer", minimum: 1 },
+      deploymentUrl: { type: "string", maxLength: 500 },
+      deploymentStatus: { type: "string", maxLength: 100 },
+      previewUrl: { type: "string", maxLength: 500 },
+      previewPort: { type: "integer", minimum: 1, maximum: 65535 },
+      framework: { type: "string", maxLength: 100 },
     } } },
   }, async (request, reply) => {
-    try { return await service.rename(await authorize(auth, request, "business:manage"), request.params.companyId, request.params.projectId, request.body.name, request.body.expectedRevision); }
+    try {
+      const ctx = await authorize(auth, request, "business:manage");
+      let updated = await service.rename(ctx, request.params.companyId, request.params.projectId, request.body.name, request.body.expectedRevision);
+      const bodyAny = request.body as unknown as Record<string, unknown>;
+      if (bodyAny.deploymentUrl !== undefined || bodyAny.deploymentStatus !== undefined || bodyAny.previewUrl !== undefined || bodyAny.previewPort !== undefined || bodyAny.framework !== undefined) {
+        updated = await service.updatePreview(ctx, request.params.companyId, request.params.projectId, {
+          deploymentUrl: typeof bodyAny.deploymentUrl === "string" ? bodyAny.deploymentUrl : undefined,
+          deploymentStatus: typeof bodyAny.deploymentStatus === "string" ? bodyAny.deploymentStatus : (typeof bodyAny.deploymentUrl === "string" && bodyAny.deploymentUrl ? "deployed" : undefined),
+          previewUrl: typeof bodyAny.previewUrl === "string" ? bodyAny.previewUrl : undefined,
+          previewPort: typeof bodyAny.previewPort === "number" ? bodyAny.previewPort : undefined,
+          framework: typeof bodyAny.framework === "string" ? bodyAny.framework : undefined,
+        });
+      }
+      return updated;
+    }
     catch (error) { return fail(reply, error); }
   });
 

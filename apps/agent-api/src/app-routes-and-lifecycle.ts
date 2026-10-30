@@ -275,7 +275,8 @@ export function registerAppRoutesAndLifecycle(deps: AppRoutesAndLifecycleDeps) {
     workspaceStore,
   });
 
-  const resolveProjectIntent = createChatProjectIntentResolver({ engine: aiEngine, getAIContext, log,
+  const resolveProjectIntent = createChatProjectIntentResolver({
+    engine: aiEngine, getAIContext, log,
     resolveNamedProject: async (auth, message, companyId, conversationText = "") => {
       const current = await activeContextResolver.resolve(auth, { contextType: companyId ? "company" : "none", companyId: companyId ?? null, businessId: null }).catch(() => undefined);
       return current ? (await activeContextResolver.resolveNamedCompany(auth, current, message, undefined, conversationText, { deferProjectAmbiguity: true }))?.project?.id : undefined;
@@ -297,7 +298,8 @@ export function registerAppRoutesAndLifecycle(deps: AppRoutesAndLifecycleDeps) {
       do { const page = await workspaceStore.listCompanies(auth, 100, cursor); owned.push(...page.items); cursor = page.nextCursor ?? undefined; } while (cursor && owned.length < 500);
       const companies = owned.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()).slice(0, 20);
       return (await Promise.all(companies.map(async (company) => (await workspaceStore.listCompanyAgentsPage(auth, company.id, 50)).items.map((agent) => agent.name)))).flat();
-    } });
+    }
+  });
   registerChatRoutes(app, {
     ollamaChat: createOllamaChatHandler(aiEngine, authProvider),
     resolveProjectIntent,

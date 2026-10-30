@@ -62,7 +62,7 @@ export const WebsiteProjectCard = React.memo(function WebsiteProjectCard({
       }}
     >
       {/* 1. Main visual preview of the project */}
-      <CatalogProjectThumbnail companyId={companyId} projectId={site.id} name={site.name} language={language} onPreview={() => void handleOpenPreview()} />
+      <CatalogProjectThumbnail companyId={companyId} projectId={site.id} name={site.name} language={language} kind={site.kind ?? projectKindOf(site)} type={site.type} framework={site.framework} projectStatus={site.status} hasThumbnail={site.hasThumbnail} onPreview={() => void handleOpenPreview()} />
       {previewError && <p role="alert" className="project-error">{previewError}</p>}
 
       {/* 2. Project Title */}
@@ -84,7 +84,7 @@ export const WebsiteProjectCard = React.memo(function WebsiteProjectCard({
         </h3>
         <small className="website-card-kind" style={{ display: "block", marginTop: "4px", color: "#667085", fontSize: "12.5px" }}>
           {PROJECT_KIND_LABELS[projectKindOf(site)][language === "uk" ? "uk" : "en"]}
-          {site.framework ? ` · ${site.framework}` : ""}
+          {site.framework ? ` · ${site.framework}` : ""}{site.deploymentUrl && !site.deploymentUrl.includes(".preview.npati.com") ? ` · ${site.deploymentUrl.replace(/^https?:\/\//, "")}` : ""}
         </small>
       </div>
 

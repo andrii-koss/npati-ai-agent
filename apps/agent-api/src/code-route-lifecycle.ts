@@ -316,15 +316,28 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
       finished = await verifyWebsiteRuntime(input, finished, async () => {
         if (!inputDeps.projectBrowserQaService) throw new Error("Browser QA is not configured");
         await featureFlagService.assertEnabled(input.ctx, "code.shell", { companyId: input.session.companyId });
-        return inputDeps.projectBrowserQaService.inspect(input.ctx, input.session.companyId, {
-          projectId: input.session.projectId, runId: input.runId, checks: ["console", "links"], agentId: "system",
-        });
+        try {
+          return await inputDeps.projectBrowserQaService!.inspect(input.ctx, input.session.companyId, {
+            projectId: input.session.projectId, runId: input.runId,
+            checks: ["screenshot", "console", "links"], screenshotMode: "visual", maxScreenshotBytes: 2_000_000, agentId: "system",
+          });
+        } catch (error) {
+          if (!["visual_screenshot_unavailable", "preview_empty"].includes((error as { code?: string })?.code ?? "")) throw error;
+          return inputDeps.projectBrowserQaService!.inspect(input.ctx, input.session.companyId, {
+            projectId: input.session.projectId, runId: input.runId, checks: ["console", "links"], agentId: "system",
+          });
+        }
       });
+      if ((finished as { backendPreview?: { status?: string } })?.backendPreview?.status === "running" && inputDeps.projectBrowserQaService) {
+        await inputDeps.projectBrowserQaService.inspect(input.ctx, input.session.companyId, {
+          projectId: input.session.projectId, runId: input.runId, checks: ["screenshot"], screenshotMode: "visual", maxScreenshotBytes: 2_000_000, agentId: "system",
+        }).catch(() => undefined);
+      }
       finished = await reviewWebsiteReference(input, finished, {
         inspect: async () => {
           if (!inputDeps.projectBrowserQaService) throw new Error("visual_screenshot_unavailable");
           await featureFlagService.assertEnabled(input.ctx, "code.shell", { companyId: input.session.companyId });
-          return inputDeps.projectBrowserQaService.inspect(input.ctx, input.session.companyId, { projectId: input.session.projectId, runId: input.runId,
+          return inputDeps.projectBrowserQaService!.inspect(input.ctx, input.session.companyId, { projectId: input.session.projectId, runId: input.runId,
             checks: ["screenshot", "console", "links"], screenshotMode: "visual", maxScreenshotBytes: 2_000_000, agentId: "system" });
         },
         chat: request => inputDeps.aiEngine.chat(request),

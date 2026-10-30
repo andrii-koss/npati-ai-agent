@@ -108,6 +108,10 @@ export class ProjectService {
     framework?: string | null;
     runtime?: string | null;
     lastBuildStatus?: string | null;
+    deploymentUrl?: string | null;
+    deploymentStatus?: string | null;
+    lastDeploymentStatus?: string | null;
+    lastDeployedAt?: string | null;
   }) {
     await this.get(context, companyId, projectId);
     return this.store.updateProjectPreview(context, companyId, projectId, patch);

@@ -4,6 +4,8 @@ import { WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
 import { AuthenticationError, type AuthProvider } from "./auth";
 import { PreviewError, type ProjectPreviewService } from "./project-preview-service";
 import type { ProjectWorkspace } from "./project-workspace";
+import { createCustomDomainHandler } from "./project-domain-proxy";
+import { setCustomDomainHandler } from "./web-frontend";
 
 interface ProjectParams {
   companyId: string;
@@ -17,6 +19,7 @@ export function registerProjectPreviewRoutes(
   auth: AuthProvider,
   workspaceStore?: WorkspaceStore,
 ) {
+  setCustomDomainHandler(app, createCustomDomainHandler(previewService, workspace, workspaceStore));
   const authenticate = async (request: FastifyRequest, reply: FastifyReply): Promise<AuthContext | null> => {
     try {
       return await auth.authenticate(request);

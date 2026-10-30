@@ -11,6 +11,7 @@ function key(filters: CatalogFilters, cursor?: string) {
   return new URLSearchParams({ ...filters, ...(cursor ? { cursor } : {}) }).toString();
 }
 export function cachedCatalog(filters: CatalogFilters) { return cache.get(key(filters)); }
+export function invalidateProjectCatalog() { cache.clear(); }
 export function requestCatalog(filters: CatalogFilters, cursor?: string) {
   const query = key(filters, cursor);
   let entry = pending.get(query);
@@ -35,4 +36,11 @@ export function requestCatalog(filters: CatalogFilters, cursor?: string) {
     // A StrictMode remount or another subscriber may acquire the same request.
     queueMicrotask(() => { if (!shared.users && pending.get(query) === shared) { pending.delete(query); shared.controller.abort(); } });
   } };
+}
+export function prefetchProjectCatalog() {
+  void import("./WebsiteBuilderDashboard");
+  const initialFilters: CatalogFilters = { companyId: "", search: "", status: "all", framework: "all", kind: "all" };
+  if (cachedCatalog(initialFilters)) return;
+  const req = requestCatalog(initialFilters);
+  void req.promise.catch(() => {}).finally(() => req.release());
 }

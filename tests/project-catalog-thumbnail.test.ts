@@ -28,6 +28,8 @@ describe("saved catalog screenshots", () => {
     const screenshot = { name: "desktop", viewport: { width: 1280, height: 800 }, mimeType: "image/png", base64Data: "test-fixture", sizeBytes: 12, captureMode: "visual" as const };
     await f.store.createProjectQaReport(owner, f.company.id, f.project.id, { status: "passed", targetUrl: "/preview", summary: "Screenshot", issues: [], metrics: {} as never, screenshots: [screenshot] });
     expect((await f.app.inject({ url: f.url })).json().thumbnail.dataUrl).toBe("data:image/png;base64,test-fixture");
+    await f.store.createProjectQaReport(owner, f.company.id, f.project.id, { status: "passed", targetUrl: "/preview", summary: "Console check only", issues: [], metrics: {} as never, screenshots: [] });
+    expect((await f.app.inject({ url: f.url })).json().thumbnail.dataUrl).toBe("data:image/png;base64,test-fixture");
     f.setContext({ ...owner, userId: "other" }); expect((await f.app.inject({ url: f.url })).statusCode).toBe(403);
     f.setContext({ ...owner, companyId: "other-company" }); expect((await f.app.inject({ url: f.url })).statusCode).toBe(403);
     f.setContext({ ...owner, permissions: [] }); expect((await f.app.inject({ url: f.url })).statusCode).toBe(403);

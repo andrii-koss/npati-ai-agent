@@ -686,6 +686,9 @@ export class ProjectOrchestrator {
         previewUrl = pStatus.previewUrl || undefined;
       } catch {}
     }
+    if (previewUrl && this.qaService && !usedMultiAgent) {
+      await this.qaService.inspect(ctx, params.companyId, { projectId: project.id, checks: ["screenshot"], screenshotMode: "visual", maxScreenshotBytes: 2_000_000 }).catch(() => undefined);
+    }
 
     if (usedMultiAgent && needsBuild && runDetails.run.status === "completed") lastBuildStatus = previewUrl ? "success" : "failed";
     const finalStatus = runDetails.run.status === "awaiting_approval" ? "working" : runDetails.run.status === "failed" || lastBuildStatus === "failed" ? "failed" : previewUrl ? "previewing" : "ready";

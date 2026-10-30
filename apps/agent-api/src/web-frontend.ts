@@ -1,10 +1,15 @@
 import fastifyStatic from "@fastify/static";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { IncomingMessage } from "node:http";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 const apiRequests = new WeakSet<IncomingMessage>();
+export type CustomDomainHandler = (request: FastifyRequest, reply: FastifyReply) => Promise<boolean>;
+const customDomainHandlers = new WeakMap<FastifyInstance, CustomDomainHandler>();
+export function setCustomDomainHandler(app: FastifyInstance, handler: CustomDomainHandler): void {
+  customDomainHandlers.set(app, handler);
+}
 
 /** Match the former nginx /api/ proxy without buffering or redispatching requests. */
 export function rewriteBrowserApiUrl(request: IncomingMessage): string {
@@ -43,6 +48,8 @@ export function registerWebFrontend(app: FastifyInstance, directory: string): vo
     },
   });
   app.addHook("onRequest", async (request, reply) => {
+    const domainHandler = customDomainHandlers.get(app);
+    if (domainHandler && (await domainHandler(request, reply))) return;
     const pathname = request.url.split("?")[0] ?? "/";
     const staticRoute = request.routeOptions.url === "/*";
     if (apiRequests.has(request.raw)) {

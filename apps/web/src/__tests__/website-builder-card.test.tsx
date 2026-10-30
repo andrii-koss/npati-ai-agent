@@ -82,5 +82,59 @@ describe("WebsiteProjectCard", () => {
     expect(markup).toContain("Duplicate");
     expect(markup).toContain("Rename");
     expect(markup).toContain("Delete");
+    expect(markup).toContain("No preview yet");
+    expect(markup).toContain("A preview will be available after the project is set up.");
+    expect(markup).toContain('data-project-variant="website"');
+    expect(markup).not.toContain("lucide-camera");
+  });
+
+  it("renders distinct SVG placeholder variants for mobile, game, and other projects", () => {
+    const mobileMarkup = renderToStaticMarkup(
+      <MemoryRouter>
+        <WebsiteProjectCard
+          site={{ ...dummyProject, type: "mobile_app", kind: "mobile_app", framework: "Expo" }}
+          companyId="comp-1"
+          language="en"
+          t={websiteBuilderCopy.en}
+          handleDuplicate={() => {}}
+          handleRename={() => {}}
+          handleDelete={() => {}}
+        />
+      </MemoryRouter>
+    );
+    expect(mobileMarkup).toContain('data-project-variant="mobile"');
+    expect(mobileMarkup).toContain("Preview coming soon");
+    expect(mobileMarkup).toContain("This project&#x27;s preview will appear here.");
+
+    const gameMarkup = renderToStaticMarkup(
+      <MemoryRouter>
+        <WebsiteProjectCard
+          site={{ ...dummyProject, kind: "game", framework: "HTML/CSS" }}
+          companyId="comp-1"
+          language="uk"
+          t={websiteBuilderCopy.uk}
+          handleDuplicate={() => {}}
+          handleRename={() => {}}
+          handleDelete={() => {}}
+        />
+      </MemoryRouter>
+    );
+    expect(gameMarkup).toContain('data-project-variant="game"');
+    expect(gameMarkup).toContain("Превʼю ще немає");
+
+    const apiMarkup = renderToStaticMarkup(
+      <MemoryRouter>
+        <WebsiteProjectCard
+          site={{ ...dummyProject, type: "code_project", kind: "api", framework: "Node.js" }}
+          companyId="comp-1"
+          language="en"
+          t={websiteBuilderCopy.en}
+          handleDuplicate={() => {}}
+          handleRename={() => {}}
+          handleDelete={() => {}}
+        />
+      </MemoryRouter>
+    );
+    expect(apiMarkup).toContain('data-project-variant="other"');
   });
 });

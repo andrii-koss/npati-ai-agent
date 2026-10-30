@@ -282,6 +282,7 @@ export interface WorkspaceStore {
   createProject(context: AuthContext, companyId: string, input: ProjectInput, idempotencyKey: string): Promise<{ project: Project; created: boolean }>;
   listProjects(context: AuthContext, companyId: string, includeArchived?: boolean): Promise<Project[]>;
   listProjectCatalog(context: AuthContext, input: import("./project-catalog").ProjectCatalogInput): Promise<import("./project-catalog").ProjectCatalogPage>;
+  findProjectByDomain?(domain: string): Promise<{ workspaceId: string; userId: string; companyId: string; projectId: string; previewPort?: number | null } | null>;
   getProject(context: AuthContext, companyId: string, projectId: string): Promise<Project>;
   updateProject(context: AuthContext, companyId: string, projectId: string, input: { name?: string; expectedRevision: number; code?: ProjectCodeSettings }): Promise<Project>;
   archiveProject(context: AuthContext, companyId: string, projectId: string, expectedRevision: number): Promise<Project>;

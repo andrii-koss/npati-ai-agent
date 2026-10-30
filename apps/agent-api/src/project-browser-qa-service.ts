@@ -150,4 +150,8 @@ export class ProjectBrowserQaService {
     await this.projects.get(ctx, companyId, projectId);
     return this.store.getLatestProjectQaReport(ctx, companyId, projectId);
   }
+  async getLatestVisualReport(ctx: AuthContext, companyId: string, projectId: string): Promise<ProjectQaReport | null> {
+    const reports = await this.store.listProjectQaReports(ctx, companyId, projectId, 10);
+    return reports.find(r => r.screenshots.some(s => s.captureMode === "visual" && s.mimeType === "image/png" && s.sizeBytes <= 2_000_000)) ?? null;
+  }
 }

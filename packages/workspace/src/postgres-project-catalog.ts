@@ -24,11 +24,26 @@ export function projectCatalogQuery(context: AuthContext, input: ProjectCatalogI
     where.push(`p.updated_at <= ${time}::timestamptz AND (p.updated_at < ${time}::timestamptz OR p.id > ${id})`);
   }
   return { text: `SELECT p.id,p.company_id AS "companyId",p.name,p.description,p.type,p.kind,p.status,p.framework,p.revision,
-    to_char(p.updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "updatedAt"
+    p.deployment_url AS "deploymentUrl",p.deployment_status AS "deploymentStatus",p.preview_url AS "previewUrl",p.preview_port AS "previewPort",
+    to_char(p.updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "updatedAt",
+    EXISTS (SELECT 1 FROM project_qa_reports q WHERE q.workspace_id=p.workspace_id AND q.company_id=p.company_id AND q.project_id=p.id AND jsonb_typeof(q.screenshots)='array' AND jsonb_array_length(q.screenshots)>0) AS "hasThumbnail"
     FROM projects p WHERE ${where.join(" AND ")} ORDER BY p.updated_at DESC,p.id ASC LIMIT 25`, values };
 }
 export async function listProjectCatalog(pool: Pool, context: AuthContext, input: ProjectCatalogInput) {
   await assertMember(pool, context);
   if (input.companyId) await assertCompany(pool, context, input.companyId);
   return catalogPage(context, input, (await pool.query<ProjectCatalogItem>(projectCatalogQuery(context, input))).rows);
+}
+export async function findProjectByDomain(pool: Pool, domain: string): Promise<{ workspaceId: string; userId: string; companyId: string; projectId: string; previewPort?: number | null } | null> {
+  const clean = domain.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/:\d+$/, "");
+  if (!clean) return null;
+  const res = await pool.query<{ workspaceId: string; userId: string; companyId: string; projectId: string; previewPort: number | null }>(
+    `SELECT workspace_id AS "workspaceId", created_by AS "userId", company_id AS "companyId", id AS "projectId", preview_port AS "previewPort"
+     FROM projects
+     WHERE lower(regexp_replace(coalesce(deployment_url, ''), '^https?://|/.*$', '', 'g')) = $1
+       AND status NOT IN ('archived', 'soft_deleted', 'purging', 'deleted')
+     ORDER BY updated_at DESC LIMIT 1`,
+    [clean],
+  );
+  return res.rows[0] ?? null;
 }

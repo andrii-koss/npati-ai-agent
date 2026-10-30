@@ -18,6 +18,7 @@ export interface WebsiteProject {
   deploymentUrl?: string;
   lastDeployedAt?: string;
   revision: number;
+  hasThumbnail?: boolean;
   createdAt?: string;
   updatedAt: string;
 }
@@ -40,9 +41,12 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
 export const WEBSITES_CACHE_PREFIX = "npati_websites_cache_v1_";
 export const WEBSITES_LATEST_CACHE_KEY = "npati_websites_cache_latest_v1";
+let companiesMemoryCache: { token: string | null; time: number; items: Array<{ id: string; name: string }> } | null = null;
 
 /** Projects remain company-scoped; fetch every company page so the selector does not hide older projects. */
 export async function listProjectCompanies(): Promise<Array<{ id: string; name: string }>> {
+  const token = getStoredAuthToken();
+  if (companiesMemoryCache && companiesMemoryCache.token === token && Date.now() - companiesMemoryCache.time < 60_000) return companiesMemoryCache.items;
   const companies = new Map<string, { id: string; name: string }>();
   const cursors = new Set<string>();
   let cursor: string | undefined;
@@ -55,7 +59,9 @@ export async function listProjectCompanies(): Promise<Array<{ id: string; name: 
     if (cursor && cursors.has(cursor)) throw new Error("Company pagination did not advance");
     if (cursor) cursors.add(cursor);
   } while (cursor);
-  return [...companies.values()];
+  const items = [...companies.values()];
+  companiesMemoryCache = { token, time: Date.now(), items };
+  return items;
 }
 
 export async function listCompanyProjects(companyIds: string[]): Promise<WebsiteProject[]> {
