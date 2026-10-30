@@ -205,7 +205,7 @@ export class ProjectPreviewService {
   }
   generateToken(
     payload: Omit<PreviewTokenPayload, "expiresAt">,
-    ttlMs = 15 * 60 * 1000,
+    ttlMs = 24 * 60 * 60 * 1000,
   ): { token: string; expiresAt: number } {
     const expiresAt = Date.now() + ttlMs;
     const fullPayload: PreviewTokenPayload = { ...payload, expiresAt };
@@ -519,13 +519,35 @@ export class ProjectPreviewService {
           return this.getPreviewStatus(ctx, companyId, projectId);
         }
       }
+      let activePreviewUrl = project.previewUrl;
+      if (this.sandbox && project.status === "previewing" && project.previewPort) {
+        let isExpired = false;
+        if (activePreviewUrl) {
+          const match = activePreviewUrl.match(/token=([^&]+)/);
+          if (match && match[1]) {
+            try { this.verifyToken(decodeURIComponent(match[1])); }
+            catch { isExpired = true; }
+          }
+        }
+        if (!activePreviewUrl || isExpired) {
+          const { token } = this.generateToken({
+            workspaceId: ctx.workspaceId,
+            userId: ctx.userId,
+            companyId,
+            projectId,
+            sandboxId: project.sandboxId || "default",
+          });
+          activePreviewUrl = `/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/preview/proxy/?token=${encodeURIComponent(token)}`;
+          void this.projects.updatePreview(ctx, companyId, projectId, { previewUrl: activePreviewUrl }).catch(() => {});
+        }
+      }
       return {
         status: project.status,
-        previewUrl: project.previewUrl,
+        previewUrl: activePreviewUrl,
         port: project.previewPort,
         framework: project.framework,
         lastBuildStatus: project.lastBuildStatus,
-        isRunning: !!this.sandbox && project.status === "previewing" && !!project.previewUrl && !!project.previewPort,
+        isRunning: !!this.sandbox && project.status === "previewing" && !!activePreviewUrl && !!project.previewPort,
         error: null,
         restartCount: 0,
       };
@@ -583,9 +605,30 @@ export class ProjectPreviewService {
       session.status = "failed";
       session.lastError = cause instanceof Error ? cause.message : "Failed to inspect process";
     }
+    let activePreviewUrl = project.previewUrl;
+    if (session.status === "running") {
+      let isExpired = false;
+      if (activePreviewUrl) {
+        const match = activePreviewUrl.match(/token=([^&]+)/);
+        if (match && match[1]) {
+          try { this.verifyToken(decodeURIComponent(match[1])); }
+          catch { isExpired = true; }
+        }
+      }
+      if (!activePreviewUrl || isExpired) {
+        const { token } = this.generateToken({
+          workspaceId: ctx.workspaceId,
+          userId: ctx.userId,
+          companyId,
+          projectId,
+          sandboxId: session.sandboxId,
+        });
+        activePreviewUrl = `/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/preview/proxy/?token=${encodeURIComponent(token)}`;
+      }
+    }
     return {
       status: session.status === "failed" ? "failed" : project.status,
-      previewUrl: project.previewUrl,
+      previewUrl: activePreviewUrl,
       port: session.port,
       framework: session.framework,
       lastBuildStatus: session.status === "failed" ? "failed" : project.lastBuildStatus,
@@ -613,12 +656,37 @@ export class ProjectPreviewService {
       || (request.headers.authorization?.replace(/^Bearer\s+/i, ""))
       || readCookieValue(request.headers.cookie, cookieName)
       || "";
-    let tokenPayload: PreviewTokenPayload;
+    let tokenPayload: PreviewTokenPayload | undefined;
     try {
       tokenPayload = this.validateTokenForRequest(token, companyId, projectId);
     } catch (error) {
-      const known = error instanceof PreviewError ? error : new PreviewError("access_denied", "Unauthorized preview token", 403);
-      return reply.code(known.status).send({ error: { code: known.code, message: known.message } });
+      if (error instanceof PreviewError && error.code === "token_expired") {
+        try {
+          const [body, signature] = (token || "").split(".");
+          if (body && signature) {
+            const expected = createHmac("sha256", this.secret).update(body).digest("base64url");
+            if (signature === expected) {
+              const rawPayload = JSON.parse(base64UrlDecode(body)) as PreviewTokenPayload;
+              if (rawPayload.companyId === companyId && rawPayload.projectId === projectId) {
+                tokenPayload = rawPayload;
+                const cookiePath = `/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/preview/proxy`;
+                const fresh = this.generateToken({
+                  workspaceId: rawPayload.workspaceId,
+                  userId: rawPayload.userId,
+                  companyId,
+                  projectId,
+                  sandboxId: rawPayload.sandboxId || "default",
+                });
+                reply.header("Set-Cookie", `${cookieName}=${fresh.token}; Path=${cookiePath}; HttpOnly; SameSite=Lax; Max-Age=86400`);
+              }
+            }
+          }
+        } catch { }
+      }
+      if (!tokenPayload) {
+        const known = error instanceof PreviewError ? error : new PreviewError("access_denied", "Unauthorized preview token", 403);
+        return reply.code(known.status).send({ error: { code: known.code, message: known.message } });
+      }
     }
     const scope = { workspaceId: tokenPayload.workspaceId ?? this.sessions.get(projectId)?.workspaceId ?? "", userId: tokenPayload.userId, permissions: ["workspace:read"] };
     try {

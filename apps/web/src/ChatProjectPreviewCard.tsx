@@ -181,7 +181,7 @@ export function ChatProjectPreviewCard({
   const isUk = i18n?.language === "uk";
 
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState(card.previewUrl ?? "");
+  const [previewUrl, setPreviewUrl] = useState("");
   const [previewHtml, setPreviewHtml] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
@@ -268,14 +268,18 @@ export function ChatProjectPreviewCard({
           if (!isMounted) return;
           if (res?.ok) {
             setRuntimeStatus("running");
+            const file = await res.json().catch(() => null) as { content?: string } | null;
+            if (isMounted && file?.content) {
+              setPreviewHtml(file.content);
+            }
           } else {
             setRuntimeStatus("unavailable");
           }
           return;
         }
 
-        const endpoint = `/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/preview/status`;
-        const res = await fetch(endpoint, { headers });
+        const endpoint = `/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/preview`;
+        const res = await fetch(`${endpoint}/status`, { headers });
         if (!isMounted) return;
         if (!res.ok) {
           if (res.status === 404) {
@@ -289,8 +293,8 @@ export function ChatProjectPreviewCard({
         if (!isMounted) return;
         if (data?.isRunning) {
           setRuntimeStatus("running");
-          if (data.previewUrl && !previewUrl) {
-            setPreviewUrl(data.previewUrl);
+          if (data.previewUrl) {
+            setPreviewUrl((current) => current || data.previewUrl || "");
           }
         } else {
           if (data?.status === "failed") {
@@ -321,7 +325,7 @@ export function ChatProjectPreviewCard({
       isMounted = false;
       window.removeEventListener("npati-code-project-updated", onProjectUpdate);
     };
-  }, [card.companyId, card.projectId, card.id, card.status, card.framework, isStatic, previewUrl]);
+  }, [card.companyId, card.projectId, card.id, card.status, card.framework, isStatic]);
 
   // Load project thumbnail screenshot if available
   useEffect(() => {
@@ -415,28 +419,39 @@ export function ChatProjectPreviewCard({
   async function openPreview() {
     setPreviewOpen(true);
     setPreviewError("");
-    setPreviewUrl("");
-    setPreviewHtml("");
     if (!card.companyId) {
       setPreviewError("Project company is unavailable.");
       return;
     }
+
+    const endpoint = `/api/companies/${encodeURIComponent(card.companyId)}/projects/${encodeURIComponent(card.projectId ?? card.id)}/preview`;
+
+    if (isStatic) {
+      if (!previewHtml) {
+        setPreviewLoading(true);
+        await loadStaticPreviewPage("index.html").catch((error) => {
+          setPreviewError(error instanceof Error ? error.message : "Preview is unavailable.");
+          setRuntimeStatus("failed");
+        });
+        setPreviewLoading(false);
+      }
+      return;
+    }
+
     setPreviewLoading(true);
-    setRuntimeStatus("starting");
     try {
       const token = getStoredAuthToken();
-      const endpoint = `/api/companies/${encodeURIComponent(card.companyId)}/projects/${encodeURIComponent(card.projectId ?? card.id)}/preview`;
       const headers: Record<string, string> = {};
       if (token) headers.authorization = `Bearer ${token}`;
 
-      if (isStatic) {
-        await loadStaticPreviewPage("index.html");
-        return;
-      }
-
       const statusResponse = await fetch(`${endpoint}/status`, { headers });
-      const status = await statusResponse.json().catch(() => null) as { isRunning?: boolean } | null;
+      const status = await statusResponse.json().catch(() => null) as { isRunning?: boolean; previewUrl?: string } | null;
       if (statusResponse.ok && status?.isRunning) {
+        if (status.previewUrl) {
+          setPreviewUrl(status.previewUrl);
+          setRuntimeStatus("running");
+          return;
+        }
         const tokenResponse = await fetch(`${endpoint}/token`, { headers });
         const freshToken = await tokenResponse.json().catch(() => null) as { token?: string } | null;
         if (tokenResponse.ok && freshToken?.token) {
@@ -458,10 +473,13 @@ export function ChatProjectPreviewCard({
         throw new Error(message || "Preview is unavailable.");
       }
       setPreviewUrl(payload.previewUrl);
+      setIframeKey((prev) => prev + 1);
       setRuntimeStatus("running");
     } catch (error) {
-      setPreviewError(error instanceof Error ? error.message : "Preview is unavailable.");
-      setRuntimeStatus("failed");
+      if (!previewUrl) {
+        setPreviewError(error instanceof Error ? error.message : "Preview is unavailable.");
+        setRuntimeStatus("failed");
+      }
     } finally {
       setPreviewLoading(false);
     }
@@ -487,155 +505,155 @@ export function ChatProjectPreviewCard({
     <>
       {showPreviewTrigger && (
         <div className={`chat-project-preview-card ${className}`.trim()} data-testid="chat-project-preview-card">
-      <div className="chat-preview-card-left">
-        {/* Project Thumbnail / SVG Mockup */}
-        <div className="chat-preview-card-thumbnail" data-type={projectType}>
-          {thumbnailUrl ? (
-            <img
-              src={thumbnailUrl}
-              alt={title}
-              className="chat-preview-card-thumbnail-img"
-              onError={() => setThumbnailUrl(null)}
-            />
-          ) : projectType === "website" ? (
-            <WebsiteSvgThumbnail />
-          ) : projectType === "mobile_app" ? (
-            <MobileSvgThumbnail />
-          ) : projectType === "game" ? (
-            <GameSvgThumbnail />
-          ) : (
-            <OtherSvgThumbnail />
-          )}
-        </div>
+          <div className="chat-preview-card-left">
+            {/* Project Thumbnail / SVG Mockup */}
+            <div className="chat-preview-card-thumbnail" data-type={projectType}>
+              {thumbnailUrl ? (
+                <img
+                  src={thumbnailUrl}
+                  alt={title}
+                  className="chat-preview-card-thumbnail-img"
+                  onError={() => setThumbnailUrl(null)}
+                />
+              ) : projectType === "website" ? (
+                <WebsiteSvgThumbnail />
+              ) : projectType === "mobile_app" ? (
+                <MobileSvgThumbnail />
+              ) : projectType === "game" ? (
+                <GameSvgThumbnail />
+              ) : (
+                <OtherSvgThumbnail />
+              )}
+            </div>
 
-        {/* Center Info */}
-        <div className="chat-preview-card-info">
-          <h4 className="chat-preview-card-title" title={title}>{title}</h4>
-          <span className="chat-preview-card-subtitle">{subtitle}</span>
-          <div className={`chat-preview-card-status status-${runtimeStatus}`}>
-            <span className="chat-preview-status-dot" aria-hidden="true" />
-            <span>{statusLabels[runtimeStatus]}</span>
+            {/* Center Info */}
+            <div className="chat-preview-card-info">
+              <h4 className="chat-preview-card-title" title={title}>{title}</h4>
+              <span className="chat-preview-card-subtitle">{subtitle}</span>
+              <div className={`chat-preview-card-status status-${runtimeStatus}`}>
+                <span className="chat-preview-status-dot" aria-hidden="true" />
+                <span>{statusLabels[runtimeStatus]}</span>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
 
-      {/* Right Actions */}
-      <div className="chat-preview-card-actions" ref={dropdownRef}>
-        <button
-          type="button"
-          className="chat-preview-open-btn coding-preview-trigger"
-          onClick={() => void openPreview()}
-          disabled={runtimeStatus === "unavailable"}
-          aria-label={isUk ? "Відкрити Live Preview" : "Open Live Preview"}
-        >
-          <ExternalLink size={15} aria-hidden="true" strokeWidth={2.3} />
-          <span>{isUk ? "Open" : "Open"}</span>
-        </button>
-
-        {showDropdown && (
-          <button
-            type="button"
-            className="chat-preview-dropdown-btn"
-            onClick={() => setDropdownOpen((open) => !open)}
-            aria-label={isUk ? "Додаткові дії" : "Additional actions"}
-            aria-haspopup="true"
-            aria-expanded={dropdownOpen}
-          >
-            <ChevronDown size={16} aria-hidden="true" strokeWidth={2.5} />
-          </button>
-        )}
-
-        {showDropdown && dropdownOpen && (
-          <div className="chat-preview-dropdown-menu" role="menu">
-            {/* Open in new tab */}
+          {/* Right Actions */}
+          <div className="chat-preview-card-actions" ref={dropdownRef}>
             <button
               type="button"
-              className="chat-preview-dropdown-item"
-              role="menuitem"
-              onClick={handleOpenInNewTab}
+              className="chat-preview-open-btn coding-preview-trigger"
+              onClick={() => void openPreview()}
+              disabled={runtimeStatus === "unavailable"}
+              aria-label={isUk ? "Відкрити Live Preview" : "Open Live Preview"}
             >
-              <ExtIcon size={14} aria-hidden="true" />
-              <span>{isUk ? "Відкрити в новій вкладці" : "Open in new tab"}</span>
+              <ExternalLink size={15} aria-hidden="true" strokeWidth={2.3} />
+              <span>{isUk ? "Open" : "Open"}</span>
             </button>
 
-            {/* Edit in chat */}
-            {onActivate && (
+            {showDropdown && (
               <button
                 type="button"
-                className="chat-preview-dropdown-item"
-                role="menuitem"
-                onClick={() => {
-                  setDropdownOpen(false);
-                  onActivate(card);
-                }}
+                className="chat-preview-dropdown-btn"
+                onClick={() => setDropdownOpen((open) => !open)}
+                aria-label={isUk ? "Додаткові дії" : "Additional actions"}
+                aria-haspopup="true"
+                aria-expanded={dropdownOpen}
               >
-                <MessageSquare size={14} aria-hidden="true" />
-                <span>{isUk ? "Редагувати в чаті" : "Edit in chat"}</span>
+                <ChevronDown size={16} aria-hidden="true" strokeWidth={2.5} />
               </button>
             )}
 
-            {/* Changes */}
-            {isCodeProject && codeChangesUrl && (
-              <button
-                type="button"
-                className="chat-preview-dropdown-item"
-                role="menuitem"
-                onClick={() => {
-                  setDropdownOpen(false);
-                  navigate(codeChangesUrl);
-                }}
-              >
-                <GitCommit size={14} aria-hidden="true" />
-                <span>
-                  {isUk ? "Зміни" : "Changes"}
-                  {typeof card.changesCount === "number" ? ` (${card.changesCount})` : ""}
-                </span>
-              </button>
-            )}
+            {showDropdown && dropdownOpen && (
+              <div className="chat-preview-dropdown-menu" role="menu">
+                {/* Open in new tab */}
+                <button
+                  type="button"
+                  className="chat-preview-dropdown-item"
+                  role="menuitem"
+                  onClick={handleOpenInNewTab}
+                >
+                  <ExtIcon size={14} aria-hidden="true" />
+                  <span>{isUk ? "Відкрити в новій вкладці" : "Open in new tab"}</span>
+                </button>
 
-            {/* Code Workspace */}
-            {isCodeProject && codeWorkspaceUrl && (
-              <button
-                type="button"
-                className="chat-preview-dropdown-item"
-                role="menuitem"
-                onClick={() => {
-                  setDropdownOpen(false);
-                  navigate(codeWorkspaceUrl);
-                }}
-              >
-                <Terminal size={14} aria-hidden="true" />
-                <span>{isUk ? "Робоча область коду" : "Code Workspace"}</span>
-              </button>
-            )}
+                {/* Edit in chat */}
+                {onActivate && (
+                  <button
+                    type="button"
+                    className="chat-preview-dropdown-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setDropdownOpen(false);
+                      onActivate(card);
+                    }}
+                  >
+                    <MessageSquare size={14} aria-hidden="true" />
+                    <span>{isUk ? "Редагувати в чаті" : "Edit in chat"}</span>
+                  </button>
+                )}
 
-            {/* Restart preview */}
-            <button
-              type="button"
-              className="chat-preview-dropdown-item"
-              role="menuitem"
-              onClick={() => void restartPreview()}
-            >
-              <RefreshCw size={14} aria-hidden="true" />
-              <span>{isUk ? "Перезапустити preview" : "Restart preview"}</span>
-            </button>
+                {/* Changes */}
+                {isCodeProject && codeChangesUrl && (
+                  <button
+                    type="button"
+                    className="chat-preview-dropdown-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setDropdownOpen(false);
+                      navigate(codeChangesUrl);
+                    }}
+                  >
+                    <GitCommit size={14} aria-hidden="true" />
+                    <span>
+                      {isUk ? "Зміни" : "Changes"}
+                      {typeof card.changesCount === "number" ? ` (${card.changesCount})` : ""}
+                    </span>
+                  </button>
+                )}
 
-            {/* View Run */}
-            {card.runId && (
-              <Link
-                to={`/activity?runId=${card.runId}`}
-                className="chat-preview-dropdown-item"
-                role="menuitem"
-                onClick={() => setDropdownOpen(false)}
-              >
-                <Eye size={14} aria-hidden="true" />
-                <span>{isUk ? "Переглянути запуск" : "View Run"}</span>
-              </Link>
+                {/* Code Workspace */}
+                {isCodeProject && codeWorkspaceUrl && (
+                  <button
+                    type="button"
+                    className="chat-preview-dropdown-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setDropdownOpen(false);
+                      navigate(codeWorkspaceUrl);
+                    }}
+                  >
+                    <Terminal size={14} aria-hidden="true" />
+                    <span>{isUk ? "Робоча область коду" : "Code Workspace"}</span>
+                  </button>
+                )}
+
+                {/* Restart preview */}
+                <button
+                  type="button"
+                  className="chat-preview-dropdown-item"
+                  role="menuitem"
+                  onClick={() => void restartPreview()}
+                >
+                  <RefreshCw size={14} aria-hidden="true" />
+                  <span>{isUk ? "Перезапустити preview" : "Restart preview"}</span>
+                </button>
+
+                {/* View Run */}
+                {card.runId && (
+                  <Link
+                    to={`/activity?runId=${card.runId}`}
+                    className="chat-preview-dropdown-item"
+                    role="menuitem"
+                    onClick={() => setDropdownOpen(false)}
+                  >
+                    <Eye size={14} aria-hidden="true" />
+                    <span>{isUk ? "Переглянути запуск" : "View Run"}</span>
+                  </Link>
+                )}
+              </div>
             )}
           </div>
-        )}
-      </div>
-      </div>
+        </div>
       )}
 
       {/* Live Preview Modal / Drawer */}
@@ -662,7 +680,7 @@ export function ChatProjectPreviewCard({
                 setIframeKey((k) => k + 1);
                 if (isStatic) {
                   void loadStaticPreviewPage("index.html");
-                } else {
+                } else if (!previewUrl || previewError) {
                   void openPreview();
                 }
               }}
@@ -686,12 +704,12 @@ export function ChatProjectPreviewCard({
                     src={previewUrl}
                     className="project-chat-preview-frame"
                   />
-                ) : (
+                ) : previewError ? (
                   <div className="project-chat-preview-empty" role="status">
-                    {previewLoading
-                      ? (isUk ? "Запуск Live Preview…" : "Starting preview…")
-                      : previewError || (isUk ? "Прев'ю недоступне." : "Preview is unavailable.")}
+                    {previewError}
                   </div>
+                ) : (
+                  <div className="project-chat-preview-frame" />
                 )}
               </div>
             </div>

@@ -90,7 +90,7 @@ export function registerProjectPreviewRoutes(
       const ctx = await authenticate(request, reply);
       if (!ctx) return;
       const { companyId, projectId } = request.params;
-      const ttl = Number(request.query.ttlMs) || 15 * 60 * 1000;
+      const ttl = Number(request.query.ttlMs) || 24 * 60 * 60 * 1000;
       let authorizedProject;
       try { authorizedProject = await previewService.assertProjectAccess(ctx, companyId, projectId); }
       catch (error) {

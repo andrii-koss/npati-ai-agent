@@ -725,7 +725,7 @@ body:has(.project-chat-preview-layer) .workspace-content.chat-workspace-content 
 
 body:has(.project-chat-preview-layer) .chat-workspace-content .standard-live-chat,
 body:has(.project-chat-preview-layer) .chat-workspace-content .onboarding-live-chat {
-  width: calc(48vw - 28px);
+  width: calc(36vw - 20px);
   margin-right: 0;
 }
 
@@ -740,7 +740,7 @@ body:has(.project-chat-preview-layer) .chat-workspace-content .onboarding-live-c
 .project-chat-preview-drawer {
   top: 12px;
   right: 12px;
-  width: calc(52vw - 12px);
+  width: calc(64vw - 16px);
   height: calc(100% - 24px);
   pointer-events: auto;
   border: 1px solid #dedede;
