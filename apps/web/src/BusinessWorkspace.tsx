@@ -697,6 +697,23 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const displayMessages = mergeConversationMessages(messages,development.project?.conversationMessages);
   rowStateRef.current = { displayMessages, activeTurn };
   const timeline = chatTimeline(displayMessages, development.project?.progress, selected, development.project);
+  const currentProjId = chatSearch.get("project") ?? selectedProject?.projectId ?? development.project?.projectId;
+  const hasTimelineCard = timeline.some(entry =>
+    entry.kind === "message" &&
+    (Boolean(entry.message.projectCard) || Boolean(development.card(displayMessages, entry.index))) &&
+    (!currentProjId || (entry.message.projectCard?.projectId ?? entry.message.projectCard?.id ?? development.card(displayMessages, entry.index)?.projectId ?? development.card(displayMessages, entry.index)?.id) === currentProjId)
+  );
+  const fallbackCard = entryProjectCard || (development.project?.projectId && development.project.companyId ? {
+    id: development.project.projectId,
+    projectId: development.project.projectId,
+    companyId: development.project.companyId,
+    name: development.project.name,
+    status: development.project.status,
+    framework: development.project.framework,
+    previewUrl: development.project.previewUrl,
+    kind: "code_project" as const
+  } : null);
+  const showFallbackCard = !hasTimelineCard && Boolean(fallbackCard);
   return (
     <>
       {notice && (
@@ -710,28 +727,11 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       <div className="onboarding-live-chat standard-live-chat">
         <div className="message-stream" ref={messageStreamRef} onScroll={() => { if (!messageStreamRef.current) return; followBottomRef.current = nearChatBottom(messageStreamRef.current); if (userScrolledRef.current && messageStreamRef.current.scrollTop < EARLIER_MESSAGES_THRESHOLD_PX) void loadEarlierMessages(); }}
           onWheel={() => { userScrolledRef.current = true; }} onTouchMove={() => { userScrolledRef.current = true; }} onKeyDown={() => { userScrolledRef.current = true; }}>
-          {(() => {
-            const currentProjId = chatSearch.get("project") ?? selectedProject?.projectId ?? development.project?.projectId;
-            const hasTimelineCard = timeline.some(entry => entry.kind === "message" && Boolean(entry.message.projectCard) && (!currentProjId || (entry.message.projectCard?.projectId ?? entry.message.projectCard?.id) === currentProjId));
-            const fallbackCard = entryProjectCard || (development.project?.projectId && development.project.companyId ? {
-              id: development.project.projectId,
-              projectId: development.project.projectId,
-              companyId: development.project.companyId,
-              name: development.project.name,
-              status: development.project.status,
-              framework: development.project.framework,
-              previewUrl: development.project.previewUrl,
-              kind: "code_project" as const
-            } : null);
-            if (!hasTimelineCard && fallbackCard) {
-              return (
-                <article className="assistant" style={{ margin: "8px 0 16px" }}>
-                  <ChatProjectPreviewCard card={fallbackCard} onActivate={(card) => setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected })} />
-                </article>
-              );
-            }
-            return null;
-          })()}
+          {showFallbackCard && fallbackCard && (
+            <article className="assistant" style={{ margin: "8px 0 16px" }}>
+              <ChatProjectPreviewCard card={fallbackCard} onActivate={(card) => setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected })} />
+            </article>
+          )}
           {messages.length === 0 && !selected && !initialConversationId && !loadingHistory && (
             <div className="chat-welcome">
               <h2>{t("chat.emptyTitle")}</h2>
@@ -772,7 +772,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           )}
           {!development.isActive && sending && slowReply && !streamingResponse && !progressEvents.some((event) => !event.type.startsWith("final_generation")) && <article className="assistant research-progress chat-thinking" role="status" aria-label="NPATI Agent is working"><div className="research-generation-row active"><span className="research-progress-state" aria-hidden="true">●</span><span className="research-active-text">{isWebsiteAnalysisRequest(activeTurn) ? "Analyzing website and sources…" : t("chat.thinking")}</span></div></article>}
           {(development.submitting && !development.project && !progressEvents.some(event => !event.type.startsWith("final_generation"))) && <article className="assistant thinking thinking-status" role="status" aria-label="NPATI Agent is working"><p>{language === "uk" ? "\u041f\u0440\u0430\u0446\u044e\u044e \u043d\u0430\u0434 \u043f\u0440\u043e\u0454\u043a\u0442\u043e\u043c" : "Working on the project"}</p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span></article>}
-          {development.preview}
+          {!hasTimelineCard && !showFallbackCard && development.preview}
           {messages.length > 0 && <div className="chat-scroll-spacer" aria-hidden="true" />}
           <div ref={streamEndRef} aria-hidden="true" />
         </div>
