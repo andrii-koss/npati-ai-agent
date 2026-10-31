@@ -798,14 +798,21 @@
    ========================================================================== */
 .website-studio-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 24px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
 }
 
-@media (max-width: 860px) {
+@media (max-width: 1080px) {
+  .website-studio-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+  }
+}
+
+@media (max-width: 680px) {
   .website-studio-grid {
     grid-template-columns: 1fr;
-    gap: 18px;
+    gap: 16px;
   }
 }
 

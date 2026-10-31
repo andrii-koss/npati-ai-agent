@@ -23,6 +23,14 @@ export function requestCatalog(filters: CatalogFilters, cursor?: string) {
       if (!controller.signal.aborted) {
         if (cache.size >= 40) cache.delete(cache.keys().next().value!);
         cache.set(query, page);
+        // Pre-warm thumbnails for any projects that have a screenshot
+        if (page?.projects) {
+          import("./catalog-project-thumbnail").then(({ prefetchProjectThumbnail }) => {
+            for (const p of page.projects.slice(0, 15)) {
+              if (p.hasThumbnail) prefetchProjectThumbnail(p.companyId, p.id);
+            }
+          }).catch(() => {});
+        }
       }
       return page;
     }).finally(() => { if (pending.get(query)?.controller === controller) pending.delete(query); });
@@ -40,7 +48,14 @@ export function requestCatalog(filters: CatalogFilters, cursor?: string) {
 export function prefetchProjectCatalog() {
   void import("./WebsiteBuilderDashboard");
   const initialFilters: CatalogFilters = { companyId: "", search: "", status: "all", framework: "all", kind: "all" };
-  if (cachedCatalog(initialFilters)) return;
   const req = requestCatalog(initialFilters);
-  void req.promise.catch(() => {}).finally(() => req.release());
+  void req.promise.then(page => {
+    if (page?.projects) {
+      import("./catalog-project-thumbnail").then(({ prefetchProjectThumbnail }) => {
+        for (const p of page.projects.slice(0, 15)) {
+          if (p.hasThumbnail) prefetchProjectThumbnail(p.companyId, p.id);
+        }
+      }).catch(() => {});
+    }
+  }).catch(() => {}).finally(() => req.release());
 }

@@ -9,6 +9,46 @@ interface Thumbnail { dataUrl: string; capturedAt: string }
 const cache = new Map<string, { thumbnail: Thumbnail | null; time: number }>();
 let identity = "";
 
+function storageKey(companyId: string, projectId: string) {
+  return `npati_thumb_${companyId}_${projectId}`;
+}
+
+export function getStoredThumbnail(companyId: string, projectId: string): Thumbnail | null {
+  try {
+    const raw = sessionStorage.getItem(storageKey(companyId, projectId)) ||
+                localStorage.getItem(storageKey(companyId, projectId));
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed?.dataUrl && typeof parsed.dataUrl === "string") return parsed;
+    }
+  } catch {}
+  return null;
+}
+
+export function setStoredThumbnail(companyId: string, projectId: string, value: Thumbnail | null) {
+  try {
+    const key = storageKey(companyId, projectId);
+    if (value?.dataUrl) {
+      sessionStorage.setItem(key, JSON.stringify(value));
+      try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+    } else {
+      sessionStorage.removeItem(key);
+      try { localStorage.removeItem(key); } catch {}
+    }
+  } catch {}
+}
+
+export function prefetchProjectThumbnail(companyId: string, projectId: string) {
+  const stored = getStoredThumbnail(companyId, projectId);
+  if (stored) return;
+  const root = projectPreviewRoot(companyId, projectId);
+  void apiFetch<{ thumbnail: Thumbnail | null }>(root + "/qa/thumbnail").then(result => {
+    if (result?.thumbnail) {
+      setStoredThumbnail(companyId, projectId, result.thumbnail);
+    }
+  }).catch(() => {});
+}
+
 export interface CatalogProjectThumbnailProps {
   companyId: string;
   projectId: string;
@@ -41,14 +81,29 @@ export function CatalogProjectThumbnail({
   const uk = language === "uk";
   const refreshLabel = uk ? "Оновити знімок" : "Refresh screenshot";
   const container = useRef<HTMLDivElement>(null);
-  const [thumbnail, setThumbnail] = useState<Thumbnail | null>(() => cache.get(key)?.thumbnail ?? null);
+
+  // Synchronously initialize from memory cache or persistent storage to avoid any placeholder flash on frame 0
+  const [thumbnail, setThumbnail] = useState<Thumbnail | null>(() => {
+    const fromMem = cache.get(key)?.thumbnail;
+    if (fromMem !== undefined) return fromMem;
+    const stored = getStoredThumbnail(companyId, projectId);
+    if (stored) {
+      cache.set(key, { thumbnail: stored, time: Date.now() });
+      return stored;
+    }
+    return null;
+  });
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
   function remember(value: Thumbnail | null) {
-    if (cache.size >= 32) cache.delete(cache.keys().next().value!);
+    if (cache.size >= 128) cache.delete(cache.keys().next().value!);
     cache.set(key, { thumbnail: value, time: Date.now() });
+    setStoredThumbnail(companyId, projectId, value);
     setThumbnail(value);
   }
+
   useEffect(() => {
     const controller = new AbortController();
     let started = false;
@@ -56,17 +111,31 @@ export function CatalogProjectThumbnail({
       if (started) return;
       started = true;
       const previous = cache.get(key);
-      if (previous?.thumbnail && Date.now() - previous.time < 60_000) return;
+      if (previous?.thumbnail && Date.now() - previous.time < 300_000) return;
       if (hasThumbnail === false && !previous?.thumbnail) return;
       void apiFetch<{ thumbnail: Thumbnail | null }>(root + "/qa/thumbnail", { signal: controller.signal }).then(result => {
         if (!controller.signal.aborted) remember(result.thumbnail);
       }).catch(() => { });
     };
-    if (!globalThis.IntersectionObserver) load();
-    const observer = globalThis.IntersectionObserver ? new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) { load(); observer?.disconnect(); } }, { rootMargin: "150px" }) : null;
-    if (container.current) observer?.observe(container.current);
-    return () => { controller.abort(); observer?.disconnect(); };
-  }, [key, root, hasThumbnail]);
+
+    // If project has thumbnail or is already cached, load immediately without waiting for IntersectionObserver
+    if (hasThumbnail || thumbnail) {
+      load();
+    } else if (!globalThis.IntersectionObserver) {
+      load();
+    } else {
+      const observer = new IntersectionObserver(entries => {
+        if (entries.some(entry => entry.isIntersecting)) {
+          load();
+          observer?.disconnect();
+        }
+      }, { rootMargin: "250px" });
+      if (container.current) observer.observe(container.current);
+      return () => { controller.abort(); observer.disconnect(); };
+    }
+    return () => { controller.abort(); };
+  }, [key, root, hasThumbnail, thumbnail]);
+
   async function capture() {
     if (busy) return;
     setBusy(true); setError("");
@@ -77,6 +146,7 @@ export function CatalogProjectThumbnail({
     } catch (cause) { setError(cause instanceof Error ? cause.message : uk ? "Не вдалося створити знімок" : "Could not capture screenshot"); }
     finally { setBusy(false); }
   }
+
   const placeholderStatus: PreviewPlaceholderStatus = busy
     ? "loading"
     : error
@@ -85,17 +155,48 @@ export function CatalogProjectThumbnail({
         ? "coming_soon"
         : "empty";
   const previewHref = "/settings/projects/" + encodeURIComponent(companyId) + "/" + encodeURIComponent(projectId);
+
+  // If project has a thumbnail or it's currently loaded, display the real screenshot.
+  // If thumbnail exists -> show <img>
+  // If hasThumbnail is true but thumbnail not yet fetched -> show clean minimal skeleton (never flash the fake vector website mockup)
+  // If hasThumbnail is false -> show ProjectPreviewPlaceholder (the screensaver/placeholder for projects without photos)
+  const isImageReady = Boolean(thumbnail && !busy);
+  const isImagePending = Boolean(hasThumbnail && !thumbnail && !error);
+
   return <div ref={container}>
-    <div className="website-preview-viewport" style={{ position: "relative", width: "100%", aspectRatio: "16 / 10", borderRadius: 14, overflow: "hidden" }}>
+    <div className="website-preview-viewport" style={{ position: "relative", width: "100%", aspectRatio: "16 / 10", borderRadius: 14, overflow: "hidden", background: "#f8fafc" }}>
       <a href={previewHref} aria-label={`Preview ${name}`} onClick={event => { event.preventDefault(); onPreview(); }} style={{ position: "absolute", inset: 0, display: "block", cursor: "pointer", textDecoration: "none" }}>
-        {thumbnail && !busy ? (
+        {isImageReady ? (
           <img
-            src={thumbnail.dataUrl}
+            src={thumbnail!.dataUrl}
             alt={uk ? `Вигляд проєкту ${name}` : `${name} project screenshot`}
-            loading="lazy"
+            loading="eager"
             onError={() => remember(null)}
             style={{ display: "block", width: "100%", height: "100%", objectFit: "cover", objectPosition: "top" }}
           />
+        ) : isImagePending ? (
+          <div
+            className="website-thumbnail-skeleton"
+            style={{
+              width: "100%",
+              height: "100%",
+              background: "#f1f5f9",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <div
+              style={{
+                width: 24,
+                height: 24,
+                borderRadius: "50%",
+                border: "2.5px solid #e2e8f0",
+                borderTopColor: "#dc2626",
+                animation: "website-preview-spin 0.8s linear infinite"
+              }}
+            />
+          </div>
         ) : (
           <ProjectPreviewPlaceholder
             kind={kind}
