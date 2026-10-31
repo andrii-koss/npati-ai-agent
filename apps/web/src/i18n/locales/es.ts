@@ -783,8 +783,12 @@ export const es: TranslationSchema = {
       companySaved: "Empresa guardada.",
       companyDeleted: "Empresa eliminada.",
       companiesDeleted: "{{count}} empresas eliminadas.",
+      businessDeleted: "Idea de negocio eliminada.",
+      businessesDeleted: "{{count}} ideas de negocio eliminadas.",
       agentSaved: "Agente guardado.",
       agentDeleted: "Agente eliminado.",
+
+      agentsDeleted: "{{count}} agentes eliminados.",
       businessUpdated: "Negocio vinculado actualizado.",
       knowledgeEnabled:
         'Conocimiento habilitado para el agente principal "{{name}}".',
@@ -985,6 +989,41 @@ export const es: TranslationSchema = {
       "confirmMessageAll": "¿Seguro que deseas eliminar definitivamente TODAS las empresas ({{count}})? Esta acción no se puede deshacer.",
       "confirmTitleSelected": "Eliminar empresas seleccionadas",
       "confirmMessageSelected": "¿Seguro que deseas eliminar definitivamente {{count}} empresas seleccionadas?",
+      openBusinessTitle: "Eliminación masiva de ideas de negocio",
+
+      searchBusinessPlaceholder: "Buscar ideas de negocio por nombre o industria...",
+
+      noBusinessIdeas: "Aún no se han creado ideas de negocio",
+
+      noBusinessResults: "No se encontraron ideas de negocio para su búsqueda",
+
+      confirmTitleSelectedBusiness: "Eliminar ideas de negocio seleccionadas",
+
+      confirmMessageSelectedBusiness: "¿Está seguro de que desea eliminar permanentemente {{count}} ideas de negocio seleccionadas?",
+
+      deletingBusinessProgress: "Eliminando ideas de negocio: {{current}} de {{total}} ({{percent}}%)",
+
+      openAgentTitle: "Eliminación masiva de agentes",
+
+
+      searchAgentPlaceholder: "Buscar agentes por nombre o rol...",
+
+
+      noAgents: "Aún no hay agentes en esta empresa",
+
+
+      noAgentResults: "No se encontraron agentes para su búsqueda",
+
+
+      confirmTitleSelectedAgent: "Eliminar agentes seleccionados",
+
+
+      confirmMessageSelectedAgent: "¿Está seguro de que desea eliminar permanentemente {{count}} agentes seleccionados?",
+
+
+      deletingAgentProgress: "Eliminando agentes: {{current}} de {{total}} ({{percent}}%)",
+
+
       "confirmBtn": "Eliminar ({{count}})"
     },
   },

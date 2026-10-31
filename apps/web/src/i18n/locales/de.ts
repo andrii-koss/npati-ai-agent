@@ -632,8 +632,12 @@ export const de: TranslationSchema = {
       companySaved: "Unternehmen gespeichert.",
       companyDeleted: "Unternehmen gelöscht.",
       companiesDeleted: "{{count}} Unternehmen gelöscht.",
+      businessDeleted: "Geschäftsidee gelöscht.",
+      businessesDeleted: "{{count}} Geschäftsideen gelöscht.",
       agentSaved: "Agent gespeichert.",
       agentDeleted: "Agent gelöscht.",
+
+      agentsDeleted: "{{count}} Agenten gelöscht.",
       businessUpdated: "Verknüpftes Geschäft aktualisiert.",
       knowledgeEnabled: "Wissen für Hauptagent \"{{name}}\" aktiviert.",
       runCompleted: "Unternehmensausführung abgeschlossen.",
@@ -816,6 +820,41 @@ export const de: TranslationSchema = {
       "confirmMessageAll": "Möchten Sie wirklich ALLE Unternehmen ({{count}}) unwiderruflich löschen? Dies kann nicht rückgängig gemacht werden.",
       "confirmTitleSelected": "Ausgewählte Unternehmen löschen",
       "confirmMessageSelected": "Möchten Sie wirklich {{count}} ausgewählte Unternehmen unwiderruflich löschen?",
+      openBusinessTitle: "Geschäftsideen massenhaft löschen",
+
+      searchBusinessPlaceholder: "Geschäftsideen nach Name oder Branche suchen...",
+
+      noBusinessIdeas: "Noch keine Geschäftsideen erstellt",
+
+      noBusinessResults: "Keine Geschäftsideen für Ihre Suche gefunden",
+
+      confirmTitleSelectedBusiness: "Ausgewählte Geschäftsideen löschen",
+
+      confirmMessageSelectedBusiness: "Möchten Sie die {{count}} ausgewählten Geschäftsideen wirklich dauerhaft löschen?",
+
+      deletingBusinessProgress: "Geschäftsideen werden gelöscht: {{current}} von {{total}} ({{percent}}%)",
+
+      openAgentTitle: "Agenten massenhaft löschen",
+
+
+      searchAgentPlaceholder: "Agenten nach Name oder Rolle suchen...",
+
+
+      noAgents: "Noch keine Agenten in diesem Unternehmen",
+
+
+      noAgentResults: "Keine Agenten für Ihre Suche gefunden",
+
+
+      confirmTitleSelectedAgent: "Ausgewählte Agenten löschen",
+
+
+      confirmMessageSelectedAgent: "Möchten Sie die {{count}} ausgewählten Agenten wirklich dauerhaft löschen?",
+
+
+      deletingAgentProgress: "Agenten werden gelöscht: {{current}} von {{total}} ({{percent}}%)",
+
+
       "confirmBtn": "Löschen ({{count}})"
     },
   },

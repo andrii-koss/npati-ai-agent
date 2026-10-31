@@ -636,8 +636,12 @@ export const uk: TranslationSchema = {
       companySaved: "Компанію збережено.",
       companyDeleted: "Компанію видалено.",
       companiesDeleted: "Видалено {{count}} компаній.",
+      businessDeleted: "Бізнес-ідею видалено.",
+      businessesDeleted: "Видалено {{count}} бізнес-ідей.",
       agentSaved: "Агента збережено.",
       agentDeleted: "Агента видалено.",
+
+      agentsDeleted: "Видалено {{count}} агентів.",
       businessUpdated: "Пов'язаний бізнес оновлено.",
       knowledgeEnabled: "Знання увімкнено для головного агента \"{{name}}\".",
       runCompleted: "Запуск компанії завершено.",
@@ -820,6 +824,41 @@ export const uk: TranslationSchema = {
       "confirmMessageAll": "Ви дійсно бажаєте безповоротно видалити ВСІ компанії ({{count}})? Цю дію неможливо скасувати.",
       "confirmTitleSelected": "Видалити вибрані компанії",
       "confirmMessageSelected": "Ви дійсно бажаєте безповоротно видалити вибрані компанії ({{count}})?",
+      openBusinessTitle: "Масове видалення бізнес-ідей",
+
+      searchBusinessPlaceholder: "Пошук бізнес-ідей за назвою чи індустрією...",
+
+      noBusinessIdeas: "Бізнес-ідей ще не створено",
+
+      noBusinessResults: "Бізнес-ідей не знайдено за вашим запитом",
+
+      confirmTitleSelectedBusiness: "Видалити вибрані бізнес-ідеї",
+
+      confirmMessageSelectedBusiness: "Ви впевнені, що хочете безповоротно видалити {{count}} вибраних бізнес-ідей?",
+
+      deletingBusinessProgress: "Видалення бізнес-ідей: {{current}} з {{total}} ({{percent}}%)",
+
+      openAgentTitle: "Масове видалення агентів",
+
+
+      searchAgentPlaceholder: "Пошук агентів за назвою чи роллю...",
+
+
+      noAgents: "У цій компанії ще немає агентів",
+
+
+      noAgentResults: "Агентів не знайдено за вашим запитом",
+
+
+      confirmTitleSelectedAgent: "Видалити вибраних агентів",
+
+
+      confirmMessageSelectedAgent: "Ви впевнені, що хочете безповоротно видалити {{count}} вибраних агентів?",
+
+
+      deletingAgentProgress: "Видалення агентів: {{current}} з {{total}} ({{percent}}%)",
+
+
       "confirmBtn": "Видалити ({{count}})"
     },
   },

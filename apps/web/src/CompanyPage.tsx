@@ -34,6 +34,8 @@ import {
   useCompanyKnowledge,
   CompanyHeader,
   CompanyMassDeleteModal,
+  BusinessMassDeleteModal,
+  AgentMassDeleteModal,
 } from "./company";
 
 export function CompanyPage() {
@@ -41,7 +43,7 @@ export function CompanyPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedCompanyId = searchParams.get("company") ?? "";
   const requestedRunId = searchParams.get("runId") ?? "";
-  const { overview } = useWorkspace();
+  const { overview, refresh } = useWorkspace();
   const cachedCompaniesRef = useRef(getCachedCompanies());
   const [companies, setCompanies] = useState<Company[]>(cachedCompaniesRef.current);
   const [companiesLoading, setCompaniesLoading] = useState(() => cachedCompaniesRef.current.length === 0);
@@ -68,6 +70,8 @@ export function CompanyPage() {
   const [agentForm, setAgentForm] = useState<AgentDraft>({ ...emptyAgent });
   const [notice, setNotice] = useState("");
   const [massDeleteOpen, setMassDeleteOpen] = useState(false);
+  const [massDeleteBusinessOpen, setMassDeleteBusinessOpen] = useState(false);
+  const [massDeleteAgentOpen, setMassDeleteAgentOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const companyCreateKey = useRef(crypto.randomUUID());
   const agentCreateKey = useRef(crypto.randomUUID());
@@ -159,6 +163,32 @@ export function CompanyPage() {
         : t("companySettings.notices.companiesDeleted", { count: deletedIds.length })
     );
     await loadCompanies(nextSelectedId);
+  }
+
+  async function handleBusinessesDeleted(deletedIds: string[]) {
+    if (selected && selected.businessId && deletedIds.includes(selected.businessId)) {
+      await updateCompanyBusiness("");
+    }
+    await refresh();
+    setNotice(
+      deletedIds.length === 1
+        ? t("companySettings.notices.businessDeleted")
+        : t("companySettings.notices.businessesDeleted", { count: deletedIds.length })
+    );
+  }
+
+  async function handleAgentsDeleted(deletedIds: string[]) {
+    setAgents((items) => items.filter((agent) => !deletedIds.includes(agent.id)));
+    setEdges((items) => items.filter((edge) => !deletedIds.includes(edge.parentAgentId) && !deletedIds.includes(edge.childAgentId)));
+    if (selected) {
+      const refreshedCompanies = await loadCompanies(selected.id);
+      await loadOrganization(selected.id, undefined, false, refreshedCompanies);
+    }
+    setNotice(
+      deletedIds.length === 1
+        ? t("companySettings.notices.agentDeleted")
+        : t("companySettings.notices.agentsDeleted", { count: deletedIds.length })
+    );
   }
 
   async function loadOrganization(companyId: string, cursor?: string, append = false, companySnapshot = companies) {
@@ -552,6 +582,8 @@ export function CompanyPage() {
         businesses={overview?.businesses}
         onUpdateBusiness={updateCompanyBusiness}
         onOpenMassDelete={() => setMassDeleteOpen(true)}
+        onOpenMassDeleteBusiness={() => setMassDeleteBusinessOpen(true)}
+        onOpenMassDeleteAgent={() => setMassDeleteAgentOpen(true)}
       />
 
       <section className="company-run-card">
@@ -782,5 +814,22 @@ export function CompanyPage() {
       companies={companies}
       onCompaniesDeleted={handleCompaniesDeleted}
     />
+
+    <BusinessMassDeleteModal
+      isOpen={massDeleteBusinessOpen}
+      onClose={() => setMassDeleteBusinessOpen(false)}
+      businesses={overview?.businesses}
+      onBusinessesDeleted={handleBusinessesDeleted}
+    />
+
+    {selected && (
+      <AgentMassDeleteModal
+        isOpen={massDeleteAgentOpen}
+        onClose={() => setMassDeleteAgentOpen(false)}
+        companyId={selected.id}
+        agents={agents}
+        onAgentsDeleted={handleAgentsDeleted}
+      />
+    )}
   </main>;
 }

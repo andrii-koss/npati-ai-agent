@@ -12,6 +12,8 @@ export interface ControlStripProps {
   businesses?: Array<{ id: string; name: string }>;
   onUpdateBusiness: (businessId: string) => void | Promise<void>;
   onOpenMassDelete?: () => void;
+  onOpenMassDeleteBusiness?: () => void;
+  onOpenMassDeleteAgent?: () => void;
 }
 
 export function ControlStrip({
@@ -23,6 +25,8 @@ export function ControlStrip({
   businesses,
   onUpdateBusiness,
   onOpenMassDelete,
+  onOpenMassDeleteBusiness,
+  onOpenMassDeleteAgent,
 }: ControlStripProps) {
   const { t } = useTranslation();
 
@@ -76,6 +80,17 @@ export function ControlStrip({
 
       {/* Block 2: Обираємо бізнес який є створений і підходить */}
       <div className="company-strip-card">
+        {onOpenMassDeleteBusiness && (
+          <button
+            type="button"
+            className="company-strip-mass-delete-btn"
+            onClick={onOpenMassDeleteBusiness}
+            title={t("companySettings.massDelete.openBusinessTitle")}
+            aria-label={t("companySettings.massDelete.openBusinessTitle")}
+          >
+            <Trash2 size={13} />
+          </button>
+        )}
         <div className="company-strip-eyebrow">
           <span className="company-strip-label">{t("companySettings.strip.linkedBusiness")}</span>
           <span className="company-strip-badge badge-linked">{t("companySettings.strip.linked")}</span>
@@ -105,6 +120,17 @@ export function ControlStrip({
 
       {/* Block 3: Кількість агентів */}
       <div className="company-strip-card">
+        {onOpenMassDeleteAgent && (
+          <button
+            type="button"
+            className="company-strip-mass-delete-btn"
+            onClick={onOpenMassDeleteAgent}
+            title={t("companySettings.massDelete.openAgentTitle")}
+            aria-label={t("companySettings.massDelete.openAgentTitle")}
+          >
+            <Trash2 size={13} />
+          </button>
+        )}
         <div className="company-strip-eyebrow">
           <span className="company-strip-label">{t("companySettings.strip.totalAgents")}</span>
           <span className="company-strip-badge badge-hierarchy">{t("companySettings.strip.hierarchy")}</span>

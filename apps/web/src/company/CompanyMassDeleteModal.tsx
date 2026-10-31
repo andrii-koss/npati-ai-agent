@@ -109,6 +109,7 @@ export function CompanyMassDeleteModal({
     const concurrency = 8;
     const queue = [...idsToDelete];
     let completed = 0;
+    const successfullyDeleted: string[] = [];
 
     const worker = async () => {
       while (queue.length > 0) {
@@ -116,6 +117,7 @@ export function CompanyMassDeleteModal({
         if (!id) break;
         try {
           await api(`/companies/${id}`, { method: "DELETE" });
+          successfullyDeleted.push(id);
         } catch (e) {
           console.warn(`Failed to delete company ${id}:`, e);
         }
@@ -127,7 +129,7 @@ export function CompanyMassDeleteModal({
     const workers = Array.from({ length: Math.min(concurrency, count) }, () => worker());
     await Promise.all(workers);
 
-    await onCompaniesDeleted(idsToDelete);
+    await onCompaniesDeleted(successfullyDeleted);
     setDeleting(false);
     onClose();
   };

@@ -156,8 +156,12 @@ export function createChatActions(deps: ChatActionDeps) {
 
     if (dataBackendService) {
       const backends = await dataBackendService.list(context, companyId).catch(() => []);
-      if (backends.length) {
-        throw new Error(`Company cannot be deleted while it owns ${backends.length} DataBackend(s) — transfer or delete them in Data Studio first.`);
+      for (const backend of backends) {
+        try {
+          await dataBackendService.remove(context, companyId, backend.id, backend.name, { immediate: true, detachProjects: true });
+        } catch (err) {
+          log.warn({ err, companyId, backendId: backend.id }, "Failed to remove data backend during company deletion");
+        }
       }
     }
     await scopedMemory.purgeCompany(companyId, context.workspaceId);

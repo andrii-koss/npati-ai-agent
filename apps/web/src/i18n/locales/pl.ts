@@ -632,8 +632,12 @@ export const pl: TranslationSchema = {
       companySaved: "Firma zapisana.",
       companyDeleted: "Firma została usunięta.",
       companiesDeleted: "Usunięto {{count}} firm.",
+      businessDeleted: "Pomysł biznesowy został usunięty.",
+      businessesDeleted: "Usunięto {{count}} pomysłów biznesowych.",
       agentSaved: "Agent zapisany.",
       agentDeleted: "Agent usunięty.",
+
+      agentsDeleted: "Usunięto {{count}} agentów.",
       businessUpdated: "Powiązany biznes zaktualizowany.",
       knowledgeEnabled: "Wiedza włączona dla głównego agenta \"{{name}}\".",
       runCompleted: "Uruchomienie firmy zakończone.",
@@ -816,6 +820,41 @@ export const pl: TranslationSchema = {
       "confirmMessageAll": "Czy na pewno chcesz bezpowrotnie usunąć WSZYSTKIE firmy ({{count}})? Tej operacji nie można cofnąć.",
       "confirmTitleSelected": "Usuń wybrane firmy",
       "confirmMessageSelected": "Czy na pewno chcesz bezpowrotnie usunąć {{count}} wybranych firm?",
+      openBusinessTitle: "Masowe usuwanie pomysłów na biznes",
+
+      searchBusinessPlaceholder: "Szukaj pomysłów na biznes po nazwie lub branży...",
+
+      noBusinessIdeas: "Nie utworzono jeszcze żadnych pomysłów na biznes",
+
+      noBusinessResults: "Nie znaleziono pomysłów na biznes pasujących do wyszukiwania",
+
+      confirmTitleSelectedBusiness: "Usuń wybrane pomysły na biznes",
+
+      confirmMessageSelectedBusiness: "Czy na pewno chcesz trwale usunąć {{count}} wybranych pomysłów na biznes?",
+
+      deletingBusinessProgress: "Usuwanie pomysłów na biznes: {{current}} z {{total}} ({{percent}}%)",
+
+      openAgentTitle: "Masowe usuwanie agentów",
+
+
+      searchAgentPlaceholder: "Szukaj agentów po nazwie lub roli...",
+
+
+      noAgents: "W tej firmie nie ma jeszcze żadnych agentów",
+
+
+      noAgentResults: "Nie znaleziono agentów pasujących do wyszukiwania",
+
+
+      confirmTitleSelectedAgent: "Usuń wybranych agentów",
+
+
+      confirmMessageSelectedAgent: "Czy na pewno chcesz trwale usunąć {{count}} wybranych agentów?",
+
+
+      deletingAgentProgress: "Usuwanie agentów: {{current}} z {{total}} ({{percent}}%)",
+
+
       "confirmBtn": "Usuń ({{count}})"
     },
   },

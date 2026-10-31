@@ -739,6 +739,7 @@ export async function updateCompany(pool: Pool, context: AuthContext, companyId:
   }
 export async function deleteCompany(pool: Pool, context: AuthContext, companyId: string) {
     await assertCompany(pool, context, companyId);
+    await pool.query("DELETE FROM data_backends WHERE company_id=$1 AND workspace_id=$2", [companyId, context.workspaceId]).catch(() => undefined);
     return Boolean((await pool.query("DELETE FROM companies WHERE id=$1 AND workspace_id=$2 AND user_id=$3 RETURNING id", [companyId, context.workspaceId, context.userId])).rowCount);
   }
 export async function setCompanyMainAgent(pool: Pool, context: AuthContext, companyId: string, agentId: string | null, expectedRevision: number) {

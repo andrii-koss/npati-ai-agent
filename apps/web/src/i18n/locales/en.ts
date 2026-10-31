@@ -636,8 +636,12 @@ export const en: TranslationSchema = {
       companySaved: "Company saved.",
       companyDeleted: "Company deleted.",
       companiesDeleted: "Deleted {{count}} companies.",
+      businessDeleted: "Business idea deleted.",
+      businessesDeleted: "Deleted {{count}} business ideas.",
       agentSaved: "Agent saved.",
       agentDeleted: "Agent deleted.",
+
+      agentsDeleted: "Deleted {{count}} agents.",
       businessUpdated: "Linked business updated.",
       knowledgeEnabled: "Knowledge enabled for Main Agent \"{{name}}\".",
       runCompleted: "Company run completed.",
@@ -820,6 +824,41 @@ export const en: TranslationSchema = {
       "confirmMessageAll": "Are you sure you want to permanently delete ALL companies ({{count}})? This cannot be undone.",
       "confirmTitleSelected": "Delete selected companies",
       "confirmMessageSelected": "Are you sure you want to permanently delete {{count}} selected companies?",
+      openBusinessTitle: "Batch delete business ideas",
+
+      searchBusinessPlaceholder: "Search business ideas by name or industry...",
+
+      noBusinessIdeas: "No business ideas created yet",
+
+      noBusinessResults: "No business ideas found matching your search",
+
+      confirmTitleSelectedBusiness: "Delete selected business ideas",
+
+      confirmMessageSelectedBusiness: "Are you sure you want to permanently delete {{count}} selected business ideas?",
+
+      deletingBusinessProgress: "Deleting business ideas: {{current}} of {{total}} ({{percent}}%)",
+
+      openAgentTitle: "Batch delete agents",
+
+
+      searchAgentPlaceholder: "Search agents by name or role...",
+
+
+      noAgents: "No agents in this company yet",
+
+
+      noAgentResults: "No agents found matching your search",
+
+
+      confirmTitleSelectedAgent: "Delete selected agents",
+
+
+      confirmMessageSelectedAgent: "Are you sure you want to permanently delete {{count}} selected agents?",
+
+
+      deletingAgentProgress: "Deleting agents: {{current}} of {{total}} ({{percent}}%)",
+
+
       "confirmBtn": "Delete ({{count}})"
     },
   },

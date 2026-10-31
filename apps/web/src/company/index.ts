@@ -8,3 +8,5 @@ export * from "./ControlStrip";
 export * from "./useCompanyKnowledge";
 export * from "./CompanyHeader";
 export * from "./CompanyMassDeleteModal";
+export * from "./BusinessMassDeleteModal";
+export * from "./AgentMassDeleteModal";
