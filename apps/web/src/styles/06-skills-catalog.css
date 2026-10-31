@@ -89,22 +89,38 @@
   scroll-margin-top: 20px;
 }
 
-.message-stream article.user {
+.message-stream article.user,
+article.user {
   width: fit-content;
   max-width: 85%;
   min-width: 0;
   margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+}
+
+.message-stream article.user .user-message-bubble,
+article.user .user-message-bubble {
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
   padding: 13px 15px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   overflow-wrap: anywhere;
   color: white;
-  background: var(--npati-black);
+  background: var(--npati-black, #1c1c1e);
   border-radius: 14px 14px 3px 14px;
+  box-sizing: border-box;
 }
 
-.message-stream article.user .user-prompt-preview {
+.message-stream article.user .user-prompt-preview,
+article.user .user-prompt-preview {
   max-width: min(560px, 100%);
   margin: 0;
   overflow: hidden;
@@ -116,27 +132,36 @@
   line-clamp: 4;
 }
 
-.message-stream article.user .user-prompt-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-top: 9px;
-}
-
-.message-stream article.user .user-prompt-actions button {
-  border: 1px solid rgba(255, 255, 255, .3);
-  border-radius: 7px;
-  padding: 5px 8px;
-  background: rgba(255, 255, 255, .1);
-  color: #fff;
+.message-stream article.user .user-prompt-expand-btn,
+article.user .user-prompt-expand-btn {
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 6px;
+  padding: 3px 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
   font: inherit;
-  font-size: 12px;
+  font-size: 11px;
   cursor: pointer;
+  transition: background-color 0.15s ease;
+  margin-top: 6px;
+  align-self: flex-start;
 }
 
-.message-stream article.user .user-prompt-actions button:hover,
-.message-stream article.user .user-prompt-actions button:focus-visible {
-  background: rgba(255, 255, 255, .22);
+.message-stream article.user .user-prompt-expand-btn:hover,
+.message-stream article.user .user-prompt-expand-btn:focus-visible,
+article.user .user-prompt-expand-btn:hover,
+article.user .user-prompt-expand-btn:focus-visible {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+}
+
+.user-message-toolbar,
+.assistant-message-toolbar.user-message-toolbar {
+  margin-top: 2px;
+  padding-top: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .message-stream article.assistant {

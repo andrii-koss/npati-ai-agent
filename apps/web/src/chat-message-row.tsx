@@ -41,10 +41,16 @@ export const ChatMessageRow = memo(function ChatMessageRow({ message, card, show
       data-message-id={message.id}
       aria-label={message.role === "user" ? "Your message" : "NPATI Agent message"}
     >
-      <PendingMessageAttachments value={message.attachments ?? []} />
-      {message.role === "user"
-        ? <UserPromptMessage content={message.content} onEdit={actions.edit} />
-        : <ChatMessageContent content={projectChatText(message.content, message.projectCard, responseLanguage)} />}
+      {message.role === "user" ? (
+        <UserPromptMessage content={message.content} onEdit={actions.edit}>
+          <PendingMessageAttachments value={message.attachments ?? []} />
+        </UserPromptMessage>
+      ) : (
+        <>
+          <PendingMessageAttachments value={message.attachments ?? []} />
+          <ChatMessageContent content={projectChatText(message.content, message.projectCard, responseLanguage)} />
+        </>
+      )}
       {card && <ChatProjectPreviewCard card={card} onActivate={actions.activateCard} />}
       {showToolbar && <AssistantMessageToolbar content={message.content} onRegenerate={() => actions.regenerate(message.id)} />}
     </article>

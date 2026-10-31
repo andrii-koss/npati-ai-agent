@@ -578,6 +578,11 @@
   padding-top: 4px;
 }
 
+.assistant-message-toolbar.user-message-toolbar {
+  margin-top: 2px;
+  padding-top: 0;
+}
+
 .assistant-toolbar-btn {
   width: 30px;
   height: 30px;
