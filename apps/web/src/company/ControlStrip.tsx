@@ -1,3 +1,4 @@
+import { Trash2 } from "lucide-react";
 import { useTranslation } from "../i18n";
 import type { Company, Agent } from "./types";
 import { SELECTED_COMPANY_ID_KEY } from "./cache";
@@ -10,6 +11,7 @@ export interface ControlStripProps {
   agents: Agent[];
   businesses?: Array<{ id: string; name: string }>;
   onUpdateBusiness: (businessId: string) => void | Promise<void>;
+  onOpenMassDelete?: () => void;
 }
 
 export function ControlStrip({
@@ -20,6 +22,7 @@ export function ControlStrip({
   agents,
   businesses,
   onUpdateBusiness,
+  onOpenMassDelete,
 }: ControlStripProps) {
   const { t } = useTranslation();
 
@@ -27,6 +30,17 @@ export function ControlStrip({
     <section className="company-control-strip">
       {/* Block 1: Обираємо компанію */}
       <div className="company-strip-card">
+        {onOpenMassDelete && (
+          <button
+            type="button"
+            className="company-strip-mass-delete-btn"
+            onClick={onOpenMassDelete}
+            title={t("companySettings.massDelete.openTitle")}
+            aria-label={t("companySettings.massDelete.openTitle")}
+          >
+            <Trash2 size={13} />
+          </button>
+        )}
         <div className="company-strip-eyebrow">
           <span className="company-strip-label">{t("companySettings.strip.company")}</span>
           <span className="company-strip-badge badge-active">{t("companySettings.strip.active")}</span>

@@ -92,6 +92,8 @@ export interface CompanySettingsSchema {
       updateCompleted: string;
       systemAlert: string;
       companySaved: string;
+      companyDeleted: string;
+      companiesDeleted: string;
       agentSaved: string;
       agentDeleted: string;
       businessUpdated: string;
@@ -260,5 +262,24 @@ export interface CompanySettingsSchema {
       deleteCompanyMessage: string;
       deleteConfirm: string;
       deleteCancel: string;
+    };
+    massDelete: {
+      openTitle: string;
+      close: string;
+      searchPlaceholder: string;
+      selectAll: string;
+      deselectAll: string;
+      selectAllFiltered: string;
+      selectedCount: string;
+      noResults: string;
+      cancel: string;
+      deleteAll: string;
+      deleteSelected: string;
+      deletingProgress: string;
+      confirmTitleAll: string;
+      confirmMessageAll: string;
+      confirmTitleSelected: string;
+      confirmMessageSelected: string;
+      confirmBtn: string;
     };
 };

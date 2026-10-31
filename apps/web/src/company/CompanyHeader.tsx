@@ -11,6 +11,8 @@ export interface CompanyHeaderProps {
   onOpenCompanyEditor: (company?: Company) => void;
   onOpenAgentEditor: () => void;
   onDeleteCompany: () => void | Promise<void>;
+  onOpenMassDelete?: () => void;
+  companiesCount?: number;
 }
 
 export function CompanyHeader({
@@ -66,14 +68,6 @@ export function CompanyHeader({
                   title={t("companySettings.header.editCompanyTitle")}
                 >
                   {t("companySettings.header.editCompany")}
-                </button>
-                <button
-                  type="button"
-                  className="content-action-btn delete-btn"
-                  onClick={() => void onDeleteCompany()}
-                  title={t("companySettings.header.deleteTitle")}
-                >
-                  {t("companySettings.header.deleteBtn")}
                 </button>
               </div>
             )}

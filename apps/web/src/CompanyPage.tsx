@@ -33,6 +33,7 @@ import {
   ControlStrip,
   useCompanyKnowledge,
   CompanyHeader,
+  CompanyMassDeleteModal,
 } from "./company";
 
 export function CompanyPage() {
@@ -66,6 +67,7 @@ export function CompanyPage() {
   const [companyForm, setCompanyForm] = useState<CompanyDraft>({ ...emptyCompany });
   const [agentForm, setAgentForm] = useState<AgentDraft>({ ...emptyAgent });
   const [notice, setNotice] = useState("");
+  const [massDeleteOpen, setMassDeleteOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const companyCreateKey = useRef(crypto.randomUUID());
   const agentCreateKey = useRef(crypto.randomUUID());
@@ -117,16 +119,46 @@ export function CompanyPage() {
   }, []);
 
   async function loadCompanies(preferredId?: string) {
-    const data = await api<{ companies: Company[] }>("/companies?limit=100");
-    const list = data.companies ?? [];
-    if (preferredId && !list.some((item) => item.id === preferredId)) {
-      try { list.push(await api<Company>(`/companies/${encodeURIComponent(preferredId)}`)); } catch { /* Deleted or inaccessible companies are never selected. */ }
+    const all: Company[] = [];
+    let cursor: string | null = null;
+    let hasMore = true;
+    while (hasMore) {
+      const pageUrl: string = `/companies?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+      const res = await api<{ companies: Company[]; pagination?: { nextCursor?: string | null } }>(pageUrl);
+      const list = res?.companies ?? [];
+      all.push(...list);
+      if (!res?.pagination?.nextCursor || list.length === 0) {
+        hasMore = false;
+      } else {
+        cursor = res.pagination.nextCursor;
+      }
     }
-    setCompanies(list);
-    const nextId = preferredId && list.some((item) => item.id === preferredId) ? preferredId : (list[0]?.id ?? "");
+    if (preferredId && !all.some((item) => item.id === preferredId)) {
+      try { all.push(await api<Company>(`/companies/${encodeURIComponent(preferredId)}`)); } catch { /* Deleted or inaccessible companies are never selected. */ }
+    }
+    setCompanies(all);
+    const nextId = preferredId && all.some((item) => item.id === preferredId) ? preferredId : (all[0]?.id ?? "");
     setSelectedId(nextId);
-    updateCachedCompanies(list, nextId);
-    return list;
+    updateCachedCompanies(all, nextId);
+    return all;
+  }
+
+  async function handleCompaniesDeleted(deletedIds: string[]) {
+    const nextCompanies = companies.filter((c) => !deletedIds.includes(c.id));
+    const nextSelectedId = nextCompanies.some((c) => c.id === selectedId)
+      ? selectedId
+      : (nextCompanies[0]?.id ?? "");
+
+    if (deletedIds.includes(readActiveCompanyId())) {
+      writeActiveCompanyId(nextSelectedId);
+    }
+    window.dispatchEvent(new CustomEvent("npati:company-changed", { detail: { action: "delete_batch", count: deletedIds.length } }));
+    setNotice(
+      deletedIds.length === 1
+        ? t("companySettings.notices.companyDeleted")
+        : t("companySettings.notices.companiesDeleted", { count: deletedIds.length })
+    );
+    await loadCompanies(nextSelectedId);
   }
 
   async function loadOrganization(companyId: string, cursor?: string, append = false, companySnapshot = companies) {
@@ -476,12 +508,12 @@ export function CompanyPage() {
       if (readActiveCompanyId() === selected.id) writeActiveCompanyId("");
       window.dispatchEvent(new CustomEvent("npati:company-changed", { detail: { action: "delete", companyId: selected.id } }));
       setCompanyEditor(false); setEditingCompany(undefined); await loadCompanies();
+      setNotice(t("companySettings.notices.companyDeleted"));
     } catch (error) { setNotice(error instanceof Error ? error.message : t("companySettings.errors.couldNotDelete")); }
   }
 
   const noticeIsSuccess = Boolean(notice)
-    && /saved|uploaded|queued|added|updated|deleted|completed/i.test(notice)
-    && !/failed|error|could not|unavailable|exceeded|required|conflict|timed out|denied/i.test(notice);
+    && !/failed|error|could not|unavailable|exceeded|required|conflict|timed out|denied|помилка|не вдалося|nicht|echoué|fallit|błąd/i.test(notice);
 
   useEffect(() => {
     if (!notice) return;
@@ -519,6 +551,7 @@ export function CompanyPage() {
         agents={agents}
         businesses={overview?.businesses}
         onUpdateBusiness={updateCompanyBusiness}
+        onOpenMassDelete={() => setMassDeleteOpen(true)}
       />
 
       <section className="company-run-card">
@@ -741,6 +774,13 @@ export function CompanyPage() {
       language={language}
       agents={agents}
       setMainAgent={setMainAgent}
+    />
+
+    <CompanyMassDeleteModal
+      isOpen={massDeleteOpen}
+      onClose={() => setMassDeleteOpen(false)}
+      companies={companies}
+      onCompaniesDeleted={handleCompaniesDeleted}
     />
   </main>;
 }

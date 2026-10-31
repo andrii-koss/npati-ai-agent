@@ -7,3 +7,4 @@ export * from "./AgentDrawer";
 export * from "./ControlStrip";
 export * from "./useCompanyKnowledge";
 export * from "./CompanyHeader";
+export * from "./CompanyMassDeleteModal";
