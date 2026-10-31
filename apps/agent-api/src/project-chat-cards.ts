@@ -10,7 +10,7 @@ export interface ChatEntityContext {
   lastConfirmedAction: { entityType: string; entityId: string | null; companyId: string | null; projectId: string | null; action: string };
 }
 const contextKey = (conversationId: string) => `chat-active-context:${conversationId}`;
-export type ChatEntityRead = { field: "name" | "description" | "instructions" | "projects" | "role" | "agents" | "memory"; entityType: "focused" | "company" | "business" | "project" | "agent" };
+export type ChatEntityRead = { field: "name" | "description" | "instructions" | "projects" | "role" | "agents" | "memory" | "profile"; entityType: "focused" | "company" | "business" | "project" | "agent" };
 export function focusedChatEntity(context: Partial<ActiveContext>, confirmed?: ChatEntityContext | null) {
   const selected = { entityType: context.contextType ?? "none", entityId: context.projectId ?? context.companyId ?? context.businessId ?? null,
     companyId: context.companyId ?? null, projectId: context.projectId ?? null, action: "select" };
@@ -56,6 +56,12 @@ export async function executeChatEntityRead(store: WorkspaceStore, auth: AuthCon
   if (!record) return null;
   let value: string | undefined;
   if (request.field === "name" || request.field === "description") value = record[request.field] ?? undefined;
+  else if (request.field === "profile" && type === "business") {
+    const business = record as import("@npati/workspace").Business;
+    value = ([["Name", business.name], ["Stage", business.businessStage], ["Market", business.market], ["Country", business.country],
+      ["Audience", business.audienceSummary], ["Products/services", business.productsServicesSummary], ["Description", business.description]] as const)
+      .filter(([, v]) => v?.trim()).map(([label, v]) => label + ": " + v!.trim()).join("\n") || undefined;
+  }
   else if (request.field === "memory" && type === "company") {
     const company = record as import("@npati/workspace").Company;
     const facts = Object.keys(company.memory ?? {}).length ? JSON.stringify(company.memory, null, 2) : undefined;
@@ -72,6 +78,8 @@ export async function executeChatEntityRead(store: WorkspaceStore, auth: AuthCon
   else if (request.field === "projects" && type === "company") value = (await store.listProjects(auth, id))
     .filter(project => !["archived", "soft_deleted", "purging", "deleted"].includes(project.status)).slice(0, 30).map(project => project.name).join("\n");
   else return null;
+  // A Business Profile spreads its facts across several fields: one empty field is not evidence that the profile lacks the data.
+  if (type === "business" && request.field !== "profile" && !value?.trim()) return null;
   if (type === "business") companyId = null;
   const answer = value?.trim() || "No stored value is available for this field.";
   let conversation;

@@ -262,6 +262,15 @@ export class WorkspaceChatActions {
     return names.some((name) => name.length > 2 && new RegExp(`(?<![\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "u").test(message));
   }
 
+  /** "Enable Stress Hook in Bakery" names an existing webhook: its exact name identifies the resource, as for automations. */
+  static async namesOwnedWebhook(auth: AuthContext, store: WorkspaceStore, message: string, webhooks?: WorkspaceChatActionDependencies["webhooks"]): Promise<boolean> {
+    if (!webhooks || !auth.permissions.includes("business:manage")) return false;
+    const owned = (await companies(store, auth).catch(() => [] as Company[]))
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()).slice(0, 20);
+    const names = (await Promise.all(owned.map((company) => webhooks.listWebhooks(auth, company.id).catch(() => [])))).flat().map((item) => item.name.trim());
+    return names.some((name) => name.length > 2 && new RegExp(`(?<![\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "u").test(message));
+  }
+
   static isPotentialMutationRequest(message: string): boolean {
     return mutationSignals.some((pattern) => pattern.test(message)) && referenceSignals.some((pattern) => pattern.test(message));
   }

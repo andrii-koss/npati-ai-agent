@@ -64,6 +64,17 @@ describe("pixel-evidence visual acceptance", () => {
     expect(chat).not.toHaveBeenCalled();
     expect((await reviewWebsiteReference(f.input, f.run, { inspect: async () => f.qa, chat }) as any).visualAcceptance.status).toBe("blocked");
   });
+  it("D106: retries one malformed reference analysis and keeps the schema strict", async () => {
+    const f = await fixture(), keys = ["layout", "colors", "typography", "spacing", "imagery", "components", "plan"];
+    const valid = JSON.stringify(Object.fromEntries(keys.map(key => [key, ["observed " + key]])));
+    const truncated = valid.slice(0, 60);
+    const recovering = vi.fn().mockResolvedValueOnce({ content: truncated }).mockResolvedValueOnce({ content: valid });
+    expect((await analyzeWebsiteReference(f.input, recovering))[0]).toContain("observed plan");
+    expect(recovering).toHaveBeenCalledTimes(2);
+    const broken = vi.fn(async () => ({ content: JSON.stringify({ layout: ["only layout"] }) }));
+    await expect(analyzeWebsiteReference(f.input, broken)).rejects.toThrow("vision_analysis_invalid_result");
+    expect(broken).toHaveBeenCalledTimes(2);
+  });
   it("runs real image-bearing analysis before implementation and refuses missing vision", async () => {
     const f = await fixture(), keys = ["layout", "colors", "typography", "spacing", "imagery", "components", "plan"];
     const chat = vi.fn(async () => ({ content: JSON.stringify(Object.fromEntries(keys.map(key => [key, ["observed " + key]]))) }));

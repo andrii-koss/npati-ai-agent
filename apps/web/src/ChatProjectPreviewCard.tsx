@@ -4,6 +4,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { ExternalLink, ChevronDown, RefreshCw, MessageSquare, GitCommit, Terminal, Eye, ExternalLink as ExtIcon } from "lucide-react";
 import type { ProjectCardData } from "@npati/shared";
 import { getStoredAuthToken } from "./AuthContext";
+import { readProjectFile } from "./project-files-client";
 import { I18nContextRef } from "./i18n";
 import { persistedModeLabel } from "./code-workspace/actions";
 import { LivePreviewHeader, type DeviceMode } from "./LivePreviewHeader";
@@ -264,12 +265,10 @@ export function ChatProjectPreviewCard({
         if (token) headers.authorization = `Bearer ${token}`;
 
         if (isStatic) {
-          const filesUrl = `/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/files/read?path=index.html`;
-          const res = await fetch(filesUrl, { headers }).catch(() => null);
+          const file = await readProjectFile({ companyId, projectId }, "index.html").catch(() => null);
           if (!isMounted) return;
-          if (res?.ok) {
+          if (file) {
             setRuntimeStatus("running");
-            const file = await res.json().catch(() => null) as { content?: string } | null;
             if (isMounted && file?.content) {
               setPreviewHtml(file.content);
             }
@@ -390,13 +389,8 @@ export function ChatProjectPreviewCard({
     if (!/^(?:[a-z0-9_-]+\/)*[a-z0-9_-]+\.html$/i.test(filePath)) {
       throw new Error("Invalid preview page.");
     }
-    const token = getStoredAuthToken();
-    const headers: Record<string, string> = {};
-    if (token) headers.authorization = `Bearer ${token}`;
-    const filesUrl = `/api/companies/${encodeURIComponent(card.companyId)}/projects/${encodeURIComponent(card.projectId ?? card.id)}/files/read?path=${encodeURIComponent(filePath)}`;
-    const response = await fetch(filesUrl, { headers });
-    const file = await response.json().catch(() => null) as { content?: string; error?: { message?: string } } | null;
-    if (!response.ok || !file?.content) throw new Error(file?.error?.message || `${filePath} is unavailable.`);
+    const file = await readProjectFile({ companyId: card.companyId, projectId: card.projectId ?? card.id }, filePath);
+    if (!file.content) throw new Error(`${filePath} is unavailable.`);
     setPreviewHtml(file.content);
     setRuntimeStatus("running");
   }

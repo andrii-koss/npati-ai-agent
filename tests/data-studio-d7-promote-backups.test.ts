@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
 import { PromoteService } from "../apps/agent-api/src/data-studio/promote-service";
 import { DataStudioError } from "../apps/agent-api/src/data-studio/identifier";
@@ -323,6 +323,22 @@ describe("D7 — backups and restore", () => {
     expect(restored.safetySnapshotId).toBeTruthy();
     expect(calls).toContain(`restore:prod:${created.id}`);
     expect(state.snapshots.some((snapshot) => snapshot.kind === "pre_restore")).toBe(true);
+  });
+
+  it("D105: restores a lost database from its snapshot instead of failing on the safety dump", async () => {
+    const state = fakeState();
+    const { provisioner, calls } = fakeProvisioner(state);
+    const backups = new BackupService(fakeRepository(state), provisioner, fakeProvider(), memoryStorage);
+    const created = await backups.create(owner, state.backend.companyId, state.backend.id, "dev", { reason: "before loss" });
+    const lost = Object.assign(provisioner, { databaseExists: async () => false });
+    const pg_dump = vi.spyOn(lost, "snapshot");
+
+    const restored = await backups.restore(owner, state.backend.companyId, state.backend.id, "dev", created.id, { approved: true });
+    expect(restored).toMatchObject({ restoredSnapshotId: created.id, recreatedDatabase: true });
+    expect(restored.safetySnapshotId).toBeUndefined();
+    expect(pg_dump).not.toHaveBeenCalled();
+    expect(calls).toContain(`restore:dev:${created.id}`);
+    expect(state.snapshots.some((snapshot) => snapshot.kind === "pre_restore")).toBe(false);
   });
 
   it("takes scheduled snapshots when the policy interval elapsed and keeps only `keep` of them", async () => {

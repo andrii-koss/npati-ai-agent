@@ -282,6 +282,7 @@ export function registerAppRoutesAndLifecycle(deps: AppRoutesAndLifecycleDeps) {
       return current ? (await activeContextResolver.resolveNamedCompany(auth, current, message, undefined, conversationText, { deferProjectAmbiguity: true }))?.project?.id : undefined;
     },
     namesOwnedManagementRecord: (auth, message) => WorkspaceChatActions.namesOwnedAutomation(auth, workspaceStore, message, automationsRepo),
+    namesOwnedWebhook: (auth, message) => WorkspaceChatActions.namesOwnedWebhook(auth, workspaceStore, message, integrationsRepo),
     listBusinessNames: async (auth) => (await workspaceStore.listUserBusinesses(auth)).map(business => business.name),
     // Every owned company: a name past the first page is still an owned record to the classifier (A077).
     listCompanyNames: async (auth) => {

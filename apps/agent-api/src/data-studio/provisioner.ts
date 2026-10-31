@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { chmod, mkdir, stat } from "node:fs/promises";
 import path from "node:path";
-import { Pool } from "pg";
+import { Pool, type PoolClient } from "pg";
 import type { AuthContext } from "@npati/workspace";
 import { DataStudioError, quoteIdentifier } from "./identifier";
 import type { DataBackend, DataBackendEnvironment, DataEnvironmentName, DatabaseRole, ProjectDatabaseConnection, ProjectDatabaseUsage, ProjectSnapshot } from "./types";
@@ -18,6 +18,8 @@ export interface DatabaseProvisioner {
   resumeRuntime(backend: DataBackend, environment: DataEnvironmentName): Promise<void>;
   snapshot(backend: DataBackend, environment: DataEnvironmentName): Promise<ProjectSnapshot>;
   restoreSnapshot(backend: DataBackend, environment: DataEnvironmentName, snapshot: ProjectSnapshot): Promise<void>;
+  /** Whether the environment's physical database exists. A provider that cannot tell omits it. */
+  databaseExists?(backend: DataBackend, environment: DataEnvironmentName): Promise<boolean>;
   getUsage(backend: DataBackend, environment: DataEnvironmentName): Promise<ProjectDatabaseUsage>;
 }
 
@@ -65,6 +67,7 @@ export class ProvisionerRouter implements DatabaseProvisioner {
   resumeRuntime(backend: DataBackend, environment: DataEnvironmentName) { return this.pick(backend).resumeRuntime(backend, environment); }
   snapshot(backend: DataBackend, environment: DataEnvironmentName) { return this.pick(backend).snapshot(backend, environment); }
   restoreSnapshot(backend: DataBackend, environment: DataEnvironmentName, snapshot: ProjectSnapshot) { return this.pick(backend).restoreSnapshot(backend, environment, snapshot); }
+  databaseExists(backend: DataBackend, environment: DataEnvironmentName) { const provisioner = this.pick(backend); return provisioner.databaseExists ? provisioner.databaseExists(backend, environment) : Promise.resolve(true); }
   getUsage(backend: DataBackend, environment: DataEnvironmentName) { return this.pick(backend).getUsage(backend, environment); }
 
   async close() {
@@ -86,6 +89,8 @@ function objectNames(backend: DataBackend, environment: DataEnvironmentName) {
 }
 
 function password(): string { return randomBytes(32).toString("hex"); }
+
+const ROLE_OPTIONS = { migrator: " LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS CONNECTION LIMIT 5 PASSWORD '", runtime: " LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS CONNECTION LIMIT 10 PASSWORD '" } as const;
 
 async function runPgTool(command: "pg_dump" | "pg_restore", args: string[], secret: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
@@ -134,21 +139,9 @@ export class SharedPostgresProvisioner implements DatabaseProvisioner {
       await client.query("SELECT pg_advisory_lock(hashtextextended($1,0))", [lockKey]);
       const existing = await client.query("SELECT 1 FROM pg_database WHERE datname=$1", [names.database]);
       if (existing.rowCount) throw new DataStudioError(409, "provision", "Project database already exists", false, "DATABASE_EXISTS");
-      await client.query("CREATE ROLE " + quoteIdentifier(names.migrator) + " LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS CONNECTION LIMIT 5 PASSWORD '" + migratorPassword + "'");
-      await client.query("CREATE ROLE " + quoteIdentifier(names.runtime) + " LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS CONNECTION LIMIT 10 PASSWORD '" + runtimePassword + "'");
-      await client.query("CREATE DATABASE " + quoteIdentifier(names.database) + " OWNER " + quoteIdentifier(names.migrator));
-      await client.query("REVOKE ALL ON DATABASE " + quoteIdentifier(names.database) + " FROM PUBLIC");
-      await client.query("GRANT CONNECT ON DATABASE " + quoteIdentifier(names.database) + " TO " + quoteIdentifier(names.migrator) + ", " + quoteIdentifier(names.runtime));
-      await client.query("ALTER ROLE " + quoteIdentifier(names.migrator) + " IN DATABASE " + quoteIdentifier(names.database) + " SET statement_timeout = '30s'");
-      await client.query("ALTER ROLE " + quoteIdentifier(names.runtime) + " IN DATABASE " + quoteIdentifier(names.database) + " SET statement_timeout = '5s'");
-      await client.query("ALTER ROLE " + quoteIdentifier(names.migrator) + " IN DATABASE " + quoteIdentifier(names.database) + " SET idle_in_transaction_session_timeout = '30s'");
-      await client.query("ALTER ROLE " + quoteIdentifier(names.runtime) + " IN DATABASE " + quoteIdentifier(names.database) + " SET idle_in_transaction_session_timeout = '5s'");
-      const projectPool = new Pool({ ...this.adminConnection(names.database), max: 1 });
-      try {
-        await projectPool.query("REVOKE ALL ON SCHEMA public FROM PUBLIC");
-        await projectPool.query("GRANT USAGE ON SCHEMA public TO " + quoteIdentifier(names.runtime));
-        await projectPool.query("GRANT ALL ON SCHEMA public TO " + quoteIdentifier(names.migrator));
-      } finally { await projectPool.end(); }
+      await client.query("CREATE ROLE " + quoteIdentifier(names.migrator) + ROLE_OPTIONS.migrator + migratorPassword + "'");
+      await client.query("CREATE ROLE " + quoteIdentifier(names.runtime) + ROLE_OPTIONS.runtime + runtimePassword + "'");
+      await this.createDatabaseObjects(client, names);
       const ctx = ownerContext(backend);
       const migratorRef = await this.repository.putSecret(ctx, backend.companyId, backend.id, environment, "migrator", migratorPassword);
       const runtimeRef = await this.repository.putSecret(ctx, backend.companyId, backend.id, environment, "runtime", runtimePassword);
@@ -169,6 +162,49 @@ export class SharedPostgresProvisioner implements DatabaseProvisioner {
       await client.query("SELECT pg_advisory_unlock(hashtextextended($1,0))", [lockKey]).catch(() => undefined);
       client.release();
     }
+  }
+
+  /** The database, its grants and per-role limits, as provisioned. Shared by provisioning and the recovery of a lost database. */
+  private async createDatabaseObjects(client: PoolClient, names: ReturnType<typeof objectNames>): Promise<void> {
+    await client.query("CREATE DATABASE " + quoteIdentifier(names.database) + " OWNER " + quoteIdentifier(names.migrator));
+    await client.query("REVOKE ALL ON DATABASE " + quoteIdentifier(names.database) + " FROM PUBLIC");
+    await client.query("GRANT CONNECT ON DATABASE " + quoteIdentifier(names.database) + " TO " + quoteIdentifier(names.migrator) + ", " + quoteIdentifier(names.runtime));
+    await client.query("ALTER ROLE " + quoteIdentifier(names.migrator) + " IN DATABASE " + quoteIdentifier(names.database) + " SET statement_timeout = '30s'");
+    await client.query("ALTER ROLE " + quoteIdentifier(names.runtime) + " IN DATABASE " + quoteIdentifier(names.database) + " SET statement_timeout = '5s'");
+    await client.query("ALTER ROLE " + quoteIdentifier(names.migrator) + " IN DATABASE " + quoteIdentifier(names.database) + " SET idle_in_transaction_session_timeout = '30s'");
+    await client.query("ALTER ROLE " + quoteIdentifier(names.runtime) + " IN DATABASE " + quoteIdentifier(names.database) + " SET idle_in_transaction_session_timeout = '5s'");
+    const projectPool = new Pool({ ...this.adminConnection(names.database), max: 1 });
+    try {
+      await projectPool.query("REVOKE ALL ON SCHEMA public FROM PUBLIC");
+      await projectPool.query("GRANT USAGE ON SCHEMA public TO " + quoteIdentifier(names.runtime));
+      await projectPool.query("GRANT ALL ON SCHEMA public TO " + quoteIdentifier(names.migrator));
+    } finally { await projectPool.end(); }
+  }
+
+  /** Recreates a lost environment database under the provisioning lock, so a snapshot can be restored into it.
+   * Cluster roles normally survive; a missing role is recreated with its stored secret, so credentials stay valid. */
+  private async recreateLostDatabase(backend: DataBackend, environment: DataEnvironmentName): Promise<void> {
+    const names = objectNames(backend, environment);
+    const client = await this.adminPool.connect().catch(() => { throw new DataStudioError(503, "restore", "Project database unavailable", true, "PROJECT_DATABASE_UNAVAILABLE"); });
+    const lockKey = "npati:" + names.database;
+    try {
+      await client.query("SELECT pg_advisory_lock(hashtextextended($1,0))", [lockKey]);
+      if ((await client.query("SELECT 1 FROM pg_database WHERE datname=$1", [names.database])).rowCount) return;
+      for (const role of ["migrator", "runtime"] as const) {
+        if ((await client.query("SELECT 1 FROM pg_roles WHERE rolname=$1", [names[role]])).rowCount) continue;
+        const secret = await this.repository.resolveSecret(ownerContext(backend), backend.companyId, backend.id, environment, role);
+        if (!/^[0-9a-f]{64}$/.test(secret)) throw new DataStudioError(409, "restore", "Stored credential cannot recreate the database role", false, "ROLE_RECOVERY_UNAVAILABLE");
+        await client.query("CREATE ROLE " + quoteIdentifier(names[role]) + ROLE_OPTIONS[role] + secret + "'");
+      }
+      await this.createDatabaseObjects(client, names);
+    } finally {
+      await client.query("SELECT pg_advisory_unlock(hashtextextended($1,0))", [lockKey]).catch(() => undefined);
+      client.release();
+    }
+  }
+
+  async databaseExists(backend: DataBackend, environment: DataEnvironmentName): Promise<boolean> {
+    return Boolean((await this.adminPool.query("SELECT 1 FROM pg_database WHERE datname=$1", [objectNames(backend, environment).database])).rowCount);
   }
 
   async deprovisionDatabase(backend: DataBackend, environment: DataEnvironmentName): Promise<void> {
@@ -229,6 +265,8 @@ export class SharedPostgresProvisioner implements DatabaseProvisioner {
       [snapshot.id, backend.id, environment, snapshot.path]);
     if (!record.rowCount) throw new DataStudioError(404, "restore", "Snapshot reference not found", false, "SNAPSHOT_NOT_FOUND");
     await stat(snapshot.path);
+    // A lost database is recreated first; pg_restore then rebuilds its schema and rows from the snapshot.
+    if (!await this.databaseExists(backend, environment)) await this.recreateLostDatabase(backend, environment);
     const names = objectNames(backend, environment);
     const migrator = await this.getConnection(backend, environment, "migrator");
     await runPgTool("pg_restore", ["-h", this.config.host, "-p", String(this.config.port), "-U", migrator.user,

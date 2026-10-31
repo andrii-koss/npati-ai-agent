@@ -136,7 +136,7 @@ export class BackupService {
     environment: DataEnvironmentName,
     snapshotId: string,
     options: { approved?: boolean } = {},
-  ): Promise<{ restoredSnapshotId: string; safetySnapshotId?: string; fingerprint?: string }> {
+  ): Promise<{ restoredSnapshotId: string; safetySnapshotId?: string; recreatedDatabase?: true; fingerprint?: string }> {
     const backend = await this.repository.get(ctx, companyId, backendId);
     const snapshot = await this.repository.getSnapshot(backend.id, environment, snapshotId);
     if (!snapshot) throw new DataStudioError(404, "restore", "Snapshot not found for this environment", false, "SNAPSHOT_NOT_FOUND");
@@ -152,7 +152,9 @@ export class BackupService {
     if (!await this.storage.exists(snapshot)) {
       throw new DataStudioError(410, "restore", "Snapshot file is no longer available", false, "SNAPSHOT_MISSING");
     }
-    const safety = await this.snapshot(backend, environment, "pre_restore", `Automatic snapshot before restoring ${snapshotId}`, ctx.userId);
+    // A lost database has nothing to protect: the restore recreates it instead of failing on the safety dump.
+    const exists = await this.provisioner.databaseExists?.(backend, environment) ?? true;
+    const safety = exists ? await this.snapshot(backend, environment, "pre_restore", `Automatic snapshot before restoring ${snapshotId}`, ctx.userId) : undefined;
     await this.provisioner.restoreSnapshot(backend, environment, snapshot);
 
     let fingerprint: string | undefined;
@@ -161,7 +163,7 @@ export class BackupService {
       fingerprint = this.provider.schemaFingerprint(schema);
       await this.repository.setExpectedSchema(ctx, companyId, backend.id, environment, schema, fingerprint);
     }
-    return { restoredSnapshotId: snapshot.id, safetySnapshotId: safety.id, fingerprint };
+    return { restoredSnapshotId: snapshot.id, ...(safety ? { safetySnapshotId: safety.id } : { recreatedDatabase: true }), fingerprint };
   }
 
   /** Deletes snapshots past their retention window (files and metadata). */
