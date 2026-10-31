@@ -24,6 +24,9 @@ export function projectChatText(content: string, card?: ProjectCardData, languag
   if (card?.kind !== "code_project" && card?.status === "previewing" && (card.buildStatus ?? card.lastBuildStatus) === "success" && content.length > 300) {
     return `Проєкт «${card.name}» готовий. Build успішний, Live Preview працює.`;
   }
+  if (card && (content === card.name || /^(?:Coding Agent session started\.|Агент готує проєкт)/u.test(content.trim()))) {
+    return "";
+  }
   return content;
 }
 

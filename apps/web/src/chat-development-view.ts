@@ -9,15 +9,20 @@ export function developmentCard(messages: CardMessage[], index: number, processe
   const projectId = card.projectId ?? card.id;
   if (messages.slice(index + 1).some(m => (!m.role || m.role === "assistant") && (m.projectCard?.projectId ?? m.projectCard?.id) === projectId)) return null;
   const process = processes.find(p => p.projectId === projectId);
-  if (process?.conversationId === conversationId) return null;
-  if (process && (developmentIsActive(process) || process.parentConversationId === conversationId && process.conversationId !== conversationId)) return null;
+  if (process && process.parentConversationId === conversationId && process.conversationId !== conversationId) return null;
   const verified = ["ready", "success"].includes(card.lastBuildStatus ?? "") && !!card.previewUrl;
-  return { ...card, status: process?.status ?? (card.status === "ready" && !verified ? "idle" : card.status) };
+  return {
+    ...card,
+    status: process?.status ?? (card.status === "ready" && !verified ? "idle" : card.status),
+    previewUrl: process?.previewUrl ?? card.previewUrl,
+    framework: process?.framework || card.framework,
+  };
 }
 export function hideDevelopmentMessage(messages: CardMessage[], index: number, processes: DevelopmentProcess[]) {
-  const message = messages[index]; if (!message?.projectCard || message.role && message.role !== "assistant") return false;
-  const projectId = message.projectCard.projectId ?? message.projectCard.id;
-  const process = processes.find(p => p.projectId === projectId); if (!process) return false;
+  const message = messages[index];
+  if (!message || message.projectCard) return false;
+  const process = processes.find(p => p.name === message.content);
+  if (!process) return false;
   const placeholder = message.content === process.name || /^(?:Coding Agent session started\.|Агент готує проєкт)/u.test(message.content);
   return placeholder;
 }

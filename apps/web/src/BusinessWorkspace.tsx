@@ -27,7 +27,7 @@ import { ChatMessageRow, useChatRowActions } from "./chat-message-row";
 import { confirmModal, alertModal } from "./ConfirmDialog";
 import { detectChatMutationOperation, mutationProgressTargets } from "./chat-mutation-progress";
 import { Business, Goal, MemoryItem, Company, api, blankBusiness, Notice, useWorkspace, Skill, getCachedSkills, updateCachedSkills, PageIntro, EmptyBusiness } from "./business-workspace-shared";
-import { BusinessForm, ProjectChatCard, AssistantMessageToolbar, FloatingNotice, Message } from "./business-workspace-cards";
+import { BusinessForm, ProjectChatCard, ChatProjectPreviewCard, AssistantMessageToolbar, FloatingNotice, Message } from "./business-workspace-cards";
 export * from "./business-workspace-page-views";
 export * from "./business-workspace-cards";
 export * from "./business-workspace-shared";
@@ -67,25 +67,29 @@ function isWebsiteAnalysisRequest(message: string) {
 
 export function BusinessChatPage({ initialPrompt = "", initialConversationId, neutralChat = false, companyId }: { initialPrompt?: string; initialConversationId?: string; neutralChat?: boolean; companyId?: string }) {
   const { t, language } = useTranslation();
-  const { overview } = useWorkspace(); const business = neutralChat || companyId ? null : overview?.currentBusiness;
+  const [chatSearch] = useSearchParams();
+  const isNeutral = neutralChat || Boolean(chatSearch.get("project")) || Boolean(chatSearch.get("company"));
+  const { overview } = useWorkspace();
+  const business = (isNeutral || companyId) ? null : overview?.currentBusiness;
   const contextSwitcher = useContext(ChatContextSwitcherContext);
   const navigate = useNavigate();
-  const [chatSearch] = useSearchParams();
   const [selectedProject, setSelectedProject] = useState<{ companyId: string; projectId: string; conversationId: string | null } | null>(() => {
     const projectId = chatSearch.get("project"); const selectedCompany = chatSearch.get("company");
     return projectId && selectedCompany ? { projectId, companyId: selectedCompany, conversationId: initialConversationId ?? null } : null;
   });
   const [entryProjectCard, setEntryProjectCard] = useState<ProjectCardData | null>(null);
   useEffect(() => {
-    if (!selectedProject || selectedProject.conversationId !== null) return;
+    const projectId = chatSearch.get("project") ?? selectedProject?.projectId;
+    const companyId = chatSearch.get("company") ?? selectedProject?.companyId;
+    if (!projectId || !companyId) return;
     const controller = new AbortController();
     void api<{ id: string; name: string; status: string; framework?: string; previewUrl?: string; type: string }>(
-      `/companies/${encodeURIComponent(selectedProject.companyId)}/projects/${encodeURIComponent(selectedProject.projectId)}`, { signal: controller.signal }
+      `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}`, { signal: controller.signal }
     ).then(project => {
-      if (!controller.signal.aborted) setEntryProjectCard({ id: project.id, projectId: project.id, companyId: selectedProject.companyId, name: project.name, status: project.status, framework: project.framework, previewUrl: project.previewUrl, kind: project.type === "code_project" ? "code_project" : "website_project" });
+      if (!controller.signal.aborted) setEntryProjectCard({ id: project.id, projectId: project.id, companyId, name: project.name, status: project.status, framework: project.framework, previewUrl: project.previewUrl, kind: project.type === "code_project" ? "code_project" : "website_project" });
     }).catch(error => { if (!controller.signal.aborted) setNotice(error instanceof Error ? error.message : "Project unavailable"); });
     return () => controller.abort();
-  }, [selectedProject]);
+  }, [chatSearch, selectedProject?.projectId, selectedProject?.companyId]);
   const [selected, setSelected] = useState<string | null>(null); const [earlierMessages, setEarlierMessages] = useState(0);
   const loadingEarlierRef = useRef(false);
   // Earlier messages load on the user's own scroll, not on the scroll that opens the chat at its end.
@@ -706,7 +710,28 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       <div className="onboarding-live-chat standard-live-chat">
         <div className="message-stream" ref={messageStreamRef} onScroll={() => { if (!messageStreamRef.current) return; followBottomRef.current = nearChatBottom(messageStreamRef.current); if (userScrolledRef.current && messageStreamRef.current.scrollTop < EARLIER_MESSAGES_THRESHOLD_PX) void loadEarlierMessages(); }}
           onWheel={() => { userScrolledRef.current = true; }} onTouchMove={() => { userScrolledRef.current = true; }} onKeyDown={() => { userScrolledRef.current = true; }}>
-          {entryProjectCard && !selected && <ProjectChatCard card={entryProjectCard} onActivate={(card) => setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected })} />}
+          {(() => {
+            const currentProjId = chatSearch.get("project") ?? selectedProject?.projectId ?? development.project?.projectId;
+            const hasTimelineCard = timeline.some(entry => entry.kind === "message" && Boolean(entry.message.projectCard) && (!currentProjId || (entry.message.projectCard?.projectId ?? entry.message.projectCard?.id) === currentProjId));
+            const fallbackCard = entryProjectCard || (development.project?.projectId && development.project.companyId ? {
+              id: development.project.projectId,
+              projectId: development.project.projectId,
+              companyId: development.project.companyId,
+              name: development.project.name,
+              status: development.project.status,
+              framework: development.project.framework,
+              previewUrl: development.project.previewUrl,
+              kind: "code_project" as const
+            } : null);
+            if (!hasTimelineCard && fallbackCard) {
+              return (
+                <article className="assistant" style={{ margin: "8px 0 16px" }}>
+                  <ChatProjectPreviewCard card={fallbackCard} onActivate={(card) => setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected })} />
+                </article>
+              );
+            }
+            return null;
+          })()}
           {messages.length === 0 && !selected && !initialConversationId && !loadingHistory && (
             <div className="chat-welcome">
               <h2>{t("chat.emptyTitle")}</h2>
