@@ -4,6 +4,77 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { confirmModal, alertModal } from "./ConfirmDialog";
 import { Business, Goal, MemoryItem, api, Notice, useWorkspace, Skill, getCachedSkills, updateCachedSkills, PageIntro, EmptyBusiness } from "./business-workspace-shared";
 import { BusinessForm } from "./business-workspace-cards";
+import {
+  Search,
+  Calendar,
+  ChevronRight,
+  ChevronDown,
+  ArrowUpDown,
+  LayoutGrid,
+  List,
+  Trash2,
+} from "lucide-react";
+
+function formatBusinessDate(dateStr?: string | null): string {
+  if (!dateStr) return "Updated recently";
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return "Updated recently";
+    const month = d.toLocaleDateString("en-US", { month: "short" });
+    const day = d.getDate();
+    const year = d.getFullYear();
+    return `Updated ${month} ${day}, ${year}`;
+  } catch {
+    return "Updated recently";
+  }
+}
+
+function extractBusinessTags(item: {
+  industry?: string;
+  market?: string;
+  country?: string;
+  niche?: string;
+}): string[] {
+  const tags: string[] = [];
+  const add = (val?: string) => {
+    if (!val) return;
+    const parts = val.split(/[,;/]+/).map((s) => s.trim()).filter(Boolean);
+    for (const p of parts) {
+      if (!tags.includes(p) && tags.length < 5) tags.push(p);
+    }
+  };
+  add(item.niche);
+  add(item.industry);
+  add(item.market);
+  add(item.country);
+  return tags;
+}
+
+function getBusinessBadge(item: {
+  kind: "draft" | "business";
+  businessStage?: string;
+  activationStatus?: string;
+}): { label: string; className: string } {
+  if (item.kind === "draft") {
+    return { label: "Setup draft", className: "setup-draft" };
+  }
+  const stage = (item.businessStage || "").toLowerCase();
+  const activation = item.activationStatus;
+  if (stage === "draft" || activation === "draft" || stage === "idea") {
+    return { label: "Draft", className: "draft" };
+  }
+  if (stage === "operating") {
+    return { label: "Operating", className: "operating" };
+  }
+  return { label: "Active", className: "active" };
+}
+
+const sortLabels: Record<string, string> = {
+  newest: "Newest first",
+  oldest: "Oldest first",
+  name_asc: "Name (A-Z)",
+  name_desc: "Name (Z-A)",
+};
 
 export function BusinessPage() {
   const { overview, loading, error, refresh, switchBusiness } = useWorkspace();
@@ -16,14 +87,159 @@ export function BusinessPage() {
   const editTarget = editBusinessId ? overview?.businesses.find((business) => business.id === editBusinessId) : undefined;
   const { t } = useTranslation();
 
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterTab, setFilterTab] = useState<"all" | "active" | "drafts">("all");
+  const [sortBy, setSortBy] = useState<"newest" | "oldest" | "name_asc" | "name_desc">("newest");
+  const [sortOpen, setSortOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deletingBatch, setDeletingBatch] = useState(false);
+
   useEffect(() => {
     if (!editTarget || current?.id === editTarget.id) return;
     void switchBusiness(editTarget.id);
   }, [editTarget?.id, current?.id]);
 
-  function createBusinessIdea() {
-    navigate("/b/new", { state: { newBusiness: Date.now() } });
-  }
+  useEffect(() => {
+    if (!sortOpen) return;
+    const handleClick = () => setSortOpen(false);
+    window.addEventListener("click", handleClick);
+    return () => window.removeEventListener("click", handleClick);
+  }, [sortOpen]);
+
+  const businesses = overview?.businesses ?? [];
+  const drafts = overview?.onboardings ?? [];
+  const ideaCount = businesses.length + drafts.length;
+
+  type UnifiedItem = {
+    id: string;
+    kind: "draft" | "business";
+    name: string;
+    description: string;
+    date: string;
+    badge: { label: string; className: string };
+    tags: string[];
+    rawDraft?: (typeof drafts)[number];
+    rawBusiness?: Business;
+  };
+
+  const allItems: UnifiedItem[] = useMemo(() => {
+    const list: UnifiedItem[] = [];
+
+    for (const draft of drafts) {
+      list.push({
+        id: draft.businessId,
+        kind: "draft",
+        name: draft.business?.name || "New Business Idea",
+        description: draft.business?.description || t("businessSettings.card.stepsCompleted", {
+          completed: String(draft.completedFields.length),
+          total: String(draft.totalFields),
+        }),
+        date: draft.updatedAt || draft.business?.updatedAt || draft.business?.createdAt || "",
+        badge: { label: "Setup draft", className: "setup-draft" },
+        tags: extractBusinessTags(draft.business || {}),
+        rawDraft: draft,
+      });
+    }
+
+    for (const business of businesses) {
+      const desc = business.description || (business.industry ? (business.niche ? `${business.industry} · ${business.niche}` : business.industry) : "") || t("businessSettings.card.businessProfile");
+      list.push({
+        id: business.id,
+        kind: "business",
+        name: business.name,
+        description: desc,
+        date: business.updatedAt || business.createdAt || "",
+        badge: getBusinessBadge({
+          kind: "business",
+          businessStage: business.businessStage,
+          activationStatus: business.activationStatus,
+        }),
+        tags: extractBusinessTags(business),
+        rawBusiness: business,
+      });
+    }
+
+    return list;
+  }, [drafts, businesses, t]);
+
+  const activeCount = useMemo(() => {
+    return allItems.filter((it) => it.kind === "business").length;
+  }, [allItems]);
+
+  const draftsCount = useMemo(() => {
+    return allItems.filter((it) => it.kind === "draft").length;
+  }, [allItems]);
+
+  const totalCount = allItems.length;
+
+  const visibleItems = useMemo(() => {
+    let result = allItems;
+
+    if (filterTab === "active") {
+      result = result.filter((it) => it.kind === "business");
+    } else if (filterTab === "drafts") {
+      result = result.filter((it) => it.kind === "draft");
+    }
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      result = result.filter((it) => {
+        return (
+          it.name.toLowerCase().includes(q) ||
+          it.description.toLowerCase().includes(q) ||
+          it.tags.some((tag) => tag.toLowerCase().includes(q))
+        );
+      });
+    }
+
+    return [...result].sort((a, b) => {
+      if (sortBy === "newest") {
+        const timeA = a.date ? new Date(a.date).getTime() : 0;
+        const timeB = b.date ? new Date(b.date).getTime() : 0;
+        return timeB - timeA;
+      }
+      if (sortBy === "oldest") {
+        const timeA = a.date ? new Date(a.date).getTime() : 0;
+        const timeB = b.date ? new Date(b.date).getTime() : 0;
+        return timeA - timeB;
+      }
+      if (sortBy === "name_asc") {
+        return a.name.localeCompare(b.name);
+      }
+      if (sortBy === "name_desc") {
+        return b.name.localeCompare(a.name);
+      }
+      return 0;
+    });
+  }, [allItems, filterTab, searchQuery, sortBy]);
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const allVisibleSelected = visibleItems.length > 0 && visibleItems.every((it) => selectedIds.has(it.id));
+
+  const toggleSelectAll = () => {
+    if (allVisibleSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const it of visibleItems) next.delete(it.id);
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const it of visibleItems) next.add(it.id);
+        return next;
+      });
+    }
+  };
 
   async function removeBusiness(id: string, name: string) {
     if (!await confirmModal({
@@ -70,6 +286,31 @@ export function BusinessPage() {
     }
   }
 
+  async function removeSelectedBusinesses() {
+    if (selectedIds.size === 0) return;
+    const count = selectedIds.size;
+    if (!await confirmModal({
+      title: t("businessSettings.dialogs.deleteTitle"),
+      message: `Ви дійсно бажаєте видалити вибрані бізнес-профілі (${count})?`,
+      confirmText: t("businessSettings.dialogs.deleteConfirm"),
+      cancelText: t("businessSettings.dialogs.deleteCancel"),
+      isDanger: true,
+    })) return;
+
+    setDeletingBatch(true);
+    try {
+      const idsToDelete = Array.from(selectedIds);
+      await Promise.allSettled(
+        idsToDelete.map((id) => api(`/businesses/${id}`, { method: "DELETE" }))
+      );
+      setSelectedIds(new Set());
+      await refresh();
+    } finally {
+      setDeletingBatch(false);
+    }
+  }
+
+  // EARLY RETURNS ARE NOW AFTER ALL HOOKS - FULLY COMPLIANT WITH RULES OF HOOKS
   if (loading && editBusinessId) return <main className="automations-container business-settings-page"><BusinessSettingsHeader copy={t("businessSettings.loadingCopy")} backTo="/settings/business" /></main>;
   if (error) return <main className="automations-container business-settings-page"><BusinessSettingsHeader copy={t("businessSettings.loadingCopy")} backTo={editBusinessId ? "/settings/business" : "/settings"} /><Notice tone="error">{error}</Notice></main>;
 
@@ -95,9 +336,6 @@ export function BusinessPage() {
   }
   if (editBusinessId) return <main className="automations-container business-settings-page"><BusinessSettingsHeader copy={t("businessSettings.loadingCopy")} backTo="/settings/business" /><Notice tone="error">{t("businessSettings.notFoundError")}</Notice></main>;
 
-  const businesses = overview?.businesses ?? [];
-  const drafts = overview?.onboardings ?? [];
-  const ideaCount = businesses.length + drafts.length;
   return (
     <main className="automations-container business-settings-page">
       <BusinessSettingsHeader
@@ -112,10 +350,6 @@ export function BusinessPage() {
         <div><strong>{current ? 1 : 0}</strong><span>{t("businessSettings.stats.currentContext")}</span><small>{current?.name || t("businessSettings.stats.noBusinessSelected")}</small></div>
       </section>
 
-      <div className="inspector-table-status business-list-status">
-        <div className="status-left"><span>{t("businessSettings.list.showingProfiles")} <strong>{ideaCount}</strong> {ideaCount === 1 ? t("businessSettings.list.profile") : t("businessSettings.list.profiles")}</span></div>
-      </div>
-
       {ideaCount === 0 ? (
         <div className="automations-empty-card">
           <div className="automations-empty-icon">B</div>
@@ -124,47 +358,253 @@ export function BusinessPage() {
           <button className="button-primary automations-action-primary" onClick={() => setCreatingManually(true)}>{t("businessSettings.createFirstBusiness")}</button>
         </div>
       ) : (
-        <div className="record-list business-profile-list">
-          {drafts.map((draft) => (
-            <article className="record-card business-profile-card" key={draft.businessId} onClick={() => navigate(`/b/${draft.businessId}`)}>
-              <div className="business-card-main">
-                <span className="business-card-icon">{draft.business.name.charAt(0).toUpperCase() || "B"}</span>
-                <div><span className="record-status">{t("businessSettings.card.setupDraft")}</span><h3>{draft.business.name}</h3><p>{t("businessSettings.card.stepsCompleted", { completed: String(draft.completedFields.length), total: String(draft.totalFields) })}</p></div>
-              </div>
-              <div className="record-actions">
-                <button onClick={(event) => { event.stopPropagation(); navigate(`/b/${draft.businessId}`); }}>{t("businessSettings.card.continueSetup")}</button>
-                <button onClick={(event) => { event.stopPropagation(); navigate(`/settings/business/${draft.businessId}`); }}>{t("businessSettings.card.edit")}</button>
-                <button className="danger" onClick={(event) => { event.stopPropagation(); void removeBusiness(draft.businessId, draft.business.name); }}>{t("businessSettings.card.delete")}</button>
-              </div>
-            </article>
-          ))}
-          {businesses.map((business) => (
-            <article className="record-card business-profile-card" key={business.id} onClick={() => navigate(`/settings/business/${business.id}`)}>
-              <div className="business-card-main">
-                <span className="business-card-icon">{business.name.charAt(0).toUpperCase() || "B"}</span>
-                <div>
-                  <span className={`record-status${business.id === current?.id ? " active" : ""}`}>{business.id === current?.id ? t("businessSettings.card.current") : business.businessStage}</span>
-                  <h3>{business.name}</h3>
-                  <p>{business.description || business.industry || t("businessSettings.card.businessProfile")}</p>
-                  <div className="business-card-meta">
-                    {business.industry && <span>{business.industry}</span>}
-                    {business.market && <span>{business.market}</span>}
-                    {business.country && <span>{business.country}</span>}
-                  </div>
+        <>
+          <div className="biz-toolbar">
+            <div className="biz-search-wrapper">
+              <Search size={15} className="biz-search-icon" />
+              <input
+                type="text"
+                className="biz-search-input"
+                placeholder="Search business profiles..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+
+            <div className="biz-tabs">
+              <button
+                type="button"
+                className={`biz-tab-btn ${filterTab === "all" ? "active" : ""}`}
+                onClick={() => setFilterTab("all")}
+              >
+                All ({totalCount})
+              </button>
+              <button
+                type="button"
+                className={`biz-tab-btn ${filterTab === "active" ? "active" : ""}`}
+                onClick={() => setFilterTab("active")}
+              >
+                Active ({activeCount})
+              </button>
+              <button
+                type="button"
+                className={`biz-tab-btn ${filterTab === "drafts" ? "active" : ""}`}
+                onClick={() => setFilterTab("drafts")}
+              >
+                Drafts ({draftsCount})
+              </button>
+            </div>
+
+            <div className="biz-sort-wrapper">
+              <button
+                type="button"
+                className="biz-sort-btn"
+                onClick={(e) => { e.stopPropagation(); setSortOpen((prev) => !prev); }}
+                aria-expanded={sortOpen}
+              >
+                <ArrowUpDown size={13} />
+                <span>{sortLabels[sortBy]}</span>
+                <ChevronDown size={13} />
+              </button>
+              {sortOpen && (
+                <div className="biz-sort-dropdown" onClick={(e) => e.stopPropagation()}>
+                  <button type="button" onClick={() => { setSortBy("newest"); setSortOpen(false); }}>Newest first</button>
+                  <button type="button" onClick={() => { setSortBy("oldest"); setSortOpen(false); }}>Oldest first</button>
+                  <button type="button" onClick={() => { setSortBy("name_asc"); setSortOpen(false); }}>Name (A-Z)</button>
+                  <button type="button" onClick={() => { setSortBy("name_desc"); setSortOpen(false); }}>Name (Z-A)</button>
                 </div>
+              )}
+            </div>
+
+            <div className="biz-view-toggle">
+              <button
+                type="button"
+                className={`biz-view-btn ${viewMode === "grid" ? "active" : ""}`}
+                onClick={() => setViewMode("grid")}
+                title="Grid view"
+              >
+                <LayoutGrid size={15} />
+              </button>
+              <button
+                type="button"
+                className={`biz-view-btn ${viewMode === "list" ? "active" : ""}`}
+                onClick={() => setViewMode("list")}
+                title="List view"
+              >
+                <List size={15} />
+              </button>
+            </div>
+          </div>
+
+          <div className="biz-selection-bar">
+            <label className="biz-select-all-label">
+              <input
+                type="checkbox"
+                checked={allVisibleSelected}
+                onChange={toggleSelectAll}
+                className="biz-checkbox"
+              />
+              <span>Select all ({visibleItems.length})</span>
+            </label>
+            {selectedIds.size > 0 && (
+              <div className="biz-selection-actions">
+                <span className="biz-selection-count">Selected: {selectedIds.size}</span>
+                <button
+                  type="button"
+                  className="biz-batch-delete-btn"
+                  disabled={deletingBatch}
+                  onClick={removeSelectedBusinesses}
+                >
+                  <Trash2 size={13} />
+                  <span>{deletingBatch ? "Deleting..." : `Delete selected (${selectedIds.size})`}</span>
+                </button>
+                <button
+                  type="button"
+                  className="biz-batch-clear-btn"
+                  onClick={() => setSelectedIds(new Set())}
+                >
+                  Deselect all
+                </button>
               </div>
-              <div className="record-actions">
-                <button onClick={(event) => { event.stopPropagation(); navigate(`/settings/business/${business.id}`); }}>{t("businessSettings.card.edit")}</button>
-                <button disabled={convertingId === business.id} onClick={(event) => { event.stopPropagation(); void convertToCompany(business); }}>{convertingId === business.id ? t("businessSettings.card.converting") : t("businessSettings.card.createCompany")}</button>
-                <button className="danger" onClick={(event) => { event.stopPropagation(); void removeBusiness(business.id, business.name); }}>{t("businessSettings.card.delete")}</button>
-              </div>
-            </article>
-          ))}
-        </div>
+            )}
+          </div>
+
+          {visibleItems.length === 0 ? (
+            <div className="automations-empty-card" style={{ marginTop: 12 }}>
+              <h3>No business profiles found</h3>
+              <p>Try adjusting your search query or filter tab.</p>
+            </div>
+          ) : (
+            <div className={viewMode === "grid" ? "biz-cards-grid" : "biz-cards-list"}>
+              {visibleItems.map((item) => (
+                <article
+                  className={`biz-card ${selectedIds.has(item.id) ? "selected" : ""}`}
+                  key={item.id}
+                  onClick={() => {
+                    if (item.kind === "draft") {
+                      navigate(`/b/${item.id}`);
+                    } else {
+                      navigate(`/settings/business/${item.id}`);
+                    }
+                  }}
+                >
+                  <div className="biz-card-header">
+                    <div className="biz-card-title-group">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(item.id)}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          toggleSelect(item.id);
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="biz-checkbox"
+                        aria-label={`Select ${item.name}`}
+                      />
+                      <h3 title={item.name}>{item.name}</h3>
+                    </div>
+                    <div className="biz-card-header-actions">
+                      <span className={`biz-badge ${item.badge.className}`}>{item.badge.label}</span>
+                      <button
+                        type="button"
+                        className="biz-chevron-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (item.kind === "draft") {
+                            navigate(`/b/${item.id}`);
+                          } else {
+                            navigate(`/settings/business/${item.id}`);
+                          }
+                        }}
+                        title="Open profile"
+                      >
+                        <ChevronRight size={16} />
+                      </button>
+                    </div>
+                  </div>
+
+                  <p className="biz-card-description">{item.description}</p>
+
+                  {item.tags.length > 0 && (
+                    <div className="biz-card-tags">
+                      {item.tags.map((tag, idx) => (
+                        <span key={idx} className="biz-tag-pill">{tag}</span>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="biz-card-footer">
+                    <div className="biz-card-date">
+                      <Calendar size={13} />
+                      <span>{formatBusinessDate(item.date)}</span>
+                    </div>
+                    <div className="biz-card-actions">
+                      {item.kind === "draft" ? (
+                        <>
+                          <button
+                            type="button"
+                            className="biz-btn-outline"
+                            onClick={(e) => { e.stopPropagation(); navigate(`/b/${item.id}`); }}
+                          >
+                            {t("businessSettings.card.continueSetup")}
+                          </button>
+                          <button
+                            type="button"
+                            className="biz-btn-outline"
+                            onClick={(e) => { e.stopPropagation(); navigate(`/settings/business/${item.id}`); }}
+                          >
+                            {t("businessSettings.card.edit")}
+                          </button>
+                          <button
+                            type="button"
+                            className="biz-btn-danger"
+                            onClick={(e) => { e.stopPropagation(); void removeBusiness(item.id, item.name); }}
+                          >
+                            {t("businessSettings.card.delete")}
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            className="biz-btn-outline"
+                            onClick={(e) => { e.stopPropagation(); navigate(`/settings/business/${item.id}`); }}
+                          >
+                            {t("businessSettings.card.edit")}
+                          </button>
+                          <button
+                            type="button"
+                            className="biz-btn-outline"
+                            disabled={convertingId === item.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (item.rawBusiness) void convertToCompany(item.rawBusiness);
+                            }}
+                          >
+                            {convertingId === item.id ? t("businessSettings.card.converting") : t("businessSettings.card.createCompany")}
+                          </button>
+                          <button
+                            type="button"
+                            className="biz-btn-danger"
+                            onClick={(e) => { e.stopPropagation(); void removeBusiness(item.id, item.name); }}
+                          >
+                            {t("businessSettings.card.delete")}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </main>
   );
 }
+
+
 export function SkillsPage() {
   const { t } = useTranslation();
   const [skills, setSkills] = useState<Skill[]>(getCachedSkills);

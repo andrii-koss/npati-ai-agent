@@ -8,7 +8,7 @@ export type Business = {
   market?: string; website?: string; businessStage: string; teamType?: string; businessModel?: string;
   presenceType?: string; description?: string; audienceSummary?: string; productsServicesSummary?: string;
   legalName?: string; contactEmail?: string; contactPhone?: string; postalAddress?: string; registrationDetails?: string; logoFileId?: string;
-  activationStatus?: "draft" | "active";
+  activationStatus?: "draft" | "active"; createdAt?: string; updatedAt?: string;
 };
 export type Goal = { id: string; title: string; description?: string; status: string; priority: number; targetDate?: string };
 export type MemoryItem = { id: string; type: string; title: string; content: string; source: string; updatedAt: string };
