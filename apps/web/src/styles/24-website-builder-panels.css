@@ -863,6 +863,12 @@
   transform: scale(0.95);
 }
 
+.website-icon-btn.website-more-btn.active {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
 .website-icon-btn.website-delete-btn:hover {
   background: #fef2f2;
   border-color: #fecaca;
@@ -916,7 +922,8 @@
    Project Preview Placeholder (SVG + CSS Glassmorphic Mockup)
    ========================================================================== */
 .website-preview-viewport {
-  border: 1px solid #eef2f6;
+  border: 0;
+  border-bottom: 1px solid #eaecf0;
   background: #f8fafc;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }

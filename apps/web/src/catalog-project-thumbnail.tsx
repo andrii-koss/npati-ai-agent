@@ -156,15 +156,11 @@ export function CatalogProjectThumbnail({
         : "empty";
   const previewHref = "/settings/projects/" + encodeURIComponent(companyId) + "/" + encodeURIComponent(projectId);
 
-  // If project has a thumbnail or it's currently loaded, display the real screenshot.
-  // If thumbnail exists -> show <img>
-  // If hasThumbnail is true but thumbnail not yet fetched -> show clean minimal skeleton (never flash the fake vector website mockup)
-  // If hasThumbnail is false -> show ProjectPreviewPlaceholder (the screensaver/placeholder for projects without photos)
   const isImageReady = Boolean(thumbnail && !busy);
   const isImagePending = Boolean(hasThumbnail && !thumbnail && !error);
 
-  return <div ref={container}>
-    <div className="website-preview-viewport" style={{ position: "relative", width: "100%", aspectRatio: "16 / 10", borderRadius: 14, overflow: "hidden", background: "#f8fafc" }}>
+  return <div ref={container} style={{ width: "100%" }}>
+    <div className="website-preview-viewport" style={{ position: "relative", width: "100%", aspectRatio: "16 / 10", overflow: "hidden", background: "#f8fafc" }}>
       <a href={previewHref} aria-label={`Preview ${name}`} onClick={event => { event.preventDefault(); onPreview(); }} style={{ position: "absolute", inset: 0, display: "block", cursor: "pointer", textDecoration: "none" }}>
         {isImageReady ? (
           <img
@@ -210,6 +206,6 @@ export function CatalogProjectThumbnail({
       </a>
       <button type="button" className="button-secondary website-thumbnail-refresh" title={refreshLabel} aria-label={refreshLabel} aria-busy={busy} disabled={busy} onClick={() => void capture()} style={{ position: "absolute", bottom: 10, right: 10, display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12 }}><RefreshCw size={14} aria-hidden="true" style={busy ? { animation: "website-preview-spin 0.8s linear infinite" } : undefined} /></button>
     </div>
-    {error && <p role="alert" className="project-error">{error}</p>}
+    {error && <p role="alert" className="project-error" style={{ margin: "6px 12px 0" }}>{error}</p>}
   </div>;
 }

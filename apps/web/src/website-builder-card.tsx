@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { MessageSquare, ExternalLink, Code2, Copy, Pencil, Trash2 } from "lucide-react";
 import { openableProjectPreview } from "./catalog-project-preview";
@@ -6,6 +7,7 @@ import { CatalogProjectThumbnail } from "./catalog-project-thumbnail";
 import type { WebsiteProject } from "./website-builder-cache";
 import { PROJECT_KIND_LABELS, type websiteBuilderCopy } from "./website-builder-constants";
 import { projectKindOf } from "@npati/shared";
+
 export interface WebsiteProjectCardProps {
   site: WebsiteProject;
   companyId: string;
@@ -15,7 +17,6 @@ export interface WebsiteProjectCardProps {
   handleRename: (site: WebsiteProject) => void | Promise<void>;
   handleDelete: (site: WebsiteProject) => void | Promise<void>;
 }
-
 
 export const WebsiteProjectCard = React.memo(function WebsiteProjectCard({
   site,
@@ -30,11 +31,64 @@ export const WebsiteProjectCard = React.memo(function WebsiteProjectCard({
   const codeUrl = `/settings/code/${encodeURIComponent(companyId)}/${encodeURIComponent(site.id)}`;
   const [opening, setOpening] = useState(false);
   const [previewError, setPreviewError] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
+  const moreButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Close popup menu when clicking outside, scrolling, or pressing Escape
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest(".sidebar-action-menu") || target?.closest(".website-more-btn")) {
+        return;
+      }
+      setMenuOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    const onScroll = () => {
+      setMenuOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [menuOpen]);
+
+  const handleToggleMenu = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    if (menuOpen) {
+      setMenuOpen(false);
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    const menuWidth = 175;
+    const menuHeight = 135;
+    let left = rect.right - menuWidth;
+    if (left < 10) left = 10;
+    if (left + menuWidth > window.innerWidth - 10) left = window.innerWidth - menuWidth - 10;
+
+    let top = rect.bottom + 6;
+    if (top + menuHeight > window.innerHeight - 10 && rect.top > menuHeight + 10) {
+      top = rect.top - menuHeight - 6;
+    }
+
+    setMenuPos({ top, left });
+    setMenuOpen(true);
+  };
+
   async function handleOpenPreview() {
     if (opening) return;
     const popup = window.open("about:blank", "_blank");
     if (popup) popup.opener = null;
-    setOpening(true); setPreviewError("");
+    setOpening(true);
+    setPreviewError("");
     try {
       const url = await openableProjectPreview(companyId, site.id);
       if (popup) popup.location.replace(url);
@@ -43,7 +97,9 @@ export const WebsiteProjectCard = React.memo(function WebsiteProjectCard({
       const message = cause instanceof Error ? cause.message : "Preview unavailable";
       setPreviewError(message);
       if (popup) popup.document.body.textContent = message;
-    } finally { setOpening(false); }
+    } finally {
+      setOpening(false);
+    }
   }
 
   return (
@@ -54,120 +110,193 @@ export const WebsiteProjectCard = React.memo(function WebsiteProjectCard({
         flexDirection: "column",
         background: "#ffffff",
         borderRadius: "18px",
-        padding: "16px",
+        overflow: "hidden",
         border: "1px solid #eaecf0",
         boxShadow: "0 2px 10px rgba(0,0,0,0.03)",
         transition: "all 0.2s ease",
         boxSizing: "border-box",
+        position: "relative",
       }}
     >
-      {/* 1. Main visual preview of the project */}
-      <CatalogProjectThumbnail companyId={companyId} projectId={site.id} name={site.name} language={language} kind={site.kind ?? projectKindOf(site)} type={site.type} framework={site.framework} projectStatus={site.status} hasThumbnail={site.hasThumbnail} onPreview={() => void handleOpenPreview()} />
-      {previewError && <p role="alert" className="project-error">{previewError}</p>}
+      {/* 1. Main visual preview of the project - edge-to-edge for bigger photo */}
+      <CatalogProjectThumbnail
+        companyId={companyId}
+        projectId={site.id}
+        name={site.name}
+        language={language}
+        kind={site.kind ?? projectKindOf(site)}
+        type={site.type}
+        framework={site.framework}
+        projectStatus={site.status}
+        hasThumbnail={site.hasThumbnail}
+        onPreview={() => void handleOpenPreview()}
+      />
+      {previewError && <p role="alert" className="project-error" style={{ margin: "8px 16px 0" }}>{previewError}</p>}
 
-      {/* 2. Project Title */}
-      <div style={{ marginTop: "14px", marginBottom: "12px" }}>
-        <h3
-          style={{
-            fontSize: "17px",
-            fontWeight: 700,
-            margin: 0,
-            color: "#111111",
-            lineHeight: 1.3,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-          title={site.name}
-        >
-          {site.name}
-        </h3>
-        <small className="website-card-kind" style={{ display: "block", marginTop: "4px", color: "#667085", fontSize: "12.5px" }}>
-          {PROJECT_KIND_LABELS[projectKindOf(site)][language === "uk" ? "uk" : "en"]}
-          {site.framework ? ` · ${site.framework}` : ""}{site.deploymentUrl && !site.deploymentUrl.includes(".preview.npati.com") ? ` · ${site.deploymentUrl.replace(/^https?:\/\//, "")}` : ""}
-        </small>
-      </div>
-
-      {/* 3. Action Buttons Row */}
+      {/* 2. Card Body Content with padding */}
       <div
-        className="website-card-actions"
         style={{
+          padding: "14px 16px 16px",
           display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          flexWrap: "wrap",
+          flexDirection: "column",
+          flex: 1,
+          minWidth: 0,
         }}
       >
-        {/* Primary Edit in chat button */}
-        <Link
-          to={editorUrl}
-          className="website-action-btn-primary"
+        {/* Project Title */}
+        <div style={{ marginBottom: "14px" }}>
+          <h3
+            style={{
+              fontSize: "16.5px",
+              fontWeight: 700,
+              margin: 0,
+              color: "#111111",
+              lineHeight: 1.3,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+            title={site.name}
+          >
+            {site.name}
+          </h3>
+          <small className="website-card-kind" style={{ display: "block", marginTop: "4px", color: "#667085", fontSize: "12.5px" }}>
+            {PROJECT_KIND_LABELS[projectKindOf(site)][language === "uk" ? "uk" : "en"]}
+            {site.framework ? ` · ${site.framework}` : ""}{site.deploymentUrl && !site.deploymentUrl.includes(".preview.npati.com") ? ` · ${site.deploymentUrl.replace(/^https?:\/\//, "")}` : ""}
+          </small>
+        </div>
+
+        {/* 3. Action Buttons Row: Edit in chat, Preview, Code on left, 3-dots on right */}
+        <div
+          className="website-card-actions"
           style={{
-            display: "inline-flex",
+            display: "flex",
             alignItems: "center",
-            gap: "7px",
-            background: "#dc2626",
-            color: "#ffffff",
-            padding: "8px 16px",
-            borderRadius: "10px",
-            fontSize: "13.5px",
-            fontWeight: 600,
-            textDecoration: "none",
-            border: "none",
-            cursor: "pointer",
-            boxShadow: "0 1px 2px rgba(220, 38, 38, 0.2)",
-            transition: "all 0.15s ease",
+            gap: "8px",
+            marginTop: "auto",
           }}
-          title={language === "uk" ? "Редагувати в чаті" : "Edit in chat"}
         >
-          <MessageSquare size={16} />
-          <span>{t.openBuilder}</span>
-        </Link>
+          {/* Primary Edit in chat button */}
+          <Link
+            to={editorUrl}
+            className="website-action-btn-primary"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "7px",
+              background: "#dc2626",
+              color: "#ffffff",
+              padding: "8px 14px",
+              borderRadius: "10px",
+              fontSize: "13px",
+              fontWeight: 600,
+              textDecoration: "none",
+              border: "none",
+              cursor: "pointer",
+              boxShadow: "0 1px 2px rgba(220, 38, 38, 0.2)",
+              transition: "all 0.15s ease",
+              whiteSpace: "nowrap",
+            }}
+            title={language === "uk" ? "Редагувати в чаті" : "Edit in chat"}
+          >
+            <MessageSquare size={16} />
+            <span>{t.openBuilder}</span>
+          </Link>
 
-        <button type="button" className="website-icon-btn" disabled={opening} onClick={() => void handleOpenPreview()} title={language === "uk" ? "Відкрити Preview" : "Open Live Preview"} aria-label={language === "uk" ? "Відкрити Preview" : "Open Live Preview"}><ExternalLink size={16} /></button>
-        {/* Code workspace */}
-        <Link
-          to={codeUrl}
-          className="website-icon-btn"
-          title={language === "uk" ? "Код" : "Code"}
-          aria-label={language === "uk" ? "Код" : "Code"}
-        >
-          <Code2 size={16} />
-        </Link>
+          {/* Preview button */}
+          <button
+            type="button"
+            className="website-icon-btn"
+            disabled={opening}
+            onClick={() => void handleOpenPreview()}
+            title={language === "uk" ? "Відкрити Preview" : "Open Live Preview"}
+            aria-label={language === "uk" ? "Відкрити Preview" : "Open Live Preview"}
+          >
+            <ExternalLink size={16} />
+          </button>
 
-        {/* Duplicate */}
-        <button
-          type="button"
-          className="website-icon-btn"
-          onClick={() => void handleDuplicate(site)}
-          title={t.duplicate}
-          aria-label={t.duplicate}
-        >
-          <Copy size={16} />
-        </button>
+          {/* Code workspace */}
+          <Link
+            to={codeUrl}
+            className="website-icon-btn"
+            title={language === "uk" ? "Код" : "Code"}
+            aria-label={language === "uk" ? "Код" : "Code"}
+          >
+            <Code2 size={16} />
+          </Link>
 
-        {/* Rename */}
-        <button
-          type="button"
-          className="website-icon-btn"
-          onClick={() => void handleRename(site)}
-          title={t.rename}
-          aria-label={t.rename}
-        >
-          <Pencil size={16} />
-        </button>
-
-        {/* Delete */}
-        <button
-          type="button"
-          className="website-icon-btn website-delete-btn"
-          onClick={() => void handleDelete(site)}
-          title={t.delete}
-          aria-label={t.delete}
-        >
-          <Trash2 size={16} color="#dc2626" />
-        </button>
+          {/* Three dots menu button on the right */}
+          <button
+            ref={moreButtonRef}
+            type="button"
+            className={`website-icon-btn website-more-btn ${menuOpen ? "active" : ""}`}
+            onClick={handleToggleMenu}
+            title={language === "uk" ? "Більше дій" : "More options"}
+            aria-label={language === "uk" ? "Більше дій" : "More options"}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            style={{ marginLeft: "auto" }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="5" cy="12" r="2.2" />
+              <circle cx="12" cy="12" r="2.2" />
+              <circle cx="19" cy="12" r="2.2" />
+            </svg>
+          </button>
+        </div>
       </div>
+
+      {/* 4. Three dots Popup menu with Rename, Duplicate, Delete */}
+      {menuOpen && createPortal(
+        <div
+          className="sidebar-action-menu"
+          style={{
+            position: "fixed",
+            top: menuPos.top,
+            left: menuPos.left,
+            zIndex: 999999,
+          }}
+        >
+          <button
+            type="button"
+            className="sidebar-action-item"
+            onClick={() => {
+              setMenuOpen(false);
+              void handleRename(site);
+            }}
+          >
+            <Pencil size={15} />
+            <span>{language === "uk" ? "Редагувати" : "Rename"}</span>
+          </button>
+
+          <button
+            type="button"
+            className="sidebar-action-item"
+            onClick={() => {
+              setMenuOpen(false);
+              void handleDuplicate(site);
+            }}
+          >
+            <Copy size={15} />
+            <span>{language === "uk" ? "Дублювати" : "Duplicate"}</span>
+          </button>
+
+          <div className="sidebar-action-divider" />
+
+          <button
+            type="button"
+            className="sidebar-action-item danger"
+            onClick={() => {
+              setMenuOpen(false);
+              void handleDelete(site);
+            }}
+          >
+            <Trash2 size={15} />
+            <span>{language === "uk" ? "Видалити" : "Delete"}</span>
+          </button>
+        </div>,
+        document.body
+      )}
     </article>
   );
 });
