@@ -1,6 +1,6 @@
 
 .workspace-content.settings-workspace-content {
-  padding-top: 28px;
+  padding: 28px clamp(16px, 2.5vw, 40px) 48px;
   min-width: 0;
 }
 
@@ -444,7 +444,8 @@
 }
 
 .settings-card-grid {
-  width: min(1100px, 100%);
+  width: 100%;
+  max-width: none;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
@@ -489,8 +490,9 @@
 }
 
 .ai-marketplace {
-  width: min(1240px, 100%);
-  margin: 0 auto;
+  width: 100%;
+  max-width: none;
+  margin: 0;
 }
 
 .marketplace-hero {

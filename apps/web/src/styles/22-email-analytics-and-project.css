@@ -502,9 +502,10 @@
   display: flex;
   flex-direction: column;
   gap: 18px;
-  max-width: 1600px;
-  margin: 0 auto;
-  padding: 16px 24px;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
 }
 
 .project-topbar {

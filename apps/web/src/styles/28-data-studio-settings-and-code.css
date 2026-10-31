@@ -1099,8 +1099,9 @@
   outline-offset: 4px;
 }
 .code-agent-settings {
-  width: min(1240px, 100%);
-  margin: 0 auto;
+  width: 100%;
+  max-width: none;
+  margin: 0;
 }
 .code-agent-settings .automations-header {
   padding: 0;

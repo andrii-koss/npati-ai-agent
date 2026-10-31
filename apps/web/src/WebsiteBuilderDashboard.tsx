@@ -486,7 +486,7 @@ export function WebsiteBuilderDashboard() {
   }, [companyId, loadWebsites, t.deletePrompt]);
 
   return (
-    <main className="company-refined company-page" style={{ maxWidth: "1400px", margin: "0 auto", padding: "20px 24px" }}>
+    <main className="company-refined company-page">
       {/* NPATI Header Standard (Matching Settings & Automations) */}
       <header className="inspector-header automations-header" style={{ marginBottom: "24px" }}>
         <div className="automations-header-top">

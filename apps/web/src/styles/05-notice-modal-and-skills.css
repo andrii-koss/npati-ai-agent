@@ -521,7 +521,8 @@
 }
 
 .business-profile-form {
-  width: min(100%, 1100px);
+  width: 100%;
+  max-width: none;
   padding: 0;
   overflow: hidden;
   border: 1px solid #e5e5e5;
