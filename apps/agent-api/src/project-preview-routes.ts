@@ -110,6 +110,45 @@ export function registerProjectPreviewRoutes(
     },
   );
 
+  // Launch preview directly: starts/verifies server, generates token, and redirects 302 straight to proxy URL (no splash screen)
+  app.get<{ Params: ProjectParams; Querystring: { token?: string; authToken?: string } }>(
+    "/companies/:companyId/projects/:projectId/preview/launch",
+    async (request, reply) => {
+      const ctx = await authenticate(request, reply);
+      if (!ctx) return;
+      const { companyId, projectId } = request.params;
+      try {
+        let authorizedProject;
+        try {
+          authorizedProject = await previewService.assertProjectAccess(ctx, companyId, projectId);
+        } catch (error) {
+          const status = error instanceof WorkspaceAccessError ? 403 : error instanceof WorkspaceNotFoundError ? 404 : 500;
+          return reply.code(status).type("text/html").send(`<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;padding:32px;text-align:center;"><h2>Access Denied</h2><p>Preview is unavailable for this project.</p></body></html>`);
+        }
+        let session = previewService.getSession(projectId);
+        let previewToken: string;
+        if (session && session.status === "running") {
+          const sandboxId = session.sandboxId || authorizedProject.sandboxId || "default";
+          previewToken = previewService.generateToken({
+            workspaceId: ctx.workspaceId,
+            userId: ctx.userId,
+            companyId,
+            projectId,
+            sandboxId,
+          }, 24 * 60 * 60 * 1000).token;
+        } else {
+          const callerOrigin = typeof request.headers.origin === "string" ? request.headers.origin : undefined;
+          const started = await previewService.startPreview(ctx, companyId, projectId, { callerOrigin });
+          previewToken = started.token;
+        }
+        return reply.redirect(`/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/preview/proxy/?token=${encodeURIComponent(previewToken)}`, 302);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to launch preview";
+        return reply.code(500).type("text/html").send(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Preview</title><style>body{font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f8fafc;color:#1e293b}div{text-align:center;padding:32px;background:#fff;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,0.08);max-width:480px}h2{color:#ef4444;margin-top:0}p{color:#64748b;line-height:1.5}</style></head><body><div><h2>Не вдалося відкрити Preview</h2><p>${message}</p></div></body></html>`);
+      }
+    },
+  );
+
   // Changes: get workspace diffs
   app.get<{ Params: ProjectParams }>(
     "/companies/:companyId/projects/:projectId/changes",

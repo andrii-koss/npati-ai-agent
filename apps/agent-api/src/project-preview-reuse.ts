@@ -27,7 +27,7 @@ export function canReusePreviewSession(input: {
 }): boolean {
   if (input.forceRestart) return false;
   if (input.command || input.port) return false;
-  if (input.verifiedBuild === false) return true;
+  if (input.verifiedBuild !== true) return true;
   return input.framework === "static";
 }
 

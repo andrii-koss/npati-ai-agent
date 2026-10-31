@@ -35,7 +35,7 @@ export async function listProjects(pool: Pool, context: AuthContext, companyId: 
     await assertCompany(pool, context, companyId);
     const result = await pool.query<Project>(`SELECT ${projectColumns} FROM projects
       WHERE workspace_id=$1 AND company_id=$2 AND created_by=$3 AND ($4 OR status<>'archived')
-      ORDER BY updated_at DESC,id`, [context.workspaceId,companyId,context.userId,includeArchived]);
+      ORDER BY created_at DESC,id`, [context.workspaceId,companyId,context.userId,includeArchived]);
     return result.rows;
   }
 

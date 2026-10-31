@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { MessageSquare, ExternalLink, Code2, Copy, Pencil, Trash2 } from "lucide-react";
-import { openableProjectPreview } from "./catalog-project-preview";
+import { getStoredAuthToken } from "./AuthContext";
 import { CatalogProjectThumbnail } from "./catalog-project-thumbnail";
 import type { WebsiteProject } from "./website-builder-cache";
 import { PROJECT_KIND_LABELS, type websiteBuilderCopy } from "./website-builder-constants";
@@ -29,8 +29,6 @@ export const WebsiteProjectCard = React.memo(function WebsiteProjectCard({
 }: WebsiteProjectCardProps) {
   const editorUrl = `/chat?company=${encodeURIComponent(companyId)}&project=${encodeURIComponent(site.id)}`;
   const codeUrl = `/settings/code/${encodeURIComponent(companyId)}/${encodeURIComponent(site.id)}`;
-  const [opening, setOpening] = useState(false);
-  const [previewError, setPreviewError] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
   const moreButtonRef = useRef<HTMLButtonElement>(null);
@@ -83,23 +81,11 @@ export const WebsiteProjectCard = React.memo(function WebsiteProjectCard({
     setMenuOpen(true);
   };
 
-  async function handleOpenPreview() {
-    if (opening) return;
-    const popup = window.open("about:blank", "_blank");
-    if (popup) popup.opener = null;
-    setOpening(true);
-    setPreviewError("");
-    try {
-      const url = await openableProjectPreview(companyId, site.id);
-      if (popup) popup.location.replace(url);
-      else setPreviewError(language === "uk" ? "Дозвольте спливаючі вікна для відкриття Preview" : "Allow pop-ups to open Preview");
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "Preview unavailable";
-      setPreviewError(message);
-      if (popup) popup.document.body.textContent = message;
-    } finally {
-      setOpening(false);
-    }
+  const authToken = getStoredAuthToken();
+  const launchUrl = `/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(site.id)}/preview/launch${authToken ? `?authToken=${encodeURIComponent(authToken)}` : ""}`;
+
+  function handleOpenPreview() {
+    window.open(launchUrl, "_blank", "noopener,noreferrer");
   }
 
   return (
@@ -131,7 +117,6 @@ export const WebsiteProjectCard = React.memo(function WebsiteProjectCard({
         hasThumbnail={site.hasThumbnail}
         onPreview={() => void handleOpenPreview()}
       />
-      {previewError && <p role="alert" className="project-error" style={{ margin: "8px 16px 0" }}>{previewError}</p>}
 
       {/* 2. Card Body Content with padding */}
       <div
@@ -204,16 +189,17 @@ export const WebsiteProjectCard = React.memo(function WebsiteProjectCard({
           </Link>
 
           {/* Preview button */}
-          <button
-            type="button"
+          <a
+            href={launchUrl}
+            target="_blank"
+            rel="noopener noreferrer"
             className="website-icon-btn"
-            disabled={opening}
-            onClick={() => void handleOpenPreview()}
             title={language === "uk" ? "Відкрити Preview" : "Open Live Preview"}
             aria-label={language === "uk" ? "Відкрити Preview" : "Open Live Preview"}
+            style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", textDecoration: "none" }}
           >
             <ExternalLink size={16} />
-          </button>
+          </a>
 
           {/* Code workspace */}
           <Link

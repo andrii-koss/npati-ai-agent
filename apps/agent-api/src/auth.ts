@@ -195,7 +195,8 @@ export class NpatiBackendAuthProvider implements AuthProvider {
   }
 
   async authenticate(request: FastifyRequest): Promise<AuthContext> {
-    const queryToken = (request.query as Record<string, string> | undefined)?.token;
+    const query = request.query as Record<string, string> | undefined;
+    const queryToken = query?.authToken || query?.token;
     const rawApiKey = (request.headers["x-api-key"] as string) || (request.headers["x-npati-api-key"] as string);
     const authHeader = request.headers.authorization;
     const bearerToken = authHeader && authHeader.startsWith("Bearer ")

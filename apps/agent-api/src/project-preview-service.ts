@@ -229,7 +229,7 @@ export class ProjectPreviewService {
       try { await validateStaticProjectResources(files, async p => (await this.workspace.readFile(ctx, companyId, projectId, p)).content); }
       catch (error) { throw new PreviewError("preview_resources_missing", error instanceof Error ? error.message : "Static resource validation failed", 409); }
     }
-    const verifiedBuild = options.verifiedBuild ?? project.lastBuildStatus === "ready";
+    const verifiedBuild = options.verifiedBuild === true;
     let devCommand = options.command?.trim()
       || (verifiedBuild && detected.productionCommand ? detected.productionCommand : detected.command);
     let devPort = options.port && Number.isInteger(options.port) ? options.port : extractPortFromCommand(devCommand, detected.port);
@@ -265,21 +265,33 @@ export class ProjectPreviewService {
     for (const command of previousCommands) await this.sandbox.stopRecordedPreview(ctx, companyId, projectId, command);
     // Ensure dependencies are installed before starting the dev server for node/framework projects
     if (!verifiedBuild && options.verifiedBuild !== false && detected.framework !== "static" && files.some((f) => f.path === "package.json")) {
-      const paths = new Set(files.map((f) => f.path));
-      const installCmd = detected.packageManager === "pnpm" && paths.has("pnpm-lock.yaml")
-        ? "pnpm install"
-        : detected.packageManager === "yarn" && paths.has("yarn.lock")
-          ? "yarn install"
-          : "npm install";
+      let hasModules = false;
       try {
-        await this.sandbox.execute(ctx, companyId, {
+        const check = await this.sandbox.execute(ctx, companyId, {
           projectId,
-          command: installCmd,
+          command: "ls node_modules",
           agentId: options.agentId || "system",
           approved: true,
         });
-      } catch (installErr) {
-        console.warn(`[startPreview] Dependency preparation warning for project ${projectId}:`, installErr);
+        hasModules = check.exitCode === 0;
+      } catch {}
+      if (!hasModules) {
+        const paths = new Set(files.map((f) => f.path));
+        const installCmd = detected.packageManager === "pnpm" && paths.has("pnpm-lock.yaml")
+          ? "pnpm install"
+          : detected.packageManager === "yarn" && paths.has("yarn.lock")
+            ? "yarn install"
+            : "npm install";
+        try {
+          await this.sandbox.execute(ctx, companyId, {
+            projectId,
+            command: installCmd,
+            agentId: options.agentId || "system",
+            approved: true,
+          });
+        } catch (installErr) {
+          console.warn(`[startPreview] Dependency preparation warning for project ${projectId}:`, installErr);
+        }
       }
     }
     // Start process in sandbox
@@ -308,7 +320,7 @@ export class ProjectPreviewService {
             projectId, action: "status", processId, agentId: options.agentId || "system",
           });
           if (!("status" in state) || state.status !== "running") break;
-          await new Promise((resolve) => setTimeout(resolve, 1000));
+          await new Promise((resolve) => setTimeout(resolve, 250));
         }
         if (!ready) throw new PreviewError("preview_start_failed", "Preview server did not become HTTP-ready", 503);
       } catch (error) {
@@ -355,7 +367,7 @@ export class ProjectPreviewService {
       previewUrl,
       previewPort: devPort,
       framework: finalFramework,
-      lastBuildStatus: verifiedBuild ? "ready" : detected.framework === "nextjs" ? null : "ready",
+      lastBuildStatus: "ready",
     });
     return {
       status: "running",
@@ -703,9 +715,21 @@ export class ProjectPreviewService {
     const payload = request.body === undefined ? undefined
       : Buffer.from(typeof request.body === "string" ? request.body : JSON.stringify(request.body)).toString("base64");
     try {
-      const result = await this.sandbox.proxyPreview({
-        workspaceId: session.workspaceId, userId: session.userId, companyId, projectId,
-      }, session.sandboxId, { port: session.port, path, method: request.method, headers, body: payload });
+      let result: import("./sandbox-provider").PreviewProxyResponse | undefined;
+      const maxAttempts = request.method === "GET" ? 8 : 1;
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        try {
+          result = await this.sandbox.proxyPreview({
+            workspaceId: session.workspaceId, userId: session.userId, companyId, projectId,
+          }, session.sandboxId, { port: session.port, path, method: request.method, headers, body: payload });
+          if (result.status < 500 || attempt === maxAttempts - 1) break;
+          await new Promise((r) => setTimeout(r, 350));
+        } catch (attemptErr) {
+          if (attempt === maxAttempts - 1) throw attemptErr;
+          await new Promise((r) => setTimeout(r, 350));
+        }
+      }
+      if (!result) throw new Error("Preview server unavailable");
       reply.code(result.status);
       const prefix = `/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/preview/proxy`;
       const routed = (target: string) => `${prefix}${target}${target.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;

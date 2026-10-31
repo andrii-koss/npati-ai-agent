@@ -3,7 +3,7 @@ import type { AuthContext, Project } from "./types";
 export interface ProjectCatalogInput {
   companyId?: string; search?: string; status?: string; framework?: string; kind?: string; cursor?: string;
 }
-export type ProjectCatalogItem = Pick<Project, "id" | "companyId" | "name" | "description" | "type" | "kind" | "status" | "framework" | "deploymentUrl" | "deploymentStatus" | "previewUrl" | "previewPort" | "revision" | "updatedAt"> & { hasThumbnail?: boolean };
+export type ProjectCatalogItem = Pick<Project, "id" | "companyId" | "name" | "description" | "type" | "kind" | "status" | "framework" | "deploymentUrl" | "deploymentStatus" | "previewUrl" | "previewPort" | "revision" | "createdAt" | "updatedAt"> & { hasThumbnail?: boolean };
 export interface ProjectCatalogPage { projects: ProjectCatalogItem[]; pagination: { nextCursor: string | null } }
 export const CATALOG_SIZE = 24;
 export function catalogScope(context: AuthContext, input: ProjectCatalogInput) {
@@ -18,8 +18,8 @@ export function catalogCursor(context: AuthContext, input: ProjectCatalogInput):
   } catch { throw new Error("Invalid catalog cursor"); }
 }
 export function catalogPage(context: AuthContext, input: ProjectCatalogInput, rows: ProjectCatalogItem[]): ProjectCatalogPage {
-  const projects = rows.slice(0, CATALOG_SIZE).map(({ id, companyId, name, description, type, kind, status, framework, deploymentUrl, deploymentStatus, previewUrl, previewPort, revision, updatedAt, hasThumbnail }) => ({
-    id, companyId, name, description, type, kind, status, framework, revision, updatedAt,
+  const projects = rows.slice(0, CATALOG_SIZE).map(({ id, companyId, name, description, type, kind, status, framework, deploymentUrl, deploymentStatus, previewUrl, previewPort, revision, createdAt, updatedAt, hasThumbnail }) => ({
+    id, companyId, name, description, type, kind, status, framework, revision, createdAt, updatedAt,
     ...(deploymentUrl ? { deploymentUrl } : {}),
     ...(deploymentStatus ? { deploymentStatus } : {}),
     ...(previewUrl ? { previewUrl } : {}),
@@ -27,7 +27,8 @@ export function catalogPage(context: AuthContext, input: ProjectCatalogInput, ro
     ...(typeof hasThumbnail === "boolean" ? { hasThumbnail } : {}),
   }));
   const last = projects.at(-1);
-  return { projects, pagination: { nextCursor: rows.length > CATALOG_SIZE && last ? Buffer.from(JSON.stringify({ scope: catalogScope(context, input), time: last.updatedAt, id: last.id })).toString("base64url") : null } };
+  const cursorTime = last?.createdAt || last?.updatedAt;
+  return { projects, pagination: { nextCursor: rows.length > CATALOG_SIZE && last && cursorTime ? Buffer.from(JSON.stringify({ scope: catalogScope(context, input), time: cursorTime, id: last.id })).toString("base64url") : null } };
 }
 export function catalogFramework(framework: string, filter: string) {
   const fw = framework.toLowerCase();

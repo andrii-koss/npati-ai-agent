@@ -21,13 +21,14 @@ export function projectCatalogQuery(context: AuthContext, input: ProjectCatalogI
   if (input.search) where.push(`lower(p.name || ' ' || coalesce(p.description,'')) LIKE ${bind('%' + input.search.toLowerCase().replace(/[\\%_]/g, '\\$&') + '%')}`);
   if (cursor) {
     const time = bind(cursor.time), id = bind(cursor.id);
-    where.push(`p.updated_at <= ${time}::timestamptz AND (p.updated_at < ${time}::timestamptz OR p.id > ${id})`);
+    where.push(`p.created_at <= ${time}::timestamptz AND (p.created_at < ${time}::timestamptz OR p.id > ${id})`);
   }
   return { text: `SELECT p.id,p.company_id AS "companyId",p.name,p.description,p.type,p.kind,p.status,p.framework,p.revision,
     p.deployment_url AS "deploymentUrl",p.deployment_status AS "deploymentStatus",p.preview_url AS "previewUrl",p.preview_port AS "previewPort",
+    to_char(p.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "createdAt",
     to_char(p.updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "updatedAt",
     EXISTS (SELECT 1 FROM project_qa_reports q WHERE q.workspace_id=p.workspace_id AND q.company_id=p.company_id AND q.project_id=p.id AND jsonb_typeof(q.screenshots)='array' AND jsonb_array_length(q.screenshots)>0) AS "hasThumbnail"
-    FROM projects p WHERE ${where.join(" AND ")} ORDER BY p.updated_at DESC,p.id ASC LIMIT 25`, values };
+    FROM projects p WHERE ${where.join(" AND ")} ORDER BY p.created_at DESC,p.id ASC LIMIT 25`, values };
 }
 export async function listProjectCatalog(pool: Pool, context: AuthContext, input: ProjectCatalogInput) {
   await assertMember(pool, context);

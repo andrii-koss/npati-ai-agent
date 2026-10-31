@@ -325,8 +325,13 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
         if (input.kind && input.kind !== "all" && project.kind !== input.kind) return false;
         if (!catalogFramework(project.framework ?? "", input.framework ?? "all")) return false;
         if (input.search && !(project.name + " " + (project.description ?? "")).toLowerCase().includes(input.search.toLowerCase())) return false;
-        return !cursor || project.updatedAt < cursor.time || project.updatedAt === cursor.time && project.id > cursor.id;
-      }).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
+        const time = project.createdAt || project.updatedAt;
+        return !cursor || time < cursor.time || (time === cursor.time && project.id > cursor.id);
+      }).sort((a, b) => {
+        const timeA = a.createdAt || a.updatedAt;
+        const timeB = b.createdAt || b.updatedAt;
+        return timeB.localeCompare(timeA) || a.id.localeCompare(b.id);
+      });
       return catalogPage(context, input, rows);
     }
 

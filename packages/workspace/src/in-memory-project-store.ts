@@ -40,7 +40,7 @@ export async function listProjects(host: InMemoryProjectState, context: AuthCont
     return structuredClone([...host.projects.values()]
       .filter((project) => project.workspaceId === context.workspaceId && project.companyId === companyId
         && project.createdBy === context.userId && (includeArchived || project.status !== "archived"))
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id)));
+      .sort((a, b) => (b.createdAt || b.updatedAt).localeCompare(a.createdAt || a.updatedAt) || a.id.localeCompare(b.id)));
   }
 
 export async function getProject(host: InMemoryProjectState, context: AuthContext, companyId: string, projectId: string) {
