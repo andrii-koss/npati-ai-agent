@@ -379,10 +379,14 @@
   display: flex;
   gap: 10px;
   align-items: center;
+  flex-wrap: wrap;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .activity-task-input {
-  flex: 1;
+  flex: 1 1 240px;
+  min-width: 200px;
   height: 44px;
   padding: 0 16px;
   background: var(--npati-gray-50);
@@ -710,15 +714,26 @@
 }
 
 /* Split Activity Layout */
+.activity-layout-wrapper {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
 .activity-layout {
   display: grid;
-  grid-template-columns: 360px 1fr;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
   gap: 20px;
   align-items: start;
   margin-top: 10px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
-@media (max-width: 960px) {
+@media (max-width: 980px) {
   .activity-layout {
     grid-template-columns: 1fr;
   }
@@ -732,6 +747,9 @@
   max-height: calc(100vh - 160px);
   overflow-y: auto;
   box-shadow: 0 2px 8px rgba(17, 17, 17, 0.03);
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .activity-runs-sidebar::-webkit-scrollbar {

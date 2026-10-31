@@ -149,10 +149,18 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px 12px;
   padding: 6px 0;
   border-bottom: 1px solid var(--npati-gray-100);
   font-size: 13px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.code-detail-row > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .code-detail-row:last-child {
