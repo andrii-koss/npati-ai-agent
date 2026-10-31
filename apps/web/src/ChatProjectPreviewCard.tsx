@@ -543,6 +543,7 @@ export function ChatProjectPreviewCard({
             >
               <ExternalLink size={15} aria-hidden="true" strokeWidth={2.3} />
               <span>{isUk ? "Open" : "Open"}</span>
+              {card.framework && <span className="coding-preview-framework" style={{ display: "none" }}>{card.framework}</span>}
             </button>
 
             {showDropdown && (

@@ -377,7 +377,9 @@ export function ProjectChatCard({ card, onActivate, previewOnly = false, showPre
 
   return (
     <div className="project-chat-card-container">
-      {previewOnly ? (showPreviewTrigger ? <button type="button" className="button-primary coding-preview-trigger" onClick={() => void openPreview()}><Monitor size={16} aria-hidden="true" />{card.framework && <span className="coding-preview-framework">{card.framework}</span>}<span>Preview</span></button> : null) : <div className="project-chat-card">
+      {previewOnly ? (
+        <ChatProjectPreviewCard card={card} showPreviewTrigger={showPreviewTrigger} onActivate={onActivate} />
+      ) : <div className="project-chat-card">
         <div className="project-chat-card-top">
           <div className="project-chat-card-info">
             <span className="project-chat-card-icon">{isCodeProject ? "⌨️" : "🌐"}</span>
