@@ -10,6 +10,7 @@ import { CodeDataPolicyPanel } from "./CodeDataPolicyPanel";
 import { CodeQueuePanel } from "./CodeQueuePanel";
 import { CodeMembershipPanel } from "./CodeMembershipPanel";
 import { ErrorBoundary } from "./ErrorBoundary";
+import { persistedSessionMode } from "./code-workspace/actions";
 import {
   type CompanySummary,
   type CodeProject,
@@ -101,7 +102,8 @@ function CodeSettingsPageContent() {
         if (!result.persisted) throw new Error(isUk ? "Не вдалося зберегти активну сесію." : "Could not save the active session.");
       }
       writeActiveCompanyId(companyId);
-      navigate(chat ? "/chat" : `/settings/code/${encodeURIComponent(companyId)}/${encodeURIComponent(session.projectId)}?session=${encodeURIComponent(session.id)}`);
+      navigate(chat ? `/chat?company=${encodeURIComponent(companyId)}&project=${encodeURIComponent(session.projectId)}`
+        : `/settings/code/${encodeURIComponent(companyId)}/${encodeURIComponent(session.projectId)}?session=${encodeURIComponent(session.id)}`);
     } catch (cause) {
       setFeedback({ type: "error", message: codeErrorMessage(cause, isUk) });
     } finally { setBusyId(null); }
@@ -300,7 +302,7 @@ function CodeSettingsPageContent() {
     if (!companyId) return;
     const session = await apiFetch<CodeSession>(
       `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/code/sessions`,
-      { method: "POST", body: JSON.stringify({ mode: input.mode, ...(input.summary ? { summary: input.summary } : {}) }) },
+        { method: "POST", body: JSON.stringify({ mode: persistedSessionMode(input.mode), ...(input.summary ? { summary: input.summary } : {}) }) },
     );
     setSessionOpen(false);
     setFeedback({

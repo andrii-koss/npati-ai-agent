@@ -1,7 +1,8 @@
 import type { ActiveSessionRegistry } from "./distributed-session-registry";
 
 type StreamOwner = { workspaceId: string; userId: string };
-type StreamRecord = StreamOwner & { controller: AbortController };
+/** `onUserStop`: the explicit Stop of this stream also stops the work it started (a background code run). */
+type StreamRecord = StreamOwner & { controller: AbortController; onUserStop?: () => void };
 
 export class ChatStreamLeaseError extends Error {
   constructor(public readonly code: string, public readonly status: number, message: string) { super(message); }
@@ -14,6 +15,18 @@ async function bounded<T>(pending: Promise<T>): Promise<T> {
       timer = setTimeout(() => reject(new Error("Chat coordination timed out")), 5000);
     })]);
   } finally { if (timer) clearTimeout(timer); }
+}
+
+/**
+ * "Stop generating" is an explicit Stop of the work this stream started, not a disconnect: a background code run
+ * outlives a closed tab by design, but must stop when the user stops it. Returns whether that Stop has happened, so
+ * the run stops at its next boundary even before its own controller is registered.
+ */
+export function bindChatStreamUserStop(activeStreams: Map<string, StreamRecord>, streamId: string | undefined, controller: AbortController, stop: () => void): () => boolean {
+  let stopped = false;
+  const record = streamId ? activeStreams.get(streamId) : undefined;
+  if (record?.controller === controller) record.onUserStop = () => { stopped = true; stop(); };
+  return () => stopped;
 }
 
 /** Reserve identity before provider work or project mutations, across API replicas. */

@@ -2,6 +2,7 @@ import { detectEol, toEol } from "./code-text-format";
 import { CodeToolError } from "./code-tools-path";
 import { buildUnifiedDiff, diffLineStats, sha256, splitLines } from "./code-tools-diff";
 import { assertNoPlaceholderInWrite } from "./provider-data-guard";
+import { assertCodeWriteReadable } from "./workspace-protected-content";
 import { commitPatchMutations } from "./code-patch-transaction";
 import {
   assertEditSize, assertMassOperation, guardWritePath, resolveWriteLimits,
@@ -289,6 +290,7 @@ export async function applyPatch(
   const diffParts: string[] = [];
   for (const item of planned) {
     assertEditSize(item.after, tool, limits);
+    if (item.op.action !== "delete") assertCodeWriteReadable(item.guarded.path, item.after, tool);
     if (item.op.action !== "add" && item.before === item.after) continue;
     diffParts.push(buildUnifiedDiff(item.before, item.after, item.guarded.path));
   }
@@ -319,6 +321,7 @@ export async function applyPatch(
   for (const item of planned) {
     if (item.op.action !== "delete") {
       assertNoPlaceholderInWrite(item.after, { tool: "code.fs.apply_patch", path: item.guarded.path });
+      assertCodeWriteReadable(item.guarded.path, item.after, tool);
     }
   }
   await commitPatchMutations(planned.map((item) => ({ path: item.guarded.path, before: item.before, after: item.after, existing: item.existing, delete: item.op.action === "delete", mode: item.mode, revision: item.revision })), port, options);

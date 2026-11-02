@@ -15,6 +15,8 @@ export interface BusinessChatComposerProps {
   sending: boolean;
   codeInbox: any;
   inboxSubmitting: boolean;
+  /** The project chat is still opening (Settings → Open in chat): text typed now would be lost with the move. */
+  inputDisabled?: boolean;
   contextSwitcher: ReactNode;
   noMemory: boolean;
   ttsEnabled: boolean;
@@ -46,6 +48,7 @@ export function BusinessChatComposer({
   sending,
   codeInbox,
   inboxSubmitting,
+  inputDisabled = false,
   contextSwitcher,
   noMemory,
   ttsEnabled,
@@ -70,6 +73,11 @@ export function BusinessChatComposer({
   return (
     <form className="onboarding-live-composer" onSubmit={(event) => void submit(event)}>
       {contextSwitcher}
+      {workMode === "code" && !projectSelected && (
+        <a href="/settings/code?agent=npati" className="composer-code-project-hint">
+          {t("chat.codeModeNeedsProject")}
+        </a>
+      )}
       {noMemory && (
         <span
           className="composer-private-badge"
@@ -124,6 +132,7 @@ export function BusinessChatComposer({
           setInput(event.target.value);
         }}
         onKeyDown={sendOnEnter}
+        disabled={inputDisabled}
         placeholder={business ? t("chat.businessPlaceholder") : t("chat.placeholder")}
       />
       <div>

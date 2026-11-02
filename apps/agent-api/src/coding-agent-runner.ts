@@ -525,7 +525,9 @@ export class CodingAgentRunner {
         lastTurnMutated = false;
         if (noProgressTurns === 4) {
           await record({ kind: "reminder", companyId, projectId, sessionId, runId: input.runId, turn: steps, reason: "no_source_progress" });
-          messages.push({ role: "system", content: "Four model turns produced no source progress. Stop repeated inspection/planning. Use the files already read to implement the current request; if blocked, report the concrete blocker. Build/Preview and visual acceptance are separate system checks." });
+          messages.push({ role: "system", content: input.requireImplementation
+            ? "Four model turns produced no source progress. The creation request is still incomplete. Stop rereading your generated styles/components. Implement the user-facing entry page and working actions now using the files already available; state reasonable assumptions for missing details. A scaffold or stylesheet alone is not a delivered application. If blocked, report the concrete blocker. Build/Preview and visual acceptance remain mandatory separate checks."
+            : "Four model turns produced no source progress. Stop repeated inspection/planning. Use the files already read to implement the current request; if blocked, report the concrete blocker. Build/Preview and visual acceptance are separate system checks." });
         }
         if (noProgressTurns >= 10) {
           await release("loop_detected");

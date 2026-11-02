@@ -144,6 +144,7 @@ export function createAppCodeToolRuntimeWiring(deps: AppCodeToolRuntimeWiringDep
     codeProjectTrust,
     codeSandboxExecPort,
     codeShellRuntime,
+    codeTurnTracker,
     featureFlagService,
     projectSandbox,
     projectService,

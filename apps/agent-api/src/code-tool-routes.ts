@@ -24,6 +24,8 @@ const ERROR_STATUS: Record<string, number> = {
   symlink_escape: 400,
   null_byte: 400,
   sensitive_file_denied: 403,
+  secret_content: 403,
+  file_scope_denied: 403,
   unknown_tool: 404,
   unknown_tool_version: 404,
   not_a_file: 404,

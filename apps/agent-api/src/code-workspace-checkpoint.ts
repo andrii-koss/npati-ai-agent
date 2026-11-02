@@ -335,6 +335,7 @@ export function extractWriteChanges(tool: string, raw: unknown): Array<Omit<Code
   const numberValue = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) ? value : 0);
   // A dry run changes nothing, so it must not enter the turn's change log (and therefore not the diff).
   if (data.dryRun === true) return [];
+  if (tool === "code.fs.write" && data.created === false && data.diff === "") return [];
   // The canonical patch engine reports per-file results as `applied[]`, together with the action taken.
   const entries = Array.isArray(data.files) ? data.files : Array.isArray(data.applied) ? data.applied : null;
   if (entries) {

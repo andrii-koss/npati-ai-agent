@@ -556,6 +556,60 @@ a {
   background: #242424;
 }
 
+.sidebar-history-row.has-activity {
+  grid-template-columns: minmax(0, 1fr) 24px;
+}
+
+.sidebar-history-row.has-activity > .sidebar-icon-action {
+  display: none;
+}
+
+.sidebar-chat-activity {
+  width: 24px;
+  height: 24px;
+  position: relative;
+  left: -3px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: var(--npati-red);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.sidebar-chat-spinner {
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: sidebar-chat-spin 800ms linear infinite;
+}
+
+.sidebar-chat-stop {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  opacity: 0;
+}
+
+.sidebar-chat-activity:not(:disabled):is(:hover, :focus-visible) {
+  background: rgba(211, 47, 47, 0.12);
+  outline: 1px solid currentColor;
+}
+
+.sidebar-chat-activity:not(:disabled):is(:hover, :focus-visible) .sidebar-chat-spinner { opacity: 0; }
+.sidebar-chat-activity:not(:disabled):is(:hover, :focus-visible) .sidebar-chat-stop { opacity: 1; }
+.sidebar-chat-activity:disabled { cursor: wait; opacity: 0.65; }
+@keyframes sidebar-chat-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .sidebar-chat-spinner { animation: none; } }
+@media (hover: none) {
+  .sidebar-chat-activity:not(:disabled) .sidebar-chat-spinner { opacity: 0; }
+  .sidebar-chat-activity:not(:disabled) .sidebar-chat-stop { opacity: 1; }
+}
+
 .sidebar-history-link {
   min-width: 0;
   padding: 8px;

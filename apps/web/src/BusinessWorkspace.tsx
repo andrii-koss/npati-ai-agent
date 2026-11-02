@@ -1,6 +1,6 @@
 import { getStoredAuthToken } from "./AuthContext";
 import { useTranslation } from "./i18n";
-import type { AgentReply, ProjectCardData } from "@npati/shared";
+import { developmentIsActive, type AgentReply, type ProjectCardData } from "@npati/shared";
 import { defaultHybridRouter } from "@npati/shared/hybrid-router";
 import { FormEvent, Fragment, KeyboardEvent as ReactKeyboardEvent, ReactNode, SyntheticEvent, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -12,7 +12,7 @@ import { AutoResizeChatTextarea } from "./AutoResizeChatTextarea";
 import { ChatAttachments, PendingMessageAttachments, type ChatAttachmentInput } from "./ChatAttachments";
 import { SPEECH_VOICES } from "./speech-voices";
 import { persistedModeLabel } from "./code-workspace/actions";
-import { ResearchProgressPanel, type ChatProgressEvent } from "./ResearchProgress";
+import { ChatThinking, useChatThinking, ResearchProgressPanel, type ChatProgressEvent } from "./ResearchProgress";
 import { cancelChatStream, streamChat } from "./chat-stream";
 import { InboxSubmission } from "./code-inbox-client";
 import { useCodeInbox } from "./use-code-inbox";
@@ -23,11 +23,13 @@ import { ChatDevelopmentProgress } from "./ChatDevelopmentProgress";
 import { useChatDevelopment } from "./use-chat-development";
 import { BusinessChatComposer, ChatWorkModeSwitch } from "./business-workspace-composer";
 import { chatOpenData } from "./chat-open";
+import { registerChatTurn } from "./chat-activity";
 import { ChatMessageRow, useChatRowActions } from "./chat-message-row";
 import { confirmModal, alertModal } from "./ConfirmDialog";
 import { detectChatMutationOperation, mutationProgressTargets } from "./chat-mutation-progress";
 import { Business, Goal, MemoryItem, Company, api, blankBusiness, Notice, useWorkspace, Skill, getCachedSkills, updateCachedSkills, PageIntro, EmptyBusiness } from "./business-workspace-shared";
 import { BusinessForm, ProjectChatCard, ChatProjectPreviewCard, AssistantMessageToolbar, FloatingNotice, Message } from "./business-workspace-cards";
+import { ChatPreviewOpenContext } from "./ChatProjectPreviewCard";
 export * from "./business-workspace-page-views";
 export * from "./business-workspace-cards";
 export * from "./business-workspace-shared";
@@ -79,8 +81,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   });
   const [entryProjectCard, setEntryProjectCard] = useState<ProjectCardData | null>(null);
   useEffect(() => {
-    const projectId = chatSearch.get("project") ?? selectedProject?.projectId;
-    const companyId = chatSearch.get("company") ?? selectedProject?.companyId;
+    const projectId = selectedProject?.projectId ?? chatSearch.get("project");
+    const companyId = selectedProject?.companyId ?? chatSearch.get("company");
     if (!projectId || !companyId) return;
     const controller = new AbortController();
     void api<{ id: string; name: string; status: string; framework?: string; previewUrl?: string; type: string }>(
@@ -112,7 +114,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     } catch {}
   }, []);
 
-  const [sending, setSending] = useState(false); const [slowReply, setSlowReply] = useState(false);
+  const [sending, setSending] = useState(false);
   const codeInbox = useCodeInbox(selected, sending);
   useEffect(() => {
     if (codeInbox.session && codeInbox.snapshot?.phase === "settled") {
@@ -129,13 +131,18 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const [streamingResponse, setStreamingResponse] = useState(false);
   const [notice, setNotice] = useState(""); const [replyMeta, setReplyMeta] = useState<AgentReply | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(() => Boolean(initialConversationId));
+  // Where this chat last worked: the project of its newest card (a request, a reply or the project it was opened with).
+  const latestCard = useMemo(() => [...messages].reverse().find(item => item.projectCard)?.projectCard, [messages]);
   const development = useChatDevelopment({
+    latestProjectId: latestCard ? latestCard.projectId ?? latestCard.id : undefined,
     companyId: companyId ?? readActiveCompanyId(),
     conversationId: selected,
     businessId: business?.id,
     onConversation: (id, preserve) => { void loadConversations(id, preserve ?? true); },
     onError: setNotice,
     onAccepted: (message) => {
+      resetProgress();
+      thinking.start(message);
       setInput("");
       const userMsg: Message = { id: `opt-u-${crypto.randomUUID()}`, role: "user", content: message, createdAt: new Date().toISOString() };
       setMessages(curr => mergeConversationMessages(curr, [userMsg]));
@@ -147,6 +154,13 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     onSession: codeInbox.accept,
     boundSessionId: codeInbox.session?.sessionId
   });
+  // A project created in this chat becomes its selection: Preview and follow-ups no longer use the empty entry project.
+  useEffect(() => {
+    const p = development.project;
+    if (p?.projectId && p.companyId && selected && p.conversationId === selected) setSelectedProject(current => current && current.projectId === p.projectId && current.conversationId === selected ? current : { companyId: p.companyId, projectId: p.projectId!, conversationId: selected });
+  }, [development.project?.projectId, selected]);
+  // Open Previews of this chat survive a card moving to the newest reply; another chat starts with none.
+  const openPreviews = useMemo(() => new Set<string>(), [selected]);
   const [ttsVoice, setTtsVoice] = useState(() => {
     try {
       return localStorage.getItem("npati_chat_tts_voice") || "alloy";
@@ -240,6 +254,11 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     progressEventsRef,
   } = useChatResearchProgress(flushDeltasRef);
   const streamControllerRef=useRef<{controller:AbortController;streamId:string}|null>(null);
+  const thinking = useChatThinking({
+    busy: sending || development.submitting || development.isActive || codeInbox.active,
+    streaming: streamingResponse, text: t("chat.thinking"), items: development.project?.progress, events: progressEvents,
+    runIds: [...Object.keys(development.project?.runStatuses ?? {}), development.project?.runId, development.project?.initialRunId].filter((id): id is string => Boolean(id)),
+  });
   const suggestions = useMemo(
     () => business
       ? ["What should I focus on this week?", "Review my current goals", "Help me improve my offer"]
@@ -250,6 +269,15 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const selectedRef = useRef(selected);
   const historyLoadVersionRef = useRef(0);
   selectedRef.current = selected;
+  useEffect(() => {
+    if (!sending || !selected) return;
+    return registerChatTurn(selected, async () => {
+      const active = streamControllerRef.current;
+      if (!active || selectedRef.current !== selected) return;
+      if (!await cancelChatStream(active.streamId)) throw new Error("Stream cancellation was not confirmed");
+      active.controller.abort(new DOMException("Stopped", "AbortError"));
+    });
+  }, [sending, selected]);
   const { rowActions, rowStateRef } = useChatRowActions({ setInput, setSelectedProject, selectedRef, latestMessageRef, activeTurnRef });
 
   /** Prepends the previous page of the open chat and keeps the visible message in place. */
@@ -360,12 +388,6 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     }
   }, [business?.id, initialConversationId]);
   useEffect(() => {
-    // The thinking indicator appears only when an answer is actually slow; a fast answer is shown without it.
-    if (!sending) { setSlowReply(false); return; }
-    const timer = window.setTimeout(() => setSlowReply(true), 1000);
-    return () => window.clearTimeout(timer);
-  }, [sending]);
-  useEffect(() => {
     const handleImageLoaded = () => {
       if (!activeTurn) {
         scrollToBottom("auto");
@@ -415,11 +437,13 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (development.openingProjectChat) return; // the draft stays; the chat it belongs to is still opening
     if (!noMemory && !attachments.length && !sending && !chatSubmissionBusy.current && await development.submit(input.trim())) return;
-    const boundProjectId = development.project?.projectId ?? codeInbox.session?.projectId ?? (selectedProject?.conversationId === selected ? selectedProject.projectId : undefined);
+    const boundProjectId = (selectedProject?.conversationId === selected ? selectedProject.projectId : undefined) ?? development.project?.projectId ?? codeInbox.session?.projectId;
     const nextIntent = defaultHybridRouter.classifyProject({ message: input.trim(), activeProjectId: boundProjectId, activeCompanyId: companyId ?? readActiveCompanyId() });
     const createsProject = nextIntent.intent === "CREATE_WEBSITE" || nextIntent.intent === "CREATE_PROJECT";
-    if (codeInbox.active && !createsProject) { await submitInbox("queue"); return; }
+    // The inbox queues work for its own session; a request for another project of this chat goes through routing.
+    if (codeInbox.active && !createsProject && (!boundProjectId || codeInbox.session?.projectId === boundProjectId)) { await submitInbox("queue"); return; }
     const message = input.trim(); if ((!message && attachments.length === 0) || sending || chatSubmissionBusy.current) return;
     chatSubmissionBusy.current = true;
     const submittedDraftVersion = draftVersion.current;
@@ -472,7 +496,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     }
 
     const optimisticContent = message;
-    const projectProgressIntent = defaultHybridRouter.classifyProject({ message: requestMessage, activeProjectId: boundProjectId, activeCompanyId: companyId ?? readActiveCompanyId() });
+    thinking.start(message);
     const mutationContext = companyId ? "company" : business ? "business" : "none";
     const pendingMutation = detectChatMutationOperation(requestMessage, mutationContext);
     const mutationTargets = pendingMutation
@@ -482,7 +506,6 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     const optimisticMessage: Message = { id: optimisticId, role: "user", content: optimisticContent, createdAt: new Date().toISOString(), attachments: sentAttachments };
     setMessages((current) => [...current, optimisticMessage]);
     resetProgress();
-    if (projectProgressIntent.intent !== "CHAT" && !development.project) enqueueProgress({ type: "project_progress", stage: "project", status: "active", title: /[\u0400-\u04ff]/u.test(requestMessage) ? "\u041f\u0440\u0430\u0446\u044e\u044e \u043d\u0430\u0434 \u043f\u0440\u043e\u0454\u043a\u0442\u043e\u043c" : "Working on the project", timestamp: new Date().toISOString() });
     for (const mutationTarget of mutationTargets) enqueueProgress({ type: "action_started", ...mutationTarget, timestamp: new Date().toISOString() });
     setSending(true); setStreamingResponse(false); setNotice("");
     if (draftVersion.current === submittedDraftVersion) { setInput(""); setAttachments([]); }
@@ -541,9 +564,9 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     const projectIntent = defaultHybridRouter.classifyProject({ message: requestMessage, activeProjectId: boundProjectId, activeCompanyId: activeCompanyForRequest });
     const isNewProjectRequest = projectIntent.intent === "CREATE_WEBSITE" || projectIntent.intent === "CREATE_PROJECT";
     if (!isNewProjectRequest) {
-      const latestCard = [...messages].reverse().find(item => item.projectCard)?.projectCard;
-      if (development.project?.companyId === activeCompanyForRequest) activeProjectId = development.project.projectId;
-      else if (selectedProject?.conversationId === selected && selectedProject.companyId === activeCompanyForRequest) activeProjectId = selectedProject.projectId;
+      // The chat's selection follows its newest development project and the server's routed replies.
+      if (selectedProject?.conversationId === selected && selectedProject.companyId === activeCompanyForRequest) activeProjectId = selectedProject.projectId;
+      else if (development.project?.companyId === activeCompanyForRequest) activeProjectId = development.project.projectId;
       else if (latestCard?.companyId === activeCompanyForRequest) activeProjectId = latestCard.projectId ?? latestCard.id;
       try {
         const stored = sessionStorage.getItem("npati_active_project");
@@ -561,7 +584,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         contextType: activeProjectId ? "project" : companyId ? "company" : (business ? "business" : "none"),
         ...(activeCompanyForRequest && (companyId || activeProjectId) ? { companyId: activeCompanyForRequest } : {}),
         ...(activeProjectId ? { projectId: activeProjectId } : {}),
-        ...(workMode === "code" && activeProjectId ? { mode: "code" as const } : {}),
+        ...(workMode === "code" ? { mode: "code" as const } : {}),
         noMemory: privateRequest,
         streamId,
       }, enqueueProgress, {
@@ -599,6 +622,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         window.dispatchEvent(new CustomEvent("npati:goals-changed", { detail: (result as any).goalAction }));
       }
       if (result.activeContext?.projectId) {
+        // The server may route a follow-up to another project of this chat ("У грі …"); later turns continue there.
+        if (result.activeContext.companyId && selectedProject?.conversationId === conversationAtSubmit && selectedChatRef.current === conversationAtSubmit) setSelectedProject({ companyId: result.activeContext.companyId, projectId: result.activeContext.projectId, conversationId: selectedProject.conversationId });
         window.dispatchEvent(new CustomEvent("npati-code-project-updated", { detail: { projectId: result.activeContext.projectId } }));
         try {
           sessionStorage.setItem("npati_active_project", JSON.stringify({ companyId: result.activeContext.companyId, projectId: result.activeContext.projectId, conversationId: result.conversationId ?? selected }));
@@ -697,9 +722,12 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const displayMessages = mergeConversationMessages(messages,development.project?.conversationMessages);
   rowStateRef.current = { displayMessages, activeTurn };
   const timeline = chatTimeline(displayMessages, development.project?.progress, selected, development.project);
-  const currentProjId = chatSearch.get("project") ?? selectedProject?.projectId ?? development.project?.projectId;
+  // While the agent works in this chat, an open Preview stays but none is offered for the state it is changing.
+  const agentWorking = sending || codeInbox.active || Boolean(development.project && developmentIsActive(development.project));
+  const currentProjId = selectedProject?.projectId ?? chatSearch.get("project") ?? development.project?.projectId;
+  // A card on the user's request is routing metadata and never renders, so it does not replace the fallback card.
   const hasTimelineCard = timeline.some(entry =>
-    entry.kind === "message" &&
+    entry.kind === "message" && entry.message.role !== "user" &&
     (Boolean(entry.message.projectCard) || Boolean(development.card(displayMessages, entry.index))) &&
     (!currentProjId || (entry.message.projectCard?.projectId ?? entry.message.projectCard?.id ?? development.card(displayMessages, entry.index)?.projectId ?? development.card(displayMessages, entry.index)?.id) === currentProjId)
   );
@@ -715,7 +743,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   } : null);
   const showFallbackCard = !hasTimelineCard && Boolean(fallbackCard);
   return (
-    <>
+    <ChatPreviewOpenContext.Provider value={openPreviews}>
       {notice && (
         <FloatingNotice
           message={notice}
@@ -729,7 +757,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           onWheel={() => { userScrolledRef.current = true; }} onTouchMove={() => { userScrolledRef.current = true; }} onKeyDown={() => { userScrolledRef.current = true; }}>
           {showFallbackCard && fallbackCard && (
             <article className="assistant" style={{ margin: "8px 0 16px" }}>
-              <ChatProjectPreviewCard card={fallbackCard} onActivate={(card) => setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected })} />
+              <ChatProjectPreviewCard card={fallbackCard} showPreviewTrigger={!agentWorking} onActivate={(card) => setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected })} />
             </article>
           )}
           {messages.length === 0 && !selected && !initialConversationId && !loadingHistory && (
@@ -739,7 +767,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
             </div>
           )}
           {timeline.map(entry => {
-            if (entry.kind === "activity") return <ChatDevelopmentProgress key={"activity:" + entry.item.id} process={development.project} items={entry.run?.items ?? [entry.item]} run={entry.run} />;
+            if (entry.kind === "activity") return <ChatDevelopmentProgress key={"activity:" + entry.item.id} process={development.project} items={entry.run?.items ?? [entry.item]} run={entry.run} animatePending={!thinking.visible} />;
             const { message, index } = entry;
             if (development.hideMessage(displayMessages, index)) return null;
             const messageCard = development.card(displayMessages, index);
@@ -756,7 +784,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
                     failed={!sending && progressFailed}
                   />
                 )}
-                <ChatMessageRow message={message} card={messageCard} showToolbar={message.role === "assistant" && !sending}
+                <ChatMessageRow message={message} card={messageCard} showToolbar={message.role === "assistant" && !sending} previewBusy={agentWorking}
                   responseLanguage={development.project?.responseLanguage ?? language} actions={rowActions} />
               </Fragment>
             );
@@ -770,14 +798,12 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
               failed={!sending && progressFailed}
             />
           )}
-          {!development.isActive && sending && slowReply && !streamingResponse && !progressEvents.some((event) => !event.type.startsWith("final_generation")) && <article className="assistant research-progress chat-thinking" role="status" aria-label="NPATI Agent is working"><div className="research-generation-row active"><span className="research-progress-state" aria-hidden="true">●</span><span className="research-active-text">{isWebsiteAnalysisRequest(activeTurn) ? "Analyzing website and sources…" : t("chat.thinking")}</span></div></article>}
-          {(development.submitting && !development.project && !progressEvents.some(event => !event.type.startsWith("final_generation"))) && <article className="assistant thinking thinking-status" role="status" aria-label="NPATI Agent is working"><p>{language === "uk" ? "\u041f\u0440\u0430\u0446\u044e\u044e \u043d\u0430\u0434 \u043f\u0440\u043e\u0454\u043a\u0442\u043e\u043c" : "Working on the project"}</p><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span></article>}
+          {thinking.visible && <ChatThinking key="turn-thinking" text={thinking.text} />}
           {!hasTimelineCard && !showFallbackCard && development.preview}
           {messages.length > 0 && <div className="chat-scroll-spacer" aria-hidden="true" />}
           <div ref={streamEndRef} aria-hidden="true" />
         </div>
         {replyMeta?.memoryCandidate && <div className="memory-candidate"><div><strong>Remember this?</strong><p>{replyMeta.memoryCandidate.title}: {replyMeta.memoryCandidate.content}</p></div><button onClick={() => void remember()}>Remember</button><button onClick={() => setReplyMeta({ ...replyMeta, memoryCandidate: undefined })}>Not now</button></div>}
-        {development.panel}
         <BusinessChatComposer
           input={input}
           setInput={setInput}
@@ -788,7 +814,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           developmentActive={development.isActive}
           onStopDevelopment={development.stop}
           codeInbox={codeInbox}
-          inboxSubmitting={inboxSubmitting}
+          inboxSubmitting={inboxSubmitting || development.openingProjectChat}
+          inputDisabled={development.openingProjectChat}
           contextSwitcher={contextSwitcher}
           noMemory={noMemory}
           ttsEnabled={ttsEnabled}
@@ -809,6 +836,6 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           projectSelected={Boolean(development.project?.projectId ?? codeInbox.session?.projectId ?? (selectedProject?.conversationId === selected ? selectedProject?.projectId : undefined))}
         />
       </div>
-    </>
+    </ChatPreviewOpenContext.Provider>
   );
 }

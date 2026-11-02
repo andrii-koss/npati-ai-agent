@@ -181,6 +181,15 @@ const readFile = async (h: Harness, path: string, toolCallId?: string) =>
   });
 
 describe("security-gate: C3 read-before-write", () => {
+  it("enforces the trusted user file scope even when the model tries to repair another file", async () => {
+    const h = harness();
+    await readFile(h, "src/orders.ts");
+    const before = h.files.get("src/orders.ts");
+    const denied = await invoke(h, "code.fs.edit", {path: "src/orders.ts", oldString: "return 1", newString: "return 2"}, {userWritePaths: ["index.html"]});
+    expect(denied).toMatchObject({ok: false, error: {code: "file_scope_denied", status: 403, retryable: false}});
+    expect(h.files.get("src/orders.ts")).toBe(before);
+    expect(h.writes).toEqual([]);
+  });
   it("binds cached tool results to project identity and exact arguments", async () => {
     const h = harness();
     const first = await invoke(h, "code.fs.read", { path: "src/orders.ts" }, { toolCallId: "same-id" });

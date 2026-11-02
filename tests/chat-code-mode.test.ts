@@ -41,6 +41,24 @@ async function run(mode: "chat" | "code" | undefined) {
 }
 
 describe("Code mode", () => {
+  it("requires a project instead of invoking the neutral model when Code has no scope", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const calls: ChatRequest[] = [];
+    const ai = { chat: async (request: ChatRequest) => { calls.push(request); return { content: "No file tools" }; },
+      supportsNativeTools: () => true } as unknown as AIEngine;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace });
+    try {
+      for (const context of [{ contextType: "none" }, { contextType: "company", companyId: (await store.createCompany(auth, { name: "Scope Labs" }, "scope-labs")).id }]) {
+        const response = await app.inject({ method: "POST", url: "/chat/stream", payload: {
+          message: "Створи файл e2e-smoke/hello.txt з текстом Hello", mode: "code", ...context,
+        } });
+        expect(response.statusCode).toBe(409);
+        expect(response.json()).toMatchObject({ error: { code: "CODE_PROJECT_REQUIRED" } });
+      }
+      expect(calls).toHaveLength(0);
+      expect(await store.listNeutralConversations(auth)).toHaveLength(0);
+    } finally { await app.close(); }
+  });
   it("works on the selected project without a classifier call or record modules", async () => {
     const { classifierCalls, main } = await run("code");
     expect(classifierCalls).toHaveLength(0);

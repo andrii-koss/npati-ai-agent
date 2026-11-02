@@ -56,6 +56,13 @@ export function nearChatBottom(element: Pick<HTMLElement, "scrollHeight" | "scro
 }
 
 export type CodingActivityRun = { id: string; runId?: string; at: string; items: DevelopmentProcessProgressItem[]; status: string; language?: string; sequence?: number; usage?: NonNullable<DevelopmentProcessProgressItem["modelUsage"]>[] };
+/** Chat rows show operations, while model/agent lifecycle remains in the durable trace. */
+export function isVisibleChatOperation(item: DevelopmentProcessProgressItem): boolean {
+  if (["failed", "cancelled", "awaiting_approval", "waiting_for_approval"].includes(item.status ?? "")) return true;
+  if (item.kind === "assistant_message") return false;
+  if (["agent", "completed", "planning", "model_usage", "model_response", "model_generation", "model_output"].includes(item.stage)) return false;
+  return !(item.stage === "project" && item.tool === "code.workspace");
+}
 export function codingActivityRuns(value: unknown, process?: DevelopmentProcess): CodingActivityRun[] {
   const rows = normalizeActivity(value).filter(item => item.kind !== "assistant_message" && item.stage !== "template_ready"
     && !(item.stage === "project" && item.tool === "code.workspace" && !["failed", "cancelled", "awaiting_approval", "waiting_for_approval"].includes(item.status ?? "")));

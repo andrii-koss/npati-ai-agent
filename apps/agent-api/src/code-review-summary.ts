@@ -7,6 +7,19 @@ import type { SelfReviewFinding, SelfReviewVerdict } from "./code-self-review-ty
 import type { VerificationReport } from "./code-verification-loop";
 import type { VerificationPlan } from "./code-verification-plan";
 
+export function verificationEvidenceForReview(report: VerificationReport, summaryStatus?: string): string {
+  if (!summaryStatus && report.verificationRuns === 0) return "verification did not run for this change";
+  const failed = report.failedChecks.map(check => `${check.tool}${check.code ? ` (${check.code})` : ""}`);
+  return [
+    `status: ${summaryStatus ?? report.status}`,
+    `verification runs: ${report.verificationRuns}`,
+    `repair attempts used: ${report.attemptsUsed} of ${report.maxAttempts}`,
+    `requested checks: ${report.requestedTools.join(", ") || "(none)"}`,
+    `latest check receipts: ${JSON.stringify(report.checks)}`,
+    `failing checks: ${failed.join(", ") || "(none)"}`,
+  ].join("\n");
+}
+
 /**
  * Step 4 — the two summary builders.
  *

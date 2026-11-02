@@ -26,6 +26,22 @@ async function fixture(framework = "Next.js") {
 const verified = { status: "completed", summary: { verification: { status: "passed", requestedTools: ["build"] } } };
 
 describe("Coding Agent website chat", () => {
+  it("opens a detected static Code project when Preview is requested, including an unchanged index.html", async () => {
+    const { store, company, project, input, ports } = await fixture("");
+    const prepareStaticPreview = vi.fn(async () => store.updateProjectPreview(ctx, company.id, project.id, { framework: "HTML/CSS" }));
+    const run = { status: "completed", summary: { filesChanged: [] } };
+    expect(hasCodeChatPreview(await finishCodeChatWebsite({ ...input, toolContext: { userMessage: "Створи index.html з заголовком Test і покажи preview" } }, run, { ...ports, prepareStaticPreview }))).toBe(true);
+    expect(prepareStaticPreview).toHaveBeenCalledOnce();
+    expect(ports.startPreview).toHaveBeenCalledOnce();
+  });
+
+  it.each(["Create hello.txt containing Hello", "Do not show preview"])("does not promote an unclassified Code project for %s", async userMessage => {
+    const { input, ports } = await fixture("");
+    const prepareStaticPreview = vi.fn();
+    await finishCodeChatWebsite({ ...input, toolContext: { userMessage } }, { status: "completed", summary: { filesChanged: [] } }, { ...ports, prepareStaticPreview });
+    expect(prepareStaticPreview).not.toHaveBeenCalled();
+    expect(ports.startPreview).not.toHaveBeenCalled();
+  });
   it("keeps natural-language edits and legacy websites in a validated session, preserving read-only reviews", () => {
     for (const projectKind of ["website", "code_project"] as const) {
       const input = { codingEnabled: true, companyId: "c", projectId: "p", projectKind, sessionBound: true };

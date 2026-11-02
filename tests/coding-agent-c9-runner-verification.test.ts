@@ -36,12 +36,13 @@ function session(overrides: Partial<CodeSession> = {}): CodeSession {
 const TOOLS: CodeRunToolDescriptor[] = [
   { name: "code.fs.read", version: 1, status: "active", description: "read a file", write: false },
   { name: "code.fs.edit", version: 1, status: "active", description: "edit a file", write: true },
+  { name: "code.fs.move", version: 1, status: "active", description: "move a file", write: true },
   { name: "code.verify.run", version: 1, status: "active", description: "run checks", write: false },
 ];
 
 const SCHEMAS = TOOLS.map((tool) => ({
   ...tool,
-  inputSchema: {
+  inputSchema: tool.name === "code.fs.move" ? { type: "object", properties: { from: {type: "string"}, to: {type: "string"} }, required: ["from", "to"] } : {
     type: "object",
     properties: { path: { type: "string" } },
     // Required on purpose: the argument-correction test needs schema validation to reject a call.
@@ -72,6 +73,7 @@ interface ChangeRow {
 }
 
 interface HarnessOptions {
+  moveRefused?: boolean;
   script?: Array<ChatResult | Error>;
   changes?: ChangeRow[];
   quota?: CodingAgentRunnerPorts["quota"];
@@ -96,6 +98,7 @@ function createHarness(options: HarnessOptions = {}) {
     listTools: () => TOOLS.map((tool) => ({ ...tool })),
     invoke: async (_ctx, input) => {
       invocations.push({ tool: input.tool, toolCallId: input.toolCallId });
+      if (input.tool === "code.fs.move" && options.moveRefused) return {ok: false, error: {code: "secret_content", status: 403, message: "Protected move", tool: input.tool, step: "guard", retryable: false}};
       if (input.tool === "code.verify.run") {
         return options.verify ? options.verify() : okResult("code.verify.run", { checks: [{ tool: "typecheck", passed: true }, { tool: "test", passed: true }] });
       }
@@ -163,6 +166,39 @@ const editThenFinish: Array<ChatResult> = [
   { content: "editing", toolCalls: [nativeCall("code.fs.edit", { path: "src/a.ts" })] },
   { content: "all done" },
 ];
+
+it("D10 stops at a protected move before pending writes or another model suggestion", async () => {
+  const harness = createHarness({ moveRefused: true, changes: [], verificationTools: [], script: [
+    {content: "rename", toolCalls: [nativeCall("code.fs.move", {from: "fixture/package.json", to: "fixture/metadata.json"}), nativeCall("code.fs.edit", {path: "other.ts"})]},
+    {content: "Ask the owner to rename it outside this workflow"},
+  ] });
+  const result = await harness.run({responseLanguage: "uk", prompt: "Перейменуй fixture/package.json на fixture/metadata.json, не змінюючи вмісту."});
+  expect(result.status).toBe("stopped");
+  expect(result.reason).toBe("refused");
+  expect(result.message).toContain("secret_content, 403");
+  expect(result.message).toContain("Схвалення користувача не може скасувати");
+  expect(harness.engineCalls).toHaveLength(1);
+  expect(harness.invocations.map(call => call.tool)).toEqual(["code.fs.move"]);
+});
+
+it("D09 verifies a test script discovered after generation started without any checks", async () => {
+  const harness = createHarness({ script: editThenFinish, verificationTools: [],
+    verify: () => okResult("code.verify.run", { data: { results: [{ tool: "test", ok: true, summary: "13/13 tests" }] } }),
+  });
+  const result = await harness.run({ refreshVerificationTools: async () => ["test"] });
+  expect(harness.invocations.filter(entry => entry.tool === "code.verify.run")).toHaveLength(1);
+  expect(result.verification?.status).toBe("passed");
+});
+
+it("D09 fails the actual newly discovered root test command instead of accepting a build-only result", async () => {
+  const harness = createHarness({ script: editThenFinish, verificationTools: [], limits: { repairLoopAttempts: 0 },
+    verify: () => okResult("code.verify.run", { data: { results: [{ tool: "test", ok: false, summary: "MODULE_NOT_FOUND backend/test" }] } }),
+  });
+  const result = await harness.run({ refreshVerificationTools: async () => ["test"] });
+  expect(harness.invocations.some(entry => entry.tool === "code.verify.run")).toBe(true);
+  expect(result.status).toBe("stopped");
+  expect(result.reason).toBe("verification_failed");
+});
 
 it("finishes and verifies beyond the obsolete 16-turn chat override within the configured budget", async () => {
   const reads: ChatResult[] = Array.from({ length: 16 }, (_, index) => ({ content: "", toolCalls: [nativeCall("code.fs.read", { path: `src/file-${index}.ts` }, `read-${index}`)] }));

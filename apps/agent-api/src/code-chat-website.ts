@@ -91,13 +91,20 @@ export function hasCodeChatPreview(result: unknown): boolean {
 
 export async function finishCodeChatWebsite(input: CodeSessionRunInput, result: unknown, ports: {
   getProject(ctx: AuthContext, companyId: string, projectId: string): Promise<Project>;
+  prepareStaticPreview?(ctx: AuthContext, companyId: string, projectId: string): Promise<Project | null>;
   startPreview(ctx: AuthContext, companyId: string, projectId: string, signal?: AbortSignal, options?: { development: boolean }): Promise<{ status: string; previewUrl: string }>;
   markFailed(ctx: AuthContext, companyId: string, projectId: string): Promise<unknown>;
 }): Promise<unknown> {
   const run = result as { status?: string; summary?: { stylePreview?: boolean; filesChanged?: string[]; verification?: { status?: string; requestedTools?: string[] } } } | null;
   if (run?.status !== "completed" || input.readOnlyIntent || input.session.mode === "plan") return result;
   const { companyId, projectId } = input.session;
-  const project = await ports.getProject(input.ctx, companyId, projectId);
+  let project = await ports.getProject(input.ctx, companyId, projectId);
+  const userMessage = input.toolContext?.userMessage ?? "";
+  const previewRequested = /\bpreview\b|прев['’]?ю|попередн\S*\s+перегляд/iu.test(userMessage)
+    && !/(?:do not|don't|without|не)\s+(?:(?:show|start|open|показуй|запускай|відкривай)\s+)?(?:live\s+)?preview/iu.test(userMessage);
+  if (previewRequested && project.type === "code_project" && !project.framework && ports.prepareStaticPreview) {
+    project = await ports.prepareStaticPreview(input.ctx, companyId, projectId) ?? project;
+  }
   // Backend readiness is established by the existing Preview service, separately from frontend build/Browser QA.
   if (project.type === "code_project" && isBackendProjectFramework(project.framework)) {
     if (!input.requireImplementation && Array.isArray(run.summary?.filesChanged) && run.summary.filesChanged.length === 0) return result;
@@ -110,7 +117,7 @@ export async function finishCodeChatWebsite(input: CodeSessionRunInput, result: 
     && run.summary.filesChanged.every(path => /\.css$/i.test(path));
   // A run that changed no file (e.g. Data Studio only) leaves the last verified build and Preview as they were; it must
   // not mark a working site as failed for lacking a build it had no reason to run.
-  if (!input.requireImplementation && Array.isArray(run.summary?.filesChanged) && run.summary.filesChanged.length === 0
+  if (!previewRequested && !input.requireImplementation && Array.isArray(run.summary?.filesChanged) && run.summary.filesChanged.length === 0
       && run.summary.verification?.status !== "failed") return result;
   // A model's prose is never evidence of a successful production build.
   if (!stylePreview && project.framework !== "HTML/CSS" && (run.summary?.verification?.status !== "passed"

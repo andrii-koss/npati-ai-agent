@@ -56,7 +56,7 @@ export function registerWebFrontend(app: FastifyInstance, directory: string): vo
     const referer = typeof request.headers.referer === "string" ? request.headers.referer : "";
     if (referer && !pathname.startsWith("/api/") && !pathname.startsWith("/companies/") && !pathname.startsWith("/assets/") && !frontendPage.test(pathname) && !dataStudioPage.test(pathname) && !pathname.startsWith("/health")) {
       const match = referer.match(/(\/(?:api\/)?companies\/[^/]+\/projects\/[^/]+\/preview\/proxy)(?:[/?#]|$)/);
-      if (match) {
+      if (match?.[1]) {
         const prefix = match[1].startsWith("/api/") ? match[1] : `/api${match[1]}`;
         return reply.redirect(`${prefix}${request.url}`, 307);
       }

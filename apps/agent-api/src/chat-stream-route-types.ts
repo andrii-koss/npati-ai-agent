@@ -27,7 +27,7 @@ export interface ChatStreamRouteDeps {
   resolveProjectIntent?: import("./chat-project-intent").ChatProjectIntentResolver;
   config: AppConfig;
   log: FastifyBaseLogger;
-  activeChatStreams: Map<string,{controller:AbortController;workspaceId:string;userId:string}>;
+  activeChatStreams: Map<string,{controller:AbortController;workspaceId:string;userId:string;onUserStop?:()=>void}>;
   activeContextResolver: ReturnType<typeof createCoreServices>["activeContextResolver"];
   activeSessionRegistry: ActiveSessionRegistry;
   agent: ReturnType<typeof createCoreServices>["agent"];

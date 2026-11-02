@@ -20,6 +20,10 @@ it("renders the selected Company's code projects/sessions and opens the exact sa
   const sessionId = "11223344-5566-7788-99aa-bbccddeeff00";
   const fetcher = vi.fn(async (input: unknown, _init?: RequestInit) => {
     const url = String(input);
+    if (url.includes("/projects/project-c1/code/sessions") && _init?.method === "POST") {
+      expect(JSON.parse(String(_init.body)).mode).toBe("auto");
+      return json({ id: sessionId, projectId: "project-c1", companyId: "company-c1", mode: "auto", status: "active" });
+    }
     if (url === "/api/companies?limit=50") return json({ companies: [{ id: "company-c1", name: "C1 Company" }] });
     if (url.includes("/code/projects?")) return json({ projects: [{
       id: "project-c1", companyId: "company-c1", name: "Audited repository", type: "code_project", status: "ready",
@@ -53,5 +57,16 @@ it("renders the selected Company's code projects/sessions and opens the exact sa
     expect(request).toBeTruthy();
     expect(JSON.parse(String(request![1]?.body))).toEqual({ contextType: "project", projectId: "project-c1", sessionId });
     expect(host.querySelector("[data-route]")?.textContent).toBe("/settings/code/company-c1/project-c1?session=" + sessionId);
+    const chat = [...row!.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.trim() === "Open in chat");
+    await act(async () => { chat!.click(); });
+    expect(host.querySelector("[data-route]")?.textContent).toBe("/chat?company=company-c1&project=project-c1");
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.trim() === "＋ New session")!.click());
+    const dialog = host.querySelector('[role="dialog"]')!;
+    await act(async () => {
+      const mode = dialog.querySelectorAll("select")[1]!;
+      mode.value = "auto_edit"; mode.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await act(async () => [...dialog.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.trim() === "Create session")!.click());
+    expect(fetcher.mock.calls.some(([url, init]) => String(url).includes("/projects/project-c1/code/sessions") && init?.method === "POST")).toBe(true);
   } finally { await act(async () => root.unmount()); }
 });

@@ -17,6 +17,7 @@ import {
 } from "./code-git-workflow";
 import type { CodeWorkspaceRevisionSnapshot } from "./code-workspace-revision";
 import { patchTargets } from "./code-tools-patch";
+import { assertUserFileScope } from "./code-user-file-scope";
 import {
   CodeTurnTracker, extractWriteChanges, resolveTurnTrackingOptions, revisionConflictDetails,
   type CodeWriteChange,
@@ -188,6 +189,7 @@ export class CodeToolRuntime {
     readOnlyIntent?: boolean;
     parentRunId?: string;
     subagentWritePaths?: readonly string[];
+    userWritePaths?: readonly string[];
     capabilityScope?: readonly string[];
   }): Promise<CodeToolInvokeResult | CodeToolInvokeFailure> {
     const started = Date.now();
@@ -265,6 +267,7 @@ export class CodeToolRuntime {
 
       // (5) Arguments
       const args = validateArguments(tool.inputSchema, input.args, tool.name);
+      if (input.userWritePaths) assertUserFileScope(tool.name, args, input.userWritePaths, write);
       if (input.subagentWritePaths) {
         const scopedFileTools = ["code.fs.edit", "code.fs.write", "code.fs.move", "code.fs.delete", "code.fs.apply_patch"];
         const unsafe = this.isWriteTool(tool.name) || /^(code\.shell\.(exec|exec_async|process\.start)|code\.verify\.run|code\.deps\.(add|install|update|remove)|code\.git\.(branch|stage|commit|restore|push|pr))/.test(tool.name);

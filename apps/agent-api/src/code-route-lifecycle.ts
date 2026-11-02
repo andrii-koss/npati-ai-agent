@@ -9,6 +9,7 @@ import { DEFAULT_CODE_AGENT_LIMITS } from "./code-agent-config";
 import { registerCodeAgentControlRoutes } from "./code-agent-controls";
 import { CodeAsyncWorkspaceService, registerCodeAsyncWorkspaceRoutes } from "./code-async-workspace";
 import { finishCodeChatWebsite, isCodeChatWebsite } from "./code-chat-website";
+import { detectProjectStack } from "./project-preview-stack";
 import { verifyWebsiteRuntime } from "./website-runtime-acceptance";
 import { registerCodeIntentRoutes } from "./code-intent-routing";
 import { collectCodeMetrics } from "./code-metrics";
@@ -22,6 +23,7 @@ import { CodeRunReconciler } from "./code-run-reconciler";
 import { readRunEstimate } from "./code-run-state";
 import { registerCodeSessionControlRoutes } from "./code-session-control-routes";
 import { CodeSessionRunExecutor } from "./code-session-run-executor";
+import { resolveProjectVerificationTools } from "./code-project-verification-tools";
 import { collectCodeSessionUsage } from "./code-session-usage";
 import { registerCodeSnapshotRoutes } from "./code-snapshot-routes";
 import { createCodeSubagentChildRunner } from "./code-subagent-child-runner";
@@ -299,14 +301,17 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
     runner: codingAgentRunner,
     control: codeRunCancellation,
     prepareReference: input => analyzeWebsiteReference(input, request => inputDeps.aiEngine.chat(request)),
-    resolveVerificationTools: async (input) => {
-      const project = await projectService.get(input.ctx, input.session.companyId, input.session.projectId);
-      if (!isCodeChatWebsite(project) || input.readOnlyIntent || input.session.mode === "plan") return undefined;
-      return project.framework === "HTML/CSS" ? [] : ["build"];
-    },
+    resolveVerificationTools: async (input) => resolveProjectVerificationTools(input, projectService, codeService),
     afterRun: async (input, result) => {
       let finished = await finishCodeChatWebsite(input, result, {
         getProject: (ctx, companyId, projectId) => projectService.get(ctx, companyId, projectId),
+        prepareStaticPreview: async (ctx, companyId, projectId) => {
+          const files = await projectWorkspace.listFiles(ctx, companyId, projectId);
+          if (!files.some(file => file.path === "index.html")) return null;
+          const stack = await detectProjectStack(files, async path => (await projectWorkspace.readFile(ctx, companyId, projectId, path)).content);
+          if (stack.framework !== "static") return null;
+          return projectService.updatePreview(ctx, companyId, projectId, { framework: "HTML/CSS" });
+        },
         startPreview: async (ctx, companyId, projectId, signal, options) => {
           await featureFlagService.assertEnabled(ctx, "code.shell", { companyId });
           return projectPreviewService.startPreview(ctx, companyId, projectId, { signal, verifiedBuild: !options?.development });

@@ -1,5 +1,6 @@
 import {rowTaskCapabilities,takesRowCapabilityPath} from "./chat-project-data-capabilities";
 import { runChatProjectBatch } from "./chat-project-batch";
+import { conversationProjectIds, resolveConversationProjectTarget } from "./chat-conversation-project-target";
 import { isChatProjectCreationBatch, runChatProjectCreation } from "./chat-project-creation";
 import { resolveCodingConversationLanguage, codingChatResponseInstruction, chatLanguageInstruction, detectCompanyChatLanguage } from "./company-chat-i18n";
 
@@ -23,7 +24,7 @@ import { CompanyChatActions, isReadOnlyCompanySwitch } from "./company-chat-acti
 import { CompanyDelegationRuntime, companyRunTelemetryHeaders } from "./company-runtime";
 import { createCoreServices } from "./core-services";
 import { ActiveSessionRegistry } from "./distributed-session-registry";
-import { ChatStreamLeaseError, reserveChatStream } from "./chat-stream-lease";
+import { ChatStreamLeaseError, bindChatStreamUserStop, reserveChatStream } from "./chat-stream-lease";
 import { EmailChatActions } from "./email-chat-actions";
 import { NoMemoryEvaluationResult, PerRequestNoMemoryGate } from "./ephemeral-no-memory-and-rtk";
 import { CODE_AGENT_MASTER_FLAG, FeatureFlagService } from "./feature-flags";
@@ -115,6 +116,14 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         requestedContext.companyId = conversationCard.companyId;
         requestedContext.contextType = "project";
       }
+      // Explicit Code mode must never silently become an ordinary chat with no filesystem tools.
+      // A new chat has no safe project scope; ask for one rather than choosing another project's files.
+      if (request.body.mode === "code" && !requestedContext.projectId) {
+        return reply.code(409).send({ error: { code: "CODE_PROJECT_REQUIRED", message:
+          /[\u0400-\u04ff]/u.test(message)
+            ? "Оберіть або створіть код-проєкт у налаштуваннях Npati Code, відкрийте його чат і повторіть запит."
+            : "Choose or create a code project in Npati Code settings, open its chat, and retry your request." } });
+      }
       const history = !memoryPolicy.noMemoryActive
         ? await readIntentHistory(workspaceStore, auth, request.body.conversationId, requestedContext.businessId) : [];
       // In Code mode the selected project's operation comes from the deterministic router, and anything it reads as
@@ -142,9 +151,11 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         Object.assign(requestedContext, { contextType: "none", companyId: null, projectId: null });
         return activeContextResolver.resolveChat(auth, requestedContext, message, semantic?.decision);
       });
-      // The request names another owned company than the selected one: work there instead of the open project.
-      const namedContext = await activeContextResolver.resolveNamedCompany(auth, resolved, message, semantic?.decision, history.map((item) => item.content).join("\n"))
-        .catch((err) => { request.log.warn({ err, projectIntent: semantic?.decision.intent, intentSource: semantic?.source }, "named_company_resolution_failed"); throw err; });
+      // The request names another owned company than the selected one, or another project of this chat: work there.
+      const namedContext = await activeContextResolver.resolveNamedCompany(auth, resolved, message, semantic?.decision, history.map((item) => item.content).join("\n"),
+        { conversationProjectIds: conversationProjectIds(workspaceStore, auth, memoryPolicy.noMemoryActive ? undefined : request.body.conversationId, history) })
+        .catch((err) => { request.log.warn({ err, projectIntent: semantic?.decision.intent, intentSource: semantic?.source }, "named_company_resolution_failed"); throw err; })
+        ?? await resolveConversationProjectTarget(workspaceStore, activeContextResolver, auth, { conversationId: memoryPolicy.noMemoryActive ? undefined : request.body.conversationId, message, current: resolved, intent: semantic?.decision.intent, history, log: request.log });
       if (namedContext) resolved = namedContext;
 
       let activeProjectId = resolved.project?.id ?? null;
@@ -441,6 +452,10 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
                 title: (codeProject.framework ?? "") + ": " + selection.reason, agentId: selection.source === "ai_planner" ? "AI Planner" : "System", result: JSON.stringify(selection),
               });
             }
+            const userStopped = bindChatStreamUserStop(activeChatStreams, streamId, streamController, () => {
+              codeRunCancellation.requestSessionCancel({ sessionId: codeSession.id, companyId: activeCompanyId!, projectId: effectiveProjectId ?? null, requestedBy: auth.userId, runId: runKey });
+              codeRunCancellation.abortLiveRuns(codeSession.id, new Error("Stopped by request"));
+            });
             const executed = await codeSessionRunExecutor.execute({
               ctx: auth,
               session: codeSession,
@@ -474,7 +489,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
               abort: isBackground
                 ? (reason?: unknown) => { codeBackgroundRuns.abort(runKey, reason instanceof Error ? reason.message : "Stopped by request"); }
                 : (reason?: unknown) => { streamController.abort(reason instanceof Error ? reason : new Error("Client disconnected")); },
-              cancelRequested: () => codeRunCancellation.isSessionCancelled(codeSession.id),
+              cancelRequested: () => userStopped() || codeRunCancellation.isSessionCancelled(codeSession.id),
             }).finally(stopInboxObservation);
             runResult = executed.result;
             if (chatInboxEnabled) {

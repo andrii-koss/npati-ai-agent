@@ -5,7 +5,7 @@ import { OmniRouteEngine, type OmniRouteMarketplace, type AIEngine } from "@npat
 import { type WebResearchService } from "@npati/web-research";
 import { type ServiceHealth } from "@npati/shared";
 import { type AuthContext, type WorkspaceStore } from "@npati/workspace";
-import { AuthenticationError, NpatiBackendAuthProvider, type AuthProvider } from "./auth";
+import { AuthenticationError, NpatiBackendAuthProvider, redactedRequestSerializer, type AuthProvider } from "./auth";
 import { type NpatiAuthClient } from "@npati/hub-connector";
 import { ProjectService } from "./project-service";
 import { MountedWorkspaceProvider } from "./mounted-workspace-provider";
@@ -125,7 +125,7 @@ export interface AppConfig {
 }
 
 export function buildApp(config: AppConfig = {}) {
-  const app = Fastify({ rewriteUrl: rewriteBrowserApiUrl, logger: process.env.NODE_ENV !== "test" ? {redact:{paths:["req.headers.authorization","req.headers.x-npati-api-key","req.body.password","req.body.apiKey","req.body.token","req.body.imapConfig.password","req.body.smtpConfig.password","req.body.imapConfig.accessToken","req.body.smtpConfig.accessToken","req.body.imapConfig.refreshToken","req.body.smtpConfig.refreshToken","req.body.imapConfig.clientSecret","req.body.smtpConfig.clientSecret"],censor:"[REDACTED]"}} : false, bodyLimit: 30 * 1024 * 1024 });
+  const app = Fastify({ rewriteUrl: rewriteBrowserApiUrl, logger: process.env.NODE_ENV !== "test" ? {serializers:{req:redactedRequestSerializer},redact:{paths:["req.headers.authorization","req.headers.x-npati-api-key","req.body.password","req.body.apiKey","req.body.token","req.body.imapConfig.password","req.body.smtpConfig.password","req.body.imapConfig.accessToken","req.body.smtpConfig.accessToken","req.body.imapConfig.refreshToken","req.body.smtpConfig.refreshToken","req.body.imapConfig.clientSecret","req.body.smtpConfig.clientSecret"],censor:"[REDACTED]"}} : false, bodyLimit: 30 * 1024 * 1024 });
 
   if (config.webDistDirectory) registerWebFrontend(app, config.webDistDirectory);
 

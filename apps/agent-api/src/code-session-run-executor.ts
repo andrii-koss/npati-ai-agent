@@ -59,6 +59,7 @@ export interface CodeSessionRunPort {
     quotaSessionId?: string;
     initialInboxMessageId?: string;
     verificationTools?: readonly string[];
+    refreshVerificationTools?: CodingAgentRunInput["refreshVerificationTools"];
     forceVerification?: boolean;
     requireImplementation?: boolean;
     /** Trusted creation context; never set for existing-project edits. */
@@ -248,6 +249,7 @@ export class CodeSessionRunExecutor {
         ...(input.initialInboxMessageId ? { initialInboxMessageId: input.initialInboxMessageId } : {}),
         ...(model ? { model } : {}),
         ...(verificationTools ? { verificationTools } : {}),
+        ...(this.options.resolveVerificationTools ? { refreshVerificationTools: () => this.options.resolveVerificationTools!(input) } : {}),
         ...(verificationTools?.includes("build") && forcesBuild(input) ? { forceVerification: true } : {}),
         signal: sink ? sink.signal : controller.signal,
         cancelRequested: input.cancelRequested,

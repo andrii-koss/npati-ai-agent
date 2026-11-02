@@ -5,7 +5,7 @@ import {
   type VerificationPlan,
 } from "./code-verification-plan";
 import { decideSelfReview, type SelfReviewRiskDecision } from "./code-self-review-risk";
-import { buildSelfReviewSummary, buildVerificationSummary } from "./code-review-summary";
+import { buildSelfReviewSummary, buildVerificationSummary, verificationEvidenceForReview } from "./code-review-summary";
 import {
   createSelfReview,
   selfReviewStopMessage,
@@ -25,7 +25,7 @@ import {
   emitCodingActivity,
 } from "./coding-agent-runner-contracts";
 import type { CodingAgentReviewPhases } from "./coding-agent-review-phases";
-import { CredentialMasker } from "./security-guardrails";
+import { SelfReviewSourceContext } from "./code-self-review-source-context";
 
 import type { CodeAgentLimits } from "./code-agent-config";
 
@@ -62,20 +62,13 @@ export interface ReviewCoordinatorHost {
 const VERIFICATION_CACHE_LIMIT = 4;
 
 export class CodingAgentReviewCoordinator {
-  private readonly runtimeReceipts: string[] = [];
-  recordRuntimeResult(result: CodeToolInvokeResult): void {
-    let receipt: unknown = result.result;
-    if (result.tool === "code.shell.exec") {
-      const data = (result.result as { data?: { exitCode?: number; stdout?: string; durationMs?: number; truncated?: boolean } })?.data;
-      if (data?.exitCode !== 0) return;
-      receipt = { exitCode: 0, stdout: CredentialMasker.mask(String(data.stdout ?? "")).slice(-3000), durationMs: data.durationMs, truncated: data.truncated || String(data.stdout ?? "").length > 3000 };
-    } else if (result.tool !== "code.data.policies.apply") return;
-    this.runtimeReceipts.push(JSON.stringify({ tool: result.tool, toolVersion: result.toolVersion, schemaVersion: result.schemaVersion, result: receipt }).slice(0, 4000));
-    if (this.runtimeReceipts.length > 8) this.runtimeReceipts.shift();
+  private readonly reviewSourceContext = new SelfReviewSourceContext();
+  recordRuntimeResult(result: CodeToolInvokeResult, args?: Record<string, unknown>): void {
+    this.reviewSourceContext.record(result, args);
   }
-  private readonly verificationTools: readonly string[];
+  private verificationTools: readonly string[];
   private readonly verificationLoop: VerificationLoop;
-  readonly verificationDisabled: boolean;
+  get verificationDisabled(): boolean { return this.verificationTools.length === 0; }
 
   private testIntegrity: TestIntegrityVerdict | null = null;
   private scopeGuard: ScopeGuardResult | null = null;
@@ -108,7 +101,6 @@ export class CodingAgentReviewCoordinator {
       maxRepairAttempts: host.ports.limits?.repairLoopAttempts ?? 3,
       requestedTools: this.verificationTools,
     });
-    this.verificationDisabled = this.verificationTools.length === 0;
   }
 
   get verdict(): SelfReviewVerdict | null {
@@ -351,17 +343,7 @@ export class CodingAgentReviewCoordinator {
   }
 
   verificationForReview(): string {
-    const report = this.verificationLoop.report();
-    if (!this.host.summary.verification && report.verificationRuns === 0) return "verification did not run for this change";
-    const status = this.host.summary.verification?.status ?? report.status;
-    const failed = report.failedChecks.map((check) => `${check.tool}${check.code ? ` (${check.code})` : ""}`);
-    return [
-      `status: ${status}`,
-      `verification runs: ${report.verificationRuns}`,
-      `repair attempts used: ${report.attemptsUsed} of ${report.maxAttempts}`,
-      `requested checks: ${report.requestedTools.join(", ") || "(none)"}`,
-      `failing checks: ${failed.join(", ") || "(none)"}`,
-    ].join("\n");
+    return verificationEvidenceForReview(this.verificationLoop.report(), this.host.summary.verification?.status);
   }
 
   testIntegrityForReview(): string {
@@ -383,6 +365,7 @@ export class CodingAgentReviewCoordinator {
   }
 
   async runSelfReview(steps: number, prompt: string): Promise<void> {
+    const context = await this.reviewSourceContext.collect(this.host, steps);
     const verdict = await this.host.reviewPhases.runSelfReviewOnce({
       input: this.host.input,
       session: this.host.session,
@@ -396,7 +379,7 @@ export class CodingAgentReviewCoordinator {
       runChanges: () => this.runChanges(),
       verificationForReview: () => this.verificationForReview(),
       testIntegrityForReview: () => this.testIntegrityForReview(),
-      runtimeEvidence: this.runtimeReceipts.join("\n"),
+      runtimeEvidence: context.join("\n"),
       boundedDiff: (limit) => this.boundedDiff(limit),
       writeSelfReviewSummary: () => this.writeSelfReviewSummary(),
       setSelfReviewVerdict: (value) => { this.selfReviewVerdict = value; },
@@ -705,6 +688,13 @@ export class CodingAgentReviewCoordinator {
     | { action: "continue" }
   > {
     const { steps, prompt, assistantText, stateRunId } = args;
+    // Creation can start with no commands. Discover the scripts that now exist before deciding to skip.
+    // Keep all prior requirements and the spent repair budget even if a script was removed during repair.
+    if (!this.host.input.readOnlyIntent && this.host.session.mode !== "plan" && this.host.input.refreshVerificationTools) {
+      const discovered = await this.host.input.refreshVerificationTools();
+      this.verificationTools = Object.freeze([...new Set([...this.verificationTools, ...(discovered ?? [])])]);
+      this.verificationLoop.addRequestedTools(this.verificationTools);
+    }
     await this.evaluateChangeSet(steps, prompt);
     const changeSet = this.runChanges();
 

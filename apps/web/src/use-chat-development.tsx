@@ -7,22 +7,30 @@ import type { CodeChatSession } from "./code-inbox-client";
 import { watchDevelopmentTrace } from "./chat-development-stream";
 import { ChatDevelopmentProgress, ChatDevelopmentPreview } from "./ChatDevelopmentProgress";
 import { developmentCard, hideDevelopmentMessage } from "./chat-development-view";
-import { ChatDevelopmentPanel } from "./ChatDevelopmentPanel";
+import { publishChatProcesses, stopConversationActivity } from "./chat-activity";
 import { useTranslation } from "./i18n";
 export function useChatDevelopment(options: {
   companyId?: string | null; conversationId: string | null; businessId?: string; onConversation(id: string, preserveActiveTurn?: boolean): void; onError(message: string): void; onAccepted(message: string, intro?: string): void; onSession(session: CodeChatSession, conversationId: string): void; boundSessionId?: string; busy?: boolean;
+  /** The project of the chat's newest project card: where this chat last worked, whatever order its processes were created in. */
+  latestProjectId?: string;
 }) {
   const navigate = useNavigate(); const [search] = useSearchParams();
   const { language } = useTranslation();
   const queryProjectId = search.get("project") ?? undefined; const root = search.get("developmentRoot");
   const [processes, setProcesses] = useState<DevelopmentProcess[]>([]);
-  const currentProcess = processes.find(p => p.conversationId === options.conversationId && (!queryProjectId || p.projectId === queryProjectId))
-    ?? processes.find(p => p.parentConversationId === options.conversationId && (!queryProjectId || p.projectId === queryProjectId))
-    ?? (queryProjectId ? processes.find(p => p.projectId === queryProjectId) : undefined)
-    ?? processes.find(p => developmentIsActive(p));
-  const projectId = queryProjectId ?? currentProcess?.projectId;
-  const [busyId, setBusyId] = useState<string>();
-  const [showAll, setShowAll] = useState(false);
+  // The chat continues where it last worked (its newest card), not with the empty project it was opened with ("Open in
+  // chat" leaves an idle entry) nor with the most recently created process: a TODO chat that made a game and then
+  // edited the TODO again is still on the TODO.
+  const latestWorked = options.latestProjectId && options.conversationId
+    ? processes.find(p => p.projectId === options.latestProjectId && p.conversationId === options.conversationId) : undefined;
+  const currentProcess = latestWorked
+    // Without a process for the chat's newest project, another project of this chat is not substituted for it.
+    ?? (options.latestProjectId ? undefined : processes.find(p => p.conversationId === options.conversationId && (!queryProjectId || p.projectId === queryProjectId)))
+    ?? (options.latestProjectId ? undefined : processes.find(p => p.parentConversationId === options.conversationId && (!queryProjectId || p.projectId === queryProjectId)))
+    ?? (queryProjectId ? processes.find(p => p.projectId === queryProjectId) : undefined);
+  const projectId = latestWorked?.projectId ?? queryProjectId ?? currentProcess?.projectId;
+  // Opening a project from Settings first moves to its own chat; a message sent meanwhile would be cut off by that move.
+  const [openingProjectChat, setOpeningProjectChat] = useState(false);
   const previousStatuses = useRef(new Map<string, string>());
   const retry = useRef<{ payload: string; requestId: string } | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
@@ -32,6 +40,7 @@ export function useChatDevelopment(options: {
   const snapshotGeneration = useRef(0);
   const refreshing = useRef<Promise<void> | undefined>(undefined);
   const firstRead = useRef(true);
+  useEffect(() => { if (!firstRead.current) publishChatProcesses(processes); }, [processes]);
   const readFor = useRef<string | null | undefined>(undefined);
   async function refresh(): Promise<void> {
     // A read already running for the same chat is shared; a read for another chat waits for it and then runs.
@@ -95,10 +104,12 @@ export function useChatDevelopment(options: {
     const companyId = search.get("company");
     if (!projectId || !companyId || options.conversationId || root) return;
     let cancelled = false;
+    setOpeningProjectChat(true);
     void api<{ url: string }>("/chat/development/project", { method: "POST", body: JSON.stringify({ companyId, projectId }) })
       .then(data => { if (!cancelled) navigate(data.url, { replace: true }); })
-      .catch(error => { if (!cancelled) callbacks.current.onError(error instanceof Error ? error.message : "Could not restore project chat"); });
-    return () => { cancelled = true; };
+      .catch(error => { if (!cancelled) callbacks.current.onError(error instanceof Error ? error.message : "Could not restore project chat"); })
+      .finally(() => { if (!cancelled) setOpeningProjectChat(false); });
+    return () => { cancelled = true; setOpeningProjectChat(false); };
   }, [projectId, root, options.conversationId, search, navigate]);
   useEffect(() => {
     const process = processes.find(p => p.projectId === projectId && p.sessionId && p.conversationId === options.conversationId);
@@ -113,15 +124,6 @@ export function useChatDevelopment(options: {
     previousStatuses.current.set(process.id, signature);
     if (previous && previous !== signature && !developmentIsActive(process) && options.conversationId) callbacks.current.onConversation(options.conversationId);
   }, [processes, projectId, options.conversationId, options.busy]);
-  async function action(id: string, action: "open" | "stop" | "hide") {
-    setBusyId(id);
-    try {
-      const result = await api<{ url?: string }>("/chat/development/processes/" + encodeURIComponent(id) + "/" + action, { method: "POST" });
-      if (result.url) navigate(result.url);
-      else { await refresh(); if (action === "hide" && root && processes.find(p => p.id === id)?.projectId === projectId) navigate("/c/" + root); }
-    } catch (error) { callbacks.current.onError(error instanceof Error ? error.message : "Process action failed"); }
-    finally { if (alive.current) setBusyId(undefined); }
-  }
   async function submit(message: string): Promise<boolean> {
     const restore = requestsDevelopmentRestore(message);
     let targets: DevelopmentTarget[] = [];
@@ -143,7 +145,7 @@ export function useChatDevelopment(options: {
       if (restore) {
         const data = await api<{ processes: DevelopmentProcess[]; conversationId?: string }>("/chat/development/restore", { method: "POST" });
         if (!data.processes.length) { callbacks.current.onError(language === "uk" ? "Проєктів для розробки ще немає. Створіть перший проєкт у чаті." : "No development projects yet. Create your first project in chat."); return true; }
-        setProcesses(data.processes); setShowAll(true);
+        setProcesses(data.processes);
         if (data.conversationId) { callbacks.current.onConversation(data.conversationId, true); navigate("/c/" + data.conversationId); }
         return true;
       }
@@ -170,27 +172,23 @@ export function useChatDevelopment(options: {
     } catch (error) { callbacks.current.onError(error instanceof Error ? error.message : "Could not start development"); return true; }
     finally { sending.current = false; if (alive.current) setSubmitting(false); }
   }
-  const currentRoot = root ?? currentProcess?.parentConversationId ?? options.conversationId;
-  const visible = processes.filter(p => p.conversationId !== options.conversationId && (p.parentConversationId === currentRoot || !p.hidden && (showAll || !currentRoot)));
-  const activeProcess = (currentProcess && developmentIsActive(currentProcess))
-    ? currentProcess
-    : processes.find(developmentIsActive);
+  const activeProcess = processes.find(p => developmentIsActive(p) &&
+    (p.conversationId === options.conversationId || p.parentConversationId === options.conversationId));
   const isActive = Boolean(activeProcess);
   return {
     submit,
     submitting,
     stop: async () => {
-      const target = (currentProcess && developmentIsActive(currentProcess)) ? currentProcess : processes.find(developmentIsActive);
-      if (!target) return;
-      setProcesses(current => current.map(p => p.id === target.id ? { ...p, status: "cancelled" } : p));
-      await action(target.id, "stop");
+      if (!options.conversationId || !activeProcess) return;
+      await stopConversationActivity(options.conversationId);
+      await refresh();
     },
     isActive,
+    openingProjectChat,
     project: currentProcess,
     card: (messages: Parameters<typeof developmentCard>[0], index: number) => developmentCard(messages, index, processes, options.conversationId),
     hideMessage: (messages: Parameters<typeof hideDevelopmentMessage>[0], index: number) => hideDevelopmentMessage(messages, index, processes),
     preview: <ChatDevelopmentPreview process={currentProcess} busy={options.busy || submitting} />,
     timeline: <ChatDevelopmentProgress process={currentProcess} isUk={language === "uk"} />,
-    panel: null,
   };
 }

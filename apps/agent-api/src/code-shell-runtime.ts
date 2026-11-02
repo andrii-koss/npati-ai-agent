@@ -392,7 +392,7 @@ export class CodeShellRuntime {
       }
     }
 
-    const command = this.composeCommand(input.command, cwd, environment);
+    const command = this.composeCommand(input.command, environment);
     const installLike = classification.timeoutClass === "install" || classification.timeoutClass === "install_build";
     const ceiling = installLike ? this.limits.installBuildTimeoutMs : this.limits.commandTimeoutMs;
     const timeoutMs = Math.max(1_000, Math.min(input.timeoutMs ?? ceiling, this.limits.installBuildTimeoutMs));
@@ -483,9 +483,10 @@ export class CodeShellRuntime {
    * Builds the command line that reproduces the session state. Only non-secret variables are inlined
    * (they were validated above); secret values are never part of the command string.
    */
-  private composeCommand(command: string, cwd: string, environment: Record<string, string>): string {
+  private composeCommand(command: string, environment: Record<string, string>): string {
     const parts: string[] = [];
-    if (cwd && cwd !== "/workspace") parts.push(`cd ${quote(cwd)}`);
+    // cwd is already a structured sandbox/process argument. Inlining `cd ... &&` changes the
+    // classified command and makes safe subdirectory operations fail the inner terminal policy.
     for (const [name, value] of Object.entries(environment)) parts.push(`export ${name}=${quote(value)}`);
     parts.push(command);
     return parts.length > 1 ? parts.join(" && ") : command;

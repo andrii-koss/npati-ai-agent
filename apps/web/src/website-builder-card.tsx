@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { MessageSquare, ExternalLink, Code2, Copy, Pencil, Trash2 } from "lucide-react";
-import { getStoredAuthToken } from "./AuthContext";
+import { openableProjectPreview } from "./catalog-project-preview";
 import { CatalogProjectThumbnail } from "./catalog-project-thumbnail";
 import type { WebsiteProject } from "./website-builder-cache";
 import { PROJECT_KIND_LABELS, type websiteBuilderCopy } from "./website-builder-constants";
@@ -81,11 +81,20 @@ export const WebsiteProjectCard = React.memo(function WebsiteProjectCard({
     setMenuOpen(true);
   };
 
-  const authToken = getStoredAuthToken();
-  const launchUrl = `/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(site.id)}/preview/launch${authToken ? `?authToken=${encodeURIComponent(authToken)}` : ""}`;
-
-  function handleOpenPreview() {
-    window.open(launchUrl, "_blank", "noopener,noreferrer");
+  // The window opens on the click (so no pop-up blocker stops it) and gets a scoped preview token; the user's own
+  // access token is sent only in a request header, never in a URL that browser history or server logs keep.
+  const opening = useRef(false);
+  async function handleOpenPreview() {
+    if (opening.current) return;
+    opening.current = true;
+    const popup = window.open("about:blank", "_blank");
+    if (popup) popup.opener = null;
+    try {
+      const url = await openableProjectPreview(companyId, site.id);
+      if (popup) popup.location.replace(url);
+    } catch (cause) {
+      if (popup) popup.document.body.textContent = cause instanceof Error ? cause.message : "Preview unavailable";
+    } finally { opening.current = false; }
   }
 
   return (
@@ -189,17 +198,16 @@ export const WebsiteProjectCard = React.memo(function WebsiteProjectCard({
           </Link>
 
           {/* Preview button */}
-          <a
-            href={launchUrl}
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            type="button"
+            onClick={() => void handleOpenPreview()}
             className="website-icon-btn"
             title={language === "uk" ? "Відкрити Preview" : "Open Live Preview"}
             aria-label={language === "uk" ? "Відкрити Preview" : "Open Live Preview"}
             style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", textDecoration: "none" }}
           >
             <ExternalLink size={16} />
-          </a>
+          </button>
 
           {/* Code workspace */}
           <Link
@@ -252,7 +260,7 @@ export const WebsiteProjectCard = React.memo(function WebsiteProjectCard({
             }}
           >
             <Pencil size={15} />
-            <span>{language === "uk" ? "Редагувати" : "Rename"}</span>
+            <span>{t.rename}</span>
           </button>
 
           <button
@@ -264,7 +272,7 @@ export const WebsiteProjectCard = React.memo(function WebsiteProjectCard({
             }}
           >
             <Copy size={15} />
-            <span>{language === "uk" ? "Дублювати" : "Duplicate"}</span>
+            <span>{t.duplicate}</span>
           </button>
 
           <div className="sidebar-action-divider" />
@@ -278,7 +286,7 @@ export const WebsiteProjectCard = React.memo(function WebsiteProjectCard({
             }}
           >
             <Trash2 size={15} />
-            <span>{language === "uk" ? "Видалити" : "Delete"}</span>
+            <span>{t.delete}</span>
           </button>
         </div>,
         document.body

@@ -42,6 +42,7 @@ import {
 } from "./coding-agent-runner-contracts";
 import type { CodingAgentReviewCoordinator } from "./coding-agent-review-coordinator";
 import { compactWriteReceipt, recordWrittenFiles } from "./code-write-receipt";
+import { protectedMoveStopMessage } from "./code-protected-move-stop";
 
 export interface ToolWavesExecutionHost {
   ports: CodingAgentRunnerPorts;
@@ -403,7 +404,7 @@ export class CodingAgentToolWaves {
         }));
       }
 
-      if (result.ok && call.arguments.dryRun !== true) reviewCoordinator.recordRuntimeResult(result);
+      if (result.ok && call.arguments.dryRun !== true) reviewCoordinator.recordRuntimeResult(result, call.arguments);
       if (call.name === "code.verify.run" && result.ok) {
         await reviewCoordinator.onVerifyToolExecuted(beforeVerification, result);
         const envelope = (result.result as Record<string, unknown>)?.data ?? (result.result as Record<string, unknown>);
@@ -599,6 +600,13 @@ export class CodingAgentToolWaves {
         }
         const outcome = await execute(head);
         await appendToolResult(outcome);
+
+        const protectedMove = protectedMoveStopMessage(outcome.call.name, outcome.result, input.responseLanguage, input.prompt, input.requireImplementation);
+        if (protectedMove) {
+          summary.remaining = "secret_content";
+          await release("protected_move_refused");
+          return { action: "stopped", result: await stop("stopped", "refused", protectedMove) };
+        }
 
         const approvalPause = approvalPauseFrom(outcome);
         if (approvalPause) {

@@ -52,6 +52,14 @@ export function companyNamedInMessage<T extends { id: string; name: string }>(co
   return best.company;
 }
 
+/** The question for a name several projects share: which one, with the company and last change that tell them apart. */
+function sameNameQuestion(message: string, projects: Project[], companies: Company[]): string {
+  const uk = /[Ѐ-ӿ]/u.test(message);
+  const list = projects.slice(0, 6).map(p => `«${p.name}» — ${companies.find(c => c.id === p.companyId)?.name ?? p.companyId}, ${String(p.updatedAt ?? "").slice(0, 10)}`).join("; ");
+  return uk ? `Знайдено кілька проєктів із назвою «${projects[0]!.name}»: ${list}. Відкрийте чат потрібного проєкту або назвіть його однозначно.`
+    : `More than one owned project is named “${projects[0]!.name}”: ${list}. Open the chat of the project you mean or name it unambiguously.`;
+}
+
 export class ActiveContextResolver {
   constructor(private readonly store: WorkspaceStore) {}
 
@@ -83,7 +91,7 @@ export class ActiveContextResolver {
     return (await this.store.listCompanyAgentsPage(auth, companyId, 50)).items.filter(agent => mentions(message, agent.name));
   }
 
-  async resolveNamedCompany(auth: AuthContext, current: ResolvedActiveContext, message: string, decision?: import("@npati/shared").ProjectIntentDecision, conversationText = "", options?: { deferProjectAmbiguity?: boolean }): Promise<ResolvedActiveContext | undefined> {
+  async resolveNamedCompany(auth: AuthContext, current: ResolvedActiveContext, message: string, decision?: import("@npati/shared").ProjectIntentDecision, conversationText = "", options?: { deferProjectAmbiguity?: boolean; conversationProjectIds?: () => Promise<string[]> }): Promise<ResolvedActiveContext | undefined> {
     const owned: Company[] = [];
     let cursor: string | undefined;
     do {
@@ -128,6 +136,15 @@ export class ActiveContextResolver {
       const clauses = lowerMessage.split(/[.;!?\n]+/u);
       const targets = candidates.filter(project => clauses.some(clause => clause.includes(project.name.trim().toLocaleLowerCase()) && !preservingClause.test(clause)));
       if (candidates.length > 1 && targets.length === 1) candidates = targets;
+      // Several projects share the one name the request uses ("My Tasks"): the chat's own project is the one meant,
+      // then a single same-named project this conversation worked in. Otherwise the user chooses; nothing is guessed.
+      const sameName = candidates.length > 1 && new Set(candidates.map(p => p.name.trim().toLocaleLowerCase())).size === 1;
+      if (sameName && current.project && candidates.some(p => p.id === current.project!.id)) return undefined;
+      if (sameName && options?.conversationProjectIds) {
+        const ids = new Set(await options.conversationProjectIds());
+        const worked = candidates.filter(p => ids.has(p.id));
+        if (worked.length === 1) return this.resolve(auth, { contextType: "project", companyId: worked[0]!.companyId, projectId: worked[0]!.id });
+      }
       if (candidates.length > 1) {
         // The preliminary lookup only supplies a unique project to the semantic router.
         // Resolve ambiguity after that router has classified the complete request.
@@ -137,6 +154,7 @@ export class ActiveContextResolver {
           && new Set(candidates.map(p => p.name.trim().toLocaleLowerCase())).size === candidates.length) {
           return { ...await this.resolve(auth, { contextType: "company", companyId: candidates[0]!.companyId }), projects: candidates };
         }
+        if (sameName) throw new ContextValidationError(sameNameQuestion(message, candidates, owned));
         throw new ContextValidationError("More than one owned project is named; specify a single project for this action");
       }
       const project = candidates[0];

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { CodeToolError } from "../apps/agent-api/src/code-tools-path";
 import { buildUnifiedDiff, diffStats, splitLines } from "../apps/agent-api/src/code-tools-diff";
+import { extractWriteChanges } from "../apps/agent-api/src/code-workspace-checkpoint";
 import {
   applyEdit, deletePathSafe, detectEol, findWhitespaceTolerantMatch, movePathSafe,
   preferredEditTool, resolveWriteLimits, writeFileSafe, type CodeWritePort,
@@ -58,6 +59,29 @@ function memoryPort(files: Record<string, string>, modes: Record<string, number>
 const limits = { maxEditBytes: 4096, maxPatchFiles: 5, massOperationThreshold: 2 };
 
 describe("security-gate: C3 diff engine", () => {
+  it("reports removing or adding only the EOF newline as a real reviewable change", () => {
+    const removed = buildUnifiedDiff("Hello\n", "Hello", "hello.txt");
+    expect(removed).toContain("-Hello\n+Hello\n\\ No newline at end of file");
+    expect(diffStats(removed)).toMatchObject({ additions: 1, deletions: 1 });
+    const added = buildUnifiedDiff("Hello", "Hello\n", "hello.txt");
+    expect(added).toContain("-Hello\n\\ No newline at end of file\n+Hello");
+  });
+
+  it("keeps an identical write out of mutation bookkeeping and performs no filesystem write", async () => {
+    const { port, calls } = memoryPort({ "hello.txt": "Hello" });
+    const result = await writeFileSafe({ path: "hello.txt", content: "Hello" }, port, { limits }, { revision: "r-5" });
+    expect(result).toMatchObject({ created: false, diff: "", bytes: 5 });
+    expect(calls.write).toBe(0);
+    expect(extractWriteChanges("code.fs.write", result)).toEqual([]);
+  });
+
+  it("keeps CRLF-only mutations reviewable instead of classifying them as no-op writes", async () => {
+    const { port, calls } = memoryPort({ "hello.txt": "Hello\r\n" });
+    const result = await writeFileSafe({ path: "hello.txt", content: "Hello\n" }, port, { limits }, { revision: "r-7" });
+    expect(result.diff).toContain("-Hello\r\n+Hello\n");
+    expect(calls.write).toBe(1);
+    expect(extractWriteChanges("code.fs.write", result)).toHaveLength(1);
+  });
   it("produces git-style hunks with context and counts lines", () => {
     const before = "one\ntwo\nthree\nfour\nfive\n";
     const after = "one\ntwo\nTHREE\nfour\nfive\n";

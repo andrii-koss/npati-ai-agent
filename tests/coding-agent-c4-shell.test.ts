@@ -150,7 +150,8 @@ describe("security-gate: C4 shell sessions and output", () => {
     await runtime.exec(context, { companyId: "c1", projectId: "p1", sessionId: "s1", toolCallId: "t1", command: "cd src", cwd: "/workspace/src", env: { NODE_ENV: "test" } });
     const second = await runtime.exec(context, { companyId: "c1", projectId: "p1", sessionId: "s1", toolCallId: "t2", command: "pwd" });
     expect(second.cwd).toBe("/workspace/src");
-    expect(fake.calls[1]!.command).toContain("cd '/workspace/src'");
+    expect(fake.calls[1]!.cwd).toBe("/workspace/src");
+    expect(fake.calls[1]!.command).not.toContain("cd '/workspace/src'");
     expect(fake.calls[1]!.command).toContain("export NODE_ENV='test'");
   });
 

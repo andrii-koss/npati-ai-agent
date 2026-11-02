@@ -8,10 +8,12 @@ import { SidebarActionMenu } from "./SidebarActionMenu";
 import { ConversationRow } from "./SidebarItemRows";
 import { useSidebarState } from "./use-sidebar-state";
 import { prefetchProjectCatalog } from "../project-catalog-client";
+import { conversationActivity, stopConversationActivity, useChatActivity } from "../chat-activity";
 
 const navigation = ["Settings"];
 
 export function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose?: () => void } = {}) {
+  const activity = useChatActivity();
   const {
     location,
     t,
@@ -54,6 +56,8 @@ export function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose
         isPinned={isPinned}
         isMenuOpen={isMenuOpen}
         isActive={isActive}
+        activity={conversationActivity(activity, conversation.id)}
+        onStop={() => { void stopConversationActivity(conversation.id); }}
         onOpen={(c) => void openConversation(c)}
         onTogglePin={togglePinChat}
         onOptionsClick={(e, c, pinned) => {

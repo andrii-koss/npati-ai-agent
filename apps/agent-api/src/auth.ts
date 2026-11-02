@@ -196,7 +196,9 @@ export class NpatiBackendAuthProvider implements AuthProvider {
 
   async authenticate(request: FastifyRequest): Promise<AuthContext> {
     const query = request.query as Record<string, string> | undefined;
-    const queryToken = query?.authToken || query?.token;
+    // Only ?token= (browser media and event streams that cannot send headers); the old ?authToken= alias put a session
+    // token into navigable URLs (catalog Preview) and is gone with that use.
+    const queryToken = query?.token;
     const rawApiKey = (request.headers["x-api-key"] as string) || (request.headers["x-npati-api-key"] as string);
     const authHeader = request.headers.authorization;
     const bearerToken = authHeader && authHeader.startsWith("Bearer ")
@@ -443,4 +445,27 @@ export function createMockNpatiJwt(
   ).toString("base64url");
   const signature = createHmac("sha256", secret).update(`${header}.${payload}`).digest("base64url");
   return `${header}.${payload}.${signature}`;
+}
+
+/**
+ * Query-string credentials kept out of request logs. Browser media and event streams pass `?token=` because they
+ * cannot send an Authorization header, and Fastify logs every request URL, so a session or preview token in the URL
+ * would otherwise be written to the log in full.
+ */
+const SECRET_QUERY = /([?&](?:token|authToken|access_token|api_key|apiKey|key)=)[^&#]*/giu;
+
+export function redactUrlSecrets(url: string | undefined): string | undefined {
+  return url?.replace(SECRET_QUERY, "$1[REDACTED]");
+}
+
+/** Fastify's default request serializer with the URL's credentials redacted. */
+export function redactedRequestSerializer(request: { method?: string; url?: string; version?: string; host?: string; hostname?: string; ip?: string; socket?: { remotePort?: number } }) {
+  return {
+    method: request.method,
+    url: redactUrlSecrets(request.url),
+    version: request.version,
+    host: request.host ?? request.hostname,
+    remoteAddress: request.ip,
+    remotePort: request.socket?.remotePort,
+  };
 }

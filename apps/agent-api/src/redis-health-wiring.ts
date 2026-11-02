@@ -15,7 +15,7 @@ export interface CreateRedisHealthWiringDeps {
 
 export function createRedisHealthWiring(deps: CreateRedisHealthWiringDeps) {
   const { config, log, app } = deps;
-  const activeChatStreams=new Map<string,{controller:AbortController;workspaceId:string;userId:string}>();
+  const activeChatStreams=new Map<string,{controller:AbortController;workspaceId:string;userId:string;onUserStop?:()=>void}>();
   const activeSessionRegistry = config.activeSessionRegistry ?? (config.redisUrl ? new RedisActiveSessionRegistry(config.redisUrl) : new InMemoryActiveSessionRegistry());
   let redisHealthClient: ReturnType<typeof createClient> | undefined;
   let redisHealthConnecting: Promise<ReturnType<typeof createClient>> | undefined;

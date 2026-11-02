@@ -1,4 +1,5 @@
 import { adaptiveLimit, classifyRunTask, CODE_RUN_TASK_BUDGETS } from "./code-run-budget";
+import { explicitUserWritePaths } from "./code-user-file-scope";
 import type { AuthContext, CodeSession } from "@npati/workspace";
 import type { CodeAgentLimits } from "./code-agent-config";
 import {
@@ -157,7 +158,9 @@ export async function startCodingAgentSession(args: StartSessionArgs): Promise<S
     };
   }
 
+  const userWritePaths = explicitUserWritePaths(input.prompt);
   const capabilityScopeFields: Record<string, unknown> = {
+    ...(userWritePaths ? { userWritePaths } : {}),
     ...(input.subagentWritePaths ? { subagentWritePaths: input.subagentWritePaths } : {}),
     ...(capabilityScope.tools ? { capabilityScope: capabilityScope.tools } : {}),
     ...(capabilityScope.parentRunId ? { parentRunId: capabilityScope.parentRunId } : {}),

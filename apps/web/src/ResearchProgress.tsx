@@ -1,5 +1,27 @@
 import React, { useEffect, useMemo, useState } from "react";
-import type { ProjectProgressEvent } from "@npati/shared";
+import type { DevelopmentProcessProgressItem, ProjectProgressEvent } from "@npati/shared";
+import { isVisibleChatOperation, normalizeActivity } from "./chat-timeline";
+
+/** One owner per submitted turn. Run boundaries and server locale updates cannot restart thinking. */
+export function useChatThinking(options: { busy: boolean; streaming: boolean; text: string; items?: DevelopmentProcessProgressItem[]; runIds: string[]; events: ChatProgressEvent[] }) {
+  const [turn, setTurn] = useState<{ text: string; baseline: Set<string>; runs: Set<string>; finished: boolean } | null>(null);
+  const items = normalizeActivity(options.items);
+  const start = (message: string) => {
+    setTurn({ text: /[іїєґ]/iu.test(message) ? "Думаю" : options.text,
+      baseline: new Set(items.map(item => item.id)), runs: new Set([...options.runIds, ...items.flatMap(item => item.runId ? [item.runId] : [])]), finished: false });
+  };
+  const operationStarted = Boolean(turn && items.some(item => isVisibleChatOperation(item) &&
+    (item.runId ? !turn.runs.has(item.runId) : !turn.baseline.has(item.id))));
+  const progressed = operationStarted || options.streaming || options.events.some(event => !event.type.startsWith("final_generation"));
+  useEffect(() => {
+    if (turn && !turn.finished && (progressed || !options.busy)) setTurn(current => current === turn ? { ...current, finished: true } : current);
+  }, [turn, progressed, options.busy]);
+  return { start, text: turn?.text ?? options.text, visible: Boolean(turn && !turn.finished && options.busy && !progressed) };
+}
+
+export function ChatThinking({ text }: { text: string }) {
+  return <article className="assistant research-progress chat-thinking" role="status" aria-label={text}><div className="research-generation-row active"><span className="research-progress-state" aria-hidden="true">●</span><span className="research-active-text">{text}</span></div></article>;
+}
 
 export type ChatProgressEvent = {
   type:

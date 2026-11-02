@@ -21,6 +21,7 @@ import { SecurityPolicyViolation } from "./security-guardrails";
 import { StorageRateLimitError } from "./storage-protection";
 import { WorkspaceChatActions } from "./workspace-chat-actions";
 import { AgentReply, ContextValidationError, defaultHybridRouter } from "@npati/shared";
+import { conversationProjectIds } from "./chat-conversation-project-target";
 import { ResearchProgressListener } from "@npati/web-research";
 import { AuthContext, OnboardingScenario, WorkspaceAccessError } from "@npati/workspace";
 import type { AgentAIContext } from "@npati/agent";
@@ -31,7 +32,7 @@ export interface ChatRouteDeps {
   resolveProjectIntent?: import("./chat-project-intent").ChatProjectIntentResolver;
   config: AppConfig;
   log: FastifyBaseLogger;
-  activeChatStreams: Map<string,{controller:AbortController;workspaceId:string;userId:string}>;
+  activeChatStreams: Map<string,{controller:AbortController;workspaceId:string;userId:string;onUserStop?:()=>void}>;
   activeContextResolver: ReturnType<typeof createCoreServices>["activeContextResolver"];
   agent: ReturnType<typeof createCoreServices>["agent"];
   authProvider: ReturnType<typeof createCoreServices>["authProvider"];
@@ -53,6 +54,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
     const active=activeChatStreams.get(request.params.streamId);
     if(!active)return {cancelled:false};
     if(active.workspaceId!==auth.workspaceId||active.userId!==auth.userId)return reply.code(403).send({error:{code:"STREAM_FORBIDDEN",message:"This chat stream belongs to another user."}});
+    // A disconnect leaves a background code run going; the user's Stop must stop it too (D03).
+    active.onUserStop?.();
     active.controller.abort(new DOMException("Stopped by user","AbortError"));
     return {cancelled:true};
   });
@@ -197,7 +200,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
         conversationHistory: history,
       });
       let resolved = await activeContextResolver.resolveChat(auth, requestedContext, prompt ?? "", semantic?.decision);
-      resolved = await activeContextResolver.resolveNamedCompany(auth, resolved, prompt ?? "", semantic?.decision, history.map(item => item.content).join("\n")) ?? resolved;
+      resolved = await activeContextResolver.resolveNamedCompany(auth, resolved, prompt ?? "", semantic?.decision, history.map(item => item.content).join("\n"),
+        { conversationProjectIds: conversationProjectIds(workspaceStore, auth, memoryPolicy.noMemoryActive ? undefined : request.body.conversationId, history) }) ?? resolved;
       const activeProjId = resolved.project?.id ?? null;
       const activeCompId = resolved.company?.id ?? resolved.project?.companyId ?? null;
 

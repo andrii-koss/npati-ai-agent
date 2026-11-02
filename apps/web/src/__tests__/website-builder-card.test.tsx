@@ -44,14 +44,13 @@ describe("WebsiteProjectCard", () => {
     // "Edit in chat" button is present
     expect(markup).toContain("Редагувати в чаті");
 
-    // Compact icon buttons are present: Open Preview, Code, Duplicate, Rename, Delete
+    // Compact icon buttons: Open Preview and Code; Duplicate, Rename and Delete live in the "⋯" menu (website-builder-card-menu.test.tsx)
     expect(markup).toContain("Відкрити Preview");
     expect(markup).toContain("aspect-ratio:16 / 10");
     expect(markup).not.toContain("height:180px");
     expect(markup).toContain("Код");
-    expect(markup).toContain("Дублювати");
-    expect(markup).toContain("Перейменувати");
-    expect(markup).toContain("Видалити");
+    expect(markup).toContain("Більше дій");
+    expect(markup).toContain('aria-haspopup="menu"');
 
     // Excluded clutter: no description, no framework badge (Next.js/Vite), no status pill, no date
     expect(markup).not.toContain("Responsive shop with products and shopping cart");
@@ -79,9 +78,7 @@ describe("WebsiteProjectCard", () => {
     expect(markup).toContain("Edit in chat");
     expect(markup).toContain("Open Live Preview");
     expect(markup).toContain("Code");
-    expect(markup).toContain("Duplicate");
-    expect(markup).toContain("Rename");
-    expect(markup).toContain("Delete");
+    expect(markup).toContain("More options");
     expect(markup).toContain("No preview yet");
     expect(markup).toContain("A preview will be available after the project is set up.");
     expect(markup).toContain('data-project-variant="website"');

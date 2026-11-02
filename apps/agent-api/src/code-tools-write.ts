@@ -7,6 +7,7 @@ import { decideSensitiveRead, isSensitivePath, resolveSensitivePolicy } from "./
 import { resolveCodeAgentLimits } from "./code-agent-config";
 import { buildUnifiedDiff, diffLineStats, sha256, splitLines } from "./code-tools-diff";
 import { assertNoPlaceholderInWrite } from "./provider-data-guard";
+import { assertCodeWriteReadable, isWorkspaceManifest } from "./workspace-protected-content";
 
 /**
  * C3: write-side engine for the editing tools.
@@ -291,6 +292,7 @@ export async function applyEdit(
   // C5b: a redaction placeholder is a reference to a value the model never saw, so it must never reach
   // disk. This runs before the write (and before hooks) so a refused edit leaves the file untouched.
   assertNoPlaceholderInWrite(nextContent, { tool, path: guarded.path });
+  assertCodeWriteReadable(guarded.path, nextContent, tool);
   const diff = buildUnifiedDiff(toEol(body, "lf"), toEol(nextBody, "lf"), guarded.path);
   const written = await port.writeFile(guarded.path, nextContent, {
     encoding: encoding.encoding,
@@ -342,6 +344,7 @@ export async function writeFileSafe(
   // C5b: never persist a redaction placeholder — it references a value the model never received. Checked
   // before any stat/read so a refused write has no side effects at all.
   assertNoPlaceholderInWrite(input.content, { tool, path: guarded.path });
+  assertCodeWriteReadable(guarded.path, input.content, tool);
   const existing = await port.stat(guarded.path);
   if (existing.exists && existing.type === "dir") {
     throw new CodeToolError("not_a_file", `"${guarded.path}" is a directory`, tool);
@@ -365,6 +368,10 @@ export async function writeFileSafe(
   const before = existing.exists ? (await port.readFile(guarded.path)).content : "";
   const encoding = detectEncoding(input.content);
   const { eol } = detectEol(input.content);
+  if (existing.exists && before === input.content) {
+    return { path: guarded.path, created: false, linesAdded: 0, linesRemoved: 0,
+      bytes: Buffer.byteLength(input.content, "utf8"), sha256: sha256(input.content), encoding: encoding.encoding, eol, diff: "" };
+  }
   const diff = existing.exists ? buildUnifiedDiff(before, input.content, guarded.path) : [
     `--- /dev/null`, `+++ b/${guarded.path}`, `@@ -0,0 +1,${splitLines(input.content).lines.length} @@`,
     ...splitLines(input.content).lines.map((line) => `+${line}`), "",
@@ -403,6 +410,12 @@ export async function movePathSafe(input: MoveInput, port: CodeWritePort, option
   const target = await port.stat(to.path);
   if (target.exists && input.overwrite !== true) {
     throw new CodeToolError("already_exists", `"${to.path}" already exists and overwrite is false`, tool, 409);
+  }
+  // The basename controls manifest exceptions: a readable manifest may become protected after rename.
+  // Directory moves retain descendant basenames and therefore do not change this content policy.
+  // Ordinary/binary and manifest-to-manifest renames do not lose a content-policy exception.
+  if (source.type !== "dir" && isWorkspaceManifest(from.path) && !isWorkspaceManifest(to.path)) {
+    assertCodeWriteReadable(to.path, (await port.readFile(from.path)).content, tool);
   }
   await port.movePath(from.path, to.path, { overwrite: input.overwrite === true });
   return { from: from.path, to: to.path, moved: true, ...(options.approved ? { approved: true } : {}) };

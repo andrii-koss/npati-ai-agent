@@ -1,4 +1,5 @@
 import { openWorkspaceRead } from "./project-file-descriptor";
+import { isWorkspaceContentProtected } from "./workspace-protected-content";
 import { acquireKernelFileLease, type KernelFileLease } from "./project-file-kernel-lease";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { commitWorkspacePatch, recoverWorkspacePatch, type WorkspacePatchIO } from "./project-file-transaction";
@@ -494,8 +495,7 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
     const operation = async () => {
     const { clean, absolute } = await this.target(base, filePath);
     const bytes = await this.bytes(absolute);
-    const isManifestOrLockfile = /^(?:package(?:-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|composer\.(?:json|lock)|requirements\.txt|Pipfile(?:\.lock)?)$/i.test(path.basename(clean));
-    if (!isManifestOrLockfile && (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{20,})\b|(?<![-A-Za-z0-9_])(?:[A-Za-z0-9_]*(?:api[_-]?key|password|secret|token)(?![sS]\b)[A-Za-z0-9_]*)["']?\s*[:=]\s*["'][^"']{8,}["']/i.test(bytes.toString("utf8")))) throw new ProjectFileError("secret_content", "Protected file content", 403);
+    if (isWorkspaceContentProtected(clean, bytes.toString("utf8"))) throw new ProjectFileError("secret_content", "Protected file content", 403);
     return { ...this.content(clean, bytes), mode: (await lstat(absolute)).mode & 0o777 };
     };
     return readOnly ? operation() : this.lock(base, operation);
@@ -589,6 +589,8 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
       const current = await this.bytes(source.absolute);
       if (!expectedRevision || expectedRevision !== revision(current)) throw new ProjectFileError("revision_conflict", "Project file revision changed", 409, revision(current));
       if (await lstat(destination.absolute).then(() => true, () => false)) throw new ProjectFileError("file_exists", "Destination already exists", 409);
+      // Validate the exact bytes held under the mutation lock, before changing either path.
+      if (isWorkspaceContentProtected(destination.clean, current.toString("utf8"))) throw new ProjectFileError("secret_content", "Move refused before persistence: destination content would be protected", 403);
       await mkdir(path.dirname(destination.absolute), { recursive: true });
       await rename(source.absolute, destination.absolute);
       return this.content(destination.clean, current);

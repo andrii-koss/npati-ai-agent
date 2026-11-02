@@ -173,6 +173,26 @@ function toHunks(ops: readonly EditOp[], contextLines: number): DiffHunk[] {
  */
 export function buildUnifiedDiff(before: string, after: string, path: string, options: DiffOptions = {}): string {
   const contextLines = Math.max(0, Math.min(options.contextLines ?? 3, 20));
+  const oldFile = splitLines(before), newFile = splitLines(after);
+  if (before !== after && oldFile.trailingNewline === newFile.trailingNewline
+    && oldFile.lines.length === newFile.lines.length && oldFile.lines.every((line, index) => line === newFile.lines[index])) {
+    // Preserve CR bytes in line-ending-only changes; a nonempty byte change must not look like a no-op.
+    const oldLines = before.replace(/\n$/, "").split("\n"), newLines = after.replace(/\n$/, "").split("\n");
+    return `--- a/${path}\n+++ b/${path}\n@@ -1,${oldLines.length} +1,${newLines.length} @@\n`
+      + [...oldLines.map(line => `-${line}`), ...newLines.map(line => `+${line}`)].join("\n") + "\n";
+  }
+  if (oldFile.trailingNewline !== newFile.trailingNewline && oldFile.lines.length > 0
+    && oldFile.lines.length === newFile.lines.length && oldFile.lines.every((line, index) => line === newFile.lines[index])) {
+    // EOF is part of the file: identical line text with a different terminator still needs a reviewable hunk.
+    const last = oldFile.lines.length - 1, start = Math.max(0, last - contextLines);
+    const lines = oldFile.lines.slice(start, last).map(line => ` ${line}`);
+    lines.push(`-${oldFile.lines[last]}`);
+    if (!oldFile.trailingNewline) lines.push(NO_NEWLINE_MARKER);
+    lines.push(`+${newFile.lines[last]}`);
+    if (!newFile.trailingNewline) lines.push(NO_NEWLINE_MARKER);
+    const count = oldFile.lines.length - start;
+    return `--- a/${path}\n+++ b/${path}\n@@ -${start + 1},${count} +${start + 1},${count} @@\n${lines.join("\n")}\n`;
+  }
   const { ops } = buildOps(before, after, options);
   if (!ops.length) return "";
   const hunks = toHunks(ops, contextLines);

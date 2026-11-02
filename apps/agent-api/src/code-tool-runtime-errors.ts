@@ -15,6 +15,8 @@ export type CodeToolErrorCode =
   | "symlink_escape"
   | "null_byte"
   | "sensitive_file_denied"
+  | "secret_content"
+  | "file_scope_denied"
   | "sandbox_unavailable"
   | "limit_exceeded"
   | "file_too_large"
@@ -125,6 +127,7 @@ export type CodeToolErrorCode =
 
 /** Codes thrown by the canonical modules; they are mapped onto the runtime's failure shape. */
 export const CANONICAL_ERROR_CODES: ReadonlySet<string> = new Set<string>([
+  "secret_content",
   "command_failed", "command_not_found", "command_timeout", "install_failed", "build_failed",
   "file_too_large",
   "runtime_recovery_required", "runtime_state_invalid", "process_termination_unconfirmed", "process_cleanup_failed", "workspace_busy", "workspace_lock_unavailable", "transaction_recovery_required", "invalid_path", "path_outside_workspace", "null_byte", "symlink_escape", "sensitive_file_denied",
@@ -179,7 +182,9 @@ export function canonicalFailure(error: unknown): { code: CodeToolErrorCode; sta
       code: shaped.code as CodeToolErrorCode,
       // Structured port errors carry either `httpStatus` (canonical) or a numeric `status` (runtime-shaped).
       status: typeof shaped.httpStatus === "number" ? shaped.httpStatus : (typeof shaped.status === "number" ? shaped.status : 400),
-      message: typeof shaped.message === "string" ? shaped.message : "Tool error",
+      message: shaped.code === "secret_content"
+        ? "Workspace content protection refused the operation. Remove hardcoded credentials introduced by this run; use runtime-generated test credentials or approved secret environment references. Protection remains enforced. This is not an approval request: user approval cannot override content protection. Do not offer an exception or suggest another tool to transfer the same protected content."
+        : typeof shaped.message === "string" ? shaped.message : "Tool error",
       tool: typeof shaped.tool === "string" ? shaped.tool : undefined,
       step: typeof shaped.step === "string" ? shaped.step : undefined,
       retryable: shaped.retryable === true,

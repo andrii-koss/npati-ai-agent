@@ -54,6 +54,7 @@ export function classifyTerminalCommand(input: string | TerminalCommandSpec): Te
   if (/[;&|`$<>\r\n\\(){}\[\]*?!#'"~]/.test(clean)) return result("approval", "Shell syntax or expansion requires approval");
   const words = [normalized.executable, ...normalized.args];
   const [program, action, ...args] = words;
+  if (["node", "npm"].includes(program!) && words.length === 2 && ["-v", "--version"].includes(action ?? "")) return result("safe", "Read Node/npm version");
   if (program === "pwd" && words.length === 1) return result("safe", "Read current directory");
   if (program === "ls" && words.slice(1).every((word) => ["-l", "-a", "-la", "-al"].includes(word) || relative(word))) return result("safe", "List sandbox files");
   if (program === "cat" && words.length === 2 && relative(action!)) return result("safe", "Read sandbox file");
@@ -64,7 +65,9 @@ export function classifyTerminalCommand(input: string | TerminalCommandSpec): Te
     return nested.requiresApproval ? result("approval", "Corepack command requires approval") : { ...nested, policyRule: "corepack_" + nested.policyRule };
   }
   if (packageManager(program!)) {
-    if (["install", "ci"].includes(action!) && installArgs(args) && (action !== "ci" || args.every(installFlag))) return result("controlled", "Install dependencies inside sandbox", "install_build");
+    // npm already saves named installs by default; explicit --save has the same scope.
+    const installArguments = program === "npm" && action === "install" ? args.filter(arg => arg !== "--save") : args;
+    if (["install", "ci"].includes(action!) && installArgs(installArguments) && (action !== "ci" || args.every(installFlag))) return result("controlled", "Install dependencies inside sandbox", "install_build");
     if (action === "test" && args.length === 0) return result("safe", "Run sandbox tests", "install_build");
     if (action === "run" && ["build", "test"].includes(args[0] ?? "") && args.length === 1) return result("safe", "Run sandbox build or tests", "install_build");
     if ((action === "run" && ["dev", "start", "preview"].includes(args[0] ?? "") && serverArgs(args.slice(1))) || (["dev", "start", "preview"].includes(action!) && serverArgs(args))) return result("controlled", "Start sandbox development server");

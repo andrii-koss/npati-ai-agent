@@ -2,8 +2,23 @@
 import { classifyTerminalCommand, normalizeTerminalCommand } from "../apps/agent-api/src/terminal-command-policy";
 import { defaultRiskApprovalService } from "@npati/shared";
 import { logTerminalPolicy } from "../apps/agent-api/src/terminal-policy-log";
+import { classifyShellCommand } from "../apps/agent-api/src/code-shell-classifier";
 
 describe("Project terminal command policy", () => {
+  it.each(["npm install lodash --save", "npm install --save @types/node"])("keeps explicit npm default-save equivalent to bare install: %s", command => {
+    expect(classifyTerminalCommand(command)).toMatchObject({ level: "controlled", requiresApproval: false });
+    expect(classifyShellCommand(command)).toMatchObject({ risk: "controlled" });
+  });
+  it.each(["npm install lodash --save --global", "npm install lodash --save --prefix ../host", "npm install lodash --save --registry=https://untrusted.example", "npm install lodash --save --ignore-scripts=false"])("retains approval for extended save installs: %s", command => {
+    expect(classifyTerminalCommand(command).requiresApproval).toBe(true);
+    expect(classifyShellCommand(command).risk).toBe("approval");
+  });
+  it.each(["node -v", "node --version", "npm -v", "npm --version"])("allows the exact read-only version diagnostic %s", command => {
+    expect(classifyTerminalCommand(command)).toMatchObject({ level: "safe", requiresApproval: false });
+  });
+  it.each(["node -v app.js", "node --version --require evil.js", "node -v && npm install", "./node -v", "npm --version install lodash"])("keeps extended version commands behind approval: %s", command => {
+    expect(classifyTerminalCommand(command).requiresApproval).toBe(true);
+  });
   it("redacts secrets in terminal policy diagnostics", () => {
     const previous = process.env.NPATI_TERMINAL_POLICY_LOG;
     process.env.NPATI_TERMINAL_POLICY_LOG = "true";

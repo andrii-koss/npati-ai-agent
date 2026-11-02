@@ -59,6 +59,39 @@ async function fixture(maxConcurrentPerUser = 4) {
   return { store, company, projects, flags, code, controls, starts, service, start, finish, ports, preview };
 }
 describe("durable coding activity", () => {
+  it("discovers a live inbox run behind another chat's idle binding without reading its replay", async () => {
+    const f = await fixture();
+    await f.start("Create a Next.js website");
+    await vi.waitFor(() => expect(f.controls.size).toBe(1));
+    const process = (await f.service.list(owner))[0]!;
+    f.finish(process.projectId!);
+    await vi.waitFor(async () => expect((await f.service.list(owner))[0]?.status).toBe("completed"));
+    const setting = await f.store.getUserSetting(owner, "chat-development-processes:v1");
+    await f.store.setUserSetting(owner, "chat-development-processes:v1", [{ ...process, requestId: "binding", status: "idle", hidden: true }], setting!.revision);
+    await f.store.createCodeRunState({ runId: "live-inbox", workspaceId: owner.workspaceId, companyId: f.company.id, projectId: process.projectId!, sessionId: process.sessionId!, owner: "worker", leaseMs: 60000, now: new Date() });
+    const replay = vi.spyOn(f.store, "listReplayBundleSteps");
+    const history = vi.spyOn(f.store, "getNeutralConversation");
+    expect((await f.service.listForChat(owner, "another-chat")).find(p => p.id === process.id)).toMatchObject({ status: "running", runId: "live-inbox" });
+    expect(replay).not.toHaveBeenCalled();
+    expect(history).not.toHaveBeenCalled();
+  });
+  it("does not hydrate unrelated idle or approval histories when opening a chat", async () => {
+    const f = await fixture();
+    const now = new Date().toISOString();
+    const entry = (id: string, conversationId: string, status: string) => ({
+      id, requestId: id, companyId: f.company.id, conversationId, parentConversationId: conversationId,
+      name: id, framework: "HTML/CSS", status, hidden: true, createdAt: now, updatedAt: now,
+    });
+    await f.store.setUserSetting(owner, "chat-development-processes:v1", [
+      entry("own-idle", "opened-chat", "idle"),
+      entry("own-approval", "opened-chat", "awaiting_approval"),
+      ...Array.from({ length: 100 }, (_, i) => entry("other-idle-" + i, "other-chat-" + i, "idle")),
+      entry("other-approval", "other-chat", "awaiting_approval"),
+    ], 0);
+    const projected = await f.service.listForChat(owner, "opened-chat");
+    expect(projected.map(p => p.id).sort()).toEqual(["own-approval", "own-idle"]);
+    expect(await f.service.listForChat(owner)).toEqual([]);
+  });
   it("shares concurrent projections for the same owner without multiplying database reads", async () => {
     const f = await fixture();
     const reads = vi.spyOn(f.store,"getUserSetting");
@@ -94,7 +127,7 @@ describe("durable coding activity", () => {
     await f.service.recordActivity({...owner,userId:"other"},f.company.id,process.sessionId!,process.conversationId,event);
     expect((await f.service.list(owner))[0]!.progress!.filter(x=>x.id===event.id)).toHaveLength(1);
     f.controls.get(process.projectId!)!.finish({status:"completed",runId:process.runId,message:"Implemented the requested storefront.",summary:{verification:{status:"passed",requestedTools:["build"]}}});
-    await vi.waitFor(async () => expect((await f.store.getNeutralConversation(owner,process.conversationId!)).messages.at(-1)?.content).toBe("Implemented the requested storefront."));
+    await vi.waitFor(async () => expect((await f.store.getNeutralConversation(owner,process.conversationId!)).messages.at(-1)?.content).toBe("Assumptions for this brief request: a basic working website. Generated names, copy and business details you did not provide are examples to replace with your own data.\n\nImplemented the requested storefront."));
     expect((await f.store.getNeutralConversation(owner,started.conversationId)).messages[0]?.role).toBe("user");
     await restored.close();
   });
@@ -370,6 +403,25 @@ describe("development acknowledgements and restart recovery", () => {
     expect((await f.store.getNeutralConversation(owner, result.conversationId)).messages.map(item => item.role)).toEqual(["user"]);
     expect([...f.controls.values()][0]!.input.requireImplementation).toBe(true);
     expect((await service.list(owner))[0]!.progress!.find(item => item.stage === "dependencies")?.status).toBe("completed");
+  });
+  it("stores a project created in an existing chat with its own request, so it becomes the chat's latest project", async () => {
+    const f = await fixture();
+    const chat = await f.store.createNeutralConversation(owner, "TODO");
+    const earlier = await f.store.appendNeutralMessage(owner, chat.id, "user", "Створи новий React/Vite TODO-проєкт.");
+    await f.store.appendNeutralMessage(owner, chat.id, "assistant", "Створено TODO.");
+    const request = "Створи ОКРЕМИЙ тестовий браузерний проєкт гри «Змійка», не змінюючи TODO.";
+    await f.start(request, "game-in-todo-chat", chat.id);
+    await vi.waitFor(() => expect(f.controls.size).toBe(1));
+    const process = (await f.service.list(owner))[0]!;
+    const card = await getLatestChatProjectCard(f.store, owner, chat.id);
+    expect(card?.projectId).toBe(process.projectId);
+    const messages = (await f.store.getNeutralConversation(owner, chat.id)).messages;
+    const carrier = messages.find(item => item.id !== earlier.id && item.role === "user" && item.content === request);
+    expect(carrier).toBeDefined();
+    const { getChatMessagesWithProjectCards } = await import("../apps/agent-api/src/project-chat-cards");
+    const decorated = await getChatMessagesWithProjectCards(f.store, owner, chat.id, messages);
+    expect(decorated.find(item => item.id === earlier.id)?.projectCard).toBeUndefined();
+    expect(decorated.find(item => item.id === carrier!.id)?.projectCard?.projectId).toBe(process.projectId);
   });
   it("marks an expired running lease as interrupted after the API restarts", async () => {
     const f = await fixture(); await f.start("Create a Next.js website");

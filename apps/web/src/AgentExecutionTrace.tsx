@@ -1,17 +1,18 @@
-import React, { useCallback, useContext, useEffect, useState } from "react";
-import { Terminal, FilePenLine, FileText, Package, Hammer, Monitor, Search, FlaskConical, Globe, Brain, ChevronDown, ChevronRight, Copy, Check, X, AlertCircle } from "lucide-react";
+import React, { useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { Terminal, Blocks, FilePenLine, FileText, Package, Hammer, Monitor, Search, FlaskConical, Globe, Brain, ChevronDown, ChevronRight, Copy, Check, X, AlertCircle } from "lucide-react";
 import type { DevelopmentProcess, DevelopmentProcessProgressItem } from "@npati/shared";
 import { sanitizeExecutionTrace } from "@npati/shared";
 import { I18nContextRef, executionTraceText } from "./i18n";
 import { en } from "./i18n/locales/en";
 import { uk } from "./i18n/locales/uk";
-import { normalizeActivity, type CodingActivityRun } from "./chat-timeline";
+import { isVisibleChatOperation, normalizeActivity, type CodingActivityRun } from "./chat-timeline";
 import { codingStopCopy } from "./coding-stop-copy";
-export interface AgentExecutionTraceProps { process?: DevelopmentProcess; items?: DevelopmentProcessProgressItem[]; isUk?: boolean; className?: string; run?: CodingActivityRun; nested?: boolean; language?: string; showIdentity?:boolean }
+export interface AgentExecutionTraceProps { process?: DevelopmentProcess; items?: DevelopmentProcessProgressItem[]; isUk?: boolean; className?: string; run?: CodingActivityRun; nested?: boolean; language?: string; showIdentity?:boolean; animatePending?: boolean }
 export const sanitizeTraceSecrets = sanitizeExecutionTrace;
 type Labels = (key: string) => string;
 function operation(item: DevelopmentProcessProgressItem) {
   const tool = (item.tool ?? item.stage).toLowerCase();
+  if (item.stage === "technology_selection" || /scaffold/.test(tool) || item.stage === "project" && tool === "code.workspace") return ["creatingProject", Blocks] as const;
   if (/search|grep|repo_map/.test(tool)) return ["searching", Search] as const;
   if (/read|list/.test(tool)) return ["reading", FileText] as const;
   if (/write|edit|patch|scaffold|files/.test(tool)) return ["editing", FilePenLine] as const;
@@ -23,12 +24,14 @@ function operation(item: DevelopmentProcessProgressItem) {
   if (/coding_agent|^agent$/.test(tool)) return ["working", Brain] as const;
   if (item.stage === "model_generation") return ["generatingCode", FilePenLine] as const;
   if (item.stage === "model_output") return ["modelResponding", Brain] as const;
-  if (item.stage === "model_response") return ["waitingForModel", Brain] as const;
+  if (item.stage === "model_response") return ["working", Brain] as const;
   if (/planning|thinking/.test(tool)) return ["planning", Brain] as const;
   if (/sandbox|workspace/.test(tool)) return ["sandbox", Monitor] as const;
   return ["command", Terminal] as const;
 }
 function title(item: DevelopmentProcessProgressItem, t: Labels, active: boolean) {
+  if (item.stage === "technology_selection") return sanitizeExecutionTrace(item.title);
+  if (operation(item)[0] === "working") return t(item.status === "waiting_for_approval" ? "awaiting_approval" : item.status ?? "running");
   if (!item.status) return sanitizeExecutionTrace(item.command ? item.tool + ": " + item.command : item.title);
   if (item.command) { const command = sanitizeExecutionTrace(item.command).slice(0,100); return active ? t("runningCommand").replace("{{command}}",command) : t("executed") + ": " + command; }
   if (item.dryRun) return t("dryRun");
@@ -38,7 +41,7 @@ function title(item: DevelopmentProcessProgressItem, t: Labels, active: boolean)
   return kind === "command" ? sanitizeExecutionTrace(item.title) : t(kind);
 }
 export function formatProcessTitle(item: DevelopmentProcessProgressItem, isUk: boolean, active: boolean) { return title(item, key => (isUk ? uk : en).executionTrace[key] ?? key, active); }
-export function AgentExecutionTrace({ process, items: directItems, run, nested = false, language, isUk = false, className = "",showIdentity=false }: AgentExecutionTraceProps) {
+export function AgentExecutionTrace({ process, items: directItems, run, nested = false, language, isUk = false, className = "",showIdentity=false, animatePending = true }: AgentExecutionTraceProps) {
   const i18n = useContext(I18nContextRef);
   const t: Labels = key => executionTraceText(run?.language ?? language ?? (isUk ? "uk" : i18n?.language ?? "en"),key);
   const [runOpen, setRunOpen] = useState(false);
@@ -47,23 +50,44 @@ export function AgentExecutionTrace({ process, items: directItems, run, nested =
   const [fullLogs, setFullLogs] = useState(new Set<string>());
   const [copied, setCopied] = useState<string>();
   const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    if (!run || !["running", "pending", "preparing"].includes(run.status)) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [run?.id, run?.status]);
   const toggle = (setter: typeof setExpanded, id: string) => setter(previous => { const next = new Set(previous); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   const copy = useCallback(async (text: string, id: string) => {
     try { await navigator.clipboard.writeText(sanitizeExecutionTrace(text)); setCopied(id); setTimeout(() => setCopied(current => current === id ? undefined : current), 1800); } catch { /* Clipboard denial does not stop the run. */ }
   }, []);
   const usageView = (usage: NonNullable<DevelopmentProcessProgressItem["modelUsage"]>) => <div className="codex-trace-usage" key={usage.id}><strong>{t("usage")} / #{usage.turn}</strong>{usage.model && <code>{sanitizeExecutionTrace(usage.model)}</code>}<span>{t("inputTokens")}: {usage.inputTokens ?? t("unavailableTokens")} / {t("outputTokens")}: {usage.outputTokens ?? t("unavailableTokens")} / {t("totalTokens")}: {usage.totalTokens ?? t("unavailableTokens")}</span>{usage.costUsd !== undefined && <span>${usage.costUsd.toFixed(6)}</span>}{usage.toolCallIds.length>1 && <small>{t("sharedTurn").replace("{{count}}",String(usage.toolCallIds.length))}</small>}</div>;
-  const items = normalizeActivity(directItems ?? process?.progress);
+  const recordedItems = normalizeActivity(directItems ?? process?.progress);
+  const items = recordedItems.filter(isVisibleChatOperation);
+  const latestOperation = useMemo(() => {
+    const progress = process?.progress;
+    if (!Array.isArray(progress)) return undefined;
+    for (let index = progress.length - 1; index >= 0; index--) {
+      const item = progress[index];
+      if (item && typeof item.id === "string" && typeof item.stage === "string" && isVisibleChatOperation(item)) return item;
+    }
+    return undefined;
+  }, [process?.progress]);
+  const processActive = Boolean(process && ["preparing", "running"].includes(process.status));
+  // Model calls are not separate chat steps: keep the latest visible workflow step active
+  // until another operation takes over or the overall work ends. Never reactivate it for a new prompt.
+  const carryActive = Boolean(animatePending && !nested && processActive && latestOperation &&
+    !["cancelled", "awaiting_approval", "waiting_for_approval"].includes(latestOperation.status ?? "") &&
+    !["cancelled", "queued", "waiting_for_approval"].includes(run?.status ?? "") &&
+    (items.some(item => item.id === latestOperation.id) || !items.length && run?.status === "failed" && latestOperation.runId && latestOperation.runId === run.runId));
+  useEffect(() => {
+    if (!run || !carryActive && !["running", "pending", "preparing"].includes(run.status)) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [run?.id, run?.status, carryActive]);
   if (!items.length && !run) return null;
   if (run) {
-    const running = run.status === "running" || run.status === "preparing" || run.status === "pending" && items.some(item=>["running","active"].includes(item.status??""));
-    const current = [...items].reverse().find(item=>["running","active","awaiting_approval","waiting_for_approval"].includes(item.status??"")) ?? (running ? {id:run.id,stage:"agent",title:"",at:run.at,status:"running" as const} : items.at(-1) ?? {id:run.id,stage:"agent",title:"",at:run.at,status:"pending" as const});
-    const [, Icon] = operation(current);
-    const label = run.status === "completed" ? t("operationsDone").replace("{{count}}",String(items.filter(item=>!["agent","planning","model_response","model_generation","model_output","provider_retry"].includes(item.stage)).length)) : running ? title(current,t,true) : t(run.status === "waiting_for_approval" ? "awaiting_approval" : run.status);
+    const running = (!process || processActive) && (run.status === "running" || run.status === "preparing" || run.status === "pending" && items.some(item=>["running","active"].includes(item.status??"")));
+    if (!items.length && !carryActive && ["running", "pending", "preparing", "completed"].includes(run.status)) return null;
+    const current = [...items].reverse().find(item=>["running","active","awaiting_approval","waiting_for_approval"].includes(item.status??"")) ?? items.at(-1) ?? {id:run.id,stage:"agent",title:"",at:run.at,status:"pending" as const};
+    const stepActive = running || carryActive;
+    const operations = items.filter(item=>!["agent","planning","model_response","model_generation","model_output","provider_retry"].includes(item.stage));
+    const setupOnly = operations.length > 0 && operations.every(item => operation(item)[0] === "creatingProject");
+    const [, Icon] = operation(setupOnly ? operations[0] ?? current : current);
+    const label = run.status === "failed" ? t("failed") : stepActive ? setupOnly ? t("creatingProject") : title(current,t,["running", "active"].includes(current.status ?? "")) : run.status === "completed" ? setupOnly ? t("creatingProject") : t("operationsDone").replace("{{count}}",String(operations.length)) : t(run.status === "waiting_for_approval" ? "awaiting_approval" : run.status);
     const files = new Map<string, {path: string; linesAdded?: number; linesRemoved?: number; status?: string}>();
     for (const item of items) {
       if (!/write|edit|patch|move|delete/.test(item.tool ?? "")) continue;
@@ -71,11 +95,11 @@ export function AgentExecutionTrace({ process, items: directItems, run, nested =
       for (const file of item.files ?? []) files.set(file.path, {...file, status:item.status});
     }
     const visibleFiles = [...files.values()].slice(-6);
-    const elapsed = running && Number.isFinite(Date.parse(current.at)) ? Math.max(0, Math.floor((now - Date.parse(current.at)) / 1000)) : undefined;
-    return <article className="assistant research-progress coding-run-activity" aria-live="polite"><div className={"research-page-row codex-trace-row " + (running ? "active" : run.status) + (runOpen ? " expanded" : "")} data-run-id={run.runId ?? run.id}><button type="button" className="codex-trace-row-header coding-run-header" aria-expanded={runOpen} aria-controls={"run-detail-" + run.id} onClick={()=>{setHistoryMounted(true);setRunOpen(previous=>!previous);}}><span className="research-progress-state" aria-hidden="true">{run.status === "completed" ? <Check size={12}/> : run.status === "failed" ? <AlertCircle size={12}/> : run.status === "cancelled" ? <X size={12}/> : "\u25cf"}</span><Icon className="research-progress-globe" size={16} aria-hidden="true"/><span dir="auto" className={running ? "research-active-text" : undefined}>{label}</span>{elapsed !== undefined && <span className="codex-trace-duration-tag">{elapsed}s</span>}<span className="codex-trace-chevron-btn" aria-hidden="true">{runOpen ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}</span></button>
+    const elapsed = stepActive && Number.isFinite(Date.parse(current.at)) ? Math.max(0, Math.floor((now - Date.parse(current.at)) / 1000)) : undefined;
+    return <article className="assistant research-progress coding-run-activity" aria-live="polite"><div className={"research-page-row codex-trace-row " + (stepActive ? "active" : run.status) + (runOpen ? " expanded" : "")} data-run-id={run.runId ?? run.id}><button type="button" className="codex-trace-row-header coding-run-header" aria-expanded={runOpen} aria-controls={"run-detail-" + run.id} onClick={()=>{setHistoryMounted(true);setRunOpen(previous=>!previous);}}><span className="research-progress-state" aria-hidden="true">{stepActive ? "\u25cf" : run.status === "completed" ? <Check size={12}/> : run.status === "failed" ? <AlertCircle size={12}/> : run.status === "cancelled" ? <X size={12}/> : "\u25cf"}</span><Icon className="research-progress-globe" size={16} aria-hidden="true"/><span dir="auto" className={stepActive ? "research-active-text" : undefined}>{label}</span>{elapsed !== undefined && <span className="codex-trace-duration-tag">{elapsed}s</span>}<span className="codex-trace-chevron-btn" aria-hidden="true">{runOpen ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}</span></button>
       {visibleFiles.length > 0 && <ul className="coding-changed-files" aria-label={t("file")}>{visibleFiles.map(file => <li key={file.path}><FilePenLine size={13} aria-hidden="true"/> <code>{file.path}</code>{file.linesAdded !== undefined && <span> +{file.linesAdded}</span>}{file.linesRemoved !== undefined && <span> -{file.linesRemoved}</span>}{file.status === "running" && <span> · {t("editing")}</span>}</li>)}</ul>}
       {run.status === "failed" && process?.status === "failed" && run.runId === process.runId && process.detail && <p className="codex-trace-error-msg">{sanitizeExecutionTrace(codingStopCopy(process.detail,run.language ?? process.responseLanguage ?? language ?? i18n?.language))}</p>}
-      <div className="codex-trace-collapse" aria-hidden={!runOpen} inert={!runOpen} onTransitionEnd={event=>{if(!runOpen && event.target===event.currentTarget)setHistoryMounted(false);}}> <div className="codex-trace-collapse-inner"><div id={"run-detail-" + run.id} className="coding-run-history">{runOpen && run.runId && <a href={"/activity?runId="+encodeURIComponent(run.runId)}>{t("viewRun")}</a>}{historyMounted && <AgentExecutionTrace process={process ? {...process,runId:run.runId} : undefined} items={items} isUk={isUk} language={run.language} nested />}</div></div></div></div></article>;
+      <div className="codex-trace-collapse" aria-hidden={!runOpen} inert={!runOpen} onTransitionEnd={event=>{if(!runOpen && event.target===event.currentTarget)setHistoryMounted(false);}}> <div className="codex-trace-collapse-inner"><div id={"run-detail-" + run.id} className="coding-run-history">{historyMounted && <AgentExecutionTrace process={process ? {...process,runId:run.runId} : undefined} items={items} isUk={isUk} language={run.language} nested />}</div></div></div></div></article>;
   }
   return <article className={nested ? "coding-operation-history" : "assistant research-progress"} aria-live="polite"><div className={"research-page-list codex-trace-list " + className}>
     {items.map(item => {
@@ -94,7 +118,6 @@ export function AgentExecutionTrace({ process, items: directItems, run, nested =
           <span className="codex-trace-header-right">{item.durationMs !== undefined && <span className="codex-trace-duration-tag">{(item.durationMs/1000).toFixed(1)}s</span>}<span className="codex-trace-chevron-btn" aria-hidden="true">{open ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}</span></span>
         </button>
         <div className="codex-trace-collapse" aria-hidden={!open} inert={!open}><div className="codex-trace-collapse-inner">{open && <div id={"trace-detail-" + item.id} className="codex-trace-detail-panel">
-          {(item.runId || process?.runId) && <a href={"/activity?runId=" + encodeURIComponent(item.runId ?? process?.runId ?? "")}>{t("viewRun")}</a>}
           <div>{t("operationStatus")}: {t(status === "active" ? "running" : status === "waiting_for_approval" ? "awaiting_approval" : status)}</div>
           {item.stage==="provider_retry" && <div>{isUk?"Заплановано спробу з наступною моделлю":"Retry scheduled with the next configured model"}</div>}
           <div><time dateTime={item.at}>{item.at}</time>{showIdentity && item.agentId && <> · {safe(item.agentId)}</>}{item.modelUsage?.provider && <> · {safe(item.modelUsage.provider)}</>}</div>

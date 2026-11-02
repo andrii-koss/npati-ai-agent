@@ -59,12 +59,17 @@
   overflow-y: auto;
 }
 
-.message-stream {
+.message-stream,
+.sidebar-dropdown {
   scrollbar-width: thin;
+}
+
+.message-stream {
   scrollbar-color: #b8b8b8 transparent;
 }
 
-.message-stream::-webkit-scrollbar {
+.message-stream::-webkit-scrollbar,
+.sidebar-dropdown::-webkit-scrollbar {
   width: 5px;
 }
 

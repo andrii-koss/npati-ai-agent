@@ -1,5 +1,6 @@
 import { CodeToolError } from "./code-tools-path";
 import { assertNoPlaceholderInWrite } from "./provider-data-guard";
+import { assertCodeWriteReadable } from "./workspace-protected-content";
 import { assertEditSize, assertMassOperation, detectEncoding, detectEol, guardWritePath, resolveWriteLimits, type CodeWritePort, type WriteOptions } from "./code-tools-write";
 
 export interface PatchMutation {
@@ -17,7 +18,10 @@ export async function commitPatchMutations(plan: PatchMutation[], port: CodeWrit
     if (seen.has(item.path)) throw new CodeToolError("patch_invalid", "Duplicate patch target", tool);
     seen.add(item.path);
     assertEditSize(item.after, tool, limits);
-    if (!item.delete) assertNoPlaceholderInWrite(item.after, { tool, path: item.path });
+    if (!item.delete) {
+      assertNoPlaceholderInWrite(item.after, { tool, path: item.path });
+      assertCodeWriteReadable(item.path, item.after, tool);
+    }
     if (item.delete && !dryRun && !options.approved) throw new CodeToolError("approval_required", "Patch deletion requires approval", tool, 409, false, "approval");
   }
   const written: Array<{ item: PatchMutation; revision?: string }> = [];

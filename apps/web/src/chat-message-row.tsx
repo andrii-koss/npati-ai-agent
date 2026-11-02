@@ -22,6 +22,8 @@ interface ChatMessageRowProps {
   message: Message;
   card: ProjectCardData | null | undefined;
   showToolbar: boolean;
+  /** The agent is working in this chat: an open Preview stays, but a new one is not offered for the old state. */
+  previewBusy?: boolean;
   responseLanguage: string;
   actions: ChatRowActions;
 }
@@ -33,7 +35,7 @@ const sameCard = (left: ProjectCardData | null | undefined, right: ProjectCardDa
  * One chat message. A finished message (and its Markdown) renders again only when its own text, attachments or card
  * change: typing in the composer or the streamed reply of another message leaves it as it is.
  */
-export const ChatMessageRow = memo(function ChatMessageRow({ message, card, showToolbar, responseLanguage, actions }: ChatMessageRowProps) {
+export const ChatMessageRow = memo(function ChatMessageRow({ message, card, showToolbar, previewBusy = false, responseLanguage, actions }: ChatMessageRowProps) {
   return (
     <article
       ref={(element) => actions.registerArticle(message.id, element)}
@@ -51,13 +53,13 @@ export const ChatMessageRow = memo(function ChatMessageRow({ message, card, show
           <ChatMessageContent content={projectChatText(message.content, message.projectCard, responseLanguage)} />
         </>
       )}
-      {card && <ChatProjectPreviewCard card={card} onActivate={actions.activateCard} />}
+      {card && <ChatProjectPreviewCard card={card} showPreviewTrigger={!previewBusy} onActivate={actions.activateCard} />}
       {showToolbar && <AssistantMessageToolbar content={message.content} onRegenerate={() => actions.regenerate(message.id)} />}
     </article>
   );
 }, (previous, next) => previous.message.id === next.message.id && previous.message.content === next.message.content
   && previous.message.attachments === next.message.attachments && previous.message.projectCard === next.message.projectCard
-  && sameCard(previous.card, next.card) && previous.showToolbar === next.showToolbar
+  && sameCard(previous.card, next.card) && previous.showToolbar === next.showToolbar && previous.previewBusy === next.previewBusy
   && previous.responseLanguage === next.responseLanguage && previous.actions === next.actions);
 
 /**

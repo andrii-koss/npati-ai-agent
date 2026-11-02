@@ -147,6 +147,8 @@ export interface CodingAgentRunInput {
   extraSystemPromptLines?: readonly string[];
 
   verificationTools?: readonly string[];
+  /** Trusted command discovery after generated manifests have been saved; only adds checks. */
+  refreshVerificationTools?: () => Promise<readonly string[] | undefined>;
 
   forceVerification?: boolean;
 

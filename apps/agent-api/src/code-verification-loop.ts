@@ -66,6 +66,7 @@ export type VerificationDecision =
   | { decision: "stop"; code: string; status: Exclude<VerificationStatus, "not_run" | "passed"> };
 
 export interface VerificationLoop {
+  addRequestedTools(tools: readonly string[]): void;
   /** Records the outcome of one verification run. Does not increment the repair counter. */
   record(checks: readonly VerificationCheckReport[]): VerificationReport;
   /**
@@ -159,6 +160,9 @@ export function createVerificationLoop(options: VerificationLoopOptions): Verifi
   });
 
   return {
+    addRequestedTools(tools) {
+      for (const tool of tools) if (!requestedTools.includes(tool)) requestedTools.push(tool);
+    },
     record(input) {
       checks = (input ?? []).map((check) => toCheck(check.tool, check));
       status = summariseVerification(checks);
@@ -222,6 +226,7 @@ export function formatRepairInstruction(report: VerificationReport): string {
     ...lines,
     "Fix the cause of the failure. Do not delete, skip or weaken a test to make the check pass, and do not",
     "report success while a check is failing; if a test change is genuinely required, say why in your summary.",
+    "If a configured build/test command cannot find a local dependency (for example vite), inspect the manifest and lockfile, then restore dependencies with code.deps.install under its existing policy. Rerun the same checks. Do not add an install/prebuild hook, alter the scripts or weaken checks to repair a missing node_modules environment. If installation requires approval or is denied, report that exact limitation.",
   ].join("\n");
 }
 
@@ -234,5 +239,6 @@ export function verificationChecks(outcome: import("./code-tool-runtime").CodeTo
   return requested.map(tool=>{const value=reports.map(object).find(row=>(row.tool??row.name)===tool);
     if(!value)return {tool,state:"unavailable",code:"verification_result_missing"};
     const passed=value.ok===true||value.passed===true||value.state==="passed"||value.status==="passed";
-    return {tool,state:passed?"passed":value.state==="unavailable"?"unavailable":value.state==="approval_required"?"approval_required":"failed",...(typeof value.code==="string"?{code:value.code}:{})};});
+    const message = bound(typeof value.summary === "string" ? value.summary : typeof value.message === "string" ? value.message : undefined);
+    return {tool,state:passed?"passed":value.state==="unavailable"?"unavailable":value.state==="approval_required"?"approval_required":"failed",...(typeof value.code==="string"?{code:value.code}:{}),...(message ? {message} : {})};});
 }

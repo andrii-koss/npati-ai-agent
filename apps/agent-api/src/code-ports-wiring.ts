@@ -17,6 +17,9 @@ import { CodeReaper, asStaleApprovalReaper } from "./code-reaper";
 import { activitySinkForKind, createCodeRunActivitySink } from "./code-run-activity-sink";
 import { SecretLeaseProvider } from "./code-secret-lease";
 import { CodeShellRuntime } from "./code-shell-runtime";
+import { classifyShellCommand } from "./code-shell-classifier";
+import { withTrackedShellChanges } from "./code-shell-workspace-changes";
+import type { CodeTurnTracker } from "./code-workspace-checkpoint";
 import { CodeVerifyRunnerPort } from "./code-tool-executors";
 import { CodeToolError, type SandboxExecPort } from "./code-tool-runtime";
 import { detectVerifyTool, parseVerifyOutput } from "./code-verify-parser";
@@ -41,6 +44,7 @@ export interface CreateCodePortsWiringDeps {
   codeProjectTrust: CodeProjectTrustService;
   codeSandboxExecPort: SandboxExecPort | undefined;
   codeShellRuntime: CodeShellRuntime;
+  codeTurnTracker?: CodeTurnTracker;
   codeUserQuestionReaperPort: ReturnType<typeof createCodeUserQuestionReaperPort> | null;
   featureFlagService: FeatureFlagService;
   mcpApprovalPauseRelease: ((input: { companyId: string; runId: string; approvalId: string; reason: McpApprovalReleaseReason; answeredBy?: string }) => Promise<unknown>) | null;
@@ -158,12 +162,19 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
           });
           leaseIds.push(lease.leaseId);
         }
-        const result = await codeShellRuntime.exec(input.ctx, {
+        const execute = () => codeShellRuntime.exec(input.ctx, {
           companyId: input.companyId, projectId: input.projectId, sessionId, command: input.command,
           cwd: input.cwd, env: input.env, timeoutMs: input.timeoutMs, secretLeaseIds: leaseIds,
           toolCallId, approved: input.approved,
           approvalId: input.approvalId, runId: input.runId, agentId: input.agentId, sessionMode: input.sessionMode,
         });
+        const result = deps.codeTurnTracker && input.turnId && classifyShellCommand(input.command).risk !== "safe"
+          ? await withTrackedShellChanges({
+            listFiles: () => projectWorkspace.listFiles(input.ctx, input.companyId, input.projectId),
+            readFile: path => projectWorkspace.readFile(input.ctx, input.companyId, input.projectId, path),
+            record: change => deps.codeTurnTracker!.recordChange(sessionId, input.turnId!, change),
+          }, execute)
+          : await execute();
         return {
           exitCode: result.exitCode,
           stdout: result.stdout,
@@ -227,9 +238,9 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
         } catch (error) {
           const errMsg = error instanceof Error ? error.message : String(error);
           const failure = error as { code?: string; details?: { exitCode?: number | null } };
-          const state = failure.code === "command_not_found" || failure.code === "tool_not_configured" ? "unavailable" as const
+          const state = failure.code === "tool_not_configured" ? "unavailable" as const
             : failure.code === "approval_required" ? "approval_required" as const : undefined;
-          results.push({ tool, ok: false, ...(state ? {state,code:failure.code} : {}), summary: `${tool} execution failed: ${errMsg}`, findings: [errMsg], raw: errMsg, command, exitCode: failure.details?.exitCode ?? null, durationMs: Date.now() - started });
+          results.push({ tool, ok: false, ...(state ? {state} : {}), ...(failure.code ? {code:failure.code} : {}), summary: `${tool} execution failed: ${errMsg}`, findings: [errMsg], raw: errMsg, command, exitCode: failure.details?.exitCode ?? null, durationMs: Date.now() - started });
           continue;
         }
         const stdout = result?.stdout ?? result?.output ?? "";

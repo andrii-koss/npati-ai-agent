@@ -35,32 +35,39 @@ describe("project deployment chat", () => {
     expect(duplicates.match(/research-page-row/g)).toHaveLength(1); expect(duplicates).toContain('data-status="failed"');
   });
   it("hides duplicate placeholder messages and cards but retains substantive replies", () => {
-    const messages = [{ content: "Coding Agent session started.", projectCard: card }, { content: "I changed the page", projectCard: card }, { content: "Stopped: A2A_TOKEN_QUOTA_EXCEEDED", projectCard: card }];
+    // Since projects-5 a placeholder bubble is hidden when it has no card; one with a card renders as that card.
+    const messages = [{ content: "Online store" }, { content: "I changed the page", projectCard: card }, { content: "Stopped: A2A_TOKEN_QUOTA_EXCEEDED", projectCard: card }];
     expect(hideDevelopmentMessage(messages, 0, [process])).toBe(true);
     expect(hideDevelopmentMessage(messages, 1, [process])).toBe(false);
+    expect(hideDevelopmentMessage(messages, 2, [process])).toBe(false);
     const failed = { ...process, status: "failed" as const };
-    expect(developmentCard(messages, 0, [failed], "child")).toBeNull();
-    expect(developmentCard(messages, 2, [failed], "child")).toBeNull();
+    // Only a project's latest card shows, with the process's real status; a child chat's card stays out of the parent.
+    expect(developmentCard(messages, 1, [failed], "child")).toBeNull();
+    expect(developmentCard(messages, 2, [failed], "child")?.status).toBe("failed");
     expect(developmentCard(messages, 2, [failed], "parent")).toBeNull();
+    // While the process still runs, the card reads it as a build in progress, never as a running Preview.
+    expect(developmentCard(messages, 2, [process], "child")?.status).toBe("building");
   });
   it("shows only Preview beneath the completed trace and retains substantive replies", () => {
     const completed = { ...process, status: "completed" as const, previewUrl: "/preview/project", progress: [{ ...process.progress![0]!, status: "completed" as const }] };
     const html = renderToStaticMarkup(<MemoryRouter><ChatDevelopmentProgress process={completed} /><ChatDevelopmentPreview process={completed} /></MemoryRouter>);
     expect(html.indexOf("chat-development-preview")).toBeGreaterThan(html.indexOf("codex-trace-row"));
-    expect(html.match(/>Preview<\/span>/g)).toHaveLength(1);expect(html).not.toContain("Code ");expect(html).not.toContain("Edit in chat");expect(html).not.toContain("Live Preview Active");
-    expect(hideDevelopmentMessage([{ content: process.name, projectCard: card }], 0, [completed])).toBe(true);
+    // ChatProjectPreviewCard (projects-10) replaced the old "Preview" button markup: still exactly one trigger.
+    expect(html.match(/coding-preview-trigger/g)).toHaveLength(1);expect(html).not.toContain("Code ");expect(html).not.toContain("Edit in chat");expect(html).not.toContain("Live Preview Active");
+    expect(hideDevelopmentMessage([{ content: process.name }], 0, [completed])).toBe(true);
     expect(hideDevelopmentMessage([{ content: "I changed the button", projectCard: card }], 0, [completed])).toBe(false);
-    expect(developmentCard([{ content: "I changed the button", projectCard: card }], 0, [completed], "child")).toBeNull();
+    expect(developmentCard([{ content: "I changed the button", projectCard: card }], 0, [completed], "child")?.status).toBe("completed");
   });
   it("preserves project and parent-chat identity after a coding reply", () => {
     const search = new URLSearchParams("company=c&project=p&developmentRoot=parent");
     expect(projectConversationUrl("child", {companyId:"c",projectId:"p"},search)).toBe("/c/child?company=c&project=p&developmentRoot=parent");
     expect(projectConversationUrl("other", {companyId:"c",projectId:"other"},search)).not.toContain("developmentRoot");
   });
-  it("never calls an unbuilt template ready and shows no card while a process runs", () => {
+  it("never calls an unbuilt template ready or a working agent a running Preview", () => {
     const messages = [{ content: "Online store", projectCard: card }];
     expect(developmentCard(messages, 0, [], "child")?.status).toBe("idle");
-    expect(developmentCard(messages, 0, [process], "child")).toBeNull();
+    // The chat offers no Preview trigger meanwhile (chat-created-project-preview.test.tsx).
+    expect(developmentCard(messages, 0, [process], "child")?.status).toBe("building");
   });
   it("renders Codex execution trace for Next.js website creation, dependencies, build, and preview", () => {
     const nextJsProcess: DevelopmentProcess = {
@@ -173,9 +180,10 @@ describe("project deployment chat", () => {
 it("does not offer an old or template Preview while coding or parallel work is still active",()=>{
   const process:DevelopmentProcess={id:"p",companyId:"c",projectId:"project",parentConversationId:"parent",name:"Site",framework:"Next.js",status:"running",hidden:false,createdAt:"",updatedAt:"",previewUrl:"/existing-preview",runId:"current",initialRunId:"current"};
   const html=(p:DevelopmentProcess)=>renderToStaticMarkup(<MemoryRouter><ChatDevelopmentPreview process={p}/></MemoryRouter>);
-  for(const status of ["preparing","running","stopping","awaiting_approval","failed","cancelled"] as const)expect(html({...process,status})).not.toContain('>Preview</span>');
-  expect(html({...process,status:"completed"})).toContain('>Preview</span>');
-  expect(html({...process,status:"completed",runStatuses:{current:"completed",child:"running"}})).not.toContain('>Preview</span>');
+  // The trigger markup is ChatProjectPreviewCard's (projects-10); the rule is unchanged.
+  for(const status of ["preparing","running","stopping","awaiting_approval","failed","cancelled"] as const)expect(html({...process,status})).not.toContain('coding-preview-trigger');
+  expect(html({...process,status:"completed"})).toContain('coding-preview-trigger');
+  expect(html({...process,status:"completed",runStatuses:{current:"completed",child:"running"}})).not.toContain('coding-preview-trigger');
 });
 
 it("labels a searched directory as search rather than a modified file",()=>{
@@ -207,13 +215,10 @@ it("never renders routing cards on user/system messages or hides a user's matchi
  expect(developmentCard(messages,0,[],"child")).toMatchObject({id:card.id});
 });
 
-it("shows one working row during blank HTML startup and preserves real queue waits", () => {
+it("leaves thinking to the chat owner during blank HTML startup and preserves real queue waits", () => {
   const startup: DevelopmentProcess = { ...process, framework: "HTML/CSS", status: "preparing", progress: [], runId: undefined, initialRunId: undefined };
   const markup = renderToStaticMarkup(<ChatDevelopmentProgress process={startup} />);
-  expect(markup.match(/coding-run-header/g)).toHaveLength(1);
-  expect(markup).toContain("Working on the project");
-  expect(markup).toContain("research-active-text");
-  expect(markup).not.toContain(">Preparing<");
+  expect(markup).toBe("");
   const queued = renderToStaticMarkup(<ChatDevelopmentProgress process={{ ...startup, status: "queued" }} />);
   expect(queued).toContain(">Queued<");
   expect(queued).not.toContain("research-active-text");
@@ -224,10 +229,17 @@ it("shows one working row during blank HTML startup and preserves real queue wai
 });
 
 
-it("distinguishes provider waiting from streamed code generation without claiming a planning step", () => {
+it("does not create thinking or model lifecycle rows inside run traces", () => {
  const event={id:"model",stage:"model_response",title:"Waiting for model",status:"running" as const,at:""};
  const waiting=renderToStaticMarkup(<ChatDevelopmentProgress process={{...process,progress:[event]}} />);
- expect(waiting).toContain("Waiting for the model response");expect(waiting).not.toContain(">Planning<");
+ expect(waiting).toBe("");
  const generating=renderToStaticMarkup(<ChatDevelopmentProgress process={{...process,progress:[{...event,stage:"model_generation"}]}} />);
- expect(generating).toContain("Generating code");expect(generating).not.toContain(">Planning<");
+ expect(generating).toBe("");
+});
+
+it("hides completed model-wait-only history without hiding provider failures", () => {
+ const event={id:"model",stage:"model_response",title:"Waiting for the model response",status:"completed" as const,at:""};
+ expect(renderToStaticMarkup(<ChatDevelopmentProgress process={{...process,status:"completed",progress:[event]}} />)).toBe("");
+ const failed=renderToStaticMarkup(<AgentExecutionTrace items={[{...event,status:"failed",error:"Provider unavailable"}]} />);
+ expect(failed).toContain('data-status="failed"');
 });

@@ -13,6 +13,12 @@ import { LivePreviewSplitResizer } from "./LivePreviewSplitResizer";
 export type ProjectVariantType = "website" | "mobile_app" | "game" | "other";
 export type PreviewRuntimeStatus = "running" | "starting" | "stopped" | "failed" | "unavailable";
 
+/**
+ * Projects whose Preview the user has open in this chat. A project's card moves to the agent's newest reply, which
+ * mounts a new card; it reopens the Preview instead of closing it while the agent edits the project.
+ */
+export const ChatPreviewOpenContext = React.createContext<Set<string> | null>(null);
+
 export interface ChatProjectPreviewCardProps {
   card: ProjectCardData;
   onActivate?: (card: ProjectCardData) => void;
@@ -182,7 +188,10 @@ export function ChatProjectPreviewCard({
   const i18n = useContext(I18nContextRef);
   const isUk = i18n?.language === "uk";
 
-  const [previewOpen, setPreviewOpen] = useState(false);
+  const openPreviews = useContext(ChatPreviewOpenContext);
+  const previewKey = card.projectId ?? card.id;
+  const [previewOpen, setPreviewOpenState] = useState(false);
+  const setPreviewOpen = (open: boolean) => { if (open) openPreviews?.add(previewKey); else openPreviews?.delete(previewKey); setPreviewOpenState(open); };
   const [previewUrl, setPreviewUrl] = useState("");
   const [previewHtml, setPreviewHtml] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -410,6 +419,8 @@ export function ChatProjectPreviewCard({
       });
     });
   }
+
+  useEffect(() => { if (openPreviews?.has(previewKey)) void openPreview(); }, []);
 
   async function openPreview() {
     setPreviewOpen(true);

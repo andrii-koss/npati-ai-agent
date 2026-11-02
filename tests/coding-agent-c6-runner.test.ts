@@ -305,9 +305,10 @@ describe("security-gate: C6 runner — tool execution and the model contract", (
      * the model's own call is executed and counted once — so the assertion names the model's call instead of
      * counting every invocation, which would have made this test fail for the wrong reason.
      */
-    expect(harness.invocations.filter((entry) => entry.tool !== "code.verify.run")).toHaveLength(1);
+    expect(harness.invocations.filter((entry) => entry.tool !== "code.verify.run" && !entry.toolCallId.startsWith("review-context:"))).toHaveLength(1);
+    expect(harness.invocations.filter((entry) => entry.toolCallId.startsWith("review-context:"))).toHaveLength(1);
     expect(harness.invocations.filter((entry) => entry.tool === "code.verify.run")).toHaveLength(1);
-    expect(result.summary.toolCalls).toBe(1);
+    expect(result.summary.toolCalls).toBe(2); // One model read plus the mandatory final-context reread.
     expect(result.summary.filesChanged).toEqual(["src/a.ts"]);
     expect(result.summary.diffStats).toEqual({ files: 1, linesAdded: 3, linesRemoved: 1 });
     expect(harness.runEvents.map((event) => event.eventType)).toEqual(["started", "completed"]);
@@ -779,7 +780,8 @@ it("executes registered reads after repeated inspection instead of reporting unk
   turnSummary:()=>({files:changed?1:0,linesAdded:changed?10:0,linesRemoved:0,changes:changed?[{path:"app/page.tsx",tool:"code.fs.edit"}]:[]}) });
   const result=await harness.run({requireImplementation:true,verificationTools:[]});
   expect(result.status).toBe("completed");
-  expect(harness.invocations.filter(call=>call.tool==="code.fs.read")).toHaveLength(7);
+  expect(harness.invocations.filter(call=>call.tool==="code.fs.read" && !call.toolCallId.startsWith("review-context:"))).toHaveLength(7);
+  expect(harness.invocations.filter(call=>call.toolCallId.startsWith("review-context:"))).toHaveLength(7);
   expect(harness.engineCalls[4]!.toolChoice).toBe("auto");
   expect(harness.engineCalls[4]!.messages.some(message=>message.role==="tool" && typeof message.content === "string" && message.content.includes("unknown_tool"))).toBe(false);
 });
@@ -795,7 +797,8 @@ it("resets correction attempts after a successful tool recovery across implement
   const harness=createHarness({script,limits:{maxStepsPerRun:25},toolResult:tool=>{if(tool==="code.fs.edit")changed=true;return {ok:true,tool,toolVersion:1,schemaVersion:1,result:{},truncated:false,durationMs:1};},turnSummary:()=>({files:changed?1:0,linesAdded:changed?10:0,linesRemoved:0,changes:changed?[{path:"app/page.tsx",tool:"code.fs.edit"}]:[]})});
   const result=await harness.run({requireImplementation:true,verificationTools:[]});
   expect(result.status).toBe("completed");
-  expect(harness.invocations.filter(call=>call.tool==="code.fs.read")).toHaveLength(12);
+  expect(harness.invocations.filter(call=>call.tool==="code.fs.read" && !call.toolCallId.startsWith("review-context:"))).toHaveLength(12);
+  expect(harness.invocations.filter(call=>call.toolCallId.startsWith("review-context:"))).toHaveLength(8);
   expect(harness.invocations.filter(call=>call.tool==="code.fs.edit")).toHaveLength(3);
 });
 

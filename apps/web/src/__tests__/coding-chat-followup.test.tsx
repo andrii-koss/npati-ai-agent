@@ -8,8 +8,27 @@ const mocks = vi.hoisted(() => ({ api: vi.fn() }));
 vi.mock("../business-workspace-shared", async importOriginal => ({ ...await importOriginal<object>(), api: mocks.api, useWorkspace: () => ({ overview: { currentBusiness: null }, loading: false }) }));
 import { I18nProvider } from "../i18n";
 import { BusinessChatPage } from "../BusinessWorkspace";
+import { useChatDevelopment } from "../use-chat-development";
 let root: Root | undefined;
 afterEach(async () => { if(root) await act(async () => root!.unmount()); document.body.innerHTML="";vi.unstubAllGlobals();vi.restoreAllMocks(); });
+it("does not adopt or stop another chat's active project and has no task panel", async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  window.history.replaceState({}, "", "/c/active-control-view");
+  const process: DevelopmentProcess = { id: "background-task", companyId: "company", projectId: "background-project", parentConversationId: "background-root", conversationId: "background-chat", name: "Background task", framework: "HTML/CSS", status: "running", hidden: true, createdAt: "2026-01-01", updatedAt: "2026-01-01" };
+  mocks.api.mockClear();mocks.api.mockImplementation(async () => ({ processes: [process] }));
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => url.startsWith("/api/chat/open")
+    ? new Response(JSON.stringify({ overview: null, conversation: { id: "active-control-view", messages: [], earlier: 0 }, company: null, chats: { items: [], more: false }, processes: [process] }))
+    : new Response(new ReadableStream({ start(c) { init?.signal?.addEventListener("abort", () => c.close(), { once: true }); } }))));
+  function Harness() { const development = useChatDevelopment({ conversationId: "active-control-view", onConversation: vi.fn(), onError: vi.fn(), onAccepted: vi.fn(), onSession: vi.fn() }); return <button data-active={String(development.isActive)} data-project={development.project?.id ?? ""} onClick={() => { void development.stop(); }}>Stop current chat</button>; }
+  const host=document.createElement("div");document.body.append(host);root=createRoot(host);
+  await act(async () => root!.render(<I18nProvider><MemoryRouter><Harness /></MemoryRouter></I18nProvider>));
+  await act(async () => { await Promise.resolve(); });
+  expect(host.querySelector("button")?.dataset.active).toBe("false");
+  expect(host.querySelector("button")?.dataset.project).toBe("");
+  expect(host.querySelector(".chat-development-panel")).toBeNull();
+  await act(async () => (host.querySelector("button") as HTMLButtonElement).click());
+  expect(mocks.api.mock.calls.filter(([url, init]) => init?.method === "POST")).toEqual([]);
+});
 it.each(["/c/child?company=company&project=project&developmentRoot=parent", "/c/child"])("keeps the project chat mounted across repeated edits from %s", async entry => {
   Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});
   Object.defineProperty(HTMLElement.prototype,"scrollIntoView",{configurable:true,value:vi.fn()});
@@ -55,9 +74,12 @@ it.each(["/c/child?company=company&project=project&developmentRoot=parent", "/c/
   await act(async () => {host.querySelector("form")!.dispatchEvent(new Event("submit",{bubbles:true,cancelable:true}));});
   // The server still reports the previous completed run while the next request is being admitted.
   expect(requests).toHaveLength(1);
-  expect(host.querySelector(".chat-development-preview button")).toBeNull();
+  expect(host.querySelector(".chat-thinking .research-active-text")?.textContent).toBe("Thinking");
+  expect(host.textContent).not.toContain("Working on the project");
+  // No Preview of the previous state is offered while the next request runs (the Preview trigger is ChatProjectPreviewCard's since projects-10).
+  expect(host.querySelector(".coding-preview-trigger")).toBeNull();
   await act(async()=>{changes!.enqueue(new TextEncoder().encode("event: change\ndata: {}\n\n"));await new Promise(resolve=>setTimeout(resolve,40));});
-  expect(host.querySelector(".chat-development-preview button")).toBeNull();
+  expect(host.querySelector(".coding-preview-trigger")).toBeNull();
   await act(async()=>{releaseFirstResponse!();await new Promise(resolve=>setTimeout(resolve,30));});
   expect(host.querySelector(".codex-trace-row-header")).toBe(activityHeader);
   expect(activityHeader.getAttribute("aria-expanded")).toBe("true");
@@ -65,7 +87,7 @@ it.each(["/c/child?company=company&project=project&developmentRoot=parent", "/c/
   expect(host.textContent).toContain("Changed the button to green.");
   expect(host.querySelector("textarea")).not.toBeNull();expect(host.textContent).not.toContain("Editing Company website");
   expect(host.querySelectorAll(".project-chat-card")).toHaveLength(0);
-  expect(host.querySelectorAll(".chat-development-preview button")).toHaveLength(1);
+  expect(host.querySelectorAll(".coding-preview-trigger")).toHaveLength(1);
   expect(new URL(window.location.href).searchParams.get("project")).toBe("project");
   const textarea = host.querySelector<HTMLTextAreaElement>("textarea")!;
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
@@ -73,10 +95,11 @@ it.each(["/c/child?company=company&project=project&developmentRoot=parent", "/c/
   await act(async () => {host.querySelector("form")!.dispatchEvent(new Event("submit",{bubbles:true,cancelable:true}));});
   expect(requests).toHaveLength(2);expect(requests[1]).toMatchObject({projectId:"project",companyId:"company",conversationId:"child",message:"Create a contact form on this website"});
   expect(host.textContent).toContain("Added the contact form.");expect(host.querySelectorAll(".project-chat-card")).toHaveLength(0);
-  const preview = host.querySelector(".chat-development-preview")!;
+  const preview = host.querySelector<HTMLButtonElement>(".coding-preview-trigger")!;
   const reply = [...host.querySelectorAll("article.assistant")].find(node=>node.textContent?.includes("Added the contact form."))!;
-  expect(reply.compareDocumentPosition(preview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  await act(async () => preview.querySelector<HTMLButtonElement>("button")!.click());
+  // The one Preview is in the latest reply, not above it.
+  expect(host.querySelectorAll(".coding-preview-trigger")).toHaveLength(1);expect(reply.contains(preview)).toBe(true);
+  await act(async () => preview.click());
   expect(document.querySelector('[aria-label="Preview of Company website"] iframe')).not.toBeNull();
   expect(host.textContent).not.toContain("Editing Company website");
   await act(async () => { setter.call(textarea,"Make the footer blue");textarea.dispatchEvent(new Event("input",{bubbles:true})); });
@@ -129,11 +152,11 @@ it("keeps Preview outside user messages before and after reloading persisted cha
   expect(host.querySelector("article.user .coding-preview-trigger")).toBeNull();
   expect(host.querySelector("article.user .project-chat-card")).toBeNull();
   await act(async()=>releaseProcesses());
-  const preview=host.querySelector(".chat-development-preview")!;
+  const preview=host.querySelector(".coding-preview-trigger")!;
   const reply=host.querySelector("article.assistant")!;
   expect(host.querySelector("article.user .coding-preview-trigger")).toBeNull();
   expect(host.querySelectorAll(".coding-preview-trigger")).toHaveLength(1);
-  expect(reply.compareDocumentPosition(preview)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(reply===preview.closest("article")||Boolean(reply.compareDocumentPosition(preview)&Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   await act(async()=>root!.unmount());root=undefined;
  }
 });
