@@ -8,6 +8,7 @@ import { decideSelfReview, type SelfReviewRiskDecision } from "./code-self-revie
 import { buildSelfReviewSummary, buildVerificationSummary, verificationEvidenceForReview } from "./code-review-summary";
 import {
   createSelfReview,
+  selfReviewDeliveryNotice,
   selfReviewStopMessage,
   type SelfReviewState,
   type SelfReviewVerdict,
@@ -106,6 +107,9 @@ export class CodingAgentReviewCoordinator {
   get verdict(): SelfReviewVerdict | null {
     return this.selfReviewVerdict;
   }
+
+  private selfReviewNotice: string | null = null;
+  private withSelfReviewNotice(message: string): string { return this.selfReviewNotice ? `${message}\n\n${this.selfReviewNotice}` : message; }
 
   readVerificationRevision(): Promise<string | null> {
     return this.host.ports.toolRuntime.verificationRevision?.(
@@ -529,7 +533,8 @@ export class CodingAgentReviewCoordinator {
     if (!verdict) return { action: "complete" };
 
     if (verdict.status === "unavailable") {
-      return { action: "stop", reason: "self_review_unavailable", message: selfReviewStopMessage(verdict) };
+      this.selfReviewNotice = this.host.input.signal?.aborted ? null : selfReviewDeliveryNotice(verdict, this.host.input.prompt);
+      return this.selfReviewNotice ? { action: "complete" } : { action: "stop", reason: "self_review_unavailable", message: selfReviewStopMessage(verdict) };
     }
 
     if (verdict.status === "findings") {
@@ -727,7 +732,7 @@ export class CodingAgentReviewCoordinator {
         runStatus: "completed", message: "Coding Agent run completed",
       });
       this.host.summary.remaining = "The model finished without further tool calls.";
-      return { action: "completed", result: await this.host.stop("completed", "completed", assistantText || "The run finished.") };
+      return { action: "completed", result: await this.host.stop("completed", "completed", this.withSelfReviewNotice(assistantText || "The run finished.")) };
     }
 
     let verificationExhausted = false;
@@ -785,6 +790,6 @@ export class CodingAgentReviewCoordinator {
       runStatus: "completed", message: "Coding Agent run completed",
     });
     this.host.summary.remaining = "The model finished without further tool calls.";
-    return { action: "completed", result: await this.host.stop("completed", "completed", assistantText || "The run finished.") };
+    return { action: "completed", result: await this.host.stop("completed", "completed", this.withSelfReviewNotice(assistantText || "The run finished.")) };
   }
 }

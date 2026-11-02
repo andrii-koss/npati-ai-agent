@@ -651,19 +651,39 @@ describe("security-gate: C9 self-review — the provider data guard and the hone
   it("is `unavailable`, never `clean`, when the review call fails", async () => {
     const harness = createHarness({
       script: editThenFinish,
-      reviews: [Object.assign(new Error("provider down"), { code: "provider_error" })],
+      reviews: [
+        Object.assign(new Error("provider down"), { code: "provider_error" }),
+        Object.assign(new Error("provider down"), { code: "provider_error" }),
+      ],
     });
 
     const result = await harness.run();
 
+    expect(harness.reviewCalls).toHaveLength(2);
     expect(result.selfReview?.status).toBe("unavailable");
     expect(result.selfReview?.ran).toBe(false);
     expect(result.selfReview?.reason).toBe("review_call_failed");
-    expect(result.status).toBe("stopped");
-    expect(result.reason).toBe("self_review_unavailable");
-    expect(result.message).toContain("could not be completed");
+    // The finished work is delivered, and the reply says it was not reviewed.
+    expect(result.status).toBe("completed");
+    expect(result.message).toContain("Not verified");
     // An unavailable review never reports findings, and never reports clean.
     expect(result.selfReview?.findingsCount).toBe(0);
+  });
+
+  it("retries a failed review call once and bounds it without reasoning", async () => {
+    const harness = createHarness({
+      script: editThenFinish,
+      reviews: [Object.assign(new Error("timed out"), { code: "provider_timeout" }), { content: reviewJson([]) }],
+    });
+
+    const result = await harness.run();
+
+    expect(harness.reviewCalls).toHaveLength(2);
+    expect(harness.reviewCalls[0]).toMatchObject({ reasoningMode: "disabled", timeoutMs: 60_000 });
+    expect(harness.reviewCalls[1]?.idempotencyKey).toBe(`${harness.reviewCalls[0]?.idempotencyKey}:retry`);
+    expect(result.selfReview?.status).toBe("clean");
+    expect(result.status).toBe("completed");
+    expect(result.message).not.toContain("Not verified");
   });
 
   it("is `unavailable` when the review answers in a shape that cannot be read", async () => {
@@ -676,8 +696,8 @@ describe("security-gate: C9 self-review — the provider data guard and the hone
 
     expect(result.selfReview?.status).toBe("unavailable");
     expect(result.selfReview?.reason).toBe("review_parser_unavailable");
-    expect(result.status).toBe("stopped");
-    expect(result.reason).toBe("self_review_unavailable");
+    expect(result.status).toBe("completed");
+    expect(result.message).toContain("Not verified");
     expect(harness.reviewCalls).toHaveLength(2);
   });
 

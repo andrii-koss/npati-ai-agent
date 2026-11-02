@@ -16,6 +16,13 @@ describe("Project terminal command policy", () => {
   it.each(["node -v", "node --version", "npm -v", "npm --version"])("allows the exact read-only version diagnostic %s", command => {
     expect(classifyTerminalCommand(command)).toMatchObject({ level: "safe", requiresApproval: false });
   });
+  it.each(["node --check game.js", "node --check src/app.mjs"])("allows a syntax check that does not run the file: %s", command => {
+    expect(classifyTerminalCommand(command)).toMatchObject({ level: "safe", requiresApproval: false });
+    expect(classifyShellCommand(command).risk).not.toBe("approval");
+  });
+  it.each(["node --check ../outside.js", "node --check /etc/app.js", "node --check game.js evil.js", "node --check --require evil.js game.js", "node --check game.txt"])("keeps other node --check forms behind approval: %s", command => {
+    expect(classifyTerminalCommand(command).requiresApproval).toBe(true);
+  });
   it.each(["node -v app.js", "node --version --require evil.js", "node -v && npm install", "./node -v", "npm --version install lodash"])("keeps extended version commands behind approval: %s", command => {
     expect(classifyTerminalCommand(command).requiresApproval).toBe(true);
   });

@@ -55,6 +55,7 @@ export function classifyTerminalCommand(input: string | TerminalCommandSpec): Te
   const words = [normalized.executable, ...normalized.args];
   const [program, action, ...args] = words;
   if (["node", "npm"].includes(program!) && words.length === 2 && ["-v", "--version"].includes(action ?? "")) return result("safe", "Read Node/npm version");
+  if (program === "node" && action === "--check" && args.length === 1 && relative(args[0]!) && /\.(?:js|mjs|cjs)$/.test(args[0]!)) return result("safe", "Check JavaScript syntax without running it");
   if (program === "pwd" && words.length === 1) return result("safe", "Read current directory");
   if (program === "ls" && words.slice(1).every((word) => ["-l", "-a", "-la", "-al"].includes(word) || relative(word))) return result("safe", "List sandbox files");
   if (program === "cat" && words.length === 2 && relative(action!)) return result("safe", "Read sandbox file");

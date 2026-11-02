@@ -85,6 +85,9 @@ export const DEFAULT_VERIFICATION_TOOLS: readonly string[] = ["typecheck", "test
 
 export const DEFAULT_SELF_REVIEW_DIFF_CHARS = 60_000;
 
+/** Per attempt. With reasoning disabled a review of a 1000-line diff takes 7-12 s, so this only catches a stuck provider. */
+export const SELF_REVIEW_TIMEOUT_MS = 60_000;
+
 const FORBIDDEN_EVENT_KEYS = [
   "content", "prompt", "command", "diff", "patch", "body", "stdout", "stderr", "token", "secret", "password",
 ] as const;

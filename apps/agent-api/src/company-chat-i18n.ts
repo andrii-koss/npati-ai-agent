@@ -264,6 +264,28 @@ export function codingStartCopy(language: CompanyChatLanguage) {
   return labels[language] ?? labels.en!;
 }
 
+export function selfReviewUnavailableNotice(language: CompanyChatLanguage): string {
+  const labels: Record<CompanyChatLanguage,string> = {
+    en:"⚠️ Not verified: the automatic code review could not finish, so this result was not reviewed.",
+    uk:"⚠️ Не перевірено: автоматичну перевірку коду не вдалося завершити, тому цей результат не перевірявся.",
+    ru:"⚠️ Не проверено: автоматическую проверку кода не удалось завершить, поэтому этот результат не проверялся.",
+    de:"⚠️ Nicht geprüft: Die automatische Code-Prüfung konnte nicht abgeschlossen werden, dieses Ergebnis wurde daher nicht geprüft.",
+    fr:"⚠️ Non vérifié : la revue automatique du code n’a pas pu se terminer, ce résultat n’a donc pas été vérifié.",
+    es:"⚠️ Sin verificar: la revisión automática del código no pudo completarse, por lo que este resultado no se revisó.",
+    it:"⚠️ Non verificato: la revisione automatica del codice non è stata completata, quindi questo risultato non è stato controllato.",
+    pl:"⚠️ Nie sprawdzono: automatycznego przeglądu kodu nie udało się ukończyć, więc ten wynik nie został sprawdzony.",
+    pt:"⚠️ Não verificado: a revisão automática do código não pôde ser concluída, por isso este resultado não foi revisto.",
+    nl:"⚠️ Niet gecontroleerd: de automatische codereview kon niet worden voltooid, dus dit resultaat is niet gecontroleerd.",
+    tr:"⚠️ Doğrulanmadı: otomatik kod incelemesi tamamlanamadı, bu nedenle bu sonuç incelenmedi.",
+    zh:"⚠️ 未验证：自动代码审查未能完成，因此此结果未经审查。",
+    ja:"⚠️ 未確認：自動コードレビューを完了できなかったため、この結果はレビューされていません。",
+    ko:"⚠️ 확인되지 않음: 자동 코드 검토를 완료하지 못해 이 결과는 검토되지 않았습니다.",
+    ar:"⚠️ لم يتم التحقق: تعذّر إكمال المراجعة التلقائية للكود، لذا لم تتم مراجعة هذه النتيجة.",
+    hi:"⚠️ सत्यापित नहीं: स्वचालित कोड समीक्षा पूरी नहीं हो सकी, इसलिए इस परिणाम की समीक्षा नहीं की गई।",
+  };
+  return labels[language];
+}
+
 /** User-facing copy policy only; execution and verification remain unchanged. */
 export function codingChatResponseInstruction(): string {
   return "\nCommunication: keep public progress updates to one short sentence about the actual next action. Unless the user explicitly asks for a detailed report, finish with 2-4 concise sentences: the concrete changes, actual verification result, and any actionable blocker. Do not repeat command logs, a file-by-file report, unchanged-file lists or unsolicited next steps; real execution details are available in the chat activity. Do not claim Preview is ready before the system confirms it. Answer in the user request language.";

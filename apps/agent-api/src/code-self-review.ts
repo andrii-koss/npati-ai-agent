@@ -36,6 +36,7 @@
  * from its inputs — and a run's verdict can be persisted and compared instead of re-derived.
  */
 
+import { resolveCodingConversationLanguage, selfReviewUnavailableNotice } from "./company-chat-i18n";
 import {
   CODE_SELF_REVIEW_MAX_FIX_ITERATIONS,
   resolveSelfReviewFixIterations,
@@ -497,6 +498,15 @@ export function describeSelfReview(verdict: SelfReviewVerdict): string {
  * The message a human reads when the review left something blocking after the single fix iteration. It is
  * deliberately blunt: an unresolved self-review is **not** a completed run.
  */
+/**
+ * A review that simply failed must not discard finished work: the run is delivered with this notice.
+ * A policy refusal or a missing diff returns null, and the run still stops.
+ */
+export function selfReviewDeliveryNotice(verdict: SelfReviewVerdict, prompt: string): string | null {
+  if (verdict.reason !== "review_call_failed" && verdict.reason !== "review_parser_unavailable") return null;
+  return selfReviewUnavailableNotice(resolveCodingConversationLanguage(prompt));
+}
+
 export function selfReviewStopMessage(verdict: SelfReviewVerdict | undefined): string {
   if (!verdict) return "Stopped: the self-review left the run unresolved.";
   const blocking = verdict.unresolved.filter((finding) => finding.blocking);

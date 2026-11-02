@@ -1,5 +1,6 @@
 import { emitCodingActivity, withCodingReferenceImages } from "./coding-agent-runner-contracts";
 import type { CodingAgentRunnerPorts } from "./coding-agent-runner-contracts";
+import { SELF_REVIEW_TIMEOUT_MS } from "./coding-agent-runner-prompt";
 import type { CodeAgentLimits } from "./code-agent-config";
 import type { ChatMessage } from "@npati/omniroute-adapter";
 import type { AuthContext, CodeSession } from "@npati/workspace";
@@ -363,20 +364,28 @@ export class CodingAgentReviewPhases {
         await emitCodingActivity(input,{...activity,status:"running"});
         let attempt=0;
         try {
-          const result = await this.ports.engine.chat({
+          // The review only returns a verdict; with reasoning on, DeepSeek Flash spent up to 27k tokens and 162 s on one diff.
+          const callReview = (idempotencyKey: string) => this.ports.engine.chat({
             onProviderAttempt:async(event)=>{if(event.phase==="started") attempt++;await record({...metadata,attempt,...event});},
             messages: withCodingReferenceImages(request.messages, input.images),
 
             model: input.model,
             ...(input.fallbackModel ? { fallbackModel: input.fallbackModel } : {}),
             signal: input.signal,
-            idempotencyKey: request.idempotencyKey,
+            idempotencyKey,
+            reasoningMode: "disabled",
+            timeoutMs: SELF_REVIEW_TIMEOUT_MS,
             policyContext: {
               companyId,
               projectId,
               sessionId,
               dataClassification: session.dataClassification,
             },
+          });
+          const result = await callReview(request.idempotencyKey).catch(async (error: { code?: string }) => {
+            if (input.signal?.aborted) throw error;
+            await record({...metadata,phase:"failed",errorCode:error.code ?? "review_call_failed",durationMs:this.now()-started});
+            return callReview(`${request.idempotencyKey}:retry`);
           });
           await record({...metadata,phase:"completed",model:result.model ?? input.model,provider:result.telemetry?.provider,durationMs:this.now()-started});
           await emitCodingActivity(input,{...activity,status:"completed",durationMs:this.now()-started,modelUsage:{id:activity.id,turn:steps,model:result.model ?? input.model,provider:result.telemetry?.provider,totalTokens:result.usage?.totalTokens,inputTokens:result.usage?.promptTokens,outputTokens:result.usage?.completionTokens,toolCallIds:[]}});
