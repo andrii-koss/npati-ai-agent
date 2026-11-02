@@ -19,3 +19,6 @@ screenshots/
 videos/
 traces/
 downloads/
+
+# Local QA evidence and harness; never committed
+reports/
