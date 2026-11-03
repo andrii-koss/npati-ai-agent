@@ -13,7 +13,7 @@ export function previewBrowserBridge(prefix: string, token: string): string {
   // a socket that stays "connecting" instead of logging failures; the app's own sockets are untouched.
   if(typeof WebSocket==="function"){
     const NativeSocket=WebSocket;
-    const devReload=(url,protocols)=>[].concat(protocols||[]).some(item=>item==="vite-hmr"||item==="vite-ping")||/\/_next\/webpack-hmr|\/sockjs-node|\/__webpack_hmr|\/_nuxt\/|\/hmr(?:[/?]|$)/.test(String(url));
+    const devReload=(url,protocols)=>[].concat(protocols||[]).some(item=>item==="vite-hmr"||item==="vite-ping")||new RegExp("[/](?:_next[/]webpack-hmr|sockjs-node|__webpack_hmr|_nuxt[/]|hmr(?:[/?]|$))").test(String(url));
     window.WebSocket=new Proxy(NativeSocket,{construct(target,args){
       if(!devReload(args[0],args[1]))return new target(...args);
       return Object.assign(new EventTarget(),{readyState:0,url:String(args[0]),protocol:"",send(){},close(){}});
