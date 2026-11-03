@@ -18,8 +18,8 @@ describe("Stage 06 Preview runtime regressions", () => {
     expect(await verifyWebsiteRuntime(input, completed, async () => qa(false))).toMatchObject({ status: "failed", reason: "website_preview_qa_failed", functionalAcceptance: { status: "failed", reportId: "persisted-report" } });
     expect(await verifyWebsiteRuntime(input, completed, async () => qa(true))).toMatchObject({ status: "completed", functionalAcceptance: { status: "passed" } });
   });
-  it("reports unavailable browser verification and does not run QA for read-only or unchanged previews", async () => {
-    expect(await verifyWebsiteRuntime(input, completed, async () => { throw Error("runner unavailable"); })).toMatchObject({ status: "failed", functionalAcceptance: { status: "blocked" } });
+  it("warns when browser verification is unavailable and does not run QA for read-only or unchanged previews", async () => {
+    expect(await verifyWebsiteRuntime(input, completed, async () => { throw Error("runner unavailable"); })).toMatchObject({ status: "completed", functionalAcceptance: { status: "blocked" } });
     const inspect = vi.fn(async () => qa(true));
     await verifyWebsiteRuntime({ ...input, readOnlyIntent: true }, completed, inspect);
     await verifyWebsiteRuntime(input, { status: "completed" }, inspect);

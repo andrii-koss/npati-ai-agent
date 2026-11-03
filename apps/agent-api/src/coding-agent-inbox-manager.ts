@@ -18,6 +18,8 @@ export interface InboxManagerArgs {
   onUserInstruction?: (text: string) => void;
 }
 
+const SESSION_WAIT_MS = 30 * 60_000;
+
 export class CodingAgentInboxManager {
   private inboxOpened = false;
   private inboxSealed = false;
@@ -42,12 +44,22 @@ export class CodingAgentInboxManager {
     if (!stateRunId) return { ok: false, error: "Durable input requires C6a run state." };
 
     try {
-      const opened = await ports.inbox!.transact(session, {
+      const open = () => ports.inbox!.transact(session, {
         kind: "open",
         runId: stateRunId,
         owner: stateOwner,
         ...(input.initialInboxMessageId ? { initialMessageId: input.initialInboxMessageId } : {}),
       });
+      let opened: Awaited<ReturnType<typeof open>> | undefined;
+      const waitUntil = Date.now() + SESSION_WAIT_MS;
+      while (!opened) {
+        try {
+          opened = await open();
+        } catch (error) {
+          if ((error as { code?: string }).code !== "session_run_held" || input.signal?.aborted || Date.now() > waitUntil) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 2_000));
+        }
+      }
       this.inboxOpened = true;
       if (input.detachedChildInbox) {
         await ports.inbox!.transact(session, { kind: "resume-inputs", runId: stateRunId, owner: stateOwner });

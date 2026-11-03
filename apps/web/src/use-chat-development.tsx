@@ -184,6 +184,8 @@ export function useChatDevelopment(options: {
       await refresh();
     },
     isActive,
+    /** The project this chat is building right now: a follow-up belongs to it, not to whatever was open before. */
+    activeProject: activeProcess,
     openingProjectChat,
     project: currentProcess,
     card: (messages: Parameters<typeof developmentCard>[0], index: number) => developmentCard(messages, index, processes, options.conversationId),

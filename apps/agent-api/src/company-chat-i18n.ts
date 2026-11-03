@@ -264,6 +264,28 @@ export function codingStartCopy(language: CompanyChatLanguage) {
   return labels[language] ?? labels.en!;
 }
 
+export function browserCheckUnavailableNotice(language: CompanyChatLanguage): string {
+  const labels: Record<CompanyChatLanguage,string> = {
+    en:"⚠️ Not verified: Preview is running, but the automatic browser check could not finish. Please check the page.",
+    uk:"⚠️ Не перевірено: Preview працює, але автоматичну перевірку в браузері не вдалося завершити. Перегляньте сторінку.",
+    ru:"⚠️ Не проверено: Preview работает, но автоматическую проверку в браузере не удалось завершить. Проверьте страницу.",
+    de:"⚠️ Nicht geprüft: Preview läuft, aber die automatische Browser-Prüfung konnte nicht abgeschlossen werden. Bitte die Seite prüfen.",
+    fr:"⚠️ Non vérifié : Preview fonctionne, mais la vérification automatique dans le navigateur n’a pas pu se terminer. Veuillez vérifier la page.",
+    es:"⚠️ Sin verificar: Preview funciona, pero la comprobación automática en el navegador no pudo completarse. Revise la página.",
+    it:"⚠️ Non verificato: Preview è attivo, ma il controllo automatico nel browser non è stato completato. Controlla la pagina.",
+    pl:"⚠️ Nie sprawdzono: Preview działa, ale automatyczna kontrola w przeglądarce nie zakończyła się. Sprawdź stronę.",
+    pt:"⚠️ Não verificado: o Preview está a funcionar, mas a verificação automática no navegador não terminou. Verifique a página.",
+    nl:"⚠️ Niet gecontroleerd: Preview draait, maar de automatische browsercontrole is niet voltooid. Controleer de pagina.",
+    tr:"⚠️ Doğrulanmadı: Preview çalışıyor, ancak otomatik tarayıcı kontrolü tamamlanamadı. Lütfen sayfayı kontrol edin.",
+    zh:"⚠️ 未验证：Preview 正在运行，但浏览器自动检查未能完成，请检查页面。",
+    ja:"⚠️ 未確認：Preview は動作していますが、ブラウザの自動チェックを完了できませんでした。ページを確認してください。",
+    ko:"⚠️ 확인되지 않음: Preview는 실행 중이지만 브라우저 자동 검사를 완료하지 못했습니다. 페이지를 확인해 주세요.",
+    ar:"⚠️ لم يتم التحقق: يعمل Preview لكن فحص المتصفح التلقائي لم يكتمل. يرجى التحقق من الصفحة.",
+    hi:"⚠️ जाँच नहीं हुई: Preview चल रहा है, पर ब्राउज़र की स्वचालित जाँच पूरी नहीं हो सकी। कृपया पेज देखें।",
+  };
+  return labels[language];
+}
+
 export function selfReviewFindingsNotice(language: CompanyChatLanguage, detail: string): string {
   const labels: Record<CompanyChatLanguage,string> = {
     en:"⚠️ The automatic code review found issues that were not fixed. Please check them:",

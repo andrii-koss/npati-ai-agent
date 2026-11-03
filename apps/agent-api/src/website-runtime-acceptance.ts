@@ -1,4 +1,5 @@
 import { normalizeBrowserDiagnostic } from "../browser-qa-diagnostics.mjs";
+import { browserCheckUnavailableNotice, resolveCodingConversationLanguage } from "./company-chat-i18n";
 import type { CodeSessionRunInput } from "./code-session-run-executor";
 import type { BrowserQaReportResult } from "./project-browser-qa-service";
 
@@ -13,7 +14,9 @@ export async function verifyWebsiteRuntime(input: CodeSessionRunInput, result: u
     return qa.success ? { ...run, functionalAcceptance } : { ...run, status: "failed", reason: "website_preview_qa_failed", functionalAcceptance,
       message: "The production build passed, but Browser QA failed. Correct the reported browser diagnostics or broken links in this same project and retry. " + JSON.stringify(functionalAcceptance) };
   } catch (error) {
-    return { ...run, status: "failed", reason: "website_preview_qa_unavailable", functionalAcceptance: { status: "blocked" },
-      message: "Preview started, but browser verification could not complete: " + (error instanceof Error ? error.message : "Browser QA unavailable") };
+    console.warn(`[website-qa] browser check unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    const answer = (run as { message?: string }).message;
+    return { ...run, functionalAcceptance: { status: "blocked" },
+      message: `${answer ? `${answer}\n\n` : ""}${browserCheckUnavailableNotice(resolveCodingConversationLanguage(input.prompt ?? ""))}` };
   }
 }

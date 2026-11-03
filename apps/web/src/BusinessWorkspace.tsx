@@ -439,7 +439,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     event.preventDefault();
     if (development.openingProjectChat) return; // the draft stays; the chat it belongs to is still opening
     if (!noMemory && !attachments.length && !sending && !chatSubmissionBusy.current && await development.submit(input.trim())) return;
-    const boundProjectId = (selectedProject?.conversationId === selected ? selectedProject.projectId : undefined) ?? development.project?.projectId ?? codeInbox.session?.projectId;
+    const boundProjectId = development.activeProject?.projectId ?? (selectedProject?.conversationId === selected ? selectedProject.projectId : undefined) ?? development.project?.projectId ?? codeInbox.session?.projectId;
     const nextIntent = defaultHybridRouter.classifyProject({ message: input.trim(), activeProjectId: boundProjectId, activeCompanyId: companyId ?? readActiveCompanyId() });
     const createsProject = nextIntent.intent === "CREATE_WEBSITE" || nextIntent.intent === "CREATE_PROJECT";
     // The inbox queues work for its own session; a request for another project of this chat goes through routing.
@@ -559,13 +559,14 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     };
     flushDeltasRef.current = flushDeltas;
 
-    const activeCompanyForRequest = (!createsProject ? development.project?.companyId : null) ?? (!createsProject && selectedProject?.conversationId === selected ? selectedProject.companyId : null) ?? companyId ?? readActiveCompanyId();
+    const activeCompanyForRequest = (!createsProject ? (development.activeProject ?? development.project)?.companyId : null) ?? (!createsProject && selectedProject?.conversationId === selected ? selectedProject.companyId : null) ?? companyId ?? readActiveCompanyId();
     let activeProjectId: string | undefined;
     const projectIntent = defaultHybridRouter.classifyProject({ message: requestMessage, activeProjectId: boundProjectId, activeCompanyId: activeCompanyForRequest });
     const isNewProjectRequest = projectIntent.intent === "CREATE_WEBSITE" || projectIntent.intent === "CREATE_PROJECT";
     if (!isNewProjectRequest) {
       // The chat's selection follows its newest development project and the server's routed replies.
-      if (selectedProject?.conversationId === selected && selectedProject.companyId === activeCompanyForRequest) activeProjectId = selectedProject.projectId;
+      if (development.activeProject?.companyId === activeCompanyForRequest) activeProjectId = development.activeProject.projectId;
+      else if (selectedProject?.conversationId === selected && selectedProject.companyId === activeCompanyForRequest) activeProjectId = selectedProject.projectId;
       else if (development.project?.companyId === activeCompanyForRequest) activeProjectId = development.project.projectId;
       else if (latestCard?.companyId === activeCompanyForRequest) activeProjectId = latestCard.projectId ?? latestCard.id;
       try {
