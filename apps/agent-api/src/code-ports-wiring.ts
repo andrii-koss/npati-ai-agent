@@ -232,6 +232,7 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
         : project?.toolchain?.verifyCommands ?? {};
       const startedAll = Date.now();
       const results: Array<{ tool: "lint" | "typecheck" | "test" | "build"; ok: boolean; state?: "unavailable" | "approval_required"; code?: string; summary: string; findings: string[]; raw?: string; exitCode?: number | null; stdout?: string; stderr?: string; timedOut?: boolean; durationMs?: number; command?: string }> = [];
+      let dependenciesInstalled = false;
       for (const tool of input.tools) {
         const command = commands[tool];
         if (!command) {
@@ -240,11 +241,20 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
         }
         const started = Date.now();
         let result: { stdout?: string; stderr?: string; output?: string; exitCode?: number | null; status?: string } | undefined;
+        const runCommand = (line: string) => projectSandbox!.execute(input.ctx, input.companyId, {
+          projectId: input.projectId, command: line, agentId: "system", approved: true,
+          timeoutMs: input.timeoutMs,
+        }) as Promise<{ stdout?: string; stderr?: string; output?: string; exitCode?: number | null; status?: string }>;
         try {
-          result = await projectSandbox!.execute(input.ctx, input.companyId, {
-            projectId: input.projectId, command, agentId: "system", approved: true,
-            timeoutMs: input.timeoutMs,
-          }) as { stdout?: string; stderr?: string; output?: string; exitCode?: number | null; status?: string };
+          try {
+            result = await runCommand(command);
+          } catch (error) {
+            // "vite: not found" means dependencies are missing, not that the code is broken: install once and retry.
+            if ((error as { code?: string }).code !== "command_not_found" || !/^npm\b/.test(command) || dependenciesInstalled) throw error;
+            dependenciesInstalled = true;
+            await runCommand("npm install");
+            result = await runCommand(command);
+          }
         } catch (error) {
           const errMsg = error instanceof Error ? error.message : String(error);
           const failure = error as { code?: string; details?: { exitCode?: number | null } };
