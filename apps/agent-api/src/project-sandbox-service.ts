@@ -1,4 +1,5 @@
 import { codeSearchTypeArguments } from "./code-search-types";
+import { hasQuotedCredential } from "./workspace-protected-content";
 import { projectRuntimeCommandPort } from "./shared-project-runtime-provider";
 import { commitSandboxWrites } from "./project-sandbox-write-commit";
 import type { PatchMutation } from "./code-patch-transaction";
@@ -359,9 +360,8 @@ export class ProjectSandboxService {
       // Terminal redaction also matches TypeScript declarations such as `password: string`.
       // Scan source credentials instead, and avoid revalidating unchanged canonical files.
       const changed = !original || original.content !== file.content;
-      const quotedCredential = /(?<![-A-Za-z0-9_])[A-Za-z0-9_]*(?:api[_-]?key|password|secret|token)(?![sS]\b)[A-Za-z0-9_]*["']?\s*[:=]\s*["'][^"']{8,}["']/i;
       if (secrets.some((secret) => secret.length > 0 && file.content.includes(secret)) ||
-        (changed && !isLockfile && (!scanTextForSecrets(file.content).clean || quotedCredential.test(file.content)))) {
+        (changed && !isLockfile && (!scanTextForSecrets(file.content).clean || hasQuotedCredential(file.content)))) {
         throw new SandboxProviderError("secret_content", "Sandbox produced protected file content", 403, "download");
       }
       if (changed) plan.push({ path: file.path, before: original?.content ?? "", after: file.content, existing: !!original, revision: original?.revision });

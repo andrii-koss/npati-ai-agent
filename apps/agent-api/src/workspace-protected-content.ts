@@ -6,8 +6,23 @@ export function isWorkspaceManifest(filePath: string): boolean {
   return /^(?:package(?:-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|composer\.(?:json|lock)|requirements\.txt|Pipfile(?:\.lock)?)$/i.test(name);
 }
 
+/**
+ * A quoted value under a credential-like name. Messages and labels (spaces or non-Latin letters) and names of a
+ * storage key, field or header ("TOKEN_KEY", "passwordLabel") are ordinary code, not credentials.
+ */
+export function hasQuotedCredential(content: string): boolean {
+  const assignments = /(?<![-A-Za-z0-9_])([A-Za-z0-9_]*(?:api[_-]?key|password|secret|token)(?![sS]\b)[A-Za-z0-9_]*)["']?\s*[:=]\s*["']([^"']{8,})["']/gi;
+  for (const [, name, value] of content.matchAll(assignments)) {
+    if (/\s|[^\x00-\x7F]/.test(value!)) continue;
+    const secretKeyName = /(?:api|secret|access|private)[_-]?key$/i.test(name!);
+    if (!secretKeyName && /(?:key|name|storage|header|field|label|error|message|placeholder|hint|title|path|url|type|param|cookie|prefix|regex|pattern)$/i.test(name!)) continue;
+    return true;
+  }
+  return false;
+}
+
 export function isWorkspaceContentProtected(filePath: string, content: string): boolean {
-  return !isWorkspaceManifest(filePath) && /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{20,})\b|(?<![-A-Za-z0-9_])(?:[A-Za-z0-9_]*(?:api[_-]?key|password|secret|token)(?![sS]\b)[A-Za-z0-9_]*)["']?\s*[:=]\s*["'][^"']{8,}["']/i.test(content);
+  return !isWorkspaceManifest(filePath) && /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{20,})\b/i.test(content) || !isWorkspaceManifest(filePath) && hasQuotedCredential(content);
 }
 
 export function assertCodeWriteReadable(filePath: string, content: string, tool: string): void {
