@@ -545,9 +545,9 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
         safeProjectPath(item.path);
         if (typeof item.after !== "string" || Buffer.byteLength(item.after) > this.maxFileBytes) throw new ProjectFileError("file_too_large", "Patch file size limit exceeded", 413);
       }
-      const currentCount = (await this.tree(base)).filter(entry => entry.type === "file").length;
+      const currentCount = Number.isFinite(this.maxFiles) ? (await this.tree(base)).filter(entry => entry.type === "file").length : 0;
       const resultingCount = currentCount + plan.filter(item => !item.existing && !item.delete).length - plan.filter(item => item.existing && item.delete).length;
-      if (resultingCount > this.maxFiles) throw new ProjectFileError("file_limit", "Project file count limit exceeded", 409);
+      if (Number.isFinite(this.maxFiles) && resultingCount > this.maxFiles) throw new ProjectFileError("file_limit", "Project file count limit exceeded", 409);
       return commitWorkspacePatch(base, plan, this.patchIO(base));
     });
   }
@@ -556,7 +556,7 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
     return this.lock(base, async () => {
       const { clean, absolute } = await this.target(base, filePath);
       if (await lstat(absolute).then(() => true, () => false)) throw new ProjectFileError("file_exists", "Project file already exists", 409);
-      if ((await this.listFiles(ctx, companyId, projectId, workspaceId, agentId)).length >= this.maxFiles) throw new ProjectFileError("file_limit", "Project file count limit exceeded", 409);
+      if (Number.isFinite(this.maxFiles) && (await this.listFiles(ctx, companyId, projectId, workspaceId, agentId)).length >= this.maxFiles) throw new ProjectFileError("file_limit", "Project file count limit exceeded", 409);
       const bytes = await this.save(absolute, content, restoredMode);
       return this.content(clean, bytes);
     });

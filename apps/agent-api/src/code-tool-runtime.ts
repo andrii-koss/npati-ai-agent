@@ -1,4 +1,6 @@
 import { compactWriteReceipt } from "./code-write-receipt";
+import { supersededSources } from "./code-tool-superseded-source";
+import { buildUnifiedDiff, diffLineStats } from "./code-tools-diff";
 import type { AuthContext } from "@npati/workspace";
 import { canonicalJson } from "@npati/workspace";
 import { resolveCodeAgentLimits, type CodeAgentLimits } from "./code-agent-config";
@@ -503,6 +505,16 @@ export class CodeToolRuntime {
             this.tracker.record(sessionId, { path: change.path, sha256: change.sha256, revision: committedRevisions.get(change.path) });
           }
           this.revisionAttempts.delete(this.writeGuard.revisionKey(operationScope, change.path));
+        }
+        const created = changes.map((change) => change.path).filter((path) => writeTargets.some((target) => target.path === path && !target.exists));
+        for (const twin of created.flatMap(supersededSources)) {
+          const content = await this.portFor(input.projectId).readFile({ ctx, companyId: input.companyId, projectId: input.projectId, path: twin, maxLines: Number.MAX_SAFE_INTEGER, maxBytes: Number.MAX_SAFE_INTEGER }).then((file) => file.content ?? "", () => null);
+          if (content === null) continue;
+          await this.options.writePort?.deleteFile({ ctx, companyId: input.companyId, projectId: input.projectId, path: twin });
+          const diff = buildUnifiedDiff(content, "", twin);
+          const stats = diffLineStats(diff);
+          this.turns.recordChange(sessionId, turnId, { path: twin, tool: tool.name, sha256: null, linesAdded: stats.additions, linesRemoved: stats.deletions, diff, at: new Date().toISOString() });
+          warnings.push(`Removed ${twin}: the new TypeScript file with the same name replaces it.`);
         }
         warnings.push(...await this.hooksCoordinator.runPostWriteHooks(ctx, input, tool.name, raw));
       }

