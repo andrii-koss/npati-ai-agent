@@ -65,7 +65,9 @@ describe("Coding Agent tool visibility tiers", () => {
 
   it("adds intent groups only when the request or the project state asks for them", () => {
     const git = offered("hosted-native-tools", "auto_edit", { userMessage: "commit the change and open a pull request" });
-    expect(git.visible).toEqual(expect.arrayContaining(["code.git.status", "code.git.commit", "code.git.pr.create"]));
+    expect(git.visible).toEqual(expect.arrayContaining(["code.git.commit", "code.git.pr.create"]));
+    expect(git.visible).not.toContain("code.git.status");
+    expect(git.hidden.find((entry) => entry.name === "code.git.status")?.reason).toBe("retired");
     expect(git.visible.some((name) => name.startsWith("code.data."))).toBe(false);
 
     const data = offered("hosted-native-tools", "auto_edit", { userMessage: "створи таблицю замовлень у базі даних" });

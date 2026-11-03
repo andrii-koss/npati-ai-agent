@@ -247,7 +247,7 @@ const RUN_STOP_COPY: Record<string, Array<[RegExp, (...groups: string[]) => stri
     [/^Stopped: the self-review could not be completed \((.+)\), so the change was not reviewed\.$/u, (e) => `Зупинено: самоперевірку не вдалося завершити (${e}), тому зміну не перевірено.`],
     [/^Stopped: repeating cycle of tool calls \[(.+)\] was detected without progress\.$/u, (e) => `Зупинено: виявлено цикл викликів інструментів [${e}] без прогресу.`],
     [/^Stopped: the same tool call \((.+)\) was repeated without progress\.$/u, (e) => `Зупинено: той самий виклик інструмента (${e}) повторювався без прогресу.`],
-    [/^Stopped: ten model turns without source progress\..*$/u, () => "Зупинено: десять кроків моделі без змін у коді. Завершення реалізації не стверджується."],
+    [/^Stopped: \d+ model turns without source progress\..*$/u, () => "Зупинено: багато кроків моделі без змін у коді. Завершення реалізації не стверджується."],
   ],
   pt: [
     [/^Stopped after (\d+) minutes: the time limit was reached\.$/u, (n) => `Interrompido após ${n} min: o limite de tempo foi atingido.`],

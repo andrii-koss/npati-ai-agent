@@ -55,7 +55,7 @@ export function classifyTerminalCommand(input: string | TerminalCommandSpec): Te
   const words = [normalized.executable, ...normalized.args];
   const [program, action, ...args] = words;
   if (["node", "npm"].includes(program!) && words.length === 2 && ["-v", "--version"].includes(action ?? "")) return result("safe", "Read Node/npm version");
-  if (program === "node" && action === "--check" && args.length === 1 && relative(args[0]!) && /\.(?:js|mjs|cjs)$/.test(args[0]!)) return result("safe", "Check JavaScript syntax without running it");
+  if (program === "node" && action === "--check" && args.length === 1 && /\.(?:js|mjs|cjs)$/.test(args[0]!) && args[0]!.split("/").every((part) => /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(part))) return result("safe", "Check JavaScript syntax without running it");
   if (program === "pwd" && words.length === 1) return result("safe", "Read current directory");
   if (program === "ls" && words.slice(1).every((word) => ["-l", "-a", "-la", "-al"].includes(word) || relative(word))) return result("safe", "List sandbox files");
   if (program === "cat" && words.length === 2 && relative(action!)) return result("safe", "Read sandbox file");
@@ -67,8 +67,12 @@ export function classifyTerminalCommand(input: string | TerminalCommandSpec): Te
   }
   if (packageManager(program!)) {
     // npm already saves named installs by default; explicit --save has the same scope.
-    const installArguments = program === "npm" && action === "install" ? args.filter(arg => arg !== "--save") : args;
-    if (["install", "ci"].includes(action!) && installArgs(installArguments) && (action !== "ci" || args.every(installFlag))) return result("controlled", "Install dependencies inside sandbox", "install_build");
+    const installArguments = (program === "npm" && action === "install") || action === "add" ? args.filter(arg => !["--save", "--save-dev", "-D"].includes(arg)) : args;
+    if (program === "npm" && action === "audit" && args.every((word) => word === "--json")) return result("safe", "Read dependency advisories");
+    if (program === "npm" && action === "ls" && args.every((word) => packageName(word) || /^--(?:depth=\d+|all|json)$/.test(word))) return result("safe", "Read installed packages");
+    if (program === "npm" && action === "view" && args.length >= 1 && args.length <= 2 && args.every(packageName)) return result("safe", "Read package registry data");
+    if (action === "run" && args.length === 1 && /^[A-Za-z0-9:_-]+$/.test(args[0]!) && !["build", "test", "dev", "start", "preview"].includes(args[0]!) && !/deploy|migrat|publish|release|prod/i.test(args[0]!)) return result("controlled", "Run a project script inside sandbox", "install_build");
+    if (["install", "ci", "add"].includes(action!) && installArgs(installArguments) && (action !== "ci" || args.every(installFlag))) return result("controlled", "Install dependencies inside sandbox", "install_build");
     if (action === "test" && args.length === 0) return result("safe", "Run sandbox tests", "install_build");
     if (action === "run" && ["build", "test"].includes(args[0] ?? "") && args.length === 1) return result("safe", "Run sandbox build or tests", "install_build");
     if ((action === "run" && ["dev", "start", "preview"].includes(args[0] ?? "") && serverArgs(args.slice(1))) || (["dev", "start", "preview"].includes(action!) && serverArgs(args))) return result("controlled", "Start sandbox development server");

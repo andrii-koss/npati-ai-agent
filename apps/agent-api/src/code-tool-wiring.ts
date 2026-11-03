@@ -4,7 +4,7 @@ import type { AppConfig } from "./app";
 import { createCodeCommandRegistry } from "./code-command-registry";
 import { runDependencyAudit, shouldBlockCommit } from "./code-deps-audit";
 import { classifyDependencySource, findTyposquatTarget, isRegistryAllowed, resolveDepsGuardPolicy, sourceRequiresApproval } from "./code-deps-guard";
-import { buildInstallPlan, registryFromConfig, runInstallPlan } from "./code-deps-policy";
+import { buildInstallPlan, packageAddCommand, registryFromConfig, runInstallPlan } from "./code-deps-policy";
 import { sessionBranchName } from "./code-git-workflow";
 import { createCodeInstructionsLoader } from "./code-instructions-loader";
 import { buildPullRequestDescription } from "./code-pr-description";
@@ -205,14 +205,16 @@ export function createCodeToolWiring(deps: CodeToolWiringDeps) {
   };
   const resolveDepsTarget = async (ctx: AuthContext, companyId: string, projectId: string, requestedManager?: string, requestedPath?: string) => {
     const candidates = requestedManager ? CODE_DEPS_MANIFESTS.filter((entry) => entry.manager === requestedManager) : CODE_DEPS_MANIFESTS;
+    let withoutLockfile: { manager: string; manifestPath: string; manifestText: string; lockfile: null } | null = null;
     for (const candidate of candidates) {
       const manifestPath = requestedPath ?? candidate.manifest;
       const text = await readWorkspaceText(ctx, companyId, projectId, manifestPath);
       if (text === null) continue;
       const lockfileText = candidate.lockfile ? await readWorkspaceText(ctx, companyId, projectId, candidate.lockfile) : null;
-      return { manager: candidate.manager, manifestPath, manifestText: text, lockfile: candidate.lockfile && lockfileText !== null ? candidate.lockfile : null };
+      if (candidate.lockfile && lockfileText !== null) return { manager: candidate.manager, manifestPath, manifestText: text, lockfile: candidate.lockfile };
+      if (!withoutLockfile || candidate.manager === "npm") withoutLockfile = { manager: candidate.manager, manifestPath, manifestText: text, lockfile: null };
     }
-    return null;
+    return withoutLockfile;
   };
   const codeDepsPort = {
     inspect: async ({ ctx, companyId, projectId, path: requestedPath, manager: requestedManager }: { ctx: AuthContext; companyId: string; projectId: string; path?: string; manager?: string }) => {
@@ -225,13 +227,13 @@ export function createCodeToolWiring(deps: CodeToolWiringDeps) {
         metadata: { manifest: target.manifestPath },
       };
     },
-    audit: async ({ ctx, companyId, projectId, manager: requestedManager, lockfilePath, blockOn }: { ctx: AuthContext; companyId: string; projectId: string; manager?: string; lockfilePath?: string; blockOn?: string[] }) => {
+    audit: async ({ ctx, companyId, projectId, manager: requestedManager, lockfilePath, blockOn, sessionId, sessionMode }: { sessionId?: string; sessionMode?: string; ctx: AuthContext; companyId: string; projectId: string; manager?: string; lockfilePath?: string; blockOn?: string[] }) => {
       const target = await resolveDepsTarget(ctx, companyId, projectId, requestedManager, lockfilePath);
       if (!target) throw new CodeToolError("package_not_found", "No dependency manifest was found in the project workspace", 404, "resolve", false, "code.deps.audit");
       if (target.manager === "yarn" || target.manager === "pnpm" || target.manager === "npm" || target.manager === "pip" || target.manager === "poetry" || target.manager === "composer" || target.manager === "cargo" || target.manager === "go") {
         const auditRunner = async ({ command }: { command: string }) => {
           if (!codeShellRuntimePort) throw new CodeToolError("audit_unavailable", "Dependency audit needs the sandbox shell runtime", 503, "configure", true, "code.deps.audit");
-          const executed = await codeShellRuntimePort.exec({ ctx, companyId, projectId, command, timeoutMs: config.codeAgentLimits?.installBuildTimeoutMs ?? 600_000, approved: false });
+          const executed = await codeShellRuntimePort.exec({ ctx, companyId, projectId, ...(sessionId ? { sessionId } : {}), ...(sessionMode ? { sessionMode } : {}), command, timeoutMs: config.codeAgentLimits?.installBuildTimeoutMs ?? 600_000, approved: false });
           return { exitCode: executed.exitCode ?? 1, stdout: executed.stdout, stderr: executed.stderr };
         };
         const report = await runDependencyAudit({
@@ -250,8 +252,8 @@ export function createCodeToolWiring(deps: CodeToolWiringDeps) {
     },
     add: async ({ ctx, companyId, projectId, name, version, manager: requestedManager, dev, source, approved, sessionId }: { ctx: AuthContext; companyId: string; projectId: string; name: string; version?: string; manager?: string; dev?: boolean; source?: string; approved: boolean; sessionId?: string }) => {
       const target = await resolveDepsTarget(ctx, companyId, projectId, requestedManager);
-      const manager = (target?.manager ?? "npm") as Parameters<typeof classifyDependencySource>[0]["manager"];
-      const spec = version ? `${name}@${version}` : name;
+      const manager = (requestedManager ?? target?.manager ?? "npm") as Parameters<typeof classifyDependencySource>[0]["manager"];
+      const spec = version ? `${name}@${version.replace(/^[\^~]/, "")}` : name;
       const resolvedSource = (source ?? classifyDependencySource({ manager, spec })) as Parameters<typeof sourceRequiresApproval>[0];
       const reasons: string[] = [];
       if (sourceRequiresApproval(resolvedSource) && !approved) reasons.push("deps:source_requires_approval");
@@ -259,16 +261,21 @@ export function createCodeToolWiring(deps: CodeToolWiringDeps) {
       if (!isRegistryAllowed(registryHost, resolveDepsGuardPolicy().allowedRegistries)) reasons.push("deps:registry_not_allowed");
       const typosquat = findTyposquatTarget(name, resolveDepsGuardPolicy().popularPackages, 2);
       if (typosquat) reasons.push(`deps:typosquat_suspected:${typosquat}`);
-      if (!target) reasons.push("deps:lockfile_missing");
       if (reasons.length && !approved) {
         return { manager, name, version: version ?? null, source: resolvedSource, verdict: "require_approval" as const, reasons, metadata: { registryHost, lockfile: target?.lockfile ?? null } };
       }
       const plan = buildInstallPlan({
         manager: manager as Parameters<typeof buildInstallPlan>[0]["manager"],
         args: [dev ? "add-dev" : "add", spec],
-        ...(target?.lockfile ? { lockfilePresent: true } : {}),
+        lockfilePresent: true,
         registryHost,
       });
+      // pip installs from requirements.txt; every other manager adds the named package.
+      if (manager !== "pip") {
+        const addCommand = packageAddCommand(manager, spec, dev === true);
+        if (!addCommand) throw new CodeToolError("install_unavailable", `code.deps.add cannot add "${spec}" with ${manager}; use code.shell.exec`, 400, "validate_arguments", false, "code.deps.add");
+        plan.phaseCommands.fetch = [addCommand];
+      }
       if (!codeShellRuntimePort) throw new CodeToolError("install_unavailable", "Dependency install needs the sandbox shell runtime", 503, "configure", true, "code.deps.add");
       const runner = {
         supportsNetworkIsolation: false,
@@ -279,6 +286,11 @@ export function createCodeToolWiring(deps: CodeToolWiringDeps) {
         },
       };
       const result = await runInstallPlan(plan, runner, { approved: approved === true });
+      // "added" is a fact about the manifest, not about the exit code.
+      const manifest = result.ok && manager !== "pip" ? await readWorkspaceText(ctx, companyId, projectId, "package.json") : null;
+      if (result.ok && manager !== "pip" && !manifest?.includes(`"${name}"`)) {
+        return { manager, name, version: version ?? null, source: resolvedSource, verdict: "denied" as const, reasons: ["deps:not_in_manifest"], metadata: { commands: result.phases.map((phase) => phase.command), registryHost, lockfile: target?.lockfile ?? null } };
+      }
       return {
         manager,
         name,

@@ -26,6 +26,8 @@ export interface CodeDepsPort {
     manager?: string;
     lockfilePath?: string;
     blockOn?: string[];
+    sessionId?: string;
+    sessionMode?: string;
   }): Promise<{ report: { critical: number; high: number; moderate: number; low: number; advisories: Array<Record<string, unknown>> }; blocked: boolean; reason?: string }>;
   add(input: {
     ctx: CodeToolExecutionContext["ctx"];
@@ -85,6 +87,8 @@ export function canonicalDepsExecutors(options: CanonicalDepsExecutorOptions = {
           ...(typeof input.args.manager === "string" ? { manager: input.args.manager } : {}),
           ...(typeof input.args.lockfilePath === "string" ? { lockfilePath: input.args.lockfilePath } : {}),
           ...(blockOn?.length ? { blockOn } : {}),
+          ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+          ...(input.sessionMode ? { sessionMode: input.sessionMode } : {}),
         });
       } catch (error) { rethrowCanonical(error); }
     },

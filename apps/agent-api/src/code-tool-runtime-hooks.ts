@@ -3,6 +3,9 @@ import type { CodeToolSchema } from "./code-tool-registry";
 import { extractWriteChanges, revisionConflictDetails, type CodeTurnTracker } from "./code-workspace-checkpoint";
 import type { CodeToolInvokeFailure, CodeToolRuntimeOptions } from "./code-tool-runtime-ports";
 import { canonicalFailure, CodeToolError } from "./code-tool-runtime-errors";
+import { SandboxProviderError } from "./sandbox-provider";
+import { ProjectFileError } from "./project-workspace";
+import { SsrfPolicyError } from "./ssrf-policy";
 
 export function toFailure(error: unknown, tool: string): CodeToolInvokeFailure {
   if (error instanceof CodeToolError) {
@@ -22,6 +25,15 @@ export function toFailure(error: unknown, tool: string): CodeToolInvokeFailure {
   if (flags?.code === "feature_disabled") {
     return { ok: false, error: { code: "feature_disabled", status: flags.status ?? 403, message: flags.message ?? `Feature disabled: ${flags.flagKey ?? "unknown"}`, tool, step: "flags", retryable: false } };
   }
+  // Sandbox and workspace errors are written for the caller; hiding them left the model nothing to act on.
+  if (error instanceof SandboxProviderError || error instanceof ProjectFileError) {
+    const known = error as { code: string; status?: number; step?: string; retryable?: boolean; message: string };
+    return { ok: false, error: { code: known.code as never, status: known.status ?? 500, message: known.message, tool, step: known.step ?? "execute", retryable: known.retryable ?? false } };
+  }
+  if (error instanceof SsrfPolicyError) {
+    return { ok: false, error: { code: "web_host_not_allowed" as never, status: 403, message: "This host is not in the allowed web list (NPATI_WEB_FETCH_ALLOWED_HOSTS). Tell the user the page cannot be opened; do not retry.", tool, step: "execute", retryable: false } };
+  }
+  console.error("[code-tool] unexpected failure", tool, error instanceof Error ? error.name + ": " + error.message.slice(0, 300) : typeof error);
   return { ok: false, error: { code: "tool_failed", status: 500, message: "Tool execution failed", tool, step: "execute", retryable: true } };
 }
 

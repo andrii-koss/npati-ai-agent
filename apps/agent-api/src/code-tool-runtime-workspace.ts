@@ -18,14 +18,14 @@ export function createProjectWorkspaceReadPort(
   sandbox?: SandboxExecPort,
 ): CodeReadPort {
   return {
-    async listDir({ ctx, companyId, projectId, path, limit }) {
+    async listDir({ ctx, companyId, projectId, path, limit, depth }) {
       const entries = await workspace.getFileTree(ctx, companyId, projectId);
       const prefix = path && path !== "." ? `${path.replace(/\/$/, "")}/` : "";
       const filtered = entries
         .filter((entry) => entry.path.startsWith(prefix))
         .filter((entry) => {
           const rest = entry.path.slice(prefix.length);
-          return rest.length > 0 && !rest.includes("/");
+          return rest.length > 0 && rest.split("/").length <= (depth ?? 1);
         })
         .map((entry) => ({ path: entry.path, type: entry.type === "directory" ? "directory" as const : "file" as const, size: entry.size, mtimeMs: entry.mtimeMs }));
       return { entries: typeof limit === "number" ? filtered.slice(0, limit) : filtered };

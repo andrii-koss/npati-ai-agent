@@ -67,6 +67,8 @@ export interface CodeSearchResponse {
  */
 export interface CodeReadPort {
   listDir(dir: string): Promise<CodeDirEntry[]>;
+  /** Every entry under `dir` in one read, named relative to it. Optional: without it the listing walks folder by folder. */
+  listTree?(dir: string): Promise<CodeDirEntry[]>;
   readFile(path: string, opts?: { maxBytes?: number }): Promise<CodeFileReadResult>;
   runSearch(input: CodeSearchRequest): Promise<CodeSearchResponse>;
   runCtags?(path: string): Promise<string | null>;
@@ -252,6 +254,26 @@ export interface ListFilesInput {
   tool?: string;
 }
 
+/** Breadth-first, so a limit keeps the top of the project. Names stay relative to `dir`, like a flat listing. */
+async function listRecursively(port: ListFilesInput["port"], dir: string, limit: number): Promise<CodeDirEntry[]> {
+  if (port.listTree) return (await port.listTree(dir)).filter((entry) => !/(?:^|\/)(?:node_modules|\.git|dist|build|\.next)(?:\/|$)/.test(entry.name));
+  const found: CodeDirEntry[] = [];
+  const queue = [""];
+  while (queue.length && found.length < limit * 2) {
+    const relative = queue.shift()!;
+    const absolute = relative ? (dir === "." ? relative : `${dir}/${relative}`) : dir;
+    if (isSensitiveDirectory(absolute)) continue;
+    let children: CodeDirEntry[];
+    try { children = await port.listDir(absolute); } catch (error) { if (relative) continue; throw error; }
+    for (const child of children) {
+      const name = relative ? `${relative}/${child.name}` : child.name;
+      found.push({ ...child, name });
+      if (child.type === "dir" && !/^(?:node_modules|\.git|dist|build|\.next)$/.test(child.name)) queue.push(name);
+    }
+  }
+  return found;
+}
+
 export async function listFiles(input: ListFilesInput): Promise<{ entries: Array<{ path: string; type: CodeDirEntry["type"]; size: number | null; mtimeMs: number | null }>; truncated: boolean; total: number }> {
   const tool = input.tool ?? "code.fs.list";
   const limits = input.limits ?? codeToolLimits();
@@ -259,7 +281,7 @@ export async function listFiles(input: ListFilesInput): Promise<{ entries: Array
   const limit = clamp(input.limit, 200, 1, 1000);
   let entries: CodeDirEntry[];
   try {
-    entries = await input.port.listDir(dir);
+    entries = input.glob?.includes("**") ? await listRecursively(input.port, dir, limit) : await input.port.listDir(dir);
   } catch (error) {
     rethrowIfStructured(error);
     throw new CodeToolError("not_a_directory", `Cannot list "${dir}": ${messageOf(error)}`, tool, 400);

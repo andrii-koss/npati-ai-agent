@@ -63,6 +63,7 @@ export interface CodeShellSandboxPort {
     cwd?: string;
     environmentReferences?: Record<string, SecretEnvironmentReference>;
     approved?: boolean;
+    policyCleared?: boolean;
     timeoutMs?: number;
     runId?: string;
   }): Promise<{ exitCode: number; stdout: string; stderr: string; durationMs: number; status?: string; sandboxId?: string; riskLevel?: string }>;
@@ -419,7 +420,7 @@ export class CodeShellRuntime {
         context, companyId: input.companyId, projectId: input.projectId,
         agentId: input.agentId ?? "code-shell-runtime", command, cwd,
         environmentReferences: Object.keys(references).length ? references : undefined,
-        approved: sandboxApproved, timeoutMs, runId: input.runId,
+        approved: sandboxApproved, policyCleared: classification.risk === "safe", timeoutMs, runId: input.runId,
       });
     } finally {
       // The lease never outlives the call, whatever happened.

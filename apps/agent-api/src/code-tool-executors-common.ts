@@ -52,6 +52,17 @@ export function toCanonicalPort(input: CodeToolExecutionContext, options: Canoni
         target: (entry as { target?: string | null }).target ?? null,
       }));
     },
+    async listTree(dir: string): Promise<CodeDirEntry[]> {
+      const result = await port2.listDir({ ctx, companyId, projectId, path: dir, depth: 32, limit: 5000 });
+      const prefix = dir === "." ? "" : `${dir.replace(/\/$/, "")}/`;
+      return (result.entries ?? []).map((entry) => ({
+        name: entry.path.startsWith(prefix) ? entry.path.slice(prefix.length) : entry.path,
+        type: entry.type === "directory" ? "dir" : "file",
+        size: entry.size ?? null,
+        mtimeMs: (entry as { mtimeMs?: number | null }).mtimeMs ?? null,
+        target: (entry as { target?: string | null }).target ?? null,
+      }));
+    },
     async readFile(path: string, opts?: { maxBytes?: number }) {
       // The canonical reader needs the whole file to compute line offsets and the content hash; the
       // byte budget is enforced by the port and re-checked by the canonical reader.

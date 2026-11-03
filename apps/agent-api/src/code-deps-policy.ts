@@ -173,6 +173,17 @@ export interface InstallPlan {
 
 const ENV_GO_READONLY: Record<string, string> = { GOFLAGS: "-mod=readonly", GONOSUMDB: "", GONOSUMCHECK: "1", GOTOOLCHAIN: "local" };
 
+/** The command that adds one named package. Scripts stay off, as in the plain install. */
+export function packageAddCommand(manager: string, spec: string, dev: boolean): string | null {
+  if (!/^(?:@[A-Za-z0-9._-]+\/)?[A-Za-z0-9._-]+(?:@[A-Za-z0-9.~*_-]+)?$/.test(spec)) return null;
+  switch (manager) {
+    case "npm": return `npm install ${spec}${dev ? " --save-dev" : ""} --ignore-scripts --no-fund`;
+    case "pnpm": return `pnpm add ${spec}${dev ? " -D" : ""} --ignore-scripts`;
+    case "yarn": return `yarn add ${spec}${dev ? " -D" : ""} --ignore-scripts`;
+    default: return null;
+  }
+}
+
 /** Builds the reproducible, phased install plan. Pure: it never runs anything. */
 export function buildInstallPlan(input: InstallPlanInput): InstallPlan {
   const limits = { ...DEFAULT_DEPS_POLICY_LIMITS, ...(input.limits ?? {}) };

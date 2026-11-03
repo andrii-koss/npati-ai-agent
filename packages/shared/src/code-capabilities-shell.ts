@@ -21,7 +21,7 @@ export const CODE_SHELL_CAPABILITIES: CapabilityDefinition[] = [
       "The command needs production credentials or network access outside the allowlist: it will be refused.",
       "The command contains a pipe, redirect, substitution or command chaining: use one simple command, or code.verify.run for build/typecheck/test.",
       "A read/search tool answers the question (code.fs.grep, code.fs.read): running a shell command for that is wasteful and riskier.",
-      "The check is a build, typecheck, test or lint: use code.verify.run, which runs the project's configured commands and returns structured findings. Outside a short allowlist (npm run build, npm test, ls, cat, git status/diff) a shell command pauses for human approval.",
+      "The check is a build, typecheck, test or lint: use code.verify.run, which runs the project's configured commands and returns structured findings. Allowed without approval: read-only commands (ls, cat, wc, grep, find, pwd, git status, git diff, git log, npm ls, npm view, npm audit --json, node --check file.js), npm install, npm run <script>; anything else needs approval, so do not retry it.",
     ],
     agentCallable: true,
     userVisible: true,

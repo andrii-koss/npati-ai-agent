@@ -281,7 +281,7 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
   }
   async uploadFiles(scope: SandboxScope, id: string, files: SandboxFile[]) {
     const entry = await this.entry(scope, id);
-    if (files.length > 500 || files.reduce((sum, file) => sum + Buffer.byteLength(file.content), 0) > 20_000_000) throw new SandboxProviderError("upload_limit", "Project exceeds workspace sync limits", 413);
+    if (files.length > 2000 || files.reduce((sum, file) => sum + Buffer.byteLength(file.content), 0) > 70_000_000) throw new SandboxProviderError("upload_limit", "Project exceeds workspace sync limits", 413);
     const sanitized = files.map(file => ({ path: safeProjectPath(file.path), content: file.content, ...(file.encoding ? { encoding: file.encoding } : {}) }));
     // Run file synchronization through the same OS boundary as project code.
     // A malicious symlink/race cannot make the root supervisor write elsewhere.
@@ -307,7 +307,7 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
   async downloadFiles(scope: SandboxScope, id: string) {
     const entry = await this.entry(scope, id);
     const script = `const fs=require('fs'),p=require('path');const files=[];let bytes=0;function walk(dir){for(const f of fs.readdirSync(dir,{withFileTypes:true})){if(${excluded}.test(f.name))continue;const file=p.join(dir,f.name);if(f.isSymbolicLink())throw Error('Project symlink denied');if(f.isDirectory())walk(file);else if(f.isFile()){const data=fs.readFileSync(file);bytes+=data.length;if(bytes>20000000||files.length>=500)throw Error('Workspace sync limit');let content,binary=data.includes(0);try{content=new TextDecoder('utf-8',{fatal:true}).decode(data)}catch{binary=true}files.push(binary?{path:file,content:data.toString('base64'),encoding:'base64'}:{path:file,content})}}}walk('.');process.stdout.write(JSON.stringify(files));`;
-    const result = await this.collect(entry, "node", ["-e", script], "", { timeoutMs: 120000, outputLimitBytes: 32_000_000 }, ".", true);
+    const result = await this.collect(entry, "node", ["-e", script], "", { timeoutMs: 120000, outputLimitBytes: 100_000_000 }, ".", true);
     if (result.exitCode !== 0) throw new SandboxProviderError("workspace_sync_failed", result.stderr.slice(0, 1000), 403);
     return JSON.parse(result.stdout) as SandboxFile[];
   }

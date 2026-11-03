@@ -44,7 +44,7 @@ export interface CodeToolVisibilityPolicy {
 /** Full core for hosted models with native tool calling and a large window. */
 export const DEFAULT_CODE_TOOL_VISIBILITY: CodeToolVisibilityPolicy = Object.freeze({
   core: Object.freeze([
-    "code.fs.read", "code.fs.list", "code.fs.grep", "code.fs.tree", "code.project.info",
+    "code.fs.read", "code.fs.list", "code.fs.grep", "code.project.info",
     "code.fs.edit", "code.fs.apply_patch", "code.fs.write", "code.fs.diff",
     "code.shell.exec", "code.verify.run", "code.finish",
   ]),
@@ -72,12 +72,32 @@ export const MINIMAL_CODE_TOOL_VISIBILITY: CodeToolVisibilityPolicy = Object.fre
  * Inspector (with this status) and are not offered to the model. Evidence: `docs/audit/coding-tools-audit.md`
  * §3.4 — `code.shell.process.wait` 4/4 `tool_failed` (HTTP 500), `code.shell.exec_async` never succeeded.
  */
-export const CODE_TOOL_MODEL_STATUS: Readonly<Record<string, { status: "degraded"; reason: string }>> = Object.freeze({
+const SHELL_COVERS = "use code.shell.exec: git status, git diff and git log are allowed there";
+const RUN_MANAGES_BRANCHES = "the run creates its session branch and checkpoints by itself";
+const NO_DETACHED_CHILDREN = "detached sub-agents are not offered; code.agent.spawn covers delegation";
+export const CODE_TOOL_MODEL_STATUS: Readonly<Record<string, { status: "degraded" | "retired"; reason: string }>> = Object.freeze({
+  "code.fs.tree": { status: "retired", reason: "code.fs.list with glob \"**\" gives the same overview" },
+  "code.symbols.outline": { status: "retired", reason: "code.fs.grep finds definitions; no symbol engine is installed" },
+  "code.fs.undo_last_turn": { status: "retired", reason: "undo is a user action in the interface" },
+  "code.git.status": { status: "retired", reason: SHELL_COVERS },
+  "code.git.diff": { status: "retired", reason: SHELL_COVERS },
+  "code.git.log": { status: "retired", reason: SHELL_COVERS },
+  "code.git.stage": { status: "retired", reason: "code.git.commit stages by itself" },
+  "code.git.restore": { status: "retired", reason: "undo is a user action in the interface" },
+  "code.git.branch.create": { status: "retired", reason: RUN_MANAGES_BRANCHES },
+  "code.git.branch.switch": { status: "retired", reason: RUN_MANAGES_BRANCHES },
+  "code.deps.audit": { status: "retired", reason: "code.shell.exec runs npm audit --json" },
+  "code.deps.inspect": { status: "retired", reason: "code.fs.read package.json shows the dependencies" },
+  "code.data.rows.list": { status: "retired", reason: "code.data.query.read reads the same rows with filters" },
+  "code.agent.spawn_async": { status: "retired", reason: NO_DETACHED_CHILDREN },
+  "code.agent.send_message": { status: "retired", reason: NO_DETACHED_CHILDREN },
+  "code.agent.continue": { status: "retired", reason: NO_DETACHED_CHILDREN },
+  "code.agent.interrupt": { status: "retired", reason: NO_DETACHED_CHILDREN },
   "code.shell.exec_async": { status: "degraded", reason: "tracked async execution has no successful run on record; use code.shell.exec or code.verify.run" },
   "code.shell.process.wait": { status: "degraded", reason: "every recorded call failed with tool_failed (HTTP 500)" },
 });
 
-export function codeToolModelStatus(name: string): { status: "visible" | "degraded"; reason?: string } {
+export function codeToolModelStatus(name: string): { status: "visible" | "degraded" | "retired"; reason?: string } {
   return CODE_TOOL_MODEL_STATUS[name] ?? { status: "visible" };
 }
 
@@ -167,7 +187,7 @@ export function intentGroupMatches(context: CodeToolVisibilityContext, runtimeTo
 
 export interface CodeToolVisibilityDecision {
   visible: string[];
-  hidden: Array<{ name: string; reason: "degraded" | "not_in_tier" | "intent_not_requested" | "context_not_matched" | "data_studio_disabled" }>;
+  hidden: Array<{ name: string; reason: "degraded" | "retired" | "not_in_tier" | "intent_not_requested" | "context_not_matched" | "data_studio_disabled" }>;
   contextual: string[];
   intentGroups: CodeToolIntentGroup[];
 }
@@ -190,7 +210,8 @@ export function selectVisibleTools(
   const visible: string[] = [];
   const hidden: CodeToolVisibilityDecision["hidden"] = [];
   for (const name of available) {
-    if (codeToolModelStatus(name).status === "degraded") { hidden.push({ name, reason: "degraded" }); continue; }
+    const modelStatus = codeToolModelStatus(name).status;
+    if (modelStatus !== "visible") { hidden.push({ name, reason: modelStatus }); continue; }
     if (core.has(name)) { visible.push(name); continue; }
     if (contextualAllowed.has(name)) {
       if (contextual.has(name)) visible.push(name);

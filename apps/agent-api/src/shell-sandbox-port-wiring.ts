@@ -26,6 +26,7 @@ export function createShellSandboxPortWiring(deps: CreateShellSandboxPortWiringD
         agentId: "system",
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(input.approved ? { approved: true } : {}),
+        ...(input.policyCleared ? { policyCleared: true } : {}),
         ...(input.environmentReferences ? { environmentReferences: input.environmentReferences } : {}),
       }) as { stdout?: string; stderr?: string; output?: string; exitCode?: number; durationMs?: number; status?: string; sandboxId?: string; riskLevel?: string };
       return {

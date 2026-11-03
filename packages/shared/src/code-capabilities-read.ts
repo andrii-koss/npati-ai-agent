@@ -15,6 +15,7 @@ export const CODE_READ_CAPABILITIES: CapabilityDefinition[] = [
     useWhen: [
       "The agent needs to discover which files exist in a code project before reading them.",
       "The agent has a glob or extension hint and wants the matching paths.",
+      "The agent needs an overview of the whole project: pass the glob \"**\" to include subfolders (node_modules, .git and build output are skipped).",
     ],
     doNotUseWhen: [
       "The goal is to modify, create or delete files (the read-only C2 tool set cannot do that).",

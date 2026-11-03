@@ -146,8 +146,8 @@ describe("security-gate: C14 red-team — disk and memory exhaustion", () => {
 
     // The service-level ceilings the sandbox is driven with are finite and unchanged defaults.
     expect(defaultTerminalLimits.outputLimitBytes).toBe(64_000);
-    expect(defaultTerminalLimits.syncMaxBytes).toBe(20_000_000);
-    expect(defaultTerminalLimits.syncMaxFiles).toBe(500);
+    expect(defaultTerminalLimits.syncMaxBytes).toBe(50_000_000);
+    expect(defaultTerminalLimits.syncMaxFiles).toBe(2000);
     expect(defaultTerminalLimits.commandTimeoutMs).toBe(120_000);
     expect(defaultTerminalLimits.installBuildTimeoutMs).toBe(600_000);
   });

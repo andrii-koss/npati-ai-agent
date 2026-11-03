@@ -78,7 +78,7 @@ describe("progress guard — inspection without source changes", () => {
     expect(result.status).toBe("stopped");
     expect(result.reason).toBe("loop_detected");
     // The guard must fire well before the generic turn limit and without a single write.
-    expect(modelCalls).toBeLessThanOrEqual(12);
+    expect(modelCalls).toBeLessThanOrEqual(21);
     expect(modelCalls).toBeGreaterThanOrEqual(8);
     expect(toolCalls).toBe(modelCalls);
     expect(result.summary?.filesChanged ?? []).toHaveLength(0);

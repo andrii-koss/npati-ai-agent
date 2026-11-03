@@ -29,6 +29,12 @@ export interface ResolvedActiveContext {
 const preservingClause = /(?:не\s+(?:змінюй|чіпай|редагуй|меняй|трогай)|збережи|залиш|сохрани|оставь|don'?t\s+(?:change|touch|edit|modify)|do\s+not\s+(?:change|touch|edit|modify)|\bkeep\b|\bpreserve\b|\bleave\b|nicht\s+ändern|no\s+(?:cambies|toques)|não\s+(?:altere|mude|toque)|mantén|mantenha|conserva|preserva)/iu;
 const nameWords = (value: string) => value.toLocaleLowerCase().match(/[\p{L}]+/gu) ?? [];
 /** A proper name as written (case-sensitive) and as whole words: "add" or "new" in ordinary text never names "Add" or "New". */
+/** "this empty test project": the words describe the open project, even when another project is called Test. */
+const refersToCurrentProject = (lowerMessage: string, lowerName: string) => {
+  const escaped = lowerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![\\p{L}\\p{N}])(?:this|current|цей|цьому|цього|поточн\\p{L}*|этот|этом|этого|текущ\\p{L}*)\\s+(?:\\p{L}+\\s+){0,3}${escaped}\\s+(?:project|website|site|app|проєкт\\p{L}*|сайт\\p{L}*|проект\\p{L}*)`, "u").test(lowerMessage);
+};
+
 const mentions = (text: string, name: string) => {
   const trimmed = name.trim();
   return trimmed.length > 2 && new RegExp(`(?<![\\p{L}\\p{N}])${trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "u").test(text);
@@ -131,7 +137,9 @@ export class ActiveContextResolver {
       }
       let candidates = ownedProjects
         .filter(project => !["archived", "soft_deleted", "purging", "deleted"].includes(project.status)
-          && project.name.trim().length >= 3 && lowerMessage.includes(project.name.trim().toLocaleLowerCase()));
+          && project.name.trim().length >= 3 && mentions(lowerMessage, project.name.trim().toLocaleLowerCase())
+          // "this empty test project" points at the open project; it does not name a project called Test.
+          && !(current.project && current.project.id !== project.id && refersToCurrentProject(lowerMessage, project.name.trim().toLocaleLowerCase())));
       // "Add a bonus to «Game»; do not change «Site»": a project named only where the request preserves it is not the target (P037).
       const clauses = lowerMessage.split(/[.;!?\n]+/u);
       const targets = candidates.filter(project => clauses.some(clause => clause.includes(project.name.trim().toLocaleLowerCase()) && !preservingClause.test(clause)));

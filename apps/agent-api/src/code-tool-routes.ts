@@ -119,12 +119,14 @@ export function registerCodeToolRoutes(app: FastifyInstance, deps: CodeToolRoute
     if (error instanceof WorkspaceAccessError) {
       return reply.code(403).send({ error: { code: "code_access_denied", message: error.message, tool: tool ?? null, step: "authorize", retryable: false }, apiVersion: API_VERSION });
     }
-    const code = values?.code && values.code in ERROR_STATUS ? values.code : "tool_failed";
-    const status = ERROR_STATUS[code] ?? 500;
+    // A failure the runtime already shaped keeps its own code and status, known to this table or not.
+    const shaped = typeof values?.code === "string" && typeof values?.status === "number" && values.code !== "tool_failed";
+    const code = values?.code && (values.code in ERROR_STATUS || shaped) ? values.code : "tool_failed";
+    const status = shaped ? values.status! : ERROR_STATUS[code] ?? 500;
     return reply.code(status).send({
       error: {
         code, status,
-        message: status === 500 ? "Tool execution failed" : values?.message ?? "Tool call failed",
+        message: shaped ? values?.message ?? "Tool call failed" : status === 500 ? "Tool execution failed" : values?.message ?? "Tool call failed",
         tool: values?.tool ?? tool ?? null,
         step: values?.step ?? "execute",
         retryable: values?.retryable ?? false,

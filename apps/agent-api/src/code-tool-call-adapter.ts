@@ -154,7 +154,7 @@ export function resolveKnownTool(
     "code.write": "code.fs.write",
     "code.edit": "code.fs.edit",
     "code.read": "code.fs.read",
-    "code.tree": "code.fs.tree",
+    "code.tree": "code.fs.list",
     "code.list": "code.fs.list",
     "code.grep": "code.fs.grep",
   };

@@ -479,7 +479,7 @@ describe("security-gate: C15 wiring — one resolver, and the runner reads the a
     // No copy in either direction for a mounted project, which is what keeps the sandbox from becoming a second
     // writer of the canonical folder.
     expect(service).toContain("if (mount) return new Map<string, SandboxFile>();");
-    expect(service).toContain("if (!startProcess && !ready.mount) await this.download(");
+    expect(service).toContain("if (!startProcess && !ready.mount && !commandChangesNothing(normalized.executable, normalized.args, command)) await this.download(");
   });
 });
 

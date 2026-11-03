@@ -1,3 +1,4 @@
+import { FileRevisionCache } from "./project-file-revision-cache";
 import { openWorkspaceRead } from "./project-file-descriptor";
 import { isWorkspaceContentProtected } from "./workspace-protected-content";
 import { acquireKernelFileLease, type KernelFileLease } from "./project-file-kernel-lease";
@@ -457,6 +458,7 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
     return { path: clean, content: bytes.toString("utf8"), size: bytes.length, revision: revision(bytes),
       ...(binary ? { binary: true, encoding: "binary", contentBase64: bytes.toString("base64"), mimeGuess: kind.mimeGuess } : {}) };
   }
+  private readonly revisions = new FileRevisionCache();
   private async tree(base: string): Promise<ProjectFileEntry[]> {
     const items: ProjectFileEntry[] = [];
     const walk = async (relative: string): Promise<void> => {
@@ -471,7 +473,7 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
           if (!info.isFile()) continue;
           // List multiply-linked dependencies as metadata without opening their
           // bytes. Direct API reads still refuse unknown external provenance.
-          items.push({ path: child, name: entry.name, type: "file", size: info.size, mtimeMs: info.mtimeMs, revision: info.nlink === 1 && info.size <= this.maxFileBytes ? revision(await this.bytes(full)) : undefined });
+          items.push({ path: child, name: entry.name, type: "file", size: info.size, mtimeMs: info.mtimeMs, revision: info.nlink === 1 && info.size <= this.maxFileBytes ? await this.revisions.get(full, info, async () => revision(await this.bytes(full))) : undefined });
         }
         if (items.length > this.maxFiles * 2) throw new ProjectFileError("file_limit", "Project file count limit exceeded", 409);
       }

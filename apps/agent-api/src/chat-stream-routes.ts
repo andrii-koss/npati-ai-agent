@@ -363,7 +363,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
 
           const codeSession = preparedChatSession ?? (storedSession && storedSession.status !== "archived" && storedSession.projectId === effectiveProjectId
             ? storedSession
-            : codeSessions[0] ?? null);
+            : codeSessions[0] ?? await codeService.createSession(auth, activeCompanyId!, effectiveProjectId!, { mode: "auto" }).catch(() => null));
           if (!codeSession) {
             await send("result", { routed: "clarify", intent: codeDecision.intent, message: "Which project should I work in? Create or select a code session first." });
           } else {

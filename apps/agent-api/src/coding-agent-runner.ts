@@ -529,9 +529,9 @@ export class CodingAgentRunner {
             ? "Four model turns produced no source progress. The creation request is still incomplete. Stop rereading your generated styles/components. Implement the user-facing entry page and working actions now using the files already available; state reasonable assumptions for missing details. A scaffold or stylesheet alone is not a delivered application. If blocked, report the concrete blocker. Build/Preview and visual acceptance remain mandatory separate checks."
             : "Four model turns produced no source progress. Stop repeated inspection/planning. Use the files already read to implement the current request; if blocked, report the concrete blocker. Build/Preview and visual acceptance are separate system checks." });
         }
-        if (noProgressTurns >= 10) {
+        if (noProgressTurns >= (input.requireImplementation ? 12 : 20)) {
           await release("loop_detected");
-          return stop("stopped", "loop_detected", "Stopped: ten model turns without source progress. No claim of completed implementation or visual acceptance is made.");
+          return stop("stopped", "loop_detected", `Stopped: ${noProgressTurns} model turns without source progress. No claim of completed implementation or visual acceptance is made.`);
         }
       }
       const needsImplementation = input.requireImplementation && !input.readOnlyIntent && session.mode !== "plan" && currentChanges.length === 0;

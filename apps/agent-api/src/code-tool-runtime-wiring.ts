@@ -12,6 +12,9 @@ import { createCodeAskUserService } from "./code-ask-user-service";
 import { CodeAsyncProcessService } from "./code-async-process";
 import { isCodeChatWebsite } from "./code-chat-website";
 import { gitWriteIntentForTool, sessionBranchName } from "./code-git-workflow";
+import { GIT_WRITE_TOOLS } from "./code-git-write-policy";
+
+const isGitWriteTool = (tool: string) => GIT_WRITE_TOOLS.includes(tool);
 import { createCodeHookPolicyPreflight, createCodeHooksService } from "./code-hooks";
 import { proposePlan, updateSessionTodos } from "./code-plan-tool";
 import { PolicyEngine, isReviewSafeTool } from "./code-policy-engine";
@@ -246,14 +249,14 @@ export function createCodeToolRuntimeWiring(deps: CodeToolRuntimeWiringDeps) {
 
     gitPolicy: {
       evaluate: async ({ ctx, companyId, projectId, sessionId, tool, args, toolCallId, agentId }) => {
-        const intent = gitWriteIntentForTool(tool, args);
+        const intent = isGitWriteTool(tool) ? gitWriteIntentForTool(tool, args) : undefined;
         const result = await enrichedPolicyEngine.evaluate({
           ctx, companyId, projectId,
           ...(sessionId ? { sessionId } : {}),
           ...(agentId ? { agentId } : {}),
           tool,
           toolCallId,
-          git: intent,
+          ...(intent ? { git: intent } : {}),
           approvalDeferredByBoundary: true,
         });
         return {

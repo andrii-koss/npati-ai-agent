@@ -3,6 +3,8 @@ import { projectRuntimeCommandPort } from "./shared-project-runtime-provider";
 import { commitSandboxWrites } from "./project-sandbox-write-commit";
 import type { PatchMutation } from "./code-patch-transaction";
 import { parseCodeSearchOutput } from "./code-search-output";
+import { commandChangesNothing } from "./code-shell-read-only";
+import { SandboxSyncStates, withoutRuntimeNoise } from "./project-sandbox-sync";
 import { normalizeWorkspacePath } from "./code-tools-path";
 import { createHash, randomUUID } from "node:crypto";
 import type { AuthContext, Project, WorkspaceStore } from "@npati/workspace";
@@ -24,6 +26,7 @@ export interface TerminalRequest {
   action?: "start" | "status" | "logs" | "stop";
   environmentReferences?: Record<string, TerminalSecretReference>;
   approved?: boolean; runId?: string; agentId: string; timeoutMs?: number;
+  policyCleared?: boolean; // The coding policy ruled this command read-only; the stricter terminal rules do not apply.
 }
 export interface TerminalLimits {
   commandTimeoutMs: number;
@@ -39,9 +42,11 @@ export interface TerminalLimits {
    */
   retentionMs: number;
 }
+const WORKSPACE_BUSY_WAIT_MS = 30_000;
+
 export const defaultTerminalLimits: TerminalLimits = {
   commandTimeoutMs: 120_000, installBuildTimeoutMs: 600_000, outputLimitBytes: 64_000,
-  inactivityMs: 900_000, syncMaxBytes: 20_000_000, syncMaxFiles: 500,
+  inactivityMs: 900_000, syncMaxBytes: 50_000_000, syncMaxFiles: 2000,
   retentionMs: 7 * 24 * 60 * 60 * 1000,
 };
 const uuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
@@ -270,6 +275,7 @@ export class ProjectSandboxService {
     if (sandboxId) {
       try {
         const status = await this.provider.getStatus(scope, sandboxId);
+        if (status.state !== "running") this.syncStates.forget(sandboxId);
         if (status.state === "stopped") await this.provider.startSandbox(scope, sandboxId);
         else if (status.state === "failed" || status.state === "destroyed") sandboxId = undefined;
       } catch (error) {
@@ -290,6 +296,7 @@ export class ProjectSandboxService {
     this.touch(ctx, { ...project, sandboxId });
     return { project: { ...project, sandboxId }, scope, sandboxId, mount };
   }
+  private readonly syncStates = new SandboxSyncStates();
   private async upload(ctx: AuthContext, project: Project, scope: SandboxScope, sandboxId: string, mount: ProjectMountRequest | null) {
     /**
      * C15: nothing is uploaded into a mounted workspace. The container's `/workspace` **is** the canonical
@@ -302,10 +309,19 @@ export class ProjectSandboxService {
     const files: SandboxFile[] = [];
     let total = 0;
     const sources = entries.filter((item) => !artifact(item.path));
+    const manifest = sources.map((item) => `${item.path}|${item.revision ?? item.mtimeMs}|${item.size}`).join("\n");
+    const known = this.syncStates.fresh(sandboxId);
+    if (known?.manifest === manifest) return { files: [...known.files.values()], manifest, unchanged: true };
     if (sources.length > this.limits.syncMaxFiles) throw new SandboxProviderError("workspace_sync_limit", "Project exceeds sandbox sync limits", 413, "upload");
     // Bound concurrency so large projects do not fan out hundreds of storage reads.
-    for (let offset = 0; offset < sources.length; offset += 8) {
-      const batch = await Promise.all(sources.slice(offset, offset + 8).map(entry => this.workspace.readFile(ctx, project.companyId, project.id, entry.path)));
+    const reusable = (entry: { path: string; revision?: string }) => entry.revision && known?.files.get(entry.path)?.revision === entry.revision ? known.files.get(entry.path) : undefined;
+    for (const entry of sources) {
+      const cached = reusable(entry);
+      if (cached) { total += Buffer.byteLength(cached.content, cached.encoding === "base64" ? "base64" : "utf8"); files.push(cached); }
+    }
+    const toRead = sources.filter((entry) => !reusable(entry));
+    for (let offset = 0; offset < toRead.length; offset += 8) {
+      const batch = await Promise.all(toRead.slice(offset, offset + 8).map(entry => this.workspace.readFile(ctx, project.companyId, project.id, entry.path)));
       for (const file of batch) {
         total += file.size;
         if (total > this.limits.syncMaxBytes) throw new SandboxProviderError("workspace_sync_limit", "Project exceeds sandbox sync limits", 413, "upload");
@@ -313,11 +329,14 @@ export class ProjectSandboxService {
         files.push({ path: file.path, content: file.contentBase64 ?? file.content, revision: file.revision, ...(file.binary ? { encoding: "base64" as const } : {}) });
       }
     }
-      return files;
+      return { files, manifest, unchanged: false };
     };
-    const files = this.workspace.withFileLease ? await this.workspace.withFileLease(ctx, project.companyId, project.id, capture) : await capture();
+    const { files, manifest, unchanged } = this.workspace.withFileLease ? await this.workspace.withFileLease(ctx, project.companyId, project.id, capture) : await capture();
+    const originals = new Map(files.map((file) => [file.path, file]));
+    if (unchanged) return originals;
     await this.provider.uploadFiles(scope, sandboxId, files);
-    return new Map(files.map((file) => [file.path, file]));
+    this.syncStates.remember(sandboxId, manifest, originals);
+    return originals;
   }
   private async download(ctx: AuthContext, project: Project, scope: SandboxScope, sandboxId: string, originals: Map<string, SandboxFile>, secrets: string[]) {
     const files = await this.provider.downloadFiles(scope, sandboxId);
@@ -357,7 +376,7 @@ export class ProjectSandboxService {
     const normalized = normalizeTerminalCommand(request);
     const command = normalized.command;
     const decision = classifyTerminalCommand({ command: normalized.command, cwd: normalized.cwd });
-    if ((decision.requiresApproval || Object.keys(request.environmentReferences ?? {}).length > 0) && request.approved !== true) {
+    if (((decision.requiresApproval && request.policyCleared !== true) || Object.keys(request.environmentReferences ?? {}).length > 0) && request.approved !== true) {
       logTerminalPolicy({ rawCommand: normalized.rawCommand, normalizedCommand: command, sandboxId: project.sandboxId, projectId: project.id, decision: "approval", reason: decision.requiresApproval ? decision.reason : "Secret references require approval", policyRule: decision.policyRule, toolName: tool, executionContext: "project_sandbox", runId: request.runId ?? "direct", agentId: request.agentId, runType: "project_tool", cwd: normalized.cwd, rawArgs: normalized.args, commandPolicyRule: decision.policyRule });
       throw new SandboxProviderError("approval_required", "Terminal command requires approval", 403, "approval", tool);
     }
@@ -390,7 +409,13 @@ export class ProjectSandboxService {
     if (request.timeoutMs !== undefined && (!Number.isSafeInteger(request.timeoutMs) || request.timeoutMs <= 0)) throw new SandboxProviderError("invalid_arguments", "timeoutMs must be a positive safe integer", 400);
     const timeoutMs = Math.max(1000, Math.min(request.timeoutMs ?? ceiling, beforeStart ? this.limits.installBuildTimeoutMs : ceiling));
     let sandboxId = project.sandboxId ?? "";
-    const release = !beforeStart && this.processCleanupGuard ? await (this.processCleanupGuard.prepare ?? this.processCleanupGuard.acquire)(ctx, project) : async () => {};
+    // Commands of one project take turns: a parallel call waits instead of failing.
+    const prepare = () => (this.processCleanupGuard!.prepare ?? this.processCleanupGuard!.acquire).call(this.processCleanupGuard, ctx, project);
+    let release = !beforeStart && this.processCleanupGuard ? await prepare() : async () => {};
+    for (const waitUntil = Date.now() + WORKSPACE_BUSY_WAIT_MS; !release && Date.now() < waitUntil;) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      release = await prepare();
+    }
     if (!release) throw new SandboxProviderError("process_workspace_busy", "A tracked producer still owns the sandbox workspace", 409);
     let commandDispatched = false, terminalEventAttempted = false, executionFailed = false;
     let execution: SandboxCommandResult | undefined;
@@ -405,7 +430,7 @@ export class ProjectSandboxService {
       commandDispatched = true;
       const raw = startProcess
         ? await this.provider.startProcess(ready.scope, sandboxId, command, { timeoutMs, outputLimitBytes: this.limits.outputLimitBytes, environment, cwd: normalized.cwd, ...(beforeStart ? { processId: request.processId } : {}) })
-        : await this.provider.executeCommand(ready.scope, sandboxId, command, { timeoutMs, outputLimitBytes: this.limits.outputLimitBytes, environment, cwd: normalized.cwd });
+        : withoutRuntimeNoise(await this.provider.executeCommand(ready.scope, sandboxId, command, { timeoutMs, outputLimitBytes: this.limits.outputLimitBytes, environment, cwd: normalized.cwd }));
       execution = raw;
       const output = redactTerminalText(raw.stdout + (raw.stderr ? "\n" + raw.stderr : ""), secrets).slice(0, this.limits.outputLimitBytes);
       /**
@@ -418,7 +443,7 @@ export class ProjectSandboxService {
        * on them. The read-before-write `originals` map is therefore empty for a mounted project, and the
        * download below is the only place the distinction is observable.
        */
-      if (!startProcess && !ready.mount) await this.download(ctx, ready.project, ready.scope, sandboxId, originals, secrets);
+      if (!startProcess && !ready.mount && !commandChangesNothing(normalized.executable, normalized.args, command)) await this.download(ctx, ready.project, ready.scope, sandboxId, originals, secrets);
       const commandKind = decision.reason === "Install dependencies inside sandbox" ? "install" : normalized.args.includes("build") ? "build" : startProcess ? "preview" : "command";
       const failureCode = raw.status === "timed_out" ? "command_timeout" : raw.exitCode === 127 ? "command_not_found" : commandKind === "install" ? "install_failed" : commandKind === "build" ? "build_failed" : commandKind === "preview" ? "preview_start_failed" : "command_failed";
       const detailLimit = commandKind === "build" ? 6000 : 1200;
@@ -440,6 +465,7 @@ export class ProjectSandboxService {
         : await runPrepared();
     } catch (error) {
       executionFailed = true;
+      this.syncStates.forget(sandboxId);
       if (commandDispatched && !terminalEventAttempted) {
         const errorCode = error instanceof SandboxProviderError || error instanceof ProjectFileError ? error.code : "sandbox_execution_failed";
         await this.events.append(ctx, companyId, request.projectId, { runId: request.runId, agentId: request.agentId, sandboxId,

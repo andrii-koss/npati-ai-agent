@@ -221,8 +221,25 @@ describe("Project terminal integration", () => {
       provider.files = [{ path: "index.html", content: "sandbox edit" }];
       return result();
     };
-    await expect(sandbox.execute(owner, company.id, { projectId: project.id, command: "pwd", agentId: agent.id })).rejects.toMatchObject({ code: "revision_conflict", status: 409, currentRevision: expect.any(String) });
+    await expect(sandbox.execute(owner, company.id, { projectId: project.id, command: "node build.js", agentId: agent.id })).rejects.toMatchObject({ code: "revision_conflict", status: 409, currentRevision: expect.any(String) });
     expect((await workspace.readFile(owner, company.id, project.id, "index.html")).content).toBe("concurrent");
+  });
+  it("does not resend an unchanged project or copy back after a read-only command", async () => {
+    const { store, company, project, workspace, provider, sandbox } = await fixture();
+    const agent = await store.createCompanyAgent(owner, company.id, { name: "Reader", role: "Developer", tools: ["project.terminal.exec"] }, "terminal-reader");
+    await workspace.createFile(owner, company.id, project.id, "index.html", "before");
+    const uploads = () => provider.calls.filter((call) => call === "upload").length;
+    const downloads = () => provider.calls.filter((call) => call === "download").length;
+    await sandbox.execute(owner, company.id, { projectId: project.id, command: "pwd", agentId: agent.id });
+    const firstUploads = uploads();
+    await sandbox.execute(owner, company.id, { projectId: project.id, command: "ls", agentId: agent.id });
+    expect(uploads()).toBe(firstUploads);
+    expect(downloads()).toBe(0);
+    const current = await workspace.readFile(owner, company.id, project.id, "index.html");
+    await workspace.writeFile(owner, company.id, project.id, "index.html", "after", current.revision);
+    await sandbox.execute(owner, company.id, { projectId: project.id, command: "pwd", agentId: agent.id });
+    expect(uploads()).toBe(firstUploads + 1);
+    expect(provider.files.find((item) => item.path === "index.html")?.content).toBe("after");
   });
   it("blocks a leased vault value written into a manifest during execution", async () => {
     const { store, company, project, workspace, provider, events, projects } = await fixture();

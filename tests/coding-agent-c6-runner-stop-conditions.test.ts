@@ -445,11 +445,11 @@ describe("security-gate: C3 runner operation scope", () => {
 });
 
 
-it("stops website inspection with changing arguments after ten turns without saved source progress", async () => {
+it("stops website inspection with changing arguments after twenty turns without saved source progress", async () => {
   const h = createHarness({ limits: { maxStepsPerRun: 40 }, script: Array.from({ length: 30 }, (_, i) => ({ content: "Inspect", toolCalls: [nativeCall("code.fs.read", { path: "component-" + i + ".tsx" }, "read-" + i)] })) });
   const result = await h.run({ websiteEdit: true });
   expect(result.reason).toBe("loop_detected");
-  expect(h.engineCalls.length).toBeLessThanOrEqual(11);
+  expect(h.engineCalls.length).toBeLessThanOrEqual(21);
   expect(result.summary.filesChanged).toEqual([]);
   expect(h.activity.some(event => event.kind === "reminder" && event.reason === "no_source_progress")).toBe(true);
 });

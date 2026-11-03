@@ -4,7 +4,8 @@ export interface CodeSearchLine { path: string; line: number; text: string; cont
 export function parseCodeSearchOutput(stdout: string, maxResults: number, contextLines: number) {
   const matches: CodeSearchLine[] = [], contexts = new Map<string, Array<{ line: number; text: string }>>();
   let truncated = false;
-  for (const raw of stdout.split("\n")) {
+  const rows = stdout.split("\n");
+  for (const [index, raw] of rows.entries()) {
     if (!raw.trim()) continue;
     if (!raw.startsWith("{")) {
       const legacy = /^(.*?):(\d+):(.*)$/.exec(raw);
@@ -13,7 +14,11 @@ export function parseCodeSearchOutput(stdout: string, maxResults: number, contex
       continue;
     }
     let event: { type?: string; data?: { path?: { text?: string }; line_number?: number; lines?: { text?: string } } };
-    try { event = JSON.parse(raw); } catch { throw new SandboxProviderError("search_failed", "Sandbox search returned malformed JSON", 502); }
+    try { event = JSON.parse(raw); } catch {
+      // Only the last row can be cut by the output limit; anything earlier is a real fault.
+      if (index === rows.length - 1) { truncated = true; continue; }
+      throw new SandboxProviderError("search_failed", "Sandbox search returned malformed JSON", 502);
+    }
     if (event.type !== "match" && event.type !== "context") continue;
     const data = event.data;
     if (!data || typeof data.path?.text !== "string" || !Number.isSafeInteger(data.line_number) || typeof data.lines?.text !== "string")
