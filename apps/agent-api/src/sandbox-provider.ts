@@ -1,3 +1,5 @@
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { createHmac, randomUUID } from "node:crypto";
 
 /** Frozen decision: docs/website-builder/SHARED_PROJECT_RUNTIME.md. Transport locality
@@ -111,6 +113,23 @@ export interface SandboxProvider {
 }
 export interface PreviewProxyRequest { port: number; path: string; method: string; headers: Record<string, string>; body?: string; }
 export interface PreviewProxyResponse { status: number; headers: Record<string, string>; body: string; }
+/**
+ * Global fetch gives up after 300 s without response headers, so a long command looked like a dead runner.
+ * Every runner call already carries its own AbortSignal deadline.
+ */
+const runnerFetch: typeof fetch = (input, init) => new Promise((resolve, reject) => {
+  const url = new URL(String(input));
+  const send = url.protocol === "https:" ? httpsRequest : httpRequest;
+  const call = send(url, { method: init?.method, headers: init?.headers as Record<string, string>, ...(init?.signal ? { signal: init.signal } : {}) }, (response) => {
+    const chunks: Buffer[] = [];
+    response.on("data", (chunk: Buffer) => chunks.push(chunk));
+    response.on("error", reject);
+    response.on("end", () => resolve(new Response(Buffer.concat(chunks), { status: response.statusCode ?? 500 })));
+  });
+  call.on("error", reject);
+  call.end(init?.body as string | undefined);
+});
+
 export class SandboxProviderError extends Error {
   diagnostics?: { dockerAction?: string; dockerStderr?: string; image?: string; container?: string; network?: string; sandboxId?: string };
   constructor(public readonly code: string, message: string, public readonly status = 503, public readonly step = "sandbox", public readonly tool = "project.terminal.exec", public readonly retryable = false, public readonly currentRevision?: string) { super(message); }
@@ -119,7 +138,7 @@ export class RemoteSandboxProvider implements SandboxProvider {
   get executionMode(): ProjectRuntimeMode { return this.runtimeMode ?? projectRuntimeMode(); }
   processCapabilities(scope: SandboxScope) { return this.request<{ durableIdentity: boolean; terminalStatus: boolean }>("processCapabilities", { scope }); }
   private readonly endpoint: URL;
-  constructor(url: string, private readonly secret: string, private readonly transport: typeof fetch = fetch, private readonly mode: "local" | "remote" = (process.env.NPATI_SANDBOX_RUNNER_MODE === "local" ? "local" : "remote"), private readonly runtimeMode?: ProjectRuntimeMode) {
+  constructor(url: string, private readonly secret: string, private readonly transport: typeof fetch = runnerFetch, private readonly mode: "local" | "remote" = (process.env.NPATI_SANDBOX_RUNNER_MODE === "local" ? "local" : "remote"), private readonly runtimeMode?: ProjectRuntimeMode) {
     if (process.env.NPATI_SANDBOX_RUNNER_MODE && !["local", "remote"].includes(process.env.NPATI_SANDBOX_RUNNER_MODE)) throw new Error("Invalid sandbox runner mode");
     this.endpoint = new URL(url);
     const loopback = ["127.0.0.1", "localhost"].includes(this.endpoint.hostname);

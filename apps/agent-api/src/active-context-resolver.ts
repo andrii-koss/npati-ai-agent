@@ -35,6 +35,12 @@ const refersToCurrentProject = (lowerMessage: string, lowerName: string) => {
   return new RegExp(`(?<![\\p{L}\\p{N}])(?:this|current|цей|цьому|цього|поточн\\p{L}*|этот|этом|этого|текущ\\p{L}*)\\s+(?:\\p{L}+\\s+){0,3}${escaped}\\s+(?:project|website|site|app|проєкт\\p{L}*|сайт\\p{L}*|проект\\p{L}*)`, "u").test(lowerMessage);
 };
 
+/** "Change the title to My Tasks": the words are the new value, even when another project is called My Tasks. */
+const namesNewValue = (lowerMessage: string, lowerName: string) => {
+  const escaped = lowerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![\\p{L}])(?:change|rename|set|update|replace|make|зміни\\p{L}*|поміняй|заміни\\p{L}*|перейменуй|встанови|зроби|измени\\p{L}*|поменяй|замени\\p{L}*|переименуй|сделай)(?![\\p{L}]).*(?<![\\p{L}])(?:to|as|into|на|в|во)\\s+["'«“]?${escaped}(?![\\p{L}\\p{N}])`, "u").test(lowerMessage);
+};
+
 const mentions = (text: string, name: string) => {
   const trimmed = name.trim();
   return trimmed.length > 2 && new RegExp(`(?<![\\p{L}\\p{N}])${trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "u").test(text);
@@ -139,7 +145,8 @@ export class ActiveContextResolver {
         .filter(project => !["archived", "soft_deleted", "purging", "deleted"].includes(project.status)
           && project.name.trim().length >= 3 && mentions(lowerMessage, project.name.trim().toLocaleLowerCase())
           // "this empty test project" points at the open project; it does not name a project called Test.
-          && !(current.project && current.project.id !== project.id && refersToCurrentProject(lowerMessage, project.name.trim().toLocaleLowerCase())));
+          && !(current.project && current.project.id !== project.id
+            && (refersToCurrentProject(lowerMessage, project.name.trim().toLocaleLowerCase()) || namesNewValue(lowerMessage, project.name.trim().toLocaleLowerCase()))));
       // "Add a bonus to «Game»; do not change «Site»": a project named only where the request preserves it is not the target (P037).
       const clauses = lowerMessage.split(/[.;!?\n]+/u);
       const targets = candidates.filter(project => clauses.some(clause => clause.includes(project.name.trim().toLocaleLowerCase()) && !preservingClause.test(clause)));

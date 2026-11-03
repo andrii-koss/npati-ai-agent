@@ -79,6 +79,11 @@ describe("the project a chat message points at", () => {
     expect(await route("Build a TODO app in this empty test project")).toBeUndefined();
   });
 
+  it("treats a new value as text, not as a project", async () => {
+    expect(await route("Change the page title to 'Test'")).toBeUndefined();
+    expect(await route("Поміняй заголовок на Test")).toBeUndefined();
+  });
+
   it("still switches when the other project is named", async () => {
     expect((await route("Fix the header in the Test project"))?.project?.id).toBe("other");
   });

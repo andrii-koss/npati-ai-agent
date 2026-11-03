@@ -9,6 +9,16 @@ export function previewBrowserBridge(prefix: string, token: string): string {
     if(!url.pathname.startsWith(prefix+"/"))url.pathname=prefix+url.pathname;
     if(resource)url.searchParams.delete("token");else url.searchParams.set("token",token);return url.href;
   }
+  // The preview proxy carries HTTP only, so a dev server's live-reload socket can never connect. Its client gets
+  // a socket that stays "connecting" instead of logging failures; the app's own sockets are untouched.
+  if(typeof WebSocket==="function"){
+    const NativeSocket=WebSocket;
+    const devReload=(url,protocols)=>[].concat(protocols||[]).some(item=>item==="vite-hmr"||item==="vite-ping")||/\/_next\/webpack-hmr|\/sockjs-node|\/__webpack_hmr|\/_nuxt\/|\/hmr(?:[/?]|$)/.test(String(url));
+    window.WebSocket=new Proxy(NativeSocket,{construct(target,args){
+      if(!devReload(args[0],args[1]))return new target(...args);
+      return Object.assign(new EventTarget(),{readyState:0,url:String(args[0]),protocol:"",send(){},close(){}});
+    }});
+  }
   try {
     const origSetAttribute = HTMLScriptElement.prototype.setAttribute;
     HTMLScriptElement.prototype.setAttribute = function(name, val) {
