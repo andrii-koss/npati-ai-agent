@@ -1,7 +1,8 @@
 FROM node:24-alpine AS project-web-toolchain
 RUN apk add --no-cache python3 git build-base
-COPY apps/agent-api/project-runtime-profiles.json apps/agent-api/build-project-runtime-profiles.cjs apps/agent-api/src/project-framework-locks.json /tmp/npati-toolchain/
+COPY apps/agent-api/build-project-runtime-npm-cache.cjs apps/agent-api/project-runtime-profiles.json apps/agent-api/build-project-runtime-profiles.cjs apps/agent-api/src/project-framework-locks.json /tmp/npati-toolchain/
 RUN --mount=type=cache,id=npati-project-web-npm,target=/root/.npm node /tmp/npati-toolchain/build-project-runtime-profiles.cjs
+RUN node /tmp/npati-toolchain/build-project-runtime-npm-cache.cjs
 
 FROM node:24-alpine AS web-build
 WORKDIR /app

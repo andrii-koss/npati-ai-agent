@@ -361,7 +361,7 @@ export class ProjectSandboxService {
       // Scan source credentials instead, and avoid revalidating unchanged canonical files.
       const changed = !original || original.content !== file.content;
       if (secrets.some((secret) => secret.length > 0 && file.content.includes(secret)) ||
-        (changed && !isLockfile && (!scanTextForSecrets(file.content).clean || hasQuotedCredential(file.content)))) {
+        (changed && !isLockfile && (!scanTextForSecrets(file.content).clean || hasQuotedCredential(file.content, file.path)))) {
         throw new SandboxProviderError("secret_content", "Sandbox produced protected file content", 403, "download");
       }
       if (changed) plan.push({ path: file.path, before: original?.content ?? "", after: file.content, existing: !!original, revision: original?.revision });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { hasQuotedCredential } from "../apps/agent-api/src/workspace-protected-content";
+import { projectConversationContext } from "../apps/agent-api/src/code-chat-website";
+import { hasQuotedCredential, isWorkspaceContentProtected } from "../apps/agent-api/src/workspace-protected-content";
 import { gitHistoryArgs } from "../apps/agent-api/src/code-shell-git-history";
 import { supersededSources } from "../apps/agent-api/src/code-tool-superseded-source";
 import { ActiveContextResolver } from "../apps/agent-api/src/active-context-resolver";
@@ -71,10 +72,24 @@ describe("a new TypeScript file replaces its JavaScript twin", () => {
   });
 });
 
+describe("chat history in a code project", () => {
+  it("carries earlier messages to a follow-up", () => {
+    const context = projectConversationContext([{ role: "user", content: "Build a coffee shop landing page" }, { role: "assistant", content: "The run was cancelled." }]);
+    expect(context).toContain("Build a coffee shop landing page");
+    expect(context).toContain("same project chat");
+  });
+});
+
 describe("content protection and ordinary code", () => {
   it("leaves names and messages alone", () => {
     for (const line of ['const TOKEN_KEY = "teamflow_token";', 'password: "Мінімум 8 символів",', 'passwordLabel: "PasswordField",', 'token: "Invalid token value",', 'const TOKEN_HEADER = "x-auth-token";']) expect(hasQuotedCredential(line), line).toBe(false);
   });
+  it("allows sample passwords in test files only", () => {
+    for (const file of ["tests/api.test.js", "server/__tests__/auth.js", "src/App.test.tsx", "e2e/login.spec.ts"]) expect(hasQuotedCredential('password: "Str0ng-pass",', file), file).toBe(false);
+    for (const file of ["server/index.js", "src/config.ts", "contest/app.js"]) expect(hasQuotedCredential('password: "Str0ng-pass",', file), file).toBe(true);
+    expect(isWorkspaceContentProtected("tests/api.test.js", 'const key = "sk-abcdefghijklmnopqrstuvwxyz";')).toBe(true);
+  });
+
   it("still refuses credentials", () => {
     for (const line of ['password: "Str0ng-pass",', 'const secret = "abcd1234efgh";', 'SECRET_KEY = "abcd1234efgh"', 'api_key: "abcd1234efgh"', 'token = "abcd1234efgh"']) expect(hasQuotedCredential(line), line).toBe(true);
   });

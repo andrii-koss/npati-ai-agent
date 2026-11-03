@@ -80,6 +80,11 @@ export function websiteConversationContext(history: readonly { role: string; con
   return kept.length ? "\n\nPrevious messages in this same website chat (historical context, not tasks to repeat). Use them to resolve references such as main color or earlier research results; implement only the current request above:\n" + JSON.stringify(kept) : "";
 }
 
+/** Any other code project: "continue" and "that button" need the same chat history a website gets. */
+export function projectConversationContext(history: readonly { role: string; content: unknown }[]): string {
+  return websiteConversationContext(history).replace("same website chat", "same project chat");
+}
+
 /** Native audits retain the same bounded history without treating previous prose as fresh execution evidence. */
 export function nativeMobileConversationContext(history: readonly { role: string; content: unknown }[]): string {
   return websiteConversationContext(history).replace("same website chat", "same project chat")

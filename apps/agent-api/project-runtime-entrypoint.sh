@@ -53,6 +53,19 @@ ip6tables -A NPATI_EGRESS_RESTRICT -m conntrack --ctstate ESTABLISHED,RELATED -j
 ip6tables -A NPATI_EGRESS_RESTRICT -o lo -j ACCEPT
 ip6tables -A NPATI_EGRESS_RESTRICT -j REJECT --reject-with icmp6-port-unreachable
 
+# The shared npm cache lives on the projects disk so that projects can hard-link it.
+seed_source=/opt/npati-project-toolchain/npm-cache
+seed=/projects/.npm-seed
+if [ -f "$seed_source/.stamp" ] && ! cmp -s "$seed_source/.stamp" "$seed/.complete"; then
+  (
+    rm -rf "$seed" "$seed.tmp"
+    cp -R "$seed_source" "$seed.tmp"
+    chmod -R a+rX,go-w "$seed.tmp"
+    cp "$seed_source/.stamp" "$seed.tmp/.complete"
+    mv "$seed.tmp" "$seed"
+  ) &
+fi
+
 node /opt/npati-runtime/sandbox-egress-proxy.mjs &
 proxy_pid=$!
 node /app/dist/shared-project-runtime-server.js &

@@ -3,7 +3,7 @@ import { assertProjectQuiescent, awaitProcessClose } from "./shared-runtime-proc
 import { createHash, randomUUID } from "node:crypto";
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
-import { chown, chmod, mkdir, readFile, writeFile, rename, rm, open } from "node:fs/promises";
+import { access, chown, chmod, mkdir, readFile, writeFile, rename, rm, open } from "node:fs/promises";
 import path from "node:path";
 import {
   SandboxProviderError, sandboxProcessEnvironment, type SandboxProvider, type SandboxScope,
@@ -201,7 +201,7 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
       // Loopback belongs to the command namespace; its helper enforces egress.
       NO_PROXY: "localhost,127.0.0.1,0.0.0.0,::1", no_proxy: "localhost,127.0.0.1,0.0.0.0,::1",
       npm_config_proxy: "http://127.0.0.1:8080", npm_config_https_proxy: "http://127.0.0.1:8080", NPM_CONFIG_CACHE: `${directory}/.npati-runtime/npm`,
-      npm_config_audit: "false", npm_config_fund: "false", NEXT_TELEMETRY_DISABLED: "1", CI: "1" };
+      npm_config_prefer_offline: "true", npm_config_audit: "false", npm_config_fund: "false", NEXT_TELEMETRY_DISABLED: "1", CI: "1" };
   }
   private launch(entry: Entry, executable: string, args: string[], cwd = ".", environment?: Record<string, string>, detached = false, preview = false, offline = false) {
     const child = spawn(this.launcher, [String(entry.uid), this.directory(entry), String(entry.port), path.join(this.directory(entry), cwd), ...(preview ? ["--preview"] : offline ? ["--offline"] : []), executable, ...args],
@@ -275,10 +275,34 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
   private command(command: string, cwd?: string) { const normalized = normalizeTerminalCommand({ command, cwd }); classifyTerminalCommand({ command: normalized.command, cwd: normalized.cwd }); return normalized; }
   async executeCommand(scope: SandboxScope, id: string, command: string, options: SandboxCommandOptions) {
     const entry = await this.entry(scope, id), normalized = this.command(command, options.cwd);
+    if (/^(?:npm|npx)\b/.test(normalized.command)) await this.linkNpmCache(entry);
     if (/^npm (?:install|ci)$/.test(normalized.command) && normalized.cwd === ".") {
       return this.collect(entry, "node", ["/opt/npati-runtime/prepare-project-dependencies.cjs", normalized.command.slice(4)], "", options);
     }
     return this.collect(entry, "sh", ["-s"], projectRuntimeWorkspaceCommand(normalized.command, this.directory(entry)), options, normalized.cwd);
+  }
+  /**
+   * Gives a project the prepared npm cache as hard links: instant, and no extra disk. The linked files stay root-owned
+   * and read-only, so one project cannot change them for the others; the index is a real copy because npm appends to it.
+   */
+  private async linkNpmCache(entry: Entry) {
+    const seed = path.join(this.root, ".npm-seed", "_cacache");
+    const target = path.join(this.directory(entry), ".npati-runtime", "npm", "_cacache");
+    if (await access(path.join(this.root, ".npm-seed", ".complete")).then(() => false, () => true)) return;
+    if (await access(target).then(() => true, () => false)) return;
+    await mkdir(path.dirname(target), { recursive: true });
+    await chown(path.dirname(target), entry.uid, entry.uid);
+    try {
+      await executeFile("cp", ["-al", seed, target]);
+      await rm(path.join(target, "index-v5"), { recursive: true, force: true });
+      await executeFile("cp", ["-R", path.join(seed, "index-v5"), path.join(target, "index-v5")]);
+      await executeFile("chown", ["-R", `${entry.uid}:${entry.uid}`, path.join(target, "index-v5")]);
+      await executeFile("find", [target, "-type", "d", "-exec", "chown", `${entry.uid}:${entry.uid}`, "{}", "+"]);
+    } catch (error) {
+      // A project without the cache only downloads more.
+      await rm(target, { recursive: true, force: true }).catch(() => undefined);
+      console.warn(`[project-runtime] npm cache link failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
   async uploadFiles(scope: SandboxScope, id: string, files: SandboxFile[]) {
     const entry = await this.entry(scope, id);

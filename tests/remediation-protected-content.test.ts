@@ -15,14 +15,14 @@ describe("D10 protected content is a refusal, not a retryable server error", () 
       writeFile: async (path, content) => { writes++; files.set(path, content); return { sha256: "revision" }; },
       deletePath: async () => {}, movePath: async () => {},
     };
-    await expect(writeFileSafe({ path: "test/api.test.js", content: "const password = 'fixed-password-for-tests';" }, port)).rejects.toMatchObject({ code: "secret_content", status: 403 });
+    await expect(writeFileSafe({ path: "server/auth.js", content: "const password = 'fixed-password-for-tests';" }, port)).rejects.toMatchObject({ code: "secret_content", status: 403 });
     expect(writes).toBe(0);
-    await expect(writeFileSafe({ path: "test/api.test.js", content: "const password = 'fixed-password-for-tests';" }, port)).rejects.toMatchObject({ details: { approvalCanOverride: false } });
-    expect(files.has("test/api.test.js")).toBe(false);
+    await expect(writeFileSafe({ path: "server/auth.js", content: "const password = 'fixed-password-for-tests';" }, port)).rejects.toMatchObject({ details: { approvalCanOverride: false } });
+    expect(files.has("server/auth.js")).toBe(false);
     const safe = "import { randomBytes } from 'node:crypto';\nconst password = randomBytes(24).toString('base64url');";
-    await writeFileSafe({ path: "test/api.test.js", content: safe }, port);
-    expect(files.get("test/api.test.js")).toBe(safe);
-    expect(isWorkspaceContentProtected("test/api.test.js", files.get("test/api.test.js")!)).toBe(false);
+    await writeFileSafe({ path: "server/auth.js", content: safe }, port);
+    expect(files.get("server/auth.js")).toBe(safe);
+    expect(isWorkspaceContentProtected("server/auth.js", files.get("server/auth.js")!)).toBe(false);
   });
   it("validates the whole patch before committing any sibling file", async () => {
     let committed = false;
