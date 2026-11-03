@@ -321,6 +321,19 @@ export class ProjectGitService {
     }, false);
   }
 
+  /** One read of history, for arguments `gitHistoryArgs` has already checked. A git refusal is a result, not an error. */
+  async readHistory(ctx: AuthContext, companyId: string, projectId: string, args: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+    return this.withWorkspaceLease(ctx, companyId, projectId, async () => {
+      const dir = await ensureRepositoryInitialized(this.repositoryHost(), ctx, companyId, projectId);
+      try {
+        const { stdout, stderr } = await this.repositoryHost().runGit(dir, ["--no-pager", ...args]);
+        return { exitCode: 0, stdout: redactSecrets(stdout), stderr: redactSecrets(stderr ?? "") };
+      } catch (error) {
+        return { exitCode: 1, stdout: "", stderr: redactSecrets(error instanceof Error ? error.message : String(error)).slice(0, 2_000) };
+      }
+    }, false);
+  }
+
     async log(
     ctx: AuthContext,
     companyId: string,

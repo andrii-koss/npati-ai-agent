@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { gitHistoryArgs } from "../apps/agent-api/src/code-shell-git-history";
 import { supersededSources } from "../apps/agent-api/src/code-tool-superseded-source";
 import { ActiveContextResolver } from "../apps/agent-api/src/active-context-resolver";
 import { parseCodeSearchOutput } from "../apps/agent-api/src/code-search-output";
@@ -66,6 +67,20 @@ describe("a new TypeScript file replaces its JavaScript twin", () => {
     expect(supersededSources("vite.config.ts")).toEqual([]);
     expect(supersededSources("src/App.test.tsx")).toEqual([]);
     expect(supersededSources("src/App.jsx")).toEqual([]);
+  });
+});
+
+describe("reading history through the shell", () => {
+  it("accepts plain reads of history", () => {
+    expect(gitHistoryArgs("git log --oneline")).toEqual(["log", "--oneline"]);
+    expect(gitHistoryArgs("git log -p -- src/App.css")).toEqual(["log", "-p", "--", "src/App.css"]);
+    expect(gitHistoryArgs("git show abc123:src/App.tsx")).toEqual(["show", "abc123:src/App.tsx"]);
+  });
+
+  it("leaves everything else to the normal path", () => {
+    for (const command of ["git commit -m x", "git push", "git reset --hard", "git log | cat", "git log; rm -rf src", "npm test", "git diff --output=/tmp/x", "git show HEAD:.env", "git log -- .env"]) {
+      expect(gitHistoryArgs(command), command).toBeNull();
+    }
   });
 });
 

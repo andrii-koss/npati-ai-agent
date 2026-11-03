@@ -133,6 +133,7 @@ export function createAppCodeToolRuntimeWiring(deps: AppCodeToolRuntimeWiringDep
   });
 
   const ports = createCodePortsWiring({
+    projectGitService,
     config,
     log,
     approvalsRepo,

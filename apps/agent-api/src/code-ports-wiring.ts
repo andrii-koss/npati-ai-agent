@@ -18,6 +18,7 @@ import { activitySinkForKind, createCodeRunActivitySink } from "./code-run-activ
 import { SecretLeaseProvider } from "./code-secret-lease";
 import { CodeShellRuntime } from "./code-shell-runtime";
 import { classifyShellCommand } from "./code-shell-classifier";
+import { gitHistoryArgs } from "./code-shell-git-history";
 import { ShellChangeCache, withTrackedShellChanges } from "./code-shell-workspace-changes";
 import type { CodeTurnTracker } from "./code-workspace-checkpoint";
 import { CodeVerifyRunnerPort } from "./code-tool-executors";
@@ -48,6 +49,7 @@ export interface CreateCodePortsWiringDeps {
   codeUserQuestionReaperPort: ReturnType<typeof createCodeUserQuestionReaperPort> | null;
   featureFlagService: FeatureFlagService;
   mcpApprovalPauseRelease: ((input: { companyId: string; runId: string; approvalId: string; reason: McpApprovalReleaseReason; answeredBy?: string }) => Promise<unknown>) | null;
+  projectGitService: { readHistory(ctx: import("@npati/workspace").AuthContext, companyId: string, projectId: string, args: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> };
   projectSandbox: ProjectSandboxService | undefined;
   projectService: ProjectService;
   projectWorkspace: MountedWorkspaceProvider;
@@ -150,6 +152,12 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
     },
     exec: async (input: Parameters<import("./code-tool-executors").CodeShellRuntimePort["exec"]>[0]) => {
       const sessionId = input.sessionId ?? `${input.companyId}:${input.projectId}`;
+      const historyArgs = gitHistoryArgs(input.command);
+      if (historyArgs) {
+        const started = Date.now();
+        const history = await deps.projectGitService.readHistory(input.ctx, input.companyId, input.projectId, historyArgs);
+        return { ...history, durationMs: Date.now() - started, truncated: false, risk: "low" as const };
+      }
 
       const toolCallId = `${sessionId}:${input.turnId ?? "no-turn"}:${fnv1a(`code.shell.exec:${input.command}`)}`;
 
