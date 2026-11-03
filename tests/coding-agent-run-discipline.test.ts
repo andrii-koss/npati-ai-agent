@@ -3,7 +3,7 @@ import { chatWithTransientRetry, isTransientProviderFailure, withTransientModelR
 import { decideSelfReview } from "../apps/agent-api/src/code-self-review-risk";
 import { buildSystemPrompt, CODE_RUN_DISCIPLINE_RULES, systemPromptStablePrefix } from "../apps/agent-api/src/coding-agent-runner-prompt";
 
-describe("a transient provider failure is retried once, nothing else is (audit F-11)", () => {
+describe("a transient provider failure is retried, nothing else is (audit F-11)", () => {
   it("recognises transient failures and never retries a cancelled request or a client error", () => {
     expect(isTransientProviderFailure({ httpStatus: 503 })).toBe(true);
     expect(isTransientProviderFailure({ httpStatus: 429 })).toBe(true);
@@ -13,16 +13,35 @@ describe("a transient provider failure is retried once, nothing else is (audit F
     expect(isTransientProviderFailure({ httpStatus: 503 }, aborted.signal)).toBe(false);
   });
 
-  it("retries once and returns the second answer; a second failure surfaces unchanged", async () => {
-    const ok = vi.fn().mockRejectedValueOnce(Object.assign(new Error("down"), { httpStatus: 502 })).mockResolvedValueOnce("answer");
-    await expect(chatWithTransientRetry(ok, {}, { delayMs: 1 })).resolves.toBe("answer");
-    expect(ok).toHaveBeenCalledTimes(2);
+  it("keeps retrying with pauses and surfaces the failure only after the last attempt", async () => {
+    const delaysMs = [1, 1, 1];
+    const recovers = vi.fn().mockRejectedValueOnce(Object.assign(new Error("down"), { httpStatus: 502 })).mockRejectedValueOnce(Object.assign(new Error("down"), { httpStatus: 503 })).mockResolvedValueOnce("answer");
+    await expect(chatWithTransientRetry(recovers, {}, { delaysMs })).resolves.toBe("answer");
+    expect(recovers).toHaveBeenCalledTimes(3);
     const failing = vi.fn().mockRejectedValue(Object.assign(new Error("down"), { httpStatus: 502 }));
-    await expect(chatWithTransientRetry(failing, {}, { delayMs: 1 })).rejects.toThrow("down");
-    expect(failing).toHaveBeenCalledTimes(2);
+    await expect(chatWithTransientRetry(failing, {}, { delaysMs })).rejects.toThrow("down");
+    expect(failing).toHaveBeenCalledTimes(4);
     const bad = vi.fn().mockRejectedValue(Object.assign(new Error("bad request"), { httpStatus: 400 }));
-    await expect(chatWithTransientRetry(bad, {}, { delayMs: 1 })).rejects.toThrow("bad request");
+    await expect(chatWithTransientRetry(bad, {}, { delaysMs })).rejects.toThrow("bad request");
     expect(bad).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    "OmniRoute stream failed with HTTP 503: [deepseek/deepseek-flash] [503]: Service is too busy",
+    "OmniRoute stream failed with HTTP 500: stream content stall: no model output within 800",
+    "provider_stream_idle_timeout: no model output for 90 s",
+  ])("treats a failed stream as transient: %s", (message) => {
+    expect(isTransientProviderFailure(new Error(message))).toBe(true);
+  });
+
+  it("stops waiting as soon as the run is cancelled", async () => {
+    const controller = new AbortController();
+    const failing = vi.fn().mockRejectedValue(Object.assign(new Error("down"), { httpStatus: 503 }));
+    const pending = chatWithTransientRetry(failing, { signal: controller.signal }, { delaysMs: [60_000] });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    controller.abort();
+    await expect(pending).rejects.toThrow("down");
+    expect(failing).toHaveBeenCalledTimes(1);
   });
 
   it("wraps only chat on the engine port and keeps its other methods", async () => {
