@@ -201,7 +201,7 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
       // Loopback belongs to the command namespace; its helper enforces egress.
       NO_PROXY: "localhost,127.0.0.1,0.0.0.0,::1", no_proxy: "localhost,127.0.0.1,0.0.0.0,::1",
       npm_config_proxy: "http://127.0.0.1:8080", npm_config_https_proxy: "http://127.0.0.1:8080", NPM_CONFIG_CACHE: `${directory}/.npati-runtime/npm`,
-      npm_config_prefer_offline: "true", npm_config_audit: "false", npm_config_fund: "false", NEXT_TELEMETRY_DISABLED: "1", CI: "1" };
+      npm_config_prefer_offline: "true", npm_config_nodedir: "/usr/local", npm_config_audit: "false", npm_config_fund: "false", NEXT_TELEMETRY_DISABLED: "1", CI: "1" };
   }
   private launch(entry: Entry, executable: string, args: string[], cwd = ".", environment?: Record<string, string>, detached = false, preview = false, offline = false) {
     const child = spawn(this.launcher, [String(entry.uid), this.directory(entry), String(entry.port), path.join(this.directory(entry), cwd), ...(preview ? ["--preview"] : offline ? ["--offline"] : []), executable, ...args],
