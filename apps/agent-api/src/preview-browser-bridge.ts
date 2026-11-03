@@ -91,7 +91,7 @@ export function rewritePreviewSsrResources(html: string, prefix: string): string
     if (/\btype\s*=\s*(?:"module"|'module'|module(?:\s|$))/i.test(attributes)) {
       rewritten = rewritten.replace(/(from\s+["'])(\/(?!\/)[^"'\s]+)(["'])/g, (match, from: string, target: string, endQuote: string) =>
         target.startsWith("/api/") || target.startsWith("/companies/") ? match : `${from}${prefix}${target}${endQuote}`);
-      rewritten = rewritten.replace(/(["'])(\/(?!\/)[^"'\\s]+(?:\.(?:m?js|css|jsx|tsx|json|svg|png|woff2?)|\@[^"'\\s]+)(?:[?#][^"'\\s]*)?)\1/g, (literal, quote: string, target: string) =>
+      rewritten = rewritten.replace(/(["'])(\/(?!\/)[^"'\s]+(?:\.(?:m?js|css|jsx|tsx|json|svg|png|woff2?)|\@[^"'\s]+)(?:[?#][^"'\s]*)?)\1/g, (literal, quote: string, target: string) =>
         target.startsWith("/api/") || target.startsWith("/companies/") ? literal : `${quote}${prefix}${target}${quote}`);
     }
     return rewritten === source ? script : `<script${attributes}>${rewritten}</script>`;

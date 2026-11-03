@@ -229,7 +229,7 @@ export class ProjectPreviewService {
       try { await validateStaticProjectResources(files, async p => (await this.workspace.readFile(ctx, companyId, projectId, p)).content); }
       catch (error) { throw new PreviewError("preview_resources_missing", error instanceof Error ? error.message : "Static resource validation failed", 409); }
     }
-    const verifiedBuild = options.verifiedBuild === true;
+    const verifiedBuild = options.verifiedBuild ?? project.lastBuildStatus === "ready";
     let devCommand = options.command?.trim()
       || (verifiedBuild && detected.productionCommand ? detected.productionCommand : detected.command);
     let devPort = options.port && Number.isInteger(options.port) ? options.port : extractPortFromCommand(devCommand, detected.port);
@@ -367,7 +367,7 @@ export class ProjectPreviewService {
       previewUrl,
       previewPort: devPort,
       framework: finalFramework,
-      lastBuildStatus: "ready",
+      lastBuildStatus: verifiedBuild || !detected.productionCommand ? "ready" : "development",
     });
     return {
       status: "running",

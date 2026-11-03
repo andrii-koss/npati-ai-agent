@@ -24,6 +24,8 @@ import { readIntentHistory } from "./chat-project-intent";
 
 const key = DEVELOPMENT_PROCESS_SETTINGS_KEY;
 type Entry = DevelopmentProcess & { requestId: string; businessId?: string; cardMessageId?: string; resultMessageId?: string };
+/** A dev server is a working Preview too; only a production start needs a verified build. */
+const previewBuildUsable = (status: string | null | undefined) => status === "ready" || status === "development";
 const STALE_PROCESS_MS = 30 * 60_000;
 const ACTIVITY_FLUSH_MS = 1_000;
 
@@ -191,7 +193,7 @@ export class ChatDevelopmentService {
         const live = this.d.background.isLive(latest.runId);
         const expired = latest.status === "running" && (executionTimestamp(latest.leaseExpiresAt) ?? Infinity) < Date.now();
         const previewEvent = merged.filter(event => event.runId === latest.runId && event.stage === "preview").at(-1);
-        const previewReady = !!project?.previewUrl && (previewEvent ? previewEvent.status === "completed" : project.lastBuildStatus === "ready");
+        const previewReady = !!project?.previewUrl && (previewEvent ? previewEvent.status === "completed" : previewBuildUsable(project.lastBuildStatus));
         // The coding lease finishes before afterRun starts Preview. Recover this bounded finalization gap.
         const awaitingPreview = !previewEvent && !previewReady && latest.status === "completed"
           && Date.now() - (executionTimestamp(latest.finishedAt) ?? 0) < 120_000;
@@ -552,7 +554,7 @@ export class ChatDevelopmentService {
       const session = sessions.find(s => s.status === "active");
       return {
         id: randomUUID(), requestId: randomUUID(), companyId: project.companyId, projectId: project.id, sessionId: session?.id,
-        parentConversationId: root.id, name: project.name, framework: project.framework ?? "", status: project.previewUrl && project.lastBuildStatus === "ready" ? "completed" : project.lastBuildStatus === "failed" ? "failed" : "idle",
+        parentConversationId: root.id, name: project.name, framework: project.framework ?? "", status: project.previewUrl && previewBuildUsable(project.lastBuildStatus) ? "completed" : project.lastBuildStatus === "failed" ? "failed" : "idle",
         hidden: true, createdAt: project.createdAt, updatedAt: new Date().toISOString()
       };
     }));
@@ -623,7 +625,7 @@ export class ChatDevelopmentService {
       const now = new Date().toISOString();
       process = {
         id: randomUUID(), requestId: randomUUID(), companyId, projectId, parentConversationId: root.id, name: project.name,
-        framework: project.framework ?? "", status: project.previewUrl && project.lastBuildStatus === "ready" ? "completed" : project.lastBuildStatus === "failed" ? "failed" : "idle", hidden: true, createdAt: now, updatedAt: now
+        framework: project.framework ?? "", status: project.previewUrl && previewBuildUsable(project.lastBuildStatus) ? "completed" : project.lastBuildStatus === "failed" ? "failed" : "idle", hidden: true, createdAt: now, updatedAt: now
       };
       const activeIds = new Set((await this.list(ctx)).filter(developmentIsActive).map(p => p.id));
       await this.change(ctx, items => this.bounded(ctx, [...items, process!], activeIds));

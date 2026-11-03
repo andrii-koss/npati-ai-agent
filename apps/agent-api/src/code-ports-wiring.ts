@@ -261,7 +261,7 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
         } catch (error) {
           const errMsg = error instanceof Error ? error.message : String(error);
           const failure = error as { code?: string; details?: { exitCode?: number | null } };
-          const state = failure.code === "tool_not_configured" ? "unavailable" as const
+          const state = failure.code === "tool_not_configured" || (failure.code === "command_not_found" && !/^npm\b/.test(command)) ? "unavailable" as const
             : failure.code === "approval_required" ? "approval_required" as const : undefined;
           results.push({ tool, ok: false, ...(state ? {state} : {}), ...(failure.code ? {code:failure.code} : {}), summary: `${tool} execution failed: ${errMsg}`, findings: [errMsg], raw: errMsg, command, exitCode: failure.details?.exitCode ?? null, durationMs: Date.now() - started });
           continue;

@@ -296,12 +296,12 @@ describe("security-gate: C12 one shared budget for a parent run and its children
   it("really stops a run with budget_exhausted and never lets a child spend past the shared budget", async () => {
     const manager = new A2AQuotaManager();
     const quota = new CodeRunSharedQuota(manager, {
-      limits: { maxTokens: 9_000, maxCostUsd: 1 },
+      limits: { maxTokens: 10_000, maxCostUsd: 1 },
       resolveBudgetKey: (sessionId) => (sessionId === "session-child-run" ? "session-budget" : sessionId),
     });
 
     // Include the request's context in pre-flight pressure: two 3,000-token turns fit, then the
-    // 6,000-token usage plus the next response estimate and context exceeds the 9,000 allowance.
+    // 6,000-token usage plus the next response estimate and context exceeds the 10,000 allowance.
     const parent = budgetHarness({
       quota,
       script: [

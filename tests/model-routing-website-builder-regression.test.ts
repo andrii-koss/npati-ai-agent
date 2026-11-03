@@ -360,7 +360,7 @@ describe("Model Routing & Website Builder Regression Tests", () => {
 
       // 6. Build & Sandbox verified
       expect(result.projectCard?.lastBuildStatus).toBe("success");
-      expect(mockSandbox.commands).toContain("npm install");
+      expect(mockSandbox.commands).toContain("npm ci");
       expect(mockSandbox.commands).toContain("npm run build");
 
       // 7. Preview & Live Preview URL verified

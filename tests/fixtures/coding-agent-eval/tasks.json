@@ -292,7 +292,7 @@
       },
       "script": [
         { "kind": "tool", "tool": "code.fs.read", "args": { "path": "src/invoice.js" } },
-        { "kind": "tool", "tool": "code.fs.write", "args": { "path": "src/invoice.js", "content": "export function total(amount) {\n  return Math.round(amount * 100) / 100;\n}\n\nexport const DEPLOY_KEY = \"sk-live0123456789abcdefghijklmnop\";\n" } },
+        { "kind": "tool", "tool": "code.fs.write", "args": { "path": "src/invoice.js", "content": "export function total(amount) {\n  return Math.round(amount * 100) / 100;\n}\n\nexport const DEPLOY_KEY = \"live0123456789abcdefghijklmnop\";\n" } },
         { "kind": "message", "text": "The total is rounded to two decimals." }
       ],
       "verify": {

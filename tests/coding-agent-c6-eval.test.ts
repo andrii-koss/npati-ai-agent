@@ -669,12 +669,12 @@ describe("security-gate: C6/C9/C14 eval harness runs the thirty-three determinis
       if (found.status !== "proposed") throw new Error(`proposal ${target} is ${found.status}: ${found.reason}`);
       return found;
     };
-    // 4x the largest measured transcript (10 steps) is exactly the shipped step limit.
+    // The calibration proposes 4x the largest measured transcript; no step limit ships by default.
     const steps = proposalOf("code.agent.maxStepsPerRun");
     expect(steps.value).toBe(40);
     expect(steps.basis).toBe("measured");
     expect(steps.appliedTo).toEqual({ quantity: "steps", statistic: "max", measured: 10, sampleSize: 33, headroomMultiplier: 4 });
-    expect(steps.value).toBe(DEFAULT_CODE_AGENT_LIMITS.maxStepsPerRun);
+    expect(DEFAULT_CODE_AGENT_LIMITS.maxStepsPerRun).toBe(0);
     // R1's cost multiple is kept, with what it does to the measured population reported beside it: it flags the
     // single largest task in the corpus (0.001764 > 3 x 0.000489 = 0.001467), which is a discriminating rule.
     const cost = proposalOf("code.anomaly.costMedianMultiplier");

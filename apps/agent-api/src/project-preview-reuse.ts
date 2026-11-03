@@ -27,7 +27,8 @@ export function canReusePreviewSession(input: {
 }): boolean {
   if (input.forceRestart) return false;
   if (input.command || input.port) return false;
-  if (input.verifiedBuild !== true) return true;
+  // Unknown means the production server may be wanted, so only an explicit development request reuses a dev server.
+  if (input.verifiedBuild === false) return true;
   return input.framework === "static";
 }
 

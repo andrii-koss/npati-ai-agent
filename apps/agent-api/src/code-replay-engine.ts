@@ -20,6 +20,7 @@
  */
 
 import type { AuthContext, CodeSession } from "@npati/workspace";
+import { resolveKnownTool } from "./code-tool-call-adapter";
 import {
   REPLAY_BUNDLE_FORMAT_VERSION,
   replayModelSteps,
@@ -507,7 +508,8 @@ export async function replayRecorded(deps: RecordedReplayDeps): Promise<Recorded
       );
       continue;
     }
-    if (expected.toolName !== actualTool) {
+    // A model may name a tool by its provider alias; the run executed the canonical tool.
+    if (expected.toolName !== actualTool && resolveKnownTool([actualTool], expected.toolName)?.name !== actualTool) {
       divergences.push(
         divergence("tool_name", turn, { toolCallId: actualId, expected: expected.toolName, actual: actualTool }),
       );
