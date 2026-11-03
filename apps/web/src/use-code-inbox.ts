@@ -16,6 +16,18 @@ export function useCodeInbox(conversationId: string | null, streaming: boolean) 
   const refresh = useCallback((sessionId: string) => {
     if (current.current?.session.sessionId === sessionId && refreshRef.current?.sessionId === sessionId) void refreshRef.current.refresh();
   }, []);
+  /** Asks the server when the snapshot is not known yet. An error keeps the queue: a second run must not start. */
+  const confirmActive = useCallback(async () => {
+    const session = current.current?.session;
+    if (!session) return false;
+    if (streaming) return true;
+    try {
+      const next = await requestCodeInbox(session, "GET");
+      applySnapshotRef.current?.(next, session.sessionId);
+      return inboxActive(next);
+    } catch { return true; }
+  }, [streaming]);
+  const applySnapshotRef = useRef<((next: InboxSnapshot, sessionId: string) => void) | null>(null);
   const accept = useCallback((session: CodeChatSession, chatId: string | null) => {
     generation.current++;
     current.current = { session, conversationId: chatId };
@@ -48,6 +60,7 @@ export function useCodeInbox(conversationId: string | null, streaming: boolean) 
     if (next.receipt?.target) setReceiptTarget(next.receipt.target);
     setError("");
   }, []);
+  applySnapshotRef.current = applySnapshot;
   useEffect(() => {
     if (!activeBinding) return;
     const session = activeBinding.session;
@@ -84,5 +97,5 @@ export function useCodeInbox(conversationId: string | null, streaming: boolean) 
     receiptTarget: activeBinding ? receiptTarget : null,
     // An unavailable authoritative snapshot must not fall through to a second routing request.
     active: !!activeBinding && (streaming || !snapshot || !!error || inboxActive(snapshot)),
-    accept, bindConversation, applySnapshot, refresh, generation };
+    accept, bindConversation, applySnapshot, refresh, generation, confirmActive };
 }

@@ -443,7 +443,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     const nextIntent = defaultHybridRouter.classifyProject({ message: input.trim(), activeProjectId: boundProjectId, activeCompanyId: companyId ?? readActiveCompanyId() });
     const createsProject = nextIntent.intent === "CREATE_WEBSITE" || nextIntent.intent === "CREATE_PROJECT";
     // The inbox queues work for its own session; a request for another project of this chat goes through routing.
-    if (codeInbox.active && !createsProject && (!boundProjectId || codeInbox.session?.projectId === boundProjectId)) { await submitInbox("queue"); return; }
+    if (codeInbox.active && !createsProject && (!boundProjectId || codeInbox.session?.projectId === boundProjectId) && (codeInbox.snapshot ? true : await codeInbox.confirmActive())) { await submitInbox("queue"); return; }
     const message = input.trim(); if ((!message && attachments.length === 0) || sending || chatSubmissionBusy.current) return;
     chatSubmissionBusy.current = true;
     const submittedDraftVersion = draftVersion.current;
