@@ -36,7 +36,7 @@
  * from its inputs — and a run's verdict can be persisted and compared instead of re-derived.
  */
 
-import { resolveCodingConversationLanguage, selfReviewUnavailableNotice } from "./company-chat-i18n";
+import { resolveCodingConversationLanguage, selfReviewFindingsNotice, selfReviewUnavailableNotice } from "./company-chat-i18n";
 import {
   CODE_SELF_REVIEW_MAX_FIX_ITERATIONS,
   resolveSelfReviewFixIterations,
@@ -505,6 +505,15 @@ export function describeSelfReview(verdict: SelfReviewVerdict): string {
 export function selfReviewDeliveryNotice(verdict: SelfReviewVerdict, prompt: string): string | null {
   if (verdict.reason !== "review_call_failed" && verdict.reason !== "review_parser_unavailable") return null;
   return selfReviewUnavailableNotice(resolveCodingConversationLanguage(prompt));
+}
+
+/** Findings the fix turn did not resolve reach the user as a warning next to the finished work. */
+export function selfReviewUnresolvedNotice(verdict: SelfReviewVerdict | undefined, prompt: string): string {
+  const unresolved = verdict?.unresolved ?? [];
+  const blocking = unresolved.filter((finding) => finding.blocking);
+  const detail = (blocking.length ? blocking : unresolved).slice(0, 5)
+    .map((finding) => `- ${finding.category}${finding.file ? ` (${finding.file})` : ""}: ${finding.reason}`).join("\n");
+  return selfReviewFindingsNotice(resolveCodingConversationLanguage(prompt), detail);
 }
 
 export function selfReviewStopMessage(verdict: SelfReviewVerdict | undefined): string {

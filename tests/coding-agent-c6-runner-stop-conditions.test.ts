@@ -405,10 +405,10 @@ describe("security-gate: C1a durable flag suspension", () => {
 });
 
 describe("security-gate: PLAN default turn budget integration", () => {
-  it.each([40, 60])("stops before dispatching model turn beyond the configured %i turn budget", async limit => {
+  it.each([40, 60])("stops at a turn budget only when an operator configures %i", async limit => {
     const { DEFAULT_CODE_AGENT_LIMITS, resolveCodeAgentLimits } = await import("../apps/agent-api/src/code-agent-config");
-    const configured = limit === 40 ? resolveCodeAgentLimits({}) : resolveCodeAgentLimits({ NPATI_CODE_MAX_STEPS: "60" });
-    if (limit === 40) expect(DEFAULT_CODE_AGENT_LIMITS.maxStepsPerRun).toBe(40);
+    const configured = resolveCodeAgentLimits({ NPATI_CODE_MAX_STEPS: String(limit) });
+    expect(DEFAULT_CODE_AGENT_LIMITS.maxStepsPerRun).toBe(0);
     const h = createHarness({ limits: configured,
       script: Array.from({ length: limit + 1 }, (_, index) => ({ content: "", toolCalls: [nativeCall("code.fs.read", { path: "file-" + index + ".ts" }, "budget-" + index)] })) });
     const result = await h.run();
@@ -445,11 +445,11 @@ describe("security-gate: C3 runner operation scope", () => {
 });
 
 
-it("stops website inspection with changing arguments after twenty turns without saved source progress", async () => {
+it("reminds but never stops website inspection that has not saved source yet", async () => {
   const h = createHarness({ limits: { maxStepsPerRun: 40 }, script: Array.from({ length: 30 }, (_, i) => ({ content: "Inspect", toolCalls: [nativeCall("code.fs.read", { path: "component-" + i + ".tsx" }, "read-" + i)] })) });
   const result = await h.run({ websiteEdit: true });
-  expect(result.reason).toBe("loop_detected");
-  expect(h.engineCalls.length).toBeLessThanOrEqual(21);
+  expect(result.reason).not.toBe("loop_detected");
+  expect(h.engineCalls.length).toBeGreaterThanOrEqual(30);
   expect(result.summary.filesChanged).toEqual([]);
   expect(h.activity.some(event => event.kind === "reminder" && event.reason === "no_source_progress")).toBe(true);
 });

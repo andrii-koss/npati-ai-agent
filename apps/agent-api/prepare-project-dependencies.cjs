@@ -40,20 +40,37 @@ async function prepareWorkspace(workspace, toolchain, mode, copyModules = (sourc
   }
   return name;
 }
-module.exports = { prepareWorkspace, dependencySet, lockGraph };
+async function seedWorkspace(workspace, toolchain, copyModules) {
+  const manifest = await json(path.join(workspace, 'package.json'));
+  try { await fs.access(path.join(workspace, 'node_modules')); return null; } catch { /* nothing installed yet */ }
+  const wanted = Object.assign({}, manifest.dependencies, manifest.devDependencies);
+  const profiles = await json(path.join(toolchain, 'profiles.json'));
+  let best = null, bestShared = 0;
+  for (const [name, profile] of Object.entries(profiles)) {
+    const shared = Object.keys(Object.assign({}, profile.dependencies, profile.devDependencies)).filter(key => key in wanted).length;
+    if (shared > bestShared) { best = name; bestShared = shared; }
+  }
+  if (!best) return null;
+  await copyModules(path.join(toolchain, best, 'node_modules'), path.join(workspace, 'node_modules'));
+  return best;
+}
+module.exports = { prepareWorkspace, seedWorkspace, dependencySet, lockGraph };
 if (require.main === module) (async () => {
   const mode = process.argv[2]; if (!['install', 'ci'].includes(mode)) throw Error('Unsupported dependency preparation command');
   let profile = null;
-  try { profile = await prepareWorkspace(process.cwd(), '/opt/npati-project-toolchain', mode, (source, target) => {
+  const copy = (source, target) => {
     const copied = spawnSync('cp', ['-R', '--preserve=mode,timestamps', '--no-preserve=ownership', '--reflink=auto', source, target], { encoding: 'utf8' });
     if (copied.error) throw copied.error;
     if (copied.status !== 0) throw Error(`Prepared dependency copy failed: ${copied.stderr.slice(0, 500)}`);
-  }); }
+  };
+  try { profile = await prepareWorkspace(process.cwd(), '/opt/npati-project-toolchain', mode, copy); }
   catch (error) {
     // A failed copy must fail explicitly; do not conceal permission/isolation errors.
     if (!['ENOENT', 'ENOTDIR'].includes(error.code)) throw error;
   }
   if (profile) { console.log(`Prepared dependencies: ${profile} (project-owned copy, no registry download)`); return; }
+  // `npm ci` deletes node_modules first, so only `npm install` can use a seed.
+  if (mode === 'install') await seedWorkspace(process.cwd(), '/opt/npati-project-toolchain', copy).catch(() => null);
   const result = spawnSync('npm', [mode, '--prefer-offline', '--no-audit', '--no-fund'], { stdio: 'inherit', env: process.env });
   if (result.error) throw result.error;
   process.exitCode = result.status ?? 1;

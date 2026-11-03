@@ -40,7 +40,8 @@ export const CODE_RUN_START_PERMISSION = "workspace:write";
 export const DEFAULT_ESTIMATED_TOKENS_PER_CALL = 4_000;
 export const DEFAULT_ESTIMATED_COST_PER_CALL_USD = 0.01;
 export const LOOP_REPEAT_THRESHOLD = 3;
-export const MAX_ARGUMENT_CORRECTIONS = 2;
+/** Identical calls in a row before a run ends. The only automatic stop left, and only a stuck model reaches it. */
+export const LOOP_STOP_REPEATS = 20;
 export const REMINDER_MESSAGE =
   "Reminder: the last attempts repeated the same call or the same error. Change your approach: use a different tool, narrow the arguments, or inspect the failing output before retrying.";
 

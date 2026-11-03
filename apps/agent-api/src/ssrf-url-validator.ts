@@ -9,7 +9,7 @@ import { createSafeUrlValidatorAdapter, type SafeUrlValidatorLike } from "./ssrf
  * every other NPATI-side outbound request.
  *
  * Hosts are taken from `NPATI_WEB_FETCH_ALLOWED_HOSTS` (comma separated, `*.example.com` allows exactly
- * one extra label). An empty configuration denies every host, which is the fail-closed default.
+ * one extra label, `*` allows any public host). An empty configuration denies every host.
  */
 export function webResearchUrlValidator(environment: NodeJS.ProcessEnv = process.env): SafeUrlValidatorLike {
   const allowlist = (environment.NPATI_WEB_FETCH_ALLOWED_HOSTS ?? "")

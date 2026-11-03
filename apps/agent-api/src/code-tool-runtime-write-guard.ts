@@ -385,6 +385,6 @@ export class CodeToolWriteGuard {
     return new CodeToolError(exhausted ? "revision_conflict_exhausted" : "revision_conflict",
       exhausted ? "Revision retry budget exhausted for this run or turn" : "File changed on disk; re-read it before retrying",
       409, "revision", !exhausted, tool, { currentRevision, attempts, paths,
-        ...(exhausted ? {} : { retriesLeft: this.ctx.maxRevisionRetries - attempts + 1 }) });
+        ...(exhausted || !Number.isFinite(this.ctx.maxRevisionRetries) ? {} : { retriesLeft: this.ctx.maxRevisionRetries - attempts + 1 }) });
   }
 }

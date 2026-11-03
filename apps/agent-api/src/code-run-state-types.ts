@@ -184,7 +184,7 @@ export interface CodeRunOverdueRun {
 
 export interface CodeRunOverdueRunScanInput {
   companyId: string | null;
-  /** Defaults to `limits.maxRunMinutes` (30 in the plan defaults). */
+  /** Defaults to `limits.maxRunMinutes` (0, no limit, by default). */
   maxRunMinutes?: number;
   /** Defaults to five minutes; a run is never overdue at exactly `maxRunMinutes`. */
   graceMs?: number;

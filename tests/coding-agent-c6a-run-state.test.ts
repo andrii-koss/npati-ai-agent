@@ -392,7 +392,7 @@ describe("security-gate: C6a run state — scans for the reaper", () => {
     await log.startRun({ ctx, companyId: "company-1", projectId: "p", sessionId: "overdue", owner: "w", runId: "run-overdue" });
     clock.t = start + 40 * 60_000;
 
-    const scan = await log.listOverdueRuns({ companyId: "company-1", now: new Date(clock.t) });
+    const scan = await log.listOverdueRuns({ companyId: "company-1", maxRunMinutes: 30, now: new Date(clock.t) });
     // run-grace is 40 min old (overdue), run-overdue is 9 min old (not).
     expect(scan.items.map((item) => item.runId)).toEqual(["run-grace"]);
     const overdue = scan.items[0]!;
@@ -422,13 +422,13 @@ describe("security-gate: C6a run state — scans for the reaper", () => {
     await log.startRun({ ctx, companyId: "company-9", projectId: "p9", sessionId: "s9", owner: "w", runId: "run-c" });
     clock.t = start + 60 * 60_000;
 
-    const scoped = await log.listOverdueRuns({ companyId: "company-1", now: new Date(clock.t) });
+    const scoped = await log.listOverdueRuns({ companyId: "company-1", maxRunMinutes: 30, now: new Date(clock.t) });
     expect(scoped.items.map((item) => item.runId)).toEqual(["run-a", "run-b"]);
-    const firstPage = await log.listOverdueRuns({ companyId: null, now: new Date(clock.t), limit: 2 });
+    const firstPage = await log.listOverdueRuns({ companyId: null, maxRunMinutes: 30, now: new Date(clock.t), limit: 2 });
     expect(firstPage.items).toHaveLength(2);
     expect(firstPage.nextCursor).not.toBeNull();
     const secondPage = await log.listOverdueRuns({
-      companyId: null, now: new Date(clock.t), limit: 2, cursor: firstPage.nextCursor,
+      companyId: null, maxRunMinutes: 30, now: new Date(clock.t), limit: 2, cursor: firstPage.nextCursor,
     });
     expect(secondPage.items.map((item) => item.runId)).toEqual(["run-c"]);
     expect(secondPage.nextCursor).toBeNull();

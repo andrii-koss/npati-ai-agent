@@ -29,7 +29,7 @@ export async function createC3ProofFixture() {
   const company = await store.createCompany(ctx, { name: "Disposable C3" }, "proof-company");
   const { project } = await store.createProject(ctx, company.id, { name: "Proof", type: "website" }, "proof-project");
   const projects = { get: (auth: AuthContext, companyId: string, projectId: string) => store.getProject(auth, companyId, projectId) };
-  const workspace = new LocalProjectWorkspace(projects, { root });
+  const workspace = new LocalProjectWorkspace(projects, { root, maxFileBytes: 1024 * 1024 });
   const git = new ProjectGitService(store, projects, root, undefined, undefined, undefined, { withFileLease: workspace.withFileLease.bind(workspace) });
   await git.ensureRepository(ctx, company.id, project.id);
   const audit = new AuditLogService(store);
@@ -41,7 +41,7 @@ export async function createC3ProofFixture() {
     activity: activitySinkForKind(createCodeRunActivitySink({ store, workspaceId: ctx.workspaceId }), "code_tool_activity"),
     store, flags: new FeatureFlagService(store, undefined, { enabledByDefault: true, allowPreGateRollout: true }),
     schemas: CODE_TOOL_SCHEMAS, executors: allCanonicalExecutors(), writePort: write,
-    toPort: () => read, checkpoints: codeCheckpointPortFromGit(git),
+    toPort: () => read, checkpoints: codeCheckpointPortFromGit(git), maxRevisionRetries: 2,
   });
   const invoke = (tool: string, args: Record<string, unknown>, auth = ctx) => runtime.invoke(auth, {
     companyId: company.id, projectId: project.id, sessionId: "proof-session", turnId: "proof-turn",

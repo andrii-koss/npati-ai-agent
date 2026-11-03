@@ -304,7 +304,7 @@ server.on("connect", async (req, client, head) => {
       const timer = setTimeout(() => {
         console.warn(`[egress-proxy] SNI timeout for host: ${host}`);
         client.destroy(); upstream.destroy();
-      }, 5_000);
+      }, 60_000);
       const onData = (chunk) => {
         buffered = Buffer.concat([buffered, chunk]);
         if (buffered.length > 16_384) {

@@ -144,10 +144,10 @@ describe("security-gate: C14 red-team — disk and memory exhaustion", () => {
     // Positive control: valid values are accepted, so the refusals above are about the values.
     expect(() => new DockerSandboxProvider({ diskBytes: 16_000_000, memory: "1536m", cpu: "1", pids: 128 })).not.toThrow();
 
-    // The service-level ceilings the sandbox is driven with are finite and unchanged defaults.
+    // Project size has no ceiling; what a command prints and how long it runs still do.
     expect(defaultTerminalLimits.outputLimitBytes).toBe(64_000);
-    expect(defaultTerminalLimits.syncMaxBytes).toBe(50_000_000);
-    expect(defaultTerminalLimits.syncMaxFiles).toBe(2000);
+    expect(defaultTerminalLimits.syncMaxBytes).toBe(Number.POSITIVE_INFINITY);
+    expect(defaultTerminalLimits.syncMaxFiles).toBe(Number.POSITIVE_INFINITY);
     expect(defaultTerminalLimits.commandTimeoutMs).toBe(120_000);
     expect(defaultTerminalLimits.installBuildTimeoutMs).toBe(600_000);
   });

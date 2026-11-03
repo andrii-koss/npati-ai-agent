@@ -29,10 +29,10 @@ export interface ProjectImportLimits {
 }
 
 export const defaultProjectImportLimits: ProjectImportLimits = {
-  maxFiles: 500,
-  maxBytes: 20 * 1024 * 1024,
-  maxFileBytes: 1024 * 1024,
-  cloneTimeoutMs: 120_000,
+  maxFiles: Number.POSITIVE_INFINITY,
+  maxBytes: Number.POSITIVE_INFINITY,
+  maxFileBytes: Number.POSITIVE_INFINITY,
+  cloneTimeoutMs: 600_000,
 };
 
 export class ProjectImportService {

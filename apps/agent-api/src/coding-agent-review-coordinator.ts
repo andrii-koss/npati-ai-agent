@@ -8,7 +8,7 @@ import { decideSelfReview, type SelfReviewRiskDecision } from "./code-self-revie
 import { buildSelfReviewSummary, buildVerificationSummary, verificationEvidenceForReview } from "./code-review-summary";
 import {
   createSelfReview,
-  selfReviewDeliveryNotice,
+  selfReviewDeliveryNotice, selfReviewUnresolvedNotice,
   selfReviewStopMessage,
   type SelfReviewState,
   type SelfReviewVerdict,
@@ -109,6 +109,10 @@ export class CodingAgentReviewCoordinator {
   }
 
   private selfReviewNotice: string | null = null;
+  private deliverWithFindings(): { action: "complete" } {
+    if (!this.host.input.signal?.aborted) this.selfReviewNotice = selfReviewUnresolvedNotice(this.selfReviewVerdict ?? undefined, this.host.input.prompt);
+    return { action: "complete" };
+  }
   private withSelfReviewNotice(message: string): string { return this.selfReviewNotice ? `${message}\n\n${this.selfReviewNotice}` : message; }
 
   readVerificationRevision(): Promise<string | null> {
@@ -559,20 +563,18 @@ export class CodingAgentReviewCoordinator {
         this.selfReviewState?.noteFixOutcome(false);
         this.selfReviewVerdict = this.selfReviewState?.report() ?? verdict;
         this.writeSelfReviewSummary();
-        return { action: "stop", reason: "self_review_unresolved", message: selfReviewStopMessage(this.selfReviewVerdict) };
+        return this.deliverWithFindings();
       }
       return { action: "complete" };
     }
 
-    if (verdict.status === "unresolved") {
-      return { action: "stop", reason: "self_review_unresolved", message: selfReviewStopMessage(verdict) };
-    }
+    if (verdict.status === "unresolved") return this.deliverWithFindings();
 
     return { action: "complete" };
   }
 
   async afterSelfReviewFix(steps: number, stateRunId?: string): Promise<{ action: "complete" } | { action: "stop"; reason: CodingAgentStopReason; message: string }> {
-    return this.host.reviewPhases.afterSelfReviewFixOnce({
+    const outcome = await this.host.reviewPhases.afterSelfReviewFixOnce({
       ctx: this.host.ctx,
       input: this.host.input,
       companyId: this.host.companyId,
@@ -595,6 +597,7 @@ export class CodingAgentReviewCoordinator {
       toCheckReports: (outcome) => this.toCheckReports(outcome),
       record: this.host.record,
     });
+    return outcome.action === "stop" && outcome.reason === "self_review_unresolved" ? this.deliverWithFindings() : outcome;
   }
 
   async onVerifyToolExecuted(

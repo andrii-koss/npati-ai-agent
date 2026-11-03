@@ -348,7 +348,7 @@ describe("security-gate: C9 self-review — the deliberate secret and the extra 
     // stops as `unresolved` rather than pretending the secret is gone.
     expect(result.selfReview?.status).toBe("unresolved");
     expect(result.selfReview?.blocking).toBe(1);
-    expect(result.reason).toBe("self_review_unresolved");
+    expect(result.reason).toBe("completed");
     expect(harness.engineCalls.length).toBe(3); // edit, finish, the fix turn
     const fixInstruction = (harness.engineCalls[2]?.messages ?? []).map((message) => String(message.content)).join("\n");
     expect(fixInstruction).toContain("R-1");
@@ -424,15 +424,14 @@ describe("security-gate: C9 self-review — exactly one pass per run, at most on
 
     const result = await harness.run();
 
-    expect(result.status).toBe("stopped");
-    expect(result.reason).toBe("self_review_unresolved");
+    expect(result.status).toBe("completed");
+    expect(result.reason).toBe("completed");
     expect(result.selfReview?.status).toBe("unresolved");
     expect(result.selfReview?.unresolved).toBe(1);
     expect(result.selfReview?.blocking).toBe(1);
     expect(result.selfReview?.iterationsUsed).toBe(1);
-    // The run did NOT call itself complete, and the summary says which finding is still open.
-    expect(result.message).toContain("R-1");
-    expect(result.message).toContain("unresolved");
+    // The work is delivered, and the message warns about the finding that is still open.
+    expect(result.message).toContain("automatic code review");
     // No second review, and no second fix iteration.
     expect(harness.reviewCalls).toHaveLength(1);
     expect(harness.engineCalls.length).toBe(3);
@@ -493,8 +492,8 @@ describe("security-gate: C9 self-review — a review fix is re-verified, a revie
     const result = await harness.run({ verificationTools: [] });
     expect(harness.verifyCalls()).toHaveLength(0);
     expect(harness.reviewCalls).toHaveLength(1);
-    expect(result.status).toBe("stopped");
-    expect(result.reason).toBe("self_review_unresolved");
+    expect(result.status).toBe("completed");
+    expect(result.reason).toBe("completed");
     expect(result.selfReview?.status).not.toBe("repaired");
   });
 
@@ -513,7 +512,7 @@ describe("security-gate: C9 self-review — a review fix is re-verified, a revie
     // Exactly one verification — the one that happened before the review. Re-checking an unchanged tree would
     // be a second answer to a question already answered.
     expect(harness.verifyCalls()).toHaveLength(1);
-    expect(result.reason).toBe("self_review_unresolved");
+    expect(result.reason).toBe("completed");
   });
 
   it("does not run a review at all when the run changed nothing", async () => {
@@ -577,8 +576,8 @@ describe("security-gate: C9 self-review — the review is data, never an instruc
     // authority the review asked for.
     expect(result.selfReview?.findings[0]?.suggestedFix).toContain("full_auto");
     expect(result.selfReview?.findings[0]?.category).not.toBe("correctness");
-    expect(result.status).toBe("stopped");
-    expect(result.reason).toBe("self_review_unresolved");
+    expect(result.status).toBe("completed");
+    expect(result.reason).toBe("completed");
     // The verdict has no `mode`, `policy` or `permissions` key at all: the boundary is structural, not a check.
     const keys = Object.keys(result.selfReview ?? {});
     expect(keys).not.toContain("mode");

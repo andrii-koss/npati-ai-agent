@@ -38,7 +38,7 @@ async function readCurrent(input: CodeToolExecutionContext, path: string): Promi
   try {
     const file = await input.port.readFile({
       ctx: input.ctx, companyId: input.companyId, projectId: input.projectId, path,
-      maxLines: Number.MAX_SAFE_INTEGER, maxBytes: input.limits.readFileBytes,
+      maxLines: Number.MAX_SAFE_INTEGER, maxBytes: Number.MAX_SAFE_INTEGER,
     });
     if (file.truncated) throw new CodeToolError("too_large", `Refusing to edit a truncated read of ${path}`, 413, "read", false, input.tool.name);
     return { content: file.content ?? "", revision: file.revision, sha256: file.sha256 };
@@ -139,7 +139,7 @@ export function toEngineWritePort(input: CodeToolExecutionContext): EngineWriteP
   return {
     ...(input.writePort?.applyPatchTransaction ? { applyPatchTransaction: (plan: readonly import("./code-patch-transaction").PatchMutation[]) => input.writePort!.applyPatchTransaction!({ ...base, plan }) } : {}),
     async readFile(path) {
-      const file = await input.port.readFile({ ...base, path, maxLines: Number.MAX_SAFE_INTEGER, maxBytes: input.limits.readFileBytes });
+      const file = await input.port.readFile({ ...base, path, maxLines: Number.MAX_SAFE_INTEGER, maxBytes: Number.MAX_SAFE_INTEGER });
       if (file.truncated) throw new CodeToolError("too_large", `Refusing to edit a truncated read of ${path}`, 413, "read", false, input.tool.name);
       if (file.binary || (file.encoding && !["utf8", "utf8-bom", "utf-8"].includes(file.encoding))) {
         throw new CodeToolError("unsupported_encoding", "Text editing requires supported UTF-8 input; the file was not changed", 415, "read", false, input.tool.name);

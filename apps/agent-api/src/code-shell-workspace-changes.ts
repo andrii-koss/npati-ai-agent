@@ -7,24 +7,49 @@ import { isSandboxWorkspaceArtifact } from "./project-sandbox-service";
 import type { CodeWriteChange } from "./code-workspace-checkpoint";
 
 export interface ShellChangePort {
-  listFiles(): Promise<readonly { path: string }[]>;
+  listFiles(): Promise<readonly { path: string; revision?: string }[]>;
   readFile(path: string): Promise<{ content: string }>;
   record(change: CodeWriteChange): void;
+  /** Contents already read, by path and revision. Shared between commands so only changed files are read again. */
+  cache?: ShellChangeCache;
+}
+
+const CACHE_MAX_CHARS = 256_000_000;
+const READ_CONCURRENCY = 16;
+
+/** Oldest entries leave first; a miss is only one more read. */
+export class ShellChangeCache {
+  private readonly entries = new Map<string, string>();
+  private chars = 0;
+  get(key: string): string | undefined { return this.entries.get(key); }
+  set(key: string, content: string): void {
+    if (this.entries.has(key)) return;
+    this.entries.set(key, content);
+    this.chars += content.length;
+    for (const [oldest, value] of this.entries) {
+      if (this.chars <= CACHE_MAX_CHARS) break;
+      this.entries.delete(oldest);
+      this.chars -= value.length;
+    }
+  }
 }
 
 /** Foreground shell mutations need the same trusted change receipts as file tools. */
 export async function withTrackedShellChanges<T>(port: ShellChangePort, execute: () => Promise<T>): Promise<T> {
   const capture = async () => {
     const files = (await port.listFiles()).filter(file => !isSandboxWorkspaceArtifact(file.path) && !isSensitivePath(file.path));
-    if (files.length > 2000) throw new Error("shell_change_capture_limit");
     const snapshot = new Map<string, string>();
-    let bytes = 0;
-    for (const file of files) {
-      const path = normalizeWorkspacePath(file.path, { tool: "code.fs.diff", allowEmpty: false });
-      const { content } = await port.readFile(path);
-      bytes += Buffer.byteLength(content);
-      if (bytes > 32 * 1024 * 1024) throw new Error("shell_change_capture_limit");
-      snapshot.set(path, content);
+    for (let offset = 0; offset < files.length; offset += READ_CONCURRENCY) {
+      await Promise.all(files.slice(offset, offset + READ_CONCURRENCY).map(async (file) => {
+        const path = normalizeWorkspacePath(file.path, { tool: "code.fs.diff", allowEmpty: false });
+        const key = file.revision ? `${path}|${file.revision}` : undefined;
+        let content = key ? port.cache?.get(key) : undefined;
+        if (content === undefined) {
+          ({ content } = await port.readFile(path));
+          if (key) port.cache?.set(key, content);
+        }
+        snapshot.set(path, content);
+      }));
     }
     return snapshot;
   };

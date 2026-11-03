@@ -13,7 +13,7 @@ assertProjectRuntimeProvider("shared");
 if (secret.length < 32 || process.env.NPATI_SANDBOX_RUNNER_MODE !== "local") throw new Error("Shared runtime requires local self-hosted mode and a 32-character runner secret");
 const provider = new SharedProjectRuntimeProvider();
 const seen = new Map<string, number>();
-const app = Fastify({ bodyLimit: 25_000_000, logger: false });
+const app = Fastify({ bodyLimit: Number.MAX_SAFE_INTEGER, logger: false });
 app.addContentTypeParser("application/json", { parseAs: "string" }, (_request, body, done) => done(null, body));
 const projectApiControl = registerProjectApiControlServer(app, secret, seen, { enabled: process.env.NPATI_PROJECT_API_SERVICE_BINDING === "dev" });
 const execute = promisify(execFile);

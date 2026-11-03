@@ -54,7 +54,6 @@ export async function collectAsyncOperationChanges(input: {
       if (op.workspaceSnapshot.mounted && op.workspaceSnapshot.version !== 2) throw new Error("collect_change_evidence_missing");
       files ??= await input.listFiles();
       const paths = new Set([...files.map((file) => file.path), ...op.workspaceSnapshot.files.map((file) => file.path)].filter(path => !isSandboxWorkspaceArtifact(path)));
-      if (paths.size > 2000) throw new Error("collect_change_limit");
       for (const raw of paths) {
         const path = guardedPath(raw);
         const original = op.workspaceSnapshot.files.find((file) => file.path === path);

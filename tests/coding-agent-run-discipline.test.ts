@@ -1,31 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { adaptiveLimit, classifyRunTask, CODE_RUN_TASK_BUDGETS } from "../apps/agent-api/src/code-run-budget";
 import { chatWithTransientRetry, isTransientProviderFailure, withTransientModelRetry } from "../apps/agent-api/src/coding-agent-provider-retry";
 import { decideSelfReview } from "../apps/agent-api/src/code-self-review-risk";
 import { buildSystemPrompt, CODE_RUN_DISCIPLINE_RULES, systemPromptStablePrefix } from "../apps/agent-api/src/coding-agent-runner-prompt";
-
-describe("turn and time budgets follow the task class (audit F-13)", () => {
-  it("classifies runs from trusted run input only", () => {
-    expect(classifyRunTask({ readOnlyIntent: true, websiteEdit: true })).toBe("analysis");
-    expect(classifyRunTask({ sessionMode: "plan" })).toBe("analysis");
-    expect(classifyRunTask({ requireImplementation: true, websiteEdit: true })).toBe("creation");
-    expect(classifyRunTask({ websiteEdit: true, imageCount: 1 })).toBe("visual_edit");
-    expect(classifyRunTask({ websiteEdit: true })).toBe("small_edit");
-    expect(classifyRunTask({})).toBe("general");
-  });
-
-  it("only ever lowers the configured limit and replaces 'unlimited' for known classes", () => {
-    const small = CODE_RUN_TASK_BUDGETS.small_edit.turns;
-    expect(adaptiveLimit(0, small, true)).toBe(small);
-    expect(adaptiveLimit(40, small, true)).toBe(small);
-    expect(adaptiveLimit(10, small, true)).toBe(10);
-    expect(adaptiveLimit(0, small, false)).toBe(0);
-    expect(CODE_RUN_TASK_BUDGETS.small_edit.turns).toBeLessThan(CODE_RUN_TASK_BUDGETS.creation.turns);
-    // A code project of unknown size keeps the operator's limits, including "unlimited".
-    expect(adaptiveLimit(60, CODE_RUN_TASK_BUDGETS.general.turns, true)).toBe(60);
-    expect(adaptiveLimit(0, CODE_RUN_TASK_BUDGETS.general.turns, true)).toBe(0);
-  });
-});
 
 describe("a transient provider failure is retried once, nothing else is (audit F-11)", () => {
   it("recognises transient failures and never retries a cancelled request or a client error", () => {

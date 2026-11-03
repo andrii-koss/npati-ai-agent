@@ -330,7 +330,7 @@ describe("CodingAgentToolWaves argument error recovery semantics", () => {
     });
     expect(turn1.action).toBe("continue");
     expect(host.messages).toHaveLength(1);
-    expect(host.messages[0].content).toContain("attempt 1 of 2");
+    expect(host.messages[0].content).toContain("Retry only this rejected call");
 
     // Step 2: Model successfully calls code.fs.read
     const turn2 = await waves.executeTurnTools({
@@ -369,10 +369,10 @@ describe("CodingAgentToolWaves argument error recovery semantics", () => {
     });
     // It should NOT stop the run!
     expect(turn3.action).toBe("continue");
-    expect(host.messages[host.messages.length - 1].content).toContain("attempt 1 of 2");
+    expect(host.messages[host.messages.length - 1].content).toContain("Retry only this rejected call");
   });
 
-  it("terminates run if same tool fails consecutively > MAX_ARGUMENT_CORRECTIONS (2) times without success", async () => {
+  it("keeps feeding a rejected call back to the model and ends only a truly stuck run", async () => {
     const host = createMockHost();
     const waves = new CodingAgentToolWaves(host);
     const profile = { maxParallelToolCalls: 1 } as any;
@@ -384,35 +384,13 @@ describe("CodingAgentToolWaves argument error recovery semantics", () => {
       mode: "native" as const,
     };
 
-    // Attempt 1
-    const t1 = await waves.executeTurnTools({
-      steps: 1,
-      normalized: { calls: [], rejected: [rejection], warnings: [] },
-      callsToRun: [],
-      profile,
-    });
-    expect(t1.action).toBe("continue");
-
-    // Attempt 2
-    const t2 = await waves.executeTurnTools({
-      steps: 2,
-      normalized: { calls: [], rejected: [rejection], warnings: [] },
-      callsToRun: [],
-      profile,
-    });
-    expect(t2.action).toBe("continue");
-
-    // Attempt 3 (exceeds max of 2 consecutive corrections)
-    const t3 = await waves.executeTurnTools({
-      steps: 3,
-      normalized: { calls: [], rejected: [rejection], warnings: [] },
-      callsToRun: [],
-      profile,
-    });
-    expect(t3.action).toBe("stopped");
-    if (t3.action === "stopped") {
-      expect(t3.result.reason).toBe("invalid_arguments_exhausted");
+    for (let step = 1; step < 20; step += 1) {
+      const turn = await waves.executeTurnTools({ steps: step, normalized: { calls: [], rejected: [rejection], warnings: [] }, callsToRun: [], profile });
+      expect(turn.action).toBe("continue");
     }
+    const last = await waves.executeTurnTools({ steps: 20, normalized: { calls: [], rejected: [rejection], warnings: [] }, callsToRun: [], profile });
+    expect(last.action).toBe("stopped");
+    if (last.action === "stopped") expect(last.result.reason).toBe("loop_detected");
   });
 
   it("normalizes underscore tool names and provider schema hex hashes to canonical tools", () => {
@@ -596,7 +574,7 @@ describe("CodingAgentToolWaves argument error recovery semantics", () => {
     expect(fail.error).toBeUndefined();
   });
 
-  it("argument recovery alternation: alternating invalid -> valid -> invalid cannot loop indefinitely", async () => {
+  it("argument recovery alternation: a success between rejections keeps the run going", async () => {
     let stoppedResult: any = null;
     const host = createMockHost();
     host.stop = vi.fn().mockImplementation(async (status, reason, message) => {
@@ -656,7 +634,7 @@ describe("CodingAgentToolWaves argument error recovery semantics", () => {
     });
     expect(t4.action).toBe("continue"); // Attempt 2 of 2
 
-    // Turn 5: 3rd Consecutive Invalid A (count = 3 > MAX_ARGUMENT_CORRECTIONS(2) -> stops the run)
+    // Turn 5: another rejection goes back to the model; only a long identical streak ends a run.
     const t5 = await waves.executeTurnTools({
       steps: 5,
       normalized: {
@@ -667,8 +645,8 @@ describe("CodingAgentToolWaves argument error recovery semantics", () => {
       callsToRun: [],
       profile,
     });
-    expect(t5.action).toBe("stopped");
-    expect(stoppedResult?.reason).toBe("invalid_arguments_exhausted");
+    expect(t5.action).toBe("continue");
+    expect(stoppedResult).toBeNull();
   });
 
   it("tool name canonicalization negative tests: spoofing, aliases, collisions, forbidden tools", () => {

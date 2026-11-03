@@ -132,12 +132,12 @@ describe("Step 7 repository import boundaries", () => {
     expect(f.startPreview).toHaveBeenCalledOnce();
   });
 
-  it("rejects a large repository before local writes", async () => {
+  it("imports a repository of any size", async () => {
     const f = await fixture({ cloneFiles: Array.from({ length: 501 }, (_, index) => ({ path: `file-${index}.txt`, content: "x" })) });
     await expect(f.imports.importRepository(ctx, f.company.id, f.project.id, { url: "https://github.com/example/huge" }))
-      .rejects.toMatchObject({ code: "repository_too_large" });
-    expect(await f.workspace.listFiles(ctx, f.company.id, f.project.id)).toHaveLength(0);
-  });
+      .resolves.toBeTruthy();
+    expect((await f.workspace.listFiles(ctx, f.company.id, f.project.id)).length).toBeGreaterThanOrEqual(501);
+  }, 120_000);
 
   it("reports private repository access failure without exposing vault credentials", async () => {
     const f = await fixture({ credentialToken: "github_pat_SECRET_TEST" });

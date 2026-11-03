@@ -209,10 +209,11 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
     child.once("close", () => this.closedChildren.add(child));
     return child;
   }
-  private async collect(entry: Entry, executable: string, args: string[], input: string, options: SandboxCommandOptions, cwd = ".", offline = false) {
+  private async collect(entry: Entry, executable: string, args: string[], input: string, options: SandboxCommandOptions, cwd = ".", offline = false, wholeOutput = false) {
     const child = this.launch(entry, executable, args, cwd, options.environment, true, false, offline);
     const jobs = this.jobs.get(entry.id) ?? new Set<ChildProcess>(); this.jobs.set(entry.id, jobs); jobs.add(child);
-    const limit = Math.min(Math.max(options.outputLimitBytes, 1024), 32_000_000);
+    // File sync needs every byte; cutting its output would only produce broken JSON.
+    const limit = wholeOutput ? Number.POSITIVE_INFINITY : Math.min(Math.max(options.outputLimitBytes, 1024), 32_000_000);
     let stdout: Buffer<ArrayBufferLike> = Buffer.alloc(0), stderr: Buffer<ArrayBufferLike> = Buffer.alloc(0), timedOut = false, settled = false;
     const started = Date.now();
     const stop = () => { if (child.pid) { try { process.kill(-child.pid, "SIGKILL"); } catch { /* already exited */ } } };
@@ -281,7 +282,6 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
   }
   async uploadFiles(scope: SandboxScope, id: string, files: SandboxFile[]) {
     const entry = await this.entry(scope, id);
-    if (files.length > 2000 || files.reduce((sum, file) => sum + Buffer.byteLength(file.content), 0) > 70_000_000) throw new SandboxProviderError("upload_limit", "Project exceeds workspace sync limits", 413);
     const sanitized = files.map(file => ({ path: safeProjectPath(file.path), content: file.content, ...(file.encoding ? { encoding: file.encoding } : {}) }));
     // Run file synchronization through the same OS boundary as project code.
     // A malicious symlink/race cannot make the root supervisor write elsewhere.
@@ -301,13 +301,13 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
       }
       function clean(dir){for(const item of fs.readdirSync(dir,{withFileTypes:true})){if(${excluded}.test(item.name))continue;const file=p.join(dir,item.name);if(item.isDirectory())clean(file);else if(!keep.has(file))fs.unlinkSync(file)}}clean('.');
     });`;
-    const result = await this.collect(entry, "node", ["-e", script], JSON.stringify(sanitized), { timeoutMs: 120000, outputLimitBytes: 64000 }, ".", true);
+    const result = await this.collect(entry, "node", ["-e", script], JSON.stringify(sanitized), { timeoutMs: 600000, outputLimitBytes: 64000 }, ".", true);
     if (result.exitCode !== 0) throw new SandboxProviderError("workspace_sync_failed", result.stderr.slice(0, 1000), 403);
   }
   async downloadFiles(scope: SandboxScope, id: string) {
     const entry = await this.entry(scope, id);
-    const script = `const fs=require('fs'),p=require('path');const files=[];let bytes=0;function walk(dir){for(const f of fs.readdirSync(dir,{withFileTypes:true})){if(${excluded}.test(f.name))continue;const file=p.join(dir,f.name);if(f.isSymbolicLink())throw Error('Project symlink denied');if(f.isDirectory())walk(file);else if(f.isFile()){const data=fs.readFileSync(file);bytes+=data.length;if(bytes>20000000||files.length>=500)throw Error('Workspace sync limit');let content,binary=data.includes(0);try{content=new TextDecoder('utf-8',{fatal:true}).decode(data)}catch{binary=true}files.push(binary?{path:file,content:data.toString('base64'),encoding:'base64'}:{path:file,content})}}}walk('.');process.stdout.write(JSON.stringify(files));`;
-    const result = await this.collect(entry, "node", ["-e", script], "", { timeoutMs: 120000, outputLimitBytes: 100_000_000 }, ".", true);
+    const script = `const fs=require('fs'),p=require('path');const files=[];function walk(dir){for(const f of fs.readdirSync(dir,{withFileTypes:true})){if(${excluded}.test(f.name))continue;const file=p.join(dir,f.name);if(f.isSymbolicLink())throw Error('Project symlink denied');if(f.isDirectory())walk(file);else if(f.isFile()){const data=fs.readFileSync(file);let content,binary=data.includes(0);try{content=new TextDecoder('utf-8',{fatal:true}).decode(data)}catch{binary=true}files.push(binary?{path:file,content:data.toString('base64'),encoding:'base64'}:{path:file,content})}}}walk('.');process.stdout.write(JSON.stringify(files));`;
+    const result = await this.collect(entry, "node", ["-e", script], "", { timeoutMs: 600000, outputLimitBytes: 64000 }, ".", true, true);
     if (result.exitCode !== 0) throw new SandboxProviderError("workspace_sync_failed", result.stderr.slice(0, 1000), 403);
     return JSON.parse(result.stdout) as SandboxFile[];
   }

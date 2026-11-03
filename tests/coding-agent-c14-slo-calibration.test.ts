@@ -345,8 +345,8 @@ describe("security-gate: C14 SLO calibration — measured, not_measured and prop
     expect(steps.value).toBe(40);
     expect(steps.basis).toBe("measured");
     expect(steps.appliedTo).toEqual({ quantity: "steps", statistic: "max", measured: 10, sampleSize: 5, headroomMultiplier: 4 });
-    // The shipped default and the calibrated value are the same number, which is the point of calibrating.
-    expect(DEFAULT_CODE_AGENT_LIMITS.maxStepsPerRun).toBe(steps.value);
+    // The calibration only proposes a value: no turn limit ships by default.
+    expect(DEFAULT_CODE_AGENT_LIMITS.maxStepsPerRun).toBe(0);
 
     const cost = proposal(calibration, "code.anomaly.costMedianMultiplier");
     if (cost.status !== "proposed") throw new Error("the cost multiplier was not proposed");
@@ -696,7 +696,6 @@ describe("security-gate: C14 anomaly detection — a run is never cleared by a r
     ];
     const calibration = buildSloCalibration({ report: reportOf(results), tasks });
     // The proposal and the configuration are the same number, so a default cannot drift from its calibration.
-    expect(proposedValue(calibration, "code.agent.maxStepsPerRun")).toBe(DEFAULT_CODE_AGENT_LIMITS.maxStepsPerRun);
     expect(proposedValue(calibration, "code.anomaly.turnP95Multiplier")).toBe(DEFAULT_CODE_ANOMALY_THRESHOLDS.turnP95Multiplier);
     expect(calibration.proposed.find((entry) => entry.target === "code.anomaly.costMedianMultiplier")!.status === "proposed"
       ? (calibration.proposed.find((entry) => entry.target === "code.anomaly.costMedianMultiplier") as { value: number }).value

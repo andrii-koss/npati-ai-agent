@@ -33,7 +33,7 @@ import {
   CODE_ASK_USER_TOOL,
   CHECK_TOOL_PREFIXES,
   LOOP_REPEAT_THRESHOLD,
-  MAX_ARGUMENT_CORRECTIONS,
+  LOOP_STOP_REPEATS,
   REMINDER_MESSAGE,
   TRUNCATED_TOOL_CALL_HINT,
   isReadOnlyRunTool,
@@ -128,6 +128,7 @@ export class CodingAgentToolWaves {
   private readonly zeroDiffEdits: string[] = [];
   private readonly verificationFailures: string[] = [];
   private readonly turnPatterns: string[] = [];
+  private identicalRepeats = 0;
   private loopReminded = false;
   private errorReminded = false;
   private cycleReminded = false;
@@ -198,21 +199,12 @@ export class CodingAgentToolWaves {
         count = (this.argumentCorrections.get(key) ?? 0) + (correctionKeys.has(key) ? 0 : 1);
         correctionKeys.add(key);
         this.argumentCorrections.set(key, count);
-        if (count > MAX_ARGUMENT_CORRECTIONS) {
-          await release("invalid_arguments_exhausted");
-          const res = await stop(
-            "stopped",
-            "invalid_arguments_exhausted",
-            `Stopped: the model kept sending unusable arguments for ${rejected.name ?? "a tool"} (${rejected.code}).`,
-          );
-          return { action: "stopped", result: res };
-        }
       }
       rejectedSignatures.push(`rejected:${key}`);
       turnHadFailure = true;
       const hint = truncated
         ? TRUNCATED_TOOL_CALL_HINT
-        : `Retry only this rejected call with corrected arguments (attempt ${count} of ${MAX_ARGUMENT_CORRECTIONS}). Use the other tool results in this batch; do not repeat successful writes or restart saved changes.`;
+        : `Retry only this rejected call with corrected arguments. Use the other tool results in this batch; do not repeat successful writes or restart saved changes.`;
       messages.push({
         role: "tool",
         tool_call_id: rejected.id ?? `rejected:${messages.length}`,
@@ -238,7 +230,7 @@ export class CodingAgentToolWaves {
     /**
      * Rejections are fed into the same repeat detector as executed calls, so an identical truncated or refused
      * call cannot be retried forever: the third identical signature produces the existing corrective reminder,
-     * and the next one stops the run with `loop_detected`. Signatures are namespaced (`rejected:`) so a
+     * and only `LOOP_STOP_REPEATS` in a row stop the run with `loop_detected`. Signatures are namespaced (`rejected:`) so a
      * rejection can never be confused with a successful call, and distinct tools keep distinct signatures —
      * normal work therefore cannot trip the detector.
      */
@@ -247,15 +239,20 @@ export class CodingAgentToolWaves {
       this.repeatedSignatures.push(...signatures);
       while (this.repeatedSignatures.length > LOOP_REPEAT_THRESHOLD) this.repeatedSignatures.shift();
       if (this.repeatedSignatures.length === LOOP_REPEAT_THRESHOLD && new Set(this.repeatedSignatures).size === 1) {
-        if (this.loopReminded) {
+        this.identicalRepeats += 1;
+        if (this.identicalRepeats + LOOP_REPEAT_THRESHOLD - 1 >= LOOP_STOP_REPEATS) {
           await release("loop_detected");
           const repeated = callsToRun[0]?.name ?? normalized.rejected[0]?.name ?? "unknown";
           const res = await stop("stopped", "loop_detected", `Stopped: the same tool call (${repeated}) was repeated without progress.`);
           return { action: "stopped", result: res };
         }
-        this.loopReminded = true;
-        deferredMessages.push({ role: "system", content: REMINDER_MESSAGE });
-        await record({ kind: "reminder", companyId, projectId, sessionId, runId: input.runId, turn: steps, reason: "repeated_call" });
+        if (!this.loopReminded) {
+          this.loopReminded = true;
+          deferredMessages.push({ role: "system", content: REMINDER_MESSAGE });
+          await record({ kind: "reminder", companyId, projectId, sessionId, runId: input.runId, turn: steps, reason: "repeated_call" });
+        }
+      } else {
+        this.identicalRepeats = 0;
       }
     }
 
@@ -466,6 +463,7 @@ export class CodingAgentToolWaves {
             this.repeatedSignatures.length = 0;
             this.turnPatterns.length = 0;
             this.loopReminded = false;
+            this.identicalRepeats = 0;
             this.cycleReminded = false;
             this.zeroDiffEdits.length = 0;
             this.zeroDiffReminded = false;

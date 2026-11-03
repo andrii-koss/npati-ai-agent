@@ -18,7 +18,7 @@ import { activitySinkForKind, createCodeRunActivitySink } from "./code-run-activ
 import { SecretLeaseProvider } from "./code-secret-lease";
 import { CodeShellRuntime } from "./code-shell-runtime";
 import { classifyShellCommand } from "./code-shell-classifier";
-import { withTrackedShellChanges } from "./code-shell-workspace-changes";
+import { ShellChangeCache, withTrackedShellChanges } from "./code-shell-workspace-changes";
 import type { CodeTurnTracker } from "./code-workspace-checkpoint";
 import { CodeVerifyRunnerPort } from "./code-tool-executors";
 import { CodeToolError, type SandboxExecPort } from "./code-tool-runtime";
@@ -57,6 +57,7 @@ export interface CreateCodePortsWiringDeps {
 }
 
 export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
+  const shellChangeCache = new ShellChangeCache();
   const { config, log, approvalsRepo, codeActivitySink, codeDataRetention, codeProcessManager, codeProjectTrust, codeSandboxExecPort, codeShellRuntime, codeUserQuestionReaperPort, featureFlagService, mcpApprovalPauseRelease, projectSandbox, projectService, projectWorkspace, secretLeases, trackedProcesses } = deps;
   const codeReaper = new CodeReaper({
     intervalMs: config.codeAgentLimits?.reaperIntervalMs ?? DEFAULT_CODE_AGENT_LIMITS.reaperIntervalMs,
@@ -173,6 +174,7 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
             listFiles: () => projectWorkspace.listFiles(input.ctx, input.companyId, input.projectId),
             readFile: path => projectWorkspace.readFile(input.ctx, input.companyId, input.projectId, path),
             record: change => deps.codeTurnTracker!.recordChange(sessionId, input.turnId!, change),
+            cache: shellChangeCache,
           }, execute)
           : await execute();
         return {

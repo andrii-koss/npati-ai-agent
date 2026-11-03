@@ -46,7 +46,7 @@ const WORKSPACE_BUSY_WAIT_MS = 30_000;
 
 export const defaultTerminalLimits: TerminalLimits = {
   commandTimeoutMs: 120_000, installBuildTimeoutMs: 600_000, outputLimitBytes: 64_000,
-  inactivityMs: 900_000, syncMaxBytes: 50_000_000, syncMaxFiles: 2000,
+  inactivityMs: 900_000, syncMaxBytes: Number.POSITIVE_INFINITY, syncMaxFiles: Number.POSITIVE_INFINITY,
   retentionMs: 7 * 24 * 60 * 60 * 1000,
 };
 const uuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);

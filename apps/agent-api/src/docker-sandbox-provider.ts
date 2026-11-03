@@ -41,7 +41,7 @@ const defaults: RunnerLimits = {
   memory: sandboxMemoryArg(DEFAULT_SANDBOX_RESOURCE_LIMITS.memoryMb),
   diskBytes: DEFAULT_SANDBOX_RESOURCE_LIMITS.diskBytes,
   pids: DEFAULT_SANDBOX_RESOURCE_LIMITS.pids,
-  image: "npati/project-sandbox:local", proxyImage: "npati/sandbox-egress:local", maxFiles: 500, maxBytes: 20_000_000, allowedHosts: defaultAllowedHosts,
+  image: "npati/project-sandbox:local", proxyImage: "npati/sandbox-egress:local", maxFiles: Number.POSITIVE_INFINITY, maxBytes: Number.POSITIVE_INFINITY, allowedHosts: defaultAllowedHosts,
 };
 const DATABASE_HOST_PATTERN = /(^|[.-])(postgres|postgresql|pg|db|database)([.-]|$)/;
 

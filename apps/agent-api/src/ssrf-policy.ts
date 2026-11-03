@@ -257,7 +257,7 @@ export function isHostnameAllowed(host: string, allowlist: readonly string[]): b
 }
 
 export interface SsrfPolicyOptions {
-  /** Hostname allowlist; an empty allowlist denies every host. */
+  /** Hostname allowlist; an empty allowlist denies every host, and `*` allows any public host. */
   allowlist?: readonly string[];
   allowedPorts?: readonly number[];
   /** Extra ports permitted for allowlisted hosts only (for example 22 for git over SSH). */
@@ -298,6 +298,7 @@ export function parseDestination(input: string, options: SsrfPolicyOptions = {})
   const host = normalizeHostInput(url.hostname);
   const port = url.port ? Number.parseInt(url.port, 10) : url.protocol === "https:" ? 443 : 80;
   const allowedPorts = options.allowedPorts ?? DEFAULT_ALLOWED_PORTS;
+  const allowsAnyPublicHost = (options.allowlist ?? []).includes("*");
   const privilegedPorts = options.privilegedPorts ?? [];
   if (!allowedPorts.includes(port)) {
     const privilegedAllowed = privilegedPorts.includes(port) && isHostnameAllowed(host, options.allowlist ?? []);
@@ -311,9 +312,11 @@ export function parseDestination(input: string, options: SsrfPolicyOptions = {})
       throw new SsrfPolicyError("ssrf_blocked_private_ip", "Private, loopback or reserved addresses are blocked", { details: { host, ip: canonicalIp(host) } });
     }
     // A literal destination still has to satisfy the host allowlist when one is configured.
-    if ((options.allowlist ?? []).length > 0 && !isHostnameAllowed(host, options.allowlist ?? [])) {
+    if ((options.allowlist ?? []).length > 0 && !allowsAnyPublicHost && !isHostnameAllowed(host, options.allowlist ?? [])) {
       throw new SsrfPolicyError("host_not_allowed", "Destination host is not in the allowlist", { details: { host } });
     }
+  } else if (allowsAnyPublicHost) {
+    // Address classification below still refuses private and reserved destinations.
   } else if (!(options.allowlist ?? []).length) {
     throw new SsrfPolicyError("host_not_allowed", "No hostname allowlist is configured, so no host is reachable");
   } else if (!isHostnameAllowed(host, options.allowlist ?? [])) {

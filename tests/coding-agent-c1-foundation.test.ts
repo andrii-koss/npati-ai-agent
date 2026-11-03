@@ -115,8 +115,8 @@ describe("C1 — toolchain detection", () => {
 
 describe("C1 — configuration", () => {
   it("ships the plan defaults, is env-overridable and stays dark by default", () => {
-    expect(DEFAULT_CODE_AGENT_LIMITS.maxStepsPerRun).toBe(40);
-    expect(DEFAULT_CODE_AGENT_LIMITS.maxRunMinutes).toBe(30);
+    expect(DEFAULT_CODE_AGENT_LIMITS.maxStepsPerRun).toBe(0);
+    expect(DEFAULT_CODE_AGENT_LIMITS.maxRunMinutes).toBe(0);
     expect(DEFAULT_CODE_AGENT_LIMITS.toolOutputChars).toBe(30_000);
     expect(DEFAULT_CODE_AGENT_LIMITS.commandTimeoutMs).toBe(120_000);
     expect(DEFAULT_CODE_AGENT_LIMITS.installBuildTimeoutMs).toBe(600_000);
@@ -124,7 +124,7 @@ describe("C1 — configuration", () => {
     expect(DEFAULT_CODE_AGENT_LIMITS.toolResultRetentionDays).toBe(30);
     expect(CODE_AGENT_ENABLED_BY_DEFAULT).toBe(false);
     expect(resolveCodeAgentLimits({ NPATI_CODE_MAX_STEPS: "12" } as NodeJS.ProcessEnv).maxStepsPerRun).toBe(12);
-    expect(resolveCodeAgentLimits({ NPATI_CODE_MAX_STEPS: "-3" } as NodeJS.ProcessEnv).maxStepsPerRun).toBe(40);
+    expect(resolveCodeAgentLimits({ NPATI_CODE_MAX_STEPS: "-3" } as NodeJS.ProcessEnv).maxStepsPerRun).toBe(0);
     expect(resolveCodeAgentLimits({ NPATI_CODE_MAX_STEPS: "0" } as NodeJS.ProcessEnv).maxStepsPerRun).toBe(0);
     expect(resolveCodeAgentLimits({ NPATI_CODE_MAX_RUN_MINUTES: "0" } as NodeJS.ProcessEnv).maxRunMinutes).toBe(0);
   });
@@ -290,7 +290,7 @@ describe("security-gate: C1 isolation and repository credentials", () => {
     expect(badClassification.json().error.code).toBe("classification_downgrade_denied");
 
     const limits = await app.inject({ method: "GET", url: `/companies/${company.id}/code/limits` });
-    expect(limits.json().limits.maxStepsPerRun).toBe(40);
+    expect(limits.json().limits.maxStepsPerRun).toBe(0);
 
     const invalid = await app.inject({ method: "POST", url: `/companies/${company.id}/code/projects`, payload: { name: "" } });
     expect(invalid.statusCode).toBe(400);

@@ -1,4 +1,3 @@
-import { adaptiveLimit, classifyRunTask, CODE_RUN_TASK_BUDGETS } from "./code-run-budget";
 import { explicitUserWritePaths } from "./code-user-file-scope";
 import type { AuthContext, CodeSession } from "@npati/workspace";
 import type { CodeAgentLimits } from "./code-agent-config";
@@ -168,12 +167,9 @@ export async function startCodingAgentSession(args: StartSessionArgs): Promise<S
 
   const delegationDepth = subagentDepthForRun(capabilityScope.parentRunId);
 
-  const taskBudget = CODE_RUN_TASK_BUDGETS[classifyRunTask({ readOnlyIntent: input.readOnlyIntent, sessionMode: input.session.mode,
-    websiteEdit: input.websiteEdit, requireImplementation: input.requireImplementation, imageCount: input.images?.length ?? 0 })];
-  const adaptive = limits.adaptiveRunLimits !== false && !capabilityScope.isSubagent;
-  const runMinuteLimit = adaptiveLimit(limits.maxRunMinutes, taskBudget.minutes, adaptive);
+  const runMinuteLimit = limits.maxRunMinutes;
   const runTurnLimit = input.maxTurns === undefined
-    ? adaptiveLimit(limits.maxStepsPerRun, taskBudget.turns, adaptive)
+    ? limits.maxStepsPerRun
     : clampCodeSubagentTurnLimit(input.maxTurns, limits.maxStepsPerRun > 0 ? limits.maxStepsPerRun : CODE_SUBAGENT_MAX_TURNS);
 
   let sessionBranch: { branch: string; created: boolean; switched: boolean; previousBranch: string | null } | null = null;

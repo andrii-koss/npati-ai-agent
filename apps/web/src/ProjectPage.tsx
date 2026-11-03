@@ -366,10 +366,6 @@ export function ProjectPage() {
 
   const handleZipImport = async () => {
     if (!importFile || importing) return;
-    if (importFile.size > 10 * 1024 * 1024) {
-      setError("ZIP upload must be 10 MB or less");
-      return;
-    }
     setImporting(true);
     setError("");
     try {

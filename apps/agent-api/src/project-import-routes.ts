@@ -49,13 +49,13 @@ export function registerProjectImportRoutes(app: FastifyInstance, imports: Proje
 
   app.post<{ Params: ProjectParams; Body: { filename?: string; contentBase64?: string } }>(
     "/companies/:companyId/projects/:projectId/import/zip",
-    { bodyLimit: 14 * 1024 * 1024 },
+    { bodyLimit: Number.MAX_SAFE_INTEGER },
     async (request, reply) => {
       const ctx = await authenticate(request, reply);
       if (!ctx) return;
       try {
         const content = request.body?.contentBase64;
-        if (typeof content !== "string" || content.length > 13_981_016 || content.length % 4 !== 0
+        if (typeof content !== "string" || content.length % 4 !== 0
           || !/^[A-Za-z0-9+/]*={0,2}$/.test(content)
           || !/\.zip$/i.test(request.body.filename ?? "")) {
           throw new ProjectImportError("invalid_zip_upload", "A ZIP file within 10 MB is required", 400);

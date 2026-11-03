@@ -39,10 +39,10 @@ describe("foreground shell workspace evidence", () => {
     expect(f.changes).toEqual([]);
     expect(f.reads).toEqual(["hello.txt", "hello.txt"]);
   });
-  it("refuses a source capture beyond its bounds before executing", async () => {
+  it("runs the command however many source files the project has", async () => {
     const f = fixture(Object.fromEntries(Array.from({ length: 2001 }, (_, i) => [`${i}.txt`, ""])));
     let executed = false;
-    await expect(withTrackedShellChanges(f.port, async () => { executed = true; })).rejects.toThrow("shell_change_capture_limit");
-    expect(executed).toBe(false);
+    await withTrackedShellChanges(f.port, async () => { executed = true; });
+    expect(executed).toBe(true);
   });
 });

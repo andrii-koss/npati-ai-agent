@@ -38,10 +38,11 @@ function readCall(turn: number) {
 }
 
 describe("progress guard — inspection without source changes", () => {
-  it("stops a read-only loop instead of running until an unrelated limit", async () => {
+  it("keeps reminding a read-only loop and leaves stopping it to the user", async () => {
     let modelCalls = 0;
     let toolCalls = 0;
     const reminders: string[] = [];
+    const stopController = new AbortController();
     const ports: CodingAgentRunnerPorts = {
       flags: { assertEnabled: async () => true },
       rbac: { authorize: async () => ({ allowed: true }) },
@@ -57,6 +58,8 @@ describe("progress guard — inspection without source changes", () => {
         chat: async (request): Promise<ChatResult> => {
           if (!request.tools?.length) return { content: JSON.stringify({ status: "clean", findings: [] }) };
           modelCalls += 1;
+          // The user presses Stop at some point.
+          if (modelCalls > 30) stopController.abort();
           return readCall(modelCalls) as ChatResult;
         },
       },
@@ -67,21 +70,16 @@ describe("progress guard — inspection without source changes", () => {
       sandbox: { release: async () => undefined },
       environment: createCodeRunEnvironmentHolder(),
       snapshot: { create: async () => ({ snapshotId: "snap-1" }) },
-      limits: { maxStepsPerRun: 40, maxRunMinutes: 5, parallelReadOnlyCalls: 8, repairLoopAttempts: 1, maxChangedFiles: 25 },
+      limits: { maxStepsPerRun: 0, maxRunMinutes: 0, parallelReadOnlyCalls: 8, repairLoopAttempts: 1, maxChangedFiles: 25 },
     };
     const result = await new CodingAgentRunner(ports).run({
       ctx, session: session(), prompt: "change the design like the photo", turnId: "turn-1",
-      websiteEdit: true,
+      websiteEdit: true, signal: stopController.signal,
       onActivity: async (event) => { if (event.stage === "reminder") reminders.push(String(event.title ?? event.reason ?? "")); },
     });
 
-    expect(result.status).toBe("stopped");
-    expect(result.reason).toBe("loop_detected");
-    // The guard must fire well before the generic turn limit and without a single write.
-    expect(modelCalls).toBeLessThanOrEqual(21);
-    expect(modelCalls).toBeGreaterThanOrEqual(8);
-    expect(toolCalls).toBe(modelCalls);
+    expect(result.reason).toBe("cancelled");
+    expect(modelCalls).toBeGreaterThan(30);
     expect(result.summary?.filesChanged ?? []).toHaveLength(0);
-    expect(String(result.message)).toMatch(/without source progress/i);
   }, 60_000);
 });

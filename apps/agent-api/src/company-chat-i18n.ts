@@ -264,6 +264,28 @@ export function codingStartCopy(language: CompanyChatLanguage) {
   return labels[language] ?? labels.en!;
 }
 
+export function selfReviewFindingsNotice(language: CompanyChatLanguage, detail: string): string {
+  const labels: Record<CompanyChatLanguage,string> = {
+    en:"⚠️ The automatic code review found issues that were not fixed. Please check them:",
+    uk:"⚠️ Автоматична перевірка коду знайшла проблеми, які не вдалося виправити. Перевірте їх:",
+    ru:"⚠️ Автоматическая проверка кода нашла проблемы, которые не удалось исправить. Проверьте их:",
+    de:"⚠️ Die automatische Code-Prüfung hat Probleme gefunden, die nicht behoben wurden. Bitte prüfen:",
+    fr:"⚠️ La revue automatique du code a trouvé des problèmes non corrigés. Veuillez les vérifier :",
+    es:"⚠️ La revisión automática del código encontró problemas sin corregir. Revíselos:",
+    it:"⚠️ La revisione automatica del codice ha trovato problemi non corretti. Controllali:",
+    pl:"⚠️ Automatyczny przegląd kodu znalazł problemy, których nie naprawiono. Sprawdź je:",
+    pt:"⚠️ A revisão automática do código encontrou problemas não corrigidos. Verifique-os:",
+    nl:"⚠️ De automatische codereview vond problemen die niet zijn opgelost. Controleer ze:",
+    tr:"⚠️ Otomatik kod incelemesi düzeltilemeyen sorunlar buldu. Lütfen kontrol edin:",
+    zh:"⚠️ 自动代码审查发现了未修复的问题，请检查：",
+    ja:"⚠️ 自動コードレビューで未修正の問題が見つかりました。確認してください：",
+    ko:"⚠️ 자동 코드 검토에서 수정되지 않은 문제를 발견했습니다. 확인해 주세요:",
+    ar:"⚠️ وجدت مراجعة الشيفرة التلقائية مشكلات لم تُصلح. يرجى التحقق منها:",
+    hi:"⚠️ स्वचालित कोड समीक्षा में ऐसी समस्याएँ मिलीं जो ठीक नहीं हुईं। कृपया जाँचें:",
+  };
+  return `${labels[language]}\n${detail}`;
+}
+
 export function selfReviewUnavailableNotice(language: CompanyChatLanguage): string {
   const labels: Record<CompanyChatLanguage,string> = {
     en:"⚠️ Not verified: the automatic code review could not finish, so this result was not reviewed.",

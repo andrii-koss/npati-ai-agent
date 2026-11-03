@@ -98,7 +98,7 @@ export class CodeProcessManager {
     this.logLines = positive(options.logLines, 2_000);
     this.outputChars = positive(options.outputChars, 64_000);
     this.ttlMs = positive(options.ttlMs, 12 * 60 * 60 * 1000);
-    this.maxProcessesPerSession = positive(options.maxProcessesPerSession, 10);
+    this.maxProcessesPerSession = options.maxProcessesPerSession ?? Number.POSITIVE_INFINITY;
     this.now = options.now ?? (() => Date.now());
   }
 

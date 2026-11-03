@@ -276,8 +276,8 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
   constructor(private readonly projects: { get(ctx: AuthContext, companyId: string, projectId: string): Promise<Pick<Project, "id" | "companyId" | "workspaceId" | "status" | "repositoryBranch" | "sandboxId" | "revision">> }, options: { root: string; maxFileBytes?: number; maxFiles?: number; bases?: WorkspaceBaseResolverPort }) {
     this.root = path.resolve(options.root);
     this.bases = options.bases ?? managedWorkspaceBaseResolver(this.root);
-    this.maxFileBytes = fileLimit(options.maxFileBytes, 1024 * 1024);
-    this.maxFiles = fileLimit(options.maxFiles, 2000);
+    this.maxFileBytes = fileLimit(options.maxFileBytes, Number.POSITIVE_INFINITY);
+    this.maxFiles = fileLimit(options.maxFiles, Number.POSITIVE_INFINITY);
   }
 
   registerWorktree(companyId: string, projectId: string, agentId: string, worktreeDir: string): void {
@@ -541,7 +541,6 @@ export class LocalProjectWorkspace implements ProjectWorkspace {
   async applyPatchTransaction(ctx: AuthContext, companyId: string, projectId: string, plan: readonly PatchMutation[], workspaceId?: string, agentId?: string) {
     const { base } = await this.access(ctx, companyId, projectId, "write", workspaceId, agentId);
     return this.lock(base, async () => {
-      if (plan.length > 500) throw new ProjectFileError("file_limit", "Patch file limit exceeded", 413);
       for (const item of plan) {
         safeProjectPath(item.path);
         if (typeof item.after !== "string" || Buffer.byteLength(item.after) > this.maxFileBytes) throw new ProjectFileError("file_too_large", "Patch file size limit exceeded", 413);

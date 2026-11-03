@@ -285,7 +285,7 @@ export class CodeSessionRunExecutor {
               + (failedCapture ? "\nThe LAST attached image is the current Preview screenshot that failed this check; the other images are the reference. Compare them instead of taking a new screenshot." : "")
               + "\nRead current files before editing. Do not scaffold or reinstall unchanged dependencies. Finish saved edits for automatic build and screenshot review.",
             runId: repairRunId, runDetails: { parentRunId: rootRunId ?? null, visualParentRunId: rootRunId ?? null, visualRepairAttempt: attempt },
-            quotaSessionId: sessionId, maxTurns: Math.min(input.maxTurns ?? 12, 12), websiteEdit: true,
+            quotaSessionId: sessionId, ...(input.maxTurns ? { maxTurns: input.maxTurns } : {}), websiteEdit: true,
             ...(input.toolContext ? { toolContext: input.toolContext } : {}),
             verificationTools, forceVerification: verificationTools?.includes("build"), extraSystemPromptLines: input.extraSystemPromptLines,
             signal: AbortSignal.any([controller.signal, AbortSignal.timeout(Math.max(1, deadline - Date.now()))]),

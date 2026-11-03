@@ -408,16 +408,14 @@ describe("security-gate: C6 runner — tool execution and the model contract", (
     expect(calls.map(call => call.id)).toEqual(results.map(message => message.tool_call_id));
   });
 
-  it("returns structured validation feedback and stops after the correction budget is exhausted", async () => {
+  it("returns structured validation feedback and ends only a truly stuck run", async () => {
     const harness = createHarness({
-      script: [
-        { content: "", toolCalls: [nativeCall("code.unknown.tool", {}, "unknown-1")] },
-        { content: "", toolCalls: [nativeCall("code.unknown.tool", {}, "unknown-2")] },
-        { content: "", toolCalls: [nativeCall("code.unknown.tool", {}, "unknown-3")] },
-      ],
+      limits: { maxStepsPerRun: 0 },
+      script: Array.from({ length: 25 }, (_, i) => ({ content: "", toolCalls: [nativeCall("code.unknown.tool", {}, "bad-" + i)] })),
     });
     const result = await harness.run();
-    expect(result.reason).toBe("invalid_arguments_exhausted");
+    expect(result.reason).toBe("loop_detected");
+    expect(harness.engineCalls.length).toBe(20);
     expect(harness.invocations).toHaveLength(0);
     const firstFeedback = harness.engineCalls[1]?.messages.find((message) => message.role === "tool");
     expect(firstFeedback?.content).toContain("unknown_tool");
@@ -426,11 +424,11 @@ describe("security-gate: C6 runner — tool execution and the model contract", (
     expect(assistant?.tool_calls?.some((call) => call.id === firstFeedback?.tool_call_id)).toBe(true);
   });
 
-  it("reminds the model once about a repeated call and stops on the next repetition", async () => {
+  it("reminds the model once about a repeated call and lets it recover", async () => {
     const repeated = () => ({ content: "", toolCalls: [nativeCall("code.fs.read", { path: "same.ts" }, `call-${Math.random()}`)] });
     const harness = createHarness({ script: [repeated(), repeated(), repeated(), repeated(), { content: "done" }] });
     const result = await harness.run();
-    expect(result.reason).toBe("loop_detected");
+    expect(result.reason).not.toBe("loop_detected");
     const reminded = harness.engineCalls.some((call) =>
       call.messages.some((message) => message.role === "system" && typeof message.content === "string" && message.content.includes("Change your approach")),
     );

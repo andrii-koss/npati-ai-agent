@@ -18,10 +18,10 @@ export interface ZipImportLimits {
 }
 
 export const defaultZipImportLimits: ZipImportLimits = {
-  maxArchiveBytes: 10 * 1024 * 1024,
-  maxExpandedBytes: 20 * 1024 * 1024,
-  maxFiles: 500,
-  maxFileBytes: 1024 * 1024,
+  maxArchiveBytes: Number.POSITIVE_INFINITY,
+  maxExpandedBytes: Number.POSITIVE_INFINITY,
+  maxFiles: Number.POSITIVE_INFINITY,
+  maxFileBytes: Number.POSITIVE_INFINITY,
   maxCompressionRatio: 100,
 };
 

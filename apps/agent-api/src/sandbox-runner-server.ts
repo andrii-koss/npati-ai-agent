@@ -197,7 +197,7 @@ const runnerPreflight = async (): Promise<void> => {
 }
 void runnerPreflight().catch(() => console.error("[sandbox-runner-preflight] failed"));
 const resourceNames = (id: string) => /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id) ? { container: `npati-sb-${id}`, network: `npati-net-${id}` } : { container: null, network: null };
-const app = Fastify({ bodyLimit: 25_000_000, logger: false });
+const app = Fastify({ bodyLimit: Number.MAX_SAFE_INTEGER, logger: false });
 const seen = new Map<string, number>();
 app.get("/health", async (_request, reply) => {
   const report = await runnerReadiness.collect();

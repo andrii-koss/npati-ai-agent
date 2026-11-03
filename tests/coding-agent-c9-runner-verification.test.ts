@@ -403,16 +403,12 @@ describe("security-gate: C9 runner — scope guard and the separation from argum
     // and it must exhaust *itself* — it must not spend the verification budget, and the run must not be
     // reported as a verification failure.
     const harness = createHarness({
-      script: [
-        { content: "trying", toolCalls: [nativeCall("code.fs.edit", {}, "bad-1")] },
-        { content: "trying", toolCalls: [nativeCall("code.fs.edit", {}, "bad-2")] },
-        { content: "trying", toolCalls: [nativeCall("code.fs.edit", {}, "bad-3")] },
-        { content: "trying", toolCalls: [nativeCall("code.fs.edit", {}, "bad-4")] },
-      ],
+      limits: { maxStepsPerRun: 0 },
+      script: Array.from({ length: 25 }, (_, i) => ({ content: "", toolCalls: [nativeCall("code.fs.edit", {}, "bad-" + i)] })),
     });
     const result = await harness.run();
 
-    expect(result.reason).toBe("invalid_arguments_exhausted");
+    expect(result.reason).toBe("loop_detected");
     expect(result.verification).toBeUndefined();
     expect(harness.invocations.filter((entry) => entry.tool === "code.verify.run")).toHaveLength(0);
   });

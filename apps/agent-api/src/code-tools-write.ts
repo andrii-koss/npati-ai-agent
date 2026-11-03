@@ -59,8 +59,8 @@ function envInt(env: NodeJS.ProcessEnv, key: string, fallback: number, min: numb
 /** Write-specific limits; the read limits keep coming from `resolveCodeAgentLimits()`. */
 export function resolveWriteLimits(env: NodeJS.ProcessEnv = process.env): WriteLimits {
   return {
-    maxEditBytes: envInt(env, "NPATI_CODE_MAX_EDIT_BYTES", 512 * 1024, 1024, 16 * 1024 * 1024),
-    maxPatchFiles: envInt(env, "NPATI_CODE_MAX_PATCH_FILES", 50, 1, 500),
+    maxEditBytes: envInt(env, "NPATI_CODE_MAX_EDIT_BYTES", Number.MAX_SAFE_INTEGER, 1024, Number.MAX_SAFE_INTEGER),
+    maxPatchFiles: envInt(env, "NPATI_CODE_MAX_PATCH_FILES", Number.MAX_SAFE_INTEGER, 1, Number.MAX_SAFE_INTEGER),
     massOperationThreshold: envInt(env, "NPATI_CODE_MASS_OP_THRESHOLD", 10, 1, 500),
   };
 }

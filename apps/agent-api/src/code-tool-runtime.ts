@@ -83,7 +83,7 @@ export class CodeToolRuntime {
     this.writeTools = options.writeTools ?? CODE_WRITE_TOOLS;
     this.approvalPolicy = options.approvalPolicy ?? resolveApprovalPolicy();
     this.turns = options.turns ?? new CodeTurnTracker(resolveTurnTrackingOptions());
-    this.maxRevisionRetries = options.maxRevisionRetries ?? 2;
+    this.maxRevisionRetries = options.maxRevisionRetries ?? Number.POSITIVE_INFINITY;
 
     this.writeGuard = new CodeToolWriteGuard({
       options: this.options,

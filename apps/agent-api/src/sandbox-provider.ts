@@ -198,8 +198,8 @@ export class RemoteSandboxProvider implements SandboxProvider {
   stopSandbox(scope: SandboxScope, sandboxId: string) { return this.request<SandboxStatus>("stopSandbox", { scope, sandboxId }); }
   destroySandbox(scope: SandboxScope, sandboxId: string) { return this.request<void>("destroySandbox", { scope, sandboxId }); }
   executeCommand(scope: SandboxScope, sandboxId: string, command: string, options: SandboxCommandOptions) { return this.request<SandboxCommandResult>("executeCommand", { scope, sandboxId, command, options }, options.timeoutMs + 15_000); }
-  uploadFiles(scope: SandboxScope, sandboxId: string, files: SandboxFile[]) { return this.request<void>("uploadFiles", { scope, sandboxId, files }, 120_000); }
-  downloadFiles(scope: SandboxScope, sandboxId: string) { return this.request<SandboxFile[]>("downloadFiles", { scope, sandboxId }, 120_000); }
+  uploadFiles(scope: SandboxScope, sandboxId: string, files: SandboxFile[]) { return this.request<void>("uploadFiles", { scope, sandboxId, files }, 605_000); }
+  downloadFiles(scope: SandboxScope, sandboxId: string) { return this.request<SandboxFile[]>("downloadFiles", { scope, sandboxId }, 605_000); }
   exposePort(scope: SandboxScope, sandboxId: string, port: number) { return this.request<{ port: number; internalHost: string }>("exposePort", { scope, sandboxId, port }); }
   getLogs(scope: SandboxScope, sandboxId: string, processId?: string) { return this.request<string>("getLogs", { scope, sandboxId, processId }); }
   getStatus(scope: SandboxScope, sandboxId: string) { return this.request<SandboxStatus>("getStatus", { scope, sandboxId }); }

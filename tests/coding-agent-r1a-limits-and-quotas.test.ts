@@ -229,12 +229,11 @@ describe("security-gate: R1 A.1 — the periodic run limit is configured, clampe
 // ---------------------------------------------------------------------------------------------
 
 describe("security-gate: R1 A.1/A.3 — the queue defaults are the R1 start values", () => {
-  it("defaults to 5 parallel runs per Company and a 50-ticket queue, and both stay configurable", () => {
-    expect(DEFAULT_CODE_RUN_QUEUE_LIMITS.maxConcurrentPerCompany).toBe(5);
-    expect(DEFAULT_CODE_RUN_QUEUE_LIMITS.maxQueueDepth).toBe(50);
-    // Current development defaults support the four concurrent projects already configured.
-    expect(DEFAULT_CODE_RUN_QUEUE_LIMITS.maxConcurrentPerUser).toBe(4);
-    expect(DEFAULT_CODE_RUN_QUEUE_LIMITS.queueTimeoutMs).toBe(120_000);
+  it("defaults to the ceilings, so a user waits instead of being refused, and stays configurable", () => {
+    expect(DEFAULT_CODE_RUN_QUEUE_LIMITS.maxConcurrentPerCompany).toBe(64);
+    expect(DEFAULT_CODE_RUN_QUEUE_LIMITS.maxQueueDepth).toBe(5_000);
+    expect(DEFAULT_CODE_RUN_QUEUE_LIMITS.maxConcurrentPerUser).toBe(16);
+    expect(DEFAULT_CODE_RUN_QUEUE_LIMITS.queueTimeoutMs).toBe(15 * 60_000);
 
     // The environment still overrides them, and the clamp still applies to the new default.
     const overridden = resolveCodeRunQueueLimits({

@@ -164,7 +164,7 @@ export async function runChatToolLoop(input: {
   const onGenerationProgress = input.request.onGenerationProgress ?? (() => undefined);
   const traces: ChatToolTrace[] = [];
   const metadata: Record<string, unknown>[] = [];
-  const maxSteps = Math.max(1, Math.min(input.maxSteps ?? 8, 16));
+  const maxSteps = Math.max(1, input.maxSteps ?? Number.POSITIVE_INFINITY);
   let result: ChatResult = { content: "" };
   let completionReminders = 0;
   let requiredReminded = false;
@@ -176,7 +176,7 @@ export async function runChatToolLoop(input: {
     const call = input.recoveryCall;
     if (!call || recoveryAttempted) return undefined;
     recoveryAttempted = true;
-    const requested: ChatToolTrace = { step: maxSteps, toolName: call.function.name, callId: call.id, status: "requested" };
+    const requested: ChatToolTrace = { step: traces.length, toolName: call.function.name, callId: call.id, status: "requested" };
     try {
       const args = toolArguments(call);
       requested.arguments = args;
