@@ -23,6 +23,8 @@ export interface CodeAgentLimits {
   editRepairAttempts: number;
   repairLoopAttempts: number;
   contextCompressionRatio: number;
+  /** Hidden reasoning stays off in the main loop unless `NPATI_CODE_MODEL_REASONING=enabled`: output tokens go to the work. */
+  disableModelReasoning?: boolean;
   /** Compact old outputs before a large-context model repeatedly bills them. */
   modelInputTokens?: number;
   /**
@@ -126,6 +128,7 @@ export function resolveCodeAgentLimits(env: NodeJS.ProcessEnv = process.env): Co
     parallelReadOnlyCalls: positiveInt(env.NPATI_CODE_PARALLEL_READONLY, DEFAULT_CODE_AGENT_LIMITS.parallelReadOnlyCalls),
     editRepairAttempts: positiveInt(env.NPATI_CODE_EDIT_REPAIR_ATTEMPTS, DEFAULT_CODE_AGENT_LIMITS.editRepairAttempts),
     repairLoopAttempts: positiveInt(env.NPATI_CODE_REPAIR_LOOP, DEFAULT_CODE_AGENT_LIMITS.repairLoopAttempts),
+    disableModelReasoning: env.NPATI_CODE_MODEL_REASONING !== "enabled",
     modelInputTokens: positiveInt(env.NPATI_CODE_MODEL_INPUT_TOKENS, DEFAULT_CODE_AGENT_LIMITS.modelInputTokens ?? 16_384),
     contextCompressionRatio: positiveFloat(env.NPATI_CODE_CONTEXT_COMPRESSION_RATIO, DEFAULT_CODE_AGENT_LIMITS.contextCompressionRatio),
     subagentDepth: clampCodeSubagentDepth(env.NPATI_CODE_SUBAGENT_DEPTH ?? DEFAULT_CODE_AGENT_LIMITS.subagentDepth),

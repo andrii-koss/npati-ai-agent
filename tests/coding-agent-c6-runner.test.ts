@@ -898,17 +898,17 @@ it("retains private continuation when requesting implementation after a text-onl
 });
 
 
-it("keeps the provider's reasoning and auto tool choice for blank HTML so large writes are not truncated", async () => {
+it("turns reasoning off by default, keeps auto tool choice, and brings it back after a cut tool call", async () => {
  const tools=[...TOOLS,{name:"code.fs.write",version:1,status:"active" as const,description:"Write a new file",write:true}];
  let changed=false;
  const h=createHarness({tools,script:[{content:"Creating",toolCalls:[nativeCall("code.fs.write",{path:"index.html",content:"<main>Store</main>"})]},{content:"Ready"}],toolResult:tool=>{if(tool==="code.fs.write")changed=true;return {ok:true,tool,toolVersion:1,schemaVersion:1,result:{},truncated:false,durationMs:1}},turnSummary:()=>({files:changed?1:0,linesAdded:changed?1:0,linesRemoved:0,changes:changed?[{path:"index.html",tool:"code.fs.write"}]:[]})});
  await h.run({emptyHtmlWorkspace:true,requireImplementation:true,model:"deepseek/deepseek-flash",verificationTools:[]});
- // Step 1: disabling reasoning for a tool-bearing turn capped DeepSeek Flash tool-call arguments at ~21 KB and
- // produced partial_tool_call, so the override and the forced tool_choice (rejected by the provider while
- // reasoning is on) are gone. The model still writes first because the run prompt says so, not tool_choice.
- expect(h.engineCalls[0]?.reasoningMode).toBeUndefined();
  expect(h.engineCalls[0]?.toolChoice).toBe("auto");
  expect(h.invocations.some(call=>call.tool==="code.fs.write")).toBe(true);
- const existing=createHarness({tools});await existing.run({model:"deepseek/deepseek-flash"});
- expect(existing.engineCalls[0]?.toolChoice).toBe("auto");expect(existing.engineCalls[0]?.reasoningMode).toBeUndefined();
+ const off=createHarness({tools,limits:{disableModelReasoning:true}});await off.run({model:"deepseek/deepseek-flash"});
+ expect(off.engineCalls[0]?.reasoningMode).toBe("disabled");
+ const cut=createHarness({tools,limits:{disableModelReasoning:true},script:[{content:"",finishReason:"length",toolCalls:[nativeCall("code.fs.write",{path:"index.html",content:"<main>"})]},{content:"done"}]});
+ await cut.run({model:"deepseek/deepseek-flash"});
+ expect(cut.engineCalls[0]?.reasoningMode).toBe("disabled");
+ expect(cut.engineCalls[1]?.reasoningMode).toBeUndefined();
 });
