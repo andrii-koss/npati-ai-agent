@@ -72,6 +72,17 @@ describe("a new TypeScript file replaces its JavaScript twin", () => {
   });
 });
 
+describe("npm in a project subfolder", () => {
+  it("treats --prefix like the same command in the project", () => {
+    expect(classifyTerminalCommand("npm --prefix client install").requiresApproval).toBe(false);
+    expect(classifyTerminalCommand("npm install --prefix client").requiresApproval).toBe(false);
+    expect(classifyTerminalCommand("npm --prefix client run build").requiresApproval).toBe(false);
+  });
+  it("still refuses a folder outside the project", () => {
+    for (const command of ["npm --prefix ../other install", "npm --prefix /etc install", "npm --prefix client/../../x install"]) expect(classifyTerminalCommand(command).requiresApproval, command).toBe(true);
+  });
+});
+
 describe("chat history in a code project", () => {
   it("carries earlier messages to a follow-up", () => {
     const context = projectConversationContext([{ role: "user", content: "Build a coffee shop landing page" }, { role: "assistant", content: "The run was cancelled." }]);

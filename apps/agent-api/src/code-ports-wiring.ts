@@ -253,6 +253,9 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
             if ((error as { code?: string }).code !== "command_not_found" || !/^npm\b/.test(command) || dependenciesInstalled) throw error;
             dependenciesInstalled = true;
             await runCommand("npm install");
+            // A frontend or backend folder has its own package.json.
+            const nested = (await projectWorkspace.listFiles(input.ctx, input.companyId, input.projectId)).map((file) => /^([A-Za-z0-9_-]+)\/package\.json$/.exec(file.path)?.[1]).filter((folder): folder is string => Boolean(folder));
+            for (const folder of nested) await runCommand(`npm --prefix ${folder} install`);
             result = await runCommand(command);
           }
         } catch (error) {

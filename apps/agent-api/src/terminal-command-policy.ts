@@ -53,6 +53,9 @@ export function classifyTerminalCommand(input: string | TerminalCommandSpec): Te
   if (/^java (?:--version|-version)$/.test(clean)) return result("safe", "Read Java version");
   if (/[;&|`$<>\r\n\\(){}\[\]*?!#'"~]/.test(clean)) return result("approval", "Shell syntax or expansion requires approval");
   const words = [normalized.executable, ...normalized.args];
+  // A project with a client/ folder installs and builds it with --prefix; the folder stays inside the project.
+  const prefixAt = words[0] === "npm" ? words.indexOf("--prefix") : -1;
+  if (prefixAt > 0 && relative(words[prefixAt + 1] ?? "") && /^[A-Za-z0-9_][A-Za-z0-9_./-]*$/.test(words[prefixAt + 1]!)) words.splice(prefixAt, 2);
   const [program, action, ...args] = words;
   if (["node", "npm"].includes(program!) && words.length === 2 && ["-v", "--version"].includes(action ?? "")) return result("safe", "Read Node/npm version");
   if (program === "node" && action === "--check" && args.length === 1 && /\.(?:js|mjs|cjs)$/.test(args[0]!) && args[0]!.split("/").every((part) => /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(part))) return result("safe", "Check JavaScript syntax without running it");
