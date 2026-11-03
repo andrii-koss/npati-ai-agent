@@ -898,7 +898,7 @@ it("retains private continuation when requesting implementation after a text-onl
 });
 
 
-it("turns reasoning off by default, keeps auto tool choice, and brings it back after a cut tool call", async () => {
+it("turns reasoning off by default, keeps auto tool choice, and keeps the mode for the whole run", async () => {
  const tools=[...TOOLS,{name:"code.fs.write",version:1,status:"active" as const,description:"Write a new file",write:true}];
  let changed=false;
  const h=createHarness({tools,script:[{content:"Creating",toolCalls:[nativeCall("code.fs.write",{path:"index.html",content:"<main>Store</main>"})]},{content:"Ready"}],toolResult:tool=>{if(tool==="code.fs.write")changed=true;return {ok:true,tool,toolVersion:1,schemaVersion:1,result:{},truncated:false,durationMs:1}},turnSummary:()=>({files:changed?1:0,linesAdded:changed?1:0,linesRemoved:0,changes:changed?[{path:"index.html",tool:"code.fs.write"}]:[]})});
@@ -910,5 +910,6 @@ it("turns reasoning off by default, keeps auto tool choice, and brings it back a
  const cut=createHarness({tools,limits:{disableModelReasoning:true},script:[{content:"",finishReason:"length",toolCalls:[nativeCall("code.fs.write",{path:"index.html",content:"<main>"})]},{content:"done"}]});
  await cut.run({model:"deepseek/deepseek-flash"});
  expect(cut.engineCalls[0]?.reasoningMode).toBe("disabled");
- expect(cut.engineCalls[1]?.reasoningMode).toBeUndefined();
+ // The provider refuses a thinking turn after turns without reasoning, so the mode never changes inside a run.
+ expect(cut.engineCalls[1]?.reasoningMode).toBe("disabled");
 });

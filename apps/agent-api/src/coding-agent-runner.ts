@@ -427,7 +427,6 @@ export class CodingAgentRunner {
     let sawNativeToolCalls = false;
     let inspectionTurns = 0;
     let noProgressTurns = 0;
-    let reasoningOff = this.limits.disableModelReasoning === true;
     let lastProgressFingerprint = "";
     /** A turn that executed a mutating tool is progress even when the changed-file set stays the same. */
     let lastTurnMutated = false;
@@ -591,7 +590,7 @@ export class CodingAgentRunner {
            */
           ...(input.onTextDelta ? { onTextDelta: input.onTextDelta } : {}),
           model: input.model,
-          ...(reasoningOff ? { reasoningMode: "disabled" as const } : {}),
+          ...(this.limits.disableModelReasoning ? { reasoningMode: "disabled" as const } : {}),
           ...(input.fallbackModel ? { fallbackModel: input.fallbackModel } : {}),
           signal: input.signal,
           idempotencyKey: `${sessionId}:${turnId}:${steps}`,
@@ -670,8 +669,6 @@ export class CodingAgentRunner {
         payload: { toolCalls: result.toolCalls ?? null, content: result.content ?? null, finishReason: result.finishReason ?? null },
         profile, mode, knownTools, validate: validateArguments,
       });
-      // Without reasoning DeepSeek Flash cuts tool arguments at about 21 KB: a large file needs it back for this run.
-      if (normalized.rejected.some((entry) => entry.code === "partial_tool_call")) reasoningOff = false;
       // Text adapters synthesize IDs per response; scope them to this turn before deduplication.
       for (const call of normalized.calls) if (call.source === "text" || call.id.startsWith("text:")) call.id = `${turnId}:${steps}:${call.id}`;
       for (const rejected of normalized.rejected) if (rejected.id?.startsWith("text:")) rejected.id = `${turnId}:${steps}:${rejected.id}`;

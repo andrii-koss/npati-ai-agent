@@ -187,6 +187,7 @@ export class RemoteSandboxProvider implements SandboxProvider {
       });
     } catch (error) {
       const causeCode = error && typeof error === "object" && "code" in error ? String(error.code) : "network_error";
+      console.warn(`[sandbox-runner-client] ${operation} failed after ${Date.now() - Number(timestamp)} ms of ${timeoutMs} ms: ${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`);
       console.error("[sandbox-runner-client] " + JSON.stringify({ ...identifiers, httpStatus: null, errorCode: "runner_unavailable", causeCode }));
       throw new SandboxProviderError("runner_unavailable", `Sandbox runner is unavailable during ${operation}`, 503, operation, "project.terminal.exec", true);
     }

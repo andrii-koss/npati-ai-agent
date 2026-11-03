@@ -12,6 +12,8 @@ export function isTransientProviderFailure(error: unknown, signal?: AbortSignal)
   const status = shaped?.httpStatus ?? shaped?.statusCode ?? shaped?.status;
   if (typeof status === "number") return status === 408 || status === 429 || status >= 500;
   const text = `${shaped?.code ?? ""} ${shaped?.name ?? ""} ${shaped?.message ?? ""}`;
+  // A refused request stays refused: a failed stream may still carry a client error.
+  if (/HTTP 4\d\d/.test(text) && !/HTTP (?:408|429)/.test(text)) return false;
   return /provider_timeout|provider_connection_error|provider_stream_error|provider_stream_idle_timeout|HTTP (?:408|429|5\d\d)|stream content stall|too busy|overloaded|TimeoutError|ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang up|fetch failed|terminated/i.test(text);
 }
 

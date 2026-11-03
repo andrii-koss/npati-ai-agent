@@ -34,6 +34,11 @@ describe("a transient provider failure is retried, nothing else is (audit F-11)"
     expect(isTransientProviderFailure(new Error(message))).toBe(true);
   });
 
+  it("does not retry a request the provider refused", () => {
+    expect(isTransientProviderFailure(new Error("provider_stream_error: OmniRoute stream failed with HTTP 400: reasoning_content must be passed back"))).toBe(false);
+    expect(isTransientProviderFailure(new Error("provider_stream_error: OmniRoute stream failed with HTTP 429: slow down"))).toBe(true);
+  });
+
   it("stops waiting as soon as the run is cancelled", async () => {
     const controller = new AbortController();
     const failing = vi.fn().mockRejectedValue(Object.assign(new Error("down"), { httpStatus: 503 }));
