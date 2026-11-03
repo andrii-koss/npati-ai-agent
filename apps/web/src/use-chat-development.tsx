@@ -59,7 +59,7 @@ export function useChatDevelopment(options: {
     const opened = shared ? await shared.catch(() => null) : null;
     firstRead.current = false;
     const data = opened ? { processes: opened.processes }
-      : await api<{ processes: DevelopmentProcess[] }>(queryProjectId ? "/chat/development/processes" : `/chat/development/processes?conversationId=${encodeURIComponent(conversationId ?? "")}`);
+      : await api<{ processes: DevelopmentProcess[] }>(queryProjectId ? `/chat/development/processes?projectId=${encodeURIComponent(queryProjectId)}` : `/chat/development/processes?conversationId=${encodeURIComponent(conversationId ?? "")}`);
     if (alive.current && generation === snapshotGeneration.current) setProcesses(data.processes);
     };
     refreshing.current = task();
@@ -91,7 +91,7 @@ export function useChatDevelopment(options: {
           if (stream.signal.aborted) return;
           if (snapshot) { snapshotGeneration.current++; setProcesses(snapshot); }
           else poll();
-        }, queryProjectId ? undefined : callbacks.current.conversationId ?? currentChatConversationId() ?? "");
+        }, queryProjectId ? undefined : callbacks.current.conversationId ?? currentChatConversationId() ?? "", queryProjectId ?? undefined);
       }
     };
     visibility();

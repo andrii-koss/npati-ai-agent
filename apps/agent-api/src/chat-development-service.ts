@@ -24,6 +24,9 @@ import { readIntentHistory } from "./chat-project-intent";
 
 const key = DEVELOPMENT_PROCESS_SETTINGS_KEY;
 type Entry = DevelopmentProcess & { requestId: string; businessId?: string; cardMessageId?: string; resultMessageId?: string };
+const STALE_PROCESS_MS = 30 * 60_000;
+const ACTIVITY_FLUSH_MS = 1_000;
+
 export class DevelopmentError extends Error {
   constructor(message: string, readonly status = 400) { super(message); }
 }
@@ -75,7 +78,8 @@ export class ChatDevelopmentService {
       const items = Array.isArray(setting?.value) ? setting.value as Entry[] : [];
       const next = fn(items);
       const newest = [...next].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)).slice(0, 3).map(item => item.id);
-      const detailed = new Set([...next.filter(developmentIsActive).map(item => item.id), ...newest]);
+      const live = next.filter(item => developmentIsActive(item) && Date.now() - Date.parse(item.updatedAt) < STALE_PROCESS_MS);
+      const detailed = new Set([...live.map(item => item.id), ...newest]);
       const bounded = next.map(item => !item.progress?.length ? item : {
         ...item,
         progress: detailed.has(item.id) ? compactProgress(item.progress) : metadataOnlyProgress(item.progress),
@@ -112,12 +116,12 @@ export class ChatDevelopmentService {
     }));
     this.notifyListeners();
   }
-  async list(ctx: AuthContext): Promise<DevelopmentProcess[]> {
+  async list(ctx: AuthContext, projectId?: string): Promise<DevelopmentProcess[]> {
     await this.flushActivities(ctx);
-    const key = this.owner(ctx);
+    const key = this.owner(ctx) + ":" + (projectId ?? "");
     const pending = this.projections.get(key);
     if (pending) return pending;
-    const task = this.listOwned(ctx);
+    const task = this.listOwned(ctx, true, undefined, (entry) => developmentIsActive(entry) || entry.projectId === projectId);
     this.projections.set(key, task);
     try { return await task; }
     finally { if (this.projections.get(key) === task) this.projections.delete(key); }
@@ -320,7 +324,7 @@ export class ChatDevelopmentService {
     const owner = this.owner(ctx);
     let batch = this.activityBatches.get(owner);
     if (!batch) {
-      const timer = setTimeout(() => { void this.flushActivities(ctx).catch(error => this.d.log.warn({ err: error }, "chat_activity_batch_failed")); }, 100);
+      const timer = setTimeout(() => { void this.flushActivities(ctx).catch(error => this.d.log.warn({ err: error }, "chat_activity_batch_failed")); }, ACTIVITY_FLUSH_MS);
       timer.unref?.();
       batch = { ctx, timer, events: [] };
       this.activityBatches.set(owner, batch);

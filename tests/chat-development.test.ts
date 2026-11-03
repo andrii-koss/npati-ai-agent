@@ -120,7 +120,7 @@ describe("durable coding activity", () => {
     const callback = f.controls.get(process.projectId!)!.input.onActivity!;
     const event = {id: process.runId + ":build-call",runId:process.runId,stage:"tool",title:"Build",at:new Date().toISOString(),command:"npm run build token=secret",status:"running" as const};
     await callback(event); await callback({...event,status:"completed",result:JSON.stringify({stdout:"built password=p",exitCode:0,tests:{passed:24,failed:0,skipped:0,total:24}})});
-    await new Promise(resolve => setTimeout(resolve, 120));
+    await new Promise(resolve => setTimeout(resolve, 1_100));
     const restored = new ChatDevelopmentService(f.ports);
     const progress = (await restored.list(owner))[0]!.progress!.filter(x=>x.id===event.id);
     expect(progress).toHaveLength(1);expect(progress[0]).toMatchObject({status:"completed",command:"npm run build token=[REDACTED]",exitCode:0,tests:{passed:24,total:24}});expect(progress[0]?.stdout).toContain("password=[REDACTED]");

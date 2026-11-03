@@ -24,14 +24,14 @@ export function registerChatDevelopmentRoutes(app: FastifyInstance, deps: Develo
     });
   app.addHook("preClose", async () => { for (const close of streams) close(); await service.close(); });
   // Transport only: snapshots use the existing persisted runtime records.
-  app.get<{ Querystring: { conversationId?: string } }>("/chat/development/processes/stream", async (request, reply) => {
+  app.get<{ Querystring: { conversationId?: string; projectId?: string } }>("/chat/development/processes/stream", async (request, reply) => {
     try {
       const ctx = await deps.auth.authenticate(request);
       // A chat's live stream carries only its own and running processes; without the parameter the full list is kept.
       const conversationId = request.query.conversationId;
       const list = async () => conversationId !== undefined
         ? (await service.listForChat(ctx, conversationId || undefined)).filter((process) => chatProcess(process, conversationId || undefined))
-        : service.list(ctx);
+        : service.list(ctx, request.query.projectId);
       const initial = await list();
       reply.hijack();
       reply.raw.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
@@ -55,25 +55,29 @@ export function registerChatDevelopmentRoutes(app: FastifyInstance, deps: Develo
           if (!closed) { const delay = pending && !delayed ? 0 : 3000; pending = false; timer = setTimeout(poll, delay); }
         }
       };
+      // A run reports many steps a second; a screen needs at most one fresh list a second.
+      let lastUpdate = 0, updateTimer: ReturnType<typeof setTimeout> | undefined;
       const unsub = service.onUpdate(() => {
-        if (!closed) {
-          clearTimeout(timer);
-          void poll();
-        }
+        if (closed || updateTimer) return;
+        updateTimer = setTimeout(() => {
+          updateTimer = undefined;
+          lastUpdate = Date.now();
+          if (!closed) { clearTimeout(timer); void poll(); }
+        }, Math.max(0, lastUpdate + 1_000 - Date.now()));
       });
-      const close = () => { if (closed) return; closed = true; unsub(); clearTimeout(timer); streams.delete(close); reply.raw.end(); };
+      const close = () => { if (closed) return; closed = true; unsub(); clearTimeout(timer); if (updateTimer) clearTimeout(updateTimer); streams.delete(close); reply.raw.end(); };
       streams.add(close); reply.raw.on("close", close);
       publish(initial); timer = setTimeout(poll, 3000);
     } catch (error) { return fail(reply, error); }
   });
-  app.get<{ Querystring: { conversationId?: string } }>("/chat/development/processes", async (request, reply) => {
+  app.get<{ Querystring: { conversationId?: string; projectId?: string } }>("/chat/development/processes", async (request, reply) => {
     try {
       const context = await deps.auth.authenticate(request);
       // A chat asks only for its own processes and running ones; without the parameter the full list is kept.
       const conversationId = request.query.conversationId;
       return { processes: conversationId !== undefined
         ? (await service.listForChat(context, conversationId || undefined)).filter((process) => chatProcess(process, conversationId || undefined))
-        : await service.list(context) };
+        : await service.list(context, request.query.projectId) };
     } catch (error) { return fail(reply, error); }
   });
   app.post<{ Body: { companyId: string; message: string; targets?: import("@npati/shared").DevelopmentTarget[]; conversationId?: string; businessId?: string; requestId: string } }>("/chat/development/processes",
