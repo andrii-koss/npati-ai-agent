@@ -66,6 +66,9 @@ if [ -f "$seed_source/.stamp" ] && ! cmp -s "$seed_source/.stamp" "$seed/.comple
   ) &
 fi
 
+# Reading prepared modules from a cold image took minutes on the first project after a start.
+( find /opt/npati-project-toolchain -type f -not -path "*/npm-cache/*" -exec cat {} + > /dev/null 2>&1 ) &
+
 node /opt/npati-runtime/sandbox-egress-proxy.mjs &
 proxy_pid=$!
 node /app/dist/shared-project-runtime-server.js &
