@@ -59,6 +59,7 @@ describe("security-gate: C4b egress allowlist validation", () => {
       "index.crates.io",
       "plugins.gradle.org",
       "proxy.golang.org",
+      "pub.dev",
       "pypi.org",
       "registry.npmjs.org",
       "repo.maven.apache.org",

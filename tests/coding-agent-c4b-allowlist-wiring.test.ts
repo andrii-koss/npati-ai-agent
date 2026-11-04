@@ -9,7 +9,7 @@ const { hostnameAllowed } = await import("../apps/agent-api/src/sandbox-egress-p
 const { DockerSandboxProvider } = await import("../apps/agent-api/src/docker-sandbox-provider");
 
 const APPROVED_REGISTRIES = [
-  "files.pythonhosted.org", "index.crates.io", "plugins.gradle.org", "proxy.golang.org", "pypi.org",
+  "files.pythonhosted.org", "index.crates.io", "plugins.gradle.org", "proxy.golang.org", "pub.dev", "pypi.org",
   "registry.npmjs.org", "repo.maven.apache.org", "repo.packagist.org", "static.crates.io", "sum.golang.org",
 ];
 const FORBIDDEN_DEFAULTS = ["github.com", "codeload.github.com", "api.github.com", "objects.githubusercontent.com", "gitlab.com", "bitbucket.org", "registry.yarnpkg.com", "packagist.org"];

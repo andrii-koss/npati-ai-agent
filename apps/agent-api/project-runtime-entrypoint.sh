@@ -86,7 +86,7 @@ fi
 
 # The Flutter SDK on the projects disk, for the same reason.
 (
-  if [ -x /opt/flutter/bin/flutter ] && ! cmp -s /opt/flutter/bin/cache/flutter_tools.stamp /projects/.flutter-sdk/.complete; then
+  if [ -x /opt/flutter/bin/flutter ] && [ ! -f /projects/.flutter-sdk/flutter/engine/src/flutter/txt/third_party/fonts/Roboto-Regular.ttf ]; then
     rm -rf /projects/.flutter-sdk /projects/.flutter-sdk.tmp
     mkdir -p /projects/.flutter-sdk.tmp
     cp -R --preserve=mode,timestamps --no-preserve=ownership /opt/flutter /projects/.flutter-sdk.tmp/flutter

@@ -90,7 +90,7 @@ export function classifyTerminalCommand(input: string | TerminalCommandSpec): Te
   if (program === "npx" && action === "expo" && args[0] === "export" && args.every((word) => /^[A-Za-z0-9_@=:.,/-]+$/.test(word) && !word.includes(".."))) return result("controlled", "Export the Expo project", "install_build");
   if (program === "npx" && ["tsc", "eslint", "prettier", "vitest", "jest", "playwright"].includes(action ?? "") && args.every((word) => /^[A-Za-z0-9_@=:.,/-]+$/.test(word) && !word.includes(".."))) return result("controlled", "Check the project with its own tools", "install_build");
   if (program === "flutter" || program === "dart") {
-    if (["pub", "analyze", "test", "build", "create", "format", "--version", "doctor", "clean"].includes(action ?? "")) return result("controlled", "Run the Flutter toolchain", "install_build");
+    if (["pub", "analyze", "test", "build", "create", "format", "--version", "doctor", "clean", "config", "devices"].includes(action ?? "")) return result("controlled", "Run the Flutter toolchain", "install_build");
   }
   if (program === "composer" && action === "install" && args.every((word) => ["--no-interaction", "--prefer-dist", "--no-progress"].includes(word))) return result("controlled", "Install Composer dependencies inside sandbox", "install_build");
   return result("approval", "Unknown or destructive command requires approval");

@@ -35,7 +35,9 @@ try {
     await context.route("**/*", async route => {
       let url;
       try { url = new URL(route.request().url()); } catch { return route.abort(); }
-      if (url.origin !== origin || url.username || url.password) return route.abort();
+      // A Flutter web app loads its engine and fonts from these hosts in any browser. Blocking them made a working app look broken.
+      const flutterEngine = url.protocol === "https:" && ["www.gstatic.com", "fonts.gstatic.com"].includes(url.hostname) && route.request().method() === "GET" && !url.username && !url.password;
+      if ((url.origin !== origin && !flutterEngine) || url.username || url.password) return route.abort();
       if(input.actions?.length && !['GET','HEAD'].includes(route.request().method()))return route.abort();
       return route.continue();
     });

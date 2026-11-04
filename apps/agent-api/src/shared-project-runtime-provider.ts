@@ -441,6 +441,7 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
   }
   async startProcess(scope: SandboxScope, id: string, command: string, options: SandboxCommandOptions): Promise<SandboxCommandResult> {
     const entry = await this.entry(scope, id), normalized = this.command(command, options.cwd);
+    if (/\bflutter\b/.test(normalized.command)) await this.linkFlutterSdk(entry);
     sandboxProcessEnvironment(options.environment);
     const processId = options.processId ?? randomUUID();
     if (!UUID.test(processId)) throw new SandboxProviderError("invalid_process", "Invalid process identity", 400);

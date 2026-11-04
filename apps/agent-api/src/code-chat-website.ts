@@ -23,6 +23,24 @@ export function isCodeChatWebsite(project: Pick<Project, "type" | "framework">):
     || (project.type === "code_project" && isSupportedProjectFramework(project.framework) && !isDesktopProjectFramework(project.framework) && !isBackendProjectFramework(project.framework));
 }
 
+/** What a row names as the running command: the server itself, not the check that decides whether to rebuild first. */
+const previewCommandLabel = (command: string) => command.replace(/^if \[.*?; fi && /, "");
+
+/** Preview of a finished project that declares no framework. It only reports: a Preview that cannot start does not undo the run. */
+async function startFinishedPreview(input: Parameters<typeof emitCodingActivity>[0], ports: { startPreview(ctx: never, companyId: string, projectId: string, signal?: AbortSignal, options?: { development: boolean }): Promise<{ status?: string; command?: string; previewUrl?: string }> }, companyId: string, projectId: string, run: object, result: unknown) {
+  const runId = (result as { runId?: string })?.runId ?? (input as { runId?: string }).runId;
+  const activity = { id: `${runId}:website-preview`, runId, stage: "preview" as const, title: "Starting Live Preview", at: new Date().toISOString(), agentId: "System" };
+  await emitCodingActivity(input, { ...activity, status: "running" });
+  try {
+    const preview = await ports.startPreview((input as unknown as { ctx: never }).ctx, companyId, projectId, (input as { sink?: { signal?: AbortSignal } }).sink?.signal, { development: false });
+    await emitCodingActivity(input, { ...activity, status: preview.status === "running" ? "completed" : "failed", durationMs: Date.now() - Date.parse(activity.at), ...(preview.command ? { command: previewCommandLabel(preview.command) } : {}), result: `Preview: ${preview.status ?? "unknown"}${preview.previewUrl ? `\nAddress: ${preview.previewUrl}` : ""}` });
+    return { ...run, websitePreview: preview };
+  } catch (error) {
+    await emitCodingActivity(input, { ...activity, status: "failed", error: error instanceof Error ? error.message : "Preview failed" });
+    return result;
+  }
+}
+
 /** Current request owns visual scope; historical palette edits must not narrow a redesign. */
 export function isWebsiteReferenceRedesign(message: string, imageCount: number): boolean {
   if (!imageCount) return false;
@@ -116,7 +134,10 @@ export async function finishCodeChatWebsite(input: CodeSessionRunInput, result: 
     const preview = await ports.startPreview(input.ctx, companyId, projectId, input.sink?.signal, { development: true });
     return { ...run, backendPreview: preview };
   }
-  if (!isCodeChatWebsite(project)) return result;
+  if (!isCodeChatWebsite(project)) {
+    const finished = project.type === "code_project" && !project.framework && run.status === "completed" && (run.summary?.filesChanged?.length ?? 0) > 0;
+    return finished ? startFinishedPreview(input, ports, companyId, projectId, run, result) : result;
+  }
   const stylePreview = input.allowStylePreview && run.summary?.stylePreview === true
     && project.framework === "Next.js" && Array.isArray(run.summary.filesChanged)
     && run.summary.filesChanged.every(path => /\.css$/i.test(path));
@@ -138,8 +159,8 @@ export async function finishCodeChatWebsite(input: CodeSessionRunInput, result: 
     // The row says what ran and how it ended, so the log explains the step.
     const started = preview as { command?: string; port?: number; previewUrl?: string; status?: string };
     await emitCodingActivity(input, { ...activity, status: preview.status === "running" ? "completed" : "failed", durationMs: Date.now() - Date.parse(activity.at),
-      ...(started.command ? { command: started.command } : {}),
-      result: [`Preview: ${started.status ?? "unknown"}`, started.command ? `Command: ${started.command}` : "", started.port ? `Port: ${started.port}` : "", started.previewUrl ? `Address: ${started.previewUrl}` : ""].filter(Boolean).join("\n") });
+      ...(started.command ? { command: previewCommandLabel(started.command) } : {}),
+      result: [`Preview: ${started.status ?? "unknown"}`, started.command ? `Command: ${previewCommandLabel(started.command)}` : "", started.port ? `Port: ${started.port}` : "", started.previewUrl ? `Address: ${started.previewUrl}` : ""].filter(Boolean).join("\n") });
     return { ...run, websitePreview: preview };
   } catch (error) {
     await emitCodingActivity(input, { ...activity, status: input.sink?.signal.aborted ? "cancelled" : "failed", error: error instanceof Error ? error.message : "Preview failed" });

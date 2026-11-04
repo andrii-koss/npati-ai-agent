@@ -218,13 +218,13 @@ export class ProjectPreviewService {
     }
     const project = await this.projects.get(ctx, companyId, projectId);
     if (isDesktopProjectFramework(project.framework)) throw new PreviewError("desktop_preview_unsupported", "Desktop projects require a supported display runtime; HTTP Preview is not a GUI window", 409);
-    if (project.framework === "Flutter") throw new PreviewError("native_preview_unsupported", "Flutter native runtime requires its SDK and an authorized device; HTTP Preview is not a native application", 409);
     if (project.status === "archived") throw new PreviewError("project_archived", "Archived project cannot run preview", 409);
     if (project.status === "soft_deleted" || project.status === "purging" || project.status === "deleted") {
       throw new PreviewError("project_deleted", "Deleted project cannot run preview", 409);
     }
     const files = await this.workspace.listFiles(ctx, companyId, projectId);
     const detected = await detectProjectStack(files, async (p) => (await this.workspace.readFile(ctx, companyId, projectId, p)).content);
+    if (project.framework === "Flutter" && detected.framework !== "flutter") throw new PreviewError("native_preview_unsupported", "This project has no Flutter source to build for the web; HTTP Preview is not a native application", 409);
     if (detected.framework === "static" && (!options.command || project.framework === "HTML/CSS")) {
       try { await validateStaticProjectResources(files, async p => (await this.workspace.readFile(ctx, companyId, projectId, p)).content); }
       catch (error) { throw new PreviewError("preview_resources_missing", error instanceof Error ? error.message : "Static resource validation failed", 409); }

@@ -21,7 +21,7 @@ it('keeps the requested framework through existing mobile project preparation',a
  expect(host.projectService.updatePreview).toHaveBeenCalledWith(expect.anything(),'c','p',expect.objectContaining({framework:'Flutter'}));
  expect(host.initSharedProjectContext).toHaveBeenCalledWith(expect.anything(),'c','p',expect.objectContaining({framework:'Flutter',projectType:'mobile_app'}));
 });
-it('refuses Flutter HTTP Preview as native runtime',async()=>{
- const service=new ProjectPreviewService({get:async()=>({framework:'Flutter',type:'mobile_app'})} as never,{} as never,{} as never,{} as never,'test');
+it('refuses HTTP Preview for a Flutter project with no source to build for the web',async()=>{
+ const service=new ProjectPreviewService({get:async()=>({framework:'Flutter',type:'mobile_app'})} as never,{listFiles:async()=>[],readFile:async()=>({content:''})} as never,{listFiles:async()=>[],readFile:async()=>({content:''})} as never,{listFiles:async()=>[],readFile:async()=>({content:''})} as never,'test');
  await expect(service.startPreview({} as never,'c','p')).rejects.toMatchObject({code:'native_preview_unsupported',status:409});
 });

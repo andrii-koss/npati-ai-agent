@@ -320,10 +320,10 @@ describe("security-gate: C6a run state — scans for the reaper", () => {
     expect(scan.items.map((item) => item.toolCallId).sort()).toEqual(["stuck-deps", "stuck-edit"]);
     const edit = scan.items.find((item) => item.toolCallId === "stuck-edit")!;
     const deps = scan.items.find((item) => item.toolCallId === "stuck-deps")!;
-    // `code.deps.add` gets the install/build timeout (600 s) which exceeds the 300 s no-progress threshold, so
+    // `code.deps.add` gets the install/build timeout (one hour) which exceeds the 300 s no-progress threshold, so
     // it is explicitly long-running; a plain edit is not.
     expect(deps.longRunning).toBe(true);
-    expect(deps.declaredTimeoutMs).toBe(600_000);
+    expect(deps.declaredTimeoutMs).toBe(3_600_000);
     expect(edit.longRunning).toBe(false);
     expect(edit.declaredTimeoutMs).toBe(120_000);
     expect(edit.companyId).toBe("company-1");
