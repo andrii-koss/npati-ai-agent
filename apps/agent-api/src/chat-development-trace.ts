@@ -253,10 +253,10 @@ async function readDevelopmentTrace(store: WorkspaceStore, ctx: AuthContext, pro
         (call.stdout ?? executionResultDetails(call.result).stdout ?? "").includes(sanitizeExecutionTrace(log.output.trim()).slice(0, 1000)));
       if (log.runId ? log.runId !== process.runId : !matchedVerification && (!setupEnd || at < Date.parse(process.createdAt) || (setupEnd && at > Date.parse(setupEnd)))) continue;
       // Shell calls already have their result in replay; avoid rendering the same command twice.
-      const dispatched = log.commandSummary.startsWith("Dispatched command (");
+      const dispatched = /^(?:Dispatched|Approved) command \(/.test(log.commandSummary);
       const existing = [...progress, ...calls.values()].find(call => {
         const gap = Math.abs(Date.parse(call.at) - at);
-        if (dispatched) return log.runId === call.runId && call.command !== undefined && call.status === "failed" && gap <= (call.durationMs ?? 0) + 30_000;
+        if (dispatched) return log.runId === call.runId && call.command !== undefined && gap <= (call.durationMs ?? 0) + 30_000;
         if (call.command !== sanitizeExecutionTrace(log.commandSummary)) return false;
         const sameDuration = call.durationMs !== undefined && Math.abs(call.durationMs - log.durationMs) < 1_000;
         return gap <= (call.durationMs ?? 0) + log.durationMs + 5000 || (sameDuration && gap <= 600_000);

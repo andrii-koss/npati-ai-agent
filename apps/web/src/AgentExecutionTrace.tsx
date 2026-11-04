@@ -77,7 +77,7 @@ export function processDuration(items: DevelopmentProcessProgressItem[]): string
  */
 export function isNegativeAnswer(item: DevelopmentProcessProgressItem): boolean {
   if (item.status === "failed" && ["read_before_write_required", "unchanged"].includes(item.errorCode ?? "")) return true;
-  return item.status === "failed" && /^(?:npm ls|grep|rg|test|which|diff)\b/.test(item.command ?? "") && /"exitCode":\s*1\b/.test(item.result ?? "");
+  return item.status === "failed" && /^(?:npm ls|grep|rg|test|which|diff|ls)\b/.test(item.command ?? "") && (item.exitCode === 1 || item.exitCode === 2 || /"exitCode":\s*[12]\b/.test(item.result ?? ""));
 }
 /** A log shows the message itself, with its line breaks, not the envelope around it. */
 export function plainResult(result: string): string {
@@ -93,7 +93,7 @@ function readableFailure(item: DevelopmentProcessProgressItem): string | undefin
   const raw = item.error || item.result || "";
   let message = raw;
   try { const parsed = JSON.parse(raw) as { message?: unknown; error?: { message?: unknown } }; message = String(parsed.message ?? parsed.error?.message ?? raw); } catch { /* plain text */ }
-  const line = message.replace(/^Sandbox command failed:\s*/, "").split(/\r?\n/).map(part => part.trim()).filter(part => part && !/^npm (?:warn|notice)/.test(part)).join(" ");
+  const line = message.replace(/^Sandbox command failed:?\s*/, "").split(/\r?\n/).map(part => part.trim()).filter(part => part && !/^npm (?:warn|notice)/.test(part)).join(" ");
   return line ? sanitizeExecutionTrace(line).slice(0, 140) : undefined;
 }
 /** The last meaningful line a command printed, so its row says what happened. */
