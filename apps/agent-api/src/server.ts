@@ -3,6 +3,11 @@ import { buildApp } from "./app";
 import { resolveCodeAgentLimits } from "./code-agent-config";
 import { MinioObjectStorage } from "./object-storage";
 import { lookup } from "node:dns/promises";
+import { keepPoolErrorsFromCrashing } from "./pg-pool-errors";
+import { watchEventLoop } from "./event-loop-watch";
+
+keepPoolErrorsFromCrashing();
+watchEventLoop();
 
 const minioEndpoint = process.env.MINIO_ENDPOINT;
 const minioAccessKey = process.env.MINIO_ACCESS_KEY;

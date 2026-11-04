@@ -109,7 +109,7 @@ const READ_ONLY_EXECUTABLES = new Set([
   "eslint", "prettier", "gofmt", "make", "git", "which", "env", "date", "basename", "dirname", "true", "test",
 ]);
 
-const INSTALL_EXECUTABLES = new Set(["npm", "pnpm", "yarn", "pip", "pip3", "poetry", "uv", "go", "cargo", "composer", "bundle", "apt", "apt-get", "apk"]);
+const INSTALL_EXECUTABLES = new Set(["npm", "pnpm", "yarn", "pip", "pip3", "poetry", "uv", "go", "cargo", "composer", "bundle", "apt", "apt-get", "apk", "flutter", "dart", "npx"]);
 const NETWORK_EXECUTABLES = new Set(["curl", "wget", "nc", "netcat", "ssh", "scp", "rsync", "ftp", "telnet"]);
 
 /**
@@ -378,7 +378,7 @@ export function isAllowlistedHost(host: string, allowlist: string[]): boolean {
 
 export function resolveCommandLimits(command: string, limits: ShellLimits = {}): { timeoutMs: number; timeoutClass: "default" | "install" } {
   const timeoutClass = classifyShellCommand(command).timeoutClass;
-  if (timeoutClass === "install") return { timeoutMs: limits.installMs ?? 600_000, timeoutClass: "install" };
+  if (timeoutClass === "install") return { timeoutMs: limits.installMs ?? 3_600_000, timeoutClass: "install" };
   return { timeoutMs: limits.defaultMs ?? 120_000, timeoutClass: "default" };
 }
 

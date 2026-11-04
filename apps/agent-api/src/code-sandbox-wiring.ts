@@ -141,7 +141,8 @@ export function createCodeSandboxWiring(deps: CreateCodeSandboxWiringDeps) {
         baseUrl: sandboxRunnerUrl,
         secret: sandboxRunnerSecret,
         ttlMs: resolveRunnerReadinessTtl(process.env),
-        timeoutMs: Number.parseInt(process.env.NPATI_SANDBOX_RUNNER_READINESS_TIMEOUT_MS ?? "4000", 10) || 4_000,
+        timeoutMs: Number.parseInt(process.env.NPATI_SANDBOX_RUNNER_READINESS_TIMEOUT_MS ?? "15000", 10) || 15_000,
+        attempts: 3,
         enabled: process.env.NPATI_SANDBOX_EGRESS_ENFORCED !== "false",
         transport: (globalThis as { fetch?: typeof fetch }).fetch,
       })
@@ -151,7 +152,7 @@ export function createCodeSandboxWiring(deps: CreateCodeSandboxWiringDeps) {
   });
 
   const runnerReadinessTimer = runnerReadiness
-    ? setInterval(() => { void runnerReadiness.check(true).catch(() => undefined); }, runnerReadiness.ttlMs)
+    ? setInterval(() => { void runnerReadiness.check(true).catch(() => undefined); }, Math.floor(runnerReadiness.ttlMs / 3))
     : undefined;
   runnerReadinessTimer?.unref();
   if (runnerReadiness) void runnerReadiness.check(true).catch(() => undefined);

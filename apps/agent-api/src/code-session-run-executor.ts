@@ -323,6 +323,28 @@ export class CodeSessionRunExecutor {
             result = { ...root, visualAcceptance: { ...acceptance, status: "failed", differences } };
           }
         }
+        // The build passed but the app breaks in the browser: the agent gets the errors and fixes them itself.
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          const failed = result as { status?: string; reason?: string; functionalAcceptance?: { diagnostics?: unknown[]; brokenLinks?: unknown[] } };
+          if (failed?.status !== "failed" || failed.reason !== "website_preview_qa_failed" || controller.signal.aborted || await input.cancelRequested()) break;
+          const repairRunId = String(rootRunId ?? sessionId) + ":qa-repair:" + attempt;
+          const repaired = await runner.run({ ctx: input.ctx, session: input.session, model, images: input.images, useInbox: false, skipAsyncCollect: true,
+            prompt: input.prompt + "\nThe build passed, but opening the app in a browser found these errors: " + JSON.stringify({ errors: failed.functionalAcceptance?.diagnostics ?? [], brokenLinks: failed.functionalAcceptance?.brokenLinks ?? [] })
+              + "\nFind the cause in the SAME project and fix it, preserving what works. Read current files before editing. Do not scaffold or reinstall unchanged dependencies. Finish saved edits for the automatic build and browser check.",
+            runId: repairRunId, runDetails: { parentRunId: rootRunId ?? null, qaRepairAttempt: attempt },
+            quotaSessionId: sessionId, ...(input.maxTurns ? { maxTurns: input.maxTurns } : {}), websiteEdit: true,
+            ...(input.toolContext ? { toolContext: input.toolContext } : {}),
+            verificationTools, forceVerification: verificationTools?.includes("build"), extraSystemPromptLines: input.extraSystemPromptLines,
+            signal: controller.signal, cancelRequested: input.cancelRequested, onActivity: input.onActivity }).catch((error: unknown) => {
+              this.options.logger?.warn({ err: error, sessionId }, "code_session_qa_repair_failed");
+              return null;
+            });
+          repairRunIds.push(repairRunId);
+          const changed = ((repaired as { summary?: { filesChanged?: unknown[] } } | null)?.summary?.filesChanged?.length ?? 0) > 0;
+          // Nothing changed means the same revision and the same verdict, so the failure stays as reported.
+          if ((repaired as { status?: string } | null)?.status !== "completed" || !changed) break;
+          result = await this.options.afterRun({ ...input, runId: repairRunId }, repaired);
+        }
         if (repairRunIds.length && result && typeof result === "object") result = { ...result, runId: rootRunId, visualRepairRunIds: repairRunIds };
       }
     } catch (error) {

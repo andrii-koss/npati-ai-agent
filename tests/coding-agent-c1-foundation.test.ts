@@ -119,7 +119,7 @@ describe("C1 — configuration", () => {
     expect(DEFAULT_CODE_AGENT_LIMITS.maxRunMinutes).toBe(0);
     expect(DEFAULT_CODE_AGENT_LIMITS.toolOutputChars).toBe(30_000);
     expect(DEFAULT_CODE_AGENT_LIMITS.commandTimeoutMs).toBe(120_000);
-    expect(DEFAULT_CODE_AGENT_LIMITS.installBuildTimeoutMs).toBe(600_000);
+    expect(DEFAULT_CODE_AGENT_LIMITS.installBuildTimeoutMs).toBe(3_600_000);
     expect(DEFAULT_CODE_AGENT_LIMITS.parallelReadOnlyCalls).toBe(8);
     expect(DEFAULT_CODE_AGENT_LIMITS.toolResultRetentionDays).toBe(30);
     expect(CODE_AGENT_ENABLED_BY_DEFAULT).toBe(false);

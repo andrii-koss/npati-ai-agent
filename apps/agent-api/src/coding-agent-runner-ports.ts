@@ -249,6 +249,7 @@ export interface CodeRunActivityEvent {
   turn?: number;
   tool?: string;
   toolCallId?: string;
+  path?: string;
   ok?: boolean;
   errorCode?: string;
   bytes?: number;

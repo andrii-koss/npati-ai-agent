@@ -1,3 +1,4 @@
+import { redactTerminalText } from "./terminal-command-policy";
 import type { SandboxFile } from "./sandbox-provider";
 
 const SYNC_STATE_TTL_MS = 300_000;
@@ -41,11 +42,20 @@ export class SandboxSyncStates {
   }
 }
 
-const RUNTIME_NOISE = /^(?:sent tapfd=\d+ for tap\d+|received tapfd=\d+)\r?\n?/gm;
+const RUNTIME_NOISE = /^(?:sent tapfd=\d+ for tap\d+|received tapfd=\d+|::progress:: .*|npm http .*|npm warn Unknown env config .*)\r?\n?/gm;
 
 /** The sandbox network helper prints these on every command; the model should not have to read them. */
 export const withoutRuntimeNoise = <T extends { stdout: string; stderr: string }>(result: T): T => ({
   ...result,
   stdout: result.stdout.replace(RUNTIME_NOISE, ""),
   stderr: result.stderr.replace(RUNTIME_NOISE, ""),
+});
+
+/** The last lines the project's running command printed, for its row in the chat. */
+export const liveOutputLines = (live: { running: boolean; output: string }) => ({
+  running: live.running,
+  lines: redactTerminalText(live.output).replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "").split(/\r\n|\n|\r/)
+    .map((line) => line.trim().replace(/^::progress:: /, ""))
+    .filter((line) => line && !/^(?:sent tapfd|received tapfd|npm warn Unknown env config)/.test(line))
+    .slice(-60),
 });

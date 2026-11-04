@@ -110,6 +110,7 @@ export interface SandboxProvider {
   stopProcess(scope: SandboxScope, sandboxId: string, processId: string): Promise<SandboxCommandResult>;
   getProcessStatus(scope: SandboxScope, sandboxId: string, processId: string): Promise<SandboxCommandResult>;
   getProcessOutput?(scope: SandboxScope, sandboxId: string, processId: string): Promise<{ output: string; earliestOffset: number; nextOffset: number }>;
+  getLiveOutput?(scope: SandboxScope, sandboxId: string): Promise<{ running: boolean; output: string }>;
 }
 export interface PreviewProxyRequest { port: number; path: string; method: string; headers: Record<string, string>; body?: string; }
 export interface PreviewProxyResponse { status: number; headers: Record<string, string>; body: string; }
@@ -129,6 +130,12 @@ const runnerFetch: typeof fetch = (input, init) => new Promise((resolve, reject)
   call.on("error", reject);
   call.end(init?.body as string | undefined);
 });
+
+const READINESS_REQUEST_MS = 20_000;
+const readinessWaitMs = () => {
+  const configured = Number.parseInt(process.env.NPATI_RUNNER_READINESS_WAIT_MS ?? "", 10);
+  return Number.isSafeInteger(configured) && configured >= 0 ? configured : 180_000;
+};
 
 export class SandboxProviderError extends Error {
   diagnostics?: { dockerAction?: string; dockerStderr?: string; image?: string; container?: string; network?: string; sandboxId?: string };
@@ -150,7 +157,13 @@ export class RemoteSandboxProvider implements SandboxProvider {
   }
   private async assertBackend(): Promise<void> {
     const expected = this.runtimeMode ?? (process.env.NPATI_PROJECT_RUNTIME_MODE || process.env.NPATI_DEPLOYMENT_TYPE || process.env.NPATI_SANDBOX_RUNNER_MODE === "local" ? projectRuntimeMode() : undefined);
-    if (expected) {
+    if (!expected) return;
+    // Under load a readiness answer can be slow or briefly negative. That is not a wrong provider: wait for the runner
+    // and send nothing to it meanwhile. Only a runner that reports another runtime mode is refused at once.
+    const waitMs = readinessWaitMs();
+    const started = Date.now();
+    for (;;) {
+      let reason: string;
       try {
         // Authenticated readiness proves which implementation is behind the runner URL.
         // Check every admission; an API reconnect must not silently reach a replaced isolated runner.
@@ -159,20 +172,28 @@ export class RemoteSandboxProvider implements SandboxProvider {
         const signature = createHmac("sha256", this.secret).update(`${timestamp}.${nonce}.${body}`).digest("hex");
         const response = await this.transport(new URL("/v1/readiness", this.endpoint), {
           method: "POST", headers: { "content-type": "application/json", "x-npati-timestamp": timestamp, "x-npati-nonce": nonce, "x-npati-signature": signature },
-          body, signal: AbortSignal.timeout(5000),
+          body, signal: AbortSignal.timeout(READINESS_REQUEST_MS),
         });
-        const report = await response.json() as { overall_ready?: boolean; details?: { runtimeMode?: string } };
-        if (!response.ok || report.overall_ready !== true || report.details?.runtimeMode !== expected) {
-          throw new SandboxProviderError("runtime_architecture_violation", `Configured ${expected} runtime requires its matching ready provider; provider fallback is prohibited`, 503, "provider_selection");
+        const report = await response.json() as { overall_ready?: boolean; reasons?: string[]; details?: { runtimeMode?: string } };
+        if (response.ok && report.overall_ready === true && report.details?.runtimeMode === expected) return;
+        if (response.ok && report.details?.runtimeMode && report.details.runtimeMode !== expected) {
+          throw new SandboxProviderError("runtime_architecture_violation", `Configured ${expected} runtime requires its matching provider, but the runner is ${report.details.runtimeMode}`, 503, "provider_selection");
         }
+        reason = response.ok ? `not ready: ${report.reasons?.join(",") || "unknown"}` : `HTTP ${response.status}`;
       } catch (error) {
         if (error instanceof SandboxProviderError) throw error;
-        throw new SandboxProviderError("runner_unavailable", `Configured ${expected} runtime readiness could not be established; provider fallback is prohibited`, 503, "provider_selection", "project.terminal.exec", true);
+        reason = error instanceof Error ? error.message : String(error);
       }
+      console.warn(`[sandbox-runner-client] readiness wait after ${Date.now() - started} ms: ${reason}`);
+      if (Date.now() - started >= waitMs) {
+        throw new SandboxProviderError("runner_unavailable", `The ${expected} project runtime did not become ready in ${Math.round(waitMs / 1000)} s (${reason})`, 503, "provider_selection", "project.terminal.exec", true);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
     }
   }
   private async request<T>(operation: string, payload: Record<string, unknown>, timeoutMs = 30_000): Promise<T> {
-    await this.assertBackend();
+    // Reading a command's output changes nothing and is asked for every 1.5 s. A readiness check starts a sandbox each time.
+    if (operation !== "getLiveOutput") await this.assertBackend();
     const body = JSON.stringify({ operation, payload });
     const runnerEndpoint = new URL("/v1/sandbox", this.endpoint).origin + "/v1/sandbox";
     const requestScope = payload.scope as SandboxScope | undefined;
@@ -223,6 +244,7 @@ export class RemoteSandboxProvider implements SandboxProvider {
   exposePort(scope: SandboxScope, sandboxId: string, port: number) { return this.request<{ port: number; internalHost: string }>("exposePort", { scope, sandboxId, port }); }
   getLogs(scope: SandboxScope, sandboxId: string, processId?: string) { return this.request<string>("getLogs", { scope, sandboxId, processId }); }
   getStatus(scope: SandboxScope, sandboxId: string) { return this.request<SandboxStatus>("getStatus", { scope, sandboxId }); }
+  getLiveOutput(scope: SandboxScope, sandboxId: string) { return this.request<{ running: boolean; output: string }>("getLiveOutput", { scope, sandboxId }); }
   startProcess(scope: SandboxScope, sandboxId: string, command: string, options: SandboxCommandOptions) { return this.request<SandboxCommandResult>("startProcess", { scope, sandboxId, command, options }, options.timeoutMs + 15_000); }
   stopProcess(scope: SandboxScope, sandboxId: string, processId: string) { return this.request<SandboxCommandResult>("stopProcess", { scope, sandboxId, processId }); }
   getProcessStatus(scope: SandboxScope, sandboxId: string, processId: string) { return this.request<SandboxCommandResult>("getProcessStatus", { scope, sandboxId, processId }); }

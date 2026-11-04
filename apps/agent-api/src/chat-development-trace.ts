@@ -58,7 +58,8 @@ export function metadataOnlyProgress(events: DevelopmentProcessProgressItem[], l
 /** Include only the session's roots and their explicitly linked children in this tenant/project. */
 export function selectDevelopmentTraceRuns(runs: CodeRunStateRecord[], ctx: AuthContext, process: DevelopmentProcess) {
   const scoped = runs.filter(run => run.workspaceId === ctx.workspaceId && run.companyId === process.companyId && run.projectId === process.projectId);
-  const roots = scoped.filter(run => run.sessionId === process.sessionId && typeof run.details.parentRunId !== "string");
+  // A chat opened from an existing project has no session of its own yet: its runs are simply this project's runs.
+  const roots = scoped.filter(run => (!process.sessionId || run.sessionId === process.sessionId) && typeof run.details.parentRunId !== "string");
   const allowed = new Set(roots.map(run => run.runId));
   for (let i = 0; i < scoped.length; i++) {
     let changed = false;
@@ -223,7 +224,9 @@ async function readDevelopmentTrace(store: WorkspaceStore, ctx: AuthContext, pro
     for(const usage of usages.values()) if(!progress.some(item=>item.id===usage.id)) progress.push({id:usage.id,runId:run.runId,stage:"model_usage",title:"Model usage",at:process.createdAt,status:"completed",modelUsage:usage});
     for (const event of activity) {
       const p = event.payload, id = String(p.toolCallId ?? event.id);
-      if (typeof p.tool !== "string" || calls.has(id)) continue;
+      if (typeof p.tool !== "string" || event.kind === "policy_decision") continue;
+      const opened = calls.get(id);
+      if (opened) { if (!opened.file && string(p.path)) opened.file = string(p.path); continue; }
       const eventAt = executionTimestamp(event.createdAt);
       if (!p.toolCallId && eventAt !== undefined && typeof p.durationMs === "number" && [...progress, ...calls.values()].some(call =>
         call.runId === run.runId && call.tool === p.tool && call.durationMs !== undefined && Math.abs(call.durationMs - Number(p.durationMs)) < 100 &&
@@ -250,8 +253,17 @@ async function readDevelopmentTrace(store: WorkspaceStore, ctx: AuthContext, pro
         (call.stdout ?? executionResultDetails(call.result).stdout ?? "").includes(sanitizeExecutionTrace(log.output.trim()).slice(0, 1000)));
       if (log.runId ? log.runId !== process.runId : !matchedVerification && (!setupEnd || at < Date.parse(process.createdAt) || (setupEnd && at > Date.parse(setupEnd)))) continue;
       // Shell calls already have their result in replay; avoid rendering the same command twice.
-      const existing = [...progress, ...calls.values()].find(call => call.command === sanitizeExecutionTrace(log.commandSummary) && Math.abs(Date.parse(call.at) - Date.parse(log.createdAt)) <= log.durationMs + 2000);
-      const details = { command: log.commandSummary, result: log.output, exitCode: log.exitCode ?? undefined,
+      const dispatched = log.commandSummary.startsWith("Dispatched command (");
+      const existing = [...progress, ...calls.values()].find(call => {
+        const gap = Math.abs(Date.parse(call.at) - at);
+        if (dispatched) return log.runId === call.runId && call.command !== undefined && call.status === "failed" && gap <= (call.durationMs ?? 0) + 30_000;
+        if (call.command !== sanitizeExecutionTrace(log.commandSummary)) return false;
+        const sameDuration = call.durationMs !== undefined && Math.abs(call.durationMs - log.durationMs) < 1_000;
+        return gap <= (call.durationMs ?? 0) + log.durationMs + 5000 || (sameDuration && gap <= 600_000);
+      });
+      // A failed dispatch only has a hash for its command. Without a call to attach to it says nothing to a user.
+      if (dispatched && !existing) continue;
+      const details = { command: dispatched ? existing?.command ?? log.commandSummary : log.commandSummary, result: log.output, exitCode: log.exitCode ?? undefined,
         durationMs: log.durationMs, errorCode: log.errorCode, agentId: log.agentId };
       if (existing) { Object.assign(existing, sanitizeProgress({ ...existing, ...details, status:log.exitCode !== null && log.exitCode !== 0 || log.status==="failed" || log.status==="timed_out" ? "failed" : log.status==="running" ? "running" : log.status==="stopped" ? "cancelled" : existing.status === "failed" ? "failed" : "completed" })); continue; }
       progress.push(sanitizeProgress({ id: "terminal:" + log.id, runId: log.runId ?? (matchedVerification ? process.runId : undefined), stage: "command", title: "Running command", at: log.createdAt,

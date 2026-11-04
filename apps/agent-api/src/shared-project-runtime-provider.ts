@@ -44,6 +44,9 @@ export function projectRuntimeWorkspaceCommand(command: string, directory: strin
 
 /** One supervisor, many logical sandboxes. It implements the existing contract,
  * so canonical file revisions, project context, approvals and audit stay in API. */
+/** prepare-project-dependencies.cjs --plan: no prepared set fits, so a real npm install is needed. */
+const NO_PREPARED_DEPENDENCIES = 75;
+
 export class SharedProjectRuntimeProvider implements SandboxProvider {
   readonly executionMode = "shared" as const;
   async processCapabilities() { await this.ready; return { durableIdentity: true, terminalStatus: true }; }
@@ -201,7 +204,7 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
       // Loopback belongs to the command namespace; its helper enforces egress.
       NO_PROXY: "localhost,127.0.0.1,0.0.0.0,::1", no_proxy: "localhost,127.0.0.1,0.0.0.0,::1",
       npm_config_proxy: "http://127.0.0.1:8080", npm_config_https_proxy: "http://127.0.0.1:8080", NPM_CONFIG_CACHE: `${directory}/.npati-runtime/npm`,
-      npm_config_prefer_offline: "true", npm_config_nodedir: "/usr/local", npm_config_audit: "false", npm_config_fund: "false", NEXT_TELEMETRY_DISABLED: "1", CI: "1" };
+      npm_config_prefer_offline: "true", npm_config_loglevel: "http", npm_config_nodedir: "/usr/local", npm_config_audit: "false", npm_config_fund: "false", NEXT_TELEMETRY_DISABLED: "1", CI: "1" };
   }
   private launch(entry: Entry, executable: string, args: string[], cwd = ".", environment?: Record<string, string>, detached = false, preview = false, offline = false) {
     const child = spawn(this.launcher, [String(entry.uid), this.directory(entry), String(entry.port), path.join(this.directory(entry), cwd), ...(preview ? ["--preview"] : offline ? ["--offline"] : []), executable, ...args],
@@ -209,9 +212,20 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
     child.once("close", () => this.closedChildren.add(child));
     return child;
   }
-  private async collect(entry: Entry, executable: string, args: string[], input: string, options: SandboxCommandOptions, cwd = ".", offline = false, wholeOutput = false) {
+  /** What the running command has printed so far: a chat row shows it while the command works. */
+  private readonly liveOutput = new Map<string, { text: string }>();
+  private noteLiveOutput(id: string, data: Buffer) {
+    const current = this.liveOutput.get(id);
+    if (current) current.text = (current.text + data.toString()).slice(-16000);
+  }
+  async getLiveOutput(scope: SandboxScope, id: string) {
+    const entry = await this.entry(scope, id);
+    return { running: this.liveOutput.has(entry.id), output: this.liveOutput.get(entry.id)?.text ?? "" };
+  }
+  private async collect(entry: Entry, executable: string, args: string[], input: string, options: SandboxCommandOptions, cwd = ".", offline = false, wholeOutput = false, live = false) {
     const child = this.launch(entry, executable, args, cwd, options.environment, true, false, offline);
     const jobs = this.jobs.get(entry.id) ?? new Set<ChildProcess>(); this.jobs.set(entry.id, jobs); jobs.add(child);
+    if (live) { const mine = {text: ""}; this.liveOutput.set(entry.id, mine); child.once("close", () => { if (this.liveOutput.get(entry.id) === mine) this.liveOutput.delete(entry.id); }); }
     // File sync needs every byte; cutting its output would only produce broken JSON.
     const limit = wholeOutput ? Number.POSITIVE_INFINITY : Math.min(Math.max(options.outputLimitBytes, 1024), 32_000_000);
     let stdout: Buffer<ArrayBufferLike> = Buffer.alloc(0), stderr: Buffer<ArrayBufferLike> = Buffer.alloc(0), timedOut = false, settled = false;
@@ -249,7 +263,7 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
         stop();
         // `exit` normally follows the group kill. Keep a hard ceiling even if it does not.
         drainTimer = setTimeout(() => settle(null), 2_000);
-      }, Math.min(Math.max(options.timeoutMs, 1000), 600_000));
+      }, Math.max(options.timeoutMs, 1000));
       child.on("error", error => {
         if (settled) return;
         settled = true;
@@ -257,8 +271,8 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
         if (drainTimer) clearTimeout(drainTimer);
         reject(error);
       });
-      child.stdout!.on("data", (data: Buffer) => { stdout = append(stdout, data); });
-      child.stderr!.on("data", (data: Buffer) => { stderr = append(stderr, data); });
+      child.stdout!.on("data", (data: Buffer) => { stdout = append(stdout, data); if (live) this.noteLiveOutput(entry.id, data); });
+      child.stderr!.on("data", (data: Buffer) => { stderr = append(stderr, data); if (live) this.noteLiveOutput(entry.id, data); });
       // `exit` fires when the command itself ends; `close` only after every inherited stdio
       // handle is closed. Verification builds can leave an esbuild service alive, so waiting
       // for `close` alone is the hang this bounded settle exists to prevent.
@@ -275,16 +289,41 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
   private command(command: string, cwd?: string) { const normalized = normalizeTerminalCommand({ command, cwd }); classifyTerminalCommand({ command: normalized.command, cwd: normalized.cwd }); return normalized; }
   async executeCommand(scope: SandboxScope, id: string, command: string, options: SandboxCommandOptions) {
     const entry = await this.entry(scope, id), normalized = this.command(command, options.cwd);
-    if (/^(?:npm|npx)\b/.test(normalized.command)) await this.linkNpmCache(entry);
     if (/^npm (?:install|ci)$/.test(normalized.command) && normalized.cwd === ".") {
-      return this.collect(entry, "node", ["/opt/npati-runtime/prepare-project-dependencies.cjs", normalized.command.slice(4)], "", options);
+      const script = "/opt/npati-runtime/prepare-project-dependencies.cjs", mode = normalized.command.slice(4);
+      const plan = await this.collect(entry, "node", [script, mode, "--plan"], "", options);
+      if (plan.exitCode === NO_PREPARED_DEPENDENCIES) await this.linkNpmCache(entry);
+      else if (plan.exitCode === 0) await this.linkPreparedModules(entry, plan.stdout.split("\n").map(line => line.trim()).find(line => /^[a-z0-9-]+$/.test(line)) ?? "", mode === "ci");
+      return this.collect(entry, "node", [script, mode], "", options, ".", false, false, true);
     }
-    return this.collect(entry, "sh", ["-s"], projectRuntimeWorkspaceCommand(normalized.command, this.directory(entry)), options, normalized.cwd);
+    if (/^(?:npx\b|npm (?:i|add|install|ci|exec|x|create|init|update|up)\b)/.test(normalized.command)) await this.linkNpmCache(entry);
+    return this.collect(entry, "sh", ["-s"], projectRuntimeWorkspaceCommand(normalized.command, this.directory(entry)), options, normalized.cwd, false, false, true);
   }
   /**
    * Gives a project the prepared npm cache as hard links: instant, and no extra disk. The linked files stay root-owned
    * and read-only, so one project cannot change them for the others; the index is a real copy because npm appends to it.
    */
+  private async linkPreparedModules(entry: Entry, profile: string, clean: boolean) {
+    if (!profile) return;
+    const seed = path.join(this.root, ".modules-seed", profile, "node_modules");
+    const target = path.join(this.directory(entry), "node_modules");
+    if (await access(path.join(this.root, ".modules-seed", profile, ".complete")).then(() => false, () => true)) return;
+    const marker = await readFile(path.join(target, ".npati-prepared"), "utf8").catch(() => "");
+    if (marker.trim() === profile && !clean) return;
+    try {
+      await rm(target, { recursive: true, force: true });
+      await executeFile("cp", ["-al", seed, target]);
+      await executeFile("find", [target, "-type", "d", "-exec", "chown", `${entry.uid}:${entry.uid}`, "{}", "+"]);
+      await writeFile(path.join(target, ".npati-prepared"), profile + "\n");
+      await chown(path.join(target, ".npati-prepared"), entry.uid, entry.uid);
+      await writeFile(path.join(target, ".npati-linked"), "");
+      await chown(path.join(target, ".npati-linked"), entry.uid, entry.uid);
+    } catch (error) {
+      // The script then copies the set itself: slower, same result.
+      await rm(target, { recursive: true, force: true }).catch(() => undefined);
+      console.warn(`[project-runtime] prepared modules link failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
   private async linkNpmCache(entry: Entry) {
     const seed = path.join(this.root, ".npm-seed", "_cacache");
     const target = path.join(this.directory(entry), ".npati-runtime", "npm", "_cacache");
@@ -408,7 +447,7 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
         termination = "timed_out";
         if (child.pid) try { process.kill(-child.pid, "SIGKILL"); } catch { /* exited */ }
       }
-    }, Math.min(Math.max(options.timeoutMs, 1000), 600_000)) : undefined;
+    }, Math.max(options.timeoutMs, 1000)) : undefined;
     child.on("close", async code => {
       clearTimeout(timer);
       // Persist output before publishing a completed terminal identity.

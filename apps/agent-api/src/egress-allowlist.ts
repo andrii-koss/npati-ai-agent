@@ -69,6 +69,7 @@ export const DEFAULT_INSTALL_ALLOWLIST: readonly string[] = [
   "repo.packagist.org",
   "repo.maven.apache.org",
   "plugins.gradle.org",
+  "pub.dev",
 ] as const;
 
 /**

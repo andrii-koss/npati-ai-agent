@@ -67,6 +67,7 @@ export const DEFAULT_DEPS_POLICY_LIMITS: DepsPolicyLimits = {
     "crates.io",
     "static.crates.io",
     "repo.packagist.org",
+    "pub.dev",
     "github.com",
     "objects.githubusercontent.com",
   ],

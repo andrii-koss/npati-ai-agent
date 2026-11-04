@@ -18,6 +18,12 @@ export function registerProjectTerminalRoutes(app: FastifyInstance, auth: AuthPr
     try { return { events: await events.list(await context(request), request.params.companyId, request.params.projectId) }; }
     catch (error) { return fail(reply, error); }
   });
+  app.get<{ Params: { companyId: string; projectId: string } }>("/companies/:companyId/projects/:projectId/terminal/live", async (request, reply) => {
+    try {
+      const ctx = await context(request);
+      return sandbox ? await sandbox.liveOutput(ctx, request.params.companyId, request.params.projectId) : { running: false, lines: [] };
+    } catch (error) { return fail(reply, error); }
+  });
   app.get<{ Params: { companyId: string; projectId: string } }>("/companies/:companyId/projects/:projectId/terminal/logs", async (request, reply) => {
     try {
       const ctx = await context(request);

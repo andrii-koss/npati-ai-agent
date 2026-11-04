@@ -43,7 +43,7 @@ describe("shared runner readiness cache", () => {
     f.isolation.mockImplementationOnce(() => new Promise<string>(done => { resolve = done; }));
     const old = f.runner.check(); f.runner.invalidate();
     await f.runner.check(); resolve("namespaces:stale");
-    expect((await old).isolation).toBeNull();
+    expect((await old).isolation).toBe("namespaces:verified");
     expect((await f.runner.check()).isolation).toBe("namespaces:verified");
     expect(f.isolation).toHaveBeenCalledTimes(2);
   });

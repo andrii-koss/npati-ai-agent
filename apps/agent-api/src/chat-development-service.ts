@@ -158,7 +158,7 @@ export class ChatDevelopmentService {
       // loaded lease summaries, without hydrating every unrelated project's replay, inbox and conversation.
       if (currentOrActiveOnly && !detailed && !developmentIsActive(stored) && latestRun?.status !== "running") return null;
       const project = stored.projectId ? await this.d.projects.get(ctx, stored.companyId, stored.projectId) : null;
-      const traceProcess = latestRun ? { ...stored, runId: latestRun.runId, detail: latestRun.runId === stored.runId ? stored.detail : undefined } : stored;
+      const traceProcess = latestRun ? { ...stored, runId: latestRun.runId, sessionId: stored.sessionId ?? latestRun.sessionId, detail: latestRun.runId === stored.runId ? stored.detail : undefined } : stored;
       const progress = detailed ? await developmentTrace(this.d.store, ctx, traceProcess, this.d.terminalEvents) : stored.progress ?? [];
       const history = detailed ? await Promise.all([...traceRuns.roots, ...traceRuns.children].filter(run => run.runId !== traceProcess.runId).map(run =>
         developmentTrace(this.d.store, ctx, { ...stored, progress: (stored.progress ?? []).filter(event => event.runId === run.runId), runId: run.runId, sessionId: run.sessionId }, this.d.terminalEvents))) : [];

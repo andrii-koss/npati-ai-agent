@@ -66,6 +66,24 @@ if [ -f "$seed_source/.stamp" ] && ! cmp -s "$seed_source/.stamp" "$seed/.comple
   ) &
 fi
 
+# One read-only copy of each prepared set on the projects disk: a project hard-links it in about a second.
+(
+  stamp=/opt/npati-project-toolchain/npm-cache/.stamp
+  for profile in /opt/npati-project-toolchain/*/node_modules; do
+    name=$(basename "$(dirname "$profile")")
+    case "$name" in npm-cache) continue;; esac
+    target="/projects/.modules-seed/$name"
+    if [ -f "$stamp" ] && cmp -s "$stamp" "$target/.complete"; then continue; fi
+    rm -rf "$target" "$target.tmp"
+    mkdir -p "$target.tmp"
+    cp -R "$profile" "$target.tmp/node_modules"
+    chmod -R a+rX,go-w "$target.tmp"
+    if [ -f "$stamp" ]; then cp "$stamp" "$target.tmp/.complete"; else date > "$target.tmp/.complete"; fi
+    mv "$target.tmp" "$target"
+  done
+  chmod 755 /projects/.modules-seed 2>/dev/null || true
+) &
+
 # Reading prepared modules from a cold image took minutes on the first project after a start.
 ( find /opt/npati-project-toolchain -type f -not -path "*/npm-cache/*" -exec cat {} + > /dev/null 2>&1 ) &
 

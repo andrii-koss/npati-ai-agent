@@ -35,6 +35,7 @@ describe("frozen shared local runtime", () => {
   it("honors explicit shared architecture for hosted accounts without admitting the Docker provider", async () => {
     vi.stubEnv("NPATI_DEPLOYMENT_TYPE", "npati_hosted");
     vi.stubEnv("NPATI_PROJECT_RUNTIME_MODE", "shared");
+    vi.stubEnv("NPATI_RUNNER_READINESS_WAIT_MS", "0");
     expect(projectRuntimeMode()).toBe("shared");
     expect(() => assertProjectRuntimeProvider("shared")).not.toThrow();
     const admit = vi.fn();
@@ -48,6 +49,7 @@ describe("frozen shared local runtime", () => {
   });
   it("refuses Docker creation immediately in shared mode, before image admission or Docker", async () => {
     vi.stubEnv("NPATI_PROJECT_RUNTIME_MODE", "shared");
+    vi.stubEnv("NPATI_RUNNER_READINESS_WAIT_MS", "0");
     const admit = vi.fn();
     const provider = new DockerSandboxProvider({}, { admit });
     await expect(provider.createSandbox(scope)).rejects.toMatchObject({ code: "runtime_architecture_violation" });
@@ -58,6 +60,7 @@ describe("frozen shared local runtime", () => {
   });
   it("rejects a substituted isolated runner on creation, execution and recovery without a sandbox call", async () => {
     vi.stubEnv("NPATI_PROJECT_RUNTIME_MODE", "shared");
+    vi.stubEnv("NPATI_RUNNER_READINESS_WAIT_MS", "0");
     const transport = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ overall_ready: true, details: { runtimeMode: "isolated" } })));
     const provider = new RemoteSandboxProvider("https://runner.example", "x".repeat(32), transport);
     for (const operation of [() => provider.createSandbox(scope), () => provider.getStatus(scope, "old"),
@@ -67,15 +70,16 @@ describe("frozen shared local runtime", () => {
     expect(transport.mock.calls).toHaveLength(3);
     expect(transport.mock.calls.every(args => String(args[0]).endsWith("/v1/readiness"))).toBe(true);
   });
-  it("admits authenticated ready shared runtime and does not fall back if it becomes unready", async () => {
+  it("admits authenticated ready shared runtime and sends nothing if it becomes unready", async () => {
     vi.stubEnv("NPATI_PROJECT_RUNTIME_MODE", "shared");
+    vi.stubEnv("NPATI_RUNNER_READINESS_WAIT_MS", "0");
     const transport = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify({ overall_ready: true, details: { runtimeMode: "shared" } })))
       .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: "logical-workspace" } })))
       .mockResolvedValueOnce(new Response(JSON.stringify({ overall_ready: false, details: { runtimeMode: "shared" } })));
     const provider = new RemoteSandboxProvider("https://runner.example", "x".repeat(32), transport);
     expect(await provider.createSandbox(scope)).toEqual({ id: "logical-workspace" });
-    await expect(provider.getStatus(scope, "logical-workspace")).rejects.toMatchObject({ code: "runtime_architecture_violation" });
+    await expect(provider.getStatus(scope, "logical-workspace")).rejects.toMatchObject({ code: "runner_unavailable", retryable: true });
     expect(transport).toHaveBeenCalledTimes(3);
   });
   it("does not let an explicitly isolated deployment use the shared backend", async () => {
@@ -85,8 +89,20 @@ describe("frozen shared local runtime", () => {
     await expect(provider.createSandbox(scope)).rejects.toMatchObject({ code: "runtime_architecture_violation" });
     expect(transport).toHaveBeenCalledTimes(1);
   });
+  it("waits for a runner that is briefly slow or unready instead of failing the command", async () => {
+    vi.stubEnv("NPATI_PROJECT_RUNTIME_MODE", "shared");
+    vi.stubEnv("NPATI_RUNNER_READINESS_WAIT_MS", "60000");
+    const transport = vi.fn<typeof fetch>()
+      .mockRejectedValueOnce(new Error("The operation was aborted due to timeout"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ overall_ready: true, details: { runtimeMode: "shared" } })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: "logical-workspace" } })));
+    const provider = new RemoteSandboxProvider("https://runner.example", "x".repeat(32), transport);
+    expect(await provider.createSandbox(scope)).toEqual({ id: "logical-workspace" });
+    expect(transport).toHaveBeenCalledTimes(3);
+  });
   it("reports unavailable shared readiness and sends no project operation", async () => {
     vi.stubEnv("NPATI_PROJECT_RUNTIME_MODE", "shared");
+    vi.stubEnv("NPATI_RUNNER_READINESS_WAIT_MS", "0");
     const transport = vi.fn<typeof fetch>().mockRejectedValue(new Error("offline"));
     const provider = new RemoteSandboxProvider("https://runner.example", "x".repeat(32), transport);
     await expect(provider.getStatus(scope, "existing")).rejects.toMatchObject({ code: "runner_unavailable", step: "provider_selection" });

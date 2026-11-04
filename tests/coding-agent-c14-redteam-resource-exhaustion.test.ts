@@ -149,7 +149,7 @@ describe("security-gate: C14 red-team — disk and memory exhaustion", () => {
     expect(defaultTerminalLimits.syncMaxBytes).toBe(Number.POSITIVE_INFINITY);
     expect(defaultTerminalLimits.syncMaxFiles).toBe(Number.POSITIVE_INFINITY);
     expect(defaultTerminalLimits.commandTimeoutMs).toBe(120_000);
-    expect(defaultTerminalLimits.installBuildTimeoutMs).toBe(600_000);
+    expect(defaultTerminalLimits.installBuildTimeoutMs).toBe(3_600_000);
   });
 
   it("bounds what a command prints, on the way in and again in the untrusted-data envelope", () => {

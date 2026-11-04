@@ -23,12 +23,17 @@ export function useChatDevelopment(options: {
   // edited the TODO again is still on the TODO.
   const latestWorked = options.latestProjectId && options.conversationId
     ? processes.find(p => p.projectId === options.latestProjectId && p.conversationId === options.conversationId) : undefined;
-  const currentProcess = latestWorked
+  // A request in this chat can create a new project while the address still names the one it was opened from.
+  // What runs in this chat right now is what the chat shows.
+  const runningInChat = options.conversationId
+    ? processes.find(p => (p.conversationId === options.conversationId || p.parentConversationId === options.conversationId) && developmentIsActive(p)) : undefined;
+  const currentProcess = runningInChat
+    ?? latestWorked
     // Without a process for the chat's newest project, another project of this chat is not substituted for it.
     ?? (options.latestProjectId ? undefined : processes.find(p => p.conversationId === options.conversationId && (!queryProjectId || p.projectId === queryProjectId)))
     ?? (options.latestProjectId ? undefined : processes.find(p => p.parentConversationId === options.conversationId && (!queryProjectId || p.projectId === queryProjectId)))
     ?? (queryProjectId ? processes.find(p => p.projectId === queryProjectId) : undefined);
-  const projectId = latestWorked?.projectId ?? queryProjectId ?? currentProcess?.projectId;
+  const projectId = runningInChat?.projectId ?? latestWorked?.projectId ?? queryProjectId ?? currentProcess?.projectId;
   // Opening a project from Settings first moves to its own chat; a message sent meanwhile would be cut off by that move.
   const [openingProjectChat, setOpeningProjectChat] = useState(false);
   const previousStatuses = useRef(new Map<string, string>());
@@ -67,7 +72,8 @@ export function useChatDevelopment(options: {
   }
   const anyActive = processes.some(developmentIsActive);
   // A project chat keeps live updates (a new run starts after the previous one finished); a chat without processes has none.
-  const live = anyActive || processes.some(p => p.conversationId === options.conversationId || p.parentConversationId === options.conversationId);
+  // A request being sent may start a process this page has not heard of yet, so follow while the chat is busy.
+  const live = anyActive || Boolean(options.busy) || processes.some(p => p.conversationId === options.conversationId || p.parentConversationId === options.conversationId);
   useEffect(() => {
     alive.current = true;
     return () => { alive.current = false; };
@@ -78,6 +84,8 @@ export function useChatDevelopment(options: {
     // A chat without development processes needs no polling and no live stream; a started process turns them on.
     if (!live) return;
     const poll = () => { if (!document.hidden) void refresh().catch(() => {}); };
+    // The stream already carries every change and its heartbeat comes every 3 s. A second reader only loads the server.
+    let streamAliveAt = 0;
     let controller: AbortController | undefined;
     const visibility = () => {
       controller?.abort(); controller = undefined;
@@ -91,12 +99,12 @@ export function useChatDevelopment(options: {
           if (stream.signal.aborted) return;
           if (snapshot) { snapshotGeneration.current++; setProcesses(snapshot); }
           else poll();
-        }, queryProjectId ? undefined : callbacks.current.conversationId ?? currentChatConversationId() ?? "", queryProjectId ?? undefined);
+        }, queryProjectId ? undefined : callbacks.current.conversationId ?? currentChatConversationId() ?? "", queryProjectId ?? undefined, () => { streamAliveAt = Date.now(); });
       }
     };
     visibility();
     document.addEventListener("visibilitychange", visibility);
-    const timer = window.setInterval(poll, anyActive ? 5000 : 10000);
+    const timer = window.setInterval(() => { if (Date.now() - streamAliveAt > 15_000) poll(); }, anyActive ? 5000 : 10000);
     return () => { controller?.abort(); window.clearInterval(timer); document.removeEventListener("visibilitychange", visibility); };
   }, [live, anyActive]);
   useEffect(() => {

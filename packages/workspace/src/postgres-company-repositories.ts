@@ -205,7 +205,7 @@ export async function appendMessage(pool: Pool, context: AuthContext, businessId
 
 export async function listNeutralConversations(pool: Pool, context: AuthContext) {
     await ensureIdentity(pool, context);
-    return (await pool.query<Conversation>(`SELECT ${conversationColumns} FROM conversations WHERE workspace_id=$1 AND business_id IS NULL AND user_id=$2 ORDER BY updated_at DESC`, [context.workspaceId, context.userId])).rows;
+    return (await pool.query<Conversation>(`SELECT ${conversationColumns} FROM conversations WHERE workspace_id=$1 AND business_id IS NULL AND user_id=$2 AND NOT (title='Development projects' AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id=conversations.id AND m.role='user')) ORDER BY updated_at DESC`, [context.workspaceId, context.userId])).rows;
   }
 
 export async function createNeutralConversation(pool: Pool, context: AuthContext, title: string) {

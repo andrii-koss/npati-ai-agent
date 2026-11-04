@@ -148,7 +148,7 @@ describe("security-gate: C4 shell classification — safe and controlled work", 
 
   it("treats dependency installation and project scripts as controlled work with the long timeout", () => {
     expect(resolveCommandLimits("npm ci").timeoutClass).toBe("install");
-    expect(resolveCommandLimits("npm ci").timeoutMs).toBe(600_000);
+    expect(resolveCommandLimits("npm ci").timeoutMs).toBe(3_600_000);
     expect(resolveCommandLimits("pnpm install --frozen-lockfile").timeoutClass).toBe("install");
     expect(resolveCommandLimits("cargo fetch").timeoutClass).toBe("install");
     expect(resolveCommandLimits("ls -la").timeoutClass).toBe("default");

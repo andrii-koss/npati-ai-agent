@@ -135,7 +135,11 @@ export async function finishCodeChatWebsite(input: CodeSessionRunInput, result: 
   await emitCodingActivity(input, { ...activity, status: "running" });
   try {
     const preview = await ports.startPreview(input.ctx, companyId, projectId, input.sink?.signal, { development: !!stylePreview });
-    await emitCodingActivity(input, { ...activity, status: preview.status === "running" ? "completed" : "failed", durationMs: Date.now() - Date.parse(activity.at) });
+    // The row says what ran and how it ended, so the log explains the step.
+    const started = preview as { command?: string; port?: number; previewUrl?: string; status?: string };
+    await emitCodingActivity(input, { ...activity, status: preview.status === "running" ? "completed" : "failed", durationMs: Date.now() - Date.parse(activity.at),
+      ...(started.command ? { command: started.command } : {}),
+      result: [`Preview: ${started.status ?? "unknown"}`, started.command ? `Command: ${started.command}` : "", started.port ? `Port: ${started.port}` : "", started.previewUrl ? `Address: ${started.previewUrl}` : ""].filter(Boolean).join("\n") });
     return { ...run, websitePreview: preview };
   } catch (error) {
     await emitCodingActivity(input, { ...activity, status: input.sink?.signal.aborted ? "cancelled" : "failed", error: error instanceof Error ? error.message : "Preview failed" });

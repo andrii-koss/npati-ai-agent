@@ -128,7 +128,33 @@ export function mapReplayBundleStepRow(row: Record<string, unknown>): ReplayBund
     createdAt: new Date(row.createdAt as string | Date),
   };
 }
+/**
+ * Every API request passes through here, and each write waits for the disk: a run spent minutes in these three inserts.
+ * The rows only need to exist, so a recent success (or one already on its way) is enough.
+ */
+const IDENTITY_TTL_MS = 5 * 60_000;
+const knownIdentities = new WeakMap<Pool, Map<string, { at: number; pending?: Promise<void> }>>();
+
 export async function ensureIdentity(pool: Pool, context: AuthContext) {
+  let known = knownIdentities.get(pool);
+  if (!known) { known = new Map(); knownIdentities.set(pool, known); }
+  const key = JSON.stringify([context.userId, context.workspaceId, context.externalSubject ?? null]);
+  const entry = known.get(key);
+  if (entry?.pending) return entry.pending;
+  if (entry && Date.now() - entry.at < IDENTITY_TTL_MS) return;
+  const pending = writeIdentity(pool, context);
+  const current = { at: 0, pending };
+  known.set(key, current);
+  try {
+    await pending;
+    known.set(key, { at: Date.now() });
+  } catch (error) {
+    if (known.get(key) === current) known.delete(key);
+    throw error;
+  }
+}
+
+async function writeIdentity(pool: Pool, context: AuthContext) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");

@@ -36,6 +36,9 @@ const sameCard = (left: ProjectCardData | null | undefined, right: ProjectCardDa
  * change: typing in the composer or the streamed reply of another message leaves it as it is.
  */
 export const ChatMessageRow = memo(function ChatMessageRow({ message, card, showToolbar, previewBusy = false, responseLanguage, actions }: ChatMessageRowProps) {
+  const assistantText = message.role === "user" ? "" : projectChatText(message.content, message.projectCard, responseLanguage);
+  // The opening note of a project chat only names the project. With nothing to show there is nothing to copy or rate.
+  if (message.role !== "user" && !assistantText.trim() && !card && !message.attachments?.length) return null;
   return (
     <article
       ref={(element) => actions.registerArticle(message.id, element)}
@@ -50,11 +53,11 @@ export const ChatMessageRow = memo(function ChatMessageRow({ message, card, show
       ) : (
         <>
           <PendingMessageAttachments value={message.attachments ?? []} />
-          <ChatMessageContent content={projectChatText(message.content, message.projectCard, responseLanguage)} />
+          <ChatMessageContent content={assistantText} />
         </>
       )}
       {card && <ChatProjectPreviewCard card={card} showPreviewTrigger={!previewBusy} onActivate={actions.activateCard} />}
-      {showToolbar && <AssistantMessageToolbar content={message.content} onRegenerate={() => actions.regenerate(message.id)} />}
+      {showToolbar && Boolean(assistantText.trim()) && <AssistantMessageToolbar content={message.content} onRegenerate={() => actions.regenerate(message.id)} />}
     </article>
   );
 }, (previous, next) => previous.message.id === next.message.id && previous.message.content === next.message.content

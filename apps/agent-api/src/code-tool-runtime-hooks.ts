@@ -33,6 +33,10 @@ export function toFailure(error: unknown, tool: string): CodeToolInvokeFailure {
   if (error instanceof SsrfPolicyError) {
     return { ok: false, error: { code: "web_host_not_allowed" as never, status: 403, message: "This host is not in the allowed web list (NPATI_WEB_FETCH_ALLOWED_HOSTS). Tell the user the page cannot be opened; do not retry.", tool, step: "execute", retryable: false } };
   }
+  if (error instanceof Error && error.name === "ShellRuntimeError") {
+    const known = error as Error & { code: string; httpStatus?: number; retryable?: boolean };
+    return { ok: false, error: { code: known.code as never, status: known.httpStatus ?? 500, message: known.message, tool, step: "execute", retryable: known.retryable ?? false } };
+  }
   console.error("[code-tool] unexpected failure", tool, error instanceof Error ? error.name + ": " + error.message.slice(0, 300) : typeof error);
   return { ok: false, error: { code: "tool_failed", status: 500, message: "Tool execution failed", tool, step: "execute", retryable: true } };
 }

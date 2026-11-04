@@ -7,7 +7,7 @@ const common = ['--unshare-user', '--unshare-pid', '--unshare-ipc', '--unshare-u
   '--uid', '0', '--gid', '0', '--cap-drop', 'ALL', '--die-with-parent', '--new-session'];
 const filter = openSync('/opt/npati-runtime/project-command.seccomp', 'r');
 const tools = ['/usr', '/bin', '/sbin', '/lib', '/lib64', '/etc',
-  '/opt/npati-package-managers', '/opt/npati-project-toolchain', '/opt/npati-qa',
+  '/opt/npati-package-managers', '/opt/npati-project-toolchain', '/opt/npati-qa', '/opt/flutter', '/opt/flutter-glibc',
   '/opt/npati-runtime/prepare-project-dependencies.cjs', '/opt/npati-runtime/project-runtime-inner.mjs'];
 const mounts = tools.filter(existsSync).flatMap(p => ['--ro-bind', p, p]);
 // Docker must allow this fresh procfs mount (systempaths=unconfined). Keep the

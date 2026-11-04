@@ -31,7 +31,7 @@ import { lookup } from "node:dns/promises";
  * vendor mirrors — so a proxy started by hand still denies everything outside the official registries.
  */
 const DEFAULT_ALLOWED_HOSTS =
-  "registry.npmjs.org,pypi.org,files.pythonhosted.org,index.crates.io,static.crates.io,proxy.golang.org,sum.golang.org,repo.packagist.org,repo.maven.apache.org,plugins.gradle.org";
+  "registry.npmjs.org,pypi.org,files.pythonhosted.org,index.crates.io,static.crates.io,proxy.golang.org,sum.golang.org,repo.packagist.org,repo.maven.apache.org,plugins.gradle.org,pub.dev";
 
 /** Hostnames that must never be reachable, whatever the allowlist says. */
 const FORBIDDEN_HOSTS = new Set([

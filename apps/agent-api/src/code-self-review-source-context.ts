@@ -27,20 +27,26 @@ export class SelfReviewSourceContext {
   async collect(host: ReviewCoordinatorHost, steps: number): Promise<string[]> {
     const context: string[] = [];
     this.pass += 1;
-    for (const path of [...this.paths].slice(0, 8)) {
+    const pass = this.pass;
+    const paths = [...this.paths].slice(0, 8);
+    const results = await Promise.all(paths.map(async (path) => {
+      const toolCallId = `review-context:${host.turnId}:${pass}:${sha256Hex(path).slice(0, 16)}`;
       const result = await host.ports.toolRuntime.invoke(host.ctx, {
         companyId: host.companyId, projectId: host.projectId, sessionId: host.sessionId,
         tool: "code.fs.read", args: { path, limit: 120 }, turnId: host.turnId,
-        toolCallId: `review-context:${host.turnId}:${this.pass}:${sha256Hex(path).slice(0, 16)}`,
+        toolCallId,
         ...(host.input.runId ? { runId: host.input.runId } : {}),
         ...host.capabilityScopeFields,
       });
+      return { path, toolCallId, result };
+    }));
+    for (const { path, toolCallId, result } of results) {
       if (result.ok) {
         const text = JSON.stringify(result.result);
         context.push(JSON.stringify({ source: "final_source_context", path, content: text.slice(0, 7000), truncated: text.length > 7000 }));
       }
       await host.record({ kind: "tool_call", companyId: host.companyId, projectId: host.projectId,
-        sessionId: host.sessionId, runId: host.input.runId, turn: steps, tool: "code.fs.read", ok: result.ok,
+        sessionId: host.sessionId, runId: host.input.runId, turn: steps, tool: "code.fs.read", toolCallId, path, ok: result.ok,
         ...(result.ok ? {} : { errorCode: result.error.code }) });
       host.summary.toolCalls += 1;
     }

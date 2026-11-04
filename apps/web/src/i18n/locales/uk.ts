@@ -15,6 +15,8 @@ export const uk: TranslationSchema = {
 "operationStatus": "Результат",
 "dryRun": "Перевірка без застосування змін",
     runningCommand: "Виконує команду: {{command}}",
+    fileChangedReadAgain: "Файл змінився, агент перечитує",
+    agentFinished: "Агент завершив роботу",
     operationsDone: "Виконано операцій: {{count}}",
     testsPassed: "Пройдено",
     working: "Думаю",

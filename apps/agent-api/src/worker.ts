@@ -30,6 +30,9 @@ import { ProjectTerminalEventsRepository } from "./project-terminal-events";
 import { ProjectSandboxService } from "./project-sandbox-service";
 import { RemoteSandboxProvider } from "./sandbox-provider";
 import { createProviderDataGuard, conservativeHostedPolicy } from "./provider-data-guard";
+import { keepPoolErrorsFromCrashing } from "./pg-pool-errors";
+
+keepPoolErrorsFromCrashing();
 const databaseUrl=process.env.DATABASE_URL,redisUrl=process.env.REDIS_URL;
 if(!databaseUrl||!redisUrl)throw new Error("DATABASE_URL and REDIS_URL are required by the Company worker");
 const baseAi=new OmniRouteEngine({baseUrl:process.env.OMNIROUTE_BASE_URL,apiKey:process.env.OMNIROUTE_API_KEY,transcriptionModel:process.env.OMNIROUTE_TRANSCRIPTION_MODEL,embeddingModel:process.env.OMNIROUTE_EMBEDDING_MODEL,rerankModel:process.env.OMNIROUTE_RERANK_MODEL});

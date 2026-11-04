@@ -35,7 +35,7 @@ export function normalizeTerminalCommand(input: string | TerminalCommandSpec): N
   const rawCommand = spec.command ?? spec.executable ?? "";
   if (typeof rawCommand !== "string" || !rawCommand.trim() || rawCommand.length > 4096 || rawCommand.includes("\0")) throw new Error("Invalid terminal command");
   if (spec.executable !== undefined && (typeof spec.executable !== "string" || spec.executable !== rawCommand.trim().split(/\s+/)[0])) throw new Error("Conflicting terminal executable");
-  if (spec.args !== undefined && (!Array.isArray(spec.args) || spec.args.length > 64 || !spec.args.every((arg) => typeof arg === "string" && /^[A-Za-z0-9._/@+=:-]+$/.test(arg)))) throw new Error("Invalid terminal arguments");
+  if (spec.args !== undefined && (!Array.isArray(spec.args) || spec.args.length > 64 || !spec.args.every((arg) => typeof arg === "string" && /^[A-Za-z0-9._/@+=:,-]+$/.test(arg)))) throw new Error("Invalid terminal arguments");
   const rawWords = rawCommand.trim().split(/\s+/);
   const words = spec.command && rawWords.length > 1 ? rawWords : [...rawWords, ...(spec.args ?? [])];
   const command = /[\r\n]/.test(rawCommand) ? rawCommand.trim() + (spec.args?.length && rawWords.length <= 1 ? " " + spec.args.join(" ") : "") : words.join(" ");
@@ -87,6 +87,11 @@ export function classifyTerminalCommand(input: string | TerminalCommandSpec): Te
   if (cli && frameworkCli(cli) && ["build", "dev", "start", "preview", "sync", "export"].includes(cliArgs[0] ?? "") && (cliArgs[0] !== "sync" || cli === "svelte-kit") && serverArgs(cliArgs.slice(1))) return result("controlled", "Run framework CLI inside sandbox", ["build", "export"].includes(cliArgs[0] ?? "") ? "install_build" : "default");
   if (program === "node" && action && relative(action) && /\.(?:js|mjs|cjs)$/.test(action) && serverArgs(args)) return result("controlled", "Run Node project server inside sandbox");
   if (["pip", "pip3"].includes(program!) && action === "install" && (args.every(packageName) || (args.length === 2 && args[0] === "-r" && relative(args[1]!)))) return result("controlled", "Install Python dependencies inside sandbox", "install_build");
+  if (program === "npx" && action === "expo" && args[0] === "export" && args.every((word) => /^[A-Za-z0-9_@=:.,/-]+$/.test(word) && !word.includes(".."))) return result("controlled", "Export the Expo project", "install_build");
+  if (program === "npx" && ["tsc", "eslint", "prettier", "vitest", "jest", "playwright"].includes(action ?? "") && args.every((word) => /^[A-Za-z0-9_@=:.,/-]+$/.test(word) && !word.includes(".."))) return result("controlled", "Check the project with its own tools", "install_build");
+  if (program === "flutter" || program === "dart") {
+    if (["pub", "analyze", "test", "build", "create", "format", "--version", "doctor", "clean"].includes(action ?? "")) return result("controlled", "Run the Flutter toolchain", "install_build");
+  }
   if (program === "composer" && action === "install" && args.every((word) => ["--no-interaction", "--prefer-dist", "--no-progress"].includes(word))) return result("controlled", "Install Composer dependencies inside sandbox", "install_build");
   return result("approval", "Unknown or destructive command requires approval");
 }

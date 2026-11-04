@@ -65,6 +65,7 @@ export const DEFAULT_ALLOWED_REGISTRIES = [
   "static.crates.io",
   "proxy.golang.org",
   "sum.golang.org",
+  "pub.dev",
 ];
 
 /**

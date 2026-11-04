@@ -8,7 +8,7 @@ export function createSharedRuntimeReadiness(checks: {
   let isolation: { value: string; expires: number } | undefined;
   let pending: Promise<{ isolation: string | null; proxy: boolean; network: boolean }> | undefined;
   function invalidate() { generation++; isolation = undefined; pending = undefined; }
-  function check() {
+  function check(): Promise<{ isolation: string | null; proxy: boolean; network: boolean }> {
     if (pending) return pending;
     const current = generation;
     const probe = isolation && now() < isolation.expires
@@ -17,10 +17,11 @@ export function createSharedRuntimeReadiness(checks: {
         if (value && current === generation) isolation = { value, expires: now() + 2000 };
         return value;
       });
-    const work = Promise.all([probe, checks.proxy().catch(() => false), checks.network().catch(() => false)])
+    const work: Promise<{ isolation: string | null; proxy: boolean; network: boolean }> = Promise.all([probe, checks.proxy().catch(() => false), checks.network().catch(() => false)])
       .then(([value, proxy, network]) => {
-        // A failed command/check invalidates even a probe already in flight.
-        if (current !== generation) return { isolation: null, proxy: false, network: false };
+        // A failed command/check invalidates a probe already in flight, so its answer says nothing either way.
+        // Ask again: any failed preview request used to read as "the whole runtime is not ready".
+        if (current !== generation) return check();
         if (!value || !proxy || !network) invalidate();
         return { isolation: value, proxy, network };
       });

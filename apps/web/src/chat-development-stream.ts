@@ -1,7 +1,7 @@
 import type { DevelopmentProcess } from "@npati/shared";
 import { getStoredAuthToken } from "./AuthContext";
 /** Stream notifications use server projections; GET remains the recovery source. */
-export async function watchDevelopmentTrace(signal: AbortSignal, onChange: (processes?: DevelopmentProcess[]) => void, conversationId?: string, projectId?: string) {
+export async function watchDevelopmentTrace(signal: AbortSignal, onChange: (processes?: DevelopmentProcess[]) => void, conversationId?: string, projectId?: string, onAlive?: () => void) {
   let delay = 1000;
   while (!signal.aborted) {
     try {
@@ -16,6 +16,7 @@ export async function watchDevelopmentTrace(signal: AbortSignal, onChange: (proc
       try {
         while (!signal.aborted) {
           const chunk = await reader.read(); if (chunk.done) break;
+          onAlive?.();
           buffer += decoder.decode(chunk.value, { stream: true }).replace(/\r/g, "");
           let boundary: number;
           while ((boundary = buffer.indexOf("\n\n")) !== -1) {

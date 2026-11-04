@@ -18,9 +18,9 @@ app.addContentTypeParser("application/json", { parseAs: "string" }, (_request, b
 const projectApiControl = registerProjectApiControlServer(app, secret, seen, { enabled: process.env.NPATI_PROJECT_API_SERVICE_BINDING === "dev" });
 const execute = promisify(execFile);
 const readinessChecks = createSharedRuntimeReadiness({
-  isolation: () => execute("/usr/local/bin/npati-project-exec", ["--check"], { timeout: 4000 }).then(result => result.stdout.trim()),
-  proxy: () => fetch("http://127.0.0.1:8080/health", { signal: AbortSignal.timeout(3000) }).then(response => response.ok),
-  network: () => Promise.all(["iptables", "ip6tables"].map(program => execute(program, ["-C", "OUTPUT", "-m", "owner", "--uid-owner", "10000-60000", "-j", "NPATI_PROJECTS"], { timeout: 3000 }).then(() => true).catch(() => false))).then(results => results.every(Boolean)),
+  isolation: () => execute("/usr/local/bin/npati-project-exec", ["--check"], { timeout: 15_000 }).then(result => result.stdout.trim()),
+  proxy: () => fetch("http://127.0.0.1:8080/health", { signal: AbortSignal.timeout(10_000) }).then(response => response.ok),
+  network: () => Promise.all(["iptables", "ip6tables"].map(program => execute(program, ["-C", "OUTPUT", "-m", "owner", "--uid-owner", "10000-60000", "-j", "NPATI_PROJECTS"], { timeout: 10_000 }).then(() => true).catch(() => false))).then(results => results.every(Boolean)),
 });
 async function readiness() {
   const reasons: string[] = [];
@@ -63,6 +63,7 @@ app.post<{ Body: string }>("/v1/sandbox", async (request, reply) => {
       case "getProcessStatus": result = await provider.getProcessStatus(scope, id, String(p.processId ?? "")); break;
       case "getLogs": result = await provider.getLogs(scope, id, p.processId as string | undefined); break;
       case "getProcessOutput": result = await provider.getProcessOutput(scope, id, String(p.processId ?? "")); break;
+      case "getLiveOutput": result = await provider.getLiveOutput(scope, id); break;
       case "exposePort": result = await provider.exposePort(scope, id, Number(p.port)); break;
       case "inspectBrowser": result = await provider.inspectBrowser(scope, id, p.options as SandboxBrowserQaOptions); break;
       case "proxyPreview": result = await provider.proxyPreview(scope, id, p.options as PreviewProxyRequest); break;

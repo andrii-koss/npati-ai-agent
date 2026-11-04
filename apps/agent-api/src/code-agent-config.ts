@@ -75,7 +75,7 @@ export const DEFAULT_CODE_AGENT_LIMITS: CodeAgentLimits = {
   readFileLines: 2_000,
   readFileBytes: 1_048_576,
   commandTimeoutMs: 120_000,
-  installBuildTimeoutMs: 600_000,
+  installBuildTimeoutMs: 3_600_000,
   parallelReadOnlyCalls: 8,
   editRepairAttempts: 2,
   repairLoopAttempts: 3,

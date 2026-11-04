@@ -11,6 +11,8 @@ import { signRunnerRequest, type RunnerReadinessReport } from "./runner-readines
  * The `NPATI_SANDBOX_EGRESS_ENFORCED` flag is never a source of `true`; it can only switch the feature off.
  */
 export interface RunnerReadinessClientOptions {
+  /** How many times a timeout or a dropped connection is asked again before it counts. Default 1. */
+  attempts?: number;
   /** Runner base URL, e.g. `http://sandbox-runner:7865`. */
   baseUrl?: string;
   /** Shared runner secret (`NPATI_SANDBOX_RUNNER_SECRET`); short values are rejected at construction. */
@@ -62,6 +64,7 @@ export class RunnerReadinessClient {
   private readonly baseUrl?: string;
   private readonly secret?: string;
   private readonly timeoutMs: number;
+  private readonly attempts: number;
   private readonly enabled: boolean;
   private readonly transport: typeof fetch;
   private readonly now: () => number;
@@ -73,6 +76,7 @@ export class RunnerReadinessClient {
     this.secret = options.secret;
     this.ttlMs = clampTtl(options.ttlMs);
     this.timeoutMs = options.timeoutMs && options.timeoutMs > 0 ? options.timeoutMs : DEFAULT_TIMEOUT_MS;
+    this.attempts = options.attempts && options.attempts > 0 ? options.attempts : 1;
     this.enabled = options.enabled ?? true;
     this.transport = options.transport ?? fetch;
     this.now = options.now ?? (() => Date.now());
@@ -94,6 +98,15 @@ export class RunnerReadinessClient {
 
   /** Asks the runner (unless the cached verdict is still fresh) and never throws. */
   async check(force = false): Promise<RunnerReadinessState> {
+    // A slow answer is not a lost guarantee: a timeout or a dropped connection is asked again before it counts.
+    let state = await this.checkOnce(force);
+    for (let attempt = 1; attempt < this.attempts && (state.reason === "runner_timeout" || state.reason === "runner_unreachable"); attempt += 1) {
+      state = await this.checkOnce(true);
+    }
+    return state;
+  }
+
+  private async checkOnce(force: boolean): Promise<RunnerReadinessState> {
     if (!this.enabled) return this.remember({ available: false, ready: false, reason: "disabled_by_configuration", checkedAt: this.now(), fromCache: false });
     if (!this.baseUrl || !this.secret || this.secret.length < 32) {
       return this.remember({ available: false, ready: false, reason: "runner_not_configured", checkedAt: this.now(), fromCache: false });

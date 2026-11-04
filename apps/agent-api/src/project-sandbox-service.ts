@@ -5,7 +5,7 @@ import { commitSandboxWrites } from "./project-sandbox-write-commit";
 import type { PatchMutation } from "./code-patch-transaction";
 import { parseCodeSearchOutput } from "./code-search-output";
 import { commandChangesNothing } from "./code-shell-read-only";
-import { SandboxSyncStates, withoutRuntimeNoise } from "./project-sandbox-sync";
+import { SandboxSyncStates, liveOutputLines, withoutRuntimeNoise } from "./project-sandbox-sync";
 import { normalizeWorkspacePath } from "./code-tools-path";
 import { createHash, randomUUID } from "node:crypto";
 import type { AuthContext, Project, WorkspaceStore } from "@npati/workspace";
@@ -46,7 +46,7 @@ export interface TerminalLimits {
 const WORKSPACE_BUSY_WAIT_MS = 30_000;
 
 export const defaultTerminalLimits: TerminalLimits = {
-  commandTimeoutMs: 120_000, installBuildTimeoutMs: 600_000, outputLimitBytes: 64_000,
+  commandTimeoutMs: 120_000, installBuildTimeoutMs: 3_600_000, outputLimitBytes: 64_000,
   inactivityMs: 900_000, syncMaxBytes: Number.POSITIVE_INFINITY, syncMaxFiles: Number.POSITIVE_INFINITY,
   retentionMs: 7 * 24 * 60 * 60 * 1000,
 };
@@ -86,8 +86,6 @@ export class ProjectSandboxService {
   ) {
     const configured = Object.fromEntries(Object.entries(limits).filter(([, value]) => Number.isSafeInteger(value) && Number(value) > 0));
     this.limits = { ...defaultTerminalLimits, ...configured };
-    this.limits.commandTimeoutMs = Math.min(this.limits.commandTimeoutMs, 600_000);
-    this.limits.installBuildTimeoutMs = Math.min(this.limits.installBuildTimeoutMs, 600_000);
     this.limits.outputLimitBytes = Math.min(this.limits.outputLimitBytes, 128_000);
     /**
      * C10: the retention window can never be shorter than the inactivity window. Retention **destroys**, so a
@@ -168,11 +166,8 @@ export class ProjectSandboxService {
   /**
    * C10 (ТЗ item 7): the retention policy that was missing.
    *
-   * Auto-stop existed (above) and reattachment existed (`ensure`), but nothing ever **destroyed** a sandbox that
-   * had been idle for a long time: a stopped container kept its disk for as long as the process lived and, after a
-   * restart, forever — nothing could even name it, because the project row is the only durable pointer and the
-   * idle map is in memory. This pass closes that: a sandbox whose last activity is older than the configured
-   * retention window is destroyed, and `ensure` recreates it on demand (fresh, from the stored project files).
+   * A sandbox whose last activity is older than the retention window is destroyed, and `ensure` recreates it on
+   * demand from the stored project files. Without this a stopped container would keep its disk forever.
    *
    * `preview` exists for the reaper's dry run, so "nothing to clean" and "the port is unavailable" stay
    * distinguishable answers.
@@ -181,10 +176,10 @@ export class ProjectSandboxService {
     const candidates: Array<{ projectId: string; sandboxId: string; idleMs: number }> = [];
     for (const [projectId, item] of this.lastUse) {
       if (!item.project.sandboxId) continue;
-      const isRunning = await this.sandboxRuns(item).catch(() => null);
-      if (isRunning === true) continue;
       const idleMs = now - item.at;
       if (idleMs < this.limits.retentionMs) continue;
+      const isRunning = await this.sandboxRuns(item).catch(() => null);
+      if (isRunning === true) continue;
       candidates.push({ projectId, sandboxId: item.project.sandboxId, idleMs });
     }
     return candidates;
@@ -236,7 +231,9 @@ export class ProjectSandboxService {
    */
   async trackForRetention(ctx: AuthContext, project: Project): Promise<boolean> {
     if (!project.sandboxId) return false;
-    if (!this.lastUse.has(project.id)) this.lastUse.set(project.id, { ctx, project, at: Date.now() });
+    // Once per process: this pass visits every project each minute, and each question starts several runner processes.
+    if (this.lastUse.get(project.id)?.project.sandboxId === project.sandboxId) return true;
+    this.lastUse.set(project.id, { ctx, project, at: Date.now() });
     const scope = scopeOf(ctx, project);
     try {
       const status = await this.provider.getStatus(scope, project.sandboxId);
@@ -650,6 +647,10 @@ export class ProjectSandboxService {
       }
       await beforeStart(snapshot);
     });
+  }
+  async liveOutput(ctx: AuthContext, companyId: string, projectId: string) {
+    const project = await this.project(ctx, companyId, projectId);
+    return project.sandboxId && this.provider.getLiveOutput ? liveOutputLines(await this.provider.getLiveOutput(scopeOf(ctx, project), project.sandboxId)) : { running: false, lines: [] };
   }
   async trackedOutput(ctx: AuthContext, companyId: string, request: TerminalRequest, offset: number) {
     await this.agent(ctx, companyId, request.agentId, "project.terminal.process");

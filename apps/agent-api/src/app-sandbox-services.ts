@@ -122,7 +122,7 @@ export function createAppSandboxServices(deps: AppSandboxServicesDeps) {
       new RemoteSandboxProvider(
         sandboxRunnerUrl,
         sandboxRunnerSecret,
-        fetch,
+        undefined,
         undefined,
         projectRuntimeMode({
           ...process.env,

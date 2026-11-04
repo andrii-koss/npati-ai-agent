@@ -15,6 +15,8 @@ export const en: TranslationSchema = {
 "operationStatus": "Result",
 "dryRun": "Dry run: changes not applied",
     runningCommand: "Running command: {{command}}",
+    fileChangedReadAgain: "File changed, reading it again",
+    agentFinished: "The agent finished the work",
     operationsDone: "Executed {{count}} operations",
     testsPassed: "Passed",
     working: "Thinking",

@@ -61,6 +61,10 @@ USER node
 CMD ["node", "dist/server.js"]
 
 # OSS shared project runtime: no Docker CLI/socket, one container for all projects.
+FROM debian:bookworm-slim AS project-flutter-sdk
+COPY apps/agent-api/prepare-flutter-sdk.sh /tmp/prepare-flutter-sdk.sh
+RUN sh /tmp/prepare-flutter-sdk.sh
+
 FROM node:24-alpine AS project-runtime-tools
 USER root
 ENV NPATI_SANDBOX_RUNNER_MODE=local
@@ -73,6 +77,10 @@ COPY --from=project-web-toolchain /opt/npati-project-toolchain /opt/npati-projec
 COPY apps/agent-api/prepare-project-dependencies.cjs /opt/npati-runtime/prepare-project-dependencies.cjs
 COPY apps/agent-api/project-runtime-composer.sh /usr/local/bin/composer
 RUN chmod +x /usr/local/bin/composer
+COPY --from=project-flutter-sdk /opt/flutter /opt/flutter
+COPY --from=project-flutter-sdk /opt/flutter-glibc /opt/flutter-glibc
+COPY apps/agent-api/project-runtime-flutter.sh /usr/local/bin/flutter
+RUN chmod 755 /usr/local/bin/flutter && ln -sf flutter /usr/local/bin/dart
 COPY apps/agent-api/project-runtime-guard.c /tmp/project-runtime-guard.c
 COPY apps/agent-api/project-runtime-launcher.mjs apps/agent-api/project-runtime-inner.mjs /opt/npati-runtime/
 RUN apk add --no-cache libseccomp-dev chromium font-noto

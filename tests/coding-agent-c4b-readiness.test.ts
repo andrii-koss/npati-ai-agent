@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AuthContext } from "@npati/workspace";
 import { PolicyEngine, type PolicyEngineDeps } from "../apps/agent-api/src/code-policy-engine";
 import { EgressEnforcement } from "../apps/agent-api/src/sandbox-egress-enforcement";
@@ -200,5 +200,13 @@ describe("security-gate: C4b readiness drives the PolicyEngine network phase", (
     const result = await engine(() => ready.isReadySync()).evaluate({ ctx: owner, companyId: "c", tool: "code.shell.exec", command: "npm install left-pad", sessionMode: "auto" });
     expect(result.decision).not.toBe("deny");
     expect(result.phase).not.toBe("network_enforcement");
+  });
+  it("asks again after a timeout before the verdict is lost", async () => {
+    const transport = vi.fn<typeof fetch>()
+      .mockRejectedValueOnce(Object.assign(new Error("aborted"), { name: "AbortError" }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(report({ overall_ready: true })), { status: 200 }));
+    const readiness = new RunnerReadinessClient({ baseUrl: "http://sandbox-runner:7865", secret: "x".repeat(32), attempts: 3, transport });
+    expect((await readiness.check(true)).ready).toBe(true);
+    expect(transport).toHaveBeenCalledTimes(2);
   });
 });
