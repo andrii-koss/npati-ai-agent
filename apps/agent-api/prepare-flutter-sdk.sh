@@ -20,6 +20,7 @@ fi
 cd /opt/flutter
 rm -rf examples docs engine third_party .github .idea .vscode .claude .gemini .agents agent-artifacts dev/integration_tests dev/benchmarks dev/devicelab dev/tracing_tests dev/manual_tests dev/a11y_assessments
 rm -rf bin/cache/downloads
+mkdir -p examples
 glibc=/opt/flutter-glibc
 mkdir -p "$glibc"
 for library in ld-linux-x86-64.so.2 libc.so.6 libm.so.6 libdl.so.2 libpthread.so.0 librt.so.1 libresolv.so.2 libnss_dns.so.2 libnss_files.so.2; do

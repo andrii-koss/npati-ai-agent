@@ -343,7 +343,7 @@ export class ChatDevelopmentService {
     this.activityBatches.delete(owner);
     try {
       await this.change(ctx, items => items.map(p => {
-        const matching = batch.events.filter(item => p.companyId === item.companyId && p.sessionId === item.sessionId && (!item.conversationId || p.conversationId === item.conversationId));
+        const matching = batch.events.filter(item => p.companyId === item.companyId && (p.sessionId ? p.sessionId === item.sessionId : Boolean(item.conversationId)) && (!item.conversationId || p.conversationId === item.conversationId));
         if (!matching.length) return p;
         const progress = new Map((p.progress ?? []).map(event => [event.id, event]));
         for (const { event } of matching) {
@@ -351,7 +351,7 @@ export class ChatDevelopmentService {
           const safe = sanitizeProgress({ ...event, ...details, status: ["cancelled", "awaiting_approval", "waiting_for_approval"].includes(event.status ?? "") ? event.status : details.status ?? event.status, conversationId: p.conversationId });
           progress.set(safe.id, safe);
         }
-        return { ...p, progress: compactProgress([...progress.values()]), updatedAt: new Date().toISOString() };
+        return { ...p, sessionId: p.sessionId ?? matching[0]!.sessionId, progress: compactProgress([...progress.values()]), updatedAt: new Date().toISOString() };
       }));
       this.notifyListeners();
     } catch (error) {

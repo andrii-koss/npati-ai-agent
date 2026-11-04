@@ -84,6 +84,18 @@ fi
   chmod 755 /projects/.modules-seed 2>/dev/null || true
 ) &
 
+# The Flutter SDK on the projects disk, for the same reason.
+(
+  if [ -x /opt/flutter/bin/flutter ] && ! cmp -s /opt/flutter/bin/cache/flutter_tools.stamp /projects/.flutter-sdk/.complete; then
+    rm -rf /projects/.flutter-sdk /projects/.flutter-sdk.tmp
+    mkdir -p /projects/.flutter-sdk.tmp
+    cp -R --preserve=mode,timestamps --no-preserve=ownership /opt/flutter /projects/.flutter-sdk.tmp/flutter
+    chmod -R a+rX,go-w /projects/.flutter-sdk.tmp
+    cp /opt/flutter/bin/cache/flutter_tools.stamp /projects/.flutter-sdk.tmp/.complete
+    mv /projects/.flutter-sdk.tmp /projects/.flutter-sdk
+  fi
+) &
+
 # Reading prepared modules from a cold image took minutes on the first project after a start.
 ( find /opt/npati-project-toolchain -type f -not -path "*/npm-cache/*" -exec cat {} + > /dev/null 2>&1 ) &
 

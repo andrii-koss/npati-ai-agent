@@ -110,7 +110,7 @@ export interface SandboxProvider {
   stopProcess(scope: SandboxScope, sandboxId: string, processId: string): Promise<SandboxCommandResult>;
   getProcessStatus(scope: SandboxScope, sandboxId: string, processId: string): Promise<SandboxCommandResult>;
   getProcessOutput?(scope: SandboxScope, sandboxId: string, processId: string): Promise<{ output: string; earliestOffset: number; nextOffset: number }>;
-  getLiveOutput?(scope: SandboxScope, sandboxId: string): Promise<{ running: boolean; output: string }>;
+  getLiveOutput?(scope: SandboxScope, sandboxId: string): Promise<{ running: boolean; output: string; cpu?: number }>;
 }
 export interface PreviewProxyRequest { port: number; path: string; method: string; headers: Record<string, string>; body?: string; }
 export interface PreviewProxyResponse { status: number; headers: Record<string, string>; body: string; }
@@ -244,7 +244,7 @@ export class RemoteSandboxProvider implements SandboxProvider {
   exposePort(scope: SandboxScope, sandboxId: string, port: number) { return this.request<{ port: number; internalHost: string }>("exposePort", { scope, sandboxId, port }); }
   getLogs(scope: SandboxScope, sandboxId: string, processId?: string) { return this.request<string>("getLogs", { scope, sandboxId, processId }); }
   getStatus(scope: SandboxScope, sandboxId: string) { return this.request<SandboxStatus>("getStatus", { scope, sandboxId }); }
-  getLiveOutput(scope: SandboxScope, sandboxId: string) { return this.request<{ running: boolean; output: string }>("getLiveOutput", { scope, sandboxId }); }
+  getLiveOutput(scope: SandboxScope, sandboxId: string) { return this.request<{ running: boolean; output: string; cpu?: number }>("getLiveOutput", { scope, sandboxId }); }
   startProcess(scope: SandboxScope, sandboxId: string, command: string, options: SandboxCommandOptions) { return this.request<SandboxCommandResult>("startProcess", { scope, sandboxId, command, options }, options.timeoutMs + 15_000); }
   stopProcess(scope: SandboxScope, sandboxId: string, processId: string) { return this.request<SandboxCommandResult>("stopProcess", { scope, sandboxId, processId }); }
   getProcessStatus(scope: SandboxScope, sandboxId: string, processId: string) { return this.request<SandboxCommandResult>("getProcessStatus", { scope, sandboxId, processId }); }

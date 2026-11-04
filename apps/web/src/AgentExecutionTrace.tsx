@@ -16,8 +16,9 @@ const runsCommand = (item: DevelopmentProcessProgressItem) => Boolean(item.comma
 /** Follows what the project's running command prints, only while a command is running in a visible tab. */
 function useLiveCommandOutput(companyId: string | undefined, projectId: string | undefined, active: boolean) {
   const [line, setLine] = useState("");
+  const [cpu, setCpu] = useState<number>();
   useEffect(() => {
-    if (!active || !companyId || !projectId) { setLine(""); return; }
+    if (!active || !companyId || !projectId) { setLine(""); setCpu(undefined); return; }
     let closed = false;
     let seen: string[] = [];
     const queue: string[] = [];
@@ -27,8 +28,9 @@ function useLiveCommandOutput(companyId: string | undefined, projectId: string |
       try {
         const response = await authFetch(url);
         if (!response.ok || closed) return;
-        const data = await response.json() as { lines?: string[] };
+        const data = await response.json() as { lines?: string[]; cpu?: number };
         if (closed || !Array.isArray(data.lines)) return;
+        setCpu(data.cpu);
         // Everything printed since the last read is shown in turn, so a fast command visibly runs.
         const last = seen.at(-1);
         const from = last === undefined ? -1 : data.lines.lastIndexOf(last);
@@ -47,7 +49,8 @@ function useLiveCommandOutput(companyId: string | undefined, projectId: string |
     }, 70);
     return () => { closed = true; window.clearInterval(reader); window.clearInterval(player); };
   }, [companyId, projectId, active]);
-  return line;
+  // While the command prints nothing, its real CPU use shows whether it is working.
+  return cpu === undefined ? line : (line ? line + " · " : "") + "CPU " + cpu + "%";
 }
 const clock = (ms: number) => { const seconds = Math.max(0, Math.round(ms / 1000)); return Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0"); };
 /** From the first step to the end of the last one, as m:ss. */
@@ -73,7 +76,7 @@ export function processDuration(items: DevelopmentProcessProgressItem[]): string
  * agent read a file again after it changed. The agent acts on both and carries on.
  */
 export function isNegativeAnswer(item: DevelopmentProcessProgressItem): boolean {
-  if (item.status === "failed" && item.errorCode === "read_before_write_required") return true;
+  if (item.status === "failed" && ["read_before_write_required", "unchanged"].includes(item.errorCode ?? "")) return true;
   return item.status === "failed" && /^(?:npm ls|grep|rg|test|which|diff)\b/.test(item.command ?? "") && /"exitCode":\s*1\b/.test(item.result ?? "");
 }
 /** A log shows the message itself, with its line breaks, not the envelope around it. */
@@ -124,6 +127,8 @@ function operation(item: DevelopmentProcessProgressItem) {
 }
 function title(item: DevelopmentProcessProgressItem, t: Labels, active: boolean) {
   if (item.errorCode === "read_before_write_required") return t("fileChangedReadAgain") + (item.file ? ": " + sanitizeExecutionTrace(item.file) : "");
+  if (item.errorCode === "unchanged") return t("fileUnchanged") + (item.file ? ": " + sanitizeExecutionTrace(item.file) : "");
+  if (item.status === "failed" && item.file && !item.command) return t("fileNotChanged") + ": " + sanitizeExecutionTrace(item.file) + (readableFailure(item) ? " — " + readableFailure(item) : "");
   if (item.command && ["waiting_for_approval", "awaiting_approval"].includes(item.status ?? "")) return t("awaiting_approval") + ": " + sanitizeExecutionTrace(item.command).slice(0, 100);
   if (/code\.finish/.test(item.tool ?? "")) return t("agentFinished");
   if (item.stage === "technology_selection") return sanitizeExecutionTrace(item.title);
@@ -200,13 +205,13 @@ export function AgentExecutionTrace({ process, items: directItems, run, nested =
     }
     const visibleFiles = [...files.values()].slice(-6);
     const allItems = normalizeActivity(process?.progress);
-    const lastAt = Math.max(0, ...allItems.map(item => Date.parse(item.at)).filter(Number.isFinite));
+    const lastAt = Math.max(0, ...allItems.filter(isVisibleChatOperation).map(item => Date.parse(item.at)).filter(Number.isFinite));
     const isLastGroup = !processActive && recordedItems.some(item => Date.parse(item.at) === lastAt);
     const whole = isLastGroup ? processDuration(allItems) : undefined;
     const spent = stepActive ? undefined : runDuration(recordedItems);
     const total = spent && whole && whole !== spent ? spent + " · " + (isUk || (run.language ?? language ?? i18n?.language) === "uk" ? "Усього " : "Total ") + whole : spent;
     const elapsed = stepActive && Number.isFinite(Date.parse(current.at)) ? Math.max(0, Math.floor((now - Date.parse(current.at)) / 1000)) : undefined;
-    return <article className="assistant research-progress coding-run-activity" aria-live="polite"><div className={"research-page-row codex-trace-row " + (stepActive ? "active" : run.status) + (runOpen ? " expanded" : "")} data-run-id={run.runId ?? run.id}><button type="button" className="codex-trace-row-header coding-run-header" aria-expanded={runOpen} aria-controls={"run-detail-" + run.id} onClick={()=>{setHistoryMounted(true);setRunOpen(previous=>!previous);}}><span className="research-progress-state" aria-hidden="true">{stepActive ? "\u25cf" : run.status === "completed" || recovered ? <Check size={12}/> : run.status === "failed" ? <AlertCircle size={12}/> : run.status === "cancelled" ? <X size={12}/> : "\u25cf"}</span><Icon className="research-progress-globe" size={16} aria-hidden="true"/><span dir="auto" className={stepActive ? "research-active-text" : undefined}>{label}{total ? " · " + total : ""}</span>{commandRunning && liveLine && <code dir="auto" className="codex-trace-live-output" style={{ flex: 1, minWidth: 0, marginLeft: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: 0.75, fontSize: "0.85em" }}>{sanitizeExecutionTrace(liveLine)}</code>}{elapsed !== undefined && <span className="codex-trace-duration-tag">{elapsed}s</span>}<span className="codex-trace-chevron-btn" aria-hidden="true">{runOpen ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}</span></button>
+    return <article className="assistant research-progress coding-run-activity" aria-live="polite"><div className={"research-page-row codex-trace-row " + (stepActive ? "active" : recovered ? "completed" : run.status) + (runOpen ? " expanded" : "")} data-run-id={run.runId ?? run.id}><button type="button" className="codex-trace-row-header coding-run-header" aria-expanded={runOpen} aria-controls={"run-detail-" + run.id} onClick={()=>{setHistoryMounted(true);setRunOpen(previous=>!previous);}}><span className="research-progress-state" aria-hidden="true">{stepActive ? "\u25cf" : run.status === "completed" || recovered ? <Check size={12}/> : run.status === "failed" ? <AlertCircle size={12}/> : run.status === "cancelled" ? <X size={12}/> : "\u25cf"}</span><Icon className="research-progress-globe" size={16} aria-hidden="true"/><span dir="auto" className={stepActive ? "research-active-text" : undefined}>{label}{total ? " · " + total : ""}</span>{commandRunning && liveLine && <code dir="auto" className="codex-trace-live-output" style={{ flex: 1, minWidth: 0, marginLeft: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: 0.75, fontSize: "0.85em" }}>{sanitizeExecutionTrace(liveLine)}</code>}{elapsed !== undefined && <span className="codex-trace-duration-tag">{elapsed}s</span>}<span className="codex-trace-chevron-btn" aria-hidden="true">{runOpen ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}</span></button>
       {visibleFiles.length > 0 && <ul className="coding-changed-files" aria-label={t("file")}>{visibleFiles.map(file => <li key={file.path}><FilePenLine size={13} aria-hidden="true"/> <code>{file.path}</code>{file.linesAdded !== undefined && <span> +{file.linesAdded}</span>}{file.linesRemoved !== undefined && <span> -{file.linesRemoved}</span>}{file.status === "running" && <span> · {t("editing")}</span>}</li>)}</ul>}
       {run.status === "failed" && process?.status === "failed" && run.runId === process.runId && process.detail && <p className="codex-trace-error-msg">{sanitizeExecutionTrace(codingStopCopy(process.detail,run.language ?? process.responseLanguage ?? language ?? i18n?.language))}</p>}
       <div className="codex-trace-collapse" aria-hidden={!runOpen} inert={!runOpen} onTransitionEnd={event=>{if(!runOpen && event.target===event.currentTarget)setHistoryMounted(false);}}> <div className="codex-trace-collapse-inner"><div id={"run-detail-" + run.id} className="coding-run-history">{historyMounted && <AgentExecutionTrace process={process ? {...process,runId:run.runId} : undefined} items={items} isUk={isUk} language={run.language} nested />}</div></div></div></div></article>;
@@ -247,7 +252,7 @@ export function AgentExecutionTrace({ process, items: directItems, run, nested =
           {item.result && !(item.result === "skipped" && active) && item.fileContent === undefined && item.stdout === undefined && item.stderr === undefined && !item.diff && !item.files?.some(file => file.diff) && !item.tests && log(plainResult(item.result),t("output"))}{item.resultTruncated && <span>{t("limited")}</span>}
           {item.durationMs !== undefined && <div>{t("duration")}: {(item.durationMs/1000).toFixed(2)}s</div>}
           {item.exitCode !== undefined && <div>{t("exitCode")}: {item.exitCode}</div>}
-          {(item.error || item.errorCode) && <div className="codex-trace-error-msg">{t(item.errorCode === "approval_required" ? "awaiting_approval" : "error")}: {safe(item.error ?? (item.errorCode === "approval_required" ? t("awaiting_approval") : item.errorCode ?? ""))}</div>}
+          {(item.error || item.errorCode) && !isNegativeAnswer(item) && <div className="codex-trace-error-msg">{t(item.errorCode === "approval_required" ? "awaiting_approval" : "error")}: {safe(item.error ?? (item.errorCode === "approval_required" ? t("awaiting_approval") : item.errorCode ?? ""))}</div>}
         </div>}</div></div>
       </div>;
     })}

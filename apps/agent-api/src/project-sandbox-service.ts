@@ -1,7 +1,7 @@
 import { codeSearchTypeArguments } from "./code-search-types";
 import { hasQuotedCredential } from "./workspace-protected-content";
 import { projectRuntimeCommandPort } from "./shared-project-runtime-provider";
-import { commitSandboxWrites } from "./project-sandbox-write-commit";
+import { commitSandboxBinaries, commitSandboxWrites, type SandboxBinaryWrite } from "./project-sandbox-write-commit";
 import type { PatchMutation } from "./code-patch-transaction";
 import { parseCodeSearchOutput } from "./code-search-output";
 import { commandChangesNothing } from "./code-shell-read-only";
@@ -53,7 +53,7 @@ export const defaultTerminalLimits: TerminalLimits = {
 const uuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 const scopeOf = (ctx: AuthContext, project: Project): SandboxScope => ({ workspaceId: ctx.workspaceId, userId: ctx.userId, companyId: project.companyId, projectId: project.id });
 const stepOf = (decision: TerminalCommandDecision) => decision.timeoutClass === "install_build" ? "install_build" : "command";
-export const isSandboxWorkspaceArtifact = (filePath: string) => filePath.split("/").some((part) => ["node_modules", "dist", "build", ".next", ".nuxt", ".output", ".astro", ".cache", ".turbo", "vendor", "__pycache__", ".venv"].includes(part));
+export const isSandboxWorkspaceArtifact = (filePath: string) => filePath.split("/").some((part) => [".dart_tool", ".gradle", ".pub-cache", "Pods", "node_modules", "dist", "build", ".next", ".nuxt", ".output", ".astro", ".cache", ".turbo", "vendor", "__pycache__", ".venv"].includes(part));
 const artifact = isSandboxWorkspaceArtifact;
 
 /** The only Project API variables a sandbox may receive (D5). */
@@ -340,7 +340,7 @@ export class ProjectSandboxService {
     const files = await this.provider.downloadFiles(scope, sandboxId);
     if (files.length > this.limits.syncMaxFiles) throw new SandboxProviderError("workspace_sync_limit", "Sandbox returned too many files", 413, "download");
     let total = 0;
-    const plan: PatchMutation[] = [];
+    const plan: PatchMutation[] = [], binaries: SandboxBinaryWrite[] = [];
     for (const file of files) {
       if (artifact(file.path)) continue;
       safeProjectPath(file.path);
@@ -348,8 +348,8 @@ export class ProjectSandboxService {
       if (total > this.limits.syncMaxBytes) throw new SandboxProviderError("workspace_sync_limit", "Sandbox files exceed sync limit", 413, "download");
       if (file.encoding === "base64") {
         const original = originals.get(file.path);
-        if (original?.encoding === "base64" && original.content === file.content) continue;
-        throw new SandboxProviderError("unsupported_binary_file", "Terminal changed a binary asset; use the project media upload API for asset writes", 422, "download");
+        if (original?.encoding !== "base64" || original.content !== file.content) binaries.push({ path: file.path, content: file.content, revision: original?.revision });
+        continue;
       }
       const fileName = file.path.split("/").pop() || "";
       const isLockfile = /^(?:package(?:-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|composer\.(?:json|lock)|requirements\.txt|Pipfile(?:\.lock)?)$/i.test(fileName);
@@ -363,7 +363,7 @@ export class ProjectSandboxService {
       }
       if (changed) plan.push({ path: file.path, before: original?.content ?? "", after: file.content, existing: !!original, revision: original?.revision });
     }
-    await commitSandboxWrites(this.workspace, ctx, project.companyId, project.id, plan);
+    await commitSandboxWrites(this.workspace, ctx, project.companyId, project.id, plan); await commitSandboxBinaries(this.workspace, ctx, project.companyId, project.id, binaries);
   }
   private async run(ctx: AuthContext, companyId: string, request: TerminalRequest, tool: "project.terminal.exec" | "project.terminal.process", startProcess = false,
     beforeStart?: (snapshot: ProcessWorkspaceSnapshot) => Promise<void>) {
@@ -674,13 +674,13 @@ export class ProjectSandboxService {
     if (project.sandboxId !== snapshot.sandboxId) throw new SandboxProviderError("sandbox_mismatch", "Tracked workspace changed sandbox", 409);
     const files = await this.provider.downloadFiles(scopeOf(ctx, project), snapshot.sandboxId);
     if (files.length > this.limits.syncMaxFiles || files.reduce((n, f) => n + Buffer.byteLength(f.content, "utf8"), 0) > this.limits.syncMaxBytes) throw new SandboxProviderError("workspace_sync_limit", "Tracked process exceeded workspace limits", 413);
-    const plan: PatchMutation[] = [];
+    const plan: PatchMutation[] = [], binaries: SandboxBinaryWrite[] = [];
     for (const file of files) {
       if (artifact(file.path)) continue;
       safeProjectPath(file.path);
       const original = snapshot.files.find((f) => f.path === file.path);
       if (original?.hash === createHash("sha256").update(file.content).digest("hex")) continue;
-      if (file.encoding === "base64") throw new SandboxProviderError("unsupported_binary_file", "Process changed a binary asset; use the project media upload API for asset writes", 422, "download");
+      if (file.encoding === "base64") { binaries.push({ path: file.path, content: file.content, revision: original?.revision }); continue; }
       if (!scanTextForSecrets(file.content).clean) throw new SandboxProviderError("secret_content", "Process produced protected content", 403);
       // A repeated sync may see the exact result already committed by this operation.
       const existing = await this.workspace.readFile(ctx, op.companyId, op.projectId, file.path).catch((error) => { if ((error as { status?: number }).status === 404) return null; throw error; });
@@ -689,7 +689,7 @@ export class ProjectSandboxService {
       if (!original && existing) throw new ProjectFileError("revision_conflict", "Process target was created by another writer", 409);
       plan.push({ path: file.path, before: existing?.content ?? "", after: file.content, existing: !!existing, revision: original?.revision, mode: existing?.mode });
     }
-    await commitSandboxWrites(this.workspace, ctx, op.companyId, op.projectId, plan);
+    await commitSandboxWrites(this.workspace, ctx, op.companyId, op.projectId, plan); await commitSandboxBinaries(this.workspace, ctx, op.companyId, op.projectId, binaries);
   }
   async process(ctx: AuthContext, companyId: string, request: TerminalRequest) {
     const tool = "project.terminal.process" as const;

@@ -461,7 +461,7 @@ describe("C4 production shell adapter timeout contract", () => {
     { command: "pwd", timeoutMs: 3000, expected: 3000 },
     { command: "pwd", timeoutMs: undefined, expected: 120000 },
     { command: "pwd", timeoutMs: 600000, expected: 120000 },
-    { command: "npm install", timeoutMs: undefined, expected: 600000 },
+    { command: "npm install", timeoutMs: undefined, expected: 3600000 },
   ])("forwards and caps provider timeout for $command at $expected", async ({ command, timeoutMs, expected }) => {
     const { company, project, provider, sandbox } = await fixture();
     const dispatch = vi.spyOn(provider, "executeCommand");
@@ -497,16 +497,16 @@ it("stops the recorded Next.js dev listener before a production build writes .ne
  expect(order).toEqual(["stop","build"]);
 });
 
-it.each([false,true])("preserves unchanged binary assets and refuses Terminal binary modifications (modified=%s)",async modified=>{
- const f=await fixture();const bytes=Buffer.from([137,80,78,71,13,10,26,10,0,255,128]);
+it.each([false,true])("keeps binary assets, unchanged or produced by a Terminal command (modified=%s)",async modified=>{
+ const f=await fixture();const bytes=Buffer.from([137,80,78,71,13,10,26,10,0,255,128]);const produced=Buffer.from([137,80,78,71,13,10,26,10,0,255,129]);
  await f.workspace.createFile(owner,f.company.id,f.project.id,"public/reference.png",bytes);
  await f.workspace.createFile(owner,f.company.id,f.project.id,"page.ts","export const color = 'old';");
- f.provider.executeCommand=async()=>{f.provider.files=f.provider.files.map(file=>file.path==="page.ts"?{...file,content:"export const color = 'new';"}:modified?{...file,content:Buffer.from("changed binary").toString("base64")}:file);return result();};
+ f.provider.executeCommand=async()=>{f.provider.files=f.provider.files.map(file=>file.path==="page.ts"?{...file,content:"export const color = 'new';"}:modified?{...file,content:produced.toString("base64")}:file);return result();};
  const run=f.sandbox.execute(owner,f.company.id,{projectId:f.project.id,agentId:"system",command:"npm run build"});
- if(modified)await expect(run).rejects.toMatchObject({code:"unsupported_binary_file"});else await expect(run).resolves.toMatchObject({status:"completed"});
- const photo=await f.workspace.readFile(owner,f.company.id,f.project.id,"public/reference.png");expect(photo.binary).toBe(true);expect(photo.contentBase64).toBe(bytes.toString("base64"));
+ await expect(run).resolves.toMatchObject({status:"completed"});
+ const photo=await f.workspace.readFile(owner,f.company.id,f.project.id,"public/reference.png");expect(photo.binary).toBe(true);expect(photo.contentBase64).toBe((modified?produced:bytes).toString("base64"));
  expect(f.provider.files.find(file=>file.path==="public/reference.png")).toMatchObject({encoding:"base64"});
- expect((await f.workspace.readFile(owner,f.company.id,f.project.id,"page.ts")).content).toContain(modified?"old":"new");
+ expect((await f.workspace.readFile(owner,f.company.id,f.project.id,"page.ts")).content).toContain("new");
 });
 
 it.each(["running", "failed", "timed_out"] as const)("records the actual preview process outcome %s without a spurious failure", async status => {

@@ -52,8 +52,9 @@ export const withoutRuntimeNoise = <T extends { stdout: string; stderr: string }
 });
 
 /** The last lines the project's running command printed, for its row in the chat. */
-export const liveOutputLines = (live: { running: boolean; output: string }) => ({
+export const liveOutputLines = (live: { running: boolean; output: string; cpu?: number }) => ({
   running: live.running,
+  ...(live.cpu === undefined ? {} : { cpu: live.cpu }),
   lines: redactTerminalText(live.output).replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "").split(/\r\n|\n|\r/)
     .map((line) => line.trim().replace(/^::progress:: /, ""))
     .filter((line) => line && !/^(?:sent tapfd|received tapfd|npm warn Unknown env config)/.test(line))

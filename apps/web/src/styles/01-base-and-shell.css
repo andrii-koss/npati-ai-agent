@@ -119,6 +119,7 @@ a {
   background: var(--npati-red, #e11d2e);
   box-shadow: 0 0 0 3px rgba(225, 29, 46, 0.2);
   flex-shrink: 0;
+  position: relative;
   transform: translateY(-1px);
   animation: npati-pulse-dot 3.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
@@ -207,23 +208,41 @@ a {
   border-radius: 50%;
   background: var(--npati-red);
   flex-shrink: 0;
+  position: relative;
   animation: npati-pulse-dot 3.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
+/* The ring runs on the compositor: animating box-shadow repainted the page every frame, all the time. */
+.npati-agent-logo-pulse::after,
+.eyebrow-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: rgb(225 29 46 / 70%);
+  pointer-events: none;
+  animation: npati-pulse-ring 3.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
 @keyframes npati-pulse-dot {
-  0% {
+  0%, 100% {
     transform: scale(0.95);
-    box-shadow: 0 0 0 0 rgb(225 29 46 / 70%);
   }
 
   70% {
     transform: scale(1.1);
-    box-shadow: 0 0 0 7px rgb(225 29 46 / 0%);
+  }
+}
+
+@keyframes npati-pulse-ring {
+  0% {
+    transform: scale(1);
+    opacity: 1;
   }
 
-  100% {
-    transform: scale(0.95);
-    box-shadow: 0 0 0 0 rgb(225 29 46 / 0%);
+  70%, 100% {
+    transform: scale(2.75);
+    opacity: 0;
   }
 }
 

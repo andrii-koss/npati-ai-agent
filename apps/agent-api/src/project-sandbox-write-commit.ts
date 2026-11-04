@@ -23,3 +23,14 @@ export async function commitSandboxWrites(workspace: ProjectWorkspace, ctx: Auth
   if (item.existing) await workspace.writeFile(ctx, companyId, projectId, item.path, item.after, item.revision ?? "");
   else await workspace.createFile(ctx, companyId, projectId, item.path, item.after);
 }
+
+export interface SandboxBinaryWrite { path: string; content: string; revision?: string }
+
+/** Images and fonts a command produced. The workspace keeps exact bytes; only the text commit is transactional. */
+export async function commitSandboxBinaries(workspace: ProjectWorkspace, ctx: AuthContext, companyId: string, projectId: string, files: readonly SandboxBinaryWrite[]): Promise<void> {
+  for (const file of files) {
+    const bytes = Buffer.from(file.content, "base64");
+    if (file.revision) await workspace.writeFile(ctx, companyId, projectId, file.path, bytes, file.revision);
+    else await workspace.createFile(ctx, companyId, projectId, file.path, bytes);
+  }
+}
