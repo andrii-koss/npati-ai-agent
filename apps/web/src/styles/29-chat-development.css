@@ -623,7 +623,7 @@
 }
 .chat-preview-card-status.status-starting .chat-preview-status-dot {
   background-color: #2563eb;
-  animation: chat-preview-pulse 1.4s infinite ease-in-out;
+  animation: chat-preview-pulse 1.4s infinite steps(6);
 }
 
 .chat-preview-card-status.status-stopped {

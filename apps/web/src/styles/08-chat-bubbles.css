@@ -407,7 +407,7 @@ article.user .chat-message-attachment.document {
 .research-page-row.active .research-progress-state,
 .research-generation-row.active .research-progress-state {
   color: var(--npati-red);
-  animation: research-dot-pulse 1.2s ease-in-out infinite;
+  animation: research-dot-pulse 1.2s steps(5) infinite;
 }
 
 .research-page-row>span:last-child,
@@ -462,14 +462,9 @@ article.user .chat-message-attachment.document {
   margin-bottom: 5px;
 }
 
+/* No text sweep: drawn on the CPU it slowed builds several times over, and the row's live output already moves. */
 .research-active-text {
-  color: transparent !important;
-  background: linear-gradient(100deg, #4a4a4a 15%, #4a4a4a 38%, var(--npati-red) 50%, #4a4a4a 62%, #4a4a4a 85%);
-  background-size: 240% 100%;
-  background-position: 100% 0;
-  -webkit-background-clip: text;
-  background-clip: text;
-  animation: research-text-sweep 1.8s linear infinite;
+  color: #4a4a4a !important;
 }
 
 .research-page-row .research-active-text {
@@ -583,7 +578,7 @@ article.user .chat-message-attachment.document {
   display: block;
   background: var(--npati-red);
   border-radius: 50%;
-  animation: thinking-pulse 1s infinite ease-in-out;
+  animation: thinking-pulse 1s infinite steps(5);
 }
 
 .thinking-dots i:nth-child(2) {

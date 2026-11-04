@@ -64,7 +64,7 @@ export function useChatDevelopment(options: {
     const opened = shared ? await shared.catch(() => null) : null;
     firstRead.current = false;
     const data = opened ? { processes: opened.processes }
-      : await api<{ processes: DevelopmentProcess[] }>(queryProjectId ? `/chat/development/processes?projectId=${encodeURIComponent(queryProjectId)}` : `/chat/development/processes?conversationId=${encodeURIComponent(conversationId ?? "")}`);
+      : await api<{ processes: DevelopmentProcess[] }>(queryProjectId && !conversationId ? `/chat/development/processes?projectId=${encodeURIComponent(queryProjectId)}` : `/chat/development/processes?conversationId=${encodeURIComponent(conversationId ?? "")}`);
     if (alive.current && generation === snapshotGeneration.current) setProcesses(data.processes);
     };
     refreshing.current = task();
@@ -94,12 +94,14 @@ export function useChatDevelopment(options: {
       // Hidden tabs must release HTTP/1 connections, leaving navigation and
       // Activity requests available while a visible chat receives live updates.
       {
+        // A chat follows its own processes. Asking by project returned every process of the user, every 3 s.
+        const chatConversation = callbacks.current.conversationId ?? currentChatConversationId() ?? undefined;
         const stream = new AbortController(); controller = stream;
         void watchDevelopmentTrace(stream.signal, snapshot => {
           if (stream.signal.aborted) return;
           if (snapshot) { snapshotGeneration.current++; setProcesses(snapshot); }
           else poll();
-        }, queryProjectId ? undefined : callbacks.current.conversationId ?? currentChatConversationId() ?? "", queryProjectId ?? undefined, () => { streamAliveAt = Date.now(); });
+        }, chatConversation ?? (queryProjectId ? undefined : ""), chatConversation ? undefined : queryProjectId ?? undefined, () => { streamAliveAt = Date.now(); });
       }
     };
     visibility();

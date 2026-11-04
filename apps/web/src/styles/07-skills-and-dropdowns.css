@@ -692,7 +692,7 @@
 .onboarding-live-composer .chat-attachment-actions .microphone.recording {
   color: white;
   background: var(--npati-red);
-  animation: research-dot-pulse 1.2s ease-in-out infinite;
+  animation: research-dot-pulse 1.2s steps(5) infinite;
 }
 
 .chat-add-menu {

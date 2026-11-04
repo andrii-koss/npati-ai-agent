@@ -121,7 +121,6 @@ a {
   flex-shrink: 0;
   position: relative;
   transform: translateY(-1px);
-  animation: npati-pulse-dot 3.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
 .npati-agent-logo-dot {
@@ -209,7 +208,6 @@ a {
   background: var(--npati-red);
   flex-shrink: 0;
   position: relative;
-  animation: npati-pulse-dot 3.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
 /* The ring runs on the compositor: animating box-shadow repainted the page every frame, all the time. */
@@ -221,7 +219,7 @@ a {
   border-radius: 50%;
   background: rgb(225 29 46 / 70%);
   pointer-events: none;
-  animation: npati-pulse-ring 3.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  display: none;
 }
 
 @keyframes npati-pulse-dot {
@@ -604,7 +602,7 @@ a {
   border: 1.5px solid currentColor;
   border-right-color: transparent;
   border-radius: 50%;
-  animation: sidebar-chat-spin 800ms linear infinite;
+  animation: sidebar-chat-spin 800ms steps(8) infinite;
 }
 
 .sidebar-chat-stop {
