@@ -330,9 +330,15 @@ export class CodeSessionRunExecutor {
           }
         }
         // The build passed but the app breaks in the browser: the agent gets the errors and fixes them itself.
+        // A second repair runs only when the first one changed what the browser reports. With the same error left (same
+        // file, line and kind) it repeated the same attempt: in E2E G6 two repairs cost 13 + 7 turns for one unchanged error.
+        let previousErrors: string | undefined;
         for (let attempt = 1; attempt <= 2; attempt++) {
           const failed = result as { status?: string; reason?: string; functionalAcceptance?: { diagnostics?: unknown[]; brokenLinks?: unknown[] } };
           if (failed?.status !== "failed" || failed.reason !== "website_preview_qa_failed" || controller.signal.aborted || await input.cancelRequested()) break;
+          const errors = JSON.stringify([failed.functionalAcceptance?.diagnostics ?? [], failed.functionalAcceptance?.brokenLinks ?? []]);
+          if (errors === previousErrors) break;
+          previousErrors = errors;
           const repairRunId = String(rootRunId ?? sessionId) + ":qa-repair:" + attempt;
           const repaired = await runner.run({ ctx: input.ctx, session: input.session, model, images: input.images, useInbox: false, skipAsyncCollect: true,
             prompt: input.prompt + "\nThe build passed, but opening the app in a browser found these errors: " + JSON.stringify({ errors: failed.functionalAcceptance?.diagnostics ?? [], brokenLinks: failed.functionalAcceptance?.brokenLinks ?? [] })

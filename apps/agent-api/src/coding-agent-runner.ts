@@ -65,6 +65,7 @@ import { compactConversationContextIfNeeded } from "./coding-agent-context-compa
 import { CodingAgentInboxManager } from "./coding-agent-inbox-manager";
 import { CodingAgentReviewCoordinator } from "./coding-agent-review-coordinator";
 import { CodingAgentToolWaves } from "./coding-agent-tool-waves";
+import { elideWrittenContent } from "./coding-agent-history-elision";
 
 export * from "./coding-agent-runner-contracts";
 
@@ -752,6 +753,7 @@ export class CodingAgentRunner {
       messages.push(assistantMessage);
 
       const waveOutcome = await toolWaves.executeTurnTools({ steps, normalized, callsToRun, profile, modelUsage });
+      elideWrittenContent(historyCalls, messages as never);
       // Remember whether this turn attempted a source mutation; the guard runs at the start of the next turn.
       lastTurnMutated = callsToRun.some(call => /^code\.fs\.(write|edit|apply_patch|move|delete)$|^code\.deps\.add$|^code\.data\.(schema\.(apply|modify)|rows\.(seed|transfer)|policies\.apply|backend\.(create|attach))$/.test(call.name));
       if (waveOutcome.action === "paused" || waveOutcome.action === "stopped") return waveOutcome.result;
