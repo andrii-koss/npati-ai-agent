@@ -194,13 +194,16 @@ export class ChatDevelopmentService {
         const expired = latest.status === "running" && (executionTimestamp(latest.leaseExpiresAt) ?? Infinity) < Date.now();
         const previewEvent = merged.filter(event => event.runId === latest.runId && event.stage === "preview").at(-1);
         const previewReady = !!project?.previewUrl && (previewEvent ? previewEvent.status === "completed" : previewBuildUsable(project.lastBuildStatus));
-        // The coding lease finishes before afterRun starts Preview. Recover this bounded finalization gap.
+        // The coding lease finishes before afterRun starts Preview. Recover this bounded finalization gap. A project
+        // without a framework gets Preview only after a change a browser can show, so after a text file or a package
+        // install no Preview comes: waiting the full two minutes kept the chat busy and then showed the run as failed.
+        const previewExpected = !!project && (isCodeChatWebsite(project) || !!project.framework);
         const awaitingPreview = !previewEvent && !previewReady && latest.status === "completed"
-          && Date.now() - (executionTimestamp(latest.finishedAt) ?? 0) < 120_000;
+          && Date.now() - (executionTimestamp(latest.finishedAt) ?? 0) < (previewExpected ? 120_000 : 15_000);
         const publishingPreview = awaitingPreview || (previewEvent?.status === "running" || previewEvent?.status === "active")
           && Date.now() - Date.parse(previewEvent.at) < 120_000;
         const status: DevelopmentProcess["status"] = expired && !live ? "interrupted" : live || latest.status === "running" ? item.status === "stopping" && item.runId === latest.runId ? "stopping" : "running" : latest.status === "waiting_for_user" ? "awaiting_approval"
-          : latest.status === "completed" && publishingPreview ? "running" : latest.status === "completed" && !previewReady ? "failed" : latest.status;
+          : latest.status === "completed" && publishingPreview ? "running" : latest.status === "completed" && !previewReady && (previewExpected || previewEvent) ? "failed" : latest.status;
         return { ...item, runId: latest.runId, status, previewUrl: project?.previewUrl ?? undefined };
       }
       // Pre-session setup has no durable lease. Do not keep an orphaned setup spinner forever.

@@ -547,3 +547,18 @@ describe("direct HTML startup", () => {
     f.finish(process.projectId!);
   });
 });
+
+it("frees the chat and reports success when a project without a framework needs no Preview",async()=>{
+ const f=await fixture();await f.start("Create a Next.js website");await vi.waitFor(()=>expect(f.controls.size).toBe(1));
+ const process=(await f.service.list(owner))[0]!;f.finish(process.projectId!);await vi.waitFor(async()=>expect((await f.service.list(owner))[0]?.status).toBe("completed"));
+ const project=await f.projects.get(owner,f.company.id,process.projectId!);
+ // E2E S0.1: a text file in an empty project. No Preview comes, so the run must not hold the chat for two minutes.
+ vi.spyOn(f.projects,"get").mockResolvedValue({...project,type:"code_project",framework:null,previewUrl:null,lastBuildStatus:null} as never);
+ const runId="text-file";
+ await f.store.createCodeRunState({runId,workspaceId:owner.workspaceId,companyId:f.company.id,projectId:process.projectId!,sessionId:process.sessionId!,owner:"worker",leaseMs:1000,now:new Date()});
+ await f.store.applyCodeRunStateEvent({companyId:f.company.id,runId,seq:2,status:"completed",finishedAt:new Date()});
+ const restarted=new ChatDevelopmentService({...f.ports,background:new CodeBackgroundRunRegistry()});shutdown.push(()=>restarted.close());
+ expect((await restarted.list(owner))[0]?.status).toBe("running");
+ const now=vi.spyOn(Date,"now").mockReturnValue(Date.now()+16_000);
+ try { expect((await restarted.list(owner))[0]?.status).toBe("completed"); } finally { now.mockRestore(); }
+});
