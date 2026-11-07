@@ -277,6 +277,15 @@ export function createCodeToolWiring(deps: CodeToolWiringDeps) {
         plan.phaseCommands.fetch = [addCommand];
       }
       if (!codeShellRuntimePort) throw new CodeToolError("install_unavailable", "Dependency install needs the sandbox shell runtime", 503, "configure", true, "code.deps.add");
+      // The install runs in the project root. With no package.json there but one in a subfolder, it would start a
+      // second npm project in the root and leave package.json, a lockfile and node_modules the user never asked for.
+      if (["npm", "pnpm", "yarn"].includes(manager) && await readWorkspaceText(ctx, companyId, projectId, "package.json") === null) {
+        const found = await codeShellRuntimePort.exec({ ctx, companyId, projectId, sessionId, command: "find . -mindepth 2 -maxdepth 4 -name package.json -not -path '*/node_modules/*' -not -path '*/.npati-runtime/*'", cwd: ".", timeoutMs: 30_000, approved }).catch(() => null);
+        const folders = (found?.stdout ?? "").split("\n").map((line) => line.trim().replace(/^\.\//, "").replace(/\/?package\.json$/, "")).filter(Boolean);
+        if (folders.length) {
+          return { manager, name, version: version ?? null, source: resolvedSource, verdict: "denied" as const, reasons: ["deps:no_root_manifest", `The project root has no package.json; ${folders.slice(0, 5).join(", ")} ${folders.length === 1 ? "has" : "have"} one. To add ${spec} there, run \`${packageAddCommand(manager, spec, dev === true)}\` with code.shell.exec and cwd set to that folder.`], metadata: { registryHost, lockfile: null, subfolders: folders.slice(0, 5) } };
+        }
+      }
       const runner = {
         supportsNetworkIsolation: false,
         run: async (command: string) => {

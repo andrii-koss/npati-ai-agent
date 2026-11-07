@@ -23,6 +23,9 @@ export function isCodeChatWebsite(project: Pick<Project, "type" | "framework">):
     || (project.type === "code_project" && isSupportedProjectFramework(project.framework) && !isDesktopProjectFramework(project.framework) && !isBackendProjectFramework(project.framework));
 }
 
+/** A file that changes what a page shows: markup, styles, page scripts or images. */
+export const isPreviewableChange = (file: string) => /\.(?:html?|css|scss|less|m?jsx?|tsx?|vue|svelte|svg|png|jpe?g|gif|webp)$/i.test(file) && !/(?:^|\/)(?:node_modules|\.npati-runtime)\//.test(file);
+
 /** What a row names as the running command: the server itself, not the check that decides whether to rebuild first. */
 const previewCommandLabel = (command: string) => command.replace(/^if \[.*?; fi && /, "");
 
@@ -135,7 +138,9 @@ export async function finishCodeChatWebsite(input: CodeSessionRunInput, result: 
     return { ...run, backendPreview: preview };
   }
   if (!isCodeChatWebsite(project)) {
-    const finished = project.type === "code_project" && !project.framework && run.status === "completed" && (run.summary?.filesChanged?.length ?? 0) > 0;
+    // Only a change a browser can show starts Preview. A text file or a package.json alone has nothing to show, and the
+    // chat stayed busy for two minutes while such a Preview failed, holding the user's next message.
+    const finished = project.type === "code_project" && !project.framework && run.status === "completed" && (run.summary?.filesChanged ?? []).some(isPreviewableChange);
     return finished ? startFinishedPreview(input, ports, companyId, projectId, run, result) : result;
   }
   const stylePreview = input.allowStylePreview && run.summary?.stylePreview === true

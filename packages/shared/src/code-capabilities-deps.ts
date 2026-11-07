@@ -72,6 +72,7 @@ export const CODE_DEPS_CAPABILITIES: CapabilityDefinition[] = [
       "The registry would have to be changed: that needs an approval and is never done implicitly.",
       "Lifecycle scripts would have to run: installs run with scripts disabled.",
       "Production credentials would be involved: they are never issued to the agent.",
+      "The package belongs in a subfolder (a folder the user named, or an app with its own package.json): this tool always installs in the project root, so run the package manager's add command through code.shell.exec with cwd set to that folder.",
     ],
     agentCallable: true,
     userVisible: true,
