@@ -72,6 +72,8 @@ function segments(path: string): string[] {
  * The deepest common directory of a path is a better focus signal than the file itself: touching
  * `src/billing/invoice.ts` makes `src/billing` the relevant neighbourhood.
  */
+const TECHNOLOGY_WORDS = new Set(["html", "css", "js", "jsx", "ts", "tsx", "json", "sql", "api", "ui", "ux", "ua", "en", "uk", "ru", "react", "vue", "angular", "svelte", "next.js", "nextjs", "node", "node.js", "nodejs", "express", "vite", "tailwind", "bootstrap", "ios", "android", "web", "mobile", "frontend", "backend", "ci", "cd", "tcp", "ip", "http", "https", "rest", "graphql"]);
+
 function focusRoots(input: ScopeGuardInput): string[] {
   const roots = new Set<string>();
   for (const planned of input.plannedPaths ?? []) {
@@ -85,6 +87,9 @@ function focusRoots(input: ScopeGuardInput): string[] {
     const cleaned = normalize(token).replace(/[.:]+$/, "");
     if (!cleaned.includes("/")) continue;
     if (!/^[\w.@-]+(\/[\w.@-]+)+$/.test(cleaned)) continue;
+    // "HTML/CSS/JS", "UA/EN" or "React/Vue" lists technologies, not a folder. Taken as one, every file of a new site
+    // fell outside the focus, the self-review questioned the scope and the agent ran extra checks (E2E G1: 9 turns).
+    if (segments(cleaned).every((part) => /^[A-Z0-9+#]{1,6}$/.test(part) || TECHNOLOGY_WORDS.has(part.toLowerCase()))) continue;
     const parts = segments(cleaned);
     if (parts.length === 0) continue;
     roots.add(parts.length === 1 ? parts[0]! : parts.slice(0, Math.min(2, parts.length - 1)).join("/"));
