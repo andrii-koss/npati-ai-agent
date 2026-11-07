@@ -1,4 +1,3 @@
-import { WRITTEN_CONTENT_NOTE } from "./coding-agent-history-elision";
 import { javascriptSyntax } from "./code-js-syntax-check";
 import { replaceLiteralText } from "./code-text-format";
 import { CodeToolError, type CodeToolExecutionContext, type CodeWritePort } from "./code-tool-runtime";
@@ -221,10 +220,6 @@ export function canonicalWriteExecutors(options: CanonicalWriteExecutorOptions =
       const path = stringArg(input.args, ["path", "file", "filePath"]);
       if (!path) throw new CodeToolError("invalid_arguments", "code.fs.write requires a path", 400, "validate_arguments", false, input.tool.name);
       const content = typeof input.args.content === "string" ? input.args.content : input.args.newContent;
-      // The history note that replaces a written file's text must never become the file itself.
-      if (typeof content === "string" && content.trimStart().startsWith(WRITTEN_CONTENT_NOTE)) {
-        throw new CodeToolError("invalid_arguments", "content is the history note, not the file text. Read the file and write its real content, or use code.fs.edit for a change.", 400, "validate_arguments", false, input.tool.name);
-      }
       const written = await writeFileSafe(
         {
           path,
