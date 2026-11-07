@@ -327,6 +327,11 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
             checks: ["screenshot", "console", "links"], screenshotMode: "visual", maxScreenshotBytes: 2_000_000, agentId: "system",
           });
         } catch (error) {
+          // The project thumbnail is this screenshot. A page still drawing (Flutter, canvas) or a slow capture left the
+          // project without one, so one more capture runs in the background a little later; the chat does not wait.
+          setTimeout(() => void inputDeps.projectBrowserQaService!.inspect(input.ctx, input.session.companyId, {
+            projectId: input.session.projectId, runId: input.runId, checks: ["screenshot"], screenshotMode: "visual", maxScreenshotBytes: 2_000_000, agentId: "system",
+          }).catch(() => undefined), 10_000).unref?.();
           if (!["visual_screenshot_unavailable", "preview_empty"].includes((error as { code?: string })?.code ?? "")) throw error;
           return inputDeps.projectBrowserQaService!.inspect(input.ctx, input.session.companyId, {
             projectId: input.session.projectId, runId: input.runId, checks: ["console", "links"], agentId: "system",
