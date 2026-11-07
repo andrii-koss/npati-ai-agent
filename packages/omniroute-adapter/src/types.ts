@@ -40,6 +40,8 @@ export interface ChatRequest {
   /** Opt-in streamed generation counters; no text, arguments or private reasoning is exposed. */
   /** Supported fast creation path for DeepSeek Flash; other providers retain their settings. */
   reasoningMode?: "disabled";
+  /** Upper bound for one answer. Without it the provider default (8192 for DeepSeek) cut multi-file writes mid-JSON. */
+  maxOutputTokens?: number;
   /**
    * Step 3: the stable prefix of the first system message, when the caller can name it. Only providers that require
    * an explicit cache marker (Anthropic-family) receive it as a `cache_control` block; every other provider gets the

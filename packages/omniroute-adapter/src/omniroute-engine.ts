@@ -110,6 +110,7 @@ export class OmniRouteEngine implements AIEngine {
             ...(request.reasoningMode === "disabled" && model === "deepseek/deepseek-flash" ? {thinking:{type:"disabled"},reasoning_effort:"none"} : {}),
             ...(request.onGenerationProgress || request.onTextDelta ? {stream:true,stream_options:{include_usage:true}} : {}),
             ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
+            ...(request.maxOutputTokens ? { max_tokens: request.maxOutputTokens } : {}),
             ...(wire.tools?.length ? { tools: wire.tools, tool_choice: wire.toolChoice ?? "auto", parallel_tool_calls: false } : {}),
           };
       const attemptStarted=Date.now();

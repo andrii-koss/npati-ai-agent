@@ -591,6 +591,7 @@ export class CodingAgentRunner {
           ...(input.onTextDelta ? { onTextDelta: input.onTextDelta } : {}),
           model: input.model,
           ...(this.limits.disableModelReasoning ? { reasoningMode: "disabled" as const } : {}),
+          maxOutputTokens: Number(process.env.NPATI_CODE_MAX_OUTPUT_TOKENS) || 32_768, // the 8192 default cut file writes (E2E G10)
           ...(input.fallbackModel ? { fallbackModel: input.fallbackModel } : {}),
           signal: input.signal,
           idempotencyKey: `${sessionId}:${turnId}:${steps}`,
