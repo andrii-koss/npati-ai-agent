@@ -309,15 +309,17 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
     prepareReference: input => analyzeWebsiteReference(input, request => inputDeps.aiEngine.chat(request)),
     // The first command of a new project used to create the sandbox while the agent waited (E2E G1: about 0.7 s).
     beforeSelfReview: (input, changedFiles) => {
-      if (!input.runId || input.readOnlyIntent || input.session.mode === "plan" || !changedFiles.some(isPreviewableChange)) return;
+      if (input.readOnlyIntent || input.session.mode === "plan" || !changedFiles.some(isPreviewableChange)) return;
       const started = (async () => {
         const project = await projectService.get(input.ctx, input.session.companyId, input.session.projectId);
         if (project.framework !== "HTML/CSS" && !(project.type === "code_project" && !project.framework)) return undefined;
         await featureFlagService.assertEnabled(input.ctx, "code.shell", { companyId: input.session.companyId });
         return projectPreviewService.startPreview(input.ctx, input.session.companyId, input.session.projectId, { verifiedBuild: true });
       })().catch(() => undefined);
-      warmPreviews.set(input.runId, { files: fileSet(changedFiles), started });
-      setTimeout(() => warmPreviews.delete(input.runId!), 600_000).unref?.();
+      // Keyed by project: one run at a time works in a project, and the run id is not always set on this input.
+      const key = input.session.projectId;
+      warmPreviews.set(key, { files: fileSet(changedFiles), started });
+      setTimeout(() => { if (warmPreviews.get(key)?.started === started) warmPreviews.delete(key); }, 600_000).unref?.();
     },
     warmUp: async (input) => input.readOnlyIntent || input.session.mode === "plan" ? undefined : projectSandbox?.prepare(input.ctx, input.session.companyId, input.session.projectId),
     resolveVerificationTools: async (input) => resolveProjectVerificationTools(input, projectService, codeService),
@@ -333,8 +335,8 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
         },
         startPreview: async (ctx, companyId, projectId, signal, options) => {
           await featureFlagService.assertEnabled(ctx, "code.shell", { companyId });
-          const warm = input.runId ? warmPreviews.get(input.runId) : undefined;
-          if (input.runId) warmPreviews.delete(input.runId);
+          const warm = warmPreviews.get(projectId);
+          warmPreviews.delete(projectId);
           if (warm && !options?.development && warm.files === fileSet((result as { summary?: { filesChanged?: string[] } } | null)?.summary?.filesChanged)) {
             const ready = await warm.started;
             if (ready?.status === "running") return ready;
