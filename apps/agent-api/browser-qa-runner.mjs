@@ -32,7 +32,12 @@ try {
   // WebGL through Mesa's software renderer (llvmpipe): Alpine's Chromium has no SwiftShader, so without these flags every
   // Three.js or WebGL scene failed the check as a "runtime error" and the agent "repaired" working code blind (E2E G7).
   const webgl = ["--use-gl=angle", "--use-angle=gl-egl", "--ignore-gpu-blocklist"];
-  const browser = await chromium.launch({ headless: true, ...(shared ? { executablePath: "/usr/bin/chromium-browser" } : {}), args: ["--no-sandbox", "--disable-dev-shm-usage", ...webgl, ...(shared ? ["--no-proxy-server"] : [])] });
+  // The sandbox has no direct network, not even DNS: allowed outside hosts (Google Fonts, the Flutter engine) are reached
+  // through its egress proxy, which enforces the allowlist, and only the Preview itself is opened directly.
+  const egress = shared ? process.env.HTTPS_PROXY ?? process.env.https_proxy : undefined;
+  const browser = await chromium.launch({ headless: true, ...(shared ? { executablePath: "/usr/bin/chromium-browser" } : {}),
+    ...(egress ? { proxy: { server: egress, bypass: `${host},localhost,127.0.0.1` } } : {}),
+    args: ["--no-sandbox", "--disable-dev-shm-usage", ...webgl, ...(shared && !egress ? ["--no-proxy-server"] : [])] });
   try {
     const context = await browser.newContext({ viewport, serviceWorkers: "block", acceptDownloads: false });
     await context.route("**/*", async route => {
