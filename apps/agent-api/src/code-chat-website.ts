@@ -23,6 +23,10 @@ export function isCodeChatWebsite(project: Pick<Project, "type" | "framework">):
     || (project.type === "code_project" && isSupportedProjectFramework(project.framework) && !isDesktopProjectFramework(project.framework) && !isBackendProjectFramework(project.framework));
 }
 
+/** No framework yet, or the "static" one Preview records after serving plain files: both are a plain HTML site. A follow-up
+ * edit in such a project used to get no Preview refresh and no browser check once its first Preview had set "static". */
+export const isPlainProjectFramework = (framework: string | null | undefined) => !framework || framework === "static";
+
 /** A file that changes what a page shows: markup, styles, page scripts or images. */
 export const isPreviewableChange = (file: string) => /\.(?:html?|css|scss|less|m?jsx?|tsx?|vue|svelte|svg|png|jpe?g|gif|webp)$/i.test(file) && !/(?:^|\/)(?:node_modules|\.npati-runtime)\//.test(file);
 
@@ -140,7 +144,7 @@ export async function finishCodeChatWebsite(input: CodeSessionRunInput, result: 
   if (!isCodeChatWebsite(project)) {
     // Only a change a browser can show starts Preview. A text file or a package.json alone has nothing to show, and the
     // chat stayed busy for two minutes while such a Preview failed, holding the user's next message.
-    const finished = project.type === "code_project" && !project.framework && run.status === "completed" && (run.summary?.filesChanged ?? []).some(isPreviewableChange);
+    const finished = project.type === "code_project" && isPlainProjectFramework(project.framework) && run.status === "completed" && (run.summary?.filesChanged ?? []).some(isPreviewableChange);
     return finished ? startFinishedPreview(input, ports, companyId, projectId, run, result) : result;
   }
   const stylePreview = input.allowStylePreview && run.summary?.stylePreview === true

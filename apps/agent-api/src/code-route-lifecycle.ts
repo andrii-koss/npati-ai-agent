@@ -8,7 +8,7 @@ import { readCodeActiveContext, writeCodeActiveContext } from "./code-active-con
 import { DEFAULT_CODE_AGENT_LIMITS } from "./code-agent-config";
 import { registerCodeAgentControlRoutes } from "./code-agent-controls";
 import { CodeAsyncWorkspaceService, registerCodeAsyncWorkspaceRoutes } from "./code-async-workspace";
-import { finishCodeChatWebsite, isCodeChatWebsite, isPreviewableChange } from "./code-chat-website";
+import { finishCodeChatWebsite, isCodeChatWebsite, isPlainProjectFramework, isPreviewableChange } from "./code-chat-website";
 import { detectProjectStack } from "./project-preview-stack";
 import { verifyWebsiteRuntime } from "./website-runtime-acceptance";
 import { registerCodeIntentRoutes } from "./code-intent-routing";
@@ -312,7 +312,7 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
       if (input.readOnlyIntent || input.session.mode === "plan" || !changedFiles.some(isPreviewableChange)) return;
       const started = (async () => {
         const project = await projectService.get(input.ctx, input.session.companyId, input.session.projectId);
-        if (project.framework !== "HTML/CSS" && !(project.type === "code_project" && !project.framework)) return undefined;
+        if (project.framework !== "HTML/CSS" && !(project.type === "code_project" && isPlainProjectFramework(project.framework))) return undefined;
         await featureFlagService.assertEnabled(input.ctx, "code.shell", { companyId: input.session.companyId });
         return projectPreviewService.startPreview(input.ctx, input.session.companyId, input.session.projectId, { verifiedBuild: true });
       })().catch(() => undefined);
@@ -337,11 +337,13 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
           await featureFlagService.assertEnabled(ctx, "code.shell", { companyId });
           const warm = warmPreviews.get(projectId);
           warmPreviews.delete(projectId);
-          if (warm && !options?.development && warm.files === fileSet((result as { summary?: { filesChanged?: string[] } } | null)?.summary?.filesChanged)) {
+          const finalFiles = fileSet((result as { summary?: { filesChanged?: string[] } } | null)?.summary?.filesChanged);
+          if (warm && !options?.development && warm.files === finalFiles) {
             const ready = await warm.started;
             if (ready?.status === "running") return ready;
           }
-          return projectPreviewService.startPreview(ctx, companyId, projectId, { signal, verifiedBuild: !options?.development });
+          try { return await projectPreviewService.startPreview(ctx, companyId, projectId, { signal, verifiedBuild: !options?.development }); }
+          catch (error) { log.warn({ err: error, projectId }, "preview_start_after_run_failed"); throw error; }
         },
         markFailed: (ctx, companyId, projectId) => projectService.updatePreview(ctx, companyId, projectId, { status: "failed", lastBuildStatus: "failed" }),
         });

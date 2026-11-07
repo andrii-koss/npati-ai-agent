@@ -15,7 +15,7 @@ import type { CodeSessionInboxService } from "./code-session-inbox";
 import type { ProjectSandboxService } from "./project-sandbox-service";
 import type { ProjectPreviewService } from "./project-preview-service";
 import type { CodeRunCancellationRegistry } from "./code-run-cancellation";
-import { hasCodeChatPreview, isCodeChatWebsite } from "./code-chat-website";
+import { hasCodeChatPreview, isCodeChatWebsite, isPlainProjectFramework } from "./code-chat-website";
 import { saveChatProjectCard } from "./project-chat-cards";
 
 import { developmentTrace, sanitizeProgress, selectDevelopmentTraceRuns, executionTimestamp, executionResultDetails, compactProgress, metadataOnlyProgress } from "./chat-development-trace";
@@ -197,7 +197,7 @@ export class ChatDevelopmentService {
         // The coding lease finishes before afterRun starts Preview. Recover this bounded finalization gap. A project
         // without a framework gets Preview only after a change a browser can show, so after a text file or a package
         // install no Preview comes: waiting the full two minutes kept the chat busy and then showed the run as failed.
-        const previewExpected = !!project && (isCodeChatWebsite(project) || !!project.framework);
+        const previewExpected = !!project && (isCodeChatWebsite(project) || !isPlainProjectFramework(project.framework));
         const awaitingPreview = !previewEvent && !previewReady && latest.status === "completed"
           && Date.now() - (executionTimestamp(latest.finishedAt) ?? 0) < (previewExpected ? 120_000 : 15_000);
         const publishingPreview = awaitingPreview || (previewEvent?.status === "running" || previewEvent?.status === "active")
