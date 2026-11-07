@@ -11,8 +11,10 @@ import path from "node:path";
  */
 const SCRIPT = /\.(?:m?js|cjs)$/i;
 const MAX_BYTES = 512 * 1024;
+/** Said in the result itself: in one run of three the model ran node --check again despite the system prompt. */
+const CHECKED_WITH = "node --check, already run on this file; do not run it again";
 
-export async function javascriptSyntax(filePath: string, content: string): Promise<{ ok: true } | { ok: false; error: string } | undefined> {
+export async function javascriptSyntax(filePath: string, content: string): Promise<{ ok: true; checkedWith: string } | { ok: false; error: string; checkedWith: string } | undefined> {
   if (!SCRIPT.test(filePath) || typeof content !== "string" || Buffer.byteLength(content) > MAX_BYTES) return undefined;
   // The extension decides CommonJS or module, as it does for node itself; a plain .js with import/export is a module.
   const extension = /\.cjs$/i.test(filePath) ? ".cjs" : /\.mjs$/i.test(filePath) || /^\s*(?:import|export)\s/m.test(content) ? ".mjs" : ".js";
@@ -21,11 +23,11 @@ export async function javascriptSyntax(filePath: string, content: string): Promi
     await writeFile(temporary, content, { mode: 0o600 });
     return await new Promise((resolve) => {
       execFile(process.execPath, ["--check", temporary], { timeout: 5_000, env: {} }, (error, _stdout, stderr) => {
-        if (!error) return resolve({ ok: true });
+        if (!error) return resolve({ ok: true, checkedWith: CHECKED_WITH });
         if (error.killed) return resolve(undefined);
         // Point at the agent's file, not the temporary copy; keep only the line, the caret and the error.
         const text = String(stderr ?? "").split(temporary).join(filePath).split("\n").filter((line) => line.trim() && !/^\s+at |^Node\.js v/.test(line)).slice(0, 6).join("\n");
-        resolve({ ok: false, error: text.slice(0, 800) || "SyntaxError" });
+        resolve({ ok: false, error: text.slice(0, 800) || "SyntaxError", checkedWith: CHECKED_WITH });
       });
     });
   } catch {
