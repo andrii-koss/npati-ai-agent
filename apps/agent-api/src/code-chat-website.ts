@@ -4,7 +4,7 @@ import type { ProjectMediaService } from "./project-media-service";
 import { emitCodingActivity } from "./coding-agent-runner-contracts";
 import type { AuthContext, Project, CodeSession } from "@npati/workspace";
 import type { CodeSessionRunInput } from "./code-session-run-executor";
-import { isSupportedProjectFramework, isWebsiteReferenceEdit, isDesktopProjectFramework, isBackendProjectFramework } from "@npati/shared";
+import { canonicalFrameworkName, isSupportedProjectFramework, isWebsiteReferenceEdit, isDesktopProjectFramework, isBackendProjectFramework } from "@npati/shared";
 import type { CodeService } from "./code-service";
 import { CODE_TOOL_MANIFEST_VERSION } from "./code-tool-registry";
 import { contextualToolMatches } from "./code-tool-visibility";
@@ -18,9 +18,19 @@ export async function refreshChatPreviewSession(ctx: AuthContext, project: Pick<
 }
 
 /** Website chat uses the existing code loop and preview runtime; no second agent or queue. */
+/** "static", "vite" and other stack labels Preview stored earlier, read as the canonical framework; unknown names stay. */
+function withCanonicalFramework<T extends { framework?: string | null }>(project: T): T {
+  if (!project.framework || isSupportedProjectFramework(project.framework)) return project;
+  const canonical = canonicalFrameworkName(project.framework);
+  return canonical ? { ...project, framework: canonical } : project;
+}
+
 export function isCodeChatWebsite(project: Pick<Project, "type" | "framework">): boolean {
+  // Preview used to record its own stack names ("vite", "static", "nextjs"); read them as the framework they are, or a
+  // project built from an empty one got no Preview, no browser check and no thumbnail after its runs.
+  const framework = isSupportedProjectFramework(project.framework) ? project.framework : canonicalFrameworkName(project.framework);
   return ["website", "web_app", "landing_page"].includes(project.type)
-    || (project.type === "code_project" && isSupportedProjectFramework(project.framework) && !isDesktopProjectFramework(project.framework) && !isBackendProjectFramework(project.framework));
+    || (project.type === "code_project" && isSupportedProjectFramework(framework) && !isDesktopProjectFramework(framework) && !isBackendProjectFramework(framework));
 }
 
 /** No framework yet, or the "static" one Preview records after serving plain files: both are a plain HTML site. A follow-up
@@ -128,12 +138,12 @@ export async function finishCodeChatWebsite(input: CodeSessionRunInput, result: 
   const run = result as { status?: string; summary?: { stylePreview?: boolean; filesChanged?: string[]; verification?: { status?: string; requestedTools?: string[] } } } | null;
   if (run?.status !== "completed" || input.readOnlyIntent || input.session.mode === "plan") return result;
   const { companyId, projectId } = input.session;
-  let project = await ports.getProject(input.ctx, companyId, projectId);
+  let project = withCanonicalFramework(await ports.getProject(input.ctx, companyId, projectId));
   const userMessage = input.toolContext?.userMessage ?? "";
   const previewRequested = /\bpreview\b|прев['’]?ю|попередн\S*\s+перегляд/iu.test(userMessage)
     && !/(?:do not|don't|without|не)\s+(?:(?:show|start|open|показуй|запускай|відкривай)\s+)?(?:live\s+)?preview/iu.test(userMessage);
   if (previewRequested && project.type === "code_project" && !project.framework && ports.prepareStaticPreview) {
-    project = await ports.prepareStaticPreview(input.ctx, companyId, projectId) ?? project;
+    project = withCanonicalFramework(await ports.prepareStaticPreview(input.ctx, companyId, projectId) ?? project);
   }
   // Backend readiness is established by the existing Preview service, separately from frontend build/Browser QA.
   if (project.type === "code_project" && isBackendProjectFramework(project.framework)) {

@@ -313,6 +313,9 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
       const started = (async () => {
         const project = await projectService.get(input.ctx, input.session.companyId, input.session.projectId);
         if (project.framework !== "HTML/CSS" && !(project.type === "code_project" && isPlainProjectFramework(project.framework))) return undefined;
+        // Only a site with nothing to build: a Vite or Next.js project started from an empty one has no framework yet
+        // either, and an early Preview there recorded its stack before the run finished (no browser check, no thumbnail).
+        if ((await projectWorkspace.listFiles(input.ctx, input.session.companyId, input.session.projectId)).some((file) => file.path === "package.json")) return undefined;
         await featureFlagService.assertEnabled(input.ctx, "code.shell", { companyId: input.session.companyId });
         return projectPreviewService.startPreview(input.ctx, input.session.companyId, input.session.projectId, { verifiedBuild: true });
       })().catch(() => undefined);

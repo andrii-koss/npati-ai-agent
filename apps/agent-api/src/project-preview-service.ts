@@ -14,7 +14,7 @@ import type { ProjectWorkspace } from "./project-workspace";
 import type { ProjectSandboxService } from "./project-sandbox-service";
 import { SandboxProviderError } from "./sandbox-provider";
 import { projectRuntimeCommandPort } from "./shared-project-runtime-provider";
-import { isDesktopProjectFramework } from "@npati/shared";
+import { canonicalFrameworkName, isDesktopProjectFramework } from "@npati/shared";
 /** Stable across API/worker instances; the encryption key is never used directly as a signing key. */
 export function resolvePreviewSecret(secret?: string, env: NodeJS.ProcessEnv = process.env): string {
   if (secret || env.NPATI_PREVIEW_SECRET) return (secret || env.NPATI_PREVIEW_SECRET)!;
@@ -361,12 +361,14 @@ export class ProjectPreviewService {
     };
     this.sessions.set(projectId, session);
     // Update project state in DB
+    // The project keeps a canonical framework name ("React + Vite", "HTML/CSS"), not Preview's own stack label.
     const finalFramework = project.framework || detected.framework;
+    const storedFramework = project.framework || canonicalFrameworkName(detected.framework) || detected.framework;
     await this.projects.updatePreview(ctx, companyId, projectId, {
       status: "previewing",
       previewUrl,
       previewPort: devPort,
-      framework: finalFramework,
+      framework: storedFramework,
       lastBuildStatus: verifiedBuild || !detected.productionCommand ? "ready" : "development",
     });
     return {
