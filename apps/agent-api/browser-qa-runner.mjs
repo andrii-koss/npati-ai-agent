@@ -31,7 +31,8 @@ try {
   stage = "launch";
   // WebGL through Mesa's software renderer (llvmpipe): Alpine's Chromium has no SwiftShader, so without these flags every
   // Three.js or WebGL scene failed the check as a "runtime error" and the agent "repaired" working code blind (E2E G7).
-  const webgl = ["--use-gl=angle", "--use-angle=gl-egl", "--ignore-gpu-blocklist"];
+  // Compositing stays in software: drawing the whole page through Mesa made every screenshot take 5-8 s instead of under 1 s.
+  const webgl = ["--use-gl=angle", "--use-angle=gl-egl", "--ignore-gpu-blocklist", "--disable-gpu-compositing"];
   // The sandbox has no direct network, not even DNS: allowed outside hosts (Google Fonts, the Flutter engine) are reached
   // through its egress proxy, which enforces the allowlist, and only the Preview itself is opened directly.
   const egress = shared ? process.env.HTTPS_PROXY ?? process.env.https_proxy : undefined;
