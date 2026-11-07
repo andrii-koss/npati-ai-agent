@@ -17,3 +17,12 @@ describe("quoted arguments in auto mode", () => {
     expect(approval(`flutter create . ; rm -rf ~`)).toBe(true);
   });
 });
+
+describe("the shell risk classifier agrees with the terminal policy on quoted text", () => {
+  it("does not ask for approval for node -e or a quoted flutter create description", async () => {
+    const { classifyShellCommand } = await import("../apps/agent-api/src/code-shell-classifier");
+    expect(classifyShellCommand(`flutter create --project-name todo_app --platforms web,android --description "Список елементів з формою додавання" .`, {}).risk).not.toBe("approval");
+    expect(classifyShellCommand(`node -e "console.log(require('lodash/package.json').version)"`, {}).risk).not.toBe("approval");
+    expect(classifyShellCommand(`node -e "1" && rm -rf src`, {}).risk).toBe("approval");
+  });
+});

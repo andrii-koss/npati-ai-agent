@@ -662,7 +662,9 @@ export function classifyShellCommand(command: string, options: ShellClassifierOp
     // that must escalate to approval, never crash the classifier.
     let base: { level: CodeShellRisk; reason?: string; timeoutClass?: string };
     try {
-      base = classifyTerminalCommand({ executable, args, command: segment.raw });
+      // The raw segment keeps its quotes, which the policy needs to tell quoted text from shell syntax; the parsed argv
+      // has them stripped, and a quoted description with spaces then failed validation and asked for approval (E2E G9).
+      base = classifyTerminalCommand({ command: segment.raw });
     } catch (error) {
       base = { level: "approval", reason: `terminal policy could not validate this command: ${error instanceof Error ? error.message : String(error)}`, timeoutClass: "default" };
     }
