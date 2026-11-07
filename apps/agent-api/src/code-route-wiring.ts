@@ -1,3 +1,4 @@
+import { smallWorkspaceContext } from "./code-small-workspace-context";
 import { withTransientModelRetry } from "./coding-agent-provider-retry";
 import { createCodeRunVisionPort } from "./coding-agent-image-delivery";
 import { resolveConfirmedVisionModel } from "./chat-inference-candidates";
@@ -491,6 +492,10 @@ export function registerCodeRouteWiring(app: FastifyInstance, deps: CodeRouteDep
         } catch {
           projectContext = null;
         }
+        try {
+          const small = await smallWorkspaceContext(await projectWorkspace.listFiles(ctx, companyId, projectId), async (path) => (await projectWorkspace.readFile(ctx, companyId, projectId, path)).content);
+          if (small) projectContext = [projectContext, small].filter(Boolean).join("\n\n");
+        } catch { /* the agent can still list the folder itself */ }
         if (websiteEdit) {
           try {
             const files = await projectWorkspace.listFiles(ctx, companyId, projectId);
