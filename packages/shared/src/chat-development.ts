@@ -63,7 +63,9 @@ export function planChatDevelopment(message: string, activeProjectId?: string): 
           && !/(?:new\s+(?:website|site)|новий\s+сайт)/iu.test(message)))) return [];
   const kinds: DevelopmentTarget["kind"][] = [];
   const requestedFramework = extractFramework(message);
-  if (/(?:website|\bsite\b|сайт|landing)/iu.test(message)) kinds.push("website");
+  // "Лендинг" is how a landing page is usually written in Ukrainian and Russian; without it such a request went to the
+  // plain chat, which built the site with no steps on screen.
+  if (/(?:website|\bsite\b|сайт|landing|ленд[иі]нг|лэндинг)/iu.test(message)) kinds.push("website");
   if (/(?:blog|блог)/iu.test(message)) kinds.push("blog");
   if (/(?:store|shop|магазин)/iu.test(message)) {
     // A 'website shop' is one project; explicitly separate company sites remain distinct.

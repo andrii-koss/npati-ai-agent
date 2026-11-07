@@ -562,3 +562,10 @@ it("frees the chat and reports success when a project without a framework needs 
  const now=vi.spyOn(Date,"now").mockReturnValue(Date.now()+16_000);
  try { expect((await restarted.list(owner))[0]?.status).toBe("completed"); } finally { now.mockRestore(); }
 });
+
+it("starts development with steps for a landing page written in Ukrainian or Russian",()=>{
+ // The owner's chat: "Створи лендинг" went to the plain chat and the site was built with no steps on screen.
+ for(const message of ["Створи лендинг на чистих HTML/CSS/JS з контактною формою","Зроби лендінг для кав'ярні","Создай лендинг для студии"]){
+  expect(planChatDevelopment(message),message).toEqual([{kind:"website",name:"Company website",framework:"HTML/CSS"}]);
+ }
+});
