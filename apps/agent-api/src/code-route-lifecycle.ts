@@ -8,7 +8,7 @@ import { readCodeActiveContext, writeCodeActiveContext } from "./code-active-con
 import { DEFAULT_CODE_AGENT_LIMITS } from "./code-agent-config";
 import { registerCodeAgentControlRoutes } from "./code-agent-controls";
 import { CodeAsyncWorkspaceService, registerCodeAsyncWorkspaceRoutes } from "./code-async-workspace";
-import { finishCodeChatWebsite, isCodeChatWebsite } from "./code-chat-website";
+import { finishCodeChatWebsite, isCodeChatWebsite, isPreviewableChange } from "./code-chat-website";
 import { detectProjectStack } from "./project-preview-stack";
 import { verifyWebsiteRuntime } from "./website-runtime-acceptance";
 import { registerCodeIntentRoutes } from "./code-intent-routing";
@@ -297,10 +297,29 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
 
   const codeRunCancellation = new CodeRunCancellationRegistry();
 
+  /**
+   * A plain HTML site needs no build, so its Preview can start while the self-review runs instead of after it (about 2 s
+   * per run). It is used only when the review changed nothing; otherwise Preview starts again as before.
+   */
+  const warmPreviews = new Map<string, { files: string; started: Promise<Awaited<ReturnType<typeof projectPreviewService.startPreview>> | undefined> }>();
+  const fileSet = (files: readonly string[] | undefined) => [...new Set(files ?? [])].sort().join("|");
   const codeSessionRunExecutor = new CodeSessionRunExecutor({
     runner: codingAgentRunner,
     control: codeRunCancellation,
     prepareReference: input => analyzeWebsiteReference(input, request => inputDeps.aiEngine.chat(request)),
+    // The first command of a new project used to create the sandbox while the agent waited (E2E G1: about 0.7 s).
+    beforeSelfReview: (input, changedFiles) => {
+      if (!input.runId || input.readOnlyIntent || input.session.mode === "plan" || !changedFiles.some(isPreviewableChange)) return;
+      const started = (async () => {
+        const project = await projectService.get(input.ctx, input.session.companyId, input.session.projectId);
+        if (project.framework !== "HTML/CSS" && !(project.type === "code_project" && !project.framework)) return undefined;
+        await featureFlagService.assertEnabled(input.ctx, "code.shell", { companyId: input.session.companyId });
+        return projectPreviewService.startPreview(input.ctx, input.session.companyId, input.session.projectId, { verifiedBuild: true });
+      })().catch(() => undefined);
+      warmPreviews.set(input.runId, { files: fileSet(changedFiles), started });
+      setTimeout(() => warmPreviews.delete(input.runId!), 600_000).unref?.();
+    },
+    warmUp: async (input) => input.readOnlyIntent || input.session.mode === "plan" ? undefined : projectSandbox?.prepare(input.ctx, input.session.companyId, input.session.projectId),
     resolveVerificationTools: async (input) => resolveProjectVerificationTools(input, projectService, codeService),
     afterRun: async (input, result) => {
       let finished = await finishCodeChatWebsite(input, result, {
@@ -314,6 +333,12 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
         },
         startPreview: async (ctx, companyId, projectId, signal, options) => {
           await featureFlagService.assertEnabled(ctx, "code.shell", { companyId });
+          const warm = input.runId ? warmPreviews.get(input.runId) : undefined;
+          if (input.runId) warmPreviews.delete(input.runId);
+          if (warm && !options?.development && warm.files === fileSet((result as { summary?: { filesChanged?: string[] } } | null)?.summary?.filesChanged)) {
+            const ready = await warm.started;
+            if (ready?.status === "running") return ready;
+          }
           return projectPreviewService.startPreview(ctx, companyId, projectId, { signal, verifiedBuild: !options?.development });
         },
         markFailed: (ctx, companyId, projectId) => projectService.updatePreview(ctx, companyId, projectId, { status: "failed", lastBuildStatus: "failed" }),

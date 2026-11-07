@@ -176,6 +176,7 @@ export const CODE_RUN_DISCIPLINE_RULES: readonly string[] = [
   "- In an existing project, edit that project; never create a new one. If the target project is unclear, ask once.",
   "- Read the fragment you will change before editing it; do not re-read files that are already in context and unchanged.",
   "- After a change, check it once in the cheapest sufficient way, then finish with a short summary (code.finish when available).",
+  "- A JavaScript write or edit result already reports `syntax`; when it is ok, do not run node --check on that file again.",
   "- Do not repeat a failed action without changing the approach.",
 ];
 

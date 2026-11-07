@@ -259,7 +259,19 @@ export class ProjectSandboxService {
       return null;
     }
   }
-  private async ensure(ctx: AuthContext, project: Project) {
+  /** Creates or starts the project sandbox ahead of its first command; nothing is synced and nothing runs. */
+  async prepare(ctx: AuthContext, companyId: string, projectId: string) {
+    if (this.preparing.has(projectId)) return this.preparing.get(projectId);
+    const pending = this.projects.get(ctx, companyId, projectId).then((project) => this.ensure(ctx, project, true)).then(() => undefined);
+    this.preparing.set(projectId, pending);
+    try { await pending; } finally { this.preparing.delete(projectId); }
+  }
+  private readonly preparing = new Map<string, Promise<void>>();
+  private async ensure(ctx: AuthContext, project: Project, fromPrepare = false) {
+    // A command that arrives while prepare() is still creating the sandbox waits for it and then reuses it,
+    // instead of creating a second one in parallel.
+    const preparing = fromPrepare ? undefined : this.preparing.get(project.id);
+    if (preparing) { await preparing.catch(() => undefined); project = await this.projects.get(ctx, project.companyId, project.id) as Project; }
     const scope = scopeOf(ctx, project);
     /**
      * C15: the mount this project's canonical workspace is, resolved **before** the container exists. It comes

@@ -161,6 +161,10 @@ export interface CodeSessionRunExecutorOptions {
   runner: CodeSessionRunPort;
   control: CodeRunControlPort;
   resolveModel?: (ctx: AuthContext, input: CodeSessionRunInput) => Promise<string | undefined>;
+  /** Started, not awaited, when a run begins: e.g. create the project sandbox while the model writes the first files. */
+  warmUp?: (input: CodeSessionRunInput) => Promise<unknown>;
+  /** Started, not awaited, when the self-review begins, with the files the run changed so far. */
+  beforeSelfReview?: (input: CodeSessionRunInput, changedFiles: readonly string[]) => void;
   prepareReference?: (input: CodeSessionRunInput) => Promise<readonly string[]>;
   resolveVerificationTools?: (input: CodeSessionRunInput) => Promise<readonly string[] | undefined>;
   afterRun?: (input: CodeSessionRunInput, result: unknown) => Promise<unknown>;
@@ -219,6 +223,7 @@ export class CodeSessionRunExecutor {
     let result: unknown;
     try {
       if (input.referenceImageRequired && !input.images?.length) throw new Error("reference_image_missing");
+      void this.options.warmUp?.(input).catch(() => undefined);
       const model = await this.options.resolveModel?.(input.ctx, input);
       if (input.websiteEdit && input.images?.length && !model) throw new Error("vision_model_unavailable");
       input = { ...input, resolvedModel: model };
@@ -240,6 +245,7 @@ export class CodeSessionRunExecutor {
         ...(input.allowStylePreview ? { allowStylePreview: true } : {}),
         ...(input.requireImplementation ? { requireImplementation: true } : {}),
         ...(input.emptyHtmlWorkspace ? { emptyHtmlWorkspace: true } : {}),
+        ...(this.options.beforeSelfReview ? { onBeforeSelfReview: (files: readonly string[]) => this.options.beforeSelfReview!(input, files) } : {}),
         ...(input.onActivity ? { onActivity: input.onActivity } : {}),
         // Step 5: assistant prose reaches the transport through the sink, before the run settles.
         ...(sink?.emitDelta && !input.referenceImageRequired ? { onTextDelta: (text: string) => sink.emitDelta?.(text) } : {}),

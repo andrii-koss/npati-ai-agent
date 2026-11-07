@@ -1,3 +1,4 @@
+import { javascriptSyntax } from "./code-js-syntax-check";
 import { replaceLiteralText } from "./code-text-format";
 import { CodeToolError, type CodeToolExecutionContext, type CodeWritePort } from "./code-tool-runtime";
 import { simpleUnifiedDiff } from "./code-workspace-checkpoint";
@@ -206,15 +207,23 @@ export function isCanonicalPatchFormat(patch: string): boolean {
   return /^\*\*\* Begin Patch\s*$/m.test(patch) || /^\*\*\* (Update|Add|Delete) File: /m.test(patch);
 }
 
+/** A JavaScript write reports its syntax, so the agent needs no separate node --check turn. */
+async function withSyntax<T>(result: T, filePath: string, content: string | undefined): Promise<T> {
+  if (content === undefined || !result || typeof result !== "object") return result;
+  const syntax = await javascriptSyntax(filePath, content);
+  return syntax ? { ...result, syntax } : result;
+}
+
 export function canonicalWriteExecutors(options: CanonicalWriteExecutorOptions = {}): Record<string, (input: CodeToolExecutionContext) => Promise<unknown>> {
   return {
     "code.fs.write": async (input) => {
       const path = stringArg(input.args, ["path", "file", "filePath"]);
       if (!path) throw new CodeToolError("invalid_arguments", "code.fs.write requires a path", 400, "validate_arguments", false, input.tool.name);
-      return writeFileSafe(
+      const content = typeof input.args.content === "string" ? input.args.content : input.args.newContent;
+      const written = await writeFileSafe(
         {
           path,
-          content: typeof input.args.content === "string" ? input.args.content : input.args.newContent,
+          content,
           createDirectories: input.args.createDirectories,
           overwrite: input.args.overwrite,
         },
@@ -222,13 +231,16 @@ export function canonicalWriteExecutors(options: CanonicalWriteExecutorOptions =
         engineOptions(input, options),
         readRevisionFor(input, path),
       );
+      return withSyntax(written, path, typeof content === "string" ? content : undefined);
     },
 
     "code.fs.edit": async (input) => {
       const args = canonicalEditArgs(input.args);
       if (!args.path) throw new CodeToolError("invalid_arguments", "code.fs.edit requires a path", 400, "validate_arguments", false, input.tool.name);
       if (!args.old_string) throw new CodeToolError("invalid_arguments", "code.fs.edit requires old_string", 400, "validate_arguments", false, input.tool.name);
-      return applyEdit(args, toEngineWritePort(input), engineOptions(input, options), readRevisionFor(input, args.path));
+      const edited = await applyEdit(args, toEngineWritePort(input), engineOptions(input, options), readRevisionFor(input, args.path));
+      const after = /\.(?:m?js|cjs)$/i.test(args.path) ? await input.port.readFile({ ctx: input.ctx, companyId: input.companyId, projectId: input.projectId, path: args.path, maxLines: 100_000, maxBytes: 512 * 1024 }).then((file) => file.content).catch(() => undefined) : undefined;
+      return withSyntax(edited, args.path, after);
     },
 
     "code.fs.move": async (input) => {

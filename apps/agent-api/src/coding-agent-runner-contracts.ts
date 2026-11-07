@@ -157,6 +157,8 @@ export interface CodingAgentRunInput {
   /** Trusted creation context; never set for existing-project edits. */
 
   emptyHtmlWorkspace?: boolean;
+  /** Called when the self-review starts, with the files the run changed: lets Preview start alongside it. */
+  onBeforeSelfReview?: (changedFiles: readonly string[]) => void;
 
   readOnlyIntent?: boolean;
 

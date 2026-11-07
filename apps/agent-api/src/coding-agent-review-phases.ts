@@ -341,6 +341,7 @@ export class CodingAgentReviewPhases {
     } = args;
     const state = selfReviewState;
     if (!state) return null;
+    try { input.onBeforeSelfReview?.(runChanges().map((change) => change.path)); } catch { /* a warm-up never blocks the review */ }
     const verdict = await state.execute({
       input: {
         originalGoal: [prompt, ...(input.extraSystemPromptLines ?? [])].join("\n\n"),
