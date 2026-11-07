@@ -124,6 +124,12 @@ export async function detectProjectStack(
         : "npx vite --host 0.0.0.0";
       return { packageManager, framework, command, port: 5173, productionCommand: "npx vite preview --host 0.0.0.0 --port 5173" };
     }
+    // A plain HTML page whose scripts only serve its files (serve, http-server, live-server) needs no package: those scripts
+    // fetch the server from the network and listen on their own fixed port, so Preview waited on a port nobody used (E2E G5).
+    const scripts = [pkg.scripts?.dev, pkg.scripts?.start].filter((script): script is string => typeof script === "string");
+    if (pathSet.has("index.html") && scripts.length && scripts.every((script) => /^(?:npx\s+(?:-y\s+|--yes\s+)?)?(?:serve|http-server|live-server)(?:@[\w.^~-]+)?(?:\s|$)/.test(script.trim()))) {
+      return { packageManager, framework: "static", command: "python3 -m http.server $PORT --bind 0.0.0.0", port: 3000, productionCommand: "python3 -m http.server $PORT --bind 0.0.0.0" };
+    }
     if (pkg.scripts?.dev) {
       return { packageManager, framework: "custom", command: `${packageManager} run dev`, port: 3000 };
     }
