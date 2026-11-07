@@ -569,3 +569,14 @@ it("starts development with steps for a landing page written in Ukrainian or Rus
   expect(planChatDevelopment(message),message).toEqual([{kind:"website",name:"Company website",framework:"HTML/CSS"}]);
  }
 });
+
+it("starts development with steps for web apps and 3D scenes, and reads 2D as part of the name", () => {
+ // The owner's chat: a Three.js scene went to the plain chat with no steps; "2D-гра" started two projects.
+ for (const message of ["Створи сцену на Three.js з кількома 3D-об’єктами, освітленням і керуванням камерою через OrbitControls","Build a React + Vite TODO app in this empty test project","Зроби мені калькулятор кредиту","Створи дашборд продажів на React"]) {
+  expect(planChatDevelopment(message).map(t=>t.kind),message).toEqual(["website"]);
+ }
+ expect(planChatDevelopment("Створи 2D-гру арканоїд на HTML Canvas")).toHaveLength(1);
+ for (const message of ["Створи нагадування в застосунку календаря на завтра","Create a reminder in the app for tomorrow","Створи файл hello.txt з текстом Hello","What is a React app?"]) {
+  expect(planChatDevelopment(message),message).toEqual([]);
+ }
+});

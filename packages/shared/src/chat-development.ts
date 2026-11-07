@@ -51,12 +51,15 @@ export const developmentIsActive = (p: DevelopmentProcess) => ["queued", "prepar
 export function requestsDevelopmentRestore(message: string): boolean {
   return /(?:open|show|restore|відкри|покаж|віднов|открой).*(?:development processes|процеси.*розроб|процессы.*разраб)/iu.test(message);
 }
+// "в застосунку", "in the app": a place the request is about, not a thing to build.
+const WEB_APP = /(?<!(?:^|[\s(])(?:в|у|до|із|з|in|on|to|into|from|the|my|this|your)\s)(?:\bweb\s*app\b|\bapp\b|\bapplication\b|застосун\p{L}*|додат(?:ок|ку|ком)|приложени\p{L}*|\bscene\b|сцен\p{L}*|(?<![\p{L}\d])3d(?![\p{L}])|three\.?js|webgl|\bcanvas\b|\btodo\b|to-?do|дашборд|dashboard|калькулятор|calculator|портфоліо|портфолио|portfolio)/iu;
+
 export function planChatDevelopment(message: string, activeProjectId?: string): DevelopmentTarget[] {
   // A follow-up that explicitly says "do not create a new project, edit this one" must never
   // be re-planned as a creation just because the requested replacement text names a framework.
   if (/(?:не\s+створюй|не\s+создавай|do\s+not\s+create|don't\s+create)\s+(?:новий\s+|новый\s+|a\s+new\s+|new\s+)?(?:про[єе]кт|project)/iu.test(message)) return [];
   if (activeProjectId && !["CREATE_PROJECT", "CREATE_WEBSITE"].includes(classifyProjectIntent({ message, activeProjectId }).intent)) return [];
-  if (!/(?:\bcreate\b|\bbuild\s+(?:a\s+|an\s+|new\s+|[1-4]\s+)?(?:website|site|shop|store|blog|mobile|crm)|\bmake\b|створ|зроби|создай|создать)/iu.test(message)) return [];
+  if (!/(?:\bcreate\b|\bbuild\s+(?:a\s+|an\s+|new\s+|[1-4]\s+)?(?:website|site|shop|store|blog|mobile|crm)|\bbuild\b(?=[^.!?\n]{0,40}\b(?:app|application|game|scene|dashboard|tool)\b)|\bmake\b|створ|зроби|создай|создать)/iu.test(message)) return [];
   if (/(?:create|make|створ|зроби|создай).*(?:\bpage\b|\bcomponent\b|\bbutton\b|\bheader\b|сторінк|компонент|кнопк)/iu.test(message)
       && (/(?:my|this|existing|current)\s+(?:website|web\s*site|\bsite\b|project|app)|(?:мій|цей|існуюч)\p{L}*/iu.test(message)
         || (!/(?:website|web\s*site|\bsite\b|project|app|сайт|про[єе]кт|застосун\p{L}*|магазин|store|shop|blog|блог|crm|срм)/iu.test(message)
@@ -79,8 +82,13 @@ export function planChatDevelopment(message: string, activeProjectId?: string): 
   // A backend prompt need not contain the word "website": creating an Express/FastAPI service
   // is still a code project and must enter the coding-agent path rather than a generic chat.
   if (!kinds.length && isBackendProjectFramework(requestedFramework)) kinds.push("api");
-  const names = { website: "Company website", blog: "Blog", store: "Online store", mobile_app: "Mobile app", game: "Game", crm: "CRM", api: "API service" };
-  const count = kinds.length === 1 ? Number(/(?:create|build|make|створи|зроби|создай)\s+(?:мені\s+)?(\d+)/iu.exec(message)?.[1] ?? 1) : kinds.length;
+  // A web app, a 3D scene, a dashboard or anything built with a named front-end framework is a project too. Without this
+  // "Створи сцену на Three.js …" or "Build a React + Vite TODO app" went to the plain chat and was built with no steps.
+  const webApp = !kinds.length && (WEB_APP.test(message) || (!!requestedFramework && requestedFramework !== "HTML/CSS" && !isMobileProjectFramework(requestedFramework)));
+  if (webApp) kinds.push("website");
+  const names = { website: webApp ? "Web app" : "Company website", blog: "Blog", store: "Online store", mobile_app: "Mobile app", game: "Game", crm: "CRM", api: "API service" };
+  // "Створи 2D-гру" asks for one game: a number joined to a letter (2D, 3D) is not a count of projects.
+  const count = kinds.length === 1 ? Number(/(?:create|build|make|створи|зроби|создай)\s+(?:мені\s+)?(\d+)(?![\p{L}\d])/iu.exec(message)?.[1] ?? 1) : kinds.length;
   if (count > 4 || kinds.length > 4) throw new Error("A chat can start up to four development projects at once.");
   const targets = kinds.length === 1 ? Array.from({ length: Math.max(1, count) }, () => kinds[0]!) : kinds;
   return targets.map((kind, index) => ({
