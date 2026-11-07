@@ -29,7 +29,10 @@ try {
   if (!["layout", "visual"].includes(screenshotMode)) throw new Error("invalid_input");
   const origin = `http://${host}:${port}`;
   stage = "launch";
-  const browser = await chromium.launch({ headless: true, ...(shared ? { executablePath: "/usr/bin/chromium-browser" } : {}), args: ["--no-sandbox", "--disable-dev-shm-usage", ...(shared ? ["--no-proxy-server"] : [])] });
+  // WebGL through Mesa's software renderer (llvmpipe): Alpine's Chromium has no SwiftShader, so without these flags every
+  // Three.js or WebGL scene failed the check as a "runtime error" and the agent "repaired" working code blind (E2E G7).
+  const webgl = ["--use-gl=angle", "--use-angle=gl-egl", "--ignore-gpu-blocklist"];
+  const browser = await chromium.launch({ headless: true, ...(shared ? { executablePath: "/usr/bin/chromium-browser" } : {}), args: ["--no-sandbox", "--disable-dev-shm-usage", ...webgl, ...(shared ? ["--no-proxy-server"] : [])] });
   try {
     const context = await browser.newContext({ viewport, serviceWorkers: "block", acceptDownloads: false });
     await context.route("**/*", async route => {
