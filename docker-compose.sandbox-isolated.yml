@@ -29,7 +29,7 @@ services:
       NPATI_ENVIRONMENT: development
       NPATI_SANDBOX_ALLOW_UNVERIFIED_IMAGES: "true"
       NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:?required}
-      NPATI_SANDBOX_ALLOWED_HOSTS: ${NPATI_SANDBOX_ALLOWED_HOSTS:-registry.npmjs.org,registry.yarnpkg.com,pypi.org,files.pythonhosted.org,repo.packagist.org,packagist.org,github.com,codeload.github.com,api.github.com,objects.githubusercontent.com,pub.dev,www.gstatic.com,fonts.gstatic.com}
+      NPATI_SANDBOX_ALLOWED_HOSTS: ${NPATI_SANDBOX_ALLOWED_HOSTS:-registry.npmjs.org,registry.yarnpkg.com,pypi.org,files.pythonhosted.org,repo.packagist.org,packagist.org,github.com,codeload.github.com,api.github.com,objects.githubusercontent.com,pub.dev,www.gstatic.com,fonts.gstatic.com,fonts.googleapis.com}
       # The Project API host is appended to the allowlist automatically from this value.
       NPATI_PROJECT_API_PUBLIC_URL: ${NPATI_PROJECT_API_PUBLIC_URL:-}
       NPATI_SANDBOX_IMAGE: ${NPATI_SANDBOX_IMAGE:-npati/project-sandbox:local}

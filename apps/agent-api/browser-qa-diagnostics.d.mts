@@ -3,6 +3,8 @@ export interface BrowserDiagnostic {
   cause: string;
   message: string;
   source: string;
+  /** The error class, e.g. TypeError; never the page-controlled message. */
+  errorName?: string;
   line?: number;
   column?: number;
 }

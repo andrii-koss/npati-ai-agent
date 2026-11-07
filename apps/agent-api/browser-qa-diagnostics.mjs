@@ -1,4 +1,6 @@
-// Browser-controlled strings never cross the model boundary.
+// Browser-controlled text never crosses the model boundary: the message stays a fixed phrase. What does cross is the
+// file of the same site, the line and the error class, each limited to characters that cannot carry an instruction, so
+// the agent can open the right file instead of searching blind (E2E G7 spent 32 turns without them).
 const causes = {
   undefined_reference: "ReferenceError: an identifier is not defined",
   null_property: "TypeError: a property was read from null or undefined",
@@ -9,14 +11,17 @@ const causes = {
   runtime: "JavaScript runtime error",
 };
 const sourceNames = new Set(["page.tsx", "page.jsx", "layout.tsx", "layout.jsx", "main.js", "webpack.js", "preview-script"]);
+const safeSource = value => typeof value === "string" && value.length <= 160 && /^[A-Za-z0-9_@./-]+\.[A-Za-z0-9]{1,8}$/.test(value) && !value.includes("..") ? value : undefined;
+const safeErrorName = value => typeof value === "string" && /^[A-Z][A-Za-z]{2,40}Error$/.test(value) ? value : undefined;
 const coordinate = value => Number.isInteger(value) && value >= 0 && value <= 10_000_000 ? value : undefined;
 
 export function normalizeBrowserDiagnostic(value) {
   const cause = typeof value?.cause === "string" && Object.hasOwn(causes, value.cause) ? value.cause : "runtime";
-  const source = sourceNames.has(value?.source) ? value.source : "preview-script";
+  const source = safeSource(value?.source) ?? "preview-script";
+  const errorName = safeErrorName(value?.errorName);
   const line = coordinate(value?.line), column = coordinate(value?.column);
   return { type: value?.type === "pageerror" ? "pageerror" : "error", cause,
-    message: causes[cause], source, ...(line !== undefined ? { line } : {}), ...(column !== undefined ? { column } : {}) };
+    message: causes[cause], source, ...(errorName ? { errorName } : {}), ...(line !== undefined ? { line } : {}), ...(column !== undefined ? { column } : {}) };
 }
 
 export function captureBrowserDiagnostic(type, rawMessage, location, stack, origin) {
@@ -40,11 +45,13 @@ export function captureBrowserDiagnostic(type, rawMessage, location, stack, orig
   try {
     const url = new URL(loc?.url);
     if (url.origin === origin) {
-      const name = url.pathname.split("/").at(-1);
-      if (sourceNames.has(name)) source = name;
+      // The path inside the project, e.g. src/main.js or node_modules/.vite/deps/three.js; the query (?v=hash) is dropped.
+      const name = url.pathname.replace(/^\/+/, "");
+      if (sourceNames.has(name.split("/").at(-1)) || safeSource(name)) source = safeSource(name) ?? name.split("/").at(-1);
       line = coordinate(loc.lineNumber) === undefined ? undefined : loc.lineNumber + 1;
       column = coordinate(loc.columnNumber) === undefined ? undefined : loc.columnNumber + 1;
     }
   } catch { /* Unknown location stays anonymous. */ }
-  return normalizeBrowserDiagnostic({ type, cause, source, line, column });
+  const errorName = text.match(/^(?:Uncaught\s+)?([A-Z][A-Za-z]{2,40}Error)\b/)?.[1];
+  return normalizeBrowserDiagnostic({ type, cause, source, errorName, line, column });
 }

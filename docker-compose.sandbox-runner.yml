@@ -35,7 +35,7 @@ services:
       NPATI_PROJECT_API_SERVICE_BINDING: ${NPATI_PROJECT_API_SERVICE_BINDING:-}
       NPATI_SANDBOX_RUNNER_MODE: local
       NPATI_SANDBOX_RUNNER_SECRET: ${NPATI_SANDBOX_RUNNER_SECRET:?required}
-      ALLOWED_HOSTS: ${NPATI_SANDBOX_ALLOWED_HOSTS:-registry.npmjs.org,registry.yarnpkg.com,pypi.org,files.pythonhosted.org,github.com,codeload.github.com,api.github.com,objects.githubusercontent.com,pub.dev,www.gstatic.com,fonts.gstatic.com}
+      ALLOWED_HOSTS: ${NPATI_SANDBOX_ALLOWED_HOSTS:-registry.npmjs.org,registry.yarnpkg.com,pypi.org,files.pythonhosted.org,github.com,codeload.github.com,api.github.com,objects.githubusercontent.com,pub.dev,www.gstatic.com,fonts.gstatic.com,fonts.googleapis.com}
     ports:
       - "127.0.0.1:7865:7865"
     volumes:

@@ -38,8 +38,9 @@ try {
     await context.route("**/*", async route => {
       let url;
       try { url = new URL(route.request().url()); } catch { return route.abort(); }
-      // A Flutter web app loads its engine and fonts from these hosts in any browser. Blocking them made a working app look broken.
-      const flutterEngine = url.protocol === "https:" && ["www.gstatic.com", "fonts.gstatic.com"].includes(url.hostname) && route.request().method() === "GET" && !url.username && !url.password;
+      // A Flutter web app loads its engine and fonts from these hosts, and a site loads Google Fonts from the last two. Blocking
+      // them made a working page look broken, and the agent then removed the fonts from the site to "fix" it.
+      const flutterEngine = url.protocol === "https:" && ["www.gstatic.com", "fonts.gstatic.com", "fonts.googleapis.com"].includes(url.hostname) && route.request().method() === "GET" && !url.username && !url.password;
       if ((url.origin !== origin && !flutterEngine) || url.username || url.password) return route.abort();
       if(input.actions?.length && !['GET','HEAD'].includes(route.request().method()))return route.abort();
       return route.continue();
