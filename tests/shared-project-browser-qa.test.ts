@@ -70,7 +70,10 @@ describe("security-gate: shared Browser QA", () => {
   it("uses the private namespace temp directory to avoid Chromium Unix socket path overflow", () => {
     const source = readFileSync(new URL("../apps/agent-api/browser-qa-runner.mjs", import.meta.url), "utf8");
     expect(source).toContain('if (shared) process.env.TMPDIR = "/tmp";');
-    expect(source).toContain('shared ? ["--no-proxy-server"] : []');
+    // Outside hosts go only through the sandbox egress proxy, which enforces the allowlist; the Preview host bypasses it.
+    expect(source).toContain('const egress = shared ? process.env.HTTPS_PROXY ?? process.env.https_proxy : undefined;');
+    expect(source).toContain("proxy: { server: egress, bypass: `${host},localhost,127.0.0.1` }");
+    expect(source).toContain('shared && !egress ? ["--no-proxy-server"] : []');
   });
 
   it("ships a read-only browser toolchain through the same namespace boundary", () => {
