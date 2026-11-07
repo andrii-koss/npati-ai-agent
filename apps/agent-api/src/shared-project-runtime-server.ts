@@ -45,6 +45,13 @@ app.post<{ Body: string }>("/v1/sandbox", async (request, reply) => {
     const parsed = JSON.parse(request.body) as { operation: string; payload: Record<string, unknown> };
     operation = parsed.operation;
     const p = parsed.payload ?? {}; scope = p.scope as SandboxScope;
+    // Not about one project: the API names every project it still has, and the rest is removed.
+    if (operation === "pruneProjects") {
+      if (!Array.isArray(p.keepProjectIds) || !p.keepProjectIds.every(id => typeof id === "string")) throw new SandboxProviderError("invalid_payload", "keepProjectIds must list project ids", 400);
+      const result = await provider.pruneProjects(p.keepProjectIds as string[], Math.max(60_000, Number(p.olderThanMs) || 0));
+      console.info("[project-runtime] " + JSON.stringify({ operation, removed: result.removed.length }));
+      return { result };
+    }
     if (!scope?.workspaceId || !scope.userId || !scope.companyId || !scope.projectId) throw new SandboxProviderError("invalid_scope", "Project context is incomplete", 400);
     const id = String(p.sandboxId ?? "");
     let result: unknown;

@@ -3,7 +3,7 @@ import { assertProjectQuiescent, awaitProcessClose } from "./shared-runtime-proc
 import { createHash, randomUUID } from "node:crypto";
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
-import { access, chown, chmod, mkdir, readFile, writeFile, rename, rm, open } from "node:fs/promises";
+import { access, chown, chmod, lstat, mkdir, readdir, readFile, writeFile, rename, rm, open } from "node:fs/promises";
 import path from "node:path";
 import {
   SandboxProviderError, sandboxProcessEnvironment, type SandboxProvider, type SandboxScope,
@@ -186,6 +186,30 @@ export class SharedProjectRuntimeProvider implements SandboxProvider {
     await rm(this.directory(entry), { recursive: true, force: true });
     await executeFile("iptables", ["-D", "NPATI_PROJECTS", "-m", "owner", "--uid-owner", String(entry.uid), "-p", "tcp", "-d", "127.0.0.1", "--dport", String(entry.port), "-j", "ACCEPT"]);
     this.entries = this.entries.filter(item => item !== entry); await this.persist();
+  }
+  /**
+   * Removes every project the API no longer has: its processes, its port rule and its folder under /projects.
+   * Anything created in the last `olderThanMs` stays, so a project that is being created is never removed.
+   * Folders whose name is not a project id (the shared SDK and module caches) are never touched.
+   */
+  async pruneProjects(keepProjectIds: readonly string[], olderThanMs: number, now = Date.now()) {
+    await this.ready;
+    const keep = new Set(keepProjectIds);
+    const old = (time: number) => now - time >= olderThanMs;
+    const removed: string[] = [];
+    for (const entry of [...this.entries]) {
+      if (keep.has(entry.scope.projectId) || this.creating.has(entry.scope.projectId) || !old(Date.parse(entry.createdAt ?? "") || 0)) continue;
+      await this.destroySandbox(entry.scope, entry.id);
+      removed.push(entry.scope.projectId);
+    }
+    for (const name of await readdir(this.root)) {
+      if (!UUID.test(name) || keep.has(name) || this.creating.has(name) || this.entries.some(entry => entry.scope.projectId === name)) continue;
+      const info = await lstat(path.join(this.root, name)).catch(() => null);
+      if (!info?.isDirectory() || !old(info.mtimeMs)) continue;
+      await rm(path.join(this.root, name), { recursive: true, force: true });
+      removed.push(name);
+    }
+    return { removed };
   }
   async getStatus(scope: SandboxScope, id: string) { return this.status(await this.entry(scope, id)); }
   private environment(entry: Entry, environment: Record<string, string> = {}) {

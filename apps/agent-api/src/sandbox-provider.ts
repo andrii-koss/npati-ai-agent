@@ -100,6 +100,8 @@ export interface SandboxProvider {
   startSandbox(scope: SandboxScope, sandboxId: string): Promise<SandboxStatus>;
   stopSandbox(scope: SandboxScope, sandboxId: string): Promise<SandboxStatus>;
   destroySandbox(scope: SandboxScope, sandboxId: string): Promise<void>;
+  /** Removes every project runtime whose project id is not listed and is older than `olderThanMs`. */
+  pruneProjects?(keepProjectIds: readonly string[], olderThanMs: number): Promise<{ removed: string[] }>;
   executeCommand(scope: SandboxScope, sandboxId: string, command: string, options: SandboxCommandOptions): Promise<SandboxCommandResult>;
   uploadFiles(scope: SandboxScope, sandboxId: string, files: SandboxFile[]): Promise<void>;
   downloadFiles(scope: SandboxScope, sandboxId: string): Promise<SandboxFile[]>;
@@ -238,6 +240,7 @@ export class RemoteSandboxProvider implements SandboxProvider {
   startSandbox(scope: SandboxScope, sandboxId: string) { return this.request<SandboxStatus>("startSandbox", { scope, sandboxId }); }
   stopSandbox(scope: SandboxScope, sandboxId: string) { return this.request<SandboxStatus>("stopSandbox", { scope, sandboxId }); }
   destroySandbox(scope: SandboxScope, sandboxId: string) { return this.request<void>("destroySandbox", { scope, sandboxId }); }
+  pruneProjects(keepProjectIds: readonly string[], olderThanMs: number) { return this.request<{ removed: string[] }>("pruneProjects", { keepProjectIds, olderThanMs }, 600_000); }
   executeCommand(scope: SandboxScope, sandboxId: string, command: string, options: SandboxCommandOptions) { return this.request<SandboxCommandResult>("executeCommand", { scope, sandboxId, command, options }, options.timeoutMs + 15_000); }
   uploadFiles(scope: SandboxScope, sandboxId: string, files: SandboxFile[]) { return this.request<void>("uploadFiles", { scope, sandboxId, files }, 605_000); }
   downloadFiles(scope: SandboxScope, sandboxId: string) { return this.request<SandboxFile[]>("downloadFiles", { scope, sandboxId }, 605_000); }

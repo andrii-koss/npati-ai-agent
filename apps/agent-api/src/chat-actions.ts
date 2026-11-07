@@ -68,7 +68,7 @@ export interface ChatActionDeps {
   companyRunQueue: ChatOrchestrationDeps["companyRunQueue"];
   companyRuntime: ChatOrchestrationDeps["companyRuntime"];
   contentLibrary: ChatOrchestrationDeps["contentLibrary"];
-  dataBackendService: ChatOrchestrationDeps["dataBackendService"];
+  dataBackendService: ChatOrchestrationDeps["dataBackendService"]; removeCompanyProjects?: ChatOrchestrationDeps["removeCompanyProjects"];
   emailAttachmentStorage: ChatOrchestrationDeps["emailAttachmentStorage"];
   emailInboxRepo: ChatOrchestrationDeps["emailInboxRepo"];
   integrationsRepo?: ChatOrchestrationDeps["integrationsRepo"];
@@ -87,7 +87,7 @@ export interface ChatActionDeps {
 }
 
 export function createChatActions(deps: ChatActionDeps) {
-  const { log, admissionFor, agent, aiEngine, aiPreferences, apiKeysRepo, auditRepo, automationsRepo, browserCredentials, chatFiles, companyRunQueue, companyRuntime, contentLibrary, dataBackendService, emailAttachmentStorage, emailInboxRepo, emailInboxWorker, fileRepository, getAIContext, guardrailPolicies, hub, integrationsRepo, knowledgeRepo, objectStorage, persistBusinessLogo, runAutomation, scopedMemory, webResearch, workspaceStore } = deps;
+  const { log, admissionFor, agent, aiEngine, aiPreferences, apiKeysRepo, auditRepo, automationsRepo, browserCredentials, chatFiles, companyRunQueue, companyRuntime, contentLibrary, dataBackendService, emailAttachmentStorage, emailInboxRepo, emailInboxWorker, fileRepository, getAIContext, guardrailPolicies, hub, integrationsRepo, knowledgeRepo, objectStorage, persistBusinessLogo, runAutomation, scopedMemory, webResearch, workspaceStore, removeCompanyProjects } = deps;
   const contextBuilder = new ContextBuilder({
     store: workspaceStore,
     hub,
@@ -153,7 +153,7 @@ export function createChatActions(deps: ChatActionDeps) {
     return {status:"completed" as const,persistedCount};
   }
   async function beforeDeleteCompany(context: AuthContext, companyId: string) {
-
+    await removeCompanyProjects?.(context, companyId); // projects and their files in the API and the sandbox go first
     if (dataBackendService) {
       const backends = await dataBackendService.list(context, companyId).catch(() => []);
       for (const backend of backends) {

@@ -39,6 +39,8 @@ export interface AppChatOrchestrationDeps {
   companyRuntime: CompanyDelegationRuntime;
   contentLibrary: ContentLibraryStore;
   dataBackendService?: ReturnType<typeof createDataBackendServices>["dataBackendService"];
+  /** Deletes a company's projects with their files before the company itself is deleted. */
+  removeCompanyProjects?: (ctx: import("@npati/workspace").AuthContext, companyId: string) => Promise<void>;
   emailAttachmentStorage?: EmailAttachmentStorage;
   emailInboxRepo: EmailInboxRepository;
   integrationsRepo?: import("./integrations-repository").IntegrationsRepository;
@@ -135,6 +137,7 @@ export function createAppChatOrchestration(deps: AppChatOrchestrationDeps) {
   const chatOrchestration = createChatOrchestration({
     config,
     marketplace: deps.marketplace,
+    removeCompanyProjects: deps.removeCompanyProjects,
     log,
     admissionFor,
     agent,

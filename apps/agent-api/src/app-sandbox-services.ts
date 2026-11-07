@@ -12,6 +12,7 @@ import { AgentDataStudioService } from "./data-studio/agent-data-service";
 import { ProjectTerminalEventsRepository } from "./project-terminal-events";
 import { ProjectSandboxService } from "./project-sandbox-service";
 import { RemoteSandboxProvider, projectRuntimeMode } from "./sandbox-provider";
+import { createCompanyProjectCleanup, startProjectOrphanSweep } from "./project-orphan-sweep";
 
 export interface AppSandboxServicesDeps {
   config: AppConfig;
@@ -29,6 +30,8 @@ export interface AppSandboxServicesDeps {
   promoteService?: ReturnType<typeof createDataBackendServices>["promoteService"];
   browserCredentials?: BrowserCredentialsRepository;
   initialProjectSandbox?: ProjectSandboxService;
+  /** Where API project workspaces live: `<root>/<companyId>/<projectId>`. */
+  projectWorkspaceRoot?: string;
 }
 
 export function createAppSandboxServices(deps: AppSandboxServicesDeps) {
@@ -48,6 +51,7 @@ export function createAppSandboxServices(deps: AppSandboxServicesDeps) {
     promoteService,
     browserCredentials,
     initialProjectSandbox,
+    projectWorkspaceRoot,
   } = deps;
 
   const projectApiGatewayService =
@@ -114,12 +118,8 @@ export function createAppSandboxServices(deps: AppSandboxServicesDeps) {
   let projectSandbox: ProjectSandboxService | undefined = initialProjectSandbox;
   const sandboxRunnerUrl = process.env.NPATI_SANDBOX_RUNNER_URL;
   const sandboxRunnerSecret = process.env.NPATI_SANDBOX_RUNNER_SECRET;
-  if (!projectSandbox && sandboxRunnerUrl && sandboxRunnerSecret) {
-    projectSandbox = new ProjectSandboxService(
-      projectService,
-      workspaceStore,
-      projectWorkspace,
-      new RemoteSandboxProvider(
+  const runnerClient = !projectSandbox && sandboxRunnerUrl && sandboxRunnerSecret
+    ? new RemoteSandboxProvider(
         sandboxRunnerUrl,
         sandboxRunnerSecret,
         undefined,
@@ -128,7 +128,14 @@ export function createAppSandboxServices(deps: AppSandboxServicesDeps) {
           ...process.env,
           ...(config.deploymentType ? { NPATI_DEPLOYMENT_TYPE: config.deploymentType } : {}),
         }),
-      ),
+      )
+    : undefined;
+  if (runnerClient) {
+    projectSandbox = new ProjectSandboxService(
+      projectService,
+      workspaceStore,
+      projectWorkspace,
+      runnerClient,
       projectTerminalEvents,
       browserCredentials,
       {
@@ -187,6 +194,26 @@ export function createAppSandboxServices(deps: AppSandboxServicesDeps) {
     : undefined;
   sandboxRetentionTimer?.unref();
 
+  // A project gone from the database leaves no files: deleting a company removes its projects first, and a sweep
+  // removes whatever an earlier deletion left in the API workspace or the runner. NPATI_PROJECT_ORPHAN_SWEEP=off stops it.
+  const pool = config.databaseUrl ? (workspaceStore as unknown as { pool?: Pool }).pool : undefined;
+  const removeCompanyProjects = projectWorkspaceRoot
+    ? createCompanyProjectCleanup({
+        listProjects: (ctx, companyId) => workspaceStore.listProjects(ctx, companyId, true),
+        deleteProject: (ctx, companyId, projectId) => projectService.delete(ctx, companyId, projectId),
+        removeWorkspace: (ctx, companyId, projectId) => projectWorkspace.removeProjectWorkspace(ctx, companyId, projectId),
+        workspaceRoot: projectWorkspaceRoot,
+      })
+    : undefined;
+  const stopOrphanSweep = pool && projectWorkspaceRoot && process.env.NPATI_PROJECT_ORPHAN_SWEEP !== "off"
+    ? startProjectOrphanSweep({
+        listProjectIds: async () => (await pool.query<{ id: string }>("SELECT id FROM projects")).rows.map((row) => row.id),
+        workspaceRoot: projectWorkspaceRoot,
+        runner: runnerClient,
+        log,
+      }, Math.max(60_000, (Number(process.env.NPATI_PROJECT_ORPHAN_SWEEP_SECONDS) || 600) * 1000))
+    : undefined;
+
   return {
     projectApiGatewayService,
     dataStudioService,
@@ -197,5 +224,7 @@ export function createAppSandboxServices(deps: AppSandboxServicesDeps) {
     sandboxRunnerSecret,
     sandboxIdleTimer,
     sandboxRetentionTimer,
+    removeCompanyProjects,
+    stopOrphanSweep,
   };
 }

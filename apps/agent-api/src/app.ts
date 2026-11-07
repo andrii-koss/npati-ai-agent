@@ -299,7 +299,7 @@ export function buildApp(config: AppConfig = {}) {
     log: app.log,
     workspaceStore,
     projectService,
-    projectWorkspace,
+    projectWorkspace, projectWorkspaceRoot,
     dataBackendRepository,
     databaseProvisioner,
     dataProvider,
@@ -636,7 +636,7 @@ export function buildApp(config: AppConfig = {}) {
   mcpIntegrationSourceForRuntime = companyAutomationsWiring.mcpIntegrationSourceForRuntime;
 
   const chatOrchestrationWiring = createAppChatOrchestration({
-    config, marketplace,
+    config, marketplace, removeCompanyProjects: sandboxServices.removeCompanyProjects,
     log: app.log,
     agent,
     aiEngine,

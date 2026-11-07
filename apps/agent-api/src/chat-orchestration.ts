@@ -71,6 +71,7 @@ export interface ChatOrchestrationDeps {
   companyRuntime: CompanyDelegationRuntime;
   contentLibrary: ContentLibraryStore;
   dataBackendService: ReturnType<typeof createDataBackendServices>["dataBackendService"];
+  removeCompanyProjects?: (ctx: AuthContext, companyId: string) => Promise<void>;
   emailAttachmentStorage: EmailAttachmentStorage | undefined;
   emailInboxRepo: EmailInboxRepository;
   integrationsRepo?: import("./integrations-repository").IntegrationsRepository;
@@ -99,9 +100,10 @@ export interface ChatOrchestration {
 }
 
 export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrchestration {
-  const { log, admissionFor, agent, aiEngine, aiPreferences, apiKeysRepo, auditRepo, automationsRepo, browserCredentials, chatFiles, companyRunQueue, companyRuntime, config, contentLibrary, dataBackendService, emailAttachmentStorage, emailInboxRepo, emailInboxWorker, fileRepository, getAIContext, guardrailPolicies, hub, integrationsRepo, knowledgeRepo, memoryDocuments, objectStorage, persistBusinessLogo, researchBundle, runAutomation, scopedMemory, webResearch, workspaceStore } = deps;
+  const { log, admissionFor, agent, aiEngine, aiPreferences, apiKeysRepo, auditRepo, automationsRepo, browserCredentials, chatFiles, companyRunQueue, companyRuntime, config, contentLibrary, dataBackendService, emailAttachmentStorage, emailInboxRepo, emailInboxWorker, fileRepository, getAIContext, guardrailPolicies, hub, integrationsRepo, knowledgeRepo, memoryDocuments, objectStorage, persistBusinessLogo, researchBundle, runAutomation, scopedMemory, webResearch, workspaceStore, removeCompanyProjects } = deps;
 
   const chatActions = createChatActions({
+    removeCompanyProjects,
     log,
     admissionFor,
     agent,
