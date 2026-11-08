@@ -12,7 +12,7 @@ const result = (level: TerminalRiskLevel, reason: string, timeoutClass: Terminal
   level, requiresApproval: level === "approval", timeoutClass, reason, policyRule: reason.toLowerCase().replace(/[^a-z0-9]+/g, "_"),
 });
 const relative = (value: string) => /^[A-Za-z0-9._/@+-]+$/.test(value) && !value.startsWith("/") && !value.split("/").includes("..") && !/(?:^|\/)(?:\.env(?:\..*)?|\.ssh|\.aws|\.git)(?:\/|$)/i.test(value);
-const packageName = (value: string) => /^[A-Za-z0-9@._/+~-]+$/.test(value) && !value.includes("..") && !value.startsWith("/") && !/^(?:https?:|git\+|file:)/i.test(value);
+const packageName = (value: string) => /^[A-Za-z0-9@._/+~^-]+$/.test(value) && !value.includes("..") && !value.startsWith("/") && !/^(?:https?:|git\+|file:)/i.test(value);
 const packageManager = (value: string) => ["npm", "pnpm", "yarn"].includes(value);
 const installFlag = (value: string) => ["--no-audit", "--frozen-lockfile", "--offline", "--prefer-offline", "--ignore-scripts", "--no-fund", "--legacy-peer-deps"].includes(value);
 const installArgs = (values: string[]) => values.every((value) => installFlag(value) || (!value.startsWith("-") && packageName(value)));
@@ -56,7 +56,8 @@ export function classifyTerminalCommand(input: string | TerminalCommandSpec): Te
   const raw = normalized.rawCommand.trim();
   if (/^node\s+(?:-e|-p|--eval|--print)\s+(?:'[^'\r\n]*'|"[^"$`\\\r\n]*")$/.test(raw)) return result("controlled", "Run inline Node code inside sandbox");
   if (/^flutter\s+create(?:\s+(?:--?[A-Za-z][A-Za-z-]*(?:[\s=](?:[A-Za-z0-9_.,/-]+|"[^"$`\\\r\n]*"))?|[A-Za-z0-9_][A-Za-z0-9_./-]*|\.))*$/.test(raw) && !/(?:^|\s)\.\.(?:\/|\s|$)/.test(raw)) return result("controlled", "Create a Flutter project inside sandbox", "install_build");
-  if (/[;&|`$<>\r\n\\(){}\[\]*?!#'"~]/.test(clean)) return result("approval", "Shell syntax or expansion requires approval");
+  // The shell expands ~ only where a word begins, so typescript@~5.7.2 is an ordinary package name.
+  if (/[;&|`$<>\r\n\\(){}\[\]*?!#'"]|(?:^|[\s=:])~/.test(clean)) return result("approval", "Shell syntax or expansion requires approval");
   const words = [normalized.executable, ...normalized.args];
   // A project with a client/ folder installs and builds it with --prefix; the folder stays inside the project.
   const prefixAt = words[0] === "npm" ? words.indexOf("--prefix") : -1;

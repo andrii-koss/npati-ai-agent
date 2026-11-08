@@ -271,5 +271,7 @@ export function finishedRunText(
   const call = calls.find((entry) => entry.name === CODE_FINISH_TOOL);
   if (!call || !toolCallSucceeded(messages, call.id)) return null;
   const summary = typeof call.arguments.summary === "string" ? call.arguments.summary.trim() : "";
-  return [assistantText.trim(), summary].filter(Boolean).join("\n\n");
+  const prose = assistantText.trim();
+  // Text shorter than the summary is only a progress note ("Build passed. Finishing."), not part of the answer.
+  return [prose.length < summary.length ? "" : prose, summary].filter(Boolean).join("\n\n");
 }
