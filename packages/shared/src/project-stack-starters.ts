@@ -1,5 +1,5 @@
 /** Runnable starters for the stacks the Projects page offers beyond the website adapters, the game and Expo. */
-export const STACK_STARTER_IDS = ["vue", "phaser", "three", "flutter"] as const;
+export const STACK_STARTER_IDS = ["vue", "phaser", "three", "flutter", "express-react", "shadcn"] as const;
 export type StackStarterId = typeof STACK_STARTER_IDS[number];
 
 export function isStackStarterId(value: unknown): value is StackStarterId {
@@ -228,7 +228,118 @@ class _ItemsPageState extends State<ItemsPage> {
   };
 }
 
-const BUILDERS: Record<StackStarterId, (name: string) => Record<string, string>> = { vue, phaser, three, flutter };
+function reactEntry(): Record<string, string> {
+  return {
+    "vite.config.js": 'import { defineConfig } from "vite";\nimport react from "@vitejs/plugin-react";\n\nexport default defineConfig({ plugins: [react()] });\n',
+    "src/main.jsx": 'import React from "react";\nimport { createRoot } from "react-dom/client";\nimport App from "./App.jsx";\nimport "./index.css";\n\ncreateRoot(document.getElementById("root")).render(<React.StrictMode><App /></React.StrictMode>);\n',
+  };
+}
+
+function expressReact(name: string): Record<string, string> {
+  const manifest = JSON.parse(packageJson({ express: "^4.21.2", react: "^18.3.1", "react-dom": "^18.3.1" }, { vite: "^6.0.7", "@vitejs/plugin-react": "^4.3.4" })) as { scripts: Record<string, string> };
+  manifest.scripts.start = "vite build && node server/index.js";
+  return {
+    "package.json": `${JSON.stringify(manifest, null, 2)}\n`,
+    ...reactEntry(),
+    "index.html": page(name, '<div id="root"></div>', "/src/main.jsx"),
+    "server/index.js": `import express from "express";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const app = express();
+const dist = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "dist");
+const notes = [];
+
+app.use(express.json());
+app.get("/api/notes", (_request, response) => response.json(notes));
+app.post("/api/notes", (request, response) => {
+  const text = String(request.body?.text ?? "").trim();
+  if (!text) return response.status(400).json({ error: "text is required" });
+  const note = { id: notes.length + 1, text };
+  notes.push(note);
+  return response.status(201).json(note);
+});
+app.use(express.static(dist));
+app.use((_request, response) => response.sendFile(path.join(dist, "index.html")));
+
+app.listen(Number(process.env.PORT) || 3000, "0.0.0.0");
+`,
+    "src/App.jsx": `import { useEffect, useState } from "react";
+
+export default function App() {
+  const [notes, setNotes] = useState([]);
+  const [text, setText] = useState("");
+
+  useEffect(() => { fetch("/api/notes").then((response) => response.json()).then(setNotes); }, []);
+
+  async function add(event) {
+    event.preventDefault();
+    const response = await fetch("/api/notes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
+    if (response.ok) { const note = await response.json(); setNotes((current) => [...current, note]); setText(""); }
+  }
+
+  return (
+    <main>
+      <h1>${html(name).replace(/[{}]/g, "")}</h1>
+      <form onSubmit={add}>
+        <input value={text} onChange={(event) => setText(event.target.value)} aria-label="Note" />
+        <button type="submit">Add</button>
+      </form>
+      <ul>{notes.map((note) => <li key={note.id}>{note.text}</li>)}</ul>
+    </main>
+  );
+}
+`,
+    "src/index.css": "body { margin: 0; font-family: system-ui, sans-serif; }\nmain { max-width: 640px; margin: 48px auto; padding: 0 16px; }\ninput { padding: 8px; margin-right: 8px; }\nbutton { padding: 8px 14px; }\n",
+  };
+}
+
+function shadcn(name: string): Record<string, string> {
+  return {
+    "package.json": packageJson({ react: "^18.3.1", "react-dom": "^18.3.1", "class-variance-authority": "^0.7.1", clsx: "^2.1.1", "tailwind-merge": "^2.6.0" }, { vite: "^6.0.7", "@vitejs/plugin-react": "^4.3.4", tailwindcss: "^3.4.17", postcss: "^8.4.49", autoprefixer: "^10.4.20" }),
+    ...reactEntry(),
+    "index.html": page(name, '<div id="root"></div>', "/src/main.jsx"),
+    "tailwind.config.js": 'export default { content: ["./index.html", "./src/**/*.{js,jsx}"], theme: { extend: {} }, plugins: [] };\n',
+    "postcss.config.js": "export default { plugins: { tailwindcss: {}, autoprefixer: {} } };\n",
+    "src/index.css": "@tailwind base;\n@tailwind components;\n@tailwind utilities;\n",
+    "src/lib/utils.js": 'import { clsx } from "clsx";\nimport { twMerge } from "tailwind-merge";\n\nexport const cn = (...inputs) => twMerge(clsx(inputs));\n',
+    "src/components/ui/button.jsx": 'import { cva } from "class-variance-authority";\nimport { cn } from "../../lib/utils";\n\nconst buttonVariants = cva("inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium", { variants: { variant: { default: "bg-slate-900 text-white hover:bg-slate-700", outline: "border border-slate-300 bg-white hover:bg-slate-100" } }, defaultVariants: { variant: "default" } });\n\nexport function Button({ className, variant, ...props }) {\n  return <button className={cn(buttonVariants({ variant }), className)} {...props} />;\n}\n',
+    "src/components/ui/input.jsx": 'import { cn } from "../../lib/utils";\n\nexport function Input({ className, ...props }) {\n  return <input className={cn("h-10 w-full rounded-md border border-slate-300 px-3 text-sm", className)} {...props} />;\n}\n',
+    "src/components/ui/card.jsx": 'import { cn } from "../../lib/utils";\n\nexport function Card({ className, ...props }) {\n  return <div className={cn("rounded-xl border border-slate-200 bg-white p-6 shadow-sm", className)} {...props} />;\n}\n',
+    "src/App.jsx": `import { useState } from "react";
+import { Button } from "./components/ui/button";
+import { Card } from "./components/ui/card";
+import { Input } from "./components/ui/input";
+
+export default function App() {
+  const [items, setItems] = useState([]);
+  const [text, setText] = useState("");
+
+  function add(event) {
+    event.preventDefault();
+    if (!text.trim()) return;
+    setItems((current) => [...current, text.trim()]);
+    setText("");
+  }
+
+  return (
+    <main className="mx-auto max-w-xl p-8">
+      <Card>
+        <h1 className="mb-4 text-xl font-semibold">${html(name).replace(/[{}]/g, "")}</h1>
+        <form onSubmit={add} className="flex gap-2">
+          <Input value={text} onChange={(event) => setText(event.target.value)} aria-label="Item" />
+          <Button type="submit">Add</Button>
+        </form>
+        <ul className="mt-4 list-disc pl-5">{items.map((item, index) => <li key={index}>{item}</li>)}</ul>
+      </Card>
+    </main>
+  );
+}
+`,
+  };
+}
+
+const BUILDERS: Record<StackStarterId, (name: string) => Record<string, string>> = { vue, phaser, three, flutter, "express-react": expressReact, shadcn };
 
 export function createStackStarterScaffold(id: StackStarterId, options: { name: string }): { files: Record<string, string> } {
   return { files: BUILDERS[id](options.name) };

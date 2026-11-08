@@ -692,9 +692,9 @@ export class ProjectPreviewService {
       ? [cookiePath, cookiePath.slice(4)].map(path => `${cookieName}=${token}; Path=${path}; HttpOnly; SameSite=Lax; Max-Age=900${secureCookie ? "; Secure" : ""}`)
       : [];
     const subpath = "/" + (request.params["*"] ?? "");
-    const query = new URL(request.url, "http://localhost").searchParams;
-    query.delete("token");
-    const path = subpath + (query.size ? "?" + query.toString() : "");
+    // The query stays as written: Vite reads flags like ?astro&lang.css, and URLSearchParams would rewrite them to lang.css=.
+    const rawQuery = request.url.includes("?") ? request.url.slice(request.url.indexOf("?") + 1).split("&").filter((part) => part && !part.startsWith("token=")).join("&") : "";
+    const path = subpath + (rawQuery ? "?" + rawQuery : "");
     const headers: Record<string, string> = {};
     const forwardedHeaderNames = [
       "accept",

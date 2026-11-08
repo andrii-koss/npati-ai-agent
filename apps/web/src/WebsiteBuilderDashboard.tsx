@@ -309,7 +309,13 @@ export function WebsiteBuilderDashboard() {
         }
       );
 
-      const files: Record<string, string> = isStackStarterId(selectedFramework)
+      const serverScaffold = ["nuxt", "sveltekit", "angular", "nestjs", "fastapi"].includes(selectedFramework);
+      const files: Record<string, string> = serverScaffold
+        ? (await apiFetch<{ files: Record<string, string> }>(
+            `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(created.id)}/framework-scaffold`,
+            { method: "POST", body: JSON.stringify({ framework, name: name.trim() }) },
+          )).files
+        : isStackStarterId(selectedFramework)
         ? createStackStarterScaffold(selectedFramework, { name: name.trim() }).files
         : isMobileApp
         ? createMobileAppScaffold({ name: name.trim(), slug: slugifyProjectName(name.trim()), scheme: defaultAppScheme(name.trim()) }).files
@@ -350,7 +356,7 @@ export function WebsiteBuilderDashboard() {
         `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(created.id)}/preview/start`,
         {
           method: "POST",
-          body: JSON.stringify({ port: domainConfig.port }),
+          body: JSON.stringify({ port: domainConfig.port, ...(serverScaffold ? { build: true } : {}) }),
         }
       ).then(() => apiFetch(
         `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(created.id)}/qa/thumbnail`,

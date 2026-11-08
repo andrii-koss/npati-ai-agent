@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { PROJECT_KINDS, WorkspaceAccessError, WorkspaceNotFoundError, type ProjectInput } from "@npati/workspace";
 import { AuthenticationError, type AuthProvider } from "./auth";
 import { ProjectService } from "./project-service";
+import { createFrameworkScaffold } from "./project-framework-scaffold";
 
 function fail(reply: FastifyReply, error: unknown) {
   if (error instanceof AuthenticationError) return reply.code(error.status).send({ error: { code: error.code, message: error.message } });
@@ -133,6 +134,20 @@ export function registerProjectRoutes(app: FastifyInstance, service: ProjectServ
         await workspace.removeProjectWorkspace(context, request.params.companyId, request.params.projectId).catch(() => undefined);
       }
       return reply.code(204).send();
+    } catch (error) { return fail(reply, error); }
+  });
+
+  // The same known-good starters chat-created projects use; the Projects page writes the returned files itself.
+  app.post<{ Params: { companyId: string; projectId: string }; Body: { framework: string; name: string } }>("/companies/:companyId/projects/:projectId/framework-scaffold", {
+    schema: { body: { type: "object", additionalProperties: false, required: ["framework", "name"], properties: {
+      framework: { type: "string", enum: ["Nuxt", "SvelteKit", "Angular", "NestJS", "FastAPI"] },
+      name: { type: "string", minLength: 1, maxLength: 200 },
+    } } },
+  }, async (request, reply) => {
+    try {
+      const context = await authorize(auth, request, "business:manage");
+      await service.get(context, request.params.companyId, request.params.projectId);
+      return { files: createFrameworkScaffold({ projectName: request.body.name, prompt: "", framework: request.body.framework }) };
     } catch (error) { return fail(reply, error); }
   });
 

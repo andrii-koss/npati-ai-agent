@@ -31,16 +31,18 @@ export function registerProjectPreviewRoutes(
   };
 
   // Start preview server
-  app.post<{ Params: ProjectParams; Body: { command?: string; port?: number } }>(
+  app.post<{ Params: ProjectParams; Body: { command?: string; port?: number; build?: boolean } }>(
     "/companies/:companyId/projects/:projectId/preview/start",
     async (request, reply) => {
       const ctx = await authenticate(request, reply);
       if (!ctx) return;
       const { companyId, projectId } = request.params;
-      const { command, port } = request.body ?? {};
+      const { command, port, build } = request.body ?? {};
       const callerOrigin = typeof request.headers.origin === "string" ? request.headers.origin : undefined;
       try {
-        const result = await previewService.startPreview(ctx, companyId, projectId, { command, port, callerOrigin });
+        // A framework starter runs what its build produces, the way a finished chat run does; its dev server may not work behind the proxy.
+        if (build === true) await previewService.buildProject(ctx, companyId, projectId);
+        const result = await previewService.startPreview(ctx, companyId, projectId, { command, port, callerOrigin, ...(build === true ? { verifiedBuild: true } : {}) });
         return reply.code(200).send(result);
       } catch (error) {
         const known = error instanceof PreviewError ? error : new PreviewError("preview_start_failed", error instanceof Error ? error.message : "Failed to start preview", 500);

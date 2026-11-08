@@ -99,6 +99,41 @@ export function FrameworkIcon({ id }: { id: string }) {
       </svg>
     );
   }
+  if (id === "nuxt") {
+    return (
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path fill="#00DC82" d="M13.5 19h6.9c.5 0 1-.1 1.3-.4.4-.2.5-.6.5-.9 0-.3-.1-.6-.3-1l-4.6-7.9c-.2-.4-.4-.6-.7-.8-.3-.2-.6-.3-.9-.3-.4 0-.7.1-1 .3-.3.2-.5.4-.7.8l-1.2 2-2.3-4c-.2-.3-.4-.6-.7-.8-.3-.2-.6-.3-1-.3s-.7.1-1 .3c-.3.2-.5.5-.7.8L1.3 17c-.2.4-.3.7-.3 1 0 .3.2.7.5.9.3.3.8.4 1.3.4h4.3c1.7 0 3-.8 3.8-2.2l2.1-3.6 1.1-1.9 3.4 5.8h-4.5z"/></svg>
+    );
+  }
+  if (id === "sveltekit") {
+    return (
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path stroke="#FF3E00" strokeWidth="2.4" strokeLinecap="round" d="M16.5 5.5c-2-1.6-5-1.3-6.8.5l-3 3c-1.6 1.6-1.4 4 .4 5.2 1 .7 2.3.8 3.4.3M7.5 18.5c2 1.6 5 1.3 6.8-.5l3-3c1.6-1.6 1.4-4-.4-5.2-1-.7-2.3-.8-3.4-.3"/></svg>
+    );
+  }
+  if (id === "angular") {
+    return (
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path fill="#DD0031" d="M12 2 3 5.2l1.4 11.9L12 22l7.6-4.9L21 5.2z"/><path fill="#fff" d="m12 5-5.6 12.5h2.1l1.1-2.8h4.8l1.1 2.8h2.1zm1.6 8H10.4L12 9.2z"/></svg>
+    );
+  }
+  if (id === "express-react") {
+    return (
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="12" cy="12" r="2.2" fill="#61DAFB"/><g stroke="#61DAFB" strokeWidth="1.4"><ellipse cx="12" cy="12" rx="10" ry="4"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(120 12 12)"/></g></svg>
+    );
+  }
+  if (id === "nestjs") {
+    return (
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path fill="#E0234E" d="M12 2 3.5 7v10l8.5 5 8.5-5V7zm0 3.3 5.7 3.3v6.8L12 18.7l-5.7-3.3V8.6z"/><circle cx="12" cy="12" r="2.4" fill="#E0234E"/></svg>
+    );
+  }
+  if (id === "fastapi") {
+    return (
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="12" cy="12" r="10.5" fill="#009688"/><path fill="#fff" d="M13 4.5 6.5 13.5H11l-1 6 7-9.5h-4.5z"/></svg>
+    );
+  }
+  if (id === "shadcn") {
+    return (
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path stroke="#ffffff" strokeWidth="2.4" strokeLinecap="round" d="M20 12 12 20M18 4 4 18"/></svg>
+    );
+  }
   if (id === "game") {
     return (
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ffcf4a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -121,8 +156,8 @@ export function FrameworkIcon({ id }: { id: string }) {
 }
 
 export interface FrameworkStarterOption {
-  id: "html-css" | "nextjs" | "vite" | "vue" | "astro" | "game" | "phaser" | "three" | "expo" | "flutter";
-  frameworkKey: "HTML/CSS" | "Next.js" | "Vite" | "Vue 3 + Vite" | "Astro" | "Expo" | "Flutter";
+  id: "html-css" | "nextjs" | "vite" | "vue" | "astro" | "nuxt" | "sveltekit" | "angular" | "express-react" | "nestjs" | "fastapi" | "shadcn" | "game" | "phaser" | "three" | "expo" | "flutter";
+  frameworkKey: "HTML/CSS" | "Next.js" | "Vite" | "Vue 3 + Vite" | "Astro" | "Nuxt" | "SvelteKit" | "Angular" | "Express" | "NestJS" | "FastAPI" | "Expo" | "Flutter";
   /** What the starter creates; shown and filtered on the Projects page. */
   kind: ProjectKind;
   name: string;
@@ -218,6 +253,118 @@ export const FRAMEWORK_STARTERS: FrameworkStarterOption[] = [
     defaultNameUk: "Контент-хаб на Astro",
     defaultDesc: "High-performance content website with Astro islands architecture and zero unnecessary JavaScript.",
     defaultDescUk: "Високопродуктивний сайт з острівною архітектурою Astro та мінімальним завантаженням JS.",
+  },
+  {
+    id: "nuxt",
+    frameworkKey: "Nuxt",
+    kind: "website",
+    name: "Nuxt",
+    runtimeLabel: "Shared NPATI Sandbox runtime",
+    runtimeLabelUk: "Спільне середовище NPATI Sandbox",
+    verifiedLabel: "Verified",
+    tags: ["Vue 3","SSR","File routing","Server routes"],
+    defaultPort: 3000,
+    defaultType: "website",
+    defaultName: "Nuxt Website",
+    defaultNameUk: "Сайт на Nuxt",
+    defaultDesc: "Vue website with server-side rendering, file-based routes and server API routes.",
+    defaultDescUk: "Сайт на Vue із серверним рендерингом, маршрутами за файлами та серверними API.",
+  },
+  {
+    id: "sveltekit",
+    frameworkKey: "SvelteKit",
+    kind: "web_app",
+    name: "SvelteKit",
+    runtimeLabel: "Shared NPATI Sandbox runtime",
+    runtimeLabelUk: "Спільне середовище NPATI Sandbox",
+    verifiedLabel: "Verified",
+    tags: ["Svelte 5","SSR","Form actions","File routing"],
+    defaultPort: 5173,
+    defaultType: "web_app",
+    defaultName: "SvelteKit App",
+    defaultNameUk: "Застосунок на SvelteKit",
+    defaultDesc: "Fast web application with Svelte, server rendering and form actions.",
+    defaultDescUk: "Швидкий вебзастосунок на Svelte із серверним рендерингом і серверними формами.",
+  },
+  {
+    id: "angular",
+    frameworkKey: "Angular",
+    kind: "web_app",
+    name: "Angular",
+    runtimeLabel: "Shared NPATI Sandbox runtime",
+    runtimeLabelUk: "Спільне середовище NPATI Sandbox",
+    verifiedLabel: "Verified",
+    tags: ["Angular 19","TypeScript","Standalone","SPA"],
+    defaultPort: 3000,
+    defaultType: "web_app",
+    defaultName: "Angular App",
+    defaultNameUk: "Застосунок на Angular",
+    defaultDesc: "Structured TypeScript application for business dashboards and internal tools.",
+    defaultDescUk: "Структурований застосунок на TypeScript для бізнес-панелей та внутрішніх сервісів.",
+  },
+  {
+    id: "express-react",
+    frameworkKey: "Express",
+    kind: "web_app",
+    name: "Express + React",
+    runtimeLabel: "Shared NPATI Sandbox runtime",
+    runtimeLabelUk: "Спільне середовище NPATI Sandbox",
+    verifiedLabel: "Verified",
+    tags: ["Express","React 18","REST API","Vite"],
+    defaultPort: 3000,
+    defaultType: "web_app",
+    defaultName: "Express React App",
+    defaultNameUk: "Застосунок Express + React",
+    defaultDesc: "React frontend with an Express REST API served from one project.",
+    defaultDescUk: "Фронтенд на React і REST API на Express в одному проєкті.",
+  },
+  {
+    id: "nestjs",
+    frameworkKey: "NestJS",
+    kind: "api",
+    name: "API · NestJS",
+    runtimeLabel: "Shared NPATI Sandbox runtime",
+    runtimeLabelUk: "Спільне середовище NPATI Sandbox",
+    verifiedLabel: "Verified",
+    tags: ["NestJS","TypeScript","REST API","Modules"],
+    defaultPort: 3000,
+    defaultType: "web_app",
+    defaultName: "NestJS API",
+    defaultNameUk: "API на NestJS",
+    defaultDesc: "Modular TypeScript backend with controllers and dependency injection.",
+    defaultDescUk: "Модульний бекенд на TypeScript із контролерами та впровадженням залежностей.",
+  },
+  {
+    id: "fastapi",
+    frameworkKey: "FastAPI",
+    kind: "api",
+    name: "API · FastAPI",
+    runtimeLabel: "Shared NPATI Sandbox runtime",
+    runtimeLabelUk: "Спільне середовище NPATI Sandbox",
+    verifiedLabel: "Verified",
+    tags: ["Python","FastAPI","REST API","OpenAPI docs"],
+    defaultPort: 8000,
+    defaultType: "web_app",
+    defaultName: "FastAPI Service",
+    defaultNameUk: "Сервіс на FastAPI",
+    defaultDesc: "Python API with automatic documentation, ready for services and AI backends.",
+    defaultDescUk: "API на Python з автоматичною документацією для сервісів та AI-бекендів.",
+  },
+  {
+    id: "shadcn",
+    frameworkKey: "Vite",
+    kind: "web_app",
+    name: "React · shadcn/ui",
+    runtimeLabel: "Shared NPATI Sandbox runtime",
+    runtimeLabelUk: "Спільне середовище NPATI Sandbox",
+    verifiedLabel: "Verified",
+    tags: ["React 18","Tailwind CSS","shadcn/ui","Vite"],
+    defaultPort: 5173,
+    defaultType: "web_app",
+    defaultName: "shadcn/ui App",
+    defaultNameUk: "Застосунок на shadcn/ui",
+    defaultDesc: "React interface with Tailwind CSS and shadcn/ui style components.",
+    defaultDescUk: "Інтерфейс на React із Tailwind CSS та компонентами в стилі shadcn/ui.",
   },
   {
     id: "game",

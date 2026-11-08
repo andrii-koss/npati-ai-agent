@@ -5,7 +5,7 @@ describe("stack starters", () => {
   it.each(STACK_STARTER_IDS)("%s writes a project that names its stack", (id) => {
     const files = createStackStarterScaffold(id, { name: "Demo" }).files;
     const manifest = id === "flutter" ? files["pubspec.yaml"]! : files["package.json"]!;
-    expect(manifest).toContain({ vue: '"vue"', phaser: '"phaser"', three: '"three"', flutter: "sdk: flutter" }[id]);
+    expect(manifest).toContain({ vue: '"vue"', phaser: '"phaser"', three: '"three"', flutter: "sdk: flutter", "express-react": '"express"', shadcn: '"tailwindcss"' }[id]);
     if (id !== "flutter") expect(JSON.parse(manifest).scripts.build).toBe("vite build");
   });
 
