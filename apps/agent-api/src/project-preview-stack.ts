@@ -91,7 +91,7 @@ export async function detectProjectStack(
       const command = pkg.scripts?.dev
         ? pkg.scripts.dev.includes("--host") ? `${packageManager} run dev` : `${packageManager} run dev -- --host 0.0.0.0`
         : "npx vite --host 0.0.0.0";
-      return { packageManager, framework: "sveltekit", command, port: 5173, productionCommand: "node build/index.js" };
+      return { packageManager, framework: "sveltekit", command, port: 5173, productionCommand: "ORIGIN=http://127.0.0.1:$PORT node build/index.js" };
     }
     if (hasRemix) {
       const command = pkg.scripts?.dev ? `${packageManager} run dev` : "npx remix dev";

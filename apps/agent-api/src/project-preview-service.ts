@@ -294,6 +294,19 @@ export class ProjectPreviewService {
         }
       }
     }
+    // Python and PHP projects have no node_modules step: without their own environment the server command cannot start.
+    if (!verifiedBuild && options.verifiedBuild !== false && !files.some((f) => f.path === "package.json")) {
+      const paths = new Set(files.map((f) => f.path));
+      const setup = paths.has("requirements.txt")
+        ? { check: "test -x .venv/bin/python", commands: ["python3 -m venv .venv", ".venv/bin/python -m pip install -r requirements.txt"] }
+        : paths.has("composer.json") ? { check: "test -f vendor/autoload.php", commands: ["composer install --no-interaction --prefer-dist"] } : null;
+      if (setup) {
+        const ready = await this.sandbox.execute(ctx, companyId, { projectId, command: setup.check, agentId: options.agentId || "system", approved: true }).then((result) => result.exitCode === 0, () => false);
+        if (!ready) for (const command of setup.commands) {
+          await this.sandbox.execute(ctx, companyId, { projectId, command, agentId: options.agentId || "system", approved: true }).catch((error) => console.warn(`[startPreview] Dependency preparation warning for project ${projectId}:`, error));
+        }
+      }
+    }
     // Start process in sandbox
     options.signal?.throwIfAborted();
     const result = await this.sandbox.process(ctx, companyId, {
