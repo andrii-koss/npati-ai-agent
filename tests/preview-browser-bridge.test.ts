@@ -75,3 +75,14 @@ it.each(["/", "/shop"])("hydrates React Router at its scoped basename %s without
   expect(rewritePreviewSsrResources(rewritten, prefix)).toBe(rewritten);
   expect(rewritten).not.toContain('"</script>"');
 });
+
+it("sends the app's own /api requests to its backend, and platform calls of this project to the platform", () => {
+  const prefix = "/api/companies/c/projects/p/preview/proxy";
+  const location = { href: "http://preview.test" + prefix + "/", origin: "http://preview.test", assign() {} };
+  const window = { fetch: (url: string) => url };
+  const script = previewBrowserBridge(prefix, "signed").replace(/^<script>|<\/script>$/g, "");
+  runInNewContext(script, { URL, Request, location, Element: class {}, window, document: { addEventListener() {} }, history: { pushState() {}, replaceState() {} } });
+  expect(new URL(window.fetch("/api/auth/register")).pathname).toBe(prefix + "/api/auth/register");
+  expect(new URL(window.fetch("/api/companies")).pathname).toBe(prefix + "/api/companies");
+  expect(window.fetch("/api/companies/c/projects/p/data")).toBe("/api/companies/c/projects/p/data");
+});

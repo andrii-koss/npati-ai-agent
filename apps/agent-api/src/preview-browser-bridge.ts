@@ -1,11 +1,11 @@
 /** Keep hydrated links and client-side requests inside this project's signed preview route. */
 export function previewBrowserBridge(prefix: string, token: string): string {
   return `<script>(function(){
-  const prefix=${JSON.stringify(prefix)},token=${JSON.stringify(token)};
+  const prefix=${JSON.stringify(prefix)},token=${JSON.stringify(token)},platform=prefix.slice(0,-"/preview/proxy".length);
   function route(value,resource=false,navigation=false){
     if(typeof value!=="string" || !value || value.startsWith("#"))return value;
     const url=new URL(value,location.href);
-    if(url.origin!==location.origin || url.pathname.startsWith("/v1/projects/") || url.pathname.startsWith("/api/") && !url.pathname.startsWith(prefix+"/") && !navigation)return value;
+    if(url.origin!==location.origin || url.pathname.startsWith("/v1/projects/") || (url.pathname===platform || url.pathname.startsWith(platform+"/")) && !url.pathname.startsWith(prefix+"/") && !navigation)return value;
     if(!url.pathname.startsWith(prefix+"/"))url.pathname=prefix+url.pathname;
     if(resource)url.searchParams.delete("token");else url.searchParams.set("token",token);return url.href;
   }
