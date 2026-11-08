@@ -156,7 +156,7 @@ export function CreateWebsiteDrawer({
                           alignItems: "center",
                           justifyContent: "center",
                           flexShrink: 0,
-                          background: fw.id === "html-css" ? "#fff5f2" : fw.id === "nextjs" ? "#000000" : fw.id === "vite" ? "#18181b" : "#0b0f19",
+                          background: fw.id === "html-css" ? "#fff5f2" : fw.id === "nextjs" ? "#000000" : fw.id === "vite" ? "#18181b" : fw.id === "vue" || fw.id === "flutter" ? "#ffffff" : "#0b0f19",
                           border: "1px solid rgba(0, 0, 0, 0.08)",
                           boxShadow: "0 2px 6px rgba(0, 0, 0, 0.06)",
                         }}

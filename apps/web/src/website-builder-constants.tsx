@@ -65,6 +65,40 @@ export function FrameworkIcon({ id }: { id: string }) {
       </svg>
     );
   }
+  if (id === "vue") {
+    return (
+      <svg width="24" height="24" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path fill="#41B883" d="M78.8 10 64 35.6 49.2 10H0l64 110.9L128 10z" />
+        <path fill="#34495E" d="M78.8 10 64 35.6 49.2 10H25.6L64 76.5 102.4 10z" />
+      </svg>
+    );
+  }
+  if (id === "phaser") {
+    return (
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#c084fc" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M12 2 3 7v10l9 5 9-5V7z" />
+        <path d="M10 17V8h3a2.5 2.5 0 0 1 0 5h-3" />
+      </svg>
+    );
+  }
+  if (id === "three") {
+    return (
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M12 2 2 21h20z" />
+        <path d="M12 2v13M2 21l10-6 10 6" />
+      </svg>
+    );
+  }
+  if (id === "flutter") {
+    return (
+      <svg width="24" height="24" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path fill="#47C5FB" d="M76.4 2 12.8 65.6l19.7 19.7L115.8 2z" />
+        <path fill="#47C5FB" d="M76.4 60.9 42.4 95.1l19.7 19.9 19.6-19.6 34.1-34.5z" />
+        <path fill="#00569E" d="M62.1 115l14.9 13h38.9L81.7 95.4z" />
+        <path fill="#00B5F8" d="M42.3 95.2 62 75.5l19.7 19.8L62.1 115z" />
+      </svg>
+    );
+  }
   if (id === "game") {
     return (
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ffcf4a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -87,8 +121,8 @@ export function FrameworkIcon({ id }: { id: string }) {
 }
 
 export interface FrameworkStarterOption {
-  id: "html-css" | "nextjs" | "vite" | "astro" | "game" | "expo";
-  frameworkKey: "HTML/CSS" | "Next.js" | "Vite" | "Astro" | "Expo";
+  id: "html-css" | "nextjs" | "vite" | "vue" | "astro" | "game" | "phaser" | "three" | "expo" | "flutter";
+  frameworkKey: "HTML/CSS" | "Next.js" | "Vite" | "Vue 3 + Vite" | "Astro" | "Expo" | "Flutter";
   /** What the starter creates; shown and filtered on the Projects page. */
   kind: ProjectKind;
   name: string;
@@ -154,6 +188,22 @@ export const FRAMEWORK_STARTERS: FrameworkStarterOption[] = [
     defaultDescUk: "Ультрашвидкий SPA-застосунок з миттєвим гарячим перезавантаженням на Vite та React 18.",
   },
   {
+    id: "vue",
+    frameworkKey: "Vue 3 + Vite",
+    kind: "web_app",
+    name: "Vue",
+    runtimeLabel: "Shared NPATI Sandbox runtime",
+    runtimeLabelUk: "Спільне середовище NPATI Sandbox",
+    verifiedLabel: "Verified",
+    tags: ["Vue 3","Vite HMR","Composition API","SPA"],
+    defaultPort: 5173,
+    defaultType: "web_app",
+    defaultName: "Vue Web App",
+    defaultNameUk: "Вебзастосунок на Vue",
+    defaultDesc: "Single page application with Vue 3, the Composition API and instant Vite updates.",
+    defaultDescUk: "Односторінковий застосунок на Vue 3 з Composition API та миттєвим оновленням Vite.",
+  },
+  {
     id: "astro",
     frameworkKey: "Astro",
     name: "Astro",
@@ -186,6 +236,38 @@ export const FRAMEWORK_STARTERS: FrameworkStarterOption[] = [
     defaultDescUk: "Готова 2D-гра в браузері: ловіть зірки, уникайте каміння, рахунок і життя. Розвивайте її в чаті.",
   },
   {
+    id: "phaser",
+    frameworkKey: "Vite",
+    kind: "game",
+    name: "Game · Phaser",
+    runtimeLabel: "Browser game, shared NPATI Sandbox runtime",
+    runtimeLabelUk: "Браузерна гра, спільне середовище NPATI Sandbox",
+    verifiedLabel: "Verified",
+    tags: ["Phaser 3","Arcade physics","Platformer","Keyboard"],
+    defaultPort: 5173,
+    defaultType: "website",
+    defaultName: "Phaser Platformer",
+    defaultNameUk: "Платформер на Phaser",
+    defaultDesc: "A playable Phaser platformer with arcade physics and keyboard controls. Extend it in chat.",
+    defaultDescUk: "Готовий платформер на Phaser з аркадною фізикою та керуванням із клавіатури. Розвивайте його в чаті.",
+  },
+  {
+    id: "three",
+    frameworkKey: "Vite",
+    kind: "web_app",
+    name: "3D scene · Three.js",
+    runtimeLabel: "WebGL, shared NPATI Sandbox runtime",
+    runtimeLabelUk: "WebGL, спільне середовище NPATI Sandbox",
+    verifiedLabel: "Verified",
+    tags: ["Three.js","WebGL","OrbitControls","Lighting"],
+    defaultPort: 5173,
+    defaultType: "web_app",
+    defaultName: "Three.js Scene",
+    defaultNameUk: "3D-сцена на Three.js",
+    defaultDesc: "An interactive 3D scene with objects, lighting and a mouse-controlled camera.",
+    defaultDescUk: "Інтерактивна 3D-сцена з об'єктами, освітленням і камерою, що керується мишею.",
+  },
+  {
     id: "expo",
     frameworkKey: "Expo",
     kind: "mobile_app",
@@ -200,6 +282,22 @@ export const FRAMEWORK_STARTERS: FrameworkStarterOption[] = [
     defaultNameUk: "Мобільний застосунок",
     defaultDesc: "An Expo / React Native app with a web preview, connected to the project data backend.",
     defaultDescUk: "Застосунок на Expo / React Native з веб-превʼю та підключенням до даних проєкту.",
+  },
+  {
+    id: "flutter",
+    frameworkKey: "Flutter",
+    kind: "mobile_app",
+    name: "Mobile app · Flutter",
+    runtimeLabel: "Flutter with web preview",
+    runtimeLabelUk: "Flutter з веб-превʼю",
+    verifiedLabel: "Verified",
+    tags: ["Flutter","Dart","Material","iOS","Android","Web preview"],
+    defaultPort: 3000,
+    defaultType: "mobile_app",
+    defaultName: "Flutter App",
+    defaultNameUk: "Застосунок на Flutter",
+    defaultDesc: "A Flutter app with a list, an add form and a web preview.",
+    defaultDescUk: "Застосунок на Flutter зі списком, формою додавання та веб-превʼю.",
   },
 ];
 

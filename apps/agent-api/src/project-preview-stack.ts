@@ -45,7 +45,8 @@ export async function detectProjectStack(
 
   // 3. Framework & Dev command detection
   if (pathSet.has("pubspec.yaml") && /\bflutter\s*:/m.test(await readFile("pubspec.yaml").catch(() => ""))) {
-    const stale = 'if [ ! -f build/web/index.html ] || [ -n "$(find lib web pubspec.yaml -newer build/web/index.html 2>/dev/null | head -1)" ]; then flutter build web; fi';
+    // An interrupted build leaves index.html without the compiled app, so the compiled file decides.
+    const stale = 'if [ ! -f build/web/main.dart.js ] || [ -n "$(find lib web pubspec.yaml -newer build/web/main.dart.js 2>/dev/null | head -1)" ]; then flutter build web; fi';
     return { packageManager, framework: "flutter", command: `${stale} && npx -y serve -s build/web -l 3000`, port: 3000 };
   }
   if (pkg) {

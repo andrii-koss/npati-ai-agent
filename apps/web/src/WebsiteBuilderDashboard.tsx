@@ -8,6 +8,8 @@ import {
   createDefaultWebsiteDocument,
   createMobileAppScaffold,
   createGameScaffold,
+  createStackStarterScaffold,
+  isStackStarterId,
   type ProjectKind,
   projectKindOf,
   defaultAppScheme,
@@ -307,7 +309,9 @@ export function WebsiteBuilderDashboard() {
         }
       );
 
-      const files: Record<string, string> = isMobileApp
+      const files: Record<string, string> = isStackStarterId(selectedFramework)
+        ? createStackStarterScaffold(selectedFramework, { name: name.trim() }).files
+        : isMobileApp
         ? createMobileAppScaffold({ name: name.trim(), slug: slugifyProjectName(name.trim()), scheme: defaultAppScheme(name.trim()) }).files
         : kind === "game"
           ? createGameScaffold({ name: name.trim() }).files
