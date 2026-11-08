@@ -8,7 +8,7 @@ describe("installing a package with a version range", () => {
 
   it("needs no approval for ~ and ^ ranges", () => {
     expect(classifyTerminalCommand(command).requiresApproval).toBe(false);
-    expect(classifyShellCommand(command).level).not.toBe("approval");
+    expect(classifyShellCommand(command).risk).not.toBe("approval");
   });
 
   it("still refuses a command hidden after a package name", () => {

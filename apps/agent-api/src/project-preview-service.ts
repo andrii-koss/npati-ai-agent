@@ -710,6 +710,8 @@ export class ProjectPreviewService {
       }
     }
     const projectPrefix = `_npati_p_${projectId.slice(0, 8)}_`;
+    // Frameworks reject a form whose Origin differs from their own host (SvelteKit answers 403), and the browser only knows the proxy's.
+    if (typeof request.headers.origin === "string") headers["origin"] = `http://127.0.0.1:${session.port}`;
     const filteredCookies = filterIncomingCookies(request.headers.cookie, projectPrefix);
     if (filteredCookies) {
       headers["cookie"] = filteredCookies;

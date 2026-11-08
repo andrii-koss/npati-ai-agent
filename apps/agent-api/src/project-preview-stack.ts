@@ -146,14 +146,15 @@ export async function detectProjectStack(
   }
   if (pathSet.has("requirements.txt")) {
     let fastapi = false;
-    if (pathSet.has("main.py")) {
-      const entry = await readFile("main.py").catch(() => "");
+    const asgiEntry = pathSet.has("main.py") ? "main.py" : pathSet.has("app/main.py") ? "app/main.py" : null;
+    if (asgiEntry) {
+      const entry = await readFile(asgiEntry).catch(() => "");
       fastapi = /FastAPI\s*\(|from\s+fastapi\b/.test(entry);
       // Packaged ASGI apps commonly re-export app from main.py; the dependency remains authoritative.
       if (!fastapi) fastapi = /^\s*fastapi(?:\[[^\]\r\n]+\])?\s*(?:[=<>!~;]|$)/im.test(await readFile("requirements.txt").catch(() => ""));
     }
     if (fastapi) {
-      const command = ".venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port $PORT";
+      const command = `.venv/bin/python -m uvicorn ${asgiEntry === "main.py" ? "main" : "app.main"}:app --host 0.0.0.0 --port $PORT`;
       return { packageManager, framework: "fastapi", command, port: 8000, productionCommand: command };
     }
     if (pathSet.has("app.py")) {

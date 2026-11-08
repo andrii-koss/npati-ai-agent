@@ -276,6 +276,27 @@ function stripQuotes(value: string): string {
   return trimmed;
 }
 
+const PROJECT_PATH = /^[A-Za-z0-9_][A-Za-z0-9_.-]*(?:\/[A-Za-z0-9_][A-Za-z0-9_.-]*)*$/;
+const COMMAND_OPTION = /^--?[A-Za-z][A-Za-z-]*(?:=[A-Za-z0-9_.:-]+)?$/;
+const COMMAND_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const DJANGO_COMMANDS = new Set(["check", "makemigrations", "showmigrations", "test", "collectstatic"]);
+const ARTISAN_COMMANDS = /^(?:--version|about|route:list|migrate:status|key:generate|db:seed|config:clear|cache:clear|view:clear|storage:link|test|make:[a-z]+)$/;
+
+/** Everyday framework commands of the project itself: they run its own code, in the same sandbox as `npm run build`. */
+export function projectFrameworkCommand(executable: string, args: readonly string[]): "safe" | "controlled" | null {
+  const python = /^(?:\.venv\/bin\/)?python3?$/.test(executable);
+  const pipArgs = python && args[0] === "-m" && args[1] === "pip" ? args.slice(2) : /^(?:\.venv\/bin\/)?pip3?$/.test(executable) ? args : null;
+  if (pipArgs && ["list", "show", "freeze"].includes(pipArgs[0] ?? "") && pipArgs.slice(1).every((value) => COMMAND_OPTION.test(value) || COMMAND_NAME.test(value))) return "safe";
+  if (python && args[0] === "manage.py" && DJANGO_COMMANDS.has(args[1] ?? "") && args.slice(2).every((value) => COMMAND_OPTION.test(value) || COMMAND_NAME.test(value))) return "controlled";
+  if (executable === "php" && args[0] === "-l" && args.length === 2 && PROJECT_PATH.test(args[1]!) && !args[1]!.split("/").includes("..")) return "safe";
+  if (executable === "php" && args[0] === "artisan" && ARTISAN_COMMANDS.test(args[1] ?? "") && args.slice(2).every((value) => COMMAND_OPTION.test(value) || COMMAND_NAME.test(value))) return "controlled";
+  if (executable === "mkdir") {
+    const paths = args.filter((value) => value !== "-p");
+    if (paths.length && paths.every((value) => PROJECT_PATH.test(value) && !value.split("/").includes("..") && !/(?:^|\/)\.(?:git|env|ssh|aws)(?:\/|$)/i.test(value))) return "controlled";
+  }
+  return null;
+}
+
 /** A real tokeniser for a shell command line: operators, quoting and escaping are handled. */
 export function parseShellCommand(command: string): ParsedShellCommand {
   const segments: ShellSegment[] = [];
@@ -674,7 +695,11 @@ export function classifyShellCommand(command: string, options: ShellClassifierOp
     if (base.timeoutClass === "install_build") timeoutClass = "install";
 
     const readOnlyUtility = readOnlyUtilityCommand(executable, args, segment.raw);
-    if (readOnlyUtility.safe) {
+    const frameworkLevel = projectFrameworkCommand(executable, args);
+    if (frameworkLevel) {
+      segmentRisk = frameworkLevel;
+      reasons.push("project framework command inside the sandbox");
+    } else if (readOnlyUtility.safe) {
       // Provably read-only utilities (and version queries) do not mutate anything, so they must not
       // require approval even though the shared terminal policy is stricter.
       segmentRisk = "safe";
