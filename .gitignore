@@ -45,3 +45,5 @@ tests/final-v5-rbac-block.test.ts
 tests/final-v5-spend-fence.test.ts
 .vscode/
 .npati-data/
+compose.step9.override.yml
+compose.step10.override.yml
