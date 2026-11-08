@@ -2,4 +2,3 @@
 *.sh text eol=lf
 
 # E2E fixtures are copied into Linux sandboxes byte for byte.
-docs/NPATI_Code_E2E_Test/cases/** text eol=lf
