@@ -222,7 +222,9 @@ export function resolveConversationLanguage(
       if (candidate.letters >= 3) {
         const confidentInitialDetection = candidate.language === "en"
           || candidate.letters >= 24
-          || candidate.confidence >= 0.04;
+          || candidate.confidence >= 0.04
+          // Uncertain only between languages of this script: a short Cyrillic message is still not English.
+          || languageScript(candidate.language) !== languageScript("en");
         active = confidentInitialDetection ? candidate.language : "en";
       }
       continue;
