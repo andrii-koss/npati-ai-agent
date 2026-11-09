@@ -8,6 +8,7 @@ import { uk } from "./i18n/locales/uk";
 import { isVisibleChatOperation, normalizeActivity, type CodingActivityRun } from "./chat-timeline";
 import { codingStopCopy } from "./coding-stop-copy";
 import { authFetch } from "./shell/auth-helpers";
+import { ChatFileViewerContext } from "./ChatFileViewer";
 export interface AgentExecutionTraceProps { process?: DevelopmentProcess; items?: DevelopmentProcessProgressItem[]; isUk?: boolean; className?: string; run?: CodingActivityRun; nested?: boolean; language?: string; showIdentity?:boolean; animatePending?: boolean }
 export const sanitizeTraceSecrets = sanitizeExecutionTrace;
 type Labels = (key: string) => string;
@@ -148,6 +149,7 @@ function title(item: DevelopmentProcessProgressItem, t: Labels, active: boolean)
 export function formatProcessTitle(item: DevelopmentProcessProgressItem, isUk: boolean, active: boolean) { return title(item, key => (isUk ? uk : en).executionTrace[key] ?? key, active); }
 export function AgentExecutionTrace({ process, items: directItems, run, nested = false, language, isUk = false, className = "",showIdentity=false, animatePending = true }: AgentExecutionTraceProps) {
   const i18n = useContext(I18nContextRef);
+  const openFile = useContext(ChatFileViewerContext);
   const t: Labels = key => executionTraceText(run?.language ?? language ?? (isUk ? "uk" : i18n?.language ?? "en"),key);
   const [runOpen, setRunOpen] = useState(false);
   const [historyMounted, setHistoryMounted] = useState(false);
@@ -200,13 +202,14 @@ export function AgentExecutionTrace({ process, items: directItems, run, nested =
     const [, Icon] = operation(setupOnly ? operations[0] ?? current : current);
     const recovered = run.status === "failed" && process?.status === "completed";
     const label = run.status === "failed" && !recovered ? t("failed") : stepActive ? setupOnly ? t("creatingProject") : title(current,t,["running", "active"].includes(current.status ?? "")) : run.status === "completed" || recovered ? setupOnly ? t("creatingProject") : t("operationsDone").replace("{{count}}",String(operations.length)) : t(run.status === "waiting_for_approval" ? "awaiting_approval" : run.status);
-    const files = new Map<string, {path: string; linesAdded?: number; linesRemoved?: number; status?: string}>();
+    const files = new Map<string, {path: string; linesAdded?: number; linesRemoved?: number; status?: string; pending?: boolean}>();
     for (const item of items) {
       if (!/write|edit|patch|move|delete/.test(item.tool ?? "")) continue;
       if (item.file) files.set(item.file, {path:item.file, linesAdded:item.linesAdded, linesRemoved:item.linesRemoved, status:item.status});
       for (const file of item.files ?? []) files.set(file.path, {...file, status:item.status});
     }
-    for (const file of generating?.files ?? []) files.set(file.path, {...file, status: file.path === generating?.file ? "running" : "completed"});
+    // Files of a turn are saved when the turn ends, so one still being generated cannot be opened yet.
+    for (const file of generating?.files ?? []) files.set(file.path, {...file, pending: true, status: file.path === generating?.file ? "running" : "completed"});
     const visibleFiles = [...files.values()].slice(-6);
     const allItems = normalizeActivity(process?.progress);
     const lastAt = Math.max(0, ...allItems.filter(isVisibleChatOperation).map(item => Date.parse(item.at)).filter(Number.isFinite));
@@ -219,7 +222,7 @@ export function AgentExecutionTrace({ process, items: directItems, run, nested =
     const total = spent && whole && whole !== spent ? spent + " · " + (isUk || (run.language ?? language ?? i18n?.language) === "uk" ? "Усього " : "Total ") + whole : spent;
     const elapsed = stepActive && Number.isFinite(Date.parse(current.at)) ? Math.max(0, Math.floor((now - Date.parse(current.at)) / 1000)) : undefined;
     return <article className="assistant research-progress coding-run-activity" aria-live="polite"><div className={"research-page-row codex-trace-row " + (stepActive ? "active" : recovered ? "completed" : run.status) + (runOpen ? " expanded" : "")} data-run-id={run.runId ?? run.id}><button type="button" className="codex-trace-row-header coding-run-header" aria-expanded={runOpen} aria-controls={"run-detail-" + run.id} onClick={()=>{setHistoryMounted(true);setRunOpen(previous=>!previous);}}><span className="research-progress-state" aria-hidden="true">{stepActive ? "\u25cf" : run.status === "completed" || recovered ? <Check size={12}/> : run.status === "failed" ? <AlertCircle size={12}/> : run.status === "cancelled" ? <X size={12}/> : "\u25cf"}</span><Icon className="research-progress-globe" size={16} aria-hidden="true"/><span dir="auto" className={stepActive ? "research-active-text" : undefined}>{label}{total ? " · " + total : ""}</span>{commandRunning && liveLine && <code dir="auto" className="codex-trace-live-output" style={{ flex: 1, minWidth: 0, marginLeft: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: 0.75, fontSize: "0.85em" }}>{sanitizeExecutionTrace(liveLine)}</code>}{elapsed !== undefined && <span className="codex-trace-duration-tag">{elapsed}s</span>}<span className="codex-trace-chevron-btn" aria-hidden="true">{runOpen ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}</span></button>
-      {visibleFiles.length > 0 && <ul className="coding-changed-files" aria-label={t("file")}>{visibleFiles.map(file => <li key={file.path}><FilePenLine size={13} aria-hidden="true"/> <code>{file.path}</code>{file.linesAdded !== undefined && <span> +{file.linesAdded}</span>}{file.linesRemoved !== undefined && <span> -{file.linesRemoved}</span>}{file.status === "running" && <span> · {t("editing")}</span>}</li>)}</ul>}
+      {visibleFiles.length > 0 && <ul className="coding-changed-files" aria-label={t("file")}>{visibleFiles.map(file => <li key={file.path}><button type="button" className="coding-file-chip" disabled={file.pending || !openFile || !process?.projectId} onClick={() => openFile?.({ companyId: process!.companyId, projectId: process!.projectId!, path: file.path })}><code>{file.path}</code>{file.linesAdded !== undefined && <span className="coding-file-added">+{file.linesAdded}</span>}{file.linesRemoved !== undefined && <span className="coding-file-removed">-{file.linesRemoved}</span>}</button>{file.status === "running" && <span>{t("editing")}</span>}</li>)}</ul>}
       {run.status === "failed" && process?.status === "failed" && run.runId === process.runId && process.detail && <p className="codex-trace-error-msg">{sanitizeExecutionTrace(codingStopCopy(process.detail,run.language ?? process.responseLanguage ?? language ?? i18n?.language))}</p>}
       <div className="codex-trace-collapse" aria-hidden={!runOpen} inert={!runOpen} onTransitionEnd={event=>{if(!runOpen && event.target===event.currentTarget)setHistoryMounted(false);}}> <div className="codex-trace-collapse-inner"><div id={"run-detail-" + run.id} className="coding-run-history">{historyMounted && <AgentExecutionTrace process={process ? {...process,runId:run.runId} : undefined} items={items} isUk={isUk} language={run.language} nested />}</div></div></div></div></article>;
   }

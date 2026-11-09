@@ -148,10 +148,11 @@ it("keeps Preview outside user messages before and after reloading persisted cha
   loaded=new Promise<void>(resolve=>{releaseProcesses=resolve;});
   root=createRoot(host);
   await act(async()=>{root!.render(<MemoryRouter initialEntries={["/c/reload-chat"]}><I18nProvider><BusinessChatPage neutralChat initialConversationId="reload-chat" /></I18nProvider></MemoryRouter>);});
-  expect(host.querySelector("article.user")?.textContent).toContain("Create my store");
-  expect(host.querySelector("article.user .coding-preview-trigger")).toBeNull();
-  expect(host.querySelector("article.user .project-chat-card")).toBeNull();
+  // History waits for its steps, so the text and the steps appear together.
+  expect(host.querySelector("article.user")).toBeNull();
   await act(async()=>releaseProcesses());
+  expect(host.querySelector("article.user")?.textContent).toContain("Create my store");
+  expect(host.querySelector("article.user .project-chat-card")).toBeNull();
   const preview=host.querySelector(".coding-preview-trigger")!;
   const reply=host.querySelector("article.assistant")!;
   expect(host.querySelector("article.user .coding-preview-trigger")).toBeNull();

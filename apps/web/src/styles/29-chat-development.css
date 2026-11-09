@@ -478,8 +478,19 @@
 .coding-run-header { min-height: 32px; padding: 4px 8px; font-size: 14px; line-height: 24px; }
 .coding-run-header .codex-trace-chevron-btn { margin-left: auto; }
 .coding-run-history { padding: 2px 0 4px 18px; }
-.coding-changed-files { list-style: none; padding: 2px 12px 6px 36px; margin: 0; font-size: 12px; color: var(--text-primary, #444); }
-.coding-changed-files li { display: flex; align-items: baseline; gap: 5px; padding: 2px 0; }
+.coding-changed-files { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; padding: 4px 12px 8px 36px; margin: 0; font-size: 12px; color: var(--text-primary, #444); }
+.coding-changed-files li { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.coding-file-chip { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-height: 28px; padding: 3px 10px; border: 1px solid #e7e5ee; border-radius: 8px; background: #f7f6fb; color: #3f3a4d; font: inherit; cursor: pointer; transition: background-color .15s, border-color .15s; }
+.coding-file-chip:hover:not(:disabled) { background: #efedf7; border-color: #d3cfe3; }
+.coding-file-chip:focus-visible { outline: 2px solid var(--npati-red); outline-offset: 1px; }
+.coding-file-chip:disabled { cursor: default; opacity: .75; }
+.coding-file-added { color: #15803d; font-weight: 600; }
+.coding-file-removed { color: #b91c1c; font-weight: 600; }
+.chat-file-editor { flex: 1; display: flex; min-height: 0; background: #fbfbfd; font: 13px/20px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.chat-file-gutter { flex: 0 0 auto; margin: 0; padding: 14px 12px; overflow: hidden; color: #a3a3b2; text-align: right; user-select: none; border-right: 1px solid #ececf2; font: inherit; }
+.chat-file-text { flex: 1; min-width: 0; padding: 14px 16px; border: 0; outline: 0; resize: none; overflow: auto; background: transparent; color: #27272f; white-space: pre; tab-size: 2; font: inherit; }
+.chat-file-note, .chat-file-error { margin: 0; padding: 8px 20px; font-size: 13px; background: #f7f6fb; color: #52525b; }
+.chat-file-error { background: #fef2f2; color: #b91c1c; }
 .coding-changed-files code { overflow-wrap: anywhere; min-width: 0; }
 .message-stream article.coding-operation-history { padding: 0; margin: 0; border: 0; min-height: 0; }
 .coding-operation-history .codex-trace-row { margin: 0; padding: 0; }

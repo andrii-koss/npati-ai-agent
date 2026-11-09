@@ -30,6 +30,7 @@ import { detectChatMutationOperation, mutationProgressTargets } from "./chat-mut
 import { Business, Goal, MemoryItem, Company, api, blankBusiness, Notice, useWorkspace, Skill, getCachedSkills, updateCachedSkills, PageIntro, EmptyBusiness } from "./business-workspace-shared";
 import { BusinessForm, ProjectChatCard, ChatProjectPreviewCard, AssistantMessageToolbar, FloatingNotice, Message } from "./business-workspace-cards";
 import { ChatPreviewOpenContext } from "./ChatProjectPreviewCard";
+import { ChatFileViewerProvider } from "./ChatFileViewer";
 export * from "./business-workspace-page-views";
 export * from "./business-workspace-cards";
 export * from "./business-workspace-shared";
@@ -720,6 +721,11 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       event.currentTarget.form?.requestSubmit();
     }
   }
+  // A chat opened from history waits for its steps, so text and steps appear together. Work started here is never held.
+  const startedHereRef = useRef(false);
+  if (sending || activeTurn || development.isActive) startedHereRef.current = true;
+  const holdHistory = Boolean(selected) && !development.processesReady && !startedHereRef.current;
+  useEffect(() => { if (!holdHistory && selected && !startedHereRef.current) window.requestAnimationFrame(() => scrollToLatestMessageStart("auto")); }, [holdHistory]);
   const displayMessages = mergeConversationMessages(messages,development.project?.conversationMessages);
   rowStateRef.current = { displayMessages, activeTurn };
   const timeline = chatTimeline(displayMessages, development.project?.progress, selected, development.project);
@@ -742,9 +748,10 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     previewUrl: development.project.previewUrl,
     kind: "code_project" as const
   } : null);
-  const showFallbackCard = !hasTimelineCard && Boolean(fallbackCard);
+  const showFallbackCard = !holdHistory && !hasTimelineCard && Boolean(fallbackCard);
   return (
     <ChatPreviewOpenContext.Provider value={openPreviews}>
+    <ChatFileViewerProvider busy={agentWorking}>
       {notice && (
         <FloatingNotice
           message={notice}
@@ -762,7 +769,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
               <p>{business ? t("chat.businessEmptySubtitle", { name: business.name }) : t("chat.emptySubtitle")}</p>
             </div>
           )}
-          {timeline.map(entry => {
+          {(holdHistory ? [] : timeline).map(entry => {
             if (entry.kind === "activity") return <ChatDevelopmentProgress key={"activity:" + entry.item.id} process={development.project} items={entry.run?.items ?? [entry.item]} run={entry.run} animatePending={!thinking.visible} />;
             const { message, index } = entry;
             if (development.hideMessage(displayMessages, index)) return null;
@@ -838,6 +845,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           projectSelected={Boolean(development.project?.projectId ?? codeInbox.session?.projectId ?? (selectedProject?.conversationId === selected ? selectedProject?.projectId : undefined))}
         />
       </div>
+    </ChatFileViewerProvider>
     </ChatPreviewOpenContext.Provider>
   );
 }

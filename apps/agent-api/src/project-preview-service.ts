@@ -181,6 +181,21 @@ export class ProjectPreviewService {
     }
     return payload;
   }
+  /**
+   * Shows a file saved outside a run in the running Preview, which serves the sandbox's copy of the project. A static
+   * site or a dev server only needs the copy refreshed; a production server shows what was built, so it is rebuilt.
+   */
+  async applyFileChanges(ctx: AuthContext, companyId: string, projectId: string): Promise<{ status: string; rebuilt: boolean }> {
+    const project = await this.projects.get(ctx, companyId, projectId);
+    if (project.status !== "previewing") return { status: "not_running", rebuilt: false };
+    const files = await this.workspace.listFiles(ctx, companyId, projectId);
+    const detected = await detectProjectStack(files, async (p) => (await this.workspace.readFile(ctx, companyId, projectId, p)).content);
+    if (detected.framework === "static") return { status: (await this.startPreview(ctx, companyId, projectId)).status, rebuilt: false };
+    if (project.lastBuildStatus !== "ready") return { status: (await this.startPreview(ctx, companyId, projectId, { verifiedBuild: false })).status, rebuilt: false };
+    await this.buildProject(ctx, companyId, projectId);
+    return { status: (await this.startPreview(ctx, companyId, projectId, { verifiedBuild: true })).status, rebuilt: true };
+  }
+
   async startPreview(
     ctx: AuthContext, companyId: string, projectId: string,
     options: { command?: string; port?: number; agentId?: string; signal?: AbortSignal; callerOrigin?: string; verifiedBuild?: boolean; forceRestart?: boolean } = {},

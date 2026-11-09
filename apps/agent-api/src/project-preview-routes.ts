@@ -51,6 +51,22 @@ export function registerProjectPreviewRoutes(
     },
   );
 
+  // Show files saved by hand in the running preview
+  app.post<{ Params: ProjectParams }>(
+    "/companies/:companyId/projects/:projectId/preview/apply-file-changes",
+    async (request, reply) => {
+      const ctx = await authenticate(request, reply);
+      if (!ctx) return;
+      const { companyId, projectId } = request.params;
+      try {
+        return reply.code(200).send(await previewService.applyFileChanges(ctx, companyId, projectId));
+      } catch (error) {
+        const known = error instanceof PreviewError ? error : new PreviewError("preview_update_failed", error instanceof Error ? error.message : "Failed to update preview", 500);
+        return reply.code(known.status).send({ error: { code: known.code, message: known.message } });
+      }
+    },
+  );
+
   // Stop preview server
   app.post<{ Params: ProjectParams }>(
     "/companies/:companyId/projects/:projectId/preview/stop",

@@ -47,6 +47,14 @@ export function useChatDevelopment(options: {
   const firstRead = useRef(true);
   useEffect(() => { if (!firstRead.current) publishChatProcesses(processes); }, [processes]);
   const readFor = useRef<string | null | undefined>(undefined);
+  // An opened chat shows its text and steps together. A slow read must not leave the chat blank, so the wait is bounded.
+  const [loadedFor, setLoadedFor] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!options.conversationId) return;
+    const conversationId = options.conversationId;
+    const timer = window.setTimeout(() => setLoadedFor(conversationId), 3000);
+    return () => window.clearTimeout(timer);
+  }, [options.conversationId]);
   async function refresh(): Promise<void> {
     // A read already running for the same chat is shared; a read for another chat waits for it and then runs.
     if (refreshing.current) {
@@ -55,18 +63,18 @@ export function useChatDevelopment(options: {
       return refresh();
     }
     const generation = snapshotGeneration.current;
-    const task = async () => {
+    const task = async () => { let readConversation: string | null = null; try {
     // The chat page's single open request already carries this chat's processes; later reads ask only for this
     // chat's and running processes. A project link still needs the full list to find that project's chat.
     const conversationId = callbacks.current.conversationId ?? currentChatConversationId();
-    readFor.current = conversationId;
+    readFor.current = conversationId; readConversation = conversationId;
     const shared = firstRead.current && conversationId && isChatPage() && !queryProjectId ? chatOpenData(conversationId) : null;
     const opened = shared ? await shared.catch(() => null) : null;
     firstRead.current = false;
     const data = opened ? { processes: opened.processes }
       : await api<{ processes: DevelopmentProcess[] }>(queryProjectId && !conversationId ? `/chat/development/processes?projectId=${encodeURIComponent(queryProjectId)}` : `/chat/development/processes?conversationId=${encodeURIComponent(conversationId ?? "")}`);
     if (alive.current && generation === snapshotGeneration.current) setProcesses(data.processes);
-    };
+    } finally { if (alive.current) setLoadedFor(readConversation); } };
     refreshing.current = task();
     try { await refreshing.current; } finally { refreshing.current = undefined; }
   }
@@ -194,6 +202,7 @@ export function useChatDevelopment(options: {
       await refresh();
     },
     isActive,
+    processesReady: !options.conversationId || loadedFor === options.conversationId,
     /** The project this chat is building right now: a follow-up belongs to it, not to whatever was open before. */
     activeProject: activeProcess,
     openingProjectChat,

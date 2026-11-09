@@ -685,6 +685,13 @@ export function ChatProjectPreviewCard({
               isFullscreen={isFullscreen}
               setIsFullscreen={setIsFullscreen}
               onRefresh={() => {
+                // A plain site is served from the sandbox's copy of its files: bring that copy up to date, then reload.
+                if (!isStatic && previewUrl && !previewError && /^(?:HTML\/CSS|static)$/.test(card.framework ?? "")) {
+                  const token = getStoredAuthToken();
+                  void fetch(`/api/companies/${encodeURIComponent(card.companyId)}/projects/${encodeURIComponent(card.projectId ?? card.id)}/preview/apply-file-changes`, { method: "POST", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: "{}" })
+                    .catch(() => undefined).finally(() => setIframeKey((k) => k + 1));
+                  return;
+                }
                 setIframeKey((k) => k + 1);
                 if (isStatic) {
                   void loadStaticPreviewPage("index.html");
