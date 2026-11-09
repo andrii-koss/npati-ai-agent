@@ -149,6 +149,7 @@ export async function registerCodeAskUserRoutes(instance: FastifyInstance, deps:
             // outage refuses the answer rather than resuming an agent unrecorded.
             record: async (entry) => {
               await deps.audit!.record({
+                ...(entry.workspaceId ? { workspaceId: entry.workspaceId } : {}),
                 action: entry.action,
                 actor: entry.actor,
                 companyId: entry.companyId,

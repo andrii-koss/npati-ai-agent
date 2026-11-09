@@ -69,6 +69,7 @@ export interface CodeAskUserAudit {
     projectId: string;
     action: string;
     actor: string;
+    workspaceId?: string;
     questionId: string;
     runId: string;
     snapshotId?: string;
@@ -161,6 +162,7 @@ export function createCodeAskUserService(deps: CodeAskUserServiceDeps) {
     projectId: string;
     action: string;
     actor: string;
+    workspaceId?: string;
     questionId: string;
     runId: string;
   }): Promise<void> {
@@ -229,6 +231,7 @@ export function createCodeAskUserService(deps: CodeAskUserServiceDeps) {
           projectId: before.projectId,
           action: "code.question.answer",
           actor: userId,
+          workspaceId: (input.ctx as { workspaceId?: string }).workspaceId,
           questionId: before.id,
           runId: before.runId,
         });

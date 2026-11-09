@@ -442,7 +442,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   }
   /** While a run waits for an answer, the next message is that answer; queued behind the waiting run it would never be read. */
   async function answerWaitingQuestion(): Promise<boolean> {
-    const session = codeInbox.session, runId = codeInbox.snapshot?.runId, text = input.trim(), company = companyId ?? readActiveCompanyId();
+    const session = codeInbox.session, runId = codeInbox.snapshot?.runId ?? development.project?.runId, text = input.trim(), company = session?.companyId;
     if (!session || !runId || !text || !company) return false;
     const path = `/companies/${encodeURIComponent(company)}/code`;
     const pending = await api<{ waiting: boolean; question: { id: string; revision: number } | null }>(`${path}/runs/${encodeURIComponent(runId)}/question`).catch(() => null);
