@@ -93,6 +93,7 @@ export function validateOperation(operation: SchemaOperation): void {
       break;
     case "add_field":
     case "alter_field":
+      if (!operation.field || typeof operation.field !== "object") throw new DataStudioError(400, "operation", "This operation takes one field object in \"field\", not a list", false, "INVALID_OPERATION");
       validateIdentifier(operation.field.name);
       if (!VALID_FIELD_TYPES.has(operation.field.type)) throw new DataStudioError(400, "operation", `Invalid field type: ${operation.field.type}. Use one of: ${[...VALID_FIELD_TYPES].join(", ")}`, false, "INVALID_FIELD_TYPE");
       break;

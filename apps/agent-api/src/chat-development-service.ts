@@ -199,7 +199,8 @@ export class ChatDevelopmentService {
         // The coding lease finishes before afterRun starts Preview. Recover this bounded finalization gap. A project
         // without a framework gets Preview only after a change a browser can show, so after a text file or a package
         // install no Preview comes: waiting the full two minutes kept the chat busy and then showed the run as failed.
-        const previewExpected = !!project && (isCodeChatWebsite(project) || !isPlainProjectFramework(project.framework));
+        // A mobile or desktop project has no Live Preview to wait for, so its finished run is not a failed one.
+        const previewExpected = !!project && !isDesktopProjectFramework(project.framework ?? "") && project.kind !== "mobile_app" && (isCodeChatWebsite(project) || !isPlainProjectFramework(project.framework));
         const awaitingPreview = !previewEvent && !previewReady && latest.status === "completed"
           && Date.now() - (executionTimestamp(latest.finishedAt) ?? 0) < (previewExpected ? 120_000 : 15_000);
         const publishingPreview = awaitingPreview || (previewEvent?.status === "running" || previewEvent?.status === "active")
