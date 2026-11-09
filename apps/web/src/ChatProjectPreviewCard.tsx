@@ -9,6 +9,7 @@ import { I18nContextRef } from "./i18n";
 import { persistedModeLabel } from "./code-workspace/actions";
 import { LivePreviewHeader, type DeviceMode } from "./LivePreviewHeader";
 import { LivePreviewSplitResizer } from "./LivePreviewSplitResizer";
+import { ChatPreviewPanelContext, wasPreviewPanelOpen } from "./ChatPreviewPanel";
 
 export type ProjectVariantType = "website" | "mobile_app" | "game" | "other";
 export type PreviewRuntimeStatus = "running" | "starting" | "stopped" | "failed" | "unavailable";
@@ -275,6 +276,9 @@ export function ChatProjectPreviewCard({
   };
 
   const isStatic = card.framework === "HTML/CSS" && !isCodeProject;
+  const panel = useContext(ChatPreviewPanelContext);
+  const usesPanel = Boolean(panel && card.companyId && !isStatic);
+  const panelCard = { id: card.id, projectId: card.projectId, companyId: card.companyId, name: card.name, framework: card.framework, sessionId: card.sessionId };
 
   // Check Sandbox Runtime status
   useEffect(() => {
@@ -449,10 +453,11 @@ export function ChatProjectPreviewCard({
     });
   }
 
-  useEffect(() => { if (openPreviews?.has(previewKey) || wasPreviewOpen(previewKey)) void openPreview(); }, []);
+  useEffect(() => { if (openPreviews?.has(previewKey) || wasPreviewOpen(previewKey) || (usesPanel && wasPreviewPanelOpen(previewKey))) void openPreview(); }, []);
 
   /** Readies the running site in the hidden frame. It never starts a stopped Preview. */
   async function warmPreview() {
+    if (usesPanel) { if (runtimeStatus === "running") panel!.warm(panelCard, thumbnailUrl); return; }
     setHovering(true);
     if (warm || previewOpen || runtimeStatus !== "running" || !card.companyId) return;
     setWarm(true);
@@ -467,6 +472,7 @@ export function ChatProjectPreviewCard({
   }
 
   async function openPreview() {
+    if (usesPanel) { panel!.open(panelCard, thumbnailUrl); return; }
     setPreviewOpen(true);
     setWarm(true);
     setPreviewError("");
@@ -557,7 +563,7 @@ export function ChatProjectPreviewCard({
   return (
     <>
       {showPreviewTrigger && (
-        <div className={`chat-project-preview-card ${className}`.trim()} data-testid="chat-project-preview-card" onPointerEnter={() => void warmPreview()} onPointerLeave={() => setHovering(false)} onFocus={() => void warmPreview()}>
+        <div className={`chat-project-preview-card ${className}`.trim()} data-testid="chat-project-preview-card" onPointerEnter={() => void warmPreview()} onPointerLeave={() => { setHovering(false); panel?.leave(); }} onFocus={() => void warmPreview()}>
           <div className="chat-preview-card-left">
             {/* Project Thumbnail / SVG Mockup */}
             <div className="chat-preview-card-thumbnail" data-type={projectType}>

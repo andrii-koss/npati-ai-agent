@@ -32,6 +32,7 @@ import { Business, Goal, MemoryItem, Company, api, blankBusiness, Notice, useWor
 import { BusinessForm, ProjectChatCard, ChatProjectPreviewCard, AssistantMessageToolbar, FloatingNotice, Message } from "./business-workspace-cards";
 import { ChatPreviewOpenContext } from "./ChatProjectPreviewCard";
 import { ChatFileViewerProvider } from "./ChatFileViewer";
+import { ChatPreviewPanelProvider } from "./ChatPreviewPanel";
 export * from "./business-workspace-page-views";
 export * from "./business-workspace-cards";
 export * from "./business-workspace-shared";
@@ -758,6 +759,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const showFallbackCard = !holdHistory && !hasTimelineCard && Boolean(fallbackCard);
   return (
     <ChatPreviewOpenContext.Provider value={openPreviews}>
+    <ChatPreviewPanelProvider busy={agentWorking} conversationId={selected}>
     <ChatFileViewerProvider busy={agentWorking}>
       {notice && (
         <FloatingNotice
@@ -853,6 +855,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         />
       </div>
     </ChatFileViewerProvider>
+    </ChatPreviewPanelProvider>
     </ChatPreviewOpenContext.Provider>
   );
 }

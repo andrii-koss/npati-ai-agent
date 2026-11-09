@@ -1285,6 +1285,10 @@ body:has(.project-chat-preview-layer) .message-stream {
   :root[data-preview-side="left"] body:has(.project-chat-preview-layer) .chat-workspace-content .onboarding-live-chat { margin-left: auto !important; }
 }
 
+/* Two pages can share the viewport while one replaces the other, which fades in over it. */
+.chat-preview-panel-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #fff; transition: opacity .2s ease; }
+.chat-preview-panel-frame.is-entering { opacity: 0; pointer-events: none; }
+
 /* The Chat/Code switch is hidden: every message goes through the normal chat route. */
 .chat-work-mode-switch { display: none !important; }
 

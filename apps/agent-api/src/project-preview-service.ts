@@ -771,6 +771,9 @@ export class ProjectPreviewService {
           reply.header(name, name.toLowerCase() === "location" && value.startsWith("/") && !value.startsWith("//") ? routed(value) : value);
         }
       }
+      // A file server that states no caching rule lets the browser reuse a stylesheet it just saw, so a fresh edit looked
+      // unchanged. The browser now asks every time and gets a cheap 304 when nothing changed; a framework's own rule stays.
+      if (!Object.keys(result.headers).some((name) => name.toLowerCase() === "cache-control")) reply.header("cache-control", "no-cache");
       const setCookieRaw = result.headers["set-cookie"] || result.headers["Set-Cookie"];
       let rewritten: string[] = [];
       if (setCookieRaw) {
