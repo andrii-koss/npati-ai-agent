@@ -440,6 +440,18 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       inboxMutationBusy.current = false; setInboxSubmitting(false);
     }
   }
+  /** While a run waits for an answer, the next message is that answer; queued behind the waiting run it would never be read. */
+  async function answerWaitingQuestion(): Promise<boolean> {
+    const session = codeInbox.session, runId = codeInbox.snapshot?.runId, text = input.trim(), company = companyId ?? readActiveCompanyId();
+    if (!session || !runId || !text || !company) return false;
+    const path = `/companies/${encodeURIComponent(company)}/code`;
+    const pending = await api<{ waiting: boolean; question: { id: string; revision: number } | null }>(`${path}/runs/${encodeURIComponent(runId)}/question`).catch(() => null);
+    if (!pending?.waiting || !pending.question) return false;
+    await api(`${path}/sessions/${encodeURIComponent(session.sessionId)}/questions/${encodeURIComponent(pending.question.id)}/answer`, { method: "POST", body: JSON.stringify({ revision: pending.question.revision, freeAnswer: text }) });
+    draftVersion.current++; setInput("");
+    setMessages(current => mergeConversationMessages(current, [{ id: "answer:" + pending.question!.id, role: "user", content: text, createdAt: new Date().toISOString() }]));
+    return true;
+  }
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (development.openingProjectChat) return; // the draft stays; the chat it belongs to is still opening
@@ -448,6 +460,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     const nextIntent = defaultHybridRouter.classifyProject({ message: input.trim(), activeProjectId: boundProjectId, activeCompanyId: companyId ?? readActiveCompanyId() });
     const createsProject = nextIntent.intent === "CREATE_WEBSITE" || nextIntent.intent === "CREATE_PROJECT";
     // The inbox queues work for its own session; a request for another project of this chat goes through routing.
+    if (codeInbox.active && await answerWaitingQuestion()) return;
     if (codeInbox.active && !createsProject && (!boundProjectId || codeInbox.session?.projectId === boundProjectId) && (codeInbox.snapshot ? true : await codeInbox.confirmActive())) { await submitInbox("queue"); return; }
     const message = input.trim(); if ((!message && attachments.length === 0) || sending || chatSubmissionBusy.current) return;
     chatSubmissionBusy.current = true;

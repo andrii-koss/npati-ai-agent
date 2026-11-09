@@ -18,6 +18,12 @@ export interface ConversationProject {
 
 /** Every inflection of "game" a request uses to name the game project ("у грі", "гру", "in the game"). */
 const GAME_WORD = /(?<![\p{L}])(?:гр(?:а|и|і|у|ою)|ігр(?:и|а|ах|ам|ами|у|ою)?|ігор|игр(?:а|ы|е|у|ой|ах)|games?|jeux?|juegos?|jogos?|spiele?)(?![\p{L}])/iu;
+/** A kind of project named in any supported language. Non-Latin scripts write words without spaces, so those have no word boundary. */
+const PROJECT_KINDS: Array<{ kind?: string; word: RegExp }> = [
+  { word: /(?<![\p{L}])(?:блог\p{L}*|блоз\p{L}*|blog\p{L}*)|ブログ|博客|블로그|مدونة|ब्लॉग/iu },
+  { word: /(?<![\p{L}])(?:магазин\p{L}*|shop|store|sklep\p{L}*|tienda|loja|negozio|boutique|mağaza\p{L}*|winkel)(?![\p{L}])|ショップ|商店|쇼핑몰|متجر|दुकान/iu },
+  { kind: "mobile_app", word: /(?<![\p{L}])(?:мобільн\p{L}*|мобильн\p{L}*|mobile|móvil|mobilne\p{L}*|mobil)(?![\p{L}])|モバイル|手机|모바일|جوال|मोबाइल/iu },
+];
 /** A clause that keeps a project unchanged names it as context, not as the target ("не змінюючи TODO"). */
 const PRESERVING = /(?:не\s+(?:змінюй|змінюючи|чіпай|чіпаючи|редагуй|меняй|меняя|трогай)|без\s+змін|збережи|залиш|сохрани|оставь|don'?t\s+(?:change|touch|edit|modify)|do\s+not\s+(?:change|touch|edit|modify)|without\s+(?:changing|touching)|\bkeep\b|\bpreserve\b|\bleave\b)/iu;
 /** The word after a location preposition is the place the request works in: "у TODO", "повернись до TODO", "in the game". */
@@ -42,6 +48,11 @@ export function conversationProjectTarget(message: string, currentProjectId: str
   if (GAME_WORD.test(current)) {
     const games = projects.filter((project) => project.kind === "game");
     if (games.length === 1) targets.add(games[0]!);
+  }
+  for (const { kind, word } of PROJECT_KINDS) {
+    if (!word.test(current)) continue;
+    const matching = projects.filter((project) => (kind && project.kind === kind) || word.test(project.name) || word.test(project.requests[0] ?? ""));
+    if (matching.length === 1) targets.add(matching[0]!);
   }
   // A project is described by its name and the request that created it, not by every later edit ("make it green").
   const profiles = new Map(projects.map((project) => [project, [project.name, ...clauses(project.requests[0] ?? "")].flatMap(words)]));
