@@ -54,7 +54,16 @@ export function requestsDevelopmentRestore(message: string): boolean {
 // "в застосунку", "in the app": a place the request is about, not a thing to build.
 const WEB_APP = /(?<!(?:^|[\s(])(?:в|у|до|із|з|in|on|to|into|from|the|my|this|your)\s)(?:\bweb\s*app\b|\bapp\b|\bapplication\b|застосун\p{L}*|додат(?:ок|ку|ком)|приложени\p{L}*|\bscene\b|сцен\p{L}*|(?<![\p{L}\d])3d(?![\p{L}])|three\.?js|webgl|\bcanvas\b|\btodo\b|to-?do|дашборд|dashboard|калькулятор|calculator|портфоліо|портфолио|portfolio)/iu;
 
+/** "Створи базу даних для сайту": the thing to create is the database, so the site it names already exists. */
+function createsDatabaseFirst(message: string): boolean {
+  const found = /(?:database|\bdb\b|баз[уаи]\s+дан|datenbank|base\s+de\s+(?:données|donnees|datos|dados)|banco\s+de\s+dados|baz[ęa]\s+danych|veritaban|데이터베이스|データベース|数据库|डेटाबेस|قاعدة\s*بيانات)/iu.exec(message);
+  if (!found) return false;
+  const before = message.slice(0, found.index);
+  return before.trim().split(/\s+/u).length <= 4 && !/(?:website|\bsite\b|сайт|app\b|додат|застосун|приложен|магазин|\bshop\b|\bstore\b|блог|\bblog\b)/iu.test(before);
+}
+
 export function planChatDevelopment(message: string, activeProjectId?: string): DevelopmentTarget[] {
+  if (createsDatabaseFirst(message)) return [];
   // A follow-up that explicitly says "do not create a new project, edit this one" must never
   // be re-planned as a creation just because the requested replacement text names a framework.
   if (/(?:не\s+створюй|не\s+создавай|do\s+not\s+create|don't\s+create)\s+(?:новий\s+|новый\s+|a\s+new\s+|new\s+)?(?:про[єе]кт|project)/iu.test(message)) return [];
