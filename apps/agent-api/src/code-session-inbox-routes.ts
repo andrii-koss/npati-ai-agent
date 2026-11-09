@@ -9,6 +9,7 @@ import type { CodeSessionInboxService } from "./code-session-inbox";
 export function registerCodeSessionInboxRoutes(app: FastifyInstance, deps: {
   service: CodeSessionInboxService; auth: AuthProvider;
   authorize(ctx: Awaited<ReturnType<AuthProvider["authenticate"]>>, companyId: string, input: AuthorizeCodeActionInput): Promise<unknown>;
+  runFinished?(companyId: string, runId: string): Promise<boolean>;
 }) {
   type Params = { companyId: string; sessionId: string; messageId?: string };
   const path = "/companies/:companyId/code/sessions/:sessionId/messages";
@@ -26,6 +27,11 @@ export function registerCodeSessionInboxRoutes(app: FastifyInstance, deps: {
           let result;
           if (method === "GET") {
             result = await deps.service.execute(ctx, companyId, sessionId, { kind: "read" });
+            const heldBy = ["reserved", "running", "sealed"].includes(result.state.phase) ? result.state.runId : null;
+            if (heldBy && await deps.runFinished?.(companyId, heldBy)) {
+              await deps.service.releaseFinishedRun(ctx, companyId, sessionId, heldBy);
+              result = await deps.service.execute(ctx, companyId, sessionId, { kind: "read" });
+            }
             if (result.state.messages.some((m) => m.completion && m.status === "pending" && m.target === "next-turn")) void deps.service.wake(ctx, companyId, sessionId).catch(() => undefined);
           }
           else if (method === "POST") {
