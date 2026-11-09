@@ -4,6 +4,7 @@ import { Check, Copy, Maximize2, Minimize2, RefreshCw, Save, X } from "lucide-re
 import { api } from "./business-workspace-shared";
 import { I18nContextRef } from "./i18n";
 import { LivePreviewSplitResizer } from "./LivePreviewSplitResizer";
+import { PreviewSideButton } from "./PreviewSideButton";
 import { HighlightedCode, codeLanguage, codeWindow } from "./code-highlight";
 
 export type ChatFileTarget = { companyId: string; projectId: string; path: string };
@@ -126,6 +127,7 @@ function ChatFileDrawer({ target, busy, dirtyRef, onClose }: { target: ChatFileT
             <h3 className="preview-header-project-name" title={target.path}>{target.path}{dirty ? " *" : ""}</h3>
           </div>
           <div className="preview-header-right">
+            <PreviewSideButton isUk={isUk} />
             <button type="button" className="preview-header-icon-btn" onClick={reload} aria-label={isUk ? "Оновити файл" : "Reload file"} title={isUk ? "Оновити файл" : "Reload file"}><RefreshCw size={19} strokeWidth={1.9} aria-hidden="true" /></button>
             <button type="button" className="preview-header-icon-btn" onClick={() => void save()} disabled={!canSave} aria-label={isUk ? "Зберегти" : "Save"} title={busy ? (isUk ? "Агент зараз змінює проєкт" : "The agent is changing this project") : `${isUk ? "Зберегти" : "Save"} (Ctrl+S)`}>{justSaved ? <Check size={19} strokeWidth={2.2} className="preview-icon-success" aria-hidden="true" /> : <Save size={19} strokeWidth={1.9} aria-hidden="true" />}</button>
             <div className="preview-header-divider" aria-hidden="true" />

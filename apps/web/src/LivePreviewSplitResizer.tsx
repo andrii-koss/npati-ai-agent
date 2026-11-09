@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from "react";
+import { readPreviewSide } from "./PreviewSideButton";
 
 export const SPLIT_STORAGE_KEY = "npati_live_preview_split_ratio";
 export const DEFAULT_CHAT_RATIO = 40;
@@ -56,7 +57,7 @@ export function LivePreviewSplitResizer({
       const currentX = "touches" in e ? e.touches[0]?.clientX ?? startX : e.clientX;
       const totalWidth = window.innerWidth;
       if (totalWidth <= 0) return;
-      let newRatio = (currentX / totalWidth) * 100;
+      let newRatio = ((readPreviewSide() === "left" ? totalWidth - currentX : currentX) / totalWidth) * 100;
       if (newRatio < MIN_CHAT_RATIO) newRatio = MIN_CHAT_RATIO;
       if (newRatio > MAX_CHAT_RATIO) newRatio = MAX_CHAT_RATIO;
       setRatio(newRatio);
@@ -111,10 +112,12 @@ export function LivePreviewSplitResizer({
         }}
         onKeyDown={(e) => {
           const step = e.shiftKey ? 5 : 1;
-          if (e.key === "ArrowLeft") {
+          const towardsChatEnd = readPreviewSide() === "left" ? "ArrowRight" : "ArrowLeft";
+          const towardsPanelEnd = towardsChatEnd === "ArrowLeft" ? "ArrowRight" : "ArrowLeft";
+          if (e.key === towardsChatEnd) {
             e.preventDefault();
             setRatio((prev) => Math.max(MIN_CHAT_RATIO, prev - step));
-          } else if (e.key === "ArrowRight") {
+          } else if (e.key === towardsPanelEnd) {
             e.preventDefault();
             setRatio((prev) => Math.min(MAX_CHAT_RATIO, prev + step));
           } else if (e.key === "Home" || e.key === "Enter") {

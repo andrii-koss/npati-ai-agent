@@ -17,6 +17,7 @@ import {
   MoreHorizontal,
 } from "lucide-react";
 import type { PreviewRuntimeStatus } from "./ChatProjectPreviewCard";
+import { PreviewSideButton } from "./PreviewSideButton";
 
 export type DeviceMode = "desktop" | "tablet" | "mobile";
 
@@ -154,6 +155,8 @@ export function LivePreviewHeader({
 
       {/* Right: Actions */}
       <div className="preview-header-right">
+        <PreviewSideButton isUk={isUk} />
+
         {/* Full Desktop Actions */}
         <div className="preview-header-actions-desktop">
           {/* 1. RefreshCw */}

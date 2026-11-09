@@ -18,6 +18,18 @@ export type PreviewRuntimeStatus = "running" | "starting" | "stopped" | "failed"
  * mounts a new card; it reopens the Preview instead of closing it while the agent edits the project.
  */
 export const ChatPreviewOpenContext = React.createContext<Set<string> | null>(null);
+const OPEN_PREVIEW_KEY = "npati_open_preview";
+const openPreviewValue = (projectId: string) => window.location.pathname + "|" + projectId;
+/** An open panel survives a page reload in this tab, and only in the chat it was opened from. */
+function rememberOpenPreview(projectId: string, open: boolean) {
+  try {
+    if (open) sessionStorage.setItem(OPEN_PREVIEW_KEY, openPreviewValue(projectId));
+    else if (sessionStorage.getItem(OPEN_PREVIEW_KEY) === openPreviewValue(projectId)) sessionStorage.removeItem(OPEN_PREVIEW_KEY);
+  } catch { /* The panel simply stays closed after a reload. */ }
+}
+function wasPreviewOpen(projectId: string) {
+  try { return sessionStorage.getItem(OPEN_PREVIEW_KEY) === openPreviewValue(projectId); } catch { return false; }
+}
 /** Screenshots already fetched on this page, so a card that remounts shows its picture at once. */
 const knownThumbnails = new Map<string, string | null>();
 
@@ -193,7 +205,7 @@ export function ChatProjectPreviewCard({
   const openPreviews = useContext(ChatPreviewOpenContext);
   const previewKey = card.projectId ?? card.id;
   const [previewOpen, setPreviewOpenState] = useState(false);
-  const setPreviewOpen = (open: boolean) => { if (open) openPreviews?.add(previewKey); else openPreviews?.delete(previewKey); setPreviewOpenState(open); };
+  const setPreviewOpen = (open: boolean) => { if (open) openPreviews?.add(previewKey); else openPreviews?.delete(previewKey); rememberOpenPreview(previewKey, open); setPreviewOpenState(open); };
   const [previewUrl, setPreviewUrl] = useState("");
   const [previewHtml, setPreviewHtml] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -437,7 +449,7 @@ export function ChatProjectPreviewCard({
     });
   }
 
-  useEffect(() => { if (openPreviews?.has(previewKey)) void openPreview(); }, []);
+  useEffect(() => { if (openPreviews?.has(previewKey) || wasPreviewOpen(previewKey)) void openPreview(); }, []);
 
   /** Readies the running site in the hidden frame. It never starts a stopped Preview. */
   async function warmPreview() {

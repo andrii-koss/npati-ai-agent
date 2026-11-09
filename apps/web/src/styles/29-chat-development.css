@@ -1270,6 +1270,21 @@ body:has(.project-chat-preview-layer) .message-stream {
 .code-token-diff-meta { color: #94a3b8; }
 .codex-code-box code { color: #a6e37a; }
 
+/* The panel swap button copies the Settings back button; the panel and chat change sides from the root attribute. */
+.preview-side-control { display: inline-flex; align-items: center; gap: 8px; }
+.preview-side-button { padding: 0; cursor: pointer; transition: color .15s, border-color .15s, background-color .15s, transform .15s; }
+.preview-side-button.points-right:hover { transform: translateX(2px); }
+.preview-side-button.points-right:active { transform: translateX(3px) scale(0.96); }
+@media (max-width: 800px) { .preview-side-control { display: none; } }
+@media (min-width: 801px) {
+  :root[data-preview-side="left"] .project-chat-preview-drawer:not(.is-fullscreen) { right: auto; left: 12px; }
+  :root[data-preview-side="left"] .project-chat-preview-resizer { left: auto; right: -9px; }
+  /* With the panel on the right it covers the account menu; on the left the menu would sit on top of the chat text. */
+  :root[data-preview-side="left"] body:has(.project-chat-preview-layer) .chat-user-menu { display: none; }
+  :root[data-preview-side="left"] body:has(.project-chat-preview-layer) .chat-workspace-content .standard-live-chat,
+  :root[data-preview-side="left"] body:has(.project-chat-preview-layer) .chat-workspace-content .onboarding-live-chat { margin-left: auto !important; }
+}
+
 /* The Chat/Code switch is hidden: every message goes through the normal chat route. */
 .chat-work-mode-switch { display: none !important; }
 
