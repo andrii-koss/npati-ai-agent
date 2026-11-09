@@ -213,7 +213,7 @@ export const V12_TOOL_SCHEMAS = LEGACY_TOOL_SCHEMAS.filter(tool => !V15_ADDED_TO
 export const V13_TOOL_SCHEMAS = LEGACY_TOOL_SCHEMAS.filter(tool => !V15_ADDED_TOOL_NAMES.includes(tool.name) && tool.name !== "code.data.backend.create");
 export const V14_TOOL_SCHEMAS = LEGACY_TOOL_SCHEMAS.filter(tool => !V15_ADDED_TOOL_NAMES.includes(tool.name));
 export const V15_TOOL_SCHEMAS = LEGACY_TOOL_SCHEMAS;
-export const CODE_TOOL_MANIFEST_VERSION = 18;
+export const CODE_TOOL_MANIFEST_VERSION = 19;
 
 /* Step 6 publishes additive controls and spawn_async in v11; spawn@1 and manifests v1?v10 stay frozen. */
 
@@ -232,7 +232,7 @@ export const CODE_TOOL_MANIFEST_VERSION = 18;
  * places that report the artifact as stale, while `assertManifestConsistent()` — and therefore the manifest
  * the application publishes — is already satisfied.
  */
-export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "629199a9ce1c794a1c0f621687cd0563839621a0a065dd966a8d4088cb853492";
+export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "7b2902d12bbedfa158733e6c5e7d37dc5b4f7a1a2dd0b2d017da003af8363b11";
 
 /**
  * Checksum of the v8 published set (36 tools: everything through the eleven `code.git.*` tools). Frozen for

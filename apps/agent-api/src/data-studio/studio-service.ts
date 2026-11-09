@@ -96,6 +96,10 @@ export function validateOperation(operation: SchemaOperation): void {
       validateIdentifier(operation.field.name);
       if (!VALID_FIELD_TYPES.has(operation.field.type)) throw new DataStudioError(400, "operation", `Invalid field type: ${operation.field.type}. Use one of: ${[...VALID_FIELD_TYPES].join(", ")}`, false, "INVALID_FIELD_TYPE");
       break;
+    case "rename_field":
+      validateIdentifier(operation.field);
+      validateIdentifier(operation.next);
+      break;
     case "drop_field":
       validateIdentifier(operation.field);
       break;

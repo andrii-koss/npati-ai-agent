@@ -33,7 +33,7 @@ export function codeDataExecutors(options: CodeDataToolOptions) {
       switch (input.tool.name) {
         case "code.data.schema.modify": {
           const operation = args.operation as SchemaOperation;
-          if (!["rename_collection", "alter_field", "drop_field", "drop_collection"].includes(operation.kind)) throw new CodeToolError("invalid_arguments", "Unsupported schema modification", 400, "schema", false, input.tool.name);
+          if (!["rename_collection", "rename_field", "alter_field", "drop_field", "drop_collection"].includes(operation.kind)) throw new CodeToolError("invalid_arguments", "Unsupported schema modification", 400, "schema", false, input.tool.name);
           return await service.applySchema(input.ctx, input.companyId, input.projectId, operation, { expectedBackendId: args.expectedBackendId as string, expectedFingerprint: args.expectedFingerprint as string, dryRunOnly: args.dryRun === true, approved: input.approved === true, runId: input.runId, agentId: input.agentId });
         }
         case "code.data.rows.list":

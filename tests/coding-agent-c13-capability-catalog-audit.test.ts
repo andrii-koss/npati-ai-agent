@@ -312,10 +312,10 @@ describe("C13 combined Capability Inspector view", () => {
 });
 
 describe("C13 static manifest / schema parity", () => {
-  it("matches manifest v18 with 63 versioned schemas for 61 current code capabilities", () => {
+  it("matches manifest v19 with 63 versioned schemas for 61 current code capabilities", () => {
     const result = checkStaticManifestParity(readManifest());
     expect(result.ok).toBe(true);
-    expect(result.facts.manifestVersion).toBe(18);
+    expect(result.facts.manifestVersion).toBe(19);
     expect(result.facts.manifestTools).toBe(63);
     expect(result.facts.catalogCodeTools).toBe(61);
     expect(result.issues.length).toBe(0);

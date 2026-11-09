@@ -13,6 +13,7 @@ export type SchemaOperation =
   | { kind: "rename_collection"; collection: string; next: string }
   | { kind: "add_field"; collection: string; field: FieldDefinition }
   | { kind: "alter_field"; collection: string; field: FieldDefinition }
+  | { kind: "rename_field"; collection: string; field: string; next: string }
   | { kind: "drop_field"; collection: string; field: string }
   | { kind: "create_relation"; collection: string; target: string; name: string; field?: string; cardinality: "many-to-one" | "one-to-many" | "many-to-many" }
   | { kind: "drop_relation"; collection: string; name: string; cardinality: "many-to-one" | "one-to-many" | "many-to-many" }
@@ -119,6 +120,7 @@ export class PostgresDataProvider implements DataProvider {
       case "rename_collection": return this.renameCollection(operation.collection, operation.next);
       case "add_field": return this.addField(operation.collection, operation.field);
       case "alter_field": return this.alterField(operation.collection, operation.field);
+      case "rename_field": return this.renameField(operation.collection, operation.field, operation.next);
       case "drop_field": return this.dropField(operation.collection, operation.field);
       case "create_relation": {
         if (operation.field && operation.cardinality !== "many-to-many") {
@@ -166,6 +168,13 @@ export class PostgresDataProvider implements DataProvider {
     if (!type || field.name === "id") throw new DataStudioError(400, "alter_field", "Invalid field", false, "INVALID_FIELD");
     return { operation: "alter_field", upSql: "ALTER TABLE " + table + " ALTER COLUMN " + column + " TYPE " + type + " USING " + column + "::" + type + ";",
       destructive: true, requiresSnapshot: true, reversible: false };
+  }
+
+  renameField(collection: string, from: string, to: string): SchemaChange {
+    if (from === "id" || to === "id") throw new DataStudioError(400, "rename_field", "Primary key cannot be renamed", false, "INVALID_FIELD");
+    const table = quoteIdentifier(collection), oldName = quoteIdentifier(from), next = quoteIdentifier(to);
+    return { operation: "rename_field", upSql: "ALTER TABLE " + table + " RENAME COLUMN " + oldName + " TO " + next + ";",
+      downSql: "ALTER TABLE " + table + " RENAME COLUMN " + next + " TO " + oldName + ";", reversible: true, destructive: false, requiresSnapshot: false };
   }
 
   dropField(collection: string, field: string): SchemaChange {
