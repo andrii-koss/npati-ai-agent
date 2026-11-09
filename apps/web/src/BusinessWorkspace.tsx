@@ -33,6 +33,7 @@ import { BusinessForm, ProjectChatCard, ChatProjectPreviewCard, AssistantMessage
 import { ChatPreviewOpenContext } from "./ChatProjectPreviewCard";
 import { ChatFileViewerProvider } from "./ChatFileViewer";
 import { ChatPreviewPanelProvider } from "./ChatPreviewPanel";
+import { ChatRunApprovals } from "./ChatRunApprovals";
 export * from "./business-workspace-page-views";
 export * from "./business-workspace-cards";
 export * from "./business-workspace-shared";
@@ -810,6 +811,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
               failed={!sending && progressFailed}
             />
           )}
+          {development.project?.runId && developmentIsActive(development.project) && <ChatRunApprovals companyId={development.project.companyId} runId={development.project.runId} />}
           {thinking.visible && <ChatThinking key="turn-thinking" text={thinking.text} />}
           {/* After the messages: this card stands in briefly until the reply that carries the real one arrives. */}
           {showFallbackCard && fallbackCard && (

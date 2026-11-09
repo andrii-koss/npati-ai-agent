@@ -41,6 +41,11 @@ import {
   buildApiEndpoints,
 } from "./gateway-inspection";
 
+function sameOriginAsHost(origin: string, host: string | undefined): boolean {
+  if (!host) return false;
+  try { return new URL(origin).host === host; } catch { return false; }
+}
+
 export class ProjectApiGatewayService {
   private readonly rateLimiter = new ProjectApiRateLimiter();  private readonly recentLogs: ProjectApiRequestLog[] = [];
   private readonly requestCounts = new Map<string, number>();
@@ -217,7 +222,8 @@ export class ProjectApiGatewayService {
     const allowedOrigins = this.resolveAllowedOrigins(envRecord.providerConfig, projectId);
 
     if (origin) {
-      const isAllowed = this.isOriginAllowed(origin, allowedOrigins, projectId);
+      // A page served by this API's own host (a site in Preview) is not cross-origin. Browsers do not let a page set Host.
+      const isAllowed = sameOriginAsHost(origin, headers.host) || this.isOriginAllowed(origin, allowedOrigins, projectId);
       if (!isAllowed) {
         throw new DataStudioError(403, "cors", `Origin ${origin} is not allowed by Project CORS policy`, false, "CORS_ORIGIN_NOT_ALLOWED");
       }
@@ -399,19 +405,21 @@ export class ProjectApiGatewayService {
     }
   }
   private async authorizeCollection(auth: GatewayAuthResult, collection: string, action: "select" | "insert" | "update" | "delete"): Promise<void> {
+    if (!(await this.collectionAllows(auth, collection, action))) throw new DataStudioError(403, "gateway", "Collection action is not permitted", false, "POLICY_DENIED");
+  }
+  private async collectionAllows(auth: GatewayAuthResult, collection: string, action: "select" | "insert" | "update" | "delete"): Promise<boolean> {
     validateIdentifier(collection);
     const policies = await this.repository.getAccessPolicies(
       { workspaceId: auth.project.workspaceId, userId: auth.project.createdBy, permissions: ["*"] },
       auth.project.companyId, auth.backend.id, auth.environment,
     );
-    const allowed = policies.some((policy) => {
+    return policies.some((policy) => {
       if (policy.collection !== collection || !(policy.actions ?? ["all"]).some((item) => item === "all" || item === action)) return false;
       if (policy.rule === "public") return true;
       if (policy.rule === "authenticated") return Boolean(auth.userId);
       if (policy.rule === "owner") return Boolean(auth.userId);
       return policy.rule === "role" && policy.role === auth.userRole;
     });
-    if (!allowed) throw new DataStudioError(403, "gateway", "Collection action is not permitted", false, "POLICY_DENIED");
   }
   private assertQueryBounds(options: { filter?: unknown; sort?: unknown; fields?: string[]; include?: string[] }): void {
     assertQueryBounds(options);
@@ -571,22 +579,25 @@ export class ProjectApiGatewayService {
     }
 
     const keys = Object.keys(sanitized);
+    // RETURNING needs read access, so a visitor who may only add rows (a contact form) would be refused by the database.
+    const canRead = await this.collectionAllows(auth, collection, "select");
+    const returning = canRead ? " RETURNING *" : "";
     let sql: string;
     let queryParams: unknown[];
 
     if (!keys.length) {
-      sql = `INSERT INTO ${quoteIdentifier(collection)} DEFAULT VALUES RETURNING *`;
+      sql = `INSERT INTO ${quoteIdentifier(collection)} DEFAULT VALUES${returning}`;
       queryParams = [];
     } else {
       sql = `INSERT INTO ${quoteIdentifier(collection)} (${keys.map(quoteIdentifier).join(", ")}) ` +
-        `VALUES (${keys.map((_, i) => `$${i + 1}`).join(", ")}) RETURNING *`;
+        `VALUES (${keys.map((_, i) => `$${i + 1}`).join(", ")})${returning}`;
       queryParams = Object.values(sanitized);
     }
 
     return this.executeRuntime(auth, async (client) => {
       await this.validateColumns(client, collection, keys);
       const res = await client.query(sql, queryParams);
-      return { data: res.rows[0] };
+      return canRead ? { data: res.rows[0] } : { success: true };
     });
   }
 

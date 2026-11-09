@@ -490,6 +490,8 @@ export class CodingAgentToolWaves {
         tool: call.name,
         toolCallId: call.id,
         ok: result.ok,
+        // The chat row names the file while the run is live; replay steps carrying it are only written when the run ends.
+        ...(typeof call.arguments?.path === "string" ? { path: call.arguments.path } : {}),
         ...(result.ok ? {} : { errorCode: result.error.code }),
         durationMs: now() - startedCall,
       });

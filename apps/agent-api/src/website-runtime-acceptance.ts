@@ -8,7 +8,7 @@ function browserFailureMessage(prompt: string, diagnostics: unknown[], brokenLin
   const details = [...diagnostics.map((item) => {
     const entry = item as { message?: unknown; text?: unknown } | string;
     return typeof entry === "string" ? entry : String(entry?.message ?? entry?.text ?? JSON.stringify(entry));
-  }), ...brokenLinks.map((link) => String((link as { url?: unknown })?.url ?? link))].map((line) => "- " + line.split("\n")[0]!.slice(0, 200));
+  }), ...brokenLinks.map((link) => String((link as { url?: unknown; href?: unknown })?.url ?? (link as { href?: unknown })?.href ?? link))].map((line) => "- " + line.split("\n")[0]!.slice(0, 200));
   const uk = resolveCodingConversationLanguage(prompt) === "uk";
   const head = uk ? "Проєкт зібрався, але під час відкриття в браузері є помилки, які не вдалося виправити автоматично:" : "The project builds, but opening it in a browser shows errors that could not be fixed automatically:";
   return [head, ...details].join("\n");

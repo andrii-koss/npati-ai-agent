@@ -24,10 +24,17 @@ export function normalizeBrowserDiagnostic(value) {
     message: causes[cause], source, ...(errorName ? { errorName } : {}), ...(line !== undefined ? { line } : {}), ...(column !== undefined ? { column } : {}) };
 }
 
-/** The check itself blocks outside hosts, so a photo or stylesheet from another site failing here says nothing about the page. */
+/**
+ * The check opens the site's own server, which has no database API behind it, and blocks outside hosts. A failed photo,
+ * stylesheet or /v1/projects request therefore says nothing about the page. Blaming the site for one sent the repair
+ * agent to rewrite a correct database connection.
+ */
 export function isBlockedExternalResource(text, location, origin) {
   if (typeof text !== "string" || !/Failed to load resource/i.test(text)) return false;
-  try { return new URL(location?.url).origin !== origin; } catch { return false; }
+  try {
+    const url = new URL(location?.url);
+    return url.origin !== origin || url.pathname.startsWith("/v1/projects/");
+  } catch { return false; }
 }
 
 export function captureBrowserDiagnostic(type, rawMessage, location, stack, origin) {

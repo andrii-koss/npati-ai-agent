@@ -428,7 +428,8 @@ describe("Data Studio Agent Capabilities & Templates (D3)", () => {
     expect(projectMd).toContain("`orders`:");
     expect(projectMd).toContain("`carts`:");
     // Ensure no secrets or row data leaked into PROJECT.md
-    expect(projectMd).not.toContain("password");
+    // The site recipe names the {email, password} request field; a stored hash or a value would be a leak.
+    expect(projectMd).not.toMatch(/password_hash|password[:=]/i);
     expect(projectMd).not.toContain("postgres://");
     expect(projectMd).not.toContain("First post content");
   });

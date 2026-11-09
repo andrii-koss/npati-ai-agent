@@ -193,7 +193,9 @@ export class ChatDevelopmentService {
         const live = this.d.background.isLive(latest.runId);
         const expired = latest.status === "running" && (executionTimestamp(latest.leaseExpiresAt) ?? Infinity) < Date.now();
         const previewEvent = merged.filter(event => event.runId === latest.runId && event.stage === "preview").at(-1);
-        const previewReady = !!project?.previewUrl && (previewEvent ? previewEvent.status === "completed" : previewBuildUsable(project.lastBuildStatus));
+        // A run that changed no file publishes nothing, so a Preview already serving the site stays ready.
+        const changedNothing = (latest.details?.estimate as { diffStats?: { files?: number } } | undefined)?.diffStats?.files === 0;
+        const previewReady = !!project?.previewUrl && (previewEvent ? previewEvent.status === "completed" : previewBuildUsable(project.lastBuildStatus) || (project.status === "previewing" && changedNothing));
         // The coding lease finishes before afterRun starts Preview. Recover this bounded finalization gap. A project
         // without a framework gets Preview only after a change a browser can show, so after a text file or a package
         // install no Preview comes: waiting the full two minutes kept the chat busy and then showed the run as failed.

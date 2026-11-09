@@ -46,6 +46,9 @@ export function codeDataStudioExecutors(options: CodeDataStudioToolOptions): Rec
       await service.assertBackend(input.ctx, input.companyId, input.projectId, String(input.args.expectedBackendId ?? ""));
       return await body(service);
     } catch (error) {
+      // A policy naming a column the table lacks is the caller's to correct, so it gets the reason rather than a generic failure.
+      const missingColumn = input.tool.name === "code.data.policies.apply" ? /column "([^"]+)" does not exist/.exec(error instanceof Error ? error.message : "")?.[1] : undefined;
+      if (missingColumn) invalid(input, `The table has no column "${missingColumn}". Add it with code.data.schema.apply, or use a rule that does not need it; no policy was applied.`);
       if (error instanceof DataStudioError) throw new CodeToolError("project_data_error", error.message, error.status, error.step, error.retryable, input.tool.name, { dataCode: error.code });
       throw error;
     }

@@ -54,7 +54,7 @@ export function registerWebFrontend(app: FastifyInstance, directory: string): vo
 
     // Auto-route absolute asset/module requests from preview proxy tabs (e.g. Vite ES module imports)
     const referer = typeof request.headers.referer === "string" ? request.headers.referer : "";
-    if (referer && !pathname.startsWith("/api/") && !pathname.startsWith("/companies/") && !pathname.startsWith("/assets/") && !frontendPage.test(pathname) && !dataStudioPage.test(pathname) && !pathname.startsWith("/health")) {
+    if (referer && !pathname.startsWith("/api/") && !pathname.startsWith("/v1/projects/") && !pathname.startsWith("/companies/") && !pathname.startsWith("/assets/") && !frontendPage.test(pathname) && !dataStudioPage.test(pathname) && !pathname.startsWith("/health")) {
       const match = referer.match(/(\/(?:api\/)?companies\/[^/]+\/projects\/[^/]+\/preview\/proxy)(?:[/?#]|$)/);
       if (match?.[1]) {
         const prefix = match[1].startsWith("/api/") ? match[1] : `/api${match[1]}`;

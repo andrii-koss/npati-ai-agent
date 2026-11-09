@@ -70,6 +70,9 @@ export * from "./coding-agent-runner-contracts";
 
 export { WEBSITE_EDIT_TOOL_PATTERN, CODE_DATA_STUDIO_FLAG, CODE_FINISH_TOOL, toolCallSucceeded } from "./code-tool-visibility";
 
+/** Model turns a read-only run may spend reading before it answers from what it has. */
+const READ_ONLY_TURNS = 12;
+
 export class CodingAgentRunner {
   private readonly limits: CodeAgentLimits;
   private readonly snapshot: ExecutionSnapshotProvider;
@@ -530,6 +533,11 @@ export class CodingAgentRunner {
             : "Four model turns produced no source progress. Stop repeated inspection/planning. Use the files already read to implement the current request; if blocked, report the concrete blocker. Build/Preview and visual acceptance are separate system checks." });
         }
       }
+      // A read-only run has no tool that changes anything, so a model set on making an edit can only keep reading. It is told
+      // so at the start, and after enough reading it answers from what it has instead of circling until the loop guard fires.
+      if (input.readOnlyIntent && steps === 0) messages.push({ role: "system", content: "This request only looks at the project: this run has no tool that can change files or data, so do not plan or promise edits. Read only what the answer needs, then reply. If a change is needed, say what is missing and tell the user to ask for it." });
+      const answerNow = input.readOnlyIntent === true && steps >= READ_ONLY_TURNS;
+      if (answerNow && steps === READ_ONLY_TURNS) messages.push({ role: "system", content: "Stop reading and answer now from what you have already read. No tools are available for this reply." });
       const needsImplementation = input.requireImplementation && !input.readOnlyIntent && session.mode !== "plan" && currentChanges.length === 0;
       const inspectionLimit = input.allowStylePreview && inspectedStyles ? 1 : 3;
       const implementNow = !input.readOnlyIntent && session.mode !== "plan" && inspectionTurns >= inspectionLimit;
@@ -580,8 +588,8 @@ export class CodingAgentRunner {
            * already reports cached tokens without a directive, and an unexpected block array can drop the prompt).
            */
           systemCachePrefix: systemPromptStablePrefix(systemPrompt),
-          ...(definitions.length ? { tools: definitions } : {}),
-          ...(definitions.length ? { toolChoice: "auto" as const } : {}),
+          ...(definitions.length && !answerNow ? { tools: definitions } : {}),
+          ...(definitions.length && !answerNow ? { toolChoice: "auto" as const } : {}),
           /**
            * Step 5: stream the answer text to the transport as it arrives. Turning streaming on for this request is
            * the same switch the progress counters already use; the adapter reports only `delta.content`, so no tool

@@ -31,7 +31,23 @@ export interface AgentTemplateApplyOptions {
   seedDemoData?: boolean;
 }
 
-export function formatSchemaForProjectContext(backendName: string, schema: SchemaSnapshot): string {
+/**
+ * What code running in a visitor's browser must use. The sandbox variable PROJECT_API_URL is a private hostname, and an
+ * agent given only that value wrote it into plain sites, whose forms then could not reach the database.
+ */
+export function projectBrowserAccess(projectId: string, publishableKey: string) {
+  return {
+    use: "For any code that runs in the visitor's browser (plain HTML/JavaScript). PROJECT_API_URL is private to the sandbox: never write it into browser code.",
+    baseUrl: `/v1/projects/${projectId}`,
+    headers: { "X-Project-Key": publishableKey, "Authorization": "Bearer <token, once signed in>" },
+    accounts: "Built in, so do not create a users table. POST /auth/signup and POST /auth/login take JSON {email, password, name?} and return {user, token}; GET /auth/me.",
+    rows: "GET and POST /data/<table>.",
+    contactForm: "POST exactly {name, email, message} to /forms/contact_messages/submit; the table must be named contact_messages.",
+    policies: "A browser can use a table only after code.data.policies.apply: rule public with action insert for a form, rule owner only when the table has an owner_id column.",
+  };
+}
+
+export function formatSchemaForProjectContext(backendName: string, schema: SchemaSnapshot, projectId = "<projectId>"): string {
   const lines = [
     "## Data Schema (Data Studio)",
     `- Backend: ${backendName} (dev)`,
@@ -41,7 +57,9 @@ export function formatSchemaForProjectContext(backendName: string, schema: Schem
     `- Client SDK: import { createProjectClient } from "${PROJECT_SDK_IMPORT_PATH}" — generated file ${PROJECT_SDK_FILE_NAME} sits in the project root, no package install is required.`,
     "- Usage: createProjectClient({ apiUrl: PROJECT_API_URL, publishableKey: PROJECT_PUBLISHABLE_KEY }).",
     "- Auth: client.auth.signUp(credentials), signIn, signOut, getUser; Data queries: client.from(\"table\").list() returns Promise<{ data: Row[], meta: { total: number } }> (access rows via res.data), get(id) returns Promise<Row>, create(row), update(id, row), delete(id).",
-    "- For a plain HTML/JavaScript site, use fetch with the public API URL/key; do not import an uncompiled TypeScript SDK directly into a browser.",
+    `- For a plain HTML/JavaScript site do not import the TypeScript SDK and do not use PROJECT_API_URL (a private hostname the browser cannot reach). Call the relative path /v1/projects/${projectId} with fetch, never with a host name in front of it, and send the header X-Project-Key: <PROJECT_PUBLISHABLE_KEY>; once signed in also send Authorization: Bearer <token>.`,
+    "- Plain site endpoints under that base path: POST /auth/signup and POST /auth/login take JSON {email, password, name?} and return {user, token}; GET /auth/me; rows are GET and POST /data/<table>. A contact form POSTs exactly {name, email, message} to /forms/contact_messages/submit and needs an insert policy with rule public on contact_messages.",
+    "- A policy with rule owner needs an owner column in that table (owner_id uuid by default): add it with code.data.schema.apply before applying the policy.",
     "- In Sandbox, PROJECT_API_URL can be a private service hostname. Use it server-side (Next.js Route Handler or Server Component); browser components call same-origin routes. Verify real rows in Preview and show an explicit API error instead of static fallback products.",
     "- Never put PROJECT_SECRET_KEY, DATABASE_URL or any database credential into generated client code.",
     "- Send the user access token through the SDK. Access policies and row level security apply to every request.",
@@ -63,7 +81,7 @@ export async function syncProjectMdSchema(
 ): Promise<void> {
   if (!workspace) return;
   try {
-    const schemaSection = formatSchemaForProjectContext(backendName, schema);
+    const schemaSection = formatSchemaForProjectContext(backendName, schema, projectId);
     let content = "";
     let revision = "";
     try {
@@ -116,7 +134,7 @@ export class AgentDataStudioService {
     const result = await this.backendCreator(ctx, companyId, projectId, input.name);
     const { backend } = await this.context(ctx, companyId, projectId);
     await syncProjectMdSchema(ctx, companyId, projectId, backend.name, await this.provider.introspectSchema(backend,"dev"), this.workspace);
-    return { ...result, reason: input.reason, userMessage: result.created ? "Created database: " + result.backend.name : "Using existing database: " + result.backend.name };
+    return { ...result, ...(result.environment?.PROJECT_PUBLISHABLE_KEY ? { browserAccess: projectBrowserAccess(projectId, result.environment.PROJECT_PUBLISHABLE_KEY) } : {}), reason: input.reason, userMessage: result.created ? "Created database: " + result.backend.name : "Using existing database: " + result.backend.name };
   }
 
   private async context(ctx: AuthContext, companyId: string, projectId: string, requestedEnv?: string) {
