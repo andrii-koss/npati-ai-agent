@@ -1,7 +1,21 @@
 import type { ChatRequest, ChatToolCall } from "./types";
 import { PROVIDER_STREAM_IDLE_TIMEOUT_MS, readBeforeIdle, streamErrorMessage } from "./omniroute-engine-helpers";
 
-/** Assemble complete calls before execution; progress exposes counters only, never provider text. */
+const SAFE_PROGRESS_PATH = /^[\p{L}\p{N}_@.()\/ -]{1,200}$/u;
+
+/** Files a streaming write call is producing: only the checked path and a line count, never the partial arguments. */
+export function generatedFiles(calls: Iterable<ChatToolCall>): {path:string;lines:number}[] {
+  const files: {path:string;lines:number}[] = [];
+  for (const call of calls) {
+    if (!/fs[._]write/.test(call.function.name)) continue;
+    const args = call.function.arguments, content = args.indexOf('"content"');
+    const path = (content >= 0 ? args.slice(0, content) : args.slice(0, 2_000)).match(/"path"\s*:\s*"([^"\\]+)"/)?.[1];
+    if (path && SAFE_PROGRESS_PATH.test(path)) files.push({path, lines: content < 0 ? 0 : (args.slice(content).match(/\\n/g)?.length ?? 0) + 1});
+  }
+  return files;
+}
+
+/** Assemble complete calls before execution; progress exposes counters and file paths only, never provider text. */
 export async function readChatStream(response: Response, request: ChatRequest, started = Date.now()) {
   if (!response.headers.get("content-type")?.includes("text/event-stream")) return response.json();
   if (!response.body) throw new Error("provider_stream_missing");
@@ -55,7 +69,7 @@ export async function readChatStream(response: Response, request: ChatRequest, s
     const now = Date.now();
     if (!lastNotice || phase !== lastPhase || now - lastNotice >= 1000) {
       lastNotice = now; lastPhase = phase;
-      try { await request.onGenerationProgress?.({phase, firstTokenMs, outputCharacters}); } catch { /* Presentation cannot interrupt inference. */ }
+      try { await request.onGenerationProgress?.({phase, firstTokenMs, outputCharacters, files: generatedFiles(calls.values())}); } catch { /* Presentation cannot interrupt inference. */ }
     }
   };
   try {

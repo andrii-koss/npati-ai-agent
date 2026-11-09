@@ -84,7 +84,7 @@ export const CHECK_TOOL_PREFIXES = ["code.verify.", "code.deps.audit"];
 
 export const DEFAULT_VERIFICATION_TOOLS: readonly string[] = ["typecheck", "test"];
 
-export const DEFAULT_SELF_REVIEW_DIFF_CHARS = 60_000;
+export const DEFAULT_SELF_REVIEW_DIFF_CHARS = 240_000;
 
 /** Per attempt. With reasoning disabled a review of a 1000-line diff takes 7-12 s, so this only catches a stuck provider. */
 export const SELF_REVIEW_TIMEOUT_MS = 60_000;

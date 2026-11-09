@@ -234,7 +234,27 @@ it("does not create thinking or model lifecycle rows inside run traces", () => {
  const waiting=renderToStaticMarkup(<ChatDevelopmentProgress process={{...process,progress:[event]}} />);
  expect(waiting).toBe("");
  const generating=renderToStaticMarkup(<ChatDevelopmentProgress process={{...process,progress:[{...event,stage:"model_generation"}]}} />);
- expect(generating).toBe("");
+ expect(generating).toContain("Generating code");
+ expect(generating).not.toContain("coding-operation-history");
+});
+
+it("names code generation instead of keeping the finished project setup on screen", () => {
+ const setup={id:"tech",stage:"technology_selection",title:"HTML/CSS",status:"completed" as const,at:"2026-11-09T07:23:02.000Z"};
+ const model={id:"run:thinking:1",stage:"model_generation",title:"Generating code",status:"running" as const,at:"2026-11-09T07:23:04.000Z"};
+ expect(renderToStaticMarkup(<ChatDevelopmentProgress process={{...process,progress:[setup]}} />)).toContain("Creating project");
+ const html=renderToStaticMarkup(<ChatDevelopmentProgress process={{...process,progress:[setup,model]}} />);
+ expect(html).toContain("Generating code");
+ expect(html).not.toContain("Creating project");
+ const writing={...model,file:"styles.css",files:[{path:"index.html",linesAdded:240},{path:"styles.css",linesAdded:31}]};
+ const live=renderToStaticMarkup(<ChatDevelopmentProgress process={{...process,progress:[setup,writing]}} />);
+ expect(live).toContain("Generating code: styles.css");
+ expect(live).toContain("index.html"); expect(live).toContain("+240"); expect(live).toContain("+31");
+ const done=renderToStaticMarkup(<ChatDevelopmentProgress process={{...process,progress:[setup,{...model,status:"completed" as const}]}} />);
+ expect(done).toContain("Creating project");
+ const finished={...process,status:"completed" as const,createdAt:"2026-11-09T07:22:58.000Z",progress:[setup,{...model,status:"completed" as const,durationMs:64000}]};
+ const history=renderToStaticMarkup(<ChatDevelopmentProgress process={finished} />);
+ expect(history).toContain("Creating project · 0:06");
+ expect(history).not.toContain("Creating project · 1:");
 });
 
 it("hides completed model-wait-only history without hiding provider failures", () => {

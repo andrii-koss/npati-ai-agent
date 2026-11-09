@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { OmniRouteEngine, providerContinuationFor } from "@npati/omniroute-adapter";
-import { readChatStream } from "../packages/omniroute-adapter/src/chat-stream";
+import { generatedFiles, readChatStream } from "../packages/omniroute-adapter/src/chat-stream";
 const event = (data:unknown) => "data: " + JSON.stringify(data) + "\r\n\r\n";
 function response(text:string) {
  const bytes = new TextEncoder().encode(text);
@@ -18,7 +18,15 @@ it("decodes fragmented UTF8/CRLF, tool calls, usage and private continuation whi
  expect(payload.choices[0].message).toMatchObject({content:"\u041f\u0440\u0438\u0432\u0456\u0442",reasoning_content:"private reasoning",tool_calls:[{id:"call",function:{name:"code_fs_write",arguments:'{"path":"index.html","content":"secret-value"}'}}]});
  expect(payload.usage.total_tokens).toBe(36);
  expect(notices).toEqual(expect.arrayContaining([expect.objectContaining({phase:"response"}),expect.objectContaining({phase:"tool_arguments"})]));
- expect(JSON.stringify(notices)).not.toMatch(/private reasoning|secret-value|index.html/);
+ expect(JSON.stringify(notices)).not.toMatch(/private reasoning|secret-value/);
+});
+it("reports the checked path and line count of a file still being written, never its text",()=>{
+ const call=(name:string,args:string)=>({id:"c",type:"function" as const,function:{name,arguments:args}});
+ expect(generatedFiles([call("code_fs_write",'{"path":"src/index.html","content":"a\\nb\\nc')])).toEqual([{path:"src/index.html",lines:3}]);
+ expect(generatedFiles([call("code_fs_write",'{"path":"a.css"')])).toEqual([{path:"a.css",lines:0}]);
+ expect(generatedFiles([call("code_fs_read",'{"path":"a.css"}')])).toEqual([]);
+ expect(generatedFiles([call("code_fs_write",'{"path":"<img src=x>","content":"a"')])).toEqual([]);
+ expect(generatedFiles([call("code_fs_write",'{"content":"\\"path\\":\\"fake.txt\\""')])).toEqual([]);
 });
 it("refuses a truncated stream so partial tool arguments never execute",async()=>{
  await expect(readChatStream(response(event({choices:[{delta:{tool_calls:[{index:0,id:"call",function:{name:"write",arguments:'{"path":'}}]}}]})),{messages:[]})).rejects.toThrow("provider_stream_incomplete");

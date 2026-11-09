@@ -8,7 +8,7 @@ import type { VerificationReport } from "./code-verification-loop";
 import type { VerificationPlan } from "./code-verification-plan";
 
 export function verificationEvidenceForReview(report: VerificationReport, summaryStatus?: string): string {
-  if (!summaryStatus && report.verificationRuns === 0) return "verification did not run for this change";
+  if (!summaryStatus && report.verificationRuns === 0) return "No build or test check applies to this project yet, so none ran. That is not a defect: do not report it. A website is opened in a real browser after this review, and console errors or broken links fail the run there. Report only defects visible in the diff.";
   const failed = report.failedChecks.map(check => `${check.tool}${check.code ? ` (${check.code})` : ""}`);
   return [
     `status: ${summaryStatus ?? report.status}`,

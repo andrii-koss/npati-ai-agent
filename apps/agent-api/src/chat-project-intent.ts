@@ -275,8 +275,12 @@ export function createChatProjectIntentResolver(deps: {
       const value: unknown = JSON.parse(raw);
       if (!value || typeof value !== "object") throw new Error("invalid_intent_result");
       const parsed = value as Record<string, unknown>;
-      if (typeof parsed.intent !== "string" || !Object.hasOwn(examples, parsed.intent) || typeof parsed.confidence !== "number" || parsed.confidence < 0.8 || parsed.confidence > 1) throw new Error("invalid_intent_result");
+      if (typeof parsed.intent !== "string" || !Object.hasOwn(examples, parsed.intent) || typeof parsed.confidence !== "number" || parsed.confidence > 1) throw new Error("invalid_intent_result");
       const intent = parsed.intent as ProjectIntent;
+      // A bare "create me a site" is unspecific, so the model rates it 0.6-0.7 although it is sure of the action.
+      // When the independent keyword reading agrees it is a creation, that doubt only concerns details.
+      const creationConfirmed = ["CREATE_WEBSITE", "CREATE_PROJECT"].includes(intent) && ["CREATE_WEBSITE", "CREATE_PROJECT"].includes(deterministic.intent);
+      if (parsed.confidence < (creationConfirmed ? 0.5 : 0.8)) throw new Error("low_confidence");
       // Work handed to a Company Agent stays with the Company runtime; it is not a native record capability.
       let coreCapability = intent === "CHAT" && parsed.assignsWorkToCompanyAgent !== true && CORE_CHAT_CAPABILITIES.includes(parsed.coreCapability as CoreChatCapability) ? parsed.coreCapability as CoreChatCapability : undefined;
       const creation = intent === "CREATE_WEBSITE" || intent === "CREATE_PROJECT";
@@ -344,10 +348,12 @@ export function createChatProjectIntentResolver(deps: {
         && typeof parsed.reply === "string" && parsed.reply.trim() && parsed.reply.length <= 2000 ? parsed.reply.trim() : undefined;
       if (guarded && !semanticProject) return { ...guardResult, ...(coreCapability ? { coreCapability } : {}), ...(coreRoute ? { coreRoute } : {}), ...(entityRead ? { entityRead } : {}) };
       return { decision, targets, source: "semantic", ...(coreCapability ? { coreCapability } : {}), ...(coreRoute ? { coreRoute: reply ? { ...coreRoute, reply } : coreRoute } : {}), ...(entityRead ? { entityRead } : {}), ...(!creation && parsed.schemaChange !== true && isChatRowCapability(parsed.rowCapability) && (["EDIT_DATA_MODEL", "EDIT_PROJECT", "EDIT_WEBSITE"].includes(intent) || intent === "CHAT" && ["project.data.rows.list", "project.data.rows.read"].includes(parsed.rowCapability)) ? { rowCapability: parsed.rowCapability } : {}) };
-    } catch {
+    } catch (error) {
       input.signal?.throwIfAborted();
-      // Do not log private prompts or model responses. Existing deterministic routing remains available.
-      deps.log.warn({ event: "chat_project_intent_fallback" }, "Semantic routing unavailable; using deterministic routing");
+      // Do not log private prompts or model responses: only this file's own codes, never a parser or provider message.
+      const message = error instanceof Error ? error.message : "";
+      const reason = error instanceof SyntaxError ? "invalid_json" : /^[a-z_]+$/.test(message) ? message : "provider_error";
+      deps.log.warn({ event: "chat_project_intent_fallback", reason }, "Semantic routing unavailable; using deterministic routing");
       return guarded ? guardResult : fallback();
     }
   };

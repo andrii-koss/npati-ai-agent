@@ -48,7 +48,7 @@ export interface ChatRequest {
    * unchanged string, because an unexpected content-block array can make a provider drop the system prompt.
    */
   systemCachePrefix?: string;
-  onGenerationProgress?: (event: {phase:"response"|"tool_arguments";firstTokenMs:number;outputCharacters:number}) => void | Promise<void>;
+  onGenerationProgress?: (event: {phase:"response"|"tool_arguments";firstTokenMs:number;outputCharacters:number;files?:{path:string;lines:number}[]}) => void | Promise<void>;
   /**
    * Step 5: assistant **prose** as it arrives. Only `delta.content` is reported — never reasoning text, tool names or
    * tool-call argument fragments — so a caller can render the answer live without ever exposing a partial JSON

@@ -54,7 +54,8 @@ export function classifyTerminalCommand(input: string | TerminalCommandSpec): Te
   // Quoted text alone is not shell syntax. node -e runs code in the same sandbox as an allowed `node script.js`, and a
   // quoted flutter create description is plain text; both needed an approval nobody gives in auto mode (E2E S0.3, G9).
   const raw = normalized.rawCommand.trim();
-  if (/^node\s+(?:-e|-p|--eval|--print)\s+(?:'[^'\r\n]*'|"[^"$`\\\r\n]*")$/.test(raw)) return result("controlled", "Run inline Node code inside sandbox");
+  // A backslash consumes exactly the next character, so `\"` stays inside the string and `\\"` still ends it; bare $ and ` stay refused.
+  if (/^node\s+(?:-e|-p|--eval|--print)\s+(?:'[^'\r\n]*'|"(?:[^"$`\\\r\n]|\\[^\r\n])*")$/.test(raw)) return result("controlled", "Run inline Node code inside sandbox");
   if (/^flutter\s+create(?:\s+(?:--?[A-Za-z][A-Za-z-]*(?:[\s=](?:[A-Za-z0-9_.,/-]+|"[^"$`\\\r\n]*"))?|[A-Za-z0-9_][A-Za-z0-9_./-]*|\.))*$/.test(raw) && !/(?:^|\s)\.\.(?:\/|\s|$)/.test(raw)) return result("controlled", "Create a Flutter project inside sandbox", "install_build");
   // The shell expands ~ only where a word begins, so typescript@~5.7.2 is an ordinary package name.
   if (/[;&|`$<>\r\n\\(){}\[\]*?!#'"]|(?:^|[\s=:])~/.test(clean)) return result("approval", "Shell syntax or expansion requires approval");

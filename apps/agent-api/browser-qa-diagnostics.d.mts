@@ -9,4 +9,5 @@ export interface BrowserDiagnostic {
   column?: number;
 }
 export function normalizeBrowserDiagnostic(value: unknown): BrowserDiagnostic;
+export function isBlockedExternalResource(text: unknown, location: { url?: string } | undefined, origin: string): boolean;
 export function captureBrowserDiagnostic(type: string, message: unknown, location: unknown, stack: unknown, origin: string): BrowserDiagnostic;

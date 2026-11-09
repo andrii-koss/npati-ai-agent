@@ -567,8 +567,7 @@ export class CodingAgentRunner {
             if (!firstTokenRecorded) {
               firstTokenRecorded=true;
               await record({kind:"model_first_token",companyId,projectId,sessionId,turn:steps+1,model:input.model,firstTokenMs:event.firstTokenMs});
-            }
-            await emitCodingActivity(input, {...thinking, stage:event.phase === "tool_arguments" ? "model_generation" : "model_output", title:event.phase === "tool_arguments" ? "Generating code" : "The model is responding",status:"running",durationMs:this.now()-modelStarted});
+            }            await emitCodingActivity(input, {...thinking, stage:event.phase === "tool_arguments" ? "model_generation" : "model_output", title:event.phase === "tool_arguments" ? "Generating code" : "The model is responding",status:"running",durationMs:this.now()-modelStarted,...(event.files?.length ? {file:event.files.at(-1)!.path,files:event.files.map(file=>({path:file.path,action:"created" as const,linesAdded:file.lines}))} : {})});
           },
           onProviderAttempt:async(event)=>{
             if(event.phase==="started") providerAttempt++;

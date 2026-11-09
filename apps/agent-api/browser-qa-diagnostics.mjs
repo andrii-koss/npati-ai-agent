@@ -24,6 +24,12 @@ export function normalizeBrowserDiagnostic(value) {
     message: causes[cause], source, ...(errorName ? { errorName } : {}), ...(line !== undefined ? { line } : {}), ...(column !== undefined ? { column } : {}) };
 }
 
+/** The check itself blocks outside hosts, so a photo or stylesheet from another site failing here says nothing about the page. */
+export function isBlockedExternalResource(text, location, origin) {
+  if (typeof text !== "string" || !/Failed to load resource/i.test(text)) return false;
+  try { return new URL(location?.url).origin !== origin; } catch { return false; }
+}
+
 export function captureBrowserDiagnostic(type, rawMessage, location, stack, origin) {
   const text = typeof rawMessage === "string" ? rawMessage.slice(0, 4096) : "";
   const cause = /ReferenceError|is not defined/i.test(text) ? "undefined_reference"

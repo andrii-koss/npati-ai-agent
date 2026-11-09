@@ -141,7 +141,7 @@ function title(item: DevelopmentProcessProgressItem, t: Labels, active: boolean)
   if (/code\.deps\.add/.test(item.tool ?? "") && item.arguments) {
     try { const spec = JSON.parse(item.arguments) as { name?: unknown; version?: unknown }; if (typeof spec.name === "string") return t(kind) + ": " + sanitizeExecutionTrace(spec.name) + (typeof spec.version === "string" ? "@" + sanitizeExecutionTrace(spec.version) : ""); } catch { /* plain label */ }
   }
-  if (item.files && item.files.length > 1) return t(kind) + ": " + item.files.length;
+  if (item.files && item.files.length > 1 && item.stage !== "model_generation") return t(kind) + ": " + item.files.length;
   if (item.file) return t(active ? kind : kind === "reading" ? "read" : kind === "editing" ? "updated" : kind) + ": " + sanitizeExecutionTrace(item.file);
   return kind === "command" ? sanitizeExecutionTrace(item.title) : t(kind);
 }
@@ -189,11 +189,14 @@ export function AgentExecutionTrace({ process, items: directItems, run, nested =
   if (!items.length && !run) return null;
   if (run) {
     const running = (!process || processActive) && (run.status === "running" || run.status === "preparing" || run.status === "pending" && items.some(item=>["running","active"].includes(item.status??"")));
-    if (!items.length && !carryActive && ["running", "pending", "preparing", "completed"].includes(run.status)) return null;
-    const current = [...items].reverse().find(item=>["running","active","awaiting_approval","waiting_for_approval"].includes(item.status??"")) ?? items.at(-1) ?? {id:run.id,stage:"agent",title:"",at:run.at,status:"pending" as const};
+    // A long model turn writes the code inside its tool call. It stays out of the rows, but the header must say so
+    // instead of leaving the last finished step ("Creating project") on screen for the whole turn.
+    const generating = processActive && !nested && (carryActive || running) ? normalizeActivity(process?.progress).filter(item => item.stage === "model_generation" && item.status === "running" && (Date.parse(item.at) || 0) >= (Date.parse(latestOperation?.at ?? "") || 0)).at(-1) : undefined;
+    if (!items.length && !carryActive && !generating && ["running", "pending", "preparing", "completed"].includes(run.status)) return null;
+    const current = generating ?? [...items].reverse().find(item=>["running","active","awaiting_approval","waiting_for_approval"].includes(item.status??"")) ?? items.at(-1) ?? {id:run.id,stage:"agent",title:"",at:run.at,status:"pending" as const};
     const stepActive = running || carryActive;
     const operations = items.filter(item=>!["agent","planning","model_response","model_generation","model_output","provider_retry"].includes(item.stage));
-    const setupOnly = operations.length > 0 && operations.every(item => operation(item)[0] === "creatingProject");
+    const setupOnly = !generating && operations.length > 0 && operations.every(item => operation(item)[0] === "creatingProject");
     const [, Icon] = operation(setupOnly ? operations[0] ?? current : current);
     const recovered = run.status === "failed" && process?.status === "completed";
     const label = run.status === "failed" && !recovered ? t("failed") : stepActive ? setupOnly ? t("creatingProject") : title(current,t,["running", "active"].includes(current.status ?? "")) : run.status === "completed" || recovered ? setupOnly ? t("creatingProject") : t("operationsDone").replace("{{count}}",String(operations.length)) : t(run.status === "waiting_for_approval" ? "awaiting_approval" : run.status);
@@ -203,12 +206,16 @@ export function AgentExecutionTrace({ process, items: directItems, run, nested =
       if (item.file) files.set(item.file, {path:item.file, linesAdded:item.linesAdded, linesRemoved:item.linesRemoved, status:item.status});
       for (const file of item.files ?? []) files.set(file.path, {...file, status:item.status});
     }
+    for (const file of generating?.files ?? []) files.set(file.path, {...file, status: file.path === generating?.file ? "running" : "completed"});
     const visibleFiles = [...files.values()].slice(-6);
     const allItems = normalizeActivity(process?.progress);
     const lastAt = Math.max(0, ...allItems.filter(isVisibleChatOperation).map(item => Date.parse(item.at)).filter(Number.isFinite));
     const isLastGroup = !processActive && recordedItems.some(item => Date.parse(item.at) === lastAt);
     const whole = isLastGroup ? processDuration(allItems) : undefined;
-    const spent = stepActive ? undefined : runDuration(recordedItems);
+    // Setup ends where the model starts; the first model turn belongs to the code it writes, not to creating the project.
+    const modelStart = Math.min(...recordedItems.filter(item => item.stage.startsWith("model_")).map(item => Date.parse(item.at)).filter(Number.isFinite));
+    const setupMs = setupOnly && process && Number.isFinite(modelStart) ? modelStart - Date.parse(process.createdAt) : NaN;
+    const spent = stepActive ? undefined : setupMs >= 0 ? clock(setupMs) : runDuration(recordedItems);
     const total = spent && whole && whole !== spent ? spent + " · " + (isUk || (run.language ?? language ?? i18n?.language) === "uk" ? "Усього " : "Total ") + whole : spent;
     const elapsed = stepActive && Number.isFinite(Date.parse(current.at)) ? Math.max(0, Math.floor((now - Date.parse(current.at)) / 1000)) : undefined;
     return <article className="assistant research-progress coding-run-activity" aria-live="polite"><div className={"research-page-row codex-trace-row " + (stepActive ? "active" : recovered ? "completed" : run.status) + (runOpen ? " expanded" : "")} data-run-id={run.runId ?? run.id}><button type="button" className="codex-trace-row-header coding-run-header" aria-expanded={runOpen} aria-controls={"run-detail-" + run.id} onClick={()=>{setHistoryMounted(true);setRunOpen(previous=>!previous);}}><span className="research-progress-state" aria-hidden="true">{stepActive ? "\u25cf" : run.status === "completed" || recovered ? <Check size={12}/> : run.status === "failed" ? <AlertCircle size={12}/> : run.status === "cancelled" ? <X size={12}/> : "\u25cf"}</span><Icon className="research-progress-globe" size={16} aria-hidden="true"/><span dir="auto" className={stepActive ? "research-active-text" : undefined}>{label}{total ? " · " + total : ""}</span>{commandRunning && liveLine && <code dir="auto" className="codex-trace-live-output" style={{ flex: 1, minWidth: 0, marginLeft: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: 0.75, fontSize: "0.85em" }}>{sanitizeExecutionTrace(liveLine)}</code>}{elapsed !== undefined && <span className="codex-trace-duration-tag">{elapsed}s</span>}<span className="codex-trace-chevron-btn" aria-hidden="true">{runOpen ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}</span></button>

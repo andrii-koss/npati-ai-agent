@@ -7,6 +7,27 @@ import {
   stringListArg,
   toolNotConfigured,
 } from "./code-tool-executors-common";
+import { parseShellCommand } from "./code-shell-classifier";
+
+/** True for a redirect or background `&` outside quotes: the parser leaves both inside a single segment. */
+function hasUnquotedRedirectOrBackground(command: string): boolean {
+  let quote = "";
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index]!;
+    if (quote) {
+      if (char === quote && command[index - 1] !== "\\") quote = "";
+    } else if (char === "'" || char === "\"") quote = char;
+    else if (char === "<" || char === ">" || char === "&") return true;
+  }
+  return false;
+}
+
+/** Whether the command needs what `code.shell.exec` refuses; every flag here would otherwise wait for an approval. */
+export function needsShellFeatures(command: string): boolean {
+  const parsed = parseShellCommand(command);
+  return Boolean(parsed.parseError) || parsed.segments.length !== 1 || parsed.usesSubshell || parsed.usesBackticks
+    || parsed.usesHeredoc || parsed.usesVariables || hasUnquotedRedirectOrBackground(command);
+}
 
 /**
  * C4: the sandbox execution port. It is implemented by the shell runtime (command classification,
@@ -169,7 +190,8 @@ export function canonicalShellExecutors(options: CanonicalShellExecutorOptions =
       // A shell pipeline or redirect is not a single command: the sandbox policy would have to
       // ask for human approval, which a chat-created run cannot satisfy. Refuse it early with a
       // retryable validation error so the agent corrects the call instead of waiting forever.
-      if (/[|&;`$<>]/.test(command)) {
+      // Characters inside quotes are data (`node -e "a || b"`), so this uses the classifier's own parser.
+      if (needsShellFeatures(command)) {
         throw new CodeToolError(
           "invalid_arguments",
           "code.shell.exec accepts one simple command; pipes, redirects, substitutions and command chaining are not available. Use code.verify.run for build/typecheck/test, or run the bare command (for example: npm run build).",

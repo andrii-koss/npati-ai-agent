@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-import { captureBrowserDiagnostic } from "./browser-qa-diagnostics.mjs";
+import { captureBrowserDiagnostic, isBlockedExternalResource } from "./browser-qa-diagnostics.mjs";
 import { assertBrowserQaActions, runBrowserQaActions } from "./browser-qa-actions.mjs";
 
 let stage = "input";
@@ -69,7 +69,7 @@ try {
       consoleErrorCount++;
       if (consoleDiagnostics.length < 5) consoleDiagnostics.push(captureBrowserDiagnostic(type, message, location, stack, origin));
     };
-    page.on("console", message => { if (message.type() === "error") capture("error", message.text(), message.location()); });
+    page.on("console", message => { if (message.type() === "error" && !isBlockedExternalResource(message.text(), message.location(), origin)) capture("error", message.text(), message.location()); });
     page.on("pageerror", error => capture("pageerror", error.message, undefined, error.stack));
     const started = Date.now();
     stage = "navigation";
