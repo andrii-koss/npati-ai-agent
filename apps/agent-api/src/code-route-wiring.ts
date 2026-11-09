@@ -313,7 +313,6 @@ export function registerCodeRouteWiring(app: FastifyInstance, deps: CodeRouteDep
     },
   });
   registerCodeSessionInboxRoutes(app, { service: codeSessionInbox, auth: authProvider,
-    runFinished: async (companyId, runId) => ["interrupted", "failed", "cancelled", "completed"].includes((await workspaceStore.getCodeRunState(companyId, runId))?.status ?? ""),
     authorize: (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input) });
   const codeProcessCompletions = trackedProcesses && workspaceStore.codeProcesses ? new CodeProcessCompletionService({
     store: workspaceStore.codeProcesses, processes: trackedProcesses, inbox: codeSessionInbox,

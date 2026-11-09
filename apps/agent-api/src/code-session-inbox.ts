@@ -60,11 +60,6 @@ export class CodeSessionInboxService {
     await this.transact(session, { kind: "release-task", runId: run.runId });
     if (run.status === "completed") await this.wake(ctx, session.companyId, session.id);
   }
-  /** A run stopped by a server restart never reports back, so its session stays taken and queued messages wait forever. */
-  async releaseFinishedRun(ctx: AuthContext, companyId: string, sessionId: string, runId: string) {
-    const session = await this.options.loadSession(ctx, companyId, sessionId);
-    if (session) await this.settled(ctx, session, { runId, status: "completed" });
-  }
   async wake(ctx: AuthContext, companyId: string, sessionId: string) {
     if (!this.wakeTask || !await this.isEnabled(ctx, companyId) || this.shutdown.signal.aborted) return;
     const key = JSON.stringify([companyId, sessionId]);
