@@ -52,7 +52,7 @@ it("expands real command output and code changes inside the run instead of metad
   await act(async()=>root!.render(<ChatDevelopmentProgress process={process}/>));await act(async()=>host.querySelector<HTMLButtonElement>(".coding-run-header")!.click());
   for(const header of host.querySelectorAll<HTMLButtonElement>(".coding-operation-history .codex-trace-row-header"))await act(async()=>header.click());
   const panels=host.querySelectorAll(".codex-trace-detail-panel");expect(panels).toHaveLength(3);
-  expect(panels[0]!.textContent).toContain("export default function Page()");expect(panels[1]!.textContent).toContain("-Old\n+New");expect(panels[1]!.textContent).toContain('"newText":"New"');expect(panels[2]!.textContent).toContain("npm run build");expect(panels[2]!.textContent).toContain("Compiled successfully");expect(panels[2]!.textContent).toContain("0");expect(host.querySelector('button[title="Copy command"]')).not.toBeNull();
+  expect(panels[0]!.textContent).toContain("export default function Page()");expect(panels[1]!.textContent).toContain("-Old");expect(panels[1]!.textContent).toContain("+New");expect(panels[1]!.textContent).toContain('"newText": "New"');expect(panels[2]!.textContent).toContain("npm run build");expect(panels[2]!.textContent).toContain("Compiled successfully");expect(panels[2]!.textContent).toContain("0");expect(host.querySelector('button[title="Copy command"]')).not.toBeNull();
 });
 
 it("shows Preview only with settled activity and keeps an already open iframe during the next edit",async()=>{

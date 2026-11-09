@@ -450,7 +450,12 @@
 .codex-trace-collapse { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .18s ease, opacity .18s ease; }
 .codex-trace-row.expanded > .codex-trace-collapse { grid-template-rows: 1fr; opacity: 1; }
 .codex-trace-collapse-inner { min-height: 0; overflow: hidden; }
-.codex-trace-detail-panel { background: var(--surface-muted, #f8f9fb); border-color: var(--border-color, #e5e7eb); }
+.codex-trace-detail-panel { background: #ffffff; border-color: #cbd5e1; color: #374151; }
+.codex-trace-status-line { display: flex; align-items: center; gap: 7px; }
+.codex-trace-status-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: #9ca3af; }
+.codex-trace-status-dot.completed { background: #22c55e; }
+.codex-trace-status-dot.failed { background: #dc2626; }
+.codex-trace-status-dot.active, .codex-trace-status-dot.running { background: #3b82f6; }
 .codex-trace-status-pill.waiting_for_approval { color: var(--npati-red, #cf3035); background: var(--npati-gray-100, #f3f4f6); }
 .codex-trace-title, .codex-trace-title-wrapper { min-width: 0; overflow-wrap: anywhere; }
 @media (hover: none), (max-width: 640px) {
@@ -486,9 +491,9 @@
 .coding-file-chip:disabled { cursor: default; opacity: .75; }
 .coding-file-added { color: #15803d; font-weight: 600; }
 .coding-file-removed { color: #b91c1c; font-weight: 600; }
-.chat-file-editor { flex: 1; display: flex; min-height: 0; background: #fbfbfd; font: 13px/20px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.chat-file-gutter { flex: 0 0 auto; margin: 0; padding: 14px 12px; overflow: hidden; color: #a3a3b2; text-align: right; user-select: none; border-right: 1px solid #ececf2; font: inherit; }
-.chat-file-text { flex: 1; min-width: 0; padding: 14px 16px; border: 0; outline: 0; resize: none; overflow: auto; background: transparent; color: #27272f; white-space: pre; tab-size: 2; font: inherit; }
+.chat-file-editor { flex: 1; display: flex; min-height: 0; background: #0f172a; font: 13px/20px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.chat-file-gutter { flex: 0 0 auto; margin: 0; padding: 14px 12px; overflow: hidden; color: #64748b; text-align: right; user-select: none; border-right: 1px solid #1e293b; font: inherit; }
+.chat-file-text { flex: 1; min-width: 0; padding: 14px 16px; border: 0; outline: 0; resize: none; overflow: auto; background: transparent; color: #e8edf5; scrollbar-width: thin; scrollbar-color: #b8b8b8 transparent; white-space: pre; tab-size: 2; font: inherit; }
 .chat-file-note, .chat-file-error { margin: 0; padding: 8px 20px; font-size: 13px; background: #f7f6fb; color: #52525b; }
 .chat-file-error { background: #fef2f2; color: #b91c1c; }
 .coding-changed-files code { overflow-wrap: anywhere; min-width: 0; }
@@ -1241,22 +1246,47 @@ body:has(.project-chat-preview-layer) .message-stream {
 .assistant-toolbar-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: 620px; }
 .chat-run-total { flex-shrink: 0; color: #777; font-size: 14px; font-weight: 600; }
 
+/* Detail text: labels in strong grey, the values people read in near-black. */
+.codex-trace-usage { color: #4b5563; }
+.codex-trace-usage strong { color: #111827; }
+.codex-trace-detail-panel .codex-trace-usage code { display: inline-block; padding: 2px 9px; border-radius: 7px; background: #dcfce7; color: #166534; font-weight: 600; }
+.codex-trace-usage small { color: #475569; }
+.codex-trace-detail-panel > div > code { color: #111827; }
+.codex-trace-detail-panel .codex-trace-field-top > span, .codex-trace-detail-panel .codex-trace-field-name { color: #374151; }
+/* Code blocks use the same thin scrollbar as the chat. */
+.codex-log-pre, .codex-code-box { scrollbar-width: thin; scrollbar-color: #b8b8b8 transparent; }
+
+.codex-trace-detail-panel code.codex-tool-name { display: inline-block; padding: 2px 8px; border-radius: 6px; background: #f1f3f7; color: #111827; font-weight: 600; }
+/* Dark code with line numbers and indent guides, shared by chat blocks and the file panel. */
+.code-line { min-height: 20px; background-image: repeating-linear-gradient(90deg, rgba(148, 163, 184, .24) 0 1px, transparent 1px var(--guide, 2ch)); background-position: var(--guide, 2ch) 0; background-repeat: no-repeat; background-size: calc(var(--indent, 0) * 1ch - var(--guide, 2ch)) 100%; }
+.code-view.codex-log-pre { white-space: pre; overflow: auto; color: #e8edf5; line-height: 20px; }
+.code-view-row { display: flex; min-width: max-content; }
+.code-view-number { flex: 0 0 auto; width: 4ch; margin-right: 16px; color: #64748b; text-align: right; user-select: none; }
+.code-view-row .code-line { flex: 1; }
+
+.code-token-diff-add { color: #86efac; }
+.code-token-diff-remove { color: #fca5a5; }
+.code-token-diff-hunk { color: #7dd3fc; }
+.code-token-diff-meta { color: #94a3b8; }
+.codex-code-box code { color: #a6e37a; }
+
 /* The Chat/Code switch is hidden: every message goes through the normal chat route. */
 .chat-work-mode-switch { display: none !important; }
 
 /* Coloured code sits under a transparent textarea with identical metrics, so editing stays native. */
 .chat-file-code { position: relative; flex: 1; min-width: 0; display: flex; }
-.chat-file-highlight { position: absolute; inset: 0; margin: 0; padding: 14px 16px; overflow: hidden; white-space: pre; tab-size: 2; font: inherit; color: #27272f; pointer-events: none; }
-.chat-file-text.is-colored { position: relative; z-index: 1; color: transparent; caret-color: #27272f; }
-.chat-file-text.is-colored::selection { background: rgba(59, 130, 246, .25); color: transparent; }
-.code-token-keyword { color: #7c3aed; }
-.code-token-string { color: #15803d; }
-.code-token-comment { color: #9ca3af; }
-.code-token-number { color: #c2410c; }
-.code-token-function { color: #2563eb; }
-.code-token-tag { color: #be123c; }
-.code-token-attr { color: #b45309; }
-.code-token-property { color: #0e7490; }
+.chat-file-highlight { position: absolute; inset: 0; margin: 0; padding: 14px 16px; overflow: hidden; white-space: pre; tab-size: 2; font: inherit; color: #e8edf5; pointer-events: none; }
+.chat-file-text.is-colored { position: relative; z-index: 1; color: transparent; caret-color: #ffffff; }
+.chat-file-text.is-colored::selection { background: rgba(125, 211, 252, .28); color: transparent; }
+.code-token-keyword { color: #ff5c8a; }
+.code-token-string { color: #a6e37a; }
+.code-token-comment { color: #6b7a90; }
+.code-token-number { color: #fdba74; }
+.code-token-function { color: #7cc4fa; }
+.code-token-tag { color: #ff5c8a; }
+.code-token-punctuation { color: #a9c1e8; }
+.code-token-attr { color: #dfe36f; }
+.code-token-property { color: #7dd3fc; }
 
 /* Step icons share a 16px box but draw different shapes: each main shape's shorter side becomes 9.33px, never enlarged, with one line weight. */
 .codex-trace-row .research-progress-globe.lucide-terminal { transform: scale(1.000); stroke-width: 1.60; }

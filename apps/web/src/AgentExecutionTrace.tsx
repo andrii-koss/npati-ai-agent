@@ -9,6 +9,7 @@ import { isVisibleChatOperation, normalizeActivity, type CodingActivityRun } fro
 import { codingStopCopy } from "./coding-stop-copy";
 import { authFetch } from "./shell/auth-helpers";
 import { ChatFileViewerContext, preloadChatFile } from "./ChatFileViewer";
+import { CodeView } from "./code-highlight";
 export interface AgentExecutionTraceProps { process?: DevelopmentProcess; items?: DevelopmentProcessProgressItem[]; isUk?: boolean; className?: string; run?: CodingActivityRun; nested?: boolean; language?: string; showIdentity?:boolean; animatePending?: boolean }
 export const sanitizeTraceSecrets = sanitizeExecutionTrace;
 type Labels = (key: string) => string;
@@ -88,6 +89,11 @@ export function plainResult(result: string): string {
     const message = parsed.message.replace(/^Sandbox command failed:\s*/, "");
     return (typeof parsed.details?.exitCode === "number" ? "exit code " + parsed.details.exitCode + "\n\n" : "") + message;
   } catch { return result; }
+}
+/** A whole-file write shown as the code it wrote, not as escaped JSON. */
+function writtenFile(raw: string | undefined): { path: string; content: string } | null {
+  if (!raw) return null;
+  try { const value = JSON.parse(raw) as { path?: unknown; content?: unknown }; return typeof value.path === "string" && typeof value.content === "string" ? { path: value.path, content: value.content } : null; } catch { return null; }
 }
 /** The model's reply was corrupted before it became a call; nothing in the project or the agent caused it. */
 const isModelCallFailure = (item: DevelopmentProcessProgressItem) => item.errorCode === "malformed_native_tool_call" || item.error === "malformed_native_tool_call";
@@ -233,7 +239,8 @@ export function AgentExecutionTrace({ process, items: directItems, run, nested =
       const [, Icon] = operation(item);
       const safe = (text: string) => sanitizeExecutionTrace(text);
       const copyButton = (text: string, id: string, label: string) => <button type="button" className="codex-copy-btn" title={t(label)} onClick={() => void copy(text,id)}>{copied === id ? <Check size={12} /> : <Copy size={12} />}<span>{t(copied === id ? "copied" : "copy")}</span></button>;
-      const log = (text: string, label: string) => <div className="codex-trace-field"><div className="codex-trace-field-top"><span className="codex-trace-field-name">{label}</span>{copyButton(text,label + item.id,"copyLog")}</div>{text.length > 4000 && <button type="button" className="codex-copy-btn" onClick={() => toggle(setFullLogs,label + item.id)}>{t(fullLogs.has(label + item.id) ? "less" : "fullLog")}</button>}<pre className="codex-log-pre">{safe(fullLogs.has(label + item.id) ? text : text.slice(0,4000))}</pre></div>;
+      const written = writtenFile(item.arguments);
+      const log = (text: string, label: string, path?: string) => <div className="codex-trace-field"><div className="codex-trace-field-top"><span className="codex-trace-field-name">{label}</span>{copyButton(text,label + item.id,"copyLog")}</div>{text.length > 4000 && <button type="button" className="codex-copy-btn" onClick={() => toggle(setFullLogs,label + item.id)}>{t(fullLogs.has(label + item.id) ? "less" : "fullLog")}</button>}<CodeView text={safe(fullLogs.has(label + item.id) ? text : text.slice(0,4000))} path={path} /></div>;
       return <div key={item.id} className={"research-page-row codex-trace-row " + status + (open ? " expanded" : "")} data-status={status}>
         <button type="button" className="codex-trace-row-header" onClick={() => toggle(setExpanded,item.id)} aria-expanded={open} aria-controls={"trace-detail-" + item.id}>
           <span className="research-progress-state" aria-hidden="true">{status === "failed" ? <AlertCircle size={12}/> : status === "cancelled" ? <X size={12}/> : status === "completed" ? <Check size={12}/> : "\u25cf"}</span>
@@ -242,23 +249,23 @@ export function AgentExecutionTrace({ process, items: directItems, run, nested =
           <span className="codex-trace-header-right">{item.durationMs !== undefined && <span className="codex-trace-duration-tag">{(item.durationMs/1000).toFixed(1)}s</span>}<span className="codex-trace-chevron-btn" aria-hidden="true">{open ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}</span></span>
         </button>
         <div className="codex-trace-collapse" aria-hidden={!open} inert={!open}><div className="codex-trace-collapse-inner">{open && <div id={"trace-detail-" + item.id} className="codex-trace-detail-panel">
-          <div>{t("operationStatus")}: {t(status === "active" ? "running" : status === "waiting_for_approval" ? "awaiting_approval" : status)}</div>
+          <div className="codex-trace-status-line"><span className={`codex-trace-status-dot ${status}`} aria-hidden="true" />{t(status === "active" ? "running" : status === "waiting_for_approval" ? "awaiting_approval" : status)}</div>
           {item.stage==="provider_retry" && <div>{isUk?"Заплановано спробу з наступною моделлю":"Retry scheduled with the next configured model"}</div>}
-          <div><time dateTime={item.at}>{item.at}</time>{showIdentity && item.agentId && <> · {safe(item.agentId)}</>}{item.modelUsage?.provider && <> · {safe(item.modelUsage.provider)}</>}</div>
+          {showIdentity && item.agentId && <div>{safe(item.agentId)}</div>}
           {item.dryRun && <div>{t("dryRun")}</div>}
           {item.modelUsage && (item.modelUsage.totalTokens || item.modelUsage.inputTokens || item.modelUsage.outputTokens || item.modelUsage.costUsd !== undefined) ? usageView(item.modelUsage) : null}
-          {item.tool && <div>{t("tool")}: <code>{safe(item.tool)}</code></div>}
+          {item.tool && <div>{t("tool")}: <code className="codex-tool-name">{safe(item.tool)}</code></div>}
           {item.command && <div className="codex-trace-field"><div className="codex-trace-field-top"><span>{t("command")}</span>{copyButton(item.command,"cmd-" + item.id,"copyCommand")}</div><div className="codex-code-box"><code>{safe(item.command)}</code></div></div>}
-          {item.arguments && !item.command && <div className="codex-trace-field"><div className="codex-trace-field-top"><span>{t("tool")}: {safe(item.tool ?? "")}</span>{copyButton(item.arguments,"args-" + item.id,"copyLog")}</div><pre className="codex-log-pre">{safe(item.arguments)}</pre></div>}
+          {item.arguments && !item.command && (written ? <><div>{t("tool")}: <code className="codex-tool-name">{safe(item.tool ?? "")}</code></div>{log(written.content, "", written.path)}</> : <div className="codex-trace-field"><div className="codex-trace-field-top"><span>{t("tool")}: <code className="codex-tool-name">{safe(item.tool ?? "")}</code></span>{copyButton(item.arguments,"args-" + item.id,"copyLog")}</div><CodeView text={safe(item.arguments)} /></div>)}
           {item.cwd && <div>{t("workingDir")}: <code>{safe(item.cwd)}</code></div>}
-          {process?.name && <div>{t("project")}: {safe(process.name)}</div>}
+          
           {item.file && <div>{t("file")}: <code className="codex-file-code">{safe(item.file)}</code>{item.fileChange && <span> {t(item.fileChange)}</span>}{item.linesAdded !== undefined && <span> +{item.linesAdded}</span>}{item.linesRemoved !== undefined && <span> -{item.linesRemoved}</span>}</div>}
           {item.files?.map((file,index) => <div key={file.path + index}><code className="codex-file-code">{file.path}</code>{file.action && <span> {t(file.action)}</span>}{file.linesAdded !== undefined && <span> +{file.linesAdded}</span>}{file.linesRemoved !== undefined && <span> -{file.linesRemoved}</span>}{file.diff && log(file.diff,"diff " + file.path)}</div>)}
           {item.diff && !item.files?.some(file => file.diff) && log(item.diff,"diff")}
           {item.tests && <div>{t("testing")}: {item.tests.passed}/{item.tests.total} {t("testsPassed")}, {item.tests.failed} {t("failed")}, {item.tests.skipped} {t("skipped")}</div>}
-          {item.fileContent !== undefined && log(item.fileContent,t("output"))}
+          {item.fileContent !== undefined && log(item.fileContent,"",item.file)}
           {item.stdout !== undefined && log(item.stdout,"stdout")}{item.stderr !== undefined && log(item.stderr,"stderr")}
-          {item.result && !(item.result === "skipped" && active) && item.fileContent === undefined && item.stdout === undefined && item.stderr === undefined && !item.diff && !item.files?.some(file => file.diff) && !item.tests && log(plainResult(item.result),t("output"))}{item.resultTruncated && <span>{t("limited")}</span>}
+          {item.result && !(item.result === "skipped" && active) && item.fileContent === undefined && item.stdout === undefined && item.stderr === undefined && !item.diff && !item.files?.some(file => file.diff) && !item.tests && log(plainResult(item.result),"")}{item.resultTruncated && <span>{t("limited")}</span>}
           {item.durationMs !== undefined && <div>{t("duration")}: {(item.durationMs/1000).toFixed(2)}s</div>}
           {item.exitCode !== undefined && <div>{t("exitCode")}: {item.exitCode}</div>}
           {(item.error || item.errorCode) && !isNegativeAnswer(item) && <div className="codex-trace-error-msg">{t(item.errorCode === "approval_required" ? "awaiting_approval" : "error")}: {safe(isModelCallFailure(item) ? t("modelCallFailed") : item.error ?? (item.errorCode === "approval_required" ? t("awaiting_approval") : item.errorCode ?? ""))}</div>}

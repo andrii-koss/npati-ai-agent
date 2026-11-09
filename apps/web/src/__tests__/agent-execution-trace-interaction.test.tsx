@@ -106,7 +106,7 @@ describe("execution row interaction", () => {
     expect(host.querySelector(".coding-changed-files")?.textContent).toContain("+120");
     expect(host.querySelector(".coding-changed-files")?.textContent).toContain("-8");
     expect(host.querySelector(".coding-run-header")?.textContent).not.toContain("Editing files");
-    expect(host.querySelector(".codex-log-pre")).toBeNull();
+    expect(host.querySelector(".codex-log-pre .code-line")).toBeNull();
     expect(host.querySelector(".codex-trace-duration-tag")).not.toBeNull();
     expect(host.querySelector(".coding-run-header .research-active-text")).not.toBeNull();
     const activeItems = [{ ...items[0]!, status: "running" as const }];
@@ -139,9 +139,9 @@ describe("execution row interaction", () => {
     const commandCopy = host.querySelector<HTMLButtonElement>('button[title="Copy command"]')!;
     await act(async () => commandCopy.click());
     expect(writeText).toHaveBeenCalledWith("npm run build -- token=[REDACTED]");
-    expect(host.querySelector(".codex-log-pre")?.textContent?.length).toBe(4000);
+    expect(host.querySelector(".codex-log-pre .code-line")?.textContent?.length).toBe(4000);
     await act(async () => Array.from(host.querySelectorAll("button")).find(button => button.textContent === "View full recorded output")!.click());
-    expect(host.querySelector(".codex-log-pre")?.textContent).toContain("password=[REDACTED]");
+    expect(host.querySelector(".codex-log-pre .code-line")?.textContent).toContain("password=[REDACTED]");
     writeText.mockRejectedValue(new Error("clipboard denied"));
     await act(async () => host.querySelector<HTMLButtonElement>('button[title="Copy log"]')!.click());
     expect(host.querySelector('button[title="Copy log"]')?.textContent?.trim()).toBe("Copy");

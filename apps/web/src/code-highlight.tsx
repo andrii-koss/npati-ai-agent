@@ -96,9 +96,65 @@ export function tokenizeLine(line: string, start: LineState): { tokens: Token[];
 }
 
 /** Only a line whose own text or starting state changed is drawn again, so typing stays cheap in a long file. */
-const CodeLine = memo(function CodeLine({ tokens }: { tokens: Token[]; text: string; state: string }) {
-  return <>{tokens.map((token, index) => token.kind ? <span key={index} className={`code-token-${token.kind}`}>{token.text}</span> : token.text)}{"\n"}</>;
+const CodeLine = memo(function CodeLine({ tokens, text }: { tokens: Token[]; text: string; state: string }) {
+  return <div className="code-line" style={{ "--indent": indentOf(text) } as React.CSSProperties}>{tokens.map((token, index) => <TokenText key={index} token={token} />)}</div>;
 }, (previous, next) => previous.text === next.text && previous.state === next.state);
+
+/** Angle brackets are punctuation, drawn apart from the tag name. */
+function TokenText({ token }: { token: Token }) {
+  if (!token.kind) return <>{token.text}</>;
+  const parts = token.kind === "tag" ? /^(<\/?)?(.*?)(\/?>)?$/s.exec(token.text) : null;
+  if (!parts) return <span className={`code-token-${token.kind}`}>{token.text}</span>;
+  return <>{parts[1] && <span className="code-token-punctuation">{parts[1]}</span>}{parts[2] && <span className="code-token-tag">{parts[2]}</span>}{parts[3] && <span className="code-token-punctuation">{parts[3]}</span>}</>;
+}
+
+const indentOf = (line: string) => line.length - line.trimStart().length;
+/** The file's own indent unit, so the guides fall on its real nesting levels. */
+function guideStep(lines: readonly string[]): number {
+  const smallest = Math.min(...lines.map(indentOf).filter(Boolean));
+  return Number.isFinite(smallest) && smallest >= 2 && smallest <= 8 ? smallest : 2;
+}
+
+const isDiff = (text: string) => /^(?:--- |\+\+\+ |@@ |diff --git )/.test(text.trimStart());
+function diffLine(line: string): Token[] {
+  if (!line) return [];
+  const kind = /^(?:--- |\+\+\+ |diff --git |index )/.test(line) ? "diff-meta" : line.startsWith("@@") ? "diff-hunk" : line.startsWith("+") ? "diff-add" : line.startsWith("-") ? "diff-remove" : undefined;
+  return [{ text: line, ...(kind ? { kind } : {}) }];
+}
+const looksLikeJson = (text: string) => /^\s*[{[]\s*"/.test(text) || /^\s*\[\s*[\]{]/.test(text);
+/** Complete JSON laid out one field per line; anything else stays as it is. */
+function readableJson(text: string): string | null {
+  if (!/^\s*[{[]/.test(text)) return null;
+  try { return JSON.stringify(JSON.parse(text), null, 2); } catch { return null; }
+}
+/** A quoted string directly before a colon is a key, not a value. */
+function markJsonKeys(tokens: Token[]): Token[] {
+  return tokens.map((token, index) => token.kind === "string" && /^\s*:/.test(tokens[index + 1]?.text ?? "") ? { ...token, kind: "property" } : token);
+}
+
+/** Read-only code with line numbers: the one look of every code, data and log block in chat steps. */
+export function CodeView({ text, path }: { text: string; path?: string }) {
+  const rows = useMemo(() => {
+    if (isDiff(text)) {
+      const lines = text.split("\n");
+      return { step: 2, items: lines.map(line => ({ line, tokens: diffLine(line) })) };
+    }
+    const json = readableJson(text);
+    const source = json ?? text;
+    const language = json || looksLikeJson(text) ? "js" as const : path ? codeLanguage(path) : null;
+    const lines = source.split("\n");
+    let state: LineState | null = language ? { mode: language, home: language } : null;
+    return { step: guideStep(lines), items: lines.map(line => {
+      if (!state) return { line, tokens: [{ text: line }] as Token[] };
+      const { tokens, next } = tokenizeLine(line, state);
+      state = next;
+      return { line, tokens: json || looksLikeJson(text) ? markJsonKeys(tokens) : tokens };
+    }) };
+  }, [text, path]);
+  return <pre className="codex-log-pre code-view" style={{ "--guide": `${rows.step}ch` } as React.CSSProperties}>
+    {rows.items.map((item, index) => <div className="code-view-row" key={index}><span className="code-view-number" aria-hidden="true">{index + 1}</span><CodeLine tokens={item.tokens} text={item.line} state="" /></div>)}
+  </pre>;
+}
 
 export const CODE_LINE_HEIGHT = 20;
 const WINDOW_STEP = 30;
@@ -119,12 +175,13 @@ export function HighlightedCode({ text, language, firstLine }: { text: string; l
     });
   }, [text, language]);
   const widest = useMemo(() => (lines ?? []).reduce((width, item) => Math.max(width, item.line.length), 0), [lines]);
+  const step = useMemo(() => guideStep((lines ?? []).map(item => item.line)), [lines]);
   if (!lines) return <>{text}</>;
   const start = Math.max(0, firstLine - WINDOW_STEP * 2);
   const end = Math.min(lines.length, start + WINDOW_LINES);
-  return <>
+  return <div style={{ "--guide": `${step}ch` } as React.CSSProperties}>
     <div style={{ height: start * CODE_LINE_HEIGHT, width: `${widest}ch` }} />
     {lines.slice(start, end).map((item, index) => <CodeLine key={start + index} tokens={item.tokens} text={item.line} state={item.key} />)}
     <div style={{ height: (lines.length - end) * CODE_LINE_HEIGHT }} />
-  </>;
+  </div>;
 }

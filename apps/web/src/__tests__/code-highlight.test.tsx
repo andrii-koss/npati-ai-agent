@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { codeLanguage, tokenizeLine, type CodeLanguage } from "../code-highlight";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { CodeView, codeLanguage, tokenizeLine, type CodeLanguage } from "../code-highlight";
 
 function run(source: string, language: CodeLanguage) {
   let state = { mode: language, home: language } as Parameters<typeof tokenizeLine>[1];
@@ -37,6 +39,30 @@ describe("code colouring", () => {
     expect(kinds(lines[1]!)).toMatchObject({ const: "keyword" });
     expect(lines[3]!.some(token => token.kind === "keyword")).toBe(false);
     expect(kinds(run("<style>\ncolor: red;\n</style>", "html")[1]!)).toMatchObject({ color: "property" });
+  });
+
+  it("draws numbered code with brackets apart from the tag name and the file's indent unit", () => {
+    const html = renderToStaticMarkup(<CodeView path="a.html" text={"<div>\n    <p>x</p>\n</div>"} />);
+    expect(html.match(/code-view-number/g)).toHaveLength(3);
+    expect(html).toContain('<span class="code-token-punctuation">&lt;</span><span class="code-token-tag">div</span><span class="code-token-punctuation">&gt;</span>');
+    expect(html).toContain("--guide:4ch");
+    expect(html).toContain("--indent:4");
+  });
+
+  it("gives diffs, JSON and logs the same block", () => {
+    const diff = renderToStaticMarkup(<CodeView text={"--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new"} />);
+    expect(diff).toContain('code-token-diff-remove">-old');
+    expect(diff).toContain('code-token-diff-add">+new');
+    expect(diff).toContain('code-token-diff-hunk');
+    const json = renderToStaticMarkup(<CodeView text={'{"source":"ai","n":1}'} />);
+    expect(json).toContain('code-token-property">&quot;source&quot;');
+    expect(json).toContain('code-token-string">&quot;ai&quot;');
+    expect(json.match(/code-view-number/g)).toHaveLength(4);
+    const cut = renderToStaticMarkup(<CodeView text={'{"source":"a'} />);
+    expect(cut).toContain("code-token-");
+    const log = renderToStaticMarkup(<CodeView text={"Compiled successfully"} />);
+    expect(log).toContain("code-view-number");
+    expect(log).not.toContain("code-token-");
   });
 
   it("knows which files it can colour", () => {
