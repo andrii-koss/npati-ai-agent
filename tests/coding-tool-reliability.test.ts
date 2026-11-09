@@ -93,7 +93,7 @@ describe("chat history in a code project", () => {
 
 describe("content protection and ordinary code", () => {
   it("leaves names and messages alone", () => {
-    for (const line of ['const TOKEN_KEY = "teamflow_token";', 'password: "Мінімум 8 символів",', 'passwordLabel: "PasswordField",', 'token: "Invalid token value",', 'const TOKEN_HEADER = "x-auth-token";']) expect(hasQuotedCredential(line), line).toBe(false);
+    for (const line of ['const TOKEN_KEY = "teamflow_token";', 'password: "Мінімум 8 символів",', 'passwordLabel: "PasswordField",', 'token: "Invalid token value",', 'const TOKEN_HEADER = "x-auth-token";', 'passwordId: "loginPassword",']) expect(hasQuotedCredential(line), line).toBe(false);
   });
   it("allows sample passwords in test files only", () => {
     for (const file of ["tests/api.test.js", "server/__tests__/auth.js", "src/App.test.tsx", "e2e/login.spec.ts"]) expect(hasQuotedCredential('password: "Str0ng-pass",', file), file).toBe(false);

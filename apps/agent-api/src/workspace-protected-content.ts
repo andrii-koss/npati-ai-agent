@@ -10,7 +10,7 @@ const isTestFile = (filePath: string) => /(?:^|[\\/])(?:tests?|__tests__|spec|sp
 
 /**
  * A quoted value under a credential-like name. Messages and labels (spaces or non-Latin letters) and names of a
- * storage key, field or header ("TOKEN_KEY", "passwordLabel") are ordinary code, not credentials. So are the sample
+ * storage key, field, header or form element ("TOKEN_KEY", "passwordLabel", "passwordId") are ordinary code, not credentials. So are the sample
  * passwords of a test file. Real key formats stay refused everywhere, by `isWorkspaceContentProtected`.
  */
 export function hasQuotedCredential(content: string, filePath = ""): boolean {
@@ -19,7 +19,7 @@ export function hasQuotedCredential(content: string, filePath = ""): boolean {
   for (const [, name, value] of content.matchAll(assignments)) {
     if (/\s|[^\x00-\x7F]/.test(value!)) continue;
     const secretKeyName = /(?:api|secret|access|private)[_-]?key$/i.test(name!);
-    if (!secretKeyName && /(?:key|name|storage|header|field|label|error|message|placeholder|hint|title|path|url|type|param|cookie|prefix|regex|pattern)$/i.test(name!)) continue;
+    if (!secretKeyName && /(?:key|name|storage|header|field|label|error|message|placeholder|hint|title|path|url|type|param|cookie|prefix|regex|pattern|id|input|selector|element|class|attr)$/i.test(name!)) continue;
     return true;
   }
   return false;
