@@ -160,7 +160,7 @@ export const en: TranslationSchema = {
   chat: {
     emptyTitle: "What should we work on?",
     emptySubtitle: "Ask NPATI Agent anything, or brainstorm ideas.",
-    placeholder: "Ask NPATI Agent anything…",
+    placeholder: "Ask Npati…",
     businessEmptySubtitle: "I’ll use the context for {{name}} and won’t invent missing facts.",
     businessPlaceholder: "Ask about your business, goals, audience, or next move…",
     workModeLabel: "Work mode",

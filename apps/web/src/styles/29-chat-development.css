@@ -500,7 +500,14 @@
 .coding-run-activity > .codex-trace-row { margin: 0; padding: 0; min-height: 0; }
 .coding-run-header { flex-wrap: nowrap; }
 .coding-run-header > span.research-active-text, .coding-run-header > span:nth-child(3) { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.coding-run-header .research-progress-globe { stroke: currentColor; color: inherit; flex-shrink: 0; }
+.coding-run-header .research-progress-globe { stroke: currentColor; color: inherit; flex-shrink: 0; width: 16px; height: 16px; }
+.coding-run-header > span:nth-child(3) { color: #333; font-weight: 600; }
+.coding-run-header > span.research-active-text { background-image: linear-gradient(100deg, #333 15%, #333 38%, var(--npati-red) 50%, #333 62%, #333 85%); }
+/* A Preview readied before it is opened: laid out at the drawer's size, never painted and never in the way. */
+.project-chat-preview-warm { position: fixed; top: 0; left: -200vw; width: 60vw; height: 100vh; visibility: hidden; pointer-events: none; }
+.project-chat-preview-viewport { position: relative; }
+.project-chat-preview-placeholder { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.project-chat-preview-frame.is-loading { visibility: hidden; }
 
 /* Research rows center their children; execution history must stretch across the chat. */
 .coding-run-activity .codex-trace-row { align-items: stretch; }
@@ -1230,3 +1237,20 @@ body:has(.project-chat-preview-layer) .message-stream {
     display: none !important;
   }
 }
+
+/* The Chat/Code switch is hidden: every message goes through the normal chat route. */
+.chat-work-mode-switch { display: none !important; }
+
+/* Coloured code sits under a transparent textarea with identical metrics, so editing stays native. */
+.chat-file-code { position: relative; flex: 1; min-width: 0; display: flex; }
+.chat-file-highlight { position: absolute; inset: 0; margin: 0; padding: 14px 16px; overflow: hidden; white-space: pre; tab-size: 2; font: inherit; color: #27272f; pointer-events: none; }
+.chat-file-text.is-colored { position: relative; z-index: 1; color: transparent; caret-color: #27272f; }
+.chat-file-text.is-colored::selection { background: rgba(59, 130, 246, .25); color: transparent; }
+.code-token-keyword { color: #7c3aed; }
+.code-token-string { color: #15803d; }
+.code-token-comment { color: #9ca3af; }
+.code-token-number { color: #c2410c; }
+.code-token-function { color: #2563eb; }
+.code-token-tag { color: #be123c; }
+.code-token-attr { color: #b45309; }
+.code-token-property { color: #0e7490; }

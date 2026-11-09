@@ -4,6 +4,7 @@ import { Check, Copy, Maximize2, Minimize2, RefreshCw, Save, X } from "lucide-re
 import { api } from "./business-workspace-shared";
 import { I18nContextRef } from "./i18n";
 import { LivePreviewSplitResizer } from "./LivePreviewSplitResizer";
+import { HighlightedCode, codeLanguage, codeWindow } from "./code-highlight";
 
 export type ChatFileTarget = { companyId: string; projectId: string; path: string };
 type FileContent = { content: string; revision: string; binary?: boolean };
@@ -14,15 +15,40 @@ export const ChatFileViewerContext = createContext<((target: ChatFileTarget) => 
 const fileUrl = ({ companyId, projectId }: ChatFileTarget, action: string) =>
   `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/files/${action}`;
 
+/** Above this size a file is edited as plain text. */
+const MAX_COLORED_CHARS = 400_000;
+const PRELOAD_MS = 30_000;
+type Preloaded = { at: number; promise: Promise<FileContent | null>; value?: FileContent };
+const preloaded = new Map<string, Preloaded>();
+const fileKey = (target: ChatFileTarget) => `${target.projectId}:${target.path}`;
+
+/** Fetches a file when the pointer reaches its block, so the click can show it at once. */
+export function preloadChatFile(target: ChatFileTarget): void {
+  const key = fileKey(target);
+  const existing = preloaded.get(key);
+  if (existing && Date.now() - existing.at < PRELOAD_MS) return;
+  if (preloaded.size >= 30) preloaded.clear();
+  const entry: Preloaded = { at: Date.now(), promise: api<FileContent>(`${fileUrl(target, "read")}?path=${encodeURIComponent(target.path)}`).then(file => { entry.value = file; return file; }).catch(() => null) };
+  preloaded.set(key, entry);
+}
+function recentPreload(target: ChatFileTarget): Preloaded | undefined {
+  const entry = preloaded.get(fileKey(target));
+  return entry && Date.now() - entry.at < PRELOAD_MS ? entry : undefined;
+}
+
 /** Same layer, drawer, resizer and header classes as Live Preview, so the panel has its size, motion and style. */
 function ChatFileDrawer({ target, busy, dirtyRef, onClose }: { target: ChatFileTarget; busy: boolean; dirtyRef: React.MutableRefObject<boolean>; onClose(): void }) {
   const isUk = useContext(I18nContextRef)?.language === "uk";
-  const [text, setText] = useState("");
-  const [saved, setSaved] = useState("");
-  const [revision, setRevision] = useState("");
-  const [state, setState] = useState<"loading" | "ready" | "saving">("loading");
+  const [opened] = useState(() => recentPreload(target));
+  const [text, setText] = useState(opened?.value?.content ?? "");
+  const [saved, setSaved] = useState(opened?.value?.content ?? "");
+  const [revision, setRevision] = useState(opened?.value?.revision ?? "");
+  const [state, setState] = useState<"loading" | "ready" | "saving">(opened?.value ? "ready" : "loading");
   const [error, setError] = useState("");
-  const [binary, setBinary] = useState(false);
+  const [binary, setBinary] = useState(opened?.value?.binary === true);
+  const language = useMemo(() => codeLanguage(target.path), [target.path]);
+  const overlay = useRef<HTMLPreElement>(null);
+  const [firstLine, setFirstLine] = useState(0);
   const [copied, setCopied] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -41,13 +67,24 @@ function ChatFileDrawer({ target, busy, dirtyRef, onClose }: { target: ChatFileT
     } catch (failure) { setError(failure instanceof Error ? failure.message : "Could not open the file"); }
     setState("ready");
   }, [target]);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    let cancelled = false;
+    const apply = (file: FileContent) => { setBinary(file.binary === true); setText(file.content); setSaved(file.content); setRevision(file.revision); setState("ready"); };
+    if (opened?.value) {
+      // Shown from the preload at once; a newer version replaces it unless the user has already started editing.
+      void api<FileContent>(`${fileUrl(target, "read")}?path=${encodeURIComponent(target.path)}`).then(file => { if (!cancelled && !dirtyRef.current && file.revision !== opened.value!.revision) apply(file); }).catch(() => undefined);
+    } else if (opened) {
+      void opened.promise.then(file => { if (cancelled) return; if (file) apply(file); else void load(); });
+    } else void load();
+    return () => { cancelled = true; };
+  }, [load, opened, target, dirtyRef]);
 
   /** The saved file stays saved whatever happens here: this only brings it to the running Preview. */
   async function applyToPreview() {
     setPublishing(true);
     try {
       await api(`/companies/${encodeURIComponent(target.companyId)}/projects/${encodeURIComponent(target.projectId)}/preview/apply-file-changes`, { method: "POST", body: "{}" });
+      window.dispatchEvent(new CustomEvent("npati-code-project-updated", { detail: { projectId: target.projectId } }));
     } catch (failure) {
       setError(`${isUk ? "Файл збережено, але Preview не оновився" : "The file is saved, but Preview was not updated"}: ${failure instanceof Error ? failure.message : ""}`);
     }
@@ -59,6 +96,7 @@ function ChatFileDrawer({ target, busy, dirtyRef, onClose }: { target: ChatFileT
     setState("saving"); setError("");
     try {
       const file = await api<FileContent>(fileUrl(target, "write"), { method: "POST", body: JSON.stringify({ path: target.path, content: text, expectedRevision: revision }) });
+      preloaded.delete(fileKey(target));
       setSaved(text); setRevision(file.revision); setJustSaved(true);
       window.setTimeout(() => setJustSaved(false), 2000);
       void applyToPreview();
@@ -75,6 +113,7 @@ function ChatFileDrawer({ target, busy, dirtyRef, onClose }: { target: ChatFileT
     setCopied(true); window.setTimeout(() => setCopied(false), 2000);
   }
   const fullscreen = isUk ? (isFullscreen ? "Згорнути" : "На весь екран") : (isFullscreen ? "Restore size" : "Maximize");
+  const colored = Boolean(language) && text.length <= MAX_COLORED_CHARS;
   const status = state === "loading" ? "starting" : error ? "failed" : dirty ? "stopped" : "running";
 
   return createPortal(
@@ -102,10 +141,13 @@ function ChatFileDrawer({ target, busy, dirtyRef, onClose }: { target: ChatFileT
         <div className="chat-file-editor">
           {binary ? <p className="chat-file-note">{isUk ? "Це не текстовий файл." : "This is not a text file."}</p> : state !== "loading" && <>
             <pre ref={gutter} className="chat-file-gutter" aria-hidden="true">{numbers}</pre>
-            <textarea className="chat-file-text" aria-label={target.path} spellCheck={false} wrap="off" value={text} readOnly={busy || Boolean(error && !revision)}
-              onChange={event => setText(event.target.value)}
-              onScroll={event => { if (gutter.current) gutter.current.scrollTop = event.currentTarget.scrollTop; }}
-              onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void save(); } }} />
+            <div className="chat-file-code">
+              {colored && <pre ref={overlay} className="chat-file-highlight" aria-hidden="true"><HighlightedCode text={text} language={language} firstLine={firstLine} /></pre>}
+              <textarea className={`chat-file-text ${colored ? "is-colored" : ""}`} aria-label={target.path} spellCheck={false} wrap="off" value={text} readOnly={busy || Boolean(error && !revision)}
+                onChange={event => setText(event.target.value)}
+                onScroll={event => { setFirstLine(codeWindow(event.currentTarget.scrollTop)); if (gutter.current) gutter.current.scrollTop = event.currentTarget.scrollTop; if (overlay.current) { overlay.current.scrollTop = event.currentTarget.scrollTop; overlay.current.scrollLeft = event.currentTarget.scrollLeft; } }}
+                onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void save(); } }} />
+            </div>
           </>}
         </div>
       </aside>

@@ -209,6 +209,16 @@ export function ChatProjectPreviewCard({
   const [deviceMode, setDeviceMode] = useState<DeviceMode>("desktop");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [iframeKey, setIframeKey] = useState(0);
+  // The site loads in a hidden frame as soon as the pointer reaches the card, and the same frame is revealed on click.
+  const [warm, setWarm] = useState(false);
+  const [hovering, setHovering] = useState(false);
+  const [frameReady, setFrameReady] = useState(false);
+  useEffect(() => { setFrameReady(false); }, [iframeKey, previewUrl, previewHtml]);
+  useEffect(() => {
+    if (!warm || previewOpen || hovering) return;
+    const timer = window.setTimeout(() => { setWarm(false); setFrameReady(false); }, 60_000);
+    return () => window.clearTimeout(timer);
+  }, [warm, previewOpen, hovering]);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const isCodeProject = card.kind === "code_project";
@@ -326,6 +336,8 @@ export function ChatProjectPreviewCard({
       const detail = (event as CustomEvent<{ projectId?: string }>).detail;
       if (!detail?.projectId || detail.projectId === projectId) {
         void checkRuntime();
+        // A frame kept ready must not reveal the version from before this change.
+        setIframeKey((key) => key + 1);
       }
     };
     window.addEventListener("npati-code-project-updated", onProjectUpdate);
@@ -422,9 +434,26 @@ export function ChatProjectPreviewCard({
 
   useEffect(() => { if (openPreviews?.has(previewKey)) void openPreview(); }, []);
 
+  /** Readies the running site in the hidden frame. It never starts a stopped Preview. */
+  async function warmPreview() {
+    setHovering(true);
+    if (warm || previewOpen || runtimeStatus !== "running" || !card.companyId) return;
+    setWarm(true);
+    if (previewUrl || previewHtml || isStatic) return;
+    const endpoint = `/api/companies/${encodeURIComponent(card.companyId)}/projects/${encodeURIComponent(card.projectId ?? card.id)}/preview`;
+    const token = getStoredAuthToken();
+    const headers: Record<string, string> = token ? { authorization: `Bearer ${token}` } : {};
+    const status = await fetch(`${endpoint}/status`, { headers }).then(response => response.ok ? response.json() as Promise<{ isRunning?: boolean; previewUrl?: string }> : null).catch(() => null);
+    if (!status?.isRunning) return;
+    const url = status.previewUrl ?? await fetch(`${endpoint}/token`, { headers }).then(response => response.ok ? response.json() as Promise<{ token?: string }> : null).then(value => value?.token ? `${endpoint}/proxy/?token=${encodeURIComponent(value.token)}` : "").catch(() => "");
+    if (url) setPreviewUrl(current => current || url);
+  }
+
   async function openPreview() {
     setPreviewOpen(true);
+    setWarm(true);
     setPreviewError("");
+    if (frameReady && (previewUrl || previewHtml)) return;
     if (!card.companyId) {
       setPreviewError("Project company is unavailable.");
       return;
@@ -454,7 +483,8 @@ export function ChatProjectPreviewCard({
       const status = await statusResponse.json().catch(() => null) as { isRunning?: boolean; previewUrl?: string } | null;
       if (statusResponse.ok && status?.isRunning) {
         if (status.previewUrl) {
-          setPreviewUrl(status.previewUrl);
+          // Keeps the frame that is already loading: a fresh token in the address would restart it.
+          setPreviewUrl(current => current || status.previewUrl || "");
           setRuntimeStatus("running");
           return;
         }
@@ -510,7 +540,7 @@ export function ChatProjectPreviewCard({
   return (
     <>
       {showPreviewTrigger && (
-        <div className={`chat-project-preview-card ${className}`.trim()} data-testid="chat-project-preview-card">
+        <div className={`chat-project-preview-card ${className}`.trim()} data-testid="chat-project-preview-card" onPointerEnter={() => void warmPreview()} onPointerLeave={() => setHovering(false)} onFocus={() => void warmPreview()}>
           <div className="chat-preview-card-left">
             {/* Project Thumbnail / SVG Mockup */}
             <div className="chat-preview-card-thumbnail" data-type={projectType}>
@@ -664,14 +694,14 @@ export function ChatProjectPreviewCard({
       )}
 
       {/* Live Preview Modal / Drawer */}
-      {previewOpen && createPortal(
-        <div className={`project-chat-preview-layer ${isFullscreen ? "is-fullscreen" : ""}`}>
+      {(previewOpen || warm) && createPortal(
+        <div className={previewOpen ? `project-chat-preview-layer ${isFullscreen ? "is-fullscreen" : ""}` : "project-chat-preview-warm"} aria-hidden={!previewOpen}>
           <aside
             className={`project-chat-preview-drawer ${isFullscreen ? "is-fullscreen" : ""}`}
             role="complementary"
             aria-label={`Preview of ${card.name}`}
           >
-            {!isFullscreen && <LivePreviewSplitResizer />}
+            {previewOpen && !isFullscreen && <LivePreviewSplitResizer />}
             <LivePreviewHeader
               projectName={card.name}
               runtimeStatus={runtimeStatus}
@@ -703,21 +733,23 @@ export function ChatProjectPreviewCard({
             />
             <div className="project-chat-preview-body" data-device-mode={deviceMode}>
               <div className="project-chat-preview-viewport" data-device-mode={deviceMode}>
+                {!frameReady && !previewError && thumbnailUrl && <img className="project-chat-preview-placeholder" src={thumbnailUrl} alt="" />}
                 {previewHtml ? (
                   <iframe
                     key={iframeKey}
                     title={`${card.name} preview`}
                     srcDoc={previewHtml}
                     sandbox="allow-same-origin"
-                    onLoad={handleStaticPreviewLoad}
-                    className="project-chat-preview-frame"
+                    onLoad={(event) => { setFrameReady(true); handleStaticPreviewLoad(event); }}
+                    className={`project-chat-preview-frame ${frameReady ? "" : "is-loading"}`}
                   />
                 ) : previewUrl ? (
                   <iframe
                     key={iframeKey}
                     title={`${card.name} preview`}
                     src={previewUrl}
-                    className="project-chat-preview-frame"
+                    onLoad={() => setFrameReady(true)}
+                    className={`project-chat-preview-frame ${frameReady ? "" : "is-loading"}`}
                   />
                 ) : previewError ? (
                   <div className="project-chat-preview-empty" role="status">

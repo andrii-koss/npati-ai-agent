@@ -106,7 +106,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const noMemory = chatMode === "private";
   const ttsEnabled = chatMode === "tts";
   // Work mode is a per-tab convenience; Chat is the default when storage is unavailable.
-  const [workMode, setWorkMode] = useState<"chat" | "code">(() => { try { return sessionStorage.getItem("npati_work_mode") === "code" ? "code" : "chat"; } catch { return "chat"; } });
+  // The switch is hidden, so a tab must not start in a mode it can no longer leave.
+  const [workMode, setWorkMode] = useState<"chat" | "code">("chat");
   const changeWorkMode = (mode: "chat" | "code") => { setWorkMode(mode); try { sessionStorage.setItem("npati_work_mode", mode); } catch {} };
 
   useEffect(() => {

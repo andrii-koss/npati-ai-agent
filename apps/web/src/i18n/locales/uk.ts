@@ -160,7 +160,7 @@ export const uk: TranslationSchema = {
   chat: {
     emptyTitle: "Над чим попрацюємо?",
     emptySubtitle: "Запитайте що завгодно в NPATI Agent або шукайте ідеї.",
-    placeholder: "Запитайте що завгодно в NPATI Agent…",
+    placeholder: "Запитайте Npati…",
     businessEmptySubtitle: "Я використаю контекст компанії {{name}} і не вигадуватиму фактів.",
     businessPlaceholder: "Запитайте про ваш бізнес, цілі, аудиторію або наступний крок…",
     workModeLabel: "Режим роботи",
