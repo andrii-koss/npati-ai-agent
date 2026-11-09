@@ -1,6 +1,6 @@
 {
   "manifestVersion": 19,
-  "checksum": "7b2902d12bbedfa158733e6c5e7d37dc5b4f7a1a2dd0b2d017da003af8363b11",
+  "checksum": "7910924a87a84f71439db96ccc801272fda98088a2070fe03b6cd254ad74137e",
   "tools": [
     {
       "key": "code.agent.continue@1",
@@ -119,7 +119,7 @@
       "name": "code.data.schema.apply",
       "version": 2,
       "status": "active",
-      "checksum": "807225d224b16997003762ad31c0522637afcf9d005c3bcfe547243624f41dfa"
+      "checksum": "7c322077c4d784fb0eb7529e048bf2367eda57dd428daf3dda4d6c1cc4e7b57f"
     },
     {
       "key": "code.data.schema.inspect@1",

@@ -7,6 +7,14 @@ import type { DataBackend, DataEnvironmentName } from "./types";
 
 export type FieldType = "string" | "text" | "integer" | "decimal" | "boolean" | "date" | "datetime" | "json" | "uuid" | "enum" | "file_reference";
 export interface FieldDefinition { name: string; type: FieldType; required?: boolean; default?: string | number | boolean | null; options?: string[]; }
+const ON_DELETE_SQL: Record<string, string> = { cascade: " ON DELETE CASCADE", restrict: " ON DELETE RESTRICT", set_null: " ON DELETE SET NULL" };
+const onDeleteSql = (rule?: string) => {
+  if (rule === undefined) return "";
+  const sql = ON_DELETE_SQL[rule];
+  if (!sql) throw new DataStudioError(400, "create_relation", "Invalid delete rule", false, "INVALID_OPERATION");
+  return sql;
+};
+
 export type SchemaOperation =
   | { kind: "create_collection"; collection: string; fields: FieldDefinition[] }
   | { kind: "drop_collection"; collection: string }
@@ -15,7 +23,7 @@ export type SchemaOperation =
   | { kind: "alter_field"; collection: string; field: FieldDefinition }
   | { kind: "rename_field"; collection: string; field: string; next: string }
   | { kind: "drop_field"; collection: string; field: string }
-  | { kind: "create_relation"; collection: string; target: string; name: string; field?: string; cardinality: "many-to-one" | "one-to-many" | "many-to-many" }
+  | { kind: "create_relation"; collection: string; target: string; name: string; field?: string; cardinality: "many-to-one" | "one-to-many" | "many-to-many"; onDelete?: "cascade" | "restrict" | "set_null" }
   | { kind: "drop_relation"; collection: string; name: string; cardinality: "many-to-one" | "one-to-many" | "many-to-many" }
   | { kind: "create_index"; collection: string; fields: string[]; unique?: boolean };
 export interface SchemaChange {
@@ -127,7 +135,7 @@ export class PostgresDataProvider implements DataProvider {
           const many = operation.cardinality === "one-to-many" ? operation.target : operation.collection;
           const one = operation.cardinality === "one-to-many" ? operation.collection : operation.target;
           const constraint = quoteIdentifier(validateIdentifier(`fk_${many}_${operation.name}`.slice(0, 63)));
-          return { operation: "create_relation", upSql: `ALTER TABLE ${quoteIdentifier(many)} ADD CONSTRAINT ${constraint} FOREIGN KEY (${quoteIdentifier(operation.field)}) REFERENCES ${quoteIdentifier(one)}(id);`, downSql: `ALTER TABLE ${quoteIdentifier(many)} DROP CONSTRAINT ${constraint};`, reversible: true, destructive: false, requiresSnapshot: false };
+          return { operation: "create_relation", upSql: `ALTER TABLE ${quoteIdentifier(many)} ADD CONSTRAINT ${constraint} FOREIGN KEY (${quoteIdentifier(operation.field)}) REFERENCES ${quoteIdentifier(one)}(id)${onDeleteSql(operation.onDelete)};`, downSql: `ALTER TABLE ${quoteIdentifier(many)} DROP CONSTRAINT ${constraint};`, reversible: true, destructive: false, requiresSnapshot: false };
         }
         return this.createRelation(operation.collection, operation.target, operation.name, operation.cardinality);
       }

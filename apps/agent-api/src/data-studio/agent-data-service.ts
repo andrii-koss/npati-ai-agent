@@ -152,7 +152,7 @@ export class AgentDataStudioService {
 
   async assertBackend(ctx: AuthContext, companyId: string, projectId: string, expectedBackendId: string) {
     const { backend } = await this.context(ctx, companyId, projectId);
-    if (backend.id !== expectedBackendId) throw new DataStudioError(409, "project_data", "Project database attachment changed", false, "BACKEND_CHANGED");
+    if (backend.id !== expectedBackendId) throw new DataStudioError(409, "project_data", `Project database attachment changed; this project's database id is ${backend.id}`, false, "BACKEND_CHANGED");
     return backend;
   }
 

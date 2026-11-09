@@ -4447,7 +4447,8 @@
                   "type": "string",
                   "pattern": "^[a-z][a-z0-9_]{0,62}$"
                 },
-                "cardinality": {
+                "onDelete": { "enum": ["cascade", "restrict", "set_null"], "description": "What happens to these rows when the referenced row is deleted. Use it whenever the request says so." },
+"cardinality": {
                   "type": "string",
                   "enum": [
                     "many-to-one",

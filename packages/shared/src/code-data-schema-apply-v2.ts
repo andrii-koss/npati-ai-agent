@@ -124,6 +124,7 @@ export const CODE_DATA_SCHEMA_APPLY_V2_INPUT = {
               "type": "string",
               "pattern": "^[a-z][a-z0-9_]{0,62}$"
             },
+            "onDelete": { "enum": ["cascade", "restrict", "set_null"], "description": "What happens to these rows when the referenced row is deleted. Use it whenever the request says so." },
             "cardinality": {
               "type": "string",
               "enum": [
