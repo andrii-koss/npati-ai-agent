@@ -33,7 +33,7 @@ export const STATIC_CATALOG_BASELINE = {
  * existing AgentDataStudioService (dev only), and both data writes need a recorded approval unless dryRun.
  */
 // v16 retains schema.apply@1 and adds the dev-only, attachment-bound FK schema.apply@2.
-export const TOOL_SCHEMA_MANIFEST_VERSION = 18;
+export const TOOL_SCHEMA_MANIFEST_VERSION = 19;
 
 export interface CapabilityAuditIssue {
   /** Stable machine-readable code; the negative control asserts on these, never on prose. */

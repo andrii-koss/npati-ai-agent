@@ -155,9 +155,9 @@ export const CODE_DATA_CAPABILITIES: (CapabilityDefinition & { inputSchema: Reco
     "type": "tool",
     "domain": "code",
     "name": "code.data.schema.modify",
-    "description": "Rename a table (rename_collection with next), change a field type (alter_field with field definition), delete a field (drop_field with field name), or delete a table (drop_collection) in the attached dev database. Inspect first for backend ID and fingerprint. Preview with dryRun; execution requires human approval, destructive changes take a snapshot. Update application code for renamed/deleted objects.",
+    "description": "Rename a table (rename_collection with next), rename a column keeping its data (rename_field with field and next; never add a new column and drop the old one), change a field type (alter_field with field definition), delete a field (drop_field with field name), or delete a table (drop_collection) in the attached dev database. Inspect first for backend ID and fingerprint. Preview with dryRun; execution requires human approval, destructive changes take a snapshot. Update application code for renamed/deleted objects.",
     "useWhen": [
-      "Rename a table (rename_collection with next), change a field type (alter_field with field definition), delete a field (drop_field with field name), or delete a table (drop_collection) in the attached dev database. Inspect first for backend ID and fingerprint. Preview with dryRun; execution requires human approval, destructive changes take a snapshot. Update application code for renamed/deleted objects."
+      "Rename a table (rename_collection with next), rename a column keeping its data (rename_field with field and next; never add a new column and drop the old one), change a field type (alter_field with field definition), delete a field (drop_field with field name), or delete a table (drop_collection) in the attached dev database. Inspect first for backend ID and fingerprint. Preview with dryRun; execution requires human approval, destructive changes take a snapshot. Update application code for renamed/deleted objects."
     ],
     "doNotUseWhen": [
       "The target is outside this owner/company, or direct production access is required."
@@ -204,6 +204,7 @@ export const CODE_DATA_CAPABILITIES: (CapabilityDefinition & { inputSchema: Reco
             "kind": {
               "enum": [
                 "rename_collection",
+                "rename_field",
                 "alter_field",
                 "drop_field",
                 "drop_collection"

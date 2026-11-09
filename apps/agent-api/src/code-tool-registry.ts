@@ -410,6 +410,8 @@ export const KNOWN_TOOL_MANIFESTS: readonly CodeToolManifest[] = [
   toolManifest(V15_TOOL_SCHEMAS, 15),
   toolManifest(V16_TOOL_SCHEMAS, 16),
   toolManifest(V17_TOOL_SCHEMAS, 17),
+  // v19 only adds rename_field to code.data.schema.modify, so a session started on v18 keeps working with the same set.
+  toolManifest(CODE_TOOL_SCHEMAS, 18),
   toolManifest(CODE_TOOL_SCHEMAS, CODE_TOOL_MANIFEST_VERSION),
 ];
 
