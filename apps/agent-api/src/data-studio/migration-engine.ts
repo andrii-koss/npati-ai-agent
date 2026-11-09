@@ -321,13 +321,21 @@ export class ProjectMigrationEngine {
       "SELECT * FROM " + table + (conditions.length ? " WHERE " + conditions.join(" AND ") : "") + sort + " LIMIT $" + (values.length - 1) + " OFFSET $" + values.length, values);
   }
 
+  /** The database driver sends a JavaScript array as a Postgres array, which a json column refuses, so those are sent as JSON. */
+  private async ownerParameters(ctx: AuthContext, backend: DataBackend, environment: DataEnvironmentName, collection: string, fields: string[], row: Record<string, unknown>) {
+    const values = fields.map((f) => row[f] === undefined ? null : row[f]);
+    if (!values.some(Array.isArray)) return values;
+    const json = new Set((await this.ownerQuery<{ column_name: string }>(ctx, backend, environment, "SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1 AND data_type IN ('json','jsonb')", [collection])).map((column) => column.column_name));
+    return values.map((value, index) => Array.isArray(value) && json.has(fields[index]!) ? JSON.stringify(value) : value);
+  }
+
   async createOwnerRow(ctx: AuthContext, backend: DataBackend, environment: DataEnvironmentName, collection: string, row: Record<string, unknown>) {
     const fields = Object.keys(row).filter((f) => row[f] !== undefined);
     if (fields.length > 100 || fields.includes("id")) throw new DataStudioError(400, "owner_data", "Invalid row", false, "INVALID_ROW");
     const sql = fields.length === 0
       ? "INSERT INTO " + quoteIdentifier(collection) + " DEFAULT VALUES RETURNING *"
       : "INSERT INTO " + quoteIdentifier(collection) + " (" + fields.map(quoteIdentifier).join(",") + ") VALUES (" + fields.map((_, index) => "$" + (index + 1)).join(",") + ") RETURNING *";
-    const values = fields.map((f) => row[f] === undefined ? null : row[f]);
+    const values = await this.ownerParameters(ctx, backend, environment, collection, fields, row);
     return (await this.ownerQuery<Record<string, unknown>>(ctx, backend, environment, sql, values))[0];
   }
 
@@ -335,7 +343,7 @@ export class ProjectMigrationEngine {
     if (!/^[0-9a-f-]{36}$/i.test(id)) throw new DataStudioError(400, "owner_data", "Invalid row ID", false, "INVALID_ROW_ID");
     const fields = Object.keys(row).filter((f) => row[f] !== undefined);
     if (!fields.length || fields.length > 100 || fields.includes("id")) throw new DataStudioError(400, "owner_data", "Invalid row", false, "INVALID_ROW");
-    const values = fields.map((f) => row[f] === undefined ? null : row[f]);
+    const values = await this.ownerParameters(ctx, backend, environment, collection, fields, row);
     const sql = "UPDATE " + quoteIdentifier(collection) + " SET " + fields.map((field, index) => quoteIdentifier(field) + "=$" + (index + 1)).join(",") +
       " WHERE id=$" + (fields.length + 1) + " RETURNING *";
     return (await this.ownerQuery<Record<string, unknown>>(ctx, backend, environment, sql, [...values, id]))[0] ?? null;

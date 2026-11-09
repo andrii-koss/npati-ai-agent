@@ -52,6 +52,10 @@ const mentions = (text: string, name: string) => {
  * "Пекарня"); only words of five or more letters count, so short generic words ("New", "Fit") never switch context.
  * Returns undefined when no company or more than one company scores best, or when the active company scores as well.
  */
+/** New projects are often just called "Сайт" or "App": in a message such a word means the thing, unless the name is quoted. */
+const GENERIC_PROJECT_NAME = /^(?:сайт|веб-?сайт|додаток|застосунок|проєкт|проект|приложение|site|website|web ?site|app|application|project|webseite|sitio|aplicación|proyecto|aplicativo|projeto|strona|aplikacja|projekt|anwendung|application|projet|sito|applicazione|progetto|サイト|アプリ|网站|应用|项目|site web|uygulama|proje|web sitesi)$/iu;
+const quotesName = (message: string, name: string) => ["«»", '""', "“”", "''", "``"].some(([open, close]) => message.toLocaleLowerCase().includes(open! + name.toLocaleLowerCase() + close!));
+
 export function companyNamedInMessage<T extends { id: string; name: string }>(companies: T[], message: string, activeCompanyId?: string | null): T | undefined {
   const words = nameWords(message);
   const score = (company: T) => nameWords(company.name).filter((word) => word.length >= 5)
@@ -144,6 +148,7 @@ export class ActiveContextResolver {
       let candidates = ownedProjects
         .filter(project => !["archived", "soft_deleted", "purging", "deleted"].includes(project.status)
           && project.name.trim().length >= 3 && mentions(lowerMessage, project.name.trim().toLocaleLowerCase())
+          && !(GENERIC_PROJECT_NAME.test(project.name.trim()) && !quotesName(message, project.name.trim()))
           // "this empty test project" points at the open project; it does not name a project called Test.
           && !(current.project && current.project.id !== project.id
             && (refersToCurrentProject(lowerMessage, project.name.trim().toLocaleLowerCase()) || namesNewValue(lowerMessage, project.name.trim().toLocaleLowerCase()))));

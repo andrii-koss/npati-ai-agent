@@ -43,7 +43,8 @@ export function codeDataStudioExecutors(options: CodeDataStudioToolOptions): Rec
     if (decision.decision !== "allow") throw new CodeToolError("policy_denied", "Project database operation was refused by coding policy", decision.status ?? 403, "policy", false, input.tool.name, { decision: decision.decision, code: decision.code });
     if (write && input.args.dryRun !== true && !input.approved) throw new CodeToolError("approval_required", "Confirm this database operation before execution", 403, "approval", false, input.tool.name);
     try {
-      await service.assertBackend(input.ctx, input.companyId, input.projectId, String(input.args.expectedBackendId ?? ""));
+      if (!input.args.expectedBackendId) invalid(input, "expectedBackendId is required: pass the id of this project's database");
+      await service.assertBackend(input.ctx, input.companyId, input.projectId, String(input.args.expectedBackendId));
       return await body(service);
     } catch (error) {
       // A policy naming a column the table lacks is the caller's to correct, so it gets the reason rather than a generic failure.

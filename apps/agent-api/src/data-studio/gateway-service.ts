@@ -392,9 +392,10 @@ export class ProjectApiGatewayService {
   // Collection CRUD Operations
   // =========================================================================
 
-  private async validateColumns(client: PoolClient, collection: string, fields: string[]): Promise<void> {
-    const result = await client.query<{ column_name: string }>(
-      "SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1",
+  /** Checks the fields and returns the query parameters; the driver sends an array as a Postgres array, which a json column refuses. */
+  private async validateColumns(client: PoolClient, collection: string, fields: string[], values: unknown[] = []): Promise<unknown[]> {
+    const result = await client.query<{ column_name: string; data_type: string }>(
+      "SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1",
       [collection],
     );
     if (!result.rows.length) throw new DataStudioError(404, "gateway", "Collection not found", false, "COLLECTION_NOT_FOUND");
@@ -403,6 +404,8 @@ export class ProjectApiGatewayService {
       validateIdentifier(field);
       if (!allowed.has(field)) throw new DataStudioError(400, "gateway", `Unknown field: ${field}`, false, "UNKNOWN_FIELD");
     }
+    const json = new Set(result.rows.filter((row) => row.data_type === "json" || row.data_type === "jsonb").map((row) => row.column_name));
+    return values.map((value, index) => Array.isArray(value) && json.has(fields[index]!) ? JSON.stringify(value) : value);
   }
   private async authorizeCollection(auth: GatewayAuthResult, collection: string, action: "select" | "insert" | "update" | "delete"): Promise<void> {
     if (!(await this.collectionAllows(auth, collection, action))) throw new DataStudioError(403, "gateway", "Collection action is not permitted", false, "POLICY_DENIED");
@@ -595,8 +598,8 @@ export class ProjectApiGatewayService {
     }
 
     return this.executeRuntime(auth, async (client) => {
-      await this.validateColumns(client, collection, keys);
-      const res = await client.query(sql, queryParams);
+      const parameters = await this.validateColumns(client, collection, keys, queryParams);
+      const res = await client.query(sql, parameters);
       return canRead ? { data: res.rows[0] } : { success: true };
     });
   }
@@ -623,8 +626,8 @@ export class ProjectApiGatewayService {
     const params = [...Object.values(sanitized), id];
 
     return this.executeRuntime(auth, async (client) => {
-      await this.validateColumns(client, collection, keys);
-      const res = await client.query(sql, params);
+      const parameters = [...await this.validateColumns(client, collection, keys, params.slice(0, keys.length)), id];
+      const res = await client.query(sql, parameters);
       if (!res.rowCount) {
         throw new DataStudioError(404, "gateway", `Record in '${collection}' not found`, false, "RECORD_NOT_FOUND");
       }
