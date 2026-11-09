@@ -462,9 +462,14 @@ article.user .chat-message-attachment.document {
   margin-bottom: 5px;
 }
 
-/* No text sweep: the owner chose speed (2026-11-07); drawn on the CPU it took 15% of a core for two rows. */
+/* The red sweep moves in text-sweep.ts, not here: any CSS animation runs the page at full frame rate even with steps(). */
 .research-active-text {
-  color: #4a4a4a !important;
+  color: transparent !important;
+  background: linear-gradient(100deg, #4a4a4a 15%, #4a4a4a 38%, var(--npati-red) 50%, #4a4a4a 62%, #4a4a4a 85%);
+  background-size: 240% 100%;
+  background-position: 100% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
 }
 
 .research-page-row .research-active-text {

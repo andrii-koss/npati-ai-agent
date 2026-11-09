@@ -756,11 +756,6 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       <div className="onboarding-live-chat standard-live-chat">
         <div className="message-stream" ref={messageStreamRef} onScroll={() => { if (!messageStreamRef.current) return; followBottomRef.current = nearChatBottom(messageStreamRef.current); if (userScrolledRef.current && messageStreamRef.current.scrollTop < EARLIER_MESSAGES_THRESHOLD_PX) void loadEarlierMessages(); }}
           onWheel={() => { userScrolledRef.current = true; }} onTouchMove={() => { userScrolledRef.current = true; }} onKeyDown={() => { userScrolledRef.current = true; }}>
-          {showFallbackCard && fallbackCard && (
-            <article className="assistant" style={{ margin: "8px 0 16px" }}>
-              <ChatProjectPreviewCard card={fallbackCard} showPreviewTrigger={!agentWorking} onActivate={(card) => setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected })} />
-            </article>
-          )}
           {messages.length === 0 && !selected && !initialConversationId && !loadingHistory && (
             <div className="chat-welcome">
               <h2>{t("chat.emptyTitle")}</h2>
@@ -800,6 +795,12 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
             />
           )}
           {thinking.visible && <ChatThinking key="turn-thinking" text={thinking.text} />}
+          {/* After the messages: this card stands in briefly until the reply that carries the real one arrives. */}
+          {showFallbackCard && fallbackCard && (
+            <article className="assistant" style={{ margin: "8px 0 16px" }}>
+              <ChatProjectPreviewCard card={fallbackCard} showPreviewTrigger={!agentWorking} onActivate={(card) => setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected })} />
+            </article>
+          )}
           {!hasTimelineCard && !showFallbackCard && development.preview}
           {messages.length > 0 && <div className="chat-scroll-spacer" aria-hidden="true" />}
           <div ref={streamEndRef} aria-hidden="true" />

@@ -8,6 +8,9 @@ import "@fontsource/inter/700.css";
 import "@npati/branding/theme.css";
 import { App } from "./App";
 import "./styles.css";
+import { startTextSweep } from "./text-sweep";
+
+startTextSweep();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
