@@ -142,7 +142,7 @@ export class ProjectMigrationEngine {
         // A schema or constraint error (e.g. a relation on a missing column) is the caller's to fix: report the
         // database's message, which names only the identifiers of this operation, instead of an opaque failure.
         const pg = error as { code?: unknown; message?: unknown };
-        if (!(error instanceof DataStudioError) && typeof pg.code === "string" && /^(42|23)/.test(pg.code) && typeof pg.message === "string") {
+        if (!(error instanceof DataStudioError) && typeof pg.code === "string" && /^(42|23|2B)/.test(pg.code) && typeof pg.message === "string") {
           throw new DataStudioError(400, "migration", "The database rejected this migration: " + pg.message.slice(0, 300), false, "MIGRATION_REJECTED");
         }
         throw error;
@@ -315,7 +315,7 @@ export class ProjectMigrationEngine {
     const limit = Math.min(Math.max(Number(input.limit) || 50, 1), 100);
     const offset = Number(input.offset) || 0;
     if (!Number.isSafeInteger(offset) || offset < 0 || offset > 1_000_000) throw new DataStudioError(400, "owner_data", "Invalid offset", false, "INVALID_OFFSET");
-    const sort = input.sort ? " ORDER BY " + quoteIdentifier(input.sort.field) + (input.sort.direction === "desc" ? " DESC" : input.sort.direction === "asc" ? " ASC" : (() => { throw new DataStudioError(400, "owner_data", "Invalid sort", false, "INVALID_SORT"); })()) : " ORDER BY id";
+    const sort = input.sort ? " ORDER BY " + quoteIdentifier(input.sort.field) + (input.sort.direction === "desc" ? " DESC" : input.sort.direction === "asc" ? " ASC" : (() => { throw new DataStudioError(400, "owner_data", "Invalid sort", false, "INVALID_SORT"); })()) : " ORDER BY 1";
     values.push(limit, offset);
     return this.ownerQuery<Record<string, unknown>>(ctx, backend, environment,
       "SELECT * FROM " + table + (conditions.length ? " WHERE " + conditions.join(" AND ") : "") + sort + " LIMIT $" + (values.length - 1) + " OFFSET $" + values.length, values);
