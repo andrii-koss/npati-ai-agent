@@ -24,6 +24,8 @@ interface ChatMessageRowProps {
   showToolbar: boolean;
   /** The agent is working in this chat: an open Preview stays, but a new one is not offered for the old state. */
   previewBusy?: boolean;
+  /** Time of the whole run this reply closes. */
+  totalTime?: string;
   responseLanguage: string;
   actions: ChatRowActions;
 }
@@ -35,7 +37,7 @@ const sameCard = (left: ProjectCardData | null | undefined, right: ProjectCardDa
  * One chat message. A finished message (and its Markdown) renders again only when its own text, attachments or card
  * change: typing in the composer or the streamed reply of another message leaves it as it is.
  */
-export const ChatMessageRow = memo(function ChatMessageRow({ message, card, showToolbar, previewBusy = false, responseLanguage, actions }: ChatMessageRowProps) {
+export const ChatMessageRow = memo(function ChatMessageRow({ message, card, showToolbar, previewBusy = false, responseLanguage, totalTime, actions }: ChatMessageRowProps) {
   const assistantText = message.role === "user" ? "" : projectChatText(message.content, message.projectCard, responseLanguage);
   // The opening note of a project chat only names the project. With nothing to show there is nothing to copy or rate.
   if (message.role !== "user" && !assistantText.trim() && !card && !message.attachments?.length) return null;
@@ -57,13 +59,13 @@ export const ChatMessageRow = memo(function ChatMessageRow({ message, card, show
         </>
       )}
       {card && <ChatProjectPreviewCard card={card} showPreviewTrigger={!previewBusy} onActivate={actions.activateCard} />}
-      {showToolbar && Boolean(assistantText.trim()) && <AssistantMessageToolbar content={message.content} onRegenerate={() => actions.regenerate(message.id)} />}
+      {showToolbar && Boolean(assistantText.trim()) && <div className="assistant-toolbar-row"><AssistantMessageToolbar content={message.content} onRegenerate={() => actions.regenerate(message.id)} />{totalTime && <span className="chat-run-total">{responseLanguage === "uk" ? "Усього" : "Total"} {totalTime}</span>}</div>}
     </article>
   );
 }, (previous, next) => previous.message.id === next.message.id && previous.message.content === next.message.content
   && previous.message.attachments === next.message.attachments && previous.message.projectCard === next.message.projectCard
   && sameCard(previous.card, next.card) && previous.showToolbar === next.showToolbar && previous.previewBusy === next.previewBusy
-  && previous.responseLanguage === next.responseLanguage && previous.actions === next.actions);
+  && previous.responseLanguage === next.responseLanguage && previous.totalTime === next.totalTime && previous.actions === next.actions);
 
 /**
  * The chat page's row callbacks with one identity for the page's lifetime. They read the latest render through

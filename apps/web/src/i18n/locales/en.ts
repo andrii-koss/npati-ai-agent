@@ -17,6 +17,7 @@ export const en: TranslationSchema = {
     runningCommand: "Running command: {{command}}",
     fileUnchanged: "No changes",
     fileNotChanged: "Could not change the file",
+    modelCallFailed: "Model error: its reply was damaged, so this action was not run",
     fileChangedReadAgain: "File changed, reading it again",
     agentFinished: "The agent finished the work",
     operationsDone: "Executed {{count}} operations",

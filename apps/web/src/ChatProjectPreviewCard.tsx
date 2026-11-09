@@ -18,6 +18,8 @@ export type PreviewRuntimeStatus = "running" | "starting" | "stopped" | "failed"
  * mounts a new card; it reopens the Preview instead of closing it while the agent edits the project.
  */
 export const ChatPreviewOpenContext = React.createContext<Set<string> | null>(null);
+/** Screenshots already fetched on this page, so a card that remounts shows its picture at once. */
+const knownThumbnails = new Map<string, string | null>();
 
 export interface ChatProjectPreviewCardProps {
   card: ProjectCardData;
@@ -196,7 +198,9 @@ export function ChatProjectPreviewCard({
   const [previewHtml, setPreviewHtml] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
-  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
+  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(() => knownThumbnails.get(previewKey) ?? null);
+  // The standard picture appears only once it is certain the project has no screenshot.
+  const [thumbnailChecked, setThumbnailChecked] = useState(() => knownThumbnails.has(previewKey));
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [runtimeStatus, setRuntimeStatus] = useState<PreviewRuntimeStatus>(() => {
     if (card.status === "failed") return "failed";
@@ -361,14 +365,15 @@ export function ChatProjectPreviewCard({
         const headers: Record<string, string> = {};
         if (token) headers.authorization = `Bearer ${token}`;
         const res = await fetch(`/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/qa/thumbnail`, { headers });
-        if (!isMounted || !res.ok) return;
-        const data = await res.json().catch(() => null) as { thumbnail?: { dataUrl?: string } | null } | null;
-        if (isMounted && data?.thumbnail?.dataUrl) {
-          setThumbnailUrl(data.thumbnail.dataUrl);
-        }
+        const data = res.ok ? await res.json().catch(() => null) as { thumbnail?: { dataUrl?: string } | null } | null : null;
+        const url = data?.thumbnail?.dataUrl ?? null;
+        knownThumbnails.set(projectId, url);
+        if (!isMounted) return;
+        setThumbnailUrl(url);
       } catch {
-        // SVG placeholder fallback
+        if (isMounted) setThumbnailUrl(knownThumbnails.get(projectId) ?? null);
       }
+      if (isMounted) setThumbnailChecked(true);
     }
 
     void loadThumbnail();
@@ -551,7 +556,7 @@ export function ChatProjectPreviewCard({
                   className="chat-preview-card-thumbnail-img"
                   onError={() => setThumbnailUrl(null)}
                 />
-              ) : projectType === "website" ? (
+              ) : !thumbnailChecked ? null : projectType === "website" ? (
                 <WebsiteSvgThumbnail />
               ) : projectType === "mobile_app" ? (
                 <MobileSvgThumbnail />

@@ -17,6 +17,7 @@ export const uk: TranslationSchema = {
     runningCommand: "Виконує команду: {{command}}",
     fileUnchanged: "Без змін",
     fileNotChanged: "Не вдалося змінити файл",
+    modelCallFailed: "Збій моделі: її відповідь прийшла пошкодженою, тому цю дію не виконано",
     fileChangedReadAgain: "Файл змінився, агент перечитує",
     agentFinished: "Агент завершив роботу",
     operationsDone: "Виконано операцій: {{count}}",

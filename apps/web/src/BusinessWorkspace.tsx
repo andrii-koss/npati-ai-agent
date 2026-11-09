@@ -18,7 +18,8 @@ import { InboxSubmission } from "./code-inbox-client";
 import { useCodeInbox } from "./use-code-inbox";
 import { projectConversationUrl } from "./chat-development-view";
 import { useChatResearchProgress } from "./use-chat-research-progress";
-import { chatTimeline, mergeConversationMessages, nearChatBottom } from "./chat-timeline";
+import { chatTimeline, mergeConversationMessages, nearChatBottom, normalizeActivity } from "./chat-timeline";
+import { processDuration } from "./AgentExecutionTrace";
 import { ChatDevelopmentProgress } from "./ChatDevelopmentProgress";
 import { useChatDevelopment } from "./use-chat-development";
 import { BusinessChatComposer, ChatWorkModeSwitch } from "./business-workspace-composer";
@@ -749,6 +750,11 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     previewUrl: development.project.previewUrl,
     kind: "code_project" as const
   } : null);
+  // The whole run's time belongs under the reply that closes it, not under an unrelated later answer.
+  const runActivity = development.project && !agentWorking ? normalizeActivity(development.project.progress) : [];
+  const runEndedAt = Math.max(0, ...runActivity.map(item => (Date.parse(item.at) || 0) + (item.durationMs ?? 0)));
+  const latestReplyAt = Date.parse(displayMessages.at(-1)?.createdAt ?? "") || 0;
+  const runTotal = runEndedAt && Math.abs(latestReplyAt - runEndedAt) < 120_000 ? processDuration(runActivity) : undefined;
   const showFallbackCard = !holdHistory && !hasTimelineCard && Boolean(fallbackCard);
   return (
     <ChatPreviewOpenContext.Provider value={openPreviews}>
@@ -789,7 +795,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
                   />
                 )}
                 <ChatMessageRow message={message} card={messageCard} showToolbar={message.role === "assistant" && !sending} previewBusy={agentWorking}
-                  responseLanguage={development.project?.responseLanguage ?? language} actions={rowActions} />
+                  responseLanguage={development.project?.responseLanguage ?? language} totalTime={isLatestAssistant ? runTotal : undefined} actions={rowActions} />
               </Fragment>
             );
           })}

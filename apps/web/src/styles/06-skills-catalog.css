@@ -113,7 +113,7 @@ article.user .user-message-bubble {
   width: fit-content;
   max-width: 100%;
   min-width: 0;
-  padding: 13px 15px;
+  padding: 8px 12px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;

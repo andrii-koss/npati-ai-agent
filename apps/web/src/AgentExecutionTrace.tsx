@@ -89,6 +89,8 @@ export function plainResult(result: string): string {
     return (typeof parsed.details?.exitCode === "number" ? "exit code " + parsed.details.exitCode + "\n\n" : "") + message;
   } catch { return result; }
 }
+/** The model's reply was corrupted before it became a call; nothing in the project or the agent caused it. */
+const isModelCallFailure = (item: DevelopmentProcessProgressItem) => item.errorCode === "malformed_native_tool_call" || item.error === "malformed_native_tool_call";
 function readableFailure(item: DevelopmentProcessProgressItem): string | undefined {
   if (item.status !== "failed") return undefined;
   const raw = item.error || item.result || "";
@@ -127,6 +129,7 @@ function operation(item: DevelopmentProcessProgressItem) {
   return ["command", Terminal] as const;
 }
 function title(item: DevelopmentProcessProgressItem, t: Labels, active: boolean) {
+  if (isModelCallFailure(item)) return t("modelCallFailed");
   if (item.errorCode === "read_before_write_required") return t("fileChangedReadAgain") + (item.file ? ": " + sanitizeExecutionTrace(item.file) : "");
   if (item.errorCode === "unchanged") return t("fileUnchanged") + (item.file ? ": " + sanitizeExecutionTrace(item.file) : "");
   if (item.status === "failed" && item.file && !item.command) return t("fileNotChanged") + ": " + sanitizeExecutionTrace(item.file) + (readableFailure(item) ? " — " + readableFailure(item) : "");
@@ -211,15 +214,11 @@ export function AgentExecutionTrace({ process, items: directItems, run, nested =
     // Files of a turn are saved when the turn ends, so one still being generated cannot be opened yet.
     for (const file of generating?.files ?? []) files.set(file.path, {...file, pending: true, status: file.path === generating?.file ? "running" : "completed"});
     const visibleFiles = [...files.values()].slice(-6);
-    const allItems = normalizeActivity(process?.progress);
-    const lastAt = Math.max(0, ...allItems.filter(isVisibleChatOperation).map(item => Date.parse(item.at)).filter(Number.isFinite));
-    const isLastGroup = !processActive && recordedItems.some(item => Date.parse(item.at) === lastAt);
-    const whole = isLastGroup ? processDuration(allItems) : undefined;
     // Setup ends where the model starts; the first model turn belongs to the code it writes, not to creating the project.
     const modelStart = Math.min(...recordedItems.filter(item => item.stage.startsWith("model_")).map(item => Date.parse(item.at)).filter(Number.isFinite));
     const setupMs = setupOnly && process && Number.isFinite(modelStart) ? modelStart - Date.parse(process.createdAt) : NaN;
     const spent = stepActive ? undefined : setupMs >= 0 ? clock(setupMs) : runDuration(recordedItems);
-    const total = spent && whole && whole !== spent ? spent + " · " + (isUk || (run.language ?? language ?? i18n?.language) === "uk" ? "Усього " : "Total ") + whole : spent;
+    const total = spent;
     const elapsed = stepActive && Number.isFinite(Date.parse(current.at)) ? Math.max(0, Math.floor((now - Date.parse(current.at)) / 1000)) : undefined;
     return <article className="assistant research-progress coding-run-activity" aria-live="polite"><div className={"research-page-row codex-trace-row " + (stepActive ? "active" : recovered ? "completed" : run.status) + (runOpen ? " expanded" : "")} data-run-id={run.runId ?? run.id}><button type="button" className="codex-trace-row-header coding-run-header" aria-expanded={runOpen} aria-controls={"run-detail-" + run.id} onClick={()=>{setHistoryMounted(true);setRunOpen(previous=>!previous);}}><span className="research-progress-state" aria-hidden="true">{stepActive ? "\u25cf" : run.status === "completed" || recovered ? <Check size={12}/> : run.status === "failed" ? <AlertCircle size={12}/> : run.status === "cancelled" ? <X size={12}/> : "\u25cf"}</span><Icon className="research-progress-globe" size={16} aria-hidden="true"/><span dir="auto" className={stepActive ? "research-active-text" : undefined}>{label}{total ? " · " + total : ""}</span>{commandRunning && liveLine && <code dir="auto" className="codex-trace-live-output" style={{ flex: 1, minWidth: 0, marginLeft: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: 0.75, fontSize: "0.85em" }}>{sanitizeExecutionTrace(liveLine)}</code>}{elapsed !== undefined && <span className="codex-trace-duration-tag">{elapsed}s</span>}<span className="codex-trace-chevron-btn" aria-hidden="true">{runOpen ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}</span></button>
       {visibleFiles.length > 0 && <ul className="coding-changed-files" aria-label={t("file")}>{visibleFiles.map(file => <li key={file.path}><button type="button" className="coding-file-chip" disabled={file.pending || !openFile || !process?.projectId} onPointerEnter={() => { if (!file.pending && openFile && process?.projectId) preloadChatFile({ companyId: process.companyId, projectId: process.projectId, path: file.path }); }} onClick={() => openFile?.({ companyId: process!.companyId, projectId: process!.projectId!, path: file.path })}><code>{file.path}</code>{file.linesAdded !== undefined && <span className="coding-file-added">+{file.linesAdded}</span>}{file.linesRemoved !== undefined && <span className="coding-file-removed">-{file.linesRemoved}</span>}</button>{file.status === "running" && <span>{t("editing")}</span>}</li>)}</ul>}
@@ -262,7 +261,7 @@ export function AgentExecutionTrace({ process, items: directItems, run, nested =
           {item.result && !(item.result === "skipped" && active) && item.fileContent === undefined && item.stdout === undefined && item.stderr === undefined && !item.diff && !item.files?.some(file => file.diff) && !item.tests && log(plainResult(item.result),t("output"))}{item.resultTruncated && <span>{t("limited")}</span>}
           {item.durationMs !== undefined && <div>{t("duration")}: {(item.durationMs/1000).toFixed(2)}s</div>}
           {item.exitCode !== undefined && <div>{t("exitCode")}: {item.exitCode}</div>}
-          {(item.error || item.errorCode) && !isNegativeAnswer(item) && <div className="codex-trace-error-msg">{t(item.errorCode === "approval_required" ? "awaiting_approval" : "error")}: {safe(item.error ?? (item.errorCode === "approval_required" ? t("awaiting_approval") : item.errorCode ?? ""))}</div>}
+          {(item.error || item.errorCode) && !isNegativeAnswer(item) && <div className="codex-trace-error-msg">{t(item.errorCode === "approval_required" ? "awaiting_approval" : "error")}: {safe(isModelCallFailure(item) ? t("modelCallFailed") : item.error ?? (item.errorCode === "approval_required" ? t("awaiting_approval") : item.errorCode ?? ""))}</div>}
         </div>}</div></div>
       </div>;
     })}

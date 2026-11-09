@@ -1238,6 +1238,9 @@ body:has(.project-chat-preview-layer) .message-stream {
   }
 }
 
+.assistant-toolbar-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: 620px; }
+.chat-run-total { flex-shrink: 0; color: #777; font-size: 14px; font-weight: 600; }
+
 /* The Chat/Code switch is hidden: every message goes through the normal chat route. */
 .chat-work-mode-switch { display: none !important; }
 
@@ -1254,3 +1257,16 @@ body:has(.project-chat-preview-layer) .message-stream {
 .code-token-tag { color: #be123c; }
 .code-token-attr { color: #b45309; }
 .code-token-property { color: #0e7490; }
+
+/* Step icons share a 16px box but draw different shapes: each main shape's shorter side becomes 9.33px, never enlarged, with one line weight. */
+.codex-trace-row .research-progress-globe.lucide-terminal { transform: scale(1.000); stroke-width: 1.60; }
+.codex-trace-row .research-progress-globe.lucide-blocks { transform: scale(1.000); stroke-width: 1.60; }
+.codex-trace-row .research-progress-globe.lucide-file-pen-line { transform: scale(0.875); stroke-width: 1.83; }
+.codex-trace-row .research-progress-globe.lucide-file-text { transform: scale(0.875); stroke-width: 1.83; }
+.codex-trace-row .research-progress-globe.lucide-package { transform: scale(0.778); stroke-width: 2.06; }
+.codex-trace-row .research-progress-globe.lucide-hammer { transform: scale(1.000); stroke-width: 1.60; }
+.codex-trace-row .research-progress-globe.lucide-monitor { transform: scale(1.000); stroke-width: 1.60; }
+.codex-trace-row .research-progress-globe.lucide-search { transform: scale(0.875); stroke-width: 1.83; }
+.codex-trace-row .research-progress-globe.lucide-flask-conical { transform: scale(0.875); stroke-width: 1.83; }
+.codex-trace-row .research-progress-globe.lucide-globe { transform: scale(0.700); stroke-width: 2.29; }
+.codex-trace-row .research-progress-globe.lucide-brain { transform: scale(0.700); stroke-width: 2.29; }
