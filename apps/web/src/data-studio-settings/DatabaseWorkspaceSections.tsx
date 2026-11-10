@@ -43,7 +43,6 @@ export function DatabaseProjectsSection({
     <div className="ds-db-project-sections">
       <section className="ds-db-panel" aria-labelledby={`${fieldId}-connected`}>
         <header className="ds-db-panel-heading">
-          <FolderOpen size={20} aria-hidden="true" />
           <div>
             <h2 id={`${fieldId}-connected`}>{isUk ? "Підключені проєкти" : "Connected projects"} <span className="ds-db-count">{connectedProjects.length}</span></h2>
             <p>{isUk ? "Проєкти, які використовують цю базу даних." : "Projects that use this database."}</p>
@@ -65,9 +64,10 @@ export function DatabaseProjectsSection({
                     {isUk ? "Відкрити Data Studio" : "Open Data Studio"}<ArrowUpRight size={15} aria-hidden="true" />
                   </Link>
                   <button type="button" className="ds-db-button ds-db-button-quiet" disabled={busy}
+                    aria-label={isUk ? "Відключити" : "Detach"}
                     title={isUk ? "Відключити від бази. Проєкт і його файли залишаться." : "Disconnect this database. The project and its files are kept."}
                     onClick={() => void onAttach(companyId, project.id, null)}>
-                    <Unlink size={14} aria-hidden="true" />{isUk ? "Відключити" : "Detach"}
+                    <Unlink size={14} aria-hidden="true" />
                   </button>
                 </div>
               </div>
@@ -78,7 +78,6 @@ export function DatabaseProjectsSection({
 
       <section className="ds-db-panel ds-db-attach-panel" aria-labelledby={`${fieldId}-attach`}>
         <header className="ds-db-panel-heading">
-          <Link2 size={20} aria-hidden="true" />
           <div>
             <h2 id={`${fieldId}-attach`}>{isUk ? "Підключити проєкт" : "Attach a project"}</h2>
             <p>{isUk ? `Доступні проєкти компанії «${companyName}», які ще не мають бази.` : `Available projects from ${companyName} that do not have a database yet.`}</p>
