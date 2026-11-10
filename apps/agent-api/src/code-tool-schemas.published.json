@@ -1,6 +1,6 @@
 {
   "manifestVersion": 19,
-  "checksum": "4fc15016859fcbd6be76e03401bc5aaa8c65d8df3017a584a5230fbd985162e5",
+  "checksum": "6806f5841f30b4bec6b088ec38a01af633c353b5163cc0913e5c01fd55c5249b",
   "tools": [
     {
       "key": "code.agent.continue@1",
@@ -63,8 +63,8 @@
       "name": "code.data.backend.create",
       "version": 1,
       "status": "active",
-      "checksum": "e01d939ef20edf0411132cd954fee4c1f42fa47d42028dc685e2d2bc8f995367",
-      "canonical": "{\"deprecatedAt\":null,\"description\":\"Create and attach a database to the current project only when the user's request or required persistent shared data needs one. Explain the reason. Idempotent: reuse the current attachment on retry. Returns safe database identity and public SDK configuration, never credentials. Tell the user after success.\",\"inputSchema\":{\"additionalProperties\":false,\"properties\":{\"name\":{\"maxLength\":200,\"minLength\":1,\"type\":\"string\"},\"reason\":{\"maxLength\":1000,\"minLength\":1,\"type\":\"string\"}},\"required\":[\"name\",\"reason\"],\"type\":\"object\"},\"name\":\"code.data.backend.create\",\"outputSchema\":{\"additionalProperties\":false,\"properties\":{\"data\":{\"type\":\"object\"},\"kind\":{\"const\":\"code_tool_result\"},\"note\":{\"type\":\"string\"},\"schemaVersion\":{\"type\":\"integer\"},\"tool\":{\"const\":\"code.data.backend.create\"},\"toolVersion\":{\"type\":\"integer\"},\"truncated\":{\"type\":\"boolean\"},\"truncation\":{\"additionalProperties\":true,\"type\":\"object\"},\"trust\":{\"const\":\"untrusted_data\"}},\"required\":[\"kind\",\"tool\",\"toolVersion\",\"schemaVersion\",\"trust\",\"note\",\"data\"],\"type\":\"object\"},\"status\":\"active\",\"version\":1}"
+      "checksum": "e1cc0f421a4dae31b8ccdb55f9ce5bb9e06aca6a8d99b559fcfe02d00ed15220",
+      "canonical": "{\"deprecatedAt\":null,\"description\":\"Create and attach a database to the current project only when the user's request or required persistent shared data needs one. Explain the reason. Idempotent: reuse the current attachment on retry. Returns safe database identity and public SDK configuration, never credentials. Tell the user after success.\",\"inputSchema\":{\"additionalProperties\":false,\"properties\":{\"name\":{\"maxLength\":200,\"minLength\":1,\"type\":\"string\"},\"reason\":{\"maxLength\":1000,\"minLength\":1,\"type\":\"string\"},\"separate\":{\"description\":\"Give this project its own new database when it now shares one with another project: it is detached from the shared database, which the other project keeps unchanged.\",\"type\":\"boolean\"}},\"required\":[\"name\",\"reason\"],\"type\":\"object\"},\"name\":\"code.data.backend.create\",\"outputSchema\":{\"additionalProperties\":false,\"properties\":{\"data\":{\"type\":\"object\"},\"kind\":{\"const\":\"code_tool_result\"},\"note\":{\"type\":\"string\"},\"schemaVersion\":{\"type\":\"integer\"},\"tool\":{\"const\":\"code.data.backend.create\"},\"toolVersion\":{\"type\":\"integer\"},\"truncated\":{\"type\":\"boolean\"},\"truncation\":{\"additionalProperties\":true,\"type\":\"object\"},\"trust\":{\"const\":\"untrusted_data\"}},\"required\":[\"kind\",\"tool\",\"toolVersion\",\"schemaVersion\",\"trust\",\"note\",\"data\"],\"type\":\"object\"},\"status\":\"active\",\"version\":1}"
     },
     {
       "key": "code.data.migrations.list@1",

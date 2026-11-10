@@ -165,6 +165,8 @@ export class ActiveContextResolver {
         const worked = candidates.filter(p => ids.has(p.id));
         if (worked.length === 1) return this.resolve(auth, { contextType: "project", companyId: worked[0]!.companyId, projectId: worked[0]!.id });
       }
+      // "Connect the app to the site's database" names two projects; work continues in the open one when it is among them.
+      if (candidates.length > 1 && current.project && candidates.some(p => p.id === current.project!.id)) return undefined;
       if (candidates.length > 1) {
         // The preliminary lookup only supplies a unique project to the semantic router.
         // Resolve ambiguity after that router has classified the complete request.

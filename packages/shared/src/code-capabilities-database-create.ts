@@ -41,6 +41,10 @@ export const CODE_DATABASE_CREATION_CAPABILITY: CapabilityDefinition & { inputSc
         "type": "string",
         "minLength": 1,
         "maxLength": 1000
+      },
+      "separate": {
+        "type": "boolean",
+        "description": "Give this project its own new database when it now shares one with another project: it is detached from the shared database, which the other project keeps unchanged."
       }
     }
   },

@@ -128,8 +128,13 @@ export class AgentDataStudioService {
   ) {}
 
 
-  async createBackend(ctx: AuthContext, companyId: string, projectId: string, input: { name: string; reason: string }) {
-    await this.store.getProject(ctx, companyId, projectId);
+  async createBackend(ctx: AuthContext, companyId: string, projectId: string, input: { name: string; reason: string; separate?: boolean }) {
+    const project = await this.store.getProject(ctx, companyId, projectId);
+    // Creating reuses the attached database, so a project that shares one first leaves it; the other project keeps it.
+    if (input.separate && project.dataBackendId && this.store.listProjects) {
+      const shared = (await this.store.listProjects(ctx, companyId)).some((other) => other.id !== projectId && other.dataBackendId === project.dataBackendId);
+      if (shared) await this.repository.attach(ctx, companyId, projectId, null, project.dataBackendId);
+    }
     if (!this.backendCreator) throw new DataStudioError(503,"create_backend","Database provisioning is unavailable",true,"PROJECT_DATABASE_UNAVAILABLE");
     const result = await this.backendCreator(ctx, companyId, projectId, input.name);
     const { backend } = await this.context(ctx, companyId, projectId);
