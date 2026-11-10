@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { Pool, type QueryResultRow } from "pg";
-import { DataStudioError, bindFilter, quoteIdentifier } from "./identifier";
+import { DataStudioError, bindFilter, quoteIdentifier, validateIdentifier } from "./identifier";
 import type { DataBackendRepository } from "./repository";
 import type { DataProvider, SchemaChange, SchemaOperation, SchemaSnapshot } from "./data-provider";
 import type { DatabaseProvisioner } from "./provisioner";
@@ -347,6 +347,30 @@ export class ProjectMigrationEngine {
     const sql = "UPDATE " + quoteIdentifier(collection) + " SET " + fields.map((field, index) => quoteIdentifier(field) + "=$" + (index + 1)).join(",") +
       " WHERE id=$" + (fields.length + 1) + " RETURNING *";
     return (await this.ownerQuery<Record<string, unknown>>(ctx, backend, environment, sql, [...values, id]))[0] ?? null;
+  }
+
+  async deleteOwnerRowsWhere(ctx: AuthContext, backend: DataBackend, environment: DataEnvironmentName, collection: string,
+    input: { filters: Array<{ field: string; operator: string; value: unknown }>; limit: number; dryRun?: boolean }) {
+    if (!input.filters.length) throw new DataStudioError(400, "owner_data", "Name the rows to delete", false, "FILTER_REQUIRED");
+    const table = quoteIdentifier(collection);
+    const values: unknown[] = [];
+    const conditions = input.filters.map((filter) => {
+      if (filter.operator === "starts_with" || filter.operator === "contains") {
+        values.push((filter.operator === "contains" ? "%" : "") + String(filter.value).replace(/[\\%_]/g, "\\  async deleteOwnerRows(") + "%");
+        return quoteIdentifier(validateIdentifier(filter.field)) + "::text ILIKE $" + values.length + " ESCAPE '\\'";
+      }
+      return bindFilter(filter.field, filter.operator as "eq", filter.value, values);
+    });
+    const where = " WHERE " + conditions.join(" AND ");
+    const counted = await this.ownerQuery<{ count: string }>(ctx, backend, environment, "SELECT count(*)::text AS count FROM " + table + where, values);
+    const matched = Number(counted[0]?.count ?? 0);
+    if (input.dryRun) {
+      const sample = await this.ownerQuery<Record<string, unknown>>(ctx, backend, environment, "SELECT * FROM " + table + where + " LIMIT 5", values);
+      return { dryRun: true, collection, matched, sample };
+    }
+    if (matched > input.limit) throw new DataStudioError(409, "owner_data", `${matched} rows match, more than the limit of ${input.limit}; narrow the filters or confirm a higher limit`, false, "TOO_MANY_ROWS");
+    const deleted = await this.ownerQuery<{ id: unknown }>(ctx, backend, environment, "DELETE FROM " + table + where + " RETURNING 1 AS id", values);
+    return { deleted: deleted.length, collection };
   }
 
   async deleteOwnerRows(ctx: AuthContext, backend: DataBackend, environment: DataEnvironmentName, collection: string, ids: string[]) {

@@ -7,16 +7,13 @@ import type { CodeSessionRunInput } from "./code-session-run-executor";
 import { canonicalFrameworkName, isSupportedProjectFramework, isWebsiteReferenceEdit, isDesktopProjectFramework, isBackendProjectFramework } from "@npati/shared";
 import type { CodeService } from "./code-service";
 import { CODE_TOOL_MANIFEST_VERSION } from "./code-tool-registry";
-import { contextualToolMatches } from "./code-tool-visibility";
-
-const SITE_ROLE_REQUEST = /(?:адмін\p{L}*|admin\p{L}*|(?<![\p{L}])рол(?:ь|і|ей|ями|ям)(?![\p{L}])|\broles?\b|менеджер\p{L}*|\bmanagers?\b|модератор\p{L}*|\bmoderators?\b|права\s+доступу)/iu;
 
 /** Main Chat may start a current Preview-capable session; existing published pins remain immutable. */
 export async function refreshChatPreviewSession(ctx: AuthContext, project: Pick<Project,"id"|"companyId"|"type"|"framework">, session: CodeSession | null,
   message: string, code: Pick<CodeService,"createSession">): Promise<CodeSession | null> {
   if(!session || session.toolManifestVersion===CODE_TOOL_MANIFEST_VERSION || !isCodeChatWebsite(project))return session;
-  // Site roles ("make me admin") arrived in manifest v20; a chat pinned to an earlier one would never see those tools.
-  if(!SITE_ROLE_REQUEST.test(message) && !contextualToolMatches({userMessage:message,sessionMode:session.mode,websiteEdit:true}).has("code.preview.screenshot"))return session;
+  // Each manifest adds tools (site roles, row deletes); a chat pinned to an older one would never see them, so the next
+  // request in that chat starts a session on the current set. Published pins are not changed; the old session stays as it was.
   return code.createSession(ctx,project.companyId,project.id,{mode:session.mode});
 }
 

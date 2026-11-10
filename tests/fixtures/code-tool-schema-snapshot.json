@@ -1,6 +1,6 @@
 {
-  "manifestVersion": 20,
-  "checksum": "8c9daf96f454fa105cb1101593147c21d84e94897e951701ce55634b3692eadf",
+  "manifestVersion": 21,
+  "checksum": "617e28833832ef5602396e7d9fad10b00c4ec38341e9983ba6b10b8566fbfa64",
   "tools": [
     {
       "key": "code.agent.continue@1",
@@ -87,6 +87,13 @@
       "checksum": "ca47ac2c73804b2c5d62221fe81f11181df9e43adea21ea42fd5bc60c49f05fc"
     },
     {
+      "key": "code.data.rows.delete@1",
+      "name": "code.data.rows.delete",
+      "version": 1,
+      "status": "active",
+      "checksum": "fb6320ce39eacb78e35448f7234b0fe37d7100c125ff0ce98540523907f3b31f"
+    },
+    {
       "key": "code.data.rows.list@1",
       "name": "code.data.rows.list",
       "version": 1,
@@ -98,7 +105,7 @@
       "name": "code.data.rows.seed",
       "version": 1,
       "status": "active",
-      "checksum": "793e0d43fd180de349030a0b214df6ed1093216ffbeaf766a2498982bdbcd33d"
+      "checksum": "d1240efd3dc630a5255c29c379e9b0f1c24ce0616ea6f40f918deba126705602"
     },
     {
       "key": "code.data.rows.transfer@1",
@@ -133,7 +140,7 @@
       "name": "code.data.schema.modify",
       "version": 1,
       "status": "active",
-      "checksum": "67f6dcb7365809bb270a2089764efb1e82ca6668469551048795626b53f23688"
+      "checksum": "ae1056c26fe14b276236659af5a8ee40f1c938b8f5aeb712a8c814b0f40b4663"
     },
     {
       "key": "code.data.users.list@1",

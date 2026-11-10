@@ -1,5 +1,5 @@
 import type { AgentDataStudioService } from "./data-studio/agent-data-service";
-import { DataStudioError } from "./data-studio/identifier";
+import { DataStudioError, normalizeDataQueryError } from "./data-studio/identifier";
 import { CodeToolError, type CodeToolExecutionContext } from "./code-tool-runtime";
 import type { PolicyEngine } from "./code-policy-engine";
 import type { ProjectAccessPolicy } from "@npati/shared";
@@ -13,7 +13,7 @@ import type { ProjectAccessPolicy } from "@npati/shared";
  *  - arguments are structured; no SQL reaches the service.
  */
 export interface CodeDataStudioToolOptions {
-  projectData?: Partial<Pick<AgentDataStudioService, "assertBackend" | "listRows" | "createRow" | "listMigrations" | "inspectAuth" | "configureAuth" | "listSiteUsers" | "setSiteUserRoles">>;
+  projectData?: Partial<Pick<AgentDataStudioService, "assertBackend" | "listRows" | "createRow" | "listMigrations" | "inspectAuth" | "configureAuth" | "listSiteUsers" | "setSiteUserRoles" | "deleteRowsWhere">>;
   dataPolicy?: Pick<PolicyEngine, "evaluate">;
 }
 
@@ -46,7 +46,9 @@ export function codeDataStudioExecutors(options: CodeDataStudioToolOptions): Rec
       if (!input.args.expectedBackendId) invalid(input, "expectedBackendId is required: pass the id of this project's database");
       await service.assertBackend(input.ctx, input.companyId, input.projectId, String(input.args.expectedBackendId));
       return await body(service);
-    } catch (error) {
+    } catch (caught) {
+      // A row that breaks a value rule, a missing required field or a duplicate is the caller's to fix: name it instead of a server error.
+      const error = normalizeDataQueryError(caught);
       // A policy naming a column the table lacks is the caller's to correct, so it gets the reason rather than a generic failure.
       const missingColumn = input.tool.name === "code.data.policies.apply" ? /column "([^"]+)" does not exist/.exec(error instanceof Error ? error.message : "")?.[1] : undefined;
       if (missingColumn) invalid(input, `The table has no column "${missingColumn}". Add it with code.data.schema.apply, or use a rule that does not need it; no policy was applied.`);
@@ -98,6 +100,25 @@ export function codeDataStudioExecutors(options: CodeDataStudioToolOptions): Rec
       return run(input, true, async (service) => {
         if (!service.setSiteUserRoles) return unavailable(input);
         return service.setSiteUserRoles(input.ctx, input.companyId, input.projectId, { email, roles: [...new Set(roles as string[])], dryRun: input.args.dryRun === true });
+      });
+    },
+
+    "code.data.rows.delete": async (input) => {
+      const collection = identifier(input, input.args.collection, "collection");
+      const raw = input.args.filters;
+      if (!Array.isArray(raw) || raw.length < 1 || raw.length > 10) invalid(input, "filters must name 1-10 conditions; there is no delete-everything call");
+      const operators = new Set(["eq", "ne", "gt", "gte", "lt", "lte", "starts_with", "contains"]);
+      const filters = (raw as unknown[]).map((filter) => {
+        const entry = filter as { field?: unknown; operator?: unknown; value?: unknown };
+        if (!entry || typeof entry !== "object" || !operators.has(String(entry.operator))) invalid(input, "each filter needs field, operator (eq/ne/gt/gte/lt/lte/starts_with/contains) and value");
+        if (entry.value !== null && !["string", "number", "boolean"].includes(typeof entry.value)) invalid(input, "filter values must be scalars");
+        if ((entry.operator === "starts_with" || entry.operator === "contains") && (typeof entry.value !== "string" || !entry.value.length)) invalid(input, "starts_with and contains need a non-empty text value");
+        return { field: identifier(input, entry.field, "filter field"), operator: entry.operator as "eq", value: entry.value };
+      });
+      const limit = typeof input.args.limit === "number" && Number.isInteger(input.args.limit) ? Math.min(Math.max(input.args.limit, 1), 100) : 100;
+      return run(input, true, async (service) => {
+        if (!service.deleteRowsWhere) return unavailable(input);
+        return service.deleteRowsWhere(input.ctx, input.companyId, input.projectId, collection, { filters, limit, dryRun: input.args.dryRun === true });
       });
     },
 

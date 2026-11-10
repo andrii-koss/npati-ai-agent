@@ -22,6 +22,9 @@ export type SchemaOperation =
   | { kind: "add_field"; collection: string; field: FieldDefinition }
   | { kind: "alter_field"; collection: string; field: FieldDefinition }
   | { kind: "rename_field"; collection: string; field: string; next: string }
+  | { kind: "add_check"; collection: string; field: string; min?: number; max?: number; values?: Array<string | number> }
+  | { kind: "drop_check"; collection: string; field: string }
+  | { kind: "drop_foreign_key"; collection: string; field: string; keepWithDeleteRule?: boolean }
   | { kind: "drop_field"; collection: string; field: string }
   | { kind: "create_relation"; collection: string; target: string; name: string; field?: string; cardinality: "many-to-one" | "one-to-many" | "many-to-many"; onDelete?: "cascade" | "restrict" | "set_null" }
   | { kind: "drop_relation"; collection: string; name: string; cardinality: "many-to-one" | "one-to-many" | "many-to-many" }
@@ -129,6 +132,9 @@ export class PostgresDataProvider implements DataProvider {
       case "add_field": return this.addField(operation.collection, operation.field);
       case "alter_field": return this.alterField(operation.collection, operation.field);
       case "rename_field": return this.renameField(operation.collection, operation.field, operation.next);
+      case "add_check": return this.addCheck(operation.collection, operation.field, operation);
+      case "drop_check": return this.dropCheck(operation.collection, operation.field);
+      case "drop_foreign_key": return this.dropForeignKey(operation.collection, operation.field, operation.keepWithDeleteRule === true);
       case "drop_field": return this.dropField(operation.collection, operation.field);
       case "create_relation": {
         if (operation.field && operation.cardinality !== "many-to-many") {
@@ -176,6 +182,43 @@ export class PostgresDataProvider implements DataProvider {
     if (!type || field.name === "id") throw new DataStudioError(400, "alter_field", "Invalid field", false, "INVALID_FIELD");
     return { operation: "alter_field", upSql: "ALTER TABLE " + table + " ALTER COLUMN " + column + " TYPE " + type + " USING " + column + "::" + type + ";",
       destructive: true, requiresSnapshot: true, reversible: false };
+  }
+
+  /** A value rule on one column: a range, a list of allowed values, or both. Empty values stay allowed. */
+  addCheck(collection: string, field: string, rule: { min?: number; max?: number; values?: Array<string | number> }): SchemaChange {
+    if (field === "id") throw new DataStudioError(400, "add_check", "The id column cannot take a value rule", false, "INVALID_FIELD");
+    const table = quoteIdentifier(collection), column = quoteIdentifier(validateIdentifier(field));
+    const name = quoteIdentifier(validateIdentifier(("chk_" + collection + "_" + field).slice(0, 63)));
+    const parts: string[] = [];
+    const number = (value: unknown) => { if (typeof value !== "number" || !Number.isFinite(value)) throw new DataStudioError(400, "add_check", "min and max must be numbers", false, "INVALID_CHECK"); return String(value); };
+    if (rule.min !== undefined) parts.push(column + " >= " + number(rule.min));
+    if (rule.max !== undefined) parts.push(column + " <= " + number(rule.max));
+    if (rule.values !== undefined) {
+      if (!Array.isArray(rule.values) || !rule.values.length || rule.values.length > 50) throw new DataStudioError(400, "add_check", "values must list 1-50 allowed values", false, "INVALID_CHECK");
+      const literals = rule.values.map((value) => typeof value === "number" ? number(value) : typeof value === "string" && value.length <= 200 ? "'" + value.replace(/'/g, "''") + "'" : (() => { throw new DataStudioError(400, "add_check", "values must be short text or numbers", false, "INVALID_CHECK"); })());
+      parts.push(column + "::text IN (" + literals.map((literal) => literal.startsWith("'") ? literal : "'" + literal + "'").join(", ") + ")");
+    }
+    if (!parts.length) throw new DataStudioError(400, "add_check", "Give min, max or values", false, "INVALID_CHECK");
+    return { operation: "add_check", upSql: "ALTER TABLE " + table + " ADD CONSTRAINT " + name + " CHECK (" + column + " IS NULL OR (" + parts.join(" AND ") + "));",
+      downSql: "ALTER TABLE " + table + " DROP CONSTRAINT " + name + ";", reversible: true, destructive: false, requiresSnapshot: false };
+  }
+
+  dropCheck(collection: string, field: string): SchemaChange {
+    const table = quoteIdentifier(collection);
+    const name = quoteIdentifier(validateIdentifier(("chk_" + collection + "_" + validateIdentifier(field)).slice(0, 63)));
+    return { operation: "drop_check", upSql: "ALTER TABLE " + table + " DROP CONSTRAINT IF EXISTS " + name + ";", reversible: false, destructive: false, requiresSnapshot: false };
+  }
+
+  /** Removes the foreign keys on one column and keeps the column with its values. */
+  dropForeignKey(collection: string, field: string, keepWithDeleteRule: boolean): SchemaChange {
+    if (field === "id") throw new DataStudioError(400, "drop_foreign_key", "The id column has no foreign key to remove", false, "INVALID_FIELD");
+    const tableName = validateIdentifier(collection), column = validateIdentifier(field);
+    const keep = keepWithDeleteRule ? " AND c.confdeltype = 'a'" : "";
+    return { operation: "drop_foreign_key",
+      upSql: "DO $npati$ DECLARE r record; BEGIN FOR r IN SELECT c.conname FROM pg_constraint c JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey) " +
+        "WHERE c.contype = 'f' AND c.conrelid = '" + quoteIdentifier(tableName).replace(/'/g, "''") + "'::regclass AND a.attname = '" + column + "'" + keep +
+        " LOOP EXECUTE format('ALTER TABLE %I DROP CONSTRAINT %I', '" + tableName + "', r.conname); END LOOP; END $npati$;",
+      reversible: false, destructive: false, requiresSnapshot: false };
   }
 
   renameField(collection: string, from: string, to: string): SchemaChange {

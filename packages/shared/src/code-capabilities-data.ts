@@ -155,9 +155,9 @@ export const CODE_DATA_CAPABILITIES: (CapabilityDefinition & { inputSchema: Reco
     "type": "tool",
     "domain": "code",
     "name": "code.data.schema.modify",
-    "description": "Rename a table (rename_collection with next), rename a column keeping its data (rename_field with field and next; never add a new column and drop the old one), change a field type (alter_field with field definition), delete a field (drop_field with field name), or delete a table (drop_collection) in the attached dev database. Inspect first for backend ID and fingerprint. Preview with dryRun; execution requires human approval, destructive changes take a snapshot. Update application code for renamed/deleted objects.",
+    "description": "Never remove or loosen a value rule the user set just to make a row fit; say which row breaks which rule and ask. Add a value rule (add_check with field and min and/or max, or values; rows that break it make the change fail), remove it (drop_check with field), or remove only a foreign key and keep the column and its data (drop_foreign_key with field; keepWithDeleteRule removes only keys that have no delete rule). Rename a table (rename_collection with next), rename a column keeping its data (rename_field with field and next; never add a new column and drop the old one), change a field type (alter_field with field definition), delete a field (drop_field with field name), or delete a table (drop_collection) in the attached dev database. Inspect first for backend ID and fingerprint. Preview with dryRun; execution requires human approval, destructive changes take a snapshot. Update application code for renamed/deleted objects.",
     "useWhen": [
-      "Rename a table (rename_collection with next), rename a column keeping its data (rename_field with field and next; never add a new column and drop the old one), change a field type (alter_field with field definition), delete a field (drop_field with field name), or delete a table (drop_collection) in the attached dev database. Inspect first for backend ID and fingerprint. Preview with dryRun; execution requires human approval, destructive changes take a snapshot. Update application code for renamed/deleted objects."
+      "Never remove or loosen a value rule the user set just to make a row fit; say which row breaks which rule and ask. Add a value rule (add_check with field and min and/or max, or values; rows that break it make the change fail), remove it (drop_check with field), or remove only a foreign key and keep the column and its data (drop_foreign_key with field; keepWithDeleteRule removes only keys that have no delete rule). Rename a table (rename_collection with next), rename a column keeping its data (rename_field with field and next; never add a new column and drop the old one), change a field type (alter_field with field definition), delete a field (drop_field with field name), or delete a table (drop_collection) in the attached dev database. Inspect first for backend ID and fingerprint. Preview with dryRun; execution requires human approval, destructive changes take a snapshot. Update application code for renamed/deleted objects."
     ],
     "doNotUseWhen": [
       "The target is outside this owner/company, or direct production access is required."
@@ -207,7 +207,10 @@ export const CODE_DATA_CAPABILITIES: (CapabilityDefinition & { inputSchema: Reco
                 "rename_field",
                 "alter_field",
                 "drop_field",
-                "drop_collection"
+                "drop_collection",
+                "add_check",
+                "drop_check",
+                "drop_foreign_key"
               ]
             },
             "collection": {
@@ -271,6 +274,26 @@ export const CODE_DATA_CAPABILITIES: (CapabilityDefinition & { inputSchema: Reco
                   "pattern": "^[a-z][a-z0-9_]{0,62}$"
                 }
               ]
+            },
+            "min": {
+              "type": "number"
+            },
+            "max": {
+              "type": "number"
+            },
+            "values": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 50,
+              "items": {
+                "type": [
+                  "string",
+                  "number"
+                ]
+              }
+            },
+            "keepWithDeleteRule": {
+              "type": "boolean"
             }
           }
         }

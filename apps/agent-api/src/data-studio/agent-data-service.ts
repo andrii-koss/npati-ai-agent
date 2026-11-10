@@ -232,6 +232,12 @@ export class AgentDataStudioService {
     return { attached: true, direction: "this project now uses the target project's database", backendId: backend.id, projectId, sourceProjectId: source.id, previousBackendId: currentBackendId };
   }
 
+  /** Deletes only the rows the filters name, and only up to limit of them; a dry run reports what would go. */
+  async deleteRowsWhere(ctx: AuthContext, companyId: string, projectId: string, collection: string, input: { filters: Array<{ field: string; operator: string; value: unknown }>; limit: number; dryRun?: boolean }) {
+    const { backend } = await this.context(ctx, companyId, projectId);
+    return this.migrations.deleteOwnerRowsWhere(ctx, backend, "dev", collection, input);
+  }
+
   /** The people registered on the project's site, with their roles. */
   async listSiteUsers(ctx: AuthContext, companyId: string, projectId: string, email?: string) {
     if (!this.authService) throw new DataStudioError(503, "auth", "Site accounts are unavailable", false, "AUTH_UNAVAILABLE");

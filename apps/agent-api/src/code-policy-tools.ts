@@ -124,6 +124,7 @@ export const WRITE_TOOLS = new Set([
   "code.preview.restart",
   "code.data.rows.seed",
   "code.data.users.roles.set",
+  "code.data.rows.delete",
   "code.data.policies.apply",
   "code.data.backend.create",
   "code.data.schema.apply",

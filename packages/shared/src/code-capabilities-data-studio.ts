@@ -174,7 +174,7 @@ export const CODE_DATA_STUDIO_CAPABILITIES: (CapabilityDefinition & { inputSchem
     "type": "tool",
     "domain": "code",
     "name": "code.data.rows.seed",
-    "description": "Insert up to 50 sample rows into one table of this project's dev database (never production). WHEN: the user asks for demo or test data, or a page needs example content to render. NOT WHEN: the table does not exist yet (create it with code.data.schema.apply first) or the data is real customer data. Call with dryRun first; the insert needs a human approval. RETURNS: the inserted rows, or the preview for a dry run.",
+    "description": "Insert up to 50 sample rows into one table of this project's dev database (never production). WHEN: the user asks for demo or test data, or a page needs example content to render. NOT WHEN: the table does not exist yet (create it with code.data.schema.apply first) or the data is real customer data. If a row breaks a value rule, report it instead of changing the rule. Call with dryRun first; the insert needs a human approval. RETURNS: the inserted rows, or the preview for a dry run.",
     "useWhen": [
       "Demo or test data is requested for the dev database."
     ],
@@ -431,6 +431,144 @@ export const CODE_DATA_STUDIO_CAPABILITIES: (CapabilityDefinition & { inputSchem
         },
         "tool": {
           "const": "code.data.users.roles.set"
+        },
+        "toolVersion": {
+          "type": "integer"
+        },
+        "schemaVersion": {
+          "type": "integer"
+        },
+        "trust": {
+          "const": "untrusted_data"
+        },
+        "note": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "truncation": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "data": {
+          "type": "object"
+        }
+      }
+    }
+  },
+  {
+    "id": "code.data.rows.delete",
+    "inventoryIds": [
+      412
+    ],
+    "type": "tool",
+    "domain": "code",
+    "name": "code.data.rows.delete",
+    "description": "Delete the rows of one table in this project's dev database that match the filters the user described, for example contact messages whose email starts with test. WHEN: the user asks to remove particular rows or records. NOT WHEN: the user asks to delete a whole table or column (use code.data.schema.modify) or did not say which rows; then ask. Filters are required: there is no delete-everything call. Call with dryRun first to see how many rows match; the delete needs a human approval and refuses when more rows match than limit. RETURNS: the number of matching or deleted rows and a sample.",
+    "useWhen": [
+      "The user asks to remove particular rows."
+    ],
+    "doNotUseWhen": [
+      "The user did not say which rows."
+    ],
+    "agentCallable": true,
+    "userVisible": true,
+    "risk": "high",
+    "requiresConfirmation": false,
+    "requiredConnections": [],
+    "requiredPermissions": [
+      "workspace:write"
+    ],
+    "version": 1,
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedBackendId",
+        "collection",
+        "filters"
+      ],
+      "properties": {
+        "expectedBackendId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "collection": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,62}$"
+        },
+        "filters": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "field",
+              "operator",
+              "value"
+            ],
+            "properties": {
+              "field": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{0,62}$"
+              },
+              "operator": {
+                "enum": [
+                  "eq",
+                  "ne",
+                  "gt",
+                  "gte",
+                  "lt",
+                  "lte",
+                  "starts_with",
+                  "contains"
+                ]
+              },
+              "value": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 100
+        },
+        "dryRun": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": [
+        "kind",
+        "tool",
+        "toolVersion",
+        "schemaVersion",
+        "trust",
+        "note",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "code_tool_result"
+        },
+        "tool": {
+          "const": "code.data.rows.delete"
         },
         "toolVersion": {
           "type": "integer"
