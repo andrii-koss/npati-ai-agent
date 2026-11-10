@@ -52,6 +52,8 @@ try {
     const apiFailures = [];
     // A site must call its Project API by a relative path. A fixed host (another installation's domain) works for nobody else.
     const foreignApiHosts = [];
+    // Form writes to the site's own server routes (a Next.js /api route) are not sent; they are named so the report says so.
+    const uncheckedWrites = [];
     await context.route("**/*", async route => {
       let url;
       try { url = new URL(route.request().url()); } catch { return route.abort(); }
@@ -76,7 +78,11 @@ try {
       }
       if (url.origin !== origin && url.pathname.startsWith("/v1/projects/") && foreignApiHosts.length < 5 && !foreignApiHosts.includes(url.host)) foreignApiHosts.push(url.host);
       // While forms are tried, any other write (a framework API route) could change real data, so it is not sent.
-      if (formPhase && !["GET", "HEAD"].includes(route.request().method())) return route.abort();
+      if (formPhase && !["GET", "HEAD"].includes(route.request().method())) {
+        const entry = route.request().method() + " " + url.pathname.slice(0, 80);
+        if (url.origin === origin && uncheckedWrites.length < 5 && !uncheckedWrites.includes(entry)) uncheckedWrites.push(entry);
+        return route.abort();
+      }
       // A Flutter web app loads its engine and fonts from these hosts, and a site loads Google Fonts from the last two. Blocking
       // them made a working page look broken, and the agent then removed the fonts from the site to "fix" it.
       const flutterEngine = url.protocol === "https:" && ["www.gstatic.com", "fonts.gstatic.com", "fonts.googleapis.com"].includes(url.hostname) && route.request().method() === "GET" && !url.username && !url.password;
@@ -244,7 +250,7 @@ try {
       statusCode: response?.status() ?? 0, loadTimeMs, domContentLoadedMs: Math.round(observations.domContentLoadedMs),
       resourceCount: observations.resourceCount, totalSizeBytes: observations.totalSizeBytes,
       consoleErrorCount: Math.min(consoleErrorCount, 100), consoleDiagnostics, brokenLinks, accessibility: observations.violations, interactionTrace,
-      apiFailures, formsSubmitted, apiCalls, apiBridge, apiLog, foreignApiHosts, hiddenShown: observations.hiddenShown,
+      apiFailures, formsSubmitted, apiCalls, apiBridge, apiLog, foreignApiHosts, hiddenShown: observations.hiddenShown, uncheckedWrites,
       screenshot: captured,
     }));
     await context.close();

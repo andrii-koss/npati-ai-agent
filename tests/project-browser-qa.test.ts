@@ -86,6 +86,16 @@ describe("project browser QA", () => {
     const { parseBrowserQaResult } = await import("../apps/agent-api/src/sandbox-browser-qa");
     expect(parseBrowserQaResult(JSON.stringify({ ...result, hiddenShown: ["div#a<b>", "", "p.x"] })).hiddenShown).toEqual(["div#ab", "p.x"]);
   });
+  it("says which form writes to the site's own server it did not send, without failing the check", async () => {
+    const f = await fixture();
+    f.inspect.mockResolvedValueOnce({ ...result, consoleErrorCount: 0, brokenLinks: [], accessibility: [], uncheckedWrites: ["POST /api/contact"] });
+    const report = await f.qa.inspect(owner, f.company.id, { projectId: f.project.id });
+    expect(report.success).toBe(true);
+    expect(report.report.status).toBe("warning");
+    expect(report.issues).toEqual([expect.objectContaining({ severity: "warning", message: expect.stringContaining("Not checked: a form sends POST /api/contact") })]);
+    const { parseBrowserQaResult } = await import("../apps/agent-api/src/sandbox-browser-qa");
+    expect(parseBrowserQaResult(JSON.stringify({ ...result, uncheckedWrites: ["POST /api/contact", "GET /x", "DELETE /api/item<1>"] })).uncheckedWrites).toEqual(["POST /api/contact", "DELETE /api/item1"]);
+  });
   it("records the hosts in the runner and keeps only host names from its output", async () => {
     const { parseBrowserQaResult } = await import("../apps/agent-api/src/sandbox-browser-qa");
     const parsed = parseBrowserQaResult(JSON.stringify({ ...result, foreignApiHosts: ["api.npati.com", "evil.example/<script>"] }));

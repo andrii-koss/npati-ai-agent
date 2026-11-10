@@ -106,6 +106,10 @@ export class ProjectBrowserQaService {
     for (const host of result.foreignApiHosts ?? [])
       issues.push(issue("console_error", "error", `The page sends Project API requests to the fixed host ${host} instead of its own address`,
         "Call the relative path /v1/projects/<projectId>/... with no host name in front of it, and remove any fallback URL."));
+    // Not a failure: the check cannot send these without changing real data, so it says they were not tested.
+    if (result.uncheckedWrites?.length)
+      issues.push(issue("console_error", "warning", `Not checked: a form sends ${result.uncheckedWrites.join(", ")} to the site's own server, which the check does not call because it could change real data`,
+        "Submit this form once in Preview and confirm the row it should save; or post it to the Project API, which the check can test safely."));
     if (result.hiddenShown?.length)
       issues.push(issue("console_error", "error", `${result.hiddenShown.length} element(s) marked hidden are still shown: ${result.hiddenShown.join(", ")}`,
         "A CSS display rule overrides the hidden attribute. Add [hidden] { display: none !important; } to the stylesheet."));

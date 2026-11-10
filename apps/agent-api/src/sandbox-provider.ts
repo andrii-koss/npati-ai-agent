@@ -37,6 +37,8 @@ export interface SandboxBrowserQaResult {
   foreignApiHosts?: string[];
   /** Elements with the hidden attribute that are displayed anyway, as short selectors. */
   hiddenShown?: string[];
+  /** Form writes to the site's own server routes that the check did not send, as "METHOD /path". */
+  uncheckedWrites?: string[];
   screenshot?: { mimeType: "image/png"; base64Data: string; sizeBytes: number; redacted: true; captureMode?: "layout" | "visual" };
 }
 export interface SandboxBrowserQaOptions {

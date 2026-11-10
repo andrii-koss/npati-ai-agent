@@ -465,7 +465,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return;
           }
         }
-        await logout(false);
+        // Only a definite refusal ends the session. A reload while the central backend was slow or down (a failed
+        // request, a 5xx, a rate limit) used to sign the person out and delete this browser's installation cookie, so
+        // the session could not come back on its own. Kept, it is renewed on the next check (focus, timer, reload).
+        if (installationSession && (installationSession.status === 401 || installationSession.status === 403)) await logout(false);
       } else {
         // Server response other than 401: preserve session
       }
