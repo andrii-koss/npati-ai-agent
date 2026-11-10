@@ -1,0 +1,23 @@
+:root {
+  --company-filter-width: 180px;
+  --company-filter-height: 38px;
+}
+
+/* Header scope filters only; form fields and pagination selects keep their sizes.
+ * Important dimensions also override the website catalog's legacy inline sizing. */
+.automations-header-actions > select:is(.page-size-select, .company-select, .business-scope-select),
+.activity-company-selector select,
+.email-scope-select-wrap > select.email-scope-select {
+  box-sizing: border-box;
+  width: var(--company-filter-width) !important;
+  min-width: var(--company-filter-width) !important;
+  max-width: var(--company-filter-width) !important;
+  height: var(--company-filter-height);
+  min-height: var(--company-filter-height);
+  max-height: var(--company-filter-height);
+  flex: 0 0 var(--company-filter-width) !important;
+  padding-block: 0 !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

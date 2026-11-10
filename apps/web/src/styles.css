@@ -45,6 +45,7 @@
 @import "./styles/33-data-studio-environments.css";
 @import "./styles/34-data-studio-workspace.css";
 @import "./styles/35-data-studio-detail.css";
+@import "./styles/36-company-filters.css";
 
 /* Hide the assistant accent while preserving its original border and spacing. */
 .message-stream article.assistant {
