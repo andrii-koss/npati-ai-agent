@@ -232,7 +232,8 @@ export async function loginAuthUser(
       iss: host.expectedIss(backend.id, environment),
       aud: host.expectedAud(backend.id, environment),
       sub: row.id,
-      role: roles[0]!,
+      // The default "user" comes first; a site checks role for admin, so the extra role is the one reported.
+      role: roles.find((role) => role !== "user") ?? roles[0]!,
       roles,
       exp: Math.floor(Date.now() / 1000) + ttlSec,
     },
@@ -340,7 +341,8 @@ export async function refreshAuthSession(
       iss: host.expectedIss(backend.id, environment),
       aud: host.expectedAud(backend.id, environment),
       sub: token.user_id,
-      role: roles[0]!,
+      // The default "user" comes first; a site checks role for admin, so the extra role is the one reported.
+      role: roles.find((role) => role !== "user") ?? roles[0]!,
       roles,
       exp: Math.floor(Date.now() / 1000) + ttlSec,
     },
