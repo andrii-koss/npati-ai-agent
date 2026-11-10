@@ -1,0 +1,76 @@
+.ds-database-actions {
+  gap: 8px;
+}
+
+.ds-database-action-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 8px 16px;
+  border: 1px solid #e4e4e7;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #18181b;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ds-database-action-trigger:hover,
+.ds-database-action-trigger[aria-expanded="true"] {
+  background: #fafafa;
+  border-color: #d4d4d8;
+}
+
+.ds-database-actions-dropdown {
+  position: relative;
+}
+
+.ds-database-action-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  inset-inline-end: 0;
+  z-index: 20;
+  width: max-content;
+  min-width: 240px;
+  max-width: calc(100vw - 32px);
+  padding: 6px;
+  border: 1px solid #e4e4e7;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 10%);
+}
+
+.ds-database-action-menu > button {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start !important;
+  width: 100%;
+  min-height: 36px;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #18181b;
+  font: inherit;
+  font-size: 14px;
+  text-align: start !important;
+  cursor: pointer;
+}
+
+.ds-database-action-menu > button:hover {
+  background: #f4f4f5;
+}
+
+.ds-database-action-menu > .ds-database-action-danger {
+  color: var(--npati-red, #e11d2e);
+}
+
+.ds-database-actions button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}

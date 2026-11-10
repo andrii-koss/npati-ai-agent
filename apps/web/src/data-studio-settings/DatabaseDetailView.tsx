@@ -1,5 +1,6 @@
 import React from "react";
 import { Link } from "react-router-dom";
+import { Database, CircleCheck, CircleAlert, Hash } from "lucide-react";
 import type {
   BackendEnvironment,
   BackendSummary,
@@ -71,7 +72,6 @@ export function DatabaseDetailView({
   quotas,
   overview,
   loading,
-  backendsLoading,
   backendBusy,
   busy,
   countingRows,
@@ -107,11 +107,32 @@ export function DatabaseDetailView({
   applyOperation,
   notify,
   transferDatabase,
-  loadOverview,
-  refresh,
   setDetailId,
 }: DatabaseDetailViewProps) {
   const [selectedUnattachedId, setSelectedUnattachedId] = React.useState<string>("");
+  const [actionsOpen, setActionsOpen] = React.useState(false);
+  const actionsRef = React.useRef<HTMLDivElement>(null);
+  const actionsTriggerRef = React.useRef<HTMLButtonElement>(null);
+  const actionsId = React.useId();
+
+  React.useEffect(() => {
+    if (!actionsOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!actionsRef.current?.contains(event.target as Node)) setActionsOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setActionsOpen(false);
+        actionsTriggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [actionsOpen]);
   const detailEnvironments = environments[detail.id] ?? [];
   const envOrder: Array<"dev" | "prod"> = ["dev", "prod"];
 
@@ -146,44 +167,79 @@ export function DatabaseDetailView({
               ))}
             </p>
           </div>
-          <div className="automations-header-actions">
-            <button type="button" className="button-secondary" onClick={() => { void loadOverview(); refresh(); }} disabled={loading || backendsLoading}>
-              {loading || backendsLoading ? (isUk ? "Оновлення…" : "Refreshing…") : isUk ? "Оновити" : "Refresh"}
-            </button>
-            <button type="button" className="button-secondary" onClick={() => void renameDatabase(detail)} disabled={backendBusy}>
+          <div className="automations-header-actions ds-database-actions">
+            <button type="button" className="ds-database-action-trigger" onClick={() => void renameDatabase(detail)} disabled={backendBusy}>
               {isUk ? "Перейменувати" : "Rename"}
             </button>
-            <button type="button" className="button-secondary" onClick={() => void toggleArchive(detail)} disabled={backendBusy || detail.status === "deleting"}>
-              {detail.status === "ready" ? (isUk ? "Архівувати" : "Archive") : (isUk ? "Активувати" : "Activate")}
-            </button>
-            <button type="button" className="button-secondary" onClick={() => setTransferOpen(true)} disabled={backendBusy}>
-              {isUk ? "Перенести в іншу компанію" : "Move to another company"}
-            </button>
-            <button type="button" className="button-secondary" onClick={() => void deleteDatabase(detail)} disabled={backendBusy}>
-              {isUk ? "Видалити зараз" : "Delete now"}
-            </button>
+            <div className="ds-database-actions-dropdown" ref={actionsRef}>
+              <button type="button" className="ds-database-action-trigger" ref={actionsTriggerRef} aria-expanded={actionsOpen} aria-controls={actionsId} onClick={() => setActionsOpen(open => !open)} disabled={backendBusy}>
+                {isUk ? "Дії" : "Actions"}
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+              </button>
+              {actionsOpen && (
+                <div className="ds-database-action-menu" id={actionsId}>
+                  <button type="button" onClick={() => { setActionsOpen(false); void toggleArchive(detail); }} disabled={backendBusy || detail.status === "deleting"}>
+                    {detail.status === "ready" ? (isUk ? "Архівувати" : "Archive") : (isUk ? "Активувати" : "Activate")}
+                  </button>
+                  <button type="button" onClick={() => { setActionsOpen(false); setTransferOpen(true); }} disabled={backendBusy}>
+                    {isUk ? "Перенести в іншу компанію" : "Move to another company"}
+                  </button>
+                  <button type="button" className="ds-database-action-danger" onClick={() => { setActionsOpen(false); void deleteDatabase(detail); }} disabled={backendBusy}>
+                    {isUk ? "Видалити зараз" : "Delete now"}
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </header>
 
       {feedback && <div className={`data-studio-toast toast-${feedback.type}`} role="status">{feedback.message}</div>}
 
-      <section className="overview-grid inspector-stats-grid automations-stats-grid" aria-label={isUk ? "Середовища" : "Environments"}>
+      <section className="overview-grid inspector-stats-grid automations-stats-grid ds-environment-grid" aria-label={isUk ? "Середовища" : "Environments"}>
         {envOrder.map((envName) => {
           const info = detailEnvironments.find((env) => env.environment === envName);
           const quota = quotas[envName];
           const showLock = overview?.environment.environment === envName && overview?.lock?.held;
+          const statusClass = !info ? "unknown" : info.status === "ready" && info.syncStatus === "synced"
+            ? "ready" : ["error", "failed"].includes(info.status) ? "error" : "warning";
           return (
-            <div key={envName}>
-              <strong>{envName}</strong>
-              <span>{info ? `${info.status} · ${info.syncStatus}` : isUk ? "немає даних" : "no data"}</span>
-              <small>
-                {quota
-                  ? `${formatBytes(quota.usage.bytes)} / ${formatBytes(quota.limits.maxDatabaseBytes)} · ${quota.state}`
-                  : isUk ? "квоти недоступні" : "quotas unavailable"}
-              </small>
-              {showLock && <small>{isUk ? "міграція виконується" : "migration running"}{lockRemaining !== null ? ` · ${lockRemaining}s` : ""}</small>}
-              {info?.schemaFingerprint && <small title={info.schemaFingerprint}>{info.schemaFingerprint.slice(0, 12)}…</small>}
+            <div key={envName} className="ds-environment-card">
+              <svg className="ds-environment-waves" viewBox="0 0 640 180" preserveAspectRatio="none" aria-hidden="true">
+                <path d="M290 180C375 170 410 126 490 124S575 94 640 76V180Z" fill="#fcecef" />
+                <path d="M430 180C515 157 558 101 640 132V180Z" fill="#f9e2e7" fillOpacity="0.65" />
+              </svg>
+              <div className="ds-environment-heading">
+                <div className="ds-environment-icon" aria-hidden="true"><Database size={36} strokeWidth={1.8} /></div>
+                <strong className="ds-environment-name">{envName}</strong>
+                <span className={`ds-environment-status is-${statusClass}`}>
+                  <i aria-hidden="true" />
+                  {info ? `${info.status} · ${info.syncStatus}` : isUk ? "немає даних" : "no data"}
+                </span>
+              </div>
+              <div className="ds-environment-metrics">
+                {quota ? (
+                  <>
+                    <span className="ds-environment-usage">
+                      <Database size={20} strokeWidth={1.8} aria-hidden="true" />
+                      {formatBytes(quota.usage.bytes)} / {formatBytes(quota.limits.maxDatabaseBytes)}
+                    </span>
+                    <span className={`ds-environment-quota is-${quota.state}`}>
+                      {quota.state === "ok"
+                        ? <CircleCheck size={20} fill="#197237" stroke="#ffffff" aria-hidden="true" />
+                        : <CircleAlert size={20} aria-hidden="true" />}
+                      {quota.state}
+                    </span>
+                  </>
+                ) : <span className="ds-environment-usage">{isUk ? "квоти недоступні" : "quotas unavailable"}</span>}
+              </div>
+              {info?.schemaFingerprint && (
+                <div className="ds-environment-fingerprint" title={info.schemaFingerprint}>
+                  <Hash size={20} aria-hidden="true" />
+                  {info.schemaFingerprint.slice(0, 12)}...
+                </div>
+              )}
+              {showLock && <div className="ds-environment-lock">{isUk ? "міграція виконується" : "migration running"}{lockRemaining !== null ? ` · ${lockRemaining}s` : ""}</div>}
             </div>
           );
         })}
