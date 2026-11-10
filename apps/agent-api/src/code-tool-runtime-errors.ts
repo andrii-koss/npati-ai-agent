@@ -40,6 +40,8 @@ export type CodeToolErrorCode =
   | "read_before_write_required"
   | "revision_conflict"
   | "revision_conflict_exhausted"
+  /** A whole-file write that would keep under a tenth of an existing file of 2 KB or more. */
+  | "write_would_erase_file"
   | "checkpoint_unavailable"
   | "checkpoint_not_found"
   | "approval_required"

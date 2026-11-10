@@ -44,6 +44,10 @@ export function parseBrowserQaResult(stdout: string): SandboxBrowserQaResult {
     if (result.apiBridge !== undefined && typeof result.apiBridge !== "boolean") delete result.apiBridge;
     result.apiLog = Array.isArray(result.apiLog) ? result.apiLog.slice(0, 10).map((line) => String(line).replace(/[^A-Za-z0-9 /_.:=?&-]/g, "").slice(0, 140)) : undefined;
     if (!result.apiLog) delete result.apiLog;
+    result.foreignApiHosts = Array.isArray(result.foreignApiHosts) ? result.foreignApiHosts.slice(0, 5).map((host) => String(host).replace(/[^A-Za-z0-9.:-]/g, "").slice(0, 100)).filter(Boolean) : undefined;
+    if (!result.foreignApiHosts?.length) delete result.foreignApiHosts;
+    result.hiddenShown = Array.isArray(result.hiddenShown) ? result.hiddenShown.slice(0, 5).map((selector) => String(selector).replace(/[^A-Za-z0-9#._-]/g, "").slice(0, 80)).filter(Boolean) : undefined;
+    if (!result.hiddenShown?.length) delete result.hiddenShown;
     if(result.interactionTrace!==undefined){
       if(!Array.isArray(result.interactionTrace)||result.interactionTrace.length>16)throw new Error("invalid_interaction_trace");
       assertBrowserQaActions(result.interactionTrace.map(step=>step.action));

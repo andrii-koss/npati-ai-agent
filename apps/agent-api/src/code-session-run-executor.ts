@@ -334,14 +334,14 @@ export class CodeSessionRunExecutor {
         // file, line and kind) it repeated the same attempt: in E2E G6 two repairs cost 13 + 7 turns for one unchanged error.
         let previousErrors: string | undefined;
         for (let attempt = 1; attempt <= 2; attempt++) {
-          const failed = result as { status?: string; reason?: string; functionalAcceptance?: { diagnostics?: unknown[]; brokenLinks?: unknown[] } };
+          const failed = result as { status?: string; reason?: string; functionalAcceptance?: { diagnostics?: unknown[]; brokenLinks?: unknown[]; findings?: unknown[] } };
           if (failed?.status !== "failed" || failed.reason !== "website_preview_qa_failed" || controller.signal.aborted || await input.cancelRequested()) break;
-          const errors = JSON.stringify([failed.functionalAcceptance?.diagnostics ?? [], failed.functionalAcceptance?.brokenLinks ?? []]);
+          const errors = JSON.stringify([failed.functionalAcceptance?.diagnostics ?? [], failed.functionalAcceptance?.brokenLinks ?? [], failed.functionalAcceptance?.findings ?? []]);
           if (errors === previousErrors) break;
           previousErrors = errors;
           const repairRunId = String(rootRunId ?? sessionId) + ":qa-repair:" + attempt;
           const repaired = await runner.run({ ctx: input.ctx, session: input.session, model, images: input.images, useInbox: false, skipAsyncCollect: true,
-            prompt: input.prompt + "\nThe build passed, but opening the app in a browser found these errors: " + JSON.stringify({ errors: failed.functionalAcceptance?.diagnostics ?? [], brokenLinks: failed.functionalAcceptance?.brokenLinks ?? [] })
+            prompt: input.prompt + "\nThe build passed, but opening the app in a browser found these errors: " + JSON.stringify({ errors: failed.functionalAcceptance?.diagnostics ?? [], brokenLinks: failed.functionalAcceptance?.brokenLinks ?? [], problems: failed.functionalAcceptance?.findings ?? [] })
               + "\nFind the cause in the SAME project and fix it, preserving what works. Read current files before editing. Do not scaffold or reinstall unchanged dependencies. Finish saved edits for the automatic build and browser check.",
             runId: repairRunId, runDetails: { parentRunId: rootRunId ?? null, qaRepairAttempt: attempt },
             quotaSessionId: sessionId, ...(input.maxTurns ? { maxTurns: input.maxTurns } : {}), websiteEdit: true,

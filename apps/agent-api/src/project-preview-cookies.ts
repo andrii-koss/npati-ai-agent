@@ -1,3 +1,4 @@
+import { previewOriginConfig } from "./preview-origin-config";
 export function rewriteSetCookieHeader(cookieStr: string,
   projectPrefix: string,
   proxyPath: string, crossSite = false): string {
@@ -45,7 +46,10 @@ export function previewSameSite(crossSite: boolean): string[] {
 
 /** The Preview runs on a host of its own (`<project>.preview.<domain>`), away from the app's stored token. */
 export function isIsolatedPreviewHost(host: string | undefined): boolean {
-  return /^[a-z0-9-]+\.preview\./i.test(host ?? "");
+  if (/^[a-z0-9-]+\.preview\./i.test(host ?? "")) return true;
+  // An installation can name its own Preview hosts (NPATI_PREVIEW_ORIGIN, e.g. https://{project}-preview.example.com).
+  const configured = previewOriginConfig();
+  return !!configured && !!host && configured.hostPattern.test(host);
 }
 export function filterIncomingCookies(
   rawCookieHeader: string | undefined,

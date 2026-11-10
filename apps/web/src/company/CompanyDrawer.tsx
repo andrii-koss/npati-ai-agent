@@ -1,6 +1,7 @@
 import type { FormEvent } from "react";
 import { useTranslation } from "../i18n";
 import type { Company, CompanyDraft } from "./types";
+import { CompanyDataAutoAllow } from "./CompanyDataAutoAllow";
 
 export interface CompanyDrawerProps {
   isOpen: boolean;
@@ -59,6 +60,7 @@ export function CompanyDrawer({
             <label><span>{t("companySettings.companyDrawer.brandTone")}</span><input value={companyForm.brandTone} onChange={(event) => setCompanyForm({ ...companyForm, brandTone: event.target.value })} /></label></div>
             <label><span>{t("companySettings.companyDrawer.companyInstructions")}</span><textarea rows={5} value={companyForm.companyInstructions} onChange={(event) => setCompanyForm({ ...companyForm, companyInstructions: event.target.value })} /></label>
           </section>
+          {editingCompany ? <CompanyDataAutoAllow companyId={editingCompany.id} /> : null}
           <footer>
             {editingCompany && <button type="button" className="danger-button" onClick={() => void deleteCompany()}>{t("companySettings.companyDrawer.deleteCompany")}</button>}
             <span />

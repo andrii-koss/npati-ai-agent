@@ -215,6 +215,7 @@ export function createCodeToolRuntimeWiring(deps: CodeToolRuntimeWiringDeps) {
     approvals: codeApprovalPort,
 
     approvalRules: { findRule: async (ctx, query) => codeApprovalScope.findRule(ctx, query) },
+    dataAutoAllow: async (ctx, companyId) => featureFlagService.dataAutoAllow?.isOn(ctx, companyId) ?? false,
 
     approvalDecision: approvalsRepo ? {
       timeoutMs: resolveApprovalTimeoutMs(process.env),

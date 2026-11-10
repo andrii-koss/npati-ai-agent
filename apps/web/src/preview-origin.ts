@@ -1,13 +1,17 @@
 /**
  * A generated site runs its own JavaScript. Loaded from the app's origin, that code could read the app's stored
  * access token, so a Preview opens from a separate origin per project: `<project>.preview.localhost` locally, or the
- * template in VITE_PREVIEW_ORIGIN (for example `https://{project}.preview.example.com`). The preview proxy authorises
+ * template the server sets with NPATI_PREVIEW_ORIGIN (sent in index.html, so a prebuilt bundle needs no rebuild) or
+ * VITE_PREVIEW_ORIGIN at build time (for example `https://{project}.preview.example.com`). The preview proxy authorises
  * each request with its signed token and cookie, so it answers on any host.
  */
 const PROXY = /^\/api\/companies\/[^/]+\/projects\/([^/]+)\/preview\/proxy(?:\/|$)/;
 
 function originTemplate(): string | null {
-  const configured = import.meta.env.VITE_PREVIEW_ORIGIN as string | undefined;
+  const fromServer = typeof document !== "undefined"
+    ? document.querySelector<HTMLMetaElement>('meta[name="npati-preview-origin"]')?.content
+    : undefined;
+  const configured = fromServer || (import.meta.env.VITE_PREVIEW_ORIGIN as string | undefined);
   if (configured) return configured.replace(/\/+$/, "");
   if (typeof window === "undefined") return null;
   const { protocol, hostname, port } = window.location;

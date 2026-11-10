@@ -92,7 +92,7 @@ async function harness() {
     expect(chats).toHaveLength(1);
   }); };
   const paused = async () => { await vi.waitFor(async () => expect((await op()).state).toBe("interrupted")); };
-  return { store, log, inbox, service, fresh, flags, chats, runAgent, quotaChecks, start, started, paused, op,
+  return { options, store, log, inbox, service, fresh, flags, chats, runAgent, quotaChecks, start, started, paused, op,
     unblock: () => { block = false; }, finishModel: () => { block = false; releaseModel?.(); } };
 }
 
@@ -172,6 +172,25 @@ describe("Step 6: controls use the existing runner, inbox and C10 continuation",
     expect((await h.log.loadRunState("c", childRunId))?.status).toBe("cancelled");
     expect(activeCodeProcess(await h.op())).toBe(false);
     expect(release).toHaveBeenCalledOnce();
+  });
+
+  it("a run with no child is not reported as waiting for one when its session cannot be read", async () => {
+    const h = await harness();
+    const unreadable = new CodeSubagentOperationService({ ...h.options, loadSession: async () => { throw Object.assign(new Error("Session not found"), { status: 404 }); } });
+    closes.push(() => unreadable.close());
+    const target = { ctx, companyId: "c", projectId: "p", sessionId: parent.id, parentRunId: "root" };
+    expect(await unreadable.settleChildren({ ...target, cancel: false, timeoutMs: 1 })).toBe(true);
+    expect(await unreadable.hasRequiredChild(target)).toBe(false);
+    const release = vi.fn(async () => {});
+    const root = new CodingAgentRunner({ flags: { assertEnabled: async () => true }, rbac: { authorize: async () => ({ allowed: true }) },
+      toolRuntime: { listTools: () => [], invoke: async () => { throw new Error("unexpected"); } }, schemas: [], runState: h.log,
+      engine: { chat: async () => ({ content: "Added the tags column" }) }, sandbox: { release },
+      activeChildren: { settle: (i) => unreadable.settleChildren({ ...i, parentRunId: i.runId, timeoutMs: 1 }),
+        isUnsettled: (i) => unreadable.hasRequiredChild({ ...i, parentRunId: i.runId }) } });
+    const result = await root.run({ ctx, session: parent, prompt: "add tags column", runId: "root", runStateOwner: "root-worker", verificationTools: [] });
+    expect(result.status).not.toBe("interrupted");
+    expect(result.message).not.toContain("delegated sub-agent");
+    expect(release).toHaveBeenCalled();
   });
 
   it("a root with an unsettled child remains interrupted and retains its sandbox", async () => {

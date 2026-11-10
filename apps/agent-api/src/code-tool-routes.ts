@@ -46,6 +46,7 @@ const ERROR_STATUS: Record<string, number> = {
   read_before_write_required: 409,
   revision_conflict: 409,
   revision_conflict_exhausted: 409,
+  write_would_erase_file: 409,
   edit_no_match: 409,
   edit_ambiguous: 409,
   patch_conflict: 409,

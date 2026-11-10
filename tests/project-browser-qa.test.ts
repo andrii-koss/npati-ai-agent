@@ -69,6 +69,31 @@ describe("project browser QA", () => {
     expect(await f.qa.listReports(owner, f.company.id, f.project.id)).toEqual([]);
   });
 
+  it("reports a page that sends its Project API requests to a fixed host instead of its own address", async () => {
+    const f = await fixture();
+    f.inspect.mockResolvedValueOnce({ ...result, consoleErrorCount: 0, brokenLinks: [], accessibility: [], foreignApiHosts: ["api.npati.com"] });
+    const report = await f.qa.inspect(owner, f.company.id, { projectId: f.project.id });
+    expect(report.issues.map(item => item.message)).toContain("The page sends Project API requests to the fixed host api.npati.com instead of its own address");
+    f.inspect.mockResolvedValueOnce({ ...result, consoleErrorCount: 0, brokenLinks: [], accessibility: [] });
+    expect((await f.qa.inspect(owner, f.company.id, { projectId: f.project.id })).issues.some(item => /fixed host/.test(item.message))).toBe(false);
+  });
+  it("reports controls marked hidden that a CSS rule shows anyway, such as Sign out for a guest", async () => {
+    const f = await fixture();
+    f.inspect.mockResolvedValueOnce({ ...result, consoleErrorCount: 0, brokenLinks: [], accessibility: [], hiddenShown: ["div#account-chip"] });
+    const report = await f.qa.inspect(owner, f.company.id, { projectId: f.project.id });
+    expect(report.issues.find(item => /marked hidden/.test(item.message))).toMatchObject({ severity: "error",
+      message: "1 element(s) marked hidden are still shown: div#account-chip", recommendation: expect.stringContaining("[hidden] { display: none !important; }") });
+    const { parseBrowserQaResult } = await import("../apps/agent-api/src/sandbox-browser-qa");
+    expect(parseBrowserQaResult(JSON.stringify({ ...result, hiddenShown: ["div#a<b>", "", "p.x"] })).hiddenShown).toEqual(["div#ab", "p.x"]);
+  });
+  it("records the hosts in the runner and keeps only host names from its output", async () => {
+    const { parseBrowserQaResult } = await import("../apps/agent-api/src/sandbox-browser-qa");
+    const parsed = parseBrowserQaResult(JSON.stringify({ ...result, foreignApiHosts: ["api.npati.com", "evil.example/<script>"] }));
+    expect(parsed.foreignApiHosts).toEqual(["api.npati.com", "evil.examplescript"]);
+    expect(parseBrowserQaResult(JSON.stringify(result)).foreignApiHosts).toBeUndefined();
+    const source = readFileSync(new URL("../apps/agent-api/browser-qa-runner.mjs", import.meta.url), "utf8");
+    expect(source).toContain("foreignApiHosts.push(url.host)");
+  });
   it("drops screenshots without a redaction attestation", async () => {
     const f = await fixture();
     const unsafe = { ...result, screenshot: { mimeType: "image/png" as const, base64Data: Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, ...Buffer.from("SECRET")]).toString("base64"), sizeBytes: 14 } } as unknown as SandboxBrowserQaResult;

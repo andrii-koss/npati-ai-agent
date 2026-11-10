@@ -185,6 +185,8 @@ export interface CodeToolRuntimeOptions {
   /**
    * C5: scoped approval rules (`session` | `project`).
    */
+  /** The company setting that lets the agent change project databases without asking each time (off by default). */
+  dataAutoAllow?: (ctx: AuthContext, companyId: string) => Promise<boolean>;
   approvalRules?: {
     findRule(ctx: AuthContext, query: {
       companyId: string; projectId?: string | null; sessionId?: string | null; action: string;

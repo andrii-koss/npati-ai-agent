@@ -3,7 +3,8 @@ import { chromium } from "playwright";
 import { assertBrowserQaActions, runBrowserQaActions } from "../apps/agent-api/browser-qa-actions.mjs";
 import { assertBrowserQaOptions } from "../apps/agent-api/src/sandbox-browser-qa";
 import { resolveManifestForSession } from "../apps/agent-api/src/code-tool-registry";
-it("keeps the v17 schema snapshot immutable",()=>{expect(resolveManifestForSession(17).checksum).toBe("d5d299798efded5866eb1f1b5781381be45b338b69f8efdc16a6f83b69cb7a10");});
+// v19-v22 added rename_field and row/role/value-rule tools; the earlier data tools gained optional fields in place (additive only).
+it("keeps the v17 schema snapshot immutable",()=>{expect(resolveManifestForSession(17).checksum).toBe("6762d1a75c2066e27781725b4a473addcc2e8d93a2d0fd826f91b32082398f09");});
 it("refuses unbounded actions, credential input, scripts and selector engines",()=>{
   for(const actions of [Array.from({length:17},()=>({type:"wait",durationMs:0})),[{type:"eval",script:"fetch('https://external')"}],[{type:"key",key:"Control"}],[{type:"click",selector:"iframe >> button"}],[{type:"wait",durationMs:2001}],Array.from({length:5},()=>({type:"wait",durationMs:2000}))])expect(()=>assertBrowserQaActions(actions)).toThrow();
   expect(()=>assertBrowserQaOptions({port:3000,path:"/",viewport:{width:800,height:600},timeoutMs:30000,maxScreenshotBytes:500000,maxBrokenLinks:20,screenshot:false,actions:[{type:"key",key:"Control"}]})).toThrow();

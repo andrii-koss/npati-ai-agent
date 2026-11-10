@@ -220,6 +220,17 @@ export function canonicalWriteExecutors(options: CanonicalWriteExecutorOptions =
       const path = stringArg(input.args, ["path", "file", "filePath"]);
       if (!path) throw new CodeToolError("invalid_arguments", "code.fs.write requires a path", 400, "validate_arguments", false, input.tool.name);
       const content = typeof input.args.content === "string" ? input.args.content : input.args.newContent;
+      // A repair run once replaced a 783-line script with 28 bytes. A whole-file write that keeps under a tenth of a
+      // file of 2 KB or more is refused; a partial change is a code.fs.edit, and emptying a file on purpose is a delete.
+      if (typeof content === "string") {
+        const existing = await input.port.readFile({ ctx: input.ctx, companyId: input.companyId, projectId: input.projectId, path, maxLines: 100_000, maxBytes: 512 * 1024 })
+          .then((file) => file.content).catch(() => undefined);
+        if (typeof existing === "string" && existing.length >= 2000 && content.length < existing.length / 10) {
+          throw new CodeToolError("write_would_erase_file",
+            `This would replace ${existing.split(/\r?\n/).length} lines (${existing.length} characters) of ${path} with ${content.length} characters. Change part of the file with code.fs.edit, or write the complete new file. If the user asked to empty it, delete it with code.fs.delete and write it again.`,
+            409, "validate_arguments", false, input.tool.name, { existingCharacters: existing.length, newCharacters: content.length });
+        }
+      }
       const written = await writeFileSafe(
         {
           path,

@@ -33,6 +33,10 @@ export interface SandboxBrowserQaResult {
   apiCalls?: number;
   apiBridge?: boolean;
   apiLog?: string[];
+  /** Hosts other than the page's own that the page sent Project API requests to. */
+  foreignApiHosts?: string[];
+  /** Elements with the hidden attribute that are displayed anyway, as short selectors. */
+  hiddenShown?: string[];
   screenshot?: { mimeType: "image/png"; base64Data: string; sizeBytes: number; redacted: true; captureMode?: "layout" | "visual" };
 }
 export interface SandboxBrowserQaOptions {

@@ -33,7 +33,7 @@ describe("Stage 06 Preview runtime regressions", () => {
     expect(restart).toHaveBeenCalledWith(expect.objectContaining({ companyId: "c", projectId: "p" }));
     expect(canonicalAssistExecutors()["code.preview.restart"]).toBeUndefined();
     for (let version = 1; version <= 16; version++) expect(schemasForToolManifest(version).some(t => t.name === "code.preview.restart")).toBe(false);
-    expect(resolveManifestForSession(16).checksum).toBe("8e7ba87add7d4c3e1e23a83aa4920622378ced1030724ac177ab9b7373cd2bd2");
+    expect(resolveManifestForSession(16).checksum).toBe("b2ad2fec28a1e79f67cc5cf5af03a25f3e01d524bfab334cd18b6edb972528ee"); // v19-v22 added rename_field and row/role/value-rule tools; the earlier data tools gained optional fields in place (additive only).
   });
   it("never reuses a static or development process on an explicit restart", () => {
     expect(canReusePreviewSession({ framework: "static", forceRestart: true } as Parameters<typeof canReusePreviewSession>[0])).toBe(false);

@@ -50,6 +50,8 @@ try {
     const apiLog = [];
     const pendingBodies = [];
     const apiFailures = [];
+    // A site must call its Project API by a relative path. A fixed host (another installation's domain) works for nobody else.
+    const foreignApiHosts = [];
     await context.route("**/*", async route => {
       let url;
       try { url = new URL(route.request().url()); } catch { return route.abort(); }
@@ -72,6 +74,7 @@ try {
           return route.fulfill({ status: 503, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: { code: ("QA_API_UNREACHABLE_" + String(error?.code ?? error?.message ?? "")).replace(/[^A-Z0-9_]/gi, "_").slice(0, 60) } }) });
         }
       }
+      if (url.origin !== origin && url.pathname.startsWith("/v1/projects/") && foreignApiHosts.length < 5 && !foreignApiHosts.includes(url.host)) foreignApiHosts.push(url.host);
       // While forms are tried, any other write (a framework API route) could change real data, so it is not sent.
       if (formPhase && !["GET", "HEAD"].includes(route.request().method())) return route.abort();
       // A Flutter web app loads its engine and fonts from these hosts, and a site loads Google Fonts from the last two. Blocking
@@ -184,9 +187,12 @@ try {
         seen.add(el.id);
       });
       const links = [...document.querySelectorAll("a[href]")].slice(0, 100).map(el => el.getAttribute("href"));
+      // An element the page hides with the hidden attribute that a CSS display rule shows anyway (a guest seeing "Sign out").
+      const hiddenShown = [...document.querySelectorAll("body [hidden]")].filter(el => getComputedStyle(el).display !== "none" && el.getClientRects().length > 0)
+        .slice(0, 5).map(el => el.tagName.toLowerCase() + (el.id ? "#" + el.id : el.classList.length ? "." + [...el.classList].slice(0, 2).join(".") : ""));
       const navigation = performance.getEntriesByType("navigation")[0];
       return {
-        violations, links,
+        violations, links, hiddenShown,
         domContentLoadedMs: navigation?.domContentLoadedEventEnd ?? 0,
         resourceCount: performance.getEntriesByType("resource").length,
         totalSizeBytes: new TextEncoder().encode(document.documentElement.outerHTML).length,
@@ -238,7 +244,7 @@ try {
       statusCode: response?.status() ?? 0, loadTimeMs, domContentLoadedMs: Math.round(observations.domContentLoadedMs),
       resourceCount: observations.resourceCount, totalSizeBytes: observations.totalSizeBytes,
       consoleErrorCount: Math.min(consoleErrorCount, 100), consoleDiagnostics, brokenLinks, accessibility: observations.violations, interactionTrace,
-      apiFailures, formsSubmitted, apiCalls, apiBridge, apiLog,
+      apiFailures, formsSubmitted, apiCalls, apiBridge, apiLog, foreignApiHosts, hiddenShown: observations.hiddenShown,
       screenshot: captured,
     }));
     await context.close();

@@ -124,8 +124,8 @@ describe("security-gate: C3 mutating code.* capability registration", () => {
     // `code.ask_user`, C11 git, C12 delegation and Step 3 async tools. The pin had stopped at 19 (the count before
     // C4a) because this file is not part of the security gate; it is brought up to the real total rather than
     // widened into a range, which would stop catching an addition.
-    expect(catalogCode).toHaveLength(61);
-    expect(matrixCode).toHaveLength(61);
+    expect(catalogCode).toHaveLength(65);
+    expect(matrixCode).toHaveLength(65);
     expect(matrixCode.filter((entry) => WRITE_INVENTORY_IDS.includes(entry.id)).map((entry) => entry.id)).toEqual(WRITE_INVENTORY_IDS);
 
     for (const [index, id] of WRITE_IDS.entries()) {
@@ -136,11 +136,11 @@ describe("security-gate: C3 mutating code.* capability registration", () => {
 
     const allInventoryIds = CAPABILITY_CATALOG.flatMap((c) => c.inventoryIds);
     expect(new Set(allInventoryIds).size).toBe(allInventoryIds.length);
-    expect(Math.max(...allInventoryIds)).toBe(409); // Project database inspection and schema application.
+    expect(Math.max(...allInventoryIds)).toBe(413); // v22: code.data.rows.update.
 
     const callable = CAPABILITY_CATALOG.filter((c) => c.agentCallable);
-    expect(CAPABILITY_CATALOG).toHaveLength(409);
-    expect(callable).toHaveLength(145);
+    expect(CAPABILITY_CATALOG).toHaveLength(413);
+    expect(callable).toHaveLength(149);
     expect(CAPABILITY_CATALOG.length - callable.length).toBe(264);
   });
 });
@@ -149,7 +149,7 @@ describe("security-gate: C3 tool manifest and flag gating", () => {
   it("keeps manifest v3 frozen and resolvable while the current manifest publishes every tool", () => {
     // C4 bumped the manifest to v4; v3 must keep resolving with exactly its 13 tools and frozen checksum.
     expect(CODE_TOOL_MANIFEST_VERSION).toBeGreaterThanOrEqual(4);
-    expect(CODE_TOOL_SCHEMAS.length).toBe(63); // Manifest v12 adds two project database tools; v16 adds schema.apply@2 beside the frozen @1.
+    expect(CODE_TOOL_SCHEMAS.length).toBe(67); // v19-v22 add four data tools. Manifest v12 adds two project database tools; v16 adds schema.apply@2 beside the frozen @1.
     expect(PUBLISHED_TOOL_SCHEMA_CHECKSUM).toBe(toolSchemaChecksum(CODE_TOOL_SCHEMAS));
 
     const v1 = resolveManifestForSession(1);

@@ -27,6 +27,20 @@ export function registerCodeExecutionModeRoutes(app: FastifyInstance, deps: {
       catch (error) { return fail(reply, error); }
     });
 
+  // "Let the agent change this company's databases without asking": off by default, owner/admin only, audited.
+  app.get<{ Params: { companyId: string } }>("/companies/:companyId/chat/data-auto-allow", async (request, reply) => {
+    try { return await deps.flags.dataAutoAllow.get(await deps.auth.authenticate(request), request.params.companyId); }
+    catch (error) { return fail(reply, error); }
+  });
+  app.put<{ Params: { companyId: string }; Body: { autoAllow: boolean; expectedRevision: number } }>(
+    "/companies/:companyId/chat/data-auto-allow",
+    { schema: { body: { type: "object", additionalProperties: false, required: ["autoAllow", "expectedRevision"],
+      properties: { autoAllow: { type: "boolean" }, expectedRevision: { type: "integer", minimum: 0 } } } } },
+    async (request, reply) => {
+      try { return await deps.flags.dataAutoAllow.set(await deps.auth.authenticate(request), request.params.companyId, request.body.autoAllow, request.body.expectedRevision); }
+      catch (error) { return fail(reply, error); }
+    });
+
   app.post<{ Params: { companyId: string } }>("/companies/:companyId/code/creator-workspace", async (request, reply) => {
     try {
       const ctx = await deps.auth.authenticate(request);

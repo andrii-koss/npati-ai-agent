@@ -13,7 +13,7 @@ import type { CodeApprovalPort } from "../apps/agent-api/src/code-workspace-chec
 const ctx: AuthContext = { userId: "owner", workspaceId: "data-code", permissions: ["admin:all", "workspace:read", "workspace:write"] };
 const port: CodeReadPort = { listDir: vi.fn(), readFile: vi.fn(), runSearch: vi.fn() };
 const operation = { kind: "create_collection", collection: "products", fields: [{ name: "title", type: "text" }] };
-async function fixture(mode = "auto", approvals?: CodeApprovalPort) {
+async function fixture(mode = "auto", approvals?: CodeApprovalPort, dataAutoAllow?: (ctx: AuthContext, companyId: string) => Promise<boolean>) {
   const store = new InMemoryWorkspaceStore();
   const company = await store.createCompany(ctx, { name: "Data coding" }, "data-code-company");
   const flags = new FeatureFlagService(store, undefined, { enabledByDefault: true });
@@ -28,7 +28,7 @@ async function fixture(mode = "auto", approvals?: CodeApprovalPort) {
   };
   projectData.applySchema.mockResolvedValue({ applied: true, fingerprint: "after" });
   const policy = new PolicyEngine({ flags, capabilities: defaultCapabilityRegistry, sessionMode: async () => mode as "auto", });
-  const runtime = new CodeToolRuntime({ store, flags, approvals, toPort: () => port, wrap: (_tool, value) => value,
+  const runtime = new CodeToolRuntime({ store, flags, approvals, dataAutoAllow, toPort: () => port, wrap: (_tool, value) => value,
     reviewScope: { allows: isReviewSafeTool }, executors: codeDataExecutors({ projectData, dataPolicy: policy }) });
   const invoke = (tool: string, args = {}, extra = {}) => runtime.invoke(ctx, { companyId: company.id, projectId: "selected-site", sessionId: "session", tool, args, toolCallId: crypto.randomUUID(), ...extra });
   return { runtime, projectData, invoke, company };
@@ -114,6 +114,19 @@ describe("Coding Agent extended database operations", () => {
     expect((await f.invoke("code.data.schema.modify", modify, { approvalId })).ok).toBe(true);
     expect(f.projectData.applySchema).toHaveBeenCalledWith(ctx, f.company.id, "selected-site", modify.operation, expect.objectContaining({ approved: true }));
     expect((await f.invoke("code.data.schema.modify", modify, { approvalId })).ok).toBe(false);
+  });
+  it("with the company setting on, changes the database without creating a request; with it off, still asks", async () => {
+    const { approvals } = approvalFixture();
+    const on = await fixture("auto", approvals, async () => true);
+    expect((await on.invoke("code.data.schema.modify", modify)).ok).toBe(true);
+    expect(approvals.request).not.toHaveBeenCalled();
+    expect(on.projectData.applySchema).toHaveBeenCalledWith(ctx, on.company.id, "selected-site", modify.operation, expect.objectContaining({ approved: true }));
+    const off = await fixture("auto", approvals, async () => false);
+    expect(await off.invoke("code.data.schema.modify", modify)).toMatchObject({ ok: false, error: { code: "approval_required" } });
+    expect(off.projectData.applySchema).not.toHaveBeenCalled();
+    // A setting that cannot be read counts as "ask".
+    const broken = await fixture("auto", approvals, async () => { throw new Error("store down"); });
+    expect(await broken.invoke("code.data.schema.modify", modify)).toMatchObject({ ok: false, error: { code: "approval_required" } });
   });
   it.each(["code.data.schema.modify", "code.data.rows.transfer", "code.data.backend.attach"])("never offers %s as read-only", tool => expect(isReadOnlyRunTool(tool)).toBe(false));
   it("allows listing rows in planning mode", async () => {

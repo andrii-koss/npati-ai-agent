@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { IncomingMessage } from "node:http";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { previewOriginConfig, previewOriginMeta } from "./preview-origin-config";
 
 const apiRequests = new WeakSet<IncomingMessage>();
 export type CustomDomainHandler = (request: FastifyRequest, reply: FastifyReply) => Promise<boolean>;
@@ -31,7 +32,13 @@ const dataStudioPage = /^\/companies\/[^/]+\/projects\/[^/]+\/data\/?$/;
 export function registerWebFrontend(app: FastifyInstance, directory: string): void {
   const root = path.resolve(directory);
   let indexHtml: Buffer;
-  app.addHook("onReady", async () => { indexHtml = await readFile(path.join(root, "index.html")); });
+  // The Preview origin is configured on the server (NPATI_PREVIEW_ORIGIN), so a prebuilt web bundle picks it up from here.
+  app.addHook("onReady", async () => {
+    const html = (await readFile(path.join(root, "index.html"))).toString("utf8");
+    const meta = previewOriginMeta(previewOriginConfig());
+    indexHtml = Buffer.from(meta ? html.replace("</head>", () => `  ${meta}
+</head>`) : html, "utf8");
+  });
   app.register(fastifyStatic, {
     root,
     index: false,

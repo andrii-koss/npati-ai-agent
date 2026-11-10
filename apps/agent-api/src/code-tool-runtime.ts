@@ -331,22 +331,29 @@ export class CodeToolRuntime {
       let writeTargets: Array<{ path: string; exists: boolean }> = [];
       let approved = false;
       if (tool.name.startsWith("code.data.") && write) {
+        let autoAllowed = false;
         if (tool.name === "code.data.backend.attach" && args.dryRun !== true && typeof args.databaseId !== "string" && (typeof args.targetProjectId !== "string" || args.expectedTargetBackendId === undefined)) throw new CodeToolError("invalid_arguments", "Preview and select a target project and its current database attachment", 400, "arguments", false, tool.name);
         if (!["code.data.schema.apply", "code.data.backend.create"].includes(tool.name) && args.dryRun !== true) {
           if (!this.options.approvals) throw new CodeToolError("approval_unavailable", "Database changes require the approval system", 503, "approval", false, tool.name);
+          // The company chose to let the agent change its databases without asking: no request is created, and the
+          // audit entry below says which setting allowed it.
+          autoAllowed = !input.approvalId && await this.options.dataAutoAllow?.(ctx, input.companyId).catch(() => false) === true;
+        }
+        if (!["code.data.schema.apply", "code.data.backend.create"].includes(tool.name) && args.dryRun !== true && !autoAllowed) {
           const payload = { projectId: input.projectId, sessionId, turnId, tool: tool.name, toolVersion: tool.version, args };
           if (!input.approvalId) await this.writeGuard.requestApprovalDecision(ctx, input, tool, "delete", `${tool.name}: ${JSON.stringify(args)}`, payload);
           if (!input.approvalId) throw new CodeToolError("approval_invalid", "Database approval is missing", 403, "approval", false, tool.name);
           try {
-            await this.options.approvals.consume({ ctx, companyId: input.companyId, approvalId: input.approvalId, runId: input.runId ?? "", agentId: input.agentId ?? "", toolName: tool.name, inputPayload: payload });
+            await this.options.approvals!.consume({ ctx, companyId: input.companyId, approvalId: input.approvalId, runId: input.runId ?? "", agentId: input.agentId ?? "", toolName: tool.name, inputPayload: payload });
           } catch (error) {
             const shaped = error as { code?: string; message?: string };
             throw new CodeToolError(shaped.code === "approval_denied" || shaped.code === "approval_rejected" ? "approval_denied" : "approval_invalid", shaped.message ?? "Database approval does not match this operation", 403, "approval", false, tool.name);
           }
           approved = true;
         }
+        if (autoAllowed) approved = true;
         await this.hooksCoordinator.recordAudit(ctx, { ...input, sessionId, tool: tool.name }, tool, "allowed", undefined, {
-          turnId, action: "pre_schema_write", strict: true,
+          turnId, action: autoAllowed ? "pre_schema_write:allowed_by_company_setting" : "pre_schema_write", strict: true,
         });
       } else if (write) {
         if (tool.name === "code.fs.undo_last_turn") {

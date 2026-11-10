@@ -313,10 +313,15 @@ export class CodeSubagentOperationService {
      * one — the answer is only `true` when an active child record (or a live delegation of this process) was
      * actually found.
      */
-    const session = await this.options.loadSession({ ctx: input.ctx, companyId: input.companyId, sessionId: input.sessionId });
+    const session = await this.readableSession({ ctx: input.ctx, companyId: input.companyId, sessionId: input.sessionId });
     if (!session) return false;
     const children = await this.listChildren(this.scopeFor(session), input.parentRunId);
     return children.some((op) => activeCodeProcess(op));
+  }
+
+  /** A session lookup that fails (a 404 is thrown, not returned) counts as "no session", the same as a null. */
+  private async readableSession(input: { ctx: AuthContext; companyId: string; sessionId: string }) {
+    try { return await this.options.loadSession(input); } catch { return null; }
   }
 
   writeScopeOf(parentRunId: string): string[] {
@@ -735,7 +740,9 @@ export class CodeSubagentOperationService {
 
   /** Parent terminal fence: wait, or explicitly cancel and settle before allowing cleanup. */
   async settleChildren(input: Omit<CodeAgentControlTarget, "childRunId"> & { cancel: boolean; timeoutMs?: number }): Promise<boolean> {
-    const session = await this.options.loadSession(input); if (!session) return false;
+    // As in hasRequiredChild: a session that cannot be read is not "a child is still running"; this process's own children
+    // still answer for themselves.
+    const session = await this.readableSession(input); if (!session) return !this.hasActiveChild(input.parentRunId);
     const scope = this.scopeFor(session);
     const deadline = Date.now() + (input.timeoutMs ?? 30_000);
     do {

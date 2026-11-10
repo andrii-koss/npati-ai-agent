@@ -66,7 +66,8 @@ function entry(file: string, title: string, overrides: Partial<KnownFailureEntry
     reason: "synthetic fixture: this reason is never shown to a user",
     owner: "test-owner",
     added_at: "2026-10-07",
-    expires_at: "2026-11-06",
+    // Far ahead on purpose: the default entry is "not expired" on any day the suite runs. Expiry is tested with an explicit `now`.
+    expires_at: "2099-12-31",
     ...overrides,
   };
 }

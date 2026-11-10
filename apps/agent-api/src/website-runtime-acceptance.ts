@@ -3,12 +3,23 @@ import { browserCheckUnavailableNotice, resolveCodingConversationLanguage } from
 import type { CodeSessionRunInput } from "./code-session-run-executor";
 import type { BrowserQaReportResult } from "./project-browser-qa-service";
 
+/**
+ * The report's other errors (a refused form, a fixed API host, a control shown to the wrong visitor). They are not console
+ * errors, so before this the repair run was told "errors: []" and the user read a heading with nothing under it.
+ */
+export function browserQaFindings(qa: Pick<BrowserQaReportResult, "issues" | "consoleErrors">): Array<{ message: string; fix?: string }> {
+  const consoleMessages = new Set((qa.consoleErrors ?? []).map((entry) => entry.message));
+  return (qa.issues ?? [])
+    .filter((issue) => issue.severity === "error" && !consoleMessages.has(issue.message) && !/^\d+ browser console errors$/.test(issue.message) && !/^Local link returned/.test(issue.message))
+    .slice(0, 10).map((issue) => ({ message: issue.message, ...(issue.recommendation ? { fix: issue.recommendation } : {}) }));
+}
+
 /** What the user reads when the app still breaks: the actual errors, in their language, not a report dump. */
-function browserFailureMessage(prompt: string, diagnostics: unknown[], brokenLinks: unknown[]): string {
+function browserFailureMessage(prompt: string, diagnostics: unknown[], brokenLinks: unknown[], findings: Array<{ message: string }> = []): string {
   const details = [...diagnostics.map((item) => {
     const entry = item as { message?: unknown; text?: unknown } | string;
     return typeof entry === "string" ? entry : String(entry?.message ?? entry?.text ?? JSON.stringify(entry));
-  }), ...brokenLinks.map((link) => String((link as { url?: unknown; href?: unknown })?.url ?? (link as { href?: unknown })?.href ?? link))].map((line) => "- " + line.split("\n")[0]!.slice(0, 200));
+  }), ...findings.map((finding) => finding.message), ...brokenLinks.map((link) => String((link as { url?: unknown; href?: unknown })?.url ?? (link as { href?: unknown })?.href ?? link))].map((line) => "- " + line.split("\n")[0]!.slice(0, 200));
   const uk = resolveCodingConversationLanguage(prompt) === "uk";
   const head = uk ? "Проєкт зібрався, але під час відкриття в браузері є помилки, які не вдалося виправити автоматично:" : "The project builds, but opening it in a browser shows errors that could not be fixed automatically:";
   return [head, ...details].join("\n");
@@ -21,9 +32,9 @@ export async function verifyWebsiteRuntime(input: CodeSessionRunInput, result: u
   try {
     const qa = await inspect();
     const functionalAcceptance = { status: qa.success ? "passed" : "failed", qaStatus: qa.report.status, reportId: qa.report.id,
-      diagnostics: qa.consoleErrors.slice(0, 5).map(normalizeBrowserDiagnostic), brokenLinks: qa.brokenLinks.slice(0, 10) };
+      diagnostics: qa.consoleErrors.slice(0, 5).map(normalizeBrowserDiagnostic), brokenLinks: qa.brokenLinks.slice(0, 10), findings: browserQaFindings(qa) };
     return qa.success ? { ...run, functionalAcceptance } : { ...run, status: "failed", reason: "website_preview_qa_failed", functionalAcceptance,
-      message: browserFailureMessage(input.prompt ?? "", functionalAcceptance.diagnostics, functionalAcceptance.brokenLinks) };
+      message: browserFailureMessage(input.prompt ?? "", functionalAcceptance.diagnostics, functionalAcceptance.brokenLinks, functionalAcceptance.findings) };
   } catch (error) {
     console.warn(`[website-qa] browser check unavailable: ${error instanceof Error ? error.message : String(error)}`);
     const answer = (run as { message?: string }).message;
