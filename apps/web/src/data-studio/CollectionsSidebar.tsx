@@ -38,7 +38,7 @@ export function CollectionsSidebar({
             onClick={onOpenCreateCollection}
             title={isUk ? "Створити колекцію" : "New Collection"}
           >
-            +
+            <span className="ds-collection-control-glyph">+</span>
           </button>
         )}
       </div>
