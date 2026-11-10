@@ -1,6 +1,6 @@
 import type { AuthContext } from "@npati/workspace";
 import type { ProjectAuthUser, ProjectAuthUserStatus } from "@npati/shared";
-import { DataStudioError, validateIdentifier } from "./identifier";
+import { DataStudioError } from "./identifier";
 import type { DataEnvironmentName } from "./types";
 import type { ProjectAuthHost } from "./auth-service-host";
 
@@ -120,7 +120,8 @@ export async function setAuthUserRoles(
 
     await client.query("DELETE FROM _npati_auth_user_roles WHERE user_id = $1", [userId]);
     for (const role of roles) {
-      validateIdentifier(role);
+      // A role is stored as a value, not used as an SQL name, so "user" (a reserved SQL word) is a valid role.
+      if (typeof role !== "string" || !/^[a-z][a-z0-9_-]{0,31}$/.test(role)) throw new DataStudioError(400, "admin_user", "Invalid role name", false, "INVALID_ROLE");
       await client.query(
         "INSERT INTO _npati_auth_roles(name) VALUES($1) ON CONFLICT DO NOTHING",
         [role],
