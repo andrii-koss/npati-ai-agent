@@ -230,6 +230,13 @@ export function resolveConversationLanguage(
       continue;
     }
     if (candidate.language === active) continue;
+    // Ukrainian and Russian share most letters, and surzhyk ("дабав в пости поле") scores close to both: without a letter
+    // or a function word of only one of them, the conversation keeps its language.
+    if ((active === "uk" || active === "ru") && (candidate.language === "uk" || candidate.language === "ru") && !/[іїєґыэёъ]/iu.test(text)) {
+      const words = normalizedLanguageText(text).split(" ");
+      const own = words.filter((word) => cyrillicFunctionWords[candidate.language as "uk" | "ru"].has(word)).length, other = words.filter((word) => cyrillicFunctionWords[active as "uk" | "ru"].has(word)).length;
+      if (own <= other) continue;
+    }
     // A message in another script cannot continue the active language, however short ("Cambia su rol a X" after Arabic) (V5-D77).
     if (candidate.letters >= 3 && languageScript(candidate.language) !== languageScript(active)) {
       // A script change alone is not a language switch: transliteration and technical terms may be weak Latin matches.
