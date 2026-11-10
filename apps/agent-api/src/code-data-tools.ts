@@ -44,7 +44,7 @@ export function codeDataExecutors(options: CodeDataToolOptions) {
           if (service.transferRows) return await service.transferRows(input.ctx, input.companyId, input.projectId, args.expectedBackendId as string, { source: args.source as string, target: args.target as string, ids: args.ids as string[], fields: args.fields as RowTransferInput["fields"], mode: args.mode as RowTransferInput["mode"], expectedFingerprint: args.expectedFingerprint as string, dryRun: args.dryRun === true });
           break;
         case "code.data.backend.attach":
-          if (service.attachToProject) return await service.attachToProject(input.ctx, input.companyId, input.projectId, { expectedBackendId: args.expectedBackendId as string, targetProjectId: args.targetProjectId as string, expectedTargetBackendId: args.expectedTargetBackendId as string | null, dryRun: args.dryRun === true });
+          if (service.attachToProject) return await service.attachToProject(input.ctx, input.companyId, input.projectId, { expectedBackendId: args.expectedBackendId as string, targetProjectId: args.targetProjectId as string, expectedTargetBackendId: args.expectedTargetBackendId as string | null, dryRun: args.dryRun === true, useTargetDatabase: args.useTargetDatabase === true, replaceTargetDatabase: args.replaceTargetDatabase === true });
       }
       throw new CodeToolError("tool_not_configured", "Project database operation is unavailable", 503, "configure", false, input.tool.name);
     } catch (error) {

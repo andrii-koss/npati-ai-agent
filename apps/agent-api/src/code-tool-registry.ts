@@ -232,7 +232,7 @@ export const CODE_TOOL_MANIFEST_VERSION = 19;
  * places that report the artifact as stale, while `assertManifestConsistent()` — and therefore the manifest
  * the application publishes — is already satisfied.
  */
-export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "6806f5841f30b4bec6b088ec38a01af633c353b5163cc0913e5c01fd55c5249b";
+export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "5262c86b83dfb0deb94c1bdd7d58cdaad6772dad914036004774a2b0a38a07fc";
 
 /**
  * Checksum of the v8 published set (36 tools: everything through the eleven `code.git.*` tools). Frozen for

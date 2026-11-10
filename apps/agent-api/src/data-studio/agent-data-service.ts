@@ -166,9 +166,9 @@ export class AgentDataStudioService {
     return this.migrations.transferRows(ctx, backend, input);
   }
 
-  async attachToProject(ctx: AuthContext, companyId: string, projectId: string, input: { expectedBackendId: string; targetProjectId?: string; expectedTargetBackendId?: string | null; dryRun?: boolean }) {
+  async attachToProject(ctx: AuthContext, companyId: string, projectId: string, input: { expectedBackendId: string; targetProjectId?: string; expectedTargetBackendId?: string | null; dryRun?: boolean; useTargetDatabase?: boolean; replaceTargetDatabase?: boolean }) {
     const current = await this.store.getProject(ctx, companyId, projectId);
-    if (!current.dataBackendId) return this.attachFromProject(ctx, companyId, projectId, input);
+    if (!current.dataBackendId || input.useTargetDatabase) return this.attachFromProject(ctx, companyId, projectId, input, current.dataBackendId ?? null);
     const backend = await this.assertBackend(ctx, companyId, projectId, input.expectedBackendId);
     if (!input.targetProjectId && input.dryRun) {
       if (!this.store.listProjects) throw new DataStudioError(503, "attach", "Project listing is unavailable", false, "PROJECT_LIST_UNAVAILABLE");
@@ -181,6 +181,10 @@ export class AgentDataStudioService {
     if (target.type !== "code_project" && !isCodeChatWebsite(target)) throw new DataStudioError(400, "attach", "Target must be a website/code project", false, "INVALID_PROJECT");
     if (input.dryRun) return { dryRun: true, backendId: backend.id, targetProjectId: target.id, currentBackendId: target.dataBackendId ?? null };
     if ((target.dataBackendId ?? null) !== input.expectedTargetBackendId) throw new DataStudioError(409, "attach", "Target database attachment changed", false, "BACKEND_CHANGED");
+    // Switching a project away from its own database disconnects it from its data, so that needs to be asked for.
+    if (target.dataBackendId && target.dataBackendId !== backend.id && !input.replaceTargetDatabase) {
+      throw new DataStudioError(409, "attach", `«${target.name}» already uses its own database. To connect THIS project to it, pass useTargetDatabase: true. Only if the user asked to switch «${target.name}» to this project's database, pass replaceTargetDatabase: true.`, false, "TARGET_HAS_DATABASE");
+    }
     await this.repository.attach(ctx, companyId, target.id, backend.id, input.expectedTargetBackendId);
     await syncProjectMdSchema(ctx, companyId, target.id, backend.name, await this.provider.introspectSchema(backend, "dev"), this.workspace);
     return { attached: true, backendId: backend.id, targetProjectId: target.id, previousBackendId: input.expectedTargetBackendId };
@@ -190,7 +194,7 @@ export class AgentDataStudioService {
    * The other direction: this project has no database yet (a mobile app created after its site), so it takes the
    * database of the named project ("connect the app to the site's database").
    */
-  private async attachFromProject(ctx: AuthContext, companyId: string, projectId: string, input: { expectedBackendId: string; targetProjectId?: string; dryRun?: boolean }) {
+  private async attachFromProject(ctx: AuthContext, companyId: string, projectId: string, input: { expectedBackendId: string; targetProjectId?: string; dryRun?: boolean }, currentBackendId: string | null) {
     const owned = (p: { createdBy: string; workspaceId: string; companyId: string }) => p.createdBy === ctx.userId && p.workspaceId === ctx.workspaceId && p.companyId === companyId;
     if (!input.targetProjectId) {
       if (!this.store.listProjects) throw new DataStudioError(503, "attach", "Project listing is unavailable", false, "PROJECT_LIST_UNAVAILABLE");
@@ -202,12 +206,12 @@ export class AgentDataStudioService {
     const source = await this.store.getProject(ctx, companyId, input.targetProjectId);
     if (!owned(source)) throw new DataStudioError(404, "attach", "Target project not found", false, "ATTACH_NOT_FOUND");
     if (!source.dataBackendId) throw new DataStudioError(404, "attach", "Neither project has a database yet; create one first", false, "ATTACH_NOT_FOUND");
-    if (input.dryRun) return { dryRun: true, direction: "use_database_of_target", backendId: source.dataBackendId, targetProjectId: source.id, currentBackendId: null };
+    if (input.dryRun) return { dryRun: true, direction: "use_database_of_target", backendId: source.dataBackendId, targetProjectId: source.id, currentBackendId };
     if (input.expectedBackendId !== source.dataBackendId) throw new DataStudioError(409, "attach", `That project's database id is ${source.dataBackendId}; pass it as expectedBackendId`, false, "BACKEND_CHANGED");
     const backend = await this.repository.get(ctx, companyId, source.dataBackendId);
-    await this.repository.attach(ctx, companyId, projectId, backend.id, null);
+    await this.repository.attach(ctx, companyId, projectId, backend.id, currentBackendId);
     await syncProjectMdSchema(ctx, companyId, projectId, backend.name, await this.provider.introspectSchema(backend, "dev"), this.workspace);
-    return { attached: true, backendId: backend.id, projectId, sourceProjectId: source.id, previousBackendId: null };
+    return { attached: true, direction: "this project now uses the target project's database", backendId: backend.id, projectId, sourceProjectId: source.id, previousBackendId: currentBackendId };
   }
 
   async inspectSchema(ctx: AuthContext, companyId: string, projectId: string) {

@@ -612,6 +612,14 @@ export const CODE_DATA_CAPABILITIES: (CapabilityDefinition & { inputSchema: Reco
         },
         "dryRun": {
           "type": "boolean"
+        },
+        "useTargetDatabase": {
+          "type": "boolean",
+          "description": "true: THIS project starts using the target project's database (this project's own database is detached, not deleted). Omit or false: the target project starts using THIS project's database. Pick the direction from what the user asked to connect to what."
+        },
+        "replaceTargetDatabase": {
+          "type": "boolean",
+          "description": "Required when the target already has a different database of its own and the user asked to switch the target to this project's database; without it such a target is never changed."
         }
       }
     },
