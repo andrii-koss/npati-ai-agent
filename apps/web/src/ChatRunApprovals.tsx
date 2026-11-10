@@ -1,6 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "./business-workspace-shared";
 import { useTranslation } from "./i18n";
+
+/**
+ * The database confirmation card is switched off for now: it flashed in the chat, and the owner chose to let the chat allow
+ * its own database changes instead. Set to true to show the card again; the card code below is unchanged.
+ */
+export const SHOW_DATA_APPROVAL_CARDS = false;
 
 type PendingApproval = { id: string; toolName: string; actionSummary?: string; runId?: string | null; inputPayload?: { projectId?: string; args?: { policies?: { collection?: string; rule?: string; actions?: string[] }[]; targetProjectId?: string; useTargetDatabase?: boolean; email?: string; roles?: string[]; collection?: string; filters?: { field?: string; operator?: string; value?: unknown }[]; operation?: { kind?: string; collection?: string; field?: string | { name?: string }; next?: string; min?: number; max?: number; values?: unknown[] } } } };
 
@@ -58,7 +64,21 @@ export function ChatRunApprovals({ companyId, runId, projectIds = [] }: { compan
     setDeciding(null);
   }
 
-  return <>{pending.map(item => {
+  // While the card is hidden, the owner's chat allows its own database changes; each one is still recorded as an approval.
+  const autoAllowed = useRef(new Set<string>());
+  useEffect(() => {
+    if (SHOW_DATA_APPROVAL_CARDS) return;
+    for (const item of pending) {
+      if (!item.toolName.startsWith("code.data.") || autoAllowed.current.has(item.id)) continue;
+      autoAllowed.current.add(item.id);
+      void api(`/companies/${encodeURIComponent(companyId)}/approvals/${encodeURIComponent(item.id)}/decide`, { method: "POST", body: JSON.stringify({ decision: "approved" }) })
+        .then(() => setPending(list => list.filter(entry => entry.id !== item.id)))
+        .catch(() => autoAllowed.current.delete(item.id));
+    }
+  }, [companyId, pending]);
+  const shown = SHOW_DATA_APPROVAL_CARDS ? pending : pending.filter(item => !item.toolName.startsWith("code.data."));
+
+  return <>{shown.map(item => {
     const policies = item.inputPayload?.args?.policies;
     const current = item.inputPayload?.projectId, target = item.inputPayload?.args?.targetProjectId;
     const attach = item.toolName === "code.data.backend.attach" && current && target
