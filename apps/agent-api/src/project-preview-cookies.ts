@@ -1,8 +1,6 @@
-export function rewriteSetCookieHeader(
-  cookieStr: string,
+export function rewriteSetCookieHeader(cookieStr: string,
   projectPrefix: string,
-  proxyPath: string,
-): string {
+  proxyPath: string, crossSite = false): string {
   const parts = cookieStr.split(";").map((p) => p.trim());
   if (parts.length === 0 || !parts[0] || !parts[0].includes("=")) return cookieStr;
   const eqIdx = parts[0].indexOf("=");
@@ -24,8 +22,8 @@ export function rewriteSetCookieHeader(
       pathSet = true;
       continue;
     }
-    if (lower.startsWith("samesite=")) {
-      attributes.push("SameSite=Lax");
+    if (lower.startsWith("samesite=") || (crossSite && (lower === "secure" || lower === "partitioned"))) {
+      if (!sameSiteSet) attributes.push(...previewSameSite(crossSite));
       sameSiteSet = true;
       continue;
     }
@@ -35,9 +33,19 @@ export function rewriteSetCookieHeader(
     attributes.push(`Path=${proxyPath}`);
   }
   if (!sameSiteSet) {
-    attributes.push("SameSite=Lax");
+    attributes.push(...previewSameSite(crossSite));
   }
   return attributes.join("; ");
+}
+
+/** A Preview opened from its own origin is a cross-site frame: only a partitioned SameSite=None cookie reaches it. */
+export function previewSameSite(crossSite: boolean): string[] {
+  return crossSite ? ["SameSite=None", "Secure", "Partitioned"] : ["SameSite=Lax"];
+}
+
+/** The Preview runs on a host of its own (`<project>.preview.<domain>`), away from the app's stored token. */
+export function isIsolatedPreviewHost(host: string | undefined): boolean {
+  return /^[a-z0-9-]+\.preview\./i.test(host ?? "");
 }
 export function filterIncomingCookies(
   rawCookieHeader: string | undefined,

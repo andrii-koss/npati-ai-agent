@@ -1,3 +1,4 @@
+import { isolatedPreviewUrl } from "./preview-origin";
 import React from "react";
 import {
   COMPONENT_REGISTRY,
@@ -94,7 +95,7 @@ export function WebsiteEditorCanvas({
             ) : previewMode === "sandbox" && previewStatus?.previewUrl ? (
               <iframe
                 key={iframeKey}
-                src={previewStatus.previewUrl}
+                src={isolatedPreviewUrl(previewStatus.previewUrl)}
                 title="Website Live Preview"
                 style={{ width: "100%", height: "100%", minHeight: "800px", border: "none" }}
                 sandbox="allow-scripts allow-same-origin allow-forms allow-popups"

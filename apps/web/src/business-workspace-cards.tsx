@@ -1,3 +1,4 @@
+import { isolatedPreviewUrl } from "./preview-origin";
 import { Monitor } from "lucide-react";
 import { ChatProjectPreviewCard } from "./ChatProjectPreviewCard";
 import { getStoredAuthToken } from "./AuthContext";
@@ -421,14 +422,14 @@ export function ProjectChatCard({ card, onActivate, previewOnly = false, showPre
                 <span>Preview</span>
               </div>
               <div className="project-chat-preview-header-actions">
-                {previewUrl && <a href={previewUrl} target="_blank" rel="noreferrer">Open in new tab ↗</a>}
+                {previewUrl && <a href={isolatedPreviewUrl(previewUrl)} target="_blank" rel="noreferrer">Open in new tab ↗</a>}
                 <button type="button" aria-label="Close preview" onClick={() => setPreviewOpen(false)}>×</button>
               </div>
             </header>
             {previewHtml ? (
               <iframe title={`${card.name} preview`} srcDoc={previewHtml} sandbox="allow-same-origin" onLoad={handleStaticPreviewLoad} className="project-chat-preview-frame" />
             ) : previewUrl ? (
-              <iframe title={`${card.name} preview`} src={previewUrl} className="project-chat-preview-frame" />
+              <iframe title={`${card.name} preview`} src={isolatedPreviewUrl(previewUrl)} className="project-chat-preview-frame" />
             ) : (
               <div className="project-chat-preview-empty" role="status">
                 {previewLoading ? "Starting preview…" : previewError || "Preview is unavailable."}

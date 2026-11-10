@@ -1,3 +1,4 @@
+import { isolatedPreviewUrl } from "./preview-origin";
 import { CodeWorkspaceHeader } from "./code-workspace/CodeWorkspaceHeader";
 import { CodeWorkspaceExecutionPanel } from "./code-workspace/CodeWorkspaceExecutionPanel";
 import { CodeWorkspaceFilePanel } from "./code-workspace/CodeWorkspaceFilePanel";
@@ -672,7 +673,7 @@ function CodeWorkspaceContent() {
 
       {previewOpen && previewUrl && (
         <div className="project-preview-frame" style={{ marginBottom: 20 }}>
-          <iframe src={previewUrl} title={isUk ? "Live preview" : "Live preview"} sandbox="allow-scripts allow-forms allow-same-origin" />
+          <iframe src={isolatedPreviewUrl(previewUrl)} title={isUk ? "Live preview" : "Live preview"} sandbox="allow-scripts allow-forms allow-same-origin" />
         </div>
       )}
     </main>

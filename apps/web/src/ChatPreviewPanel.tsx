@@ -1,3 +1,4 @@
+import { isolatedPreviewUrl } from "./preview-origin";
 import React, { createContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { getStoredAuthToken } from "./AuthContext";
@@ -137,7 +138,7 @@ function PreviewPanel({ card, open, busy, thumbnail, onClose }: { card: PreviewP
           <div className="project-chat-preview-viewport" data-device-mode={deviceMode}>
             {shown === null && !error && thumbnail && <img className="project-chat-preview-placeholder" src={thumbnail} alt="" />}
             {error ? <div className="project-chat-preview-empty" role="status">{error}</div> : frames.map(frame => (
-              <iframe key={frame.id} ref={element => { if (element) refs.current.set(frame.id, element); else refs.current.delete(frame.id); }} title={`${card.name} preview`} src={frame.url} onLoad={() => frameLoaded(frame.id)} className={`project-chat-preview-frame chat-preview-panel-frame ${shown === null || frame.id > shown ? "is-entering" : ""}`} />
+              <iframe key={frame.id} ref={element => { if (element) refs.current.set(frame.id, element); else refs.current.delete(frame.id); }} title={`${card.name} preview`} src={isolatedPreviewUrl(frame.url)} onLoad={() => frameLoaded(frame.id)} className={`project-chat-preview-frame chat-preview-panel-frame ${shown === null || frame.id > shown ? "is-entering" : ""}`} />
             ))}
           </div>
         </div>

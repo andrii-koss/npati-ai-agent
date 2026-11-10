@@ -1,3 +1,4 @@
+import { isolatedPreviewUrl } from "../../preview-origin";
 import React from "react";
 import type { DeviceMode, PreviewStatusResponse } from "../types";
 
@@ -77,7 +78,7 @@ export function PreviewColumn({
           <div className="device-screen-container" style={deviceWidthStyle}>
             <iframe
               key={iframeKey}
-              src={previewStatus.previewUrl}
+              src={isolatedPreviewUrl(previewStatus.previewUrl)}
               title="Website Preview"
               className="preview-iframe"
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups"

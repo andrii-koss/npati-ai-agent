@@ -1,3 +1,4 @@
+import { isolatedPreviewUrl } from "./preview-origin";
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -77,7 +78,7 @@ export function LivePreviewHeader({
 
   function handleOpenInNewTab() {
     if (previewUrl) {
-      window.open(previewUrl, "_blank", "noopener,noreferrer");
+      window.open(isolatedPreviewUrl(previewUrl), "_blank", "noopener,noreferrer");
     }
   }
 

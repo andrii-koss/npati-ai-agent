@@ -16,6 +16,6 @@ it.each([true,false])('HTML preview uses the project server for code=%s',async c
  await act(async()=>root.render(<MemoryRouter><ProjectChatCard card={card} previewOnly /></MemoryRouter>));
  await act(async()=>host.querySelector<HTMLButtonElement>('button')!.click());
  const frame=document.querySelector('iframe')!;
- if(code){expect(frame.hasAttribute('srcdoc')).toBe(false);expect(frame.getAttribute('src')).toBe('/api/companies/c/projects/p/preview/proxy/?token=test-preview-token');expect(fetcher.mock.calls.map(c=>c[0])).not.toContainEqual(expect.stringContaining('/files/read'));}
+ if(code){expect(frame.hasAttribute('srcdoc')).toBe(false);expect(frame.getAttribute('src')).toBe(window.location.protocol+'//p.preview.localhost'+(window.location.port?':'+window.location.port:'')+'/api/companies/c/projects/p/preview/proxy/?token=test-preview-token');expect(fetcher.mock.calls.map(c=>c[0])).not.toContainEqual(expect.stringContaining('/files/read'));}
  else {expect(frame.getAttribute('srcdoc')).toBe('<h1>Builder</h1>');expect(frame.getAttribute('sandbox')).toBe('allow-same-origin');}
 });

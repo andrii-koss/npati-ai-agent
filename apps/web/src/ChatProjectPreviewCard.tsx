@@ -1,3 +1,4 @@
+import { isolatedPreviewUrl } from "./preview-origin";
 import React, { useState, useEffect, useRef, useContext, type SyntheticEvent } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, Link } from "react-router-dom";
@@ -552,7 +553,7 @@ export function ChatProjectPreviewCard({
   function handleOpenInNewTab() {
     setDropdownOpen(false);
     if (previewUrl) {
-      window.open(previewUrl, "_blank", "noopener,noreferrer");
+      window.open(isolatedPreviewUrl(previewUrl), "_blank", "noopener,noreferrer");
     } else {
       void openPreview();
     }
@@ -770,7 +771,7 @@ export function ChatProjectPreviewCard({
                   <iframe
                     key={iframeKey}
                     title={`${card.name} preview`}
-                    src={previewUrl}
+                    src={isolatedPreviewUrl(previewUrl)}
                     onLoad={() => setFrameReady(true)}
                     className={`project-chat-preview-frame ${frameReady ? "" : "is-loading"}`}
                   />

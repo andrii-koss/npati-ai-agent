@@ -1,4 +1,4 @@
-import { rewriteSetCookieHeader, filterIncomingCookies, previewAuthCookieName, readCookieValue } from "./project-preview-cookies";
+import { rewriteSetCookieHeader, filterIncomingCookies, previewAuthCookieName, readCookieValue, previewSameSite, isIsolatedPreviewHost } from "./project-preview-cookies";
 export { rewriteSetCookieHeader, filterIncomingCookies, previewAuthCookieName, readCookieValue } from "./project-preview-cookies";
 import { validateStaticProjectResources } from "./static-project-validation";
 import { detectProjectStack, extractPortFromCommand } from "./project-preview-stack";
@@ -652,7 +652,7 @@ export class ProjectPreviewService {
                   projectId,
                   sandboxId: rawPayload.sandboxId || "default",
                 });
-                reply.header("Set-Cookie", `${cookieName}=${fresh.token}; Path=${cookiePath}; HttpOnly; SameSite=Lax; Max-Age=86400`);
+                reply.header("Set-Cookie", `${cookieName}=${fresh.token}; Path=${cookiePath}; HttpOnly; ${previewSameSite(isIsolatedPreviewHost(request.headers.host)).join("; ")}; Max-Age=86400`);
               }
             }
           }
@@ -704,7 +704,7 @@ export class ProjectPreviewService {
     // Both supported API aliases serve relative parser-loaded assets. Keep the same signed
     // session scoped to this Project on each alias; a /api cookie cannot authorize /companies.
     const previewCookies = request.query.token
-      ? [cookiePath, cookiePath.slice(4)].map(path => `${cookieName}=${token}; Path=${path}; HttpOnly; SameSite=Lax; Max-Age=900${secureCookie ? "; Secure" : ""}`)
+      ? [cookiePath, cookiePath.slice(4)].map(path => `${cookieName}=${token}; Path=${path}; HttpOnly; Max-Age=900; ${isIsolatedPreviewHost(request.headers.host) ? previewSameSite(true).join("; ") : "SameSite=Lax" + (secureCookie ? "; Secure" : "")}`)
       : [];
     const subpath = "/" + (request.params["*"] ?? "");
     // The query stays as written: Vite reads flags like ?astro&lang.css, and URLSearchParams would rewrite them to lang.css=.
@@ -782,7 +782,7 @@ export class ProjectPreviewService {
           : typeof setCookieRaw === "string" && setCookieRaw.includes("\n")
             ? setCookieRaw.split("\n")
             : [String(setCookieRaw)];
-        rewritten = cookieList.map((c) => rewriteSetCookieHeader(c, projectPrefix, prefix));
+        rewritten = cookieList.map((c) => rewriteSetCookieHeader(c, projectPrefix, prefix, isIsolatedPreviewHost(request.headers.host)));
       }
       const cookies = [...previewCookies, ...rewritten];
       if (cookies.length) reply.header("set-cookie", cookies);

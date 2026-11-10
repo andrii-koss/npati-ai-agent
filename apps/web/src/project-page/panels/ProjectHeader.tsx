@@ -1,3 +1,4 @@
+import { isolatedPreviewUrl } from "../../preview-origin";
 import { Link } from "react-router-dom";
 import type { Project } from "../../ProjectSection";
 import type { PreviewStatusResponse } from "../types";
@@ -73,7 +74,7 @@ export function ProjectHeader({
 
             {previewStatus?.previewUrl && (
               <a
-                href={previewStatus.previewUrl}
+                href={isolatedPreviewUrl(previewStatus.previewUrl)}
                 target="_blank"
                 rel="noreferrer"
                 className="button-secondary project-ext-btn"
