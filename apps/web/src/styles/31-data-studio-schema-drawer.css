@@ -1,0 +1,58 @@
+html:has(.data-studio-schema-backdrop),
+body:has(.data-studio-schema-backdrop) {
+  overflow: hidden;
+}
+
+.data-studio-schema-backdrop {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.data-studio-schema-backdrop .data-studio-drawer {
+  position: absolute;
+  inset-block: 0;
+  right: 0;
+  left: auto;
+  box-shadow: -20px 0 50px rgb(0 0 0 / 15%);
+  animation: ds-schema-drawer-in 180ms ease-out;
+}
+
+@keyframes ds-schema-drawer-in {
+  from { transform: translateX(30px); opacity: .5; }
+}
+
+.data-studio-schema-backdrop .ds-template-card.active {
+  border-color: var(--npati-red, #e11d2e);
+  box-shadow: 0 0 0 1px var(--npati-red, #e11d2e) inset;
+  background: #ffffff;
+}
+
+.data-studio-schema-backdrop .ds-checkbox input[type="checkbox"] {
+  accent-color: var(--npati-red, #e11d2e);
+}
+
+.data-studio-schema-backdrop .ds-template-card:focus-visible,
+.data-studio-schema-backdrop .ds-segmented button:focus-visible {
+  outline: 2px solid var(--npati-red, #e11d2e);
+  outline-offset: 2px;
+}
+
+.data-studio-schema-backdrop .data-studio-drawer-body {
+  min-height: 0;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.data-studio-schema-backdrop .data-studio-drawer-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.data-studio-schema-backdrop .data-studio-drawer-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.data-studio-schema-backdrop .data-studio-drawer-body::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}

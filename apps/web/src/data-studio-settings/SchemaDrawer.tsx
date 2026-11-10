@@ -96,7 +96,7 @@ export function SchemaDrawer({ isUk, basePath, readOnly, table, busy, onClose, o
       const confirmed = await confirmModal({
         title: isUk ? "Підтвердіть зміну" : "Confirm change",
         message: isUk
-          ? `${describeOperation(pendingOperation)} — руйнівна зміна. Перед застосуванням автоматично створюється snapshot.`
+          ? `${describeOperation(pendingOperation)} - руйнівна зміна. Перед застосуванням автоматично створюється snapshot.`
           : `${describeOperation(pendingOperation)} is destructive. A snapshot is taken automatically before applying.`,
         isDanger: true,
         confirmText: isUk ? "Застосувати" : "Apply",
@@ -178,7 +178,7 @@ export function SchemaDrawer({ isUk, basePath, readOnly, table, busy, onClose, o
   };
 
   return (
-    <div className="data-studio-drawer-backdrop" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className="data-studio-drawer-backdrop data-studio-schema-backdrop" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <aside className="data-studio-drawer" role="dialog" aria-modal="true" aria-label={editing ? (isUk ? "Редагування таблиці" : "Edit table") : isUk ? "Нова таблиця" : "New table"}>
         <header className="data-studio-drawer-header">
           <h3>{editing ? (isUk ? `Таблиця ${table!.name}` : `Table ${table!.name}`) : isUk ? "Нова таблиця" : "New table"}</h3>
@@ -225,7 +225,7 @@ export function SchemaDrawer({ isUk, basePath, readOnly, table, busy, onClose, o
                 <>
                   <div className="ds-drawer-summary">
                     <strong>{isUk ? "Буде створено" : "Will be created"}:</strong>
-                    <ul>{selectedTemplate.collections.map((collection) => <li key={collection.name}>{collection.name} — {collection.fields} {isUk ? "полів" : "fields"}</li>)}</ul>
+                    <ul>{selectedTemplate.collections.map((collection) => <li key={collection.name}>{collection.name} - {collection.fields} {isUk ? "полів" : "fields"}</li>)}</ul>
                   </div>
                   <label className="ds-checkbox">
                     <input type="checkbox" checked={seedDemoData} onChange={(event) => setSeedDemoData(event.target.checked)} />
@@ -365,7 +365,7 @@ export function SchemaDrawer({ isUk, basePath, readOnly, table, busy, onClose, o
             </div>
           )}
 
-          {readOnly && <div className="data-studio-alert info" role="status">{isUk ? "prod — лише перегляд" : "prod is read-only"}</div>}
+          {readOnly && <div className="data-studio-alert info" role="status">{isUk ? "prod - лише перегляд" : "prod is read-only"}</div>}
         </div>
       </aside>
     </div>
