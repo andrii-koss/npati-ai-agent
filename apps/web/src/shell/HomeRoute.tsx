@@ -1,5 +1,5 @@
 import { ReactNode, useCallback, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../AuthContext";
 import { AuthModal } from "../AuthModal";
 import { useWorkspace } from "../BusinessWorkspace";
@@ -11,7 +11,7 @@ export function Home({ userMenu, logo }: { userMenu?: ReactNode; logo?: ReactNod
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { overview } = useWorkspace();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
   const [authModal, setAuthModal] = useState<{ open: boolean; mode: "login" | "register" }>({ open: false, mode: "login" });
   const closeAuthModal = useCallback(() => setAuthModal((prev) => ({ ...prev, open: false })), []);
   const handleAuthSuccess = useCallback(() => navigate("/chat"), [navigate]);
@@ -48,6 +48,9 @@ export function Home({ userMenu, logo }: { userMenu?: ReactNode; logo?: ReactNod
     window.dispatchEvent(new Event("npati:conversations-changed"));
     navigate(`/c/${conversation.id}`, { state: { prompt } });
   }
+
+  if (isLoading && !isAuthenticated) return <div className="workspace" />;
+  if (isAuthenticated) return <Navigate to="/chat" replace />;
 
   return (
     <main className="home-shell">
