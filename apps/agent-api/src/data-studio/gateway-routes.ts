@@ -245,6 +245,7 @@ export function registerProjectApiGatewayRoutes(
           id: auth.userId,
           email: auth.userEmail || "",
           roles: auth.userRoles ?? [auth.userRole],
+          role: auth.userRole,
           status: "active",
         },
       };

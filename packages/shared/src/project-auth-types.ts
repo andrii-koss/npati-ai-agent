@@ -8,6 +8,8 @@ export interface ProjectAuthUser {
   emailVerified: boolean;
   status: ProjectAuthUserStatus;
   roles: string[];
+  /** The role that decides access: an extra role such as admin, otherwise the default user. Sites often check this one. */
+  role?: string;
   createdAt: string;
   lastLogin: string | null;
   metadata: Record<string, unknown>;
