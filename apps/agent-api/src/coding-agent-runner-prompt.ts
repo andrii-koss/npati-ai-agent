@@ -17,6 +17,7 @@ export const CODE_RUN_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "code.data.query.read",
   "code.data.migrations.list",
   "code.data.policies.inspect",
+  "code.data.users.list",
   "code.data.schema.inspect",
   "code.data.rows.list",
   "code.shell.process.wait",

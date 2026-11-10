@@ -827,7 +827,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
               failed={!sending && progressFailed}
             />
           )}
-          {development.project?.runId && developmentIsActive(development.project) && <ChatRunApprovals companyId={development.project.companyId} runId={development.project.runId} />}
+          {/* A run started from the chat waits for its confirmation too, not only a development process run. */}
+          {agentWorking && (development.project?.companyId ?? companyId) && <ChatRunApprovals companyId={(development.project?.companyId ?? companyId)!} runId={development.project && developmentIsActive(development.project) ? development.project.runId ?? null : null} projectIds={[development.project?.projectId, development.activeProject?.projectId, selectedProject?.projectId, codeInbox.session?.projectId].filter((id): id is string => Boolean(id))} />}
           {thinking.visible && <ChatThinking key="turn-thinking" text={thinking.text} />}
           {/* After the messages: this card stands in briefly until the reply that carries the real one arrives. */}
           {showFallbackCard && fallbackCard && (

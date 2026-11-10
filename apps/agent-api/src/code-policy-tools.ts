@@ -86,6 +86,7 @@ export const READ_TOOLS = new Set([
   "code.image.view", "code.preview.screenshot", "code.web.fetch", "code.web.search",
   "code.data.query.read", "code.data.migrations.list", "code.data.policies.inspect",
   "code.data.schema.inspect",
+  "code.data.users.list",
   "code.data.rows.list",
   "code.fs.read", "code.fs.list", "code.fs.grep", "code.fs.tree",
   "code.symbols.outline", "code.project.info", "code.fs.diff",

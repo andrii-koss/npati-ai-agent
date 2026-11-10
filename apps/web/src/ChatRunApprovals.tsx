@@ -13,7 +13,7 @@ const copy = {
  * A run can stop to wait for a person inside a tool call, long before it has a reply to carry a confirmation card. This
  * shows that request while the agent waits; the decision goes through the same audited route the run is polling.
  */
-export function ChatRunApprovals({ companyId, runId }: { companyId: string; runId: string }) {
+export function ChatRunApprovals({ companyId, runId, projectIds = [] }: { companyId: string; runId: string | null; projectIds?: string[] }) {
   const { language } = useTranslation();
   const t = language === "uk" ? copy.uk : copy.en;
   const [pending, setPending] = useState<PendingApproval[]>([]);
@@ -30,12 +30,12 @@ export function ChatRunApprovals({ companyId, runId }: { companyId: string; runI
   useEffect(() => {
     let active = true;
     const read = () => void api<{ approvals: PendingApproval[] }>(`/companies/${encodeURIComponent(companyId)}/approvals?status=pending`)
-      .then(value => { if (active) setPending(value.approvals.filter(item => item.runId === runId)); })
+      .then(value => { if (active) setPending(value.approvals.filter(item => (runId && item.runId === runId) || (item.runId && item.inputPayload?.projectId && projectIds.includes(item.inputPayload.projectId)))); })
       .catch(() => undefined);
     read();
     const timer = window.setInterval(read, 2000);
     return () => { active = false; window.clearInterval(timer); };
-  }, [companyId, runId]);
+  }, [companyId, runId, projectIds.join(",")]);
 
   async function decide(id: string, decision: "approved" | "rejected") {
     setDeciding(id); setError("");
