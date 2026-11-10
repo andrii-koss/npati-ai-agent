@@ -112,6 +112,9 @@ export class CompanyApprovalsRepository {
     const query = status
       ? `SELECT ${appCols} FROM company_approvals
          WHERE workspace_id = $1 AND company_id = $2 AND user_id = $3 AND status = $4
+           -- A request left by a coding run that has already ended can no longer be acted on, so it is not offered.
+           AND NOT ($4 = 'pending' AND run_id IS NOT NULL AND EXISTS (SELECT 1 FROM code_run_states r
+             WHERE r.company_id = $2::text AND r.run_id = company_approvals.run_id::text AND r.status IN ('completed', 'failed', 'cancelled', 'interrupted')))
          ORDER BY requested_at DESC LIMIT 50`
       : `SELECT ${appCols} FROM company_approvals
          WHERE workspace_id = $1 AND company_id = $2 AND user_id = $3
