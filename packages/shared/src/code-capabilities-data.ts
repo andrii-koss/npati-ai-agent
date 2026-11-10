@@ -620,6 +620,12 @@ export const CODE_DATA_CAPABILITIES: (CapabilityDefinition & { inputSchema: Reco
         "replaceTargetDatabase": {
           "type": "boolean",
           "description": "Required when the target already has a different database of its own and the user asked to switch the target to this project's database; without it such a target is never changed."
+        },
+        "databaseId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Connect THIS project to one of the company's databases by its id, for example the database it used before. A dryRun with no target lists those databases. Never pass a database id as targetProjectId."
         }
       }
     },

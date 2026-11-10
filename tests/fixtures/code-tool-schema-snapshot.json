@@ -1,6 +1,6 @@
 {
   "manifestVersion": 19,
-  "checksum": "5262c86b83dfb0deb94c1bdd7d58cdaad6772dad914036004774a2b0a38a07fc",
+  "checksum": "d7263e515b408fabf71a46cb8345c713e96ce5d4e72f16e6790f96ab15ca0548",
   "tools": [
     {
       "key": "code.agent.continue@1",
@@ -49,7 +49,7 @@
       "name": "code.data.backend.attach",
       "version": 1,
       "status": "active",
-      "checksum": "81af24af3a8b747ba7771d8ac796265c6c8db5e10cb64b93bef2b0b290154382"
+      "checksum": "e0540c9bfd9aed6854ba2d2a6506598b6b5a6c5ac3e80c8d4c6776278d416c62"
     },
     {
       "key": "code.data.backend.create@1",
