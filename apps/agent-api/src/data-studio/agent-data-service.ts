@@ -168,8 +168,8 @@ export class AgentDataStudioService {
 
   async attachToProject(ctx: AuthContext, companyId: string, projectId: string, input: { expectedBackendId: string; targetProjectId?: string; expectedTargetBackendId?: string | null; dryRun?: boolean; useTargetDatabase?: boolean; replaceTargetDatabase?: boolean; databaseId?: string }) {
     const current = await this.store.getProject(ctx, companyId, projectId);
-    if (input.targetProjectId === projectId) throw new DataStudioError(400, "attach", "The target is this project itself; to switch it to another database pass databaseId", false, "INVALID_ATTACHMENT");
     if (input.databaseId) return this.attachDatabase(ctx, companyId, projectId, input.databaseId, current.dataBackendId ?? null, input.dryRun === true);
+    if (input.targetProjectId === projectId) throw new DataStudioError(400, "attach", "The target is this project itself; to switch it to another database pass databaseId", false, "INVALID_ATTACHMENT");
     if (!input.targetProjectId && input.dryRun && this.repository.list) {
       const databases = (await this.repository.list(ctx, companyId)).filter((backend) => backend.status === "ready").map((backend) => ({ id: backend.id, name: backend.name, current: backend.id === current.dataBackendId }));
       if (!current.dataBackendId) return { ...(await this.attachFromProject(ctx, companyId, projectId, input, null)), databases };
