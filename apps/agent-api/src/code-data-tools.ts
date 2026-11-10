@@ -29,7 +29,8 @@ export function codeDataExecutors(options: CodeDataToolOptions) {
     if (input.tool.name !== "code.data.rows.list" && args.dryRun !== true && !input.approved) throw new CodeToolError("approval_required", "Confirm this database operation before execution", 403, "approval", false, input.tool.name);
     try {
       if (!service.assertBackend) throw new CodeToolError("tool_not_configured", "Project database tools are unavailable", 503, "configure", false, input.tool.name);
-      await service.assertBackend(input.ctx, input.companyId, input.projectId, args.expectedBackendId as string);
+      // Attaching checks the database itself: a project without one may take another project's database.
+      if (input.tool.name !== "code.data.backend.attach") await service.assertBackend(input.ctx, input.companyId, input.projectId, args.expectedBackendId as string);
       switch (input.tool.name) {
         case "code.data.schema.modify": {
           const operation = args.operation as SchemaOperation;

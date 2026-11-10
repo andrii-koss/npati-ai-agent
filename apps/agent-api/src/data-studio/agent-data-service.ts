@@ -162,6 +162,8 @@ export class AgentDataStudioService {
   }
 
   async attachToProject(ctx: AuthContext, companyId: string, projectId: string, input: { expectedBackendId: string; targetProjectId?: string; expectedTargetBackendId?: string | null; dryRun?: boolean }) {
+    const current = await this.store.getProject(ctx, companyId, projectId);
+    if (!current.dataBackendId) return this.attachFromProject(ctx, companyId, projectId, input);
     const backend = await this.assertBackend(ctx, companyId, projectId, input.expectedBackendId);
     if (!input.targetProjectId && input.dryRun) {
       if (!this.store.listProjects) throw new DataStudioError(503, "attach", "Project listing is unavailable", false, "PROJECT_LIST_UNAVAILABLE");
@@ -177,6 +179,30 @@ export class AgentDataStudioService {
     await this.repository.attach(ctx, companyId, target.id, backend.id, input.expectedTargetBackendId);
     await syncProjectMdSchema(ctx, companyId, target.id, backend.name, await this.provider.introspectSchema(backend, "dev"), this.workspace);
     return { attached: true, backendId: backend.id, targetProjectId: target.id, previousBackendId: input.expectedTargetBackendId };
+  }
+
+  /**
+   * The other direction: this project has no database yet (a mobile app created after its site), so it takes the
+   * database of the named project ("connect the app to the site's database").
+   */
+  private async attachFromProject(ctx: AuthContext, companyId: string, projectId: string, input: { expectedBackendId: string; targetProjectId?: string; dryRun?: boolean }) {
+    const owned = (p: { createdBy: string; workspaceId: string; companyId: string }) => p.createdBy === ctx.userId && p.workspaceId === ctx.workspaceId && p.companyId === companyId;
+    if (!input.targetProjectId) {
+      if (!this.store.listProjects) throw new DataStudioError(503, "attach", "Project listing is unavailable", false, "PROJECT_LIST_UNAVAILABLE");
+      const projects = await this.store.listProjects(ctx, companyId);
+      const sources = projects.filter(p => p.id !== projectId && owned(p) && p.dataBackendId).map(p => ({ id: p.id, name: p.name, backendId: p.dataBackendId }));
+      if (input.dryRun) return { dryRun: true, direction: "use_database_of_target", note: "This project has no database. Pass the project whose database it should use as targetProjectId, and that project's backendId as expectedBackendId.", sources };
+      throw new DataStudioError(400, "attach", "This project has no database: name the project whose database it should use (targetProjectId)", false, "INVALID_ATTACHMENT");
+    }
+    const source = await this.store.getProject(ctx, companyId, input.targetProjectId);
+    if (!owned(source)) throw new DataStudioError(404, "attach", "Target project not found", false, "ATTACH_NOT_FOUND");
+    if (!source.dataBackendId) throw new DataStudioError(404, "attach", "Neither project has a database yet; create one first", false, "ATTACH_NOT_FOUND");
+    if (input.dryRun) return { dryRun: true, direction: "use_database_of_target", backendId: source.dataBackendId, targetProjectId: source.id, currentBackendId: null };
+    if (input.expectedBackendId !== source.dataBackendId) throw new DataStudioError(409, "attach", `That project's database id is ${source.dataBackendId}; pass it as expectedBackendId`, false, "BACKEND_CHANGED");
+    const backend = await this.repository.get(ctx, companyId, source.dataBackendId);
+    await this.repository.attach(ctx, companyId, projectId, backend.id, null);
+    await syncProjectMdSchema(ctx, companyId, projectId, backend.name, await this.provider.introspectSchema(backend, "dev"), this.workspace);
+    return { attached: true, backendId: backend.id, projectId, sourceProjectId: source.id, previousBackendId: null };
   }
 
   async inspectSchema(ctx: AuthContext, companyId: string, projectId: string) {
