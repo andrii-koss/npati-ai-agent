@@ -29,6 +29,21 @@ export function parseBrowserQaResult(stdout: string): SandboxBrowserQaResult {
     if (Array.isArray(result.consoleDiagnostics)) result.consoleDiagnostics =
       result.consoleDiagnostics.slice(0, Math.min(5, result.consoleErrorCount)).map(normalizeBrowserDiagnostic);
     else delete result.consoleDiagnostics;
+    if (result.apiFailures !== undefined) {
+      if (!Array.isArray(result.apiFailures) || result.apiFailures.length > 10) throw new Error("invalid_api_failures");
+      result.apiFailures = result.apiFailures.map((failure) => ({
+        method: /^(GET|HEAD|POST|PATCH|PUT|DELETE)$/.test(String(failure?.method)) ? String(failure.method) : "GET",
+        path: String(failure?.path ?? "").replace(/[^A-Za-z0-9/_?=&.-]/g, "").slice(0, 120),
+        status: Number.isInteger(failure?.status) && failure.status >= 400 && failure.status <= 599 ? failure.status : 500,
+        code: String(failure?.code ?? "").replace(/[^A-Z0-9_]/gi, "").slice(0, 60),
+        duringForms: failure?.duringForms === true,
+      }));
+    }
+    if (result.formsSubmitted !== undefined && (!Number.isInteger(result.formsSubmitted) || result.formsSubmitted < 0 || result.formsSubmitted > 3)) delete result.formsSubmitted;
+    if (result.apiCalls !== undefined && (!Number.isInteger(result.apiCalls) || result.apiCalls < 0 || result.apiCalls > 10000)) delete result.apiCalls;
+    if (result.apiBridge !== undefined && typeof result.apiBridge !== "boolean") delete result.apiBridge;
+    result.apiLog = Array.isArray(result.apiLog) ? result.apiLog.slice(0, 10).map((line) => String(line).replace(/[^A-Za-z0-9 /_.:=?&-]/g, "").slice(0, 140)) : undefined;
+    if (!result.apiLog) delete result.apiLog;
     if(result.interactionTrace!==undefined){
       if(!Array.isArray(result.interactionTrace)||result.interactionTrace.length>16)throw new Error("invalid_interaction_trace");
       assertBrowserQaActions(result.interactionTrace.map(step=>step.action));

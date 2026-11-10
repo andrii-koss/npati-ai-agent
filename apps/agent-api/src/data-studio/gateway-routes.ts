@@ -49,6 +49,7 @@ export function registerProjectApiGatewayRoutes(
       const origin = request.headers.origin;
 
       authResult = await gateway.authenticateRequest(projectId, headers, queryKey, ip, origin);
+      if (headers["x-npati-dry-run"] === "1") authResult = { ...authResult, dryRun: true };
 
       // Set CORS response headers
       if (origin) {

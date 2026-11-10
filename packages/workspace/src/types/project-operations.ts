@@ -81,6 +81,11 @@ export interface BrowserQaMetrics {
   consoleErrorsCount: number;
   a11yViolationsCount: number;
   performanceIssuesCount: number;
+  /** Forms the check filled and sent, and the site's Project API calls it saw (writes ran as checks and rolled back). */
+  formsSubmitted?: number;
+  apiCalls?: number;
+  apiBridge?: boolean;
+  apiLog?: string[];
 }
 
 export type BrowserQaAction = {type:"click";selector:string}|{type:"key";key:string;durationMs?:number}|{type:"wait";durationMs:number};

@@ -355,7 +355,8 @@ export class ProjectApiGatewayService {
       await client.query("SELECT set_config('npati.user_id', $1, true)", [auth.userId || ""]);
 
       const result = await action(client);
-      await client.query("COMMIT");
+      // A Browser QA check learns whether the site's write would succeed without leaving a test row behind.
+      await client.query(auth.dryRun ? "ROLLBACK" : "COMMIT");
       return result;
     } catch (error) {
       await client.query("ROLLBACK");

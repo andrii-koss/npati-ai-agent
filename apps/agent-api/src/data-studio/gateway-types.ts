@@ -21,6 +21,8 @@ export interface GatewayAuthResult {
   userRole: string;
   /** Every role of the signed-in person; userRole is the one that matters most (admin over the default user). */
   userRoles?: string[];
+  /** A Browser QA check: the write runs with the same rules and data checks, then rolls back. */
+  dryRun?: boolean;
   userEmail?: string;
   corsAllowedOrigins: string[];
 }

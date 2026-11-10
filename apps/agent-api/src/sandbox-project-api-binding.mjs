@@ -10,7 +10,7 @@ export const PROJECT_API_SERVICE_HOST = "project-api.npati.internal";
 const HOST = new Set([PROJECT_API_SERVICE_HOST, PROJECT_API_SERVICE_HOST + ":80"]);
 const PATH = /^\/v1\/projects\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:\/[a-zA-Z0-9_-]+)*\/?$/;
 const METHODS = new Set(["GET", "HEAD", "POST", "PATCH", "DELETE", "OPTIONS"]);
-const REQUEST_HEADERS = ["accept", "content-type", "x-project-key", "authorization", "origin"];
+const REQUEST_HEADERS = ["accept", "content-type", "x-project-key", "authorization", "origin", "x-npati-dry-run"];
 export const PROJECT_API_RESPONSE_HEADERS = ["content-type", "retry-after", "access-control-allow-origin", "access-control-allow-credentials", "vary"];
 export const PROJECT_API_BODY_LIMIT = 1024 * 1024;
 export const PROJECT_API_RESPONSE_LIMIT = 8 * 1024 * 1024;
@@ -25,6 +25,7 @@ export function validProjectApiRequest(value) {
     || Object.entries(value.headers).some(([k, v]) => !REQUEST_HEADERS.includes(k) || typeof v !== "string" || v.length > 8192 || /[\r\n]/.test(v))) return false;
   const key = value.headers["x-project-key"];
   if (typeof key !== "string" || !/^npati_pk_dev_[0-9a-f]{32,64}$/.test(key)) return false;
+  if (value.headers["x-npati-dry-run"] !== undefined && value.headers["x-npati-dry-run"] !== "1") return false;
   const auth = value.headers.authorization;
   if (auth && (!/^Bearer [a-zA-Z0-9._~-]{1,8192}$/.test(auth) || /^Bearer npati_sk_/i.test(auth))) return false;
   return typeof value.bodyBase64 === "string" && value.bodyBase64.length <= Math.ceil(PROJECT_API_BODY_LIMIT / 3) * 4

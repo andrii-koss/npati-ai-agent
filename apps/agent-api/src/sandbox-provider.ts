@@ -27,6 +27,12 @@ export interface SandboxBrowserQaResult {
   consoleDiagnostics?: import("../browser-qa-diagnostics.mjs").BrowserDiagnostic[];
   consoleErrorCount: number; brokenLinks: Array<{ href: string; status?: number; error?: string }>;
   accessibility: Array<{ rule: string; impact: string; selector?: string }>;
+  /** Project API calls the site made that the API refused; writes were checks that rolled back. */
+  apiFailures?: Array<{ method: string; path: string; status: number; code: string; duringForms: boolean }>;
+  formsSubmitted?: number;
+  apiCalls?: number;
+  apiBridge?: boolean;
+  apiLog?: string[];
   screenshot?: { mimeType: "image/png"; base64Data: string; sizeBytes: number; redacted: true; captureMode?: "layout" | "visual" };
 }
 export interface SandboxBrowserQaOptions {

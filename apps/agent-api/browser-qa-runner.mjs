@@ -41,9 +41,39 @@ try {
     args: ["--no-sandbox", "--disable-dev-shm-usage", ...webgl, ...(shared && !egress ? ["--no-proxy-server"] : [])] });
   try {
     const context = await browser.newContext({ viewport, serviceWorkers: "block", acceptDownloads: false });
+    // A site calls its Project API at its own origin (/v1/projects/...), where the Preview server has no API. Inside the shared
+    // runtime the egress proxy routes the Project API host, so those calls reach the real API, marked as checks: writes run
+    // with the site's real rules and roll back, and a refused form shows up here instead of only for a real visitor.
+    const apiBridge = shared && Boolean(egress) && !input.actions?.length;
+    let formPhase = false;
+    let apiCalls = 0;
+    const apiLog = [];
+    const pendingBodies = [];
+    const apiFailures = [];
     await context.route("**/*", async route => {
       let url;
       try { url = new URL(route.request().url()); } catch { return route.abort(); }
+      if (apiBridge && url.origin === origin && url.pathname.startsWith("/v1/projects/") && !url.username && !url.password) {
+        apiCalls++;
+        // Sent from here through the sandbox egress proxy, the same way the site's own server reaches the Project API; the
+        // page gets the API's real answer. A browser-side URL rewrite was refused on the way and hid the answer's body.
+        const request = route.request();
+        const headers = { "x-npati-dry-run": "1" };
+        for (const [name, value] of Object.entries(request.headers())) if (["accept", "content-type", "x-project-key", "authorization"].includes(name.toLowerCase())) headers[name.toLowerCase()] = value;
+        const body = request.postDataBuffer();
+        try {
+          // The sandbox sets NODE_USE_ENV_PROXY, so this fetch goes through the egress proxy like a site's server code does.
+          const answer = await fetch("http://project-api.npati.internal" + url.pathname + url.search, {
+            method: request.method(), headers, ...(body && body.length && !["GET", "HEAD"].includes(request.method()) ? { body } : {}),
+            signal: AbortSignal.timeout(15000), redirect: "manual",
+          });
+          return route.fulfill({ status: answer.status, headers: { "content-type": answer.headers.get("content-type") ?? "application/json" }, body: Buffer.from(await answer.arrayBuffer()) });
+        } catch (error) {
+          return route.fulfill({ status: 503, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: { code: ("QA_API_UNREACHABLE_" + String(error?.code ?? error?.message ?? "")).replace(/[^A-Z0-9_]/gi, "_").slice(0, 60) } }) });
+        }
+      }
+      // While forms are tried, any other write (a framework API route) could change real data, so it is not sent.
+      if (formPhase && !["GET", "HEAD"].includes(route.request().method())) return route.abort();
       // A Flutter web app loads its engine and fonts from these hosts, and a site loads Google Fonts from the last two. Blocking
       // them made a working page look broken, and the agent then removed the fonts from the site to "fix" it.
       const flutterEngine = url.protocol === "https:" && ["www.gstatic.com", "fonts.gstatic.com", "fonts.googleapis.com"].includes(url.hostname) && route.request().method() === "GET" && !url.username && !url.password;
@@ -69,7 +99,23 @@ try {
       consoleErrorCount++;
       if (consoleDiagnostics.length < 5) consoleDiagnostics.push(captureBrowserDiagnostic(type, message, location, stack, origin));
     };
-    page.on("console", message => { if (message.type() === "error" && !isBlockedExternalResource(message.text(), message.location(), origin)) capture("error", message.text(), message.location()); });
+    page.on("console", message => { if (!formPhase && message.type() === "error" && !isBlockedExternalResource(message.text(), message.location(), origin)) capture("error", message.text(), message.location()); });
+    page.on("requestfailed", request => {
+      if (/\/v1\/projects\//.test(request.url()) && apiLog.length < 10)
+        apiLog.push(`${request.method()} ${request.url().replace(/^https?:\/\/[^/]+/, "").replace(/\/v1\/projects\/[^/]+/, "").slice(0, 80)} failed ${(request.failure()?.errorText ?? "").slice(0, 40)}`);
+    });
+    page.on("response", async response => {
+      let url;
+      try { url = new URL(response.url()); } catch { return; }
+      if (url.pathname.startsWith("/v1/projects/") && apiLog.length < 10)
+        apiLog.push(`${response.request().method()} ${url.host}${url.pathname.replace(/^\/v1\/projects\/[^/]+/, "").slice(0, 80)} ${response.status()}`);
+      // 401 is what a signed-out visitor is meant to get for account pages, so only real refusals and errors count.
+      if (!url.pathname.startsWith("/v1/projects/") || response.status() < 400 || response.status() === 401 || apiFailures.length >= 10) return;
+      // Recorded before the body is read: the report may be written while the body is still arriving.
+      const failure = { method: response.request().method(), path: url.pathname.replace(/^\/v1\/projects\/[^/]+/, "").slice(0, 120), status: response.status(), code: "", duringForms: formPhase };
+      apiFailures.push(failure);
+      pendingBodies.push(response.json().then(body => { failure.code = String(body?.error?.code ?? "").slice(0, 60); }).catch(() => undefined));
+    });
     page.on("pageerror", error => capture("pageerror", error.message, undefined, error.stack));
     const started = Date.now();
     stage = "navigation";
@@ -77,6 +123,41 @@ try {
     await page.waitForLoadState("networkidle", { timeout: Math.min(3000, Math.max(500, timeoutMs - (Date.now() - started))) }).catch(() => undefined);
     const loadTimeMs = Date.now() - started;
     const interactionTrace = await runBrowserQaActions(page,input.actions);
+    stage = "forms";
+    let formsSubmitted = 0;
+    if (apiBridge) {
+      formPhase = true;
+      const forms = await page.locator("form:visible").all();
+      for (const form of forms.slice(0, 3)) {
+        // Sign-up and sign-in forms are left alone: an account is not something a check should create or use.
+        if (await form.locator("input[type=password]").count()) continue;
+        // Consent boxes are often drawn by CSS over a hidden input, so every checkbox is ticked, visible or not.
+        await form.evaluate(element => {
+          for (const box of element.querySelectorAll("input[type=checkbox]")) {
+            if (box.checked) continue;
+            box.checked = true;
+            box.dispatchEvent(new Event("input", { bubbles: true }));
+            box.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+        }).catch(() => undefined);
+        for (const field of await form.locator("input:visible, textarea:visible, select:visible").all()) {
+          const tag = await field.evaluate(element => element.tagName.toLowerCase()).catch(() => "");
+          const type = (await field.getAttribute("type") ?? "text").toLowerCase();
+          if (["hidden", "submit", "button", "reset", "file", "image"].includes(type)) continue;
+          if (tag === "select") { await field.evaluate(element => { if (element.options.length) element.selectedIndex = element.options.length - 1; element.dispatchEvent(new Event("change", { bubbles: true })); }).catch(() => undefined); continue; }
+          if (type === "checkbox" || type === "radio") { await field.check({ timeout: 1000 }).catch(() => undefined); continue; }
+          const value = type === "email" ? "qa-check@example.com" : type === "tel" ? "+380501234567" : type === "number" ? "2"
+            : type === "date" ? "2030-01-15" : type === "time" ? "12:00" : type === "url" ? "https://example.com" : tag === "textarea" ? "Browser QA test message" : "QA test";
+          await field.fill(value, { timeout: 1000 }).catch(() => undefined);
+        }
+        await form.evaluate(element => element.requestSubmit()).catch(() => undefined);
+        formsSubmitted++;
+        await page.waitForLoadState("networkidle", { timeout: 2500 }).catch(() => undefined);
+        await page.waitForTimeout(800);
+      }
+      formPhase = false;
+    }
+    await Promise.race([Promise.all(pendingBodies), new Promise(resolve => setTimeout(resolve, 1500))]);
     stage = "inspection";
     const observations = await page.evaluate(() => {
       const violations = [];
@@ -157,6 +238,7 @@ try {
       statusCode: response?.status() ?? 0, loadTimeMs, domContentLoadedMs: Math.round(observations.domContentLoadedMs),
       resourceCount: observations.resourceCount, totalSizeBytes: observations.totalSizeBytes,
       consoleErrorCount: Math.min(consoleErrorCount, 100), consoleDiagnostics, brokenLinks, accessibility: observations.violations, interactionTrace,
+      apiFailures, formsSubmitted, apiCalls, apiBridge, apiLog,
       screenshot: captured,
     }));
     await context.close();
