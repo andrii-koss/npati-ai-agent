@@ -40,11 +40,11 @@ describe("A018: email planner scope follows the company the request names", () =
 });
 
 describe("A015: row reads and inserts without a granted Company agent use the coding executor", () => {
-  it("only update stays Company-capability-only; delete uses the coding agent's confirmed row delete", async () => {
+  it("row requests without a granted Company agent all use the coding agent's confirmed row tools", async () => {
     const denied = vi.fn(async () => false);
     expect(await takesRowCapabilityPath("project.data.rows.create", denied)).toBe(false);
     expect(await takesRowCapabilityPath("project.data.rows.list", denied)).toBe(false);
-    expect(await takesRowCapabilityPath("project.data.rows.update", denied)).toBe(true);
+    expect(await takesRowCapabilityPath("project.data.rows.update", denied)).toBe(false);
     expect(await takesRowCapabilityPath("project.data.rows.delete", denied)).toBe(false);
     expect(await takesRowCapabilityPath("project.data.rows.create", async () => true)).toBe(true);
   });

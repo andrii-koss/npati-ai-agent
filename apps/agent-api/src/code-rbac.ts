@@ -312,6 +312,8 @@ export const CODE_ACTION_PERMISSIONS: Readonly<Record<string, string>> = Object.
   "code.data.users.roles.set": "workspace:write",
   // Manifest v21.
   "code.data.rows.delete": "workspace:write",
+  // Manifest v22.
+  "code.data.rows.update": "workspace:write",
   "code.data.policies.apply": "workspace:write",
   "code.image.view": "workspace:read",
   "code.preview.screenshot": "workspace:read",

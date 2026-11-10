@@ -312,12 +312,12 @@ describe("C13 combined Capability Inspector view", () => {
 });
 
 describe("C13 static manifest / schema parity", () => {
-  it("matches manifest v21 with 66 versioned schemas for 64 current code capabilities", () => {
+  it("matches manifest v22 with 67 versioned schemas for 65 current code capabilities", () => {
     const result = checkStaticManifestParity(readManifest());
     expect(result.ok).toBe(true);
-    expect(result.facts.manifestVersion).toBe(21);
-    expect(result.facts.manifestTools).toBe(66);
-    expect(result.facts.catalogCodeTools).toBe(64);
+    expect(result.facts.manifestVersion).toBe(22);
+    expect(result.facts.manifestTools).toBe(67);
+    expect(result.facts.catalogCodeTools).toBe(65);
     expect(result.issues.length).toBe(0);
   });
 
@@ -359,12 +359,12 @@ describe("C13 static manifest / schema parity", () => {
       const result = checkStaticManifestParity(readManifest());
       expect(result.ok).toBe(false);
       expect(codes(result)).toContain("catalog_code_tool_missing_from_manifest");
-      expect(result.facts.catalogCodeTools).toBe(65);
+      expect(result.facts.catalogCodeTools).toBe(66);
     } finally {
       CAPABILITY_CATALOG.pop();
     }
     expect(checkStaticManifestParity(readManifest()).ok).toBe(true);
-    expect(checkStaticManifestParity(readManifest()).facts.catalogCodeTools).toBe(64);
+    expect(checkStaticManifestParity(readManifest()).facts.catalogCodeTools).toBe(65);
   });
 });
 

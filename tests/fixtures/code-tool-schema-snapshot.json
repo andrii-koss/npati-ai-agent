@@ -1,6 +1,6 @@
 {
-  "manifestVersion": 21,
-  "checksum": "617e28833832ef5602396e7d9fad10b00c4ec38341e9983ba6b10b8566fbfa64",
+  "manifestVersion": 22,
+  "checksum": "b3d56934a29970563ae30c8066a2232196252cf02d5be6b41bad18c1c597f1cf",
   "tools": [
     {
       "key": "code.agent.continue@1",
@@ -115,6 +115,13 @@
       "checksum": "bbb01e5946e8e177e69cb8581db47558c29fa21d3dc6d50ea7285a7e16ddf0b8"
     },
     {
+      "key": "code.data.rows.update@1",
+      "name": "code.data.rows.update",
+      "version": 1,
+      "status": "active",
+      "checksum": "089798984620ab1207ded3516839f7b854074216e3e07f51be5482315315ed34"
+    },
+    {
       "key": "code.data.schema.apply@1",
       "name": "code.data.schema.apply",
       "version": 1,
@@ -140,7 +147,7 @@
       "name": "code.data.schema.modify",
       "version": 1,
       "status": "active",
-      "checksum": "ae1056c26fe14b276236659af5a8ee40f1c938b8f5aeb712a8c814b0f40b4663"
+      "checksum": "c187a13da4e580309ff4014cccb2a32f3255ae21fe397b804a9973c95e612db5"
     },
     {
       "key": "code.data.users.list@1",

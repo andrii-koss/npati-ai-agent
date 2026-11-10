@@ -3160,7 +3160,7 @@
         }
       }
     },
-    "description": "Never remove or loosen a value rule the user set just to make a row fit; say which row breaks which rule and ask. Add a value rule (add_check with field and min and/or max, or values; rows that break it make the change fail), remove it (drop_check with field), or remove only a foreign key and keep the column and its data (drop_foreign_key with field; keepWithDeleteRule removes only keys that have no delete rule). Rename a table (rename_collection with next), rename a column keeping its data (rename_field with field and next; never add a new column and drop the old one), change a field type (alter_field with field definition), delete a field (drop_field with field name), or delete a table (drop_collection) in the attached dev database. Inspect first for backend ID and fingerprint. Preview with dryRun; execution requires human approval, destructive changes take a snapshot. Update application code for renamed/deleted objects."
+    "description": "If other tables depend on a table the user asked to delete, do not delete those tables or links on your own: tell the user what depends on it and ask. Never remove or loosen a value rule the user set just to make a row fit; say which row breaks which rule and ask. Add a value rule (add_check with field and min and/or max, or values; rows that break it make the change fail), remove it (drop_check with field), or remove only a foreign key and keep the column and its data (drop_foreign_key with field; keepWithDeleteRule removes only keys that have no delete rule). Rename a table (rename_collection with next), rename a column keeping its data (rename_field with field and next; never add a new column and drop the old one), change a field type (alter_field with field definition), delete a field (drop_field with field name), or delete a table (drop_collection) in the attached dev database. Inspect first for backend ID and fingerprint. Preview with dryRun; execution requires human approval, destructive changes take a snapshot. Update application code for renamed/deleted objects."
   },
   {
     "name": "code.data.rows.list",
@@ -4354,6 +4354,131 @@
         },
         "tool": {
           "const": "code.data.rows.delete"
+        },
+        "toolVersion": {
+          "type": "integer"
+        },
+        "schemaVersion": {
+          "type": "integer"
+        },
+        "trust": {
+          "const": "untrusted_data"
+        },
+        "note": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "truncation": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "data": {
+          "type": "object"
+        }
+      }
+    }
+  },
+  {
+    "name": "code.data.rows.update",
+    "version": 1,
+    "status": "active",
+    "description": "Change field values in the rows of one table in this project's dev database that match the filters the user described, for example set price to 70 for the product named Croissant. WHEN: the user asks to change values in particular rows. NOT WHEN: the user asks to change a column or a table (use code.data.schema.modify) or did not say which rows; then ask. Filters are required: there is no change-everything call. Never loosen a value rule to make a change fit. Call with dryRun first to see how many rows match; the change needs a human approval and refuses when more rows match than limit. RETURNS: the number of matching or changed rows and a sample.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedBackendId",
+        "collection",
+        "filters",
+        "values"
+      ],
+      "properties": {
+        "expectedBackendId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "collection": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,62}$"
+        },
+        "filters": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "field",
+              "operator",
+              "value"
+            ],
+            "properties": {
+              "field": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{0,62}$"
+              },
+              "operator": {
+                "enum": [
+                  "eq",
+                  "ne",
+                  "gt",
+                  "gte",
+                  "lt",
+                  "lte",
+                  "starts_with",
+                  "contains"
+                ]
+              },
+              "value": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "values": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 50
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 100
+        },
+        "dryRun": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": [
+        "kind",
+        "tool",
+        "toolVersion",
+        "schemaVersion",
+        "trust",
+        "note",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "code_tool_result"
+        },
+        "tool": {
+          "const": "code.data.rows.update"
         },
         "toolVersion": {
           "type": "integer"

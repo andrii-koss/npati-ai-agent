@@ -53,7 +53,10 @@ export const CODE_TOOL_SCHEMAS: readonly CodeToolSchema[] = authoredSchemas as u
 export const V20_ADDED_TOOL_NAMES: readonly string[] = ["code.data.users.list", "code.data.users.roles.set"];
 /** Tools first published in manifest v21. */
 export const V21_ADDED_TOOL_NAMES: readonly string[] = ["code.data.rows.delete"];
-const V20_TOOL_SCHEMAS = CODE_TOOL_SCHEMAS.filter(tool => !V21_ADDED_TOOL_NAMES.includes(tool.name));
+/** Tools first published in manifest v22. */
+export const V22_ADDED_TOOL_NAMES: readonly string[] = ["code.data.rows.update"];
+const V21_TOOL_SCHEMAS = CODE_TOOL_SCHEMAS.filter(tool => !V22_ADDED_TOOL_NAMES.includes(tool.name));
+const V20_TOOL_SCHEMAS = V21_TOOL_SCHEMAS.filter(tool => !V21_ADDED_TOOL_NAMES.includes(tool.name));
 const V19_TOOL_SCHEMAS = V20_TOOL_SCHEMAS.filter(tool => !V20_ADDED_TOOL_NAMES.includes(tool.name));
 // All pre-v16 sessions retain schema.apply@1 exactly as published.
 const V17_TOOL_SCHEMAS = V19_TOOL_SCHEMAS.filter(tool => tool.name !== "code.preview.screenshot" || tool.version === 1);
@@ -219,7 +222,7 @@ export const V12_TOOL_SCHEMAS = LEGACY_TOOL_SCHEMAS.filter(tool => !V15_ADDED_TO
 export const V13_TOOL_SCHEMAS = LEGACY_TOOL_SCHEMAS.filter(tool => !V15_ADDED_TOOL_NAMES.includes(tool.name) && tool.name !== "code.data.backend.create");
 export const V14_TOOL_SCHEMAS = LEGACY_TOOL_SCHEMAS.filter(tool => !V15_ADDED_TOOL_NAMES.includes(tool.name));
 export const V15_TOOL_SCHEMAS = LEGACY_TOOL_SCHEMAS;
-export const CODE_TOOL_MANIFEST_VERSION = 21;
+export const CODE_TOOL_MANIFEST_VERSION = 22;
 
 /* Step 6 publishes additive controls and spawn_async in v11; spawn@1 and manifests v1?v10 stay frozen. */
 
@@ -238,7 +241,7 @@ export const CODE_TOOL_MANIFEST_VERSION = 21;
  * places that report the artifact as stale, while `assertManifestConsistent()` — and therefore the manifest
  * the application publishes — is already satisfied.
  */
-export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "617e28833832ef5602396e7d9fad10b00c4ec38341e9983ba6b10b8566fbfa64";
+export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "b3d56934a29970563ae30c8066a2232196252cf02d5be6b41bad18c1c597f1cf";
 
 /**
  * Checksum of the v8 published set (36 tools: everything through the eleven `code.git.*` tools). Frozen for
@@ -420,6 +423,7 @@ export const KNOWN_TOOL_MANIFESTS: readonly CodeToolManifest[] = [
   toolManifest(V19_TOOL_SCHEMAS, 18),
   toolManifest(V19_TOOL_SCHEMAS, 19),
   toolManifest(V20_TOOL_SCHEMAS, 20),
+  toolManifest(V21_TOOL_SCHEMAS, 21),
   toolManifest(CODE_TOOL_SCHEMAS, CODE_TOOL_MANIFEST_VERSION),
 ];
 

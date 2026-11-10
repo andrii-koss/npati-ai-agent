@@ -596,6 +596,150 @@ export const CODE_DATA_STUDIO_CAPABILITIES: (CapabilityDefinition & { inputSchem
     }
   },
   {
+    "id": "code.data.rows.update",
+    "inventoryIds": [
+      413
+    ],
+    "type": "tool",
+    "domain": "code",
+    "name": "code.data.rows.update",
+    "description": "Change field values in the rows of one table in this project's dev database that match the filters the user described, for example set price to 70 for the product named Croissant. WHEN: the user asks to change values in particular rows. NOT WHEN: the user asks to change a column or a table (use code.data.schema.modify) or did not say which rows; then ask. Filters are required: there is no change-everything call. Never loosen a value rule to make a change fit. Call with dryRun first to see how many rows match; the change needs a human approval and refuses when more rows match than limit. RETURNS: the number of matching or changed rows and a sample.",
+    "useWhen": [
+      "The user asks to change values in particular rows."
+    ],
+    "doNotUseWhen": [
+      "The user did not say which rows."
+    ],
+    "agentCallable": true,
+    "userVisible": true,
+    "risk": "high",
+    "requiresConfirmation": false,
+    "requiredConnections": [],
+    "requiredPermissions": [
+      "workspace:write"
+    ],
+    "version": 1,
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedBackendId",
+        "collection",
+        "filters",
+        "values"
+      ],
+      "properties": {
+        "expectedBackendId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "collection": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,62}$"
+        },
+        "filters": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "field",
+              "operator",
+              "value"
+            ],
+            "properties": {
+              "field": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{0,62}$"
+              },
+              "operator": {
+                "enum": [
+                  "eq",
+                  "ne",
+                  "gt",
+                  "gte",
+                  "lt",
+                  "lte",
+                  "starts_with",
+                  "contains"
+                ]
+              },
+              "value": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "values": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 50
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 100
+        },
+        "dryRun": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": [
+        "kind",
+        "tool",
+        "toolVersion",
+        "schemaVersion",
+        "trust",
+        "note",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "code_tool_result"
+        },
+        "tool": {
+          "const": "code.data.rows.update"
+        },
+        "toolVersion": {
+          "type": "integer"
+        },
+        "schemaVersion": {
+          "type": "integer"
+        },
+        "trust": {
+          "const": "untrusted_data"
+        },
+        "note": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "truncation": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "data": {
+          "type": "object"
+        }
+      }
+    }
+  },
+  {
     "id": "code.data.migrations.list",
     "inventoryIds": [
       406

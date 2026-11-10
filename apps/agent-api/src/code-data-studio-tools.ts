@@ -13,7 +13,7 @@ import type { ProjectAccessPolicy } from "@npati/shared";
  *  - arguments are structured; no SQL reaches the service.
  */
 export interface CodeDataStudioToolOptions {
-  projectData?: Partial<Pick<AgentDataStudioService, "assertBackend" | "listRows" | "createRow" | "listMigrations" | "inspectAuth" | "configureAuth" | "listSiteUsers" | "setSiteUserRoles" | "deleteRowsWhere">>;
+  projectData?: Partial<Pick<AgentDataStudioService, "assertBackend" | "listRows" | "createRow" | "listMigrations" | "inspectAuth" | "configureAuth" | "listSiteUsers" | "setSiteUserRoles" | "deleteRowsWhere" | "updateRowsWhere">>;
   dataPolicy?: Pick<PolicyEngine, "evaluate">;
 }
 
@@ -119,6 +119,29 @@ export function codeDataStudioExecutors(options: CodeDataStudioToolOptions): Rec
       return run(input, true, async (service) => {
         if (!service.deleteRowsWhere) return unavailable(input);
         return service.deleteRowsWhere(input.ctx, input.companyId, input.projectId, collection, { filters, limit, dryRun: input.args.dryRun === true });
+      });
+    },
+
+    "code.data.rows.update": async (input) => {
+      const collection = identifier(input, input.args.collection, "collection");
+      const raw = input.args.filters;
+      if (!Array.isArray(raw) || raw.length < 1 || raw.length > 10) invalid(input, "filters must name 1-10 conditions; there is no change-everything call");
+      const operators = new Set(["eq", "ne", "gt", "gte", "lt", "lte", "starts_with", "contains"]);
+      const filters = (raw as unknown[]).map((filter) => {
+        const entry = filter as { field?: unknown; operator?: unknown; value?: unknown };
+        if (!entry || typeof entry !== "object" || !operators.has(String(entry.operator))) invalid(input, "each filter needs field, operator (eq/ne/gt/gte/lt/lte/starts_with/contains) and value");
+        if (entry.value !== null && !["string", "number", "boolean"].includes(typeof entry.value)) invalid(input, "filter values must be scalars");
+        if ((entry.operator === "starts_with" || entry.operator === "contains") && (typeof entry.value !== "string" || !entry.value.length)) invalid(input, "starts_with and contains need a non-empty text value");
+        return { field: identifier(input, entry.field, "filter field"), operator: entry.operator as "eq", value: entry.value };
+      });
+      const values = input.args.values;
+      if (!values || typeof values !== "object" || Array.isArray(values) || !Object.keys(values).length || Object.keys(values).length > 50) invalid(input, "values must name 1-50 fields to set");
+      const keys = Object.keys(values as Record<string, unknown>);
+      if (keys.some((key) => key === "id" || !IDENTIFIER.test(key))) invalid(input, "values must be lower-case field names (not id)");
+      const limit = typeof input.args.limit === "number" && Number.isInteger(input.args.limit) ? Math.min(Math.max(input.args.limit, 1), 100) : 100;
+      return run(input, true, async (service) => {
+        if (!service.updateRowsWhere) return unavailable(input);
+        return service.updateRowsWhere(input.ctx, input.companyId, input.projectId, collection, { filters, values: values as Record<string, unknown>, limit, dryRun: input.args.dryRun === true });
       });
     },
 

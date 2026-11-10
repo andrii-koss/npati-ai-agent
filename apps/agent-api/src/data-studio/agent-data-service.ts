@@ -238,6 +238,12 @@ export class AgentDataStudioService {
     return this.migrations.deleteOwnerRowsWhere(ctx, backend, "dev", collection, input);
   }
 
+  /** Changes the named fields only in the rows the filters name, and only up to limit of them; a dry run reports what would change. */
+  async updateRowsWhere(ctx: AuthContext, companyId: string, projectId: string, collection: string, input: { filters: Array<{ field: string; operator: string; value: unknown }>; values: Record<string, unknown>; limit: number; dryRun?: boolean }) {
+    const { backend } = await this.context(ctx, companyId, projectId);
+    return this.migrations.updateOwnerRowsWhere(ctx, backend, "dev", collection, input);
+  }
+
   /** The people registered on the project's site, with their roles. */
   async listSiteUsers(ctx: AuthContext, companyId: string, projectId: string, email?: string) {
     if (!this.authService) throw new DataStudioError(503, "auth", "Site accounts are unavailable", false, "AUTH_UNAVAILABLE");

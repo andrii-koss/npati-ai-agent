@@ -142,6 +142,12 @@ export class ProjectMigrationEngine {
         // A schema or constraint error (e.g. a relation on a missing column) is the caller's to fix: report the
         // database's message, which names only the identifiers of this operation, instead of an opaque failure.
         const pg = error as { code?: unknown; message?: unknown };
+        // A table other tables depend on: the agent is told what depends on it and to ask before deleting those too.
+        if (!(error instanceof DataStudioError) && pg.code === "2BP01" && typeof pg.message === "string") {
+          const detail = (error as { detail?: unknown }).detail;
+          throw new DataStudioError(409, "migration", "Other tables depend on this one: " + pg.message.slice(0, 200) + (typeof detail === "string" ? " (" + detail.slice(0, 300) + ")" : "") +
+            ". Do not delete those tables or their links unless the user asked for them by name; tell the user what depends on it and ask first.", false, "DEPENDENT_OBJECTS");
+        }
         if (!(error instanceof DataStudioError) && typeof pg.code === "string" && /^(42|23|2B)/.test(pg.code) && typeof pg.message === "string") {
           throw new DataStudioError(400, "migration", "The database rejected this migration: " + pg.message.slice(0, 300), false, "MIGRATION_REJECTED");
         }
@@ -349,19 +355,47 @@ export class ProjectMigrationEngine {
     return (await this.ownerQuery<Record<string, unknown>>(ctx, backend, environment, sql, [...values, id]))[0] ?? null;
   }
 
-  async deleteOwnerRowsWhere(ctx: AuthContext, backend: DataBackend, environment: DataEnvironmentName, collection: string,
-    input: { filters: Array<{ field: string; operator: string; value: unknown }>; limit: number; dryRun?: boolean }) {
-    if (!input.filters.length) throw new DataStudioError(400, "owner_data", "Name the rows to delete", false, "FILTER_REQUIRED");
-    const table = quoteIdentifier(collection);
-    const values: unknown[] = [];
-    const conditions = input.filters.map((filter) => {
+  /** The WHERE clause of a filtered row change or delete; at least one filter is required. */
+  private rowFilterClause(filters: Array<{ field: string; operator: string; value: unknown }>, values: unknown[]): string {
+    if (!filters.length) throw new DataStudioError(400, "owner_data", "Name the rows to change", false, "FILTER_REQUIRED");
+    return " WHERE " + filters.map((filter) => {
       if (filter.operator === "starts_with" || filter.operator === "contains") {
-        values.push((filter.operator === "contains" ? "%" : "") + String(filter.value).replace(/[\\%_]/g, "\\  async deleteOwnerRows(") + "%");
+        // % and _ in the user's text are matched literally.
+        const literal = String(filter.value).replace(/[\\%_]/g, (character) => "\\" + character);
+        values.push((filter.operator === "contains" ? "%" : "") + literal + "%");
         return quoteIdentifier(validateIdentifier(filter.field)) + "::text ILIKE $" + values.length + " ESCAPE '\\'";
       }
       return bindFilter(filter.field, filter.operator as "eq", filter.value, values);
-    });
-    const where = " WHERE " + conditions.join(" AND ");
+    }).join(" AND ");
+  }
+
+  async updateOwnerRowsWhere(ctx: AuthContext, backend: DataBackend, environment: DataEnvironmentName, collection: string,
+    input: { filters: Array<{ field: string; operator: string; value: unknown }>; values: Record<string, unknown>; limit: number; dryRun?: boolean }) {
+    const table = quoteIdentifier(collection);
+    const fields = Object.keys(input.values).filter((field) => input.values[field] !== undefined);
+    if (!fields.length || fields.length > 50 || fields.includes("id")) throw new DataStudioError(400, "owner_data", "Name the fields to change (not id)", false, "INVALID_ROW");
+    const filterValues: unknown[] = [];
+    const where = this.rowFilterClause(input.filters, filterValues);
+    const counted = await this.ownerQuery<{ count: string }>(ctx, backend, environment, "SELECT count(*)::text AS count FROM " + table + where, filterValues);
+    const matched = Number(counted[0]?.count ?? 0);
+    if (input.dryRun) {
+      const sample = await this.ownerQuery<Record<string, unknown>>(ctx, backend, environment, "SELECT * FROM " + table + where + " LIMIT 5", filterValues);
+      return { dryRun: true, collection, matched, set: input.values, sample };
+    }
+    if (matched > input.limit) throw new DataStudioError(409, "owner_data", `${matched} rows match, more than the limit of ${input.limit}; narrow the filters or confirm a higher limit`, false, "TOO_MANY_ROWS");
+    // The new values come first ($1..$n); the filters are numbered after them.
+    const values: unknown[] = await this.ownerParameters(ctx, backend, environment, collection, fields, input.values);
+    const shiftedWhere = this.rowFilterClause(input.filters, values);
+    const sql = "UPDATE " + table + " SET " + fields.map((field, index) => quoteIdentifier(validateIdentifier(field)) + " = $" + (index + 1)).join(", ") + shiftedWhere + " RETURNING 1 AS id";
+    const updated = await this.ownerQuery<{ id: unknown }>(ctx, backend, environment, sql, values);
+    return { updated: updated.length, collection };
+  }
+
+  async deleteOwnerRowsWhere(ctx: AuthContext, backend: DataBackend, environment: DataEnvironmentName, collection: string,
+    input: { filters: Array<{ field: string; operator: string; value: unknown }>; limit: number; dryRun?: boolean }) {
+    const table = quoteIdentifier(collection);
+    const values: unknown[] = [];
+    const where = this.rowFilterClause(input.filters, values);
     const counted = await this.ownerQuery<{ count: string }>(ctx, backend, environment, "SELECT count(*)::text AS count FROM " + table + where, values);
     const matched = Number(counted[0]?.count ?? 0);
     if (input.dryRun) {
