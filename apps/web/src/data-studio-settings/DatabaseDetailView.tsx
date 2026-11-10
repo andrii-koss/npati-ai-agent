@@ -16,6 +16,7 @@ import type {
 import { formatBytes, statusPillClass, syncPillClass } from "./helpers";
 import { SchemaDrawer } from "./SchemaDrawer";
 import { TransferDatabaseDrawer } from "./TransferDatabaseDrawer";
+import { DatabaseProjectsSection, DatabaseTablesToolbar } from "./DatabaseWorkspaceSections";
 
 export interface DatabaseDetailViewProps {
   isUk: boolean;
@@ -109,7 +110,6 @@ export function DatabaseDetailView({
   transferDatabase,
   setDetailId,
 }: DatabaseDetailViewProps) {
-  const [selectedUnattachedId, setSelectedUnattachedId] = React.useState<string>("");
   const [actionsOpen, setActionsOpen] = React.useState(false);
   const actionsRef = React.useRef<HTMLDivElement>(null);
   const actionsTriggerRef = React.useRef<HTMLButtonElement>(null);
@@ -245,113 +245,20 @@ export function DatabaseDetailView({
         })}
       </section>
 
-      <div className="ds-section-title">
-        <h2>{isUk ? "Проєкти" : "Projects"}</h2>
-        <span className="ds-muted">{isUk ? "Одна база може обслуговувати кілька проєктів" : "One database can serve several projects"}</span>
-      </div>
-
-      {detailProjects.length === 0 && unattachedProjects.length === 0 && (
-        <div className="data-studio-alert info" role="status">
-          {isUk ? "У цій компанії ще немає проєктів." : "This company has no projects yet."}{" "}
-          <Link to="/settings/projects">{isUk ? "Створити проєкт" : "Create a project"}</Link>
-        </div>
-      )}
-
-      {detailProjects.length > 0 && (
-        <div className="data-studio-attachments">
-          {detailProjects.map((item) => (
-            <div key={item.id} className="ds-attach-row">
-              <span className="data-studio-chip">{item.name}{item.type ? ` · ${item.type}` : ""}</span>
-              <Link className="automation-action-btn run-btn" to={`/companies/${encodeURIComponent(detail.companyId)}/projects/${encodeURIComponent(item.id)}/data`}>
-                {isUk ? "Відкрити Data Studio" : "Open Data Studio"}
-              </Link>
-              <button type="button" className="automation-action-btn" disabled={backendBusy} onClick={() => void attachProject(detail.companyId, item.id, null)}>
-                {isUk ? "Відкріпити" : "Detach"}
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {unattachedProjects.length > 0 && (
-        <div className="ds-attach-project-box" style={{ marginTop: "16px", marginBottom: "20px" }}>
-          <h3 style={{ fontSize: "15px", fontWeight: 600, marginBottom: "8px" }}>
-            {isUk ? "Прикріпити проєкт" : "Attach a project"}
-          </h3>
-          <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-            <select
-              aria-label={isUk ? "Оберіть проєкт для прикріплення" : "Select project to attach"}
-              style={{
-                padding: "8px 12px",
-                borderRadius: "8px",
-                border: "1px solid #d1d5db",
-                fontSize: "14px",
-                minWidth: "260px",
-                background: "#fff",
-              }}
-              value={selectedUnattachedId}
-              disabled={backendBusy}
-              onChange={(e) => setSelectedUnattachedId(e.target.value)}
-            >
-              <option value="">{isUk ? "-- Оберіть проєкт для прикріплення --" : "-- Select project to attach --"}</option>
-              {unattachedProjects.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}{item.type ? ` (${item.type})` : ""}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="automation-action-btn run-btn"
-              disabled={backendBusy || !selectedUnattachedId}
-              onClick={() => {
-                if (selectedUnattachedId) {
-                  void attachProject(detail.companyId, selectedUnattachedId, detail.id).then(() => {
-                    setSelectedUnattachedId("");
-                  });
-                }
-              }}
-            >
-              {isUk ? "＋ Прикріпити до цієї бази" : "＋ Attach to this database"}
-            </button>
-          </div>
-        </div>
-      )}
-
-      <div className="ds-section-title">
-        <h2>{isUk ? "Таблиці" : "Tables"}</h2>
-        <span className="ds-muted">{isUk ? "Схема, RLS і політики проєкту" : "Schema, RLS and policies of the project"}</span>
-      </div>
-
-      <div className="ds-detail-toolbar">
-        <label>
-          <span>{isUk ? "Проєкт" : "Project"}</span>
-          <select value={projectId} onChange={(event) => setProjectId(event.target.value)} disabled={!detailProjects.length}>
-            {!detailProjects.length && <option value="">{isUk ? "Немає прикріплених проєктів" : "No attached projects"}</option>}
-            {detailProjects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-          </select>
-        </label>
-        <div className="ds-toolbar-field">
-          <span>{isUk ? "Середовище" : "Environment"}</span>
-          <div className="env-switcher" role="group" aria-label={isUk ? "Середовище" : "Environment"}>
-            <button type="button" className={`env-btn ${environment === "dev" ? "active" : ""}`} onClick={() => setEnvironment("dev")}>dev</button>
-            <button type="button" className={`env-btn ${environment === "prod" ? "active" : ""}`} onClick={() => setEnvironment("prod")}>prod</button>
-          </div>
-        </div>
-        <button type="button" className="button-secondary" onClick={() => void countRows()} disabled={countingRows || !tables.length}>
-          {countingRows ? (isUk ? "Рахуємо…" : "Counting…") : isUk ? "Порахувати рядки" : "Count rows"}
-        </button>
-        {!readOnly && (
-          <button
-            type="button"
-            className="button-primary automations-action-primary"
-            onClick={() => { setEditTable(null); setDrawerOpen(true); }}
-            disabled={!overview || busy || !detailProjects.length}
-          >
-            ＋ {isUk ? "Нова таблиця" : "New table"}
-          </button>
-        )}
-      </div>
+      <DatabaseProjectsSection
+        isUk={isUk} companyId={detail.companyId} databaseId={detail.id}
+        databaseName={detail.name} companyName={detail.companyName}
+        connectedProjects={detailProjects} availableProjects={unattachedProjects}
+        busy={backendBusy} onAttach={attachProject}
+      />
+      <DatabaseTablesToolbar
+        isUk={isUk} projects={detailProjects} projectId={projectId} onProjectChange={setProjectId}
+        environment={environment} onEnvironmentChange={setEnvironment}
+        tableCount={tables.length} showTableCount={!loading && Boolean(overview)}
+        readOnly={readOnly} countingRows={countingRows}
+        canCreate={Boolean(overview) && !busy && detailProjects.length > 0}
+        onCountRows={countRows} onNewTable={() => { setEditTable(null); setDrawerOpen(true); }}
+      />
 
       {error && (
         <div className="data-studio-alert error" role="alert">

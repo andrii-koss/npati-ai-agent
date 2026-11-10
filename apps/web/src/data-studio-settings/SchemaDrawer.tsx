@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { TEMPLATE_CATALOG } from "../../../../packages/shared/src/project-data-templates";
 import { confirmModal } from "../ConfirmDialog";
 import {
   FIELD_TYPES,
@@ -12,6 +13,17 @@ import {
   type TemplateSummary,
 } from "./types";
 import { apiFetch, errorCode } from "./helpers";
+
+const templates: TemplateSummary[] = TEMPLATE_CATALOG.map((template) => ({
+  id: template.id,
+  name: template.name,
+  description: template.description,
+  collections: template.collections.map((collection) => ({
+    name: collection.name,
+    fields: collection.fields.length,
+    fieldNames: collection.fields.map((field) => field.name),
+  })),
+}));
 
 export interface SchemaDrawerProps {
   isUk: boolean;
@@ -28,9 +40,6 @@ export interface SchemaDrawerProps {
 export function SchemaDrawer({ isUk, basePath, readOnly, table, busy, onClose, onPreview, onApply, onNotify }: SchemaDrawerProps) {
   const editing = Boolean(table);
   const [mode, setMode] = useState<"template" | "manual">(editing ? "manual" : "template");
-  const [templates, setTemplates] = useState<TemplateSummary[]>([]);
-  const [templatesLoading, setTemplatesLoading] = useState(false);
-  const [templatesError, setTemplatesError] = useState<string | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateSummary | null>(null);
   const [seedDemoData, setSeedDemoData] = useState(false);
   const [collectionName, setCollectionName] = useState(table?.name ?? "");
@@ -52,15 +61,6 @@ export function SchemaDrawer({ isUk, basePath, readOnly, table, busy, onClose, o
     const timer = setTimeout(() => firstFieldRef.current?.focus(), 30);
     return () => clearTimeout(timer);
   }, [mode, editing]);
-
-  useEffect(() => {
-    if (mode !== "template" || templates.length || templatesLoading) return;
-    setTemplatesLoading(true);
-    void apiFetch<{ templates: TemplateSummary[] }>(`${basePath}/templates`)
-      .then((result) => setTemplates(result.templates ?? []))
-      .catch((cause) => setTemplatesError(cause instanceof Error ? cause.message : "Could not load templates"))
-      .finally(() => setTemplatesLoading(false));
-  }, [basePath, mode, templates.length, templatesLoading]);
 
   const resetPreview = () => { setPreview(null); setPendingOperation(null); setLocalError(null); };
 
@@ -201,8 +201,6 @@ export function SchemaDrawer({ isUk, basePath, readOnly, table, busy, onClose, o
 
           {mode === "template" && !editing && (
             <>
-              {templatesLoading && <p>{isUk ? "Завантаження схем…" : "Loading templates…"}</p>}
-              {templatesError && <div className="data-studio-alert error" role="alert">{templatesError}</div>}
               <div className="ds-template-list">
                 {templates.map((template) => (
                   <button
