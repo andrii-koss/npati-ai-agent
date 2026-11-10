@@ -157,7 +157,8 @@ export class AgentDataStudioService {
 
   async assertBackend(ctx: AuthContext, companyId: string, projectId: string, expectedBackendId: string) {
     const { backend } = await this.context(ctx, companyId, projectId);
-    if (backend.id !== expectedBackendId) throw new DataStudioError(409, "project_data", `Project database attachment changed; this project's database id is ${backend.id}`, false, "BACKEND_CHANGED");
+    // The agent often names the database instead of giving its id; both point at this project's own database.
+    if (backend.id !== expectedBackendId && backend.name !== expectedBackendId) throw new DataStudioError(409, "project_data", `Project database attachment changed; this project's database id is ${backend.id}`, false, "BACKEND_CHANGED");
     return backend;
   }
 
@@ -252,7 +253,7 @@ export class AgentDataStudioService {
     validateOperation(operation);
     const { backend, env } = await this.context(ctx, companyId, projectId);
 
-    if (options.expectedBackendId && backend.id !== options.expectedBackendId) throw new DataStudioError(409, "apply", "Project database attachment changed", false, "BACKEND_CHANGED");
+    if (options.expectedBackendId && backend.id !== options.expectedBackendId && backend.name !== options.expectedBackendId) throw new DataStudioError(409, "apply", "Project database attachment changed", false, "BACKEND_CHANGED");
     if (backend.status !== "ready" || env.status !== "ready") {
       throw new DataStudioError(409, "apply", "Backend is not ready", false, "BACKEND_NOT_READY");
     }

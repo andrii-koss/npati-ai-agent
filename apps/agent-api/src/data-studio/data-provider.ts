@@ -46,7 +46,7 @@ export interface DataProvider {
   addField(collection: string, field: FieldDefinition): SchemaChange;
   alterField(collection: string, field: FieldDefinition): SchemaChange;
   dropField(collection: string, field: string): SchemaChange;
-  createRelation(source: string, target: string, name: string, cardinality: "many-to-one" | "one-to-many" | "many-to-many"): SchemaChange;
+  createRelation(source: string, target: string, name: string, cardinality: "many-to-one" | "one-to-many" | "many-to-many", onDelete?: string): SchemaChange;
   dropRelation(source: string, name: string, cardinality?: "many-to-one" | "one-to-many" | "many-to-many"): SchemaChange;
   createIndex(collection: string, fields: string[], unique?: boolean): SchemaChange;
   assertLimits(operation: string, current: SchemaSnapshot, usageBytes: number, target?: string): void;
@@ -137,7 +137,7 @@ export class PostgresDataProvider implements DataProvider {
           const constraint = quoteIdentifier(validateIdentifier(`fk_${many}_${operation.name}`.slice(0, 63)));
           return { operation: "create_relation", upSql: `ALTER TABLE ${quoteIdentifier(many)} ADD CONSTRAINT ${constraint} FOREIGN KEY (${quoteIdentifier(operation.field)}) REFERENCES ${quoteIdentifier(one)}(id)${onDeleteSql(operation.onDelete)};`, downSql: `ALTER TABLE ${quoteIdentifier(many)} DROP CONSTRAINT ${constraint};`, reversible: true, destructive: false, requiresSnapshot: false };
         }
-        return this.createRelation(operation.collection, operation.target, operation.name, operation.cardinality);
+        return this.createRelation(operation.collection, operation.target, operation.name, operation.cardinality, operation.onDelete);
       }
       case "drop_relation": return this.dropRelation(operation.collection, operation.name, operation.cardinality);
       case "create_index": return this.createIndex(operation.collection, operation.fields, operation.unique);
@@ -191,16 +191,16 @@ export class PostgresDataProvider implements DataProvider {
       destructive: true, requiresSnapshot: true, reversible: false };
   }
 
-  createRelation(source: string, target: string, name: string, cardinality: "many-to-one" | "one-to-many" | "many-to-many"): SchemaChange {
-    const src = quoteIdentifier(source), dst = quoteIdentifier(target), rel = quoteIdentifier(name);
+  createRelation(source: string, target: string, name: string, cardinality: "many-to-one" | "one-to-many" | "many-to-many", onDelete?: string): SchemaChange {
+    const src = quoteIdentifier(source), dst = quoteIdentifier(target), rel = quoteIdentifier(name), rule = onDeleteSql(onDelete);
     if (cardinality === "many-to-one" || cardinality === "one-to-many") {
       const many = cardinality === "many-to-one" ? src : dst;
       const one = cardinality === "many-to-one" ? dst : src;
-      return { operation: "create_relation", upSql: "ALTER TABLE " + many + " ADD COLUMN " + rel + " uuid REFERENCES " + one + "(id);",
+      return { operation: "create_relation", upSql: "ALTER TABLE " + many + " ADD COLUMN " + rel + " uuid REFERENCES " + one + "(id)" + rule + ";",
         downSql: "ALTER TABLE " + many + " DROP COLUMN " + rel + ";", reversible: false, destructive: false, requiresSnapshot: false };
     }
     if (cardinality !== "many-to-many") throw new DataStudioError(400, "relation", "Invalid cardinality", false, "INVALID_RELATION");
-    return { operation: "create_relation", upSql: "CREATE TABLE " + rel + " (source_id uuid NOT NULL REFERENCES " + src + "(id), target_id uuid NOT NULL REFERENCES " + dst + "(id), PRIMARY KEY(source_id,target_id)); " +
+    return { operation: "create_relation", upSql: "CREATE TABLE " + rel + " (source_id uuid NOT NULL REFERENCES " + src + "(id)" + rule + ", target_id uuid NOT NULL REFERENCES " + dst + "(id)" + rule + ", PRIMARY KEY(source_id,target_id)); " +
       "ALTER TABLE " + rel + " ENABLE ROW LEVEL SECURITY; ALTER TABLE " + rel + " FORCE ROW LEVEL SECURITY;",
       downSql: "DROP TABLE " + rel + ";", reversible: false, destructive: false, requiresSnapshot: false };
   }
