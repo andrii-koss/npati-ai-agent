@@ -77,6 +77,8 @@ export interface CodeAskUserRouteStore {
 
 export interface CodeAskUserRouteDeps {
   store: CodeAskUserRouteStore;
+  /** The recorded status of a run, so a chat can tell a stopped run from one still working. */
+  runStatus?(companyId: string, runId: string): Promise<string | undefined>;
   getAuthContext(request: unknown): AuthContext | null;
   authorize(ctx: AuthContext, companyId: string, input: AuthorizeCodeActionInput): Promise<unknown>;
   audit?: CodeAuditPort;
@@ -173,7 +175,7 @@ export async function registerCodeAskUserRoutes(instance: FastifyInstance, deps:
         const { companyId, runId } = request.params;
         await authorize(request, companyId, CODE_ASK_USER_ACTIONS.questionRead);
         const question = await service.pendingForRun(companyId, runId);
-        if (!question) return reply.send(withApiVersion({ status: "ok", waiting: false, question: null }));
+        if (!question) return reply.send(withApiVersion({ status: "ok", waiting: false, question: null, runStatus: await deps.runStatus?.(companyId, runId) ?? null }));
         return reply.send(withApiVersion({
           status: "ok",
           waiting: true,

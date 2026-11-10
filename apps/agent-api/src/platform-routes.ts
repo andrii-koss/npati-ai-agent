@@ -296,6 +296,7 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
   };
   registerCodeAskUserRoutes(app, {
     store: workspaceStore,
+    runStatus: async (companyId, runId) => (await workspaceStore.getCodeRunState(companyId, runId))?.status,
     authorize: async (ctx, companyId, input) => codeRbacForRun.authorize(ctx, companyId, input),
     getAuthContext: (request) => codeQuestionContexts.get(request as object) ?? null,
     runState: codeAskUserRunState,

@@ -440,17 +440,19 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       inboxMutationBusy.current = false; setInboxSubmitting(false);
     }
   }
-  /** While a run waits for an answer, the next message is that answer; queued behind the waiting run it would never be read. */
-  async function answerWaitingQuestion(): Promise<boolean> {
+  /**
+   * While a run waits for an answer, the next message is that answer. The waiting run does not continue by itself, so
+   * the answer is recorded on the question and then sent as the next turn, whose history already holds the question.
+   */
+  async function answerWaitingQuestion(): Promise<"answered" | "stopped" | false> {
     const session = codeInbox.session, runId = codeInbox.snapshot?.runId ?? development.project?.runId, text = input.trim(), company = session?.companyId;
     if (!session || !runId || !text || !company) return false;
     const path = `/companies/${encodeURIComponent(company)}/code`;
-    const pending = await api<{ waiting: boolean; question: { id: string; revision: number } | null }>(`${path}/runs/${encodeURIComponent(runId)}/question`).catch(() => null);
-    if (!pending?.waiting || !pending.question) return false;
+    const pending = await api<{ waiting: boolean; question: { id: string; revision: number } | null; runStatus?: string | null }>(`${path}/runs/${encodeURIComponent(runId)}/question`).catch(() => null);
+    // A run that stopped (an answered question, a server restart) still marks its session busy, but nothing reads that queue.
+    if (!pending?.waiting || !pending.question) return ["interrupted", "failed", "cancelled", "completed"].includes(pending?.runStatus ?? "") ? "stopped" : false;
     await api(`${path}/sessions/${encodeURIComponent(session.sessionId)}/questions/${encodeURIComponent(pending.question.id)}/answer`, { method: "POST", body: JSON.stringify({ revision: pending.question.revision, freeAnswer: text }) });
-    draftVersion.current++; setInput("");
-    setMessages(current => mergeConversationMessages(current, [{ id: "answer:" + pending.question!.id, role: "user", content: text, createdAt: new Date().toISOString() }]));
-    return true;
+    return "answered";
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -460,8 +462,9 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     const nextIntent = defaultHybridRouter.classifyProject({ message: input.trim(), activeProjectId: boundProjectId, activeCompanyId: companyId ?? readActiveCompanyId() });
     const createsProject = nextIntent.intent === "CREATE_WEBSITE" || nextIntent.intent === "CREATE_PROJECT";
     // The inbox queues work for its own session; a request for another project of this chat goes through routing.
-    if (codeInbox.active && await answerWaitingQuestion()) return;
-    if (codeInbox.active && !createsProject && (!boundProjectId || codeInbox.session?.projectId === boundProjectId) && (codeInbox.snapshot ? true : await codeInbox.confirmActive())) { await submitInbox("queue"); return; }
+    // An answer, or a message after a stopped run, starts the next turn instead of waiting in that run's queue.
+    const heldRunDone = codeInbox.active && await answerWaitingQuestion();
+    if (codeInbox.active && !heldRunDone && !createsProject && (!boundProjectId || codeInbox.session?.projectId === boundProjectId) && (codeInbox.snapshot ? true : await codeInbox.confirmActive())) { await submitInbox("queue"); return; }
     const message = input.trim(); if ((!message && attachments.length === 0) || sending || chatSubmissionBusy.current) return;
     chatSubmissionBusy.current = true;
     const submittedDraftVersion = draftVersion.current;
