@@ -100,8 +100,10 @@ export class RlsPolicyCompiler {
 
         case "role": {
           const roleVal = policy.role!.replace(/'/g, "''");
-          usingClause = `current_setting('npati.auth.user_role', true) = '${roleVal}'`;
-          withCheckClause = `current_setting('npati.auth.user_role', true) = '${roleVal}'`;
+          // Any of the person's roles grants it, not only the one the request treats as primary.
+          const hasRole = `(current_setting('npati.auth.user_role', true) = '${roleVal}' OR '${roleVal}' = ANY(string_to_array(coalesce(current_setting('npati.auth.user_roles', true), ''), ',')))`;
+          usingClause = hasRole;
+          withCheckClause = hasRole;
           break;
         }
       }

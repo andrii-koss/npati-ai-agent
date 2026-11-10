@@ -19,6 +19,8 @@ export interface GatewayAuthResult {
   keyType: ProjectApiKeyType;
   userId: string;
   userRole: string;
+  /** Every role of the signed-in person; userRole is the one that matters most (admin over the default user). */
+  userRoles?: string[];
   userEmail?: string;
   corsAllowedOrigins: string[];
 }

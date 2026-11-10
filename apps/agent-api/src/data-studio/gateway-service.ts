@@ -253,6 +253,7 @@ export class ProjectApiGatewayService {
     // 4. Resolve end-user identity from Bearer token
     let userId = "";
     let userRole = keyType === "secret" ? "service_role" : "anon";
+    let userRoles: string[] = [userRole];
     let userEmail: string | undefined;
 
     if (bearerToken && this.authService) {
@@ -266,7 +267,10 @@ export class ProjectApiGatewayService {
         );
         if (verified && verified.id) {
           userId = verified.id;
-          userRole = (verified.roles?.[0] as string) || (Array.isArray(verified.roles) && verified.roles[0]) || "authenticated";
+          // Everyone has the default "user" role, so an extra role such as admin is the one that decides access.
+          userRoles = Array.isArray(verified.roles) ? verified.roles.filter((role): role is string => typeof role === "string" && role.length > 0) : [];
+          userRole = userRoles.find((role) => role !== "user" && role !== "authenticated") ?? userRoles[0] ?? "authenticated";
+          if (!userRoles.length) userRoles = [userRole];
           userEmail = verified.email as string;
         }
       } catch {
@@ -282,6 +286,7 @@ export class ProjectApiGatewayService {
       keyType,
       userId,
       userRole,
+      userRoles,
       userEmail,
       corsAllowedOrigins: allowedOrigins,
     };
@@ -345,6 +350,7 @@ export class ProjectApiGatewayService {
       // Transaction-local claims (is_local = true) are reset at COMMIT/ROLLBACK, so pooled connections never leak identity.
       await client.query("SELECT set_config('npati.auth.user_id', $1, true)", [auth.userId || ""]);
       await client.query("SELECT set_config('npati.auth.user_role', $1, true)", [auth.userRole || "anon"]);
+      await client.query("SELECT set_config('npati.auth.user_roles', $1, true)", [(auth.userRoles ?? [auth.userRole || "anon"]).join(",")]);
       await client.query("SELECT set_config('npati.project_id', $1, true)", [auth.project.id]);
       await client.query("SELECT set_config('npati.user_id', $1, true)", [auth.userId || ""]);
 
@@ -421,7 +427,7 @@ export class ProjectApiGatewayService {
       if (policy.rule === "public") return true;
       if (policy.rule === "authenticated") return Boolean(auth.userId);
       if (policy.rule === "owner") return Boolean(auth.userId);
-      return policy.rule === "role" && policy.role === auth.userRole;
+      return policy.rule === "role" && (policy.role === auth.userRole || (auth.userRoles ?? []).includes(policy.role ?? ""));
     });
   }
   private assertQueryBounds(options: { filter?: unknown; sort?: unknown; fields?: string[]; include?: string[] }): void {
