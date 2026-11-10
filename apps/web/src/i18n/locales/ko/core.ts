@@ -1,0 +1,297 @@
+import type { TranslationSchema } from "../../types";
+
+export const core = {
+  "executionTrace": {
+    "modelResponding": "모델 응답 중",
+    "waitingForModel": "모델 응답 대기 중",
+    "generatingCode": "코드 생성 중",
+    "suspended_by_flag": "일시 중지: 코딩 에이전트 비활성화",
+    "usage": "모델 토큰",
+    "inputTokens": "입력",
+    "outputTokens": "출력",
+    "totalTokens": "합계",
+    "sharedTurn": "도구 호출 {{count}}개에서 공유",
+    "unavailableTokens": "기록되지 않음",
+    "operationStatus": "결과",
+    "dryRun": "시험 실행: 변경 사항이 적용되지 않음",
+    "runningCommand": "명령 실행 중: {{command}}",
+    "fileUnchanged": "변경 사항 없음",
+    "fileNotChanged": "파일을 변경하지 못했습니다",
+    "modelCallFailed": "모델 오류: 응답이 손상되어 이 작업을 실행하지 않았습니다",
+    "fileChangedReadAgain": "파일이 변경되어 다시 읽는 중",
+    "agentFinished": "에이전트가 작업을 완료했습니다",
+    "operationsDone": "작업 {{count}}개 실행 완료",
+    "testsPassed": "통과",
+    "working": "생각 중",
+    "creatingProject": "프로젝트 생성 중",
+    "skipped": "건너뜀",
+    "pending": "대기 중",
+    "preparing": "준비 중",
+    "queued": "대기열에 있음",
+    "running": "실행 중",
+    "completed": "완료",
+    "failed": "실패",
+    "cancelled": "취소됨",
+    "awaiting_approval": "승인 대기 중",
+    "unknown": "기록됨",
+    "command": "명령",
+    "file": "파일",
+    "tool": "도구",
+    "workingDir": "작업 디렉터리",
+    "project": "프로젝트",
+    "output": "출력 / 로그",
+    "copy": "복사",
+    "copied": "복사됨",
+    "copyCommand": "명령 복사",
+    "copyLog": "로그 복사",
+    "fullLog": "기록된 전체 출력 보기",
+    "less": "간략히 보기",
+    "limited": "실행 환경에서 출력이 제한됨",
+    "duration": "소요 시간",
+    "error": "오류",
+    "viewRun": "실행 보기",
+    "exitCode": "종료 코드",
+    "reading": "파일 읽는 중",
+    "searching": "코드 검색 중",
+    "editing": "파일 수정 중",
+    "dependencies": "종속성 설치 중",
+    "building": "프로젝트 빌드 중",
+    "testing": "테스트 중",
+    "browser": "브라우저 품질 검사",
+    "sandbox": "샌드박스",
+    "preview": "실시간 미리보기 시작 중",
+    "planning": "계획 중",
+    "executed": "명령 실행 완료",
+    "read": "파일 읽기 완료",
+    "updated": "파일 업데이트 완료",
+    "created": "생성됨",
+    "modified": "수정됨",
+    "deleted": "삭제됨"
+  },
+  "projectSection": {
+    "types": {
+      "website": "웹사이트",
+      "webApp": "웹 앱",
+      "landingPage": "랜딩 페이지",
+      "mobileApp": "모바일 앱"
+    }
+  },
+  "common": {
+    "save": "저장",
+    "cancel": "취소",
+    "delete": "삭제",
+    "edit": "수정",
+    "close": "닫기",
+    "confirm": "확인",
+    "loading": "불러오는 중…",
+    "error": "오류",
+    "success": "성공",
+    "search": "검색",
+    "send": "보내기",
+    "copy": "복사",
+    "copied": "복사했습니다!",
+    "back": "뒤로",
+    "settings": "설정",
+    "language": "언어",
+    "languageSelect": "언어 선택",
+    "options": "추가 옵션",
+    "ok": "확인",
+    "notification": "알림",
+    "deleteConfirmation": "삭제 확인",
+    "confirmation": "확인",
+    "inputRequired": "입력이 필요합니다"
+  },
+  "nav": {
+    "chat": "채팅",
+    "business": "비즈니스",
+    "company": "회사",
+    "settings": "설정",
+    "capabilities": "기능 검사기",
+    "activity": "활동 및 실행 추적",
+    "automations": "자동화",
+    "goals": "목표",
+    "content": "콘텐츠",
+    "connections": "연결된 서비스",
+    "memory": "메모리",
+    "skills": "스킬",
+    "aiProviders": "AI 제공업체"
+  },
+  "sidebar": {
+    "newChat": "+ 새 채팅",
+    "pinned": "고정됨",
+    "recent": "최근 항목",
+    "noSavedChats": "저장된 채팅이 아직 없습니다",
+    "share": "공유",
+    "rename": "이름 변경",
+    "pin": "고정",
+    "unpin": "고정 해제",
+    "archive": "보관",
+    "deleteChat": "삭제",
+    "deleteBusiness": "삭제",
+    "setupDraft": "설정 초안",
+    "current": "현재",
+    "useInChat": "채팅에서 사용"
+  },
+  "dialogs": {
+    "deleteChatTitle": "채팅을 삭제하시겠습니까?",
+    "deleteChatMessage": "채팅 “{{title}}”을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
+    "deleteBusinessTitle": "비즈니스를 삭제하시겠습니까?",
+    "deleteBusinessMessage": "비즈니스 “{{name}}” 및 관련 채팅, 목표, 메모리를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
+    "renameChatTitle": "채팅 이름 변경",
+    "renameChatMessage": "이 채팅의 새 제목을 입력하세요:",
+    "renameBusinessTitle": "비즈니스 이름 변경",
+    "renameBusinessMessage": "“{{name}}”의 새 이름을 입력하세요:",
+    "copyLinkTitle": "링크 복사",
+    "copyLinkMessage": "이 {{label}} 링크를 복사하세요:",
+    "deleteGoalTitle": "목표를 삭제하시겠습니까?",
+    "deleteGoalMessage": "목표 “{{title}}”을 삭제하시겠습니까?",
+    "deleteMemoryTitle": "메모리 정보를 삭제하시겠습니까?",
+    "deleteMemoryMessage": "메모리 항목 “{{title}}”을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
+    "deleteAutomationTitle": "자동화를 삭제하시겠습니까?",
+    "deleteAutomationMessage": "이 자동화를 삭제하시겠습니까?",
+    "deleteDocumentTitle": "문서를 삭제하시겠습니까?",
+    "deleteDocumentMessage": "이 문서를 삭제하시겠습니까?",
+    "deleteCompanyTitle": "회사를 삭제하시겠습니까?",
+    "deleteCompanyMessage": "회사 “{{name}}” 및 모든 에이전트를 삭제하시겠습니까?",
+    "deleteAgentTitle": "에이전트를 삭제하시겠습니까?",
+    "deleteAgentMessage": "에이전트 “{{name}}”을 삭제하시겠습니까?",
+    "restartSetupTitle": "비즈니스 설정을 다시 시작하시겠습니까?",
+    "restartSetupMessage": "비즈니스 설정을 다시 시작하시겠습니까? 현재 초안과 채팅 기록이 삭제됩니다. 이 작업은 되돌릴 수 없습니다."
+  },
+  "chat": {
+    "emptyTitle": "어떤 작업을 할까요?",
+    "emptySubtitle": "NPATI Agent에 무엇이든 물어보거나 아이디어를 구상하세요.",
+    "placeholder": "Npati에 질문하기…",
+    "businessEmptySubtitle": "{{name}}의 맥락을 활용하며, 없는 사실을 만들어 내지 않습니다.",
+    "businessPlaceholder": "비즈니스, 목표, 고객층 또는 다음 단계에 대해 질문하세요…",
+    "workModeLabel": "작업 모드",
+    "workModeChat": "채팅",
+    "workModeCode": "코드",
+    "codeModeNeedsProject": "코드 모드는 선택한 프로젝트에서 작동합니다. 먼저 프로젝트를 여세요.",
+    "thinking": "생각 중",
+    "noCompany": "회사 없음",
+    "stopGenerating": "생성 중지",
+    "showHistory": "분석 기록 보기",
+    "hideHistory": "분석 기록 숨기기",
+    "searchingWeb": "웹 검색 중: {{query}}",
+    "preparingAnswer": "출처가 포함된 답변 준비 중…",
+    "table": "표({{count}}행)",
+    "copyCsv": "CSV 복사",
+    "downloadCsv": "Excel / CSV 다운로드",
+    "copyCode": "코드 복사",
+    "downloadFile": "파일 다운로드",
+    "expandFullscreen": "전체 화면으로 확대",
+    "collapse": "접기",
+    "helpful": "도움이 되는 답변",
+    "notHelpful": "도움이 되지 않는 답변",
+    "regenerate": "다시 생성",
+    "shareResponse": "답변 공유",
+    "showFullPrompt": "열기",
+    "collapsePrompt": "닫기",
+    "copyPrompt": "복사",
+    "copiedPrompt": "복사됨",
+    "editPrompt": "수정"
+  },
+  "userMenu": {
+    "emailInbox": "이메일 받은편지함",
+    "aiProvider": "AI 제공업체",
+    "company": "회사",
+    "memory": "메모리",
+    "settings": "설정",
+    "signOut": "로그아웃",
+    "signOutIncompleteTitle": "로그아웃이 완료되지 않음",
+    "signOutIncompleteDesc": "npati.com에서 로그아웃하지 못했습니다."
+  },
+  "settings": {
+    "title": "설정",
+    "eyebrow": "NPATI 작업 공간",
+    "description": "NPATI Agent가 로컬에서 사용하는 서비스와 환경설정을 관리합니다.",
+    "cards": {
+      "aiProviders": {
+        "title": "AI 제공업체",
+        "desc": "제공업체를 연결하고 모델을 살펴보며 AI 라우팅을 선택합니다."
+      },
+      "business": {
+        "title": "비즈니스",
+        "desc": "사업 아이디어, 시장, 목표 및 전략을 분석합니다."
+      },
+      "company": {
+        "title": "회사",
+        "desc": "맞춤 설정 가능한 AI 팀과 에이전트 조직을 구축합니다."
+      },
+      "capabilities": {
+        "title": "기능 검사기",
+        "desc": "표준 기능 306개, 도구 공개 범위 및 위험 정책을 감사합니다."
+      },
+      "activity": {
+        "title": "활동 및 실행 추적",
+        "desc": "실시간 실행 추적, 단계 위임 및 도구 결정을 확인합니다."
+      },
+      "automations": {
+        "title": "자동화",
+        "desc": "반복 cron 작업과 백그라운드 에이전트 작업을 예약합니다."
+      },
+      "email": {
+        "title": "이메일 / AI 받은편지함",
+        "desc": "회사 이메일 주소, IMAP/SMTP 및 AI 받은편지함 자동화."
+      },
+      "goals": {
+        "title": "목표",
+        "desc": "측정 가능한 비즈니스 성과를 정의하고 추적합니다."
+      },
+      "content": {
+        "title": "콘텐츠",
+        "desc": "고객층을 위한 콘텐츠를 계획, 생성 및 관리합니다."
+      },
+      "connections": {
+        "title": "연결된 서비스",
+        "desc": "서비스 상태, 엔드포인트 및 실행 환경 통합을 모니터링합니다."
+      },
+      "memory": {
+        "title": "메모리",
+        "desc": "확인된 비즈니스 맥락을 검토하고 수정합니다."
+      },
+      "skills": {
+        "title": "스킬",
+        "desc": "NPATI Agent가 사용할 수 있는 기능을 살펴봅니다."
+      }
+    }
+  },
+  "home": {
+    "eyebrow": "나의 AI 비즈니스 에이전트",
+    "heading": "무엇을 하고 싶으신가요?",
+    "subheading": "시작점을 선택하세요. 활성 비즈니스, 목표 및 저장된 맥락을 활용하여 다음 실질적인 단계를 돕습니다.",
+    "signIn": "로그인",
+    "createAccount": "계정 만들기",
+    "chatEmptyTitle": "어떤 작업을 할까요?",
+    "chatEmptySubtitle": "NPATI Agent에 무엇이든 물어보거나 아이디어를 구상하세요.",
+    "footerPrefix": "오픈 소스 NPATI Agent · 제작:",
+    "footerLink": "NPATI",
+    "actions": {
+      "sellSomething": {
+        "title": "상품이나 서비스 판매",
+        "desc": "제품이나 서비스를 명확한 제안으로 정리하세요"
+      },
+      "startBusiness": {
+        "title": "사업 시작하기",
+        "desc": "아이디어를 실질적인 첫 검증으로 구체화하세요"
+      },
+      "growBusiness": {
+        "title": "사업 성장시키기",
+        "desc": "다음 실질적인 성장 기회를 찾으세요"
+      },
+      "improveBusiness": {
+        "title": "사업 개선하기",
+        "desc": "잘되는 점과 그렇지 않은 점을 검토하고 다음 개선점을 찾으세요"
+      },
+      "createContent": {
+        "title": "콘텐츠 만들기",
+        "desc": "고객층에 유용한 콘텐츠를 계획하세요"
+      },
+      "askAgent": {
+        "title": "NPATI Agent에 질문하기",
+        "desc": "나만의 질문으로 시작하세요"
+      }
+    }
+  }
+} satisfies Pick<TranslationSchema, "executionTrace" | "projectSection" | "common" | "nav" | "sidebar" | "dialogs" | "chat" | "userMenu" | "settings" | "home">;

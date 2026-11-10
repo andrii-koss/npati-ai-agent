@@ -1,0 +1,297 @@
+import type { TranslationSchema } from "../../types";
+
+export const core = {
+  "executionTrace": {
+    "modelResponding": "Модель отвечает",
+    "waitingForModel": "Ожидание ответа модели",
+    "generatingCode": "Генерация кода",
+    "suspended_by_flag": "Приостановлено: агент программирования отключён",
+    "usage": "Токены модели",
+    "inputTokens": "Входящие",
+    "outputTokens": "Исходящие",
+    "totalTokens": "Всего",
+    "sharedTurn": "Общий запрос для {{count}} вызовов инструментов",
+    "unavailableTokens": "Не записано",
+    "operationStatus": "Результат",
+    "dryRun": "Пробный запуск: изменения не применены",
+    "runningCommand": "Выполнение команды: {{command}}",
+    "fileUnchanged": "Без изменений",
+    "fileNotChanged": "Не удалось изменить файл",
+    "modelCallFailed": "Ошибка модели: ответ повреждён, поэтому действие не выполнено",
+    "fileChangedReadAgain": "Файл изменён, читаю повторно",
+    "agentFinished": "Агент завершил работу",
+    "operationsDone": "Выполнено операций: {{count}}",
+    "testsPassed": "Пройдено",
+    "working": "Думаю",
+    "creatingProject": "Создание проекта",
+    "skipped": "Пропущено",
+    "pending": "Ожидает",
+    "preparing": "Подготовка",
+    "queued": "В очереди",
+    "running": "Выполняется",
+    "completed": "Завершено",
+    "failed": "Ошибка",
+    "cancelled": "Отменено",
+    "awaiting_approval": "Ожидание одобрения",
+    "unknown": "Записано",
+    "command": "Команда",
+    "file": "Файл",
+    "tool": "Инструмент",
+    "workingDir": "Рабочая папка",
+    "project": "Проект",
+    "output": "Вывод / Журнал",
+    "copy": "Копировать",
+    "copied": "Скопировано",
+    "copyCommand": "Копировать команду",
+    "copyLog": "Копировать журнал",
+    "fullLog": "Показать весь записанный вывод",
+    "less": "Показать меньше",
+    "limited": "Вывод ограничен средой выполнения",
+    "duration": "Длительность",
+    "error": "Ошибка",
+    "viewRun": "Открыть запуск",
+    "exitCode": "Код выхода",
+    "reading": "Чтение файлов",
+    "searching": "Поиск кода",
+    "editing": "Редактирование файлов",
+    "dependencies": "Установка зависимостей",
+    "building": "Сборка проекта",
+    "testing": "Тестирование",
+    "browser": "Проверка в браузере",
+    "sandbox": "Песочница",
+    "preview": "Запуск предпросмотра",
+    "planning": "Планирование",
+    "executed": "Команда выполнена",
+    "read": "Файл прочитан",
+    "updated": "Файл обновлён",
+    "created": "Создано",
+    "modified": "Изменено",
+    "deleted": "Удалено"
+  },
+  "projectSection": {
+    "types": {
+      "website": "Веб-сайт",
+      "webApp": "Веб-приложение",
+      "landingPage": "Посадочная страница",
+      "mobileApp": "Мобильное приложение"
+    }
+  },
+  "common": {
+    "save": "Сохранить",
+    "cancel": "Отмена",
+    "delete": "Удалить",
+    "edit": "Изменить",
+    "close": "Закрыть",
+    "confirm": "Подтвердить",
+    "loading": "Загрузка…",
+    "error": "Ошибка",
+    "success": "Успешно",
+    "search": "Поиск",
+    "send": "Отправить",
+    "copy": "Копировать",
+    "copied": "Скопировано!",
+    "back": "Назад",
+    "settings": "Настройки",
+    "language": "Язык",
+    "languageSelect": "Выбрать язык",
+    "options": "Другие действия",
+    "ok": "ОК",
+    "notification": "Уведомление",
+    "deleteConfirmation": "Подтверждение удаления",
+    "confirmation": "Подтверждение",
+    "inputRequired": "Требуется ввод"
+  },
+  "nav": {
+    "chat": "Чат",
+    "business": "Бизнес",
+    "company": "Компания",
+    "settings": "Настройки",
+    "capabilities": "Обзор возможностей",
+    "activity": "Активность и журнал запусков",
+    "automations": "Автоматизации",
+    "goals": "Цели",
+    "content": "Контент",
+    "connections": "Подключённые сервисы",
+    "memory": "Память",
+    "skills": "Навыки",
+    "aiProviders": "Поставщики ИИ"
+  },
+  "sidebar": {
+    "newChat": "+ Новый чат",
+    "pinned": "Закреплённые",
+    "recent": "Недавние",
+    "noSavedChats": "Сохранённых чатов пока нет",
+    "share": "Поделиться",
+    "rename": "Переименовать",
+    "pin": "Закрепить",
+    "unpin": "Открепить",
+    "archive": "Архивировать",
+    "deleteChat": "Удалить",
+    "deleteBusiness": "Удалить",
+    "setupDraft": "Черновик настройки",
+    "current": "Текущий",
+    "useInChat": "Использовать в чате"
+  },
+  "dialogs": {
+    "deleteChatTitle": "Удалить чат?",
+    "deleteChatMessage": "Удалить чат «{{title}}»? Это действие нельзя отменить.",
+    "deleteBusinessTitle": "Удалить бизнес?",
+    "deleteBusinessMessage": "Удалить бизнес «{{name}}», его чаты, цели и память? Это действие нельзя отменить.",
+    "renameChatTitle": "Переименовать чат",
+    "renameChatMessage": "Введите новое название чата:",
+    "renameBusinessTitle": "Переименовать бизнес",
+    "renameBusinessMessage": "Введите новое название для «{{name}}»:",
+    "copyLinkTitle": "Копировать ссылку",
+    "copyLinkMessage": "Скопируйте ссылку {{label}}:",
+    "deleteGoalTitle": "Удалить цель?",
+    "deleteGoalMessage": "Вы уверены, что хотите удалить цель «{{title}}»?",
+    "deleteMemoryTitle": "Удалить факт из памяти?",
+    "deleteMemoryMessage": "Удалить запись памяти «{{title}}»? Это действие нельзя отменить.",
+    "deleteAutomationTitle": "Удалить автоматизацию?",
+    "deleteAutomationMessage": "Вы уверены, что хотите удалить эту автоматизацию?",
+    "deleteDocumentTitle": "Удалить документ?",
+    "deleteDocumentMessage": "Удалить этот документ?",
+    "deleteCompanyTitle": "Удалить компанию?",
+    "deleteCompanyMessage": "Удалить компанию «{{name}}» и всех её агентов?",
+    "deleteAgentTitle": "Удалить агента?",
+    "deleteAgentMessage": "Удалить агента «{{name}}»?",
+    "restartSetupTitle": "Начать настройку бизнеса заново?",
+    "restartSetupMessage": "Начать настройку бизнеса заново? Текущий черновик и история его чата будут удалены. Это действие нельзя отменить."
+  },
+  "chat": {
+    "emptyTitle": "Над чем поработаем?",
+    "emptySubtitle": "Задайте NPATI Agent любой вопрос или обсудите идеи.",
+    "placeholder": "Спросите Npati…",
+    "businessEmptySubtitle": "Я использую контекст {{name}} и не буду выдумывать недостающие факты.",
+    "businessPlaceholder": "Спросите о бизнесе, целях, аудитории или следующем шаге…",
+    "workModeLabel": "Режим работы",
+    "workModeChat": "Чат",
+    "workModeCode": "Код",
+    "codeModeNeedsProject": "Режим кода работает с выбранным проектом. Сначала откройте проект.",
+    "thinking": "Думаю",
+    "noCompany": "Нет компании",
+    "stopGenerating": "Остановить генерацию",
+    "showHistory": "Показать историю анализа",
+    "hideHistory": "Скрыть историю анализа",
+    "searchingWeb": "Поиск в интернете: {{query}}",
+    "preparingAnswer": "Подготовка ответа с источниками…",
+    "table": "Таблица (строк: {{count}})",
+    "copyCsv": "Копировать CSV",
+    "downloadCsv": "Скачать Excel / CSV",
+    "copyCode": "Копировать код",
+    "downloadFile": "Скачать файл",
+    "expandFullscreen": "Развернуть на весь экран",
+    "collapse": "Свернуть",
+    "helpful": "Полезный ответ",
+    "notHelpful": "Бесполезный ответ",
+    "regenerate": "Сгенерировать заново",
+    "shareResponse": "Поделиться ответом",
+    "showFullPrompt": "Открыть",
+    "collapsePrompt": "Закрыть",
+    "copyPrompt": "Копировать",
+    "copiedPrompt": "Скопировано",
+    "editPrompt": "Изменить"
+  },
+  "userMenu": {
+    "emailInbox": "Входящая почта",
+    "aiProvider": "Поставщик ИИ",
+    "company": "Компания",
+    "memory": "Память",
+    "settings": "Настройки",
+    "signOut": "Выйти",
+    "signOutIncompleteTitle": "Выход не завершён",
+    "signOutIncompleteDesc": "Не удалось выйти из npati.com."
+  },
+  "settings": {
+    "title": "Настройки",
+    "eyebrow": "Рабочее пространство NPATI",
+    "description": "Управляйте сервисами и настройками, которые NPATI Agent использует локально.",
+    "cards": {
+      "aiProviders": {
+        "title": "Поставщики ИИ",
+        "desc": "Подключайте поставщиков, просматривайте модели и выбирайте маршрутизацию ИИ."
+      },
+      "business": {
+        "title": "Бизнес",
+        "desc": "Анализируйте бизнес-идею, рынок, цели и стратегию."
+      },
+      "company": {
+        "title": "Компания",
+        "desc": "Создайте настраиваемую команду ИИ и структуру агентов."
+      },
+      "capabilities": {
+        "title": "Обзор возможностей",
+        "desc": "Проверяйте 306 канонических возможностей, видимость инструментов и политики рисков."
+      },
+      "activity": {
+        "title": "Активность и журнал запусков",
+        "desc": "Просматривайте текущие трассировки, делегирование шагов и решения инструментов."
+      },
+      "automations": {
+        "title": "Автоматизации",
+        "desc": "Планируйте регулярные задания cron и фоновые задачи агентов."
+      },
+      "email": {
+        "title": "Почта / ИИ-входящие",
+        "desc": "Корпоративная почта, IMAP/SMTP и автоматизация входящих с ИИ."
+      },
+      "goals": {
+        "title": "Цели",
+        "desc": "Определяйте и отслеживайте измеримые результаты бизнеса."
+      },
+      "content": {
+        "title": "Контент",
+        "desc": "Планируйте, создавайте и управляйте контентом для своей аудитории."
+      },
+      "connections": {
+        "title": "Подключённые сервисы",
+        "desc": "Следите за состоянием сервисов, конечными точками и рабочими интеграциями."
+      },
+      "memory": {
+        "title": "Память",
+        "desc": "Просматривайте и редактируйте подтверждённый контекст бизнеса."
+      },
+      "skills": {
+        "title": "Навыки",
+        "desc": "Просматривайте возможности, доступные NPATI Agent."
+      }
+    }
+  },
+  "home": {
+    "eyebrow": "Ваш ИИ-агент для бизнеса",
+    "heading": "Что бы вы хотели сделать?",
+    "subheading": "Выберите отправную точку. Мы используем активный бизнес, цели и сохранённый контекст, чтобы помочь сделать следующий практический шаг.",
+    "signIn": "Войти",
+    "createAccount": "Создать аккаунт",
+    "chatEmptyTitle": "Над чем поработаем?",
+    "chatEmptySubtitle": "Задайте NPATI Agent любой вопрос или обсудите идеи.",
+    "footerPrefix": "NPATI Agent с открытым кодом · Разработчик",
+    "footerLink": "NPATI",
+    "actions": {
+      "sellSomething": {
+        "title": "Продать что-нибудь",
+        "desc": "Превратите продукт или услугу в понятное предложение"
+      },
+      "startBusiness": {
+        "title": "Начать бизнес",
+        "desc": "Превратите идею в первый практический эксперимент"
+      },
+      "growBusiness": {
+        "title": "Развивать мой бизнес",
+        "desc": "Найдите следующую реальную возможность роста"
+      },
+      "improveBusiness": {
+        "title": "Улучшить мой бизнес",
+        "desc": "Оцените, что работает, что нет и что улучшить дальше"
+      },
+      "createContent": {
+        "title": "Создать контент",
+        "desc": "Спланируйте полезный контент для своей аудитории"
+      },
+      "askAgent": {
+        "title": "Спросить NPATI Agent",
+        "desc": "Начните со своего вопроса"
+      }
+    }
+  }
+} satisfies Pick<TranslationSchema, "executionTrace" | "projectSection" | "common" | "nav" | "sidebar" | "dialogs" | "chat" | "userMenu" | "settings" | "home">;

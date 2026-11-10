@@ -1,0 +1,297 @@
+import type { TranslationSchema } from "../../types";
+
+export const core = {
+  "executionTrace": {
+    "modelResponding": "मॉडल जवाब दे रहा है",
+    "waitingForModel": "मॉडल के जवाब की प्रतीक्षा है",
+    "generatingCode": "कोड बनाया जा रहा है",
+    "suspended_by_flag": "रुका हुआ: कोडिंग एजेंट बंद है",
+    "usage": "मॉडल टोकन",
+    "inputTokens": "इनपुट",
+    "outputTokens": "आउटपुट",
+    "totalTokens": "कुल",
+    "sharedTurn": "{{count}} टूल कॉल के बीच साझा",
+    "unavailableTokens": "दर्ज नहीं है",
+    "operationStatus": "परिणाम",
+    "dryRun": "परीक्षण रन: बदलाव लागू नहीं हुए",
+    "runningCommand": "कमांड चल रहा है: {{command}}",
+    "fileUnchanged": "कोई बदलाव नहीं",
+    "fileNotChanged": "फ़ाइल बदली नहीं जा सकी",
+    "modelCallFailed": "मॉडल त्रुटि: जवाब खराब होने के कारण यह कार्रवाई नहीं चली",
+    "fileChangedReadAgain": "फ़ाइल बदली है, दोबारा पढ़ी जा रही है",
+    "agentFinished": "एजेंट ने काम पूरा किया",
+    "operationsDone": "{{count}} कार्रवाइयाँ पूरी हुईं",
+    "testsPassed": "सफल",
+    "working": "सोच रहा है",
+    "creatingProject": "प्रोजेक्ट बनाया जा रहा है",
+    "skipped": "छोड़ा गया",
+    "pending": "लंबित",
+    "preparing": "तैयारी हो रही है",
+    "queued": "कतार में",
+    "running": "चल रहा है",
+    "completed": "पूरा हुआ",
+    "failed": "विफल",
+    "cancelled": "रद्द",
+    "awaiting_approval": "मंज़ूरी की प्रतीक्षा है",
+    "unknown": "दर्ज",
+    "command": "कमांड",
+    "file": "फ़ाइल",
+    "tool": "टूल",
+    "workingDir": "कार्य फ़ोल्डर",
+    "project": "प्रोजेक्ट",
+    "output": "आउटपुट / लॉग",
+    "copy": "कॉपी करें",
+    "copied": "कॉपी हुआ",
+    "copyCommand": "कमांड कॉपी करें",
+    "copyLog": "लॉग कॉपी करें",
+    "fullLog": "पूरा दर्ज आउटपुट देखें",
+    "less": "कम दिखाएँ",
+    "limited": "रनटाइम ने आउटपुट सीमित किया है",
+    "duration": "अवधि",
+    "error": "त्रुटि",
+    "viewRun": "रन देखें",
+    "exitCode": "निकास कोड",
+    "reading": "फ़ाइलें पढ़ी जा रही हैं",
+    "searching": "कोड में खोज हो रही है",
+    "editing": "फ़ाइलें बदली जा रही हैं",
+    "dependencies": "डिपेंडेंसी स्थापित हो रही हैं",
+    "building": "प्रोजेक्ट बिल्ड हो रहा है",
+    "testing": "परीक्षण चल रहा है",
+    "browser": "ब्राउज़र में गुणवत्ता जाँच",
+    "sandbox": "सैंडबॉक्स",
+    "preview": "लाइव पूर्वावलोकन शुरू हो रहा है",
+    "planning": "योजना",
+    "executed": "कमांड चला",
+    "read": "फ़ाइल पढ़ी गई",
+    "updated": "फ़ाइल अपडेट हुई",
+    "created": "बनाया गया",
+    "modified": "बदला गया",
+    "deleted": "हटाया गया"
+  },
+  "projectSection": {
+    "types": {
+      "website": "वेबसाइट",
+      "webApp": "वेब ऐप",
+      "landingPage": "लैंडिंग पेज",
+      "mobileApp": "मोबाइल ऐप"
+    }
+  },
+  "common": {
+    "save": "सहेजें",
+    "cancel": "रद्द करें",
+    "delete": "हटाएँ",
+    "edit": "संपादित करें",
+    "close": "बंद करें",
+    "confirm": "पुष्टि करें",
+    "loading": "लोड हो रहा है…",
+    "error": "त्रुटि",
+    "success": "सफलता",
+    "search": "खोजें",
+    "send": "भेजें",
+    "copy": "कॉपी करें",
+    "copied": "कॉपी हुआ!",
+    "back": "वापस",
+    "settings": "सेटिंग्स",
+    "language": "भाषा",
+    "languageSelect": "भाषा चुनें",
+    "options": "और विकल्प",
+    "ok": "ठीक है",
+    "notification": "सूचना",
+    "deleteConfirmation": "हटाने की पुष्टि",
+    "confirmation": "पुष्टि",
+    "inputRequired": "जानकारी देना ज़रूरी है"
+  },
+  "nav": {
+    "chat": "चैट",
+    "business": "व्यवसाय",
+    "company": "कंपनी",
+    "settings": "सेटिंग्स",
+    "capabilities": "क्षमता निरीक्षक",
+    "activity": "गतिविधि और रन ट्रेस",
+    "automations": "ऑटोमेशन",
+    "goals": "लक्ष्य",
+    "content": "कंटेंट",
+    "connections": "जुड़ी सेवाएँ",
+    "memory": "मेमोरी",
+    "skills": "कौशल",
+    "aiProviders": "AI प्रदाता"
+  },
+  "sidebar": {
+    "newChat": "+ नई चैट",
+    "pinned": "पिन की गई",
+    "recent": "हाल की",
+    "noSavedChats": "अभी कोई चैट सहेजी नहीं गई",
+    "share": "साझा करें",
+    "rename": "नाम बदलें",
+    "pin": "पिन करें",
+    "unpin": "पिन हटाएँ",
+    "archive": "आर्काइव करें",
+    "deleteChat": "हटाएँ",
+    "deleteBusiness": "हटाएँ",
+    "setupDraft": "सेटअप ड्राफ़्ट",
+    "current": "वर्तमान",
+    "useInChat": "चैट में इस्तेमाल करें"
+  },
+  "dialogs": {
+    "deleteChatTitle": "चैट हटाएँ?",
+    "deleteChatMessage": "चैट “{{title}}” हटाएँ? इसे वापस नहीं लिया जा सकेगा।",
+    "deleteBusinessTitle": "व्यवसाय हटाएँ?",
+    "deleteBusinessMessage": "व्यवसाय “{{name}}” और उसकी चैट, लक्ष्य तथा मेमोरी हटाएँ? इसे वापस नहीं लिया जा सकेगा।",
+    "renameChatTitle": "चैट का नाम बदलें",
+    "renameChatMessage": "इस चैट का नया शीर्षक लिखें:",
+    "renameBusinessTitle": "व्यवसाय का नाम बदलें",
+    "renameBusinessMessage": "“{{name}}” का नया नाम लिखें:",
+    "copyLinkTitle": "लिंक कॉपी करें",
+    "copyLinkMessage": "यह {{label}} लिंक कॉपी करें:",
+    "deleteGoalTitle": "लक्ष्य हटाएँ?",
+    "deleteGoalMessage": "क्या आप लक्ष्य “{{title}}” हटाना चाहते हैं?",
+    "deleteMemoryTitle": "मेमोरी का तथ्य हटाएँ?",
+    "deleteMemoryMessage": "मेमोरी आइटम “{{title}}” हटाएँ? इसे वापस नहीं लिया जा सकेगा।",
+    "deleteAutomationTitle": "ऑटोमेशन हटाएँ?",
+    "deleteAutomationMessage": "क्या आप यह ऑटोमेशन हटाना चाहते हैं?",
+    "deleteDocumentTitle": "दस्तावेज़ हटाएँ?",
+    "deleteDocumentMessage": "यह दस्तावेज़ हटाएँ?",
+    "deleteCompanyTitle": "कंपनी हटाएँ?",
+    "deleteCompanyMessage": "कंपनी “{{name}}” और उसके सभी एजेंट हटाएँ?",
+    "deleteAgentTitle": "एजेंट हटाएँ?",
+    "deleteAgentMessage": "एजेंट “{{name}}” हटाएँ?",
+    "restartSetupTitle": "व्यवसाय सेटअप दोबारा शुरू करें?",
+    "restartSetupMessage": "व्यवसाय सेटअप फिर शुरू करें? मौजूदा ड्राफ़्ट और उसका चैट इतिहास हट जाएगा। इसे वापस नहीं लिया जा सकेगा।"
+  },
+  "chat": {
+    "emptyTitle": "हम किस पर काम करें?",
+    "emptySubtitle": "NPATI Agent से कुछ भी पूछें या नए विचार सोचें।",
+    "placeholder": "Npati से पूछें…",
+    "businessEmptySubtitle": "मैं {{name}} का संदर्भ इस्तेमाल करूँगा और अनुपलब्ध तथ्य नहीं गढ़ूँगा।",
+    "businessPlaceholder": "अपने व्यवसाय, लक्ष्यों, दर्शकों या अगले कदम के बारे में पूछें…",
+    "workModeLabel": "कार्य मोड",
+    "workModeChat": "चैट",
+    "workModeCode": "कोड",
+    "codeModeNeedsProject": "कोड मोड चुने गए प्रोजेक्ट पर काम करता है। पहले कोई प्रोजेक्ट खोलें।",
+    "thinking": "सोच रहा है",
+    "noCompany": "कोई कंपनी नहीं",
+    "stopGenerating": "बनाना रोकें",
+    "showHistory": "विश्लेषण इतिहास दिखाएँ",
+    "hideHistory": "विश्लेषण इतिहास छिपाएँ",
+    "searchingWeb": "वेब पर खोज हो रही है: {{query}}",
+    "preparingAnswer": "स्रोतों सहित जवाब तैयार हो रहा है…",
+    "table": "तालिका ({{count}} पंक्तियाँ)",
+    "copyCsv": "CSV कॉपी करें",
+    "downloadCsv": "Excel / CSV डाउनलोड करें",
+    "copyCode": "कोड कॉपी करें",
+    "downloadFile": "फ़ाइल डाउनलोड करें",
+    "expandFullscreen": "पूरी स्क्रीन में खोलें",
+    "collapse": "समेटें",
+    "helpful": "उपयोगी जवाब",
+    "notHelpful": "जवाब उपयोगी नहीं है",
+    "regenerate": "फिर से बनाएँ",
+    "shareResponse": "जवाब साझा करें",
+    "showFullPrompt": "खोलें",
+    "collapsePrompt": "बंद करें",
+    "copyPrompt": "कॉपी करें",
+    "copiedPrompt": "कॉपी हुआ",
+    "editPrompt": "संपादित करें"
+  },
+  "userMenu": {
+    "emailInbox": "ईमेल इनबॉक्स",
+    "aiProvider": "AI प्रदाता",
+    "company": "कंपनी",
+    "memory": "मेमोरी",
+    "settings": "सेटिंग्स",
+    "signOut": "साइन आउट करें",
+    "signOutIncompleteTitle": "साइन आउट पूरा नहीं हुआ",
+    "signOutIncompleteDesc": "npati.com से साइन आउट नहीं हो सका।"
+  },
+  "settings": {
+    "title": "सेटिंग्स",
+    "eyebrow": "NPATI कार्यक्षेत्र",
+    "description": "NPATI Agent की स्थानीय सेवाएँ और प्राथमिकताएँ प्रबंधित करें।",
+    "cards": {
+      "aiProviders": {
+        "title": "AI प्रदाता",
+        "desc": "प्रदाता जोड़ें, मॉडल देखें और AI रूटिंग चुनें।"
+      },
+      "business": {
+        "title": "व्यवसाय",
+        "desc": "व्यवसाय के विचार, बाज़ार, लक्ष्य और रणनीति का विश्लेषण करें।"
+      },
+      "company": {
+        "title": "कंपनी",
+        "desc": "अपनी ज़रूरतों के अनुसार AI टीम बनाएँ और एजेंट व्यवस्थित करें।"
+      },
+      "capabilities": {
+        "title": "क्षमता निरीक्षक",
+        "desc": "306 मानक क्षमताओं, टूल दृश्यता और जोखिम नीतियों की जाँच करें।"
+      },
+      "activity": {
+        "title": "गतिविधि और रन ट्रेस",
+        "desc": "लाइव रन ट्रेस, सौंपे गए कदम और टूल के फ़ैसले देखें।"
+      },
+      "automations": {
+        "title": "ऑटोमेशन",
+        "desc": "बार-बार चलने वाले cron कार्य और एजेंट के बैकग्राउंड कार्य शेड्यूल करें।"
+      },
+      "email": {
+        "title": "ईमेल / AI इनबॉक्स",
+        "desc": "कॉर्पोरेट ईमेल पते, IMAP/SMTP और AI इनबॉक्स ऑटोमेशन।"
+      },
+      "goals": {
+        "title": "लक्ष्य",
+        "desc": "मापने योग्य व्यावसायिक परिणाम तय करें और उनकी प्रगति देखें।"
+      },
+      "content": {
+        "title": "कंटेंट",
+        "desc": "अपने दर्शकों के लिए कंटेंट की योजना बनाएँ, बनाएँ और प्रबंधित करें।"
+      },
+      "connections": {
+        "title": "जुड़ी सेवाएँ",
+        "desc": "सेवाओं की स्थिति, एंडपॉइंट और रनटाइम इंटीग्रेशन देखें।"
+      },
+      "memory": {
+        "title": "मेमोरी",
+        "desc": "पुष्ट व्यावसायिक संदर्भ देखें और संपादित करें।"
+      },
+      "skills": {
+        "title": "कौशल",
+        "desc": "NPATI Agent की उपलब्ध क्षमताएँ देखें।"
+      }
+    }
+  },
+  "home": {
+    "eyebrow": "आपका AI बिज़नेस एजेंट",
+    "heading": "आप क्या करना चाहेंगे?",
+    "subheading": "शुरुआत चुनें। आपके सक्रिय व्यवसाय, लक्ष्यों और सहेजे गए संदर्भ की मदद से हम अगला व्यावहारिक कदम तय करेंगे।",
+    "signIn": "साइन इन करें",
+    "createAccount": "खाता बनाएँ",
+    "chatEmptyTitle": "हम किस पर काम करें?",
+    "chatEmptySubtitle": "NPATI Agent से कुछ भी पूछें या नए विचार सोचें।",
+    "footerPrefix": "ओपन सोर्स NPATI Agent · निर्माता",
+    "footerLink": "NPATI",
+    "actions": {
+      "sellSomething": {
+        "title": "कुछ बेचें",
+        "desc": "उत्पाद या सेवा को स्पष्ट प्रस्ताव में बदलें"
+      },
+      "startBusiness": {
+        "title": "व्यवसाय शुरू करें",
+        "desc": "विचार को पहले व्यावहारिक परीक्षण में बदलें"
+      },
+      "growBusiness": {
+        "title": "अपना व्यवसाय बढ़ाएँ",
+        "desc": "अगला व्यावहारिक विकास अवसर खोजें"
+      },
+      "improveBusiness": {
+        "title": "अपना व्यवसाय सुधारें",
+        "desc": "देखें कि क्या सफल है, क्या नहीं और आगे क्या सुधारना है"
+      },
+      "createContent": {
+        "title": "कंटेंट बनाएँ",
+        "desc": "अपने दर्शकों के लिए उपयोगी कंटेंट की योजना बनाएँ"
+      },
+      "askAgent": {
+        "title": "NPATI Agent से पूछें",
+        "desc": "अपने सवाल से शुरुआत करें"
+      }
+    }
+  }
+} satisfies Pick<TranslationSchema, "executionTrace" | "projectSection" | "common" | "nav" | "sidebar" | "dialogs" | "chat" | "userMenu" | "settings" | "home">;

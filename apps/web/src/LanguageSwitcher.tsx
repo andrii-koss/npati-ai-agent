@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation, SupportedLanguage } from "./i18n";
 
 export interface LanguageSwitcherProps {
@@ -7,13 +8,46 @@ export interface LanguageSwitcherProps {
 }
 
 export function LanguageSwitcher({ className = "", variant = "compact" }: LanguageSwitcherProps) {
-  const { language, languageInfo, supportedLanguages, changeLanguage } = useTranslation();
+  const { language, languageInfo, supportedLanguages, changeLanguage, t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({ visibility: "hidden" });
+
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    function positionMenu() {
+      const anchor = dropdownRef.current?.getBoundingClientRect();
+      const menu = menuRef.current;
+      if (!anchor || !menu) return;
+      const margin = 16;
+      const gap = 8;
+      const width = menu.getBoundingClientRect().width;
+      const preferredLeft = language === "ar" ? anchor.right - width : anchor.left;
+      const left = Math.max(margin, Math.min(preferredLeft, window.innerWidth - width - margin));
+      const above = Math.max(0, anchor.top - gap - margin);
+      const below = Math.max(0, window.innerHeight - anchor.bottom - gap - margin);
+      const openAbove = above >= menu.scrollHeight || above >= below;
+      setMenuStyle({
+        left,
+        top: openAbove ? "auto" : anchor.bottom + gap,
+        bottom: openAbove ? window.innerHeight - anchor.top + gap : "auto",
+        maxHeight: openAbove ? above : below,
+        visibility: "visible",
+      });
+    }
+    positionMenu();
+    window.addEventListener("resize", positionMenu);
+    window.addEventListener("scroll", positionMenu, true);
+    return () => {
+      window.removeEventListener("resize", positionMenu);
+      window.removeEventListener("scroll", positionMenu, true);
+    };
+  }, [isOpen, language]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node) && !menuRef.current?.contains(e.target as Node)) {
         setIsOpen(false);
       }
     }
@@ -64,7 +98,7 @@ export function LanguageSwitcher({ className = "", variant = "compact" }: Langua
         type="button"
         className={`npati-language-trigger ${isOpen ? "open" : ""}`}
         onClick={() => setIsOpen(!isOpen)}
-        aria-label="Change language"
+        aria-label={t("common.languageSelect")}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
       >
@@ -93,9 +127,8 @@ export function LanguageSwitcher({ className = "", variant = "compact" }: Langua
         </svg>
       </button>
 
-      {isOpen && (
-        <div className="npati-language-dropdown" role="listbox">
-          <div className="npati-language-dropdown-header">Select Language</div>
+      {isOpen && createPortal(
+        <div className="npati-language-dropdown" role="listbox" ref={menuRef} style={menuStyle} aria-label={t("common.languageSelect")}>
           {supportedLanguages.map((item) => {
             const isCurrent = item.code === language;
             return (
@@ -119,7 +152,8 @@ export function LanguageSwitcher({ className = "", variant = "compact" }: Langua
               </button>
             );
           })}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

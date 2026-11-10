@@ -1,0 +1,297 @@
+import type { TranslationSchema } from "../../types";
+
+export const core = {
+  "executionTrace": {
+    "modelResponding": "模型正在回复",
+    "waitingForModel": "正在等待模型回复",
+    "generatingCode": "正在生成代码",
+    "suspended_by_flag": "已暂停：编程智能体已禁用",
+    "usage": "模型令牌",
+    "inputTokens": "输入",
+    "outputTokens": "输出",
+    "totalTokens": "总计",
+    "sharedTurn": "由 {{count}} 次工具调用共享",
+    "unavailableTokens": "未记录",
+    "operationStatus": "结果",
+    "dryRun": "试运行：未应用更改",
+    "runningCommand": "正在执行命令：{{command}}",
+    "fileUnchanged": "无更改",
+    "fileNotChanged": "无法修改文件",
+    "modelCallFailed": "模型出错：回复已损坏，因此未执行此操作",
+    "fileChangedReadAgain": "文件已更改，正在重新读取",
+    "agentFinished": "智能体已完成工作",
+    "operationsDone": "已执行 {{count}} 项操作",
+    "testsPassed": "已通过",
+    "working": "正在思考",
+    "creatingProject": "正在创建项目",
+    "skipped": "已跳过",
+    "pending": "等待中",
+    "preparing": "正在准备",
+    "queued": "已排队",
+    "running": "运行中",
+    "completed": "已完成",
+    "failed": "失败",
+    "cancelled": "已取消",
+    "awaiting_approval": "等待批准",
+    "unknown": "已记录",
+    "command": "命令",
+    "file": "文件",
+    "tool": "工具",
+    "workingDir": "工作目录",
+    "project": "项目",
+    "output": "输出 / 日志",
+    "copy": "复制",
+    "copied": "已复制",
+    "copyCommand": "复制命令",
+    "copyLog": "复制日志",
+    "fullLog": "查看完整记录输出",
+    "less": "收起",
+    "limited": "输出受运行环境限制",
+    "duration": "耗时",
+    "error": "错误",
+    "viewRun": "查看运行",
+    "exitCode": "退出码",
+    "reading": "正在读取文件",
+    "searching": "正在搜索代码",
+    "editing": "正在编辑文件",
+    "dependencies": "正在安装依赖",
+    "building": "正在构建项目",
+    "testing": "正在测试",
+    "browser": "浏览器质量检查",
+    "sandbox": "沙箱",
+    "preview": "正在启动实时预览",
+    "planning": "正在规划",
+    "executed": "已执行命令",
+    "read": "已读取文件",
+    "updated": "已更新文件",
+    "created": "已创建",
+    "modified": "已修改",
+    "deleted": "已删除"
+  },
+  "projectSection": {
+    "types": {
+      "website": "网站",
+      "webApp": "网页应用",
+      "landingPage": "落地页",
+      "mobileApp": "移动应用"
+    }
+  },
+  "common": {
+    "save": "保存",
+    "cancel": "取消",
+    "delete": "删除",
+    "edit": "编辑",
+    "close": "关闭",
+    "confirm": "确认",
+    "loading": "正在加载…",
+    "error": "错误",
+    "success": "成功",
+    "search": "搜索",
+    "send": "发送",
+    "copy": "复制",
+    "copied": "已复制！",
+    "back": "返回",
+    "settings": "设置",
+    "language": "语言",
+    "languageSelect": "选择语言",
+    "options": "更多选项",
+    "ok": "确定",
+    "notification": "通知",
+    "deleteConfirmation": "确认删除",
+    "confirmation": "确认",
+    "inputRequired": "需要输入"
+  },
+  "nav": {
+    "chat": "聊天",
+    "business": "业务",
+    "company": "公司",
+    "settings": "设置",
+    "capabilities": "能力检查器",
+    "activity": "活动与运行跟踪",
+    "automations": "自动化",
+    "goals": "目标",
+    "content": "内容",
+    "connections": "已连接的服务",
+    "memory": "记忆",
+    "skills": "技能",
+    "aiProviders": "AI 提供商"
+  },
+  "sidebar": {
+    "newChat": "+ 新建聊天",
+    "pinned": "已置顶",
+    "recent": "最近",
+    "noSavedChats": "尚无已保存的聊天",
+    "share": "分享",
+    "rename": "重命名",
+    "pin": "置顶",
+    "unpin": "取消置顶",
+    "archive": "归档",
+    "deleteChat": "删除",
+    "deleteBusiness": "删除",
+    "setupDraft": "设置草稿",
+    "current": "当前",
+    "useInChat": "在聊天中使用"
+  },
+  "dialogs": {
+    "deleteChatTitle": "删除聊天？",
+    "deleteChatMessage": "删除聊天“{{title}}”？此操作无法撤销。",
+    "deleteBusinessTitle": "删除业务？",
+    "deleteBusinessMessage": "删除业务“{{name}}”及其聊天、目标和记忆？此操作无法撤销。",
+    "renameChatTitle": "重命名聊天",
+    "renameChatMessage": "输入此聊天的新标题：",
+    "renameBusinessTitle": "重命名业务",
+    "renameBusinessMessage": "输入“{{name}}”的新名称：",
+    "copyLinkTitle": "复制链接",
+    "copyLinkMessage": "复制此 {{label}} 链接：",
+    "deleteGoalTitle": "删除目标？",
+    "deleteGoalMessage": "确定要删除目标“{{title}}”吗？",
+    "deleteMemoryTitle": "删除记忆事实？",
+    "deleteMemoryMessage": "删除记忆条目“{{title}}”？此操作无法撤销。",
+    "deleteAutomationTitle": "删除自动化？",
+    "deleteAutomationMessage": "确定要删除此自动化吗？",
+    "deleteDocumentTitle": "删除文档？",
+    "deleteDocumentMessage": "删除此文档？",
+    "deleteCompanyTitle": "删除公司？",
+    "deleteCompanyMessage": "删除公司“{{name}}”及其所有智能体？",
+    "deleteAgentTitle": "删除智能体？",
+    "deleteAgentMessage": "删除智能体“{{name}}”？",
+    "restartSetupTitle": "重新设置业务？",
+    "restartSetupMessage": "重新开始设置业务？当前草稿及其聊天记录将被删除。此操作无法撤销。"
+  },
+  "chat": {
+    "emptyTitle": "我们要做些什么？",
+    "emptySubtitle": "向 NPATI Agent 提问，或一起构思创意。",
+    "placeholder": "询问 Npati…",
+    "businessEmptySubtitle": "我会使用 {{name}} 的上下文，不会编造缺失的事实。",
+    "businessPlaceholder": "询问您的业务、目标、受众或下一步计划…",
+    "workModeLabel": "工作模式",
+    "workModeChat": "聊天",
+    "workModeCode": "代码",
+    "codeModeNeedsProject": "代码模式适用于选定的项目。请先打开一个项目。",
+    "thinking": "正在思考",
+    "noCompany": "无公司",
+    "stopGenerating": "停止生成",
+    "showHistory": "显示分析历史",
+    "hideHistory": "隐藏分析历史",
+    "searchingWeb": "正在搜索网页：{{query}}",
+    "preparingAnswer": "正在准备附有来源的回答…",
+    "table": "表格（{{count}} 行）",
+    "copyCsv": "复制 CSV",
+    "downloadCsv": "下载 Excel / CSV",
+    "copyCode": "复制代码",
+    "downloadFile": "下载文件",
+    "expandFullscreen": "全屏展开",
+    "collapse": "折叠",
+    "helpful": "有帮助的回答",
+    "notHelpful": "没有帮助的回答",
+    "regenerate": "重新生成",
+    "shareResponse": "分享回答",
+    "showFullPrompt": "打开",
+    "collapsePrompt": "关闭",
+    "copyPrompt": "复制",
+    "copiedPrompt": "已复制",
+    "editPrompt": "编辑"
+  },
+  "userMenu": {
+    "emailInbox": "电子邮件收件箱",
+    "aiProvider": "AI 提供商",
+    "company": "公司",
+    "memory": "记忆",
+    "settings": "设置",
+    "signOut": "退出登录",
+    "signOutIncompleteTitle": "退出未完成",
+    "signOutIncompleteDesc": "无法退出 npati.com。"
+  },
+  "settings": {
+    "title": "设置",
+    "eyebrow": "NPATI 工作区",
+    "description": "管理 NPATI Agent 在本地使用的服务和偏好设置。",
+    "cards": {
+      "aiProviders": {
+        "title": "AI 提供商",
+        "desc": "连接提供商、浏览模型并选择 AI 路由。"
+      },
+      "business": {
+        "title": "业务",
+        "desc": "分析业务创意、市场、目标与策略。"
+      },
+      "company": {
+        "title": "公司",
+        "desc": "构建可配置的 AI 团队和智能体组织。"
+      },
+      "capabilities": {
+        "title": "能力检查器",
+        "desc": "审查 306 项标准能力、工具可见性和风险策略。"
+      },
+      "activity": {
+        "title": "活动与运行跟踪",
+        "desc": "检查实时执行跟踪、步骤委派和工具决策。"
+      },
+      "automations": {
+        "title": "自动化",
+        "desc": "安排定期 cron 作业和智能体后台任务。"
+      },
+      "email": {
+        "title": "电子邮件 / AI 收件箱",
+        "desc": "企业邮箱、IMAP/SMTP 和 AI 收件箱自动化。"
+      },
+      "goals": {
+        "title": "目标",
+        "desc": "定义并跟踪可衡量的业务成果。"
+      },
+      "content": {
+        "title": "内容",
+        "desc": "规划、生成和管理面向受众的内容。"
+      },
+      "connections": {
+        "title": "已连接的服务",
+        "desc": "监控服务健康状态、端点和运行时集成。"
+      },
+      "memory": {
+        "title": "记忆",
+        "desc": "查看和编辑已确认的业务上下文。"
+      },
+      "skills": {
+        "title": "技能",
+        "desc": "浏览 NPATI Agent 可用的能力。"
+      }
+    }
+  },
+  "home": {
+    "eyebrow": "您的 AI 业务智能体",
+    "heading": "您想做什么？",
+    "subheading": "选择一个起点。我们将使用您的当前业务、目标和已保存的上下文，帮助您迈出下一步。",
+    "signIn": "登录",
+    "createAccount": "创建账户",
+    "chatEmptyTitle": "我们要做些什么？",
+    "chatEmptySubtitle": "向 NPATI Agent 提问，或一起构思创意。",
+    "footerPrefix": "开源 NPATI Agent · 开发者",
+    "footerLink": "NPATI",
+    "actions": {
+      "sellSomething": {
+        "title": "销售商品或服务",
+        "desc": "将产品或服务转化为清晰的销售方案"
+      },
+      "startBusiness": {
+        "title": "创办业务",
+        "desc": "将创意转化为首次实际测试"
+      },
+      "growBusiness": {
+        "title": "拓展我的业务",
+        "desc": "寻找下一个切实可行的增长机会"
+      },
+      "improveBusiness": {
+        "title": "改善我的业务",
+        "desc": "检查哪些有效、哪些无效以及接下来要改进什么"
+      },
+      "createContent": {
+        "title": "创建内容",
+        "desc": "为受众规划有用的内容"
+      },
+      "askAgent": {
+        "title": "询问 NPATI Agent",
+        "desc": "从您自己的问题开始"
+      }
+    }
+  }
+} satisfies Pick<TranslationSchema, "executionTrace" | "projectSection" | "common" | "nav" | "sidebar" | "dialogs" | "chat" | "userMenu" | "settings" | "home">;

@@ -89,19 +89,22 @@
 }
 
 .npati-language-dropdown {
-  position: absolute;
+  position: fixed;
   bottom: calc(100% + 8px);
-  left: 0;
+  inset-inline-start: 0;
   z-index: 100000;
-  width: 190px;
+  width: min(680px, calc(100vw - 32px));
+  box-sizing: border-box;
+  max-height: calc(100dvh - 96px);
+  overflow-y: auto;
   background: #ffffff;
   border: 1px solid rgba(0, 0, 0, 0.09);
   border-radius: 14px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.14), 0 2px 6px rgba(0, 0, 0, 0.04);
   padding: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
   animation: npatiLangFadeIn 0.15s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -117,17 +120,9 @@
   }
 }
 
-.npati-language-dropdown-header {
-  padding: 6px 10px 4px;
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: #a1a1aa;
-}
-
 .npati-language-item {
   width: 100%;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -136,7 +131,7 @@
   border: 0;
   border-radius: 8px;
   cursor: pointer;
-  text-align: left;
+  text-align: start;
   transition: all 0.12s ease;
 }
 
@@ -157,6 +152,7 @@
 .npati-language-names {
   flex: 1;
   min-width: 0;
+  overflow-wrap: anywhere;
   display: flex;
   flex-direction: column;
 }

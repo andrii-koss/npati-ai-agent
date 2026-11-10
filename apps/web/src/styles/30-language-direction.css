@@ -1,0 +1,9 @@
+/* Code and addresses keep their reading order inside the Arabic interface. */
+html[dir="rtl"] pre,
+html[dir="rtl"] code,
+html[dir="rtl"] input[type="email"],
+html[dir="rtl"] input[type="url"] {
+  direction: ltr;
+  text-align: left;
+  unicode-bidi: isolate;
+}

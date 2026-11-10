@@ -1,24 +1,8 @@
 import { ptExecutionTrace, additionalExecutionTrace } from "./locales/request-execution";
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
-import type { SupportedLanguage, TranslationSchema, LanguageInfo } from "./types";
+import type { SupportedLanguage, LanguageInfo } from "./types";
 import { SUPPORTED_LANGUAGES } from "./types";
-import { en } from "./locales/en";
-import { uk } from "./locales/uk";
-import { de } from "./locales/de";
-import { fr } from "./locales/fr";
-import { es } from "./locales/es";
-import { it } from "./locales/it";
-import { pl } from "./locales/pl";
-
-const dictionaries: Record<SupportedLanguage, TranslationSchema> = {
-  en,
-  uk,
-  de,
-  fr,
-  es,
-  it,
-  pl,
-};
+import { dictionaries } from "./dictionaries";
 
 const STORAGE_KEY = "npati_language";
 
@@ -45,7 +29,7 @@ export const I18nContextRef = I18nContext;
 function getInitialLanguage(): SupportedLanguage {
   try {
     const saved = localStorage.getItem(STORAGE_KEY) as SupportedLanguage | null;
-    if (saved && dictionaries[saved]) {
+    if (saved && Object.hasOwn(dictionaries, saved)) {
       return saved;
     }
   } catch {
@@ -70,8 +54,13 @@ function getNestedValue(obj: any, path: string): string | undefined {
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [language, setLanguage] = useState<SupportedLanguage>(getInitialLanguage);
 
+  useEffect(() => {
+    document.documentElement.lang = language;
+    document.documentElement.dir = language === "ar" ? "rtl" : "ltr";
+  }, [language]);
+
   const changeLanguage = useCallback((newLang: SupportedLanguage) => {
-    if (dictionaries[newLang]) {
+    if (Object.hasOwn(dictionaries, newLang)) {
       setLanguage(newLang);
       try {
         localStorage.setItem(STORAGE_KEY, newLang);
@@ -137,5 +126,6 @@ export type { SupportedLanguage };
 
 /** Reuse the same dictionaries for request-language activity without changing UI preferences. */
 export function executionTraceText(language: string, key: string) {
-  return (language === "pt" ? ptExecutionTrace[key] : additionalExecutionTrace[language]?.[key] ?? dictionaries[language as SupportedLanguage]?.executionTrace[key]) ?? en.executionTrace[key] ?? key;
+  const requestText = language === "pt" ? ptExecutionTrace[key] : additionalExecutionTrace[language]?.[key];
+  return requestText ?? dictionaries[language as SupportedLanguage]?.executionTrace[key] ?? dictionaries.en.executionTrace[key] ?? key;
 }

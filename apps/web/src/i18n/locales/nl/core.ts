@@ -1,0 +1,297 @@
+import type { TranslationSchema } from "../../types";
+
+export const core = {
+  "executionTrace": {
+    "modelResponding": "Het model antwoordt",
+    "waitingForModel": "Wachten op het antwoord van het model",
+    "generatingCode": "Code genereren",
+    "suspended_by_flag": "Gepauzeerd: programmeeragent uitgeschakeld",
+    "usage": "Modeltokens",
+    "inputTokens": "Invoer",
+    "outputTokens": "Uitvoer",
+    "totalTokens": "Totaal",
+    "sharedTurn": "Gedeeld door {{count}} toolaanroepen",
+    "unavailableTokens": "Niet vastgelegd",
+    "operationStatus": "Resultaat",
+    "dryRun": "Proefuitvoering: wijzigingen niet toegepast",
+    "runningCommand": "Opdracht uitvoeren: {{command}}",
+    "fileUnchanged": "Geen wijzigingen",
+    "fileNotChanged": "Het bestand kon niet worden gewijzigd",
+    "modelCallFailed": "Modelfout: het antwoord was beschadigd, daarom is deze actie niet uitgevoerd",
+    "fileChangedReadAgain": "Het bestand is gewijzigd en wordt opnieuw gelezen",
+    "agentFinished": "De agent heeft het werk voltooid",
+    "operationsDone": "{{count}} bewerkingen uitgevoerd",
+    "testsPassed": "Geslaagd",
+    "working": "Nadenken",
+    "creatingProject": "Project aanmaken",
+    "skipped": "Overgeslagen",
+    "pending": "In behandeling",
+    "preparing": "Voorbereiden",
+    "queued": "In de wachtrij",
+    "running": "Bezig",
+    "completed": "Voltooid",
+    "failed": "Mislukt",
+    "cancelled": "Geannuleerd",
+    "awaiting_approval": "Wachten op goedkeuring",
+    "unknown": "Vastgelegd",
+    "command": "Opdracht",
+    "file": "Bestand",
+    "tool": "Hulpmiddel",
+    "workingDir": "Werkmap",
+    "project": "Project",
+    "output": "Uitvoer / Logboek",
+    "copy": "Kopiëren",
+    "copied": "Gekopieerd",
+    "copyCommand": "Opdracht kopiëren",
+    "copyLog": "Logboek kopiëren",
+    "fullLog": "Volledige vastgelegde uitvoer bekijken",
+    "less": "Minder tonen",
+    "limited": "Uitvoer beperkt door de uitvoeromgeving",
+    "duration": "Duur",
+    "error": "Fout",
+    "viewRun": "Uitvoering bekijken",
+    "exitCode": "Afsluitcode",
+    "reading": "Bestanden lezen",
+    "searching": "Code doorzoeken",
+    "editing": "Bestanden bewerken",
+    "dependencies": "Afhankelijkheden installeren",
+    "building": "Project bouwen",
+    "testing": "Testen",
+    "browser": "Browsercontrole",
+    "sandbox": "Afgeschermde omgeving",
+    "preview": "Livevoorbeeld starten",
+    "planning": "Plannen",
+    "executed": "Opdracht uitgevoerd",
+    "read": "Bestand gelezen",
+    "updated": "Bestand bijgewerkt",
+    "created": "Aangemaakt",
+    "modified": "Gewijzigd",
+    "deleted": "Verwijderd"
+  },
+  "projectSection": {
+    "types": {
+      "website": "Website",
+      "webApp": "Webapp",
+      "landingPage": "Landingspagina",
+      "mobileApp": "Mobiele app"
+    }
+  },
+  "common": {
+    "save": "Opslaan",
+    "cancel": "Annuleren",
+    "delete": "Verwijderen",
+    "edit": "Bewerken",
+    "close": "Sluiten",
+    "confirm": "Bevestigen",
+    "loading": "Laden…",
+    "error": "Fout",
+    "success": "Gelukt",
+    "search": "Zoeken",
+    "send": "Verzenden",
+    "copy": "Kopiëren",
+    "copied": "Gekopieerd!",
+    "back": "Terug",
+    "settings": "Instellingen",
+    "language": "Taal",
+    "languageSelect": "Taal selecteren",
+    "options": "Meer opties",
+    "ok": "OK",
+    "notification": "Melding",
+    "deleteConfirmation": "Verwijdering bevestigen",
+    "confirmation": "Bevestiging",
+    "inputRequired": "Invoer vereist"
+  },
+  "nav": {
+    "chat": "Chat",
+    "business": "Onderneming",
+    "company": "Bedrijf",
+    "settings": "Instellingen",
+    "capabilities": "Functie-inspecteur",
+    "activity": "Activiteit en uitvoeringsspoor",
+    "automations": "Automatiseringen",
+    "goals": "Doelen",
+    "content": "Inhoud",
+    "connections": "Verbonden diensten",
+    "memory": "Geheugen",
+    "skills": "Vaardigheden",
+    "aiProviders": "AI-aanbieders"
+  },
+  "sidebar": {
+    "newChat": "+ Nieuwe chat",
+    "pinned": "Vastgezet",
+    "recent": "Recent",
+    "noSavedChats": "Nog geen opgeslagen chats",
+    "share": "Delen",
+    "rename": "Naam wijzigen",
+    "pin": "Vastzetten",
+    "unpin": "Losmaken",
+    "archive": "Archiveren",
+    "deleteChat": "Verwijderen",
+    "deleteBusiness": "Verwijderen",
+    "setupDraft": "Conceptconfiguratie",
+    "current": "Huidig",
+    "useInChat": "In chat gebruiken"
+  },
+  "dialogs": {
+    "deleteChatTitle": "Chat verwijderen?",
+    "deleteChatMessage": "Chat “{{title}}” verwijderen? Dit kan niet ongedaan worden gemaakt.",
+    "deleteBusinessTitle": "Onderneming verwijderen?",
+    "deleteBusinessMessage": "Onderneming “{{name}}” en de bijbehorende chats, doelen en het geheugen verwijderen? Dit kan niet ongedaan worden gemaakt.",
+    "renameChatTitle": "Chatnaam wijzigen",
+    "renameChatMessage": "Voer een nieuwe titel voor deze chat in:",
+    "renameBusinessTitle": "Naam van onderneming wijzigen",
+    "renameBusinessMessage": "Voer een nieuwe naam voor “{{name}}” in:",
+    "copyLinkTitle": "Link kopiëren",
+    "copyLinkMessage": "Kopieer deze link voor {{label}}:",
+    "deleteGoalTitle": "Doel verwijderen?",
+    "deleteGoalMessage": "Weet u zeker dat u het doel “{{title}}” wilt verwijderen?",
+    "deleteMemoryTitle": "Geheugenfeit verwijderen?",
+    "deleteMemoryMessage": "Geheugenitem “{{title}}” verwijderen? Dit kan niet ongedaan worden gemaakt.",
+    "deleteAutomationTitle": "Automatisering verwijderen?",
+    "deleteAutomationMessage": "Weet u zeker dat u deze automatisering wilt verwijderen?",
+    "deleteDocumentTitle": "Document verwijderen?",
+    "deleteDocumentMessage": "Dit document verwijderen?",
+    "deleteCompanyTitle": "Bedrijf verwijderen?",
+    "deleteCompanyMessage": "Bedrijf “{{name}}” en alle bijbehorende agents verwijderen?",
+    "deleteAgentTitle": "Agent verwijderen?",
+    "deleteAgentMessage": "Agent “{{name}}” verwijderen?",
+    "restartSetupTitle": "Bedrijfsconfiguratie opnieuw starten?",
+    "restartSetupMessage": "Opnieuw beginnen met de bedrijfsconfiguratie? Het huidige concept en de bijbehorende chatgeschiedenis worden verwijderd. Dit kan niet ongedaan worden gemaakt."
+  },
+  "chat": {
+    "emptyTitle": "Waar zullen we aan werken?",
+    "emptySubtitle": "Vraag NPATI Agent iets of verken samen ideeën.",
+    "placeholder": "Vraag het aan Npati…",
+    "businessEmptySubtitle": "Ik gebruik de context van {{name}} en verzin geen ontbrekende feiten.",
+    "businessPlaceholder": "Vraag naar uw onderneming, doelen, doelgroep of volgende stap…",
+    "workModeLabel": "Werkmodus",
+    "workModeChat": "Chat",
+    "workModeCode": "Code",
+    "codeModeNeedsProject": "De codemodus werkt met het geselecteerde project. Open eerst een project.",
+    "thinking": "Nadenken",
+    "noCompany": "Geen bedrijf",
+    "stopGenerating": "Genereren stoppen",
+    "showHistory": "Analysegeschiedenis tonen",
+    "hideHistory": "Analysegeschiedenis verbergen",
+    "searchingWeb": "Op internet zoeken: {{query}}",
+    "preparingAnswer": "Antwoord met bronnen voorbereiden…",
+    "table": "Tabel ({{count}} rijen)",
+    "copyCsv": "CSV kopiëren",
+    "downloadCsv": "Excel / CSV downloaden",
+    "copyCode": "Code kopiëren",
+    "downloadFile": "Bestand downloaden",
+    "expandFullscreen": "Uitvouwen naar volledig scherm",
+    "collapse": "Inklappen",
+    "helpful": "Nuttig antwoord",
+    "notHelpful": "Niet nuttig antwoord",
+    "regenerate": "Opnieuw genereren",
+    "shareResponse": "Antwoord delen",
+    "showFullPrompt": "Openen",
+    "collapsePrompt": "Sluiten",
+    "copyPrompt": "Kopiëren",
+    "copiedPrompt": "Gekopieerd",
+    "editPrompt": "Bewerken"
+  },
+  "userMenu": {
+    "emailInbox": "E-mailinbox",
+    "aiProvider": "AI-aanbieder",
+    "company": "Bedrijf",
+    "memory": "Geheugen",
+    "settings": "Instellingen",
+    "signOut": "Afmelden",
+    "signOutIncompleteTitle": "Afmelden niet voltooid",
+    "signOutIncompleteDesc": "Afmelden bij npati.com is niet gelukt."
+  },
+  "settings": {
+    "title": "Instellingen",
+    "eyebrow": "NPATI-werkruimte",
+    "description": "Beheer de diensten en voorkeuren die NPATI Agent lokaal gebruikt.",
+    "cards": {
+      "aiProviders": {
+        "title": "AI-aanbieders",
+        "desc": "Verbind aanbieders, bekijk modellen en kies AI-routering."
+      },
+      "business": {
+        "title": "Onderneming",
+        "desc": "Analyseer een bedrijfsidee, markt, doelen en strategie."
+      },
+      "company": {
+        "title": "Bedrijf",
+        "desc": "Bouw uw instelbare AI-team en agentorganisatie."
+      },
+      "capabilities": {
+        "title": "Functie-inspecteur",
+        "desc": "Controleer 306 canonieke functies, de zichtbaarheid van hulpmiddelen en het risicobeleid."
+      },
+      "activity": {
+        "title": "Activiteit en uitvoeringsspoor",
+        "desc": "Inspecteer live-uitvoeringssporen, stapdelegaties en beslissingen over hulpmiddelen."
+      },
+      "automations": {
+        "title": "Automatiseringen",
+        "desc": "Plan terugkerende crontaken en agenttaken op de achtergrond."
+      },
+      "email": {
+        "title": "E-mail / AI-inbox",
+        "desc": "Zakelijke e-mailadressen, IMAP/SMTP en automatisering van de inbox met AI."
+      },
+      "goals": {
+        "title": "Doelen",
+        "desc": "Bepaal en volg meetbare bedrijfsresultaten."
+      },
+      "content": {
+        "title": "Inhoud",
+        "desc": "Plan, genereer en beheer inhoud voor uw doelgroep."
+      },
+      "connections": {
+        "title": "Verbonden diensten",
+        "desc": "Bewaak de werking van diensten, eindpunten en integraties in de uitvoeromgeving."
+      },
+      "memory": {
+        "title": "Geheugen",
+        "desc": "Bekijk en bewerk bevestigde bedrijfscontext."
+      },
+      "skills": {
+        "title": "Vaardigheden",
+        "desc": "Bekijk de functies die NPATI Agent kan gebruiken."
+      }
+    }
+  },
+  "home": {
+    "eyebrow": "Uw AI-bedrijfsagent",
+    "heading": "Wat wilt u doen?",
+    "subheading": "Kies een startpunt. We gebruiken uw actieve onderneming, doelen en opgeslagen context om u te helpen bij de volgende praktische stap.",
+    "signIn": "Aanmelden",
+    "createAccount": "Account aanmaken",
+    "chatEmptyTitle": "Waar zullen we aan werken?",
+    "chatEmptySubtitle": "Vraag NPATI Agent iets of verken samen ideeën.",
+    "footerPrefix": "Opensource NPATI Agent · Gemaakt door",
+    "footerLink": "NPATI",
+    "actions": {
+      "sellSomething": {
+        "title": "Iets verkopen",
+        "desc": "Maak van een product of dienst een duidelijk aanbod"
+      },
+      "startBusiness": {
+        "title": "Een onderneming starten",
+        "desc": "Werk een idee uit tot een eerste praktische test"
+      },
+      "growBusiness": {
+        "title": "Mijn onderneming laten groeien",
+        "desc": "Vind de volgende praktische groeikans"
+      },
+      "improveBusiness": {
+        "title": "Mijn onderneming verbeteren",
+        "desc": "Bekijk wat werkt, wat niet werkt en wat u hierna kunt verbeteren"
+      },
+      "createContent": {
+        "title": "Inhoud maken",
+        "desc": "Plan nuttige inhoud voor uw doelgroep"
+      },
+      "askAgent": {
+        "title": "NPATI Agent iets vragen",
+        "desc": "Begin met uw eigen vraag"
+      }
+    }
+  }
+} satisfies Pick<TranslationSchema, "executionTrace" | "projectSection" | "common" | "nav" | "sidebar" | "dialogs" | "chat" | "userMenu" | "settings" | "home">;

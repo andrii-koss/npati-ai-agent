@@ -1,0 +1,297 @@
+import type { TranslationSchema } from "../../types";
+
+export const core = {
+  "executionTrace": {
+    "modelResponding": "O modelo está respondendo",
+    "waitingForModel": "Aguardando a resposta do modelo",
+    "generatingCode": "Gerando código",
+    "suspended_by_flag": "Pausado: agente de programação desativado",
+    "usage": "Tokens do modelo",
+    "inputTokens": "Entrada",
+    "outputTokens": "Saída",
+    "totalTokens": "Total",
+    "sharedTurn": "Compartilhado por {{count}} chamadas de ferramentas",
+    "unavailableTokens": "Não registrado",
+    "operationStatus": "Resultado",
+    "dryRun": "Simulação: alterações não aplicadas",
+    "runningCommand": "Executando comando: {{command}}",
+    "fileUnchanged": "Sem alterações",
+    "fileNotChanged": "Não foi possível alterar o arquivo",
+    "modelCallFailed": "Erro do modelo: a resposta estava corrompida, por isso esta ação não foi executada",
+    "fileChangedReadAgain": "O arquivo foi alterado; lendo novamente",
+    "agentFinished": "O agente concluiu o trabalho",
+    "operationsDone": "{{count}} operações executadas",
+    "testsPassed": "Aprovado",
+    "working": "Pensando",
+    "creatingProject": "Criando projeto",
+    "skipped": "Ignorado",
+    "pending": "Pendente",
+    "preparing": "Preparando",
+    "queued": "Na fila",
+    "running": "Em execução",
+    "completed": "Concluído",
+    "failed": "Falhou",
+    "cancelled": "Cancelado",
+    "awaiting_approval": "Aguardando aprovação",
+    "unknown": "Registrado",
+    "command": "Comando",
+    "file": "Arquivo",
+    "tool": "Ferramenta",
+    "workingDir": "Diretório de trabalho",
+    "project": "Projeto",
+    "output": "Saída / Registro",
+    "copy": "Copiar",
+    "copied": "Copiado",
+    "copyCommand": "Copiar comando",
+    "copyLog": "Copiar registro",
+    "fullLog": "Ver saída completa registrada",
+    "less": "Mostrar menos",
+    "limited": "Saída limitada pelo ambiente de execução",
+    "duration": "Duração",
+    "error": "Erro",
+    "viewRun": "Ver execução",
+    "exitCode": "Código de saída",
+    "reading": "Lendo arquivos",
+    "searching": "Pesquisando código",
+    "editing": "Editando arquivos",
+    "dependencies": "Instalando dependências",
+    "building": "Compilando projeto",
+    "testing": "Testando",
+    "browser": "Verificação no navegador",
+    "sandbox": "Ambiente isolado",
+    "preview": "Iniciando prévia ao vivo",
+    "planning": "Planejando",
+    "executed": "Comando executado",
+    "read": "Arquivo lido",
+    "updated": "Arquivo atualizado",
+    "created": "Criado",
+    "modified": "Modificado",
+    "deleted": "Excluído"
+  },
+  "projectSection": {
+    "types": {
+      "website": "Site",
+      "webApp": "Aplicativo web",
+      "landingPage": "Página de destino",
+      "mobileApp": "Aplicativo móvel"
+    }
+  },
+  "common": {
+    "save": "Salvar",
+    "cancel": "Cancelar",
+    "delete": "Excluir",
+    "edit": "Editar",
+    "close": "Fechar",
+    "confirm": "Confirmar",
+    "loading": "Carregando…",
+    "error": "Erro",
+    "success": "Sucesso",
+    "search": "Pesquisar",
+    "send": "Enviar",
+    "copy": "Copiar",
+    "copied": "Copiado!",
+    "back": "Voltar",
+    "settings": "Configurações",
+    "language": "Idioma",
+    "languageSelect": "Selecionar idioma",
+    "options": "Mais opções",
+    "ok": "OK",
+    "notification": "Notificação",
+    "deleteConfirmation": "Confirmação de exclusão",
+    "confirmation": "Confirmação",
+    "inputRequired": "Preenchimento necessário"
+  },
+  "nav": {
+    "chat": "Conversa",
+    "business": "Negócio",
+    "company": "Empresa",
+    "settings": "Configurações",
+    "capabilities": "Inspetor de recursos",
+    "activity": "Atividade e rastreamento de execuções",
+    "automations": "Automações",
+    "goals": "Metas",
+    "content": "Conteúdo",
+    "connections": "Serviços conectados",
+    "memory": "Memória",
+    "skills": "Habilidades",
+    "aiProviders": "Provedores de IA"
+  },
+  "sidebar": {
+    "newChat": "+ Nova conversa",
+    "pinned": "Fixadas",
+    "recent": "Recentes",
+    "noSavedChats": "Nenhuma conversa salva ainda",
+    "share": "Compartilhar",
+    "rename": "Renomear",
+    "pin": "Fixar",
+    "unpin": "Desafixar",
+    "archive": "Arquivar",
+    "deleteChat": "Excluir",
+    "deleteBusiness": "Excluir",
+    "setupDraft": "Rascunho de configuração",
+    "current": "Atual",
+    "useInChat": "Usar na conversa"
+  },
+  "dialogs": {
+    "deleteChatTitle": "Excluir conversa?",
+    "deleteChatMessage": "Excluir a conversa “{{title}}”? Esta ação não pode ser desfeita.",
+    "deleteBusinessTitle": "Excluir negócio?",
+    "deleteBusinessMessage": "Excluir o negócio “{{name}}” e suas conversas, metas e memória? Esta ação não pode ser desfeita.",
+    "renameChatTitle": "Renomear conversa",
+    "renameChatMessage": "Digite um novo título para esta conversa:",
+    "renameBusinessTitle": "Renomear negócio",
+    "renameBusinessMessage": "Digite um novo nome para “{{name}}”:",
+    "copyLinkTitle": "Copiar link",
+    "copyLinkMessage": "Copie este link de {{label}}:",
+    "deleteGoalTitle": "Excluir meta?",
+    "deleteGoalMessage": "Tem certeza de que deseja excluir a meta “{{title}}”?",
+    "deleteMemoryTitle": "Excluir fato da memória?",
+    "deleteMemoryMessage": "Excluir o item de memória “{{title}}”? Esta ação não pode ser desfeita.",
+    "deleteAutomationTitle": "Excluir automação?",
+    "deleteAutomationMessage": "Tem certeza de que deseja excluir esta automação?",
+    "deleteDocumentTitle": "Excluir documento?",
+    "deleteDocumentMessage": "Excluir este documento?",
+    "deleteCompanyTitle": "Excluir empresa?",
+    "deleteCompanyMessage": "Excluir a empresa “{{name}}” e todos os seus agentes?",
+    "deleteAgentTitle": "Excluir agente?",
+    "deleteAgentMessage": "Excluir o agente “{{name}}”?",
+    "restartSetupTitle": "Reiniciar a configuração do negócio?",
+    "restartSetupMessage": "Começar a configuração do negócio novamente? O rascunho atual e seu histórico de conversa serão excluídos. Esta ação não pode ser desfeita."
+  },
+  "chat": {
+    "emptyTitle": "No que vamos trabalhar?",
+    "emptySubtitle": "Pergunte qualquer coisa ao NPATI Agent ou explore ideias.",
+    "placeholder": "Pergunte ao Npati…",
+    "businessEmptySubtitle": "Usarei o contexto de {{name}} sem inventar os fatos que faltam.",
+    "businessPlaceholder": "Pergunte sobre seu negócio, metas, público ou próximo passo…",
+    "workModeLabel": "Modo de trabalho",
+    "workModeChat": "Conversa",
+    "workModeCode": "Código",
+    "codeModeNeedsProject": "O modo de código trabalha com o projeto selecionado. Abra um projeto primeiro.",
+    "thinking": "Pensando",
+    "noCompany": "Sem empresa",
+    "stopGenerating": "Parar geração",
+    "showHistory": "Mostrar histórico de análise",
+    "hideHistory": "Ocultar histórico de análise",
+    "searchingWeb": "Pesquisando na web: {{query}}",
+    "preparingAnswer": "Preparando resposta com fontes…",
+    "table": "Tabela ({{count}} linhas)",
+    "copyCsv": "Copiar CSV",
+    "downloadCsv": "Baixar Excel / CSV",
+    "copyCode": "Copiar código",
+    "downloadFile": "Baixar arquivo",
+    "expandFullscreen": "Expandir para tela cheia",
+    "collapse": "Recolher",
+    "helpful": "Resposta útil",
+    "notHelpful": "Resposta não útil",
+    "regenerate": "Gerar novamente",
+    "shareResponse": "Compartilhar resposta",
+    "showFullPrompt": "Abrir",
+    "collapsePrompt": "Fechar",
+    "copyPrompt": "Copiar",
+    "copiedPrompt": "Copiado",
+    "editPrompt": "Editar"
+  },
+  "userMenu": {
+    "emailInbox": "Caixa de entrada de e-mail",
+    "aiProvider": "Provedor de IA",
+    "company": "Empresa",
+    "memory": "Memória",
+    "settings": "Configurações",
+    "signOut": "Sair",
+    "signOutIncompleteTitle": "Saída incompleta",
+    "signOutIncompleteDesc": "Não foi possível sair de npati.com."
+  },
+  "settings": {
+    "title": "Configurações",
+    "eyebrow": "Espaço de trabalho NPATI",
+    "description": "Gerencie os serviços e as preferências que o NPATI Agent usa localmente.",
+    "cards": {
+      "aiProviders": {
+        "title": "Provedores de IA",
+        "desc": "Conecte provedores, explore modelos e escolha o roteamento de IA."
+      },
+      "business": {
+        "title": "Negócio",
+        "desc": "Analise uma ideia de negócio, o mercado, as metas e a estratégia."
+      },
+      "company": {
+        "title": "Empresa",
+        "desc": "Monte sua equipe de IA configurável e organize os agentes."
+      },
+      "capabilities": {
+        "title": "Inspetor de recursos",
+        "desc": "Audite 306 recursos canônicos, a visibilidade das ferramentas e as políticas de risco."
+      },
+      "activity": {
+        "title": "Atividade e rastreamento de execuções",
+        "desc": "Inspecione rastreamentos de execução ao vivo, delegações de etapas e decisões de ferramentas."
+      },
+      "automations": {
+        "title": "Automações",
+        "desc": "Agende tarefas cron recorrentes e tarefas de agentes em segundo plano."
+      },
+      "email": {
+        "title": "E-mail / Caixa de entrada de IA",
+        "desc": "Endereços de e-mail corporativos, IMAP/SMTP e automação da caixa de entrada com IA."
+      },
+      "goals": {
+        "title": "Metas",
+        "desc": "Defina e acompanhe resultados mensuráveis do negócio."
+      },
+      "content": {
+        "title": "Conteúdo",
+        "desc": "Planeje, gere e gerencie conteúdo para seu público."
+      },
+      "connections": {
+        "title": "Serviços conectados",
+        "desc": "Monitore a integridade dos serviços, endpoints e integrações em execução."
+      },
+      "memory": {
+        "title": "Memória",
+        "desc": "Revise e edite o contexto confirmado do negócio."
+      },
+      "skills": {
+        "title": "Habilidades",
+        "desc": "Explore os recursos que o NPATI Agent pode usar."
+      }
+    }
+  },
+  "home": {
+    "eyebrow": "Seu agente de negócios com IA",
+    "heading": "O que você gostaria de fazer?",
+    "subheading": "Escolha um ponto de partida. Usaremos seu negócio ativo, suas metas e o contexto salvo para ajudar no próximo passo prático.",
+    "signIn": "Entrar",
+    "createAccount": "Criar conta",
+    "chatEmptyTitle": "No que vamos trabalhar?",
+    "chatEmptySubtitle": "Pergunte qualquer coisa ao NPATI Agent ou explore ideias.",
+    "footerPrefix": "NPATI Agent de código aberto · Criado por",
+    "footerLink": "NPATI",
+    "actions": {
+      "sellSomething": {
+        "title": "Vender algo",
+        "desc": "Transforme um produto ou serviço em uma oferta clara"
+      },
+      "startBusiness": {
+        "title": "Iniciar um negócio",
+        "desc": "Transforme uma ideia em um primeiro teste prático"
+      },
+      "growBusiness": {
+        "title": "Expandir meu negócio",
+        "desc": "Encontre a próxima oportunidade prática de crescimento"
+      },
+      "improveBusiness": {
+        "title": "Melhorar meu negócio",
+        "desc": "Revise o que funciona, o que não funciona e o que melhorar em seguida"
+      },
+      "createContent": {
+        "title": "Criar conteúdo",
+        "desc": "Planeje conteúdo útil para seu público"
+      },
+      "askAgent": {
+        "title": "Perguntar ao NPATI Agent",
+        "desc": "Comece com sua própria pergunta"
+      }
+    }
+  }
+} satisfies Pick<TranslationSchema, "executionTrace" | "projectSection" | "common" | "nav" | "sidebar" | "dialogs" | "chat" | "userMenu" | "settings" | "home">;

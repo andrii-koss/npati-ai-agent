@@ -1,0 +1,297 @@
+import type { TranslationSchema } from "../../types";
+
+export const core = {
+  "executionTrace": {
+    "modelResponding": "モデルが応答中",
+    "waitingForModel": "モデルの応答を待機中",
+    "generatingCode": "コードを生成中",
+    "suspended_by_flag": "一時停止：コーディングエージェントが無効です",
+    "usage": "モデルのトークン",
+    "inputTokens": "入力",
+    "outputTokens": "出力",
+    "totalTokens": "合計",
+    "sharedTurn": "{{count}} 件のツール呼び出しで共有",
+    "unavailableTokens": "記録なし",
+    "operationStatus": "結果",
+    "dryRun": "試行：変更は適用されていません",
+    "runningCommand": "コマンドを実行中：{{command}}",
+    "fileUnchanged": "変更なし",
+    "fileNotChanged": "ファイルを変更できませんでした",
+    "modelCallFailed": "モデルエラー：応答が破損していたため、この操作は実行されませんでした",
+    "fileChangedReadAgain": "ファイルが変更されたため、再読み込み中",
+    "agentFinished": "エージェントが作業を完了しました",
+    "operationsDone": "{{count}} 件の操作を実行しました",
+    "testsPassed": "合格",
+    "working": "思考中",
+    "creatingProject": "プロジェクトを作成中",
+    "skipped": "スキップ済み",
+    "pending": "保留中",
+    "preparing": "準備中",
+    "queued": "キュー待機中",
+    "running": "実行中",
+    "completed": "完了",
+    "failed": "失敗",
+    "cancelled": "キャンセル済み",
+    "awaiting_approval": "承認待ち",
+    "unknown": "記録済み",
+    "command": "コマンド",
+    "file": "ファイル",
+    "tool": "ツール",
+    "workingDir": "作業ディレクトリ",
+    "project": "プロジェクト",
+    "output": "出力 / ログ",
+    "copy": "コピー",
+    "copied": "コピー済み",
+    "copyCommand": "コマンドをコピー",
+    "copyLog": "ログをコピー",
+    "fullLog": "記録された出力をすべて表示",
+    "less": "表示を減らす",
+    "limited": "実行環境により出力が制限されています",
+    "duration": "所要時間",
+    "error": "エラー",
+    "viewRun": "実行を表示",
+    "exitCode": "終了コード",
+    "reading": "ファイルを読み込み中",
+    "searching": "コードを検索中",
+    "editing": "ファイルを編集中",
+    "dependencies": "依存関係をインストール中",
+    "building": "プロジェクトをビルド中",
+    "testing": "テスト中",
+    "browser": "ブラウザーでの品質確認",
+    "sandbox": "サンドボックス",
+    "preview": "ライブプレビューを起動中",
+    "planning": "計画中",
+    "executed": "コマンド実行済み",
+    "read": "ファイル読み込み済み",
+    "updated": "ファイル更新済み",
+    "created": "作成済み",
+    "modified": "変更済み",
+    "deleted": "削除済み"
+  },
+  "projectSection": {
+    "types": {
+      "website": "ウェブサイト",
+      "webApp": "ウェブアプリ",
+      "landingPage": "ランディングページ",
+      "mobileApp": "モバイルアプリ"
+    }
+  },
+  "common": {
+    "save": "保存",
+    "cancel": "キャンセル",
+    "delete": "削除",
+    "edit": "編集",
+    "close": "閉じる",
+    "confirm": "確認",
+    "loading": "読み込み中…",
+    "error": "エラー",
+    "success": "成功",
+    "search": "検索",
+    "send": "送信",
+    "copy": "コピー",
+    "copied": "コピーしました！",
+    "back": "戻る",
+    "settings": "設定",
+    "language": "言語",
+    "languageSelect": "言語を選択",
+    "options": "その他のオプション",
+    "ok": "OK",
+    "notification": "通知",
+    "deleteConfirmation": "削除の確認",
+    "confirmation": "確認",
+    "inputRequired": "入力が必要です"
+  },
+  "nav": {
+    "chat": "チャット",
+    "business": "ビジネス",
+    "company": "会社",
+    "settings": "設定",
+    "capabilities": "機能インスペクター",
+    "activity": "アクティビティと実行履歴",
+    "automations": "自動化",
+    "goals": "目標",
+    "content": "コンテンツ",
+    "connections": "接続済みサービス",
+    "memory": "メモリ",
+    "skills": "スキル",
+    "aiProviders": "AIプロバイダー"
+  },
+  "sidebar": {
+    "newChat": "+ 新しいチャット",
+    "pinned": "固定済み",
+    "recent": "最近の項目",
+    "noSavedChats": "保存済みのチャットはまだありません",
+    "share": "共有",
+    "rename": "名前を変更",
+    "pin": "固定する",
+    "unpin": "固定を解除",
+    "archive": "アーカイブ",
+    "deleteChat": "削除",
+    "deleteBusiness": "削除",
+    "setupDraft": "設定の下書き",
+    "current": "現在",
+    "useInChat": "チャットで使用"
+  },
+  "dialogs": {
+    "deleteChatTitle": "チャットを削除しますか？",
+    "deleteChatMessage": "チャット「{{title}}」を削除しますか？この操作は元に戻せません。",
+    "deleteBusinessTitle": "ビジネスを削除しますか？",
+    "deleteBusinessMessage": "ビジネス「{{name}}」と、そのチャット、目標、メモリを削除しますか？この操作は元に戻せません。",
+    "renameChatTitle": "チャット名を変更",
+    "renameChatMessage": "このチャットの新しいタイトルを入力してください：",
+    "renameBusinessTitle": "ビジネス名を変更",
+    "renameBusinessMessage": "「{{name}}」の新しい名前を入力してください：",
+    "copyLinkTitle": "リンクをコピー",
+    "copyLinkMessage": "この{{label}}のリンクをコピーしてください：",
+    "deleteGoalTitle": "目標を削除しますか？",
+    "deleteGoalMessage": "目標「{{title}}」を削除してもよろしいですか？",
+    "deleteMemoryTitle": "メモリの情報を削除しますか？",
+    "deleteMemoryMessage": "メモリ項目「{{title}}」を削除しますか？この操作は元に戻せません。",
+    "deleteAutomationTitle": "自動化を削除しますか？",
+    "deleteAutomationMessage": "この自動化を削除してもよろしいですか？",
+    "deleteDocumentTitle": "ドキュメントを削除しますか？",
+    "deleteDocumentMessage": "このドキュメントを削除しますか？",
+    "deleteCompanyTitle": "会社を削除しますか？",
+    "deleteCompanyMessage": "会社「{{name}}」とすべてのエージェントを削除しますか？",
+    "deleteAgentTitle": "エージェントを削除しますか？",
+    "deleteAgentMessage": "エージェント「{{name}}」を削除しますか？",
+    "restartSetupTitle": "ビジネス設定をやり直しますか？",
+    "restartSetupMessage": "ビジネス設定を最初からやり直しますか？現在の下書きとチャット履歴は削除されます。この操作は元に戻せません。"
+  },
+  "chat": {
+    "emptyTitle": "何に取り組みましょうか？",
+    "emptySubtitle": "NPATI Agentに質問したり、アイデアを一緒に考えたりできます。",
+    "placeholder": "Npatiに質問…",
+    "businessEmptySubtitle": "{{name}}のコンテキストを使用し、不明な事実は作りません。",
+    "businessPlaceholder": "ビジネス、目標、顧客層、次の行動について質問…",
+    "workModeLabel": "作業モード",
+    "workModeChat": "チャット",
+    "workModeCode": "コード",
+    "codeModeNeedsProject": "コードモードは選択したプロジェクトで動作します。まずプロジェクトを開いてください。",
+    "thinking": "思考中",
+    "noCompany": "会社なし",
+    "stopGenerating": "生成を停止",
+    "showHistory": "分析履歴を表示",
+    "hideHistory": "分析履歴を非表示",
+    "searchingWeb": "ウェブを検索中：{{query}}",
+    "preparingAnswer": "出典付きの回答を準備中…",
+    "table": "表（{{count}} 行）",
+    "copyCsv": "CSVをコピー",
+    "downloadCsv": "Excel / CSVをダウンロード",
+    "copyCode": "コードをコピー",
+    "downloadFile": "ファイルをダウンロード",
+    "expandFullscreen": "全画面で表示",
+    "collapse": "折りたたむ",
+    "helpful": "役に立つ回答",
+    "notHelpful": "役に立たない回答",
+    "regenerate": "再生成",
+    "shareResponse": "回答を共有",
+    "showFullPrompt": "開く",
+    "collapsePrompt": "閉じる",
+    "copyPrompt": "コピー",
+    "copiedPrompt": "コピー済み",
+    "editPrompt": "編集"
+  },
+  "userMenu": {
+    "emailInbox": "メール受信トレイ",
+    "aiProvider": "AIプロバイダー",
+    "company": "会社",
+    "memory": "メモリ",
+    "settings": "設定",
+    "signOut": "サインアウト",
+    "signOutIncompleteTitle": "サインアウト未完了",
+    "signOutIncompleteDesc": "npati.comからサインアウトできませんでした。"
+  },
+  "settings": {
+    "title": "設定",
+    "eyebrow": "NPATIワークスペース",
+    "description": "NPATI Agentがローカルで使用するサービスと環境設定を管理します。",
+    "cards": {
+      "aiProviders": {
+        "title": "AIプロバイダー",
+        "desc": "プロバイダーに接続し、モデルを閲覧して、AIのルーティングを選択します。"
+      },
+      "business": {
+        "title": "ビジネス",
+        "desc": "ビジネスのアイデア、市場、目標、戦略を分析します。"
+      },
+      "company": {
+        "title": "会社",
+        "desc": "カスタマイズ可能なAIチームとエージェント組織を構築します。"
+      },
+      "capabilities": {
+        "title": "機能インスペクター",
+        "desc": "306の標準機能、ツールの公開範囲、リスクポリシーを監査します。"
+      },
+      "activity": {
+        "title": "アクティビティと実行履歴",
+        "desc": "実行中の履歴、ステップの委任、ツールの判断を確認します。"
+      },
+      "automations": {
+        "title": "自動化",
+        "desc": "定期的なcronジョブとバックグラウンドのエージェントタスクを設定します。"
+      },
+      "email": {
+        "title": "メール / AI受信トレイ",
+        "desc": "会社のメールアドレス、IMAP/SMTP、AI受信トレイの自動化。"
+      },
+      "goals": {
+        "title": "目標",
+        "desc": "測定可能なビジネス成果を定義し、追跡します。"
+      },
+      "content": {
+        "title": "コンテンツ",
+        "desc": "顧客層に向けたコンテンツを計画、生成、管理します。"
+      },
+      "connections": {
+        "title": "接続済みサービス",
+        "desc": "サービスの稼働状況、エンドポイント、実行環境の連携を監視します。"
+      },
+      "memory": {
+        "title": "メモリ",
+        "desc": "確認済みのビジネス情報を確認、編集します。"
+      },
+      "skills": {
+        "title": "スキル",
+        "desc": "NPATI Agentが使用できる機能を閲覧します。"
+      }
+    }
+  },
+  "home": {
+    "eyebrow": "あなたのAIビジネスエージェント",
+    "heading": "何をしたいですか？",
+    "subheading": "出発点を選んでください。利用中のビジネス、目標、保存済みの情報を使い、実践的な次の一歩を支援します。",
+    "signIn": "サインイン",
+    "createAccount": "アカウントを作成",
+    "chatEmptyTitle": "何に取り組みましょうか？",
+    "chatEmptySubtitle": "NPATI Agentに質問したり、アイデアを一緒に考えたりできます。",
+    "footerPrefix": "オープンソースのNPATI Agent · 開発：",
+    "footerLink": "NPATI",
+    "actions": {
+      "sellSomething": {
+        "title": "商品やサービスを販売",
+        "desc": "商品やサービスを明確な提案にまとめる"
+      },
+      "startBusiness": {
+        "title": "ビジネスを始める",
+        "desc": "アイデアを最初の実践的な検証に落とし込む"
+      },
+      "growBusiness": {
+        "title": "ビジネスを成長させる",
+        "desc": "実践的な次の成長機会を見つける"
+      },
+      "improveBusiness": {
+        "title": "ビジネスを改善する",
+        "desc": "うまくいっている点と課題を確認し、次の改善点を見つける"
+      },
+      "createContent": {
+        "title": "コンテンツを作成",
+        "desc": "顧客層に役立つコンテンツを計画する"
+      },
+      "askAgent": {
+        "title": "NPATI Agentに質問",
+        "desc": "自分の質問から始める"
+      }
+    }
+  }
+} satisfies Pick<TranslationSchema, "executionTrace" | "projectSection" | "common" | "nav" | "sidebar" | "dialogs" | "chat" | "userMenu" | "settings" | "home">;

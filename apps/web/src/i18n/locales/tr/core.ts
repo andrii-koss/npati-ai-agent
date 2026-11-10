@@ -1,0 +1,297 @@
+import type { TranslationSchema } from "../../types";
+
+export const core = {
+  "executionTrace": {
+    "modelResponding": "Model yanıt veriyor",
+    "waitingForModel": "Modelin yanıtı bekleniyor",
+    "generatingCode": "Kod oluşturuluyor",
+    "suspended_by_flag": "Duraklatıldı: Kodlama ajanı devre dışı",
+    "usage": "Model tokenları",
+    "inputTokens": "Girdi",
+    "outputTokens": "Çıktı",
+    "totalTokens": "Toplam",
+    "sharedTurn": "{{count}} araç çağrısı arasında paylaşılıyor",
+    "unavailableTokens": "Kaydedilmedi",
+    "operationStatus": "Sonuç",
+    "dryRun": "Deneme çalıştırması: değişiklikler uygulanmadı",
+    "runningCommand": "Komut çalıştırılıyor: {{command}}",
+    "fileUnchanged": "Değişiklik yok",
+    "fileNotChanged": "Dosya değiştirilemedi",
+    "modelCallFailed": "Model hatası: yanıt bozulduğu için bu işlem çalıştırılmadı",
+    "fileChangedReadAgain": "Dosya değişti, yeniden okunuyor",
+    "agentFinished": "Ajan çalışmayı tamamladı",
+    "operationsDone": "{{count}} işlem yürütüldü",
+    "testsPassed": "Başarılı",
+    "working": "Düşünüyor",
+    "creatingProject": "Proje oluşturuluyor",
+    "skipped": "Atlandı",
+    "pending": "Bekliyor",
+    "preparing": "Hazırlanıyor",
+    "queued": "Sıraya alındı",
+    "running": "Çalışıyor",
+    "completed": "Tamamlandı",
+    "failed": "Başarısız",
+    "cancelled": "İptal edildi",
+    "awaiting_approval": "Onay bekleniyor",
+    "unknown": "Kaydedildi",
+    "command": "Komut",
+    "file": "Dosya",
+    "tool": "Araç",
+    "workingDir": "Çalışma dizini",
+    "project": "Proje",
+    "output": "Çıktı / Günlük",
+    "copy": "Kopyala",
+    "copied": "Kopyalandı",
+    "copyCommand": "Komutu kopyala",
+    "copyLog": "Günlüğü kopyala",
+    "fullLog": "Kaydedilen çıktının tamamını göster",
+    "less": "Daha az göster",
+    "limited": "Çıktı çalışma ortamı tarafından sınırlandı",
+    "duration": "Süre",
+    "error": "Hata",
+    "viewRun": "Çalıştırmayı görüntüle",
+    "exitCode": "Çıkış kodu",
+    "reading": "Dosyalar okunuyor",
+    "searching": "Kod aranıyor",
+    "editing": "Dosyalar düzenleniyor",
+    "dependencies": "Bağımlılıklar yükleniyor",
+    "building": "Proje derleniyor",
+    "testing": "Test ediliyor",
+    "browser": "Tarayıcı kalite kontrolü",
+    "sandbox": "Korumalı alan",
+    "preview": "Canlı önizleme başlatılıyor",
+    "planning": "Planlanıyor",
+    "executed": "Komut yürütüldü",
+    "read": "Dosya okundu",
+    "updated": "Dosya güncellendi",
+    "created": "Oluşturuldu",
+    "modified": "Değiştirildi",
+    "deleted": "Silindi"
+  },
+  "projectSection": {
+    "types": {
+      "website": "Web sitesi",
+      "webApp": "Web uygulaması",
+      "landingPage": "Açılış sayfası",
+      "mobileApp": "Mobil uygulama"
+    }
+  },
+  "common": {
+    "save": "Kaydet",
+    "cancel": "İptal",
+    "delete": "Sil",
+    "edit": "Düzenle",
+    "close": "Kapat",
+    "confirm": "Onayla",
+    "loading": "Yükleniyor…",
+    "error": "Hata",
+    "success": "Başarılı",
+    "search": "Ara",
+    "send": "Gönder",
+    "copy": "Kopyala",
+    "copied": "Kopyalandı!",
+    "back": "Geri",
+    "settings": "Ayarlar",
+    "language": "Dil",
+    "languageSelect": "Dil seçin",
+    "options": "Diğer seçenekler",
+    "ok": "Tamam",
+    "notification": "Bildirim",
+    "deleteConfirmation": "Silme onayı",
+    "confirmation": "Onay",
+    "inputRequired": "Girdi gerekli"
+  },
+  "nav": {
+    "chat": "Sohbet",
+    "business": "İşletme",
+    "company": "Şirket",
+    "settings": "Ayarlar",
+    "capabilities": "Yetenek denetçisi",
+    "activity": "Etkinlik ve çalıştırma izi",
+    "automations": "Otomasyonlar",
+    "goals": "Hedefler",
+    "content": "İçerik",
+    "connections": "Bağlı hizmetler",
+    "memory": "Bellek",
+    "skills": "Beceriler",
+    "aiProviders": "Yapay zekâ sağlayıcıları"
+  },
+  "sidebar": {
+    "newChat": "+ Yeni sohbet",
+    "pinned": "Sabitlenenler",
+    "recent": "Son kullanılanlar",
+    "noSavedChats": "Henüz kaydedilmiş sohbet yok",
+    "share": "Paylaş",
+    "rename": "Yeniden adlandır",
+    "pin": "Sabitle",
+    "unpin": "Sabitlemeyi kaldır",
+    "archive": "Arşivle",
+    "deleteChat": "Sil",
+    "deleteBusiness": "Sil",
+    "setupDraft": "Kurulum taslağı",
+    "current": "Geçerli",
+    "useInChat": "Sohbette kullan"
+  },
+  "dialogs": {
+    "deleteChatTitle": "Sohbet silinsin mi?",
+    "deleteChatMessage": "“{{title}}” sohbeti silinsin mi? Bu işlem geri alınamaz.",
+    "deleteBusinessTitle": "İşletme silinsin mi?",
+    "deleteBusinessMessage": "“{{name}}” işletmesi, sohbetleri, hedefleri ve belleği silinsin mi? Bu işlem geri alınamaz.",
+    "renameChatTitle": "Sohbeti yeniden adlandır",
+    "renameChatMessage": "Bu sohbet için yeni bir başlık girin:",
+    "renameBusinessTitle": "İşletmeyi yeniden adlandır",
+    "renameBusinessMessage": "“{{name}}” için yeni bir ad girin:",
+    "copyLinkTitle": "Bağlantıyı kopyala",
+    "copyLinkMessage": "Bu {{label}} bağlantısını kopyalayın:",
+    "deleteGoalTitle": "Hedef silinsin mi?",
+    "deleteGoalMessage": "“{{title}}” hedefini silmek istediğinizden emin misiniz?",
+    "deleteMemoryTitle": "Bellek bilgisi silinsin mi?",
+    "deleteMemoryMessage": "“{{title}}” bellek öğesi silinsin mi? Bu işlem geri alınamaz.",
+    "deleteAutomationTitle": "Otomasyon silinsin mi?",
+    "deleteAutomationMessage": "Bu otomasyonu silmek istediğinizden emin misiniz?",
+    "deleteDocumentTitle": "Belge silinsin mi?",
+    "deleteDocumentMessage": "Bu belge silinsin mi?",
+    "deleteCompanyTitle": "Şirket silinsin mi?",
+    "deleteCompanyMessage": "“{{name}}” şirketi ve tüm ajanları silinsin mi?",
+    "deleteAgentTitle": "Ajan silinsin mi?",
+    "deleteAgentMessage": "“{{name}}” ajanı silinsin mi?",
+    "restartSetupTitle": "İşletme kurulumu yeniden başlatılsın mı?",
+    "restartSetupMessage": "İşletme kurulumu baştan başlatılsın mı? Geçerli taslak ve sohbet geçmişi silinecek. Bu işlem geri alınamaz."
+  },
+  "chat": {
+    "emptyTitle": "Ne üzerinde çalışalım?",
+    "emptySubtitle": "NPATI Agent'a istediğinizi sorun veya fikirler geliştirin.",
+    "placeholder": "Npati'ye sorun…",
+    "businessEmptySubtitle": "{{name}} için bağlamı kullanacağım ve eksik bilgileri uydurmayacağım.",
+    "businessPlaceholder": "İşletmeniz, hedefleriniz, kitleniz veya sonraki adımınız hakkında sorun…",
+    "workModeLabel": "Çalışma modu",
+    "workModeChat": "Sohbet",
+    "workModeCode": "Kod",
+    "codeModeNeedsProject": "Kod modu seçili projeyle çalışır. Önce bir proje açın.",
+    "thinking": "Düşünüyor",
+    "noCompany": "Şirket yok",
+    "stopGenerating": "Oluşturmayı durdur",
+    "showHistory": "Analiz geçmişini göster",
+    "hideHistory": "Analiz geçmişini gizle",
+    "searchingWeb": "Web'de aranıyor: {{query}}",
+    "preparingAnswer": "Kaynaklarla birlikte yanıt hazırlanıyor…",
+    "table": "Tablo ({{count}} satır)",
+    "copyCsv": "CSV'yi kopyala",
+    "downloadCsv": "Excel / CSV indir",
+    "copyCode": "Kodu kopyala",
+    "downloadFile": "Dosyayı indir",
+    "expandFullscreen": "Tam ekrana genişlet",
+    "collapse": "Daralt",
+    "helpful": "Yararlı yanıt",
+    "notHelpful": "Yararlı olmayan yanıt",
+    "regenerate": "Yeniden oluştur",
+    "shareResponse": "Yanıtı paylaş",
+    "showFullPrompt": "Aç",
+    "collapsePrompt": "Kapat",
+    "copyPrompt": "Kopyala",
+    "copiedPrompt": "Kopyalandı",
+    "editPrompt": "Düzenle"
+  },
+  "userMenu": {
+    "emailInbox": "E-posta gelen kutusu",
+    "aiProvider": "Yapay zekâ sağlayıcısı",
+    "company": "Şirket",
+    "memory": "Bellek",
+    "settings": "Ayarlar",
+    "signOut": "Oturumu kapat",
+    "signOutIncompleteTitle": "Oturum tam olarak kapatılamadı",
+    "signOutIncompleteDesc": "npati.com oturumu kapatılamadı."
+  },
+  "settings": {
+    "title": "Ayarlar",
+    "eyebrow": "NPATI çalışma alanı",
+    "description": "NPATI Agent'ın yerel olarak kullandığı hizmetleri ve tercihleri yönetin.",
+    "cards": {
+      "aiProviders": {
+        "title": "Yapay zekâ sağlayıcıları",
+        "desc": "Sağlayıcıları bağlayın, modelleri inceleyin ve yapay zekâ yönlendirmesini seçin."
+      },
+      "business": {
+        "title": "İşletme",
+        "desc": "İş fikrini, pazarı, hedefleri ve stratejiyi analiz edin."
+      },
+      "company": {
+        "title": "Şirket",
+        "desc": "Yapılandırılabilir yapay zekâ ekibinizi ve ajan organizasyonunuzu oluşturun."
+      },
+      "capabilities": {
+        "title": "Yetenek denetçisi",
+        "desc": "306 standart yeteneği, araç görünürlüğünü ve risk politikalarını denetleyin."
+      },
+      "activity": {
+        "title": "Etkinlik ve çalıştırma izi",
+        "desc": "Canlı yürütme izlerini, adım devirlerini ve araç kararlarını inceleyin."
+      },
+      "automations": {
+        "title": "Otomasyonlar",
+        "desc": "Yinelenen cron işlerini ve arka plan ajan görevlerini planlayın."
+      },
+      "email": {
+        "title": "E-posta / Yapay zekâ gelen kutusu",
+        "desc": "Kurumsal e-posta adresleri, IMAP/SMTP ve yapay zekâ gelen kutusu otomasyonu."
+      },
+      "goals": {
+        "title": "Hedefler",
+        "desc": "Ölçülebilir iş sonuçlarını tanımlayın ve takip edin."
+      },
+      "content": {
+        "title": "İçerik",
+        "desc": "Kitleniz için içerik planlayın, oluşturun ve yönetin."
+      },
+      "connections": {
+        "title": "Bağlı hizmetler",
+        "desc": "Hizmet sağlığını, uç noktaları ve çalışma zamanı entegrasyonlarını izleyin."
+      },
+      "memory": {
+        "title": "Bellek",
+        "desc": "Doğrulanmış işletme bağlamını inceleyin ve düzenleyin."
+      },
+      "skills": {
+        "title": "Beceriler",
+        "desc": "NPATI Agent'ın kullanabileceği yetenekleri inceleyin."
+      }
+    }
+  },
+  "home": {
+    "eyebrow": "Yapay zekâ işletme ajanınız",
+    "heading": "Ne yapmak istersiniz?",
+    "subheading": "Bir başlangıç noktası seçin. Bir sonraki somut adımı atmanıza yardımcı olmak için etkin işletmenizi, hedeflerinizi ve kayıtlı bağlamı kullanacağız.",
+    "signIn": "Oturum aç",
+    "createAccount": "Hesap oluştur",
+    "chatEmptyTitle": "Ne üzerinde çalışalım?",
+    "chatEmptySubtitle": "NPATI Agent'a istediğinizi sorun veya fikirler geliştirin.",
+    "footerPrefix": "Açık kaynaklı NPATI Agent · Geliştiren",
+    "footerLink": "NPATI",
+    "actions": {
+      "sellSomething": {
+        "title": "Bir şey satın",
+        "desc": "Bir ürünü veya hizmeti anlaşılır bir teklife dönüştürün"
+      },
+      "startBusiness": {
+        "title": "İş kurun",
+        "desc": "Bir fikri uygulanabilir ilk teste dönüştürün"
+      },
+      "growBusiness": {
+        "title": "İşletmemi büyüt",
+        "desc": "Bir sonraki uygulanabilir büyüme fırsatını bulun"
+      },
+      "improveBusiness": {
+        "title": "İşletmemi iyileştir",
+        "desc": "Neyin işe yaradığını, neyin yaramadığını ve sırada neyi iyileştireceğinizi inceleyin"
+      },
+      "createContent": {
+        "title": "İçerik oluştur",
+        "desc": "Kitleniz için yararlı içerik planlayın"
+      },
+      "askAgent": {
+        "title": "NPATI Agent'a sorun",
+        "desc": "Kendi sorunuzla başlayın"
+      }
+    }
+  }
+} satisfies Pick<TranslationSchema, "executionTrace" | "projectSection" | "common" | "nav" | "sidebar" | "dialogs" | "chat" | "userMenu" | "settings" | "home">;
