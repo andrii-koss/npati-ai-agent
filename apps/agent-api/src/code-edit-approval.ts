@@ -13,6 +13,7 @@
  */
 export const CODE_WRITE_TOOLS: ReadonlySet<string> = new Set([
   "code.data.rows.seed",
+  "code.data.users.roles.set",
   "code.data.policies.apply",
   "code.data.backend.create",
   "code.data.schema.apply",

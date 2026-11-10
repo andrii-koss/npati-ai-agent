@@ -13,8 +13,8 @@ import type { InspectorReport } from "./capability-inspector";
  * this value through `push(...)` during C9/C11/C12, which is exactly the change the old gate could not see.
  */
 export const STATIC_CATALOG_BASELINE = {
-  total: 409,
-  agentCallable: 145,
+  total: 411,
+  agentCallable: 147,
   runtimeOnly: 264,
 } as const;
 
@@ -33,7 +33,7 @@ export const STATIC_CATALOG_BASELINE = {
  * existing AgentDataStudioService (dev only), and both data writes need a recorded approval unless dryRun.
  */
 // v16 retains schema.apply@1 and adds the dev-only, attachment-bound FK schema.apply@2.
-export const TOOL_SCHEMA_MANIFEST_VERSION = 19;
+export const TOOL_SCHEMA_MANIFEST_VERSION = 20;
 
 export interface CapabilityAuditIssue {
   /** Stable machine-readable code; the negative control asserts on these, never on prose. */

@@ -232,6 +232,27 @@ export class AgentDataStudioService {
     return { attached: true, direction: "this project now uses the target project's database", backendId: backend.id, projectId, sourceProjectId: source.id, previousBackendId: currentBackendId };
   }
 
+  /** The people registered on the project's site, with their roles. */
+  async listSiteUsers(ctx: AuthContext, companyId: string, projectId: string, email?: string) {
+    if (!this.authService) throw new DataStudioError(503, "auth", "Site accounts are unavailable", false, "AUTH_UNAVAILABLE");
+    await this.context(ctx, companyId, projectId);
+    const { users, total } = await this.authService.listUsers(ctx, companyId, projectId, "dev", { limit: 50, ...(email ? { search: email } : {}) });
+    return { total, users: users.map((user) => ({ email: user.email, status: user.status, roles: user.roles ?? [] })) };
+  }
+
+  /** Gives a person who already signed up on the site the requested roles; nobody is created here. */
+  async setSiteUserRoles(ctx: AuthContext, companyId: string, projectId: string, input: { email: string; roles: string[]; dryRun?: boolean }) {
+    if (!this.authService) throw new DataStudioError(503, "auth", "Site accounts are unavailable", false, "AUTH_UNAVAILABLE");
+    await this.context(ctx, companyId, projectId);
+    const { users } = await this.authService.listUsers(ctx, companyId, projectId, "dev", { limit: 50, search: input.email });
+    const user = users.find((candidate) => candidate.email.toLowerCase() === input.email);
+    if (!user) throw new DataStudioError(404, "auth", `Nobody with ${input.email} has signed up on this site yet. Ask them to sign up first, then change the role.`, false, "SITE_USER_NOT_FOUND");
+    const previousRoles = user.roles ?? [];
+    if (input.dryRun) return { dryRun: true, email: user.email, previousRoles, roles: input.roles };
+    await this.authService.setUserRoles(ctx, companyId, projectId, "dev", user.id, input.roles);
+    return { updated: true, email: user.email, previousRoles, roles: input.roles, note: "The person sees the new role after signing in again." };
+  }
+
   async inspectSchema(ctx: AuthContext, companyId: string, projectId: string) {
     const { backend, env } = await this.context(ctx, companyId, projectId);
     const drift = env.status === "ready" ? await this.migrations.detectDrift(ctx, backend, "dev") : null;

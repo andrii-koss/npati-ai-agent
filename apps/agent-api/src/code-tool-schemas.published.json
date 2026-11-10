@@ -1,6 +1,6 @@
 {
-  "manifestVersion": 19,
-  "checksum": "d7263e515b408fabf71a46cb8345c713e96ce5d4e72f16e6790f96ab15ca0548",
+  "manifestVersion": 20,
+  "checksum": "8c9daf96f454fa105cb1101593147c21d84e94897e951701ce55634b3692eadf",
   "tools": [
     {
       "key": "code.agent.continue@1",
@@ -153,6 +153,22 @@
       "status": "active",
       "checksum": "67f6dcb7365809bb270a2089764efb1e82ca6668469551048795626b53f23688",
       "canonical": "{\"deprecatedAt\":null,\"description\":\"Rename a table (rename_collection with next), rename a column keeping its data (rename_field with field and next; never add a new column and drop the old one), change a field type (alter_field with field definition), delete a field (drop_field with field name), or delete a table (drop_collection) in the attached dev database. Inspect first for backend ID and fingerprint. Preview with dryRun; execution requires human approval, destructive changes take a snapshot. Update application code for renamed/deleted objects.\",\"inputSchema\":{\"additionalProperties\":false,\"properties\":{\"dryRun\":{\"type\":\"boolean\"},\"expectedBackendId\":{\"maxLength\":128,\"minLength\":1,\"type\":\"string\"},\"expectedFingerprint\":{\"maxLength\":128,\"minLength\":1,\"type\":\"string\"},\"operation\":{\"additionalProperties\":false,\"properties\":{\"collection\":{\"pattern\":\"^[a-z][a-z0-9_]{0,62}$\",\"type\":\"string\"},\"field\":{\"anyOf\":[{\"additionalProperties\":false,\"properties\":{\"default\":{\"type\":[\"string\",\"number\",\"boolean\",\"null\"]},\"name\":{\"type\":\"string\"},\"options\":{\"items\":{\"type\":\"string\"},\"type\":\"array\"},\"required\":{\"type\":\"boolean\"},\"type\":{\"enum\":[\"string\",\"text\",\"integer\",\"decimal\",\"boolean\",\"date\",\"datetime\",\"json\",\"uuid\",\"enum\",\"file_reference\"],\"type\":\"string\"}},\"required\":[\"name\",\"type\"],\"type\":\"object\"},{\"pattern\":\"^[a-z][a-z0-9_]{0,62}$\",\"type\":\"string\"}]},\"kind\":{\"enum\":[\"rename_collection\",\"rename_field\",\"alter_field\",\"drop_field\",\"drop_collection\"]},\"next\":{\"pattern\":\"^[a-z][a-z0-9_]{0,62}$\",\"type\":\"string\"}},\"required\":[\"kind\",\"collection\"],\"type\":\"object\"}},\"required\":[\"expectedBackendId\",\"expectedFingerprint\",\"operation\"],\"type\":\"object\"},\"name\":\"code.data.schema.modify\",\"outputSchema\":{\"additionalProperties\":false,\"properties\":{\"data\":{\"type\":\"object\"},\"kind\":{\"const\":\"code_tool_result\"},\"note\":{\"type\":\"string\"},\"schemaVersion\":{\"type\":\"integer\"},\"tool\":{\"const\":\"code.data.schema.modify\"},\"toolVersion\":{\"type\":\"integer\"},\"truncated\":{\"type\":\"boolean\"},\"truncation\":{\"additionalProperties\":true,\"type\":\"object\"},\"trust\":{\"const\":\"untrusted_data\"}},\"required\":[\"kind\",\"tool\",\"toolVersion\",\"schemaVersion\",\"trust\",\"note\",\"data\"],\"type\":\"object\"},\"status\":\"active\",\"version\":1}"
+    },
+    {
+      "key": "code.data.users.list@1",
+      "name": "code.data.users.list",
+      "version": 1,
+      "status": "active",
+      "checksum": "b5098f125ffe1c7f1fe7e225b46e6ea929c46383b5d139d2f4e3c86a060932a8",
+      "canonical": "{\"deprecatedAt\":null,\"description\":\"List the people registered on this project's site (dev database) with their roles. WHEN: the user asks who is an administrator, or before changing someone's role. Pass email to find one person. RETURNS: up to 50 users with email, status and roles.\",\"inputSchema\":{\"additionalProperties\":false,\"properties\":{\"email\":{\"maxLength\":320,\"minLength\":1,\"type\":\"string\"},\"expectedBackendId\":{\"maxLength\":128,\"minLength\":1,\"type\":\"string\"}},\"required\":[\"expectedBackendId\"],\"type\":\"object\"},\"name\":\"code.data.users.list\",\"outputSchema\":{\"additionalProperties\":false,\"properties\":{\"data\":{\"type\":\"object\"},\"kind\":{\"const\":\"code_tool_result\"},\"note\":{\"type\":\"string\"},\"schemaVersion\":{\"type\":\"integer\"},\"tool\":{\"const\":\"code.data.users.list\"},\"toolVersion\":{\"type\":\"integer\"},\"truncated\":{\"type\":\"boolean\"},\"truncation\":{\"additionalProperties\":true,\"type\":\"object\"},\"trust\":{\"const\":\"untrusted_data\"}},\"required\":[\"kind\",\"tool\",\"toolVersion\",\"schemaVersion\",\"trust\",\"note\",\"data\"],\"type\":\"object\"},\"status\":\"active\",\"version\":1}"
+    },
+    {
+      "key": "code.data.users.roles.set@1",
+      "name": "code.data.users.roles.set",
+      "version": 1,
+      "status": "active",
+      "checksum": "fb7745ea84cb7cd173ce9dfeece686748ff1b56aaba44f71514880b5171d9bb2",
+      "canonical": "{\"deprecatedAt\":null,\"description\":\"Give a person registered on this project's site the roles named by the user, for example make them an administrator (admin). WHEN: the user asks to make someone admin, manager or another role, or to take a role away. NOT WHEN: the person has not signed up on the site yet (tell the user they must sign up first; never create accounts or passwords for them). roles replaces the person's roles; keep \\\"user\\\" unless asked otherwise. Call with dryRun first; the change needs a human approval. RETURNS: the person's email with previous and new roles.\",\"inputSchema\":{\"additionalProperties\":false,\"properties\":{\"dryRun\":{\"default\":true,\"type\":\"boolean\"},\"email\":{\"maxLength\":320,\"minLength\":3,\"type\":\"string\"},\"expectedBackendId\":{\"maxLength\":128,\"minLength\":1,\"type\":\"string\"},\"roles\":{\"items\":{\"pattern\":\"^[a-z][a-z0-9_-]{0,31}$\",\"type\":\"string\"},\"maxItems\":8,\"minItems\":1,\"type\":\"array\"}},\"required\":[\"expectedBackendId\",\"email\",\"roles\"],\"type\":\"object\"},\"name\":\"code.data.users.roles.set\",\"outputSchema\":{\"additionalProperties\":false,\"properties\":{\"data\":{\"type\":\"object\"},\"kind\":{\"const\":\"code_tool_result\"},\"note\":{\"type\":\"string\"},\"schemaVersion\":{\"type\":\"integer\"},\"tool\":{\"const\":\"code.data.users.roles.set\"},\"toolVersion\":{\"type\":\"integer\"},\"truncated\":{\"type\":\"boolean\"},\"truncation\":{\"additionalProperties\":true,\"type\":\"object\"},\"trust\":{\"const\":\"untrusted_data\"}},\"required\":[\"kind\",\"tool\",\"toolVersion\",\"schemaVersion\",\"trust\",\"note\",\"data\"],\"type\":\"object\"},\"status\":\"active\",\"version\":1}"
     },
     {
       "key": "code.deps.add@1",

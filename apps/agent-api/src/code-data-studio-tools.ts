@@ -13,7 +13,7 @@ import type { ProjectAccessPolicy } from "@npati/shared";
  *  - arguments are structured; no SQL reaches the service.
  */
 export interface CodeDataStudioToolOptions {
-  projectData?: Partial<Pick<AgentDataStudioService, "assertBackend" | "listRows" | "createRow" | "listMigrations" | "inspectAuth" | "configureAuth">>;
+  projectData?: Partial<Pick<AgentDataStudioService, "assertBackend" | "listRows" | "createRow" | "listMigrations" | "inspectAuth" | "configureAuth" | "listSiteUsers" | "setSiteUserRoles">>;
   dataPolicy?: Pick<PolicyEngine, "evaluate">;
 }
 
@@ -79,6 +79,25 @@ export function codeDataStudioExecutors(options: CodeDataStudioToolOptions): Rec
           limit: typeof input.args.limit === "number" ? input.args.limit : 50,
           ...(typeof input.args.offset === "number" ? { offset: input.args.offset } : {}),
         });
+      });
+    },
+
+    "code.data.users.list": async (input) => {
+      const email = typeof input.args.email === "string" ? input.args.email.trim().toLowerCase() : undefined;
+      return run(input, false, async (service) => {
+        if (!service.listSiteUsers) return unavailable(input);
+        return service.listSiteUsers(input.ctx, input.companyId, input.projectId, email);
+      });
+    },
+
+    "code.data.users.roles.set": async (input) => {
+      const email = typeof input.args.email === "string" ? input.args.email.trim().toLowerCase() : "";
+      const roles = input.args.roles;
+      if (!email.includes("@")) invalid(input, "email must be the address the person signed up with");
+      if (!Array.isArray(roles) || !roles.length || roles.length > 8 || roles.some((role) => typeof role !== "string" || !/^[a-z][a-z0-9_-]{0,31}$/.test(role))) invalid(input, "roles must be 1-8 lower-case role names such as admin or user");
+      return run(input, true, async (service) => {
+        if (!service.setSiteUserRoles) return unavailable(input);
+        return service.setSiteUserRoles(input.ctx, input.companyId, input.projectId, { email, roles: [...new Set(roles as string[])], dryRun: input.args.dryRun === true });
       });
     },
 

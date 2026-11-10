@@ -41,7 +41,7 @@ const TOOL_NAMES = [
   "code.data.schema.inspect", "code.data.schema.apply",
   // Manifest v15: completion, viewing, documentation lookup and the Data Studio additions.
   "code.finish", "code.image.view", "code.preview.screenshot", "code.preview.restart", "code.web.fetch", "code.web.search",
-  "code.data.query.read", "code.data.rows.seed", "code.data.migrations.list", "code.data.policies.inspect", "code.data.policies.apply",
+  "code.data.query.read", "code.data.rows.seed", "code.data.migrations.list", "code.data.policies.inspect", "code.data.policies.apply", "code.data.users.list", "code.data.users.roles.set",
   "code.agent.spawn_async", "code.agent.continue", "code.agent.send_message", "code.agent.interrupt",
   "code.shell.exec_async", "code.shell.process.wait",
   "code.fs.list",
@@ -181,7 +181,7 @@ const EXPECTED_RISK: Record<string, "low" | "medium" | "high"> = {
   "code.data.backend.attach": "high",
   "code.data.backend.create": "medium",
   "code.finish": "low", "code.image.view": "low", "code.preview.screenshot": "low", "code.web.fetch": "medium", "code.web.search": "medium",
-  "code.data.query.read": "low", "code.data.rows.seed": "medium", "code.data.migrations.list": "low", "code.data.policies.inspect": "low", "code.data.policies.apply": "high",
+  "code.data.query.read": "low", "code.data.rows.seed": "medium", "code.data.migrations.list": "low", "code.data.policies.inspect": "low", "code.data.policies.apply": "high", "code.data.users.list": "low", "code.data.users.roles.set": "high",
   "code.data.schema.inspect": "low", "code.data.schema.apply": "medium",
   "code.agent.spawn_async": "medium", "code.agent.continue": "medium", "code.agent.send_message": "medium", "code.agent.interrupt": "medium",
   "code.shell.exec_async": "high", "code.shell.process.wait": "low",

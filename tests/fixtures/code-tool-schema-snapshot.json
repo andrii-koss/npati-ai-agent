@@ -1,6 +1,6 @@
 {
-  "manifestVersion": 19,
-  "checksum": "d7263e515b408fabf71a46cb8345c713e96ce5d4e72f16e6790f96ab15ca0548",
+  "manifestVersion": 20,
+  "checksum": "8c9daf96f454fa105cb1101593147c21d84e94897e951701ce55634b3692eadf",
   "tools": [
     {
       "key": "code.agent.continue@1",
@@ -134,6 +134,20 @@
       "version": 1,
       "status": "active",
       "checksum": "67f6dcb7365809bb270a2089764efb1e82ca6668469551048795626b53f23688"
+    },
+    {
+      "key": "code.data.users.list@1",
+      "name": "code.data.users.list",
+      "version": 1,
+      "status": "active",
+      "checksum": "b5098f125ffe1c7f1fe7e225b46e6ea929c46383b5d139d2f4e3c86a060932a8"
+    },
+    {
+      "key": "code.data.users.roles.set@1",
+      "name": "code.data.users.roles.set",
+      "version": 1,
+      "status": "active",
+      "checksum": "fb7745ea84cb7cd173ce9dfeece686748ff1b56aaba44f71514880b5171d9bb2"
     },
     {
       "key": "code.deps.add@1",

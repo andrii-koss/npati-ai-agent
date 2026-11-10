@@ -65,7 +65,7 @@ export function codeDataExecutors(options: CodeDataToolOptions) {
         if (!options.projectData.createBackend) throw new CodeToolError("tool_not_configured", "Database creation is unavailable", 503, "configure", false, input.tool.name);
         const name = String(input.args.name ?? "").trim(), reason = String(input.args.reason ?? "").trim();
         if (!name || !reason) throw new CodeToolError("invalid_arguments", "A database name and reason are required", 400, "arguments", false, input.tool.name);
-        return await options.projectData.createBackend(input.ctx, input.companyId, input.projectId, { name, reason, separate: input.args.separate === true });
+        return await options.projectData.createBackend(input.ctx, input.companyId, input.projectId, { name, reason, ...(input.args.separate === true ? { separate: true } : {}) });
       }
       if (!apply) return await options.projectData.inspectSchema(input.ctx, input.companyId, input.projectId);
       const operation = input.args.operation as SchemaOperation;

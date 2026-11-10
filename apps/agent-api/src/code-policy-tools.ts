@@ -122,6 +122,7 @@ export const SHELL_TOOLS = new Set(["code.shell.exec_async", "code.shell.exec", 
 export const WRITE_TOOLS = new Set([
   "code.preview.restart",
   "code.data.rows.seed",
+  "code.data.users.roles.set",
   "code.data.policies.apply",
   "code.data.backend.create",
   "code.data.schema.apply",

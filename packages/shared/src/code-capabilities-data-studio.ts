@@ -269,6 +269,195 @@ export const CODE_DATA_STUDIO_CAPABILITIES: (CapabilityDefinition & { inputSchem
     }
   },
   {
+    "id": "code.data.users.list",
+    "inventoryIds": [
+      410
+    ],
+    "type": "tool",
+    "domain": "code",
+    "name": "code.data.users.list",
+    "description": "List the people registered on this project's site (dev database) with their roles. WHEN: the user asks who is an administrator, or before changing someone's role. Pass email to find one person. RETURNS: up to 50 users with email, status and roles.",
+    "useWhen": [
+      "The user asks who has which role on the site."
+    ],
+    "doNotUseWhen": [
+      "The project has no database."
+    ],
+    "agentCallable": true,
+    "userVisible": true,
+    "risk": "low",
+    "requiresConfirmation": false,
+    "requiredConnections": [],
+    "requiredPermissions": [
+      "workspace:read"
+    ],
+    "version": 1,
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedBackendId"
+      ],
+      "properties": {
+        "expectedBackendId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "email": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 320
+        }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": [
+        "kind",
+        "tool",
+        "toolVersion",
+        "schemaVersion",
+        "trust",
+        "note",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "code_tool_result"
+        },
+        "tool": {
+          "const": "code.data.users.list"
+        },
+        "toolVersion": {
+          "type": "integer"
+        },
+        "schemaVersion": {
+          "type": "integer"
+        },
+        "trust": {
+          "const": "untrusted_data"
+        },
+        "note": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "truncation": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "data": {
+          "type": "object"
+        }
+      }
+    }
+  },
+  {
+    "id": "code.data.users.roles.set",
+    "inventoryIds": [
+      411
+    ],
+    "type": "tool",
+    "domain": "code",
+    "name": "code.data.users.roles.set",
+    "description": "Give a person registered on this project's site the roles named by the user, for example make them an administrator (admin). WHEN: the user asks to make someone admin, manager or another role, or to take a role away. NOT WHEN: the person has not signed up on the site yet (tell the user they must sign up first; never create accounts or passwords for them). roles replaces the person's roles; keep \"user\" unless asked otherwise. Call with dryRun first; the change needs a human approval. RETURNS: the person's email with previous and new roles.",
+    "useWhen": [
+      "The user asks to give or take away a role such as admin."
+    ],
+    "doNotUseWhen": [
+      "The person has not signed up on the site yet."
+    ],
+    "agentCallable": true,
+    "userVisible": true,
+    "risk": "high",
+    "requiresConfirmation": false,
+    "requiredConnections": [],
+    "requiredPermissions": [
+      "workspace:write"
+    ],
+    "version": 1,
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedBackendId",
+        "email",
+        "roles"
+      ],
+      "properties": {
+        "expectedBackendId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "email": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 320
+        },
+        "roles": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+          }
+        },
+        "dryRun": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "required": [
+        "kind",
+        "tool",
+        "toolVersion",
+        "schemaVersion",
+        "trust",
+        "note",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "code_tool_result"
+        },
+        "tool": {
+          "const": "code.data.users.roles.set"
+        },
+        "toolVersion": {
+          "type": "integer"
+        },
+        "schemaVersion": {
+          "type": "integer"
+        },
+        "trust": {
+          "const": "untrusted_data"
+        },
+        "note": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "truncation": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "data": {
+          "type": "object"
+        }
+      }
+    }
+  },
+  {
     "id": "code.data.migrations.list",
     "inventoryIds": [
       406

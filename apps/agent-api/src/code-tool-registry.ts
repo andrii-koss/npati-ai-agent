@@ -49,8 +49,11 @@ export class CodeToolSchemaError extends Error {
  * same source as this registry — one artefact, no duplicated copy to drift.
  */
 export const CODE_TOOL_SCHEMAS: readonly CodeToolSchema[] = authoredSchemas as unknown as readonly CodeToolSchema[];
+/** Tools first published in manifest v20; every earlier manifest is built without them. */
+export const V20_ADDED_TOOL_NAMES: readonly string[] = ["code.data.users.list", "code.data.users.roles.set"];
+const V19_TOOL_SCHEMAS = CODE_TOOL_SCHEMAS.filter(tool => !V20_ADDED_TOOL_NAMES.includes(tool.name));
 // All pre-v16 sessions retain schema.apply@1 exactly as published.
-const V17_TOOL_SCHEMAS = CODE_TOOL_SCHEMAS.filter(tool => tool.name !== "code.preview.screenshot" || tool.version === 1);
+const V17_TOOL_SCHEMAS = V19_TOOL_SCHEMAS.filter(tool => tool.name !== "code.preview.screenshot" || tool.version === 1);
 const V16_TOOL_SCHEMAS = V17_TOOL_SCHEMAS.filter(tool => tool.name !== "code.preview.restart");
 const LEGACY_TOOL_SCHEMAS = V16_TOOL_SCHEMAS.filter(tool => tool.name !== "code.data.schema.apply" || tool.version === 1);
 
@@ -213,7 +216,7 @@ export const V12_TOOL_SCHEMAS = LEGACY_TOOL_SCHEMAS.filter(tool => !V15_ADDED_TO
 export const V13_TOOL_SCHEMAS = LEGACY_TOOL_SCHEMAS.filter(tool => !V15_ADDED_TOOL_NAMES.includes(tool.name) && tool.name !== "code.data.backend.create");
 export const V14_TOOL_SCHEMAS = LEGACY_TOOL_SCHEMAS.filter(tool => !V15_ADDED_TOOL_NAMES.includes(tool.name));
 export const V15_TOOL_SCHEMAS = LEGACY_TOOL_SCHEMAS;
-export const CODE_TOOL_MANIFEST_VERSION = 19;
+export const CODE_TOOL_MANIFEST_VERSION = 20;
 
 /* Step 6 publishes additive controls and spawn_async in v11; spawn@1 and manifests v1?v10 stay frozen. */
 
@@ -232,7 +235,7 @@ export const CODE_TOOL_MANIFEST_VERSION = 19;
  * places that report the artifact as stale, while `assertManifestConsistent()` — and therefore the manifest
  * the application publishes — is already satisfied.
  */
-export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "d7263e515b408fabf71a46cb8345c713e96ce5d4e72f16e6790f96ab15ca0548";
+export const PUBLISHED_TOOL_SCHEMA_CHECKSUM = "8c9daf96f454fa105cb1101593147c21d84e94897e951701ce55634b3692eadf";
 
 /**
  * Checksum of the v8 published set (36 tools: everything through the eleven `code.git.*` tools). Frozen for
@@ -411,7 +414,8 @@ export const KNOWN_TOOL_MANIFESTS: readonly CodeToolManifest[] = [
   toolManifest(V16_TOOL_SCHEMAS, 16),
   toolManifest(V17_TOOL_SCHEMAS, 17),
   // v19 only adds rename_field to code.data.schema.modify, so a session started on v18 keeps working with the same set.
-  toolManifest(CODE_TOOL_SCHEMAS, 18),
+  toolManifest(V19_TOOL_SCHEMAS, 18),
+  toolManifest(V19_TOOL_SCHEMAS, 19),
   toolManifest(CODE_TOOL_SCHEMAS, CODE_TOOL_MANIFEST_VERSION),
 ];
 
