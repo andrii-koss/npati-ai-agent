@@ -414,7 +414,15 @@
 
 .data-studio-container .schema-section {
   margin-bottom: 20px;
+}
+
+.data-studio-container .schema-table-scroll {
   overflow-x: auto;
+}
+
+.data-studio-container .schema-section-header > button {
+  position: relative;
+  z-index: 1;
 }
 
 .data-studio-container :is(.empty-rows-hint, .auth-empty-state, .auth-loading-state) {

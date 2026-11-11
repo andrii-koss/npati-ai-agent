@@ -38,6 +38,7 @@ export function DataStudioSchemaView({
           )}
         </div>
 
+        <div className="schema-table-scroll">
         <table className="data-studio-table schema-table">
           <thead>
             <tr>
@@ -76,6 +77,7 @@ export function DataStudioSchemaView({
             })}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* Relations Section */}
