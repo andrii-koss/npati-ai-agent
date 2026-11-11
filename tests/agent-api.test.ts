@@ -354,8 +354,9 @@ describe("Agent API", () => {
 
     const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Hello", contextType: "none" } });
     expect(response.statusCode).toBe(200);
-    expect(response.body).toContain('NPATI route \\"auto/chat\\"');
-    expect(response.body).toContain("Switch to another AI mode");
+    expect(response.body).toContain('The AI route \\"auto/chat\\" failed');
+    // HTTP 502 is a provider outage: the advice is to try again, not to switch the AI mode.
+    expect(response.body).toContain("The provider is temporarily unavailable");
     expect(response.body).not.toContain("OmniRoute");
   });
 

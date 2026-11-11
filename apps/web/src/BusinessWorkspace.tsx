@@ -3,7 +3,7 @@ import { useTranslation } from "./i18n";
 import { developmentIsActive, type AgentReply, type ProjectCardData } from "@npati/shared";
 import { defaultHybridRouter } from "@npati/shared/hybrid-router";
 import { FormEvent, Fragment, KeyboardEvent as ReactKeyboardEvent, ReactNode, SyntheticEvent, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { createPortal } from "react-dom";
 import { ChatMessageContent, projectChatText, stripInternalChatActions } from "./ChatMessageContent";
 import { UserPromptMessage } from "./UserPromptMessage";
@@ -128,7 +128,20 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     }
   }, [codeInbox.session?.projectId, codeInbox.snapshot?.phase, codeInbox.snapshot?.runId]);
   const [inboxSubmitting, setInboxSubmitting] = useState(false);
-  useEffect(() => { setNotice(""); }, [selected, codeInbox.session?.sessionId]);
+  // Moving into the conversation a failed message created must keep the failure notice the person still needs to read.
+  const keepNoticeOnSelectRef = useRef(false);
+  // A failure from the message that created this conversation, carried here by the navigation; it stays while the person
+  // is in that conversation, however often the selection settles after the route mounts.
+  const routeLocation = useLocation();
+  const carriedNotice = routeLocation.state as { chatNotice?: unknown; chatNoticeFor?: unknown } | null;
+  useEffect(() => {
+    if (keepNoticeOnSelectRef.current) { keepNoticeOnSelectRef.current = false; return; }
+    if (typeof carriedNotice?.chatNotice === "string" && (!selected || carriedNotice.chatNoticeFor === selected)) return;
+    setNotice("");
+  }, [selected, codeInbox.session?.sessionId]);
+  useEffect(() => {
+    if (typeof carriedNotice?.chatNotice === "string" && carriedNotice.chatNotice) setNotice(carriedNotice.chatNotice);
+  }, [routeLocation.key]);
   const inboxSubmission = useRef(new InboxSubmission());
   const inboxMutationBusy = useRef(false);
   const draftVersion = useRef(0);
@@ -379,7 +392,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     followBottomRef.current = true;
     setSelected(initialConversationId ?? null);
     setReplyMeta(null);
-    setNotice("");
+    // Opening the conversation a failed message created keeps that failure on screen.
+    if (!(typeof carriedNotice?.chatNotice === "string" && carriedNotice.chatNoticeFor === initialConversationId)) setNotice("");
     if (!initialConversationId || !selectedRef.current) {
       setActiveTurn("");
       resetProgress();
@@ -703,9 +717,12 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       // Stopped (or cut off) in a new chat: the server already saved this message in a conversation, so the chat moves there
       // and the next message continues it instead of starting another one. Stop ends the server stream first, so this is
       // not always an AbortError.
+      const stoppedByPerson = typed.name === "AbortError" || (streamControllerRef.current?.controller === controller && streamControllerRef.current.stopRequested === true);
       if (startedConversationId && !privateRequest && !selected && selectedChatRef.current === conversationAtSubmit) {
+        keepNoticeOnSelectRef.current = true;
         setSelected(startedConversationId);
-        navigate(`/c/${startedConversationId}`, { replace: true });
+        // /c/:id is another route, so the chat mounts again: a failure travels with the navigation and is shown there.
+        navigate(`/c/${startedConversationId}`, { replace: true, state: { ...(business ? {} : { neutralChat: true }), ...(stoppedByPerson ? {} : { chatNotice: typed.message, chatNoticeFor: startedConversationId }) } });
       }
       // A stop ends the server stream first, so the read may end with "no result" before the abort lands; it is still a stop.
       if (typed.name === "AbortError" || (streamControllerRef.current?.controller === controller && streamControllerRef.current.stopRequested)) {

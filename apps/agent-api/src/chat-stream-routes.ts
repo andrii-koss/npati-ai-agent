@@ -750,7 +750,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         request.log.error(error);
         const expected = error instanceof WorkspaceAccessError || error instanceof StorageRateLimitError || error instanceof ContextValidationError || error instanceof SecurityPolicyViolation || error instanceof AdmissionError || error instanceof ProjectOrchestrationError;
         const route = expected ? undefined : await getAIContext(auth).then((ai) => ai.model).catch(() => undefined);
-        const detail = expected ? error.message : publicChatError(error, route);
+        const detail = expected ? error.message : publicChatError(error, route, request.body.message ?? "");
         progress({ type: "final_generation_failed", error: detail });
         send("error", { error: { code: expected ? (error as any).code ?? "ERROR" : "AGENT_UNAVAILABLE", message: detail } });
       } finally {

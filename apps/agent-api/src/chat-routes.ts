@@ -507,7 +507,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
       if (error instanceof AdmissionError) return reply.header("retry-after", String(Math.max(1, Math.ceil(error.retryAfterMs / 1000)))).code(429).send({ error: { code: error.code, message: error.message } });
       request.log.error(error);
       const route = authForError ? await getAIContext(authForError).then((ai) => ai.model).catch(() => undefined) : undefined;
-      const message = publicChatError(error, route);
+      const message = publicChatError(error, route, String((request.body as { message?: unknown } | undefined)?.message ?? ""));
       return reply.code(502).send({ error: { code: "AGENT_UNAVAILABLE", message } });
     }
   });

@@ -1,11 +1,25 @@
 /* Client-safe chat and company-run messages.
  * Extracted verbatim from app.ts (step 2a of docs/refactoring/PLAN.md).
  */
-import { detectCompanyChatLanguage } from "./company-chat-i18n";
+import { detectCompanyChatLanguage, resolveConversationLanguage } from "./company-chat-i18n";
+import { providerErrorCopy, type ProviderFailureReason } from "./chat-provider-error-i18n";
 import { InferenceRouteFailure } from "./production-resilient-ai-engine";
 import { SelfHealingExhaustedError } from "./resilience-admission-queue";
 
-export function publicChatError(error: unknown, route?: string) {
+/**
+ * The language of a failure notice. A short Latin-script message ("Try again", "Hello") does not reliably show its language,
+ * so it gets English unless it carries letters only one language uses; other scripts are unambiguous.
+ */
+function noticeLanguage(message: string) {
+  const language = resolveConversationLanguage(message, []);
+  const latinLanguages = ["fr", "de", "es", "it", "pl", "pt", "nl", "tr"];
+  if (!latinLanguages.includes(language)) return language;
+  const letters = (message.match(/\p{L}/gu) ?? []).length;
+  return letters >= 24 || /[äöüßñ¿¡ãõçœèêëîïûùąćęłńśźżğış]/iu.test(message) ? language : "en";
+}
+
+/** `requestMessage` decides the language of the provider failure text, so it matches the language the person writes in. */
+export function publicChatError(error: unknown, route?: string, requestMessage = "") {
   const raw = error instanceof InferenceRouteFailure && error.cause instanceof Error
     ? error.cause.message
     : error instanceof Error ? error.message : String(error);
@@ -28,30 +42,22 @@ export function publicChatError(error: unknown, route?: string) {
           }))
         : [];
     const selected = attempts[0]?.modelId ?? route;
-    const routeLabel = selected && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,100}$/.test(selected)
-      ? `NPATI route "${selected}"`
-      : "The selected NPATI AI route";
+    const routeName = selected && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,100}$/.test(selected) ? selected : "NPATI";
     const status = Number(/\bAPI\s*\[(\d{3})\]/i.exec(raw)?.[1]) || attempts[0]?.httpStatus || (Number(/\bHTTP\s+(\d{3})\b/i.exec(raw)?.[1]) || undefined);
     const fallback = attempts.length > 1 ? attempts.at(-1) : undefined;
-    const fallbackLabel = fallback?.modelId && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,100}$/.test(fallback.modelId)
-      ? ` Fallback route "${fallback.modelId}" also failed${fallback.httpStatus ? ` (HTTP ${fallback.httpStatus})` : ""}.`
-      : "";
-    const reason = /no active credentials for provider/i.test(raw)
-      ? "No active provider credential is available. Reconnect this provider in AI Marketplace."
-      : status === 401 || status === 403
-      ? "The provider denied the request. Check its connection and permissions in AI Marketplace."
-      : status === 404
-        ? "The provider could not find this model. Check the model ID in AI Marketplace."
-        : status === 429
-          ? "The provider rate limit or quota was reached. Try again later or choose another model."
-          : status === 400
-            ? "The provider rejected the request. Check the model settings in AI Marketplace."
-            : selected?.startsWith("auto")
-              ? "Switch to another AI mode or choose a model in AI Marketplace."
-              : "Try again or choose another model in AI Marketplace.";
-    return `${routeLabel} failed${status ? ` (HTTP ${status})` : ""}.${fallbackLabel} ${reason}`;
+    const text = providerErrorCopy(noticeLanguage(requestMessage));
+    const fallbackLabel = fallback?.modelId && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,100}$/.test(fallback.modelId) ? text.fallback(fallback.modelId, fallback.httpStatus) : "";
+    // A provider outage (5xx, timeout) is temporary: the advice is to try again, not to change the AI mode.
+    const reason: ProviderFailureReason = /no active credentials for provider/i.test(raw) ? "noCredential"
+      : status === 401 || status === 403 ? "denied"
+      : status === 404 ? "notFound"
+      : status === 429 ? "rateLimit"
+      : status === 400 ? "rejected"
+      : (status !== undefined && status >= 500) || /timed? ?out|ECONNRESET|ECONNREFUSED|unavailable|overload/i.test(raw) ? "unavailable"
+      : selected?.startsWith("auto") ? "switchMode" : "tryAgain";
+    return `${text.failed(routeName, status)}${fallbackLabel} ${text.reasons[reason]}`;
   }
-  return "NPATI Agent could not complete this message. Please try again.";
+  return providerErrorCopy(noticeLanguage(requestMessage)).generic;
 }
 
 /** Run failures caused by the company's own configuration or policy, not by the AI model. */
