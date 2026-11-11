@@ -50,14 +50,14 @@ it("renders the selected Company's code projects/sessions and opens the exact sa
     });
     const row = [...host.querySelectorAll("tr")].find(row => row.textContent?.includes("11223344"));
     expect(row).toBeTruthy();
-    const open = [...row!.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.trim() === "Open Workspace");
+    const open = row!.querySelector<HTMLButtonElement>('button[aria-label="Open Workspace"]');
     expect(open).toBeTruthy();
     await act(async () => { open!.click(); });
     const request = fetcher.mock.calls.find(([url]) => String(url).endsWith("/code/active-context"));
     expect(request).toBeTruthy();
     expect(JSON.parse(String(request![1]?.body))).toEqual({ contextType: "project", projectId: "project-c1", sessionId });
     expect(host.querySelector("[data-route]")?.textContent).toBe("/settings/code/company-c1/project-c1?session=" + sessionId);
-    const chat = [...row!.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.trim() === "Open in chat");
+    const chat = row!.querySelector<HTMLButtonElement>('button[aria-label="Open in chat"]');
     await act(async () => { chat!.click(); });
     expect(host.querySelector("[data-route]")?.textContent).toBe("/chat?company=company-c1&project=project-c1");
     await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.trim() === "＋ New session")!.click());

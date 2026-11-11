@@ -1,0 +1,95 @@
+.code-agent-settings .code-records-panel {
+  min-width: 0;
+  margin-bottom: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 3%);
+}
+
+.code-agent-settings .code-records-toolbar,
+.code-agent-settings .code-records-pagination,
+.code-agent-settings .code-record-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.code-agent-settings .code-records-toolbar {
+  flex-wrap: wrap;
+  padding: 8px 10px;
+}
+
+.code-agent-settings .code-records-toolbar-spacer { flex: 1; }
+
+.code-agent-settings .code-records-count {
+  margin-right: 4px;
+  color: #475569;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.code-agent-settings .code-records-panel .code-record-icon {
+  display: inline-flex;
+  flex: 0 0 30px;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  background: #fff;
+  color: #334155;
+  cursor: pointer;
+}
+
+.code-agent-settings .code-records-panel .code-record-icon:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.code-agent-settings .code-records-panel .code-record-icon.danger { color: #b91c1c; }
+.code-agent-settings .code-records-panel .code-record-icon:disabled { opacity: 0.4; cursor: not-allowed; }
+.code-agent-settings .code-records-panel :is(button, input):focus-visible { outline: 2px solid var(--npati-red, #d83438); outline-offset: 2px; }
+
+.code-agent-settings .code-records-panel .automations-table-container {
+  margin: 0;
+  border: 0;
+  border-top: 1px solid #e2e8f0;
+  border-bottom: 1px solid #e2e8f0;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: auto;
+}
+
+.code-agent-settings .code-records-panel .code-record-select { width: 32px; }
+.code-agent-settings .code-record-select input { width: 14px; height: 14px; margin: 0; accent-color: var(--npati-red, #d83438); vertical-align: middle; }
+.code-agent-settings .code-record-row-actions { flex-wrap: nowrap; }
+
+.code-agent-settings .code-records-pagination {
+  justify-content: flex-end;
+  padding: 8px 10px;
+  color: #475569;
+  font-size: 12px;
+}
+.code-agent-settings .code-records-pagination > span { margin-right: 6px; font-variant-numeric: tabular-nums; }
+.code-agent-settings .code-records-notice { margin: 0; padding: 8px 12px; color: #334155; font-size: 12px; }
+.code-agent-settings .code-records-content[hidden] { display: none; }
+
+.code-agent-settings .code-records-panel.is-fullscreen {
+  position: fixed;
+  inset: 16px;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  box-shadow: 0 0 0 100vmax rgb(15 23 42 / 35%);
+}
+.code-agent-settings .is-fullscreen .code-records-content { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.code-agent-settings .is-fullscreen .automations-table-container { flex: 1; min-height: 0; }
+
+@media (max-width: 600px) {
+  .code-agent-settings .code-records-panel.is-fullscreen { inset: 8px; }
+}

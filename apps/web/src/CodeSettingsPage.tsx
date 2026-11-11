@@ -11,6 +11,7 @@ import { CodeQueuePanel } from "./CodeQueuePanel";
 import { CodeMembershipPanel } from "./CodeMembershipPanel";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { persistedSessionMode } from "./code-workspace/actions";
+import { CodeProjectsTable, CodeSessionsTable } from "./code-settings/CodeRecordsTables";
 import {
   type CompanySummary,
   type CodeProject,
@@ -23,14 +24,7 @@ import {
   type VerifyCommands,
   codeErrorMessage,
   errorCode,
-  formatDate,
-  classificationLabel,
-  retentionLabel,
   sessionModeLabel,
-  sessionStatusLabel,
-  projectStatusClass,
-  sessionStatusClass,
-  ToolchainCell,
   CreateProjectDrawer,
   ProjectDetailsDrawer,
   CreateSessionDrawer,
@@ -439,79 +433,11 @@ function CodeSettingsPageContent() {
               </button>
             </div>
           ) : (
-            <div className="automations-table-container">
-              <table className="automations-table">
-                <thead>
-                  <tr>
-                    <th>{isUk ? "Проєкт" : "Project"}</th>
-                    <th>{isUk ? "Репозиторій" : "Repository"}</th>
-                    <th>Toolchain</th>
-                    <th>{isUk ? "Класифікація" : "Classification"}</th>
-                    <th>Retention</th>
-                    <th>{isUk ? "Оновлено" : "Updated"}</th>
-                    <th aria-label={isUk ? "Дії" : "Actions"} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleProjects.map((project) => (
-                    <tr key={project.id}>
-                      <td className="automation-title-cell">
-                        <strong>{project.name}</strong>
-                        <span className={`status-pill ${projectStatusClass(project.status)}`}>{project.status ?? "—"}</span>
-                      </td>
-                      <td>
-                        {project.repositoryUrl ? (
-                          <span className="code-repository">
-                            <span className="ds-muted">{project.repositoryUrl}</span>
-                            {(project.repositoryBranch || project.defaultBranch) && (
-                              <span className="data-studio-badge">{project.repositoryBranch || project.defaultBranch}</span>
-                            )}
-                          </span>
-                        ) : <span className="ds-muted">—</span>}
-                      </td>
-                      <td><ToolchainCell toolchain={project.toolchain} isUk={isUk} /></td>
-                      <td><span className="data-studio-badge">{classificationLabel(project.dataClassification, isUk)}</span></td>
-                      <td><span className="data-studio-badge">{retentionLabel(project.retentionClass, isUk)}</span></td>
-                      <td className="ds-muted">{formatDate(project.updatedAt, isUk)}</td>
-                      <td className="automation-actions-cell">
-                        <button type="button" className="automation-action-btn run-btn" onClick={() => setDetailId(project.id)}>
-                          {isUk ? "Деталі" : "Details"}
-                        </button>
-                        <button
-                          type="button"
-                          className="automation-action-btn"
-                          disabled={busyId === project.id || readOnly}
-                          title={readOnly ? readOnlyTitle : undefined}
-                          onClick={() => void detectToolchain(project)}
-                        >
-                          {busyId === project.id ? "…" : isUk ? "Визначити toolchain" : "Detect toolchain"}
-                        </button>
-                        <button
-                          type="button"
-                          className="automation-action-btn"
-                          disabled={readOnly}
-                          title={readOnly ? readOnlyTitle : undefined}
-                          onClick={() => { setSessionProjectId(project.id); setSessionOpen(true); }}
-                        >
-                          {isUk ? "Сесії" : "Sessions"}
-                        </button>
-                        {project.status !== "archived" && (
-                          <button
-                            type="button"
-                            className="automation-action-btn danger"
-                            disabled={busyId === project.id || readOnly}
-                            title={readOnly ? readOnlyTitle : undefined}
-                            onClick={() => void archiveProject(project)}
-                          >
-                            {isUk ? "Архівувати" : "Archive"}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <CodeProjectsTable key={`projects-${companyId}-${searchQuery}-${showArchived}`}
+              companyId={companyId} items={visibleProjects} isUk={isUk} readOnly={readOnly} busyId={busyId}
+              api={apiFetch} onChanged={reload} onDetails={project => setDetailId(project.id)}
+              onDetect={project => void detectToolchain(project)} onArchive={project => void archiveProject(project)}
+              onSessions={project => { setSessionProjectId(project.id); setSessionOpen(true); }} />
           )}
 
           <section className="ds-section-title">
@@ -538,48 +464,10 @@ function CodeSettingsPageContent() {
           </section>
 
           {sessions.length > 0 && (
-            <div className="automations-table-container">
-              <table className="automations-table">
-                <thead>
-                  <tr>
-                    <th>{isUk ? "Сесія" : "Session"}</th>
-                    <th>{isUk ? "Проєкт" : "Project"}</th>
-                    <th>{isUk ? "Режим" : "Mode"}</th>
-                    <th>{isUk ? "Статус" : "Status"}</th>
-                    <th>{isUk ? "Класифікація" : "Classification"}</th>
-                    <th>{isUk ? "Створено" : "Created"}</th>
-                    <th aria-label={isUk ? "Дії" : "Actions"} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {sessions.map((session) => (
-                    <tr key={session.id}>
-                      <td><code>{session.id.slice(0, 8)}</code></td>
-                      <td>{session.projectName ?? projects.find((project) => project.id === session.projectId)?.name ?? "—"}</td>
-                      <td>{sessionModeLabel(session.mode, isUk)}</td>
-                      <td><span className={`status-pill ${sessionStatusClass(session.status)}`}>{sessionStatusLabel(session.status, isUk)}</span></td>
-                      <td><span className="data-studio-badge">{classificationLabel(session.dataClassification, isUk)}</span></td>
-                      <td className="ds-muted">{formatDate(session.createdAt, isUk)}</td>
-                      <td className="automation-actions-cell">
-                        <button type="button" className="automation-action-btn" disabled={busyId === session.id} onClick={() => void openSession(session)}>{isUk ? "Відкрити Workspace" : "Open Workspace"}</button>
-                        <button type="button" className="automation-action-btn" disabled={busyId === session.id || readOnly || session.status === "archived"} onClick={() => void openSession(session, true)}>{isUk ? "У чаті" : "Open in chat"}</button>
-                        {session.status !== "archived" && (
-                          <button
-                            type="button"
-                            className="automation-action-btn danger"
-                            disabled={busyId === session.id || readOnly}
-                            title={readOnly ? readOnlyTitle : undefined}
-                            onClick={() => void archiveSession(session)}
-                          >
-                            {isUk ? "Архівувати" : "Archive"}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <CodeSessionsTable key={`sessions-${companyId}`} companyId={companyId} items={sessionList}
+              projects={projectList} isUk={isUk} readOnly={readOnly} busyId={busyId} api={apiFetch} onChanged={reload}
+              onOpen={(session, inChat) => void openSession(session, inChat)}
+              onArchive={session => void archiveSession(session)} />
           )}
 
           {companyId && (

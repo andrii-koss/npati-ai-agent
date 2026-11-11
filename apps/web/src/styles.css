@@ -48,6 +48,7 @@
 @import "./styles/36-company-filters.css";
 @import "./styles/37-business-spacing.css";
 @import "./styles/38-workspace-panels.css";
+@import "./styles/39-code-records.css";
 
 /* Hide the assistant accent while preserving its original border and spacing. */
 .message-stream article.assistant {
