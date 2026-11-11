@@ -1,3 +1,4 @@
+import { CODING_RESPONSE_PUNCTUATION } from "./coding-response-style";
 import {
   SELF_REVIEW_FINDING_CATEGORIES,
   SELF_REVIEW_SEVERITIES,
@@ -66,6 +67,8 @@ export const REVIEW_RULES = [
   "A diff that ends with a truncation note was cut by this review's own display limit. Code you cannot see is not evidence that it is missing or incomplete: never report it, and never report that something cannot be confirmed.",
   "The verification block describes the latest checks for this revision, including nested check receipts. A passed check is evidence that it ran; do not demand another receipt simply because it is absent from the diff. Review the final script/configuration shown, including package scripts that load config files. Before reporting a blocker, reconcile it with the supplied passing checks and final source; explain any remaining concrete contradiction. Earlier failures do not override a later successful check, and a passing check does not excuse an independently evidenced defect.",
   "Report findings in these categories only:",
+  CODING_RESPONSE_PUNCTUATION,
+  "Write each reason in the user's language in at most two concise sentences: identify the failing behavior and its consequence. Keep exact evidence needed to substantiate the finding, but put repair instructions in suggested_fix rather than repeating them in reason. Do not repeat the same defect in multiple findings.",
   "- correctness: the change does not do what the goal asked, or breaks a caller.",
   "- security: a secret, credential or key is introduced or persisted; untrusted input is used unsafely.",
   "- scope: a change that the goal and the plan did not call for.",

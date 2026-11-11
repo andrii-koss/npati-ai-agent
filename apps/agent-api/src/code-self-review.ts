@@ -512,7 +512,7 @@ export function selfReviewUnresolvedNotice(verdict: SelfReviewVerdict | undefine
   const unresolved = verdict?.unresolved ?? [];
   const blocking = unresolved.filter((finding) => finding.blocking);
   const detail = (blocking.length ? blocking : unresolved).slice(0, 5)
-    .map((finding) => `- ${finding.category}${finding.file ? ` (${finding.file})` : ""}: ${finding.reason}`).join("\n");
+    .map((finding) => `- **${(finding.file || finding.category).replace(/([\\`*_\[\]])/g, "\\$1")}**: ${finding.reason}`).join("\n\n");
   return selfReviewFindingsNotice(resolveCodingConversationLanguage(prompt), detail);
 }
 

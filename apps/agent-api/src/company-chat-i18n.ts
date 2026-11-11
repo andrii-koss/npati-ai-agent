@@ -314,7 +314,7 @@ export function selfReviewFindingsNotice(language: CompanyChatLanguage, detail: 
     ar:"⚠️ وجدت مراجعة الشيفرة التلقائية مشكلات لم تُصلح. يرجى التحقق منها:",
     hi:"⚠️ स्वचालित कोड समीक्षा में ऐसी समस्याएँ मिलीं जो ठीक नहीं हुईं। कृपया जाँचें:",
   };
-  return `${labels[language]}\n${detail}`;
+  return `**${labels[language]}**\n\n${detail}`;
 }
 
 export function selfReviewUnavailableNotice(language: CompanyChatLanguage): string {

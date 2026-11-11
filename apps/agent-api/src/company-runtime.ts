@@ -1,4 +1,5 @@
 import { companyChatEntityReferencesPrompt } from "./project-chat-cards";
+import { CODING_RESPONSE_STYLE } from "./coding-response-style";
 import {canonicalJson,sha256} from "@npati/workspace";
 import {defaultCapabilityRegistry} from "@npati/shared";
 import type {ChatToolDefinition} from "@npati/omniroute-adapter";
@@ -503,7 +504,7 @@ export class CompanyDelegationRuntime {
       let result = await executeAgentStages({ ai: this.ai, main, selected, reviewer, mainAssignedWork, mode: plan.mode,
         agentModels: execution.agentModels, signal, timeoutMs: this.timeoutMs, task: protectedTask + sourceLimitation, evidence,
         managerInstruction: protect(instruction(company, main, true, !options.noMemory, linked) + entityContext + chatLanguageInstruction(input.task)
-          + (existing.run.projectId ? "\nSummarize only verified tool results in at most 120 words. This response cannot execute tools or save files." : "")),
+          + (existing.run.projectId ? "\n" + CODING_RESPONSE_STYLE + "\nThis response cannot execute tools or save files." : "")),
         knowledgeContext, entityContext, runId: created.run.id,
         isRuntimeRunId: id => this.store.getCompanyAgentRun(ctx, companyId, id).then(() => true, () => false),
         admission: { tenantId: ctx.workspaceId, tier: ctx.permissions.includes("admin:all") ? "enterprise" : "pro" },
@@ -528,7 +529,7 @@ export class CompanyDelegationRuntime {
         result = await this.ai.chat({
           model: this.strictInferenceRouting ? inferenceModels[0] : comboModel(main.modelId), fallbackModel: this.strictInferenceRouting ? undefined : comboModel(main.fallbackModelId), signal, timeoutMs: this.timeoutMs, admission: { tenantId: ctx.workspaceId, tier: ctx.permissions.includes("admin:all") ? "enterprise" : "pro" }, idempotencyKey: `${created.run.id}:grounded-final`,
           messages: [
-            { role: "system", content: protect(instruction(company, main, true, !options.noMemory, linked) + entityContext + "\n\nYou are the final grounding verifier. Use the authoritative Company Knowledge below as the source of truth. Preserve exact relevant values. Remove unsupported claims. Never omit the direct answer requested by the user." + chatLanguageInstruction(input.task) + (existing.run.projectId ? "\nSummarize only verified tool results in at most 120 words. Do not output source code or proposed edits. This response cannot save files; Build and Preview are handled by the project pipeline." : "")) },
+            { role: "system", content: protect(instruction(company, main, true, !options.noMemory, linked) + entityContext + "\n\nYou are the final grounding verifier. Use the authoritative Company Knowledge below as the source of truth. Preserve exact relevant values. Remove unsupported claims. Never omit the direct answer requested by the user." + chatLanguageInstruction(input.task) + (existing.run.projectId ? "\n" + CODING_RESPONSE_STYLE + "\nDo not output source code or proposed edits. This response cannot save files; Build and Preview are handled by the project pipeline." : "")) },
             { role: "user", content: protect([protectedTask, knowledgeContext, `Delegated draft to verify:\n${result.content}`, "Return only the corrected, knowledge-grounded final answer."].join("\n\n")) },
           ],
         });

@@ -1,4 +1,5 @@
 import { preferredEditTool, type EditProfile } from "./code-tools-write";
+import { CODING_RESPONSE_STYLE } from "./coding-response-style";
 import { isToolImageMessage } from "./coding-agent-image-delivery";
 import type { ChatMessage, ChatToolCall } from "@npati/omniroute-adapter";
 import type { AuthContext, CodeSession } from "@npati/workspace";
@@ -227,6 +228,8 @@ export function buildSystemPrompt(input: {
     ...editingGuidance,
     "",
     ...CODE_RUN_DISCIPLINE_RULES,
+    "",
+    CODING_RESPONSE_STYLE,
     "",
     limitLine,
     ...(input.extraLines && input.extraLines.length > 0 ? ["", ...input.extraLines] : []),
