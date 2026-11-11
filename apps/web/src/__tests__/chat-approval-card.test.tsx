@@ -58,3 +58,16 @@ it("does not offer it for a git write, which still asks", async () => {
   expect(host.querySelectorAll("button").length).toBeGreaterThan(0);
   expect(host.querySelector('[data-testid="approval-always"]')).toBeNull();
 });
+it("speaks the conversation's language and names the action in plain words", async () => {
+  mocks.api.mockImplementation(async (url: string) => url.endsWith("/chat/data-auto-allow") ? { autoAllow: false, revision: 1, canChange: true }
+    : url.includes("/approvals/") ? { approval: { id: "approval", status: "pending", runId: "run", toolName: props.toolName, actionSummary: "Main requests project.data.rows.delete" } }
+    : { run: { id: "run", status: "awaiting_approval" } });
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
+  await act(async () => root!.render(<ChatApprovalCard {...props} language="uk" />));
+  expect(host.textContent).toContain("Потрібне підтвердження");
+  expect(host.textContent).toContain("Змінити базу даних");
+  expect(host.textContent).toContain("Очікує вашого рішення");
+  expect(host.textContent).not.toContain("Main requests");
+  expect([...host.querySelectorAll("button")].map(button => button.textContent)).toEqual(["Підтвердити", "Відхилити", "Дозволити і більше не питати"]);
+});

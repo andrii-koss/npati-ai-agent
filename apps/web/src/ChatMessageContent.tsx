@@ -15,6 +15,7 @@ import { AudioAttachmentPlayer, SynthesizedVoiceAudioPlayer } from "./chat-messa
 import { RenderedCodeBlock, RenderedTableBlock } from "./chat-message-code-table";
 import { codingStopCopy } from "./coding-stop-copy";
 import { approvalLine, ChatApprovalCard } from "./chat-approval-card";
+import { messageLanguage } from "./approval-i18n";
 
 export { collectSourceTitles, isSourceCitationLine, toTrackedChatUrl };
 
@@ -473,6 +474,11 @@ function EditableContentCard({
 }
 
 export function ChatMessageContent({ content }: { content: string }) {
+  // A confirmation card inside a reply speaks the reply's language: the agent answers in the language the person writes in.
+  // The interface language as the app stores it; read directly, since this component also renders without a provider.
+  let interfaceLanguage = "en";
+  try { interfaceLanguage = localStorage.getItem("npati_language") || "en"; } catch { /* storage unavailable */ }
+  const replyLanguage = messageLanguage(content.replace(/\[\[npati-approval:[^\]]*\]\]/g, ""), interfaceLanguage);
   const safeContent = stripInternalChatActions(content)
     .replace(/[\u2014\u2013]/g, " - ")
     .replace(/<[|｜]end[▁_]of[▁_]sentence[|｜]>/giu, "")
@@ -492,7 +498,7 @@ export function ChatMessageContent({ content }: { content: string }) {
     const line = lines[i]!;
     const approval = approvalLine.exec(line.trim());
     if (approval) {
-      elements.push(<ChatApprovalCard key={`approval-${i}`} companyId={approval[1]!} runId={approval[2]!} approvalId={approval[3]!} toolName={approval[4]!} />);
+      elements.push(<ChatApprovalCard key={`approval-${i}`} companyId={approval[1]!} runId={approval[2]!} approvalId={approval[3]!} toolName={approval[4]!} language={replyLanguage} />);
       i++;
       continue;
     }

@@ -14,10 +14,10 @@ const approvals = [
   { id: "shell", toolName: "code.shell.exec", runId: "run-1" },
   { id: "other", toolName: "code.fs.delete", runId: "run-2" },
 ];
-async function mount(fetchMock: ReturnType<typeof vi.fn>) {
+async function mount(fetchMock: ReturnType<typeof vi.fn>, language?: string) {
   vi.stubGlobal("fetch", fetchMock);
   const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
-  await act(async () => { root!.render(<I18nProvider><ChatRunApprovals companyId="c" runId="run-1" /></I18nProvider>); await new Promise(resolve => setTimeout(resolve, 0)); });
+  await act(async () => { root!.render(<I18nProvider><ChatRunApprovals companyId="c" runId="run-1" language={language} /></I18nProvider>); await new Promise(resolve => setTimeout(resolve, 0)); });
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
   return host;
 }
@@ -36,8 +36,9 @@ describe("approvals while the agent waits", () => {
     expect(posts(fetchMock)).toEqual([]);
     expect(host.querySelectorAll('[data-testid="run-approval"]')).toHaveLength(2);
     expect(host.textContent).toContain("leads");
-    expect(host.textContent).toContain("code.shell.exec");
-    expect(host.textContent).not.toContain("code.fs.delete");
+    // A terminal request is named in plain words, not by its tool id.
+    expect(host.textContent).toContain("Run a command in the terminal");
+    expect(host.textContent).not.toContain("Delete a file");
   });
 
   it("describes a row change as the change itself, not a tool name", async () => {
@@ -45,6 +46,20 @@ describe("approvals while the agent waits", () => {
     const host = await mount(server(url => url.includes("/approvals?") ? reply({ approvals: [update] }) : undefined));
     expect(host.textContent).toContain('In products set price = 95 where title eq "Круасан".');
     expect(host.textContent).not.toContain("code.data.rows.update");
+  });
+
+  it("speaks the language the person writes in, whatever the interface language", async () => {
+    const del = { id: "d1", toolName: "code.fs.delete", runId: "run-1", inputPayload: { projectId: "p", targets: [{ path: "temp-check.txt" }] } };
+    const shell = { id: "s1", toolName: "code.shell.exec", runId: "run-1" };
+    const uk = await mount(server(url => url.includes("/approvals?") ? reply({ approvals: [del, shell] }) : undefined), "uk");
+    expect(uk.textContent).toContain("Потрібен ваш дозвіл");
+    expect(uk.textContent).toContain("Видалити файл: temp-check.txt.");
+    expect(uk.textContent).toContain("Виконати команду в терміналі");
+    expect([...uk.querySelectorAll("button")].map(button => button.textContent)).toEqual(expect.arrayContaining(["Дозволити", "Відхилити", "Дозволити і більше не питати"]));
+    await act(async () => root?.unmount()); root = undefined; document.body.innerHTML = "";
+    const ja = await mount(server(url => url.includes("/approvals?") ? reply({ approvals: [shell] }) : undefined), "ja");
+    expect(ja.textContent).toContain("許可が必要です");
+    expect(ja.textContent).toContain("ターミナルでコマンドを実行");
   });
 
   it("names the file a delete would remove", async () => {

@@ -34,6 +34,7 @@ import { ChatPreviewOpenContext } from "./ChatProjectPreviewCard";
 import { ChatFileViewerProvider } from "./ChatFileViewer";
 import { ChatPreviewPanelProvider } from "./ChatPreviewPanel";
 import { ChatRunApprovals } from "./ChatRunApprovals";
+import { messageLanguage } from "./approval-i18n";
 export * from "./business-workspace-page-views";
 export * from "./business-workspace-cards";
 export * from "./business-workspace-shared";
@@ -828,7 +829,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
             />
           )}
           {/* A run started from the chat waits for its confirmation too, not only a development process run. */}
-          {agentWorking && (development.project?.companyId ?? companyId) && <ChatRunApprovals companyId={(development.project?.companyId ?? companyId)!} runId={development.project && developmentIsActive(development.project) ? development.project.runId ?? null : null} projectIds={[development.project?.projectId, development.activeProject?.projectId, selectedProject?.projectId, codeInbox.session?.projectId].filter((id): id is string => Boolean(id))} />}
+          {agentWorking && (development.project?.companyId ?? companyId) && <ChatRunApprovals language={messageLanguage([...messages].reverse().find(message => message.role === "user")?.content, development.project?.responseLanguage ?? language)} companyId={(development.project?.companyId ?? companyId)!} runId={development.project && developmentIsActive(development.project) ? development.project.runId ?? null : null} projectIds={[development.project?.projectId, development.activeProject?.projectId, selectedProject?.projectId, codeInbox.session?.projectId].filter((id): id is string => Boolean(id))} />}
           {thinking.visible && <ChatThinking key="turn-thinking" text={thinking.text} />}
           {/* After the messages: this card stands in briefly until the reply that carries the real one arrives. */}
           {showFallbackCard && fallbackCard && (

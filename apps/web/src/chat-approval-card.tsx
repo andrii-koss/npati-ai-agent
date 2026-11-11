@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "./business-workspace-shared";
 import { useTranslation } from "./i18n";
+import { approvalCopy, approvalToolLabel } from "./approval-i18n";
 import { dataAutoAllowPath, saveDataAutoAllow, type DataAutoAllowView } from "./company/CompanyDataAutoAllow";
 
 /** `[[npati-approval:<companyId>:<runId>:<approvalId>:<toolName>]]`, stored with the assistant reply so the card survives reloads. */
@@ -9,22 +10,17 @@ export const approvalLine = /^\[\[npati-approval:([0-9a-f-]{36}):([0-9a-f-]{36})
 type Approval = { id: string; status: string; toolName: string; actionSummary?: string; runId?: string | null; expiresAt?: string | null; consumedAt?: string | null; inputPayload?: Record<string, unknown> };
 type RunDetails = { run: { id: string; status: string; errorMessage?: string | null; result?: string | null } };
 
-const copy: Record<string, Record<string, string>> = {
-  en: { title: "Confirmation required", approve: "Approve", resume: "Continue", reject: "Reject", pending: "Waiting for your decision", approved: "Approved", rejected: "Rejected", expired: "Expired", completed: "Done", failed: "Failed", cancelled: "Cancelled", working: "Working…", used: "This confirmation was already used", always: "Allow and don't ask again", alwaysHint: "The agents of this company will act without asking (git writes still ask). You can turn this off in the company settings." },
-  uk: { title: "Потрібне підтвердження", approve: "Підтвердити", reject: "Відхилити", pending: "Очікує вашого рішення", approved: "Підтверджено", rejected: "Відхилено", expired: "Термін минув", completed: "Виконано", failed: "Помилка", cancelled: "Скасовано", working: "Виконується…", used: "Це підтвердження вже використано", always: "Дозволити і більше не питати", alwaysHint: "Агенти цієї компанії діятимуть без підтвердження (запис у git і далі питатиме). Вимкнути можна в налаштуваннях компанії." },
-  de: { title: "Bestätigung erforderlich", approve: "Bestätigen", reject: "Ablehnen", pending: "Wartet auf Ihre Entscheidung", approved: "Bestätigt", rejected: "Abgelehnt", expired: "Abgelaufen", completed: "Erledigt", failed: "Fehlgeschlagen", cancelled: "Abgebrochen", working: "Wird ausgeführt…", used: "Diese Bestätigung wurde bereits verwendet" },
-  es: { title: "Se requiere confirmación", approve: "Aprobar", reject: "Rechazar", pending: "Esperando tu decisión", approved: "Aprobado", rejected: "Rechazado", expired: "Caducado", completed: "Hecho", failed: "Error", cancelled: "Cancelado", working: "Ejecutando…", used: "Esta confirmación ya se usó" },
-  pt: { title: "Confirmação necessária", approve: "Aprovar", reject: "Rejeitar", pending: "Aguardando sua decisão", approved: "Aprovado", rejected: "Rejeitado", expired: "Expirado", completed: "Concluído", failed: "Falhou", cancelled: "Cancelado", working: "Executando…", used: "Esta confirmação já foi usada" },
-};
 
 /**
  * Approves or rejects one durable approval of a chat operation, exactly as the Company page does: decide the approval,
  * then resume (or cancel) the run that waits on it. The server binds the approval to company, run, tool and payload and
  * accepts it once, so a reload, a second click or another run can never reuse it.
  */
-export function ChatApprovalCard({ companyId, runId, approvalId, toolName }: { companyId: string; runId: string; approvalId: string; toolName: string }) {
+export function ChatApprovalCard({ companyId, runId, approvalId, toolName, language: chatLanguage }: { companyId: string; runId: string; approvalId: string; toolName: string; language?: string | null }) {
+  // The card speaks the language of the conversation; the interface language is the fallback.
   const { language } = useTranslation();
-  const t = copy[language] ?? copy.en!;
+  const t = approvalCopy(chatLanguage || language);
+  const statusText: Record<string, string> = { pending: t.pending, approved: t.approved, rejected: t.rejected, expired: t.expired, completed: t.completed, failed: t.failed, cancelled: t.cancelled };
   const [approval, setApproval] = useState<Approval | null>(null);
   const [runStatus, setRunStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -82,22 +78,22 @@ export function ChatApprovalCard({ companyId, runId, approvalId, toolName }: { c
   const status = runStatus && ["completed", "failed", "cancelled"].includes(runStatus) ? runStatus : approval?.status ?? "pending";
   const decidable = (approval?.status === "pending" || approval?.status === "approved") && approval.runId === runId && !approval.consumedAt && (!approval.expiresAt || Date.parse(approval.expiresAt) > Date.now()) && runStatus === "awaiting_approval" && !busy;
   return (
-    <div className="chat-approval-card" data-status={status} role="group" aria-label={t.title}>
-      <div className="chat-approval-card-title">{t.title}</div>
-      <div className="chat-approval-card-action"><code>{approval?.toolName ?? toolName}</code>{approval?.actionSummary ? <span> {approval.actionSummary}</span> : null}</div>
+    <div className="chat-approval-card" data-status={status} role="group" aria-label={t.confirmTitle}>
+      <div className="chat-approval-card-title">{t.confirmTitle}</div>
+      <div className="chat-approval-card-action" title={approval?.toolName ?? toolName}>{approvalToolLabel(approval?.toolName ?? toolName, t)}</div>
       {approval?.inputPayload ? <pre className="chat-approval-resource">{JSON.stringify(Object.fromEntries(Object.entries(approval.inputPayload).filter(([key]) => ["projectId", "resourceId", "collection", "id", "ids", "path", "paths", "operation"].includes(key))), null, 2)}</pre> : null}
-      <div className="chat-approval-card-status">{busy ? t.working : approval?.consumedAt && status === "approved" ? t.used : t[status] ?? status}</div>
+      <div className="chat-approval-card-status">{busy ? t.working : approval?.consumedAt && status === "approved" ? t.used : statusText[status] ?? status}</div>
       {decidable ? (
         <div className="chat-approval-card-actions">
-          <button type="button" onClick={() => void decide("approved")}>{approval?.status === "approved" ? t.resume ?? copy.en!.resume : t.approve}</button>
+          <button type="button" onClick={() => void decide("approved")}>{approval?.status === "approved" ? t.resume : t.approve}</button>
           <button type="button" className="secondary" onClick={() => void decide("rejected")}>{t.reject}</button>
           {offersAlways && setting?.canChange && !setting.autoAllow
-            ? <button type="button" className="secondary" title={t.alwaysHint ?? copy.en!.alwaysHint} onClick={() => void allowAlways()} data-testid="approval-always">{t.always ?? copy.en!.always}</button>
+            ? <button type="button" className="secondary" title={t.alwaysHint} onClick={() => void allowAlways()} data-testid="approval-always">{t.always}</button>
             : null}
         </div>
       ) : null}
       {result ? <pre className="chat-approval-result">{result}</pre> : null}
-      {nextApproval ? <ChatApprovalCard companyId={companyId} runId={runId} approvalId={nextApproval.id} toolName={nextApproval.toolName} /> : null}
+      {nextApproval ? <ChatApprovalCard companyId={companyId} runId={runId} approvalId={nextApproval.id} toolName={nextApproval.toolName} language={chatLanguage} /> : null}
       {error ? <div className="chat-approval-card-error" role="alert">{error}</div> : null}
     </div>
   );
