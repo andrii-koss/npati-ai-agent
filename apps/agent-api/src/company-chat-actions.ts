@@ -398,6 +398,11 @@ class NamedCompanyNotFoundError extends Error {
 
 
 /** Whether the request names a different company than `company` (case-insensitive prefix match either way). */
+/** The user asks to replace the instructions, not to add to them ("replace the instructions with", "зміни інструкції на"). */
+export function replacesInstructions(message: string): boolean {
+  return /(?:\breplace\b|\brewrite\b|\boverwrite\b|\binstead\b|\bclear\b|\bchange\b[^.!?]{0,60}\bto\b|\bset\b[^.!?]{0,60}\bto\b|замін|перепиш|замість|очист|змін\p{L}*[^.!?]{0,60}\bна\b|встанов\p{L}*[^.!?]{0,60}\bна\b|замен|вместо|измени\p{L}*[^.!?]{0,60}\bна\b|ersetz|überschreib|\bstatt\b|remplac|réécri|au lieu|reemplaz|reescrib|en lugar|sostitui|riscriv|invece|zastąp|przepisz|zamiast|substitu|reescrev|em vez|vervang|herschrijf|in plaats|yerine|üzerine yaz|替换|改为|置き換|대체|استبدل|बदलकर)/iu.test(message);
+}
+
 function requestNamesOtherCompany(message: string, company: Pick<Company, "name">): boolean {
   const named = companyNamedAfterNoun(message)?.toLocaleLowerCase();
   if (!named) return false;
@@ -709,6 +714,15 @@ For update, include only fields that should change. To change only agents, use a
           changed = true;
           await store.deleteCompany(auth, company.id);
           return { cleanText: companyResultMessage("delete", company, [], options.requestMessage, options.responseLanguage), companyAction: { action: "delete", companyId: company.id, companyName: company.name, agentCount: 0 } };
+        }
+        // "Remember for the company: X" or "add X to the instructions" adds to what is there. The model writes the whole field,
+        // so its new text alone silently erased the owner's earlier instructions; only an explicit replace request replaces.
+        const previousInstructions = company.companyInstructions?.trim();
+        const nextInstructions = typeof companyPatch.companyInstructions === "string" ? companyPatch.companyInstructions.trim() : undefined;
+        if (previousInstructions && nextInstructions && !nextInstructions.includes(previousInstructions) && !replacesInstructions(options.requestMessage ?? "")) {
+          // The same fact remembered again is already there: nothing is added twice.
+          if (previousInstructions.includes(nextInstructions)) delete companyPatch.companyInstructions;
+          else companyPatch.companyInstructions = `${previousInstructions}\n${nextInstructions}`;
         }
         if (Object.keys(companyPatch).length) {
           company = await store.updateCompany(auth, company.id, companyPatch, company.revision);

@@ -125,6 +125,27 @@ describe("deleting a website from chat", () => {
     expect(confirmed.body).toContain("видалено");
     expect(await store.listProjects(context, company.id)).toHaveLength(0);
   });
+  it("announces a new conversation before the reply, so a stopped reply still belongs to it", async () => {
+    const context: AuthContext = { workspaceId: "workspace-conversation-started", userId: "owner", permissions: ["workspace:read", "workspace:write", "business:manage", "chat:use"] };
+    const store = new InMemoryWorkspaceStore();
+    const aiEngine: AIEngine = {
+      chat: vi.fn(async () => ({ content: "Neutral answer" })), async *stream() { yield "Neutral answer"; },
+      listModels: async () => [], getModel: async () => undefined, executeTool: async () => ({}),
+      searchMemory: async () => [], saveMemory: async () => undefined, getCapabilities: async () => ["chat"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => ({ ...context }) }, aiEngine, marketplace });
+    apps.push(app);
+    const first = await app.inject({ method: "POST", url: "/chat/stream", payload: { contextType: "none", message: "Привіт, як справи?" } });
+    const started = /"type":"conversation_started","conversationId":"([0-9a-f-]{36})"/.exec(first.body)?.[1];
+    expect(started).toBeTruthy();
+    expect(first.body.indexOf("conversation_started")).toBeLessThan(first.body.indexOf("event: result"));
+    expect(first.body).toContain(`"conversationId":"${started}"`);
+    // A message in that conversation does not announce a new one.
+    const next = await app.inject({ method: "POST", url: "/chat/stream", payload: { contextType: "none", conversationId: started, message: "Ще одне питання." } });
+    expect(next.body).not.toContain("conversation_started");
+  });
+
   it("finds the named site from a new chat with no company chosen, and asks before deleting it", async () => {
     const context: AuthContext = { workspaceId: "workspace-site-new-chat", userId: "owner", permissions: ["workspace:read", "workspace:write", "business:manage", "chat:use"] };
     const store = new InMemoryWorkspaceStore();

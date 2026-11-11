@@ -129,6 +129,8 @@ export function createChatTurn(deps: ChatTurnDeps) {
       : conversationId
         ? priorExisting!.conversation
         : await workspaceStore.createNeutralConversation(auth, conversationTitle(media.prompt));
+    // Announced at once, so a reply stopped before its result still leaves the client in this conversation.
+    if (conversation && !conversationId) progress?.({ type: "conversation_started", conversationId: conversation.id } as never);
     const existing = priorExisting ?? (conversation ? await workspaceStore.getNeutralConversation(auth, conversation.id) : { messages: [] });
     const confirmedEntity = conversation ? await readChatActiveContext(workspaceStore, auth, conversation.id) : null;
     const activeConversationLanguage = resolveConversationLanguage(safeUserRequest, existing.messages);

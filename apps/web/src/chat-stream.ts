@@ -55,7 +55,9 @@ export async function streamChat<T>(
   onProgress: (event: ChatProgressEvent) => void,
   options: { onDelta?: (delta:string)=>void; signal?:AbortSignal;
     onCodeSession?: (session: CodeChatSession) => void;
-    onCodeInbox?: (sessionId: string, revision: number) => void } = {},
+    onCodeInbox?: (sessionId: string, revision: number) => void;
+    /** The server created a new conversation for this message; sent before any reply text. */
+    onConversation?: (conversationId: string) => void } = {},
 ): Promise<T> {
   const token = localStorage.getItem("npati_agent_access_token");
   const headers: Record<string, string> = {
@@ -85,6 +87,8 @@ export async function streamChat<T>(
   let buffer = "";
   let result: T | undefined;
   const emitProgress = (data: unknown) => {
+    const started = data as { type?: unknown; conversationId?: unknown } | null;
+    if (started?.type === "conversation_started" && typeof started.conversationId === "string") { options.onConversation?.(started.conversationId); return; }
     if (isChatProgressEvent(data)) { onProgress(data); return; }
     publishStreamedDevelopment(data, body.conversationId ?? null);
   };

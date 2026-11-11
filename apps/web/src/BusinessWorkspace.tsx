@@ -259,7 +259,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     progressCompleteRef,
     progressEventsRef,
   } = useChatResearchProgress(flushDeltasRef);
-  const streamControllerRef=useRef<{controller:AbortController;streamId:string}|null>(null);
+  const streamControllerRef=useRef<{controller:AbortController;streamId:string;stopRequested?:boolean}|null>(null);
   const thinking = useChatThinking({
     busy: sending || development.submitting || development.isActive || codeInbox.active,
     streaming: streamingResponse, text: t("chat.thinking"), items: development.project?.progress, events: progressEvents,
@@ -280,6 +280,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     return registerChatTurn(selected, async () => {
       const active = streamControllerRef.current;
       if (!active || selectedRef.current !== selected) return;
+      active.stopRequested = true;
       if (!await cancelChatStream(active.streamId)) throw new Error("Stream cancellation was not confirmed");
       active.controller.abort(new DOMException("Stopped", "AbortError"));
     });
@@ -599,6 +600,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         }
       } catch {}
     }
+    let startedConversationId: string | undefined;
     try {
       const result = await streamChat<AgentReply>({
         message: requestMessage,
@@ -614,6 +616,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         signal: controller.signal,
         onCodeSession: (session) => { if (streamControllerRef.current?.controller === controller && selectedChatRef.current === conversationAtSubmit) codeInbox.accept(session, conversationAtSubmit); },
         onCodeInbox: (sessionId) => { if (streamControllerRef.current?.controller === controller) codeInbox.refresh(sessionId); },
+        onConversation: (id) => { startedConversationId = id; },
         onDelta: (delta) => {
           if (!progressCompleteRef.current && progressEventsRef.current.some((event) => !event.type.startsWith("final_generation"))) {
             deltaBuffer.push(delta);
@@ -697,7 +700,15 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       if (typed.message?.includes("Project not found") || (typed as any).code === "WORKSPACE_NOT_FOUND" || (typed as any).status === 404) {
         try { sessionStorage.removeItem("npati_active_project"); } catch {}
       }
-      if (typed.name === "AbortError") {
+      // Stopped (or cut off) in a new chat: the server already saved this message in a conversation, so the chat moves there
+      // and the next message continues it instead of starting another one. Stop ends the server stream first, so this is
+      // not always an AbortError.
+      if (startedConversationId && !privateRequest && !selected && selectedChatRef.current === conversationAtSubmit) {
+        setSelected(startedConversationId);
+        navigate(`/c/${startedConversationId}`, { replace: true });
+      }
+      // A stop ends the server stream first, so the read may end with "no result" before the abort lands; it is still a stop.
+      if (typed.name === "AbortError" || (streamControllerRef.current?.controller === controller && streamControllerRef.current.stopRequested)) {
         window.dispatchEvent(new CustomEvent("npati:company-changed", { detail: { action: "refresh" } }));
       markComplete();
         setNotice("");

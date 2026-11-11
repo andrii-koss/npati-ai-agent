@@ -96,10 +96,15 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         projectId: request.body.projectId ?? null,
       };
       // The neutral conversation this turn is saved in; undefined when memory writes are off.
-      const chatConversation = async () => memoryPolicy.writeAllowed
-        ? request.body.conversationId ? (await workspaceStore.getNeutralConversation(auth, request.body.conversationId)).conversation
-          : await workspaceStore.createNeutralConversation(auth, conversationTitle(message))
-        : undefined;
+      // A new conversation is announced at once: a reply stopped before its result would otherwise leave the client without
+      // the id, and the next message would open yet another conversation.
+      const chatConversation = async () => {
+        if (!memoryPolicy.writeAllowed) return undefined;
+        if (request.body.conversationId) return (await workspaceStore.getNeutralConversation(auth, request.body.conversationId)).conversation;
+        const created = await workspaceStore.createNeutralConversation(auth, conversationTitle(message));
+        await send("progress", { type: "conversation_started", conversationId: created.id });
+        return created;
+      };
       const conversationCard = request.body.conversationId && !memoryPolicy.noMemoryActive
         ? await getLatestChatProjectCard(workspaceStore, auth, request.body.conversationId, requestedContext.businessId ?? undefined) : null;
       const confirmedContext = request.body.conversationId && !memoryPolicy.noMemoryActive

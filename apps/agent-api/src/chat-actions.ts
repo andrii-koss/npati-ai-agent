@@ -546,8 +546,18 @@ ${localized.next}`;
         ? await verifyPlannedCompany(workspaceStore, input.auth, executed.companyAction.companyId, input.companyPlan)
         : { complete: true, missing: [] as string[] };
       const cleanText = verification.complete ? executed.cleanText : executed.cleanText + "\n\n" + companyChatCopy(input.requestMessage, input.responseLanguage).partial + " " + verification.missing.join(", ");
+      // The model words the answer from this result: it gets the instructions as stored, so it never tells the user that
+      // earlier instructions were replaced when the server kept them and added the new text.
+      const instructionsChanged = typeof (directiveArgs.fields as Record<string, unknown> | undefined)?.companyInstructions === "string";
+      const storedInstructions = instructionsChanged
+        ? (await workspaceStore.getCompany(input.auth, executed.companyAction.companyId).catch(() => undefined))?.companyInstructions ?? null : undefined;
+      const requested = instructionsChanged ? String((directiveArgs.fields as Record<string, unknown>).companyInstructions).trim() : "";
       return {
-        output: { message: cleanText, companyAction: executed.companyAction, verification },
+        output: { message: cleanText, companyAction: executed.companyAction, verification,
+          ...(storedInstructions !== undefined ? { companyInstructionsNow: storedInstructions,
+            instructionsNote: storedInstructions && storedInstructions.trim() !== requested
+              ? "The earlier company instructions were kept and the new text was added after them. Do not say they were replaced."
+              : "The company instructions now hold exactly this text." } : {}) },
         metadata: { kind: "company", companyAction: executed.companyAction, cleanText, primaryComplete: verification.complete, missing: verification.missing },
       };
     }

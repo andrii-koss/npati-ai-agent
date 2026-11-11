@@ -259,7 +259,10 @@ describe("Agent API", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.headers["content-type"]).toContain("text/event-stream");
-    const progressEvents = [...response.body.matchAll(/event: progress\ndata: ({[^\n]+})/g)].map((match) => JSON.parse(match[1]!).type);
+    const allProgress = [...response.body.matchAll(/event: progress\ndata: ({[^\n]+})/g)].map((match) => JSON.parse(match[1]!).type);
+    // A new conversation is announced first, before any research step.
+    expect(allProgress[0]).toBe("conversation_started");
+    const progressEvents = allProgress.filter((type) => type !== "conversation_started");
     expect(progressEvents).toEqual([
       "source_discovered",
       "page_fetch_started",

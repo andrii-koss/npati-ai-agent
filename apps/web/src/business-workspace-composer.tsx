@@ -31,7 +31,7 @@ export interface BusinessChatComposerProps {
   business: Business | null | undefined;
   t: (key: string, options?: any) => string;
   setNotice: (notice: string) => void;
-  streamControllerRef: React.MutableRefObject<{ controller: AbortController; streamId: string } | null>;
+  streamControllerRef: React.MutableRefObject<{ controller: AbortController; streamId: string; stopRequested?: boolean } | null>;
   developmentActive?: boolean;
   onStopDevelopment?: () => void | Promise<void>;
   workMode?: "chat" | "code";
@@ -147,6 +147,8 @@ export function BusinessChatComposer({
               }
               const active = streamControllerRef.current;
               if (active) {
+                // Marks the stop as the person's own, so the reply cut short is not shown as a failure.
+                active.stopRequested = true;
                 void cancelChatStream(active.streamId).finally(() =>
                   active.controller.abort(new DOMException("Stopped", "AbortError"))
                 );

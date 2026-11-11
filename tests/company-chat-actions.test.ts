@@ -1050,3 +1050,25 @@ it("lists a named company's projects in the chat context instead of relying on c
   expect(summaries.find(entry => entry.companyId === studio.id)?.projects.map(project => project.name)).toEqual(["Studio Vite"]);
   expect(summaries.find(entry => entry.companyId === bakery.id)?.projects.map(project => project.name)).toEqual(["Bakery Shop"]);
 });
+
+describe("company instructions from chat keep what the owner wrote", () => {
+  it("adds a remembered fact to the instructions instead of replacing them, and replaces only on an explicit request", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(alice, { name: "V6TEST Bakery", companyInstructions: "Always answer politely." }, "v6-instructions");
+    const run = (message: string, instructions: string) => CompanyChatActions.extractAndExecute(alice,
+      directive({ action: "update", companyId: company.id, fields: { companyInstructions: instructions } }), store, "v6-conversation-" + message.length,
+      { requestMessage: message, selectedCompanyId: company.id });
+    await run("Запам'ятай для компанії: офіс відкривається о 9:00.", "Офіс відкривається о 9:00.");
+    expect((await store.getCompany(alice, company.id)).companyInstructions).toBe("Always answer politely.\nОфіс відкривається о 9:00.");
+    await run("Remember for the company: deliveries come on Monday.", "Deliveries come on Monday.");
+    expect((await store.getCompany(alice, company.id)).companyInstructions).toBe("Always answer politely.\nОфіс відкривається о 9:00.\nDeliveries come on Monday.");
+    // A model that already merged the old text is not doubled.
+    await run("Додай в інструкції: пиши коротко.", "Always answer politely.\nОфіс відкривається о 9:00.\nDeliveries come on Monday.\nПиши коротко.");
+    expect((await store.getCompany(alice, company.id)).companyInstructions).toBe("Always answer politely.\nОфіс відкривається о 9:00.\nDeliveries come on Monday.\nПиши коротко.");
+    // Remembering the same fact again adds nothing.
+    await run("Запам'ятай для компанії: офіс відкривається о 9:00!", "Офіс відкривається о 9:00.");
+    expect((await store.getCompany(alice, company.id)).companyInstructions).toBe(["Always answer politely.", "Офіс відкривається о 9:00.", "Deliveries come on Monday.", "Пиши коротко."].join("\n"));
+    await run("Заміни інструкції компанії на: тільки українською.", "Тільки українською.");
+    expect((await store.getCompany(alice, company.id)).companyInstructions).toBe("Тільки українською.");
+  });
+});
