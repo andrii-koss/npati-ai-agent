@@ -1,7 +1,7 @@
 /* Project Data Studio only; database settings and other pages keep their styles. */
 .data-studio-container {
   --studio-border: #e7e7eb;
-  --studio-muted: #71717a;
+  --studio-muted: #3f3f46;
   --studio-shadow: 0 2px 8px rgb(17 17 17 / 4%);
   font-size: 13px;
 }
@@ -120,6 +120,12 @@
   background: #f4f4f5;
   color: #18181b;
   font-weight: 500;
+  box-shadow: 0 2px 5px rgb(17 17 17 / 8%);
+}
+
+.data-studio-container .data-studio-sidebar :is(.collection-item, .sidebar-nav-item) > span {
+  color: #000;
+  font-weight: 600;
 }
 
 .data-studio-container .col-name {
@@ -179,6 +185,18 @@
 
 .data-studio-container :is(.col-tab-btn, .subtab-btn, .env-btn).active {
   font-weight: 500;
+}
+
+.data-studio-container .col-tab-btn:not(.active) {
+  color: #27272a;
+}
+
+.data-studio-container .search-input-box input::placeholder {
+  color: #3f3f46;
+}
+
+.data-studio-container .page-size-selector select {
+  color: #3f3f46;
 }
 
 .data-studio-container :is(.data-view-toolbar, .toolbar-search-filter, .toolbar-actions, .pane-actions, .collection-actions-inline) {
