@@ -1,5 +1,6 @@
 import type { Dispatch, SetStateAction, ReactNode } from "react";
 import type { flattenFiles } from "../code-workspace-page-types";
+import { CodeView } from "../code-highlight";
 interface Props {
   isUk: boolean;
   activeTab: string;
@@ -268,16 +269,16 @@ export function CodeWorkspaceFilePanel({ isUk, activeTab, tree, filteredTree, fi
                     }}
                   />
                 ) : (
-                  <pre
-                    className="project-file-browser-pre"
+                  <div
+                    className="workspace-source-viewer"
                     style={{
                       maxHeight: isFullscreenFile ? "calc(100vh - 160px)" : 480,
                       height: isFullscreenFile ? "calc(100vh - 160px)" : undefined,
-                      flex: isFullscreenFile ? 1 : undefined,
+                      flex: 1,
                     }}
                   >
-                    {fileContent}
-                  </pre>
+                    <CodeView text={fileContent} path={selectedPath} preserveSource />
+                  </div>
                 )
               )}
             </div>

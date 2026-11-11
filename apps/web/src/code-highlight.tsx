@@ -133,13 +133,13 @@ function markJsonKeys(tokens: Token[]): Token[] {
 }
 
 /** Read-only code with line numbers: the one look of every code, data and log block in chat steps. */
-export function CodeView({ text, path }: { text: string; path?: string }) {
+export function CodeView({ text, path, preserveSource = false }: { text: string; path?: string; preserveSource?: boolean }) {
   const rows = useMemo(() => {
     if (isDiff(text)) {
       const lines = text.split("\n");
       return { step: 2, items: lines.map(line => ({ line, tokens: diffLine(line) })) };
     }
-    const json = readableJson(text);
+    const json = preserveSource ? null : readableJson(text);
     const source = json ?? text;
     const language = json || looksLikeJson(text) ? "js" as const : path ? codeLanguage(path) : null;
     const lines = source.split("\n");
@@ -150,7 +150,7 @@ export function CodeView({ text, path }: { text: string; path?: string }) {
       state = next;
       return { line, tokens: json || looksLikeJson(text) ? markJsonKeys(tokens) : tokens };
     }) };
-  }, [text, path]);
+  }, [text, path, preserveSource]);
   return <pre className="codex-log-pre code-view" style={{ "--guide": `${rows.step}ch` } as React.CSSProperties}>
     {rows.items.map((item, index) => <div className="code-view-row" key={index}><span className="code-view-number" aria-hidden="true">{index + 1}</span><CodeLine tokens={item.tokens} text={item.line} state="" /></div>)}
   </pre>;

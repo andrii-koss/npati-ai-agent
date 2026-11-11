@@ -81,7 +81,7 @@ it("ignores a stale file response and saves the selected file with its own revis
     await act(async () => files[0]!.click());
     await act(async () => files[1]!.click());
     await act(async () => releaseA());
-    expect(host.querySelector(".project-file-browser-pre")?.textContent).toBe("CURRENT_B_CONTENT");
+    expect(host.querySelector(".workspace-source-viewer .code-line")?.textContent).toBe("CURRENT_B_CONTENT");
     expect(host.textContent).not.toContain("LATE_A_CONTENT");
     await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Edit file"]')!.click());
     await act(async () => button(host, "Save").click());

@@ -14,6 +14,15 @@ function run(source: string, language: CodeLanguage) {
 const kinds = (tokens: { text: string; kind?: string }[]) => Object.fromEntries(tokens.filter(token => token.kind).map(token => [token.text.trim(), token.kind]));
 
 describe("code colouring", () => {
+  it("keeps original JSON lines and whitespace when rendering project source files", () => {
+    const source = '{"name":"demo", "enabled":true}\n';
+    const html = renderToStaticMarkup(<CodeView path="package.json" text={source} preserveSource />);
+    expect(html.match(/code-view-number/g)).toHaveLength(2);
+    expect(html).toContain('code-token-property');
+    expect(html).toContain('code-token-keyword');
+    expect(html).not.toContain("--indent:2");
+  });
+
   it("never changes a character, whatever the input", () => {
     for (const [source, language] of [['<a href="x" b>t</a> <!-- c', "html"], ["a{color:#fff;width:10px}/* x", "css"], ['const a = "x\\"y" + `t${1}` // c', "js"], ['<', "html"], ['"', "js"]] as const) {
       expect(run(source, language).flat().map(token => token.text).join("")).toBe(source);

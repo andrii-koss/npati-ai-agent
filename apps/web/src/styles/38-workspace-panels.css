@@ -4,6 +4,45 @@
   place-items: center;
 }
 
+.code-workspace .workspace-source-viewer {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.code-workspace .workspace-source-viewer > .code-view {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  max-height: inherit;
+  margin: 0;
+  padding: 14px 0;
+  border-radius: 0;
+  background: #0f172a;
+  font: 13px/20px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre;
+  word-break: normal;
+  tab-size: 2;
+}
+
+.code-workspace .workspace-source-viewer .code-view-row {
+  width: max-content;
+  min-width: 100%;
+}
+
+.code-workspace .workspace-source-viewer .code-view-number {
+  position: sticky;
+  left: 0;
+  padding: 0 12px;
+  border-right: 1px solid #1e293b;
+  background: #0f172a;
+}
+
+.code-workspace .workspace-source-viewer .code-line {
+  padding-right: 16px;
+}
+
 .code-workspace .async-workspace-panel {
   display: flex;
   flex-direction: column;
