@@ -63,6 +63,8 @@
   stroke-width: 1.6;
 }
 
-.company-drawer.agent-editor form > footer button.danger-button {
+.company-drawer form > footer button.danger-button,
+.company-mass-btn-danger,
+.npati-dialog-btn-danger {
   font-weight: 400;
 }

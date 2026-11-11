@@ -228,7 +228,7 @@ export function CodeWorkspaceFilePanel({ isUk, activeTab, tree, filteredTree, fi
                 </div>
               )}
               {!selectedPath && (
-                <div className="code-empty-state" style={{ color: "#94a3b8" }}>
+                <div className="code-empty-state" style={{ color: "#94a3b8", margin: "auto 0" }}>
                   <div className="code-empty-state-icon">
                     <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
