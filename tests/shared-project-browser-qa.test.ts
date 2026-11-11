@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { assertBrowserQaActions, runBrowserQaActions } from "../apps/agent-api/browser-qa-actions.mjs";
+import { captureBrowserDiagnostic, isBlockedExternalResource } from "../apps/agent-api/browser-qa-diagnostics.mjs";
 import { SharedProjectRuntimeProvider } from "../apps/agent-api/src/shared-project-runtime-provider";
 import { assertBrowserQaOptions, parseBrowserQaResult, browserQaFailure } from "../apps/agent-api/src/sandbox-browser-qa";
 import type { SandboxBrowserQaOptions, SandboxScope } from "../apps/agent-api/src/sandbox-provider";
@@ -89,10 +90,10 @@ describe("security-gate: shared Browser QA", () => {
 
 describe("Browser QA WebSocket destination isolation", () => {
   it.each([false,true])("executes the runner with interactions=%s and confines sockets and network writes", async interactions => {
+    // Every import is removed and its names are passed in, so a new imported name cannot leave an `import` behind.
     const source = readFileSync(new URL("../apps/agent-api/browser-qa-runner.mjs", import.meta.url), "utf8")
-      .replace('import { chromium } from "playwright";', "")
-      .replace('import { captureBrowserDiagnostic } from "./browser-qa-diagnostics.mjs";', "")
-      .replace('import { assertBrowserQaActions, runBrowserQaActions } from "./browser-qa-actions.mjs";', "");
+      .replace(/^import [^;]+;$/gm, "");
+    expect(source).not.toMatch(/^import /m);
     let handler: ((socket: { url(): string; connectToServer(): void; close(): void }) => void) | undefined;
     const page = {
       routeWebSocket: vi.fn(async (_pattern: string, callback: typeof handler) => { handler = callback; }),
@@ -110,7 +111,8 @@ describe("Browser QA WebSocket destination isolation", () => {
       stdout: { write: output }, exitCode: 0,
     };
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-    await new AsyncFunction("chromium", "process", "assertBrowserQaActions", "runBrowserQaActions", source)(chromium, processMock, assertBrowserQaActions, runBrowserQaActions);
+    await new AsyncFunction("chromium", "process", "assertBrowserQaActions", "runBrowserQaActions", "captureBrowserDiagnostic", "isBlockedExternalResource", source)(
+      chromium, processMock, assertBrowserQaActions, runBrowserQaActions, captureBrowserDiagnostic, isBlockedExternalResource);
     expect(handler).toBeTypeOf("function");
     for (const [url, allowed] of [
       ["ws://10.0.2.2:3002/?token=fixture", true],
