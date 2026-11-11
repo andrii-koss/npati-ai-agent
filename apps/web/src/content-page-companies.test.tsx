@@ -4,13 +4,32 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ContentPage, contentExportFileName } from "./ContentPage";
-vi.mock("./AuthContext", () => ({ getStoredAuthToken: () => "test" }));
+const auth = vi.hoisted(() => ({ token: "test" }));
+vi.mock("./AuthContext", () => ({ getStoredAuthToken: () => auth.token }));
 vi.mock("./i18n", () => ({ useTranslation: () => ({ language: "en", t: (s: string) => s }) }));
 let root: Root, host: HTMLDivElement;
-beforeEach(() => { localStorage.clear(); sessionStorage.clear(); host = document.createElement("div"); document.body.append(host); root = createRoot(host); Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); });
+beforeEach(() => { auth.token += "-next"; localStorage.clear(); sessionStorage.clear(); host = document.createElement("div"); document.body.append(host); root = createRoot(host); Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
 
 describe("Content Hub company scope", () => {
+  it("uses compact loading instead of fake content cards before an empty result", async () => {
+    let release!: (response: Response) => void;
+    const pending = new Promise<Response>(resolve => { release = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async () => (await pending).clone()));
+    await act(async () => root.render(<MemoryRouter><ContentPage /></MemoryRouter>));
+    expect(host.querySelector('[role="status"]')?.textContent).toBe("common.loading");
+    expect(host.querySelector(".content-studio-layout")).toBeNull();
+    expect(host.querySelector(".content-summary-card")).toBeNull();
+    expect(host.querySelector(".content-empty-card")).toBeNull();
+    await act(async () => {
+      release(new Response(JSON.stringify({ companies: [], runs: [], overrides: {} })));
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    expect(host.querySelector('[role="status"]')).toBeNull();
+    expect(host.querySelector(".content-empty-card h3")?.textContent).toBe("contentPage.empty.readyTitle");
+    expect(host.querySelector(".content-studio-layout")).toBeNull();
+  });
+
   it("shows content of a company beyond the first company page and the first five companies", async () => {
     const early = Array.from({ length: 10 }, (_, index) => ({ id: `early-${index}`, name: `Early ${index}` }));
     const requested: string[] = [];

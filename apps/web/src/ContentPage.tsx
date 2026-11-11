@@ -431,17 +431,8 @@ export function ContentPage() {
       </div>
 
       {items.length === 0 && loading ? (
-        <div className="content-studio-layout" style={{ minHeight: "766px", opacity: 0.6 }}>
-          <aside className="content-sidebar-list" aria-hidden="true">
-            <div className="content-cards-container">
-              {[1, 2, 3, 4].map((n) => (
-                <div key={n} className="content-summary-card" style={{ pointerEvents: "none" }} />
-              ))}
-            </div>
-          </aside>
-          <section className="content-main-viewer" aria-hidden="true">
-            <div className="content-viewer-card" style={{ minHeight: "766px" }} />
-          </section>
+        <div role="status" aria-live="polite" style={{ padding: "16px 0", color: "var(--npati-gray-500)", fontSize: 13 }}>
+          {t("common.loading")}
         </div>
       ) : items.length === 0 ? (
         <div className="automations-empty-card content-empty-card">

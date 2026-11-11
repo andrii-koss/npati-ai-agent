@@ -87,6 +87,8 @@ const DEFAULT_SERVICES: RawServiceStatus[] = [
 const STORAGE_CONNECTIONS_KEY = "npati_connections_cache_v2";
 const CONNECTION_CACHE_TTL_MS = 60_000;
 const CONNECTION_REFRESH_INTERVAL_MS = 30_000;
+// Keep the cloud catalog integration available for a future release.
+const SHOW_CLOUD_HUB = false;
 
 interface CachedConnections {
   checkedAt: string;
@@ -136,15 +138,11 @@ export function ConnectionsPage() {
   const { t } = useTranslation();
   const [initialConnections] = useState(getCachedConnections);
   const [rawServices, setRawServices] = useState<RawServiceStatus[]>(initialConnections.items);
-  const [lastSuccessfulCheckAt, setLastSuccessfulCheckAt] = useState<string | null>(initialConnections.checkedAt);
-  const [lastCheckFailed, setLastCheckFailed] = useState(false);
-  const [checking, setChecking] = useState(true);
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [copiedEndpoint, setCopiedEndpoint] = useState<string | null>(null);
 
-  async function checkConnections(isManual = false) {
-    if (isManual) setChecking(true);
+  async function checkConnections() {
     try {
       const headers: HeadersInit = {};
       const token = getStoredAuthToken();
@@ -210,26 +208,21 @@ export function ConnectionsPage() {
       ];
 
       setRawServices(items);
-      setLastSuccessfulCheckAt(checkedAt);
-      setLastCheckFailed(false);
       updateCachedConnections(items, checkedAt);
     } catch {
       setRawServices(unavailableServices());
-      setLastCheckFailed(true);
       clearCachedConnections();
-    } finally {
-      setChecking(false);
     }
   }
 
   useEffect(() => {
-    void checkConnections(false);
-    const timer = window.setInterval(() => void checkConnections(false), CONNECTION_REFRESH_INTERVAL_MS);
+    void checkConnections();
+    const timer = window.setInterval(() => void checkConnections(), CONNECTION_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, []);
 
   const services = useMemo<ServiceStatus[]>(() => {
-    return rawServices.map((s) => {
+    return rawServices.filter(s => SHOW_CLOUD_HUB || s.id !== "cloud-hub").map((s) => {
       let name = "";
       let description = "";
       let details = "";
@@ -397,27 +390,6 @@ export function ConnectionsPage() {
             <p className="hero-copy">
               {t("connectionsPage.heroCopy")}
             </p>
-          </div>
-          <div className="automations-header-actions">
-            <button
-              type="button"
-              className="button-primary automations-action-primary"
-              style={{ minWidth: "155px" }}
-              onClick={() => void checkConnections(true)}
-              disabled={checking}
-              title={t("connectionsPage.refreshTitle")}
-            >
-              {checking ? t("connectionsPage.checkingStatus") : t("connectionsPage.refreshStatus")}
-            </button>
-            <small role="status" style={{ display: "block", marginTop: "8px", textAlign: "right" }}>
-              {lastCheckFailed ? t("connectionsPage.checkFailed") : null}
-              {lastCheckFailed && lastSuccessfulCheckAt ? <br /> : null}
-              {lastSuccessfulCheckAt
-                ? t("connectionsPage.lastSuccessfulCheck", { time: new Date(lastSuccessfulCheckAt).toLocaleString() })
-                : !lastCheckFailed
-                  ? t("connectionsPage.noSuccessfulCheck")
-                  : null}
-            </small>
           </div>
         </div>
       </header>
