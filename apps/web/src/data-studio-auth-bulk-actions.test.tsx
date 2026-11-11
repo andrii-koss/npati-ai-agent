@@ -51,6 +51,19 @@ const button = (text: string) => [...host.querySelectorAll("button")].find(item 
 const checkbox = (label: string) => host.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`);
 
 describe("Project Authentication bulk actions", () => {
+  it("shows only the standard spinner while users load, then replaces it with the table", async () => {
+    let finish!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(resolve => { finish = resolve; })));
+    await render();
+    expect(host.querySelector(".auth-loading-state .ds-table-spinner")).not.toBeNull();
+    expect(host.querySelector(".auth-loading-state")?.textContent).toBe("");
+    expect(host.querySelector(".auth-empty-state")).toBeNull();
+    expect(host.querySelector(".users-table-container")).toBeNull();
+    await act(async () => { finish(new Response(JSON.stringify({ users: [user(0)], total: 1 }))); });
+    expect(host.querySelector(".auth-loading-state")).toBeNull();
+    expect(host.querySelector(".users-table-container")?.textContent).toContain("user0@example.com");
+  });
+
   it("selects individual users, shows a mixed header, selects the visible list and clears it", async () => {
     await render();
     expect(host.querySelector(".auth-user-bulk-toolbar")).toBeNull();

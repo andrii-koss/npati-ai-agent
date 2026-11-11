@@ -55,7 +55,7 @@ export const DataStudioAuthSection: React.FC<Props> = ({
   // Users State
   const [users, setUsers] = useState<ProjectAuthUser[]>([]);
   const [usersTotal, setUsersTotal] = useState(0);
-  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersLoading, setUsersLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("");
 
@@ -431,8 +431,8 @@ export const DataStudioAuthSection: React.FC<Props> = ({
 
           <AuthUserBulkToolbar bulk={bulk} total={usersTotal} isUk={isUk} disabled={usersLoading} />
           {usersLoading ? (
-            <div className="auth-loading-state">
-              <p>{isUk ? "Завантаження користувачів…" : "Loading users…"}</p>
+            <div className="auth-loading-state" role="status" aria-label={isUk ? "Завантаження користувачів" : "Loading users"}>
+              <div className="ds-table-spinner" aria-hidden="true" />
             </div>
           ) : users.length === 0 ? (
             <div className="auth-empty-state">
@@ -482,8 +482,9 @@ export const DataStudioAuthSection: React.FC<Props> = ({
                         </div>
                       </td>
                       <td>
-                        <span className={`badge ${u.emailVerified ? "badge-success" : "badge-warning"}`}>
-                          {u.emailVerified ? "✓ Verified" : "Unverified"}
+                        <span className={u.emailVerified ? "auth-user-verified" : "badge badge-warning"}
+                          aria-label={u.emailVerified ? (isUk ? "Email підтверджено" : "Email verified") : undefined}>
+                          {u.emailVerified ? "✓" : "Unverified"}
                         </span>
                       </td>
                       <td>

@@ -424,6 +424,14 @@
   color: #000;
 }
 
+.data-studio-container .users-table-container :is(td, td small, .user-id-sub, .role-pill) {
+  color: #000;
+}
+
+.data-studio-container .users-table-container .auth-user-verified {
+  color: #15803d;
+}
+
 .data-studio-container .auth-user-selection-cell {
   width: 34px;
 }
