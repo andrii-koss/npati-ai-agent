@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { Terminal, Blocks, FilePenLine, FileText, Package, Hammer, Monitor, Search, FlaskConical, Globe, Brain, ChevronDown, ChevronRight, Copy, Check, X, AlertCircle } from "lucide-react";
+import { Terminal, Blocks, FilePenLine, FileText, Package, Box, Monitor, Search, FlaskConical, Globe, Brain, ChevronDown, ChevronRight, Copy, Check, X, AlertCircle } from "lucide-react";
 import type { DevelopmentProcess, DevelopmentProcessProgressItem } from "@npati/shared";
 import { sanitizeExecutionTrace } from "@npati/shared";
 import { I18nContextRef, executionTraceText } from "./i18n";
@@ -123,7 +123,7 @@ function operation(item: DevelopmentProcessProgressItem) {
   if (/write|edit|patch|scaffold|files/.test(tool)) return ["editing", FilePenLine] as const;
   if (/deps|dependencies/.test(tool)) return ["dependencies", Package] as const;
   if (/test/.test(tool)) return ["testing", FlaskConical] as const;
-  if (/build|verify/.test(tool)) return ["building", Hammer] as const;
+  if (/build|verify/.test(tool)) return ["building", Box] as const;
   if (/browser/.test(tool)) return ["browser", Globe] as const;
   if (/preview/.test(tool)) return ["preview", Monitor] as const;
   if (/coding_agent|^agent$/.test(tool)) return ["working", Brain] as const;

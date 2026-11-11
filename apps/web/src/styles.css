@@ -56,3 +56,8 @@
 .message-stream article.user .user-prompt-preview {
   margin-top: 0;
 }
+
+.codex-trace-row .research-progress-globe.lucide-box {
+  transform: scale(1);
+  stroke-width: 1.6;
+}
