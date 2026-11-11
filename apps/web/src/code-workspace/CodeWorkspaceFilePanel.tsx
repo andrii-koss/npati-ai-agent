@@ -223,11 +223,6 @@ export function CodeWorkspaceFilePanel({ isUk, activeTab, tree, filteredTree, fi
 
             <div className="project-file-viewer-body" style={{ minHeight: isFullscreenFile ? "calc(100vh - 140px)" : 420, flex: isFullscreenFile ? 1 : undefined, display: "flex", flexDirection: "column" }}>
               {fileError && <p className="ds-hint-error" style={{ margin: "16px" }}>{fileError}</p>}
-              {!fileError && fileContent === null && selectedPath && (
-                <div className="code-empty-state" style={{ color: "#94a3b8" }}>
-                  <p>{isUk ? "Завантаження вмісту файлу…" : "Loading file content…"}</p>
-                </div>
-              )}
               {!selectedPath && (
                 <div className="code-empty-state" style={{ color: "#94a3b8", margin: "auto 0" }}>
                   <div className="code-empty-state-icon">
