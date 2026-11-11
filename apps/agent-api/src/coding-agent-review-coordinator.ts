@@ -312,6 +312,12 @@ export class CodingAgentReviewCoordinator {
     }
     const recorded = new Set(patches.map(change => change.path + "\0" + change.diff));
     for (const change of [...this.collectedChanges, ...this.runChanges()]) {
+      // A deleted file has no text diff, yet it is a change the review must see; without this the review of a run that
+      // only deleted a file stopped as review_diff_unavailable.
+      if (!change.diff && (change.tool === "code.fs.delete" || change.status === "deleted") && !patches.some(patch => patch.path === change.path)) {
+        patches.push({ path: change.path, diff: "(the file was deleted)", source: "collected operation" });
+        continue;
+      }
       if (!change.diff || recorded.has(change.path + "\0" + change.diff)) continue;
       patches.push({ path: change.path, diff: change.diff, source: "collected operation" });
       recorded.add(change.path + "\0" + change.diff);

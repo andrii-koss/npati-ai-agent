@@ -125,6 +125,29 @@ describe("deleting a website from chat", () => {
     expect(confirmed.body).toContain("видалено");
     expect(await store.listProjects(context, company.id)).toHaveLength(0);
   });
+  it("deletes the named site at once when the company lets its agents act without asking", async () => {
+    const context: AuthContext = { workspaceId: "workspace-site-auto-delete", userId: "owner", permissions: ["workspace:read", "workspace:write", "business:manage", "chat:use"] };
+    const store = new InMemoryWorkspaceStore();
+    const aiEngine: AIEngine = {
+      chat: vi.fn(async () => ({ content: "Neutral answer" })), async *stream() { yield "Neutral answer"; },
+      listModels: async () => [], getModel: async () => undefined, executeTool: async () => ({}),
+      searchMemory: async () => [], saveMemory: async () => undefined, getCapabilities: async () => ["chat"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => ({ ...context }) }, aiEngine, marketplace });
+    apps.push(app);
+    const company = await store.createCompany(context, { name: "Fit" }, "fit-auto-delete");
+    await store.setUserSetting(context, "chat.data-auto-allow:" + company.id, { autoAllow: true }, 0);
+    await store.createProject(context, company.id, { name: "Fit landing", type: "website" } as never, "fit-landing-auto");
+    await store.createProject(context, company.id, { name: "Fit blog", type: "website" } as never, "fit-blog-auto");
+    const blog = (await store.listProjects(context, company.id)).find(item => item.name === "Fit blog")!;
+    // The chat works on the blog and deletes the other site: the site goes at once, and the chat keeps the blog.
+    const answer = await app.inject({ method: "POST", url: "/chat/stream", payload: { contextType: "project", companyId: company.id, projectId: blog.id, message: "Видали сайт Fit landing — він більше не потрібен." } });
+    expect(answer.body).not.toContain("Для підтвердження напишіть");
+    expect(answer.body).toContain("видалено");
+    expect(answer.body).not.toContain('"contextType":"none"');
+    expect((await store.listProjects(context, company.id)).map(item => item.name)).toEqual(["Fit blog"]);
+  });
 });
 
 describe("deleting a site of another named company", () => {

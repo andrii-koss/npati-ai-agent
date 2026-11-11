@@ -43,7 +43,7 @@ interface Harness {
   attempts: string[];
 }
 
-function harness(options: { auditFailure?: { value: boolean }; withCheckpoints?: boolean; withApprovals?: boolean; turnTracker?: CodeTurnTracker; beforeCheckpoint?: (files: Map<string, string>) => void } = {}): Harness {
+function harness(options: { auditFailure?: { value: boolean }; withCheckpoints?: boolean; withApprovals?: boolean; turnTracker?: CodeTurnTracker; beforeCheckpoint?: (files: Map<string, string>) => void; companyAutoAllow?: boolean } = {}): Harness {
   const files = new Map<string, string>([["src/orders.ts", "export function createOrder() {\n  return 1;\n}\n"]]);
   const checkpoints: Harness["checkpoints"] = [];
   const approvals: Harness["approvals"] = [];
@@ -160,6 +160,7 @@ function harness(options: { auditFailure?: { value: boolean }; withCheckpoints?:
     executors: allCanonicalExecutors(),
     checkpoints: checkpointPort,
     approvals: approvalPort,
+    ...(options.companyAutoAllow !== undefined ? { dataAutoAllow: async () => options.companyAutoAllow === true } : {}),
     writePort,
     toPort: () => readPort,
     maxRevisionRetries: 2,
@@ -344,6 +345,20 @@ describe("security-gate: C3 approvals", () => {
     expect(approved.ok).toBe(true);
     expect(h.files.has("src/orders.ts")).toBe(false);
     expect(h.approvals[0]?.consumed).toBe(true);
+  });
+
+  it("deletes without a request when the company lets its agents act without asking", async () => {
+    const h = harness({ companyAutoAllow: true });
+    await readFile(h, "src/orders.ts");
+    const result = await invoke(h, "code.fs.delete", { path: "src/orders.ts" }, { toolCallId: "del-auto" });
+    expect(result.ok).toBe(true);
+    expect(h.files.has("src/orders.ts")).toBe(false);
+    expect(h.approvals).toHaveLength(0);
+    const asks = harness({ companyAutoAllow: false });
+    await readFile(asks, "src/orders.ts");
+    expect(await invoke(asks, "code.fs.delete", { path: "src/orders.ts" }, { toolCallId: "del-ask" })).toMatchObject({ ok: false, error: { code: "approval_required" } });
+    // The request names its project, so the chat can show it beside a chat run.
+    expect(asks.approvals[0]?.payload).toMatchObject({ projectId: "project-c3" });
   });
 
   it("rejects a payload substituted between approval and execution", async () => {

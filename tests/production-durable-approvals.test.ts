@@ -56,6 +56,28 @@ describe("Production durable approvals and route tiers",()=>{
     expect((await store.getCompanyAgentRun(auth,company.id,first.run.id)).run.status).toBe("completed");
   });
 
+  it("runs the high-risk tool without a request when the company lets its agents act without asking, and audits it",async()=>{
+    const {store,company,agent}=await fixture();
+    await store.setUserSetting(auth,"chat.data-auto-allow:"+company.id,{autoAllow:true},0);
+    const remove=vi.fn(async()=>true);
+    const toolRuntime=new CompanyToolRuntime({executeTool:vi.fn()} as unknown as AIEngine,undefined,undefined,undefined,{
+      memories:vi.fn(async()=>[]),getMemory:vi.fn(),searchMemories:vi.fn(async()=>[]),addMemory:vi.fn(),updateMemory:vi.fn(),deleteMemory:remove,
+    });
+    const approvals:DurableApprovalGateway={requestApproval:vi.fn(async()=>({id:"never"})),consumeApproved:vi.fn()};
+    const ai={
+      executeTool:vi.fn(),ensureA2AEnabled:vi.fn(),ensureCombo:vi.fn(async input=>({name:input.name})),
+      a2aSend:vi.fn(async()=>({taskId:"plan",content:JSON.stringify({mode:"single",agentIds:[agent.id],toolRequests:[{agentId:agent.id,tool:"storage.company_memory",input:{operation:"delete",id:"memory-1"}}]}),metadata:{}})),
+      chat:vi.fn(async()=>({content:"done",model:"auto"})),
+    } as unknown as AIEngine;
+    const runtime=new CompanyDelegationRuntime(store,ai,10_000,toolRuntime,undefined,undefined,undefined,undefined,approvals);
+    const run=await runtime.execute(auth,company.id,{task:"Delete memory one"},"auto-allow-run");
+    const done=await runtime.process(auth,company.id,run.run.id);
+    expect(done.run.status).toBe("completed");
+    expect(approvals.requestApproval).not.toHaveBeenCalled();
+    expect(remove).toHaveBeenCalledOnce();
+    expect(done.toolAudit.some(item=>item.reasonCode==="company_setting_auto_allow")).toBe(true);
+  });
+
   it.each(["cancelled", "failed"] as const)("does not replay a %s run", async (status) => {
     const { store, company } = await fixture();
     const ai = { a2aSend: vi.fn(), chat: vi.fn(), executeTool: vi.fn() } as unknown as AIEngine;

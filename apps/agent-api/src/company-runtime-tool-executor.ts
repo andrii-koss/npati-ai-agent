@@ -1,3 +1,5 @@
+import { ChatDataAutoAllowService } from "./chat-data-auto-allow";
+import { writesGitFromShell } from "./code-policy-git-and-approval";
 import { createHash } from "node:crypto";
 import type { AuthContext, Company, CompanyAgent, WorkspaceStore } from "@npati/workspace";
 import type { EffectiveCapabilityResolver, RiskApprovalService } from "@npati/shared";
@@ -223,7 +225,19 @@ export async function executeCompanyRunTools(params: CompanyRunToolsParams): Pro
               credentialId: typeof plan.input.credentialId === "string" ? plan.input.credentialId : null,
             })
           : plan.input;
-    if (riskApprovalService.requiresApproval(toolToAssess, projectFileRisk) && !scopedBrowserAuthorization) {
+    // The company lets its agents act without asking (owner/admin setting, audited below). Git writes and pull requests still
+    // ask: their approval is consumed again at the git boundary.
+    const companyAutoAllowed = !gitWriteIntent && !pullRequestTarget && !approvedForCurrent
+      && !writesGitFromShell(isTerminal ? (normalizedTerminal?.command ?? String(plan.input.command ?? "")) : null)
+      && riskApprovalService.requiresApproval(toolToAssess, projectFileRisk) && !scopedBrowserAuthorization
+      && await new ChatDataAutoAllowService(store, async () => false).isOn(ctx, company.id);
+    if (companyAutoAllowed) {
+      await store.appendCompanyAgentToolAudit(ctx, company.id, runId, {
+        agentId: agent.id, toolName: toolToAssess, decision: "allowed", status: "requested",
+        inputSummary: summary(approvalPayload), reasonCode: "company_setting_auto_allow", sequenceNumber: sequenceNumber++,
+      });
+    }
+    if (riskApprovalService.requiresApproval(toolToAssess, projectFileRisk) && !scopedBrowserAuthorization && !companyAutoAllowed) {
       if (durableApprovals) {
         if (!approvedForCurrent) {
           const cleanPayload = { ...approvalPayload }; delete cleanPayload._approvalToken;
@@ -330,7 +344,7 @@ export async function executeCompanyRunTools(params: CompanyRunToolsParams): Pro
             : company.name || "company information";
       }
       if (tool.startsWith("project.files.")) { adapterInput.__npatiAgentId = agent.id; adapterInput.__npatiTaskRunId = runId; if (tool === "project.files.delete") adapterInput.__npatiApprovalGranted = true; }
-      if (tool.startsWith("project.terminal.") || tool.startsWith("project.preview.") || tool.startsWith("project.git.") || tool.startsWith("project.deploy.") || tool.startsWith("project.data.") || tool.startsWith("project.auth.") || tool === "project.api.inspect") { adapterInput.__npatiAgentId = agent.id; adapterInput.__npatiTaskRunId = runId; adapterInput.__npatiApprovalGranted = tool === "project.deploy.publish" || tool === "project.data.schema.apply" || tool === "project.data.templates.apply" || tool === "project.data.rows.delete" || tool === "project.auth.configure" ? Boolean(approvedForCurrent || plan.input._approvalToken) : (!terminalNeedsApproval || Boolean(approvedForCurrent || plan.input._approvalToken)); }
+      if (tool.startsWith("project.terminal.") || tool.startsWith("project.preview.") || tool.startsWith("project.git.") || tool.startsWith("project.deploy.") || tool.startsWith("project.data.") || tool.startsWith("project.auth.") || tool === "project.api.inspect") { adapterInput.__npatiAgentId = agent.id; adapterInput.__npatiTaskRunId = runId; adapterInput.__npatiApprovalGranted = tool === "project.deploy.publish" || tool === "project.data.schema.apply" || tool === "project.data.templates.apply" || tool === "project.data.rows.delete" || tool === "project.auth.configure" ? Boolean(approvedForCurrent || companyAutoAllowed || plan.input._approvalToken) : (!terminalNeedsApproval || Boolean(approvedForCurrent || companyAutoAllowed || plan.input._approvalToken)); }
       if ((tool === "project.git.push" || tool === "project.git.pr") && approvedForCurrent && approvalId) {
         adapterInput.__npatiApprovalId = approvalId;
       }

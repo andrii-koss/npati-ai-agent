@@ -11,8 +11,14 @@ export async function saveDataAutoAllow(companyId: string, autoAllow: boolean, e
 }
 
 const copy = {
-  en: { title: "Database changes", label: "Let the agent change this company's databases without asking", hint: "Off: the chat asks before each change to tables, columns, rows, roles or links. Every change is still written to the audit log.", readOnly: "Only the company owner or an admin can change this." },
-  uk: { title: "Зміни бази даних", label: "Дозволяти агенту змінювати бази даних цієї компанії без підтвердження", hint: "Вимкнено: чат питає перед кожною зміною таблиць, колонок, рядків, ролей чи зв'язків. Кожна зміна все одно записується в журнал аудиту.", readOnly: "Змінити це може лише власник компанії або адміністратор." },
+  en: { title: "Confirmations in chat", label: "Let the agents act without asking for confirmation",
+    on: "On: database changes, terminal commands, file deletes, risky agent tools and deleting a site from the chat run without a confirmation. A deleted site cannot be restored. Writing to git and deleting the whole company still ask. Every action is written to the audit log.",
+    off: "Off: the chat asks before database changes, terminal commands, file deletes, risky agent tools and deleting a site.",
+    readOnly: "Only the company owner or an admin can change this." },
+  uk: { title: "Підтвердження в чаті", label: "Дозволяти агентам діяти без підтвердження",
+    on: "Увімкнено: зміни бази даних, команди в терміналі, видалення файлів, ризиковані інструменти агентів і видалення сайту з чату виконуються без підтвердження. Видалений сайт не відновити. Запис у git і видалення всієї компанії і далі питають. Кожна дія записується в журнал аудиту.",
+    off: "Вимкнено: чат питає перед змінами бази даних, командами в терміналі, видаленням файлів, ризикованими інструментами агентів і видаленням сайту.",
+    readOnly: "Змінити це може лише власник компанії або адміністратор." },
 };
 
 /** The company setting shown in the company drawer; it saves on its own, apart from the company form. */
@@ -42,7 +48,7 @@ export function CompanyDataAutoAllow({ companyId }: { companyId: string }) {
         <input type="checkbox" checked={view.autoAllow} disabled={!view.canChange || saving} onChange={event => void toggle(event.target.checked)} style={{ width: "auto", marginTop: 3 }} />
         <span>{t.label}</span>
       </label>
-      <small>{view.canChange ? t.hint : t.readOnly}</small>
+      <small>{view.autoAllow ? t.on : t.off}{view.canChange ? "" : " " + t.readOnly}</small>
       {error ? <div role="alert">{error}</div> : null}
     </section>
   );

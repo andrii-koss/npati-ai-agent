@@ -152,7 +152,8 @@ export class CodeToolWriteGuard {
     const payload = boundaryConsumes ? gitPayload! : buildApprovalPayload({
       tool: tool.name, toolVersion: tool.version, turnId, sessionId,
       targets: targets.map((target) => ({ ...target, sha256: this.ctx.tracker.get(sessionId, target.path)?.sha256 ?? null })),
-      extra: { ...(gitPayload ? { git: gitPayload } : {}), ...(writeArgs ? { argumentsHash: createHash("sha256").update(JSON.stringify(writeArgs)).digest("hex") } : {}) },
+      // The project lets the chat show this request beside the run that waits on it (a chat run has no process run id).
+      extra: { projectId: input.projectId, ...(gitPayload ? { git: gitPayload } : {}), ...(writeArgs ? { argumentsHash: createHash("sha256").update(JSON.stringify(writeArgs)).digest("hex") } : {}) },
     });
     const reason = gitApprovalRequired ? "git_write" : decision.reason;
     const summary = gitApprovalRequired
@@ -162,6 +163,11 @@ export class CodeToolWriteGuard {
       throw new CodeToolError("approval_unavailable", "This change requires an approval, but the approval system is not configured", 503, "approval", false, tool.name, { reason });
     }
 
+    // The company lets its agents act without asking (audited by the runtime like every write). A git write still asks.
+    if (!boundaryConsumes && !gitApprovalRequired && !input.approvalId
+        && await this.ctx.options.dataAutoAllow?.(authCtx, input.companyId).catch(() => false) === true) {
+      return { required: true, approved: true };
+    }
     if (this.ctx.options.approvalRules && !boundaryConsumes) {
       const rule = await this.ctx.options.approvalRules
         .findRule(authCtx, { companyId: input.companyId, projectId: input.projectId, sessionId, action: tool.name })

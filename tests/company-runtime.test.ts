@@ -123,7 +123,7 @@ describe("Project delegation JSON recovery", () => {
     expect(result.run.status).toBe("completed");
     expect(result.run.selectedAgentIds).toContain(builder.id);
     expect(calls).toBe(2);
-    expect(JSON.stringify(finalChat.mock.calls)).toContain("Summarize only verified tool results in at most 120 words");
+    expect(JSON.stringify(finalChat.mock.calls)).toContain("no more than 120 words unless the user requests detail");
   });
 
   it("accepts this company's agent names in place of ids and still refuses other agents", async () => {

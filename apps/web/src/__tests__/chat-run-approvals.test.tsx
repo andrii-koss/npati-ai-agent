@@ -47,9 +47,19 @@ describe("approvals while the agent waits", () => {
     expect(host.textContent).not.toContain("code.data.rows.update");
   });
 
-  it("offers to stop asking only on a database card, and only to someone who may change the setting", async () => {
+  it("names the file a delete would remove", async () => {
+    const del = { id: "d1", toolName: "code.fs.delete", runId: "run-1", inputPayload: { projectId: "p", targets: [{ path: "temp-check.txt", sha256: "x" }] } };
+    const host = await mount(server(url => url.includes("/approvals?") ? reply({ approvals: [del] }) : undefined));
+    expect(host.textContent).toContain("Delete the file: temp-check.txt.");
+  });
+
+  it("offers to stop asking on every card except a git write, and only to someone who may change the setting", async () => {
     const host = await mount(server());
-    expect(host.querySelectorAll('[data-testid="run-approval-always"]')).toHaveLength(1);
+    expect(host.querySelectorAll('[data-testid="run-approval-always"]')).toHaveLength(2);
+    await act(async () => root?.unmount()); root = undefined; document.body.innerHTML = "";
+    const git = await mount(server(url => url.includes("/approvals?") ? reply({ approvals: [{ id: "g1", toolName: "code.git.push", runId: "run-1" }] }) : undefined));
+    expect(git.querySelectorAll('[data-testid="run-approval"]')).toHaveLength(1);
+    expect(git.querySelectorAll('[data-testid="run-approval-always"]')).toHaveLength(0);
     const readOnly = await (async () => { await act(async () => root?.unmount()); root = undefined; document.body.innerHTML = "";
       return mount(server(url => url.endsWith("/chat/data-auto-allow") ? reply({ ...settingOff, canChange: false }) : undefined)); })();
     expect(readOnly.querySelectorAll('[data-testid="run-approval-always"]')).toHaveLength(0);

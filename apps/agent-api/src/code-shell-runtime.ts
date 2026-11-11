@@ -346,7 +346,10 @@ export class CodeShellRuntime {
 
     // Carry the engine's consumed, payload-bound approval to the downstream terminal gate.
     // A caller-supplied ID alone is never evidence of authorization.
-    const sandboxApproved = input.approved === true || decision.reasons?.includes("approval:consumed") === true;
+    // The sandbox's own terminal rules accept the same decisions: a consumed approval, or the company setting that lets its
+    // agents act without asking (the policy engine never grants that for a git write).
+    const sandboxApproved = input.approved === true || decision.reasons?.includes("approval:consumed") === true
+      || decision.reasons?.includes("approval:company_setting") === true;
     const session = this.sessionFor(context, input);
     const cwd = input.cwd?.trim() || session.cwd;
     const environment = { ...session.env, ...(input.env ?? {}) };

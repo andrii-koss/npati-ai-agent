@@ -242,6 +242,11 @@ export interface PolicyEngineDeps {
    * runs after `hard_deny`, the session-mode check, project rules and the network enforcement gate —
    * that ordering is what makes a rule unable to bypass any of them. `once` approvals create no rule.
    */
+  /**
+   * The company setting "let the agents act without asking" (owner/admin only, audited, off by default). Consulted at the
+   * same point as a standing rule, so it never bypasses a hard deny, the session mode, project rules or the network gate.
+   */
+  companyAutoAllow?: (ctx: AuthContext, companyId: string) => Promise<boolean>;
   approvalRules?: {
     findRule(ctx: AuthContext, query: {
       companyId: string; projectId?: string | null; sessionId?: string | null; action: string;

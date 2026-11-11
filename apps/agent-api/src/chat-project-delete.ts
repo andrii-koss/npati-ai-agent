@@ -1,3 +1,4 @@
+import { GENERIC_PROJECT_NAME, quotesName } from "./active-context-resolver";
 import { detectCompanyChatLanguage, type CompanyChatLanguage } from "./company-chat-i18n";
 
 /**
@@ -56,8 +57,15 @@ export function confirmedProjectDeletion(message: string, previousAssistant: str
 export function projectDeleteTarget<T extends { id: string; name: string }>(projects: T[], message: string, confirmedName?: string, activeProjectId?: string | null): T | undefined {
   if (confirmedName) return projects.find(project => project.name === confirmedName);
   const lower = message.toLocaleLowerCase();
-  const named = projects.map(project => ({ project, at: project.name.length > 2 ? lower.indexOf(project.name.toLocaleLowerCase()) : -1 }))
-    .filter(entry => entry.at >= 0).sort((a, b) => a.at - b.at);
+  const found = projects.map(project => ({ project, at: project.name.length > 2 ? lower.indexOf(project.name.toLocaleLowerCase()) : -1 }))
+    .filter(entry => entry.at >= 0);
+  // A short name found inside a longer one ("Сайт" inside "Тимчасовий сайт перевірки") is part of that name, not a
+  // second site: only the longest name covering a place in the message counts.
+  const longer = found.filter(entry => !found.some(other => other !== entry && other.project.name.length > entry.project.name.length
+      && other.at <= entry.at && other.at + other.project.name.length >= entry.at + entry.project.name.length));
+  // A generic name ("Сайт", "Blog") is the kind word of the request itself; it names a site only when quoted or alone.
+  const specific = longer.filter(entry => !GENERIC_PROJECT_NAME.test(entry.project.name.trim()) || quotesName(message, entry.project.name));
+  const named = (specific.length ? specific : longer).sort((a, b) => a.at - b.at);
   if (named.length > 1) {
     // "Delete X ... Keep Y and Z": only the one site named before the keep clause is the target; otherwise ambiguous.
     const keep = lower.search(/(?:\bkeep\b|\bpreserve\b|\bretain\b|залиш|збереж|не\s+чіпай|сохрани|оставь|mant[eé]n|conserv|behalte)/iu);

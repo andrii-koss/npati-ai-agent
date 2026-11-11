@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "./business-workspace-shared";
 import { useTranslation } from "./i18n";
+import { dataAutoAllowPath, saveDataAutoAllow, type DataAutoAllowView } from "./company/CompanyDataAutoAllow";
 
 /** `[[npati-approval:<companyId>:<runId>:<approvalId>:<toolName>]]`, stored with the assistant reply so the card survives reloads. */
 export const approvalLine = /^\[\[npati-approval:([0-9a-f-]{36}):([0-9a-f-]{36}):([0-9a-f-]{36}):([a-z0-9._-]+)\]\]$/i;
@@ -9,8 +10,8 @@ type Approval = { id: string; status: string; toolName: string; actionSummary?: 
 type RunDetails = { run: { id: string; status: string; errorMessage?: string | null; result?: string | null } };
 
 const copy: Record<string, Record<string, string>> = {
-  en: { title: "Confirmation required", approve: "Approve", resume: "Continue", reject: "Reject", pending: "Waiting for your decision", approved: "Approved", rejected: "Rejected", expired: "Expired", completed: "Done", failed: "Failed", cancelled: "Cancelled", working: "Working…", used: "This confirmation was already used" },
-  uk: { title: "Потрібне підтвердження", approve: "Підтвердити", reject: "Відхилити", pending: "Очікує вашого рішення", approved: "Підтверджено", rejected: "Відхилено", expired: "Термін минув", completed: "Виконано", failed: "Помилка", cancelled: "Скасовано", working: "Виконується…", used: "Це підтвердження вже використано" },
+  en: { title: "Confirmation required", approve: "Approve", resume: "Continue", reject: "Reject", pending: "Waiting for your decision", approved: "Approved", rejected: "Rejected", expired: "Expired", completed: "Done", failed: "Failed", cancelled: "Cancelled", working: "Working…", used: "This confirmation was already used", always: "Allow and don't ask again", alwaysHint: "The agents of this company will act without asking (git writes still ask). You can turn this off in the company settings." },
+  uk: { title: "Потрібне підтвердження", approve: "Підтвердити", reject: "Відхилити", pending: "Очікує вашого рішення", approved: "Підтверджено", rejected: "Відхилено", expired: "Термін минув", completed: "Виконано", failed: "Помилка", cancelled: "Скасовано", working: "Виконується…", used: "Це підтвердження вже використано", always: "Дозволити і більше не питати", alwaysHint: "Агенти цієї компанії діятимуть без підтвердження (запис у git і далі питатиме). Вимкнути можна в налаштуваннях компанії." },
   de: { title: "Bestätigung erforderlich", approve: "Bestätigen", reject: "Ablehnen", pending: "Wartet auf Ihre Entscheidung", approved: "Bestätigt", rejected: "Abgelehnt", expired: "Abgelaufen", completed: "Erledigt", failed: "Fehlgeschlagen", cancelled: "Abgebrochen", working: "Wird ausgeführt…", used: "Diese Bestätigung wurde bereits verwendet" },
   es: { title: "Se requiere confirmación", approve: "Aprobar", reject: "Rechazar", pending: "Esperando tu decisión", approved: "Aprobado", rejected: "Rechazado", expired: "Caducado", completed: "Hecho", failed: "Error", cancelled: "Cancelado", working: "Ejecutando…", used: "Esta confirmación ya se usó" },
   pt: { title: "Confirmação necessária", approve: "Aprovar", reject: "Rejeitar", pending: "Aguardando sua decisão", approved: "Aprovado", rejected: "Rejeitado", expired: "Expirado", completed: "Concluído", failed: "Falhou", cancelled: "Cancelado", working: "Executando…", used: "Esta confirmação já foi usada" },
@@ -64,6 +65,20 @@ export function ChatApprovalCard({ companyId, runId, approvalId, toolName }: { c
     } finally { setBusy(false); }
   };
 
+  // The owner can stop these questions for the whole company; a git write still asks, so its card does not offer it.
+  const [setting, setSetting] = useState<DataAutoAllowView | null>(null);
+  const offersAlways = !/(^|\.)git(\.|$)/i.test(approval?.toolName ?? toolName);
+  useEffect(() => {
+    if (!offersAlways) return;
+    void api<DataAutoAllowView>(dataAutoAllowPath(companyId)).then(setSetting).catch(() => undefined);
+  }, [companyId, offersAlways]);
+  const allowAlways = async () => {
+    if (!setting || busy) return;
+    try { setSetting(await saveDataAutoAllow(companyId, true, setting.revision)); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); return; }
+    await decide("approved");
+  };
+
   const status = runStatus && ["completed", "failed", "cancelled"].includes(runStatus) ? runStatus : approval?.status ?? "pending";
   const decidable = (approval?.status === "pending" || approval?.status === "approved") && approval.runId === runId && !approval.consumedAt && (!approval.expiresAt || Date.parse(approval.expiresAt) > Date.now()) && runStatus === "awaiting_approval" && !busy;
   return (
@@ -76,6 +91,9 @@ export function ChatApprovalCard({ companyId, runId, approvalId, toolName }: { c
         <div className="chat-approval-card-actions">
           <button type="button" onClick={() => void decide("approved")}>{approval?.status === "approved" ? t.resume ?? copy.en!.resume : t.approve}</button>
           <button type="button" className="secondary" onClick={() => void decide("rejected")}>{t.reject}</button>
+          {offersAlways && setting?.canChange && !setting.autoAllow
+            ? <button type="button" className="secondary" title={t.alwaysHint ?? copy.en!.alwaysHint} onClick={() => void allowAlways()} data-testid="approval-always">{t.always ?? copy.en!.always}</button>
+            : null}
         </div>
       ) : null}
       {result ? <pre className="chat-approval-result">{result}</pre> : null}

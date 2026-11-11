@@ -235,6 +235,12 @@ export async function evaluatePolicyApproval(
     }
     return { decision: "allow", phase, reasons: [...reasons, "approval:consumed"], risk, status: 200 };
   }
+  // The company chose to let its agents act without asking. A git write still asks: its approval is consumed again at the
+  // git boundary, and publishing code is the one action the setting does not cover.
+  if (deps.companyAutoAllow && phase !== "project_rules" && !request.git && !isGitWriteTool(request.tool) && !writesGitFromShell(request.command)
+      && await deps.companyAutoAllow(request.ctx, request.companyId).catch(() => false)) {
+    return { decision: "allow", phase, risk, status: 200, reasons: [...reasons, "approval:company_setting", `approval:action:${approvalActionFor(request)}`] };
+  }
   // C5: a standing rule for this action short-circuits the request. Never consulted for an approval
   // raised in the `project_rules` phase, because that phase precedes the network enforcement gate.
   if (deps.approvalRules && phase !== "project_rules") {
@@ -276,6 +282,13 @@ export async function evaluatePolicyApproval(
     deps.logger?.warn({ err: error }, "policy_approval_request_failed");
     return denyPolicyResult("approval_unavailable", "Approval request could not be created", 503, phase);
   }
+}
+
+/** A shell command that writes to git (push, commit, reset...): the company setting does not cover it, like a git tool. */
+export function writesGitFromShell(command: string | null | undefined): boolean {
+  if (typeof command !== "string" || !command) return false;
+  return detectGitWriteAttempts(command).length > 0
+    || /\bgit\s+(?:-\S+\s+)*(push|commit|merge|rebase|reset|tag|cherry-pick|am|apply|remote|config|clean|checkout|restore|branch\s+-[dD])\b/i.test(command);
 }
 
 /**

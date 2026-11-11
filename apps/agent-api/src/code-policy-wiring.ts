@@ -77,6 +77,7 @@ export function createCodePolicyWiring(deps: CreateCodePolicyWiringDeps) {
         }
       : undefined,
 
+    companyAutoAllow: async (ctx, companyId) => featureFlagService.dataAutoAllow.isOn(ctx, companyId),
     approvalRules: {
       findRule: async (ctx, query) => codeApprovalScope.findRule(ctx, query),
     },

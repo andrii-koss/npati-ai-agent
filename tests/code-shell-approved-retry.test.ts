@@ -52,4 +52,30 @@ describe("shell approval through the production executor and adapter", () => {
     await expect(exec({ ...input, approvalId: "approval-1" })).rejects.toBeDefined();
     expect(executions).toBe(1);
   });
+
+  it("runs a command the company setting allowed, with the sandbox told it is approved, and still asks for a git push", async () => {
+    const ctx: AuthContext = { workspaceId: "ws", userId: "owner", permissions: ["workspace:write"] };
+    const requested: unknown[] = []; const sandboxCalls: Array<{ command: string; approved?: boolean }> = [];
+    const policy = new PolicyEngine({
+      flags: { assertEnabled: async () => true },
+      capabilities: { get: () => ({ id: "code.shell.exec", status: "active", version: 1 }) },
+      classifier: () => ({ risk: "approval" }),
+      sessionMode: async () => "auto",
+      approvals: { requestApproval: async (_c, _co, input) => { requested.push(input); return { id: "approval-x" }; }, consumeApproved: async () => {} },
+      networkEnforcement: () => true,
+      companyAutoAllow: async () => true,
+    });
+    const shell = new CodeShellRuntime({ policy, sandbox: { execute: async input => { sandboxCalls.push({ command: input.command, approved: input.approved }); return { exitCode: 0, stdout: "ok", stderr: "", durationMs: 1, status: "completed", sandboxId: "sandbox" }; } } });
+    const ports = createCodePortsWiring({ config: {}, log: { warn() {}, info() {} }, codeShellRuntime: shell,
+      projectSandbox: {}, featureFlagService: {}, secretLeases: {} } as unknown as CreateCodePortsWiringDeps);
+    const exec = canonicalShellExecutors({ shellRuntime: ports.codeShellRuntimePort })["code.shell.exec"]!;
+    const input = { ctx, companyId: "company", projectId: "project", sessionId: "session", turnId: "turn", toolCallId: "call",
+      tool: { name: "code.shell.exec", version: 1 }, args: { command: "rm temp-check.txt" }, limits: DEFAULT_CODE_AGENT_LIMITS,
+    } as CodeToolExecutionContext;
+    await expect(exec(input)).resolves.toMatchObject({ stdout: "ok" });
+    expect(sandboxCalls).toEqual([{ command: "rm temp-check.txt", approved: true }]);
+    await expect(exec({ ...input, toolCallId: "push", args: { command: "git push origin main" } })).rejects.toMatchObject({ code: "approval_required" });
+    expect(sandboxCalls).toHaveLength(1);
+    expect(requested).toHaveLength(1);
+  });
 });
