@@ -70,3 +70,12 @@
 .npati-dialog-btn-danger {
   font-weight: 400;
 }
+
+/* Only the page title and its description beside the back arrow. */
+:is(.marketplace-hero, .inspector-header, .activity-header, .automations-header, .company-page-header):has(.marketplace-back-button) h1 {
+  font-size: 26px !important;
+}
+
+:is(.marketplace-hero, .inspector-header, .activity-header, .automations-header, .company-page-header):has(.marketplace-back-button) :is(h1, .company-title-row) + p:not(.eyebrow) {
+  font-size: 13px !important;
+}

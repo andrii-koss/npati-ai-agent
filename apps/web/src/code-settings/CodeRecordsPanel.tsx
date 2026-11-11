@@ -32,16 +32,25 @@ export function CodeRecordsPanel<T extends RecordItem>({ items, kind, companyId,
   const [page, setPage] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const [fullscreenPageSize, setFullscreenPageSize] = useState(5);
   const [selected, setSelected] = useState(new Set<string>());
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const lock = useRef(false), alive = useRef(true);
   const panel = useRef<HTMLElement>(null);
+  const exitFullscreen = useRef(() => {});
+  const pageSize = fullscreen ? fullscreenPageSize : 5;
+  const measuredPageSize = useRef(pageSize);
+  measuredPageSize.current = pageSize;
   const contentId = useId();
   const label = kind === "projects" ? (isUk ? "Проєкти" : "Projects") : (isUk ? "Сесії" : "Sessions");
-  const pages = Math.max(1, Math.ceil(items.length / 5));
+  const pages = Math.max(1, Math.ceil(items.length / pageSize));
   const currentPage = Math.min(page, pages - 1);
-  const rows = items.slice(currentPage * 5, currentPage * 5 + 5);
+  const rows = items.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
+  exitFullscreen.current = () => {
+    setPage(Math.floor(currentPage * pageSize / 5));
+    setFullscreen(false);
+  };
   const blocked = busy || busyId !== null;
   const allVisible = rows.length > 0 && rows.every(item => selected.has(item.id));
   const someVisible = rows.some(item => selected.has(item.id));
@@ -56,10 +65,40 @@ export function CodeRecordsPanel<T extends RecordItem>({ items, kind, companyId,
     const focused = document.activeElement as HTMLElement | null;
     document.body.style.overflow = "hidden";
     panel.current?.focus();
-    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setFullscreen(false); };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") exitFullscreen.current(); };
     window.addEventListener("keydown", escape);
     return () => { document.body.style.overflow = overflow; window.removeEventListener("keydown", escape); focused?.focus(); };
   }, [fullscreen]);
+  useEffect(() => {
+    if (!fullscreen || collapsed) return;
+    const container = panel.current?.querySelector<HTMLElement>(".automations-table-container");
+    const header = container?.querySelector("thead");
+    const body = container?.querySelector("tbody");
+    if (!container || !header || !body) return;
+    let largestRow = 0;
+    let previousWidth = container.clientWidth;
+    const measure = () => {
+      if (container.clientWidth !== previousWidth) {
+        largestRow = 0;
+        previousWidth = container.clientWidth;
+      }
+      const heights = [...body.querySelectorAll("tr")].map(row => row.getBoundingClientRect().height);
+      largestRow = Math.max(largestRow, ...heights);
+      if (!largestRow || !container.clientHeight) return;
+      const available = container.clientHeight - header.getBoundingClientRect().height - 1;
+      const nextSize = Math.max(1, Math.floor(available / largestRow));
+      const previousSize = measuredPageSize.current;
+      if (nextSize === previousSize) return;
+      measuredPageSize.current = nextSize;
+      setFullscreenPageSize(nextSize);
+      setPage(previous => Math.floor(previous * previousSize / nextSize));
+    };
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    [container, header, body].forEach(element => observer?.observe(element));
+    window.addEventListener("resize", measure);
+    measure();
+    return () => { observer?.disconnect(); window.removeEventListener("resize", measure); };
+  }, [fullscreen, collapsed, items.length, notice]);
   const toggle = (id: string) => setSelected(previous => {
     const next = new Set(previous); if (next.has(id)) next.delete(id); else next.add(id); return next;
   });
@@ -121,7 +160,10 @@ export function CodeRecordsPanel<T extends RecordItem>({ items, kind, companyId,
       <RecordIconButton label={isUk ? "Архівувати вибрані" : "Archive selected"} icon={Archive} disabled={blocked || readOnly || !targets.some(item => item.status !== "archived")} onClick={() => void execute("archive", targets.filter(item => item.status !== "archived"))} />
       <RecordIconButton label={isUk ? "Видалити вибрані" : "Delete selected"} icon={Trash2} danger disabled={blocked || readOnly || !targets.length} onClick={() => void execute("delete", targets)} />
       <RecordIconButton label={collapsed ? (isUk ? "Розгорнути таблицю" : "Expand table") : (isUk ? "Згорнути таблицю" : "Collapse table")} icon={collapsed ? ChevronDown : ChevronUp} aria-expanded={!collapsed} aria-controls={contentId} onClick={() => setCollapsed(value => !value)} />
-      <RecordIconButton label={fullscreen ? (isUk ? "Вийти з повного екрана" : "Exit fullscreen") : (isUk ? "На весь екран" : "Fullscreen")} icon={fullscreen ? Minimize2 : Maximize2} aria-pressed={fullscreen} onClick={() => { setCollapsed(false); setFullscreen(value => !value); }} />
+      <RecordIconButton label={fullscreen ? (isUk ? "Вийти з повного екрана" : "Exit fullscreen") : (isUk ? "На весь екран" : "Fullscreen")} icon={fullscreen ? Minimize2 : Maximize2} aria-pressed={fullscreen} onClick={() => {
+        if (fullscreen) exitFullscreen.current();
+        else { setCollapsed(false); setFullscreenPageSize(5); setFullscreen(true); }
+      }} />
     </div>
     {notice && <p className="code-records-notice" role="status">{notice}</p>}
     <div id={contentId} hidden={collapsed} className="code-records-content" aria-busy={busy}>
@@ -129,7 +171,7 @@ export function CodeRecordsPanel<T extends RecordItem>({ items, kind, companyId,
         {children({ rows, selected, allVisible, someVisible, busy: blocked, toggle, togglePage, remove: item => void execute("delete", [item]) })}
       </div>
       <div className="code-records-pagination">
-        <span>{items.length ? currentPage * 5 + 1 : 0}-{Math.min((currentPage + 1) * 5, items.length)} / {items.length}</span>
+        <span>{items.length ? currentPage * pageSize + 1 : 0}-{Math.min((currentPage + 1) * pageSize, items.length)} / {items.length}</span>
         <RecordIconButton label={isUk ? "Попередня сторінка" : "Previous page"} icon={ChevronLeft} disabled={blocked || currentPage === 0} onClick={() => setPage(currentPage - 1)} />
         <RecordIconButton label={isUk ? "Наступна сторінка" : "Next page"} icon={ChevronRight} disabled={blocked || currentPage === pages - 1} onClick={() => setPage(currentPage + 1)} />
       </div>

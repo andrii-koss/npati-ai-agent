@@ -59,6 +59,29 @@ describe("Code project and session table controls", () => {
     expect(document.body.style.overflow).toBe("");
   });
 
+  it("fits fullscreen rows to available height and restores five rows on exit", async () => {
+    let availableHeight = 680;
+    const height = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("automations-table-container") ? availableHeight : 0;
+    });
+    const bounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(() => new DOMRect(0, 0, 900, 40));
+    try {
+      await render();
+      expect(rows()).toHaveLength(5);
+      await click(host.querySelector<HTMLInputElement>('input[aria-label="Select Project 0"]')!);
+      await click(button("Fullscreen"));
+      expect(rows()).toHaveLength(12);
+      expect(button("Next page").disabled).toBe(true);
+      availableHeight = 400;
+      await act(async () => window.dispatchEvent(new Event("resize")));
+      expect(rows()).toHaveLength(8);
+      expect(button("Next page").disabled).toBe(false);
+      await click(button("Exit fullscreen"));
+      expect(rows()).toHaveLength(5);
+      expect(host.querySelector<HTMLInputElement>('input[aria-label="Select Project 0"]')?.checked).toBe(true);
+    } finally { height.mockRestore(); bounds.mockRestore(); }
+  });
+
   it("cancels deletion, then deletes all selected projects using confirmed scoped requests", async () => {
     await render(); await click(button("Select all records"));
     vi.mocked(promptModal).mockResolvedValueOnce(null);
