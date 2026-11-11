@@ -43,7 +43,12 @@ export function AddFieldModal({
       <aside className="company-drawer modal-drawer" onMouseDown={(e) => e.stopPropagation()}>
         <header>
           <h2>{isUk ? `Додати поле до "${selectedCollection}"` : `Add Field to "${selectedCollection}"`}</h2>
-          <button type="button" className="company-drawer-close" onClick={onClose}>×</button>
+          <button type="button" className="company-drawer-close" aria-label={isUk ? "Закрити" : "Close"} onClick={onClose}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
         </header>
         <form onSubmit={onSubmit}>
           <section>
