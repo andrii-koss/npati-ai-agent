@@ -8,20 +8,20 @@ export function AsyncOperationsView({ snapshot, stale, busy, isUk, onControl, on
   onControl(op: AsyncOperation, action: "continue" | "interrupt" | "send_message"): void;
   onProcess(op: AsyncOperation, action: "output" | "stop"): void;
 }) {
-  return <section aria-label={isUk ? "Асинхронна робота" : "Async work"}>
+  return <section className="async-operations" aria-label={isUk ? "Асинхронна робота" : "Async work"}>
     <h2>{isUk ? "Процеси та дочірні агенти" : "Processes and child agents"}</h2>
     {stale && <p role="status">{isUk ? "З’єднання втрачено. Керування призупинено." : "Connection unavailable. Controls paused."}</p>}
-    {!snapshot.operations.length && <p>{isUk ? "Немає операцій." : "No operations."}</p>}
-    <ul>{snapshot.operations.map(op => <li key={op.operationId}>
+    {!snapshot.operations.length && <p className="async-operations-empty">{isUk ? "Немає операцій." : "No operations."}</p>}
+    <ul className="async-operations-list">{snapshot.operations.map(op => <li key={op.operationId}>
       <code>{op.childRunId ?? op.processId}</code> · {op.agentType ?? op.kind} · {op.state}
       {op.cancelRequested && op.state !== "interrupted" && <span> · {isUk ? "зупинка запитана" : "stop requested"}</span>}
       {op.collected && <span> · {isUk ? "результат зібрано" : "result collected"}</span>}
-      {op.kind === "process" && snapshot.capabilities.processes && <div>
+      {op.kind === "process" && snapshot.capabilities.processes && <div className="async-operation-actions">
         <button type="button" disabled={stale || busy || ["accepted", "preparing"].includes(op.state)} onClick={() => onProcess(op, "output")}>{isUk ? "Вивід процесу" : "Process output"}</button>
         <button type="button" disabled={stale || busy || op.cancelRequested || !["accepted", "preparing", "dispatching", "running", "unknown_outcome"].includes(op.state)} onClick={() => onProcess(op, "stop")}>{isUk ? "Зупинити процес" : "Stop process"}</button>
       </div>}
       {op.state === "unknown_outcome" && <p>{isUk ? "Результат невідомий. Потрібна перевірка перед відновленням." : "Outcome unknown. Review before recovery."}</p>}
-      {op.childRunId && snapshot.capabilities.controls && <div>
+      {op.childRunId && snapshot.capabilities.controls && <div className="async-operation-actions">
         <button type="button" disabled={stale || busy || !snapshot.capabilities.resume || op.stopRequested || op.state !== "interrupted"} onClick={() => onControl(op, "continue")}>{isUk ? "Продовжити" : "Continue"}</button>
         <button type="button" disabled={stale || busy || !snapshot.capabilities.inbox || op.cancelRequested || !["accepted", "running"].includes(op.state)} onClick={() => onControl(op, "send_message")}>{isUk ? "Надіслати повідомлення" : "Send message"}</button>
         <button type="button" disabled={stale || busy || op.cancelRequested || !["accepted", "running"].includes(op.state)} onClick={() => onControl(op, "interrupt")}>{isUk ? "Перервати" : "Interrupt"}</button>
@@ -94,7 +94,7 @@ export function AsyncWorkspacePanel({ scope, runId, isUk, onAvailability, onRun 
     });
   };
   if (!snapshot) return error ? <p role="alert">{error}</p> : null;
-  return <div className="project-panel" data-async-session={sessionId}>
+  return <div className="project-panel async-workspace-panel" data-async-session={sessionId}>
     <AsyncOperationsView snapshot={snapshot} stale={!!error} busy={busy} isUk={isUk} onControl={childControl} onProcess={(op, action) => void act(async signal => {
       const offset = cursors.current.get(op.processId) ?? 0;
       const attempt = controls.current, toolCallId = attempt.begin(JSON.stringify([key, op.processId, action, offset])); if (!toolCallId) return;
@@ -115,14 +115,15 @@ export function AsyncWorkspacePanel({ scope, runId, isUk, onAvailability, onRun 
         return action === "stop" ? (isUk ? "Запит зупинки прийнято." : "Stop request accepted.") : undefined;
       } finally { attempt.finish(accepted); }
     })} />
-    {output && <section aria-label={isUk ? "Вивід процесу" : "Process output"}><code>{output.processId}</code>
+    {output && <section className="async-process-output" aria-label={isUk ? "Вивід процесу" : "Process output"}><code>{output.processId}</code>
       {output.lossy && <p>{isUk ? "Вивід скорочено або частково втрачено." : "Output truncated or partially lost."}</p>}<pre>{output.text}</pre></section>}
     {error && <p role="alert">{error}</p>}
     {notice && <p role="status">{notice}</p>}
-    {snapshot.capabilities.inbox && <section aria-label={isUk ? "Черга повідомлень" : "Message queue"}>
+    {snapshot.capabilities.inbox && <section className="async-message-panel" aria-label={isUk ? "Черга повідомлень" : "Message queue"}>
       <label>{target ? `${isUk ? "Повідомлення агенту" : "Message to agent"} ${target.childRunId}` : isUk ? "Завдання або уточнення" : "Task or steering message"}
         <textarea value={draft} maxLength={8000} onChange={e => setDraft(e.target.value)} disabled={busy || !!error} />
       </label>
+      <div className="async-message-actions">
       {target ? <>
         <button type="button" disabled={busy || !!error || !snapshot.capabilities.controls || !draft.trim() || !snapshot.operations.some(op => op.operationId === target.operationId && !op.cancelRequested && ["accepted", "running"].includes(op.state))} onClick={() => void act(async signal => {
           const text = draft, attempt = controls.current; const requestId = attempt.begin(JSON.stringify([key, target.childRunId, text])); if (!requestId) return;
@@ -139,7 +140,8 @@ export function AsyncWorkspacePanel({ scope, runId, isUk, onAvailability, onRun 
           if (!signal.aborted) { setInbox(next); setDraft(""); } return next.receipt?.target === "next-step" ? (isUk ? "Прийнято для наступного кроку." : "Accepted for the next step.") : (isUk ? "Додано до наступного завдання." : "Queued for the next task."); }
         finally { attempt.finish(accepted); }
       })}>{mode === "queue" ? (isUk ? "У чергу" : "Queue") : (isUk ? "Уточнити" : "Steer")}</button>)}
-      <ul>{inbox?.messages.map(message => <li key={message.id}>
+      </div>
+      <ul className="async-inbox-list">{inbox?.messages.map(message => <li key={message.id}>
         {message.completion ? <span>{isUk ? "Результат очікує збору" : "Result awaiting collection"} · {message.completion.status}</span> : <>
           <input aria-label={isUk ? "Повідомлення в черзі" : "Queued message"} value={edits[message.id] ?? message.text} disabled={message.status !== "pending" || busy || !!error} onChange={e => setEdits(current => ({ ...current, [message.id]: e.target.value }))} />
           {(["PUT", "DELETE"] as const).map(method => <button type="button" key={method} disabled={message.status !== "pending" || busy || !!error} onClick={() => void act(async signal => {
@@ -150,7 +152,7 @@ export function AsyncWorkspacePanel({ scope, runId, isUk, onAvailability, onRun 
         </>} · {message.target} · {message.status}
       </li>)}</ul>
     </section>}
-    {snapshot.capabilities.resume && runId && <button type="button" disabled={busy || !!error} onClick={() => void act(async signal => {
+    {snapshot.capabilities.resume && runId && <button type="button" className="async-recovery-button" disabled={busy || !!error} onClick={() => void act(async signal => {
       const result = await asyncRequest<{ status: string }>(`/api/companies/${encodeURIComponent(companyId)}/code/runs/${encodeURIComponent(runId)}/recovery`, signal);
       return result.status === "none" ? (isUk ? "Запису про відновлення немає." : "No recovery notice recorded.") : (isUk ? "Run був перерваний. Перевірте Activity перед відновленням." : "Run was interrupted. Review Activity before recovery.");
     })}>{isUk ? "Перевірити відновлення run" : "Check run recovery"}</button>}

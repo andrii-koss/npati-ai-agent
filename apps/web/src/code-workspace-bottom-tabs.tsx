@@ -115,7 +115,7 @@ export function CodeWorkspaceBottomTabs({
         )}
 
         {tab === "terminal" && (
-          <div>
+          <div className={terminalCommands.length === 0 ? "workspace-terminal-empty" : undefined}>
             {terminalCommands.length === 0 ? (
               <p className="ds-muted" style={{ padding: "16px 0", textAlign: "center" }}>
                 {isUk

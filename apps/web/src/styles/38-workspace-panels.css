@@ -1,0 +1,156 @@
+.code-workspace .workspace-terminal-empty {
+  min-height: 200px;
+  display: grid;
+  place-items: center;
+}
+
+.code-workspace .async-workspace-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+  color: #334155;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 3%);
+  font-size: 13px;
+}
+
+.code-workspace .async-workspace-panel h2 {
+  margin: 0 0 12px;
+  color: #1e293b;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.code-workspace .async-workspace-panel p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.code-workspace .async-operations-empty {
+  padding: 12px;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #475569;
+}
+
+.code-workspace :is(.async-operations-list, .async-inbox-list) {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.code-workspace :is(.async-operations-list, .async-inbox-list):empty {
+  display: none;
+}
+
+.code-workspace :is(.async-operations-list, .async-inbox-list) > li {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.code-workspace :is(.async-operation-actions, .async-message-actions) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.code-workspace .async-operation-actions {
+  margin-top: 8px;
+}
+
+.code-workspace .async-message-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.code-workspace .async-message-panel > label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.code-workspace .async-message-panel :is(textarea, input) {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #1e293b;
+  font: inherit;
+  line-height: 1.5;
+}
+
+.code-workspace .async-message-panel textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+
+.code-workspace .async-workspace-panel button {
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  background: #fff;
+  color: #334155;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.code-workspace .async-workspace-panel button:hover:not(:disabled) {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.code-workspace .async-workspace-panel button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.code-workspace .async-workspace-panel :is(button, input, textarea):focus-visible {
+  outline: 2px solid var(--npati-red, #d83438);
+  outline-offset: 2px;
+}
+
+.code-workspace .async-recovery-button {
+  align-self: flex-start;
+}
+
+.code-workspace .async-inbox-list input {
+  margin-bottom: 8px;
+}
+
+.code-workspace .async-inbox-list button + button {
+  margin-left: 8px;
+}
+
+.code-workspace .async-process-output pre {
+  max-height: 240px;
+  margin: 8px 0 0;
+  padding: 12px;
+  overflow: auto;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
