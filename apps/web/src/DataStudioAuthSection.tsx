@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { getStoredAuthToken } from "./AuthContext";
 import { confirmModal, promptModal } from "./ConfirmDialog";
 import { DataStudioAuthSettingsTab } from "./data-studio-auth-settings-tab";
+import { AuthUserBulkToolbar, useAuthUserBulkActions } from "./data-studio-auth-bulk-actions";
 import type {
   GdprAffectedData,
   ProjectAccessPolicy,
@@ -96,6 +97,9 @@ export const DataStudioAuthSection: React.FC<Props> = ({
       setUsersLoading(false);
     }
   }, [basePath, search, statusFilter, notify]);
+
+  const bulk = useAuthUserBulkActions({ basePath, search, statusFilter, users, usersTotal,
+    isUk, api: apiFetch, reload: loadUsers, notify });
 
   const loadSettings = useCallback(async () => {
     setSettingsLoading(true);
@@ -403,17 +407,18 @@ export const DataStudioAuthSection: React.FC<Props> = ({
               <input
                 type="text"
                 placeholder={isUk ? "Пошук за email…" : "Search users by email…"}
+                disabled={bulk.busy}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            <select value={statusFilter} disabled={bulk.busy} onChange={(e) => setStatusFilter(e.target.value)}>
               <option value="">{isUk ? "Усі статуси" : "All statuses"}</option>
               <option value="active">Active</option>
               <option value="pending">Pending</option>
               <option value="suspended">Suspended</option>
             </select>
-            <button type="button" className="button-secondary" onClick={() => void loadUsers()} style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+            <button type="button" className="button-secondary" disabled={bulk.busy || usersLoading} onClick={() => void loadUsers()} style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
                 <path d="M3 3v5h5" />
@@ -424,6 +429,7 @@ export const DataStudioAuthSection: React.FC<Props> = ({
             </button>
           </div>
 
+          <AuthUserBulkToolbar bulk={bulk} total={usersTotal} isUk={isUk} disabled={usersLoading} />
           {usersLoading ? (
             <div className="auth-loading-state">
               <p>{isUk ? "Завантаження користувачів…" : "Loading users…"}</p>
@@ -437,6 +443,12 @@ export const DataStudioAuthSection: React.FC<Props> = ({
               <table className="data-studio-table">
                 <thead>
                   <tr>
+                    <th className="auth-user-selection-cell">
+                      <input type="checkbox" aria-label={isUk ? "Вибрати видимих користувачів" : "Select displayed users"}
+                        checked={bulk.allVisible} disabled={bulk.busy}
+                        ref={input => { if (input) input.indeterminate = bulk.someVisible && !bulk.allVisible; }}
+                        onChange={bulk.toggleVisible} />
+                    </th>
                     <th>Email</th>
                     <th>{isUk ? "Статус" : "Status"}</th>
                     <th>{isUk ? "Ролі" : "Roles"}</th>
@@ -449,6 +461,10 @@ export const DataStudioAuthSection: React.FC<Props> = ({
                 <tbody>
                   {users.map((u) => (
                     <tr key={u.id}>
+                      <td className="auth-user-selection-cell">
+                        <input type="checkbox" aria-label={`${isUk ? "Вибрати" : "Select"} ${u.email}`}
+                          checked={bulk.selected.has(u.id)} disabled={bulk.busy} onChange={() => bulk.toggle(u.id)} />
+                      </td>
                       <td>
                         <strong>{u.email}</strong>
                         <div className="user-id-sub">{u.id}</div>
@@ -482,6 +498,7 @@ export const DataStudioAuthSection: React.FC<Props> = ({
                             type="button"
                             className="button-secondary table-action-btn"
                             onClick={() => void handleToggleStatus(u)}
+                            disabled={bulk.busy}
                             title={u.status === "active" ? "Suspend user" : "Activate user"}
                             style={{ fontSize: "12px", padding: "4px 8px" }}
                           >
@@ -491,6 +508,7 @@ export const DataStudioAuthSection: React.FC<Props> = ({
                             type="button"
                             className="button-secondary table-action-btn"
                             onClick={() => void handleEditRoles(u)}
+                            disabled={bulk.busy}
                             title={isUk ? "Змінити ролі" : "Edit roles"}
                             style={{ fontSize: "12px", padding: "4px 8px" }}
                           >
@@ -500,6 +518,7 @@ export const DataStudioAuthSection: React.FC<Props> = ({
                             type="button"
                             className="button-secondary table-action-btn"
                             onClick={() => void handleExportData(u)}
+                            disabled={bulk.busy}
                             title={isUk ? "GDPR Експорт" : "GDPR Export"}
                             style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "12px", padding: "4px 8px" }}
                           >
@@ -514,6 +533,7 @@ export const DataStudioAuthSection: React.FC<Props> = ({
                             type="button"
                             className="button-secondary table-action-btn danger"
                             onClick={() => void handleOpenDeleteModal(u)}
+                            disabled={bulk.busy}
                             title={isUk ? "GDPR Видалення" : "GDPR Delete"}
                             style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "12px", padding: "4px 8px" }}
                           >

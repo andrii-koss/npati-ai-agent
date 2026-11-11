@@ -420,6 +420,40 @@
   grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
 }
 
+.data-studio-container .users-table-container .data-studio-table th {
+  color: #000;
+}
+
+.data-studio-container .auth-user-selection-cell {
+  width: 34px;
+}
+
+.data-studio-container .auth-user-selection-cell input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  vertical-align: middle;
+  accent-color: var(--npati-red, #dc2626);
+}
+
+.data-studio-container .auth-user-bulk-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  border: 1px solid var(--studio-border);
+  border-radius: 7px;
+  color: #18181b;
+  background: #fafafa;
+  font-size: 12px;
+}
+
+.data-studio-container .auth-user-bulk-spacer {
+  flex: 1;
+}
+
 .data-studio-container .auth-filters-bar > .search-box {
   display: contents;
 }

@@ -107,7 +107,7 @@ export function registerProjectAuthRoutes(
         request.params.environment,
         request.params.id!,
         request.body.roles,
-      ),
+      ).then(() => ({ success: true })),
     ),
   );
 
