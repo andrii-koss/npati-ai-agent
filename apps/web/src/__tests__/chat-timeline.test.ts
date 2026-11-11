@@ -55,7 +55,7 @@ it("anchors a whole run once, preserves completed runs and shows actual running 
 
 it.each(["en","uk","de","fr","es","it","pl","pt","nl","tr","ru","zh","ja","ko","ar","hi"])("provides request-language summaries and command labels for %s",async language=>{
  const {executionTraceText}=await import("../i18n");expect(executionTraceText(language,"runningCommand")).toContain("{{command}}");expect(executionTraceText(language,"operationsDone")).toContain("{{count}}");if(language!=="en")expect(executionTraceText(language,"working")).not.toBe(executionTraceText("en","working"));
-});
+}, 30_000); // The first language loads every locale module; under a full parallel run that alone passed 5 s.
 
 it("keeps the running row anchored when the first tool arrives after a public assistant update",()=>{
  const process: import("@npati/shared").DevelopmentProcess={id:"p",companyId:"c",parentConversationId:"parent",name:"Site",framework:"Next.js",hidden:false,createdAt:at(1),updatedAt:at(6),runId:"r",initialRunId:"initial",status:"running",runStatuses:{r:"running"},runStartedAts:{r:at(2)}};

@@ -3,18 +3,37 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import type { DevelopmentProcess } from "@npati/shared";
+import { MemoryRouter } from "react-router-dom";
 import { ChatDevelopmentProgress } from "../ChatDevelopmentProgress";
+import { ChatProjectPreviewCard } from "../ChatProjectPreviewCard";
+import { ChatThinking, useChatThinking } from "../ResearchProgress";
 import { I18nProvider } from "../i18n";
 let root: Root | undefined;
-afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;document.body.innerHTML="";vi.restoreAllMocks();});
+afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;document.body.innerHTML="";vi.restoreAllMocks();vi.unstubAllGlobals();});
+/** The chat as the user sees it: "Думаю" from the moment a message is sent, beside the run's progress row. */
+function ChatTurn({process}:{process:DevelopmentProcess}){
+  const thinking=useChatThinking({busy:true,streaming:false,text:"Думаю",items:process.progress,runIds:[],events:[]});
+  React.useEffect(()=>{thinking.start("зроби сайт");},[]);
+  return <>{thinking.visible&&<ChatThinking text={thinking.text}/>}<ChatDevelopmentProgress process={process}/></>;
+}
 it("updates one collapsed run row, retains actual operations inside click-open history and hides service labels",async()=>{
   localStorage.setItem("npati_language","en");Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});const host=document.createElement("div");document.body.append(host);root=createRoot(host);
   let process:DevelopmentProcess={id:"process",companyId:"company",parentConversationId:"parent",name:"Site",framework:"Next.js",status:"running",hidden:false,createdAt:"",updatedAt:"",runId:"run",initialRunId:"run",responseLanguage:"uk",progress:[]};
   const steps=[{stage:"project",tool:"code.workspace"},{stage:"files",tool:"code.fs.edit"},{stage:"dependencies",command:"npm install"},{stage:"build",command:"npm run build"}];
   let header:Element|null=null;
+  // The message was just sent; the agent has not started yet.
+  await act(async()=>root!.render(<I18nProvider><ChatTurn process={{...process,status:"preparing"}}/></I18nProvider>));
   for(let index=0;index<steps.length;index++){
     process={...process,progress:[...(process.progress??[]).map(item=>({...item,status:"completed" as const})),{...steps[index]!,id:"operation"+index,runId:"run",title:"Internal action",at:new Date(index*1000).toISOString(),status:"running",agentId:"SYSTEM"}]};
-    await act(async()=>root!.render(<I18nProvider><ChatDevelopmentProgress process={process}/></I18nProvider>));
+    await act(async()=>root!.render(<I18nProvider><ChatTurn process={process}/></I18nProvider>));
+    if(index===0){
+      // Preparing the workspace is a service step: the chat shows "Думаю", not an empty progress row.
+      expect(host.querySelector(".chat-thinking")?.textContent).toContain("Думаю");
+      expect(host.querySelectorAll(".coding-run-activity")).toHaveLength(0);
+      continue;
+    }
+    // The first visible action replaces "Думаю" with the run's progress row.
+    expect(host.querySelector(".chat-thinking")).toBeNull();
     expect(host.querySelectorAll(".coding-run-activity")).toHaveLength(1);expect(host.querySelectorAll(".codex-trace-row-header")).toHaveLength(1);
     expect(host.querySelector(".coding-run-header")?.getAttribute("aria-expanded")).toBe("false");
     if(header)expect(host.querySelector(".coding-run-header")).toBe(header);header=host.querySelector(".coding-run-header");
@@ -25,7 +44,8 @@ it("updates one collapsed run row, retains actual operations inside click-open h
   const commandHeader=host.querySelectorAll<HTMLButtonElement>(".coding-operation-history .codex-trace-row-header")[2]!;
   commandHeader.focus();expect(document.activeElement).toBe(commandHeader);await act(async()=>commandHeader.click());expect(commandHeader.getAttribute("aria-expanded")).toBe("true");
   process={...process,status:"completed",runStatuses:{run:"completed"},progress:process.progress!.map(item=>({...item,status:"completed"}))};
-  await act(async()=>root!.render(<I18nProvider><ChatDevelopmentProgress process={process}/></I18nProvider>));
+  await act(async()=>root!.render(<I18nProvider><ChatTurn process={process}/></I18nProvider>));
+  expect(host.querySelector(".chat-thinking")).toBeNull();
   expect(host.querySelector(".coding-run-header")).toBe(header);expect(host.querySelector(".coding-run-header")?.textContent).toContain("3");
   for(const text of ["SYSTEM","Completed","NPATI Coding Agent"])expect(host.textContent).not.toContain(text);
   expect(host.querySelector(".codex-trace-status-pill")).toBeNull();
@@ -36,7 +56,15 @@ it("keeps different runs independent and restores their histories from JSON",asy
   Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});const host=document.createElement("div");document.body.append(host);root=createRoot(host);
   const process:DevelopmentProcess={id:"process",companyId:"c",parentConversationId:"parent",name:"Site",framework:"Next.js",status:"running",hidden:false,createdAt:"",updatedAt:"",initialRunId:"first",runId:"second",runStatuses:{first:"completed",second:"running"},progress:[{id:"a",stage:"build",title:"build",status:"completed",at:""},{id:"b",runId:"second",stage:"files",title:"edit",status:"running",at:""}]};
   await act(async()=>root!.render(<ChatDevelopmentProgress process={JSON.parse(JSON.stringify(process))}/>));
-  expect(host.querySelectorAll(".coding-run-header")).toHaveLength(2);const headers=host.querySelectorAll<HTMLButtonElement>(".coding-run-header");await act(async()=>headers[0]!.click());expect(host.querySelector('.coding-run-history a')?.getAttribute("href")).toBe("/activity?runId=first");expect(headers[1]!.getAttribute("aria-expanded")).toBe("false");
+  expect(host.querySelectorAll(".coding-run-header")).toHaveLength(2);const headers=host.querySelectorAll<HTMLButtonElement>(".coding-run-header");await act(async()=>headers[0]!.click());expect(headers[0]!.getAttribute("aria-expanded")).toBe("true");expect(headers[1]!.getAttribute("aria-expanded")).toBe("false");
+  // The link to the run's activity lives on the project card's menu, not inside the step history.
+  expect(host.querySelector('.coding-run-history a[href^="/activity"]')).toBeNull();
+  vi.stubGlobal("fetch",vi.fn(async(url:string)=>new Response(JSON.stringify(url.endsWith("/preview/status")?{isRunning:true,previewUrl:"/preview/test"}:{}))));
+  const cardHost=document.createElement("div");document.body.append(cardHost);const cardRoot=createRoot(cardHost);
+  await act(async()=>cardRoot.render(<MemoryRouter><ChatProjectPreviewCard card={{id:"p1",projectId:"p1",companyId:"c",name:"Site",framework:"Next.js",kind:"website_project",status:"ready",runId:"first"}}/></MemoryRouter>));
+  await act(async()=>cardHost.querySelector<HTMLButtonElement>(".chat-preview-dropdown-btn")!.click());
+  expect(cardHost.querySelector('a[href="/activity?runId=first"]')).not.toBeNull();
+  await act(async()=>cardRoot.unmount());
 });
 
 it("offers the existing Send button for a new queued request during coding and preserves Stop for an empty draft",async()=>{
