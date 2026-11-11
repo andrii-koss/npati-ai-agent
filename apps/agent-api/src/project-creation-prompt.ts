@@ -6,6 +6,7 @@ export function createProjectImplementationPrompt(message: string, target: Devel
     "Begin with a brief acknowledgement in the user's language alongside your first tool calls, then implement the complete request.",
     "User request: " + message,
     "Your assigned project is " + target.name + " (" + target.kind + "), using " + target.framework + ". Implement ONLY this project's specification; other requested projects have separate workspaces.",
+    "Other requested projects are built at the same time by their own runs and get their own project cards. Report only this project; never say another requested project was not implemented or not created.",
     target.framework === "HTML/CSS"
       ? "This is a NEW, EMPTY HTML/CSS/JavaScript workspace. No design or starter files exist. Start by writing index.html and the required CSS/JavaScript files with code.fs.write. Do not list or search for a template, read nonexistent files, add a framework, or install packages unless the user's request needs them."
       : "Only minimal framework configuration and empty entry points have been prepared. Implement the requested pages and interactions directly; there is no demo design to analyze or preserve. Read only the configuration or existing files needed for your edits; use code.fs.edit for an existing file and code.fs.write for a new file.",

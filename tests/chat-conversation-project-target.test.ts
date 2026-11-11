@@ -109,6 +109,10 @@ describe("ordinal and plural references to the chat's projects (V6 step 02)", ()
     expect(target("в останньому додай паузу", "todo")).toBe("game");
     expect(target("in the second one make the background dark", "todo")).toBe("game");
     expect(target("змінити другий проєкт: темний фон", "todo")).toBe("game");
+    // Live V6 step 02: a Russian verb after the ordinal ("во втором поменяй") stayed on the first project.
+    expect(target("во втором поменяй цвет кнопок на оранжевый", "todo")).toBe("game");
+    expect(target("в другому поміняй шрифт", "todo")).toBe("game");
+    expect(target("в первом замени заголовок", "game")).toBe("todo");
   });
 
   it("does not move for an ordinal inside the project ('другу кнопку', 'у другому рядку')", () => {
@@ -138,5 +142,17 @@ describe("plural check requests the intent router reads as conversation (V6 step
     expect(projectBatchIntent("протестуй обидва", "TEST_PROJECT")).toBe("TEST_PROJECT");
     expect(projectBatchIntent("зміни фон в обох проєктах", "CHAT")).toBeUndefined();
     expect(projectBatchIntent("перевір і виправ обидва", "EDIT_PROJECT")).toBeUndefined();
+  });
+});
+
+describe("a change named for several projects (V6 step 02, live D02-04)", () => {
+  it("is an edit batch only when the user named the projects together; a check stays read-only", async () => {
+    const { projectBatchIntent } = await import("../apps/agent-api/src/chat-conversation-project-target");
+    expect(projectBatchIntent("зміни фон в обох проєктах на білий", "CHAT", { allowEdit: true })).toBe("EDIT_PROJECT");
+    expect(projectBatchIntent("поменяй цвет кнопок в обоих проектах", undefined, { allowEdit: true })).toBe("EDIT_PROJECT");
+    expect(projectBatchIntent("make the title bigger in both projects", "EDIT_PROJECT", { allowEdit: true })).toBe("EDIT_PROJECT");
+    expect(projectBatchIntent("перевір і виправ обидва", "REVIEW_PROJECT", { allowEdit: true })).toBe("EDIT_PROJECT");
+    expect(projectBatchIntent("перевір обидва проєкти", "CHAT", { allowEdit: true })).toBe("REVIEW_PROJECT");
+    expect(projectBatchIntent("зміни фон в обох проєктах", "EDIT_PROJECT")).toBeUndefined();
   });
 });

@@ -64,7 +64,7 @@ export function ordinalProjectTarget(message: string, projects: ConversationProj
       const before = tokens[i - 1], after = tokens[i + 1], afterThe = tokens[i - 1] === "the" ? tokens[i - 2] : undefined;
       const located = ["у", "в", "во", "in", "on", "im", "dans", "en", "nel"].includes(before ?? "") || ["in", "on"].includes(afterThe ?? "");
       const named = after !== undefined && PROJECT_NOUN.test(after);
-      if (!named && !(located && (after === undefined || ACTION_VERB.test(after)))) continue;
+      if (!named && !(located && (after === undefined || ACTION_VERB.test(after) || CHANGE_REQUEST.test(after) || CHECK_REQUEST.test(after)))) continue;
       const index = entry.index === "last" ? projects.length - 1 : entry.index;
       return projects[index];
     }
@@ -86,11 +86,19 @@ const CHECK_REQUEST = /(?<![\p{L}])(?:перев[іиі]р\p{L}*|перевир�
 export function isProjectCheckRequest(message: string): boolean {
   return CHECK_REQUEST.test(message);
 }
-type ProjectBatchIntent = "REVIEW_PROJECT" | "TEST_PROJECT" | "PREVIEW_PROJECT";
-const BATCH_INTENTS: string[] = ["REVIEW_PROJECT", "TEST_PROJECT", "PREVIEW_PROJECT"];
-/** The batch intent of a plural read-only request, or undefined when it is not one. */
-export function projectBatchIntent(message: string, intent: string | undefined): ProjectBatchIntent | undefined {
-  if (intent && BATCH_INTENTS.includes(intent)) return intent as ProjectBatchIntent;
+/** A change request ("зміни", "поменяй", "make", typos such as "змини"): it writes, so it is never a read-only check. */
+const CHANGE_REQUEST = /(?<![\p{L}])(?:змін\p{L}*|змини|додай\p{L}*|добав\p{L}*|видали\p{L}*|прибери|зроби\p{L}*|постав\p{L}*|онови\p{L}*|виправ\p{L}*|перефарбуй|замін\p{L}*|помін\p{L}*|измени\p{L}*|поменяй\p{L}*|добавь\p{L}*|удали\p{L}*|сделай\p{L}*|исправь\p{L}*|поставь\p{L}*|замени\p{L}*|change|add|remove|make|update|fix|set|replace|rename|ändere|ajoute|change[zr]?|cambia|modifica|zmień|dodaj|wijzig)(?![\p{L}])/iu;
+export type ProjectBatchIntent = "REVIEW_PROJECT" | "TEST_PROJECT" | "PREVIEW_PROJECT" | "EDIT_PROJECT";
+const READ_BATCH_INTENTS: string[] = ["REVIEW_PROJECT", "TEST_PROJECT", "PREVIEW_PROJECT"];
+const EDIT_INTENTS: string[] = ["EDIT_PROJECT", "EDIT_WEBSITE", "IMPROVE_PROJECT", "DEBUG_PROJECT"];
+/**
+ * The batch intent of a request over several projects, or undefined when it is not one. A change ("зміни фон в обох")
+ * is an edit of each project in turn, and only when `allowEdit` says the user named the projects together.
+ */
+export function projectBatchIntent(message: string, intent: string | undefined, options: { allowEdit?: boolean } = {}): ProjectBatchIntent | undefined {
+  const changes = CHANGE_REQUEST.test(message) || (intent !== undefined && EDIT_INTENTS.includes(intent));
+  if (changes) return options.allowEdit ? "EDIT_PROJECT" : undefined;
+  if (intent && READ_BATCH_INTENTS.includes(intent)) return intent as ProjectBatchIntent;
   return (!intent || intent === "CHAT") && isProjectCheckRequest(message) ? "REVIEW_PROJECT" : undefined;
 }
 
@@ -134,13 +142,13 @@ export async function resolveConversationProjectTarget(store: WorkspaceStore, re
   const from = input.current.project;
   if (!input.conversationId || !from || input.intent === "CREATE_WEBSITE" || input.intent === "CREATE_PROJECT") return undefined;
   const projects = await readConversationProjects(store, auth, input.conversationId, input.history);
-  // "Check both projects": a read-only batch over every project of this chat, never a write to several at once.
-  const plural = projectBatchIntent(input.message, input.intent) ? pluralProjectTargets(input.message, projects) : [];
+  // "Check both projects" / "change the background in both": a batch over every project of this chat, one project at a time.
+  const plural = projectBatchIntent(input.message, input.intent, { allowEdit: true }) ? pluralProjectTargets(input.message, projects) : [];
   if (plural.length && plural.every((project) => project.companyId === plural[0]!.companyId)) {
     const loaded = (await Promise.all(plural.map((project) => store.getProject(auth, project.companyId, project.id).catch(() => undefined)))).filter((project): project is Project => Boolean(project));
     if (loaded.length >= 2) {
       input.log.info({ projectIds: loaded.map((project) => project.id) }, "chat_conversation_project_batch");
-      return { ...await resolver.resolve(auth, { contextType: "company", companyId: plural[0]!.companyId }), projects: loaded };
+      return { ...await resolver.resolve(auth, { contextType: "company", companyId: plural[0]!.companyId }), projects: loaded, pluralReference: true };
     }
   }
   const target = conversationProjectTarget(input.message, from.id, projects);

@@ -22,6 +22,8 @@ export interface ResolvedActiveContext {
   project?: Project;
   /** Bounded same-company read/preview batch; never an ambiguous source-write target. */
   projects?: Project[];
+  /** The user named these projects together ("в обох", "both"): a change applies to each of them in turn. */
+  pluralReference?: boolean;
   snapshot: RunContextSnapshot;
 }
 

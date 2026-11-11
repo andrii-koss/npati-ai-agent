@@ -273,7 +273,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         }
         // Deleting a whole site is a confirmed project deletion through ProjectService, never a Coding Agent run.
         // A plural check ("перевір обидва проєкти") is a read-only batch even when the router reads it as conversation.
-        const batchIntent = resolved.projects?.length ? projectBatchIntent(message, projectIntent.intent) : undefined;
+        const batchIntent = resolved.projects?.length ? projectBatchIntent(message, projectIntent.intent, { allowEdit: resolved.pluralReference }) : undefined;
         if(resolved.projects?.length && batchIntent){
           const conversation=await chatConversation();if(conversation)await workspaceStore.appendNeutralMessage(auth,conversation.id,"user",message);
           const run=await runChatProjectBatch({ctx:auth,projects:resolved.projects,intent:batchIntent,message,signal:streamController.signal,

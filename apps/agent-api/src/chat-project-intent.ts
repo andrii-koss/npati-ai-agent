@@ -245,6 +245,7 @@ export function createChatProjectIntentResolver(deps: {
       || (requestsBusinessGoal(message) && /(?:\bbusiness\b|бізнес|бизнес)/iu.test(message))
     );
     const guardResult = { decision: guardedByName ? recordChat() : deterministic, targets: [] as DevelopmentTarget[], source: "guard" as const };
+    let lowConfidence: { intent: string; confidence: number; deterministic: string } | undefined;
     try {
       const context = await deps.getAIContext(auth);
       const routingSignal = input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000);
@@ -280,7 +281,7 @@ export function createChatProjectIntentResolver(deps: {
       // A bare "create me a site" is unspecific, so the model rates it 0.6-0.7 although it is sure of the action.
       // When the independent keyword reading agrees it is a creation, that doubt only concerns details.
       const creationConfirmed = ["CREATE_WEBSITE", "CREATE_PROJECT"].includes(intent) && ["CREATE_WEBSITE", "CREATE_PROJECT"].includes(deterministic.intent);
-      if (parsed.confidence < (creationConfirmed ? 0.5 : 0.8)) throw new Error("low_confidence");
+      if (parsed.confidence < (creationConfirmed ? 0.5 : 0.8)) { lowConfidence = { intent, confidence: parsed.confidence, deterministic: deterministic.intent }; throw new Error("low_confidence"); }
       // Work handed to a Company Agent stays with the Company runtime; it is not a native record capability.
       let coreCapability = intent === "CHAT" && parsed.assignsWorkToCompanyAgent !== true && CORE_CHAT_CAPABILITIES.includes(parsed.coreCapability as CoreChatCapability) ? parsed.coreCapability as CoreChatCapability : undefined;
       const creation = intent === "CREATE_WEBSITE" || intent === "CREATE_PROJECT";
@@ -354,7 +355,8 @@ export function createChatProjectIntentResolver(deps: {
       // Do not log private prompts or model responses: only this file's own codes, never a parser or provider message.
       const message = error instanceof Error ? error.message : "";
       const reason = error instanceof SyntaxError ? "invalid_json" : /^[a-z_]+$/.test(message) ? message : "provider_error";
-      deps.log.warn({ event: "chat_project_intent_fallback", reason }, "Semantic routing unavailable; using deterministic routing");
+      // A rejected low-confidence reading names only intent codes and a number, so it is safe to log and shows what was set aside.
+      deps.log.warn({ event: "chat_project_intent_fallback", reason, ...(lowConfidence ? { classified: lowConfidence } : {}) }, "Semantic routing unavailable; using deterministic routing");
       return guarded ? guardResult : fallback();
     }
   };
