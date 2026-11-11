@@ -316,6 +316,14 @@ ${localized.next}`;
     };
   }
 
+  async function linkNewBusinessToSelectedCompany(auth: AuthContext, outcome: { action: string; alreadyExisted: boolean; businessId: string }, companyId?: string) {
+    if (!companyId || outcome.action !== "create" || outcome.alreadyExisted) return undefined;
+    const company = await workspaceStore.getCompany(auth, companyId).catch(() => undefined);
+    if (!company || company.businessId) return undefined;
+    const linked = await workspaceStore.updateCompany(auth, company.id, { businessId: outcome.businessId }, company.revision);
+    return linked.businessId === outcome.businessId ? linked : undefined;
+  }
+
   async function executeCompanyChatAction(auth: AuthContext, content: string, conversationId?: string, requestMessage?: string, route?: { model?: string; fallbackModel?: string; signal?: AbortSignal; selectedCompanyId?: string; researchContext?: string; responseLanguage?: CompanyChatLanguage }) {
     const managementRequest = Boolean(requestMessage && (CompanyChatActions.isManagementRequest(requestMessage) || (route?.selectedCompanyId && CompanyChatActions.isPotentialMutationRequest(requestMessage))));
     const aiRefinement = Boolean(requestMessage && CompanyChatActions.isDetailedAgentRefinementRequest(requestMessage));
@@ -520,7 +528,11 @@ ${localized.next}`;
       const namesOwnedBusiness = createName.length > 2 && input.requestMessage.toLocaleLowerCase().includes(createName)
         && (await workspaceStore.listUserBusinesses(input.auth)).some((business) => business.name.toLocaleLowerCase() === createName);
       const outcome = await executeBusinessProfileTool({ store: workspaceStore, auth: input.auth, args, createRequestKey: namesOwnedBusiness ? undefined : input.businessCreateKey, logoAttachments: input.logoAttachments, persistLogo: persistBusinessLogo });
-      return { output: outcome, metadata: { kind: "business_profile", outcome } };
+      // "Додай бізнес-профіль" while a company is selected is that company's profile: a new Business is linked to the
+      // selected company when it has none yet. A company already linked to another Business keeps its link.
+      const linkedCompany = await linkNewBusinessToSelectedCompany(input.auth, outcome, input.selectedCompanyId);
+      const result = linkedCompany ? { ...outcome, linkedCompanyId: linkedCompany.id, linkedCompanyName: linkedCompany.name } : outcome;
+      return { output: result, metadata: { kind: "business_profile", outcome: result } };
     }
     if (input.call.function.name === "npati_company_action") {
       if (!input.auth.permissions.includes("business:manage")) throw new Error("Company management permission is required");

@@ -41,10 +41,65 @@ const sameWord = (term: string, word: string) => {
   return word.startsWith(term.slice(0, Math.max(4, term.length - 2)));
 };
 
+/**
+ * "у другому", "в першому", "in the second one": a project named by the order this chat created it in. The ordinal counts
+ * only when a project word, an action verb or the end of the clause follows, so "у другому рядку" or "другу кнопку" (a line
+ * or a button inside the project) never moves the request to another project.
+ */
+const ORDINAL_INDEX: Array<{ index: number | "last"; word: RegExp }> = [
+  { index: 0, word: /перш\p{L}*|перв\p{L}*|first|erst\p{L}*|premi\p{L}*|primer\p{L}*|prim[oa]|pierwsz\p{L}*|eerste/iu },
+  { index: 1, word: /друг\p{L}*|втор\p{L}*|second\p{L}*|zweit\p{L}*|deuxième|segund\p{L}*|drug\p{L}*|tweede/iu },
+  { index: 2, word: /трет\p{L}*|third|dritt\p{L}*|troisième|tercer\p{L}*|terz\p{L}*|trzeci\p{L}*|derde/iu },
+  { index: "last", word: /останн\p{L}*|последн\p{L}*|last|letzt\p{L}*|dernier\p{L}*|últim\p{L}*|ultim\p{L}*|ostatni\p{L}*|laatste/iu },
+];
+const PROJECT_NOUN = /^(?:проєкт\p{L}*|проект\p{L}*|сайт\p{L}*|гр[аиіу]|грі|ігр\p{L}*|застосун\p{L}*|додат\p{L}*|приложен\p{L}*|project\p{L}*|site|website|game|app|one|projekt\p{L}*|projet|proyecto|progetto)$/iu;
+const ACTION_VERB = /^(?:зміни|змініть|додай|додайте|видали|прибери|зроби|перевір|постав|онови|виправ|покажи|відкрий|измени|добавь|удали|сделай|проверь|исправь|поставь|change|add|remove|make|update|fix|check|set|open|show)$/iu;
+export function ordinalProjectTarget(message: string, projects: ConversationProject[]): ConversationProject | undefined {
+  if (projects.length < 2) return undefined;
+  for (const clause of clauses(message)) {
+    const tokens = words(clause);
+    for (let i = 0; i < tokens.length; i++) {
+      const entry = ORDINAL_INDEX.find(({ word }) => new RegExp(`^(?:${word.source})$`, "iu").test(tokens[i]!));
+      if (!entry) continue;
+      const before = tokens[i - 1], after = tokens[i + 1], afterThe = tokens[i - 1] === "the" ? tokens[i - 2] : undefined;
+      const located = ["у", "в", "во", "in", "on", "im", "dans", "en", "nel"].includes(before ?? "") || ["in", "on"].includes(afterThe ?? "");
+      const named = after !== undefined && PROJECT_NOUN.test(after);
+      if (!named && !(located && (after === undefined || ACTION_VERB.test(after)))) continue;
+      const index = entry.index === "last" ? projects.length - 1 : entry.index;
+      return projects[index];
+    }
+  }
+  return undefined;
+}
+
+/** "Перевір обидва проєкти", "check both", "всі проєкти": every project this chat worked in, for a read-only batch. */
+const PLURAL_PROJECTS = /(?<![\p{L}])(?:обидва|обидві|обох|оба|обоих|обе|both|beide\p{L}*|les\s+deux|ambos|ambas|entrambi|oba|obydwa|her\s+ikisi|(?:усі|всі|все|all)\s+(?:\p{L}+\s+)?(?:проєкт\p{L}*|проект\p{L}*|projects?))(?![\p{L}])|两个|両方|둘\s*다/iu;
+export function pluralProjectTargets(message: string, projects: ConversationProject[]): ConversationProject[] {
+  return projects.length >= 2 && PLURAL_PROJECTS.test(clauses(message).join(" ")) ? projects : [];
+}
+
+/**
+ * A read-only check request ("перевір", "проверь", "check", typos such as "перевирь"). The intent router reads
+ * "перевір обидва проєкти" as conversation, so a plural check is recognised here; a change request never matches.
+ */
+const CHECK_REQUEST = /(?<![\p{L}])(?:перев[іиі]р\p{L}*|перевирь|провір\p{L}*|протесту\p{L}*|тестуй|проверь\p{L}*|протестир\p{L}*|check|test|review|verify|inspect|prüf\p{L}*|teste|vérifie\p{L}*|revisa\p{L}*|controlla|sprawdź|kontroluj)(?![\p{L}])/iu;
+export function isProjectCheckRequest(message: string): boolean {
+  return CHECK_REQUEST.test(message);
+}
+type ProjectBatchIntent = "REVIEW_PROJECT" | "TEST_PROJECT" | "PREVIEW_PROJECT";
+const BATCH_INTENTS: string[] = ["REVIEW_PROJECT", "TEST_PROJECT", "PREVIEW_PROJECT"];
+/** The batch intent of a plural read-only request, or undefined when it is not one. */
+export function projectBatchIntent(message: string, intent: string | undefined): ProjectBatchIntent | undefined {
+  if (intent && BATCH_INTENTS.includes(intent)) return intent as ProjectBatchIntent;
+  return (!intent || intent === "CHAT") && isProjectCheckRequest(message) ? "REVIEW_PROJECT" : undefined;
+}
+
 export function conversationProjectTarget(message: string, currentProjectId: string | null | undefined, projects: ConversationProject[]): ConversationProject | undefined {
   if (projects.length < 2) return undefined;
   const current = clauses(message).join(" ");
   const targets = new Set<ConversationProject>();
+  const ordinal = ordinalProjectTarget(message, projects);
+  if (ordinal) targets.add(ordinal);
   if (GAME_WORD.test(current)) {
     const games = projects.filter((project) => project.kind === "game");
     if (games.length === 1) targets.add(games[0]!);
@@ -78,7 +133,17 @@ export async function resolveConversationProjectTarget(store: WorkspaceStore, re
 }): Promise<ResolvedActiveContext | undefined> {
   const from = input.current.project;
   if (!input.conversationId || !from || input.intent === "CREATE_WEBSITE" || input.intent === "CREATE_PROJECT") return undefined;
-  const target = conversationProjectTarget(input.message, from.id, await readConversationProjects(store, auth, input.conversationId, input.history));
+  const projects = await readConversationProjects(store, auth, input.conversationId, input.history);
+  // "Check both projects": a read-only batch over every project of this chat, never a write to several at once.
+  const plural = projectBatchIntent(input.message, input.intent) ? pluralProjectTargets(input.message, projects) : [];
+  if (plural.length && plural.every((project) => project.companyId === plural[0]!.companyId)) {
+    const loaded = (await Promise.all(plural.map((project) => store.getProject(auth, project.companyId, project.id).catch(() => undefined)))).filter((project): project is Project => Boolean(project));
+    if (loaded.length >= 2) {
+      input.log.info({ projectIds: loaded.map((project) => project.id) }, "chat_conversation_project_batch");
+      return { ...await resolver.resolve(auth, { contextType: "company", companyId: plural[0]!.companyId }), projects: loaded };
+    }
+  }
+  const target = conversationProjectTarget(input.message, from.id, projects);
   if (!target) return undefined;
   input.log.info({ fromProjectId: from.id, projectId: target.id }, "chat_conversation_project_target");
   return resolver.resolve(auth, { contextType: "project", companyId: target.companyId, projectId: target.id });

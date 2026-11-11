@@ -101,3 +101,42 @@ describe("projects of one conversation", () => {
     } finally { await app.close(); }
   });
 });
+
+describe("ordinal and plural references to the chat's projects (V6 step 02)", () => {
+  it("'у другому' and 'the second one' name the second project this chat created; 'в першому' the first", () => {
+    expect(target("у другому зміни колір фону на темно-синій", "todo")).toBe("game");
+    expect(target("в першому зміни заголовок", "game")).toBe("todo");
+    expect(target("в останньому додай паузу", "todo")).toBe("game");
+    expect(target("in the second one make the background dark", "todo")).toBe("game");
+    expect(target("змінити другий проєкт: темний фон", "todo")).toBe("game");
+  });
+
+  it("does not move for an ordinal inside the project ('другу кнопку', 'у другому рядку')", () => {
+    expect(target("зроби другу кнопку зеленою", "todo")).toBeUndefined();
+    expect(target("у другому рядку таблиці виправ ціну", "todo")).toBeUndefined();
+    expect(target("make the second button green", "todo")).toBeUndefined();
+  });
+
+  it("'перевір обидва проєкти' and 'check both' name every project of the chat", async () => {
+    const { pluralProjectTargets } = await import("../apps/agent-api/src/chat-conversation-project-target");
+    expect(pluralProjectTargets("перевір обидва проєкти", both).map(project => project.id)).toEqual(["todo", "game"]);
+    expect(pluralProjectTargets("check both projects", both)).toHaveLength(2);
+    expect(pluralProjectTargets("перевір усі проєкти", both)).toHaveLength(2);
+    expect(pluralProjectTargets("перевір сайт", both)).toEqual([]);
+    expect(pluralProjectTargets("перевір обидва", [todo])).toEqual([]);
+  });
+});
+
+describe("plural check requests the intent router reads as conversation (V6 step 02, live D02-01)", () => {
+  it("a check verb, also misspelled or in Russian/English, makes a read-only review batch; a change never does", async () => {
+    const { projectBatchIntent } = await import("../apps/agent-api/src/chat-conversation-project-target");
+    expect(projectBatchIntent("перевір обидва проєкти", "CHAT")).toBe("REVIEW_PROJECT");
+    expect(projectBatchIntent("перевір обидва проєкти ще раз коротко", undefined)).toBe("REVIEW_PROJECT");
+    expect(projectBatchIntent("перевирь обидва проекти", "CHAT")).toBe("REVIEW_PROJECT");
+    expect(projectBatchIntent("проверь оба проекта", undefined)).toBe("REVIEW_PROJECT");
+    expect(projectBatchIntent("check both projects", "CHAT")).toBe("REVIEW_PROJECT");
+    expect(projectBatchIntent("протестуй обидва", "TEST_PROJECT")).toBe("TEST_PROJECT");
+    expect(projectBatchIntent("зміни фон в обох проєктах", "CHAT")).toBeUndefined();
+    expect(projectBatchIntent("перевір і виправ обидва", "EDIT_PROJECT")).toBeUndefined();
+  });
+});

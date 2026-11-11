@@ -87,6 +87,29 @@ describe("long Business Profile production chat path", () => {
       expect(await store.listMemory(auth, businesses[0]!.id)).toHaveLength(1);
     } finally { await app.close(); }
   });
+  it("links a Business Profile created while a company is selected to that company only (V6-015)", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const selected = await store.createCompany(auth, { name: "V6 Selected" }, "v6-selected");
+    const other = await store.createCompany(auth, { name: "V6 Other" }, "v6-other");
+    let step = 0;
+    const ai = engine(async (request) => {
+      if (request.messages.at(-1)?.role === "tool") return { content: "Готово." };
+      step += 1;
+      return { content: "", toolCalls: [toolCall(`step-${step}`, { action: "create", profile: { name: step === 1 ? "Кав'ярня у Львові" : "Друга кав'ярня", industry: "Кав'ярня" } })] };
+    });
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "добав бізнес профіль: галузь кавярня, опис - маленька кавярня у Львові", contextType: "company", companyId: selected.id } });
+      expect(response.statusCode).toBe(200);
+      const [business] = await store.listUserBusinesses(auth);
+      expect((await store.getCompany(auth, selected.id)).businessId).toBe(business!.id);
+      expect((await store.getCompany(auth, other.id)).businessId).toBeFalsy();
+      expect(response.body).toContain("Прив’язано до компанії");
+      // A company that already has a Business Profile keeps it; a second new profile is not swapped in.
+      await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "створи ще один бізнес профіль: Друга кав'ярня", contextType: "company", companyId: selected.id } });
+      expect((await store.getCompany(auth, selected.id)).businessId).toBe(business!.id);
+    } finally { await app.close(); }
+  });
   it("adds a goal to the business from conversation context without creating another business", async () => {
     const store = new InMemoryWorkspaceStore();
     let step = 0;

@@ -22,6 +22,12 @@ const copy: Record<CompanyChatLanguage, Copy> = {
   ar: { created: "تم إنشاء ملف الأعمال **{name}** والتحقق منه.", existing: "ملف الأعمال **{name}** موجود بالفعل؛ تم التحقق من البيانات المقدمة وتحديثها.", updated: "تم تحديث ملف الأعمال **{name}** والتحقق منه.", goal: "تم ربط الهدف", memory: "تم ربط الذاكرة", logo: "تم ربط الشعار", incomplete: "تعذر التحقق من بعض البيانات المطلوبة", open: "فتح الملف" },
   hi: { created: "**{name}** की व्यवसाय प्रोफ़ाइल बनाई और सत्यापित की गई।", existing: "**{name}** की व्यवसाय प्रोफ़ाइल पहले से मौजूद है; दी गई जानकारी जाँचकर अपडेट की गई।", updated: "**{name}** की व्यवसाय प्रोफ़ाइल अपडेट और सत्यापित की गई।", goal: "लक्ष्य जोड़ा गया", memory: "मेमोरी जोड़ी गई", logo: "लोगो जोड़ा गया", incomplete: "कुछ अनुरोधित जानकारी सत्यापित नहीं हो सकी", open: "प्रोफ़ाइल खोलें" },
 };
+/** The label of the company the new Business Profile was linked to (the company selected in chat). */
+const linkedCompanyLabel: Record<CompanyChatLanguage, string> = {
+  en: "Linked to company", uk: "Прив’язано до компанії", fr: "Lié à l’entreprise", de: "Mit Unternehmen verknüpft", es: "Vinculado a la empresa",
+  it: "Collegato all’azienda", pl: "Powiązano z firmą", pt: "Vinculado à empresa", nl: "Gekoppeld aan bedrijf", tr: "Şirkete bağlandı",
+  ru: "Привязан к компании", zh: "已关联到公司", ja: "会社に関連付けました", ko: "회사에 연결됨", ar: "تم الربط بالشركة", hi: "कंपनी से जोड़ा गया",
+};
 
 export function businessProfileChatMessage(outcome: Outcome, language: CompanyChatLanguage, createdThisTurn: boolean, missingPlannedFields: string[] = []): string {
   const t = copy[language] ?? copy.en;
@@ -40,6 +46,8 @@ export function businessProfileChatMessage(outcome: Outcome, language: CompanyCh
   if (outcome.goalIds.length) lines.push("", `**${t.goal}:** ${outcome.goalTitles.map(escape).join("; ") || outcome.goalIds.length}`);
   if (outcome.memoryIds.length) lines.push(`**${t.memory}:** ${outcome.memoryFacts.map(escape).join("; ") || outcome.memoryIds.length}`);
   if (outcome.logoFileId) lines.push(`**${t.logo}**`);
+  const linkedCompanyName = (outcome as Outcome & { linkedCompanyName?: string }).linkedCompanyName;
+  if (linkedCompanyName) lines.push(`**${linkedCompanyLabel[language] ?? linkedCompanyLabel.en}:** ${escape(linkedCompanyName)}`);
   if (!complete) { const unresolved = missing.map((item) => item in label.fields ? label.fields[item as keyof typeof label.fields] : item === "goal" ? t.goal : item === "memory" ? t.memory : item); lines.push("", `**${t.incomplete}**${unresolved.length ? `: ${unresolved.join(", ")}` : ""}`); }
   lines.push("", `[${t.open}](/settings/business/${encodeURIComponent(outcome.businessId)})`, "```");
   return lines.join("\n");

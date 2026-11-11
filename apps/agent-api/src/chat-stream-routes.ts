@@ -1,6 +1,6 @@
 import {rowTaskCapabilities,takesRowCapabilityPath} from "./chat-project-data-capabilities";
 import { runChatProjectBatch } from "./chat-project-batch";
-import { conversationProjectIds, resolveConversationProjectTarget } from "./chat-conversation-project-target";
+import { conversationProjectIds, projectBatchIntent, resolveConversationProjectTarget } from "./chat-conversation-project-target";
 import { isChatProjectCreationBatch, runChatProjectCreation, chatProjectCreationReply } from "./chat-project-creation";
 import { resolveCodingConversationLanguage, codingChatResponseInstruction, chatLanguageInstruction, detectCompanyChatLanguage } from "./company-chat-i18n";
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
@@ -272,9 +272,11 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
           clearInterval(heartbeat); if (!reply.raw.writableEnded) reply.raw.end(); return;
         }
         // Deleting a whole site is a confirmed project deletion through ProjectService, never a Coding Agent run.
-        if(resolved.projects?.length && (projectIntent.intent==="PREVIEW_PROJECT"||projectIntent.intent==="REVIEW_PROJECT"||projectIntent.intent==="TEST_PROJECT")){
+        // A plural check ("перевір обидва проєкти") is a read-only batch even when the router reads it as conversation.
+        const batchIntent = resolved.projects?.length ? projectBatchIntent(message, projectIntent.intent) : undefined;
+        if(resolved.projects?.length && batchIntent){
           const conversation=await chatConversation();if(conversation)await workspaceStore.appendNeutralMessage(auth,conversation.id,"user",message);
-          const run=await runChatProjectBatch({ctx:auth,projects:resolved.projects,intent:projectIntent.intent,message,signal:streamController.signal,
+          const run=await runChatProjectBatch({ctx:auth,projects:resolved.projects,intent:batchIntent,message,signal:streamController.signal,
             code:codeService,executor:codeSessionRunExecutor,preview:projectPreviewService,flags:featureFlagService,admission:codeRunAdmission,queueTimeoutMs:codeRunQueueLimits.queueTimeoutMs,
             noMemory:memoryPolicy.noMemoryActive,responseLanguage:resolveCodingConversationLanguage(message,history),cancelRequested:id=>codeRunCancellation.isSessionCancelled(id),emitDelta:text=>{send("delta",{delta:text});}});
           if(conversation)await workspaceStore.appendNeutralMessage(auth,conversation.id,"assistant",run.message);
