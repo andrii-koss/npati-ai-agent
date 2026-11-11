@@ -1,0 +1,50 @@
+.business-settings-page .biz-toolbar {
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.business-settings-page .biz-tabs {
+  gap: 4px;
+  padding: 3px;
+}
+
+.business-settings-page .biz-sort-btn,
+.business-settings-page .biz-card-header-actions,
+.business-settings-page .biz-card-actions {
+  gap: 8px;
+}
+
+.business-settings-page .biz-cards-grid,
+.business-settings-page .biz-cards-list {
+  gap: 12px;
+}
+
+.business-settings-page .biz-card {
+  min-width: 0;
+  padding: 16px;
+}
+
+.business-settings-page .biz-card-header {
+  margin-bottom: 8px;
+}
+
+.business-settings-page .biz-card-description {
+  margin-bottom: 8px;
+}
+
+.business-settings-page .biz-card-tags {
+  gap: 6px;
+}
+
+.business-settings-page .biz-card-date {
+  gap: 6px;
+}
+
+.business-settings-page .biz-card-footer {
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.business-settings-page .business-profile-form .business-narrative-fields {
+  max-width: none;
+}
