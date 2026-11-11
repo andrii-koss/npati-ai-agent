@@ -2,7 +2,7 @@ import type { FormEvent } from "react";
 import type { Model } from "../ai-marketplace-types";
 import { useTranslation } from "../i18n";
 import type { Agent, AgentDraft, CapabilityItem } from "./types";
-import { translatedStatus, translatedTool } from "./types";
+import { translatedTool } from "./types";
 
 export interface AgentDrawerProps {
   isOpen: boolean;
@@ -144,8 +144,6 @@ export function AgentDrawer({
                     />
                     <span>
                       <strong>{translated.name}</strong>
-                      {tool.risk && tool.risk !== "low" && <span className={`risk-badge ${tool.risk}`}>{translatedStatus(t, tool.risk)}</span>}
-                      {tool.requiresConfirmation && <span className="confirm-badge">{t("companySettings.agentDrawer.approvalRequired")}</span>}
                     </span>
                   </label>
                 );

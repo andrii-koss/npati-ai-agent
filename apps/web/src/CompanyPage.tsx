@@ -37,7 +37,6 @@ import {
   BusinessMassDeleteModal,
   AgentMassDeleteModal,
 } from "./company";
-
 export function CompanyPage() {
   const { t, language } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -76,7 +75,6 @@ export function CompanyPage() {
   const companyCreateKey = useRef(crypto.randomUUID());
   const agentCreateKey = useRef(crypto.randomUUID());
   const selected = companies.find((company) => company.id === selectedId);
-
   const {
     documents,
     knowledgeBusy,
@@ -98,7 +96,6 @@ export function CompanyPage() {
     startEditingMemory,
     deleteCompanyMemory,
   } = useCompanyKnowledge(selected, setNotice);
-
   useEffect(() => {
     if (!selectedId || !/^[0-9a-f-]{36}$/i.test(requestedRunId)) return;
     void api<RunDetails>(`/companies/${selectedId}/runs/${requestedRunId}`).then((details) => {
@@ -106,9 +103,7 @@ export function CompanyPage() {
       setRunning(!["completed", "failed", "cancelled", "awaiting_approval"].includes(details.run.status));
     }).catch(() => undefined);
   }, [selectedId, requestedRunId]);
-
   const [availableTools, setAvailableTools] = useState<CapabilityItem[]>(defaultToolOptions);
-
   useEffect(() => {
     api<CapabilityItem[]>("/capabilities?callable=true")
       .then((capabilities) => {
@@ -121,7 +116,6 @@ export function CompanyPage() {
       })
       .catch(() => {});
   }, []);
-
   async function loadCompanies(preferredId?: string) {
     const all: Company[] = [];
     let cursor: string | null = null;
@@ -146,13 +140,11 @@ export function CompanyPage() {
     updateCachedCompanies(all, nextId);
     return all;
   }
-
   async function handleCompaniesDeleted(deletedIds: string[]) {
     const nextCompanies = companies.filter((c) => !deletedIds.includes(c.id));
     const nextSelectedId = nextCompanies.some((c) => c.id === selectedId)
       ? selectedId
       : (nextCompanies[0]?.id ?? "");
-
     if (deletedIds.includes(readActiveCompanyId())) {
       writeActiveCompanyId(nextSelectedId);
     }
@@ -164,7 +156,6 @@ export function CompanyPage() {
     );
     await loadCompanies(nextSelectedId);
   }
-
   async function handleBusinessesDeleted(deletedIds: string[]) {
     if (selected && selected.businessId && deletedIds.includes(selected.businessId)) {
       await updateCompanyBusiness("");
@@ -176,7 +167,6 @@ export function CompanyPage() {
         : t("companySettings.notices.businessesDeleted", { count: deletedIds.length })
     );
   }
-
   async function handleAgentsDeleted(deletedIds: string[]) {
     setAgents((items) => items.filter((agent) => !deletedIds.includes(agent.id)));
     setEdges((items) => items.filter((edge) => !deletedIds.includes(edge.parentAgentId) && !deletedIds.includes(edge.childAgentId)));
@@ -190,7 +180,6 @@ export function CompanyPage() {
         : t("companySettings.notices.agentsDeleted", { count: deletedIds.length })
     );
   }
-
   async function loadOrganization(companyId: string, cursor?: string, append = false, companySnapshot = companies) {
     if (agentsPageLoading) return;
     setAgentsPageLoading(true);
@@ -219,7 +208,6 @@ export function CompanyPage() {
       setAgentsPageLoading(false);
     }
   }
-
   async function loadAddedModels(showError = false) {
     setModelsLoading(true);
     setModelsError("");
@@ -235,23 +223,19 @@ export function CompanyPage() {
       setModelsLoading(false);
     }
   }
-
   useEffect(() => {
     void initializeCompanies();
     void loadAddedModels();
   }, []);
-
   useEffect(() => {
     if (!requestedCompanyId) return;
     const next = new URLSearchParams(searchParams);
     next.delete("company");
     setSearchParams(next, { replace: true });
   }, [requestedCompanyId]);
-
   useEffect(() => {
     if (requestedCompanyId && companies.some((company) => company.id === requestedCompanyId)) setSelectedId(requestedCompanyId);
   }, [requestedCompanyId, companies]);
-
   useEffect(() => {
     const refreshCompanies = () => { void loadCompanies(selectedId || requestedCompanyId).then((items) => {
       const active = items.find((company) => company.id === (selectedId || requestedCompanyId));
@@ -260,7 +244,6 @@ export function CompanyPage() {
     window.addEventListener("npati:company-changed", refreshCompanies);
     return () => window.removeEventListener("npati:company-changed", refreshCompanies);
   }, [selectedId, requestedCompanyId]);
-
   async function initializeCompanies() {
     if (companies.length === 0) setCompaniesLoading(true);
     setCompaniesLoadError("");
@@ -275,12 +258,10 @@ export function CompanyPage() {
       setCompaniesLoading(false);
     }
   }
-
   useEffect(() => {
     if (!selectedId) return;
     void loadOrganization(selectedId);
   }, [selectedId]);
-
   useEffect(() => {
     if (!selectedId) {
       setWorkingAgentIds(new Set());
@@ -315,7 +296,6 @@ export function CompanyPage() {
       window.clearInterval(timer);
     };
   }, [selectedId]);
-
   useEffect(() => { setRunDetails(undefined); setRunning(false); }, [selectedId]);
   useEffect(() => {
     if (!runDetails || !selectedId || ["completed", "failed", "cancelled", "awaiting_approval"].includes(runDetails.run.status)) return;
@@ -335,7 +315,6 @@ export function CompanyPage() {
     }, 1500);
     return () => { active = false; window.clearTimeout(timer); };
   }, [selectedId, runDetails]);
-
   function openCompanyEditor(company?: Company) {
     setEditingCompany(company); setCompanyForm(companyDraft(company)); setCompanyEditor(true); setAgentEditor(false); setNotice("");
   }
@@ -343,7 +322,6 @@ export function CompanyPage() {
     setEditingAgent(agent); setAgentForm(agentDraft(agent, edges)); setAgentEditor(true); setCompanyEditor(false); setNotice("");
     void loadAddedModels(true);
   }
-
   async function saveCompany(event: FormEvent) {
     event.preventDefault(); setSaving(true); setNotice("");
     try {
@@ -374,7 +352,6 @@ export function CompanyPage() {
     }
     finally { setSaving(false); }
   }
-
   async function saveAgent(event: FormEvent) {
     event.preventDefault();
     if (!selected) return;
@@ -411,7 +388,6 @@ export function CompanyPage() {
     }
     finally { setSaving(false); }
   }
-
   async function setMainAgent(agentId: string) {
     if (!selected) return;
     try {
@@ -421,7 +397,6 @@ export function CompanyPage() {
       setCompanies((items) => items.map((item) => item.id === updated.id ? updated : item));
     } catch (error) { setNotice(error instanceof Error ? error.message : t("companySettings.errors.couldNotSetMain")); }
   }
-
   async function enableMainAgentKnowledge() {
     if (!selected?.mainAgentId) return;
     const mainAgent = agents.find((agent) => agent.id === selected.mainAgentId);
@@ -437,7 +412,6 @@ export function CompanyPage() {
       setNotice(error instanceof Error ? error.message : t("companySettings.errors.couldNotEnableKnowledge"));
     }
   }
-
   async function updateCompanyBusiness(businessId: string) {
     if (!selected) return;
     try {
@@ -449,7 +423,6 @@ export function CompanyPage() {
       setNotice(t("companySettings.notices.businessUpdated"));
     } catch (error) { setNotice(error instanceof Error ? error.message : t("companySettings.errors.couldNotUpdateBusiness")); }
   }
-
   async function deleteAgent() {
     if (!selected || !editingAgent) return;
     const confirmed = await confirmModal({
@@ -471,7 +444,6 @@ export function CompanyPage() {
       setNotice(t("companySettings.notices.agentDeleted"));
     } catch (error) { setNotice(error instanceof Error ? error.message : t("companySettings.errors.couldNotDeleteAgent")); }
   }
-
   async function runCompany(event: FormEvent) {
     event.preventDefault();
     if (!selected || !task.trim() || running) return;
@@ -490,11 +462,9 @@ export function CompanyPage() {
       if (!remainsActive) setWorkingAgentIds(new Set());
     } catch (error) { setRunning(false); setWorkingAgentIds(new Set()); setNotice(error instanceof Error ? error.message : t("companySettings.notices.runFailed")); }
   }
-
   const pendingApprovalId = runDetails?.run.errorCode === "APPROVAL_REQUIRED"
     ? runDetails.run.errorMessage?.match(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i)?.[0]
     : undefined;
-
   async function decideRunApproval(decision: "approved" | "rejected") {
     if (!selected || !runDetails || !pendingApprovalId || approvalBusy) return;
     setApprovalBusy(true); setNotice("");
@@ -522,7 +492,6 @@ export function CompanyPage() {
       setNotice(error instanceof Error ? error.message : t("companySettings.errors.couldNotApply"));
     } finally { setApprovalBusy(false); }
   }
-
   async function deleteCompany() {
     if (!selected) return;
     const confirmed = await confirmModal({
@@ -541,22 +510,18 @@ export function CompanyPage() {
       setNotice(t("companySettings.notices.companyDeleted"));
     } catch (error) { setNotice(error instanceof Error ? error.message : t("companySettings.errors.couldNotDelete")); }
   }
-
   const noticeIsSuccess = Boolean(notice)
     && !/failed|error|could not|unavailable|exceeded|required|conflict|timed out|denied|помилка|не вдалося|nicht|echoué|fallit|błąd/i.test(notice);
-
   useEffect(() => {
     if (!notice) return;
     const timer = window.setTimeout(() => setNotice(""), 2000);
     return () => window.clearTimeout(timer);
   }, [notice]);
-
   if (companiesLoadError) return <main className="company-page company-refined company-initial-state">
     <strong>{t("companySettings.errors.couldNotLoad")}</strong>
     <p>{companiesLoadError}</p>
     <button className="button-primary" type="button" onClick={() => void initializeCompanies()}>{t("companySettings.errors.tryAgain")}</button>
   </main>;
-
   return <main className="company-page company-refined">
     <CompanyHeader
       selected={selected}
@@ -567,7 +532,6 @@ export function CompanyPage() {
       onOpenAgentEditor={() => openAgentEditor()}
       onDeleteCompany={() => void deleteCompany()}
     />
-
     {companiesLoading ? null : !selected ? <section className="company-first-run">
       <span className="provider-avatar">CO</span><h2>{t("companySettings.firstRun.title")}</h2>
       <p>{t("companySettings.firstRun.description")}</p>
@@ -631,12 +595,11 @@ export function CompanyPage() {
               {running ? (
                 <>
                   <span className="company-btn-spinner" aria-hidden="true" />
-                  <span>{t("companySettings.runtime.running")}</span>
+                  <span>{t("companySettings.runtime.runningCompany")}</span>
                 </>
               ) : (
                 <>
-                  <span className="company-btn-icon" aria-hidden="true">▶</span>
-                  <span>{t("companySettings.runtime.runTask")}</span>
+                  <span>{t("companySettings.runtime.runCompany")}</span>
                 </>
               )}
             </button>

@@ -62,3 +62,7 @@
   transform: scale(1);
   stroke-width: 1.6;
 }
+
+.company-drawer.agent-editor form > footer button.danger-button {
+  font-weight: 400;
+}

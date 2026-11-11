@@ -67,7 +67,6 @@ export function KnowledgePanel({
       <div className="company-knowledge-block">
         <div className="company-knowledge-subhead">
           <div className="company-subhead-title">
-            <span className="company-subhead-icon" aria-hidden="true">📁</span>
             <h3>{t("companySettings.knowledge.documentsTitle")}</h3>
             <small className="tab-count">{documents.length}</small>
           </div>
@@ -158,7 +157,6 @@ export function KnowledgePanel({
       <div className="company-knowledge-block company-memory-block">
         <div className="company-knowledge-subhead">
           <div className="company-subhead-title">
-            <span className="company-subhead-icon" aria-hidden="true">💡</span>
             <h3>{t("companySettings.memory.durableTitle")}</h3>
             <small className="tab-count">{memories.length}</small>
           </div>
