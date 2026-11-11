@@ -51,3 +51,8 @@
 .message-stream article.assistant {
   border-left-color: transparent;
 }
+
+.message-stream article.user .chat-message-content,
+.message-stream article.user .user-prompt-preview {
+  margin-top: 0;
+}
