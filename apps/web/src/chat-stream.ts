@@ -1,6 +1,7 @@
 import type { ChatProgressEvent } from "./ResearchProgress";
 import type { ChatAttachmentInput } from "./ChatAttachments";
 import type { CodeChatSession } from "./code-inbox-client";
+import { publishStreamedDevelopment } from "./chat-development-progress-events";
 
 const progressTypes = new Set(["search_started", "search_results_received", "source_discovered", "page_fetch_started", "page_fetch_completed", "page_fetch_failed", "action_started", "action_completed", "project_progress", "research_completed", "final_generation_started", "final_generation_completed", "final_generation_failed"]);
 /** Routing metadata uses the same wire channel but is not a presentation event. */
@@ -83,6 +84,10 @@ export async function streamChat<T>(
   const decoder = new TextDecoder();
   let buffer = "";
   let result: T | undefined;
+  const emitProgress = (data: unknown) => {
+    if (isChatProgressEvent(data)) { onProgress(data); return; }
+    publishStreamedDevelopment(data, body.conversationId ?? null);
+  };
   while (true) {
     const { value, done } = await reader.read();
     buffer += decoder.decode(value, { stream: !done }).replace(/\r\n/g, "\n");
@@ -91,7 +96,7 @@ export async function streamChat<T>(
     for (const block of blocks) {
       const envelope = parseBlock<T>(block);
       if (!envelope) continue;
-      if (envelope.event === "progress" && isChatProgressEvent(envelope.data)) onProgress(envelope.data);
+      if (envelope.event === "progress") emitProgress(envelope.data);
       if (envelope.event === "delta") options.onDelta?.(envelope.data.delta);
       if (envelope.event === "code_session") options.onCodeSession?.(envelope.data);
       if (envelope.event === "code_inbox") options.onCodeInbox?.(envelope.data.sessionId, envelope.data.revision);
@@ -106,7 +111,7 @@ export async function streamChat<T>(
   }
   if(buffer.trim()){
     const envelope=parseBlock<T>(buffer);
-    if(envelope?.event==="progress" && isChatProgressEvent(envelope.data))onProgress(envelope.data);
+    if(envelope?.event==="progress")emitProgress(envelope.data);
     if(envelope?.event==="delta")options.onDelta?.(envelope.data.delta);
     if(envelope?.event==="code_session")options.onCodeSession?.(envelope.data);
     if(envelope?.event==="code_inbox")options.onCodeInbox?.(envelope.data.sessionId,envelope.data.revision);

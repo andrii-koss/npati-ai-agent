@@ -9,6 +9,7 @@ import { ChatDevelopmentProgress, ChatDevelopmentPreview } from "./ChatDevelopme
 import { developmentCard, hideDevelopmentMessage } from "./chat-development-view";
 import { publishChatProcesses, stopConversationActivity } from "./chat-activity";
 import { useTranslation } from "./i18n";
+import { STREAMED_DEVELOPMENT_PROGRESS, type StreamedDevelopmentSnapshot } from "./chat-development-progress-events";
 export function useChatDevelopment(options: {
   companyId?: string | null; conversationId: string | null; businessId?: string; onConversation(id: string, preserveActiveTurn?: boolean): void; onError(message: string): void; onAccepted(message: string, intro?: string): void; onSession(session: CodeChatSession, conversationId: string): void; boundSessionId?: string; busy?: boolean;
   /** The project of the chat's newest project card: where this chat last worked, whatever order its processes were created in. */
@@ -18,6 +19,7 @@ export function useChatDevelopment(options: {
   const { language } = useTranslation();
   const queryProjectId = search.get("project") ?? undefined; const root = search.get("developmentRoot");
   const [processes, setProcesses] = useState<DevelopmentProcess[]>([]);
+  const [streamed, setStreamed] = useState<StreamedDevelopmentSnapshot | null>(null);
   // The chat continues where it last worked (its newest card), not with the empty project it was opened with ("Open in
   // chat" leaves an idle entry) nor with the most recently created process: a TODO chat that made a game and then
   // edited the TODO again is still on the TODO.
@@ -27,7 +29,15 @@ export function useChatDevelopment(options: {
   // What runs in this chat right now is what the chat shows.
   const runningInChat = options.conversationId
     ? processes.find(p => (p.conversationId === options.conversationId || p.parentConversationId === options.conversationId) && developmentIsActive(p)) : undefined;
-  const currentProcess = runningInChat
+  const streamedEntry = options.busy && streamed?.conversationId === options.conversationId
+    ? streamed.processes.find(developmentIsActive) ?? streamed.processes.at(-1) : undefined;
+  // The pending root chat has no canonical id yet. Bind its display rows to this turn;
+  // the original receipts in processes retain their server conversation ids.
+  const streamedProcess = streamedEntry ? { ...streamedEntry,
+    conversationId: options.conversationId ?? streamedEntry.conversationId,
+    progress: streamedEntry.progress?.map(item => ({ ...item, conversationId: options.conversationId ?? undefined })),
+  } : undefined;
+  const currentProcess = streamedProcess ?? runningInChat
     ?? latestWorked
     // Without a process for the chat's newest project, another project of this chat is not substituted for it.
     ?? (options.latestProjectId ? undefined : processes.find(p => p.conversationId === options.conversationId && (!queryProjectId || p.projectId === queryProjectId)))
@@ -45,6 +55,18 @@ export function useChatDevelopment(options: {
   const snapshotGeneration = useRef(0);
   const refreshing = useRef<Promise<void> | undefined>(undefined);
   const firstRead = useRef(true);
+  useEffect(() => {
+    const receive = (event: Event) => {
+      const snapshot = (event as CustomEvent<StreamedDevelopmentSnapshot>).detail;
+      if (!callbacks.current.busy || snapshot.conversationId !== callbacks.current.conversationId) return;
+      snapshotGeneration.current++;
+      setStreamed(snapshot);
+      setProcesses(current => [...current.filter(p => !snapshot.processes.some(next => next.id === p.id)), ...snapshot.processes]);
+    };
+    window.addEventListener(STREAMED_DEVELOPMENT_PROGRESS, receive);
+    return () => window.removeEventListener(STREAMED_DEVELOPMENT_PROGRESS, receive);
+  }, []);
+  useEffect(() => { if (!options.busy) setStreamed(null); }, [options.busy]);
   useEffect(() => { if (!firstRead.current) publishChatProcesses(processes); }, [processes]);
   const readFor = useRef<string | null | undefined>(undefined);
   // An opened chat shows its text and steps together. A slow read must not leave the chat blank, so the wait is bounded.
@@ -116,7 +138,7 @@ export function useChatDevelopment(options: {
     document.addEventListener("visibilitychange", visibility);
     const timer = window.setInterval(() => { if (Date.now() - streamAliveAt > 15_000) poll(); }, anyActive ? 5000 : 10000);
     return () => { controller?.abort(); window.clearInterval(timer); document.removeEventListener("visibilitychange", visibility); };
-  }, [live, anyActive]);
+  }, [live, anyActive, options.conversationId, queryProjectId]);
   useEffect(() => {
     // Websites links recover a dedicated development chat, even after its previous chat was deleted.
     const companyId = search.get("company");

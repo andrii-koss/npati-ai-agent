@@ -1,9 +1,8 @@
 import {rowTaskCapabilities,takesRowCapabilityPath} from "./chat-project-data-capabilities";
 import { runChatProjectBatch } from "./chat-project-batch";
 import { conversationProjectIds, resolveConversationProjectTarget } from "./chat-conversation-project-target";
-import { isChatProjectCreationBatch, runChatProjectCreation } from "./chat-project-creation";
+import { isChatProjectCreationBatch, runChatProjectCreation, chatProjectCreationReply } from "./chat-project-creation";
 import { resolveCodingConversationLanguage, codingChatResponseInstruction, chatLanguageInstruction, detectCompanyChatLanguage } from "./company-chat-i18n";
-
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { AppConfig } from "./app";
 import { AuthenticationError } from "./auth";
@@ -44,10 +43,8 @@ import { AuthContext, CodeSession, WorkspaceAccessError, WorkspaceNotFoundError 
 import type { CodeRunCancellationRegistry } from "./code-run-cancellation";
 import type { CodeSessionRunExecutor } from "./code-session-run-executor";
 import { codeModeDecision, readIntentHistory } from "./chat-project-intent";
-
 export type { ChatStreamRouteDeps } from "./chat-stream-route-types";
 import type { ChatStreamRouteDeps } from "./chat-stream-route-types";
-
 export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamRouteDeps): void {
   const { activeChatStreams, activeContextResolver, activeSessionRegistry, agent, aiPreferences, codePreferences, authProvider, codeBackgroundRuns, codeRunAdmission, codeRunCancellation, codeRunQueueLimits, codeService, codeSessionInbox, codeSessionRunExecutor, companyRuntime, featureFlagService, getAIContext, marketplace, notifyMessagingConnections, persistAutomaticCompanyMemory, projectOrchestrator, projectPreviewService, projectSandbox, projectService, runBusinessMessage, runNeutralMessage, workspaceStore, boundedResponseChunks } = deps;
   app.post<{ Body: {
@@ -64,7 +61,6 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
     /** "code": the user chose project work on the selected project, so no classifier call is made. */
     mode?: "chat" | "code";
   } }>("/chat/stream", async (request, reply) => {
-
     let reservedCodeRunSlot: { lease: Awaited<ReturnType<CodeRunQueue["acquire"]>>; background: boolean } | null = null;
     const streamController = new AbortController();
     let streamId: string | undefined;
@@ -89,7 +85,6 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
       }
       const message = request.body.message?.trim() ?? "";
       if (!message && !request.body.attachments?.length) return reply.code(400).send({ error: { code: "MESSAGE_REQUIRED", message: "Enter a message or attach a photo or voice message." } });
-
       reply.raw.once("close", abortPreflight);
       releaseStream = await reserveChatStream({ owner: auth, streamId, controller: streamController, activeStreams: activeChatStreams, registry: activeSessionRegistry });
       streamController.signal.throwIfAborted();
@@ -100,7 +95,6 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         companyId: request.body.companyId ?? null,
         projectId: request.body.projectId ?? null,
       };
-
       // The neutral conversation this turn is saved in; undefined when memory writes are off.
       const chatConversation = async () => memoryPolicy.writeAllowed
         ? request.body.conversationId ? (await workspaceStore.getNeutralConversation(auth, request.body.conversationId)).conversation
@@ -157,7 +151,6 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         .catch((err) => { request.log.warn({ err, projectIntent: semantic?.decision.intent, intentSource: semantic?.source }, "named_company_resolution_failed"); throw err; })
         ?? await resolveConversationProjectTarget(workspaceStore, activeContextResolver, auth, { conversationId: memoryPolicy.noMemoryActive ? undefined : request.body.conversationId, message, current: resolved, intent: semantic?.decision.intent, history, log: request.log });
       if (namedContext) resolved = namedContext;
-
       let activeProjectId = resolved.project?.id ?? null;
       let activeCompanyId = (namedContext || staleContext ? undefined : request.body.companyId) ?? resolved.company?.id ?? resolved.project?.companyId ?? null;
       const projectIntent = semantic?.decision ?? defaultHybridRouter.classifyProject({
@@ -167,7 +160,6 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         hasWorkspace: Boolean(overview.currentBusiness || resolved.company || resolved.project),
       });
       let creatingChatWebsite = (projectIntent.intent === "CREATE_WEBSITE" || projectIntent.intent === "CREATE_PROJECT");
-
       const boundCard = !creatingChatWebsite && !staleContext && resolved.context.contextType === "project"
         && conversationCard?.companyId === resolved.company?.id && (conversationCard?.projectId ?? conversationCard?.id) === resolved.project?.id ? conversationCard : null;
       if (boundCard && !request.body.projectId) {
@@ -236,7 +228,6 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
       if (!preparedChatSession && projectIntent.intent === "CHAT" && resolved.context.contextType === "business" && !resolved.business) {
         return reply.code(409).send({ error: { code: "BUSINESS_REQUIRED", message: "Complete business setup before starting a streamed research chat." } });
       }
-
       streamController.signal.throwIfAborted();
       reply.hijack();
       reply.raw.writeHead(200, {
@@ -247,7 +238,6 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
       });
       reply.raw.flushHeaders();
       let sequence = 0;
-
       let codeBackgroundRunId: string | null = null;
       reply.raw.off("close", abortPreflight);
       reply.raw.once("close",()=>{
@@ -273,9 +263,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
           const run = await runChatProjectCreation({ service: deps.chatDevelopment, ctx: auth, companyId: activeCompanyId, message,
             conversationId: conversation?.id, requestId: `chat-multi:${auth.userId}:${streamId ?? crypto.randomUUID()}`, signal: streamController.signal,
             progress: processes => send("progress", { routed: "chat_development", processes }) });
-          await send("result", { routed: "chat_development", run, conversationId: run.conversationId,
-            message: run.processes.map(process => `${process.name}: ${process.status} [${process.projectId ?? "pending"}]`).join("\n"),
-            activeContext: { contextType: "company", companyId: activeCompanyId, projectId: null, businessId: null } });
+          await send("result", await chatProjectCreationReply(workspaceStore, auth, run, activeCompanyId));
           clearInterval(heartbeat); if (!reply.raw.writableEnded) reply.raw.end(); return;
         }
         // Deleting a whole site is a confirmed project deletion through ProjectService, never a Coding Agent run.

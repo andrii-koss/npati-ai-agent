@@ -64,6 +64,10 @@ export class ChatDevelopmentService {
   constructor(private readonly d: DevelopmentPorts) { }
   private owner(ctx: AuthContext) { return ctx.workspaceId + ":" + ctx.userId; }
   private jobKey(ctx: AuthContext, id: string) { return this.owner(ctx) + ":" + id; }
+  async waitForCompletion(ctx: AuthContext, processIds: string[]): Promise<void> {
+    await Promise.all(processIds.map(id => this.jobs.get(this.jobKey(ctx, id))?.promise));
+    await this.flushActivities(ctx);
+  }
   private async entries(ctx: AuthContext): Promise<Entry[]> {
     const value = (await this.d.store.getUserSetting(ctx, key))?.value;
     return Array.isArray(value) ? value as Entry[] : [];
