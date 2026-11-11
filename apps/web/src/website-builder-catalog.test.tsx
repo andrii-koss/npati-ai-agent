@@ -17,6 +17,36 @@ const project = (id: string, companyId: string) => ({ id, companyId, name: id, t
 const render = () => act(async () => { root.render(<MemoryRouter><WebsiteBuilderDashboard /></MemoryRouter>); });
 
 describe("Projects catalog company scope and freshness", () => {
+  it.each(["scroll", "wheel"])("shows six projects and appends a prefetched page ahead after %s", async mode => {
+    let intersect!: (entries: Partial<IntersectionObserverEntry>[]) => void;
+    const observe = vi.fn(), disconnect = vi.fn();
+    vi.stubGlobal("IntersectionObserver", class {
+      constructor(callback: typeof intersect) { intersect = callback; }
+      observe = observe;
+      disconnect = disconnect;
+    });
+    const fetch = vi.fn(async (url: string) => new Response(JSON.stringify(url.includes("/projects/catalog")
+      ? { projects: Array.from({ length: 6 }, (_, index) => project(`site-${index + (url.includes("cursor=") ? 6 : 0)}`, "company")), pagination: { nextCursor: url.includes("cursor=") ? null : "page-two" } }
+      : { companies: [], pagination: { nextCursor: null } })));
+    vi.stubGlobal("fetch", fetch);
+    await render();
+    expect(host.querySelectorAll("[data-project]")).toHaveLength(6);
+    expect(fetch.mock.calls.filter(([url]) => url.includes("/projects/catalog"))).toHaveLength(2);
+    expect(observe).not.toHaveBeenCalled();
+    await act(async () => {
+      if (mode === "wheel") document.dispatchEvent(new Event("wheel"));
+      else { host.scrollTop = 100; host.dispatchEvent(new Event("scroll")); }
+    });
+    expect(observe).toHaveBeenCalledWith(host.querySelector(".website-catalog-pagination"));
+    expect(host.querySelector(".website-catalog-load-more")).toBeNull();
+    expect(host.querySelector(".website-catalog-pagination")?.getAttribute("aria-hidden")).toBe("true");
+    await act(async () => { intersect([{ isIntersecting: false }]); });
+    expect(host.querySelectorAll("[data-project]")).toHaveLength(6);
+    await act(async () => { intersect([{ isIntersecting: true }]); intersect([{ isIntersecting: true }]); });
+    expect(host.querySelectorAll("[data-project]")).toHaveLength(12);
+    expect(fetch.mock.calls.filter(([url]) => url.includes("cursor=page-two"))).toHaveLength(1);
+    expect(host.querySelector(".website-catalog-pagination")).toBeNull();
+  });
   it("cancels an obsolete scope and ignores its late response", async () => {
     let resolveOld!: (response: Response) => void;
     let oldSignal: AbortSignal | null | undefined;

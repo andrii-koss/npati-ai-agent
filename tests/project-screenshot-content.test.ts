@@ -1,6 +1,6 @@
 import { deflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
-import { screenshotHasDetail } from "../apps/agent-api/src/project-screenshot-content";
+import { isWebpScreenshot, screenshotHasDetail } from "../apps/agent-api/src/project-screenshot-content";
 function chunk(type: string, data: Buffer) {
   const name = Buffer.from(type), body = Buffer.concat([name,data]); let crc = 0xffffffff;
   for (const byte of body) { crc ^= byte; for (let bit=0;bit<8;bit++) crc = (crc>>>1)^((crc&1)?0xedb88320:0); }
@@ -23,6 +23,18 @@ export function screenshotFixture(detail: boolean, filter=0) {
   return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',header),chunk('IDAT',deflateSync(raw)),chunk('IEND',Buffer.alloc(0))]);
 }
 describe("project screenshot content",()=>{
+  it("accepts a WebP keyframe and rejects truncated data, forged size and oversized dimensions", () => {
+    const image = Buffer.alloc(30);
+    image.write("RIFF"); image.writeUInt32LE(22, 4); image.write("WEBPVP8 ", 8); image.writeUInt32LE(10, 16);
+    image.set([157, 1, 42], 23); image.writeUInt16LE(1280, 26); image.writeUInt16LE(800, 28);
+    expect(isWebpScreenshot(image)).toBe(true);
+    expect(isWebpScreenshot(image.subarray(0, 29))).toBe(false);
+    const forged = Buffer.from(image); forged.writeUInt32LE(200, 16);
+    expect(isWebpScreenshot(forged)).toBe(false);
+    image.writeUInt16LE(2000, 26);
+    expect(isWebpScreenshot(image)).toBe(false);
+    expect(isWebpScreenshot(screenshotFixture(true))).toBe(false);
+  });
   it.each([0,1,2,3,4])("rejects a uniformly blank PNG using filter %i",filter=>{expect(screenshotHasDetail(screenshotFixture(false,filter))).toBe(false);});
   it.each([0,1,2,3,4])("retains image detail using filter %i",filter=>{expect(screenshotHasDetail(screenshotFixture(true,filter))).toBe(true);});
   it("leaves unsupported or invalid encodings to the existing validation",()=>{expect(screenshotHasDetail(Buffer.from('invalid'))).toBe(true);});

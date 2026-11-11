@@ -22,14 +22,18 @@ describe("saved catalog screenshots", () => {
     const f = await fixture();
     const response = await f.app.inject({ url: f.url });
     expect(response.statusCode).toBe(200); expect(response.json()).toEqual({ thumbnail: null }); expect(f.inspect).not.toHaveBeenCalled();
+    expect(response.headers["cache-control"]).toBe("private, no-store");
   });
-  it("serves only real visual captures and keeps project ownership and credential scope", async () => {
+  it.each(["image/png", "image/webp"])("serves saved %s captures and keeps project ownership and credential scope", async mimeType => {
     const f = await fixture();
-    const screenshot = { name: "desktop", viewport: { width: 1280, height: 800 }, mimeType: "image/png", base64Data: "test-fixture", sizeBytes: 12, captureMode: "visual" as const };
+    const screenshot = { name: "desktop", viewport: { width: 1280, height: 800 }, mimeType, hasDetail: true, base64Data: "test-fixture", sizeBytes: 12, captureMode: "visual" as const };
     await f.store.createProjectQaReport(owner, f.company.id, f.project.id, { status: "passed", targetUrl: "/preview", summary: "Screenshot", issues: [], metrics: {} as never, screenshots: [screenshot] });
-    expect((await f.app.inject({ url: f.url })).json().thumbnail.dataUrl).toBe("data:image/png;base64,test-fixture");
+    const response = await f.app.inject({ url: f.url });
+    expect(response.json().thumbnail.dataUrl).toBe(`data:${mimeType};base64,test-fixture`);
+    expect(response.headers["cache-control"]).toBe("private, max-age=300");
+    expect(response.headers.vary).toBe("Authorization");
     await f.store.createProjectQaReport(owner, f.company.id, f.project.id, { status: "passed", targetUrl: "/preview", summary: "Console check only", issues: [], metrics: {} as never, screenshots: [] });
-    expect((await f.app.inject({ url: f.url })).json().thumbnail.dataUrl).toBe("data:image/png;base64,test-fixture");
+    expect((await f.app.inject({ url: f.url })).json().thumbnail.dataUrl).toBe(`data:${mimeType};base64,test-fixture`);
     f.setContext({ ...owner, userId: "other" }); expect((await f.app.inject({ url: f.url })).statusCode).toBe(403);
     f.setContext({ ...owner, companyId: "other-company" }); expect((await f.app.inject({ url: f.url })).statusCode).toBe(403);
     f.setContext({ ...owner, permissions: [] }); expect((await f.app.inject({ url: f.url })).statusCode).toBe(403);
@@ -39,8 +43,10 @@ describe("saved catalog screenshots", () => {
     f.setContext({ ...owner, permissions: ["workspace:read"] });
     expect((await f.app.inject({ method: "POST", url: f.url })).statusCode).toBe(403); expect(f.inspect).not.toHaveBeenCalled();
     f.setContext(owner);
-    f.inspect.mockResolvedValueOnce({ report: { createdAt: "2026-10-29" }, screenshots: [{ captureMode: "visual", base64Data: "pixels" }] } as never);
-    expect((await f.app.inject({ method: "POST", url: f.url })).statusCode).toBe(200);
+    f.inspect.mockResolvedValueOnce({ report: { createdAt: "2026-10-29" }, screenshots: [{ captureMode: "visual", mimeType: "image/webp", base64Data: "pixels" }] } as never);
+    const response = await f.app.inject({ method: "POST", url: f.url });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().thumbnail.dataUrl).toBe("data:image/webp;base64,pixels");
     expect(f.inspect).toHaveBeenCalledWith(owner, f.company.id, expect.objectContaining({ projectId: f.project.id, screenshotMode: "visual", checks: ["screenshot"], maxScreenshotBytes: 2_000_000 }));
   });
 });

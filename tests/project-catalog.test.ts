@@ -4,6 +4,7 @@ import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
 import { ProjectService } from "../apps/agent-api/src/project-service";
 import { registerProjectRoutes } from "../apps/agent-api/src/project-routes";
 import { rewriteBrowserApiUrl } from "../apps/agent-api/src/web-frontend";
+import { projectCatalogQuery } from "../packages/workspace/src/postgres-project-catalog";
 
 const owner: AuthContext = { workspaceId: "catalog-ws", userId: "catalog-owner", permissions: ["workspace:read", "business:manage"] };
 const apps: ReturnType<typeof Fastify>[] = [];
@@ -24,20 +25,26 @@ async function fixture() {
   return { app, store, a, b, setContext: (next: AuthContext) => { context = next; } };
 }
 describe("Projects server catalog", () => {
+  it("bounds the PostgreSQL query to six cards plus one cursor lookahead row", () => {
+    const query = projectCatalogQuery(owner, { search: "bakery", kind: "website" });
+    expect(query.text).toContain("ORDER BY p.created_at DESC,p.id ASC LIMIT 7");
+    expect(query.text).toContain("p.created_by=$2");
+    expect(query.values).toContain("%bakery%");
+  });
   it("serves the browser's /api/projects/catalog URL through the production URL rewrite", async () => {
     const { app } = await fixture();
     const response = await app.inject({ url: "/api/projects/catalog?status=all" });
     expect(response.statusCode).toBe(200);
-    expect(response.json().projects).toHaveLength(24);
+    expect(response.json().projects).toHaveLength(6);
     expect(response.headers["cache-control"]).toBe("private, no-store");
   });
-  it("pages 24 items with no duplicates, hides deleted projects and retains archived in All", async () => {
+  it("pages 6 items with no duplicates, hides deleted projects and retains archived in All", async () => {
     const { app } = await fixture();
     const seen = new Set<string>(); let cursor: string | null = null;
     do {
       const response = await app.inject({ url: `/projects/catalog${cursor ? `?cursor=${cursor}` : ""}` });
       expect(response.statusCode).toBe(200);
-      const page = response.json(); expect(page.projects.length).toBeLessThanOrEqual(24);
+      const page = response.json(); expect(page.projects.length).toBeLessThanOrEqual(6);
       for (const row of page.projects) { expect(seen.has(row.id)).toBe(false); seen.add(row.id); expect(row).not.toHaveProperty("sandboxId"); }
       cursor = page.pagination.nextCursor;
     } while (cursor);
@@ -48,7 +55,7 @@ describe("Projects server catalog", () => {
     const { app, a } = await fixture();
     expect((await app.inject({ url: "/projects/catalog?search=100%25_" })).json().projects).toHaveLength(1);
     const first = (await app.inject({ url: `/projects/catalog?companyId=${a.id}&kind=game` })).json();
-    expect(first.projects).toHaveLength(24);
+    expect(first.projects).toHaveLength(6);
     expect(first.projects.every((p: { companyId: string; kind: string }) => p.companyId === a.id && p.kind === "game")).toBe(true);
     expect((await app.inject({ url: `/projects/catalog?cursor=${first.pagination.nextCursor}` })).statusCode).toBe(400);
     expect((await app.inject({ url: "/projects/catalog?kind=unknown" })).statusCode).toBe(400);

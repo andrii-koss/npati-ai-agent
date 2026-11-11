@@ -1,5 +1,25 @@
 import { unzlibSync } from "fflate";
 
+/** Verify the container and image payload before accepting WebP from the runner. */
+export function isWebpScreenshot(data: Buffer): boolean {
+  if (data.length < 30 || data.toString("ascii", 0, 4) !== "RIFF" || data.toString("ascii", 8, 12) !== "WEBP" || data.readUInt32LE(4) !== data.length - 8) return false;
+  for (let offset = 12; offset + 8 <= data.length;) {
+    const size = data.readUInt32LE(offset + 4);
+    if (size > data.length - offset - 8) return false;
+    const type = data.toString("ascii", offset, offset + 4), start = offset + 8;
+    if (type === "VP8 " && size >= 10 && (data[start]! & 1) === 0 && data.subarray(start + 3, start + 6).equals(Buffer.from([157, 1, 42]))) {
+      const width = data.readUInt16LE(start + 6) & 16383, height = data.readUInt16LE(start + 8) & 16383;
+      return width > 0 && height > 0 && width <= 1920 && height <= 1200;
+    }
+    if (type === "VP8L" && size >= 5 && data[start] === 47) {
+      const bits = data.readUInt32LE(start + 1), width = (bits & 16383) + 1, height = ((bits >>> 14) & 16383) + 1;
+      return (bits >>> 29) === 0 && width <= 1920 && height <= 1200;
+    }
+    offset += 8 + size + (size % 2);
+  }
+  return false;
+}
+
 /** Reject a solid-color browser capture instead of saving an empty app as a thumbnail.
  * Chromium screenshots use non-interlaced 8-bit RGB/RGBA PNGs. Other encodings are left unchanged. */
 export function screenshotHasDetail(png: Uint8Array): boolean {

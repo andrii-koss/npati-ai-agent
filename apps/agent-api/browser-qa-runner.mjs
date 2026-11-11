@@ -221,10 +221,31 @@ try {
     if (screenshot && screenshotMode === "visual") {
       // Explicit reference-review mode captures the real render; default QA remains layout-only.
       // Mask user-entered values and regions explicitly marked private without replacing the design.
-      const bytes = await page.screenshot({ type: "png", fullPage: false, animations: "disabled", caret: "hide",
+      const bytes = await page.screenshot({ type: "webp", quality: 80, fullPage: false, animations: "disabled", caret: "hide",
         mask: [page.locator('input,textarea,[contenteditable],[data-private],[data-sensitive],iframe')],
         timeout: Math.min(5000, timeoutMs) });
-      if (bytes.length <= maxScreenshotBytes) captured = { mimeType: "image/png", base64Data: bytes.toString("base64"), sizeBytes: bytes.length, redacted: true, captureMode: "visual" };
+      if (bytes.length <= maxScreenshotBytes) {
+        const base64Data = bytes.toString("base64");
+        // Decode the single captured image in an isolated page to reject a solid-color preview.
+        const imagePage = await context.newPage();
+        try {
+          const hasDetail = await imagePage.evaluate(async base64 => {
+            const image = new Image();
+            image.src = "data:image/webp;base64," + base64;
+            await image.decode();
+            const canvas = document.createElement("canvas");
+            canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
+            const drawing = canvas.getContext("2d");
+            if (!drawing) throw new Error("image_decode_failed");
+            drawing.drawImage(image, 0, 0);
+            const pixels = drawing.getImageData(0, 0, canvas.width, canvas.height).data;
+            for (let offset = 4; offset < pixels.length; offset += 4)
+              if (Math.abs(pixels[offset] - pixels[0]) > 8 || Math.abs(pixels[offset + 1] - pixels[1]) > 8 || Math.abs(pixels[offset + 2] - pixels[2]) > 8) return true;
+            return false;
+          }, base64Data);
+          captured = { mimeType: "image/webp", base64Data, sizeBytes: bytes.length, redacted: true, captureMode: "visual", hasDetail };
+        } finally { await imagePage.close(); }
+      }
     } else if (screenshot) {
       const boxes = await page.evaluate(({ width, height }) => {
         const tags = "header,nav,main,section,article,aside,footer,h1,h2,h3,p,button,a,input,textarea,img,svg,canvas,video";

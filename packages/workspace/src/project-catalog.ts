@@ -5,7 +5,7 @@ export interface ProjectCatalogInput {
 }
 export type ProjectCatalogItem = Pick<Project, "id" | "companyId" | "name" | "description" | "type" | "kind" | "status" | "framework" | "deploymentUrl" | "deploymentStatus" | "previewUrl" | "previewPort" | "revision" | "createdAt" | "updatedAt"> & { hasThumbnail?: boolean };
 export interface ProjectCatalogPage { projects: ProjectCatalogItem[]; pagination: { nextCursor: string | null } }
-export const CATALOG_SIZE = 24;
+export const CATALOG_SIZE = 6;
 export function catalogScope(context: AuthContext, input: ProjectCatalogInput) {
   return JSON.stringify([context.workspaceId, context.userId, context.companyId ?? "", input.companyId ?? "", input.search ?? "", input.status ?? "all", input.framework ?? "all", input.kind ?? "all"]);
 }

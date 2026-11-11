@@ -7,46 +7,37 @@ import { ProjectPreviewPlaceholder, type PreviewPlaceholderStatus } from "./Proj
 
 interface Thumbnail { dataUrl: string; capturedAt: string }
 const cache = new Map<string, { thumbnail: Thumbnail | null; time: number }>();
+const pending = new Map<string, Promise<Thumbnail | null>>();
 let identity = "";
 
-function storageKey(companyId: string, projectId: string) {
-  return `npati_thumb_${companyId}_${projectId}`;
+function thumbnailKey(companyId: string, projectId: string) {
+  const auth = JSON.stringify([getStoredAuthToken(), getStoredAuthUser()?.id]);
+  if (identity !== auth) { cache.clear(); pending.clear(); identity = auth; }
+  return JSON.stringify([auth, companyId, projectId]);
 }
 
-export function getStoredThumbnail(companyId: string, projectId: string): Thumbnail | null {
-  try {
-    const raw = sessionStorage.getItem(storageKey(companyId, projectId)) ||
-                localStorage.getItem(storageKey(companyId, projectId));
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed?.dataUrl && typeof parsed.dataUrl === "string") return parsed;
-    }
-  } catch {}
-  return null;
+function rememberThumbnail(key: string, thumbnail: Thumbnail | null) {
+  if (cache.size >= 128) cache.delete(cache.keys().next().value!);
+  cache.set(key, { thumbnail, time: Date.now() });
 }
 
-export function setStoredThumbnail(companyId: string, projectId: string, value: Thumbnail | null) {
-  try {
-    const key = storageKey(companyId, projectId);
-    if (value?.dataUrl) {
-      sessionStorage.setItem(key, JSON.stringify(value));
-      try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
-    } else {
-      sessionStorage.removeItem(key);
-      try { localStorage.removeItem(key); } catch {}
-    }
-  } catch {}
+function requestThumbnail(key: string, root: string) {
+  const previous = cache.get(key);
+  if (previous && Date.now() - previous.time < 300_000) return Promise.resolve(previous.thumbnail);
+  const existing = pending.get(key);
+  if (existing) return existing;
+  const auth = identity;
+  const request = apiFetch<{ thumbnail: Thumbnail | null }>(root + "/qa/thumbnail", { signal: AbortSignal.timeout(15_000) }).then(result => {
+    if (identity === auth && pending.get(key) === request) rememberThumbnail(key, result.thumbnail);
+    return cache.get(key)?.thumbnail ?? result.thumbnail;
+  }).finally(() => { if (pending.get(key) === request) pending.delete(key); });
+  pending.set(key, request);
+  return request;
 }
 
-export function prefetchProjectThumbnail(companyId: string, projectId: string) {
-  const stored = getStoredThumbnail(companyId, projectId);
-  if (stored) return;
-  const root = projectPreviewRoot(companyId, projectId);
-  void apiFetch<{ thumbnail: Thumbnail | null }>(root + "/qa/thumbnail").then(result => {
-    if (result?.thumbnail) {
-      setStoredThumbnail(companyId, projectId, result.thumbnail);
-    }
-  }).catch(() => {});
+export function preloadCatalogThumbnails(projects: ReadonlyArray<{ companyId: string; id: string; hasThumbnail?: boolean }>) {
+  for (const project of projects.slice(0, 6)) if (project.hasThumbnail)
+    void requestThumbnail(thumbnailKey(project.companyId, project.id), projectPreviewRoot(project.companyId, project.id)).catch(() => {});
 }
 
 export interface CatalogProjectThumbnailProps {
@@ -74,54 +65,45 @@ export function CatalogProjectThumbnail({
   hasThumbnail,
   onPreview,
 }: CatalogProjectThumbnailProps) {
-  const authIdentity = JSON.stringify([getStoredAuthToken(), getStoredAuthUser()?.id]);
-  if (identity !== authIdentity) { cache.clear(); identity = authIdentity; }
-  const key = JSON.stringify([authIdentity, companyId, projectId]);
+  const key = thumbnailKey(companyId, projectId);
   const root = projectPreviewRoot(companyId, projectId);
   const uk = language === "uk";
   const refreshLabel = uk ? "Оновити знімок" : "Refresh screenshot";
   const container = useRef<HTMLDivElement>(null);
 
-  // Synchronously initialize from memory cache or persistent storage to avoid any placeholder flash on frame 0
-  const [thumbnail, setThumbnail] = useState<Thumbnail | null>(() => {
-    const fromMem = cache.get(key)?.thumbnail;
-    if (fromMem !== undefined) return fromMem;
-    const stored = getStoredThumbnail(companyId, projectId);
-    if (stored) {
-      cache.set(key, { thumbnail: stored, time: Date.now() });
-      return stored;
-    }
-    return null;
-  });
+  const [thumbnail, setThumbnail] = useState<Thumbnail | null>(() => cache.get(key)?.thumbnail ?? null);
+  const [imageLoading, setImageLoading] = useState(false);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   function remember(value: Thumbnail | null) {
-    if (cache.size >= 128) cache.delete(cache.keys().next().value!);
-    cache.set(key, { thumbnail: value, time: Date.now() });
-    setStoredThumbnail(companyId, projectId, value);
+    pending.delete(key);
+    rememberThumbnail(key, value);
     setThumbnail(value);
   }
 
   useEffect(() => {
-    const controller = new AbortController();
+    let active = true;
     let started = false;
+    setThumbnail(cache.get(key)?.thumbnail ?? null);
+    setImageLoading(false);
     const load = () => {
       if (started) return;
       started = true;
       const previous = cache.get(key);
-      if (previous?.thumbnail && Date.now() - previous.time < 300_000) return;
+      if (previous && Date.now() - previous.time < 300_000) {
+        setThumbnail(previous.thumbnail);
+        return;
+      }
       if (hasThumbnail === false && !previous?.thumbnail) return;
-      void apiFetch<{ thumbnail: Thumbnail | null }>(root + "/qa/thumbnail", { signal: controller.signal }).then(result => {
-        if (!controller.signal.aborted) remember(result.thumbnail);
-      }).catch(() => { });
+      setImageLoading(true);
+      void requestThumbnail(key, root).then(value => {
+        if (active) setThumbnail(value);
+      }).catch(() => { }).finally(() => { if (active) setImageLoading(false); });
     };
 
-    // If project has thumbnail or is already cached, load immediately without waiting for IntersectionObserver
-    if (hasThumbnail || thumbnail) {
-      load();
-    } else if (!globalThis.IntersectionObserver) {
+    if (!globalThis.IntersectionObserver) {
       load();
     } else {
       const observer = new IntersectionObserver(entries => {
@@ -131,10 +113,10 @@ export function CatalogProjectThumbnail({
         }
       }, { rootMargin: "250px" });
       if (container.current) observer.observe(container.current);
-      return () => { controller.abort(); observer.disconnect(); };
+      return () => { active = false; observer.disconnect(); };
     }
-    return () => { controller.abort(); };
-  }, [key, root, hasThumbnail, thumbnail]);
+    return () => { active = false; };
+  }, [key, root, hasThumbnail]);
 
   async function capture() {
     if (busy) return;
@@ -157,7 +139,7 @@ export function CatalogProjectThumbnail({
   const previewHref = "/settings/projects/" + encodeURIComponent(companyId) + "/" + encodeURIComponent(projectId);
 
   const isImageReady = Boolean(thumbnail && !busy);
-  const isImagePending = Boolean(hasThumbnail && !thumbnail && !error);
+  const isImagePending = Boolean(imageLoading && !thumbnail && !error);
 
   return <div ref={container} style={{ width: "100%" }}>
     <div className="website-preview-viewport" style={{ position: "relative", width: "100%", aspectRatio: "16 / 10", overflow: "hidden", background: "#f8fafc" }}>
@@ -166,7 +148,8 @@ export function CatalogProjectThumbnail({
           <img
             src={thumbnail!.dataUrl}
             alt={uk ? `Вигляд проєкту ${name}` : `${name} project screenshot`}
-            loading="eager"
+            loading="lazy"
+            decoding="async"
             onError={() => remember(null)}
             style={{ display: "block", width: "100%", height: "100%", objectFit: "cover", objectPosition: "top" }}
           />
@@ -182,16 +165,6 @@ export function CatalogProjectThumbnail({
               justifyContent: "center",
             }}
           >
-            <div
-              style={{
-                width: 24,
-                height: 24,
-                borderRadius: "50%",
-                border: "2.5px solid #e2e8f0",
-                borderTopColor: "#dc2626",
-                animation: "website-preview-spin 0.8s linear infinite"
-              }}
-            />
           </div>
         ) : (
           <ProjectPreviewPlaceholder

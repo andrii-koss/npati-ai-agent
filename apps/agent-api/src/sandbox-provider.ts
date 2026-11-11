@@ -39,7 +39,7 @@ export interface SandboxBrowserQaResult {
   hiddenShown?: string[];
   /** Form writes to the site's own server routes that the check did not send, as "METHOD /path". */
   uncheckedWrites?: string[];
-  screenshot?: { mimeType: "image/png"; base64Data: string; sizeBytes: number; redacted: true; captureMode?: "layout" | "visual" };
+  screenshot?: { mimeType: "image/png" | "image/webp"; base64Data: string; sizeBytes: number; redacted: true; captureMode?: "layout" | "visual"; hasDetail?: boolean };
 }
 export interface SandboxBrowserQaOptions {
   actions?: import("../browser-qa-actions.mjs").BrowserQaAction[];

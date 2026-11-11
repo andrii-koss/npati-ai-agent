@@ -93,6 +93,8 @@ export interface BrowserQaObservation {text:string;buttons:Array<{label:string;d
 export interface BrowserQaInteraction {action:BrowserQaAction;status:"completed"|"failed";before:BrowserQaObservation;after:BrowserQaObservation}
 
 export interface BrowserQaScreenshot {
+  /** Pixel-content check performed by the isolated runner for WebP captures. */
+  hasDetail?: boolean;
   captureMode?: "layout" | "visual";
   name: string;
   viewport: { width: number; height: number };

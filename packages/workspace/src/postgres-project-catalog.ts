@@ -1,7 +1,7 @@
 import type { Pool } from "pg";
 import type { AuthContext } from "./types";
 import { assertMember, assertCompany } from "./postgres-store-support";
-import { catalogCursor, catalogPage, type ProjectCatalogInput, type ProjectCatalogItem } from "./project-catalog";
+import { CATALOG_SIZE, catalogCursor, catalogPage, type ProjectCatalogInput, type ProjectCatalogItem } from "./project-catalog";
 
 export function projectCatalogQuery(context: AuthContext, input: ProjectCatalogInput) {
   const cursor = catalogCursor(context, input);
@@ -28,7 +28,7 @@ export function projectCatalogQuery(context: AuthContext, input: ProjectCatalogI
     to_char(p.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "createdAt",
     to_char(p.updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "updatedAt",
     EXISTS (SELECT 1 FROM project_qa_reports q WHERE q.workspace_id=p.workspace_id AND q.company_id=p.company_id AND q.project_id=p.id AND jsonb_typeof(q.screenshots)='array' AND jsonb_array_length(q.screenshots)>0) AS "hasThumbnail"
-    FROM projects p WHERE ${where.join(" AND ")} ORDER BY p.created_at DESC,p.id ASC LIMIT 25`, values };
+    FROM projects p WHERE ${where.join(" AND ")} ORDER BY p.created_at DESC,p.id ASC LIMIT ${CATALOG_SIZE + 1}`, values };
 }
 export async function listProjectCatalog(pool: Pool, context: AuthContext, input: ProjectCatalogInput) {
   await assertMember(pool, context);

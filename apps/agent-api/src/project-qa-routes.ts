@@ -51,12 +51,14 @@ export function registerProjectQaRoutes(
     if (!ctx.permissions.includes("workspace:read")) return reply.code(403).send({ error: { code: "FORBIDDEN", message: "Insufficient permissions" } });
     try {
       reply.header("Cache-Control", "private, no-store");
+      reply.header("Vary", [reply.getHeader("Vary"), "Authorization"].filter(Boolean).join(", "));
       const report = await qaService.getLatestReport(ctx, request.params.companyId, request.params.projectId);
-      const screenshot = report?.screenshots.find(image => image.captureMode === "visual" && image.mimeType === "image/png" && image.sizeBytes <= 2_000_000);
+      const screenshot = report?.screenshots.find(image => image.captureMode === "visual" && ["image/png", "image/webp"].includes(image.mimeType) && image.sizeBytes <= 2_000_000);
       const visualReport = report && !screenshot ? await qaService.getLatestVisualReport(ctx, request.params.companyId, request.params.projectId) : report;
-      const activeScreenshot = screenshot ?? visualReport?.screenshots.find(image => image.captureMode === "visual" && image.mimeType === "image/png" && image.sizeBytes <= 2_000_000);
-      if (activeScreenshot && !screenshotHasDetail(Buffer.from(activeScreenshot.base64Data, "base64"))) return { thumbnail: null };
-      return { thumbnail: activeScreenshot ? { dataUrl: "data:image/png;base64," + activeScreenshot.base64Data, capturedAt: visualReport!.createdAt } : null };
+      const activeScreenshot = screenshot ?? visualReport?.screenshots.find(image => image.captureMode === "visual" && ["image/png", "image/webp"].includes(image.mimeType) && image.sizeBytes <= 2_000_000);
+      if (activeScreenshot && (activeScreenshot.mimeType === "image/webp" ? activeScreenshot.hasDetail !== true : !screenshotHasDetail(Buffer.from(activeScreenshot.base64Data, "base64")))) return { thumbnail: null };
+      if (activeScreenshot) reply.header("Cache-Control", "private, max-age=300");
+      return { thumbnail: activeScreenshot ? { dataUrl: `data:${activeScreenshot.mimeType};base64,` + activeScreenshot.base64Data, capturedAt: visualReport!.createdAt } : null };
     } catch (error) { return handleError(error, reply); }
   });
 
@@ -69,7 +71,7 @@ export function registerProjectQaRoutes(
       const result = await qaService.inspect(ctx, request.params.companyId, { projectId: request.params.projectId, viewport: "desktop", checks: ["screenshot"], screenshotMode: "visual", maxScreenshotBytes: 2_000_000 });
       const screenshot = result.screenshots.find(image => image.captureMode === "visual");
       if (!screenshot) throw new BrowserQaError("visual_screenshot_unavailable", "A real project screenshot could not be captured", 503);
-      return { thumbnail: { dataUrl: "data:image/png;base64," + screenshot.base64Data, capturedAt: result.report.createdAt } };
+      return { thumbnail: { dataUrl: `data:${screenshot.mimeType};base64,` + screenshot.base64Data, capturedAt: result.report.createdAt } };
     } catch (error) { return handleError(error, reply); }
   });
 

@@ -35,6 +35,22 @@ async function fixture() {
 }
 
 describe("project browser QA", () => {
+  it.each([true, false, undefined])("persists only valid redacted WebP with visible content, detail=%s", async hasDetail => {
+    const f = await fixture();
+    const bytes = Buffer.alloc(30);
+    bytes.write("RIFF"); bytes.writeUInt32LE(22, 4); bytes.write("WEBPVP8 ", 8); bytes.writeUInt32LE(10, 16);
+    bytes.set([157, 1, 42], 23); bytes.writeUInt16LE(1280, 26); bytes.writeUInt16LE(800, 28);
+    f.inspect.mockResolvedValueOnce({ ...result, screenshot: { mimeType: "image/webp", redacted: true, captureMode: "visual", hasDetail, base64Data: bytes.toString("base64"), sizeBytes: bytes.length } });
+    const request = f.qa.inspect(owner, f.company.id, { projectId: f.project.id, screenshotMode: "visual" });
+    if (hasDetail === true) {
+      const report = await request;
+      expect(report.screenshots).toEqual([expect.objectContaining({ mimeType: "image/webp", hasDetail: true, base64Data: bytes.toString("base64") })]);
+      expect((await f.qa.getLatestVisualReport(owner, f.company.id, f.project.id))?.screenshots).toEqual(report.screenshots);
+    } else {
+      await expect(request).rejects.toMatchObject({ code: hasDetail === false ? "preview_empty" : "visual_screenshot_unavailable" });
+      expect(await f.qa.listReports(owner, f.company.id, f.project.id)).toEqual([]);
+    }
+  });
   it("parses the isolated browser runner script", () => {
     const source = readFileSync(new URL("../apps/agent-api/browser-qa-runner.mjs", import.meta.url), "utf8");
     expect(() => transformSync(source, { loader: "js" })).not.toThrow();

@@ -6,7 +6,7 @@ import type { ProjectPreviewService } from "./project-preview-service";
 import type { ProjectSandboxService } from "./project-sandbox-service";
 import type { ProjectService } from "./project-service";
 import type { SandboxBrowserQaResult } from "./sandbox-provider";
-import { screenshotHasDetail } from "./project-screenshot-content";
+import { isWebpScreenshot, screenshotHasDetail } from "./project-screenshot-content";
 
 export interface BrowserQaInspectOptions {
   actions?: BrowserQaAction[];
@@ -128,11 +128,15 @@ export class ProjectBrowserQaService {
     const screenshots: BrowserQaScreenshot[] = [];
     if (enabled.has("screenshot") && result.screenshot) {
       const bytes = Buffer.from(result.screenshot.base64Data, "base64");
-      if (result.screenshot.redacted === true && result.screenshot.mimeType === "image/png" && bytes.length <= maxScreenshotBytes &&
-          bytes.length === result.screenshot.sizeBytes && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])))
-        screenshots.push({ name: options.viewport ?? "desktop", viewport, mimeType: "image/png", base64Data: result.screenshot.base64Data, sizeBytes: bytes.length, captureMode: result.screenshot.captureMode ?? "layout" });
+      const image = result.screenshot;
+      const validFormat = image.mimeType === "image/webp"
+        ? typeof image.hasDetail === "boolean" && isWebpScreenshot(bytes)
+        : image.mimeType === "image/png" && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+      if (image.redacted === true && validFormat && bytes.length <= maxScreenshotBytes && bytes.length === image.sizeBytes)
+        screenshots.push({ name: options.viewport ?? "desktop", viewport, mimeType: image.mimeType, base64Data: image.base64Data, sizeBytes: bytes.length, captureMode: image.captureMode ?? "layout", ...(image.mimeType === "image/webp" ? { hasDetail: image.hasDetail } : {}) });
     }
-    if (options.screenshotMode === "visual" && screenshots.some(image => !screenshotHasDetail(Buffer.from(image.base64Data, "base64")))) {
+    if (options.screenshotMode === "visual" && !screenshots.length) throw new BrowserQaError("visual_screenshot_unavailable", "The runner returned an invalid visual image.", 503);
+    if (options.screenshotMode === "visual" && screenshots.some(image => image.mimeType === "image/webp" ? !image.hasDetail : !screenshotHasDetail(Buffer.from(image.base64Data, "base64")))) {
       throw new BrowserQaError("preview_empty", "The project renders an empty screen. A screenshot requires visible project content.", 409);
     }
     const status: BrowserQaStatus = issues.some(item => item.severity === "error") ? "failed" : issues.length ? "warning" : "passed";
@@ -173,6 +177,6 @@ export class ProjectBrowserQaService {
   }
   async getLatestVisualReport(ctx: AuthContext, companyId: string, projectId: string): Promise<ProjectQaReport | null> {
     const reports = await this.store.listProjectQaReports(ctx, companyId, projectId, 10);
-    return reports.find(r => r.screenshots.some(s => s.captureMode === "visual" && s.mimeType === "image/png" && s.sizeBytes <= 2_000_000)) ?? null;
+    return reports.find(r => r.screenshots.some(s => s.captureMode === "visual" && ["image/png", "image/webp"].includes(s.mimeType) && s.sizeBytes <= 2_000_000)) ?? null;
   }
 }

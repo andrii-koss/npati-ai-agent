@@ -40,6 +40,7 @@ import { CreateWebsiteDrawer } from "./website-builder-drawer";
 import { WebsiteFiltersBar } from "./website-builder-filters";
 import { WebsiteProjectCard } from "./website-builder-card";
 import { cachedCatalog, invalidateProjectCatalog, requestCatalog } from "./project-catalog-client";
+import { preloadCatalogThumbnails } from "./catalog-project-thumbnail";
 
 export function WebsiteBuilderDashboard() {
   const navigate = useNavigate();
@@ -65,6 +66,8 @@ export function WebsiteBuilderDashboard() {
   const catalogGeneration = useRef(0);
   const lastCatalogFetchAt = useRef(0);
   const requests = useRef(new Set<ReturnType<typeof requestCatalog>>());
+  const paginationTarget = useRef<HTMLDivElement>(null);
+  const [scrollStarted, setScrollStarted] = useState(false);
 
   // Create Modal State
   const [modalOpen, setModalOpen] = useState(false);
@@ -127,6 +130,7 @@ export function WebsiteBuilderDashboard() {
   }, []);
 
   const loadWebsites = useCallback(async (_companyId?: string, cursor?: string) => {
+    if (cursor && requests.current.size) return;
     if (!cursor) {
       ++catalogGeneration.current;
       for (const request of requests.current) request.release();
@@ -140,6 +144,7 @@ export function WebsiteBuilderDashboard() {
     try {
       const page = await request.promise;
       if (generation !== catalogGeneration.current) return;
+      preloadCatalogThumbnails(page.projects);
       setWebsites(previous => cursor ? [...new Map([...previous, ...page.projects].map(item => [item.id, item])).values()] : page.projects);
       setNextCursor(page.pagination?.nextCursor ?? null);
       setError("");
@@ -153,6 +158,7 @@ export function WebsiteBuilderDashboard() {
 
   useEffect(() => {
     const cached = cachedCatalog(filters);
+    setScrollStarted(false);
     setWebsites(cached?.projects ?? []);
     setNextCursor(cached?.pagination?.nextCursor ?? null);
     void loadWebsites();
@@ -167,6 +173,45 @@ export function WebsiteBuilderDashboard() {
       document.removeEventListener("visibilitychange", refresh);
     };
   }, [filters, loadWebsites]);
+
+  useEffect(() => {
+    const onScrollIntent = () => setScrollStarted(true);
+    const onKey = (event: KeyboardEvent) => { if (["PageDown", "End", "ArrowDown", " "].includes(event.key)) onScrollIntent(); };
+    const onScroll = (event: Event) => {
+      const target = event.target;
+      if ((target instanceof HTMLElement && target.scrollTop > 0) || (document.scrollingElement?.scrollTop ?? 0) > 0) setScrollStarted(true);
+    };
+    document.addEventListener("scroll", onScroll, true);
+    document.addEventListener("wheel", onScrollIntent, { passive: true });
+    document.addEventListener("touchmove", onScrollIntent, { passive: true });
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("scroll", onScroll, true);
+      document.removeEventListener("wheel", onScrollIntent);
+      document.removeEventListener("touchmove", onScrollIntent);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!nextCursor || loading || error) return;
+    let active = true;
+    const request = requestCatalog(filters, nextCursor);
+    void request.promise.then(page => { if (active && scrollStarted) preloadCatalogThumbnails(page.projects); }).catch(() => {}).finally(() => request.release());
+    return () => { active = false; request.release(); };
+  }, [filters, nextCursor, loading, error, scrollStarted]);
+
+  useEffect(() => {
+    if (!nextCursor || loading || error || !scrollStarted || !globalThis.IntersectionObserver) return;
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) {
+        observer.disconnect();
+        void loadWebsites(undefined, nextCursor);
+      }
+    }, { rootMargin: "0px 0px 600px 0px" });
+    if (paginationTarget.current) observer.observe(paginationTarget.current);
+    return () => observer.disconnect();
+  }, [nextCursor, loading, error, scrollStarted, loadWebsites]);
 
   // When framework selection changes in drawer, update suggested values.
   const handleSelectFramework = (fw: FrameworkStarterOption) => {
@@ -624,7 +669,7 @@ export function WebsiteBuilderDashboard() {
         </div>
       )}
 
-      {nextCursor && <div className="website-catalog-pagination"><button type="button" className="website-catalog-load-more" disabled={loading} onClick={() => void loadWebsites(undefined, nextCursor)}>{language === "uk" ? "Показати ще" : "Load more"}</button></div>}
+      {nextCursor && <div ref={paginationTarget} className="website-catalog-pagination" aria-hidden="true" style={{ height: 1, margin: 0 }} />}
 
       <CreateWebsiteDrawer
         isOpen={modalOpen}
