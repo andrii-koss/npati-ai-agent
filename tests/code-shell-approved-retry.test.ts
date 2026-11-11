@@ -78,4 +78,29 @@ describe("shell approval through the production executor and adapter", () => {
     expect(sandboxCalls).toHaveLength(1);
     expect(requested).toHaveLength(1);
   });
+
+  it("lets the sandbox run a command a standing rule allows, and refuses one the rule does not cover", async () => {
+    const ctx: AuthContext = { workspaceId: "ws", userId: "owner", permissions: ["workspace:write"] };
+    const sandboxCalls: Array<{ command: string; approved?: boolean }> = [];
+    const policy = new PolicyEngine({
+      flags: { assertEnabled: async () => true },
+      capabilities: { get: () => ({ id: "code.shell.exec", status: "active", version: 1 }) },
+      classifier: () => ({ risk: "approval" }),
+      sessionMode: async () => "auto",
+      approvals: { requestApproval: async () => ({ id: "approval-r" }), consumeApproved: async () => {} },
+      networkEnforcement: () => true,
+      approvalRules: { findRule: async (_ctx, query) => query.action === "code.shell.exec:npm:test" ? { id: "rule-1", scope: "project" } : null },
+    });
+    const shell = new CodeShellRuntime({ policy, sandbox: { execute: async input => { sandboxCalls.push({ command: input.command, approved: input.approved }); return { exitCode: 0, stdout: "ok", stderr: "", durationMs: 1, status: "completed", sandboxId: "sandbox" }; } } });
+    const ports = createCodePortsWiring({ config: {}, log: { warn() {}, info() {} }, codeShellRuntime: shell,
+      projectSandbox: {}, featureFlagService: {}, secretLeases: {} } as unknown as CreateCodePortsWiringDeps);
+    const exec = canonicalShellExecutors({ shellRuntime: ports.codeShellRuntimePort })["code.shell.exec"]!;
+    const input = { ctx, companyId: "company", projectId: "project", sessionId: "session", turnId: "turn", toolCallId: "rule-call",
+      tool: { name: "code.shell.exec", version: 1 }, args: { command: "npm test" }, limits: DEFAULT_CODE_AGENT_LIMITS,
+    } as CodeToolExecutionContext;
+    await expect(exec(input)).resolves.toMatchObject({ stdout: "ok" });
+    expect(sandboxCalls).toEqual([{ command: "npm test", approved: true }]);
+    await expect(exec({ ...input, toolCallId: "other", args: { command: "npm run deploy-db" } })).rejects.toMatchObject({ code: "approval_required" });
+    expect(sandboxCalls).toHaveLength(1);
+  });
 });

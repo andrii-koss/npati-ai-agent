@@ -284,12 +284,21 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
           clearInterval(heartbeat); if (!reply.raw.writableEnded) reply.raw.end(); return;
         }
         const confirmedName = confirmedProjectDeletion(message, previousAssistant);
-        if (activeCompanyId && (confirmedName || isProjectDeleteRequest(message, requestsDeletion(message) ? (await workspaceStore.listProjects(auth, activeCompanyId).catch(() => [])).map((project) => project.name) : []))) {
+        // A new chat with no company chosen still deletes a site the request names: the name is looked up across the
+        // owned companies and must point at exactly one site written in the message.
+        let deleteCompanyId = activeCompanyId;
+        if (!deleteCompanyId && (confirmedName || requestsDeletion(message))) {
+          const owned = await activeContextResolver.ownedCompanies(auth).catch(() => []);
+          const everyProject = (await Promise.all(owned.map((company) => workspaceStore.listProjects(auth, company.id).catch(() => [])))).flat();
+          const named = projectDeleteTarget(everyProject, message, confirmedName ?? undefined, null);
+          if (named && (confirmedName || message.toLocaleLowerCase().includes(named.name.toLocaleLowerCase()))) deleteCompanyId = named.companyId;
+        }
+        if (deleteCompanyId && (confirmedName || isProjectDeleteRequest(message, requestsDeletion(message) ? (await workspaceStore.listProjects(auth, deleteCompanyId).catch(() => [])).map((project) => project.name) : []))) {
           // The site may belong to another owned company the request names explicitly; a confirmation names the site
           // exactly, so it is looked up across owned companies and must be unique.
           const others = (confirmedName ? await activeContextResolver.ownedCompanies(auth) : await activeContextResolver.companiesNamedIn(auth, message))
-            .filter((company) => company.id !== activeCompanyId);
-          const projects = (await Promise.all([activeCompanyId, ...others.map((company) => company.id)]
+            .filter((company) => company.id !== deleteCompanyId);
+          const projects = (await Promise.all([deleteCompanyId, ...others.map((company) => company.id)]
             .map((companyId) => workspaceStore.listProjects(auth, companyId).catch(() => [])))).flat();
           const confirmedMatches = confirmedName ? projects.filter((project) => project.name === confirmedName) : [];
           const target = confirmedName && confirmedMatches.length !== 1 ? undefined : projectDeleteTarget(projects, message, confirmedName, activeProjectId);

@@ -77,6 +77,26 @@ describe("Project terminal integration", () => {
     provider.executeCommand = async () => { provider.files.push({ path: "generated.ts", content }); return result(); };
     await expect(sandbox.execute(owner, company.id, { projectId: project.id, command: "npm install", agentId: "system", approved: true })).rejects.toMatchObject({ code: "secret_content" });
   });
+  it("removes from the project a file the command deleted, and keeps every other file", async () => {
+    const { company, project, workspace, provider, sandbox } = await fixture();
+    await workspace.createFile(owner, company.id, project.id, "index.html", "<h1>site</h1>");
+    await workspace.createFile(owner, company.id, project.id, "temp-check.txt", "перевірка");
+    provider.executeCommand = async () => { provider.files = provider.files.filter(file => file.path !== "temp-check.txt"); return result(); };
+    await sandbox.execute(owner, company.id, { projectId: project.id, command: "rm temp-check.txt", agentId: "system", approved: true });
+    await expect(workspace.readFile(owner, company.id, project.id, "temp-check.txt")).rejects.toBeDefined();
+    expect((await workspace.readFile(owner, company.id, project.id, "index.html")).content).toBe("<h1>site</h1>");
+  });
+  it("does not treat a file under a directory the sandbox does not list as deleted", async () => {
+    const { company, project, workspace, provider, sandbox } = await fixture();
+    await workspace.createFile(owner, company.id, project.id, "index.html", "<h1>site</h1>");
+    await workspace.createFile(owner, company.id, project.id, "tmp/notes.txt", "keep me");
+    await workspace.createFile(owner, company.id, project.id, "coverage/report.txt", "keep me too");
+    // A provider lists files back without these directories; their absence is not a delete.
+    provider.executeCommand = async () => { provider.files = provider.files.filter(file => !["tmp/", "coverage/"].some(prefix => file.path.startsWith(prefix))); return result(); };
+    await sandbox.execute(owner, company.id, { projectId: project.id, command: "npm run lint", agentId: "system", approved: true });
+    expect((await workspace.readFile(owner, company.id, project.id, "tmp/notes.txt")).content).toBe("keep me");
+    expect((await workspace.readFile(owner, company.id, project.id, "coverage/report.txt")).content).toBe("keep me too");
+  });
   it("registers Terminal capabilities in the inspector", () => {
     const report = new CapabilityInspectorService().inspect("all");
     for (const id of ["project.terminal.exec", "project.terminal.process"]) {

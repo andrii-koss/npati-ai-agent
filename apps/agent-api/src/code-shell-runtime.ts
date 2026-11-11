@@ -346,10 +346,13 @@ export class CodeShellRuntime {
 
     // Carry the engine's consumed, payload-bound approval to the downstream terminal gate.
     // A caller-supplied ID alone is never evidence of authorization.
-    // The sandbox's own terminal rules accept the same decisions: a consumed approval, or the company setting that lets its
-    // agents act without asking (the policy engine never grants that for a git write).
+    // The sandbox's own terminal rules accept the same decisions: a consumed approval, a standing rule an owner granted for
+    // this exact command shape, or the company setting that lets its agents act without asking (never for a git write).
+    // Before, a standing rule was allowed by the engine and then refused by the sandbox, so the rule never worked for a
+    // terminal command.
     const sandboxApproved = input.approved === true || decision.reasons?.includes("approval:consumed") === true
-      || decision.reasons?.includes("approval:company_setting") === true;
+      || decision.reasons?.includes("approval:company_setting") === true
+      || decision.reasons?.some(reason => reason.startsWith("approval:rule:")) === true;
     const session = this.sessionFor(context, input);
     const cwd = input.cwd?.trim() || session.cwd;
     const environment = { ...session.env, ...(input.env ?? {}) };

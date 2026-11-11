@@ -125,6 +125,32 @@ describe("deleting a website from chat", () => {
     expect(confirmed.body).toContain("видалено");
     expect(await store.listProjects(context, company.id)).toHaveLength(0);
   });
+  it("finds the named site from a new chat with no company chosen, and asks before deleting it", async () => {
+    const context: AuthContext = { workspaceId: "workspace-site-new-chat", userId: "owner", permissions: ["workspace:read", "workspace:write", "business:manage", "chat:use"] };
+    const store = new InMemoryWorkspaceStore();
+    const aiEngine: AIEngine = {
+      chat: vi.fn(async () => ({ content: "Neutral answer" })), async *stream() { yield "Neutral answer"; },
+      listModels: async () => [], getModel: async () => undefined, executeTool: async () => ({}),
+      searchMemory: async () => [], saveMemory: async () => undefined, getCapabilities: async () => ["chat"], healthCheck: async () => ({ status: "ok" }),
+    };
+    const marketplace = { marketplace: async () => ({ overview: { connectedProviders: 1 } }) } as unknown as OmniRouteMarketplace;
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => ({ ...context }) }, aiEngine, marketplace });
+    apps.push(app);
+    const company = await store.createCompany(context, { name: "Fit" }, "fit-new-chat");
+    await store.createProject(context, company.id, { name: "Fit landing", type: "website" } as never, "fit-landing-new-chat");
+    await store.createProject(context, company.id, { name: "Fit blog", type: "website" } as never, "fit-blog-new-chat");
+    const vague = await app.inject({ method: "POST", url: "/chat/stream", payload: { contextType: "none", message: "Видали сайт." } });
+    expect(vague.body).not.toContain("Для підтвердження напишіть");
+    const asked = await app.inject({ method: "POST", url: "/chat/stream", payload: { contextType: "none", message: "Видали сайт Fit landing — він більше не потрібен." } });
+    expect(asked.body).toContain("Для підтвердження напишіть");
+    expect(asked.body).toContain("Fit landing");
+    expect(await store.listProjects(context, company.id)).toHaveLength(2);
+    await store.setUserSetting(context, "chat.data-auto-allow:" + company.id, { autoAllow: true }, 0);
+    const deleted = await app.inject({ method: "POST", url: "/chat/stream", payload: { contextType: "none", message: "Видали сайт Fit landing — він більше не потрібен." } });
+    expect(deleted.body).toContain("видалено");
+    expect((await store.listProjects(context, company.id)).map(item => item.name)).toEqual(["Fit blog"]);
+  });
+
   it("deletes the named site at once when the company lets its agents act without asking", async () => {
     const context: AuthContext = { workspaceId: "workspace-site-auto-delete", userId: "owner", permissions: ["workspace:read", "workspace:write", "business:manage", "chat:use"] };
     const store = new InMemoryWorkspaceStore();

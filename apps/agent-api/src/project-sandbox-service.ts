@@ -55,6 +55,11 @@ const scopeOf = (ctx: AuthContext, project: Project): SandboxScope => ({ workspa
 const stepOf = (decision: TerminalCommandDecision) => decision.timeoutClass === "install_build" ? "install_build" : "command";
 export const isSandboxWorkspaceArtifact = (filePath: string) => filePath.split("/").some((part) => [".dart_tool", ".gradle", ".pub-cache", "Pods", "node_modules", "dist", "build", ".next", ".nuxt", ".output", ".astro", ".cache", ".turbo", "vendor", "__pycache__", ".venv"].includes(part));
 const artifact = isSandboxWorkspaceArtifact;
+/**
+ * Every directory a sandbox leaves out when it lists its files back (the union of the providers' lists). A file under one
+ * of these was not listed, so its absence after a command is not evidence that the command deleted it.
+ */
+const SANDBOX_UNLISTED_DIRECTORY = /^(?:node_modules|\.git|\.next|\.nuxt|\.output|\.astro|\.svelte-kit|\.angular|\.cache|\.turbo|\.parcel-cache|dist|build|out|coverage|\.expo|\.dart_tool|\.gradle|\.pub-cache|Pods|\.npati-runtime|\.worktrees|\.venv|venv|vendor|__pycache__|\.pytest_cache|\.mypy_cache|\.ruff_cache|tmp|temp)$/;
 
 /** The only Project API variables a sandbox may receive (D5). */
 export const PROJECT_API_SANDBOX_VARIABLES = SANDBOX_PROCESS_ENVIRONMENT_ALLOWLIST;
@@ -374,6 +379,14 @@ export class ProjectSandboxService {
         throw new SandboxProviderError("secret_content", "Sandbox produced protected file content", 403, "download");
       }
       if (changed) plan.push({ path: file.path, before: original?.content ?? "", after: file.content, existing: !!original, revision: original?.revision });
+    }
+    // A file the command removed (`rm notes.txt`) is removed from the project too. Before, only new and changed files came
+    // back, so the project kept a file the sandbox no longer had. Only text files that were uploaded, are missing from the
+    // full listing, and sit outside every directory a sandbox does not list, count as deleted.
+    const listed = new Set(files.map((file) => file.path));
+    for (const [path, original] of originals) {
+      if (listed.has(path) || original.encoding === "base64" || artifact(path) || path.split("/").some((part) => SANDBOX_UNLISTED_DIRECTORY.test(part))) continue;
+      plan.push({ path, before: original.content, after: "", existing: true, delete: true, revision: original.revision });
     }
     await commitSandboxWrites(this.workspace, ctx, project.companyId, project.id, plan); await commitSandboxBinaries(this.workspace, ctx, project.companyId, project.id, binaries);
   }
