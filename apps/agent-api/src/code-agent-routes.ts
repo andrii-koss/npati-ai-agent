@@ -3,7 +3,7 @@ import type { AuthContext } from "@npati/workspace";
 import { OmniRouteError, type OmniRouteMarketplace } from "@npati/omniroute-adapter";
 import type { AuthProvider } from "./auth";
 import type { AIPreferencesStore } from "./ai-preferences";
-import type { CodePreferences, CodePreferencesStore } from "./code-preferences";
+import { externalCodingAgentsEnabled, type CodePreferences, type CodePreferencesStore } from "./code-preferences";
 
 class CodeAccessError extends Error {
   readonly code = "CODE_ACCESS_DENIED";
@@ -80,7 +80,8 @@ export function registerCodeAgentRoutes(
         const prefs = await codePreferences.get(scope);
         const storedAI = await aiPreferences.get(scope);
         const tab = request.query.tab;
-        const marketplaceData = await marketplace.marketplace(
+        // External agents are hidden until they are connected to NPATI projects (see externalCodingAgentsEnabled).
+        const marketplaceData = !externalCodingAgentsEnabled() ? { providers: [] } : await marketplace.marketplace(
           {
             scope: "code",
             tab: tab === "connected" || tab === "recommended" || tab === "free" || tab === "local" || tab === "all" ? tab : undefined,

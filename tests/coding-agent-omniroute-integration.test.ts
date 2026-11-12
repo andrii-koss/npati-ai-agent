@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { filterProviders, isCodingAgentProvider, KNOWN_CODING_AGENT_PROVIDER_IDS, OmniRouteMarketplace } from "@npati/omniroute-adapter";
 import { InMemoryWorkspaceStore, type AuthContext } from "@npati/workspace";
 import { CodePreferencesStore } from "../apps/agent-api/src/code-preferences";
@@ -66,6 +66,9 @@ describe("Coding Agent OmniRoute Integration", () => {
   });
 
   describe("Code Preferences Store", () => {
+    // External agents are hidden by default (V6 step 04); these cases cover them switched on.
+    beforeEach(() => { process.env.NPATI_EXTERNAL_CODING_AGENTS = "on"; });
+    afterEach(() => { delete process.env.NPATI_EXTERNAL_CODING_AGENTS; });
     it("manages active coding agent and enabled agents in workspace store", async () => {
       const store = new InMemoryWorkspaceStore();
       const prefs = new CodePreferencesStore(store);
@@ -122,6 +125,9 @@ describe("Coding Agent OmniRoute Integration", () => {
   });
 
   describe("Fastify Code Agent Routes Pipeline", () => {
+    // External agents are hidden by default (V6 step 04); these cases cover them switched on.
+    beforeEach(() => { process.env.NPATI_EXTERNAL_CODING_AGENTS = "on"; });
+    afterEach(() => { delete process.env.NPATI_EXTERNAL_CODING_AGENTS; });
     it("registers /code/preferences and /code/agents with active agent controls", async () => {
       const authProvider: AuthProvider = { authenticate: async () => testContext };
       const marketplace = {
