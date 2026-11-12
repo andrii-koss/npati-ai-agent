@@ -1,9 +1,10 @@
 import { useEffect, useState, type RefObject } from "react";
 import { useTranslation } from "./i18n";
 
-export function CatalogScrollToTop({ gridRef, items, enabled = true }: {
-  gridRef: RefObject<HTMLDivElement | null>;
-  items: readonly unknown[];
+export function CatalogScrollToTop({ gridRef, items, anchorSelector, enabled = true }: {
+  gridRef?: RefObject<HTMLDivElement | null>;
+  items?: readonly unknown[];
+  anchorSelector?: string;
   enabled?: boolean;
 }) {
   const { language } = useTranslation();
@@ -12,9 +13,14 @@ export function CatalogScrollToTop({ gridRef, items, enabled = true }: {
   useEffect(() => {
     if (!enabled) { setVisible(false); return; }
     const update = () => {
+      if (anchorSelector) {
+        const anchor = document.querySelector(anchorSelector);
+        setVisible(Boolean(anchor && window.scrollY > 0 && anchor.getBoundingClientRect().top <= window.innerHeight * 0.75));
+        return;
+      }
       let rows = 0;
       let previousTop: number | undefined;
-      for (const card of Array.from(gridRef.current?.children ?? [])) {
+      for (const card of Array.from(gridRef?.current?.children ?? [])) {
         const rect = card.getBoundingClientRect();
         if (previousTop === undefined || Math.abs(rect.top - previousTop) > 1) {
           rows++;
@@ -31,13 +37,14 @@ export function CatalogScrollToTop({ gridRef, items, enabled = true }: {
     window.addEventListener("scroll", update, { passive: true });
     window.addEventListener("resize", update);
     const observer = globalThis.ResizeObserver ? new ResizeObserver(update) : null;
-    if (gridRef.current) observer?.observe(gridRef.current);
+    const observedElement = anchorSelector ? document.querySelector(anchorSelector) : gridRef?.current;
+    if (observedElement) observer?.observe(observedElement);
     return () => {
       window.removeEventListener("scroll", update);
       window.removeEventListener("resize", update);
       observer?.disconnect();
     };
-  }, [gridRef, items, enabled]);
+  }, [gridRef, items, anchorSelector, enabled]);
 
   if (!visible || !enabled) return null;
   const label = language === "uk" ? "Повернутися нагору" : "Back to top";

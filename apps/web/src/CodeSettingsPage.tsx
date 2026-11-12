@@ -12,6 +12,7 @@ import { CodeMembershipPanel } from "./CodeMembershipPanel";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { persistedSessionMode } from "./code-workspace/actions";
 import { CodeProjectsTable, CodeSessionsTable } from "./code-settings/CodeRecordsTables";
+import { CatalogScrollToTop } from "./CatalogScrollToTop";
 import {
   type CompanySummary,
   type CodeProject,
@@ -623,6 +624,7 @@ function CodeSettingsPageContent() {
           onSubmit={createSession}
         />
       )}
+      <CatalogScrollToTop anchorSelector=".code-agent-settings .code-flags" items={projects} enabled={!!companyId && !error} />
     </main>
   );
 }

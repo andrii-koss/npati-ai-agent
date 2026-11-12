@@ -4,9 +4,10 @@ import { createRoot } from "react-dom/client";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 import { CodeSettingsPage } from "../CodeSettingsPage";
+import { CodeAgentsPage } from "../CodeAgentsPage";
 
 vi.mock("../i18n", () => ({ useTranslation: () => ({ language: "en" }) }));
-vi.mock("../CodeFlagsPanel", () => ({ CodeFlagsPanel: () => null }));
+vi.mock("../CodeFlagsPanel", () => ({ CodeFlagsPanel: () => <section className="code-flags"><h2>Feature flags (experimental)</h2></section> }));
 vi.mock("../CodeSandboxImagesPanel", () => ({ CodeSandboxImagesPanel: () => null }));
 vi.mock("../CodeDataPolicyPanel", () => ({ CodeDataPolicyPanel: () => null }));
 vi.mock("../CodeQueuePanel", () => ({ CodeQueuePanel: () => null }));
@@ -14,6 +15,43 @@ vi.mock("../CodeMembershipPanel", () => ({ CodeMembershipPanel: () => null }));
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); document.body.innerHTML = ""; });
 function Location() { return <output data-route>{useLocation().pathname + useLocation().search}</output>; }
 const json = (body: unknown) => new Response(JSON.stringify(body));
+
+it("shows the Npati settings arrow at Feature flags and scrolls to the top with the shared button", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("scrollY", 0);
+  vi.stubGlobal("innerHeight", 800);
+  const scrollTo = vi.fn();
+  vi.stubGlobal("scrollTo", scrollTo);
+  vi.stubGlobal("fetch", vi.fn(async (input: unknown) => {
+    const url = String(input);
+    if (url === "/api/companies?limit=50") return json({ companies: [{ id: "company-flags", name: "Flags Company" }] });
+    if (url.includes("/code/projects?")) return json({ projects: [] });
+    if (url.endsWith("/code/sessions")) return json({ sessions: [] });
+    if (url.endsWith("/code/limits")) return json({ limits: {} });
+    throw new Error("Unexpected request: " + url);
+  }));
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+    return this.classList.contains("code-flags") ? new DOMRect(0, 1400 - window.scrollY, 600, 1400) : new DOMRect();
+  });
+  const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
+  const arrow = () => host.querySelector<HTMLButtonElement>(".marketplace-scroll-top");
+  const scroll = async (position: number) => act(async () => { vi.stubGlobal("scrollY", position); window.dispatchEvent(new Event("scroll")); });
+  try {
+    await act(async () => root.render(<MemoryRouter initialEntries={["/settings/code?agent=npati"]}><CodeAgentsPage /></MemoryRouter>));
+    expect(host.querySelector(".code-flags")).not.toBeNull();
+    expect(arrow()).toBeNull();
+    await scroll(500);
+    expect(arrow()).toBeNull();
+    await scroll(850);
+    expect(arrow()).not.toBeNull();
+    await act(async () => arrow()!.click());
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
+    await scroll(1400);
+    expect(arrow()).not.toBeNull();
+    await scroll(0);
+    expect(arrow()).toBeNull();
+  } finally { await act(async () => root.unmount()); }
+});
 it("renders the selected Company's code projects/sessions and opens the exact saved session", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   localStorage.clear();
