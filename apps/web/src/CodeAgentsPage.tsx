@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "./i18n";
 import { CodeSettingsPage } from "./CodeSettingsPage";
 import type { Provider } from "./ai-marketplace-types";
+import { CatalogScrollToTop } from "./CatalogScrollToTop";
 import {
   api,
   Badge,
@@ -80,6 +81,7 @@ function CodeAgentsCatalog() {
   const [builtinDrawerOpen, setBuiltinDrawerOpen] = useState(false);
   const [busy, setBusy] = useState("");
   const [feedback, setFeedback] = useState("");
+  const providerGridRef = useRef<HTMLDivElement>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -406,7 +408,7 @@ function CodeAgentsCatalog() {
             </button>
           </div>
         ) : (
-          <div className="provider-grid">
+          <div className="provider-grid" ref={providerGridRef}>
             {/* Built-in NPATI Card in Explore Grid */}
             {showBuiltInInGrid && (
               <article className="provider-card is-connected" key="npati-card">
@@ -500,6 +502,8 @@ function CodeAgentsCatalog() {
           </div>
         )}
       </section>
+
+      <CatalogScrollToTop gridRef={providerGridRef} items={visibleProviders} />
 
       {/* Provider Drawer Modal */}
       {selectedProvider && (

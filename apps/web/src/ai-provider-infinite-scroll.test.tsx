@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { I18nProvider } from "./i18n";
 import { AIProviderMarketplace } from "./AIProviderMarketplace";
+import { CodeAgentsPage } from "./CodeAgentsPage";
 import type { MarketplaceData, Provider } from "./ai-marketplace-types";
 
 vi.mock("./AuthContext", () => ({ getStoredAuthToken: () => null }));
@@ -44,6 +45,9 @@ beforeEach(() => {
     const url = new URL(String(input), "http://localhost");
     if (url.pathname === "/api/ai/models/added") return new Response("[]");
     if (url.pathname === "/api/ai/routing") return new Response("null");
+    if (url.pathname === "/api/code/agents") return new Response(JSON.stringify({
+      providers, preferences: { activeAgentId: "npati", activeAgentName: "Npati Code", enabledAgentIds: ["npati"] },
+    }));
     const offset = Number(url.searchParams.get("offset") ?? 0);
     if (url.searchParams.get("tab") === "all" && offset > 0) {
       nextRequests++;
@@ -54,7 +58,7 @@ beforeEach(() => {
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-async function render() { await act(async () => root.render(<I18nProvider><MemoryRouter><AIProviderMarketplace /></MemoryRouter></I18nProvider>)); }
+async function render(Page = AIProviderMarketplace) { await act(async () => root.render(<I18nProvider><MemoryRouter><Page /></MemoryRouter></I18nProvider>)); }
 
 it("appends providers near the end, prevents duplicate requests, and stops on the last page", async () => {
   await render();
@@ -83,7 +87,7 @@ it("stops automatic pagination on failure and retains the existing retry action"
   expect(nextRequests).toBe(1);
 });
 
-it("shows the arrow only when the third provider row is substantially visible, including after a responsive layout change", async () => {
+it.each([["AI", AIProviderMarketplace], ["Code", CodeAgentsPage]] as const)("shows the %s arrow at the third row and updates it after a responsive layout change", async (_name, Page) => {
   let columns = 3;
   vi.stubGlobal("scrollY", 0);
   vi.stubGlobal("innerHeight", 800);
@@ -92,7 +96,7 @@ it("shows the arrow only when the third provider row is substantially visible, i
     const rowHeight = columns === 3 ? 300 : 400;
     return new DOMRect(0, 1000 + Math.floor(index / columns) * rowHeight - window.scrollY, 250, rowHeight - 20);
   });
-  await render();
+  await render(Page);
   const arrow = () => host.querySelector<HTMLButtonElement>(".marketplace-scroll-top");
   const scroll = async (position: number) => act(async () => { vi.stubGlobal("scrollY", position); window.dispatchEvent(new Event("scroll")); });
   expect(arrow()).toBeNull();
@@ -107,6 +111,10 @@ it("shows the arrow only when the third provider row is substantially visible, i
   expect(arrow()).toBeNull();
   await scroll(1400);
   expect(arrow()).not.toBeNull();
+  const scrollTo = vi.fn();
+  vi.stubGlobal("scrollTo", scrollTo);
+  await act(async () => arrow()!.click());
+  expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
   await scroll(0);
   expect(arrow()).toBeNull();
 });

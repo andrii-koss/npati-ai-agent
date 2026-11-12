@@ -5,6 +5,7 @@ import type { MarketplaceData, Model, Provider, Routing } from "./ai-marketplace
 import { alertModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
 import { getLocalizedProviderDescription } from "./i18n/providerDescriptions";
+import { CatalogScrollToTop } from "./CatalogScrollToTop";
 
 const tabs = ["all", "recommended", "free", "connected"] as const;
 const RECOMMENDED_ORDER = [
@@ -489,7 +490,7 @@ function getCachedOverview(): { providers: number; models: number; connectedProv
 }
 
 export function AIProviderMarketplace() {
-  const { t, language } = useTranslation();
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [tab, setTab] = useState<(typeof tabs)[number]>("all");
   const [search, setSearch] = useState("");
@@ -503,39 +504,12 @@ export function AIProviderMarketplace() {
   const [models, setModels] = useState<Model[]>(() => getCachedModels());
   const [routing, setRouting] = useState<Routing | null>(() => getCachedRouting());
   const [version, setVersion] = useState(0);
-  const [showScrollToTop, setShowScrollToTop] = useState(false);
 
   const providerSentinelRef = useRef<HTMLDivElement>(null);
   const providerGridRef = useRef<HTMLDivElement>(null);
   const loadingNextProvidersRef = useRef(false);
 
   const cacheRef = useRef<Map<string, { data: MarketplaceData; providers: Provider[] }>>(new Map());
-
-  useEffect(() => {
-    const updateScrollButton = () => {
-      let rows = 0;
-      let previousTop: number | undefined;
-      for (const card of Array.from(providerGridRef.current?.children ?? [])) {
-        const rect = card.getBoundingClientRect();
-        if (previousTop === undefined || Math.abs(rect.top - previousTop) > 1) {
-          rows++;
-          previousTop = rect.top;
-        }
-        if (rows === 3) {
-          setShowScrollToTop(window.scrollY > 0 && rect.top <= window.innerHeight - Math.min(rect.height, window.innerHeight) / 2);
-          return;
-        }
-      }
-      setShowScrollToTop(false);
-    };
-    updateScrollButton();
-    window.addEventListener("scroll", updateScrollButton, { passive: true });
-    window.addEventListener("resize", updateScrollButton);
-    return () => {
-      window.removeEventListener("scroll", updateScrollButton);
-      window.removeEventListener("resize", updateScrollButton);
-    };
-  }, [providers, error]);
 
   const getCacheKey = useCallback((t: string, s: string, ty: string, au: string, co: string, ca: string, off: number) => {
     return `${t}|${s}|${ty}|${au}|${co}|${ca}|${off}`;
@@ -764,14 +738,7 @@ export function AIProviderMarketplace() {
         </>
       )}
     </section>
-    {showScrollToTop && <button type="button" className="marketplace-scroll-top"
-      aria-label={language === "uk" ? "Повернутися нагору" : "Back to top"}
-      title={language === "uk" ? "Повернутися нагору" : "Back to top"}
-      onClick={() => window.scrollTo({ top: 0, behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ? "auto" : "smooth" })}>
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="m6 12 6-6 6 6M12 6v12" />
-      </svg>
-    </button>}
+    <CatalogScrollToTop gridRef={providerGridRef} items={providers} enabled={!error} />
     {selected && <ProviderDrawer key={selected.id} provider={selected} addedIds={addedIds} onClose={() => setSelected(null)} onChanged={changed} onReady={() => navigate("/chat")} />}
   </main>;
 }
