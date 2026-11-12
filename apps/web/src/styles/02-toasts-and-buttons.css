@@ -511,16 +511,30 @@
   background: white;
   box-shadow: 0 4px 16px rgb(0 0 0 / 12%);
   cursor: pointer;
+  animation: marketplaceScrollTopEnter 400ms ease-out;
+  transition: transform 220ms ease, box-shadow 220ms ease;
 }
 
 .marketplace-scroll-top:hover {
-  color: white;
-  background: var(--npati-red);
+  color: var(--npati-red);
+  background: white;
+  transform: scale(1.08);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 20%);
 }
 
 .marketplace-scroll-top:focus-visible {
   outline: 2px solid var(--npati-red);
   outline-offset: 3px;
+}
+
+@keyframes marketplaceScrollTopEnter {
+  from { opacity: 0; transform: translateY(10px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marketplace-scroll-top { animation: none; transition: none; }
+  .marketplace-scroll-top:hover { transform: none; }
 }
 
 .marketplace-hero {
