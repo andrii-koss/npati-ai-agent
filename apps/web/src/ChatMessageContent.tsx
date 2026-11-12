@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import { AttachmentFileIcon } from "./ChatAttachments";
 import { cardLinkHtml, escapeInlineText } from "./chat-markdown-inline";
@@ -394,7 +395,7 @@ function EditableContentCard({
         />
       </div>
 
-      {isFullscreen && (
+      {isFullscreen && createPortal(
         <div className="editable-card-modal-backdrop" onClick={toggleFullscreen}>
           <div className="editable-card-modal" onClick={(e) => e.stopPropagation()}>
             <div className="editable-card-header">
@@ -467,7 +468,8 @@ function EditableContentCard({
               dangerouslySetInnerHTML={{ __html: sanitizeCardHtml(bodyRef.current ? bodyRef.current.innerHTML : initialHtml) }}
             />
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );
