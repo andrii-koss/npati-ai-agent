@@ -1,4 +1,5 @@
 import { getChatMessagesWithProjectCards } from "./project-chat-cards";
+import { registerConversationImportRoute } from "./conversation-import-route";
 import type { BusinessInput, BusinessToCompanyInput, CompanyAgentInput, CompanyInput, GoalInput, MemoryInput, OnboardingScenario, WorkspaceStore } from "@npati/workspace";
 import { WorkspaceAccessError, WorkspaceNotFoundError } from "@npati/workspace";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -37,6 +38,7 @@ export function registerWorkspaceRoutes(app: FastifyInstance, store: WorkspaceSt
   beforeDeleteCompany?(context: Awaited<ReturnType<AuthProvider["authenticate"]>>, companyId: string): Promise<void>;
   beforeDeleteConversation?(context: Awaited<ReturnType<AuthProvider["authenticate"]>>, businessId: string, conversationId: string): Promise<void>;
 }) {
+  registerConversationImportRoute(app, store, auth);
   async function validateAgentModels(context: Awaited<ReturnType<AuthProvider["authenticate"]>>, input: Partial<CompanyAgentInput>) {
     if (!aiPreferences) return;
     const requested = [input.modelId, input.fallbackModelId].filter((id): id is string => Boolean(id));

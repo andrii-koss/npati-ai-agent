@@ -26,6 +26,7 @@ import {
   updateCachedSidebarBusinesses,
   updateCachedSidebarConversations,
 } from "./sidebar-cache";
+import { listTransferChats } from "./chat-transfer";
 import type { SidebarMenuTarget } from "./SidebarActionMenu";
 
 function getInitialStringArray(key: string): string[] {
@@ -240,6 +241,19 @@ export function useSidebarState(onClose?: () => void) {
     }
   }
 
+  async function loadAllConversations() {
+    const rows = await listTransferChats();
+    ++conversationLoadVersionRef.current;
+    loadedCountRef.current = rows.length;
+    setMoreConversations(false);
+    updateCachedSidebarConversations(rows);
+    setConversations(rows);
+    setHasLoaded(true);
+    setChatOpen(true);
+    setCachedChatOpen(true);
+    return rows.filter(c => c.title !== "Business setup" && !onboardingConversationIds.has(c.id) && !archivedChatIds.includes(c.id));
+  }
+
   useEffect(() => {
     clearLegacyLocalChatsOnce();
     void loadConversations();
@@ -352,6 +366,27 @@ export function useSidebarState(onClose?: () => void) {
     }
   }
 
+  function removeDeletedConversations(ids: string[]) {
+    const deleted = new Set(ids);
+    // Update the cache before navigation can remount the shell.
+    const remaining = (getCachedSidebarConversations() ?? conversations).filter(chat => !deleted.has(chat.id));
+    ++conversationLoadVersionRef.current;
+    loadedCountRef.current = remaining.length;
+    updateCachedSidebarConversations(remaining);
+    setConversations(remaining);
+    const nextPinned = pinnedChatIds.filter(id => !deleted.has(id));
+    const nextArchived = archivedChatIds.filter(id => !deleted.has(id));
+    setPinnedChatIds(nextPinned);
+    setArchivedChatIds(nextArchived);
+    try {
+      localStorage.setItem("npati_pinned_chats", JSON.stringify(nextPinned));
+      localStorage.setItem("npati_archived_chats", JSON.stringify(nextArchived));
+    } catch { /* storage can be unavailable */ }
+    window.dispatchEvent(new Event("npati:conversations-changed"));
+    const activeId = location.pathname.startsWith("/c/") ? location.pathname.slice(3) : null;
+    if (activeId && deleted.has(activeId)) navigate("/chat", { replace: true });
+  }
+
   async function deleteBusiness(id: string, name: string) {
     const confirmed = await confirmModal({
       title: t("dialogs.deleteBusinessTitle"),
@@ -390,6 +425,7 @@ export function useSidebarState(onClose?: () => void) {
     hasSavedChats,
     hasLoaded,
     loadMoreConversations,
+    loadAllConversations,
     pinnedChats,
     unpinnedChats,
     menuTarget,
@@ -404,6 +440,7 @@ export function useSidebarState(onClose?: () => void) {
     openConversation,
     renameConversation,
     deleteConversation,
+    removeDeletedConversations,
     deleteBusiness,
   };
 }

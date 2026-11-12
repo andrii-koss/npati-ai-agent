@@ -8,6 +8,8 @@ export type BusinessListItem =
   | { kind: "business"; id: string; name: string; subtitle: string; business: CachedBusinessItem };
 
 interface ConversationRowProps {
+  selected?: boolean;
+  onSelect?: (id: string) => void;
   conversation: SidebarConversation;
   isPinned: boolean;
   isMenuOpen: boolean;
@@ -20,6 +22,8 @@ interface ConversationRowProps {
 }
 
 export function ConversationRow({
+  selected,
+  onSelect,
   conversation,
   isPinned,
   isMenuOpen,
@@ -40,10 +44,13 @@ export function ConversationRow({
     : stopLabel;
   return (
     <div
-      className={`sidebar-history-row ${activity?.active ? "has-activity" : ""} ${isActive ? "active" : ""} ${isPinned ? "is-pinned" : ""} ${isMenuOpen ? "menu-open" : ""}`}
+      className={`sidebar-history-row ${onSelect ? "is-selecting" : ""} ${activity?.active ? "has-activity" : ""} ${isActive ? "active" : ""} ${isPinned ? "is-pinned" : ""} ${isMenuOpen ? "menu-open" : ""}`}
       data-conversation-id={conversation.id}
       key={conversation.id}
     >
+      {onSelect && <input type="checkbox" className="sidebar-chat-checkbox" checked={selected ?? false}
+        aria-label={`${language === "uk" ? "Виділити" : "Select"} ${conversation.title}`}
+        onChange={() => onSelect(conversation.id)} />}
       <button className="sidebar-history-link" onClick={() => onOpen(conversation)}>
         <span>{conversation.title}</span>
         <small>

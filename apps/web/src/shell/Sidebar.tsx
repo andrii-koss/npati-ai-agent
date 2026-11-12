@@ -3,7 +3,8 @@ import { Link } from "react-router-dom";
 import { LanguageSwitcher } from "../LanguageSwitcher";
 import { NpatiAgentLogo } from "./brand";
 import { setCachedChatOpen, type SidebarConversation } from "./sidebar-cache";
-import { IconClose } from "./sidebar-icons";
+import { IconClose, IconDots, IconTrash } from "./sidebar-icons";
+import { useChatTransfer } from "./use-chat-transfer";
 import { SidebarActionMenu } from "./SidebarActionMenu";
 import { ConversationRow } from "./SidebarItemRows";
 import { useSidebarState } from "./use-sidebar-state";
@@ -25,6 +26,7 @@ export function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose
     pinnedChats,
     unpinnedChats,
     loadMoreConversations,
+    loadAllConversations,
     menuTarget,
     setMenuTarget,
     toast,
@@ -37,8 +39,10 @@ export function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose
     openConversation,
     renameConversation,
     deleteConversation,
+    removeDeletedConversations,
     deleteBusiness,
   } = useSidebarState(onClose);
+  const transfer = useChatTransfer(loadAllConversations, removeDeletedConversations);
 
   // Each route renders its own shell: keep the open chat visible in the list after navigation.
   const chatListRef = useRef<HTMLDivElement>(null);
@@ -53,6 +57,8 @@ export function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose
       <ConversationRow
         key={conversation.id}
         conversation={conversation}
+        selected={transfer.selection?.some(row => row.id === conversation.id)}
+        onSelect={transfer.selection !== null ? () => transfer.toggleSelection(conversation) : undefined}
         isPinned={isPinned}
         isMenuOpen={isMenuOpen}
         isActive={isActive}
@@ -124,6 +130,20 @@ export function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose
               const list = event.currentTarget;
               if (list.scrollHeight - list.scrollTop - list.clientHeight < 60) void loadMoreConversations();
             }}>
+              {transfer.selection !== null && <div className="sidebar-bulk-actions">
+                <span>{transfer.uk ? "Виділено" : "Selected"}: {transfer.selection.length}</span>
+                <button type="button" disabled={transfer.busy || !transfer.selection.length} onClick={transfer.exportSelected}>
+                  {transfer.uk ? "Експортувати" : "Export"}
+                </button>
+                <button type="button" className="danger sidebar-bulk-delete" disabled={transfer.busy || !transfer.selection.length} onClick={transfer.deleteSelected}
+                  aria-label={transfer.uk ? "Видалити вибрані" : "Delete selected"}
+                  title={transfer.uk ? "Видалити вибрані" : "Delete selected"}>
+                  <IconTrash />
+                </button>
+                <button type="button" disabled={transfer.busy} onClick={transfer.cancelSelection}>
+                  {transfer.uk ? "Скасувати" : "Cancel"}
+                </button>
+              </div>}
               {!hasSavedChats && hasLoaded && <small className="sidebar-empty">{t("sidebar.noSavedChats")}</small>}
               {pinnedChats.length > 0 && (
                 <>
@@ -143,8 +163,8 @@ export function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose
         {navigation.map((item) => {
           const href = item === "Projects" ? "/settings/projects" : `/${item.toLowerCase()}`;
           return (
+            <div key={item} className={`sidebar-settings-row ${menuTarget?.type === "settings" ? "menu-open" : ""}`}>
             <Link
-              key={item}
               className={`sidebar-settings-link ${location.pathname === href || location.pathname.startsWith(`${href}/`) ? "active" : ""}`}
               to={href}
               onMouseEnter={() => { if (href === "/settings/projects") prefetchProjectCatalog(); }}
@@ -153,6 +173,20 @@ export function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose
             >
               {item === "Settings" ? t("common.settings") : item === "Projects" ? "Projects" : item}
             </Link>
+            <button type="button" className={`sidebar-icon-action ${menuTarget?.type === "settings" ? "active" : ""}`}
+              aria-label={transfer.uk ? "Опції Settings" : "Options for Settings"}
+              aria-haspopup="menu" aria-expanded={menuTarget?.type === "settings"}
+              title={transfer.uk ? "Керування чатами" : "Manage chats"}
+              onClick={event => {
+                const rect = event.currentTarget.getBoundingClientRect();
+                const sidebarRight = event.currentTarget.closest(".sidebar")?.getBoundingClientRect().right ?? 230;
+                setMenuTarget(menuTarget?.type === "settings" ? null : {
+                  type: "settings", id: "settings", title: "Settings", isPinned: false, data: {},
+                  left: Math.max(8, Math.min(Math.max(rect.right + 10, sidebarRight + 8), window.innerWidth - 190)),
+                  top: Math.max(10, Math.min(rect.top - 6, window.innerHeight - 200)),
+                });
+              }}><IconDots /></button>
+            </div>
           );
         })}
       </nav>
@@ -170,9 +204,21 @@ export function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose
           onArchiveBusiness={archiveBusiness}
           onDeleteChat={(c) => void deleteConversation(c)}
           onDeleteBusiness={(id, title) => void deleteBusiness(id, title)}
+          onSelectAllChats={transfer.selectAll}
+          onImportChats={() => transfer.inputRef.current?.click()}
+          onExportChats={transfer.exportAll}
+          busy={transfer.busy}
         />
       )}
       {toast && <div className="sidebar-toast">{toast}</div>}
+      <input ref={transfer.inputRef} type="file" accept=".json,application/json" hidden
+        aria-label={transfer.uk ? "Імпортувати чати з JSON" : "Import chats from JSON"}
+        onChange={event => {
+          const file = event.currentTarget.files?.[0];
+          event.currentTarget.value = "";
+          if (file) transfer.importFile(file);
+        }} />
+      {transfer.status && <div className="sidebar-transfer-status" role="status" aria-live="polite">{transfer.status}</div>}
       <div className="sidebar-footer-row">
         <LanguageSwitcher variant="full" />
       </div>

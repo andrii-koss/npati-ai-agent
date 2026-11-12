@@ -447,6 +447,101 @@ a {
   font-weight: 600;
 }
 
+.sidebar-settings-row {
+  position: relative;
+  min-width: 0;
+}
+
+.sidebar-settings-row > .sidebar-settings-link {
+  display: block;
+  padding-right: 42px;
+}
+
+.sidebar-settings-row > .sidebar-icon-action {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.sidebar-settings-row:hover > .sidebar-icon-action,
+.sidebar-settings-row:focus-within > .sidebar-icon-action,
+.sidebar-settings-row.menu-open > .sidebar-icon-action,
+.sidebar-history-row:focus-within > .sidebar-icon-action {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sidebar-chat-checkbox {
+  flex-shrink: 0;
+  margin-left: 8px;
+  accent-color: var(--npati-red);
+}
+
+.sidebar-bulk-actions {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f7f7f7;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  font-size: 12px;
+}
+
+.sidebar-bulk-actions button {
+  border: 1px solid #ddd;
+  background: white;
+  color: #222;
+  border-radius: 6px;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+
+.sidebar-bulk-actions button.danger {
+  color: #c91625;
+  border-color: #efb6bc;
+}
+
+.sidebar-bulk-actions .sidebar-bulk-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  padding: 4px;
+}
+
+.sidebar-bulk-delete svg {
+  width: 15px;
+  height: 15px;
+}
+
+.sidebar-bulk-actions button.danger:not(:disabled):hover {
+  background: #fff1f2;
+}
+
+.sidebar-action-item:disabled,
+.sidebar-bulk-actions button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.sidebar-transfer-status {
+  padding: 8px 12px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+@media (hover: none) {
+  .sidebar-settings-row > .sidebar-icon-action {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
 .sidebar nav a:hover {
   color: white;
   background: #222;
@@ -575,6 +670,14 @@ a {
 
 .sidebar-history-row.has-activity {
   grid-template-columns: minmax(0, 1fr) 24px;
+}
+
+.sidebar-history-row.is-selecting {
+  grid-template-columns: 24px minmax(0, 1fr) 25px 25px;
+}
+
+.sidebar-history-row.is-selecting.has-activity {
+  grid-template-columns: 24px minmax(0, 1fr) 24px;
 }
 
 .sidebar-history-row.has-activity > .sidebar-icon-action {
