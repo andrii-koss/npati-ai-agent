@@ -24,7 +24,7 @@ async function request<T>(url: string, body?: object): Promise<T> {
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
-    throw new Error(payload?.error?.message ?? "Request failed with HTTP " + response.status);
+    throw Object.assign(new Error(payload?.error?.message ?? "Request failed with HTTP " + response.status), { status: response.status });
   }
   return response.json() as Promise<T>;
 }
@@ -371,9 +371,16 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
       return null;
     }
   };
-  const persistSelection = (value: string) => {
+  const persistSelection = (value: string, company?: { id: string; name: string }) => {
     try { sessionStorage.setItem(key, value); } catch {}
     try { localStorage.setItem(key, value); } catch {}
+    const selectedCompany = company ?? companies.find(item => value === `company:${item.id}`);
+    for (const storage of [() => sessionStorage, () => localStorage]) {
+      try {
+        if (selectedCompany && value === `company:${selectedCompany.id}`) storage().setItem(`${key}:company`, JSON.stringify({ id: selectedCompany.id, name: selectedCompany.name }));
+        else storage().removeItem(`${key}:company`);
+      } catch {}
+    }
     writeActiveCompanyId(value.startsWith("company:") ? value.slice(8) : "");
   };
   const [selection, setSelection] = useState(() => {
@@ -382,7 +389,13 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
     if (stored && stored.startsWith("company:")) return stored;
     return "none";
   });
-  const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
+  const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>(() => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(`${key}:company`) ?? localStorage.getItem(`${key}:company`) ?? "null");
+      return saved && typeof saved.id === "string" && typeof saved.name === "string" && selection === `company:${saved.id}` ? [{ id: saved.id, name: saved.name }] : [];
+    } catch { return []; }
+  });
+  const selectionRevision = useRef(0);
   const companyListLoadedRef = useRef(false);
   const companyListLoadingRef = useRef<Promise<void> | null>(null);
   const [error, setError] = useState("");
@@ -405,26 +418,32 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
     let active = true;
     // On a chat page the selected Company arrives with the page's single open request; elsewhere one Company is read.
     const loadSelected = async (companyId?: string) => {
+      const revision = selectionRevision.current;
       const stored = companyId ? `company:${companyId}` : readStoredSelection();
       const id = stored?.startsWith("company:") ? stored.slice(8) : "";
       if (!id) return;
       const opened = !companyId && isChatPage() ? chatOpenData() : null;
       const company = opened ? (await opened).company
-        : await request<{ id: string; name: string }>(`/companies/${encodeURIComponent(id)}`).catch(() => null);
-      if (!active) return;
-      if (company) setCompanies((current) => current.some((item) => item.id === company.id) ? current : [{ id: company.id, name: company.name }, ...current]);
+        : await request<{ id: string; name: string }>(`/companies/${encodeURIComponent(id)}`).catch(error => {
+          if (error.status === 403 || error.status === 404) return null;
+          throw error;
+        });
+      if (!active || revision !== selectionRevision.current) return;
+      if (company) setCompanies(current => [{ id: company.id, name: company.name }, ...current.filter(item => item.id !== company.id)]);
       if (businessRoute || businessSetup) return;
       const value = company ? `company:${company.id}` : "none";
-      persistSelection(value);
+      persistSelection(value, company ?? undefined);
       setSelection(value);
     };
     const handleCompanyChanged = (event: Event) => {
       const detail = (event as CustomEvent<{ action?: string; companyId?: string }>).detail;
       if (detail?.action === "create" && detail.companyId) {
+        selectionRevision.current++;
         void loadSelected(detail.companyId).catch((e) => { if (active) setError(e instanceof Error ? e.message : "Could not refresh companies"); });
         return;
       }
       if (detail?.action === "delete" && detail.companyId) {
+        if (readStoredSelection() === `company:${detail.companyId}`) selectionRevision.current++;
         setCompanies((current) => current.filter((company) => company.id !== detail.companyId));
         setSelection((current) => {
           if (current !== `company:${detail.companyId}`) return current;
@@ -450,6 +469,7 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
   }, [userId, key, businessRoute, businessSetup]);
 
   async function choose(value: string) {
+    selectionRevision.current++;
     setSwitching(true);
     setError("");
     try {
@@ -462,9 +482,7 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
     }
   }
 
-  const selectValue = selection.startsWith("company:")
-    ? (companies.some((c) => "company:" + c.id === selection) ? selection : "none")
-    : "none";
+  const selectValue = selection.startsWith("company:") ? selection : "none";
 
   const activeCompanyName = companies.find((c) => "company:" + c.id === selectValue)?.name;
 
@@ -486,7 +504,7 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
     <div className="composer-context-switcher" title={activeCompanyName || "Active context"} onPointerEnter={() => void ensureCompanyList()} onFocusCapture={() => void ensureCompanyList()}>
       <div className="composer-context-trigger" aria-hidden="true">
         <span className="composer-context-text">
-          {activeCompanyName || "No company"}
+          {activeCompanyName || (selectValue !== "none" ? <span aria-hidden="true" style={{ display: "inline-block", width: 96, height: 12, borderRadius: 4, background: "var(--surface-muted, #f1f5f9)" }} /> : "No company")}
         </span>
         <svg className="composer-context-icon" viewBox="0 0 10 6" width="10" height="6" fill="none">
           <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -494,12 +512,14 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
       </div>
       <select
         aria-label="Active context"
+        aria-busy={selectValue !== "none" && !activeCompanyName}
         value={selectValue}
         disabled={switching}
         onChange={(e) => void choose(e.target.value)}
         className="composer-context-select"
       >
         <option value="none">No company</option>
+        {selectValue !== "none" && !activeCompanyName && <option value={selectValue}>Loading company…</option>}
         {companies.map((c) => (
             <option key={c.id} value={"company:" + c.id} title={c.name}>
               {c.name}
