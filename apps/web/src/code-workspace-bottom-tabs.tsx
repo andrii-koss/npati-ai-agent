@@ -1,5 +1,5 @@
 import { CodeSnapshotPanel } from "./CodeSnapshotPanel";
-import { type BottomTab, type Change, type RunEvent } from "./code-workspace-page-types";
+import { type BottomTab, type Change, type ProjectTerminalRow, type RunEvent } from "./code-workspace-page-types";
 
 export interface CodeWorkspaceBottomTabsProps {
   tab: BottomTab;
@@ -11,6 +11,8 @@ export interface CodeWorkspaceBottomTabsProps {
   changesError: string | null;
   changedFiles: Change[];
   events?: RunEvent[];
+  /** Stored project commands with their output; when present they are what the Terminal tab shows. */
+  terminalEvents?: ProjectTerminalRow[];
 }
 
 export function CodeWorkspaceBottomTabs({
@@ -23,8 +25,19 @@ export function CodeWorkspaceBottomTabs({
   changesError,
   changedFiles,
   events = [],
+  terminalEvents = [],
 }: CodeWorkspaceBottomTabsProps) {
-  const terminalCommands = events
+  // Activity events name the tool but carry neither the command nor its output, so the Terminal showed only
+  // "$ code.shell.exec". The project's stored commands have both; activity remains the fallback.
+  const storedCommands = [...terminalEvents].reverse().map((e) => ({
+    command: e.commandSummary + (e.status === "running" ? (isUk ? "  · виконується" : "  · running") : ""),
+    stdout: e.output || undefined,
+    stderr: undefined as string | undefined,
+    exitCode: typeof e.exitCode === "number" ? e.exitCode : undefined,
+    cwd: undefined as string | undefined,
+    at: e.createdAt,
+  }));
+  const terminalCommands = storedCommands.length ? storedCommands : events
     .filter((e) => {
       const p = e.payload ?? {};
       return (

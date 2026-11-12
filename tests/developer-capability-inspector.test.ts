@@ -178,7 +178,7 @@ describe("Section 15: Developer / Capability Inspector", () => {
       expect(body.activeSlice).toBe("agent-callable");
 
       await app.close();
-    }, 40_000);
+    }, 120_000); // the app import takes ~35 s on a loaded machine; see capability-registry.test.ts
   });
 
   describe("security-gate: C2/C3 coding capabilities and their feature-flag badge", () => {

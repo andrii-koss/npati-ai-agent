@@ -472,7 +472,9 @@ class UnnamedAgentDeletionError extends Error {
 }
 
 /** "Додай ще одного агента з таким самим ім'ям": a second agent is wanted, not an update of the one with that name. */
-const ANOTHER_AGENT = /(?:ще\s+(?:одн\p{L}*|друг\p{L}*)|ещ[её]\s+одн\p{L}*|another|one\s+more|second\s+agent|з\s+таким\s+(?:самим|же)\s+ім|с\s+таким\s+же\s+имен|same\s+name|дубл\p{L}*|duplicate)/iu;
+// Only an instruction to add one: "додай ще одного агента", "add another agent", "з таким самим ім'ям". A description
+// ("avoid duplicating work assigned to another agent") must not turn every repeated company setup into new agents.
+const ANOTHER_AGENT = /(?:(?:дода\p{L}*|добав\p{L}*|створ\p{L}*|созда\p{L}*|add|create|make)\s+(?:(?:ще|ещ[её]|one)\s+)?(?:одн\p{L}*|друг\p{L}*|another|more|a\s+second|second)\s+(?:\p{L}+\s+)?(?:агент\p{L}*|agents?))|(?:з|с|with)\s+(?:таким\s+(?:самим|же)|the\s+same)\s+(?:ім|имен|name)/iu;
 export function requestsAnotherAgent(request: string): boolean {
   return ANOTHER_AGENT.test(request);
 }

@@ -118,7 +118,7 @@ export function ProjectSection({ companyId }: { companyId: string }) {
   }
 
   async function remove(project: Project) {
-    if (!await confirmModal({ message: t.deletePrompt, isDanger: true })) return;
+    if (!await confirmModal({ title: project.name, message: t.deletePrompt, isDanger: true })) return;
     setBusy(true);
     try {
       await projectApi<void>("/companies/" + encodeURIComponent(companyId) + "/projects/" + encodeURIComponent(project.id), { method: "DELETE" });

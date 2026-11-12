@@ -1125,3 +1125,15 @@ describe("company instructions from chat keep what the owner wrote", () => {
     expect((await store.getCompany(alice, company.id)).companyInstructions).toBe("Тільки українською.");
   });
 });
+
+// A description such as "avoid duplicating work assigned to another agent" in a long company specification made every
+// repeated setup add agents, and the chat tool loop never completed (V6 step 04: long-ai-company-chat hung).
+it("reads only an instruction to add an agent as 'another agent', not a description mentioning one", async () => {
+  const { requestsAnotherAgent } = await import("../apps/agent-api/src/company-chat-actions");
+  expect(requestsAnotherAgent("додай ще одного агента з таким самим імям QA Tester, роль - маркетолог")).toBe(true);
+  expect(requestsAnotherAgent("add another agent named QA Tester")).toBe(true);
+  expect(requestsAnotherAgent("создай еще одного агента Тестер")).toBe(true);
+  expect(requestsAnotherAgent("create an agent with the same name QA Tester")).toBe(true);
+  expect(requestsAnotherAgent("- Avoid duplicating work already assigned to another agent")).toBe(false);
+  expect(requestsAnotherAgent("додай агента QA Tester, роль тестувальник")).toBe(false);
+});

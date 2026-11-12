@@ -148,7 +148,11 @@ describe("semantic project routing", () => {
     const message = "Create a business profile named Context Studio\n" + "Background data. ".repeat(6250);
     expect((await f.resolve(auth, { message })).decision.intent).toBe("CHAT");
     expect(f.chat).toHaveBeenCalledOnce();
-    expect(JSON.stringify(f.chat.mock.calls[0]![0].messages).length).toBeLessThan(20_000);
+    // The guarded message itself is cut to its opening; the router instructions are measured on their own, so a new
+    // routing rule (V6 step 04) does not read as an uncut message.
+    const [system, user] = f.chat.mock.calls[0]![0].messages;
+    expect(String(user!.content).length).toBeLessThan(6_000);
+    expect(String(system!.content).length).toBeLessThan(18_000);
   });
 
   it("redacts credentials and personal data from the routing request and history", async () => {

@@ -67,6 +67,8 @@ export type PendingApproval = {
 export type ApprovalScope = "once" | "session" | "project";
 
 export type BottomTab = "changes" | "terminal" | "logs" | "activity";
+/** One stored project command (project_terminal_events): the command, its combined output, status and exit code. */
+export type ProjectTerminalRow = { id: string; runId?: string | null; processId?: string | null; commandSummary: string; status: string; exitCode?: number | null; output: string; errorCode?: string | null; createdAt: string };
 export type MobileView = "all" | "files" | "stream" | "file" | "bottom";
 
 export const SESSION_MODES = ["plan", "ask", "auto_edit", "full_auto_sandbox"] as const;

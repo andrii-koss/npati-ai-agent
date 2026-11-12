@@ -13,7 +13,7 @@ import {
   NPATI_API_BASE,
   Sidebar,
 } from "./shell";
-import { AuthProvider, useAuth } from "./AuthContext";
+import { AuthProvider, getStoredAuthToken, useAuth } from "./AuthContext";
 import {
   BusinessPage,
   BusinessSwitcher,
@@ -575,12 +575,33 @@ function HealthBadge() {
   return <div className="health-card"><span className={`status-dot ${health?.status === "ok" ? "healthy" : ""}`} /><div><strong>{health?.status === "ok" ? "Agent API connected" : "Waiting for local services"}</strong><small>Database: {health?.services.database ?? "unknown"} · AI routing: {health?.services.omniroute ?? "unknown"} · Crawler: {health?.services.crawler ?? "unknown"} · Hub: {health?.services.hub ?? "unknown"}</small></div></div>;
 }
 
+/**
+ * An old "/projects/:projectId" link names no company. The project's own company is found among the user's companies;
+ * the link used a Business ID as the company before, so the project was never found and the catalog opened instead.
+ */
 function LegacyProjectRedirect() {
   const { projectId = "" } = useParams();
-  const { overview } = useWorkspace();
-  const companyId = overview?.currentBusiness?.id || overview?.businesses[0]?.id || "";
-  if (!companyId) return <Navigate to="/settings/projects" replace />;
-  return <Navigate to={`/settings/projects/${encodeURIComponent(companyId)}/${encodeURIComponent(projectId)}`} replace />;
+  const [target, setTarget] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      const found = await findProjectCompany(projectId).catch(() => null);
+      if (active) setTarget(found ? `/settings/projects/${encodeURIComponent(found)}/${encodeURIComponent(projectId)}` : "/settings/projects");
+    })();
+    return () => { active = false; };
+  }, [projectId]);
+  return target ? <Navigate to={target} replace /> : null;
+}
+
+async function findProjectCompany(projectId: string): Promise<string | null> {
+  const token = getStoredAuthToken();
+  const headers: Record<string, string> = token ? { authorization: `Bearer ${token}` } : {};
+  const list = await fetch("/api/companies?limit=100", { headers }).then((response) => response.ok ? response.json() : { companies: [] }) as { companies?: Array<{ id: string }> };
+  for (const company of list.companies ?? []) {
+    const response = await fetch(`/api/companies/${encodeURIComponent(company.id)}/projects/${encodeURIComponent(projectId)}`, { headers });
+    if (response.ok) return company.id;
+  }
+  return null;
 }
 
 export function App() {

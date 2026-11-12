@@ -233,6 +233,6 @@ describe("PHASE 4: Hybrid Router, Intent & Tool Selection Suite", () => {
       expect(resUrl.json().matchedSignals).toContain("url_detected");
 
       await app.close();
-    }, 40_000);
+    }, 120_000); // the app import takes ~35 s on a loaded machine; see capability-registry.test.ts
   });
 });

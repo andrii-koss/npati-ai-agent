@@ -528,7 +528,8 @@ export function WebsiteBuilderDashboard() {
   }, [companyId, loadWebsites, t.archivePrompt]);
 
   const handleDelete = useCallback(async (site: WebsiteProject) => {
-    if (!(await confirmModal({ message: t.deletePrompt, isDanger: true }))) return;
+    // The dialog names the project, so the user confirms this one and not "this project" in general.
+    if (!(await confirmModal({ title: site.name, message: t.deletePrompt, isDanger: true }))) return;
     try {
       await apiFetch(
         `/companies/${encodeURIComponent(site.companyId)}/projects/${encodeURIComponent(site.id)}`,

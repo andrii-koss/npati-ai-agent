@@ -274,3 +274,25 @@ describe("ChatProjectPreviewCard", () => {
     expect(host.querySelector(".chat-preview-card-status")?.textContent).toContain("Працює");
   });
 });
+
+// V6 D02-07: right after an edit the preview server restarts and /preview/status answers 502 for a few seconds; the
+// card said "Failed" until the next event. A transient 5xx is "starting" and is checked again.
+it("shows a restarting preview as starting and becomes Running after the retry, never Failed", async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  vi.useFakeTimers();
+  try {
+    let calls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.endsWith("/preview/status")) { calls += 1; return calls === 1 ? new Response("Bad gateway", { status: 502 }) : new Response(JSON.stringify({ isRunning: true, previewUrl: "/preview/test" })); }
+      return new Response(JSON.stringify({}));
+    }));
+    const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
+    const card: ProjectCardData = { id: "p2", projectId: "p2", companyId: "c1", name: "Cafe", framework: "React + Vite", kind: "website_project", status: "ready" };
+    await act(async () => { root!.render(<MemoryRouter><ChatProjectPreviewCard card={card} /></MemoryRouter>); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(host.querySelector(".chat-preview-card-status")?.textContent ?? "").not.toContain("Failed");
+    await act(async () => { await vi.advanceTimersByTimeAsync(3100); });
+    expect(calls).toBeGreaterThanOrEqual(2);
+    expect(host.querySelector(".chat-preview-card-status")?.textContent).toContain("Running");
+  } finally { vi.useRealTimers(); }
+});

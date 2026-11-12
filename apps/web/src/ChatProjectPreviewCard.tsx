@@ -298,7 +298,16 @@ export function ChatProjectPreviewCard({
       return;
     }
 
-    async function checkRuntime() {
+    // A preview server restarting after an edit answers 5xx for a few seconds; that is "starting", checked again, not a
+    // failure. Only an error that persists through the retries is shown as Failed (V6 D02-07).
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    const transient = (attempt: number) => {
+      if (attempt >= 5) { setRuntimeStatus("failed"); return; }
+      setRuntimeStatus("starting");
+      retryTimer = setTimeout(() => { if (isMounted) void checkRuntime(attempt + 1); }, 3000);
+    };
+
+    async function checkRuntime(attempt = 0) {
       try {
         const token = getStoredAuthToken();
         const headers: Record<string, string> = {};
@@ -324,6 +333,8 @@ export function ChatProjectPreviewCard({
         if (!res.ok) {
           if (res.status === 404) {
             setRuntimeStatus("unavailable");
+          } else if (res.status >= 500) {
+            transient(attempt);
           } else {
             setRuntimeStatus("failed");
           }
@@ -347,7 +358,8 @@ export function ChatProjectPreviewCard({
         }
       } catch {
         if (!isMounted) return;
-        setRuntimeStatus(card.status === "failed" ? "failed" : "stopped");
+        if (card.status === "failed") setRuntimeStatus("failed");
+        else transient(attempt);
       }
     }
 
@@ -365,6 +377,7 @@ export function ChatProjectPreviewCard({
 
     return () => {
       isMounted = false;
+      if (retryTimer) clearTimeout(retryTimer);
       window.removeEventListener("npati-code-project-updated", onProjectUpdate);
     };
   }, [card.companyId, card.projectId, card.id, card.status, card.framework, isStatic]);

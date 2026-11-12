@@ -24,6 +24,7 @@ import {
   type PendingApproval,
   type ApprovalScope,
   type BottomTab,
+  type ProjectTerminalRow,
   type MobileView,
   type SessionMode,
   normalizeWorkspaceMode,
@@ -80,7 +81,22 @@ function CodeWorkspaceContent() {
   const [streamError, setStreamError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
-  const [tab, setTab] = useState<BottomTab>("changes");
+  // "Open project terminal" links here with ?tab=terminal; the page opens on that tab instead of Changes.
+  const [tab, setTab] = useState<BottomTab>(() => {
+    const requested = searchParams.get("tab");
+    return requested === "terminal" || requested === "logs" || requested === "activity" || requested === "changes" ? requested : "changes";
+  });
+  // The project's real commands with their output and exit code (project_terminal_events), shown on the Terminal tab.
+  const [terminalEvents, setTerminalEvents] = useState<ProjectTerminalRow[]>([]);
+  useEffect(() => {
+    if (tab !== "terminal" || !companyId || !projectId) return;
+    let active = true;
+    const load = () => void apiGet<{ events: ProjectTerminalRow[] }>(`/api/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(projectId)}/terminal/events`)
+      .then((data) => { if (active) setTerminalEvents(data.events ?? []); }).catch(() => {});
+    load();
+    const timer = window.setInterval(load, 5000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [tab, companyId, projectId]);
   const [mobileView, setMobileView] = useState<MobileView>("all");
   const [activeTab, setActiveTab] = useState<"all" | "workspace" | "files" | "changes" | "metrics">("all");
 
@@ -639,6 +655,7 @@ function CodeWorkspaceContent() {
             changesError={changesError}
             changedFiles={changedFiles}
             events={events}
+            terminalEvents={terminalEvents}
           />
         </div>
       )}

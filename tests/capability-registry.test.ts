@@ -125,18 +125,22 @@ describe("PHASE 2: Capability Registry for all 306 Inventory Items", () => {
   describe("API Exposure", () => {
     it("exposes /capabilities endpoint with filtering", async () => {
       const { buildApp } = await import("../apps/agent-api/src/app");
+      // Importing the whole app takes ~35 s on a loaded machine. A 40 s limit failed under load and left the app's timers
+      // running, so the test worker never exited and the full run hung (V6 step 04); the app is closed in finally.
       const app = buildApp();
-      const res = await app.inject({ method: "GET", url: "/capabilities?type=tool" });
-      expect(res.statusCode).toBe(200);
-      const data = res.json();
-      expect(data.length).toBe(149);
-      expect(data.every((c: any) => c.type === "tool")).toBe(true);
+      try {
+        const res = await app.inject({ method: "GET", url: "/capabilities?type=tool" });
+        expect(res.statusCode).toBe(200);
+        const data = res.json();
+        expect(data.length).toBe(149);
+        expect(data.every((c: any) => c.type === "tool")).toBe(true);
 
-      const callableOnly = await app.inject({ method: "GET", url: "/capabilities?callable=true" });
-      expect(callableOnly.statusCode).toBe(200);
-      expect(callableOnly.json().length).toBe(149);
-
-      await app.close();
-    }, 40_000);
+        const callableOnly = await app.inject({ method: "GET", url: "/capabilities?callable=true" });
+        expect(callableOnly.statusCode).toBe(200);
+        expect(callableOnly.json().length).toBe(149);
+      } finally {
+        await app.close();
+      }
+    }, 120_000);
   });
 });

@@ -181,10 +181,17 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     boundSessionId: codeInbox.session?.sessionId
   });
   // A project created in this chat becomes its selection: Preview and follow-ups no longer use the empty entry project.
+  // A chat opened for one project ("Edit in chat" on its card) keeps that project: the chat's newest card, already there
+  // when the page opened, is not a new project and must not replace it (V6 step 04: a game's edits went to the site).
+  const entryProject = useRef<{ projectId: string | null; preexisting?: string }>({ projectId: chatSearch.get("project") });
   useEffect(() => {
     const p = development.project;
-    if (p?.projectId && p.companyId && selected && p.conversationId === selected) setSelectedProject(current => current && current.projectId === p.projectId && current.conversationId === selected ? current : { companyId: p.companyId, projectId: p.projectId!, conversationId: selected });
-  }, [development.project?.projectId, selected]);
+    if (!(p?.projectId && p.companyId && selected && p.conversationId === selected)) return;
+    const entry = entryProject.current;
+    if (entry.projectId && entry.projectId !== p.projectId && entry.preexisting === undefined) { entry.preexisting = p.projectId; return; }
+    if (entry.projectId && p.projectId === entry.preexisting && !developmentIsActive(p)) return;
+    setSelectedProject(current => current && current.projectId === p.projectId && current.conversationId === selected ? current : { companyId: p.companyId, projectId: p.projectId!, conversationId: selected });
+  }, [development.project?.projectId, development.project?.status, selected]);
   // Open Previews of this chat survive a card moving to the newest reply; another chat starts with none.
   const openPreviews = useMemo(() => new Set<string>(), [selected]);
   const [ttsVoice, setTtsVoice] = useState(() => {

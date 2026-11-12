@@ -155,15 +155,20 @@ export function useChatDevelopment(options: {
     const process = processes.find(p => p.projectId === projectId && p.sessionId && p.conversationId === options.conversationId);
     if (process?.inboxEnabled && process.sessionId && process.sessionId !== options.boundSessionId && options.conversationId) callbacks.current.onSession({ companyId: process.companyId, projectId: process.projectId!, sessionId: process.sessionId, inboxEnabled: true }, options.conversationId);
   }, [processes, projectId, options.conversationId, options.boundSessionId]);
+  // Any project of this chat that finishes brings in its saved reply and card. Watching only the chat's current project
+  // missed a second project: when it finished, the current project switched back to the earlier card's, so the reply
+  // appeared only after a reload (V6 step 04).
   useEffect(() => {
-    const process = processes.find(p => p.projectId === projectId && p.conversationId === options.conversationId);
-    if (!process) return;
-    if (options.busy) return;
-    const signature = process.status + ":" + process.updatedAt;
-    const previous = previousStatuses.current.get(process.id);
-    previousStatuses.current.set(process.id, signature);
-    if (previous && previous !== signature && !developmentIsActive(process) && options.conversationId) callbacks.current.onConversation(options.conversationId);
-  }, [processes, projectId, options.conversationId, options.busy]);
+    if (options.busy || !options.conversationId) return;
+    let finished = false;
+    for (const process of processes.filter(p => p.conversationId === options.conversationId)) {
+      const signature = process.status + ":" + process.updatedAt;
+      const previous = previousStatuses.current.get(process.id);
+      previousStatuses.current.set(process.id, signature);
+      if (previous && previous !== signature && !developmentIsActive(process)) finished = true;
+    }
+    if (finished) callbacks.current.onConversation(options.conversationId);
+  }, [processes, options.conversationId, options.busy]);
   async function submit(message: string): Promise<boolean> {
     const restore = requestsDevelopmentRestore(message);
     let targets: DevelopmentTarget[] = [];
