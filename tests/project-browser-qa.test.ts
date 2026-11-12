@@ -93,6 +93,16 @@ describe("project browser QA", () => {
     f.inspect.mockResolvedValueOnce({ ...result, consoleErrorCount: 0, brokenLinks: [], accessibility: [] });
     expect((await f.qa.inspect(owner, f.company.id, { projectId: f.project.id })).issues.some(item => /fixed host/.test(item.message))).toBe(false);
   });
+  it("reports each console error once: diagnosed errors by detail, only the rest by count (V6-D06-02)", async () => {
+    const f = await fixture();
+    const diagnostic = { type: "error", cause: "runtime", message: "JavaScript runtime error", source: "preview-script", line: 71, column: 17 };
+    f.inspect.mockResolvedValueOnce({ ...result, consoleErrorCount: 1, consoleDiagnostics: [diagnostic], brokenLinks: [], accessibility: [] } as never);
+    const one = (await f.qa.inspect(owner, f.company.id, { projectId: f.project.id })).issues.map(item => item.message);
+    expect(one).toEqual(["JavaScript runtime error at preview-script:71:17"]);
+    f.inspect.mockResolvedValueOnce({ ...result, consoleErrorCount: 3, consoleDiagnostics: [diagnostic], brokenLinks: [], accessibility: [] } as never);
+    const three = (await f.qa.inspect(owner, f.company.id, { projectId: f.project.id })).issues.map(item => item.message);
+    expect(three).toEqual(["2 browser console errors", "JavaScript runtime error at preview-script:71:17"]);
+  });
   it("reports controls marked hidden that a CSS rule shows anyway, such as Sign out for a guest", async () => {
     const f = await fixture();
     f.inspect.mockResolvedValueOnce({ ...result, consoleErrorCount: 0, brokenLinks: [], accessibility: [], hiddenShown: ["div#account-chip"] });

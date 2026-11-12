@@ -188,6 +188,26 @@ const NO_CHANGE_NOTE: Record<string, string> = {
  * a failed task (V6 step 05, CODING_ACCEPTANCE "Невиконання"). When the reply does not already say so, the stored
  * evidence (an empty list of changed files) is added to it.
  */
+const REPAIR_HEADING: Record<string, string> = {
+  uk: "Автоматична перевірка знайшла помилку і виправила її:",
+  ru: "Автоматическая проверка нашла ошибку и исправила её:",
+  en: "The automatic check found an error and fixed it:",
+};
+
+/**
+ * The reply of an automatic repair run describes only the repair. Shown alone, it replaced the summary of what was
+ * built (V6-D06-01: a new todo app was answered with "replaced crypto.randomUUID"), so the root reply stays first.
+ */
+export function withRootReply(result: unknown, rootReply: unknown, responseLanguage?: string): unknown {
+  if (typeof rootReply !== "string" || !rootReply.trim() || !result || typeof result !== "object") return result;
+  const view = result as { message?: unknown; status?: unknown };
+  if (typeof view.message !== "string" || !view.message.trim()) return { ...view, message: rootReply };
+  if (view.message.includes(rootReply.trim())) return result;
+  // A failed repair ends with the failure notice, which already says the error could not be fixed.
+  const heading = view.status === "completed" ? (REPAIR_HEADING[responseLanguage ?? ""] ?? REPAIR_HEADING.en!) + "\n" : "";
+  return { ...view, message: rootReply.trimEnd() + "\n\n" + heading + view.message.trim() };
+}
+
 export function withUnchangedFilesNote(result: unknown, input: { readOnlyIntent?: boolean; responseLanguage?: string; session?: { mode?: string } }): unknown {
   if (input.readOnlyIntent || input.session?.mode === "plan" || !result || typeof result !== "object") return result;
   const view = result as { status?: unknown; message?: unknown; summary?: { filesChanged?: unknown } | null };
@@ -290,6 +310,8 @@ export class CodeSessionRunExecutor {
         ...(input.toolContext ? { toolContext: input.toolContext } : {}),
       });
       if (this.options.afterRun && !controller.signal.aborted && !await input.cancelRequested()) {
+        // The model's own reply, before a failed check replaces it with the failure notice.
+        const rootReply = (result as { message?: unknown } | null)?.message;
         result = await this.options.afterRun(input, result);
         const rootRunId = input.runId ?? (result as { runId?: string })?.runId;
         const deadline = Date.now() + 600_000;
@@ -384,7 +406,8 @@ export class CodeSessionRunExecutor {
           if ((repaired as { status?: string } | null)?.status !== "completed" || !changed) break;
           result = await this.options.afterRun({ ...input, runId: repairRunId }, repaired);
         }
-        if (repairRunIds.length && result && typeof result === "object") result = { ...result, runId: rootRunId, visualRepairRunIds: repairRunIds };
+        if (repairRunIds.length && result && typeof result === "object")
+          result = { ...(withRootReply(result, rootReply, input.responseLanguage) as object), runId: rootRunId, visualRepairRunIds: repairRunIds };
       }
     } catch (error) {
       /**
