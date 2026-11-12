@@ -17,6 +17,45 @@ const project = (id: string, companyId: string) => ({ id, companyId, name: id, t
 const render = () => act(async () => { root.render(<MemoryRouter><WebsiteBuilderDashboard /></MemoryRouter>); });
 
 describe("Projects catalog company scope and freshness", () => {
+  it("keeps scrolled cards mounted and the pagination cursor when returning from another tab", async () => {
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    let intersect!: (entries: Partial<IntersectionObserverEntry>[]) => void;
+    vi.stubGlobal("IntersectionObserver", class { constructor(callback: typeof intersect) { intersect = callback; } observe() {} disconnect() {} });
+    const fetch = vi.fn(async (url: string) => {
+      const offset = url.includes("cursor=third") ? 12 : url.includes("cursor=second") ? 6 : 0;
+      return new Response(JSON.stringify(url.includes("/projects/catalog") ? {
+        projects: Array.from({ length: 6 }, (_, index) => ({ ...project(`stable-${offset + index}`, "company"), createdAt: new Date(Date.UTC(2026, 10, 12) - (offset + index) * 1000).toISOString() })),
+        pagination: { nextCursor: offset === 0 ? "second" : offset === 6 ? "third" : null },
+      } : { companies: [], pagination: { nextCursor: null } }));
+    });
+    vi.stubGlobal("fetch", fetch);
+    await render();
+    await act(async () => document.dispatchEvent(new Event("wheel")));
+    await act(async () => intersect([{ isIntersecting: true }]));
+    const cards = [...host.querySelectorAll("[data-project]")];
+    expect(cards).toHaveLength(12);
+    const mutations: MutationRecord[] = [];
+    const observer = new MutationObserver(records => mutations.push(...records));
+    observer.observe(host, { childList: true, subtree: true });
+    try {
+      const reads = fetch.mock.calls.length;
+      now += 4000;
+      visibility.mockReturnValue("hidden");
+      await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+      expect(fetch).toHaveBeenCalledTimes(reads);
+      visibility.mockReturnValue("visible");
+      await act(async () => { document.dispatchEvent(new Event("visibilitychange")); window.dispatchEvent(new Event("focus")); });
+      expect(fetch).toHaveBeenCalledTimes(reads + 1);
+      expect([...host.querySelectorAll("[data-project]")]).toEqual(cards);
+      expect(cards.every(card => card.isConnected)).toBe(true);
+      expect(mutations.flatMap(record => [...record.removedNodes]).some(node => cards.includes(node as Element))).toBe(false);
+      await act(async () => intersect([{ isIntersecting: true }]));
+      expect(host.querySelectorAll("[data-project]")).toHaveLength(18);
+      expect(fetch.mock.calls.filter(([url]) => url.includes("cursor=third"))).toHaveLength(1);
+    } finally { observer.disconnect(); }
+  });
   it("shows the shared back-to-top button only when the ninth project is reached", async () => {
     let intersect!: (entries: Partial<IntersectionObserverEntry>[]) => void;
     vi.stubGlobal("IntersectionObserver", class { constructor(callback: typeof intersect) { intersect = callback; } observe() {} disconnect() {} });

@@ -94,7 +94,7 @@ export function CatalogProjectThumbnail({
   useEffect(() => {
     let active = true;
     let started = false;
-    setImage({ key, thumbnail: cache.get(key)?.thumbnail ?? null, settled: hasThumbnail === false || cache.has(key) });
+    setImage(current => current.key === key && current.thumbnail ? current : { key, thumbnail: cache.get(key)?.thumbnail ?? null, settled: hasThumbnail === false || cache.has(key) });
     const load = () => {
       if (started) return;
       started = true;

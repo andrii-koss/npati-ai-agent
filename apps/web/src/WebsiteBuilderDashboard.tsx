@@ -39,7 +39,7 @@ import {
 import { CreateWebsiteDrawer } from "./website-builder-drawer";
 import { WebsiteFiltersBar } from "./website-builder-filters";
 import { WebsiteProjectCard } from "./website-builder-card";
-import { cachedCatalog, invalidateProjectCatalog, requestCatalog } from "./project-catalog-client";
+import { cachedCatalog, invalidateProjectCatalog, mergeCatalogRefresh, requestCatalog } from "./project-catalog-client";
 import { CatalogScrollToTop } from "./CatalogScrollToTop";
 
 export function WebsiteBuilderDashboard() {
@@ -63,6 +63,8 @@ export function WebsiteBuilderDashboard() {
   useEffect(() => { const timer = setTimeout(() => setSearch(searchQuery.trim()), 250); return () => clearTimeout(timer); }, [searchQuery]);
   const filters = useMemo(() => ({ companyId, search, status: statusFilter, framework: frameworkFilter, kind: kindFilter }), [companyId, search, statusFilter, frameworkFilter, kindFilter]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const loadedProjects = useRef(websites);
+  loadedProjects.current = websites;
   const catalogGeneration = useRef(0);
   const lastCatalogFetchAt = useRef(0);
   const requests = useRef(new Set<ReturnType<typeof requestCatalog>>());
@@ -129,7 +131,7 @@ export function WebsiteBuilderDashboard() {
     };
   }, []);
 
-  const loadWebsites = useCallback(async (_companyId?: string, cursor?: string) => {
+  const loadWebsites = useCallback(async (_companyId?: string, cursor?: string, background = false) => {
     if (cursor && requests.current.size) return;
     if (!cursor) {
       ++catalogGeneration.current;
@@ -138,14 +140,15 @@ export function WebsiteBuilderDashboard() {
     }
     const generation = catalogGeneration.current;
     lastCatalogFetchAt.current = Date.now();
-    const request = requestCatalog(filters, cursor);
+    const keepCursor = background && loadedProjects.current.length > 6;
+    const request = requestCatalog(filters, cursor, background);
     requests.current.add(request);
     setLoading(true);
     try {
       const page = await request.promise;
       if (generation !== catalogGeneration.current) return;
-      setWebsites(previous => cursor ? [...new Map([...previous, ...page.projects].map(item => [item.id, item])).values()] : page.projects);
-      setNextCursor(page.pagination?.nextCursor ?? null);
+      setWebsites(previous => cursor ? [...new Map([...previous, ...page.projects].map(item => [item.id, item])).values()] : background ? mergeCatalogRefresh(previous, page) : page.projects);
+      if (!keepCursor || !page.pagination?.nextCursor) setNextCursor(page.pagination?.nextCursor ?? null);
       setError("");
     } catch (err: any) {
       if (generation === catalogGeneration.current && err.name !== "AbortError") setError(err.message || t.loadError);
@@ -161,7 +164,7 @@ export function WebsiteBuilderDashboard() {
     setWebsites(cached?.projects ?? []);
     setNextCursor(cached?.pagination?.nextCursor ?? null);
     void loadWebsites();
-    const refresh = () => { if (document.visibilityState !== "hidden" && requests.current.size === 0 && Date.now() - lastCatalogFetchAt.current > 3000) void loadWebsites(); };
+    const refresh = () => { if (document.visibilityState !== "hidden" && requests.current.size === 0 && Date.now() - lastCatalogFetchAt.current > 3000) void loadWebsites(undefined, undefined, true); };
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", refresh);
     return () => {

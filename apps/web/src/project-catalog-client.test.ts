@@ -2,10 +2,28 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 let token = "one";
 vi.mock("./AuthContext", () => ({ getStoredAuthToken: () => token, getStoredAuthUser: () => ({ id: token }) }));
-import { cachedCatalog, requestCatalog } from "./project-catalog-client";
+import { cachedCatalog, mergeCatalogRefresh, requestCatalog } from "./project-catalog-client";
 const filters = { companyId: "", search: "", status: "all", framework: "all", kind: "all" };
 beforeEach(() => { token = crypto.randomUUID(); });
 describe("catalog request cache", () => {
+  it("keeps prefetched pages during a background refresh", async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ projects: [], pagination: { nextCursor: "next" } })));
+    vi.stubGlobal("fetch", fetch);
+    const warm = requestCatalog(filters, "next"); await warm.promise; warm.release();
+    const refresh = requestCatalog(filters, undefined, true); await refresh.promise; refresh.release();
+    const next = requestCatalog(filters, "next"); await next.promise; next.release();
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+  it("retains older rows and stable objects while removing missing rows in the refreshed range", () => {
+    const rows = Array.from({ length: 12 }, (_, index) => ({ id: `p${index}`, companyId: "c", name: `Site ${index}`, type: "website" as const, status: "ready", revision: 1,
+      createdAt: new Date(Date.UTC(2026, 10, 12) - index * 1000).toISOString(), updatedAt: "2026-11-12" }));
+    const unchanged = { projects: rows.slice(0, 6).map(row => ({ ...row })), pagination: { nextCursor: "page2" } };
+    expect(mergeCatalogRefresh(rows, unchanged)).toBe(rows);
+    const inserted = { ...rows[0]!, id: "new", createdAt: "2026-11-13T00:00:00.000Z" };
+    expect(mergeCatalogRefresh(rows, { projects: [inserted, ...rows.slice(0, 5)], pagination: { nextCursor: "new-head" } })).toEqual([inserted, ...rows]);
+    expect(mergeCatalogRefresh(rows, { projects: rows.slice(1, 7), pagination: { nextCursor: "changed-head" } })).toEqual(rows.slice(1));
+    expect(mergeCatalogRefresh(rows, { projects: rows.slice(0, 2), pagination: { nextCursor: null } })).toEqual(rows.slice(0, 2));
+  });
   it("reuses the prefetched next page and discards it when the first page refreshes", async () => {
     const page = { projects: [], pagination: { nextCursor: null } };
     const fetch = vi.fn(async () => new Response(JSON.stringify(page)));
