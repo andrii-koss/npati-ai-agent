@@ -6,7 +6,7 @@ import { registerDataBackendRoutes } from "../apps/agent-api/src/data-studio/rou
 import { registerDataStudioRoutes } from "../apps/agent-api/src/data-studio/studio-routes";
 import type { DataBackendService } from "../apps/agent-api/src/data-studio/service";
 import { DataStudioUiService } from "../apps/agent-api/src/data-studio/studio-service";
-import { readDataStudioCatalog, readDataStudioWorkspace } from "../apps/agent-api/src/data-studio/catalog";
+import { readDataStudioCatalog, readDataStudioWorkspace, resolveDataStudioDatabase } from "../apps/agent-api/src/data-studio/catalog";
 import type { DataBackendRepository } from "../apps/agent-api/src/data-studio/repository";
 import { PostgresDataProvider } from "../apps/agent-api/src/data-studio/data-provider";
 import type { DataProvider } from "../apps/agent-api/src/data-studio/data-provider";
@@ -14,6 +14,33 @@ import type { ProjectMigrationEngine } from "../apps/agent-api/src/data-studio/m
 import type { WorkspaceStore } from "@npati/workspace";
 
 const owner: AuthContext = { workspaceId: "tenant", userId: "owner", permissions: ["workspace:read"] };
+
+it("resolves an exact database name within its owner and refuses missing or ambiguous matches", async () => {
+  const backend = { id: "backend", name: "bakery-orders", companyId: "company" };
+  const query = vi.fn(async (_sql: string, _values: unknown[]) => ({ rows: [backend] }));
+  const pool = { query } as unknown as Pool;
+  expect(await resolveDataStudioDatabase(pool, owner, "bakery-orders")).toEqual(backend);
+  expect(query.mock.calls[0]?.[1]).toEqual([owner.workspaceId, owner.userId, null, "bakery-orders"]);
+  expect(query.mock.calls[0]?.[0]).toContain("b.created_by=$2 AND c.user_id=$2");
+  query.mockResolvedValueOnce({ rows: [] });
+  await expect(resolveDataStudioDatabase(pool, owner, "missing")).rejects.toMatchObject({ status: 404 });
+  query.mockResolvedValueOnce({ rows: [backend, { ...backend, id: "other" }] });
+  await expect(resolveDataStudioDatabase(pool, owner, "bakery-orders")).rejects.toMatchObject({ status: 409 });
+});
+
+it("authorizes direct database-name requests before lookup", async () => {
+  const resolveDatabase = vi.fn(async () => ({ id: "backend", name: "bakery-orders" }));
+  let context = owner;
+  const app = Fastify();
+  registerDataBackendRoutes(app, { authenticate: async () => context }, { resolveDatabase } as unknown as DataBackendService);
+  try {
+    expect((await app.inject({ method: "GET", url: "/data-studio/databases/bakery-orders" })).statusCode).toBe(200);
+    expect(resolveDatabase).toHaveBeenCalledWith(owner, "bakery-orders");
+    context = { ...owner, permissions: [] };
+    expect((await app.inject({ method: "GET", url: "/data-studio/databases/bakery-orders" })).statusCode).toBe(403);
+    expect(resolveDatabase).toHaveBeenCalledTimes(1);
+  } finally { await app.close(); }
+});
 
 it("defaults to ten catalog entries, validates pagination, and authorizes before dispatch", async () => {
   const catalog = vi.fn(async () => ({ items: [], companies: [], stats: {}, pagination: { total: 0, nextCursor: null } }));

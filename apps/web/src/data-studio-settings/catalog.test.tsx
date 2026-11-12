@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { DataStudioSettingsPage } from "../DataStudioSettingsPage";
 import type { DataStudioCatalog } from "./types";
@@ -37,6 +37,10 @@ const fetcher = async (input: RequestInfo | URL, init?: RequestInit): Promise<Re
     }
     return json(response(url));
   }
+  if (url.pathname.startsWith("/api/data-studio/databases/")) {
+    const backend = items.find(item => item.name === decodeURIComponent(url.pathname.split("/").at(-1)!));
+    return backend ? json(backend) : json({ error: { message: "Database not found" } }, 404);
+  }
   const id = url.pathname.match(/\/data-backends\/(b\d+)\/workspace/)?.[1];
   if (id) {
     const backend = items.find(item => item.id === id)!;
@@ -70,7 +74,11 @@ beforeEach(() => {
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
-const render = async () => act(async () => root.render(<MemoryRouter><DataStudioSettingsPage /></MemoryRouter>));
+function RouteProbe() {
+  const location = useLocation(); const navigate = useNavigate();
+  return <><output data-testid="url">{location.pathname}</output><button onClick={() => navigate(-1)}>Browser back</button><button onClick={() => navigate(1)}>Browser forward</button></>;
+}
+const render = async (url = "/settings/data-studio") => act(async () => root.render(<MemoryRouter initialEntries={[url]}><RouteProbe /><DataStudioSettingsPage /></MemoryRouter>));
 const rows = () => host.querySelectorAll("tbody tr");
 const urls = () => vi.mocked(fetch).mock.calls.map(([url]) => String(url));
 const click = async (button: HTMLElement) => act(async () => button.click());
@@ -144,6 +152,7 @@ it("searches all databases rather than only the first page and sends server comp
 
 it("loads workspace and schema only on opening a database, uses its own company, and returns real bulk row counts", async () => {
   await render(); await click(host.querySelectorAll<HTMLButtonElement>(".ds-name-link")[1]!);
+  expect(host.querySelector('[data-testid="url"]')?.textContent).toBe("/settings/data-studio/Database%201");
   expect(urls()).toHaveLength(3);
   expect(urls()[1]).toBe("/api/companies/c1/data-backends/b1/workspace");
   expect(urls()[2]).toBe("/api/companies/c1/projects/pb1/data-studio/dev");
@@ -152,6 +161,32 @@ it("loads workspace and schema only on opening a database, uses its own company,
   expect([...rows()].map(row => row.children[5]?.textContent)).toEqual(["7", "12"]);
   await click(host.querySelector<HTMLButtonElement>('button[aria-label="All databases"]')!);
   expect(rows()).toHaveLength(10); expect(urls()).toHaveLength(4);
+});
+
+it("restores a direct database URL outside the first page after a full remount and supports browser history", async () => {
+  const url = "/settings/data-studio/Database%2024";
+  await render(url);
+  expect(host.querySelector("h1")?.textContent).toContain("Database 24");
+  expect(urls()).toContain("/api/data-studio/databases/Database%2024");
+  expect(urls()).toContain("/api/companies/c0/data-backends/b24/workspace");
+  expect(urls()).toContain("/api/companies/c0/projects/pb24/data-studio/dev");
+  expect(host.querySelector(".ds-catalog-stats")).toBeNull();
+  await act(async () => root.unmount()); root = createRoot(host);
+  await render(url);
+  expect(host.querySelector("h1")?.textContent).toContain("Database 24");
+  await click(host.querySelector<HTMLButtonElement>('button[aria-label="All databases"]')!);
+  expect(host.querySelector('[data-testid="url"]')?.textContent).toBe("/settings/data-studio");
+  await click([...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Browser back")!);
+  expect(host.querySelector("h1")?.textContent).toContain("Database 24");
+  await click([...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Browser forward")!);
+  expect(rows()).toHaveLength(10);
+});
+
+it("shows a missing-database error on its own URL without falling back to the catalog", async () => {
+  await render("/settings/data-studio/missing");
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe("Database not found");
+  expect(host.querySelector(".ds-catalog-stats")).toBeNull();
+  expect(host.querySelector('[data-testid="url"]')?.textContent).toBe("/settings/data-studio/missing");
 });
 
 it("selects all matching databases across unloaded pages only on explicit user action", async () => {

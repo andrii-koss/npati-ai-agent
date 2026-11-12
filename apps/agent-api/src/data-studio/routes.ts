@@ -57,6 +57,14 @@ export function registerDataBackendRoutes(
     } catch (error) { return fail(reply, error); }
   });
 
+  app.get<{ Params: { databaseName: string } }>("/data-studio/databases/:databaseName", async (request, reply) => {
+    try {
+      const { ctx, service } = await authorize(request, "workspace:read");
+      reply.header("cache-control", "private, no-store");
+      return await service.resolveDatabase(ctx, request.params.databaseName);
+    } catch (error) { return fail(reply, error); }
+  });
+
   app.get<{ Params: { companyId: string; backendId: string } }>("/companies/:companyId/data-backends/:backendId/workspace", async (request, reply) => {
     try {
       const { ctx, service } = await authorize(request, "workspace:read");

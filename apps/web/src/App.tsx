@@ -645,7 +645,7 @@ export function App() {
             <Route path="/inbox" element={<Navigate to="/settings/email/inbox" replace />} />
             <Route path="/email" element={<Navigate to="/settings/email/inbox" replace />} />
             <Route path="/settings/capabilities" element={<Workspace><CapabilityInspectorPage /></Workspace>} />
-            <Route path="/settings/data-studio" element={<Workspace><DataStudioSettingsPage /></Workspace>} />
+            <Route path="/settings/data-studio/:databaseName?" element={<Workspace><DataStudioSettingsPage /></Workspace>} />
             <Route path="/settings/code" element={<Workspace><CodeAgentsPage /></Workspace>} />
             <Route path="/settings/code/:companyId/:projectId" element={<Workspace><CodeWorkspacePage /></Workspace>} />
             <Route path="/capabilities" element={<Navigate to="/settings/capabilities" replace />} />

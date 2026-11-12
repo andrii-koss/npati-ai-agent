@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useMatch, useNavigate } from "react-router-dom";
 import { confirmModal, promptModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
 import { chooseAvailableCompanyId } from "./active-company";
@@ -35,6 +35,11 @@ export * from "./data-studio-settings/types";
 export function DataStudioSettingsPage() {
   const { language } = useTranslation();
   const isUk = language === "uk";
+  const navigate = useNavigate();
+  const location = useLocation();
+  const databaseName = useMatch("/settings/data-studio/:databaseName")?.params.databaseName;
+  const [resolvedRoute, setResolvedRoute] = useState<{ name: string; backend: BackendSummary } | null>(null);
+  const [routeError, setRouteError] = useState<string | null>(null);
 
   const [companyId, setCompanyId] = useState<string>("");
 
@@ -53,7 +58,6 @@ export function DataStudioSettingsPage() {
   const [quotas, setQuotas] = useState<Record<string, QuotaReport | null>>({});
   const [reloadToken, setReloadToken] = useState(0);
 
-  const [detailId, setDetailId] = useState<string | null>(null);
   const [openedBackend, setOpenedBackend] = useState<BackendSummary | null>(null);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const overviewVersion = useRef(0);
@@ -84,7 +88,29 @@ export function DataStudioSettingsPage() {
   const project = useMemo(() => projects.find((item) => item.id === projectId) ?? null, [projects, projectId]);
   const tables = useMemo(() => [...(overview?.schema?.tables ?? [])].sort((left, right) => left.name.localeCompare(right.name)), [overview]);
   const readOnly = environment === "prod";
-  const detail = useMemo(() => backends.find((backend) => backend.id === detailId) ?? (openedBackend?.id === detailId ? openedBackend : null), [backends, detailId, openedBackend]);
+  const routeHint = (location.state as { dataStudioBackend?: BackendSummary } | null)?.dataStudioBackend;
+  const routeBackend = databaseName ? (routeHint?.name === databaseName ? routeHint : resolvedRoute?.name === databaseName ? resolvedRoute.backend : null) : null;
+  const detail = routeBackend ? (openedBackend?.id === routeBackend.id ? openedBackend : routeBackend) : null;
+  const detailId = detail?.id ?? null;
+  const openDatabase = useCallback((backend: BackendSummary, replace = false) => {
+    navigate(`/settings/data-studio/${encodeURIComponent(backend.name)}`, { replace, state: { dataStudioBackend: backend } });
+  }, [navigate]);
+  const setDetailId = useCallback((id: string | null) => {
+    if (!id) { navigate("/settings/data-studio"); return; }
+    const backend = backends.find(item => item.id === id) ?? catalog.data?.items.find(item => item.id === id) ?? (openedBackend?.id === id ? openedBackend : null);
+    if (backend) openDatabase(backend);
+  }, [backends, catalog.data, openedBackend, navigate, openDatabase]);
+  useEffect(() => {
+    setRouteError(null);
+    if (!databaseName || routeBackend) return;
+    const controller = new AbortController();
+    void apiFetch<BackendSummary>(`/data-studio/databases/${encodeURIComponent(databaseName)}`, { signal: controller.signal }).then(backend => {
+      if (!controller.signal.aborted) setResolvedRoute({ name: databaseName, backend });
+    }).catch(cause => {
+      if (!controller.signal.aborted) setRouteError(cause instanceof Error ? cause.message : "Could not load database");
+    });
+    return () => controller.abort();
+  }, [databaseName, routeBackend]);
   /** Databases and tables are company-scoped: the opened database dictates the active company. */
   const activeCompanyId = detail?.companyId ?? companyId;
   const detailProjects = useMemo(() => projects.filter((item) => item.dataBackendId === detailId), [projects, detailId]);
@@ -159,7 +185,7 @@ export function DataStudioSettingsPage() {
       notify(isUk ? `Базу «${created.name}» створено` : `Database “${created.name}” created`);
       setOpenedBackend({ ...created, companyId: createTargetCompanyId, companyName: companies.find(item => item.id === createTargetCompanyId)?.name ?? "" });
       setCreateOpen(false);
-      setDetailId(created.id);
+      openDatabase({ ...created, companyId: createTargetCompanyId, companyName: companies.find(item => item.id === createTargetCompanyId)?.name ?? "" });
       setDatabaseFilter("all");
       refresh();
     } catch (cause) {
@@ -178,7 +204,7 @@ export function DataStudioSettingsPage() {
     } finally {
       setBackendBusy(false);
     }
-  }, [createTargetCompanyId, companies, isUk, notify, refresh]);
+  }, [createTargetCompanyId, companies, isUk, notify, refresh, openDatabase]);
 
   const toggleArchive = useCallback(async (backend: BackendSummary) => {
     const archiving = backend.status === "ready";
@@ -223,13 +249,14 @@ export function DataStudioSettingsPage() {
       notify(isUk ? "Назву оновлено" : "Name updated");
       setBackends(current => current.map(item => item.id === backend.id ? { ...item, name: clean } : item));
       setOpenedBackend(current => current?.id === backend.id ? { ...current, name: clean } : current);
+      openDatabase({ ...backend, name: clean }, true);
       refresh();
     } catch (cause) {
       notify(cause instanceof Error ? cause.message : "Could not rename the database", "error");
     } finally {
       setBackendBusy(false);
     }
-  }, [isUk, notify, refresh]);
+  }, [isUk, notify, refresh, openDatabase]);
 
   const deleteDatabase = useCallback(async (backend: BackendSummary) => {
     const confirmed = await confirmModal({
@@ -565,6 +592,15 @@ export function DataStudioSettingsPage() {
   );
 
   // --- Detail view ----------------------------------------------------------
+
+  if (databaseName && !detail) {
+    return <main className="automations-container">
+      <Link to="/settings/data-studio" className="button-secondary">{isUk ? "Усі бази даних" : "All databases"}</Link>
+      <h1>{databaseName}</h1>
+      {routeError ? <div className="data-studio-alert error" role="alert">{routeError}</div>
+        : <p role="status">{isUk ? "Завантаження бази даних…" : "Loading database…"}</p>}
+    </main>;
+  }
 
   if (detail) {
     return (

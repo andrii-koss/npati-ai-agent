@@ -112,6 +112,16 @@ export async function readDataStudioCatalog(pool: Pick<Pool, "query">, ctx: Auth
   };
 }
 
+export async function resolveDataStudioDatabase(pool: Pick<Pool, "query">, ctx: AuthContext, name: string) {
+  const matches = (await pool.query<CatalogItem>(`${owned}
+    SELECT b.id,b.name,b.company_id AS "companyId",b.company_name AS "companyName",b.provider,b.status,
+      b.created_at::text AS "createdAt",b.updated_at::text AS "updatedAt",b.remove_after::text AS "removeAfter"
+    FROM owned b WHERE b.name=$4 ORDER BY b.id LIMIT 2`, [ctx.workspaceId, ctx.userId, null, name])).rows;
+  if (!matches.length) throw new DataStudioError(404, "workspace", "Database not found", false, "BACKEND_NOT_FOUND");
+  if (matches.length > 1) throw new DataStudioError(409, "workspace", "Several databases have this name. Open the database from the list.", false, "AMBIGUOUS_DATABASE_NAME");
+  return matches[0]!;
+}
+
 export async function readDataStudioWorkspace(pool: Pick<Pool, "query">, ctx: AuthContext, companyId: string, backendId: string) {
   const backend = (await pool.query<CatalogItem>(`${owned}
     SELECT b.id,b.name,b.company_id AS "companyId",b.company_name AS "companyName",b.provider,b.status,
