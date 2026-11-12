@@ -555,12 +555,22 @@ a {
 .sidebar-group {
   min-width: 0;
   border-radius: 10px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .sidebar-group-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 38px;
+  border-radius: 10px;
+}
+
+.sidebar-group-head:has(+ .sidebar-dropdown) {
+  border-radius: 10px 10px 0 0;
+}
+
+.sidebar-group-head,
+.sidebar nav a.sidebar-settings-link {
+  box-shadow: 0 1px 3px rgba(17, 17, 17, 0.09);
 }
 
 .sidebar-main-action,
