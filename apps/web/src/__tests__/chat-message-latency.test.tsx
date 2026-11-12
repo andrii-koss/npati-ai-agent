@@ -25,11 +25,20 @@ beforeEach(() => {
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); localStorage.clear(); sessionStorage.clear(); vi.unstubAllGlobals(); });
-const render = () => act(async () => root.render(<MemoryRouter initialEntries={["/c/chat"]}><I18nProvider><BusinessChatPage neutralChat initialConversationId="chat" /></I18nProvider></MemoryRouter>));
+const render = (id = "chat") => act(async () => root.render(<MemoryRouter initialEntries={["/c/chat"]}><I18nProvider><BusinessChatPage neutralChat initialConversationId={id} /></I18nProvider></MemoryRouter>));
 
 it("shows loaded messages even when development processes are still unresolved", async () => {
   await render(); expect(host.textContent).toContain("Loaded history is ready");
   expect(mocks.api).toHaveBeenCalledTimes(1);
+});
+
+it("replaces the previous conversation on an in-place chat switch", async () => {
+  await render();
+  mocks.api.mockResolvedValue({ messages: [{ id: "other", role: "assistant", content: "Another conversation", createdAt: "2026-11-12" }], earlier: 0, cursor: "other" });
+  await render("other-chat");
+  expect(host.textContent).toContain("Another conversation");
+  expect(host.textContent).not.toContain("Loaded history is ready");
+  expect(mocks.api).toHaveBeenLastCalledWith("/conversations/other-chat/messages");
 });
 
 it("paints received text before research presentation and the final stream result finish", async () => {

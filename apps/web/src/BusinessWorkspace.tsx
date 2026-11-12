@@ -18,6 +18,7 @@ import { InboxSubmission } from "./code-inbox-client";
 import { useCodeInbox } from "./use-code-inbox";
 import { projectConversationUrl } from "./chat-development-view";
 import { useChatResearchProgress } from "./use-chat-research-progress";
+import { useChatOpeningPosition } from "./use-chat-opening-position";
 import { chatTimeline, mergeConversationMessages, nearChatBottom, normalizeActivity } from "./chat-timeline";
 import { processDuration } from "./AgentExecutionTrace";
 import { ChatDevelopmentProgress } from "./ChatDevelopmentProgress";
@@ -160,6 +161,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     onConversation: (id, preserve) => { void loadConversations(id, preserve ?? true); },
     onError: setNotice,
     onAccepted: (message) => {
+      cancelOpeningPosition();
       resetProgress();
       thinking.start(message);
       setInput("");
@@ -258,6 +260,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const activeTurnRef = useRef<HTMLElement>(null);
   const latestMessageRef = useRef<HTMLElement>(null);
   const [activeTurn, setActiveTurn] = useState("");
+  const [openingPosition, setOpeningPosition] = useState<string | null>(null);
+  const cancelOpeningPosition = useChatOpeningPosition(messageStreamRef, openingPosition, sending);
 
   const followBottomRef = useRef(true);
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
@@ -271,7 +275,6 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
 
   }, []);
 
-  const scrollToLatestMessageStart = scrollToBottom;
   const flushDeltasRef = useRef<(() => void) | null>(null);
   const {
     progressEvents,
@@ -372,14 +375,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           return loaded;
         }
         setMessages(loaded);
-        if (!preserveActiveTurn && !activeTurn) {
-          window.requestAnimationFrame(() => {
-            scrollToLatestMessageStart("auto");
-            setTimeout(() => scrollToLatestMessageStart("auto"), 50);
-            setTimeout(() => scrollToLatestMessageStart("auto"), 150);
-            setTimeout(() => scrollToLatestMessageStart("auto"), 300);
-          });
-        }
+        followBottomRef.current = false;
+        setOpeningPosition(`${next}:${loadVersion}`);
         return loaded;
       }
     }
@@ -401,7 +398,10 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       return;
     }
 
-    followBottomRef.current = true;
+    followBottomRef.current = false;
+    userScrolledRef.current = false;
+    earlierAnchorRef.current = null;
+    setOpeningPosition(null);
     setSelected(initialConversationId ?? null);
     setReplyMeta(null);
     // Opening the conversation a failed message created keeps that failure on screen.
@@ -411,9 +411,10 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       resetProgress();
     }
     if (initialConversationId) {
-      const hasActive = messages.length > 0;
-      if (!hasActive) setLoadingHistory(true);
-      void loadConversations(initialConversationId, hasActive).finally(() => setLoadingHistory(false));
+      setMessages([]);
+      setActiveTurn("");
+      setLoadingHistory(true);
+      void loadConversations(initialConversationId).finally(() => setLoadingHistory(false));
     } else {
       setMessages([]);
       setLoadingHistory(false);
@@ -441,7 +442,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => scrollToBottom("auto"));
     return () => window.cancelAnimationFrame(frame);
-  }, [messages, sending, development.project?.progress, scrollToBottom]);
+  }, [messages, sending, scrollToBottom]);
   useEffect(() => () => {
     streamControllerRef.current?.controller.abort();
   }, []);
@@ -450,6 +451,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     const text = input.trim();
     if (!session || !text || inboxMutationBusy.current) return;
     if (attachments.length || noMemory || ttsEnabled) { setNotice(t("codeInbox.textOnly")); return; }
+    cancelOpeningPosition();
+    followBottomRef.current = true;
     const version = draftVersion.current, generation = codeInbox.generation.current;
     inboxMutationBusy.current = true; setInboxSubmitting(true);
     try {
@@ -545,6 +548,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     }
 
     const optimisticContent = message;
+    cancelOpeningPosition();
     thinking.start(message);
     const mutationContext = companyId ? "company" : business ? "business" : "none";
     const pendingMutation = detectChatMutationOperation(requestMessage, mutationContext);
@@ -800,8 +804,9 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         />
       )}
       <div className="onboarding-live-chat standard-live-chat">
-        <div className="message-stream" ref={messageStreamRef} onScroll={() => { if (!messageStreamRef.current) return; followBottomRef.current = nearChatBottom(messageStreamRef.current); if (userScrolledRef.current && messageStreamRef.current.scrollTop < EARLIER_MESSAGES_THRESHOLD_PX) void loadEarlierMessages(); }}
-          onWheel={() => { userScrolledRef.current = true; }} onTouchMove={() => { userScrolledRef.current = true; }} onKeyDown={() => { userScrolledRef.current = true; }}>
+        <div className="message-stream" ref={messageStreamRef} onScroll={() => { if (!messageStreamRef.current) return; if (!openingPosition || userScrolledRef.current || sending) followBottomRef.current = nearChatBottom(messageStreamRef.current); if (userScrolledRef.current && messageStreamRef.current.scrollTop < EARLIER_MESSAGES_THRESHOLD_PX) void loadEarlierMessages(); }}
+          onPointerDown={() => { cancelOpeningPosition(); userScrolledRef.current = true; }}
+          onWheel={() => { cancelOpeningPosition(); userScrolledRef.current = true; }} onTouchMove={() => { cancelOpeningPosition(); userScrolledRef.current = true; }} onKeyDown={() => { cancelOpeningPosition(); userScrolledRef.current = true; }}>
           {messages.length === 0 && !selected && !initialConversationId && !loadingHistory && (
             <div className="chat-welcome">
               <h2>{t("chat.emptyTitle")}</h2>

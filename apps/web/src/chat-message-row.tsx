@@ -46,6 +46,7 @@ export const ChatMessageRow = memo(function ChatMessageRow({ message, card, show
       ref={(element) => actions.registerArticle(message.id, element)}
       className={`${message.role}${message.role === "user" && messageHasImage(message) ? " image-message" : ""}`}
       data-message-id={message.id}
+      data-chat-reply-id={message.role === "assistant" && assistantText.trim() ? message.id : undefined}
       aria-label={message.role === "user" ? "Your message" : "NPATI Agent message"}
     >
       {message.role === "user" ? (

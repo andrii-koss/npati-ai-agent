@@ -9,8 +9,8 @@ export function ChatDevelopmentProgress({ process, items, run, isUk, animatePend
   const rows = normalizeActivity(items ?? process?.progress);
   if (!process || !rows.length && !run && !Object.keys(process.runStatuses ?? {}).length && !["preparing", "running", "queued", "stopping"].includes(process.status)) return null;
   if (run) return <AgentExecutionTrace process={process} items={run.items} run={run} isUk={isUk} animatePending={animatePending} />;
-  if (items && rows.every(item=>item.kind==="assistant_message")) return <>{rows.map(item=><article key={item.id} className="assistant"><ChatMessageContent content={item.title}/></article>)}</>;
-  return <>{chatTimeline([],rows,process.conversationId,process).map(entry=>entry.kind!=="activity" ? null : entry.run ? <AgentExecutionTrace key={entry.item.id} process={process} items={entry.run.items} run={entry.run} isUk={isUk} animatePending={animatePending}/> : <article key={entry.item.id} className="assistant"><ChatMessageContent content={entry.item.title}/></article>)}</>;
+  if (items && rows.every(item=>item.kind==="assistant_message")) return <>{rows.map(item=><article key={item.id} className="assistant" data-chat-reply-id={item.id}><ChatMessageContent content={item.title}/></article>)}</>;
+  return <>{chatTimeline([],rows,process.conversationId,process).map(entry=>entry.kind!=="activity" ? null : entry.run ? <AgentExecutionTrace key={entry.item.id} process={process} items={entry.run.items} run={entry.run} isUk={isUk} animatePending={animatePending}/> : <article key={entry.item.id} className="assistant" data-chat-reply-id={entry.item.id}><ChatMessageContent content={entry.item.title}/></article>)}</>;
 }
 
 /** Reuse the existing preview drawer; keep it mounted while the agent edits this project. */
