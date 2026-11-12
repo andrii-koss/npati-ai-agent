@@ -66,6 +66,8 @@
 
 .code-agent-settings .code-records-panel .code-record-select { width: 32px; }
 .code-agent-settings .code-record-select input { width: 14px; height: 14px; margin: 0; accent-color: var(--npati-red, #d83438); vertical-align: middle; }
+.code-agent-settings .code-records-toolbar .code-record-select { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; }
+.code-agent-settings .code-records-toolbar .code-record-select input { width: 16px; height: 16px; cursor: pointer; }
 .code-agent-settings .code-record-row-actions { flex-wrap: nowrap; }
 
 .code-agent-settings .code-records-pagination {

@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { Archive, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Maximize2, Minimize2, Square, Trash2, type LucideIcon } from "lucide-react";
+import { Archive, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Maximize2, Minimize2, Trash2, type LucideIcon } from "lucide-react";
 import { promptModal } from "../ConfirmDialog";
 import { codeErrorMessage } from "./labels";
 
@@ -13,8 +13,8 @@ export function RecordIconButton({ label, icon: Icon, danger, ...props }: {
 
 type RecordItem = { id: string; revision?: number; status?: string };
 type TableState<T> = {
-  rows: T[]; selected: Set<string>; busy: boolean; allVisible: boolean; someVisible: boolean;
-  toggle(id: string): void; togglePage(): void; remove(item: T): void;
+  rows: T[]; selected: Set<string>; busy: boolean;
+  toggle(id: string): void; remove(item: T): void;
 };
 export interface CodeRecordsPanelProps<T extends RecordItem> {
   items: T[];
@@ -52,8 +52,7 @@ export function CodeRecordsPanel<T extends RecordItem>({ items, kind, companyId,
     setFullscreen(false);
   };
   const blocked = busy || busyId !== null;
-  const allVisible = rows.length > 0 && rows.every(item => selected.has(item.id));
-  const someVisible = rows.some(item => selected.has(item.id));
+  const allSelected = items.length > 0 && items.every(item => selected.has(item.id));
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
     const ids = new Set(items.map(item => item.id));
@@ -102,11 +101,8 @@ export function CodeRecordsPanel<T extends RecordItem>({ items, kind, companyId,
   const toggle = (id: string) => setSelected(previous => {
     const next = new Set(previous); if (next.has(id)) next.delete(id); else next.add(id); return next;
   });
-  const togglePage = () => setSelected(previous => {
-    const next = new Set(previous);
-    rows.forEach(item => { if (allVisible) next.delete(item.id); else next.add(item.id); });
-    return next;
-  });
+  const toggleAll = () => setSelected(previous => items.every(item => previous.has(item.id))
+    ? new Set<string>() : new Set(items.map(item => item.id)));
   const execute = async (action: "delete" | "archive", targets: T[]) => {
     if (readOnly || blocked || lock.current || !targets.length) return;
     lock.current = true; setBusy(true); setNotice("");
@@ -154,8 +150,8 @@ export function CodeRecordsPanel<T extends RecordItem>({ items, kind, companyId,
     aria-label={label} role={fullscreen ? "dialog" : undefined} aria-modal={fullscreen || undefined}>
     <div className="code-records-toolbar">
       <span className="code-records-count">{selected.size ? `${selected.size} / ` : ""}{items.length}</span>
-      <RecordIconButton label={isUk ? "Вибрати всі записи" : "Select all records"} icon={CheckSquare} disabled={blocked || !items.length} onClick={() => setSelected(new Set(items.map(item => item.id)))} />
-      <RecordIconButton label={isUk ? "Скасувати вибір" : "Clear selection"} icon={Square} disabled={blocked || !selected.size} onClick={() => setSelected(new Set())} />
+      <span className="code-record-select"><RecordSelection label={isUk ? "Вибрати всі записи" : "Select all records"}
+        checked={allSelected} mixed={selected.size > 0 && !allSelected} disabled={blocked || !items.length} onChange={toggleAll} /></span>
       <span className="code-records-toolbar-spacer" />
       <RecordIconButton label={isUk ? "Архівувати вибрані" : "Archive selected"} icon={Archive} disabled={blocked || readOnly || !targets.some(item => item.status !== "archived")} onClick={() => void execute("archive", targets.filter(item => item.status !== "archived"))} />
       <RecordIconButton label={isUk ? "Видалити вибрані" : "Delete selected"} icon={Trash2} danger disabled={blocked || readOnly || !targets.length} onClick={() => void execute("delete", targets)} />
@@ -168,7 +164,7 @@ export function CodeRecordsPanel<T extends RecordItem>({ items, kind, companyId,
     {notice && <p className="code-records-notice" role="status">{notice}</p>}
     <div id={contentId} hidden={collapsed} className="code-records-content" aria-busy={busy}>
       <div className="automations-table-container">
-        {children({ rows, selected, allVisible, someVisible, busy: blocked, toggle, togglePage, remove: item => void execute("delete", [item]) })}
+        {children({ rows, selected, busy: blocked, toggle, remove: item => void execute("delete", [item]) })}
       </div>
       <div className="code-records-pagination">
         <span>{items.length ? currentPage * pageSize + 1 : 0}-{Math.min((currentPage + 1) * pageSize, items.length)} / {items.length}</span>

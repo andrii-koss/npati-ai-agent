@@ -24,6 +24,7 @@ async function render(items = projects, readOnly = false) {
     onDetails={open} onDetect={open} onSessions={open} onArchive={archive} />));
 }
 const button = (label: string) => host.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
+const masterCheckbox = () => host.querySelector<HTMLInputElement>('.code-records-toolbar input[type="checkbox"]')!;
 const rows = () => host.querySelectorAll("tbody tr");
 async function click(element: HTMLElement) { expect(element).toBeTruthy(); await act(async () => element.click()); }
 
@@ -31,19 +32,29 @@ describe("Code project and session table controls", () => {
   it("paginates by five, preserves selection across pages and selects all twelve records", async () => {
     await render();
     expect(rows()).toHaveLength(5);
+    expect(host.querySelectorAll('.code-records-toolbar input[type="checkbox"]')).toHaveLength(1);
+    expect(host.querySelector('thead input[type="checkbox"]')).toBeNull();
+    expect(masterCheckbox().checked).toBe(false);
     await click(host.querySelector<HTMLInputElement>('input[aria-label="Select Project 0"]')!);
+    expect(masterCheckbox().indeterminate).toBe(true);
     await click(button("Next page"));
     expect(rows()).toHaveLength(5);
     expect(rows()[0]?.textContent).toContain("Project 5");
     await click(button("Previous page"));
     expect(host.querySelector<HTMLInputElement>('input[aria-label="Select Project 0"]')?.checked).toBe(true);
-    await click(button("Select all records"));
+    await click(masterCheckbox());
+    expect(masterCheckbox().checked).toBe(true);
+    expect(masterCheckbox().indeterminate).toBe(false);
     expect(host.querySelector(".code-records-count")?.textContent).toBe("12 / 12");
     await click(button("Next page")); await click(button("Next page"));
     expect(rows()).toHaveLength(2);
     expect(button("Next page").disabled).toBe(true);
-    await click(button("Clear selection"));
+    await click(masterCheckbox());
     expect(host.querySelector(".code-records-count")?.textContent).toBe("12");
+    expect(masterCheckbox().checked).toBe(false);
+    expect([...host.querySelectorAll<HTMLInputElement>('tbody input[type="checkbox"]')].every(input => !input.checked)).toBe(true);
+    await click(button("Previous page")); await click(button("Previous page"));
+    expect([...host.querySelectorAll<HTMLInputElement>('tbody input[type="checkbox"]')].every(input => !input.checked)).toBe(true);
   });
 
   it("collapses, expands, opens fullscreen and restores document scrolling on Escape", async () => {
@@ -83,7 +94,7 @@ describe("Code project and session table controls", () => {
   });
 
   it("cancels deletion, then deletes all selected projects using confirmed scoped requests", async () => {
-    await render(); await click(button("Select all records"));
+    await render(); await click(masterCheckbox());
     vi.mocked(promptModal).mockResolvedValueOnce(null);
     await click(button("Delete selected"));
     expect(api).not.toHaveBeenCalled();
@@ -100,7 +111,7 @@ describe("Code project and session table controls", () => {
 
   it("retains failed selections and does not report partial erasure as success", async () => {
     api.mockImplementation(async (path: string) => path.endsWith("project-1") ? { status: "partial", verified: false } : { status: "deleted" });
-    await render(projects.slice(0, 3)); await click(button("Select all records"));
+    await render(projects.slice(0, 3)); await click(masterCheckbox());
     vi.mocked(promptModal).mockResolvedValueOnce("delete");
     await click(button("Delete selected"));
     expect(host.querySelector<HTMLInputElement>('input[aria-label="Select Project 1"]')?.checked).toBe(true);
@@ -109,7 +120,7 @@ describe("Code project and session table controls", () => {
   });
 
   it("archives selected projects with each project's own revision", async () => {
-    await render(projects.slice(0, 2)); await click(button("Select all records"));
+    await render(projects.slice(0, 2)); await click(masterCheckbox());
     vi.mocked(promptModal).mockResolvedValueOnce("archive");
     await click(button("Archive selected"));
     expect(api).toHaveBeenNthCalledWith(1, "/companies/company-a/projects/project-0/archive", { method: "POST", body: JSON.stringify({ expectedRevision: 1 }) });
@@ -118,15 +129,30 @@ describe("Code project and session table controls", () => {
 
   it("uses the session erasure endpoint and keeps the project source outside its deletion scope", async () => {
     await act(async () => root.render(<CodeSessionsTable {...common()} items={sessions.slice(0, 2)} projects={projects} onOpen={open} onArchive={archive} />));
-    await click(button("Select all records")); vi.mocked(promptModal).mockResolvedValueOnce("delete");
+    await click(masterCheckbox()); vi.mocked(promptModal).mockResolvedValueOnce("delete");
     await click(button("Delete selected"));
     expect(api).toHaveBeenNthCalledWith(1, "/companies/company-a/code/sessions/session-0/data", { method: "DELETE", body: JSON.stringify({ confirm: true }) });
     expect(api).toHaveBeenCalledTimes(2);
     expect(host.querySelector("button")?.textContent).toBe("");
   });
 
+  it("selects and clears every session across pages using one master checkbox", async () => {
+    await act(async () => root.render(<CodeSessionsTable {...common()} items={sessions} projects={projects} onOpen={open} onArchive={archive} />));
+    expect(host.querySelectorAll('.code-records-toolbar input[type="checkbox"]')).toHaveLength(1);
+    expect(host.querySelector('thead input[type="checkbox"]')).toBeNull();
+    await click(masterCheckbox());
+    expect(host.querySelector(".code-records-count")?.textContent).toBe("12 / 12");
+    await click(button("Next page"));
+    expect([...host.querySelectorAll<HTMLInputElement>('tbody input[type="checkbox"]')].every(input => input.checked)).toBe(true);
+    await click(masterCheckbox());
+    expect(host.querySelector(".code-records-count")?.textContent).toBe("12");
+    await click(button("Previous page"));
+    expect([...host.querySelectorAll<HTMLInputElement>('tbody input[type="checkbox"]')].every(input => !input.checked)).toBe(true);
+    expect(api).not.toHaveBeenCalled();
+  });
+
   it("honors read-only mode and never sends mutation requests", async () => {
-    await render(projects, true); await click(button("Select all records"));
+    await render(projects, true); await click(masterCheckbox());
     expect(button("Delete selected").disabled).toBe(true);
     expect(button("Archive selected").disabled).toBe(true);
     expect(api).not.toHaveBeenCalled();

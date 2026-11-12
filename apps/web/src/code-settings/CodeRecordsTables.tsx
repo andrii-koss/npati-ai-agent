@@ -16,7 +16,7 @@ export function CodeProjectsTable(props: CommonProps & {
   const { isUk, readOnly, onDetails, onDetect, onSessions, onArchive } = props;
   return <CodeRecordsPanel {...props} kind="projects">{state => <table className="automations-table">
     <thead><tr>
-      <th className="code-record-select"><RecordSelection label={isUk ? "Вибрати записи на сторінці" : "Select page records"} checked={state.allVisible} mixed={state.someVisible && !state.allVisible} disabled={state.busy} onChange={state.togglePage} /></th>
+      <th className="code-record-select" aria-label={isUk ? "Вибір записів" : "Record selection"} />
       <th>{isUk ? "Проєкт" : "Project"}</th><th>{isUk ? "Репозиторій" : "Repository"}</th><th>Toolchain</th>
       <th>{isUk ? "Класифікація" : "Classification"}</th><th>Retention</th><th>{isUk ? "Оновлено" : "Updated"}</th><th aria-label={isUk ? "Дії" : "Actions"} />
     </tr></thead>
@@ -46,7 +46,7 @@ export function CodeSessionsTable(props: CommonProps & {
   const { isUk, readOnly, projects, onOpen, onArchive } = props;
   return <CodeRecordsPanel {...props} kind="sessions">{state => <table className="automations-table">
     <thead><tr>
-      <th className="code-record-select"><RecordSelection label={isUk ? "Вибрати записи на сторінці" : "Select page records"} checked={state.allVisible} mixed={state.someVisible && !state.allVisible} disabled={state.busy} onChange={state.togglePage} /></th>
+      <th className="code-record-select" aria-label={isUk ? "Вибір записів" : "Record selection"} />
       <th>{isUk ? "Сесія" : "Session"}</th><th>{isUk ? "Проєкт" : "Project"}</th><th>{isUk ? "Режим" : "Mode"}</th><th>{isUk ? "Статус" : "Status"}</th>
       <th>{isUk ? "Класифікація" : "Classification"}</th><th>{isUk ? "Створено" : "Created"}</th><th aria-label={isUk ? "Дії" : "Actions"} />
     </tr></thead>
