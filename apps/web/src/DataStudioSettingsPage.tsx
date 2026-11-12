@@ -15,7 +15,6 @@ import {
   type AppliedMigration,
   type BackendEnvironment,
   type BackendSummary,
-  type CompanySummary,
   type DatabaseFilter,
   type Feedback,
   type Overview,

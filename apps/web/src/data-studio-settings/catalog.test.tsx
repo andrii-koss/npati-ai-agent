@@ -77,6 +77,35 @@ const click = async (button: HTMLElement) => act(async () => button.click());
 const startScroll = async () => act(async () => { vi.stubGlobal("scrollY", 300); window.dispatchEvent(new Event("scroll")); });
 const intersect = () => [...observers].reverse().find(observer => observer.active)!.callback([{ isIntersecting: true }]);
 
+it("shows complete statistics and rows together without temporary zeros or an empty-list flash", async () => {
+  let finish!: () => void;
+  const pending = new Promise<void>(resolve => { finish = resolve; });
+  vi.mocked(fetch).mockImplementationOnce(async (input, init) => { await pending; return fetcher(input, init); });
+  const frames: Array<{ busy: boolean; values: string[]; company: string; count: number; skeleton: boolean }> = [];
+  const capture = () => {
+    const stats = host.querySelector(".ds-catalog-stats")!;
+    frames.push({ busy: stats.getAttribute("aria-busy") === "true", values: [...stats.querySelectorAll("strong")].map(el => el.textContent!),
+      company: stats.querySelector("small")!.textContent!, count: rows().length, skeleton: Boolean(host.querySelector("tbody tr[style]")) });
+  };
+  const renderTracked = () => act(async () => root.render(<React.Profiler id="catalog" onRender={capture}><MemoryRouter><DataStudioSettingsPage /></MemoryRouter></React.Profiler>));
+  await renderTracked();
+  expect(frames.length).toBeGreaterThan(0);
+  expect(frames.every(frame => frame.busy && frame.values.every(value => value === "—"))).toBe(true);
+  expect(rows()).toHaveLength(10);
+  await act(async () => finish());
+  const ready = frames.filter(frame => !frame.busy);
+  expect(ready.length).toBeGreaterThan(0);
+  for (const frame of ready) {
+    expect(frame.values).toEqual(["25", "50 / 50", "50", "25"]);
+    expect(frame.company).toBe("across 2 companies"); expect(frame.count).toBe(10); expect(frame.skeleton).toBe(false);
+  }
+  await act(async () => root.unmount()); root = createRoot(host); frames.length = 0;
+  await renderTracked();
+  expect(frames.length).toBeGreaterThan(0);
+  expect(frames.every(frame => !frame.busy && frame.count === 10 && !frame.skeleton)).toBe(true);
+  expect(urls()).toHaveLength(1);
+});
+
 it("loads exactly ten newest databases with one request, then appends pages after scrolling without duplicate requests", async () => {
   await render(); expect(rows()).toHaveLength(10); expect(rows()[0]?.textContent).toContain("Database 0");
   expect(urls()).toHaveLength(1); expect(urls()[0]).toContain("/api/data-studio/catalog?");
