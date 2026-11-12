@@ -150,6 +150,36 @@ it("searches all databases rather than only the first page and sends server comp
   expect(urls().at(-1)).toContain("status=attention"); expect(rows()).toHaveLength(1);
 });
 
+it("keeps company summary cards unchanged through pending, rapid, and cached status-tab changes", async () => {
+  const frames: string[] = [];
+  let track = false;
+  const capture = () => { if (track) frames.push(host.querySelector(".ds-catalog-stats")!.outerHTML); };
+  await act(async () => root.render(<React.Profiler id="tabs" onRender={capture}><MemoryRouter initialEntries={["/settings/data-studio"]}><DataStudioSettingsPage /></MemoryRouter></React.Profiler>));
+  const original = host.querySelector(".ds-catalog-stats")!.outerHTML;
+  const pending: Array<() => void> = [];
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    await new Promise<void>(resolve => pending.push(resolve));
+    return fetcher(input, init);
+  });
+  track = true;
+  const tab = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(button => button.textContent?.startsWith(label))!;
+  await click(tab("Ready"));
+  expect(pending).toHaveLength(1);
+  expect(host.querySelector(".ds-catalog-stats")!.getAttribute("aria-busy")).toBe("false");
+  expect(host.querySelector('select[aria-label="Company"]')).not.toBeNull();
+  await click(tab("Needs attention"));
+  expect(pending).toHaveLength(2);
+  await act(async () => pending[0]!());
+  expect(tab("Needs attention").getAttribute("aria-selected")).toBe("true");
+  await act(async () => pending[1]!());
+  expect(rows()).toHaveLength(1);
+  await click(tab("All"));
+  expect(rows()).toHaveLength(10);
+  expect(pending).toHaveLength(2);
+  expect(frames.length).toBeGreaterThan(0);
+  expect(frames.every(frame => frame === original)).toBe(true);
+});
+
 it("loads workspace and schema only on opening a database, uses its own company, and returns real bulk row counts", async () => {
   await render(); await click(host.querySelectorAll<HTMLButtonElement>(".ds-name-link")[1]!);
   expect(host.querySelector('[data-testid="url"]')?.textContent).toBe("/settings/data-studio/Database%201");

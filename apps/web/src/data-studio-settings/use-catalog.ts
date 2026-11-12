@@ -16,7 +16,11 @@ export function useDataStudioCatalog(company: string, search: string, status: Da
   useEffect(() => { const timer = setTimeout(() => setDebouncedSearch(search.trim()), 250); return () => clearTimeout(timer); }, [search]);
   const query = new URLSearchParams({ limit: "10", status, ...(company !== "all" ? { companyId: company } : {}), ...(debouncedSearch ? { search: debouncedSearch } : {}) }).toString();
   const key = JSON.stringify([token, query]);
+  // Summary cards cover the company, regardless of the list's search/status filter.
+  const summaryScope = JSON.stringify([token, company]);
   const [state, setState] = useState<{ key: string; data: DataStudioCatalog | null }>({ key, data: cache.get(key)?.value ?? null });
+  const [summaryState, setSummaryState] = useState<{ scope: string; data: Pick<DataStudioCatalog, "companies" | "stats"> } | null>(() =>
+    state.data ? { scope: summaryScope, data: { companies: state.data.companies, stats: state.data.stats } } : null);
   const [loading, setLoading] = useState(() => !cache.has(key) || Date.now() - cache.get(key)!.at >= 30_000), [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<unknown>(null), [moreError, setMoreError] = useState<unknown>(null);
   const epoch = useRef(0), locked = useRef(false), previousReload = useRef(reload);
@@ -25,7 +29,8 @@ export function useDataStudioCatalog(company: string, search: string, status: Da
     cache.set(key, { value, at: Date.now() });
     if (cache.size > 20) cache.delete(cache.keys().next().value!);
     current.current = { key, data: value }; setState(current.current);
-  }, [key]);
+    setSummaryState({ scope: summaryScope, data: { companies: value.companies, stats: value.stats } });
+  }, [key, summaryScope]);
   const request = useCallback((cursor?: string, limit = 10) => {
     const params = new URLSearchParams(query); params.set("limit", String(limit)); if (cursor) params.set("cursor", cursor);
     const url = `/data-studio/catalog?${params}`;
@@ -87,5 +92,6 @@ export function useDataStudioCatalog(company: string, search: string, status: Da
     finally { if (version === epoch.current) { locked.current = false; setLoadingMore(false); } }
   }, [key, loading, request, remember]);
   const data = state.key === key ? state.data : null;
-  return { data, loading, loadingMore, error, moreError, loadMore, queryKey: key, settlingSearch: search.trim() !== debouncedSearch };
+  const summary = data ?? (summaryState?.scope === summaryScope ? summaryState.data : null);
+  return { data, summary, loading: loading || state.key !== key, loadingMore, error, moreError, loadMore, queryKey: key, settlingSearch: search.trim() !== debouncedSearch };
 }

@@ -76,7 +76,7 @@ export function DataStudioSettingsPage() {
   const [editTable, setEditTable] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const catalog = useDataStudioCatalog(companyFilter, searchQuery, databaseFilter, reloadToken);
-  const companies = catalog.data?.companies ?? [];
+  const companies = catalog.summary?.companies ?? [];
   const backendsLoading = catalog.loading || catalog.settlingSearch;
   const backendsError = catalog.error ? { message: catalog.error instanceof Error ? catalog.error.message : "Could not load databases", code: errorCode(catalog.error) } : null;
 
@@ -525,7 +525,7 @@ export function DataStudioSettingsPage() {
   const catalogEnvironments = useMemo(() => Object.fromEntries((catalog.data?.items ?? []).map(item => [item.id, item.environments])), [catalog.data]);
   const catalogTableCounts = useMemo(() => Object.fromEntries((catalog.data?.items ?? []).map(item => [item.id, item.tableCount])), [catalog.data]);
   const companyProjects = projects;
-  const stats = catalog.data?.stats ?? summarizeDatabaseStats(companyBackends, companyProjects, environments, tableCounts);
+  const stats = catalog.summary?.stats ?? summarizeDatabaseStats(companyBackends, companyProjects, environments, tableCounts);
   const filteredBackends = companyBackends;
 
   const lockRemaining = useMemo(() => {
@@ -669,9 +669,9 @@ export function DataStudioSettingsPage() {
       backendsError={backendsError}
       companies={companies}
       stats={stats}
-      statsLoading={!catalog.data}
+      statsLoading={!catalog.summary}
       totalMatches={catalog.data?.pagination.total ?? 0}
-      totalProjects={catalog.data?.stats.totalProjects}
+      totalProjects={catalog.summary?.stats.totalProjects}
       hasMore={Boolean(catalog.data?.pagination.nextCursor)}
       loadingMore={catalog.loadingMore}
       moreError={catalog.moreError instanceof Error ? catalog.moreError.message : catalog.moreError ? "Could not load databases" : null}
