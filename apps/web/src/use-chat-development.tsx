@@ -93,7 +93,7 @@ export function useChatDevelopment(options: {
     const shared = firstRead.current && conversationId && isChatPage() && !queryProjectId ? chatOpenData(conversationId) : null;
     const opened = shared ? await shared.catch(() => null) : null;
     firstRead.current = false;
-    const data = opened ? { processes: opened.processes }
+    const data = opened && !opened.processesDeferred ? { processes: opened.processes }
       : await api<{ processes: DevelopmentProcess[] }>(queryProjectId && !conversationId ? `/chat/development/processes?projectId=${encodeURIComponent(queryProjectId)}` : `/chat/development/processes?conversationId=${encodeURIComponent(conversationId ?? "")}`);
     if (alive.current && generation === snapshotGeneration.current) setProcesses(data.processes);
     } finally { if (alive.current) setLoadedFor(readConversation); } };

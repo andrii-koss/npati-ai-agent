@@ -11,25 +11,28 @@ export interface ChatOpenData {
   company: { id: string; name: string } | null;
   chats: { items: ChatOpenChat[]; more: boolean };
   processes: DevelopmentProcess[];
+  processesDeferred?: boolean;
 }
 
 const SHARE_MS = 5_000;
-let shared: { key: string; at: number; promise: Promise<ChatOpenData> } | null = null;
+let shared: { key: string; token: string | null; companyId: string; pending: boolean; at: number; promise: Promise<ChatOpenData> } | null = null;
 // After the page's first open request, switching chats reads only that chat; the page already has the rest.
 let pageOpened = false;
+let pageOpenedFor: string | null | undefined;
+const reusable = () => Boolean(shared && shared.token === getStoredAuthToken() && (shared.pending || Date.now() - shared.at < SHARE_MS));
 
 export function chatPageAlreadyOpened(): boolean {
-  return pageOpened;
+  return pageOpened && pageOpenedFor === getStoredAuthToken();
 }
 
 /** The page's recent open request when it was made for this conversation: its data is reused, not fetched again. */
 export function sharedChatOpen(conversationId: string | null = currentChatConversationId()): Promise<ChatOpenData> | null {
-  return shared && Date.now() - shared.at < SHARE_MS && shared.key.startsWith(`${conversationId ?? ""}|`) ? shared.promise : null;
+  return shared && reusable() && shared.companyId === readActiveCompanyId() && shared.key.startsWith(`${conversationId ?? ""}|`) ? shared.promise : null;
 }
 
 /** The open request's data for this conversation: shared when recent, fetched on the page's first open, else none. */
 export function chatOpenData(conversationId: string | null = currentChatConversationId()): Promise<ChatOpenData> | null {
-  return sharedChatOpen(conversationId) ?? (pageOpened ? null : chatOpen(conversationId));
+  return sharedChatOpen(conversationId) ?? (chatPageAlreadyOpened() ? null : chatOpen(conversationId));
 }
 
 /** The conversation of the current chat page, from /c/:conversationId. */
@@ -47,12 +50,13 @@ export function isChatPage(pathname = window.location.pathname): boolean {
  */
 export function chatOpen(conversationId = currentChatConversationId()): Promise<ChatOpenData> {
   const companyId = readActiveCompanyId();
+  const token = getStoredAuthToken();
   const key = `${conversationId ?? ""}|${companyId}`;
-  if (shared && shared.key === key && Date.now() - shared.at < SHARE_MS) return shared.promise;
+  if (shared && shared.key === key && reusable()) return shared.promise;
   const query = new URLSearchParams();
+  query.set("deferProcesses", "1");
   if (conversationId) query.set("conversationId", conversationId);
   if (companyId) query.set("companyId", companyId);
-  const token = getStoredAuthToken();
   // Fetched directly: the workspace provider itself reads this request, so it cannot depend on that module's helper.
   const promise = fetch(`/api/chat/open${query.size ? `?${query}` : ""}`, { cache: "no-store", headers: token ? { authorization: `Bearer ${token}` } : {} })
     .then((response) => {
@@ -60,15 +64,18 @@ export function chatOpen(conversationId = currentChatConversationId()): Promise<
       if (!response.ok) throw new Error(`Request failed with HTTP ${response.status}`);
       return response.json() as Promise<ChatOpenData>;
     });
-  shared = { key, at: Date.now(), promise };
-  promise.then(() => { pageOpened = true; }, () => {});
+  shared = { key, token, companyId, pending: true, at: Date.now(), promise };
+  promise.then(() => {
+    if (shared?.promise === promise) { shared.pending = false; shared.at = Date.now(); }
+    if (getStoredAuthToken() === token) { pageOpened = true; pageOpenedFor = token; }
+  }, () => {});
   promise.catch(() => { if (shared?.promise === promise) shared = null; });
   return promise;
 }
 
 /** A shared open request still in flight or just answered, if this page made one. */
 export function recentChatOpen(): Promise<ChatOpenData> | null {
-  return shared && Date.now() - shared.at < SHARE_MS ? shared.promise : null;
+  return shared && reusable() ? shared.promise : null;
 }
 
 export function forgetChatOpen(): void {

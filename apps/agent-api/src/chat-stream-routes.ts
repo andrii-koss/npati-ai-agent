@@ -43,6 +43,7 @@ import { AuthContext, CodeSession, WorkspaceAccessError, WorkspaceNotFoundError 
 import type { CodeRunCancellationRegistry } from "./code-run-cancellation";
 import type { CodeSessionRunExecutor } from "./code-session-run-executor";
 import { codeModeDecision, readIntentHistory } from "./chat-project-intent";
+import { chatPreflightReads } from "./chat-preflight-reads";
 export type { ChatStreamRouteDeps } from "./chat-stream-route-types";
 import type { ChatStreamRouteDeps } from "./chat-stream-route-types";
 export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamRouteDeps): void {
@@ -105,10 +106,11 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         await send("progress", { type: "conversation_started", conversationId: created.id });
         return created;
       };
+      const preflightStore = chatPreflightReads(workspaceStore);
       const conversationCard = request.body.conversationId && !memoryPolicy.noMemoryActive
-        ? await getLatestChatProjectCard(workspaceStore, auth, request.body.conversationId, requestedContext.businessId ?? undefined) : null;
+        ? await getLatestChatProjectCard(preflightStore, auth, request.body.conversationId, requestedContext.businessId ?? undefined) : null;
       const confirmedContext = request.body.conversationId && !memoryPolicy.noMemoryActive
-        ? await readChatActiveContext(workspaceStore, auth, request.body.conversationId, requestedContext.businessId) : null;
+        ? await readChatActiveContext(preflightStore, auth, request.body.conversationId, requestedContext.businessId) : null;
       if (!request.body.projectId && !request.body.companyId && !request.body.businessId && confirmedContext) Object.assign(requestedContext, confirmedContext.context);
       if (!confirmedContext && !requestedContext.projectId && !requestedContext.companyId && !requestedContext.businessId && conversationCard?.companyId) {
         requestedContext.projectId = conversationCard.projectId ?? conversationCard.id;
@@ -124,7 +126,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
             : "Choose or create a code project in Npati Code settings, open its chat, and retry your request." } });
       }
       const history = !memoryPolicy.noMemoryActive
-        ? await readIntentHistory(workspaceStore, auth, request.body.conversationId, requestedContext.businessId) : [];
+        ? await readIntentHistory(preflightStore, auth, request.body.conversationId, requestedContext.businessId) : [];
       // In Code mode the selected project's operation comes from the deterministic router, and anything it reads as
       // conversation is an edit of that project; record modules stay out of the prompt (no record route).
       const codeMode = request.body.mode === "code" && Boolean(requestedContext.projectId);

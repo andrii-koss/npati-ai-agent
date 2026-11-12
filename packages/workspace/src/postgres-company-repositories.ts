@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import { readOwnedNeutralConversation } from "./postgres-chat-pages";
 import { assertCompany, ensureIdentity, getBusiness } from "./postgres-store-support";
 import { randomUUID } from "node:crypto";
 import type { AuditAnchor, AuditChainState, AuditChainVerification, AuditEntry, AuditEntryInput, AuthContext, Company, CompanyAgent, CompanyAgentEdge, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunEvent, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyInvite, CompanyInviteInput, CompanyMember, Conversation, ConversationMessage, Goal, GoalInput, MemoryInput, MemoryItem, RemoveCompanyMemberInput, UpdateCompanyMemberRoleInput } from "./types";
@@ -223,18 +224,21 @@ export async function getNeutralConversation(pool: Pool, context: AuthContext, c
   }
 
 export async function updateNeutralConversation(pool: Pool, context: AuthContext, conversationId: string, title: string) {
-    await getNeutralConversation(pool, context, conversationId);
+    await ensureIdentity(pool, context);
+    await readOwnedNeutralConversation(pool, context, conversationId);
     const result = await pool.query<Conversation>(`UPDATE conversations SET title=$1,updated_at=now() WHERE id=$2 RETURNING ${conversationColumns}`, [title.trim().slice(0, 120) || "New conversation", conversationId]);
     return result.rows[0]!;
   }
 
 export async function deleteNeutralConversation(pool: Pool, context: AuthContext, conversationId: string) {
-    await getNeutralConversation(pool, context, conversationId);
+    await ensureIdentity(pool, context);
+    await readOwnedNeutralConversation(pool, context, conversationId);
     return Boolean((await pool.query("DELETE FROM conversations WHERE id=$1", [conversationId])).rowCount);
   }
 
 export async function appendNeutralMessage(pool: Pool, context: AuthContext, conversationId: string, role: ConversationMessage["role"], content: string) {
-    await getNeutralConversation(pool, context, conversationId);
+    await ensureIdentity(pool, context);
+    await readOwnedNeutralConversation(pool, context, conversationId);
     const result = await pool.query<ConversationMessage>(`INSERT INTO messages(id,conversation_id,role,content) VALUES ($1,$2,$3,$4) RETURNING id,conversation_id AS "conversationId",role,content,created_at AS "createdAt"`, [randomUUID(), conversationId, role, content]);
     await pool.query("UPDATE conversations SET updated_at=now() WHERE id=$1", [conversationId]);
     return result.rows[0]!;

@@ -17,6 +17,7 @@ const pageSize = (value: unknown, fallback: number) => Math.min(Math.max(Number.
 
 /** Neutral and Business conversations of the user, newest first, as one sidebar page. */
 async function sidebarPage(store: WorkspaceStore, context: AuthContext, offset: number, limit: number) {
+  if (store.listChatSidebarPage) return store.listChatSidebarPage(context, offset, limit);
   const [neutral, businesses] = await Promise.all([store.listNeutralConversations(context), store.listUserBusinesses(context)]);
   const business = (await Promise.all(businesses.map(async (item) => (await store.listConversations(context, item.id))
     .map((conversation) => ({ ...conversation, businessId: item.id, businessName: item.name }))))).flat();
@@ -31,6 +32,11 @@ async function sidebarPage(store: WorkspaceStore, context: AuthContext, offset: 
  * id; a numeric position from older clients is still accepted. An unknown cursor is rejected instead of guessed.
  */
 async function messagePage(store: WorkspaceStore, context: AuthContext, conversationId: string, before: string | undefined, limit: number) {
+  if (store.getNeutralConversationPage) {
+    const page = await store.getNeutralConversationPage(context, conversationId, before, limit);
+    const messages = await getChatMessagesWithProjectCards(store, context, conversationId, page.messages);
+    return { conversation: { conversation: page.conversation, messages: [] }, messages, start: page.earlier, cursor: page.cursor, hasMore: page.hasMore };
+  }
   const conversation = await store.getNeutralConversation(context, conversationId);
   let end = conversation.messages.length;
   if (before !== undefined && before !== "") {
@@ -50,18 +56,19 @@ async function messagePage(store: WorkspaceStore, context: AuthContext, conversa
  * development processes of this conversation (or still running). Earlier messages and chats load on scroll.
  */
 export function registerChatOpenRoutes(app: FastifyInstance, deps: { auth: AuthProvider; store: WorkspaceStore; listProcesses(context: AuthContext, conversationId?: string): Promise<DevelopmentProcess[]> }) {
-  app.get<{ Querystring: { conversationId?: string; companyId?: string; messages?: string; chats?: string } }>("/chat/open", async (request, reply) => {
+  app.get<{ Querystring: { conversationId?: string; companyId?: string; messages?: string; chats?: string; deferProcesses?: string } }>("/chat/open", async (request, reply) => {
     try {
       reply.header("cache-control", "private, no-store");
       const context = await deps.auth.authenticate(request);
       const { conversationId, companyId } = request.query;
+      const deferProcesses = request.query.deferProcesses === "1";
       const [overview, opened, company, chats, processes] = await Promise.all([
         context.permissions.includes("workspace:read") ? deps.store.overview(context) : null,
         // A Business conversation (or one the user cannot read) is simply not a neutral chat: the rest still loads.
         conversationId ? messagePage(deps.store, context, conversationId, undefined, pageSize(request.query.messages, MESSAGE_PAGE)).catch(() => undefined) : undefined,
         companyId ? deps.store.getCompany(context, companyId).then((item) => ({ id: item.id, name: item.name })).catch(() => null) : null,
         sidebarPage(deps.store, context, 0, pageSize(request.query.chats, CHAT_PAGE)),
-        deps.listProcesses(context, conversationId),
+        deferProcesses ? [] as DevelopmentProcess[] : deps.listProcesses(context, conversationId),
       ]);
       const { messages: _all, ...conversation } = opened?.conversation ?? { messages: [] };
       return {
@@ -70,6 +77,7 @@ export function registerChatOpenRoutes(app: FastifyInstance, deps: { auth: AuthP
         company,
         chats,
         processes: processes.filter((process) => chatProcess(process, conversationId)),
+        ...(deferProcesses ? { processesDeferred: true } : {}),
       };
     } catch (error) { return errorReply(reply, error); }
   });

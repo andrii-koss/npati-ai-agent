@@ -680,4 +680,18 @@ export async function runPostgresMigrationsPost086(pool: Pool): Promise<void> {
       } catch (error) { await client.query("ROLLBACK"); throw error; }
       finally { client.release(); }
     }
+
+    const chatPagesMigration = await pool.query("SELECT 1 FROM schema_migrations WHERE version='098_chat_pages'");
+    if (!chatPagesMigration.rowCount) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT pg_advisory_xact_lock(hashtext('098_chat_pages'))");
+        const { runMigration098 } = await import("./migration-098");
+        await runMigration098(client);
+        await client.query("INSERT INTO schema_migrations(version) VALUES ('098_chat_pages') ON CONFLICT DO NOTHING");
+        await client.query("COMMIT");
+      } catch (error) { await client.query("ROLLBACK"); throw error; }
+      finally { client.release(); }
+    }
 }

@@ -426,6 +426,10 @@ export interface WorkspaceStore {
   listNeutralConversations(context: AuthContext): Promise<Conversation[]>;
   createNeutralConversation(context: AuthContext, title: string): Promise<Conversation>;
   getNeutralConversation(context: AuthContext, conversationId: string): Promise<{ conversation: Conversation; messages: ConversationMessage[] }>;
+  getNeutralConversationPage?(context: AuthContext, conversationId: string, before?: string, limit?: number): Promise<{
+    conversation: Conversation; messages: ConversationMessage[]; earlier: number; cursor: string | null; hasMore: boolean;
+  }>;
+  listChatSidebarPage?(context: AuthContext, offset?: number, limit?: number): Promise<{ items: Array<Conversation & { businessName: string }>; more: boolean }>;
   updateNeutralConversation(context: AuthContext, conversationId: string, title: string): Promise<Conversation>;
   deleteNeutralConversation(context: AuthContext, conversationId: string): Promise<boolean>;
   appendNeutralMessage(context: AuthContext, conversationId: string, role: ConversationMessage["role"], content: string): Promise<ConversationMessage>;

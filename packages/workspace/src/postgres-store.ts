@@ -7,6 +7,7 @@ import * as replay from "./postgres-replay-repositories";
 import * as governance from "./postgres-governance-repositories";
 import * as onboarding from "./postgres-onboarding-repositories";
 import * as collab from "./postgres-collaboration-repositories";
+import { readNeutralMessagePage, readChatSidebarPage } from "./postgres-chat-pages";
 import { PostgresSessionRepositories } from "./postgres-session-repositories";
 import type {
   AnswerCodeUserQuestionInput,
@@ -324,6 +325,15 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   async listNeutralConversations(context: AuthContext) { return collab.listNeutralConversations(this.pool, context); }
   async createNeutralConversation(context: AuthContext, title: string) { return collab.createNeutralConversation(this.pool, context, title); }
   async getNeutralConversation(context: AuthContext, conversationId: string) { return collab.getNeutralConversation(this.pool, context, conversationId); }
+  async getNeutralConversationPage(context: AuthContext, conversationId: string, before?: string, limit?: number) {
+    await support.ensureIdentity(this.pool, context);
+    return readNeutralMessagePage(this.pool, context, conversationId, before, limit);
+  }
+  async listChatSidebarPage(context: AuthContext, offset?: number, limit?: number) {
+    await support.ensureIdentity(this.pool, context);
+    await support.assertMember(this.pool, context);
+    return readChatSidebarPage(this.pool, context, offset, limit);
+  }
   async updateNeutralConversation(context: AuthContext, conversationId: string, title: string) { return collab.updateNeutralConversation(this.pool, context, conversationId, title); }
   async deleteNeutralConversation(context: AuthContext, conversationId: string) { return collab.deleteNeutralConversation(this.pool, context, conversationId); }
   async appendNeutralMessage(context: AuthContext, conversationId: string, role: ConversationMessage["role"], content: string) { return collab.appendNeutralMessage(this.pool, context, conversationId, role, content); }

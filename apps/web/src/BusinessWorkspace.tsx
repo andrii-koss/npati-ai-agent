@@ -283,8 +283,6 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     markComplete,
     enqueueProgress,
     resetProgress,
-    progressCompleteRef,
-    progressEventsRef,
   } = useChatResearchProgress(flushDeltasRef);
   const streamControllerRef=useRef<{controller:AbortController;streamId:string;stopRequested?:boolean}|null>(null);
   const thinking = useChatThinking({
@@ -569,8 +567,6 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
     const controller = new AbortController(), streamId = crypto.randomUUID();
     streamControllerRef.current = { controller, streamId };
 
-    const deltaBuffer: string[] = [];
-
     // Streamed text is applied at most once per frame: many small deltas would otherwise re-render the list each.
     let deltaFrame = 0;
     const appendDelta = (chunk: string) => {
@@ -599,16 +595,6 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       });
       // Do NOT scroll to bottom! Keep user reading from the top!
     };
-
-    const flushDeltas = () => {
-      flushDeltasRef.current = null;
-      if (deltaBuffer.length > 0) {
-        const buffered = deltaBuffer.join("");
-        deltaBuffer.length = 0;
-        appendDelta(buffered);
-      }
-    };
-    flushDeltasRef.current = flushDeltas;
 
     const activeCompanyForRequest = (!createsProject ? (development.activeProject ?? development.project)?.companyId : null) ?? (!createsProject && selectedProject?.conversationId === selected ? selectedProject.companyId : null) ?? companyId ?? readActiveCompanyId();
     let activeProjectId: string | undefined;
@@ -645,20 +631,10 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         onCodeSession: (session) => { if (streamControllerRef.current?.controller === controller && selectedChatRef.current === conversationAtSubmit) codeInbox.accept(session, conversationAtSubmit); },
         onCodeInbox: (sessionId) => { if (streamControllerRef.current?.controller === controller) codeInbox.refresh(sessionId); },
         onConversation: (id) => { startedConversationId = id; },
-        onDelta: (delta) => {
-          if (!progressCompleteRef.current && progressEventsRef.current.some((event) => !event.type.startsWith("final_generation"))) {
-            deltaBuffer.push(delta);
-            return;
-          }
-          if (deltaBuffer.length > 0) {
-            flushDeltas();
-          }
-          appendDelta(delta);
-        },
+        onDelta: appendDelta,
       });
       const finalMutationTarget = mutationTargets.at(-1);
       if (finalMutationTarget) enqueueProgress({ type: "action_completed", ...finalMutationTarget, timestamp: new Date().toISOString() });
-      flushDeltas();
       settleDelta();
       setReplyMeta(result);
       const cleanedMessage = stripInternalChatActions(result.message ?? "").trim();
@@ -722,7 +698,6 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       }
       markComplete();
     } catch (reason) {
-      flushDeltas();
       settleDelta();
       const typed = reason as Error & { code?: string };
       if (typed.message?.includes("Project not found") || (typed as any).code === "WORKSPACE_NOT_FOUND" || (typed as any).status === 404) {
@@ -766,7 +741,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
         restoreDraft(sentAttachments);
       }
     } finally {
-      flushDeltas();
+      settleDelta();
       if (streamControllerRef.current?.controller === controller) streamControllerRef.current = null;
       setSending(false);
       chatSubmissionBusy.current = false;
@@ -784,11 +759,6 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       event.currentTarget.form?.requestSubmit();
     }
   }
-  // A chat opened from history waits for its steps, so text and steps appear together. Work started here is never held.
-  const startedHereRef = useRef(false);
-  if (sending || activeTurn || development.isActive) startedHereRef.current = true;
-  const holdHistory = Boolean(selected) && !development.processesReady && !startedHereRef.current;
-  useEffect(() => { if (!holdHistory && selected && !startedHereRef.current) window.requestAnimationFrame(() => scrollToLatestMessageStart("auto")); }, [holdHistory]);
   const displayMessages = mergeConversationMessages(messages,development.project?.conversationMessages);
   rowStateRef.current = { displayMessages, activeTurn };
   const timeline = chatTimeline(displayMessages, development.project?.progress, selected, development.project);
@@ -816,7 +786,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const runEndedAt = Math.max(0, ...runActivity.map(item => (Date.parse(item.at) || 0) + (item.durationMs ?? 0)));
   const latestReplyAt = Date.parse(displayMessages.at(-1)?.createdAt ?? "") || 0;
   const runTotal = runEndedAt && Math.abs(latestReplyAt - runEndedAt) < 120_000 ? processDuration(runActivity) : undefined;
-  const showFallbackCard = !holdHistory && !hasTimelineCard && Boolean(fallbackCard);
+  const showFallbackCard = !hasTimelineCard && Boolean(fallbackCard);
   return (
     <ChatPreviewOpenContext.Provider value={openPreviews}>
     <ChatPreviewPanelProvider busy={agentWorking} conversationId={selected}>
@@ -838,7 +808,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
               <p>{business ? t("chat.businessEmptySubtitle", { name: business.name }) : t("chat.emptySubtitle")}</p>
             </div>
           )}
-          {(holdHistory ? [] : timeline).map(entry => {
+          {timeline.map(entry => {
             if (entry.kind === "activity") return <ChatDevelopmentProgress key={"activity:" + entry.item.id} process={development.project} items={entry.run?.items ?? [entry.item]} run={entry.run} animatePending={!thinking.visible} />;
             const { message, index } = entry;
             if (development.hideMessage(displayMessages, index)) return null;
