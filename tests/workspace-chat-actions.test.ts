@@ -55,7 +55,8 @@ describe("workspace resources from chat", () => {
     expect(calls).toEqual([]);
     const result = await WorkspaceChatActions.extractAndExecute(alice, directive({ action: "activity.run", companyId: company.id, projectId: project.id, activity }), deps, "owned-review");
     expect(result.companyRunId).toBeTruthy();
-    expect(calls).toEqual([{ task: activity.task, mode: "pipeline", projectId: project.id }]);
+    // The run also receives the chat it was started from, so the agents see what the task refers to (V6 D03-06).
+    expect(calls).toEqual([{ task: activity.task, mode: "pipeline", projectId: project.id, conversationId: "owned-review" }]);
   });
   it("validates the explicit Business before generating one persisted content item", async () => {
     const store = new InMemoryWorkspaceStore();

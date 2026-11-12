@@ -18,8 +18,17 @@ describe("D102: Business Profile reads never claim stored facts are missing", ()
   const f = await fixture();
   const result = await executeChatEntityRead(f.store, auth, f.resolved, { field: "profile", entityType: "business" }, prompt);
   expect(result?.entityRead).toMatchObject({ entityType: "business", entityId: f.business.id, field: "profile", source: "workspace_store" });
-  expect(result?.message).toContain("Market: Kyiv"); expect(result?.message).toContain("Audience: famílias locais e pequenos escritórios");
+  expect(result?.message).toContain("Markt: Kyiv"); expect(result?.message).toContain("Zielgruppe: famílias locais e pequenos escritórios");
   expect(result?.message).not.toContain("FOREIGN_AUDIENCE"); expect(result?.message).not.toContain("No stored value");
+ });
+ // Live V6 step 03: "яка ніша у бізнес-профілі V6TEST_Flowers?" got English labels and no niche.
+ it("answers a profile question with every filled field, niche included, labelled in the user's language", async () => {
+  const f = await fixture();
+  await f.store.updateBusiness(auth, f.business.id, { niche: "Букети V6TEST_UI", industry: "Retail" });
+  const result = await executeChatEntityRead(f.store, auth, f.resolved, { field: "profile", entityType: "business" }, "яка ніша у бізнес-профілі \"Profile Business\"? одним рядком");
+  expect(result?.message).toContain("Ніша: Букети V6TEST_UI");
+  expect(result?.message).toContain("Галузь: Retail");
+  expect(result?.message).not.toMatch(/\b(?:Stage|Market|Name):/u);
  });
  it("falls through to the full chat path when a single empty Business field was chosen", async () => {
   const f = await fixture();

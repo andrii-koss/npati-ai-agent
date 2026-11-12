@@ -31,6 +31,7 @@ import { readChatActiveContext, chatEntityReferencesPrompt } from "./project-cha
 import type { ChatOrchestrationDeps } from "./chat-orchestration";
 import type { CoreChatRoute } from "./chat-project-intent";
 import { coreRouteOwns } from "./chat-core-routing";
+import { linkTurnCompanyAndBusiness } from "./chat-business-company-link";
 import { defaultSkillRegistry } from "@npati/skills";
 
 export interface ChatTurnDeps {
@@ -580,9 +581,11 @@ export function createChatTurn(deps: ChatTurnDeps) {
             nativeCompanyCleanText = typeof item.cleanText === "string" ? item.cleanText : "";
           }
         }
+        const linkedCompanyName = await linkTurnCompanyAndBusiness(workspaceStore, auth, loop.metadata, nativeCompanyAction);
         const businessSummary = summarizeBusinessProfileChat(loop.metadata, activeConversationLanguage, plan);
         if (businessSummary) {
-          nativeBusinessMessage = businessSummary.message;
+          // A company created in the same turn is part of the answer: its card comes first, then the linked profile.
+          nativeBusinessMessage = linkedCompanyName && nativeCompanyCleanText ? nativeCompanyCleanText + "\n\n" + businessSummary.message : businessSummary.message;
           nativeBusinessAction = { action: businessSummary.createdThisTurn ? "create" : businessSummary.outcome.action, business: await workspaceStore.getUserBusiness(auth, businessSummary.outcome.businessId), businessId: businessSummary.outcome.businessId };
           content = nativeBusinessMessage;
         }

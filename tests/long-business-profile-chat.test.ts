@@ -110,6 +110,29 @@ describe("long Business Profile production chat path", () => {
       expect((await store.getCompany(auth, selected.id)).businessId).toBe(business!.id);
     } finally { await app.close(); }
   });
+  it("links a Business Profile to the company the same request creates, not to the selected one (V6-018)", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const selected = await store.createCompany(auth, { name: "V6 Selected Empty" }, "v6-selected-empty");
+    let step = 0;
+    const ai = engine(async (request) => {
+      if (request.messages.at(-1)?.role === "tool" && step >= 2) return { content: "Готово." };
+      step += 1;
+      return step === 1
+        ? { content: "", toolCalls: [{ id: "company", type: "function", function: { name: "npati_company_action", arguments: JSON.stringify({ action: "create", fields: { name: "V6TEST_Bakery", industry: "Пекарня" } }) } }] }
+        : { content: "", toolCalls: [toolCall("profile", { action: "create", profile: { name: "V6TEST_Bakery", industry: "Пекарня", description: "Пекарня в Києві" } })] };
+    });
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat/stream", payload: { message: "Створи компанію V6TEST_Bakery і заповни короткий бізнес-профіль: пекарня в Києві. Агентів не створюй", contextType: "company", companyId: selected.id } });
+      expect(response.statusCode).toBe(200);
+      const companies = (await store.listCompanies(auth)).items;
+      const bakery = companies.find((company) => company.name === "V6TEST_Bakery");
+      const [business] = await store.listUserBusinesses(auth);
+      expect(bakery?.businessId).toBe(business!.id);
+      expect((await store.getCompany(auth, selected.id)).businessId).toBeFalsy();
+      expect(response.body).toContain("Прив’язано до компанії");
+    } finally { await app.close(); }
+  });
   it("adds a goal to the business from conversation context without creating another business", async () => {
     const store = new InMemoryWorkspaceStore();
     let step = 0;

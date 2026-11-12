@@ -444,6 +444,56 @@ function agentNamedInRequest(agents: CompanyAgent[], request: string): CompanyAg
   return named.every((agent) => agent === longest || longest.name.toLocaleLowerCase().includes(agent.name.toLocaleLowerCase())) ? longest : undefined;
 }
 
+/** A change names an agent several agents share; nothing is changed until the user says which one. */
+class AmbiguousAgentError extends Error {
+  constructor(readonly agents: CompanyAgent[]) {
+    super(`More than one agent is named "${agents[0]!.name}": ${agents.map((agent) => `"${agent.role || agent.name}" (ID ${agent.id})`).join(", ")}. Nothing was changed. Ask the user which one they mean (by role), then repeat the change with that agent's ID.`);
+  }
+  question(language: string): string {
+    const name = safeMarkdown(this.agents[0]!.name);
+    const roles = this.agents.map((agent) => `«${safeMarkdown(agent.role || agent.name)}»`).join(", ");
+    if (language === "uk") return `У компанії кілька агентів з ім'ям «${name}»: ${roles}. Якого саме змінити? Поки нічого не змінено.`;
+    if (language === "ru") return `В компании несколько агентов с именем «${name}»: ${roles}. Какого именно изменить? Пока ничего не изменено.`;
+    return `More than one agent in this company is named “${name}”: ${roles}. Which one should I change? Nothing has been changed yet.`;
+  }
+}
+
+/** A deletion whose request does not name the agent; nothing is deleted and the user is asked to name it. */
+class UnnamedAgentDeletionError extends Error {
+  constructor(readonly agent: CompanyAgent) {
+    super(`The request does not name agent "${agent.name}", so it was not deleted. Ask the user to name the agent to delete.`);
+  }
+  question(language: string): string {
+    const name = safeMarkdown(this.agent.name);
+    if (language === "uk") return `Агента «${name}» не видалено: у запиті не названо, якого агента видалити. Напишіть, будь ласка, ім'я агента, якого потрібно видалити.`;
+    if (language === "ru") return `Агент «${name}» не удалён: в запросе не указано, какого агента удалить. Напишите, пожалуйста, имя агента, которого нужно удалить.`;
+    return `Agent “${name}” was not deleted: the request does not say which agent to delete. Please name the agent you want to delete.`;
+  }
+}
+
+/** "Додай ще одного агента з таким самим ім'ям": a second agent is wanted, not an update of the one with that name. */
+const ANOTHER_AGENT = /(?:ще\s+(?:одн\p{L}*|друг\p{L}*)|ещ[её]\s+одн\p{L}*|another|one\s+more|second\s+agent|з\s+таким\s+(?:самим|же)\s+ім|с\s+таким\s+же\s+имен|same\s+name|дубл\p{L}*|duplicate)/iu;
+export function requestsAnotherAgent(request: string): boolean {
+  return ANOTHER_AGENT.test(request);
+}
+
+/**
+ * Several agents share the name the request uses ("зміни опис агента QA Tester" with two "QA Tester"): the change is
+ * only safe when the request tells them apart by role or ID. Returns the agents to ask about, or none when it is clear.
+ */
+export function ambiguousNamedAgents(agents: CompanyAgent[], request: string, chosenId?: string | null): CompanyAgent[] {
+  const lower = request.toLocaleLowerCase();
+  const groups = new Map<string, CompanyAgent[]>();
+  for (const agent of agents) if (requestNames(request, agent.name)) groups.set(agent.name.trim().toLocaleLowerCase(), [...(groups.get(agent.name.trim().toLocaleLowerCase()) ?? []), agent]);
+  for (const twins of groups.values()) {
+    if (twins.length < 2) continue;
+    const told = twins.filter((agent) => lower.includes(agent.id.toLocaleLowerCase()) || (agent.role.trim().length > 2 && twins.every((other) => other === agent || other.role.trim().toLocaleLowerCase() !== agent.role.trim().toLocaleLowerCase()) && lower.includes(agent.role.trim().toLocaleLowerCase())));
+    if (told.length === 1 && (!chosenId || told[0]!.id === chosenId)) continue;
+    return twins;
+  }
+  return [];
+}
+
 function findAgent(agents: CompanyAgent[], id?: string | null, name?: string | null, fallbackId?: string): CompanyAgent {
   if (!id && !name && fallbackId) id = fallbackId;
   if (!id && !name && agents.length === 1) return agents[0]!;
@@ -746,7 +796,9 @@ For update, include only fields that should change. To change only agents, use a
       for (const [index, operation] of operations.entries()) {
         const patch = fields(operation.fields, agentFields, "agent") as Partial<CompanyAgentInput>;
         if (operation.action === "create") {
-          const prior = agents.find((item) => item.name.trim().toLocaleLowerCase() === String(patch.name ?? "").trim().toLocaleLowerCase());
+          // The same name normally means a repeated request for that agent; "ще одного з таким самим ім'ям" asks for a second one.
+          const prior = requestsAnotherAgent(options.requestMessage ?? "") ? undefined
+            : agents.find((item) => item.name.trim().toLocaleLowerCase() === String(patch.name ?? "").trim().toLocaleLowerCase());
           const needsUpdate = prior && Object.entries(patch).some(([field, value]) => JSON.stringify((prior as unknown as Record<string, unknown>)[field]) !== JSON.stringify(value));
           const agent = prior
             ? needsUpdate ? await store.updateCompanyAgent(auth, company.id, prior.id, patch, prior.revision) : prior
@@ -760,12 +812,18 @@ For update, include only fields that should change. To change only agents, use a
         } else {
           // The agent the user named wins over an omitted or mismatched target: "rename Marko to Marko SMM" must never
           // rename the main agent because the planner left agentId out.
+          const twins = ambiguousNamedAgents(agents, options.requestMessage ?? "", operation.agentId);
+          if (twins.length) throw new AmbiguousAgentError(twins);
           const named = agentNamedInRequest(agents, options.requestMessage ?? "");
           const implicitAgentId = operation.action === "update" ? named?.id ?? company.mainAgentId : undefined;
           let current = findAgent(agents, operation.agentId, operation.agentName, implicitAgentId);
           if (named && current.id !== named.id && !requestNames(options.requestMessage ?? "", current.name)) current = named;
           if (directive.action === "update" && operations.length === 1) confirmedAgent = { agentId: current.id, agentAction: operation.action };
           if (operation.action === "delete") {
+            // An agent is deleted only when this request names it ("видали агента Price Checker"). "Так, видали" after a
+            // question about another agent must not remove whichever agent the planner picked.
+            const allAgents = /(?:вс[іе]х|усіх|всех|all|every)\s+(?:\p{L}+\s+)?(?:агент\p{L}*|agents?)/iu.test(options.requestMessage ?? "");
+            if (options.requestMessage !== undefined && !allAgents && !requestNames(options.requestMessage ?? "", current.name) && !(options.requestMessage ?? "").includes(current.id)) throw new UnnamedAgentDeletionError(current);
             await store.deleteCompanyAgent(auth, company.id, current.id, current.revision);
             agents = agents.filter((agent) => agent.id !== current.id);
             changed = true;
@@ -802,6 +860,9 @@ For update, include only fields that should change. To change only agents, use a
       if (error instanceof NamedCompanyNotFoundError) {
         const language = options.responseLanguage ?? detectCompanyChatLanguage(options.requestMessage ?? "");
         return { cleanText: namedCompanyNotFoundCopy[language].replace("{name}", safeMarkdown(error.companyName)) };
+      }
+      if (error instanceof AmbiguousAgentError || error instanceof UnnamedAgentDeletionError) {
+        return { cleanText: error.question(options.responseLanguage ?? detectCompanyChatLanguage(options.requestMessage ?? "")) + (changed ? " " + companyChatCopy(options.requestMessage, options.responseLanguage).partial : "") };
       }
       const labels = companyChatCopy(options.requestMessage, options.responseLanguage);
       // A business rule that refused the change (e.g. data backends still owned by the company) is the user's to act on.

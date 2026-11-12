@@ -169,6 +169,13 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
       followBottomRef.current = true;
       window.requestAnimationFrame(() => scrollToBottom("auto"));
     },
+    // The message goes through the ordinary chat next; its own send shows it again, so the development bubble goes.
+    onDeclined: (message) => {
+      setMessages(curr => {
+        const index = curr.map(item => item.id.startsWith("opt-u-") && item.role === "user" && item.content === message).lastIndexOf(true);
+        return index < 0 ? curr : curr.filter((_, position) => position !== index);
+      });
+    },
     busy: sending || inboxSubmitting || codeInbox.active,
     onSession: codeInbox.accept,
     boundSessionId: codeInbox.session?.sessionId

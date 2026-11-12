@@ -10,6 +10,7 @@ import { computeNextCronDate } from "./automation-scheduler";
 import { CompanyAutomationsRepository } from "./automations-repository";
 import { BrowserCredentialsRepository } from "./browser-credentials-repository";
 import { BusinessActionHandler } from "./business-action-handler";
+import { requestCreatesCompany } from "./chat-business-company-link";
 import { BUSINESS_PROFILE_TOOL, executeBusinessProfileDeletion, executeBusinessProfileTool, reconcilePlannedBusinessArgs } from "./business-profile-native";
 import { summarizeBusinessProfileChat } from "./business-profile-response";
 import { ChatAttachmentInput, prepareChatAttachments } from "./chat-attachments";
@@ -530,7 +531,8 @@ ${localized.next}`;
       const outcome = await executeBusinessProfileTool({ store: workspaceStore, auth: input.auth, args, createRequestKey: namesOwnedBusiness ? undefined : input.businessCreateKey, logoAttachments: input.logoAttachments, persistLogo: persistBusinessLogo });
       // "Додай бізнес-профіль" while a company is selected is that company's profile: a new Business is linked to the
       // selected company when it has none yet. A company already linked to another Business keeps its link.
-      const linkedCompany = await linkNewBusinessToSelectedCompany(input.auth, outcome, input.selectedCompanyId);
+      // A request that also creates a company ("створи компанію … і бізнес-профіль") links to that new company after the turn.
+      const linkedCompany = requestCreatesCompany(input.requestMessage) ? undefined : await linkNewBusinessToSelectedCompany(input.auth, outcome, input.selectedCompanyId);
       const result = linkedCompany ? { ...outcome, linkedCompanyId: linkedCompany.id, linkedCompanyName: linkedCompany.name } : outcome;
       return { output: result, metadata: { kind: "business_profile", outcome: result } };
     }
@@ -637,7 +639,7 @@ ${localized.next}`;
           throw error;
         }
       },
-      runCompany: (context: AuthContext, companyId: string, input: { task: string; mode?: "auto" | "single" | "pipeline" | "fusion"; projectId?: string }, key: string) =>
+      runCompany: (context: AuthContext, companyId: string, input: { task: string; mode?: "auto" | "single" | "pipeline" | "fusion"; projectId?: string; conversationId?: string }, key: string) =>
         companyRuntime.execute(context, companyId, input, key, route?.signal),
       cancelCompanyRun: async (context: AuthContext, companyId: string, runId: string) => {
         const result = await companyRuntime.cancel(context, companyId, runId);

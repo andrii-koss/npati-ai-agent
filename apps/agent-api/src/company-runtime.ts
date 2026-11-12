@@ -1,4 +1,4 @@
-import { companyChatEntityReferencesPrompt } from "./project-chat-cards";
+import { companyChatEntityReferencesPrompt, companyChatRecentTurnsPrompt } from "./project-chat-cards";
 import { CODING_RESPONSE_STYLE } from "./coding-response-style";
 import {canonicalJson,sha256} from "@npati/workspace";
 import {defaultCapabilityRegistry} from "@npati/shared";
@@ -199,7 +199,10 @@ export class CompanyDelegationRuntime {
         });
         throw new CompanyRuntimeError("MAIN_AGENT_INACTIVE", `Main agent "${main.name}" is inactive`, 400);
       }
-      const entityContext = !options.noMemory && options.conversationId ? await companyChatEntityReferencesPrompt(this.store, ctx, options.conversationId, companyId, existing.run.projectId ?? undefined) : "";
+      // Recent chat turns go to the planner here and to every agent stage in its user message: an agent's OmniRoute combo
+      // supplies its own system prompt, so a system-only context never reached the agents.
+      const recentTurns = !options.noMemory && options.conversationId ? await companyChatRecentTurnsPrompt(this.store, ctx, options.conversationId, input.task).catch(() => "") : "";
+      const entityContext = !options.noMemory && options.conversationId ? await companyChatEntityReferencesPrompt(this.store, ctx, options.conversationId, companyId, existing.run.projectId ?? undefined) + recentTurns : "";
       const mainTools = main.tools.map(toolName);
       const knowledgeRequested =
         /\b(?:find|search|look\s+up|read|extract|summari[sz]e)\b[^.\n]{0,80}\b(?:uploaded|company)\s+(?:document|documents|file|files|spreadsheet)\b|\b(?:excel|xlsx)\b|(?:знайд|пошук|прочита|витяг|проаналіз)[^.\n]{0,80}(?:у|в|із|з)\s+(?:завантажен\w*\s+)?(?:документ|файл|таблиц)\w*|\bексел\w*/iu.test(
@@ -425,16 +428,18 @@ export class CompanyDelegationRuntime {
       if (selected.length !== plan.agentIds.length) throw new CompanyRuntimeError("CROSS_COMPANY_AGENT_SELECTION", "Main Agent selected an unavailable agent", 502);
       selected = selected.filter((agent) => agent.id !== main.id);
       if (selected.length > MAX_SELECTED) throw new CompanyRuntimeError("TOO_MANY_DELEGATES", `At most ${MAX_SELECTED} agents may run`);
-      const reviewer = plan.reviewerAgentId ? byId.get(plan.reviewerAgentId) : undefined;
+      let reviewer = plan.reviewerAgentId ? byId.get(plan.reviewerAgentId) : undefined;
       if (plan.reviewerAgentId && !reviewer) throw new CompanyRuntimeError("INVALID_REVIEWER", "Reviewer is not active in this company", 502);
-      if (reviewer && reviewer.id !== main.id && !selected.some((agent) => agent.id === reviewer.id)) selected.push(reviewer);
+      const plannedReviewer = reviewer;
+      if (plannedReviewer && plannedReviewer.id !== main.id && !selected.some((agent) => agent.id === plannedReviewer.id)) selected.push(plannedReviewer);
       // Cycle and loop protection
       if (plan.toolRequests.length > 20) {
         throw new CompanyRuntimeError("TOOL_LOOP_DETECTED", "Too many tool requests in delegation plan", 400);
       }
-      if (reviewer && selected.length === 1 && selected[0]?.id === reviewer.id && !mainAssignedWork) {
-        throw new CompanyRuntimeError("CIRCULAR_DELEGATION", "An agent cannot review only its own work", 400);
-      }
+      // An agent never reviews only its own work. When the plan names the sole worker as its reviewer ("доручи QA Tester
+      // вичитати текст" makes the QA agent both), it keeps the work and the Main Agent gives the final check instead of
+      // failing the user's task.
+      if (reviewer && selected.length === 1 && selected[0]?.id === reviewer.id && !mainAssignedWork) reviewer = undefined;
       // Retrieved chunks are injected only into the Main Agent's final/grounding calls.
       // Specialists still require their own allowlist entry for direct knowledge tool calls.
       const knowledgeAllowed = !options.noMemory && mainTools.includes("knowledge");
@@ -505,7 +510,7 @@ export class CompanyDelegationRuntime {
         agentModels: execution.agentModels, signal, timeoutMs: this.timeoutMs, task: protectedTask + sourceLimitation, evidence,
         managerInstruction: protect(instruction(company, main, true, !options.noMemory, linked) + entityContext + chatLanguageInstruction(input.task)
           + (existing.run.projectId ? "\n" + CODING_RESPONSE_STYLE + "\nThis response cannot execute tools or save files." : "")),
-        knowledgeContext, entityContext, runId: created.run.id,
+        knowledgeContext, entityContext, conversationContext: protect(recentTurns.trim()), runId: created.run.id,
         isRuntimeRunId: id => this.store.getCompanyAgentRun(ctx, companyId, id).then(() => true, () => false),
         admission: { tenantId: ctx.workspaceId, tier: ctx.permissions.includes("admin:all") ? "enterprise" : "pro" },
         before: async () => {

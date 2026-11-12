@@ -98,6 +98,59 @@ describe("company management from chat", () => {
     } finally { await app.close(); }
   });
 
+  // Live V6 step 03 (V6-022): "додай ще одного агента з таким самим ім'ям QA Tester, роль - маркетолог" changed the
+  // existing QA Tester's role and reported a new agent; the next edit then went to one of two equal names silently.
+  it("adds a second agent with the same name on request, and asks which one before changing either", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(alice, { name: "V6 Bakery" }, "twins-bakery");
+    const main = await store.createCompanyAgent(alice, company.id, { name: "Головний агент", role: "Головний агент" }, "twins-main");
+    await store.setCompanyMainAgent(alice, company.id, main.id, company.revision);
+    const qa = await store.createCompanyAgent(alice, company.id, { name: "QA Tester", role: "тестувальник текстів" }, "twins-qa");
+    await CompanyChatActions.extractAndExecute(alice, directive({ action: "update", companyId: company.id, agents: [{ action: "create", fields: { name: "QA Tester", role: "маркетолог" } }] }), store, "twins-1",
+      { requestMessage: "додай ще одного агента з таким самим імям QA Tester, роль - маркетолог", selectedCompanyId: company.id });
+    let agents = await store.listCompanyAgents(alice, company.id);
+    expect(agents.filter((agent) => agent.name === "QA Tester").map((agent) => agent.role).sort()).toEqual(["маркетолог", "тестувальник текстів"]);
+    expect(agents.find((agent) => agent.id === qa.id)?.role).toBe("тестувальник текстів");
+    const marketer = agents.find((agent) => agent.name === "QA Tester" && agent.id !== qa.id)!;
+
+    const ambiguous = await CompanyChatActions.extractAndExecute(alice, directive({ action: "update", companyId: company.id, agents: [{ action: "update", agentId: qa.id, fields: { description: "перевіряє ціни" } }] }), store, "twins-2",
+      { requestMessage: "зміни опис агента QA Tester на: перевіряє ціни в меню", selectedCompanyId: company.id }).catch((error: Error) => ({ error: error.message }));
+    agents = await store.listCompanyAgents(alice, company.id);
+    expect(agents.every((agent) => agent.description !== "перевіряє ціни")).toBe(true);
+    expect(JSON.stringify(ambiguous)).toContain("кілька агентів з ім'ям «QA Tester»");
+    expect(JSON.stringify(ambiguous)).toContain("«маркетолог»");
+
+    await CompanyChatActions.extractAndExecute(alice, directive({ action: "update", companyId: company.id, agents: [{ action: "update", agentId: marketer.id, fields: { description: "перевіряє ціни" } }] }), store, "twins-3",
+      { requestMessage: "зміни опис агента QA Tester, того що маркетолог, на: перевіряє ціни", selectedCompanyId: company.id });
+    agents = await store.listCompanyAgents(alice, company.id);
+    expect(agents.find((agent) => agent.id === marketer.id)?.description).toBe("перевіряє ціни");
+    expect(agents.find((agent) => agent.id === qa.id)?.description ?? "").not.toBe("перевіряє ціни");
+  });
+
+  // Live V6 step 03: after "видали агента Price Checker" the reply asked about QA Tester; "так, видали" then deleted QA Tester.
+  it("deletes only an agent the request names", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(alice, { name: "V6 Delete" }, "delete-bakery");
+    const qa = await store.createCompanyAgent(alice, company.id, { name: "QA Tester", role: "тестувальник" }, "delete-qa");
+    const price = await store.createCompanyAgent(alice, company.id, { name: "Price Checker", role: "маркетолог" }, "delete-price");
+    const refused = await CompanyChatActions.extractAndExecute(alice, directive({ action: "update", companyId: company.id, agents: [{ action: "delete", agentId: qa.id }] }), store, "delete-1",
+      { requestMessage: "так, видали", selectedCompanyId: company.id });
+    expect((await store.listCompanyAgents(alice, company.id)).map((agent) => agent.id).sort()).toEqual([qa.id, price.id].sort());
+    expect(refused.cleanText).toContain("не видалено");
+    await CompanyChatActions.extractAndExecute(alice, directive({ action: "update", companyId: company.id, agents: [{ action: "delete", agentId: price.id }] }), store, "delete-2",
+      { requestMessage: "видали агента Price Checker", selectedCompanyId: company.id });
+    expect((await store.listCompanyAgents(alice, company.id)).map((agent) => agent.id)).toEqual([qa.id]);
+  });
+
+  it("a repeated request for an agent with an existing name still updates that one agent", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(alice, { name: "V6 Repeat" }, "repeat-bakery");
+    await store.createCompanyAgent(alice, company.id, { name: "QA Tester", role: "тестувальник" }, "repeat-qa");
+    await CompanyChatActions.extractAndExecute(alice, directive({ action: "update", companyId: company.id, agents: [{ action: "create", fields: { name: "QA Tester", role: "тестувальник" } }] }), store, "repeat-1",
+      { requestMessage: "додай агента QA Tester, роль тестувальник", selectedCompanyId: company.id });
+    expect((await store.listCompanyAgents(alice, company.id)).filter((agent) => agent.name === "QA Tester")).toHaveLength(1);
+  });
+
   it("renames the agent the user named, not the main agent, when the directive omits or mismatches the target", async () => {
     const store = new InMemoryWorkspaceStore();
     const company = await store.createCompany(alice, { name: "Пекарня" }, "rename-bakery");

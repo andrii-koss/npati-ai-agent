@@ -437,8 +437,9 @@ it.each([true, false])("allows an explicit main-agent author before a distinct r
   plan = JSON.stringify({ mode: "pipeline", agentIds: includeAuthor ? [author.id, reviewer.id] : [reviewer.id], reviewerAgentId: reviewer.id, toolRequests: [] });
   const response = await app.inject({ method: "POST", url: "/companies/" + companyId + "/runs", headers: { "idempotency-key": "explicit-author-" + includeAuthor }, payload: { task: "Designer and Reviewer collaborate on a review" } });
   if (!includeAuthor) {
-    expect(response.json().run.errorCode).toBe("CIRCULAR_DELEGATION");
-    expect(chat).not.toHaveBeenCalled();
+    // The sole worker named as its own reviewer keeps the work; it is never recorded as reviewer of it.
+    expect(response.json().run.status).toBe("completed");
+    expect(response.json().steps.filter((step: { agentId: string }) => step.agentId === reviewer.id).map((step: { role: string }) => step.role)).toEqual(["worker"]);
   } else {
     expect(response.json().run.status).toBe("completed");
     const pipeline = combos.find(combo => combo.strategy === "pipeline")!;

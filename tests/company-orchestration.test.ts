@@ -269,7 +269,9 @@ describe("PHASE 5: Company Main Agent + Specialist Agent Orchestration", () => {
     expect(retrieve).toHaveBeenCalledWith(baseAuth, company.id, "Summarize knowledge", undefined);
   });
 
-  it("rejects circular reviewer delegation (agent reviewing only its own work)", async () => {
+  // V6 step 03: a planner that names the sole worker as its own reviewer used to fail the user's task. The worker keeps
+  // the work and the Main Agent checks it; the agent is never recorded as reviewing its own output.
+  it("never lets an agent review only its own work: the Main Agent reviews instead", async () => {
     const store = new InMemoryWorkspaceStore();
     await store.initialize();
 
@@ -289,8 +291,10 @@ describe("PHASE 5: Company Main Agent + Specialist Agent Orchestration", () => {
     const runtime = new CompanyDelegationRuntime(store, ai);
     const result = await runtime.execute(baseAuth, company.id, { task: "Circular review attempt" }, "circ-run-01");
 
-    expect(result.run.status).toBe("failed");
-    expect(result.run.errorCode).toBe("CIRCULAR_DELEGATION");
+    expect(result.run.status).toBe("completed");
+    expect(result.run.errorCode || null).toBeNull();
+    expect(result.steps.filter((step) => step.agentId === worker.id).map((step) => step.role)).toEqual(["worker"]);
+    expect(result.steps.some((step) => step.role === "reviewer")).toBe(false);
   });
 
   it("rejects excessive tool loops in delegation plan", async () => {

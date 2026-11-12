@@ -30,7 +30,7 @@ const STALE_PROCESS_MS = 30 * 60_000;
 const ACTIVITY_FLUSH_MS = 1_000;
 
 export class DevelopmentError extends Error {
-  constructor(message: string, readonly status = 400) { super(message); }
+  constructor(message: string, readonly status = 400, readonly code?: string) { super(message); }
 }
 export type DevelopmentPorts = {
   engine?: Pick<import("@npati/omniroute-adapter").AIEngine, "chat">;
@@ -268,7 +268,9 @@ export class ChatDevelopmentService {
     if (duplicate.length) return { conversationId: duplicate[0]!.parentConversationId, processes: duplicate };
     // Client targets cannot override authoritative server technology planning.
     const targets = await this.plan(ctx, input);
-    if (!targets.length) throw new DevelopmentError("Describe a website, blog, shop, mobile app or CRM to create.");
+    // The server's own reading found no project to build ("створи компанію … квітковий магазин" is a company): the
+    // client sends the message through the ordinary chat instead, so it is answered rather than dropped.
+    if (!targets.length) throw new DevelopmentError("Describe a website, blog, shop, mobile app or CRM to create.", 400, "not_development_request");
     // Admission uses the existing status projection without replay, chat history or terminal logs.
     const activeExisting = (await this.listOwned(ctx, false)).filter(developmentIsActive);
     if (activeExisting.length + targets.length > 4) throw new DevelopmentError("Four development processes are already active. Stop or wait for a process before starting another.", 409);

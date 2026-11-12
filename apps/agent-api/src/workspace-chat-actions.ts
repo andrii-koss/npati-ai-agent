@@ -66,7 +66,7 @@ export type WorkspaceChatActionDependencies = {
   store: WorkspaceStore;
   automations: CompanyAutomationsRepository;
   content: ContentLibraryStore;
-  runCompany: (auth: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode; projectId?: string }, idempotencyKey: string) => Promise<CompanyAgentRunDetails>;
+  runCompany: (auth: AuthContext, companyId: string, input: { task: string; mode?: CompanyRunMode; projectId?: string; conversationId?: string }, idempotencyKey: string) => Promise<CompanyAgentRunDetails>;
   cancelCompanyRun: (auth: AuthContext, companyId: string, runId: string) => Promise<CompanyAgentRunDetails>;
   runAutomation?: (auth: AuthContext, automation: CompanyAutomation) => Promise<{ runId: string; result: string; durationMs: number }>;
   browserTargets?: Pick<BrowserCredentialsRepository, "listTargets" | "createTarget" | "updateTarget" | "deleteTarget">;
@@ -706,7 +706,7 @@ Use activity.run when the user asks the company agents to perform work and wants
         if (!item || !clean(item.task) || (item.mode && !runModes.has(item.mode))) throw new Error("Invalid activity");
         const projectId = directive.projectId ?? options.selectedProjectId;
         if (projectId) await deps.store.getProject(auth, company.id, projectId);
-        const details = await deps.runCompany(auth, company.id, { task: clean(item.task), mode: item.mode ?? "auto", projectId }, `chat-activity:${key}`);
+        const details = await deps.runCompany(auth, company.id, { task: clean(item.task), mode: item.mode ?? "auto", projectId, conversationId }, `chat-activity:${key}`);
         const run = details.run;
         if (run.status !== "completed") throw new Error(run.errorMessage || "Company run did not complete");
         const title = clean(item.title, 300) || clean(run.task, 300);
@@ -746,7 +746,7 @@ Use activity.run when the user asks the company agents to perform work and wants
       if (!item || !clean(item.title, 300) || !contentTypes.has(item.type as ContentType) || !clean(item.task) || (item.mode && !runModes.has(item.mode))) throw new Error("Invalid content request");
       const task = `[NPATI_CONTENT:${item.type}:${Buffer.from(clean(item.title, 300), "utf8").toString("base64url")}] ${clean(item.task)}`;
       const business = directive.businessId || directive.businessName ? await resolveBusiness(deps.store, auth, directive, options.selectedBusinessId) : undefined;
-      const details = await deps.runCompany(auth, company.id, { task, mode: item.mode ?? "single" }, `chat-content:${key}`);
+      const details = await deps.runCompany(auth, company.id, { task, mode: item.mode ?? "single", conversationId }, `chat-content:${key}`);
       const run = details.run;
       if (run.status !== "completed" || !clean(run.result)) throw new Error(run.errorMessage || "Content generation did not complete");
       await deps.content.update(auth, run.id, company.id, { title: clean(item.title, 300), type: contentType(item.type!), content: clean(run.result, 200_000), businessId: business?.id });

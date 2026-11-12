@@ -11,7 +11,7 @@ import { publishChatProcesses, stopConversationActivity } from "./chat-activity"
 import { useTranslation } from "./i18n";
 import { STREAMED_DEVELOPMENT_PROGRESS, type StreamedDevelopmentSnapshot } from "./chat-development-progress-events";
 export function useChatDevelopment(options: {
-  companyId?: string | null; conversationId: string | null; businessId?: string; onConversation(id: string, preserveActiveTurn?: boolean): void; onError(message: string): void; onAccepted(message: string, intro?: string): void; onSession(session: CodeChatSession, conversationId: string): void; boundSessionId?: string; busy?: boolean;
+  companyId?: string | null; conversationId: string | null; businessId?: string; onConversation(id: string, preserveActiveTurn?: boolean): void; onError(message: string): void; onAccepted(message: string, intro?: string): void; onDeclined?(message: string): void; onSession(session: CodeChatSession, conversationId: string): void; boundSessionId?: string; busy?: boolean;
   /** The project of the chat's newest project card: where this chat last worked, whatever order its processes were created in. */
   latestProjectId?: string;
 }) {
@@ -209,7 +209,11 @@ export function useChatDevelopment(options: {
       }
       window.dispatchEvent(new Event("npati:conversations-changed"));
       return true;
-    } catch (error) { callbacks.current.onError(error instanceof Error ? error.message : "Could not start development"); return true; }
+    } catch (error) {
+      // The keyword planner guessed a project, the server found none: the message is an ordinary chat turn.
+      if ((error as { code?: string })?.code === "not_development_request") { callbacks.current.onDeclined?.(message); return false; }
+      callbacks.current.onError(error instanceof Error ? error.message : "Could not start development"); return true;
+    }
     finally { sending.current = false; if (alive.current) setSubmitting(false); }
   }
   const activeProcess = processes.find(p => developmentIsActive(p) &&
