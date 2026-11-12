@@ -60,29 +60,35 @@
 }
 
 .message-stream,
+.editable-card-body,
 .sidebar-dropdown {
   scrollbar-width: thin;
 }
 
-.message-stream {
+.message-stream,
+.editable-card-body {
   scrollbar-color: #b8b8b8 transparent;
 }
 
 .message-stream::-webkit-scrollbar,
+.editable-card-body::-webkit-scrollbar,
 .sidebar-dropdown::-webkit-scrollbar {
   width: 5px;
 }
 
-.message-stream::-webkit-scrollbar-track {
+.message-stream::-webkit-scrollbar-track,
+.editable-card-body::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.message-stream::-webkit-scrollbar-thumb {
+.message-stream::-webkit-scrollbar-thumb,
+.editable-card-body::-webkit-scrollbar-thumb {
   background: #b8b8b8;
   border-radius: 999px;
 }
 
-.message-stream::-webkit-scrollbar-thumb:hover {
+.message-stream::-webkit-scrollbar-thumb:hover,
+.editable-card-body::-webkit-scrollbar-thumb:hover {
   background: #969696;
 }
 

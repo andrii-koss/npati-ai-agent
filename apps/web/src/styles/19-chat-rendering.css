@@ -808,3 +808,67 @@
 .chat-approval-card-actions button { border: 1px solid #71717a; border-radius: 6px; padding: 8px 12px; cursor: pointer; }
 .chat-approval-card-error { color: #b91c1c; margin-top: 8px; }
 .chat-approval-result, .trace-agent-result { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24rem; overflow: auto; }
+.chat-card-selection-toolbar {
+  position: fixed;
+  z-index: 10020;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  max-width: calc(100vw - 24px);
+  padding: 6px;
+  border: 1px solid #e5e5e5;
+  border-radius: 18px;
+  background: #fff;
+  color: #171717;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .13);
+  transform: translateX(-50%);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.chat-card-selection-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 32px;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chat-card-selection-toolbar button:hover,
+.chat-card-selection-toolbar button[aria-pressed="true"],
+.chat-card-selection-toolbar button[aria-checked="true"] { background: #f2f2f2; }
+.chat-card-selection-toolbar button:focus-visible { outline: 2px solid #777; outline-offset: 1px; }
+.chat-card-toolbar-divider { width: 1px; height: 20px; background: #e5e5e5; }
+.chat-card-toolbar-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  min-width: 180px;
+  max-width: calc(100vw - 24px);
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .13);
+}
+.chat-card-toolbar-popover button { justify-content: flex-start; }
+.chat-card-format-menu { min-width: 220px; overflow-y: auto; scrollbar-width: thin; }
+.chat-card-format-menu button { justify-content: space-between; gap: 18px; }
+.chat-card-link-editor { width: 280px; }
+.chat-card-link-editor input { width: 100%; min-width: 0; box-sizing: border-box; padding: 8px; border: 1px solid #ddd; border-radius: 7px; font: inherit; }
+.chat-card-link-editor small { color: #b91c1c; }
+@media (max-width: 520px) {
+  .chat-card-selection-toolbar { flex-wrap: wrap; width: calc(100vw - 24px); box-sizing: border-box; font-size: 13px; }
+}

@@ -1,4 +1,5 @@
 import { getStoredAuthToken, useAuth } from "./AuthContext";
+import { useCardChangeDraft } from "./chat-card-draft";
 import { chatOpenData, isChatPage } from "./chat-open";
 import { useTranslation } from "./i18n";
 import { readActiveCompanyId, writeActiveCompanyId } from "./active-company";
@@ -54,6 +55,7 @@ function BusinessConversation({ initialPrompt = "", initialConversationId, busin
     : (businessId === "new" ? undefined : overview?.onboarding);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
+  useCardChangeDraft(input, setInput);
   const [sending, setSending] = useState(false);
   const [thinkingStep, setThinkingStep] = useState(0);
   const [researching, setResearching] = useState(false);

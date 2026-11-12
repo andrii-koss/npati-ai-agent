@@ -3,6 +3,7 @@ import { MessageCircle, CodeXml } from "lucide-react";
 import { SPEECH_VOICES } from "./speech-voices";
 import { ChatAttachments, type ChatAttachmentInput } from "./ChatAttachments";
 import { AutoResizeChatTextarea } from "./AutoResizeChatTextarea";
+import { useCardChangeDraft } from "./chat-card-draft";
 import { cancelChatStream } from "./chat-stream";
 import type { Business } from "./business-workspace-shared";
 
@@ -70,6 +71,7 @@ export function BusinessChatComposer({
   onWorkModeChange,
   projectSelected,
 }: BusinessChatComposerProps) {
+  useCardChangeDraft(input, setInput, inputDisabled, draftVersion);
   return (
     <form className="onboarding-live-composer" onSubmit={(event) => void submit(event)}>
       {contextSwitcher}

@@ -27,6 +27,7 @@ it("opens the table outside the contained chat message, syncs edits while open, 
     expect(document.body.querySelector(".editable-card-modal-backdrop")).toBeNull();
     await act(async () => expand.click());
     expect(document.body.querySelector(".editable-card-modal-backdrop")?.parentElement).toBe(document.body);
+    expect(document.body.querySelector(".editable-card-modal table")?.textContent).toContain("Updated bakery");
     await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
     expect(document.body.querySelector(".editable-card-modal-backdrop")).toBeNull();
     await act(async () => expand.click());

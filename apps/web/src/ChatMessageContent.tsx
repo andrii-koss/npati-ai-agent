@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { ChatCardSelectionToolbar } from "./ChatCardSelectionToolbar";
+import { requestCardChanges } from "./chat-card-draft";
 import { getStoredAuthToken } from "./AuthContext";
 import { AttachmentFileIcon } from "./ChatAttachments";
 import { cardLinkHtml, escapeInlineText } from "./chat-markdown-inline";
@@ -219,14 +221,17 @@ export function sanitizeCardHtml(html: string): string {
 function EditableContentCard({
   initialContent,
   title,
+  language,
 }: {
   initialContent: string;
   title: string;
+  language: string;
 }) {
   const initialHtml = useMemo(() => markdownToCardHtml(initialContent), [initialContent]);
   const [copied, setCopied] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const isUserEditedRef = useRef(false);
+  const editedHtmlRef = useRef<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const modalBodyRef = useRef<HTMLDivElement>(null);
 
@@ -242,18 +247,20 @@ function EditableContentCard({
     }
   }, [initialContent]);
 
-  const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
+  const syncEditedContent = (source: HTMLDivElement) => {
     isUserEditedRef.current = true;
     // Read through the sanitizer: this node is contentEditable, so its innerHTML may hold pasted markup, and
     // the very next lines copy it into the other card (the fullscreen mirror).
-    const html = sanitizeCardHtml(e.currentTarget.innerHTML);
-    if (bodyRef.current && e.currentTarget !== bodyRef.current) {
+    const html = sanitizeCardHtml(source.innerHTML);
+    editedHtmlRef.current = html;
+    if (bodyRef.current && source !== bodyRef.current) {
       bodyRef.current.innerHTML = html;
     }
-    if (modalBodyRef.current && e.currentTarget !== modalBodyRef.current) {
+    if (modalBodyRef.current && source !== modalBodyRef.current) {
       modalBodyRef.current.innerHTML = html;
     }
   };
+  const handleInput = (event: React.FormEvent<HTMLDivElement>) => syncEditedContent(event.currentTarget);
 
   const handleCardLinkClick = (event: React.MouseEvent<HTMLDivElement>) => {
     const anchor = (event.target as HTMLElement).closest<HTMLAnchorElement>("a.chat-card-link");
@@ -391,7 +398,7 @@ function EditableContentCard({
           spellCheck={true}
           onInput={handleInput}
           onClick={handleCardLinkClick}
-          dangerouslySetInnerHTML={{ __html: sanitizeCardHtml(initialHtml) }}
+          dangerouslySetInnerHTML={{ __html: editedHtmlRef.current ?? sanitizeCardHtml(initialHtml) }}
         />
       </div>
 
@@ -471,6 +478,8 @@ function EditableContentCard({
         </div>,
         document.body,
       )}
+      <ChatCardSelectionToolbar inlineRef={bodyRef} modalRef={modalBodyRef} fullscreen={isFullscreen} language={language} onEdit={syncEditedContent}
+        onAsk={text => { setIsFullscreen(false); window.getSelection()?.removeAllRanges(); requestCardChanges(title, text, language === "uk"); }} />
     </>
   );
 }
@@ -536,6 +545,7 @@ export function ChatMessageContent({ content }: { content: string }) {
             key={`card-${elements.length}`}
             initialContent={codeLines.join("\n")}
             title={filename || (lang === "idea" ? "Business Idea" : lang === "goal" ? "Business Goal" : "Business Document")}
+            language={interfaceLanguage}
           />
         );
         continue;
