@@ -2,7 +2,7 @@
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AuthProvider, useAuth } from "../AuthContext";
+import { AuthProvider, getStoredAuthUser, setStoredAuthUser, useAuth } from "../AuthContext";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let root: Root | undefined;
@@ -30,6 +30,31 @@ async function reloadWithExpiredToken(installationSession: () => Response | Prom
 }
 
 describe("reloading the app while the access token has expired", () => {
+  it("keeps the stored avatar when a local fallback profile omits it", async () => {
+    const stored = { id: "u1", email: "owner@example.com", displayName: "Owner", username: "owner", role: "user", avatar: "/uploads/avatar.png" };
+    localStorage.setItem("npati_agent_access_token", "stored-token");
+    setStoredAuthUser(stored);
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => json(200, url.endsWith("/auth/me")
+      ? { success: true, data: { user: { id: "u1", displayName: "Owner" } } }
+      : { success: true, data: { connected: true, deploymentType: "self_hosted" } })));
+    const avatars: Array<string | null | undefined> = [];
+    function Probe() { avatars.push(useAuth().user?.avatar); return null; }
+    const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
+    await act(async () => root!.render(<AuthProvider><Probe /></AuthProvider>));
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
+    expect(avatars.length).toBeGreaterThan(1);
+    expect(avatars.every(avatar => avatar === stored.avatar)).toBe(true);
+    expect(getStoredAuthUser()?.avatar).toBe(stored.avatar);
+  });
+  it("accepts an explicit avatar removal and does not copy an avatar to a different account", () => {
+    const owner = { id: "u1", email: "owner@example.com", displayName: "Owner", username: "owner", role: "user" };
+    setStoredAuthUser({ ...owner, avatar: "/uploads/avatar.png" });
+    setStoredAuthUser({ ...owner, avatar: null });
+    expect(getStoredAuthUser()?.avatar).toBeNull();
+    setStoredAuthUser({ ...owner, avatar: "/uploads/avatar.png" });
+    setStoredAuthUser({ ...owner, id: "u2" });
+    expect(getStoredAuthUser()?.avatar).toBeUndefined();
+  });
   it.each([
     ["a server error", () => json(503, { success: false, error: { code: "NPATI_BACKEND_UNAVAILABLE" } })],
     ["a rate limit", () => json(429, { success: false })],

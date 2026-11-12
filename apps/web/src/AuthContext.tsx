@@ -110,9 +110,10 @@ export function getStoredAuthUser(): AuthUser | null {
 }
 
 export function setStoredAuthUser(user: AuthUser | null) {
+  const restored = preserveStoredAvatar(user);
   try {
-    if (user) {
-      localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(user));
+    if (restored) {
+      localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(restored));
     } else {
       localStorage.removeItem(STORAGE_USER_KEY);
     }
@@ -121,11 +122,19 @@ export function setStoredAuthUser(user: AuthUser | null) {
   }
 }
 
+/** Local fallback profiles omit central profile fields; omission is not an avatar removal. */
+function preserveStoredAvatar(user: AuthUser | null): AuthUser | null {
+  if (!user?.id || user.avatar !== undefined) return user;
+  const stored = getStoredAuthUser();
+  return stored?.id === user.id && stored.avatar !== undefined ? { ...user, avatar: stored.avatar } : user;
+}
+
 const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(getStoredAuthToken());
-  const [user, setUser] = useState<AuthUser | null>(getStoredAuthUser());
+  const [user, setUserState] = useState<AuthUser | null>(getStoredAuthUser());
+  const setUser = useCallback((value: AuthUser | null) => setUserState(preserveStoredAvatar(value)), []);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const renewalInFlight = useRef<Promise<"ok" | "unauthorized" | "temporary"> | null>(null);

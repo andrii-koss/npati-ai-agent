@@ -25,6 +25,7 @@ import { ConfirmDialogContainer, alertModal } from "./ConfirmDialog";
 import { ConversationalChat } from "./ConversationalChat";
 import { prefetchProjectCatalog } from "./project-catalog-client";
 import { I18nProvider, useTranslation } from "./i18n";
+import { ChatAvatarImage } from "./ChatAvatarImage";
 
 // Pages other than the chat load when first opened: the chat page does not download and parse their code.
 function lazyPage<K extends string>(load: () => Promise<Record<K, ComponentType<any>>>, name: K) {
@@ -66,7 +67,6 @@ export function ChatUserMenu() {
   const { overview } = useWorkspace();
   const { user, signOutEverywhere } = useAuth();
   const [open, setOpen] = useState(false);
-  const [avatarFailed, setAvatarFailed] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const accountName = [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim();
   const displayName = accountName || user?.displayName?.trim() || overview?.user.displayName?.trim() || user?.username || "User";
@@ -78,7 +78,6 @@ export function ChatUserMenu() {
     .join("")
     .toUpperCase() || "U";
   const avatarUrl = resolveNpatiAvatarUrl(user?.avatar);
-  useEffect(() => setAvatarFailed(false), [avatarUrl]);
 
   useEffect(() => setOpen(false), [location.pathname]);
   useEffect(() => {
@@ -108,13 +107,13 @@ export function ChatUserMenu() {
         aria-controls="chat-user-popover"
         onClick={() => setOpen((current) => !current)}
       >
-        {avatarUrl && !avatarFailed ? <img src={avatarUrl} alt="" onError={() => setAvatarFailed(true)} /> : initials}
+        <ChatAvatarImage key={user?.id} url={avatarUrl} initials={initials} />
       </button>
       {open && (
         <aside className="chat-user-popover" id="chat-user-popover" aria-label="User links">
           <div className="chat-user-summary">
             <span className="chat-user-avatar chat-user-avatar-small" aria-hidden="true">
-              {avatarUrl && !avatarFailed ? <img src={avatarUrl} alt="" onError={() => setAvatarFailed(true)} /> : initials}
+              <ChatAvatarImage key={user?.id} url={avatarUrl} initials={initials} />
             </span>
             <span><strong>{displayName}</strong><small>{email}</small></span>
           </div>
