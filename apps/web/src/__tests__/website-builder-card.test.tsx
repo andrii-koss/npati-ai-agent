@@ -16,6 +16,7 @@ describe("WebsiteProjectCard", () => {
     status: "ready",
     framework: "HTML/CSS",
     revision: 1,
+    hasThumbnail: false,
     updatedAt: "2026-10-18T10:00:00Z",
   };
 

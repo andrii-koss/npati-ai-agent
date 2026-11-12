@@ -17,8 +17,14 @@ function thumbnailKey(companyId: string, projectId: string) {
 }
 
 function rememberThumbnail(key: string, thumbnail: Thumbnail | null) {
-  if (cache.size >= 128) cache.delete(cache.keys().next().value!);
+  cache.delete(key);
   cache.set(key, { thumbnail, time: Date.now() });
+  let size = [...cache.values()].reduce((sum, entry) => sum + (entry.thumbnail?.dataUrl.length ?? 0), 0);
+  while (cache.size > 32 || size > 16 * 1024 * 1024) {
+    const oldest = cache.keys().next().value!;
+    size -= cache.get(oldest)?.thumbnail?.dataUrl.length ?? 0;
+    cache.delete(oldest);
+  }
 }
 
 function requestThumbnail(key: string, root: string) {
@@ -71,8 +77,10 @@ export function CatalogProjectThumbnail({
   const refreshLabel = uk ? "Оновити знімок" : "Refresh screenshot";
   const container = useRef<HTMLDivElement>(null);
 
-  const [thumbnail, setThumbnail] = useState<Thumbnail | null>(() => cache.get(key)?.thumbnail ?? null);
-  const [imageLoading, setImageLoading] = useState(false);
+  const [image, setImage] = useState(() => ({ key, thumbnail: cache.get(key)?.thumbnail ?? null, settled: hasThumbnail === false || cache.has(key) }));
+  const thumbnail = image.key === key ? image.thumbnail : cache.get(key)?.thumbnail ?? null;
+  const settled = image.key === key ? image.settled : hasThumbnail === false || cache.has(key);
+  const [decodedImage, setDecodedImage] = useState<string | null>(null);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -80,27 +88,25 @@ export function CatalogProjectThumbnail({
   function remember(value: Thumbnail | null) {
     pending.delete(key);
     rememberThumbnail(key, value);
-    setThumbnail(value);
+    setImage({ key, thumbnail: value, settled: true });
   }
 
   useEffect(() => {
     let active = true;
     let started = false;
-    setThumbnail(cache.get(key)?.thumbnail ?? null);
-    setImageLoading(false);
+    setImage({ key, thumbnail: cache.get(key)?.thumbnail ?? null, settled: hasThumbnail === false || cache.has(key) });
     const load = () => {
       if (started) return;
       started = true;
       const previous = cache.get(key);
       if (previous && Date.now() - previous.time < 300_000) {
-        setThumbnail(previous.thumbnail);
+        setImage({ key, thumbnail: previous.thumbnail, settled: true });
         return;
       }
       if (hasThumbnail === false && !previous?.thumbnail) return;
-      setImageLoading(true);
       void requestThumbnail(key, root).then(value => {
-        if (active) setThumbnail(value);
-      }).catch(() => { }).finally(() => { if (active) setImageLoading(false); });
+        if (active) setImage({ key, thumbnail: value, settled: true });
+      }).catch(() => { if (active) setImage(current => current.key === key ? { ...current, settled: true } : current); });
     };
 
     if (!globalThis.IntersectionObserver) {
@@ -138,22 +144,30 @@ export function CatalogProjectThumbnail({
         : "empty";
   const previewHref = "/settings/projects/" + encodeURIComponent(companyId) + "/" + encodeURIComponent(projectId);
 
-  const isImageReady = Boolean(thumbnail && !busy);
-  const isImagePending = Boolean(imageLoading && !thumbnail && !error);
+  const isImageReady = Boolean(thumbnail && decodedImage === thumbnail.dataUrl);
+  const isImagePending = Boolean(thumbnail || !settled);
 
   return <div ref={container} style={{ width: "100%" }}>
     <div className="website-preview-viewport" style={{ position: "relative", width: "100%", aspectRatio: "16 / 10", overflow: "hidden", background: "#f8fafc" }}>
       <a href={previewHref} aria-label={`Preview ${name}`} onClick={event => { event.preventDefault(); onPreview(); }} style={{ position: "absolute", inset: 0, display: "block", cursor: "pointer", textDecoration: "none" }}>
-        {isImageReady ? (
+        {thumbnail && (
           <img
             src={thumbnail!.dataUrl}
             alt={uk ? `Вигляд проєкту ${name}` : `${name} project screenshot`}
             loading="lazy"
             decoding="async"
+            onLoad={event => {
+              const element = event.currentTarget;
+              const source = thumbnail.dataUrl;
+              const ready = () => { if (container.current?.contains(element) && element.getAttribute("src") === source) setDecodedImage(source); };
+              if (element.decode) void element.decode().then(ready).catch(() => { if (container.current?.contains(element) && element.getAttribute("src") === source) remember(null); });
+              else ready();
+            }}
             onError={() => remember(null)}
-            style={{ display: "block", width: "100%", height: "100%", objectFit: "cover", objectPosition: "top" }}
+            style={{ display: "block", position: "absolute", inset: 0, opacity: isImageReady ? 1 : 0, width: "100%", height: "100%", objectFit: "cover", objectPosition: "top" }}
           />
-        ) : isImagePending ? (
+        )}
+        {!isImageReady && (isImagePending ? (
           <div
             className="website-thumbnail-skeleton"
             style={{
@@ -175,7 +189,7 @@ export function CatalogProjectThumbnail({
             language={language}
             errorMessage={error}
           />
-        )}
+        ))}
       </a>
       <button type="button" className="button-secondary website-thumbnail-refresh" title={refreshLabel} aria-label={refreshLabel} aria-busy={busy} disabled={busy} onClick={() => void capture()} style={{ position: "absolute", bottom: 10, right: 10, display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12 }}><RefreshCw size={14} aria-hidden="true" style={busy ? { animation: "website-preview-spin 0.8s linear infinite" } : undefined} /></button>
     </div>

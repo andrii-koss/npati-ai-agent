@@ -40,7 +40,7 @@ import { CreateWebsiteDrawer } from "./website-builder-drawer";
 import { WebsiteFiltersBar } from "./website-builder-filters";
 import { WebsiteProjectCard } from "./website-builder-card";
 import { cachedCatalog, invalidateProjectCatalog, requestCatalog } from "./project-catalog-client";
-import { preloadCatalogThumbnails } from "./catalog-project-thumbnail";
+import { CatalogScrollToTop } from "./CatalogScrollToTop";
 
 export function WebsiteBuilderDashboard() {
   const navigate = useNavigate();
@@ -144,7 +144,6 @@ export function WebsiteBuilderDashboard() {
     try {
       const page = await request.promise;
       if (generation !== catalogGeneration.current) return;
-      preloadCatalogThumbnails(page.projects);
       setWebsites(previous => cursor ? [...new Map([...previous, ...page.projects].map(item => [item.id, item])).values()] : page.projects);
       setNextCursor(page.pagination?.nextCursor ?? null);
       setError("");
@@ -194,11 +193,10 @@ export function WebsiteBuilderDashboard() {
   }, []);
 
   useEffect(() => {
-    if (!nextCursor || loading || error) return;
-    let active = true;
+    if (!nextCursor || loading || error || !scrollStarted) return;
     const request = requestCatalog(filters, nextCursor);
-    void request.promise.then(page => { if (active && scrollStarted) preloadCatalogThumbnails(page.projects); }).catch(() => {}).finally(() => request.release());
-    return () => { active = false; request.release(); };
+    void request.promise.catch(() => {}).finally(() => request.release());
+    return () => request.release();
   }, [filters, nextCursor, loading, error, scrollStarted]);
 
   useEffect(() => {
@@ -671,6 +669,7 @@ export function WebsiteBuilderDashboard() {
       )}
 
       {nextCursor && <div ref={paginationTarget} className="website-catalog-pagination" aria-hidden="true" style={{ height: 1, margin: 0 }} />}
+      <CatalogScrollToTop anchorSelector=".website-studio-grid > :nth-child(9)" items={websites} />
 
       <CreateWebsiteDrawer
         isOpen={modalOpen}

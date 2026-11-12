@@ -17,6 +17,34 @@ const project = (id: string, companyId: string) => ({ id, companyId, name: id, t
 const render = () => act(async () => { root.render(<MemoryRouter><WebsiteBuilderDashboard /></MemoryRouter>); });
 
 describe("Projects catalog company scope and freshness", () => {
+  it("shows the shared back-to-top button only when the ninth project is reached", async () => {
+    let intersect!: (entries: Partial<IntersectionObserverEntry>[]) => void;
+    vi.stubGlobal("IntersectionObserver", class { constructor(callback: typeof intersect) { intersect = callback; } observe() {} disconnect() {} });
+    vi.stubGlobal("scrollY", 0);
+    vi.stubGlobal("innerHeight", 800);
+    const scrollTo = vi.fn(); vi.stubGlobal("scrollTo", scrollTo);
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url.includes("/projects/catalog")
+      ? { projects: Array.from({ length: 6 }, (_, index) => project(`arrow-${index + (url.includes("cursor=") ? 6 : 0)}`, "company")), pagination: { nextCursor: url.includes("cursor=") ? null : "next" } }
+      : { companies: [], pagination: { nextCursor: null } }))));
+    await render(); expect(host.querySelector(".marketplace-scroll-top")).toBeNull();
+    await act(async () => document.dispatchEvent(new Event("wheel")));
+    await act(async () => intersect([{ isIntersecting: true }]));
+    const ninth = host.querySelector(".website-studio-grid > :nth-child(9)")!;
+    let top = 900;
+    Object.defineProperty(ninth, "getBoundingClientRect", { value: () => ({ top, height: 300 }) });
+    vi.stubGlobal("scrollY", 500);
+    await act(async () => window.dispatchEvent(new Event("scroll")));
+    expect(host.querySelector(".marketplace-scroll-top")).toBeNull();
+    top = 590;
+    await act(async () => window.dispatchEvent(new Event("scroll")));
+    const button = host.querySelector<HTMLButtonElement>(".marketplace-scroll-top")!;
+    expect(button.getAttribute("aria-label")).toBe("Back to top");
+    await act(async () => button.click());
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
+    vi.stubGlobal("scrollY", 0);
+    await act(async () => window.dispatchEvent(new Event("scroll")));
+    expect(host.querySelector(".marketplace-scroll-top")).toBeNull();
+  });
   it.each(["scroll", "wheel"])("shows six projects and appends a prefetched page ahead after %s", async mode => {
     let intersect!: (entries: Partial<IntersectionObserverEntry>[]) => void;
     const observe = vi.fn(), disconnect = vi.fn();
@@ -31,7 +59,7 @@ describe("Projects catalog company scope and freshness", () => {
     vi.stubGlobal("fetch", fetch);
     await render();
     expect(host.querySelectorAll("[data-project]")).toHaveLength(6);
-    expect(fetch.mock.calls.filter(([url]) => url.includes("/projects/catalog"))).toHaveLength(2);
+    expect(fetch.mock.calls.filter(([url]) => url.includes("/projects/catalog"))).toHaveLength(1);
     expect(observe).not.toHaveBeenCalled();
     await act(async () => {
       if (mode === "wheel") document.dispatchEvent(new Event("wheel"));

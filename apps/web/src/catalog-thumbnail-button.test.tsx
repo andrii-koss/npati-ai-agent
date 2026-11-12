@@ -6,6 +6,30 @@ import { CatalogProjectThumbnail, preloadCatalogThumbnails } from "./catalog-pro
 vi.mock("./AuthContext", () => ({ getStoredAuthToken: () => "button-state", getStoredAuthUser: () => ({ id: "button-state" }) }));
 
 describe("screenshot button feedback", () => {
+  it("keeps one neutral surface until a visible screenshot has loaded and decoded", async () => {
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+    let intersect!: (entries: Partial<IntersectionObserverEntry>[]) => void;
+    vi.stubGlobal("IntersectionObserver", class { constructor(callback: typeof intersect) { intersect = callback; } observe() {} disconnect() {} });
+    let finish!: (response: Response) => void, decoded!: () => void;
+    const fetch = vi.fn(() => new Promise<Response>(resolve => { finish = resolve; })); vi.stubGlobal("fetch", fetch);
+    const host = document.createElement("div"), root = createRoot(host); document.body.append(host);
+    const frames: Array<{ placeholder: boolean; skeleton: boolean; visible: boolean }> = [];
+    const capture = () => frames.push({ placeholder: Boolean(host.querySelector(".project-preview-placeholder")), skeleton: Boolean(host.querySelector(".website-thumbnail-skeleton")), visible: host.querySelector("img")?.style.opacity === "1" });
+    try {
+      await act(async () => root.render(<React.Profiler id="thumbnail" onRender={capture}><CatalogProjectThumbnail companyId="stable" projectId="decoded-image" name="Site" language="en" hasThumbnail onPreview={() => {}} /></React.Profiler>));
+      expect(fetch).not.toHaveBeenCalled(); expect(host.querySelector(".website-thumbnail-skeleton")).not.toBeNull();
+      await act(async () => intersect([{ isIntersecting: true }]));
+      await act(async () => finish(new Response(JSON.stringify({ thumbnail: { dataUrl: "data:image/webp;base64,decoded", capturedAt: "2026-11-12" } }))));
+      const image = host.querySelector("img")!;
+      Object.defineProperty(image, "decode", { value: () => new Promise<void>(resolve => { decoded = resolve; }) });
+      await act(async () => image.dispatchEvent(new Event("load")));
+      expect(image.style.opacity).toBe("0"); expect(host.querySelector(".website-thumbnail-skeleton")).not.toBeNull();
+      await act(async () => decoded());
+      expect(image.style.opacity).toBe("1"); expect(host.querySelector(".website-thumbnail-skeleton")).toBeNull();
+      expect(frames.every(frame => !frame.placeholder && (frame.skeleton !== frame.visible))).toBe(true);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    } finally { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); }
+  });
   it("shows a preloaded image that completes between mounting and the visibility callback", async () => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     let intersect!: (entries: Partial<IntersectionObserverEntry>[]) => void;
@@ -72,6 +96,10 @@ describe("screenshot button feedback", () => {
         finish(new Response(JSON.stringify(outcome === "failure" ? { error: { message: "Unavailable" } }
           : { thumbnail: outcome === "webp" ? { dataUrl: "data:image/webp;base64,fixture", capturedAt: "2026-11-11" } : null }), { status: outcome === "failure" ? 503 : 200 }));
       });
+      if (outcome === "webp") {
+        expect(host.querySelectorAll(".website-thumbnail-skeleton")).toHaveLength(2);
+        await act(async () => { host.querySelectorAll("img").forEach(image => image.dispatchEvent(new Event("load"))); });
+      }
       expect(host.querySelectorAll(".website-thumbnail-skeleton")).toHaveLength(0);
       if (outcome === "webp") {
         expect(host.querySelectorAll("img")).toHaveLength(2);
