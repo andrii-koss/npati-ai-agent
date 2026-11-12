@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type {
   BackendEnvironment,
@@ -30,6 +30,7 @@ export interface DatabasesListViewProps {
     readyEnvironments: number;
     tables: number | null;
     attachedProjects: number;
+    tableCountsKnown?: number;
   };
   searchQuery: string;
   setSearchQuery: (query: string) => void;
@@ -53,6 +54,14 @@ export interface DatabasesListViewProps {
   deleteDatabases?: (backends: BackendSummary[]) => Promise<void>;
   createOpen: boolean;
   createDatabase: (input: { name: string; provider: "shared_postgres" | "external_postgres"; connectionString?: string }) => Promise<void>;
+  totalMatches?: number;
+  totalProjects?: number;
+  statsLoading?: boolean;
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  moreError?: string | null;
+  onLoadMore?: () => void;
+  onSelectAll?: () => Promise<BackendSummary[]>;
 }
 
 export function DatabasesListView({
@@ -89,13 +98,41 @@ export function DatabasesListView({
   deleteDatabases,
   createOpen,
   createDatabase,
+  totalMatches,
+  totalProjects,
+  statsLoading = false,
+  hasMore = false,
+  loadingMore = false,
+  moreError,
+  onLoadMore,
+  onSelectAll,
 }: DatabasesListViewProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectingAll, setSelectingAll] = useState(false);
+  const [scrollStarted, setScrollStarted] = useState(() => window.scrollY > 0);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const matchingTotal = totalMatches ?? filteredBackends.length;
+  const selectionBusy = backendBusy || selectingAll || backendsLoading || loadingMore;
+  useEffect(() => {
+    const onScroll = () => { if (window.scrollY > 0) setScrollStarted(true); };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  useEffect(() => {
+    const element = sentinelRef.current;
+    if (!element || !scrollStarted || !hasMore || backendsLoading || loadingMore || moreError || !onLoadMore || !globalThis.IntersectionObserver) return;
+    let active = true;
+    const observer = new IntersectionObserver(entries => {
+      if (active && entries.some(entry => entry.isIntersecting)) onLoadMore();
+    }, { rootMargin: "0px 0px 200px 0px" });
+    observer.observe(element);
+    return () => { active = false; observer.disconnect(); };
+  }, [scrollStarted, hasMore, backendsLoading, loadingMore, moreError, onLoadMore]);
 
   // Reset selection when switching company filter
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [companyFilter]);
+  }, [companyFilter, searchQuery, databaseFilter]);
 
   // Clean up selected IDs that are no longer in companyBackends
   useEffect(() => {
@@ -110,7 +147,7 @@ export function DatabasesListView({
     });
   }, [companyBackends]);
 
-  const allFilteredSelected = filteredBackends.length > 0 && filteredBackends.every((b) => selectedIds.has(b.id));
+  const allFilteredSelected = filteredBackends.length > 0 && filteredBackends.length === matchingTotal && filteredBackends.every((b) => selectedIds.has(b.id));
   const someFilteredSelected = filteredBackends.some((b) => selectedIds.has(b.id));
 
   const handleToggleSelectAll = () => {
@@ -121,20 +158,18 @@ export function DatabasesListView({
         return next;
       });
     } else {
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        for (const b of filteredBackends) next.add(b.id);
-        return next;
-      });
+      void handleSelectAllFiltered();
     }
   };
 
-  const handleSelectAllFiltered = () => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      for (const b of filteredBackends) next.add(b.id);
-      return next;
-    });
+  const handleSelectAllFiltered = async () => {
+    if (selectionBusy) return;
+    setSelectingAll(true);
+    try {
+      const targets = onSelectAll ? await onSelectAll() : filteredBackends;
+      setSelectedIds(new Set(targets.map(backend => backend.id)));
+    } catch { /* The page reports the error; selection stays unchanged. */ }
+    finally { setSelectingAll(false); }
   };
 
   const handleClearSelection = () => {
@@ -203,40 +238,40 @@ export function DatabasesListView({
       {backendsWarning && <div className="data-studio-alert warning" role="status">{backendsWarning}</div>}
       {backendsError && !unavailableNotice && <div className="data-studio-alert error" role="alert">{backendsError.message}</div>}
 
-      {!companies.length && (
+      {!backendsLoading && !backendsError && !companies.length && (
         <div className="data-studio-alert info" role="status">
           {isUk ? "Створіть компанію, щоб працювати з базами даних." : "Create a company to work with databases."}{" "}
           <Link to="/settings/company">{isUk ? "Перейти" : "Open"}</Link>
         </div>
       )}
 
-      <section className="overview-grid inspector-stats-grid automations-stats-grid">
+      <section className="overview-grid inspector-stats-grid automations-stats-grid ds-catalog-stats" aria-busy={statsLoading}>
         <div>
-          <strong>{stats.total}</strong>
+          <strong>{statsLoading ? "—" : stats.total}</strong>
           <span>{isUk ? "Баз даних" : "Databases"}</span>
-          <small>
+          <small style={statsLoading ? { visibility: "hidden" } : undefined}>
             {companyFilter === allCompaniesToken
               ? (isUk ? `у ${companies.length} компаніях` : `across ${companies.length} companies`)
               : (isUk ? "у вибраній компанії" : "in the selected company")}
           </small>
         </div>
         <div>
-          <strong>{stats.readyEnvironments} / {stats.totalEnvironments}</strong>
+          <strong>{statsLoading ? "—" : `${stats.readyEnvironments} / ${stats.totalEnvironments}`}</strong>
           <span>{isUk ? "Середовищ готово" : "Environments ready"}</span>
           <small>{isUk ? "dev і prod по кожній базі" : "dev and prod per database"}</small>
         </div>
         <div>
-          <strong>{stats.tables === null ? "—" : stats.tables}</strong>
+          <strong>{statsLoading || stats.tables === null ? "—" : stats.tables}</strong>
           <span>{isUk ? "Таблиць" : "Tables"}</span>
-          <small>{isUk ? "у dev по прикріплених проєктах" : "in dev across attached projects"}</small>
+          <small>{isUk ? "За збереженою схемою dev" : "From saved dev schema"}{!statsLoading && stats.tableCountsKnown !== undefined ? ` · ${stats.tableCountsKnown}/${stats.total}` : ""}</small>
         </div>
         <div>
-          <strong>{stats.attachedProjects}</strong>
+          <strong>{statsLoading ? "—" : stats.attachedProjects}</strong>
           <span>{isUk ? "Проєктів прикріплено" : "Attached projects"}</span>
-          <small>
+          <small style={statsLoading ? { visibility: "hidden" } : undefined}>
             {companyFilter === allCompaniesToken
-              ? (isUk ? `з ${companyProjects.length} у вибраних компаніях` : `of ${companyProjects.length} in the selected companies`)
-              : (isUk ? `з ${companyProjects.length} у компанії` : `of ${companyProjects.length} in the company`)}
+              ? (isUk ? `з ${totalProjects ?? companyProjects.length} у вибраних компаніях` : `of ${totalProjects ?? companyProjects.length} in the selected companies`)
+              : (isUk ? `з ${totalProjects ?? companyProjects.length} у компанії` : `of ${totalProjects ?? companyProjects.length} in the company`)}
           </small>
         </div>
       </section>
@@ -263,7 +298,7 @@ export function DatabasesListView({
         <div className="inspector-tabs" role="tablist">
           <button type="button" role="tab" aria-selected={databaseFilter === "all"} className={`inspector-tab ${databaseFilter === "all" ? "active" : ""}`} onClick={() => setDatabaseFilter("all")}>
             <span>{isUk ? "Усі" : "All"}</span>
-            <small className="tab-count">{companyBackends.length}</small>
+            <small className="tab-count">{stats.total}</small>
           </button>
           <button type="button" role="tab" aria-selected={databaseFilter === "ready"} className={`inspector-tab ${databaseFilter === "ready" ? "active" : ""}`} onClick={() => setDatabaseFilter("ready")}>
             <span>{isUk ? "Готові" : "Ready"}</span>
@@ -279,16 +314,17 @@ export function DatabasesListView({
       <div className="inspector-table-status">
         <div className="status-left">
           <span>
-            {isUk ? `Показано ${filteredBackends.length} з ${companyBackends.length}` : `Showing ${filteredBackends.length} of ${companyBackends.length}`}
+            {isUk ? `Показано ${filteredBackends.length} з ${matchingTotal}` : `Showing ${filteredBackends.length} of ${matchingTotal}`}
             {searchQuery ? (isUk ? ` за запитом «${searchQuery}»` : ` matching “${searchQuery}”`) : ""}
           </span>
           {filteredBackends.length > 0 && selectedIds.size === 0 && (
             <button
               type="button"
               className="ds-bulk-select-link"
+              disabled={selectionBusy}
               onClick={handleSelectAllFiltered}
             >
-              {isUk ? `Вибрати всі (${filteredBackends.length})` : `Select all (${filteredBackends.length})`}
+              {isUk ? `Вибрати всі (${matchingTotal})` : `Select all (${matchingTotal})`}
             </button>
           )}
           {selectedIds.size > 0 && (
@@ -299,14 +335,15 @@ export function DatabasesListView({
         </div>
         {selectedIds.size > 0 && (
           <div className="ds-bulk-actions">
-            {selectedIds.size < filteredBackends.length && (
+            {selectedIds.size < matchingTotal && (
               <button
                 type="button"
                 className="button-secondary"
+                disabled={selectionBusy}
                 style={{ padding: "4px 10px", fontSize: "12px", height: "auto" }}
                 onClick={handleSelectAllFiltered}
               >
-                {isUk ? `Вибрати всі (${filteredBackends.length})` : `Select all (${filteredBackends.length})`}
+                {isUk ? `Вибрати всі (${matchingTotal})` : `Select all (${matchingTotal})`}
               </button>
             )}
             <button
@@ -314,6 +351,7 @@ export function DatabasesListView({
               className="button-secondary"
               style={{ padding: "4px 10px", fontSize: "12px", height: "auto" }}
               onClick={handleClearSelection}
+              disabled={selectionBusy}
             >
               {isUk ? "Зняти вибір" : "Deselect"}
             </button>
@@ -321,7 +359,7 @@ export function DatabasesListView({
               type="button"
               className="automation-action-btn danger"
               style={{ padding: "4px 12px", fontSize: "12px", height: "auto", display: "inline-flex", alignItems: "center", gap: "6px" }}
-              disabled={backendBusy}
+              disabled={selectionBusy}
               onClick={() => void handleBulkDelete()}
             >
               🗑️ {isUk ? `Видалити вибрані (${selectedIds.size})` : `Delete selected (${selectedIds.size})`}
@@ -349,7 +387,7 @@ export function DatabasesListView({
               </tr>
             </thead>
             <tbody>
-              {Array.from({ length: 3 }).map((_, index) => (
+              {Array.from({ length: 10 }).map((_, index) => (
                 <tr key={`skeleton-${index}`} style={{ opacity: 0.5 }}>
                   <td style={{ textAlign: "center", width: "40px" }}><span style={{ display: "inline-block", width: "16px", height: "16px", background: "var(--npati-gray-100)", borderRadius: "3px" }} /></td>
                   <td><span style={{ display: "inline-block", width: "160px", height: "16px", background: "var(--npati-gray-100)", borderRadius: "4px" }} /></td>
@@ -365,7 +403,7 @@ export function DatabasesListView({
             </tbody>
           </table>
         </div>
-      ) : backends.length === 0 ? (
+      ) : stats.total === 0 ? (
         <div className="automations-empty-card">
           <div className="automations-empty-icon">🗄️</div>
           <h3>{isUk ? "Баз даних ще немає" : "No databases yet"}</h3>
@@ -397,6 +435,7 @@ export function DatabasesListView({
                     type="checkbox"
                     aria-label={isUk ? "Вибрати всі бази даних" : "Select all databases"}
                     checked={allFilteredSelected}
+                    disabled={selectionBusy}
                     ref={(el) => {
                       if (el) el.indeterminate = someFilteredSelected && !allFilteredSelected;
                     }}
@@ -416,7 +455,7 @@ export function DatabasesListView({
             <tbody>
               {filteredBackends.map((backend) => {
                 const list = environments[backend.id] ?? [];
-                const attached = projects.filter((item) => item.dataBackendId === backend.id).length;
+                const attached = backend.attachedProjectCount ?? projects.filter((item) => item.dataBackendId === backend.id).length;
                 const isSelected = selectedIds.has(backend.id);
                 return (
                   <tr key={backend.id} className={isSelected ? "row-selected" : undefined}>
@@ -424,6 +463,7 @@ export function DatabasesListView({
                       <input
                         type="checkbox"
                         checked={isSelected}
+                        disabled={selectionBusy}
                         onChange={() => handleToggleSelect(backend.id)}
                         aria-label={isUk ? `Вибрати ${backend.name}` : `Select ${backend.name}`}
                       />
@@ -474,6 +514,11 @@ export function DatabasesListView({
           </table>
         </div>
       )}
+
+      {hasMore && <div ref={sentinelRef} className="data-studio-catalog-sentinel" style={{ minHeight: 1 }}>
+        {(loadingMore || selectingAll) && <div className="loading-state" role="status">{isUk ? "Завантаження…" : "Loading…"}</div>}
+        {moreError && <div className="data-studio-alert error" role="alert">{moreError} <button type="button" className="button-secondary" onClick={onLoadMore}>{isUk ? "Повторити" : "Retry"}</button></div>}
+      </div>}
 
       {createOpen && (
         <CreateDatabaseDrawer

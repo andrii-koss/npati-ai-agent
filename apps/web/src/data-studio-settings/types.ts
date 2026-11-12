@@ -29,6 +29,18 @@ export interface BackendSummary {
   /** Tagged on load: the database list merges every company of the workspace. */
   companyId: string;
   companyName: string;
+  attachedProjectCount?: number;
+}
+
+export interface CatalogStats {
+  total: number; ready: number; attention: number; totalEnvironments: number; readyEnvironments: number;
+  tables: number | null; tableCountsKnown: number; attachedProjects: number; totalProjects: number;
+}
+export interface DataStudioCatalog {
+  companies: CompanySummary[];
+  items: Array<BackendSummary & { environments: BackendEnvironment[]; tableCount: number | null }>;
+  stats: CatalogStats;
+  pagination: { total: number; nextCursor: string | null };
 }
 
 export interface TransferResult {

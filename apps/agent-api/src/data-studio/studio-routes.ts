@@ -29,6 +29,12 @@ export function registerDataStudioRoutes(
   };
   app.get<{ Params: Params }>(base, (request, reply) => run(request, reply, "workspace:read", (ctx) =>
     service!.overview(ctx, request.params.companyId, request.params.projectId, request.params.environment)));
+  app.post<{ Params: Params; Body: { collections: string[] } }>(base + "/collections/counts", { schema: { body: {
+    type: "object", required: ["collections"], additionalProperties: false, properties: {
+      collections: { type: "array", minItems: 1, maxItems: 50, uniqueItems: true, items: { type: "string", pattern: "^[a-z][a-z0-9_]{0,62}$" } },
+    },
+  } } }, (request, reply) => run(request, reply, "workspace:read", ctx =>
+    service!.countRows(ctx, request.params.companyId, request.params.projectId, request.params.environment, request.body.collections)));
   app.post<{ Params: Params; Body: { operation: SchemaOperation } }>(base + "/schema/preview", (request, reply) => run(request, reply, "business:manage", (ctx) =>
     service!.preview(ctx, request.params.companyId, request.params.projectId, request.params.environment, request.body.operation)));
   app.post<{ Params: Params; Body: { operation: SchemaOperation; expectedFingerprint: string; confirmDestructive?: boolean } }>(base + "/schema/apply", (request, reply) => run(request, reply, "business:manage", (ctx) =>

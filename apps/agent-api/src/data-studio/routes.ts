@@ -7,6 +7,7 @@ import type { PromoteService } from "./promote-service";
 import type { BackupService } from "./backup-service";
 import type { QuotaService } from "./quota-service";
 import type { DataEnvironmentName } from "./types";
+import type { CatalogQuery } from "./catalog";
 
 export function fail(reply: FastifyReply, error: unknown) {
   error = normalizeDataQueryError(error);
@@ -40,6 +41,32 @@ export function registerDataBackendRoutes(
   app.get<{ Params: { companyId: string } }>("/companies/:companyId/data-backends", async (request, reply) => {
     try { const { ctx, service } = await authorize(request, "workspace:read"); return { backends: await service.list(ctx, request.params.companyId) }; }
     catch (error) { return fail(reply, error); }
+  });
+
+  app.get<{ Querystring: CatalogQuery }>("/data-studio/catalog", { schema: { querystring: {
+    type: "object", additionalProperties: false, properties: {
+      companyId: { type: "string", maxLength: 128 }, search: { type: "string", maxLength: 200 },
+      status: { type: "string", enum: ["all", "ready", "attention"] },
+      cursor: { type: "string", maxLength: 2048 }, limit: { type: "integer", minimum: 1, maximum: 50, default: 10 },
+    },
+  } } }, async (request, reply) => {
+    try {
+      const { ctx, service } = await authorize(request, "workspace:read");
+      reply.header("cache-control", "private, no-store");
+      return await service.catalog(ctx, request.query);
+    } catch (error) { return fail(reply, error); }
+  });
+
+  app.get<{ Params: { companyId: string; backendId: string } }>("/companies/:companyId/data-backends/:backendId/workspace", async (request, reply) => {
+    try {
+      const { ctx, service } = await authorize(request, "workspace:read");
+      const { companyId, backendId } = request.params;
+      const workspace = await service.workspace(ctx, companyId, backendId);
+      const entries = await Promise.all((["dev", "prod"] as const).map(async environment => [environment,
+        d7.quotas ? await d7.quotas.report(ctx, companyId, backendId, environment).catch(() => null) : null] as const));
+      reply.header("cache-control", "private, no-store");
+      return { ...workspace, quotas: Object.fromEntries(entries) };
+    } catch (error) { return fail(reply, error); }
   });
 
   app.post<{ Params: { companyId: string }; Body: { name: string; provider?: "shared_postgres" | "external_postgres"; connectionString?: string } }>(

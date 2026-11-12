@@ -1,12 +1,17 @@
 import { Client } from "pg";
 import type { AuthContext, WorkspaceStore } from "@npati/workspace";
 import { DataStudioError } from "./identifier";
+import { readDataStudioCatalog, readDataStudioWorkspace, type CatalogQuery } from "./catalog";
 import type { DataBackendRepository } from "./repository";
 import type { DatabaseProvisioner } from "./provisioner";
 import type { DataProvider } from "./data-provider";
 import type { DataBackend, DataEnvironmentName, DataProviderKind } from "./types";
 
 export class DataBackendService {
+  catalog(ctx: AuthContext, query: CatalogQuery) { return readDataStudioCatalog(this.repository.pool, ctx, query); }
+  workspace(ctx: AuthContext, companyId: string, backendId: string) {
+    return readDataStudioWorkspace(this.repository.pool, ctx, companyId, backendId);
+  }
   constructor(
     private readonly store: Pick<WorkspaceStore, "getCompany" | "getProject">,
     private readonly repository: DataBackendRepository,

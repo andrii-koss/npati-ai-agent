@@ -824,3 +824,15 @@
   flex-direction: column;
   gap: 8px;
 }
+.ds-catalog-stats > div {
+  min-width: 0;
+}
+
+.ds-catalog-stats strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.ds-catalog-stats > div small {
+  min-height: 2.7em;
+}
+

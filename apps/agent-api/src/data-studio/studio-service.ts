@@ -200,6 +200,15 @@ export class DataStudioUiService {
     return { rows: await this.migrations.listOwnerRows(ctx, backend, environment, collection, query) };
   }
 
+  async countRows(ctx: AuthContext, companyId: string, projectId: string, environment: DataEnvironmentName, collections: string[]) {
+    if (!Array.isArray(collections) || !collections.length || collections.length > 50 || new Set(collections).size !== collections.length) {
+      throw new DataStudioError(400, "count", "Choose between 1 and 50 unique collections", false, "INVALID_COLLECTIONS");
+    }
+    collections.forEach(name => validateIdentifier(name));
+    const { backend } = await this.context(ctx, companyId, projectId, environment);
+    return { counts: await this.migrations.countOwnerRows(ctx, backend, environment, collections), exact: true, computedAt: new Date().toISOString() };
+  }
+
   async createRow(ctx: AuthContext, companyId: string, projectId: string, environment: DataEnvironmentName, collection: string, row: Row) {
     const { backend } = await this.context(ctx, companyId, projectId, environment);
     return { row: await this.migrations.createOwnerRow(ctx, backend, environment, collection, row) };

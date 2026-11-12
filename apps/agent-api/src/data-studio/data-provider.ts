@@ -337,18 +337,31 @@ export class PostgresDataProvider implements DataProvider {
       "WHERE n.nspname='public' AND c.relkind='r' AND left(c.relname,7)<>'_npati_' ORDER BY c.relname",
     );
     const result: SchemaSnapshot = { tables: [] };
-    for (const table of tables.rows) {
-      const [columns, constraints, indexes, policies] = await Promise.all([
-        pool.query<{ name: string; type: string; nullable: boolean }>(
-          'SELECT a.attname AS name,format_type(a.atttypid,a.atttypmod) AS type,NOT a.attnotnull AS nullable FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid ' +
-          "WHERE c.relname=$1 AND a.attnum>0 AND NOT a.attisdropped ORDER BY a.attnum", [table.name]),
-        pool.query<{ definition: string }>("SELECT conname || ':' || pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid=$1::regclass ORDER BY conname", [table.name]),
-        pool.query<{ definition: string }>("SELECT indexdef AS definition FROM pg_indexes WHERE schemaname='public' AND tablename=$1 ORDER BY indexname", [table.name]),
-        pool.query<{ definition: string }>("SELECT policyname || ':' || cmd || ':' || permissive || ':' || array_to_string(roles,',') || ':' || coalesce(qual,'') || ':' || coalesce(with_check,'') AS definition FROM pg_policies WHERE schemaname='public' AND tablename=$1 ORDER BY policyname", [table.name]),
-      ]);
-      result.tables.push({ ...table, columns: columns.rows, constraints: constraints.rows.map((row) => row.definition),
-        indexes: indexes.rows.map((row) => row.definition), policies: policies.rows.map((row) => row.definition) });
-    }
+    if (!tables.rows.length) return result;
+    const names = tables.rows.map(table => table.name);
+    const [columns, constraints, indexes, policies] = await Promise.all([
+      pool.query<{ tableName: string; name: string; type: string; nullable: boolean }>(
+        'SELECT c.relname AS "tableName",a.attname AS name,format_type(a.atttypid,a.atttypmod) AS type,NOT a.attnotnull AS nullable FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace ' +
+        "WHERE n.nspname='public' AND c.relname=ANY($1::text[]) AND a.attnum>0 AND NOT a.attisdropped ORDER BY c.relname,a.attnum", [names]),
+      pool.query<{ tableName: string; definition: string }>(
+        `SELECT c.relname AS "tableName",x.conname || ':' || pg_get_constraintdef(x.oid) AS definition
+        FROM pg_constraint x JOIN pg_class c ON c.oid=x.conrelid JOIN pg_namespace n ON n.oid=c.relnamespace
+        WHERE n.nspname='public' AND c.relname=ANY($1::text[]) ORDER BY c.relname,x.conname`, [names]),
+      pool.query<{ tableName: string; definition: string }>('SELECT tablename AS "tableName",indexdef AS definition FROM pg_indexes WHERE schemaname=\'public\' AND tablename=ANY($1::text[]) ORDER BY tablename,indexname', [names]),
+      pool.query<{ tableName: string; definition: string }>(`SELECT tablename AS "tableName",policyname || ':' || cmd || ':' || permissive || ':' || array_to_string(roles,',') || ':' || coalesce(qual,'') || ':' || coalesce(with_check,'') AS definition FROM pg_policies WHERE schemaname='public' AND tablename=ANY($1::text[]) ORDER BY tablename,policyname`, [names]),
+    ]);
+    const group = <T extends { tableName: string }>(rows: T[]) => {
+      const map = new Map<string, T[]>();
+      for (const row of rows) { const list = map.get(row.tableName) ?? []; list.push(row); map.set(row.tableName, list); }
+      return map;
+    };
+    const groupedColumns = group(columns.rows), groupedConstraints = group(constraints.rows), groupedIndexes = group(indexes.rows), groupedPolicies = group(policies.rows);
+    for (const table of tables.rows) result.tables.push({ ...table,
+      columns: (groupedColumns.get(table.name) ?? []).map(({ tableName: _tableName, ...column }) => column),
+      constraints: (groupedConstraints.get(table.name) ?? []).map(row => row.definition),
+      indexes: (groupedIndexes.get(table.name) ?? []).map(row => row.definition),
+      policies: (groupedPolicies.get(table.name) ?? []).map(row => row.definition),
+    });
     return result;
   }
 

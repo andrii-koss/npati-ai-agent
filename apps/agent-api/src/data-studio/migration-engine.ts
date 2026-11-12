@@ -327,6 +327,12 @@ export class ProjectMigrationEngine {
       "SELECT * FROM " + table + (conditions.length ? " WHERE " + conditions.join(" AND ") : "") + sort + " LIMIT $" + (values.length - 1) + " OFFSET $" + values.length, values);
   }
 
+  async countOwnerRows(ctx: AuthContext, backend: DataBackend, environment: DataEnvironmentName, collections: string[]) {
+    const sql = collections.map((collection, index) => `SELECT $${index + 1}::text AS collection,count(*)::text AS count FROM ${quoteIdentifier(collection)}`).join(" UNION ALL ");
+    const rows = await this.ownerQuery<{ collection: string; count: string }>(ctx, backend, environment, sql, collections);
+    return Object.fromEntries(rows.map(row => [row.collection, Number(row.count)]));
+  }
+
   /** The database driver sends a JavaScript array as a Postgres array, which a json column refuses, so those are sent as JSON. */
   private async ownerParameters(ctx: AuthContext, backend: DataBackend, environment: DataEnvironmentName, collection: string, fields: string[], row: Record<string, unknown>) {
     const values = fields.map((f) => row[f] === undefined ? null : row[f]);
