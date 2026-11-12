@@ -495,6 +495,34 @@
   margin: 0;
 }
 
+.marketplace-scroll-top {
+  position: fixed;
+  right: max(8px, env(safe-area-inset-right));
+  bottom: max(24px, env(safe-area-inset-bottom));
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid #e9a5ad;
+  border-radius: 50%;
+  color: var(--npati-red);
+  background: white;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 12%);
+  cursor: pointer;
+}
+
+.marketplace-scroll-top:hover {
+  color: white;
+  background: var(--npati-red);
+}
+
+.marketplace-scroll-top:focus-visible {
+  outline: 2px solid var(--npati-red);
+  outline-offset: 3px;
+}
+
 .marketplace-hero {
   display: flex;
   align-items: flex-start;
