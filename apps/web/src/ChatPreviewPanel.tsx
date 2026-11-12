@@ -5,6 +5,7 @@ import { getStoredAuthToken } from "./AuthContext";
 import { useTranslation } from "./i18n";
 import { LivePreviewHeader, type DeviceMode } from "./LivePreviewHeader";
 import { LivePreviewSplitResizer } from "./LivePreviewSplitResizer";
+import { previewUpdateFailure } from "./preview-update-failure";
 
 export type PreviewPanelCard = { id: string; projectId?: string; companyId: string; name: string; framework?: string; sessionId?: string };
 export interface ChatPreviewPanelApi {
@@ -56,6 +57,7 @@ function PreviewPanel({ card, open, busy, thumbnail, onClose }: { card: PreviewP
   const [frames, setFrames] = useState<Frame[]>([]);
   const [shown, setShown] = useState<number | null>(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [deviceMode, setDeviceMode] = useState<DeviceMode>("desktop");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const nextId = useRef(1);
@@ -123,7 +125,14 @@ function PreviewPanel({ card, open, busy, thumbnail, onClose }: { card: PreviewP
 
   function refresh() {
     if (/^(?:HTML\/CSS|static)$/.test(card.framework ?? "")) {
-      void fetch(`${endpointOf(card)}/apply-file-changes`, { method: "POST", headers: { "content-type": "application/json", ...authHeaders() }, body: "{}" }).catch(() => undefined).finally(() => void reload());
+      void fetch(`${endpointOf(card)}/apply-file-changes`, { method: "POST", headers: { "content-type": "application/json", ...authHeaders() }, body: "{}" })
+        .then(async response => {
+          if (response.ok) { setNotice(""); return; }
+          const body = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+          setNotice(previewUpdateFailure(body?.error?.message ?? `HTTP ${response.status}`, isUk));
+        })
+        .catch((failure: unknown) => setNotice(previewUpdateFailure(failure instanceof Error ? failure.message : "", isUk)))
+        .finally(() => void reload());
     } else void reload();
   }
 
@@ -135,6 +144,7 @@ function PreviewPanel({ card, open, busy, thumbnail, onClose }: { card: PreviewP
         {open && !isFullscreen && <LivePreviewSplitResizer />}
         <LivePreviewHeader projectName={card.name} runtimeStatus={status} previewUrl={urlRef.current || null} isUk={isUk} codeWorkspaceUrl={code} terminalUrl={`${code}${code.includes("?") ? "&" : "?"}tab=terminal`} deviceMode={deviceMode} setDeviceMode={setDeviceMode} isFullscreen={isFullscreen} setIsFullscreen={setIsFullscreen} onRefresh={refresh} onClose={onClose} />
         <div className="project-chat-preview-body" data-device-mode={deviceMode}>
+          {notice && !error && <div className="project-chat-preview-notice" role="status">{notice}</div>}
           <div className="project-chat-preview-viewport" data-device-mode={deviceMode}>
             {shown === null && !error && thumbnail && <img className="project-chat-preview-placeholder" src={thumbnail} alt="" />}
             {error ? <div className="project-chat-preview-empty" role="status">{error}</div> : frames.map(frame => (

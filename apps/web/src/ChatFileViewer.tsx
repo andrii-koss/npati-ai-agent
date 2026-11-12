@@ -6,6 +6,7 @@ import { I18nContextRef } from "./i18n";
 import { LivePreviewSplitResizer } from "./LivePreviewSplitResizer";
 import { PreviewSideButton } from "./PreviewSideButton";
 import { HighlightedCode, codeLanguage, codeWindow } from "./code-highlight";
+import { previewUpdateFailure } from "./preview-update-failure";
 
 export type ChatFileTarget = { companyId: string; projectId: string; path: string };
 type FileContent = { content: string; revision: string; binary?: boolean };
@@ -87,7 +88,7 @@ function ChatFileDrawer({ target, busy, dirtyRef, onClose }: { target: ChatFileT
       await api(`/companies/${encodeURIComponent(target.companyId)}/projects/${encodeURIComponent(target.projectId)}/preview/apply-file-changes`, { method: "POST", body: "{}" });
       window.dispatchEvent(new CustomEvent("npati-code-project-updated", { detail: { projectId: target.projectId } }));
     } catch (failure) {
-      setError(`${isUk ? "Файл збережено, але Preview не оновився" : "The file is saved, but Preview was not updated"}: ${failure instanceof Error ? failure.message : ""}`);
+      setError(`${isUk ? "Файл збережено. " : "The file is saved. "}${previewUpdateFailure(failure instanceof Error ? failure.message : "", isUk)}`);
     }
     setPublishing(false);
   }

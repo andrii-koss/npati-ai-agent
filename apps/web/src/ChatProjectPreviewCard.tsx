@@ -11,6 +11,7 @@ import { persistedModeLabel } from "./code-workspace/actions";
 import { LivePreviewHeader, type DeviceMode } from "./LivePreviewHeader";
 import { LivePreviewSplitResizer } from "./LivePreviewSplitResizer";
 import { ChatPreviewPanelContext, wasPreviewPanelOpen } from "./ChatPreviewPanel";
+import { previewUpdateFailure } from "./preview-update-failure";
 
 export type ProjectVariantType = "website" | "mobile_app" | "game" | "other";
 export type PreviewRuntimeStatus = "running" | "starting" | "stopped" | "failed" | "unavailable";
@@ -212,6 +213,7 @@ export function ChatProjectPreviewCard({
   const [previewHtml, setPreviewHtml] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
+  const [refreshNotice, setRefreshNotice] = useState("");
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(() => knownThumbnails.get(previewKey) ?? null);
   // The standard picture appears only once it is certain the project has no screenshot.
   const [thumbnailChecked, setThumbnailChecked] = useState(() => knownThumbnails.has(previewKey));
@@ -756,7 +758,13 @@ export function ChatProjectPreviewCard({
                 if (!isStatic && previewUrl && !previewError && /^(?:HTML\/CSS|static)$/.test(card.framework ?? "")) {
                   const token = getStoredAuthToken();
                   void fetch(`/api/companies/${encodeURIComponent(card.companyId)}/projects/${encodeURIComponent(card.projectId ?? card.id)}/preview/apply-file-changes`, { method: "POST", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: "{}" })
-                    .catch(() => undefined).finally(() => setIframeKey((k) => k + 1));
+                    .then(async (response) => {
+                      if (response.ok) { setRefreshNotice(""); return; }
+                      const body = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+                      setRefreshNotice(previewUpdateFailure(body?.error?.message ?? `HTTP ${response.status}`, isUk));
+                    })
+                    .catch((error: unknown) => setRefreshNotice(previewUpdateFailure(error instanceof Error ? error.message : "", isUk)))
+                    .finally(() => setIframeKey((k) => k + 1));
                   return;
                 }
                 setIframeKey((k) => k + 1);
@@ -769,6 +777,7 @@ export function ChatProjectPreviewCard({
               onClose={() => setPreviewOpen(false)}
             />
             <div className="project-chat-preview-body" data-device-mode={deviceMode}>
+              {refreshNotice && <div className="project-chat-preview-notice" role="status">{refreshNotice}</div>}
               <div className="project-chat-preview-viewport" data-device-mode={deviceMode}>
                 {!frameReady && !previewError && thumbnailUrl && <img className="project-chat-preview-placeholder" src={thumbnailUrl} alt="" />}
                 {previewHtml ? (

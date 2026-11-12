@@ -1142,3 +1142,21 @@
     opacity: 1;
   }
 }
+
+/* Why the last saved change did not reach Preview; the previous page stays visible below. */
+.project-chat-preview-notice {
+  flex: none;
+  padding: 8px 12px;
+  border-bottom: 1px solid #fcd34d;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+[data-theme="dark"] .project-chat-preview-notice,
+.dark .project-chat-preview-notice {
+  border-bottom-color: #78350f;
+  background: #2a1f0a;
+  color: #fcd34d;
+}
