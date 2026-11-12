@@ -18,17 +18,24 @@ import { projectRuntimeCommandPort } from "./shared-project-runtime-provider";
  * at startup, so a new build genuinely requires a restart. This predicate never decides *whether* a build is verified;
  * the caller still enforces the verification gate before it is asked.
  */
+/** Commands of servers that pick up workspace changes by themselves (dev servers, watchers). */
+const WATCHING_SERVER = /(?:\brun\s+dev\b|\bdev\b(?!\S)|--watch\b|\bwatch\b|\bnodemon\b|\bvite\b(?!\s+(?:preview|build))|\bnext\s+dev\b|\bastro\s+dev\b|\bexpo\s+start\b|\bhttp\.server\b|\bserve\b)/iu;
+
 export function canReusePreviewSession(input: {
   verifiedBuild?: boolean;
   command?: string;
   port?: number;
   framework: string;
   forceRestart?: boolean;
+  /** The command the preview runs. A development reuse is only safe when that command watches the workspace. */
+  resolvedCommand?: string;
 }): boolean {
   if (input.forceRestart) return false;
   if (input.command || input.port) return false;
   // Unknown means the production server may be wanted, so only an explicit development request reuses a dev server.
-  if (input.verifiedBuild === false) return true;
+  // An Express project's "development" command is `npm run start` (`node dist/server.js`): it never sees a new build,
+  // so a fixed route kept answering 500 until a manual restart (V6 step 05). Only a watching server is reused.
+  if (input.verifiedBuild === false) return input.resolvedCommand === undefined || WATCHING_SERVER.test(input.resolvedCommand);
   return input.framework === "static";
 }
 

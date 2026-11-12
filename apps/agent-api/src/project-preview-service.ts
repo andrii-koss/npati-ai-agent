@@ -248,7 +248,7 @@ export class ProjectPreviewService {
     let devCommand = options.command?.trim()
       || (verifiedBuild && detected.productionCommand ? detected.productionCommand : detected.command);
     let devPort = options.port && Number.isInteger(options.port) ? options.port : extractPortFromCommand(devCommand, detected.port);
-    const reused = canReusePreviewSession({ verifiedBuild: options.verifiedBuild, command: options.command, port: options.port, framework: detected.framework, forceRestart: options.forceRestart })
+    const reused = canReusePreviewSession({ verifiedBuild: options.verifiedBuild, command: options.command, port: options.port, framework: detected.framework, forceRestart: options.forceRestart, resolvedCommand: devCommand })
       ? await reuseDevelopmentPreview(ctx, project, devCommand, devPort, detected.framework, this.sandbox, this.projects, scope => this.generateToken(scope), options.signal) : null;
     if (reused) { this.sessions.set(projectId, reused.session); return reused.result; }
     // Stop existing session process if running

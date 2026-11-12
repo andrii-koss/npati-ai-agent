@@ -42,6 +42,17 @@ describe("Step 5 — preview reuse without a restart", () => {
     expect(canReusePreviewSession({ verifiedBuild: false, framework: "nextjs", command: "npm run dev" })).toBe(false);
     expect(canReusePreviewSession({ verifiedBuild: false, framework: "static", port: 3001 })).toBe(false);
   });
+
+  // V6 step 05: an Express project's development command is `npm run start` (`node dist/server.js`). Reusing it kept the
+  // old build running, so a fixed POST /api/contact went on returning 500 until a manual restart.
+  it("restarts a development preview whose command does not watch the workspace", () => {
+    expect(canReusePreviewSession({ verifiedBuild: false, framework: "express", resolvedCommand: "npm run start -- --port 3078" })).toBe(false);
+    expect(canReusePreviewSession({ verifiedBuild: false, framework: "express", resolvedCommand: "node dist/server.js" })).toBe(false);
+    expect(canReusePreviewSession({ verifiedBuild: false, framework: "nextjs", resolvedCommand: "npm run dev -- --port 3000" })).toBe(true);
+    expect(canReusePreviewSession({ verifiedBuild: false, framework: "vite", resolvedCommand: "npx vite --host 0.0.0.0" })).toBe(true);
+    expect(canReusePreviewSession({ verifiedBuild: false, framework: "vite", resolvedCommand: "npx vite preview" })).toBe(false);
+    expect(canReusePreviewSession({ verifiedBuild: false, framework: "express", resolvedCommand: "nodemon src/server.ts" })).toBe(true);
+  });
 });
 
 describe("Step 5 — the executor forwards assistant prose before the result", () => {

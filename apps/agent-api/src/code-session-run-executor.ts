@@ -173,6 +173,29 @@ export interface CodeSessionRunExecutorOptions {
 }
 
 /** The subset of `CodingAgentRunResult` this module reads. Everything else is passed through untouched. */
+/** A reply that already says no file changed ("Нічого не змінював", "Файли не змінювалися", "No files were changed"). */
+const ACKNOWLEDGES_NO_CHANGE = /(?:нічого\s+не\s+змін|не\s+змінюв|не\s+змінювал|не\s+змінено|не\s+змінювались|без\s+змін|ничего\s+не\s+измен|не\s+изменял|не\s+изменен|no\s+(?:files?|changes?)\s+(?:were\s+|was\s+)?(?:changed|made|modified)|nothing\s+(?:was\s+)?changed|unchanged|did\s+not\s+change|didn['’]t\s+change|left\s+(?:the\s+)?files?\s+as)/iu;
+const NO_CHANGE_NOTE: Record<string, string> = {
+  uk: "Примітка системи: під час цього запуску жоден файл проєкту не змінено.",
+  ru: "Примечание системы: во время этого запуска ни один файл проекта не изменён.",
+  en: "System note: no project file was changed during this run.",
+};
+
+/**
+ * A run asked to change the project that ends with no changed file must not read as done: "готово" without a write is
+ * a failed task (V6 step 05, CODING_ACCEPTANCE "Невиконання"). When the reply does not already say so, the stored
+ * evidence (an empty list of changed files) is added to it.
+ */
+export function withUnchangedFilesNote(result: unknown, input: { readOnlyIntent?: boolean; responseLanguage?: string; session?: { mode?: string } }): unknown {
+  if (input.readOnlyIntent || input.session?.mode === "plan" || !result || typeof result !== "object") return result;
+  const view = result as { status?: unknown; message?: unknown; summary?: { filesChanged?: unknown } | null };
+  if (view.status !== "completed" || typeof view.message !== "string" || !view.message.trim()) return result;
+  if (!Array.isArray(view.summary?.filesChanged) || view.summary!.filesChanged.length > 0) return result;
+  if (ACKNOWLEDGES_NO_CHANGE.test(view.message)) return result;
+  const note = NO_CHANGE_NOTE[input.responseLanguage ?? ""] ?? NO_CHANGE_NOTE.en!;
+  return { ...view, message: view.message.trimEnd() + "\n\n" + note };
+}
+
 interface RunnerResultView {
   status?: unknown;
   reason?: unknown;
@@ -396,6 +419,7 @@ export class CodeSessionRunExecutor {
      * the executor **after** the run settled, exactly where the chat path emitted them, so a subscriber that reads
      * the registry cannot observe a "terminal" before the run's own result is in the buffer.
      */
+    result = withUnchangedFilesNote(result, input);
     sink?.emitResult(result);
     sink?.emitTerminal(terminalStatus, reason);
 
