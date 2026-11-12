@@ -11,6 +11,8 @@ import { CodeAsyncWorkspaceService, registerCodeAsyncWorkspaceRoutes } from "./c
 import { finishCodeChatWebsite, isCodeChatWebsite, isPlainProjectFramework, isPreviewableChange } from "./code-chat-website";
 import { detectProjectStack } from "./project-preview-stack";
 import { verifyWebsiteRuntime } from "./website-runtime-acceptance";
+import { behaviourMessage, captureBehaviour, compareBehaviour, requestsBehaviourKeeping, type BehaviourBaseline } from "./website-behaviour-check";
+import { resolveCodingConversationLanguage } from "./company-chat-i18n";
 import { registerCodeIntentRoutes } from "./code-intent-routing";
 import { collectCodeMetrics } from "./code-metrics";
 import { registerCodeMetricsRoutes } from "./code-metrics-routes";
@@ -302,6 +304,8 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
    * per run). It is used only when the review changed nothing; otherwise Preview starts again as before.
    */
   const warmPreviews = new Map<string, { files: string; started: Promise<Awaited<ReturnType<typeof projectPreviewService.startPreview>> | undefined> }>();
+  /** Behaviour recorded before a behaviour-keeping run, keyed by project (one run at a time works in a project). */
+  const behaviourBaselines = new Map<string, BehaviourBaseline>();
   const fileSet = (files: readonly string[] | undefined) => [...new Set(files ?? [])].sort().join("|");
   const codeSessionRunExecutor = new CodeSessionRunExecutor({
     runner: codingAgentRunner,
@@ -325,6 +329,19 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
       setTimeout(() => { if (warmPreviews.get(key)?.started === started) warmPreviews.delete(key); }, 600_000).unref?.();
     },
     warmUp: async (input) => input.readOnlyIntent || input.session.mode === "plan" ? undefined : projectSandbox?.prepare(input.ctx, input.session.companyId, input.session.projectId),
+    // A request that must keep behaviour (a refactor) records what the running app does before any edit (V6 step 05).
+    beforeRun: async (input) => {
+      behaviourBaselines.delete(input.session.projectId);
+      if (input.readOnlyIntent || input.session.mode === "plan" || !inputDeps.projectBrowserQaService) return;
+      if (!requestsBehaviourKeeping(String(input.toolContext?.userMessage ?? ""))) return;
+      const project = await projectService.get(input.ctx, input.session.companyId, input.session.projectId);
+      if (!isCodeChatWebsite(project) || project.status !== "previewing") return;
+      const baseline = await captureBehaviour(actions => inputDeps.projectBrowserQaService!.inspect(input.ctx, input.session.companyId, {
+        projectId: input.session.projectId, runId: input.runId, actions, checks: ["console"], agentId: "system" }));
+      if (!baseline) return;
+      behaviourBaselines.set(input.session.projectId, baseline);
+      setTimeout(() => { if (behaviourBaselines.get(input.session.projectId) === baseline) behaviourBaselines.delete(input.session.projectId); }, 3_600_000).unref?.();
+    },
     resolveVerificationTools: async (input) => resolveProjectVerificationTools(input, projectService, codeService),
     afterRun: async (input, result) => {
       let finished = await finishCodeChatWebsite(input, result, {
@@ -374,6 +391,22 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
         await inputDeps.projectBrowserQaService.inspect(input.ctx, input.session.companyId, {
           projectId: input.session.projectId, runId: input.runId, checks: ["screenshot"], screenshotMode: "visual", maxScreenshotBytes: 2_000_000, agentId: "system",
         }).catch(() => undefined);
+      }
+      // The same clicks as before the run; a different result is a finding the QA repair loop gives back to the agent.
+      const baseline = behaviourBaselines.get(input.session.projectId);
+      const ready = finished as { status?: string; websitePreview?: { status?: string }; message?: string; functionalAcceptance?: Record<string, unknown> };
+      if (baseline && ready?.status === "completed" && ready.websitePreview?.status === "running" && inputDeps.projectBrowserQaService) {
+        const outcome = await compareBehaviour(baseline, actions => inputDeps.projectBrowserQaService!.inspect(input.ctx, input.session.companyId, {
+          projectId: input.session.projectId, runId: input.runId, actions, checks: ["console"], agentId: "system" })).catch(() => undefined);
+        if (outcome) {
+          const language = resolveCodingConversationLanguage(String(input.toolContext?.userMessage ?? input.prompt ?? ""));
+          const note = behaviourMessage(language, outcome);
+          finished = outcome.findings.length
+            ? { ...ready, status: "failed", reason: "website_preview_qa_failed", behaviourCheck: { status: "failed", checked: outcome.checked, findings: outcome.findings },
+                functionalAcceptance: { ...(ready.functionalAcceptance ?? {}), status: "failed", findings: [...((ready.functionalAcceptance?.findings as unknown[]) ?? []), ...outcome.findings.map(({ message, fix }) => ({ message, fix }))] },
+                message: note }
+            : { ...ready, behaviourCheck: { status: "passed", checked: outcome.checked }, message: ready.message ? ready.message.trimEnd() + "\n\n" + note : note };
+        }
       }
       finished = await reviewWebsiteReference(input, finished, {
         inspect: async () => {

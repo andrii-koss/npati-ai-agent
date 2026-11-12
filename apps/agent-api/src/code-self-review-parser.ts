@@ -70,6 +70,7 @@ export const REVIEW_RULES = [
   CODING_RESPONSE_PUNCTUATION,
   "Write each reason in the user's language in at most two concise sentences: identify the failing behavior and its consequence. Keep exact evidence needed to substantiate the finding, but put repair instructions in suggested_fix rather than repeating them in reason. Do not repeat the same defect in multiple findings.",
   "- correctness: the change does not do what the goal asked, or breaks a caller.",
+  "For a refactor that must keep behaviour (extracting a component, function or module), compare every moved call with the code it replaced: a handler passed as a prop or callback must still receive the same arguments (e.g. changeQty(item.id, 1) replaced by onAdd={changeQty} with onAdd(item.id) drops the second argument). A changed call signature is a blocking correctness finding.",
   "- security: a secret, credential or key is introduced or persisted; untrusted input is used unsafely.",
   "- scope: a change that the goal and the plan did not call for.",
   "For a targeted bug fix, inspect all changed files including manifests and configuration. An install/prebuild hook or a new UI fetch/product flow is a scope defect unless the supplied evidence establishes that it is necessary for the requested fix. A dependency environment problem calls for restoring dependencies, not modifying product/build behavior. Do not invent unrelated repairs or broad cleanup as a review fix.",

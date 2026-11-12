@@ -46,3 +46,11 @@ describe("non-file self-review evidence", () => {
     expect(evidence).not.toContain("install failed");
   });
 });
+
+// Live V6 step 05: extracting ProductCard passed `onAdd={changeQty}` and called `onAdd(item.id)`, dropping the
+// quantity argument, so "Додати" stopped adding to the cart while self-review said clean.
+it("tells the reviewer to compare moved calls in a behaviour-keeping refactor", async () => {
+  const { REVIEW_RULES } = await import("../apps/agent-api/src/code-self-review-parser");
+  expect(REVIEW_RULES).toContain("must still receive the same arguments");
+  expect(REVIEW_RULES).toContain("A changed call signature is a blocking correctness finding");
+});

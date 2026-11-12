@@ -163,6 +163,8 @@ export interface CodeSessionRunExecutorOptions {
   resolveModel?: (ctx: AuthContext, input: CodeSessionRunInput) => Promise<string | undefined>;
   /** Started, not awaited, when a run begins: e.g. create the project sandbox while the model writes the first files. */
   warmUp?: (input: CodeSessionRunInput) => Promise<unknown>;
+  /** Awaited before the model starts: records state the run's result is later compared with (behaviour before a refactor). */
+  beforeRun?: (input: CodeSessionRunInput) => Promise<void>;
   /** Started, not awaited, when the self-review begins, with the files the run changed so far. */
   beforeSelfReview?: (input: CodeSessionRunInput, changedFiles: readonly string[]) => void;
   prepareReference?: (input: CodeSessionRunInput) => Promise<readonly string[]>;
@@ -256,6 +258,8 @@ export class CodeSessionRunExecutor {
         input = { ...input, extraSystemPromptLines: [...(input.extraSystemPromptLines ?? []), ...analysis] };
       }
       const verificationTools = await this.options.resolveVerificationTools?.(input);
+      // Awaited: what it records (e.g. the app's behaviour before a refactor) must describe the code before any edit.
+      await this.options.beforeRun?.(input).catch((error: unknown) => this.options.logger?.warn({ err: error, sessionId }, "code_session_before_run_failed"));
       result = await runner.run({
         ctx: input.ctx,
         session: input.session,
