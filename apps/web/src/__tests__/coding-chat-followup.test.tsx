@@ -65,6 +65,9 @@ it.each(["/c/child?company=company&project=project&developmentRoot=parent", "/c/
   const activityHeader=host.querySelector<HTMLButtonElement>(".codex-trace-row-header")!;
   await act(async()=>activityHeader.click());
   const stream=host.querySelector<HTMLElement>(".message-stream")!;
+  // The user scrolls up with the wheel. The opening position (use-chat-opening-position) is released by user input
+  // (wheel, touch, keys, pointer), not by a scroll event its own positioning also fires.
+  await act(async()=>stream.dispatchEvent(new WheelEvent("wheel",{bubbles:true,deltaY:-400})));
   Object.defineProperties(stream,{scrollHeight:{configurable:true,value:1000},scrollTop:{configurable:true,value:100},clientHeight:{configurable:true,value:300}});
   await act(async()=>stream.dispatchEvent(new Event("scroll",{bubbles:true})));
   const scrolling=vi.spyOn(stream,"scrollTo");scrolling.mockClear();
@@ -148,8 +151,11 @@ it("keeps Preview outside user messages before and after reloading persisted cha
   loaded=new Promise<void>(resolve=>{releaseProcesses=resolve;});
   root=createRoot(host);
   await act(async()=>{root!.render(<MemoryRouter initialEntries={["/c/reload-chat"]}><I18nProvider><BusinessChatPage neutralChat initialConversationId="reload-chat" /></I18nProvider></MemoryRouter>);});
-  // History waits for its steps, so the text and the steps appear together.
-  expect(host.querySelector("article.user")).toBeNull();
+  // History shows at once and is not held for its steps (03c6795e, docs/performance/2026-11-12-chat-double-flash-audit.md);
+  // even before the steps arrive the project card and Preview stay out of the user's message.
+  expect(host.querySelector("article.user")?.textContent).toContain("Create my store");
+  expect(host.querySelector("article.user .project-chat-card")).toBeNull();
+  expect(host.querySelector("article.user .coding-preview-trigger")).toBeNull();
   await act(async()=>releaseProcesses());
   expect(host.querySelector("article.user")?.textContent).toContain("Create my store");
   expect(host.querySelector("article.user .project-chat-card")).toBeNull();
