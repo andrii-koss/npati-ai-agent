@@ -509,11 +509,6 @@ export function CodeDataPolicyPanel({ companyId, isUk, notify }: {
             }}
           >
             <div className="browser-card-title-group" style={{ flex: 1, minWidth: "260px" }}>
-              <span className="browser-card-icon" aria-hidden="true">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                </svg>
-              </span>
               <div>
                 <h3>{isUk ? "Проєкт" : "Project"}</h3>
                 <p>
