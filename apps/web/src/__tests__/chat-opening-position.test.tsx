@@ -3,6 +3,9 @@ import React, { act, useRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useChatOpeningPosition } from "../use-chat-opening-position";
+import { ChatDevelopmentProgress } from "../ChatDevelopmentProgress";
+import { I18nProvider } from "../i18n";
+import type { DevelopmentProcess } from "@npati/shared";
 
 let host: HTMLDivElement, root: Root;
 let cancel: () => void;
@@ -16,7 +19,8 @@ function Chat({ request = "a:1", sending = false, onlyUser = false, hidden = fal
   return <div ref={ref} className="message-stream" onWheel={() => cancel()}>
     <article className="assistant" data-message-id="first" data-chat-reply-id="first" />
     <article className="user" data-message-id="user" />
-    {commentary && <article className="assistant" data-chat-reply-id="commentary">I will create a professional, modern website for you with a clean layout and responsive design.</article>}
+    {commentary && <I18nProvider><ChatDevelopmentProgress process={{ id: "fixture", status: "completed" } as DevelopmentProcess}
+      items={[{ id: "commentary", stage: "model_response", kind: "assistant_message", title: "I will create a professional, modern website for you with a clean layout and responsive design.", at: "2026-11-09T09:12:29.845Z" }]} /></I18nProvider>}
     {!onlyUser && <article className="assistant" data-message-id="last" data-chat-reply-id="last" />}
     {hidden && <article className="assistant" />}
     <div className="chat-scroll-spacer" />
