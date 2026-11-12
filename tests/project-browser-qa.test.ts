@@ -93,6 +93,13 @@ describe("project browser QA", () => {
     f.inspect.mockResolvedValueOnce({ ...result, consoleErrorCount: 0, brokenLinks: [], accessibility: [] });
     expect((await f.qa.inspect(owner, f.company.id, { projectId: f.project.id })).issues.some(item => /fixed host/.test(item.message))).toBe(false);
   });
+  it("reports a script from an outside host as not checked, not as an error (V6 step 07)", async () => {
+    const f = await fixture();
+    f.inspect.mockResolvedValueOnce({ ...result, consoleErrorCount: 0, brokenLinks: [], accessibility: [], blockedScripts: ["cdn.jsdelivr.net"] } as never);
+    const report = await f.qa.inspect(owner, f.company.id, { projectId: f.project.id });
+    expect(report.issues.map(item => [item.severity, item.message])).toEqual([["warning", "Not checked: the page loads its script from cdn.jsdelivr.net"]]);
+    expect(report.success).toBe(true);
+  });
   it("reports each console error once: diagnosed errors by detail, only the rest by count (V6-D06-02)", async () => {
     const f = await fixture();
     const diagnostic = { type: "error", cause: "runtime", message: "JavaScript runtime error", source: "preview-script", line: 71, column: 17 };

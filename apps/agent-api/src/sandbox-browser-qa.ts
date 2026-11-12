@@ -46,6 +46,8 @@ export function parseBrowserQaResult(stdout: string): SandboxBrowserQaResult {
     if (!result.apiLog) delete result.apiLog;
     result.foreignApiHosts = Array.isArray(result.foreignApiHosts) ? result.foreignApiHosts.slice(0, 5).map((host) => String(host).replace(/[^A-Za-z0-9.:-]/g, "").slice(0, 100)).filter(Boolean) : undefined;
     if (!result.foreignApiHosts?.length) delete result.foreignApiHosts;
+    result.blockedScripts = Array.isArray(result.blockedScripts) ? result.blockedScripts.slice(0, 5).map((host) => String(host).replace(/[^A-Za-z0-9.:-]/g, "").slice(0, 100)).filter(Boolean) : undefined;
+    if (!result.blockedScripts?.length) delete result.blockedScripts;
     result.hiddenShown = Array.isArray(result.hiddenShown) ? result.hiddenShown.slice(0, 5).map((selector) => String(selector).replace(/[^A-Za-z0-9#._-]/g, "").slice(0, 80)).filter(Boolean) : undefined;
     if (!result.hiddenShown?.length) delete result.hiddenShown;
     result.uncheckedWrites = Array.isArray(result.uncheckedWrites) ? result.uncheckedWrites.slice(0, 5).map((entry) => String(entry).replace(/[^A-Za-z0-9 /_.-]/g, "").slice(0, 90)).filter((entry) => /^(POST|PUT|PATCH|DELETE) \//.test(entry)) : undefined;

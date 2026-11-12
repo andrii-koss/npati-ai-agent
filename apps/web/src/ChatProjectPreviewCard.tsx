@@ -45,7 +45,8 @@ export interface ChatProjectPreviewCardProps {
 }
 
 export function resolveChatProjectType(card: ProjectCardData): ProjectVariantType {
-  const kind = (card.kind ?? "").toLowerCase().trim();
+  // The project's own kind first; card.kind only says which workspace the card opens (code_project).
+  const kind = (card.projectKind ?? card.kind ?? "").toLowerCase().trim();
   const fw = (card.framework ?? "").toLowerCase().trim();
   const name = (card.name ?? "").toLowerCase().trim();
 

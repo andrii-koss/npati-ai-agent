@@ -11,6 +11,7 @@ import { CodeAsyncWorkspaceService, registerCodeAsyncWorkspaceRoutes } from "./c
 import { finishCodeChatWebsite, isCodeChatWebsite, isPlainProjectFramework, isPreviewableChange } from "./code-chat-website";
 import { detectProjectStack } from "./project-preview-stack";
 import { verifyWebsiteRuntime } from "./website-runtime-acceptance";
+import { gamePlayActions } from "./game-play-check";
 import { behaviourMessage, captureBehaviour, compareBehaviour, requestsBehaviourKeeping, type BehaviourBaseline } from "./website-behaviour-check";
 import { resolveCodingConversationLanguage } from "./company-chat-i18n";
 import { registerCodeIntentRoutes } from "./code-intent-routing";
@@ -370,8 +371,9 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
       finished = await verifyWebsiteRuntime(input, finished, async () => {
         if (!inputDeps.projectBrowserQaService) throw new Error("Browser QA is not configured");
         await featureFlagService.assertEnabled(input.ctx, "code.shell", { companyId: input.session.companyId });
+        let first: Awaited<ReturnType<NonNullable<typeof inputDeps.projectBrowserQaService>["inspect"]>>;
         try {
-          return await inputDeps.projectBrowserQaService!.inspect(input.ctx, input.session.companyId, {
+          first = await inputDeps.projectBrowserQaService!.inspect(input.ctx, input.session.companyId, {
             projectId: input.session.projectId, runId: input.runId,
             checks: ["screenshot", "console", "links"], screenshotMode: "visual", maxScreenshotBytes: 2_000_000, agentId: "system",
           });
@@ -382,10 +384,18 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
             projectId: input.session.projectId, runId: input.runId, checks: ["screenshot"], screenshotMode: "visual", maxScreenshotBytes: 2_000_000, agentId: "system",
           }).catch(() => undefined), 10_000).unref?.();
           if (!["visual_screenshot_unavailable", "preview_empty"].includes((error as { code?: string })?.code ?? "")) throw error;
-          return inputDeps.projectBrowserQaService!.inspect(input.ctx, input.session.companyId, {
+          first = await inputDeps.projectBrowserQaService!.inspect(input.ctx, input.session.companyId, {
             projectId: input.session.projectId, runId: input.runId, checks: ["console", "links"], agentId: "system",
           });
         }
+        // A game is also played for a few seconds in a separate pass without a screenshot (the thumbnail stays the first
+        // frame): its errors appear on input, not on the first frame. A play pass that cannot run keeps the first verdict.
+        const actions = first.success ? gamePlayActions(await projectService.get(input.ctx, input.session.companyId, input.session.projectId).catch(() => ({ kind: undefined }))) : undefined;
+        if (!actions) return first;
+        const played = await inputDeps.projectBrowserQaService!.inspect(input.ctx, input.session.companyId, {
+          projectId: input.session.projectId, runId: input.runId, checks: ["console"], agentId: "system", actions,
+        }).catch(() => first);
+        return played.success ? first : played;
       });
       if ((finished as { backendPreview?: { status?: string } })?.backendPreview?.status === "running" && inputDeps.projectBrowserQaService) {
         await inputDeps.projectBrowserQaService.inspect(input.ctx, input.session.companyId, {

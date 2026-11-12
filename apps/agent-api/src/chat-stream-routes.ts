@@ -552,6 +552,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
               status: runStatus,
               cardVersion: PROJECT_CARD_DATA_VERSION,
               kind: "code_project",
+              ...(finishedProject.kind ? { projectKind: finishedProject.kind } : {}),
               framework: finishedProject.framework ?? undefined,
               previewUrl: hasCodeChatPreview(runResult) ? finishedProject.previewUrl ?? undefined : undefined,
               lastBuildStatus: finishedProject.lastBuildStatus ?? undefined,

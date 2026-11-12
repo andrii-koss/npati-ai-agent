@@ -136,6 +136,8 @@ export interface ProjectCardData {
   cardVersion?: number;
   /** Which workspace the card opens. Absent means a website project, i.e. the pre-C7 shape. */
   kind?: "website_project" | "code_project";
+  /** What the project is (website, game, mobile_app, api...), from the project record; the card's label uses it. */
+  projectKind?: string;
   /** Code session the card points at; only meaningful for `kind: "code_project"`. */
   sessionId?: string;
   /** Session mode at capture time (plan | ask | auto_edit | full_auto_sandbox), for display only. */

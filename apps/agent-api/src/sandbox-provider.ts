@@ -35,6 +35,8 @@ export interface SandboxBrowserQaResult {
   apiLog?: string[];
   /** Hosts other than the page's own that the page sent Project API requests to. */
   foreignApiHosts?: string[];
+  /** Hosts of scripts the page loads that the check does not open; what those scripts draw was not tested. */
+  blockedScripts?: string[];
   /** Elements with the hidden attribute that are displayed anyway, as short selectors. */
   hiddenShown?: string[];
   /** Form writes to the site's own server routes that the check did not send, as "METHOD /path". */

@@ -423,7 +423,7 @@ export class ChatDevelopmentService {
     await saveChatProjectCard(this.d.store, ctx, process.conversationId, messageId, {
       id: project.id, projectId: project.id, companyId: project.companyId, name: project.name, status: view?.status ?? "preparing",
       framework: project.framework, previewUrl: project.previewUrl ?? undefined, lastBuildStatus: project.lastBuildStatus ?? undefined,
-      kind: "code_project", sessionId: process.sessionId, runId: process.runId,
+      kind: "code_project", sessionId: process.sessionId, runId: process.runId, ...(project.kind ? { projectKind: project.kind } : {}),
     });
   }
   private async run(ctx: AuthContext, process: Entry, target: DevelopmentTarget, message: string, controller: AbortController) {

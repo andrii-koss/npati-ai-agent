@@ -52,6 +52,8 @@ try {
     const apiFailures = [];
     // A site must call its Project API by a relative path. A fixed host (another installation's domain) works for nobody else.
     const foreignApiHosts = [];
+    // Scripts the page loads from hosts the check does not open: what they draw (a game engine from a CDN) was not tested.
+    const blockedScripts = [];
     // Form writes to the site's own server routes (a Next.js /api route) are not sent; they are named so the report says so.
     const uncheckedWrites = [];
     await context.route("**/*", async route => {
@@ -86,6 +88,7 @@ try {
       // A Flutter web app loads its engine and fonts from these hosts, and a site loads Google Fonts from the last two. Blocking
       // them made a working page look broken, and the agent then removed the fonts from the site to "fix" it.
       const flutterEngine = url.protocol === "https:" && ["www.gstatic.com", "fonts.gstatic.com", "fonts.googleapis.com"].includes(url.hostname) && route.request().method() === "GET" && !url.username && !url.password;
+      if (url.origin !== origin && !flutterEngine && route.request().resourceType() === "script" && blockedScripts.length < 5 && !blockedScripts.includes(url.host)) blockedScripts.push(url.host);
       if ((url.origin !== origin && !flutterEngine) || url.username || url.password) return route.abort();
       if(input.actions?.length && !['GET','HEAD'].includes(route.request().method()))return route.abort();
       return route.continue();
@@ -271,7 +274,7 @@ try {
       statusCode: response?.status() ?? 0, loadTimeMs, domContentLoadedMs: Math.round(observations.domContentLoadedMs),
       resourceCount: observations.resourceCount, totalSizeBytes: observations.totalSizeBytes,
       consoleErrorCount: Math.min(consoleErrorCount, 100), consoleDiagnostics, brokenLinks, accessibility: observations.violations, interactionTrace,
-      apiFailures, formsSubmitted, apiCalls, apiBridge, apiLog, foreignApiHosts, hiddenShown: observations.hiddenShown, uncheckedWrites,
+      apiFailures, formsSubmitted, apiCalls, apiBridge, apiLog, foreignApiHosts, blockedScripts, hiddenShown: observations.hiddenShown, uncheckedWrites,
       screenshot: captured,
     }));
     await context.close();

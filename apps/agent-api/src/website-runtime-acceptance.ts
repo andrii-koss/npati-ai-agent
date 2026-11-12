@@ -1,7 +1,7 @@
 import { normalizeBrowserDiagnostic } from "../browser-qa-diagnostics.mjs";
-import { browserCheckUnavailableNotice, resolveCodingConversationLanguage } from "./company-chat-i18n";
+import { browserCheckScriptBlockedNotice, browserCheckUnavailableNotice, resolveCodingConversationLanguage } from "./company-chat-i18n";
 import type { CodeSessionRunInput } from "./code-session-run-executor";
-import type { BrowserQaReportResult } from "./project-browser-qa-service";
+import { NOT_CHECKED_SCRIPT, type BrowserQaReportResult } from "./project-browser-qa-service";
 
 /**
  * The report's other errors (a refused form, a fixed API host, a control shown to the wrong visitor). They are not console
@@ -33,6 +33,15 @@ export async function verifyWebsiteRuntime(input: CodeSessionRunInput, result: u
     const qa = await inspect();
     const functionalAcceptance = { status: qa.success ? "passed" : "failed", qaStatus: qa.report.status, reportId: qa.report.id,
       diagnostics: qa.consoleErrors.slice(0, 5).map(normalizeBrowserDiagnostic), brokenLinks: qa.brokenLinks.slice(0, 10), findings: browserQaFindings(qa) };
+    // Passed, but a script of the page was never loaded: the user is told it was not fully verified.
+    const blocked = (qa.issues ?? []).filter((issue) => issue.message.startsWith(NOT_CHECKED_SCRIPT)).map((issue) => issue.message.slice(NOT_CHECKED_SCRIPT.length));
+    if (qa.success && blocked.length) {
+      const answer = (run as { message?: string }).message;
+      return { ...run, functionalAcceptance: { ...functionalAcceptance, status: "not_verified", blockedScripts: blocked },
+        message: `${answer ? `${answer}
+
+` : ""}${browserCheckScriptBlockedNotice(resolveCodingConversationLanguage(input.prompt ?? ""), blocked)}` };
+    }
     return qa.success ? { ...run, functionalAcceptance } : { ...run, status: "failed", reason: "website_preview_qa_failed", functionalAcceptance,
       message: browserFailureMessage(input.prompt ?? "", functionalAcceptance.diagnostics, functionalAcceptance.brokenLinks, functionalAcceptance.findings) };
   } catch (error) {

@@ -403,3 +403,15 @@ export function projectCapabilityUnavailableMessage(input: { message: string; to
   return capabilityAgentCopy[language]?.(input.tool, input.company)
     ?? `No active agent of company "${input.company}" has the \`${input.tool}\` tool, so I did not change any data. The owner can grant this tool to an agent on the company's Agents page and repeat the request.`;
 }
+
+/**
+ * The check ran, but the page's own script comes from an outside host the check does not open (a game engine from a
+ * CDN), so what that script draws was never run. Saying "passed" would claim a game nobody saw (V6 step 07).
+ */
+export function browserCheckScriptBlockedNotice(language: CompanyChatLanguage, hosts: string[]): string {
+  const list = hosts.join(", ");
+  if (language === "uk") return `⚠️ Не перевірено повністю: сторінка завантажує скрипт з ${list}, а автоматична перевірка зовнішні сервери не відкриває, тож те, що малює цей скрипт (наприклад, гру), не запускалося. Перевірте в Preview.`;
+  if (language === "ru") return `⚠️ Проверено не полностью: страница загружает скрипт с ${list}, а автоматическая проверка внешние серверы не открывает, поэтому то, что рисует этот скрипт (например, игру), не запускалось. Проверьте в Preview.`;
+  if (language === "en") return `⚠️ Not fully verified: the page loads its script from ${list}, and the automatic check does not open outside servers, so what that script draws (such as a game) was not run. Please check it in Preview.`;
+  return `${browserCheckUnavailableNotice(language)} (${list})`;
+}

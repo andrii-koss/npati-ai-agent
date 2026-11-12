@@ -52,3 +52,16 @@ describe("Stage 06 Preview runtime regressions", () => {
     expect(await executors["code.preview.screenshot"]!(execution("code.preview.screenshot"))).toMatchObject({ reportId: "qa-real", functionalQaPassed: true, qaSummary: { status: "warning", brokenLinksCount: 2, warningCount: 2 } });
   });
 });
+
+// V6 step 07 (D07-03): a game whose engine comes from a CDN never ran in the check, which said "passed" over a page
+// that showed only "could not load Phaser". Such a page is now "not verified", and the user is told so in their language.
+it("does not call a page passed when its own script was never loaded", async () => {
+  const { NOT_CHECKED_SCRIPT } = await import("../apps/agent-api/src/project-browser-qa-service");
+  const input = { session: { mode: "auto" }, prompt: "зроби гру на Phaser" } as CodeSessionRunInput;
+  const report = { success: true, report: { id: "r", status: "passed" }, consoleErrors: [], brokenLinks: [],
+    issues: [{ type: "console_error", severity: "warning", message: NOT_CHECKED_SCRIPT + "cdn.jsdelivr.net" }] } as unknown as BrowserQaReportResult;
+  const out = await verifyWebsiteRuntime(input, { status: "completed", websitePreview: { status: "running" }, message: "Гру створено." }, async () => report) as { status: string; message: string; functionalAcceptance: { status: string; blockedScripts: string[] } };
+  expect(out.status).toBe("completed");
+  expect(out.functionalAcceptance).toMatchObject({ status: "not_verified", blockedScripts: ["cdn.jsdelivr.net"] });
+  expect(out.message).toMatch(/^Гру створено\.\n\n⚠️ Не перевірено повністю: сторінка завантажує скрипт з cdn\.jsdelivr\.net/);
+});

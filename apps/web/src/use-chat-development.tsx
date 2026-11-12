@@ -140,17 +140,19 @@ export function useChatDevelopment(options: {
     return () => { controller?.abort(); window.clearInterval(timer); document.removeEventListener("visibilitychange", visibility); };
   }, [live, anyActive, options.conversationId, queryProjectId]);
   useEffect(() => {
-    // Websites links recover a dedicated development chat, even after its previous chat was deleted.
+    // Websites links recover a dedicated development chat, even after its previous chat was deleted. Only a project named
+    // by the address is such a link: a new chat learns the project its own reply creates before it learns its own id, and
+    // moving away then aborted that reply and cancelled the run (V6 step 07, a game never built).
     const companyId = search.get("company");
-    if (!projectId || !companyId || options.conversationId || root) return;
+    if (!queryProjectId || !companyId || options.conversationId || root || options.busy) return;
     let cancelled = false;
     setOpeningProjectChat(true);
-    void api<{ url: string }>("/chat/development/project", { method: "POST", body: JSON.stringify({ companyId, projectId }) })
+    void api<{ url: string }>("/chat/development/project", { method: "POST", body: JSON.stringify({ companyId, projectId: queryProjectId }) })
       .then(data => { if (!cancelled) navigate(data.url, { replace: true }); })
       .catch(error => { if (!cancelled) callbacks.current.onError(error instanceof Error ? error.message : "Could not restore project chat"); })
       .finally(() => { if (!cancelled) setOpeningProjectChat(false); });
     return () => { cancelled = true; setOpeningProjectChat(false); };
-  }, [projectId, root, options.conversationId, search, navigate]);
+  }, [queryProjectId, root, options.conversationId, options.busy, search, navigate]);
   useEffect(() => {
     const process = processes.find(p => p.projectId === projectId && p.sessionId && p.conversationId === options.conversationId);
     if (process?.inboxEnabled && process.sessionId && process.sessionId !== options.boundSessionId && options.conversationId) callbacks.current.onSession({ companyId: process.companyId, projectId: process.projectId!, sessionId: process.sessionId, inboxEnabled: true }, options.conversationId);

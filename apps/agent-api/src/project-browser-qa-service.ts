@@ -8,6 +8,9 @@ import type { ProjectService } from "./project-service";
 import type { SandboxBrowserQaResult } from "./sandbox-provider";
 import { isWebpScreenshot, screenshotHasDetail } from "./project-screenshot-content";
 
+/** Start of the issue for a script the check could not load; the host follows. */
+export const NOT_CHECKED_SCRIPT = "Not checked: the page loads its script from ";
+
 export interface BrowserQaInspectOptions {
   actions?: BrowserQaAction[];
   projectId: string;
@@ -106,6 +109,11 @@ export class ProjectBrowserQaService {
     for (const host of result.foreignApiHosts ?? [])
       issues.push(issue("console_error", "error", `The page sends Project API requests to the fixed host ${host} instead of its own address`,
         "Call the relative path /v1/projects/<projectId>/... with no host name in front of it, and remove any fallback URL."));
+    // Not a failure either: a script from an outside host (a game engine from a CDN) does not load in the check, so what
+    // it draws was never run. Reported as not checked, so a page that shows only a "could not load" note is not "passed".
+    for (const host of result.blockedScripts ?? [])
+      issues.push(issue("console_error", "warning", `${NOT_CHECKED_SCRIPT}${host}`,
+        "The page works for visitors who can reach this host. Check it in Preview; bundling the library into the project makes it testable here."));
     // Not a failure: the check cannot send these without changing real data, so it says they were not tested.
     if (result.uncheckedWrites?.length)
       issues.push(issue("console_error", "warning", `Not checked: a form sends ${result.uncheckedWrites.join(", ")} to the site's own server, which the check does not call because it could change real data`,
