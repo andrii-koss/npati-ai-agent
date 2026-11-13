@@ -4,7 +4,7 @@ streams its window to the browser as JPEG frames and sends the viewer's keys and
 The Preview proxy carries plain HTTP only (no WebSocket), so the page polls /frame.jpg and posts input with /input.
 Usage (from the project folder): python3 /opt/npati-qa/pygame-stream.py --port 6080 [--entry main.py]
 """
-import argparse, ctypes, ctypes.util, io, json, os, shutil, subprocess, sys, threading, time
+import argparse, ctypes, ctypes.util, io, json, os, shutil, signal, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -70,7 +70,28 @@ lock = threading.Lock()
 
 import pygame  # noqa: E402  (after DISPLAY is set; used only to encode frames)
 
-state = {"game": None, "starts": 0, "last_error": "", "log": "", "window": None}
+state = {"game": None, "starts": 0, "last_error": "", "log": "", "window": None, "seen": time.time(), "paused": False}
+IDLE_PAUSE_SECONDS = 5
+
+
+def viewer_seen():
+    """A viewer asked for a frame or sent input: wake a paused game."""
+    state["seen"] = time.time()
+    game = state["game"]
+    if state["paused"] and game and game.poll() is None:
+        os.kill(game.pid, signal.SIGCONT)
+    state["paused"] = False
+
+
+def pause_when_unwatched():
+    """A game nobody looks at is paused (SIGSTOP): every open Preview kept a 60 fps loop busy, and four of them starved
+    the Sandbox (Projects thumbnails timed out). Its window keeps the last picture, so the next frame is immediate."""
+    while True:
+        time.sleep(0.5)
+        game = state["game"]
+        if not state["paused"] and game and game.poll() is None and time.time() - state["seen"] > IDLE_PAUSE_SECONDS:
+            os.kill(game.pid, signal.SIGSTOP)
+            state["paused"] = True
 
 
 def run_game():
@@ -174,7 +195,7 @@ html,body{margin:0;height:100%;background:#0b1020;color:#cbd5e1;font:14px system
 #screen{max-width:100%;max-height:100%;image-rendering:auto;box-shadow:0 0 0 1px #1e293b;cursor:pointer}
 #hint{position:fixed;left:50%;bottom:10px;transform:translateX(-50%);background:#111827cc;padding:6px 12px;border-radius:999px;font-size:12px}
 #error{position:fixed;left:12px;right:12px;top:12px;display:none;white-space:pre-wrap;background:#3f1d24;color:#fecaca;padding:10px;border-radius:8px;font:12px ui-monospace,monospace;max-height:40%;overflow:auto}
-</style></head><body><div id="wrap" tabindex="0"><img id="screen" alt="Pygame window"></div>
+</style></head><body><div id="wrap" tabindex="0"><img id="screen" alt="" style="visibility:hidden"></div>
 <div id="hint">Натисніть на гру й керуйте з клавіатури · Click the game, then use the keyboard</div><pre id="error"></pre>
 <script>(function(){
 const token=new URLSearchParams(location.search).get("token")||"";
@@ -185,8 +206,8 @@ let last=null,seq=0,shown=0;
 // Each frame is a full round trip through the Preview proxy; two requests in flight double the frame rate, and an
 // older frame that arrives late is dropped.
 async function frame(){const n=++seq;try{const r=await fetch(url("frame.jpg",{t:Date.now()+"-"+n}),{cache:"no-store"});
- if(r.status===200&&n>shown){const b=await r.blob();if(n>shown){shown=n;const u=URL.createObjectURL(b);img.onload=()=>{if(last&&last!==u)URL.revokeObjectURL(last);last=u};img.src=u}}}catch(e){}
- setTimeout(frame,15)}
+ if(r.status===200&&n>shown){const b=await r.blob();if(n>shown){shown=n;const u=URL.createObjectURL(b);img.onload=()=>{img.style.visibility="visible";if(last&&last!==u)URL.revokeObjectURL(last);last=u};img.src=u}}}catch(e){}
+ setTimeout(frame,!automated?15:shown?1000:150)}
 async function status(){try{const s=await (await fetch(url("status"),{cache:"no-store"})).json();
  err.style.display=s.lastError?"block":"none";err.textContent=s.lastError?"Гра зупинилась з помилкою і перезапущена · The game stopped with an error and was restarted:\\n"+s.lastError:""}catch(e){}
  setTimeout(status,2000)}
@@ -200,7 +221,10 @@ window.addEventListener("blur",()=>{for(const k of down)fetch(url("input",{type:
 img.addEventListener("mousedown",e=>{wrap.focus();const r=img.getBoundingClientRect();
  fetch(url("input",{type:"click",x:((e.clientX-r.left)/r.width).toFixed(4),y:((e.clientY-r.top)/r.height).toFixed(4),button:e.button===2?3:1})).catch(()=>{})});
 img.addEventListener("contextmenu",e=>e.preventDefault());
-wrap.focus();frame();setTimeout(frame,60);status();
+// An automated browser (Browser QA, thumbnails) needs one picture, not a stream: it asks once a second.
+const automated=navigator.webdriver===true;
+if(automated)document.getElementById("hint").style.display="none";
+wrap.focus();frame();if(!automated)setTimeout(frame,60);status();
 })();</script></body></html>"""
 
 
@@ -220,12 +244,14 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         name = url.path.rsplit("/", 1)[-1]
         query = {key: values[-1] for key, values in parse_qs(url.query).items()}
+        if name in ("frame.jpg", "input"):
+            viewer_seen()
         if name == "frame.jpg":
             jpeg = frame_jpeg()
             return self.reply(200, jpeg, "image/jpeg") if jpeg else self.reply(204, b"", "text/plain")
         if name == "status":
             game = state["game"]
-            body = {"running": bool(game and game.poll() is None), "starts": state["starts"], "window": state["window"], "lastError": state["last_error"], "entry": entry}
+            body = {"running": bool(game and game.poll() is None), "paused": state["paused"], "starts": state["starts"], "window": state["window"], "lastError": state["last_error"], "entry": entry}
             return self.reply(200, json.dumps(body).encode(), "application/json")
         if name == "input":
             kind = query.get("type")
@@ -238,6 +264,7 @@ class Handler(BaseHTTPRequestHandler):
 if not shutil.which("xdotool"):
     print("pygame-stream: xdotool is missing", file=sys.stderr)
 threading.Thread(target=run_game, daemon=True).start()
+threading.Thread(target=pause_when_unwatched, daemon=True).start()
 try:
     ThreadingHTTPServer(("0.0.0.0", options.port), Handler).serve_forever()
 finally:

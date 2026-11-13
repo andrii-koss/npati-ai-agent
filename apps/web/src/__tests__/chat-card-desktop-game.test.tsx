@@ -34,3 +34,24 @@ it("Open starts the streamed game window as a Live Preview", async () => {
   expect(fetchMock.mock.calls.some(call => String((call as unknown[])[0]).endsWith("/projects/p1/preview/start"))).toBe(true);
   expect(host.querySelector('[data-testid="where"]')!.textContent).toBe("/c/chat");
 });
+
+// The side panel starts the Preview; the card used to keep its first status ("Stopped") until a reload.
+it("follows a Preview started from the card until it runs", async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  let started = false;
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/status") ? { isRunning: started, status: started ? "previewing" : "ready" } : {}))));
+  const opened: unknown[] = [];
+  const { ChatPreviewPanelContext } = await import("../ChatPreviewPanel");
+  const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
+  await act(async () => { root!.render(<MemoryRouter><ChatPreviewPanelContext.Provider value={{ open: card => { opened.push(card); }, warm() {}, leave() {} }}>
+    <ChatProjectPreviewCard card={{ id: "p2", projectId: "p2", companyId: "c1", name: "V6TEST_S8_Catcher", status: "ready", framework: "Pygame", kind: "code_project", projectKind: "game" }} />
+  </ChatPreviewPanelContext.Provider></MemoryRouter>); await new Promise(resolve => setTimeout(resolve, 50)); });
+  const card = host.querySelector('[data-testid="chat-project-preview-card"]')!;
+  expect(card.textContent).toContain("Stopped");
+  await act(async () => { host.querySelector<HTMLButtonElement>('button[aria-label="Open the game window"]')!.click(); });
+  expect(opened).toHaveLength(1);
+  expect(card.textContent).toContain("Starting");
+  started = true;
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 1700)); });
+  expect(card.textContent).toContain("Running");
+});

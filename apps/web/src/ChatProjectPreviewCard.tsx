@@ -294,6 +294,26 @@ export function ChatProjectPreviewCard({
   const usesPanel = Boolean(panel && card.companyId && !isStatic);
   const panelCard = { id: card.id, projectId: card.projectId, companyId: card.companyId, name: card.name, framework: card.framework, sessionId: card.sessionId };
 
+  // Open hands the start to the side panel; the card watched only its first status, so a game started from the card
+  // still read "Stopped" until the page was reloaded (V6 step 08). It now follows the start until it runs or fails.
+  const [panelStartedAt, setPanelStartedAt] = useState(0);
+  useEffect(() => {
+    if (!panelStartedAt || !card.companyId) return;
+    let active = true;
+    setRuntimeStatus("starting");
+    const endpoint = `/api/companies/${encodeURIComponent(card.companyId)}/projects/${encodeURIComponent(card.projectId ?? card.id)}/preview/status`;
+    const poll = async () => {
+      const token = getStoredAuthToken();
+      const state = await fetch(endpoint, { headers: token ? { authorization: `Bearer ${token}` } : {} }).then(response => response.ok ? response.json() as Promise<{ isRunning?: boolean; status?: string }> : null).catch(() => null);
+      if (!active) return;
+      if (state?.isRunning) { setRuntimeStatus("running"); return; }
+      if (state?.status === "failed") { setRuntimeStatus("failed"); return; }
+      if (Date.now() - panelStartedAt < 180_000) window.setTimeout(() => void poll(), 1500);
+    };
+    void poll();
+    return () => { active = false; };
+  }, [panelStartedAt]);
+
   // Check Sandbox Runtime status
   useEffect(() => {
     let isMounted = true;
@@ -499,7 +519,7 @@ export function ChatProjectPreviewCard({
   }
 
   async function openPreview() {
-    if (usesPanel) { panel!.open(panelCard, thumbnailUrl); return; }
+    if (usesPanel) { panel!.open(panelCard, thumbnailUrl); if (runtimeStatus !== "running") setPanelStartedAt(Date.now()); return; }
     setPreviewOpen(true);
     setWarm(true);
     setPreviewError("");
