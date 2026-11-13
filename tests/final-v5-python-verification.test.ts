@@ -17,3 +17,10 @@ it("runs standard-library unittest files when the project has no pytest", async 
   f.files["pytest.ini"] = "[pytest]\n";
   expect((await f.service.resolveVerifyCommands(ctx, f.c.id, f.p.id)).test).toBe(".venv/bin/python -m pytest");
 });
+// V6 step 08 (owner chose to run Pygame games): the build check of a Pygame game is to play it in the Sandbox's virtual display.
+it("plays a Pygame game as its build check, and keeps an owner's own build command", async () => {
+  const f = await fixture();
+  expect((await f.service.resolveVerifyCommands(ctx, f.c.id, f.p.id)).build).toBe("sh /opt/npati-qa/pygame-smoke.sh");
+  await f.service.updateProject(ctx, f.c.id, f.p.id, { expectedRevision: (await f.projects.get(ctx, f.c.id, f.p.id)).revision, verifyCommands: { build: "python3 my_check.py" } });
+  expect((await f.service.resolveVerifyCommands(ctx, f.c.id, f.p.id)).build).toBe("python3 my_check.py");
+});

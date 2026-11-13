@@ -208,6 +208,16 @@ export function withRootReply(result: unknown, rootReply: unknown, responseLangu
   return { ...view, message: rootReply.trimEnd() + "\n\n" + heading + view.message.trim() };
 }
 
+/**
+ * The same for a repair inside one run: the automatic check failed after the model's first final answer, the model fixed
+ * it and answered again with only the fix (V6 step 08: a new Pygame game was answered with "Fixed the failing test check by
+ * adding pytest"). The first answer stays first, the fix follows under the repair heading.
+ */
+export function withInRunRepair(rootReply: string | undefined, finalText: string, responseLanguage?: string): string {
+  if (!rootReply?.trim() || finalText.includes(rootReply.trim())) return finalText;
+  return rootReply.trimEnd() + "\n\n" + (REPAIR_HEADING[responseLanguage ?? ""] ?? REPAIR_HEADING.en!) + "\n" + finalText.trim();
+}
+
 export function withUnchangedFilesNote(result: unknown, input: { readOnlyIntent?: boolean; responseLanguage?: string; session?: { mode?: string } }): unknown {
   if (input.readOnlyIntent || input.session?.mode === "plan" || !result || typeof result !== "object") return result;
   const view = result as { status?: unknown; message?: unknown; summary?: { filesChanged?: unknown } | null };

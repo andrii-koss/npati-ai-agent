@@ -84,10 +84,13 @@ RUN chmod 755 /usr/local/bin/flutter && ln -sf flutter /usr/local/bin/dart
 COPY apps/agent-api/project-runtime-guard.c /tmp/project-runtime-guard.c
 COPY apps/agent-api/project-runtime-launcher.mjs apps/agent-api/project-runtime-inner.mjs /opt/npati-runtime/
 RUN apk add --no-cache libseccomp-dev chromium font-noto
+# Pygame has no musl wheel on PyPI; the distribution build runs here. Xvfb and xdotool let the automatic check play a desktop game.
+RUN apk add --no-cache py3-pygame xvfb xdotool
 RUN npm install --prefix /opt/npati-qa --omit=dev --ignore-scripts --no-audit --no-fund playwright@1.63.0
 COPY apps/agent-api/browser-qa-runner.mjs /opt/npati-qa/browser-qa-runner.mjs
 COPY apps/agent-api/browser-qa-actions.mjs /opt/npati-qa/browser-qa-actions.mjs
 COPY apps/agent-api/browser-qa-diagnostics.mjs /opt/npati-qa/browser-qa-diagnostics.mjs
+COPY apps/agent-api/pygame-smoke.sh /opt/npati-qa/pygame-smoke.sh
 RUN cc -O2 -Wall -Wextra -Werror /tmp/project-runtime-guard.c -lseccomp -o /usr/local/bin/npati-project-exec \
   && /usr/local/bin/npati-project-exec --emit-filter /opt/npati-runtime/project-command.seccomp \
   && rm /tmp/project-runtime-guard.c

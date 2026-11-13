@@ -5,6 +5,7 @@ import {
   type VerificationPlan,
 } from "./code-verification-plan";
 import { decideSelfReview, type SelfReviewRiskDecision } from "./code-self-review-risk";
+import { withInRunRepair } from "./code-session-run-executor";
 import { buildSelfReviewSummary, buildVerificationSummary, verificationEvidenceForReview } from "./code-review-summary";
 import {
   createSelfReview,
@@ -79,7 +80,7 @@ export class CodingAgentReviewCoordinator {
   private selfReviewPasses = 0;
   private verifiedSignature: string | null = null;
   private verifiedRevision: string | null = null;
-  private selfReviewFixPending = false;
+  private selfReviewFixPending = false; private repairRootReply: string | undefined; // first answer a repair followed: kept first
   private lastCheckpointId: string | null = null;
   collectedChanges: Array<{ path: string; tool: string; status?: string; diff?: string }> = [];
   /**
@@ -756,6 +757,7 @@ export class CodingAgentReviewCoordinator {
     } else {
       const failing = await this.verifyAndDecide(steps, stateRunId);
       if (failing === "repair") {
+        this.repairRootReply ??= assistantText;
         await this.host.release("verification_repair");
         return { action: "continue" };
       }
@@ -799,6 +801,6 @@ export class CodingAgentReviewCoordinator {
       runStatus: "completed", message: "Coding Agent run completed",
     });
     this.host.summary.remaining = "The model finished without further tool calls.";
-    return { action: "completed", result: await this.host.stop("completed", "completed", this.withSelfReviewNotice(assistantText || "The run finished.")) };
+    return { action: "completed", result: await this.host.stop("completed", "completed", this.withSelfReviewNotice(withInRunRepair(this.repairRootReply, assistantText || "The run finished.", this.host.input.responseLanguage))) };
   }
 }

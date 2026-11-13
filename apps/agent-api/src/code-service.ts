@@ -3,6 +3,9 @@ import { DATA_CLASSIFICATIONS, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CL
 import type { ProjectService } from "./project-service";
 import type { ProjectWorkspace } from "./project-workspace";
 import { TOOLCHAIN_MANIFEST_FILES, UNITTEST_FILES_MARKER, detectToolchain } from "./code-toolchain-detector";
+
+/** The Sandbox script (apps/agent-api/pygame-smoke.sh) that plays a Pygame game in a virtual display. */
+export const PYGAME_SMOKE_COMMAND = "sh /opt/npati-qa/pygame-smoke.sh";
 import { resolveCodeAgentLimits, type CodeAgentLimits } from "./code-agent-config";
 import { currentToolManifest } from "./code-tool-registry";
 import { hasAdminPermission } from "./code-rbac";
@@ -153,6 +156,9 @@ export class CodeService {
     if(["Pygame", "FastAPI", "Django", "Flask"].includes(project.framework ?? "")) for(const key of Object.keys(commands) as Array<keyof typeof commands>) {
       if(commands[key]?.startsWith("python ")) commands[key] = commands[key]!.replace(/^python /,".venv/bin/python ");
     }
+    // A Pygame game's "build" is to run it: the Sandbox opens it in a virtual display, presses real keys and fails on a
+    // Python error, so a game that crashes on start or on input goes to the repair loop like a broken web build.
+    if(project.framework === "Pygame" && !commands.build) commands.build = PYGAME_SMOKE_COMMAND;
     return commands;
   }
 

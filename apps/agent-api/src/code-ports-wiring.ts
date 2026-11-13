@@ -249,14 +249,23 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
           try {
             result = await runCommand(command);
           } catch (error) {
-            // "vite: not found" means dependencies are missing, not that the code is broken: install once and retry.
-            if ((error as { code?: string }).code !== "command_not_found" || !/^npm\b/.test(command) || dependenciesInstalled) throw error;
-            dependenciesInstalled = true;
-            await runCommand("npm install");
-            // A frontend or backend folder has its own package.json.
-            const nested = (await projectWorkspace.listFiles(input.ctx, input.companyId, input.projectId)).map((file) => /^([A-Za-z0-9_-]+)\/package\.json$/.exec(file.path)?.[1]).filter((folder): folder is string => Boolean(folder));
-            for (const folder of nested) await runCommand(`npm --prefix ${folder} install`);
-            result = await runCommand(command);
+            // A Python project's checks run its .venv. Without one yet, create it once (with the Sandbox's system packages,
+            // which include pygame), install requirements.txt and retry; the install's own failure stays in the result.
+            if ((error as { code?: string }).code === "command_not_found" && command.startsWith(".venv/bin/python") && !dependenciesInstalled) {
+              dependenciesInstalled = true;
+              await runCommand("python3 -m venv --system-site-packages .venv");
+              await runCommand("if [ -f requirements.txt ]; then .venv/bin/python -m pip install -r requirements.txt; fi").catch(() => undefined);
+              result = await runCommand(command);
+            } else {
+              // "vite: not found" means dependencies are missing, not that the code is broken: install once and retry.
+              if ((error as { code?: string }).code !== "command_not_found" || !/^npm\b/.test(command) || dependenciesInstalled) throw error;
+              dependenciesInstalled = true;
+              await runCommand("npm install");
+              // A frontend or backend folder has its own package.json.
+              const nested = (await projectWorkspace.listFiles(input.ctx, input.companyId, input.projectId)).map((file) => /^([A-Za-z0-9_-]+)\/package\.json$/.exec(file.path)?.[1]).filter((folder): folder is string => Boolean(folder));
+              for (const folder of nested) await runCommand(`npm --prefix ${folder} install`);
+              result = await runCommand(command);
+            }
           }
         } catch (error) {
           const errMsg = error instanceof Error ? error.message : String(error);

@@ -253,9 +253,10 @@ export async function initSharedProjectContext(
   const content = isDesktopProjectFramework(details.framework)
     ? [`# ${details.name}`, "", "Framework: Python / Pygame. This is a desktop game, not a website.",
       details.description ?? "", "Use a project-local .venv for Python dependencies; preserve Sandbox isolation and dependency policy.",
-      "Implement the requested game and unit/headless tests. Keep game rules testable independently of a display.",
+      "pygame is preinstalled in the Sandbox (PyPI has no wheel for its Python): create the venv with `python3 -m venv --system-site-packages .venv`, then `pip install -r requirements.txt` finds it. Do not build pygame from source.",
+      "Implement the requested game and unit/headless tests. Keep game rules testable independently of a display. The game starts from main.py.",
       "Run supported tests and report actual exit codes. SDL dummy/headless rendering is not real GUI input.",
-      "Only claim a real GUI window and keyboard input when an authorized display backend is available. Otherwise report GUI BLOCKED; never substitute a browser mock.",
+      "After each change the platform plays the game itself: it opens main.py in a virtual display (Xvfb), presses real keys and fails on a Python error. Report that check's result as a virtual-display check, not a physical monitor; the person plays the window on their own computer. Never substitute a browser mock.",
       "Inspect current files before edits; preserve the Project ID and existing rules except the requested change."].join("\n")
     : isMobileApp
     ? [

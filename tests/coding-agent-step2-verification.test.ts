@@ -376,6 +376,31 @@ describe("Step 2 — the eight baseline scenarios", () => {
     expect(repairText).toContain("typecheck");
   });
 
+  // V6 step 08: after a repair inside the run, the reply described only the fix ("Fixed the failing test check by adding
+  // pytest") and the summary of the new game was lost. The first answer stays first; the fix follows under a heading.
+  it("7b. a repaired run keeps its first answer and adds the fix under the repair heading", async () => {
+    let attempt = 0;
+    const harness = createHarness({
+      script: [
+        { content: "editing", toolCalls: [nativeCall("code.fs.edit", { path: "src/a.ts" })] },
+        { content: "Built the Dodger game: arrows move the ship, rocks fall, 3 hits end the game, R restarts." },
+        { content: "repairing", toolCalls: [nativeCall("code.fs.edit", { path: "src/a.ts" })] },
+        { content: "Added pytest to requirements.txt; 12 tests pass." },
+      ],
+      verificationTools: ["test"],
+      onVerify: (tools) => { attempt += 1; return attempt === 1 ? failedVerify(tools, "No module named pytest") : okVerify(tools); },
+    });
+    const result = await harness.run({ responseLanguage: "uk" });
+    expect(result.status).toBe("completed");
+    expect(result.message).toMatch(/^Built the Dodger game[^]*Автоматична перевірка знайшла помилку і виправила її:\n[^]*Added pytest/u);
+  });
+
+  it("7c. a run without a repair keeps its single answer", async () => {
+    const harness = createHarness({ script: editThenFinish, verificationTools: ["test"] });
+    const result = await harness.run();
+    expect(result.message).toBe("all done");
+  });
+
   it("8. a narrowed or partial pass is never reused for the full check set", async () => {
     const harness = createHarness({
       script: [
