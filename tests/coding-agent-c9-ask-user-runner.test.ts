@@ -205,7 +205,9 @@ describe("security-gate: C9 ask_user stops the run", () => {
 
     expect(result.status).toBe("waiting_for_user");
     expect(result.reason).toBe("waiting_for_user");
-    expect(result.message).toContain(QUESTION);
+    // V6 step 10: the reply shows the question itself (the person answers it with the next message), not its id.
+    expect(result.message).toContain("Which database?");
+    expect(result.message).not.toContain(QUESTION);
 
     // The run state says "waiting", and it was told which question and which tool call hold it.
     expect(harness.paused).toEqual([{ questionId: QUESTION, toolCallId: "call-ask-1" }]);

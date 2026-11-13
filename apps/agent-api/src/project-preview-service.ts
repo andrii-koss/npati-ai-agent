@@ -318,15 +318,19 @@ export class ProjectPreviewService {
       }
     }
     // Python and PHP projects have no node_modules step: without their own environment the server command cannot start.
-    if (!verifiedBuild && options.verifiedBuild !== false && !files.some((f) => f.path === "package.json")) {
+    // Always ensure it (the check is one cheap command): a backend run starts Preview with verifiedBuild: false, which this
+    // condition used to skip, so a chat-made FastAPI service never got its .venv and exited 127 (V6 step 10).
+    if (!files.some((f) => f.path === "package.json")) {
       const paths = new Set(files.map((f) => f.path));
       const setup = paths.has("requirements.txt")
         // A Pygame game uses the Sandbox's pygame (PyPI has no wheel for its Python): the venv sees the system packages.
-        ? { check: "test -x .venv/bin/python", commands: [detected.framework === "pygame" ? "python3 -m venv --system-site-packages .venv" : "python3 -m venv .venv", ".venv/bin/python -m pip install -r requirements.txt"] }
-        : paths.has("composer.json") ? { check: "test -f vendor/autoload.php", commands: ["composer install --no-interaction --prefer-dist"] } : null;
+        // requirements.txt is installed on every start, not only into a new venv: an agent that added a package after the
+        // venv existed (httpx) left a server that died with ModuleNotFoundError. An already satisfied install takes a moment.
+        ? { check: "test -x .venv/bin/python", commands: [detected.framework === "pygame" ? "python3 -m venv --system-site-packages .venv" : "python3 -m venv .venv"], always: [".venv/bin/python -m pip install -r requirements.txt"] }
+        : paths.has("composer.json") ? { check: "test -f vendor/autoload.php", commands: ["composer install --no-interaction --prefer-dist"], always: [] as string[] } : null;
       if (setup) {
         const ready = await this.sandbox.execute(ctx, companyId, { projectId, command: setup.check, agentId: options.agentId || "system", approved: true }).then((result) => result.exitCode === 0, () => false);
-        if (!ready) for (const command of setup.commands) {
+        for (const command of [...(ready ? [] : setup.commands), ...setup.always]) {
           await this.sandbox.execute(ctx, companyId, { projectId, command, agentId: options.agentId || "system", approved: true }).catch((error) => console.warn(`[startPreview] Dependency preparation warning for project ${projectId}:`, error));
         }
       }

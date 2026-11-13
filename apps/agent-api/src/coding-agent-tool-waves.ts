@@ -78,7 +78,7 @@ export interface ToolWavesExecutionHost {
     message: string,
   ) => Promise<CodingAgentRunResult>;
   pauseForUser: (
-    question: { questionId: string; toolCallId: string },
+    question: { questionId: string; toolCallId: string; prompt?: string; choices?: string[] },
     waitingFor?: "question" | "approval",
   ) => Promise<CodingAgentRunResult>;
 }
@@ -107,7 +107,7 @@ export function approvalPauseFrom(
 
 export function questionIdFrom(
   outcome: { call: NormalizedToolCall; result: CodeToolInvokeResult | CodeToolInvokeFailure },
-): { questionId: string; toolCallId: string } | null {
+): { questionId: string; toolCallId: string; prompt?: string; choices?: string[] } | null {
   if (outcome.call.name !== CODE_ASK_USER_TOOL || !outcome.result.ok) return null;
   const envelope = outcome.result.result;
   if (!envelope || typeof envelope !== "object") return null;
@@ -115,7 +115,11 @@ export function questionIdFrom(
   if (!data || typeof data !== "object") return null;
   const questionId = (data as { questionId?: unknown }).questionId;
   if (typeof questionId !== "string" || questionId.length === 0) return null;
-  return { questionId, toolCallId: outcome.call.id };
+  // The question itself goes into the reply: "Waiting for the user to answer question <id>" left the person unable to answer.
+  const args = outcome.call.arguments ?? {};
+  const prompt = typeof args.prompt === "string" ? args.prompt : typeof args.question === "string" ? args.question : undefined;
+  const choices = Array.isArray(args.choices) ? args.choices.map(choice => typeof choice === "string" ? choice : choice && typeof choice === "object" && typeof (choice as { label?: unknown }).label === "string" ? (choice as { label: string }).label : "").filter(Boolean) : undefined;
+  return { questionId, toolCallId: outcome.call.id, ...(prompt ? { prompt } : {}), ...(choices?.length ? { choices } : {}) };
 }
 
 export class CodingAgentToolWaves {

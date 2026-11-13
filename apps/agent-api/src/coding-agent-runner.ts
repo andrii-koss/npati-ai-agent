@@ -190,7 +190,7 @@ export class CodingAgentRunner {
     let steps = Math.max(0, input.initialTurnIndex ?? 0);
 
     const pauseForUser = async (
-      question: { questionId: string; toolCallId: string }, waitingFor: "question" | "approval" = "question",
+      question: { questionId: string; toolCallId: string; prompt?: string; choices?: string[] }, waitingFor: "question" | "approval" = "question",
     ): Promise<CodingAgentRunResult> => (await this.runPhases.pauseForUserOnce({
       ctx, session, companyId, steps, turnId, stateRunId, stateOwner,
       inboxOpened: inboxManager?.isOpened ?? false, summary, question, waitingFor,

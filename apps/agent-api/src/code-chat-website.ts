@@ -126,8 +126,18 @@ export function nativeMobileConversationContext(history: readonly { role: string
     + "\nPrior messages are historical reports, not fresh tool evidence. In an audit distinguish earlier reported checks from commands executed in this turn. Workspace listings can hide ignored node_modules, dist and .test-build: their absence does not prove installation, build or tests never ran. Do not claim an attempted command without its actual tool result. If a read-only session cannot inspect execution receipts, mark that history unverified rather than never executed. Preserve approval and read-only restrictions.\n";
 }
 export function hasCodeChatPreview(result: unknown): boolean {
-  return !!result && typeof result === "object" && (result as { websitePreview?: { status?: string } }).websitePreview?.status === "running";
+  if (!result || typeof result !== "object") return false;
+  const view = result as { websitePreview?: { status?: string }; backendPreview?: { status?: string } };
+  // A backend (Express, FastAPI…) reports its running server as backendPreview. Counting only websitePreview marked every
+  // chat-created API "failed" right after its server had started, and the cleanup then stopped that server (V6 step 10).
+  return view.websitePreview?.status === "running" || view.backendPreview?.status === "running";
 }
+
+const BACKEND_PREVIEW_FAILED: Record<string, (reason: string) => string> = {
+  uk: reason => `⚠️ Сервер не запустився в Preview: ${reason}. Код і зміни збережено; запустіть Preview знову або попросіть агента виправити запуск.`,
+  ru: reason => `⚠️ Сервер не запустился в Preview: ${reason}. Код и изменения сохранены; запустите Preview снова или попросите агента исправить запуск.`,
+  en: reason => `⚠️ The server did not start in Preview: ${reason}. The code and changes are saved; start Preview again or ask the agent to fix the start.`,
+};
 
 export async function finishCodeChatWebsite(input: CodeSessionRunInput, result: unknown, ports: {
   getProject(ctx: AuthContext, companyId: string, projectId: string): Promise<Project>;
@@ -135,7 +145,7 @@ export async function finishCodeChatWebsite(input: CodeSessionRunInput, result: 
   startPreview(ctx: AuthContext, companyId: string, projectId: string, signal?: AbortSignal, options?: { development: boolean }): Promise<{ status: string; previewUrl: string }>;
   markFailed(ctx: AuthContext, companyId: string, projectId: string): Promise<unknown>;
 }): Promise<unknown> {
-  const run = result as { status?: string; summary?: { stylePreview?: boolean; filesChanged?: string[]; verification?: { status?: string; requestedTools?: string[] } } } | null;
+  const run = result as { status?: string; message?: string; summary?: { stylePreview?: boolean; filesChanged?: string[]; verification?: { status?: string; requestedTools?: string[] } } } | null;
   if (run?.status !== "completed" || input.readOnlyIntent || input.session.mode === "plan") return result;
   const { companyId, projectId } = input.session;
   let project = withCanonicalFramework(await ports.getProject(input.ctx, companyId, projectId));
@@ -148,8 +158,19 @@ export async function finishCodeChatWebsite(input: CodeSessionRunInput, result: 
   // Backend readiness is established by the existing Preview service, separately from frontend build/Browser QA.
   if (project.type === "code_project" && isBackendProjectFramework(project.framework)) {
     if (!input.requireImplementation && Array.isArray(run.summary?.filesChanged) && run.summary.filesChanged.length === 0) return result;
-    const preview = await ports.startPreview(input.ctx, companyId, projectId, input.sink?.signal, { development: true });
-    return { ...run, backendPreview: preview };
+    // A server that does not start must not erase the agent's answer (V6 step 10: a FastAPI service was answered with only
+    // "Preview server did not become HTTP-ready"). The answer stays, the Preview is marked failed and the reason follows.
+    try {
+      const preview = await ports.startPreview(input.ctx, companyId, projectId, input.sink?.signal, { development: true });
+      return { ...run, backendPreview: preview };
+    } catch (error) {
+      if (input.sink?.signal.aborted) throw error;
+      await ports.markFailed(input.ctx, companyId, projectId);
+      const reason = error instanceof Error ? error.message : String(error);
+      const notice = (BACKEND_PREVIEW_FAILED[input.responseLanguage ?? ""] ?? BACKEND_PREVIEW_FAILED.en!)(reason);
+      const message = typeof run.message === "string" && run.message.trim() ? run.message.trimEnd() + "\n\n" + notice : notice;
+      return { ...run, message, backendPreview: { status: "failed", error: reason } };
+    }
   }
   if (!isCodeChatWebsite(project)) {
     // Only a change a browser can show starts Preview. A text file or a package.json alone has nothing to show, and the

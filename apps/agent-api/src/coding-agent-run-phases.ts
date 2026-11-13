@@ -223,7 +223,7 @@ export class CodingAgentRunPhases {
     stateOwner: string;
     inboxOpened: boolean;
     summary: CodingAgentRunSummary;
-    question: { questionId: string; toolCallId: string };
+    question: { questionId: string; toolCallId: string; prompt?: string; choices?: string[] };
     waitingFor: "question" | "approval";
     writeState: (operation: () => Promise<unknown>) => Promise<void>;
     stopHeartbeat: () => void;
@@ -299,7 +299,9 @@ export class CodingAgentRunPhases {
         "waiting_for_user",
         waitingFor === "approval"
           ? `Waiting for an approval decision on tool call ${question.toolCallId}.`
-          : `Waiting for the user to answer question ${question.questionId}.`,
+          : question.prompt
+            ? [question.prompt.trim(), ...(question.choices ?? []).map((choice, index) => `${index + 1}. ${choice}`)].join("\n")
+            : `Waiting for the user to answer question ${question.questionId}.`,
       ),
       inboxOpened,
     };
