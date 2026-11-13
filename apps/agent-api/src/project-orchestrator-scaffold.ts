@@ -256,7 +256,7 @@ export async function initSharedProjectContext(
       "pygame is preinstalled in the Sandbox (PyPI has no wheel for its Python): create the venv with `python3 -m venv --system-site-packages .venv`, then `pip install -r requirements.txt` finds it. Do not build pygame from source.",
       "Implement the requested game and unit/headless tests. Keep game rules testable independently of a display. The game starts from main.py.",
       "Run supported tests and report actual exit codes. SDL dummy/headless rendering is not real GUI input.",
-      "After each change the platform plays the game itself: it opens main.py in a virtual display (Xvfb), presses real keys and fails on a Python error. Report that check's result as a virtual-display check, not a physical monitor; the person plays the window on their own computer. Never substitute a browser mock.",
+      "After each change the platform plays the game itself: it opens main.py in a virtual display (Xvfb), presses real keys and fails on a Python error. Report that check's result as a virtual-display check, not a physical monitor. The person plays the game in Live Preview: the game window is streamed from the Sandbox to the browser, with keyboard and mouse. Never write a separate web version of the game.",
       "Inspect current files before edits; preserve the Project ID and existing rules except the requested change."].join("\n")
     : isMobileApp
     ? [

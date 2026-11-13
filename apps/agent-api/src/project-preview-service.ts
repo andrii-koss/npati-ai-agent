@@ -52,6 +52,12 @@ export class PreviewError extends Error {
     super(message);
   }
 }
+/**
+ * Live Preview of a Pygame game: apps/agent-api/pygame-stream.py runs the game in a virtual X display and serves its window
+ * as JPEG frames plus an input endpoint over plain HTTP (the Preview proxy carries no WebSocket).
+ */
+export const PYGAME_PREVIEW_STACK = { packageManager: "pip", framework: "pygame", command: "python3 /opt/npati-qa/pygame-stream.py --port $PORT", port: 6080, productionCommand: "python3 /opt/npati-qa/pygame-stream.py --port $PORT" } as const;
+
 function base64UrlEncode(data: string): string {
   return Buffer.from(data, "utf8").toString("base64url");
 }
@@ -189,7 +195,9 @@ export class ProjectPreviewService {
     const project = await this.projects.get(ctx, companyId, projectId);
     if (project.status !== "previewing") return { status: "not_running", rebuilt: false };
     const files = await this.workspace.listFiles(ctx, companyId, projectId);
-    const detected = await detectProjectStack(files, async (p) => (await this.workspace.readFile(ctx, companyId, projectId, p)).content);
+    // A Pygame game has no web server: its Preview is the game window, streamed from the Sandbox's virtual display.
+    const detected = isDesktopProjectFramework(project.framework) ? PYGAME_PREVIEW_STACK
+      : await detectProjectStack(files, async (p) => (await this.workspace.readFile(ctx, companyId, projectId, p)).content);
     if (detected.framework === "static") return { status: (await this.startPreview(ctx, companyId, projectId)).status, rebuilt: false };
     if (project.lastBuildStatus !== "ready") return { status: (await this.startPreview(ctx, companyId, projectId, { verifiedBuild: false })).status, rebuilt: false };
     await this.buildProject(ctx, companyId, projectId);
@@ -232,13 +240,13 @@ export class ProjectPreviewService {
       });
     }
     const project = await this.projects.get(ctx, companyId, projectId);
-    if (isDesktopProjectFramework(project.framework)) throw new PreviewError("desktop_preview_unsupported", "Desktop projects require a supported display runtime; HTTP Preview is not a GUI window", 409);
     if (project.status === "archived") throw new PreviewError("project_archived", "Archived project cannot run preview", 409);
     if (project.status === "soft_deleted" || project.status === "purging" || project.status === "deleted") {
       throw new PreviewError("project_deleted", "Deleted project cannot run preview", 409);
     }
     const files = await this.workspace.listFiles(ctx, companyId, projectId);
-    const detected = await detectProjectStack(files, async (p) => (await this.workspace.readFile(ctx, companyId, projectId, p)).content);
+    const detected = isDesktopProjectFramework(project.framework) ? PYGAME_PREVIEW_STACK
+      : await detectProjectStack(files, async (p) => (await this.workspace.readFile(ctx, companyId, projectId, p)).content);
     if (project.framework === "Flutter" && detected.framework !== "flutter") throw new PreviewError("native_preview_unsupported", "This project has no Flutter source to build for the web; HTTP Preview is not a native application", 409);
     if (detected.framework === "static" && (!options.command || project.framework === "HTML/CSS")) {
       try { await validateStaticProjectResources(files, async p => (await this.workspace.readFile(ctx, companyId, projectId, p)).content); }
@@ -313,7 +321,8 @@ export class ProjectPreviewService {
     if (!verifiedBuild && options.verifiedBuild !== false && !files.some((f) => f.path === "package.json")) {
       const paths = new Set(files.map((f) => f.path));
       const setup = paths.has("requirements.txt")
-        ? { check: "test -x .venv/bin/python", commands: ["python3 -m venv .venv", ".venv/bin/python -m pip install -r requirements.txt"] }
+        // A Pygame game uses the Sandbox's pygame (PyPI has no wheel for its Python): the venv sees the system packages.
+        ? { check: "test -x .venv/bin/python", commands: [detected.framework === "pygame" ? "python3 -m venv --system-site-packages .venv" : "python3 -m venv .venv", ".venv/bin/python -m pip install -r requirements.txt"] }
         : paths.has("composer.json") ? { check: "test -f vendor/autoload.php", commands: ["composer install --no-interaction --prefer-dist"] } : null;
       if (setup) {
         const ready = await this.sandbox.execute(ctx, companyId, { projectId, command: setup.check, agentId: options.agentId || "system", approved: true }).then((result) => result.exitCode === 0, () => false);
@@ -434,7 +443,8 @@ export class ProjectPreviewService {
     // durable Terminal journal just as replacement startup already does.
     if (this.sandbox && project.sandboxId && project.previewPort) {
       const files = await this.workspace.listFiles(ctx, companyId, projectId);
-      const detected = await detectProjectStack(files, async p => (await this.workspace.readFile(ctx, companyId, projectId, p)).content);
+      const detected = isDesktopProjectFramework(project.framework) ? PYGAME_PREVIEW_STACK
+        : await detectProjectStack(files, async p => (await this.workspace.readFile(ctx, companyId, projectId, p)).content);
       const commands = new Set([projectRuntimeCommandPort(detected.command, project.previewPort)]);
       if (detected.productionCommand) commands.add(projectRuntimeCommandPort(detected.productionCommand, project.previewPort));
       if (existing?.command) commands.add(existing.command);

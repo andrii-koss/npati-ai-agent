@@ -90,7 +90,7 @@ RUN npm install --prefix /opt/npati-qa --omit=dev --ignore-scripts --no-audit --
 COPY apps/agent-api/browser-qa-runner.mjs /opt/npati-qa/browser-qa-runner.mjs
 COPY apps/agent-api/browser-qa-actions.mjs /opt/npati-qa/browser-qa-actions.mjs
 COPY apps/agent-api/browser-qa-diagnostics.mjs /opt/npati-qa/browser-qa-diagnostics.mjs
-COPY apps/agent-api/pygame-smoke.sh /opt/npati-qa/pygame-smoke.sh
+COPY apps/agent-api/pygame-smoke.sh apps/agent-api/pygame-stream.py /opt/npati-qa/
 RUN cc -O2 -Wall -Wextra -Werror /tmp/project-runtime-guard.c -lseccomp -o /usr/local/bin/npati-project-exec \
   && /usr/local/bin/npati-project-exec --emit-filter /opt/npati-runtime/project-command.seccomp \
   && rm /tmp/project-runtime-guard.c

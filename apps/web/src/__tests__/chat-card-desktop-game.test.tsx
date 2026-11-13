@@ -5,20 +5,20 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 import { ChatProjectPreviewCard, desktopCardView } from "../ChatProjectPreviewCard";
 
-// V6 step 08 (D08-02): a Pygame game card said "Game · Live Preview · Stopped"; Open asked the server for a Preview, which it
-// refuses for a desktop game (409), and nothing visible happened. The card now says what it is and opens the files.
+// V6 step 08: a Pygame game card first said "Live Preview · Stopped" while Open got a 409 (D08-02). Since the owner's decision
+// its Live Preview is the game window streamed from the Sandbox: the card names it a desktop window and Open starts it.
 let root: Root | undefined;
 afterEach(async () => { if (root) await act(async () => root!.unmount()); document.body.innerHTML = ""; vi.unstubAllGlobals(); });
 
-it("describes a desktop game without a Preview, in both languages", () => {
-  expect(desktopCardView("Pygame", true)).toMatchObject({ mode: "Десктоп", status: expect.stringContaining("Без Preview") });
-  expect(desktopCardView("Pygame", false)).toMatchObject({ mode: "Desktop", status: expect.stringContaining("No Preview") });
+it("names a desktop game's Preview a desktop window, in both languages", () => {
+  expect(desktopCardView("Pygame", true)).toMatchObject({ mode: "Десктоп-вікно" });
+  expect(desktopCardView("Pygame", false)).toMatchObject({ mode: "Desktop window" });
   for (const framework of ["HTML/CSS", "React + Vite", "Expo", undefined]) expect(desktopCardView(framework, false)).toBeNull();
 });
 
-it("Open goes to the project's files and terminal and never starts a Preview", async () => {
+it("Open starts the streamed game window as a Live Preview", async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-  const fetchMock = vi.fn(async () => new Response("{}"));
+  const fetchMock = vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/status") ? { isRunning: false } : { status: "running", previewUrl: "/api/x/preview/proxy/?token=t" })));
   vi.stubGlobal("fetch", fetchMock);
   const Where = () => <span data-testid="where">{useLocation().pathname}</span>;
   const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
@@ -27,12 +27,10 @@ it("Open goes to the project's files and terminal and never starts a Preview", a
     <Where />
   </>} /></Routes></MemoryRouter>); });
   const card = host.querySelector('[data-testid="chat-project-preview-card"]')!;
-  expect(card.textContent).toContain("Desktop");
-  expect(card.textContent).not.toContain("Live Preview");
-  expect(card.textContent).toContain("No Preview");
-  const open = host.querySelector<HTMLButtonElement>('button[aria-label="Open the project\'s files and terminal"]')!;
+  expect(card.textContent).toContain("Desktop window · Live Preview");
+  const open = host.querySelector<HTMLButtonElement>('button[aria-label="Open the game window"]')!;
   expect(open.disabled).toBe(false);
-  await act(async () => { open.click(); });
-  expect(host.querySelector('[data-testid="where"]')!.textContent).toBe("/settings/code/c1/p1");
-  expect(fetchMock.mock.calls.some(call => String((call as unknown[])[0]).includes("/preview/start"))).toBe(false);
+  await act(async () => { open.click(); await new Promise(resolve => setTimeout(resolve, 50)); });
+  expect(fetchMock.mock.calls.some(call => String((call as unknown[])[0]).endsWith("/projects/p1/preview/start"))).toBe(true);
+  expect(host.querySelector('[data-testid="where"]')!.textContent).toBe("/c/chat");
 });

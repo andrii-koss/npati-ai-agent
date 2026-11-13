@@ -196,14 +196,12 @@ function OtherSvgThumbnail() {
 }
 
 /**
- * A desktop game (Pygame) has no browser Preview: it runs in its own window on a computer, and the server refuses to start
- * a Preview for it. Its card says so and Open goes to the project's files and terminal.
+ * A desktop game (Pygame): its Live Preview is the game window, streamed from the Sandbox's virtual display with keyboard
+ * and mouse. The card says it is a desktop window, and Open starts that Preview like any other.
  */
-export function desktopCardView(framework: string | undefined, isUk: boolean): { mode: string; status: string; open: string } | null {
+export function desktopCardView(framework: string | undefined, isUk: boolean): { mode: string; open: string } | null {
   if (!isDesktopProjectFramework(framework)) return null;
-  return isUk
-    ? { mode: "Десктоп", status: "Без Preview: гра запускається в окремому вікні", open: "Відкрити файли й термінал проєкту" }
-    : { mode: "Desktop", status: "No Preview: the game runs in its own window", open: "Open the project's files and terminal" };
+  return isUk ? { mode: "Десктоп-вікно", open: "Відкрити вікно гри" } : { mode: "Desktop window", open: "Open the game window" };
 }
 
 export function ChatProjectPreviewCard({
@@ -280,7 +278,7 @@ export function ChatProjectPreviewCard({
         ? (isUk ? "Гра" : "Game")
         : (isUk ? "Проєкт" : "Project");
   const desktop = desktopCardView(card.framework, isUk);
-  const subtitle = `${typeLabel} · ${desktop ? desktop.mode : "Live Preview"}`;
+  const subtitle = `${typeLabel} · ${desktop ? desktop.mode + " · " : ""}Live Preview`;
 
   // Status text and color
   const statusLabels: Record<PreviewRuntimeStatus, string> = {
@@ -618,9 +616,9 @@ export function ChatProjectPreviewCard({
             <div className="chat-preview-card-info">
               <h4 className="chat-preview-card-title" title={title}>{title}</h4>
               <span className="chat-preview-card-subtitle">{subtitle}</span>
-              <div className={`chat-preview-card-status status-${desktop ? "unavailable" : runtimeStatus}`}>
+              <div className={`chat-preview-card-status status-${runtimeStatus}`}>
                 <span className="chat-preview-status-dot" aria-hidden="true" />
-                <span>{desktop ? desktop.status : statusLabels[runtimeStatus]}</span>
+                <span>{statusLabels[runtimeStatus]}</span>
               </div>
             </div>
           </div>
@@ -630,8 +628,8 @@ export function ChatProjectPreviewCard({
             <button
               type="button"
               className="chat-preview-open-btn coding-preview-trigger"
-              onClick={() => { if (desktop && codeWorkspaceUrl) navigate(codeWorkspaceUrl); else void openPreview(); }}
-              disabled={desktop ? !codeWorkspaceUrl : runtimeStatus === "unavailable"}
+              onClick={() => void openPreview()}
+              disabled={runtimeStatus === "unavailable"}
               aria-label={desktop ? desktop.open : isUk ? "Відкрити Live Preview" : "Open Live Preview"}
             >
               <ExternalLink size={15} aria-hidden="true" strokeWidth={2.3} />
