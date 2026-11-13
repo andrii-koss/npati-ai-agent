@@ -8,3 +8,12 @@ it('re-detects generated Python test configuration instead of repairing stale em
 it('preserves explicit owner commands',async()=>{const f=await fixture();await f.service.updateProject(ctx,f.c.id,f.p.id,{expectedRevision:f.p.revision,verifyCommands:{test:'python3 custom_tests.py'}});expect(await (f.service as any).resolveVerifyCommands(ctx,f.c.id,f.p.id)).toMatchObject({test:'python3 custom_tests.py'});});
 
 it("fails closed on an unreadable current manifest",async()=>{const f=await fixture();f.files["pyproject.toml"]="[tool.pytest.ini_options]";f.workspace.readFile=async()=>{throw Object.assign(Error("private backend"),{status:503})};await expect(f.service.resolveVerifyCommands(ctx,f.c.id,f.p.id)).rejects.toMatchObject({code:"toolchain_detection_failed"});});
+// V6 step 08 (D08-03): a Pygame game tested with the standard library (tests/test_*.py, no pytest) had no test command,
+// so the platform never ran its tests and only the model could ask the person for a shell command.
+it("runs standard-library unittest files when the project has no pytest", async () => {
+  const f = await fixture();
+  f.files["tests/test_game_logic.py"] = "import unittest\n";
+  expect((await f.service.resolveVerifyCommands(ctx, f.c.id, f.p.id)).test).toBe(".venv/bin/python -m unittest discover -s tests");
+  f.files["pytest.ini"] = "[pytest]\n";
+  expect((await f.service.resolveVerifyCommands(ctx, f.c.id, f.p.id)).test).toBe(".venv/bin/python -m pytest");
+});

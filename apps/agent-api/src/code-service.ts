@@ -2,7 +2,7 @@ import type { AuthContext, CodeSession, ProjectKind, CodeSessionInput, CodeSessi
 import { DATA_CLASSIFICATIONS, DEFAULT_DATA_CLASSIFICATION, DEFAULT_RETENTION_CLASS, RETENTION_CLASSES, isClassificationAtLeast } from "@npati/workspace";
 import type { ProjectService } from "./project-service";
 import type { ProjectWorkspace } from "./project-workspace";
-import { TOOLCHAIN_MANIFEST_FILES, detectToolchain } from "./code-toolchain-detector";
+import { TOOLCHAIN_MANIFEST_FILES, UNITTEST_FILES_MARKER, detectToolchain } from "./code-toolchain-detector";
 import { resolveCodeAgentLimits, type CodeAgentLimits } from "./code-agent-config";
 import { currentToolManifest } from "./code-tool-registry";
 import { hasAdminPermission } from "./code-rbac";
@@ -138,6 +138,7 @@ export class CodeService {
         throw new CodeError("toolchain_detection_failed", "Cannot read project manifests. Check workspace access and retry detection.", 503, true);
       }
     }
+    if (present && [...present].some(path => /^tests\/test_[^/]+\.py$/.test(path))) files[UNITTEST_FILES_MARKER] = "";
     return files;
   }
 

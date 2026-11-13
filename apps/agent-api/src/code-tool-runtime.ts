@@ -472,8 +472,7 @@ export class CodeToolRuntime {
       }
 
       let raw: unknown;
-      try {
-        raw = await executor({
+      const runExecutor = (approvalId: string | undefined) => executor({
           ctx, companyId: input.companyId, projectId: input.projectId, sessionId: input.sessionId, sessionMode: input.sessionMode, turnId,
           ...(input.runId ? { runId: input.runId } : {}),
           toolCallId: input.toolCallId, leaseOwner: input.leaseOwner,
@@ -483,11 +482,26 @@ export class CodeToolRuntime {
           expectedRevisions,
           writePort,
           approved,
-          ...(input.approvalId ? { approvalId: input.approvalId } : {}),
+          ...(approvalId ? { approvalId } : {}),
           ...(input.agentId ? { agentId: input.agentId } : {}),
           ...(revisionSnapshot ? { workspaceRevision: revisionSnapshot } : {}),
           ...(input.snapshotId ? { snapshotId: input.snapshotId } : {}),
         });
+      try {
+        try {
+          raw = await runExecutor(input.approvalId);
+        } catch (error) {
+          // A shell command's policy engine creates its own approval and refuses at once. Wait for the person's answer,
+          // as a file or database change does, and run the exact same call once with that approval (the engine consumes
+          // it, bound to this payload). Before, the run went on, the "Allow" click did nothing and the reply called the
+          // command denied.
+          const pendingId = (error as { code?: string; details?: { approvalId?: unknown } }).code === "approval_required"
+            ? (error as { details?: { approvalId?: unknown } }).details?.approvalId : undefined;
+          if (typeof pendingId !== "string" || input.approvalId || !this.options.approvalDecision) throw error;
+          await input.onApprovalRequested?.({ approvalId: pendingId });
+          await this.writeGuard.awaitApprovalDecision(ctx, input, tool, pendingId, "policy");
+          raw = await runExecutor(pendingId);
+        }
       } catch (error) {
         const conflict = revisionConflictDetails(error);
         if (conflict) throw this.writeGuard.recordRevisionConflict(operationScope, conflict.currentRevision, input, tool.name, writeTargets.map(target => target.path));

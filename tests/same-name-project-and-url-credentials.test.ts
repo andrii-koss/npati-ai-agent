@@ -39,6 +39,14 @@ describe("a request naming a project several projects share", () => {
     const ask = f.resolver.resolveNamedCompany(auth, current, "У My Tasks додай фільтр", edit, "", { conversationProjectIds: async () => [] });
     await expect(ask).rejects.toThrow(/Знайдено кілька проєктів із назвою «My Tasks»: «My Tasks» — QA Labs, .*; «My Tasks» — QA Labs/u);
     await expect(f.resolver.resolveNamedCompany(auth, current, "Add a filter in My Tasks", edit)).rejects.toThrow(/More than one owned project is named “My Tasks”: «My Tasks» — QA Labs/u);
+    // V6 D08-04: the two entries must differ (the date was "Fri Nov 13" for both); each names its id and creation minute.
+    const message = await ask.catch((error: Error) => error.message);
+    const entries = message.split(": ").slice(1).join(": ").split("; ");
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).not.toBe(entries[1]);
+    const ids = entries.map(entry => /id ([0-9a-f]{8})$/.exec(entry.replace(/\. Відкрийте.*$/u, ""))?.[1]);
+    expect(ids.every(Boolean) && ids[0] !== ids[1]).toBe(true);
+    expect(message).toMatch(/створено \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/);
   });
 
   it("still refuses to guess between differently named projects", async () => {

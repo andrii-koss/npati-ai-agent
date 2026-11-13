@@ -68,6 +68,9 @@ function detectNode(files: Record<string, string | undefined>, evidence: string[
   return { languages, packageManagers: [manager], verifyCommands: commands };
 }
 
+/** Set by the manifest reader when the project has tests/test_*.py files. */
+export const UNITTEST_FILES_MARKER = "tests/test_*.py";
+
 function detectPython(files: Record<string, string | undefined>, evidence: string[]): Partial<ToolchainDetection> {
   const managers: string[] = [];
   const commands: CodeVerifyCommands = {};
@@ -80,6 +83,9 @@ function detectPython(files: Record<string, string | undefined>, evidence: strin
   if (!managers.length) return {};
   const hasPytest = Boolean(files["pytest.ini"] !== undefined || files["tests/__init__.py"] !== undefined || /pytest/.test(files["pyproject.toml"] ?? "") || /pytest/.test(files["requirements.txt"] ?? "") || /\[tool:pytest\]/.test(files["setup.cfg"] ?? ""));
   if (hasPytest) commands.test = "python -m pytest";
+  // Standard-library unittest files (tests/test_*.py, no pytest): a headless game's rules are tested this way, and pytest
+  // may not be installable. Without this the platform never ran them and only the model could ask for a shell command.
+  else if (files[UNITTEST_FILES_MARKER] !== undefined) { commands.test = "python -m unittest discover -s tests"; evidence.push("tests/test_*.py"); }
   if (/\[tool\.ruff\]/.test(files["pyproject.toml"] ?? "") || files["ruff.toml"] || files[".ruff.toml"]) { commands.lint = "python -m ruff check ."; evidence.push("ruff.toml"); }
   if (/\[tool\.mypy\]/.test(files["pyproject.toml"] ?? "") || files["mypy.ini"]) { commands.typecheck = "python -m mypy ."; evidence.push("mypy.ini"); }
   return { languages: ["python"], packageManagers: managers, verifyCommands: commands };
