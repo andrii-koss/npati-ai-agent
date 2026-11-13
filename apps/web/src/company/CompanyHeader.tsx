@@ -1,3 +1,4 @@
+import { PageGuideLink } from "../PageGuideLink";
 import { Link } from "react-router-dom";
 import { useTranslation } from "../i18n";
 import type { Company } from "./types";
@@ -57,6 +58,7 @@ export function CompanyHeader({
             >
               {selected ? selected.name : t("companySettings.header.buildTitle")}
             </h1>
+            <PageGuideLink guide="company" />
             {selected && <span className={`company-status ${selected.status}`}>{translatedStatus(t, selected.status)}</span>}
 
             {selected && (

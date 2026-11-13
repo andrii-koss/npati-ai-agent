@@ -1,3 +1,4 @@
+import { PageGuideLink } from "./PageGuideLink";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useWorkspace } from "./BusinessWorkspace";
@@ -297,6 +298,7 @@ export function GoalsPage() {
                 </svg>
               </Link>
               <span>{t("goalsPage.title")}</span>
+              <PageGuideLink guide="goals" />
             </h1>
             <p className="hero-copy">
               {t("goalsPage.heroCopy")}

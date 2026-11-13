@@ -1,3 +1,4 @@
+import { PageGuideLink } from "./PageGuideLink";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "./i18n";
@@ -125,6 +126,7 @@ export function IntegrationsPage() {
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
             </Link>
             <span>{t("integrationsPage.title")}</span>
+            <PageGuideLink guide="integrations" />
           </h1>
           <p>{t("integrationsPage.description")}</p>
         </div>

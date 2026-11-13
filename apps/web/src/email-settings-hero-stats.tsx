@@ -1,3 +1,4 @@
+import { PageGuideLink } from "./PageGuideLink";
 import { Link } from "react-router-dom";
 import type { EmailAnalytics } from "./email-settings-types";
 
@@ -22,6 +23,7 @@ export function EmailSettingsHeroHeader({
               </svg>
             </Link>
             <span>{t("emailSettings.title")}</span>
+            <PageGuideLink guide="email" />
           </h1>
           <p className="hero-copy">
             {t("emailSettings.heroCopy")}

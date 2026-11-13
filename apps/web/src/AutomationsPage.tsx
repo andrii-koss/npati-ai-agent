@@ -1,3 +1,4 @@
+import { PageGuideLink } from "./PageGuideLink";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
@@ -465,6 +466,7 @@ export function AutomationsPage() {
                 </svg>
               </Link>
               <span>{t("automations.title")}</span>
+              <PageGuideLink guide="automations" />
             </h1>
             <p className="hero-copy">
               {t("automations.heroCopy")}

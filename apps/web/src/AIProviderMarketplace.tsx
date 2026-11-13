@@ -1,3 +1,4 @@
+import { PageGuideLink } from "./PageGuideLink";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
@@ -658,6 +659,7 @@ export function AIProviderMarketplace() {
             </svg>
           </Link>
           <span>{t("aiMarketplace.title")}</span>
+          <PageGuideLink guide="ai" />
         </h1>
         <p>{t("aiMarketplace.description")}</p>
       </div>

@@ -1,3 +1,4 @@
+import { PageGuideLink } from "./PageGuideLink";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
@@ -377,6 +378,7 @@ export function MemoryPage() {
                 </svg>
               </Link>
               <span>{t("memoryPage.title")}</span>
+              <PageGuideLink guide="memory" />
             </h1>
             <p className="hero-copy">
               {t("memoryPage.heroCopy")}

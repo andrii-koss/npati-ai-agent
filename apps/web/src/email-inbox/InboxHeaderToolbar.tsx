@@ -1,3 +1,4 @@
+import { PageGuideLink } from "../PageGuideLink";
 import { Link } from "react-router-dom";
 import type { Company, EmailAccount, EmailNotification } from "../email-inbox-shared";
 import { useTranslation } from "../i18n";
@@ -60,6 +61,7 @@ export function InboxHeaderToolbar({
                 </svg>
               </Link>
               <span>{t("emailInbox.header.title")}</span>
+              <PageGuideLink guide="email" />
             </h1>
             <p className="hero-copy">
               {t("emailInbox.header.heroCopy")}

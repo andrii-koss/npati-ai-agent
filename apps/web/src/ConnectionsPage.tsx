@@ -1,3 +1,4 @@
+import { PageGuideLink } from "./PageGuideLink";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
@@ -386,6 +387,7 @@ export function ConnectionsPage() {
                 </svg>
               </Link>
               <span>{t("connectionsPage.title")}</span>
+              <PageGuideLink guide="connections" />
             </h1>
             <p className="hero-copy">
               {t("connectionsPage.heroCopy")}

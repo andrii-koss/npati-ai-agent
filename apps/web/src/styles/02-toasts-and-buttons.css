@@ -41,6 +41,33 @@
   scroll-behavior: smooth;
 }
 
+.page-guide-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  margin-inline-start: 4px;
+  padding: 4px;
+  border-radius: 50%;
+  color: var(--npati-red, #e11d2e);
+  text-decoration: none;
+  vertical-align: middle;
+  transition: color 160ms ease, background-color 160ms ease;
+}
+
+.page-guide-link:hover {
+  color: var(--npati-red-dark, #b81725);
+  background: rgb(225 29 46 / 7%);
+}
+
+.page-guide-link:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
 .chat-user-menu {
   position: absolute;
   z-index: 60;

@@ -1,3 +1,4 @@
+import { PageGuideLink } from "./PageGuideLink";
 import { useEffect, useMemo, useRef, useState } from "react";
 // C6b: read-only "why did this run act this way" — execution snapshot, snapshot diff and replay status.
 import { CodeSnapshotPanel } from "./CodeSnapshotPanel";
@@ -331,6 +332,7 @@ export function ActivityPage() {
               </svg>
             </Link>
             <span>{t("activity.title")}</span>
+            <PageGuideLink guide="activity" />
           </h1>
           <p className="hero-copy">
             {t("activity.heroCopy")}

@@ -1,3 +1,4 @@
+import { PageGuideLink } from "./PageGuideLink";
 import { useTranslation } from "./i18n";
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -695,6 +696,7 @@ export function SkillsPage() {
                 </svg>
               </Link>
               <span>{t("skillsPage.title")}</span>
+              <PageGuideLink guide="skills" />
             </h1>
             <p className="hero-copy">{t("skillsPage.heroCopy")}</p>
           </div>
@@ -827,6 +829,7 @@ export function BusinessSettingsHeader({ title, copy, action, backTo = "/setting
               </svg>
             </Link>}
             <span>{displayTitle}</span>
+            <PageGuideLink guide="business" />
           </h1>
           <p className="hero-copy">{copy}</p>
         </div>
