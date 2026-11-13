@@ -21,6 +21,7 @@ import {
   isDesktopProjectFramework,
 } from "@npati/shared";
 import { createFrameworkScaffold } from "./project-framework-scaffold";
+import { GAME_ENGINE_STARTER_FRAMEWORK, createStackStarterScaffold, gameEngineStarter } from "@npati/shared";
 import { ProjectOrchestrationError } from "./project-orchestrator-types";
 
 /**
@@ -204,7 +205,10 @@ export async function scaffoldWebsiteProject(
   const canonical = canonicalFrameworkName(framework) ?? (framework === "nextjs" ? "Next.js" : framework === "static" ? "HTML/CSS" : undefined);
   if (!canonical) throw new Error("Unsupported project framework: " + framework);
   if (canonical === "HTML/CSS") return;
-  const files = canonical === "Next.js"
+  const engine = canonical === GAME_ENGINE_STARTER_FRAMEWORK ? gameEngineStarter(prompt ?? "") : undefined;
+  const files = engine
+    ? engineStarterFiles(engine, projectName, prompt ?? "")
+    : canonical === "Next.js"
     ? minimalNextScaffold(projectName)
     : createFrameworkScaffold({ projectName, prompt: prompt ?? "", framework: canonical });
   const plan: PatchMutation[] = [];
@@ -224,6 +228,15 @@ export async function scaffoldWebsiteProject(
     try { await projectWorkspace.createFile(ctx, companyId, projectId, item.path, item.after); }
     catch { /* A concurrent scaffold may have created it. */ }
   }
+}
+
+/** A runnable Phaser / Three.js starter; the engine is an npm dependency, so the game works without outside hosts. */
+export function engineStarterFiles(engine: "phaser" | "three", projectName: string, prompt: string): Record<string, string> {
+  const files = createStackStarterScaffold(engine, { name: projectName }).files;
+  const pkg = engine === "phaser" ? "Phaser" : "Three.js";
+  const use = engine === "phaser" ? 'import Phaser from "phaser";' : 'import * as THREE from "three";';
+  files["README.md"] = `# ${projectName}\n\n${pkg} game on Vite. The engine is installed from npm (package.json); use it with \`${use}\` in src/main.js. Do not load it from a CDN with a <script> tag: Preview and the automatic browser check have no access to outside hosts.\n\n## Request\n\n${prompt}\n`;
+  return files;
 }
 
 /**

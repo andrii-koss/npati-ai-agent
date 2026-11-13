@@ -2,7 +2,7 @@ import type { ChatEntityRead } from "./project-chat-cards";
 import { isChatRowCapability, type ChatRowCapability } from "./chat-project-data-capabilities";
 import type { AIEngine, ChatToolDefinition } from "@npati/omniroute-adapter";
 import type { AuthContext, WorkspaceStore } from "@npati/workspace";
-import { SUPPORTED_PROJECT_FRAMEWORKS, developmentTargetKind, extractFramework, frameworkConstraints, isRuntimeToolchainCheck, isMobileProjectFramework, isWebsiteReferenceEdit, classifyProjectIntent, planChatDevelopment, type DevelopmentTarget, type ProjectIntent, type ProjectIntentDecision, type ProjectIntentInput } from "@npati/shared";
+import { GAME_ENGINE_STARTER_FRAMEWORK, SUPPORTED_PROJECT_FRAMEWORKS, developmentTargetKind, gameEngineStarter, extractFramework, frameworkConstraints, isRuntimeToolchainCheck, isMobileProjectFramework, isWebsiteReferenceEdit, classifyProjectIntent, planChatDevelopment, type DevelopmentTarget, type ProjectIntent, type ProjectIntentDecision, type ProjectIntentInput } from "@npati/shared";
 import { requestsNewBusinessIdea, requestsBusinessGoal, isShortAffirmativeReply, quickOnboardingReply } from "./chat-intent-helpers";
 import { isCompanyDeleteIntent } from "./company-delete-i18n";
 import { CompanyChatActions } from "./company-chat-actions";
@@ -53,7 +53,7 @@ A change to an existing accessible website ("add a contact form to the X website
 mentionedCompanyAgents are existing Company Agents named in the message; viewing or changing one of them (role, instructions, parent, tools, deletion) is CHAT. Managing NPATI records is CHAT, not a project edit: companies, agents, business profiles, goals, memory, automations and their schedules, email, integrations, webhooks and activity. This holds inside a website conversation and for a short follow-up that refers to such a record from history ("change its schedule" after an automation was created).
 Starting/opening Preview for several explicitly named existing projects is PREVIEW_PROJECT. Browser QA/testing input or reviewing source of several named existing projects is REVIEW_PROJECT. These bounded same-company requests run per project; do not misclassify them as a cross-company summary or source changes. Editing several projects remains ambiguous and must not become a read-only batch.
 An explicit Python/Pygame desktop game is kind game, framework Pygame, not HTML/CSS, React, a web API or a browser simulation. Use the exact named Project. Desktop code/unit/headless support is distinct from real GUI/display availability; do not claim GUI support from browser Preview.
-Respect positive AND negative technology constraints. Static HTML/CSS/vanilla JavaScript without a package manager => HTML/CSS; forbidden React/Next.js is not a framework selection. Choose technology BEFORE scaffolding from the supported catalog. Compare complexity, SEO/SSR/static content, persistence/auth, integrations and deployment. With no named technology, a simple presentation or small business site is HTML/CSS, unless a requirement needs more. A store does not imply a fixed framework: evaluate storefront, checkout and data needs. Explicit user technology is binding. Every target MUST include a reason and criteria. Native mobile uses Expo by default, but an explicitly requested Flutter app MUST retain Flutter source and framework. Flutter SDK availability is separate from source support. Never replace Flutter with Expo. Source, dependencies, static checks, native APK/AAB build, install and device E2E are separate statuses. Expo Web is not Android build or device evidence. A browser game uses kind game with HTML/CSS (Canvas and vanilla JavaScript) for simple 2D games or React + Vite when it needs components; a game for phones as a native app is kind mobile_app with Expo. Supported means scaffold/build/Preview code exists, not certified runtime availability. Laravel has known Composer installation blockers: disclose them rather than substituting another framework. Preserve project names in the user's language.
+Respect positive AND negative technology constraints. Static HTML/CSS/vanilla JavaScript without a package manager => HTML/CSS; forbidden React/Next.js is not a framework selection. Choose technology BEFORE scaffolding from the supported catalog. Compare complexity, SEO/SSR/static content, persistence/auth, integrations and deployment. With no named technology, a simple presentation or small business site is HTML/CSS, unless a requirement needs more. A store does not imply a fixed framework: evaluate storefront, checkout and data needs. Explicit user technology is binding. Every target MUST include a reason and criteria. Native mobile uses Expo by default, but an explicitly requested Flutter app MUST retain Flutter source and framework. Flutter SDK availability is separate from source support. Never replace Flutter with Expo. Source, dependencies, static checks, native APK/AAB build, install and device E2E are separate statuses. Expo Web is not Android build or device evidence. A browser game uses kind game with HTML/CSS (Canvas and vanilla JavaScript) for simple 2D games or React + Vite when it needs components; a game for phones as a native app is kind mobile_app with Expo. A game or 3D scene that names Phaser or Three.js is React + Vite: the platform installs the engine from npm, never from a CDN script. Supported means scaffold/build/Preview code exists, not certified runtime availability. Laravel has known Composer installation blockers: disclose them rather than substituting another framework. Preserve project names in the user's language.
 For a task whose primary outcome is reading, inserting, updating or deleting development database ROW VALUES (not table/field/relation schema, migrations, auth policy or website code), also return rowCapability as exactly one existing capability: project.data.rows.list, project.data.rows.create, project.data.rows.update or project.data.rows.delete. Set schemaChange true when the request adds, removes, renames or alters a table, field, column, relation, policy or migration, even when it also says to preserve rows; then omit rowCapability. Omit rowCapability for schema or website changes, including a request that creates, alters or drops a table, field or relation and also inserts or reads rows; such a request is ADD_DATA_MODEL or EDIT_DATA_MODEL without rowCapability. Changing or deleting values of existing rows ("set test_note of product X to Y", "delete row Z") is EDIT_DATA_MODEL with project.data.rows.update or project.data.rows.delete: the coding executor has no row update or delete tool.
 Also return format: "article" for a long-form or SEO article or blog post; "table" when the answer is or edits a table or spreadsheet; "draft" for other text the user may copy or edit (a post, script, proposal, bio, slogan, letter, plan); "none" otherwise.
 Also return reply. For plain conversation that needs no stored data (a greeting, thanks, asking whether you work, small talk, arithmetic, a short general-knowledge question) reply is the complete answer from NPATI Agent in the language of the latest message: one or two natural, friendly sentences, without emojis, em-dashes or offers of other services. Return reply null for everything else: any NPATI record, project, file or attachment, Memory or anything previously said about the user or earlier in this conversation (codes, names, facts given in earlier turns), the current date, time, prices or news, web research, writing tasks (articles, posts, plans, code, tables), questions about NPATI itself, or when unsure.
@@ -183,6 +183,7 @@ export function createChatProjectIntentResolver(deps: {
       // Without the semantic router only an explicit creation intent creates a project: "I want to open an online
       // store" is a business description (CHAT), not an executable website order.
       if (!["CREATE_WEBSITE", "CREATE_PROJECT"].includes(decision.intent)) return { decision, targets: [], source: "deterministic" as const };
+      useGameEngineStarter(safeTargets, message);
       if (safeTargets.length) { decision.intent = "CREATE_WEBSITE"; decision.isProjectIntent = true; decision.executable = true; decision.isExecutableInStep5 = true; decision.targetDetails = { ...decision.targetDetails, framework: safeTargets[0]!.framework, technologySelection: safeTargets[0]!.technologySelection }; }
       return { decision, targets: safeTargets, source: "deterministic" as const };
     };
@@ -301,6 +302,7 @@ export function createChatProjectIntentResolver(deps: {
           targets.push({ name: item.name.trim(), kind: item.kind, framework: item.framework, technologySelection: { source: explicit ? "user_explicit" : "ai_planner", reason: explicit ? "Explicit user technology: " + explicit : item.reason.slice(0, 800), criteria: explicit ? ["user_constraint"] : item.criteria.slice(0, 8) } });
         }
       }
+      useGameEngineStarter(targets, message);
       const decision = classifyProjectIntent({ ...input, message: examples[intent], prompt: undefined });
       decision.intent = intent;
       decision.confidence = parsed.confidence;
@@ -361,4 +363,20 @@ export function createChatProjectIntentResolver(deps: {
       return guarded ? guardResult : fallback();
     }
   };
+}
+
+const NO_BUILD_REQUEST = /(?:без|without|no)\s+(?:npm|збірк|сбор|build|bundler)|plain\s+html|чист(?:ому|ий|ом)\s+html|vanilla/iu;
+
+/**
+ * A browser game or 3D scene that names Phaser or Three.js becomes a Vite project built on the local engine starter
+ * (engine from npm). The planner tends to pick HTML/CSS with a CDN script, which the sandboxed browser check cannot load.
+ * "Without npm" / vanilla requests keep their static page.
+ */
+export function useGameEngineStarter(targets: DevelopmentTarget[], message: string): void {
+  if (!gameEngineStarter(message) || frameworkConstraints(message).noFramework || NO_BUILD_REQUEST.test(message)) return;
+  for (const target of targets) {
+    if (!["game", "website"].includes(target.kind) || !["HTML/CSS", GAME_ENGINE_STARTER_FRAMEWORK].includes(target.framework)) continue;
+    target.framework = GAME_ENGINE_STARTER_FRAMEWORK;
+    target.technologySelection = { source: target.technologySelection?.source ?? "policy_fallback", reason: "Named game engine: the local Vite starter installs it from npm, so Preview and the browser check work without a CDN.", criteria: ["named_engine", "no_outside_hosts"] };
+  }
 }

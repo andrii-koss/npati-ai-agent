@@ -341,6 +341,19 @@ export default function App() {
 
 const BUILDERS: Record<StackStarterId, (name: string) => Record<string, string>> = { vue, phaser, three, flutter, "express-react": expressReact, shadcn };
 
+/**
+ * The game engine a chat request names, if it has a local starter. Such a project is a Vite project whose engine comes
+ * from npm, so it runs without outside hosts and the browser check can play it (a CDN script is blocked there).
+ */
+export function gameEngineStarter(text: string): "phaser" | "three" | undefined {
+  if (/\bphaser(?:\s*3|\.js)?\b|фейзер/iu.test(text)) return "phaser";
+  if (/\bthree\.?js\b|три\.?js/iu.test(text)) return "three";
+  return undefined;
+}
+
+/** Vite framework record used for engine starters (the Projects page stores them the same way). */
+export const GAME_ENGINE_STARTER_FRAMEWORK = "React + Vite";
+
 export function createStackStarterScaffold(id: StackStarterId, options: { name: string }): { files: Record<string, string> } {
   return { files: BUILDERS[id](options.name) };
 }
