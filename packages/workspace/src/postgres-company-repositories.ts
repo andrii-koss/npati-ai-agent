@@ -361,13 +361,13 @@ export async function createCompanyAgentRun(pool: Pool, context: AuthContext, co
     return { run: existing.rows[0], created: false };
   }
 
-export async function listCompanyAgentRuns(pool: Pool, context: AuthContext, companyId: string, limit = 50, filter?: { projectId?: string }) {
+export async function listCompanyAgentRuns(pool: Pool, context: AuthContext, companyId: string, limit = 50, filter?: { projectId?: string; contentOnly?: boolean }) {
     await assertCompany(pool, context, companyId);
     const result = await pool.query<CompanyAgentRun>(
       `SELECT ${companyRunColumns} FROM company_agent_runs
-       WHERE workspace_id=$1 AND company_id=$2 AND ($4::text IS NULL OR project_id=$4)
+       WHERE workspace_id=$1 AND company_id=$2 AND ($4::text IS NULL OR project_id=$4) AND ($5::boolean IS NOT TRUE OR left(task, 15) = '[NPATI_CONTENT:')
        ORDER BY created_at DESC LIMIT $3`,
-      [context.workspaceId, companyId, Math.max(1, Math.min(100, limit)), filter?.projectId ?? null]
+      [context.workspaceId, companyId, Math.max(1, Math.min(100, limit)), filter?.projectId ?? null, filter?.contentOnly === true]
     );
     return result.rows;
   }

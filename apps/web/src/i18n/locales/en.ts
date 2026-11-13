@@ -1864,6 +1864,7 @@ export const en: TranslationSchema = {
       low: "Low P3",
     },
     showingGoals: "Showing {count} of {total} goals",
+    assignedAgent: "Responsible agent",
     matchingQuery: ' matching "{query}"',
     table: {
       status: "Status",

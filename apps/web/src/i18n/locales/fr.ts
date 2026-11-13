@@ -2011,6 +2011,7 @@ export const fr: TranslationSchema = {
       low: "Basse P3",
     },
     showingGoals: "Affichage de {count} sur {total} objectifs",
+    assignedAgent: "Agent responsable",
     matchingQuery: ' correspondant à "{query}"',
     table: {
       status: "Statut",

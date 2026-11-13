@@ -1864,6 +1864,7 @@ export const uk: TranslationSchema = {
       low: "Низький P3",
     },
     showingGoals: "Відображається {count} із {total} цілей",
+    assignedAgent: "Відповідальний агент",
     matchingQuery: ' за запитом "{query}"',
     table: {
       status: "Статус",

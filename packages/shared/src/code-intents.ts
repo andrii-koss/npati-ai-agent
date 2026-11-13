@@ -84,6 +84,10 @@ const EXPLAIN_PATTERNS = [/(?:поясни (?:код|функцію|цей фа�
 const ANALYSIS_PATTERNS = [/(?:проаналізу|проаналізува|аналізу|зроби аналіз|оціни|оцінити|переглянь|ознайомся|опиши (?:код|проєкт|структур|сайт)|знайди (?:проблем|помилк|слабк)|які (?:є )?проблеми|що не так|analy[sz]e|analysis|\bassess|\bevaluate|\binspect\b|\baudit\b|what(?:'s| is) wrong|find (?:issues|problems|bugs))/iu];
 const CHANGE_VERB_PATTERNS = [/(?:виправ|полагод|зміни|змінити|онови|додай|створи|видали|перепиши|зроби (?!аналіз)|налаштуй|встанови|заміни|рефактор|реалізуй|впровад|переробі|покращ(?:и|іть)(?![\p{L}])|поліпш(?:и|іть)(?![\p{L}])|оптимізуй|підключ(?:и|іть)(?![\p{L}])|\bimprove\b|\benhance\b|\boptimi[sz]e\b|\bconnect\b|\bredesign\b|\bmelhore\b|\botimize\b|\bconecte\b|\badicione\b|\bcrie\b|\baltere\b|\bmude\b|\bfix|\bchange|\bupdate|\badd\b|\bcreate|\bremove|\bdelete|\brewrite|\bmake\b|\bimplement|\brefactor|\breplace|\bapply\b|\binstall|\bbuild\b)/iu];
 const CREATE_PATTERNS = [/(?:створи|згенеруй|напиши|додай)\s+(?:новий\s+|нову\s+|new\s+)?(?:скрипт|модуль|функці\p{L}*|клас|файл|ендпойнт|сервіс)|create (?:a )?(?:new )?(?:script|module|function|class|file|endpoint|service)/iu];
+// An office document or spreadsheet the user sent or wants back ("give me the updated Excel file") is chat file work, not a
+// code project edit; it asked "Which project should I work in?" (V6 step 11). Code words keep their meaning.
+const OFFICE_DOCUMENT_PATTERNS = [/(?:\bexcel\b|\bxlsx?\b|\bcsv\b|\btsv\b|spreadsheet|\bdocx?\b|\bword (?:file|document)|price list|ексел\p{L}*|таблиц\p{L}*|прайс)/iu];
+const CODE_WORD_PATTERNS = [/(?:\bcode\b|\bfunction\b|\bmodule\b|\bclass\b|\bcomponent\b|\bscript\b|\brepo(?:sitory)?\b|\.(?:tsx?|jsx?|py|go|rs|java|rb|php|css|html)\b|\bproject\b|код\p{L}*|функці\p{L}*|модул\p{L}*|компонент\p{L}*|проєкт\p{L}*|проект\p{L}*)/iu];
 const EDIT_PATTERNS = [/(?:зміни|змінити|відредагуй|онови|поправ|перейменуй|видали|додай)[^\n]{0,40}(?:функці\p{L}*|модул\p{L}*|файл\p{L}*|клас\p{L}*|код\p{L}*)|(?:edit|modify|update|rename|delete|add)[^\n]{0,30}(?:the )?(?:code|file|function|module|class)/iu];
 
 /**
@@ -105,6 +109,10 @@ export function classifyCodeIntent(input: CodeIntentInput): CodeIntentDecision {
 
   if (!codeContext) {
     return { intent: "CHAT", confidence: 0.9, reason: `project_kind_not_code:${projectKind}`, needsProjectSelection: false, projectOptional: false };
+  }
+
+  if (!hasProject && matches(OFFICE_DOCUMENT_PATTERNS) && !matches(CODE_WORD_PATTERNS)) {
+    return { intent: "CHAT", confidence: 0.8, reason: "office_document_request", needsProjectSelection: false, projectOptional: false };
   }
 
   if (matches(ANALYSIS_PATTERNS) && !matches(CHANGE_VERB_PATTERNS)) return decided("REVIEW_CODE", 0.8, "analysis_keywords_without_change");

@@ -99,6 +99,8 @@ export interface Goal {
   priority: number; createdAt: string; updatedAt: string;
   /** Company Agent responsible for the goal; it must belong to a company owned by the same user. */
   assignedAgentId?: string | null;
+  /** Read-only display of the assigned agent (Goals page); filled by listGoals. */
+  assignedAgent?: { name: string; role: string; companyName: string } | null;
 }
 export type GoalInput = Partial<Omit<Goal, "id" | "workspaceId" | "businessId" | "createdByUserId" | "createdAt" | "updatedAt">> & { title: string };
 

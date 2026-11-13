@@ -39,6 +39,7 @@ export const workspace = {
       "low": "Baixa P3"
     },
     "showingGoals": "Mostrando {count} de {total} metas",
+    assignedAgent: "Agente responsável",
     "matchingQuery": " correspondentes a \"{query}\"",
     "table": {
       "status": "Status",

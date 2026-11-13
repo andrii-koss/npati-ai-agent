@@ -1854,6 +1854,7 @@ export const pl: TranslationSchema = {
       low: "Niski P3",
     },
     showingGoals: "Wyświetlanie {count} z {total} celów",
+    assignedAgent: "Odpowiedzialny agent",
     matchingQuery: ' pasujących do "{query}"',
     table: {
       status: "Status",

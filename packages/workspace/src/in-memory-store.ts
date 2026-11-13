@@ -214,6 +214,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       memories: this.memories,
       assertBusiness: this.assertBusiness.bind(this),
       assertCompanyAgent: this.assertCompanyAgent.bind(this),
+      agentDisplay: (agentId: string) => { const agent = this.companyAgents.get(agentId); const company = agent ? this.companies.get(agent.companyId) : undefined; return agent && company ? { name: agent.name, role: agent.role, companyName: company.name } : null; },
       assertOwnedAgent: (context, agentId) => {
         const agent = this.companyAgents.get(agentId);
         if (!agent) throw new WorkspaceAccessError("Assigned agent is not available");
@@ -429,7 +430,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
 
     async createCompanyAgentRun(context: AuthContext, companyId: string, input: { task: string; requestedMode: "auto" | "single" | "pipeline" | "fusion"; projectId?: string }, idempotencyKey: string) { return createCompanyAgentRun(this.companyState(), context, companyId, input, idempotencyKey); }
 
-    async listCompanyAgentRuns(context: AuthContext, companyId: string, limit = 50, filter?: { projectId?: string }) { return listCompanyAgentRuns(this.companyState(), context, companyId, limit, filter); }
+    async listCompanyAgentRuns(context: AuthContext, companyId: string, limit = 50, filter?: { projectId?: string; contentOnly?: boolean }) { return listCompanyAgentRuns(this.companyState(), context, companyId, limit, filter); }
 
   async listProjectRuns(context: AuthContext, companyId: string, projectId: string, limit = 50) { return this.listCompanyAgentRuns(context, companyId, limit, { projectId }); }
 

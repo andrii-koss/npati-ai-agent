@@ -391,7 +391,7 @@ export interface WorkspaceStore {
   listCompanyAgentEdges(context: AuthContext, companyId: string, agentIds?: string[]): Promise<CompanyAgentEdge[]>;
   setCompanyAgentParent(context: AuthContext, companyId: string, childAgentId: string, parentAgentId: string | null): Promise<CompanyAgentEdge | null>;
   createCompanyAgentRun(context: AuthContext, companyId: string, input: { task: string; requestedMode: CompanyRunMode; projectId?: string }, idempotencyKey: string): Promise<{ run: CompanyAgentRun; created: boolean }>;
-  listCompanyAgentRuns(context: AuthContext, companyId: string, limit?: number, filter?: { projectId?: string }): Promise<CompanyAgentRun[]>;
+  listCompanyAgentRuns(context: AuthContext, companyId: string, limit?: number, filter?: { projectId?: string; contentOnly?: boolean }): Promise<CompanyAgentRun[]>;
   listProjectRuns(context: AuthContext, companyId: string, projectId: string, limit?: number): Promise<CompanyAgentRun[]>;
   getCompanyAgentRun(context: AuthContext, companyId: string, runId: string): Promise<CompanyAgentRunDetails>;
   getCompanyRunPendingPlan(context: AuthContext, companyId: string, runId: string): Promise<unknown | null>;

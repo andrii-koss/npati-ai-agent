@@ -550,6 +550,11 @@ export function GoalsPage() {
                         {goal.title}
                       </strong>
                       {goal.description && <p>{goal.description}</p>}
+                      {goal.assignedAgent && (
+                        <p className="goal-assigned-agent" data-testid="goal-assigned-agent">
+                          {t("goalsPage.assignedAgent")}: {goal.assignedAgent.name}{goal.assignedAgent.role ? ` (${goal.assignedAgent.role})` : ""} · {goal.assignedAgent.companyName}
+                        </p>
+                      )}
                     </td>
                     <td>
                       {progress ? (

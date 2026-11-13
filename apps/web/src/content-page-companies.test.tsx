@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ContentPage, contentExportFileName } from "./ContentPage";
 const auth = vi.hoisted(() => ({ token: "test" }));
 vi.mock("./AuthContext", () => ({ getStoredAuthToken: () => auth.token }));
-vi.mock("./i18n", () => ({ useTranslation: () => ({ language: "en", t: (s: string) => s }) }));
+vi.mock("./i18n", async () => ({ I18nContextRef: (await import("react")).createContext(null), executionTraceText: (s: string) => s, useTranslation: () => ({ language: "en", t: (s: string) => s }) }));
 let root: Root, host: HTMLDivElement;
 beforeEach(() => { auth.token += "-next"; localStorage.clear(); sessionStorage.clear(); host = document.createElement("div"); document.body.append(host); root = createRoot(host); Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
@@ -46,6 +46,8 @@ describe("Content Hub company scope", () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     expect([...host.querySelectorAll(".content-card-title")].map((node) => node.textContent)).toContain("Social post about rye bread");
     expect(requested.filter((url) => url.includes("/runs")).length).toBe(11);
+    // V6 step 11: only content runs are requested, so delegated chat questions are not listed as articles.
+    expect(requested.filter((url) => url.includes("/runs")).every((url) => url.includes("content=1"))).toBe(true);
   });
   it("keeps Cyrillic letters in the exported Markdown file name", () => {
     expect(contentExportFileName("R118366 Хліб дня")).toBe("r118366-хліб-дня.md");

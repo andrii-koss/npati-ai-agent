@@ -63,7 +63,9 @@ export function publicChatError(error: unknown, route?: string, requestMessage =
 /** Run failures caused by the company's own configuration or policy, not by the AI model. */
 const COMPANY_RUN_POLICY_ERRORS = new Set(["TOOL_FORBIDDEN", "NO_MEMORY_TOOL_FORBIDDEN", "COMPANY_INACTIVE", "CONTEXT_DELETED", "MAIN_AGENT_INACTIVE", "PERMISSION_REVOKED", "RUN_CANCELLED", "SECURITY_GUARDRAIL_BLOCKED",
   "CIRCULAR_DELEGATION", "CROSS_COMPANY_AGENT_SELECTION", "INVALID_DELEGATION_PLAN", "INVALID_REVIEWER", "TOO_MANY_DELEGATES", "TOOL_LOOP_DETECTED", "BOUND_AGENT_UNAVAILABLE", "AGENT_DELETED",
-  "APPROVAL_REQUIRED", "APPROVAL_INVALID", "APPROVAL_ALREADY_USED", "APPROVAL_EXPIRED", "RUN_IDENTITY_MISMATCH"]);
+  "APPROVAL_REQUIRED", "APPROVAL_INVALID", "APPROVAL_ALREADY_USED", "APPROVAL_EXPIRED", "RUN_IDENTITY_MISMATCH",
+  // V6 step 11: "Knowledge is disabled for the Main Agent" was shown as "the selected AI model is temporarily unavailable".
+  "KNOWLEDGE_PERMISSION_REQUIRED", "PROJECT_SCOPE_MISMATCH", "INVALID_TOOL_AGENT", "EXEC_REVIEW_BLOCKED"]);
 
 export function publicCompanyRunMessage(result: string | null | undefined, errorMessage: string | null | undefined, requestMessage: string, errorCode?: string | null) {
   if (result?.trim()) return result;

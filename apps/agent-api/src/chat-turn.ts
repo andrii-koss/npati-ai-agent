@@ -402,7 +402,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
       "       ]\n" +
       "     }\n" +
       "     ```\n" +
-      "     Supported actions: \"insert_after\" (with search or afterRow), \"append_rows\", \"update_cells\" (with cellUpdates: [{searchRow, column, value}]), \"add_column\" (with newColumn: {header, values}).\n" +
+      "     Supported actions: \"insert_after\" (with search or afterRow), \"append_rows\", \"update_cells\" (with cellUpdates: [{searchRow, column, value}]), \"add_column\" (with newColumn: {header, values}), \"map_column\" (sourceColumn, newColumn.header, valueMap [{match, value, mode}] with mode contains|equals|starts_with|regex|lt|lte|gt|gte|eq_number, defaultValue; Reorder = yes when Stock < 5 is {\"action\":\"map_column\",\"sourceColumn\":\"Stock\",\"newColumn\":{\"header\":\"Reorder\"},\"valueMap\":[{\"match\":\"5\",\"value\":\"yes\",\"mode\":\"lt\"}],\"defaultValue\":\"no\"}), \"sort_rows\" (sortColumn, order asc|desc), \"scale_column\" (column, multiply and/or add, round; +10% is multiply 1.1), \"delete_rows\" (deleteSearch, optional searchColumn). Several changes go in one block as {\"operations\":[...]} in order. Never sort or recalculate with update_cells: whole rows must move together.\n" +
       "2. For new or standalone tables: output in clean Markdown table format (| col1 | col2 |) or ```csv block. Keep column headers concise, crisp, and clear (e.g. 'Проєкт', 'Категорія', 'Призначення', 'Посилання'). Avoid overly verbose header names so tables remain elegant and readable. The web interface renders every table with a 'Завантажити Excel / CSV' button.";
     const cardArtifactInstruction = "\n\nCRITICAL ARTIFACT & INTERACTIVE CARD RULES:\n" +
       "When generating a business idea, draft, post, script, proposal, formulated statement, bio, or actionable text that the user might want to read, edit, copy, or download:\n" +
@@ -684,7 +684,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
             timeoutMs: 90_000,
             signal,
             messages: [
-              { role: "system", content: "Convert the user's spreadsheet edit request into exactly one executable spreadsheet-edit JSON object. Return no prose and no Markdown table. Allowed actions: add_column, map_column, update_cells, insert_after, append_rows, delete_rows. Preserve the existing workbook and express only the requested changes. When a new column is derived from an existing column, prefer the compact map_column action: provide sourceColumn, newColumn.header, valueMap entries shaped as {match,value,mode} where mode is contains, equals, starts_with, or regex, plus optional defaultValue. These rules are applied by the backend to every row of the original workbook, including rows omitted from the prompt. Use add_column values only when values are not derived from an existing column." },
+              { role: "system", content: "Convert the user's spreadsheet edit request into exactly one executable spreadsheet-edit JSON object. Return no prose and no Markdown table. Allowed actions: add_column, map_column, update_cells, insert_after, append_rows, delete_rows, sort_rows (sortColumn, order asc|desc), scale_column (column, multiply/add, round). map_column valueMap modes also include lt, lte, gt, gte and eq_number for numeric thresholds. Put several changes in {\"operations\":[...]} in order; never emulate a sort or a recalculation with update_cells. Preserve the existing workbook and express only the requested changes. When a new column is derived from an existing column, prefer the compact map_column action: provide sourceColumn, newColumn.header, valueMap entries shaped as {match,value,mode} where mode is contains, equals, starts_with, or regex, plus optional defaultValue. These rules are applied by the backend to every row of the original workbook, including rows omitted from the prompt. Use add_column values only when values are not derived from an existing column." },
               { role: "assistant", content: `The primary model proposed this edit. Convert its intended workbook changes into the executable JSON operation:\n${content.slice(0, 16_000)}` },
               { role: "user", content: safePrompt },
             ],
@@ -697,7 +697,8 @@ export function createChatTurn(deps: ChatTurnDeps) {
             const modified = await SpreadsheetModifier.applyEdits(
               targetAttachment.data,
               targetAttachment.name,
-              extractedDirective.directive
+              extractedDirective.directive,
+              { asXlsx: /\b(?:excel|xlsx)\b|ексел/iu.test(safeUserRequest) },
             );
 
             const savedEdited = await chatFiles.persist(auth, undefined, conversation.id, [

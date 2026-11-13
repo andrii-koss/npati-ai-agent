@@ -13,6 +13,8 @@ export interface Goal {
   currentValue?: number | null;
   targetDate?: string | null;
   priority: number;
+  assignedAgentId?: string | null;
+  assignedAgent?: { name: string; role: string; companyName: string } | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -284,7 +284,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore {
   async listCompanyAgentEdges(context: AuthContext, companyId: string, agentIds?: string[]) { return company.listCompanyAgentEdges(this.pool, context, companyId, agentIds); }
   async setCompanyAgentParent(context: AuthContext, companyId: string, childAgentId: string, parentAgentId: string | null) { return agentRepos.setCompanyAgentParent(this.pool, context, companyId, childAgentId, parentAgentId); }
   async createCompanyAgentRun(context: AuthContext, companyId: string, input: { task: string; requestedMode: "auto" | "single" | "pipeline" | "fusion"; projectId?: string }, idempotencyKey: string) { return company.createCompanyAgentRun(this.pool, context, companyId, input, idempotencyKey); }
-  async listCompanyAgentRuns(context: AuthContext, companyId: string, limit = 50, filter?: { projectId?: string }) { return company.listCompanyAgentRuns(this.pool, context, companyId, limit, filter); }
+  async listCompanyAgentRuns(context: AuthContext, companyId: string, limit = 50, filter?: { projectId?: string; contentOnly?: boolean }) { return company.listCompanyAgentRuns(this.pool, context, companyId, limit, filter); }
   async listProjectRuns(context: AuthContext, companyId: string, projectId: string, limit = 50) {
     return this.listCompanyAgentRuns(context, companyId, limit, { projectId });
   }

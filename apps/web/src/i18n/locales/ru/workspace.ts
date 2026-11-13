@@ -39,6 +39,7 @@ export const workspace = {
       "low": "Низкий P3"
     },
     "showingGoals": "Показано целей: {count} из {total}",
+    assignedAgent: "Ответственный агент",
     "matchingQuery": " по запросу «{query}»",
     "table": {
       "status": "Статус",

@@ -62,7 +62,7 @@ export function ContentPage() {
 
         const loadCompanyContent = async (company: { id: string; name: string }) => {
           try {
-            const runRes = await fetch(`/api/companies/${company.id}/runs?limit=20`, { headers });
+            const runRes = await fetch(`/api/companies/${company.id}/runs?limit=100&content=1`, { headers });
             if (!runRes.ok) return [];
             const runData = (await runRes.json()) as {
               runs?: Array<{ id: string; task: string; result?: string; createdAt: string; status: string }>;

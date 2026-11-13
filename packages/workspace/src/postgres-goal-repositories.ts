@@ -7,7 +7,17 @@ import type { AuthContext, Goal, GoalInput } from "./types";
 
 export async function listGoals(pool: Pool, context: AuthContext, businessId: string) {
     await getBusiness(pool, context, businessId);
-    return (await pool.query<Goal>(`SELECT ${goalColumns} FROM goals WHERE workspace_id=$1 AND business_id=$2 ORDER BY priority, updated_at DESC`, [context.workspaceId, businessId])).rows;
+    const goals = (await pool.query<Goal>(`SELECT ${goalColumns} FROM goals WHERE workspace_id=$1 AND business_id=$2 ORDER BY priority, updated_at DESC`, [context.workspaceId, businessId])).rows;
+    // The Goals page names the responsible agent (V6 step 11: it was stored and shown in the chat, never on the page).
+    const ids = [...new Set(goals.map((goal) => goal.assignedAgentId).filter((id): id is string => Boolean(id)))];
+    if (!ids.length) return goals;
+    const agents = new Map((await pool.query<{ id: string; name: string; role: string; companyName: string }>(
+      `SELECT a.id, a.name, a.role, c.name AS "companyName" FROM company_agents a JOIN companies c ON c.id=a.company_id
+       WHERE a.id = ANY($1::text[]) AND a.workspace_id=$2 AND c.workspace_id=$2 AND c.user_id=$3`, [ids, context.workspaceId, context.userId])).rows.map((row) => [row.id, row]));
+    return goals.map((goal) => {
+      const agent = goal.assignedAgentId ? agents.get(goal.assignedAgentId) : undefined;
+      return { ...goal, assignedAgent: agent ? { name: agent.name, role: agent.role, companyName: agent.companyName } : null };
+    });
   }
 
 /** An assigned goal agent must belong to a company owned by the same user in this workspace. */

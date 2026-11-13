@@ -2005,6 +2005,7 @@ export const es: TranslationSchema = {
       low: "Baja P3",
     },
     showingGoals: "Mostrando {count} de {total} objetivos",
+    assignedAgent: "Agente responsable",
     matchingQuery: ' que coinciden con "{query}"',
     table: {
       status: "Estado",

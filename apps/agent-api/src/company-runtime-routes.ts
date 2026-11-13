@@ -71,12 +71,13 @@ export function registerCompanyRuntimeRoutes(app: FastifyInstance, runtime: Comp
       return reply.code(runtimeStatus(result.run.errorCode)).send(result);
     } catch (error) { return failure(reply, error); }
   });
-  app.get<{ Params: { companyId: string }; Querystring: { limit?: string } }>("/companies/:companyId/runs", async (request, reply) => {
+  app.get<{ Params: { companyId: string }; Querystring: { limit?: string; content?: string } }>("/companies/:companyId/runs", async (request, reply) => {
     try {
       const ctx = await context(auth, request, "workspace:read");
       if(!guardRoute(ctx,reply))return;
       const limit = Number(request.query.limit) || 30;
-      const runs = await runtime.list(ctx, request.params.companyId, limit);
+      // Content Hub lists only work created as content, not every chat question delegated to the Main Agent (V6 step 11).
+      const runs = await runtime.list(ctx, request.params.companyId, limit, request.query.content === "1" ? { contentOnly: true } : undefined);
       return { runs };
     } catch (error) { return failure(reply, error); }
   });

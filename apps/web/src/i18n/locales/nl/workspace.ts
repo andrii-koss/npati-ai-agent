@@ -39,6 +39,7 @@ export const workspace = {
       "low": "Laag P3"
     },
     "showingGoals": "{count} van {total} doelen weergegeven",
+    assignedAgent: "Verantwoordelijke agent",
     "matchingQuery": " overeenkomend met \"{query}\"",
     "table": {
       "status": "Status",

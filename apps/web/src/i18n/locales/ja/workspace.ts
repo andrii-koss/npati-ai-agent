@@ -39,6 +39,7 @@ export const workspace = {
       "low": "低 P3"
     },
     "showingGoals": "{total} 件中 {count} 件の目標を表示",
+    assignedAgent: "担当エージェント",
     "matchingQuery": " 「{query}」に一致",
     "table": {
       "status": "状態",

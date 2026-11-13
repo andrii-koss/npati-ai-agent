@@ -39,6 +39,7 @@ export const workspace = {
       "low": "منخفض P3"
     },
     "showingGoals": "عرض {count} من {total} أهداف",
+    assignedAgent: "الوكيل المسؤول",
     "matchingQuery": " المطابق لـ \"{query}\"",
     "table": {
       "status": "الحالة",

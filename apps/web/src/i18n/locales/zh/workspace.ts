@@ -39,6 +39,7 @@ export const workspace = {
       "low": "低 P3"
     },
     "showingGoals": "显示 {count} / {total} 个目标",
+    assignedAgent: "负责的智能体",
     "matchingQuery": " 匹配“{query}”",
     "table": {
       "status": "状态",

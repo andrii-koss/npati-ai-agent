@@ -1,8 +1,33 @@
 import ExcelJS from "exceljs";
+import { deleteRows, numericMatch, scaleColumn, sortRows, type Cell } from "./spreadsheet-row-operations";
+
+const TABLE_ACTIONS = new Set(["sort_rows", "scale_column", "delete_rows"]);
+
+/** Applies a whole-table operation to a row matrix; the summary says what changed. */
+function applyTableOperation(rows: Cell[][], op: SpreadsheetEditOperation): { rows: Cell[][]; summary: string } {
+  if (op.action === "sort_rows") {
+    const column = op.sortColumn ?? op.column;
+    return { rows: sortRows(rows, column, op.order === "desc" ? "desc" : "asc"), summary: `Sorted ${Math.max(0, rows.length - 1)} rows by «${String(column)}» (${op.order === "desc" ? "descending" : "ascending"})` };
+  }
+  if (op.action === "scale_column") {
+    const result = scaleColumn(rows, op.column ?? op.sourceColumn, { multiply: op.multiply, add: op.add, round: op.round });
+    return { rows: result.rows, summary: `Changed ${result.updated} values in «${String(op.column ?? op.sourceColumn)}»` };
+  }
+  const result = deleteRows(rows, op.deleteSearch ?? op.search, op.searchColumn);
+  return { rows: result.rows, summary: `Deleted ${result.deleted} rows` };
+}
 
 export interface SpreadsheetEditOperation {
   sheet?: string;
-  action?: "insert_after" | "insert_rows" | "append_rows" | "update_cells" | "add_column" | "map_column" | "delete_rows" | "replace_sheet";
+  action?: "insert_after" | "insert_rows" | "append_rows" | "update_cells" | "add_column" | "map_column" | "delete_rows" | "sort_rows" | "scale_column";
+  /** sort_rows: the column and direction. */
+  sortColumn?: string | number;
+  order?: "asc" | "desc";
+  /** scale_column: the numeric column and the change (multiply 1.1 = +10%). */
+  column?: string | number;
+  multiply?: number;
+  add?: number;
+  round?: number;
   search?: string | number;
   searchColumn?: string | number;
   afterRow?: number;
@@ -21,7 +46,7 @@ export interface SpreadsheetEditOperation {
   valueMap?: Array<{
     match: string;
     value: string | number | boolean | null;
-    mode?: "contains" | "equals" | "starts_with" | "regex";
+    mode?: "contains" | "equals" | "starts_with" | "regex" | "lt" | "lte" | "gt" | "gte" | "eq_number";
   }>;
   defaultValue?: string | number | boolean | null;
   deleteSearch?: string | number;
@@ -103,7 +128,8 @@ export class SpreadsheetModifier {
   static async applyEdits(
     inputBuffer: Buffer | Uint8Array,
     filename: string,
-    directive: SpreadsheetEditDirective
+    directive: SpreadsheetEditDirective,
+    options: { asXlsx?: boolean } = {},
   ): Promise<{ buffer: Buffer; modifiedFilename: string; summary: string }> {
     const isCsv = /\.csv$/i.test(filename);
     const baseName = filename.replace(/\.(xlsx|xlsm|xlsb|xls|csv)$/i, "");
@@ -129,6 +155,13 @@ export class SpreadsheetModifier {
     if (isCsv) {
       const csvStr = Buffer.isBuffer(inputBuffer) ? inputBuffer.toString("utf8") : Buffer.from(inputBuffer).toString("utf8");
       const result = this.applyCsvEdits(csvStr, operations);
+      // "give me the updated Excel file" for a CSV: the reply promised Excel and attached a .csv (V6 step 11).
+      if (options.asXlsx) {
+        const workbook = new ExcelJS.Workbook();
+        const sheet = workbook.addWorksheet(baseName.slice(0, 31) || "Sheet1");
+        parseCsv(result.csv).forEach((row, index) => sheet.addRow(index === 0 ? row : row.map((cell) => /^-?\d+(?:\.\d+)?$/.test(cell.trim()) ? Number(cell) : cell)));
+        return { buffer: Buffer.from(await workbook.xlsx.writeBuffer()), modifiedFilename: `${baseName}_edited.xlsx`, summary: result.summary };
+      }
       return {
         buffer: Buffer.from("\uFEFF" + result.csv, "utf8"),
         modifiedFilename,
@@ -143,10 +176,28 @@ export class SpreadsheetModifier {
 
     for (const op of operations) {
       const sheet = this.resolveWorksheet(workbook, op.sheet);
-      if (!sheet) continue;
+      if (!sheet) throw new Error(`Spreadsheet sheet not found: ${String(op.sheet ?? "")}`);
+
+      if (op.action && TABLE_ACTIONS.has(op.action)) {
+        const width = sheet.columnCount, height = sheet.rowCount;
+        const matrix: Cell[][] = [];
+        for (let r = 1; r <= height; r++) {
+          const row = sheet.getRow(r);
+          matrix.push(Array.from({ length: width }, (_, c) => { const value = row.getCell(c + 1).value; return value == null || typeof value === "object" ? (value == null ? null : String((value as { result?: unknown; text?: unknown }).result ?? (value as { text?: unknown }).text ?? "")) : value as Cell; }));
+        }
+        const result = applyTableOperation(matrix, op);
+        for (let r = 1; r <= height; r++) {
+          const values = result.rows[r - 1];
+          for (let c = 1; c <= width; c++) sheet.getRow(r).getCell(c).value = values ? (values[c - 1] ?? null) as ExcelJS.CellValue : null;
+        }
+        summaries.push(`${result.summary} on «${sheet.name}»`);
+        continue;
+      }
 
       const summary = this.applyWorksheetOperation(sheet, op);
-      if (summary) summaries.push(summary);
+      // An operation that changed nothing must not be reported as an edited file.
+      if (!summary) throw new Error(`Spreadsheet edit could not be applied: ${op.action ?? "insert_after"}`);
+      summaries.push(summary);
     }
 
     const outputBuffer = await workbook.xlsx.writeBuffer();
@@ -308,6 +359,13 @@ export class SpreadsheetModifier {
     for (const op of operations) {
       const action = op.action ?? "insert_after";
 
+      if (TABLE_ACTIONS.has(action)) {
+        const result = applyTableOperation(rows, { ...op, action });
+        rows = result.rows.map((row) => row.map((cell) => String(cell ?? "")));
+        summaries.push(result.summary);
+        continue;
+      }
+
       if (action === "add_column" && op.newColumn) {
         if (rows.length > 0) rows[0]!.push(op.newColumn.header);
         const colVals = op.newColumn.values ?? [];
@@ -377,7 +435,10 @@ export class SpreadsheetModifier {
           rows.splice(insertPos, 0, ...stringRows);
           summaries.push(`Вставлено ${stringRows.length} рядків після позиції ${insertPos}`);
         }
+        continue;
       }
+      // An operation that changed nothing must not be reported as an edited file.
+      throw new Error(`Spreadsheet edit could not be applied: ${action}`);
     }
 
     const outputCsv = rows.map(r => r.map(escapeCsvCell).join(",")).join("\r\n");
@@ -408,7 +469,7 @@ export class SpreadsheetModifier {
           if (!operation) return false;
           const inferredAction = operation.action
             ?? (operation.newColumn ? "add_column" : operation.cellUpdates?.length ? "update_cells" : operation.rows?.length ? "append_rows" : "");
-          return ["insert_after", "insert_rows", "append_rows", "update_cells", "add_column", "map_column", "delete_rows", "replace_sheet"].includes(inferredAction);
+          return ["insert_after", "insert_rows", "append_rows", "update_cells", "add_column", "map_column", "delete_rows", "sort_rows", "scale_column"].includes(inferredAction);
         });
         if (!valid) continue;
         const cleanText = candidate.matched
@@ -427,7 +488,8 @@ export class SpreadsheetModifier {
     for (const mapping of mappings) {
       const match = mapping.match.trim();
       const needle = match.toLowerCase();
-      const matched = mapping.mode === "equals"
+      const numeric = numericMatch(source, match, mapping.mode ?? "");
+      const matched = numeric !== undefined ? numeric : mapping.mode === "equals"
         ? normalized === needle
         : mapping.mode === "starts_with"
           ? normalized.startsWith(needle)

@@ -236,10 +236,10 @@ export async function createCompanyAgentRun(host: InMemoryCompanyState, context:
     return { run: structuredClone(run), created: true };
   }
 
-export async function listCompanyAgentRuns(host: InMemoryCompanyState, context: AuthContext, companyId: string, limit = 50, filter?: { projectId?: string }) {
+export async function listCompanyAgentRuns(host: InMemoryCompanyState, context: AuthContext, companyId: string, limit = 50, filter?: { projectId?: string; contentOnly?: boolean }) {
     assertCompany(host, context, companyId);
     return Array.from(host.companyRuns.values())
-      .filter((r) => r.workspaceId === context.workspaceId && r.companyId === companyId && (!filter?.projectId || r.projectId === filter.projectId))
+      .filter((r) => r.workspaceId === context.workspaceId && r.companyId === companyId && (!filter?.projectId || r.projectId === filter.projectId) && (!filter?.contentOnly || r.task.startsWith("[NPATI_CONTENT:")))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .slice(0, Math.max(1, Math.min(100, limit)))
       .map((r) => structuredClone(r));

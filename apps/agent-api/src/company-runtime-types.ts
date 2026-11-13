@@ -126,7 +126,9 @@ export function context(company: Company, includeMemory = true, linked?: LinkedB
     company.industry && `Industry: ${company.industry}`,
     company.description && `Description: ${company.description}`,
     company.productsServices && `Products / Services: ${company.productsServices}`,
-    company.languages.length > 0 && `Languages: ${company.languages.join(", ")}`,
+    // A company's languages are those of its customers and published content, not of the reply: an English request to a
+    // company listing "uk" was answered in Ukrainian (V6 step 11).
+    company.languages.length > 0 && `Customer and content languages: ${company.languages.join(", ")} (not the reply language; reply in the user's language)`,
     company.brandTone && `Brand tone: ${company.brandTone}`,
     company.companyInstructions && `Company instructions: ${company.companyInstructions}`,
   ];

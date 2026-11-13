@@ -2003,6 +2003,7 @@ export const it: TranslationSchema = {
       low: "Bassa P3",
     },
     showingGoals: "Visualizzazione di {count} su {total} obiettivi",
+    assignedAgent: "Agente responsabile",
     matchingQuery: ' corrispondenti a "{query}"',
     table: {
       status: "Stato",

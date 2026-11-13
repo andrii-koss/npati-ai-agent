@@ -39,6 +39,7 @@ export const workspace = {
       "low": "Düşük P3"
     },
     "showingGoals": "{total} hedeften {count} tanesi gösteriliyor",
+    assignedAgent: "Sorumlu ajan",
     "matchingQuery": " “{query}” ile eşleşen",
     "table": {
       "status": "Durum",

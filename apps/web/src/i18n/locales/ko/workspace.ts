@@ -39,6 +39,7 @@ export const workspace = {
       "low": "낮음 P3"
     },
     "showingGoals": "목표 {total}개 중 {count}개 표시",
+    assignedAgent: "담당 에이전트",
     "matchingQuery": " \"{query}\"과 일치",
     "table": {
       "status": "상태",

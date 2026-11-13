@@ -9,7 +9,7 @@ import { AuthenticationError } from "./auth";
 import { prepareChatAttachments, ChatAttachmentInput } from "./chat-attachments";
 import { conversationTitle, isShortAffirmativeReply, requestsCompositeCompanyDeletionIntent } from "./chat-intent-helpers";
 import { publicChatError, publicCompanyRunMessage } from "./chat-public-errors";
-import { explicitlyRequestsWebResearch } from "./chat-text-directives";
+import { explicitlyRequestsWebResearch, isChatSpreadsheetTurn, isSpreadsheetEditRequest } from "./chat-text-directives";
 import { CodeBackgroundRunRegistry } from "./code-background-run-registry";
 import { canUseStylePreview, hasCodeChatPreview, isCodeChatWebsite, nativeMobileConversationContext, projectConversationContext, websiteConversationContext, websiteReferenceInstructions, isWebsiteReferenceRedesign, storeWebsiteReferenceAssets, refreshChatPreviewSession } from "./code-chat-website";
 import { namesExternalPage, resolveChatCodeIntent } from "./code-intent-routing";
@@ -693,7 +693,11 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
           const runnableMainAgent = company.mainAgentId
             ? await workspaceStore.getCompanyAgent(auth, company.id, company.mainAgentId).then((agent) => agent.isActive).catch(() => false)
             : false;
-          if ((semantic?.coreRoute ? !semantic.coreRoute.delegate : semantic?.coreCapability || managementRequest || isReadOnlyCompanySwitch(message) || explicitCoreWebRequest) || !runnableMainAgent) {
+          // Editing a spreadsheet sent to this chat is chat file work: delegated to the Main Agent it never saw the file and
+          // failed (V6 step 11: "give me the updated Excel file" with a CSV). A named agent asked to do it still gets it.
+          const spreadsheetTurn = !delegatesWork && isChatSpreadsheetTurn(message, (request.body.attachments ?? []).map((item) => String((item as { name?: string }).name ?? "")),
+            Boolean(request.body.conversationId && isSpreadsheetEditRequest(message) && deps.chatFiles && await deps.chatFiles.latestChatSpreadsheet(auth, request.body.conversationId).catch(() => null)));
+          if ((semantic?.coreRoute ? !semantic.coreRoute.delegate : semantic?.coreCapability || managementRequest || isReadOnlyCompanySwitch(message) || explicitCoreWebRequest) || !runnableMainAgent || spreadsheetTurn) {
             const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal, { id: resolved.company!.id, name: resolved.company!.name }, undefined, semantic?.coreRoute);
             await send("result", { ...result, activeContext: resolved.context });
           } else {

@@ -39,6 +39,7 @@ export const workspace = {
       "low": "कम P3"
     },
     "showingGoals": "{total} में से {count} लक्ष्य दिख रहे हैं",
+    assignedAgent: "ज़िम्मेदार एजेंट",
     "matchingQuery": " \"{query}\" से मिलते परिणाम",
     "table": {
       "status": "स्थिति",

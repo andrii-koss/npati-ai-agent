@@ -36,6 +36,7 @@ export interface GoalsPageSchema {
       low: string;
     };
     showingGoals: string;
+    assignedAgent: string;
     matchingQuery: string;
     table: {
       status: string;

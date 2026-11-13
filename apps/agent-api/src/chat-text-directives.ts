@@ -5,7 +5,7 @@ import { detectCompanyChatLanguage } from "./company-chat-i18n";
 import { extractTargetUrlOrDomain } from "@npati/web-research";
 
 export function isSpreadsheetEditRequest(message: string): boolean {
-  const edit = /(?:дод|заповн|змін|онов|редаг|встав|видал|приб|добав|заполн|измен|обнов|редакт|встав|удал|add|fill|edit|update|change|insert|append|remove|delete|modify|ajout|rempl|modif|supprim|hinzuf|bearbeit|änder|lösch|agreg|rellen|edit|elimin|aggiung|modific|rimuov|dodaj|wypeł|edyt|zmień|usuń|adicion|preench|editar|alter|exclu|voeg|bewerk|wijzig|verwijder|ekle|doldur|düzenle|değiştir|sil|添加|填写|编辑|更新|删除|追加|入力|編集|変更|削除|추가|입력|편집|수정|삭제|أضف|املأ|عدّل|حدّث|احذف|जोड़|भर|संपादित|बदल|हटा)/iu.test(message);
+  const edit = /(?:дод|заповн|змін|онов|редаг|встав|видал|приб|добав|заполн|измен|обнов|редакт|встав|удал|add|fill|edit|update|change|insert|append|remove|delete|modify|ajout|rempl|modif|supprim|hinzuf|bearbeit|änder|lösch|agreg|rellen|edit|elimin|aggiung|modific|rimuov|dodaj|wypeł|edyt|zmień|usuń|adicion|preench|editar|alter|exclu|voeg|bewerk|wijzig|verwijder|ekle|doldur|düzenle|değiştir|sil|添加|填写|编辑|更新|删除|追加|入力|編集|変更|削除|추가|입력|편집|수정|삭제|أضف|املأ|عدّل|حدّث|احذف|जोड़|भर|संपादित|बदल|हटा|raise|increase|decrease|lower|reduce|multiply|sort|reorder|rename|recalculate|round|convert|merge|split|filter|збільш|зменш|підвищ|зниз|сорту|відсорту|перерах|перейменуй|округл|увелич|уменьш|повыс|сортир|пересчит|переименуй)/iu.test(message);
   const spreadsheet = /(?:xlsx|xls|csv|excel|spreadsheet|workbook|worksheet|table|column|row|cell|sheet|стовп|колон|ряд|клітин|аркуш|таблиц|файл|feuille|tableau|colonne|ligne|zelle|spalte|tabelle|hoja|tabla|columna|fila|foglio|tabella|colonna|riga|arkusz|tabela|kolumn|wiersz|planilha|coluna|linha|werkblad|tabel|kolom|rij|sayfa|tablo|sütun|satır|电子表格|表格|列|行|单元格|スプレッドシート|表|列|行|セル|스프레드시트|표|열|행|셀|جدول|عمود|صف|خلية|स्प्रेडशीट|तालिका|कॉलम|पंक्ति|सेल)/iu.test(message);
   return edit && spreadsheet;
 }
@@ -84,3 +84,8 @@ export function mapColumnDirectiveFromProposal(content: string, request: string)
   return { action: "map_column" as const, sourceColumn, newColumn: { header }, valueMap };
 }
 
+
+/** A spreadsheet edit for this chat: an edit request with a spreadsheet attached now or already in the conversation. */
+export function isChatSpreadsheetTurn(message: string, attachmentNames: string[], conversationHasSpreadsheet: boolean): boolean {
+  return isSpreadsheetEditRequest(message) && (attachmentNames.some((name) => /\.(xlsx|xlsm|xlsb|xls|csv)$/i.test(name)) || conversationHasSpreadsheet);
+}

@@ -11,6 +11,7 @@ export interface InMemoryGoalState {
   assertBusiness: (context: AuthContext, businessId: string) => any
   assertCompanyAgent: (context: AuthContext, companyId: string, agentId: string) => any
   assertOwnedAgent: (context: AuthContext, agentId: string) => any
+  agentDisplay?: (agentId: string) => { name: string; role: string; companyName: string } | null
 }
 
 export async function setCompanyAgentParent(host: InMemoryGoalState, context: AuthContext, companyId: string, childAgentId: string, parentAgentId: string | null) {
@@ -38,7 +39,8 @@ export async function setCompanyAgentParent(host: InMemoryGoalState, context: Au
 
 export async function listGoals(host: InMemoryGoalState, context: AuthContext, businessId: string) {
     host.assertBusiness(context, businessId);
-    return [...host.goals.values()].filter((goal) => goal.workspaceId === context.workspaceId && goal.businessId === businessId).sort((a, b) => a.priority - b.priority || b.updatedAt.localeCompare(a.updatedAt));
+    return [...host.goals.values()].filter((goal) => goal.workspaceId === context.workspaceId && goal.businessId === businessId).sort((a, b) => a.priority - b.priority || b.updatedAt.localeCompare(a.updatedAt))
+      .map((goal) => goal.assignedAgentId ? { ...goal, assignedAgent: host.agentDisplay?.(goal.assignedAgentId) ?? null } : goal);
   }
 
 export async function createGoal(host: InMemoryGoalState, context: AuthContext, businessId: string, input: GoalInput) {
