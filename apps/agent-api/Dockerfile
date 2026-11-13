@@ -86,6 +86,16 @@ COPY apps/agent-api/project-runtime-launcher.mjs apps/agent-api/project-runtime-
 RUN apk add --no-cache libseccomp-dev chromium font-noto
 # Pygame has no musl wheel on PyPI; the distribution build runs here. Xvfb and xdotool let the automatic check play a desktop game.
 RUN apk add --no-cache py3-pygame xvfb xdotool
+# Native Android builds (APK/AAB) for chat-made mobile apps: JDK 17 and the Android SDK (platform 36, build-tools 36, NDK
+# 28.2 that Flutter 3.47 pins). The SDK's native tools are glibc builds; gcompat runs them here. The launcher mounts it read-only.
+RUN apk add --no-cache openjdk17-jdk gcompat bash unzip
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk ANDROID_HOME=/opt/android-sdk ANDROID_SDK_ROOT=/opt/android-sdk
+RUN mkdir -p /opt/android-sdk/cmdline-tools && cd /tmp \
+  && wget -q -O tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip \
+  && unzip -q tools.zip -d /opt/android-sdk/cmdline-tools && mv /opt/android-sdk/cmdline-tools/cmdline-tools /opt/android-sdk/cmdline-tools/latest && rm tools.zip \
+  && (yes | /opt/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null) \
+  && /opt/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358" >/dev/null \
+  && chmod -R a+rX /opt/android-sdk
 RUN npm install --prefix /opt/npati-qa --omit=dev --ignore-scripts --no-audit --no-fund playwright@1.63.0
 COPY apps/agent-api/browser-qa-runner.mjs /opt/npati-qa/browser-qa-runner.mjs
 COPY apps/agent-api/browser-qa-actions.mjs /opt/npati-qa/browser-qa-actions.mjs

@@ -7,7 +7,7 @@ const common = ['--unshare-user', '--unshare-pid', '--unshare-ipc', '--unshare-u
   '--uid', '0', '--gid', '0', '--cap-drop', 'ALL', '--die-with-parent', '--new-session'];
 const filter = openSync('/opt/npati-runtime/project-command.seccomp', 'r');
 const tools = ['/usr', '/bin', '/sbin', '/lib', '/lib64', '/etc',
-  '/opt/npati-package-managers', '/opt/npati-project-toolchain', '/opt/npati-qa', '/opt/flutter', '/opt/flutter-glibc',
+  '/opt/npati-package-managers', '/opt/npati-project-toolchain', '/opt/npati-qa', '/opt/flutter', '/opt/flutter-glibc', '/opt/android-sdk',
   '/opt/npati-runtime/prepare-project-dependencies.cjs', '/opt/npati-runtime/project-runtime-inner.mjs'];
 const mounts = tools.filter(existsSync).flatMap(p => ['--ro-bind', p, p]);
 // Docker must allow this fresh procfs mount (systempaths=unconfined). Keep the
@@ -94,6 +94,13 @@ try {
   // projects/control ports remain denied by the existing network policy.
   const noProxy = 'localhost,127.0.0.1,0.0.0.0,::1,10.0.2.2:' + port;
   env.push('--setenv', 'NO_PROXY', noProxy, '--setenv', 'no_proxy', noProxy);
+  // Native Android builds (Gradle, Flutter): the read-only SDK and JDK, and the same enforced proxy for Java, which ignores
+  // HTTPS_PROXY. Without them Gradle could neither find the SDK nor reach Maven through the egress allowlist.
+  if (existsSync('/opt/android-sdk')) {
+    env.push('--setenv', 'ANDROID_HOME', '/opt/android-sdk', '--setenv', 'ANDROID_SDK_ROOT', '/opt/android-sdk');
+    if (existsSync('/usr/lib/jvm/java-17-openjdk')) env.push('--setenv', 'JAVA_HOME', '/usr/lib/jvm/java-17-openjdk');
+    env.push('--setenv', 'JAVA_TOOL_OPTIONS', '-Dhttp.proxyHost=10.0.2.2 -Dhttp.proxyPort=8080 -Dhttps.proxyHost=10.0.2.2 -Dhttps.proxyPort=8080 -Dhttp.nonProxyHosts=localhost|127.0.0.1');
+  }
   sandbox = spawn('/usr/bin/bwrap', [...base, ...(checking ? ['--clearenv'] : ['--bind', project, project]), '--chdir', cwd,
     '--info-fd', '3', '--block-fd', '4', '--seccomp', '5', ...env, '--',
     // Only Preview needs the Node relay. Foreground commands execute directly.
