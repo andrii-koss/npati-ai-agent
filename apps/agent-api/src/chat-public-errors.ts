@@ -82,13 +82,15 @@ export function publicCompanyRunMessage(result: string | null | undefined, error
   return "The company task could not be completed because the selected AI model is temporarily unavailable. Check the selected model connection in AI Marketplace, then try again.";
 }
 
-export function attachResearchSources(content: string, research?: { sources: Array<{ url: string; title?: string }> }) {
+// The sources label follows the conversation language: an English answer ended with "Джерела:" (V6 step 11).
+const SOURCES_LABEL: Record<string, string> = { en: "Sources", uk: "Джерела", ru: "Источники", de: "Quellen", fr: "Sources", es: "Fuentes", it: "Fonti", pl: "Źródła", pt: "Fontes", nl: "Bronnen", tr: "Kaynaklar", zh: "来源", ja: "出典", ko: "출처", ar: "المصادر", hi: "स्रोत" };
+export function attachResearchSources(content: string, research?: { sources: Array<{ url: string; title?: string }> }, language = "uk") {
   if (!research?.sources.length) return content;
   const unique = [...new Map(research.sources.map((item) => [item.url, item])).values()];
   const existingUrls = new Set((content.match(/https?:\/\/[^\s<>()]+/g) ?? []).map((url) => url.replace(/[.,;!?]+$/, "")));
   const missing = unique.filter((item) => !existingUrls.has(item.url));
   if (!missing.length) return content;
-  return content + "\n\nДжерела:\n" + missing.map((item) => {
+  return content + "\n\n" + (SOURCES_LABEL[language] ?? SOURCES_LABEL.en) + ":\n" + missing.map((item) => {
     const rawTitle = item.title?.replace(/[\[\]\r\n]+/g, " ").trim() || item.url;
     return "- [" + rawTitle + "](" + item.url + ")";
   }).join("\n");

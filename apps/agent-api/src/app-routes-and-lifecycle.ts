@@ -52,6 +52,8 @@ import { createChatProjectIntentResolver } from "./chat-project-intent";
 
 export interface AppRoutesAndLifecycleDeps {
   app: FastifyInstance;
+  /** Browser-use client: the chat attaches screenshots a company run took (V6 step 11). */
+  browserTool?: import("./browser-tool").BrowserUseClient;
   config: AppConfig;
   log: FastifyBaseLogger;
   boundedResponseChunks: (value: string, maxCharacters?: number) => Iterable<string>;
@@ -344,6 +346,7 @@ export function registerAppRoutesAndLifecycle(deps: AppRoutesAndLifecycleDeps) {
 
   registerChatStreamRoutes(app, {
     projectMediaService: deps.projectMediaService,
+    browserTool: deps.browserTool,
     aiEngine,
     chatFiles,
     resolveProjectIntent,

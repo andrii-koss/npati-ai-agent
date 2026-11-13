@@ -9,6 +9,7 @@ import { AuthenticationError } from "./auth";
 import { prepareChatAttachments, ChatAttachmentInput } from "./chat-attachments";
 import { conversationTitle, isShortAffirmativeReply, requestsCompositeCompanyDeletionIntent } from "./chat-intent-helpers";
 import { publicChatError, publicCompanyRunMessage } from "./chat-public-errors";
+import { browserScreenshotAttachments } from "./chat-browser-screenshots";
 import { explicitlyRequestsWebResearch, isChatSpreadsheetTurn, isSpreadsheetEditRequest } from "./chat-text-directives";
 import { CodeBackgroundRunRegistry } from "./code-background-run-registry";
 import { canUseStylePreview, hasCodeChatPreview, isCodeChatWebsite, nativeMobileConversationContext, projectConversationContext, websiteConversationContext, websiteReferenceInstructions, isWebsiteReferenceRedesign, storeWebsiteReferenceAssets, refreshChatPreviewSession } from "./code-chat-website";
@@ -726,7 +727,8 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
               runResult.run.status,
               memoryPolicy.noMemoryActive,
             );
-            const responseMessage=publicCompanyRunMessage(runResult.run.result, runResult.run.errorMessage, message, runResult.run.errorCode);
+            const responseMessage=publicCompanyRunMessage(runResult.run.result, runResult.run.errorMessage, message, runResult.run.errorCode)
+              + await browserScreenshotAttachments({ store: workspaceStore, auth, companyId: resolved.company!.id, runId: runResult.run.id, conversationId: conversation?.id, browser: deps.browserTool, chatFiles: deps.chatFiles, log: app.log });
             if (conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", responseMessage);
             for(const delta of boundedResponseChunks(responseMessage))send("delta",{delta});
             await send("result", {

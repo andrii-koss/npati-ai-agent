@@ -24,6 +24,7 @@ export interface ChatStreamRouteDeps {
   aiEngine: import("@npati/omniroute-adapter").AIEngine;
   projectMediaService?: import("./project-media-service").ProjectMediaService;
   chatFiles?: ReturnType<typeof createCoreServices>["chatFiles"];
+  browserTool?: import("./browser-tool").BrowserUseClient;
   resolveProjectIntent?: import("./chat-project-intent").ChatProjectIntentResolver;
   config: AppConfig;
   log: FastifyBaseLogger;

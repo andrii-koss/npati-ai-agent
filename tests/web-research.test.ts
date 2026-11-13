@@ -455,3 +455,33 @@ describe("reading a named page", () => {
     expect(result.pages[0]?.error).toBe("Access denied by robots.txt");
   });
 });
+
+// V6 step 11 (owner decision): web search uses the stand's SearXNG first and DuckDuckGo as the fallback, never the
+// documentation-only provider OmniRoute picked when no provider was named.
+describe("SearXNG search with DuckDuckGo fallback", () => {
+  const engine = (answers: Record<string, () => Promise<unknown>>) => {
+    const calls: Array<Record<string, unknown>> = [];
+    return { calls, engine: { webSearch: vi.fn(async (input: Record<string, unknown>) => { calls.push(input); return answers[String(input.provider)]!() as never; }) } as never };
+  };
+  const hit = { results: [{ title: "Node.js Releases", url: "https://nodejs.org/en/about/previous-releases" }] };
+
+  it("asks SearXNG with its base URL", async () => {
+    const e = engine({ "searxng-search": async () => hit });
+    const results = await new OmniRouteSearchProvider(e.engine, undefined, "http://searxng:8080").search({ query: "node lts" });
+    expect(results[0]?.url).toContain("nodejs.org");
+    expect(e.calls).toEqual([expect.objectContaining({ provider: "searxng-search", providerOptions: { baseUrl: "http://searxng:8080" } })]);
+  });
+
+  it("falls back to DuckDuckGo, and reports both failures instead of other results", async () => {
+    const e = engine({ "searxng-search": async () => { throw new Error("HTTP 503"); }, "duckduckgo-free": async () => hit });
+    expect((await new OmniRouteSearchProvider(e.engine, undefined, "http://searxng:8080").search({ query: "x" })).length).toBe(1);
+    const failing = engine({ "searxng-search": async () => { throw new Error("HTTP 503"); }, "duckduckgo-free": async () => { throw new Error("HTTP 429"); } });
+    await expect(new OmniRouteSearchProvider(failing.engine, undefined, "http://searxng:8080").search({ query: "x" })).rejects.toThrow(/searxng-search: HTTP 503; duckduckgo-free: HTTP 429/);
+  });
+
+  it("keeps OmniRoute's own choice when no SearXNG is configured", async () => {
+    const e = engine({ undefined: async () => hit });
+    await new OmniRouteSearchProvider(e.engine).search({ query: "x" });
+    expect(e.calls[0]?.provider).toBeUndefined();
+  });
+});

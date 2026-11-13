@@ -543,6 +543,7 @@ export class OmniRouteEngine implements AIEngine {
         max_results: Math.max(1, Math.min(input.maxResults ?? 5, 20)),
         search_type: input.searchType ?? "web",
         ...(input.provider ? { provider: input.provider } : {}),
+        ...(input.providerOptions ? { provider_options: input.providerOptions } : {}),
         ...(input.country ? { country: input.country } : {}),
         ...(input.language ? { language: input.language } : {}),
       }),

@@ -361,7 +361,7 @@ export function createChatOrchestration(deps: ChatOrchestrationDeps): ChatOrches
     });
     if (nativeBusinessMessage) result.message = nativeBusinessMessage;
     else if (nativeCompanyPrimary && nativeCompanyAction && nativeCompanyCleanText) result.message = nativeCompanyCleanText;
-    if (nativeToolCalling && research?.sources.length) result.message = attachResearchSources(result.message, research);
+    if (nativeToolCalling && research?.sources.length) result.message = attachResearchSources(result.message, research, activeConversationLanguage);
     if(signal?.aborted)throw signal.reason??new DOMException("Cancelled","AbortError");
     const executedAction = await BusinessActionHandler.extractAndExecute(auth, normalizeNewBusinessDirective(result.message, safePrompt), workspaceStore, log, async (ctx, bid) => { await chatFiles?.deleteBusiness(ctx, bid); }, {
       logoAttachments: media.decoded.filter((item) => item.kind === "image").map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data, kind: item.kind })),

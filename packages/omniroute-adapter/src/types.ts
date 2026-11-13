@@ -224,6 +224,8 @@ export interface WebSearchInput {
   maxResults?: number;
   searchType?: "web" | "news";
   provider?: string;
+  /** Provider settings sent as provider_options, e.g. { baseUrl } of a self-hosted SearXNG. */
+  providerOptions?: Record<string, unknown>;
   country?: string;
   language?: string;
   bypassCache?: boolean;

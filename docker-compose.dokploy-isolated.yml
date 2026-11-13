@@ -59,6 +59,7 @@ services:
       NPATI_HUB_BASE_URL: ${NPATI_HUB_BASE_URL:-}
       NPATI_HUB_API_KEY: ${NPATI_HUB_API_KEY:-}
       CRAWL4AI_BASE_URL: http://crawler:11235
+      NPATI_SEARXNG_URL: ${NPATI_SEARXNG_URL:-http://searxng:8080}
       CRAWL4AI_API_TOKEN: ${CRAWL4AI_API_TOKEN:?CRAWL4AI_API_TOKEN is required}
       BROWSER_USE_WORKER_URL: http://browser-use-worker:8765
       NPATI_BROWSER_INTERNAL_TOKEN: ${NPATI_BROWSER_INTERNAL_TOKEN:?NPATI_BROWSER_INTERNAL_TOKEN is required}
@@ -234,6 +235,26 @@ services:
       timeout: 8s
       retries: 8
       start_period: 45s
+    networks: [npati-agent]
+
+  # Web search for agents: OmniRoute's "searxng-search" provider at http://searxng:8080 (no published port). One query
+  # goes to several engines; NPATI falls back to OmniRoute's duckduckgo-free when it does not answer.
+  searxng:
+    image: searxng/searxng:${SEARXNG_VERSION:-2026.10.30-ffa88e3ba}
+    restart: unless-stopped
+    environment:
+      SEARXNG_SECRET: ${NPATI_SEARXNG_SECRET:?NPATI_SEARXNG_SECRET is required}
+      SEARXNG_BASE_URL: http://searxng:8080/
+    volumes:
+      - ./services/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks: [npati-agent]
 
   browser-use-worker:

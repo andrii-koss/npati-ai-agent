@@ -56,7 +56,7 @@ export function createWebResearch(engine: OmniRouteEngine, crawlerBaseUrl?: stri
     : undefined;
   const cache = environment.REDIS_URL ? new RedisResearchCache(environment.REDIS_URL) : undefined;
   const provider = new DefaultWebResearchProvider(
-    new OmniRouteSearchProvider(engine, outboundGuard),
+    new OmniRouteSearchProvider(engine, outboundGuard, environment.NPATI_SEARXNG_URL?.trim() || undefined),
     new OmniRouteFetchProvider(engine, validator, outboundGuard),
     crawler,
     limits,

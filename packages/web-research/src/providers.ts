@@ -66,7 +66,7 @@ function objectArray(value: unknown): Array<Record<string, unknown>> {
 }
 
 export class OmniRouteSearchProvider {
-  constructor(private readonly engine: OmniRouteEngine, private readonly outboundGuard?: OutboundGuardPort) {}
+  constructor(private readonly engine: OmniRouteEngine, private readonly outboundGuard?: OutboundGuardPort, private readonly searxngUrl?: string) {}
   async search(input: SearchInput): Promise<WebSearchResult[]> {
     const country = input.country?.trim();
     // C5b: the query itself is outbound data — it can carry a fragment of the private code an agent is
@@ -75,11 +75,31 @@ export class OmniRouteSearchProvider {
       channel: "web_search",
       parts: [{ kind: "query", value: input.query, label: "search_query" }],
     });
-    return (await this.engine.webSearch({
+    const base = {
       query: input.query, maxResults: input.maxResults,
       country: country && /^[a-z]{2}$/i.test(country) ? country.toUpperCase() : undefined,
       language: input.language, bypassCache: input.refresh,
-    })).results;
+    };
+    if (!this.searxngUrl) return (await this.engine.webSearch(base)).results;
+    // V6 step 11 (owner decision): with no provider named, OmniRoute picked "context7", which searches only library
+    // documentation, so general questions got unrelated sources. The stand's SearXNG answers first and OmniRoute's
+    // keyless DuckDuckGo is the fallback; when both fail the error is reported instead of documentation hits.
+    const attempts = [
+      { provider: "searxng-search", providerOptions: { baseUrl: this.searxngUrl } },
+      { provider: "duckduckgo-free" },
+    ];
+    const errors: string[] = [];
+    for (const attempt of attempts) {
+      try {
+        const results = (await this.engine.webSearch({ ...base, ...attempt })).results;
+        if (results.length) return results;
+        errors.push(`${attempt.provider}: no results`);
+      } catch (error) {
+        errors.push(`${attempt.provider}: ${error instanceof Error ? error.message : String(error)}`.slice(0, 300));
+      }
+    }
+    if (errors.every((error) => error.endsWith("no results"))) return [];
+    throw new Error("Web search failed: " + errors.join("; "));
   }
 }
 

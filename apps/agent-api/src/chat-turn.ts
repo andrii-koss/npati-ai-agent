@@ -632,7 +632,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
       }
     }
     if (research?.sources.length) {
-      const appended = attachResearchSources(content, research);
+      const appended = attachResearchSources(content, research, activeConversationLanguage);
       const extra = appended.slice(content.length);
       if (extra) {
         content = appended;

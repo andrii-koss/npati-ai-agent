@@ -1,0 +1,31 @@
+# SearXNG for NPATI web search (OmniRoute provider "searxng-search"). Internal only: no published port, reached by
+# OmniRoute at http://searxng:8080 on the npati-agent network. The secret comes from SEARXNG_SECRET.
+use_default_settings: true
+
+general:
+  instance_name: "NPATI search"
+  enable_metrics: false
+
+search:
+  safe_search: 1
+  autocomplete: ""
+  # OmniRoute reads results as JSON (format=json); SearXNG serves only HTML unless JSON is listed.
+  formats:
+    - html
+    - json
+
+server:
+  bind_address: "0.0.0.0"
+  port: 8080
+  # Internal service: no bot limiter (it needs Valkey) and no public image proxy.
+  limiter: false
+  public_instance: false
+  image_proxy: false
+  method: "GET"
+
+outgoing:
+  request_timeout: 4.0
+  max_request_timeout: 8.0
+
+ui:
+  static_use_hash: true
