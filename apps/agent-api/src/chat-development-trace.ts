@@ -81,12 +81,28 @@ export function executionResultDetails(value: unknown): Partial<DevelopmentProce
   const files = Array.isArray(data.files) ? data.files.slice(0,200).flatMap(raw => { const file = object(raw); if (typeof file.path !== "string") return []; return [{path:file.path,action:actions[String(file.action)] as "created" | "modified" | "deleted" | undefined,diff:string(file.diff),linesAdded:numeric(file.linesAdded),linesRemoved:numeric(file.linesRemoved)}]; }) : undefined;
   const readLines = Array.isArray(data.lines) && data.lines.every(line => typeof object(line).text === "string") ? data.lines.map(line => String(object(line).text)).join("\n") : undefined;
   const reports = Array.isArray(data.results) ? data.results.map(object) : [];
-  const recordedOutput = reports.map(report => string(report.raw)).filter(Boolean).join("\n\n");
-  const firstReport = reports[0] ?? {};
+  // A verification call may contain a successful build and a failed test. Keep
+  // its displayed command, output and exit code tied to the same failing check.
+  const failedReport = reports.find(report => report.ok === false || report.timedOut === true || typeof report.exitCode === "number" && report.exitCode !== 0);
+  const firstReport = failedReport ?? reports[0] ?? {};
+  const recordedOutput = string(firstReport.stdout) || string(firstReport.raw) || string(firstReport.summary);
   const timedOut = reports.some(report => report.timedOut === true) || data.timedOut === true;
   const counts = object(data.tests);
   const tests = ["passed","failed","skipped","total"].every(key => numeric(counts[key]) !== undefined && Number(counts[key]) >= 0) ? counts as {passed:number;failed:number;skipped:number;total:number} : undefined;
-  return Object.fromEntries(Object.entries({status: envelope.ok === false || data.ok === false || data.success === false || (tests?.failed ?? 0) > 0 || reports.some(report => report.ok === false) || typeof data.exitCode === "number" && data.exitCode !== 0 || typeof object(data.stats).failed === "number" && Number(object(data.stats).failed) > 0 ? "failed" : undefined, dryRun:typeof data.dryRun==="boolean"?data.dryRun:undefined,file:string(data.path),fileContent:data.binary === true || data.encoding === "base64" ? undefined : string(data.content) ?? readLines,stdout:string(data.stdout) ?? (recordedOutput || reports.map(report => string(report.stdout)).filter(Boolean).join("\n\n") || undefined),stderr:string(data.stderr) ?? (reports.map(report => string(report.stderr)).filter(Boolean).join("\n\n") || undefined),exitCode:numeric(data.exitCode) ?? numeric(firstReport.exitCode),command:string(firstReport.command) ?? string(data.command),diff:string(data.diff),linesAdded:numeric(data.linesAdded),linesRemoved:numeric(data.linesRemoved),fileChange:actions[String(data.status)],files,tests,errorCode:timedOut?"verification_timeout":undefined,error:timedOut?"Verification timed out":undefined}).filter(([,value]) => value !== undefined)) as Partial<DevelopmentProcessProgressItem>;
+  return Object.fromEntries(Object.entries({
+    status: envelope.ok === false || data.ok === false || data.success === false || (tests?.failed ?? 0) > 0 || failedReport !== undefined || typeof data.exitCode === "number" && data.exitCode !== 0 || typeof object(data.stats).failed === "number" && Number(object(data.stats).failed) > 0 ? "failed" : undefined,
+    dryRun: typeof data.dryRun === "boolean" ? data.dryRun : undefined,
+    file: string(data.path),
+    fileContent: data.binary === true || data.encoding === "base64" ? undefined : string(data.content) ?? readLines,
+    stdout: string(data.stdout) ?? recordedOutput,
+    stderr: string(data.stderr) ?? string(firstReport.stderr),
+    exitCode: numeric(data.exitCode) ?? numeric(firstReport.exitCode),
+    command: string(firstReport.command) ?? string(data.command),
+    diff: string(data.diff), linesAdded: numeric(data.linesAdded), linesRemoved: numeric(data.linesRemoved),
+    fileChange: actions[String(data.status)], files, tests,
+    errorCode: timedOut ? "verification_timeout" : undefined,
+    error: timedOut ? "Verification timed out" : failedReport ? string(failedReport.summary) : undefined,
+  }).filter(([, value]) => value !== undefined)) as Partial<DevelopmentProcessProgressItem>;
 }
 /** JSONB serializes nested Date values as ISO strings; pg does not revive them. */
 export function executionTimestamp(value: unknown): number | undefined {

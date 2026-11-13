@@ -29,6 +29,24 @@ it("distinguishes command transport success from failed exit codes and reads can
   expect(executionResultDetails({files:[{path:"app/page.tsx",action:"update",linesAdded:4,linesRemoved:2},{path:"app/contact.tsx",action:"add"}],tests:{total:24,passed:23,failed:1,skipped:0}})).toMatchObject({files:[{path:"app/page.tsx",action:"modified"},{path:"app/contact.tsx",action:"created"}],tests:{total:24,failed:1}});
 });
 describe("existing runtime execution trace projection", () => {
+  it("shows the failing check's command and output when build passed in the same verification call", () => {
+    const results = [
+      { tool: "build", ok: true, command: "make build", exitCode: 0, stdout: "python3 -m compileall -q main.py", raw: "python3 -m compileall -q main.py" },
+      { tool: "test", ok: false, command: ".venv/bin/python -m pytest", exitCode: 1, stdout: "1 failed", stderr: "AssertionError", summary: "test failed with exit code 1" },
+    ];
+    expect(executionResultDetails({ data: { results, stats: { failed: 1 } } })).toMatchObject({
+      status: "failed", command: ".venv/bin/python -m pytest", exitCode: 1, stdout: "1 failed", stderr: "AssertionError", error: "test failed with exit code 1",
+    });
+    expect(executionResultDetails({ results: [results[0]], stats: { failed: 0 } })).toMatchObject({ command: "make build", exitCode: 0, stdout: "python3 -m compileall -q main.py" });
+    expect(executionResultDetails({ results: [results[0]], stats: { failed: 0 } }).status).toBeUndefined();
+  });
+  it("shows a failed check's reason even when it has no command output", () => {
+    expect(executionResultDetails({ results: [
+      { ok: true, command: "make build", exitCode: 0, stdout: "compiled" },
+      { ok: false, summary: "test command is not configured" },
+    ] })).toMatchObject({ status: "failed", stdout: "test command is not configured", error: "test command is not configured" });
+    expect(executionResultDetails({ results: [{ ok: true, command: "make build" }, { ok: false, summary: "test command is not configured" }] }).command).toBeUndefined();
+  });
   it("shows concurrent unfinished calls, actual arguments/results and deduplicates Activity", async () => {
     const f = fixture(); const events = await developmentTrace(f.store, ctx, process);
     expect(events).toHaveLength(4);

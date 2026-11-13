@@ -162,6 +162,11 @@ describe("D5 completion — SDK delivery into the Project workspace", () => {
     expect(context).toContain(PROJECT_SDK_IMPORT_PATH);
     expect(context).toContain(PROJECT_SDK_FILE_NAME);
     expect(context).toContain("PROJECT_PUBLISHABLE_KEY");
+    expect(context).toContain("response.data.id");
+    expect(context).toContain("sort is field:asc or field:desc");
+    expect(context).toContain("A new table has no client access by default");
+    expect(context).toContain("Insert-only access returns {success: true}");
+    expect(context).toContain("at request time");
     expect(context).not.toContain("npati_sk_");
   });
 });

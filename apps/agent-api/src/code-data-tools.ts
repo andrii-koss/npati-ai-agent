@@ -90,6 +90,15 @@ export function codeDataExecutors(options: CodeDataToolOptions) {
       if ("approvalRequired" in result && result.approvalRequired) throw new CodeToolError("approval_required", "This schema operation requires review in Data Studio", 409, "approval", false, input.tool.name);
       return result;
     } catch (error) {
+      // An unattached database is a discovery result; mutations still fail below.
+      if (!apply && input.tool.name === "code.data.schema.inspect" && error instanceof DataStudioError && error.code === "DATA_BACKEND_NOT_ATTACHED") {
+        return {
+          attached: false,
+          backend: null,
+          schema: null,
+          nextAction: "If the requested feature needs a project database, call code.data.backend.create with a name and reason, then inspect the schema again. Otherwise continue without database tools.",
+        };
+      }
       if (error instanceof DataStudioError) throw new CodeToolError("project_data_error", error.message, error.status, error.step, error.retryable, input.tool.name, { dataCode: error.code });
       throw error;
     }

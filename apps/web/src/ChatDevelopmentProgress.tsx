@@ -1,15 +1,15 @@
-import React from "react";
+import React, { type ReactNode } from "react";
 import type { DevelopmentProcess, DevelopmentProcessProgressItem } from "@npati/shared";
 import { ChatProjectPreviewCard } from "./ChatProjectPreviewCard";
 import { normalizeActivity, codingActivityRuns, chatTimeline, type CodingActivityRun } from "./chat-timeline";
 import { ChatMessageContent } from "./ChatMessageContent";
 import { AgentExecutionTrace } from "./AgentExecutionTrace";
 
-export function ChatDevelopmentProgress({ process, items, run, isUk, animatePending = true }: { process?: DevelopmentProcess; items?: DevelopmentProcessProgressItem[]; run?: CodingActivityRun; isUk?: boolean; animatePending?: boolean }) {
+export function ChatDevelopmentProgress({ process, items, run, isUk, animatePending = true, preview }: { process?: DevelopmentProcess; items?: DevelopmentProcessProgressItem[]; run?: CodingActivityRun; isUk?: boolean; animatePending?: boolean; preview?: ReactNode }) {
   const rows = normalizeActivity(items ?? process?.progress);
   if (!process || !rows.length && !run && !Object.keys(process.runStatuses ?? {}).length && !["preparing", "running", "queued", "stopping"].includes(process.status)) return null;
   if (run) return <AgentExecutionTrace process={process} items={run.items} run={run} isUk={isUk} animatePending={animatePending} />;
-  if (items && rows.every(item=>item.kind==="assistant_message")) return <>{rows.map(item=><article key={item.id} className="assistant" data-chat-reply-id={item.id}><ChatMessageContent content={item.title}/></article>)}</>;
+  if (items && rows.every(item=>item.kind==="assistant_message")) return <>{rows.map((item,index)=><article key={item.id} className="assistant" data-chat-reply-id={item.id}><ChatMessageContent content={item.title}/>{index===rows.length-1 && preview}</article>)}</>;
   return <>{chatTimeline([],rows,process.conversationId,process).map(entry=>entry.kind!=="activity" ? null : entry.run ? <AgentExecutionTrace key={entry.item.id} process={process} items={entry.run.items} run={entry.run} isUk={isUk} animatePending={animatePending}/> : <article key={entry.item.id} className="assistant" data-chat-reply-id={entry.item.id}><ChatMessageContent content={entry.item.title}/></article>)}</>;
 }
 

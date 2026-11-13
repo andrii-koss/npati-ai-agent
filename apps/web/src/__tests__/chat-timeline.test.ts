@@ -1,10 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { activitySlots, codingActivityRuns, codingActivityStages, mergeConversationMessages, chatTimeline, normalizeActivity, nearChatBottom } from "../chat-timeline";
 import type { Message } from "../business-workspace-cards";
+import { developmentPreviewAnchor } from "../chat-development-view";
 const at = (n: number) => new Date(1000 * n).toISOString();
 const messages: Message[] = [ {id:"u1",role:"user",content:"Create site",createdAt:at(1)}, {id:"a1",role:"assistant",content:"Ready",createdAt:at(4)}, {id:"u2",role:"user",content:"Change button",createdAt:at(5)}, {id:"a2",role:"assistant",content:"Changed",createdAt:at(8)} ];
 const event = (id: string, time: number) => ({id,stage:"tool",title:"Run",at:at(time),status:"running",conversationId:"chat",runId:id});
 describe("chat chronological activity", () => {
+  it("anchors Preview after replayed final review and before a later user turn", () => {
+    const rows = [{ ...event("r1",2), tool: "code.fs.write" }, { id: "review", kind: "assistant_message" as const, stage: "planning", title: "Fixed the review finding", at: at(4.5), conversationId: "chat" }];
+    const process = { createdAt: at(0.9), id: "p", status: "completed", conversationId: "chat" } as import("@npati/shared").DevelopmentProcess;
+    const timeline = chatTimeline(messages, rows, "chat", process);
+    const anchor = developmentPreviewAnchor(timeline, process);
+    const entry = timeline[anchor]!;
+    expect(entry.kind === "activity" && entry.item.id).toBe("review");
+    expect(timeline[anchor+1]).toMatchObject({kind:"message",message:{id:"u2"}});
+  });
   it("interleaves each run with its own user/assistant turn and keeps original message order", () => {
     const slots = activitySlots(messages,[event("run2",6),event("run1",2)],"chat");
     expect(slots.get(1)?.map(x=>x.id)).toEqual(["run1"]); expect(slots.get(3)?.map(x=>x.id)).toEqual(["run2"]);

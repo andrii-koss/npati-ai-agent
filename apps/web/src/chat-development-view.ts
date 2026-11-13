@@ -1,12 +1,35 @@
 import { developmentIsActive, type DevelopmentProcess, type ProjectCardData } from "@npati/shared";
+import type { chatTimeline } from "./chat-timeline";
+
+/** Preview follows the run's last reply, including commentary restored from replay. */
+export function developmentPreviewAnchor(timeline: ReturnType<typeof chatTimeline>, process?: DevelopmentProcess): number {
+  const startedAt = Date.parse((process?.runId && process.runStartedAts?.[process.runId]) || process?.createdAt || "");
+  // The request can be appended milliseconds after the process is created. Its
+  // first tool operation is a reliable boundary for finding the following request.
+  const operationTimes = timeline.flatMap(entry => entry.kind === "activity" ? (entry.run?.items ?? [entry.item]).filter(item => item.tool).map(item => Date.parse(item.at)) : []).filter(time => Number.isFinite(time) && time >= startedAt);
+  const requestBoundary = operationTimes.length ? Math.min(...operationTimes) : startedAt;
+  const nextRequest = Number.isFinite(requestBoundary) ? timeline.findIndex(entry => entry.kind === "message" && entry.message.role === "user" && Date.parse(entry.message.createdAt) > requestBoundary) : -1;
+  let anchor = -1;
+  for (let index = 0; index < (nextRequest < 0 ? timeline.length : nextRequest); index++) {
+    const entry = timeline[index]!;
+    if (entry.kind === "message" ? entry.message.role === "assistant" : entry.item.kind === "assistant_message") anchor = index;
+  }
+  return anchor;
+}
 type CardMessage = { role?: "user" | "assistant" | "system"; content: string; projectCard?: ProjectCardData };
 export function developmentCard(messages: CardMessage[], index: number, processes: DevelopmentProcess[], conversationId: string | null): ProjectCardData | null {
   // Request metadata restores routing; only assistant replies may display project cards.
   const message = messages[index];
   if (message?.role && message.role !== "assistant") return null;
-  // A project created in this chat keeps its card with the request; the reply to that request displays it.
-  const request = messages[index - 1];
-  const requestCard = !message?.projectCard && request?.role === "user" ? request.projectCard : undefined;
+  // A project created in this chat keeps its card with the request; the LAST reply to that request displays it, below the
+  // agent's work. A status line written during the run ("Created database: …") used to be the first reply and took the
+  // card to the top of the run (V6 step 10).
+  let requestIndex = index - 1;
+  while (requestIndex >= 0 && messages[requestIndex]?.role && messages[requestIndex]?.role !== "user") requestIndex--;
+  const request = messages[requestIndex];
+  const nextUser = messages.findIndex((m, i) => i > index && m.role === "user");
+  const lastReply = messages.slice(index + 1, nextUser === -1 ? undefined : nextUser).every(m => m.role !== "assistant");
+  const requestCard = !message?.projectCard && request?.role === "user" && lastReply ? request.projectCard : undefined;
   const card = message?.projectCard ?? (requestCard && processes.some(p => p.projectId === (requestCard.projectId ?? requestCard.id) && p.conversationId === conversationId) ? requestCard : undefined);
   if (!card || card.kind === "code_project" && card.status === "waiting_for_user") return null;
   const projectId = card.projectId ?? card.id;

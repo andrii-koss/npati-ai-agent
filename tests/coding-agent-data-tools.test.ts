@@ -6,6 +6,7 @@ import { codeDataExecutors } from "../apps/agent-api/src/code-data-tools";
 import { FeatureFlagService } from "../apps/agent-api/src/feature-flags";
 import { PolicyEngine, isReviewSafeTool } from "../apps/agent-api/src/code-policy-engine";
 import { DataStudioError } from "../apps/agent-api/src/data-studio/identifier";
+import { PROJECT_DATA_API_CONTRACT } from "../apps/agent-api/src/data-studio/agent-data-service";
 import { CODE_TOOL_SCHEMAS, resolveManifestForSession } from "../apps/agent-api/src/code-tool-registry";
 import { isReadOnlyRunTool } from "../apps/agent-api/src/coding-agent-runner-contracts";
 import type { CodeApprovalPort } from "../apps/agent-api/src/code-workspace-checkpoint";
@@ -18,7 +19,7 @@ async function fixture(mode = "auto", approvals?: CodeApprovalPort, dataAutoAllo
   const company = await store.createCompany(ctx, { name: "Data coding" }, "data-code-company");
   const flags = new FeatureFlagService(store, undefined, { enabledByDefault: true });
   const projectData = {
-    inspectSchema: vi.fn(async () => ({ backend: { id: "db", name: "Site DB", status: "ready" as const }, environment: { name: "dev", syncStatus: "synced" as const, schemaFingerprint: "before" }, schema: { tables: [] }, expectedSchema: null })),
+    inspectSchema: vi.fn(async () => ({ backend: { id: "db", name: "Site DB", status: "ready" as const }, environment: { name: "dev", syncStatus: "synced" as const, schemaFingerprint: "before" }, schema: { tables: [] }, expectedSchema: null, apiContract: PROJECT_DATA_API_CONTRACT })),
     applySchema: vi.fn(),
     createBackend: vi.fn(async()=>({reason:"Persist test orders",userMessage:"Test backend created",created:true,backend:{id:"db",name:"Orders",status:"ready"},environment:{PROJECT_API_URL:"https://api.test/v1/projects/selected-site",PROJECT_PUBLISHABLE_KEY:"public"}})),
     assertBackend: vi.fn(),
@@ -72,6 +73,22 @@ describe("Coding Agent project database tools", () => {
     const f = await fixture("plan"); expect((await f.invoke("code.data.schema.inspect")).ok).toBe(true);
     expect((await f.invoke("code.data.schema.apply", { operation, expectedFingerprint: "before" })).ok).toBe(false);
     expect(f.projectData.applySchema).not.toHaveBeenCalled();
+  });
+  it.each(["auto", "plan"])("reports an unattached database as discovery in %s mode without creating one", async mode => {
+    const f = await fixture(mode);
+    f.projectData.inspectSchema.mockRejectedValue(new DataStudioError(404, "project_data", "Project has no attached DataBackend", false, "DATA_BACKEND_NOT_ATTACHED"));
+    expect(await f.invoke("code.data.schema.inspect")).toMatchObject({
+      ok: true, result: { attached: false, backend: null, schema: null, nextAction: expect.stringContaining("code.data.backend.create") },
+    });
+    expect(f.projectData.createBackend).not.toHaveBeenCalled();
+    expect(f.projectData.applySchema).not.toHaveBeenCalled();
+  });
+  it("keeps inspection outages and missing-backend mutations as failures", async () => {
+    const f = await fixture();
+    f.projectData.inspectSchema.mockRejectedValue(new DataStudioError(503, "project_data", "Unavailable", true, "PROVIDER_UNAVAILABLE"));
+    expect(await f.invoke("code.data.schema.inspect")).toMatchObject({ ok: false, error: { code: "project_data_error", details: { dataCode: "PROVIDER_UNAVAILABLE" } } });
+    f.projectData.applySchema.mockRejectedValue(new DataStudioError(404, "project_data", "Project has no attached DataBackend", false, "DATA_BACKEND_NOT_ATTACHED"));
+    expect(await f.invoke("code.data.schema.apply", { operation, expectedFingerprint: "before", expectedBackendId: "db" })).toMatchObject({ ok: false, error: { code: "project_data_error", details: { dataCode: "DATA_BACKEND_NOT_ATTACHED" } } });
   });
   it("refuses schema changes in a read-only review", async () => {
     const f = await fixture(); expect((await f.invoke("code.data.schema.apply", { operation, expectedFingerprint: "before" }, { readOnlyIntent: true })).ok).toBe(false);

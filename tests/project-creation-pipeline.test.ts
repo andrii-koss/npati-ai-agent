@@ -43,6 +43,14 @@ describe("new project creation policy",()=>{
   expect(prompt).not.toContain("smoke test");expect(prompt).not.toContain("once the requested H1");
   expect(prompt).toContain("code.data.backend.create");expect(prompt).toContain("If no database is necessary");
  });
+ it("routes requested Python testing through configured verification while keeping test files",()=>{
+  const prompt=createProjectImplementationPrompt("Create a FastAPI notes service and test it",{name:"Notes",kind:"website",framework:"FastAPI"});
+  expect(prompt).toContain('code.verify.run with tools: ["test"]');
+  expect(prompt).toContain("tests/test_<feature>.py");
+  expect(prompt).toContain("pytest in requirements.txt");
+  expect(prompt).toContain("Keep the tests");
+  expect(prompt).not.toContain("Do not call code.verify.run yourself.");
+ });
 });
 
 describe("static resource validation",()=>{

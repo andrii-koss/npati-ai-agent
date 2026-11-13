@@ -73,6 +73,24 @@ function makeRuntime(options: ConstructorParameters<typeof CodeShellRuntime>[0] 
 }
 
 describe("security-gate: C4 shell runtime gates", () => {
+  it("carries allowed compileall through the terminal gate while keeping approvals for executable Python", async () => {
+    const fake = sandbox();
+    const runtime = makeRuntime({ sandbox: fake.port, flags: allowAllFlags });
+    const command = "python3 -m compileall -q main.py";
+    expect(classifyShellCommand(command, {}).risk).toBe("controlled");
+    await runtime.exec(context, { companyId: "c1", projectId: "p1", sessionId: "s1", toolCallId: "compile", command });
+    expect(fake.calls[0]).toMatchObject({ command, policyCleared: true, approved: false });
+    await expect(runtime.exec(context, { companyId: "c1", projectId: "p1", sessionId: "s1", toolCallId: "inline", command: "python3 -c 'print(1)'" })).rejects.toMatchObject({ code: "approval_required" });
+    expect(fake.calls).toHaveLength(1);
+  });
+  it("does not clear the terminal gate for other controlled commands or a non-project compile target", async () => {
+    const fake = sandbox();
+    const runtime = makeRuntime({ sandbox: fake.port, flags: allowAllFlags });
+    await runtime.exec(context, { companyId: "c1", projectId: "p1", sessionId: "s1", toolCallId: "test", command: "python3 -m pytest" });
+    expect(fake.calls[0]).toMatchObject({ policyCleared: false, approved: false });
+    await expect(runtime.exec(context, { companyId: "c1", projectId: "p1", sessionId: "s1", toolCallId: "outside", command: "python3 -m compileall -q ../main.py" })).rejects.toMatchObject({ code: "approval_required" });
+    expect(fake.calls).toHaveLength(1);
+  });
   it("never executes without a sandbox port (code never runs on the host)", async () => {
     const runtime = makeRuntime({ classifier: classifierOf("safe"), flags: allowAllFlags });
     await expect(runtime.exec(context, { companyId: "c1", projectId: "p1", sessionId: "s1", toolCallId: "t1", command: "ls" }))

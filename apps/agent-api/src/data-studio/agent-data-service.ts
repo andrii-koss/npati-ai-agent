@@ -13,6 +13,14 @@ import type { ProjectWorkspace } from "../project-workspace";
 const MAX_SCHEMA_OPS_PER_RUN = 50;
 const MAX_AGENT_INSERT_ROWS = 100;
 
+/** Raw REST responses differ from the convenience methods of the TypeScript SDK. */
+export const PROJECT_DATA_API_CONTRACT = {
+  list: "GET /data/<table> returns {data: Row[], meta: {total, page, limit}}. Read response.data, not response.rows. Start without query parameters; optional limit is 1..100, offset is non-negative, and sort is field:asc or field:desc (not -field).",
+  create: "POST /data/<table> takes the row itself as JSON. With insert and select access it returns {data: Row}; the generated id is response.data.id. Insert-only access returns {success: true} without a row; do not invent an id or report a created row from that response.",
+  access: "A new table has no client access by default. Before endpoint tests, inspect policies and apply the authorized select/insert policies required by the requested API. A 403 POLICY_DENIED is an access-policy failure, not a connection failure.",
+  serverEnvironment: "Server code reads PROJECT_API_URL and PROJECT_PUBLISHABLE_KEY from its environment at request time. Never embed the tool-returned URL/key values or fallback literals in source. Send X-Project-Key; browser code uses the separate relative browserAccess URL.",
+} as const;
+
 export interface AgentSchemaApplyOptions {
   dryRunOnly?: boolean;
   expectedFingerprint?: string;
@@ -54,6 +62,7 @@ export function formatSchemaForProjectContext(backendName: string, schema: Schem
     `- Synchronized: ${new Date().toISOString()}`,
     `- Collections (${schema.tables.length}):`,
     "- Project API: /v1/projects/<projectId> (use the configured PROJECT_API_URL and PROJECT_PUBLISHABLE_KEY).",
+    ...Object.values(PROJECT_DATA_API_CONTRACT).map(line => "- " + line),
     `- Client SDK: import { createProjectClient } from "${PROJECT_SDK_IMPORT_PATH}" — generated file ${PROJECT_SDK_FILE_NAME} sits in the project root, no package install is required.`,
     "- Usage: createProjectClient({ apiUrl: PROJECT_API_URL, publishableKey: PROJECT_PUBLISHABLE_KEY }).",
     "- Auth: client.auth.signUp(credentials), signIn, signOut, getUser; Data queries: client.from(\"table\").list() returns Promise<{ data: Row[], meta: { total: number } }> (access rows via res.data), get(id) returns Promise<Row>, create(row), update(id, row), delete(id).",
@@ -139,7 +148,7 @@ export class AgentDataStudioService {
     const result = await this.backendCreator(ctx, companyId, projectId, input.name);
     const { backend } = await this.context(ctx, companyId, projectId);
     await syncProjectMdSchema(ctx, companyId, projectId, backend.name, await this.provider.introspectSchema(backend,"dev"), this.workspace);
-    return { ...result, ...(result.environment?.PROJECT_PUBLISHABLE_KEY ? { browserAccess: projectBrowserAccess(projectId, result.environment.PROJECT_PUBLISHABLE_KEY) } : {}), reason: input.reason, userMessage: result.created ? "Created database: " + result.backend.name : "Using existing database: " + result.backend.name };
+    return { ...result, apiContract: PROJECT_DATA_API_CONTRACT, ...(result.environment?.PROJECT_PUBLISHABLE_KEY ? { browserAccess: projectBrowserAccess(projectId, result.environment.PROJECT_PUBLISHABLE_KEY) } : {}), reason: input.reason, userMessage: result.created ? "Created database: " + result.backend.name : "Using existing database: " + result.backend.name };
   }
 
   private async context(ctx: AuthContext, companyId: string, projectId: string, requestedEnv?: string) {
@@ -273,6 +282,7 @@ export class AgentDataStudioService {
       environment: { name: "dev", syncStatus: drift?.status ?? env.syncStatus, schemaFingerprint: env.schemaFingerprint },
       schema: drift?.schema ?? null,
       expectedSchema: env.expectedSchema ?? null,
+      apiContract: PROJECT_DATA_API_CONTRACT,
     };
   }
 

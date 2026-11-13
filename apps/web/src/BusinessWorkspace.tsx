@@ -16,7 +16,7 @@ import { ChatThinking, useChatThinking, ResearchProgressPanel, type ChatProgress
 import { cancelChatStream, streamChat } from "./chat-stream";
 import { InboxSubmission } from "./code-inbox-client";
 import { useCodeInbox } from "./use-code-inbox";
-import { projectConversationUrl } from "./chat-development-view";
+import { projectConversationUrl, developmentPreviewAnchor } from "./chat-development-view";
 import { useChatResearchProgress } from "./use-chat-research-progress";
 import { useChatOpeningPosition } from "./use-chat-opening-position";
 import { chatTimeline, mergeConversationMessages, nearChatBottom, normalizeActivity } from "./chat-timeline";
@@ -768,13 +768,12 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const timeline = chatTimeline(displayMessages, development.project?.progress, selected, development.project);
   // While the agent works in this chat, an open Preview stays but none is offered for the state it is changing.
   const agentWorking = sending || codeInbox.active || Boolean(development.project && developmentIsActive(development.project));
-  const currentProjId = selectedProject?.projectId ?? chatSearch.get("project") ?? development.project?.projectId;
-  // A card on the user's request is routing metadata and never renders, so it does not replace the fallback card.
-  const hasTimelineCard = timeline.some(entry =>
-    entry.kind === "message" && entry.message.role !== "user" &&
-    (Boolean(entry.message.projectCard) || Boolean(development.card(displayMessages, entry.index))) &&
-    (!currentProjId || (entry.message.projectCard?.projectId ?? entry.message.projectCard?.id ?? development.card(displayMessages, entry.index)?.projectId ?? development.card(displayMessages, entry.index)?.id) === currentProjId)
-  );
+  // Resolve the card once, then anchor it to the closing reply below.
+  const timelineCard = timeline.flatMap(entry => {
+    if (entry.kind !== "message") return [];
+    const card = development.card(displayMessages, entry.index);
+    return card ? [card] : [];
+  }).at(-1);
   const fallbackCard = entryProjectCard || (development.project?.projectId && development.project.companyId ? {
     id: development.project.projectId,
     projectId: development.project.projectId,
@@ -790,7 +789,11 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const runEndedAt = Math.max(0, ...runActivity.map(item => (Date.parse(item.at) || 0) + (item.durationMs ?? 0)));
   const latestReplyAt = Date.parse(displayMessages.at(-1)?.createdAt ?? "") || 0;
   const runTotal = runEndedAt && Math.abs(latestReplyAt - runEndedAt) < 120_000 ? processDuration(runActivity) : undefined;
-  const showFallbackCard = !hasTimelineCard && Boolean(fallbackCard);
+  const bottomCard = timelineCard ?? fallbackCard;
+  const previewAnchor = developmentPreviewAnchor(timeline, development.project);
+  const projectPreview = bottomCard && !agentWorking ? (
+      <ChatProjectPreviewCard card={bottomCard} showPreviewTrigger onActivate={(card) => setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected })} />
+  ) : null;
   return (
     <ChatPreviewOpenContext.Provider value={openPreviews}>
     <ChatPreviewPanelProvider busy={agentWorking} conversationId={selected}>
@@ -813,11 +816,12 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
               <p>{business ? t("chat.businessEmptySubtitle", { name: business.name }) : t("chat.emptySubtitle")}</p>
             </div>
           )}
-          {timeline.map(entry => {
-            if (entry.kind === "activity") return <ChatDevelopmentProgress key={"activity:" + entry.item.id} process={development.project} items={entry.run?.items ?? [entry.item]} run={entry.run} animatePending={!thinking.visible} />;
+          {timeline.map((entry, timelineIndex) => {
+            if (entry.kind === "activity") return <ChatDevelopmentProgress key={"activity:" + entry.item.id} process={development.project} items={entry.run?.items ?? [entry.item]} run={entry.run} animatePending={!thinking.visible} preview={timelineIndex === previewAnchor ? projectPreview : undefined} />;
             const { message, index } = entry;
-            if (development.hideMessage(displayMessages, index)) return null;
-            const messageCard = development.card(displayMessages, index);
+            if (development.hideMessage(displayMessages, index)) return timelineIndex === previewAnchor && projectPreview ? <article className="assistant" key={message.id}>{projectPreview}</article> : null;
+            const resolvedCard = development.card(displayMessages, index);
+            const messageCard = timelineIndex === previewAnchor && !agentWorking ? bottomCard : resolvedCard && (resolvedCard.projectId ?? resolvedCard.id) !== (bottomCard?.projectId ?? bottomCard?.id) ? resolvedCard : null;
             const isLatestAssistant = message.role === "assistant" && index === displayMessages.length - 1;
             const hasResearch = !development.project && progressEvents.some((event) => !event.type.startsWith("final_generation"));
             return (
@@ -848,13 +852,8 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           {/* A run started from the chat waits for its confirmation too, not only a development process run. */}
           {agentWorking && (development.project?.companyId ?? companyId) && <ChatRunApprovals language={messageLanguage([...messages].reverse().find(message => message.role === "user")?.content, development.project?.responseLanguage ?? language)} companyId={(development.project?.companyId ?? companyId)!} runId={development.project && developmentIsActive(development.project) ? development.project.runId ?? null : null} projectIds={[development.project?.projectId, development.activeProject?.projectId, selectedProject?.projectId, codeInbox.session?.projectId].filter((id): id is string => Boolean(id))} />}
           {thinking.visible && <ChatThinking key="turn-thinking" text={thinking.text} />}
-          {/* After the messages: this card stands in briefly until the reply that carries the real one arrives. */}
-          {showFallbackCard && fallbackCard && (
-            <article className="assistant" style={{ margin: "8px 0 16px" }}>
-              <ChatProjectPreviewCard card={fallbackCard} showPreviewTrigger={!agentWorking} onActivate={(card) => setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected })} />
-            </article>
-          )}
-          {!hasTimelineCard && !showFallbackCard && development.preview}
+          {previewAnchor < 0 && projectPreview && <article className="assistant">{projectPreview}</article>}
+          {!bottomCard && development.preview}
           {messages.length > 0 && <div className="chat-scroll-spacer" aria-hidden="true" />}
           <div ref={streamEndRef} aria-hidden="true" />
         </div>

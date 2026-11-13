@@ -421,12 +421,16 @@ export class CodeShellRuntime {
     }
 
     let raw: Awaited<ReturnType<CodeShellSandboxPort["execute"]>>;
+    // Compile one project Python file without executing it. Keep the downstream
+    // gate for other controlled commands; the classifier still validates paths.
+    const projectSyntaxCheck = classification.risk === "controlled"
+      && /^(?:\.venv\/bin\/)?python3? -m compileall -q [A-Za-z0-9_][A-Za-z0-9_./-]*\.py$/.test(input.command.trim());
     try {
       raw = await this.options.sandbox.execute({
         context, companyId: input.companyId, projectId: input.projectId,
         agentId: input.agentId ?? "code-shell-runtime", command, cwd,
         environmentReferences: Object.keys(references).length ? references : undefined,
-        approved: sandboxApproved, policyCleared: classification.risk === "safe", timeoutMs, runId: input.runId,
+        approved: sandboxApproved, policyCleared: classification.risk === "safe" || projectSyntaxCheck, timeoutMs, runId: input.runId,
       });
     } finally {
       // The lease never outlives the call, whatever happened.
