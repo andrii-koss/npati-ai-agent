@@ -201,7 +201,9 @@ async function readDevelopmentTrace(store: WorkspaceStore, ctx: AuthContext, pro
       const started = executionTimestamp(call.startedAt);
       const finished = executionTimestamp(call.finishedAt);
       const unfinished = !call.finishedAt;
-      const status = call.errorCode === "approval_required" ? "waiting_for_approval" : run.status === "cancelled" && (unfinished || call.outcome !== "ok" || live?.status === "cancelled" || typeof data.exitCode === "number" && data.exitCode !== 0) ? "cancelled" : unfinished ? run.status === "waiting_for_user" ? "waiting_for_approval"
+      // Only a step the cancellation interrupted is "cancelled". A command that ran and exited 1 before the run was stopped
+      // failed; showing it as cancelled made the person think the platform had undone work (V6 step 10).
+      const status = call.errorCode === "approval_required" ? "waiting_for_approval" : run.status === "cancelled" && (unfinished || live?.status === "cancelled") ? "cancelled" : unfinished ? run.status === "waiting_for_user" ? "waiting_for_approval"
         : run.status === "cancelled" ? "cancelled" : run.status === "running" ? "running" : "failed"
         : call.outcome === "ok" ? "completed" : "failed";
       // Synthetic review replay entries can contain only "skipped". The durable

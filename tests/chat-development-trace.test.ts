@@ -61,6 +61,10 @@ describe("existing runtime execution trace projection", () => {
     expect(first.find(e => e.id === "run:shell")?.status).toBe("cancelled");
     const failed = fixture("failed");
     expect((await developmentTrace(failed.store, ctx, process)).find(e => e.id === "run:shell")?.status).toBe("failed");
+    // V6 step 10: a command that finished with exit 1 before the run was stopped failed; it was shown as "Cancelled".
+    const exited = fixture("cancelled");
+    exited.calls[2] = { ...exited.calls[2]!, outcome: "failed", finishedAt: new Date(exited.calls[2]!.startedAt.getTime() + 20) };
+    expect((await developmentTrace(exited.store, ctx, process)).find(e => e.id === "run:shell")?.status).toBe("failed");
   });
   it("refuses foreign workspace/project/session run details", async () => {
     const f = fixture("running", "foreign");

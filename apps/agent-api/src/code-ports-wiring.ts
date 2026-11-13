@@ -232,7 +232,7 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
         : project?.toolchain?.verifyCommands ?? {};
       const startedAll = Date.now();
       const results: Array<{ tool: "lint" | "typecheck" | "test" | "build"; ok: boolean; state?: "unavailable" | "approval_required"; code?: string; summary: string; findings: string[]; raw?: string; exitCode?: number | null; stdout?: string; stderr?: string; timedOut?: boolean; durationMs?: number; command?: string }> = [];
-      let dependenciesInstalled = false;
+      let dependenciesInstalled = false, pythonRequirementsSynced = false;
       for (const tool of input.tools) {
         const command = commands[tool];
         if (!command) {
@@ -245,6 +245,13 @@ export function createCodePortsWiring(deps: CreateCodePortsWiringDeps) {
           projectId: input.projectId, command: line, agentId: "system", approved: true,
           timeoutMs: input.timeoutMs,
         }) as Promise<{ stdout?: string; stderr?: string; output?: string; exitCode?: number | null; status?: string }>;
+        // A Python check runs the project's .venv, which must hold what requirements.txt says now: an agent that added a
+        // package (httpx) after the venv existed saw every test fail with ModuleNotFoundError (V6 step 10). Once per run,
+        // and only when the venv exists (the not-found branch below creates it).
+        if (command.startsWith(".venv/bin/python") && !pythonRequirementsSynced) {
+          pythonRequirementsSynced = true;
+          await runCommand("if [ -x .venv/bin/python ] && [ -f requirements.txt ]; then .venv/bin/python -m pip install -q -r requirements.txt; fi").catch(() => undefined);
+        }
         try {
           try {
             result = await runCommand(command);

@@ -60685,7 +60685,7 @@
     }
   },
   "FastAPI": {
-    "requirements": "PyYAML==6.0.3\nannotated-doc==0.0.5\nannotated-types==0.8.0\nanyio==4.15.1\nclick==8.5.0\nfastapi==0.156.8\nh11==0.16.0\nhttptools==0.9.0\nidna==3.20\nopentelemetry-api==1.45.1\npydantic==2.14.1\npydantic_core==2.50.1\npython-dotenv==1.2.4\nstarlette==1.9.0\ntyping-inspection==0.4.4\ntyping_extensions==4.16.0\nuvicorn==0.54.0\nuvloop==0.23.0\nwatchfiles==1.3.0\nwebsockets==17.3\n"
+    "requirements": "annotated-doc==0.0.5\nannotated-types==0.8.0\nanyio==4.15.1\nclick==8.5.0\nfastapi==0.156.8\nh11==0.16.0\nhttptools==0.9.0\nhttpx==0.28.1\nhttpx2==2.16.0\nidna==3.20\nopentelemetry-api==1.45.1\npydantic_core==2.50.1\npydantic==2.14.1\npython-dotenv==1.2.4\nPyYAML==6.0.3\nstarlette==1.9.0\ntyping_extensions==4.16.0\ntyping-inspection==0.4.4\nuvicorn==0.54.0\nuvloop==0.23.0\nwatchfiles==1.3.0\nwebsockets==17.3\n"
   },
   "Django": {
     "requirements": "Django==5.2.18\nasgiref==3.12.1\nsqlparse==0.6.0\n"

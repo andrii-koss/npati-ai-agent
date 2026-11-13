@@ -17,6 +17,8 @@ it("creates a missing .venv with the system packages and retries the check", asy
     projectWorkspace: { listFiles: async () => [] } } as unknown as CreateCodePortsWiringDeps);
   const outcome = await ports.codeVerifyRunnerPort!.run({ ctx: { workspaceId: "w", userId: "u", permissions: [] }, companyId: "c", projectId: "p", tools: ["test"], changedOnly: false, timeoutMs: 60_000 }) as unknown as { results: Array<{ ok: boolean }> };
   expect(ran).toEqual([
+    // V6 step 10: requirements.txt is synced into an existing venv first (a no-op here, the venv does not exist yet).
+    "if [ -x .venv/bin/python ] && [ -f requirements.txt ]; then .venv/bin/python -m pip install -q -r requirements.txt; fi",
     ".venv/bin/python -m unittest discover -s tests",
     "python3 -m venv --system-site-packages .venv",
     "if [ -f requirements.txt ]; then .venv/bin/python -m pip install -r requirements.txt; fi",

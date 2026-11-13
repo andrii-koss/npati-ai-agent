@@ -288,6 +288,17 @@ export function projectFrameworkCommand(executable: string, args: readonly strin
   const pipArgs = python && args[0] === "-m" && args[1] === "pip" ? args.slice(2) : /^(?:\.venv\/bin\/)?pip3?$/.test(executable) ? args : null;
   if (pipArgs && ["list", "show", "freeze"].includes(pipArgs[0] ?? "") && pipArgs.slice(1).every((value) => COMMAND_OPTION.test(value) || COMMAND_NAME.test(value))) return "safe";
   if (python && args[0] === "manage.py" && DJANGO_COMMANDS.has(args[1] ?? "") && args.slice(2).every((value) => COMMAND_OPTION.test(value) || COMMAND_NAME.test(value))) return "controlled";
+  // The Python equivalents of npm install / npm test (V6 step 10: a FastAPI task asked for nine approvals, one for each
+  // venv, install and test command, although "pip install -r requirements.txt" and "npm test" need none). Only the
+  // project's own files and plain options: no URL, no inline code (-c stays an approval).
+  const projectPath = (value: string) => PROJECT_PATH.test(value) && !value.split("/").includes("..");
+  if (python && args[0] === "-m" && args[1] === "venv" && args.length >= 3 && args.slice(2).every((value) => value === "--system-site-packages" || value === "--clear" || /^\.?[A-Za-z0-9_][A-Za-z0-9_-]*$/.test(value))) return "controlled";
+  if (pipArgs && pipArgs[0] === "install" && pipArgs.includes("-r")
+    && pipArgs.slice(1).every((value, index, rest) => value === "-r" || (rest[index - 1] === "-r" ? /^[A-Za-z0-9_.-]*requirements[A-Za-z0-9_.-]*\.txt$/.test(value) : /^(?:-q|--quiet|--no-input|--disable-pip-version-check|--upgrade|-U)$/.test(value)))) return "controlled";
+  // A syntax check of project files, and the project's own build/test targets (like npm run build / npm test).
+  if (python && args[0] === "-m" && (args[1] === "compileall" || args[1] === "py_compile") && args.length >= 3 && args.slice(2).every((value) => /^-[A-Za-z]$/.test(value) || projectPath(value))) return "controlled";
+  if (executable === "make" && args.length === 1 && /^(?:build|test|check|lint)$/.test(args[0]!)) return "controlled";
+  if (python && args[0] === "-m" && (args[1] === "pytest" || args[1] === "unittest") && args.slice(2).every((value) => COMMAND_OPTION.test(value) || COMMAND_NAME.test(value) || projectPath(value) || /^-[A-Za-z]$/.test(value))) return "controlled";
   if (executable === "php" && args[0] === "-l" && args.length === 2 && PROJECT_PATH.test(args[1]!) && !args[1]!.split("/").includes("..")) return "safe";
   if (executable === "php" && args[0] === "artisan" && ARTISAN_COMMANDS.test(args[1] ?? "") && args.slice(2).every((value) => COMMAND_OPTION.test(value) || COMMAND_NAME.test(value))) return "controlled";
   if (executable === "mkdir") {
@@ -699,6 +710,8 @@ export function classifyShellCommand(command: string, options: ShellClassifierOp
     if (frameworkLevel) {
       segmentRisk = frameworkLevel;
       reasons.push("project framework command inside the sandbox");
+      // A dependency install through the project venv is long work like any other install.
+      if (/^(?:\.venv\/bin\/)?(?:python3?|pip3?)$/.test(executable) && args.includes("install")) timeoutClass = "install";
     } else if (readOnlyUtility.safe) {
       // Provably read-only utilities (and version queries) do not mutate anything, so they must not
       // require approval even though the shared terminal policy is stricter.

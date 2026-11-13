@@ -50,12 +50,7 @@ it("installs requirements.txt into an existing venv too", async () => {
   const project = { id: "p", companyId: "c", framework: "FastAPI", status: "active", sandboxId: "sbx" };
   const sandbox = { exposePort: async () => ({ port: 8000 }), stopRecordedPreview: async () => undefined, supportsPreviewProxy: () => false,
     execute: async (_c: unknown, _co: string, input: { command: string }) => { commands.push(input.command); return { exitCode: 0 }; }, process: async () => ({ processId: "proc" }) };
-  const files: Record<string, string> = { "main.py": "from fastapi import FastAPI
-app = FastAPI()
-", "requirements.txt": "fastapi
-uvicorn
-httpx
-" };
+  const files: Record<string, string> = { "main.py": "from fastapi import FastAPI\napp = FastAPI()\n", "requirements.txt": "fastapi\nuvicorn\nhttpx\n" };
   const workspace = { listFiles: async () => Object.keys(files).map(path => ({ path, type: "file" })), readFile: async (_c: unknown, _co: string, _p: string, path: string) => ({ content: files[path] ?? "" }) };
   const preview = new ProjectPreviewService({ get: async () => project, updatePreview: async () => project } as never, {} as never, workspace as never, sandbox as never, "test");
   await preview.startPreview({ workspaceId: "w", userId: "u", permissions: [] } as never, "c", "p", { verifiedBuild: false });
