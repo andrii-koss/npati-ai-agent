@@ -62,7 +62,7 @@ function resolveNpatiAvatarUrl(value?: string | null): string | null {
 }
 
 export function ChatUserMenu() {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const location = useLocation();
   const { overview } = useWorkspace();
   const { user, signOutEverywhere } = useAuth();
@@ -117,7 +117,12 @@ export function ChatUserMenu() {
             </span>
             <span><strong>{displayName}</strong><small>{email}</small></span>
           </div>
-          <span className="chat-user-role">{overview?.workspace.role || "member"}</span>
+          <div className="chat-user-role-row">
+            <span className="chat-user-role">{overview?.workspace.role || "member"}</span>
+            <a className="chat-user-support" href="https://www.npati.com/support" target="_blank" rel="noopener noreferrer" onClick={closeMenu}>
+              {language === "uk" ? "Підтримка" : "Support"}
+            </a>
+          </div>
           <nav aria-label="Registered user links">
             <Link to="/settings/email/inbox" onClick={closeMenu}>{t("userMenu.emailInbox")} <span aria-hidden="true">&rarr;</span></Link>
             <Link to="/settings/ai" onClick={closeMenu}>{t("userMenu.aiProvider")} <span aria-hidden="true">&rarr;</span></Link>

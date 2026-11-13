@@ -266,30 +266,12 @@ export const it: TranslationSchema = {
     footerPrefix: "Open-source NPATI Agent · Creato da",
     footerLink: "NPATI",
     actions: {
-      sellSomething: {
-        title: "Vendere qualcosa",
-        desc: "Trasforma un prodotto o servizio in un'offerta chiara",
-      },
-      startBusiness: {
-        title: "Avviare un'attività",
-        desc: "Trasforma un'idea in un primo test pratico",
-      },
-      growBusiness: {
-        title: "Far crescere l'attività",
-        desc: "Trova la prossima opportunità pratica di crescita",
-      },
-      improveBusiness: {
-        title: "Migliorare l'attività",
-        desc: "Analizza cosa funziona, cosa no e cosa migliorare in seguito",
-      },
-      createContent: {
-        title: "Creare contenuti",
-        desc: "Pianifica contenuti utili per il tuo pubblico",
-      },
-      askAgent: {
-        title: "Chiedi all'agente",
-        desc: "Inizia direttamente con una tua domanda",
-      },
+      buildWebsite: { title: "Creare un sito web", desc: "Crea siti e landing page con il relativo codice e Live Preview." },
+      buildApplication: { title: "Sviluppare un’applicazione", desc: "Crea applicazioni web, CRM e strumenti aziendali partendo da una descrizione." },
+      connectDatabase: { title: "Collegare un database", desc: "Aggiungi un database al progetto e gestisci le sue tabelle e i suoi dati." },
+      improveProject: { title: "Migliorare un progetto", desc: "Modifica il codice, correggi gli errori e prova le modifiche in Live Preview." },
+      researchBusiness: { title: "Analizzare il business", desc: "Studia mercati e concorrenti, definisci le offerte e pianifica la crescita." },
+      automateWork: { title: "Creare e automatizzare", desc: "Scrivi contenuti, gestisci le email e pianifica attività ricorrenti." },
     },
   },
   aiMarketplace: {

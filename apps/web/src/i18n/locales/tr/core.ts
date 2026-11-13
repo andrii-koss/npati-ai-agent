@@ -268,30 +268,12 @@ export const core = {
     "footerPrefix": "Açık kaynaklı NPATI Agent · Geliştiren",
     "footerLink": "NPATI",
     "actions": {
-      "sellSomething": {
-        "title": "Bir şey satın",
-        "desc": "Bir ürünü veya hizmeti anlaşılır bir teklife dönüştürün"
-      },
-      "startBusiness": {
-        "title": "İş kurun",
-        "desc": "Bir fikri uygulanabilir ilk teste dönüştürün"
-      },
-      "growBusiness": {
-        "title": "İşletmemi büyüt",
-        "desc": "Bir sonraki uygulanabilir büyüme fırsatını bulun"
-      },
-      "improveBusiness": {
-        "title": "İşletmemi iyileştir",
-        "desc": "Neyin işe yaradığını, neyin yaramadığını ve sırada neyi iyileştireceğinizi inceleyin"
-      },
-      "createContent": {
-        "title": "İçerik oluştur",
-        "desc": "Kitleniz için yararlı içerik planlayın"
-      },
-      "askAgent": {
-        "title": "NPATI Agent'a sorun",
-        "desc": "Kendi sorunuzla başlayın"
-      }
+      buildWebsite: { title: "Web sitesi oluştur", desc: "Kod ve Live Preview ile web siteleri ve açılış sayfaları oluşturun." },
+      buildApplication: { title: "Uygulama geliştir", desc: "Bir açıklamadan web uygulamaları, CRM sistemleri ve iş araçları geliştirin." },
+      connectDatabase: { title: "Veritabanı bağla", desc: "Projenize bir veritabanı ekleyin, tablolarını ve verilerini yönetin." },
+      improveProject: { title: "Projeyi iyileştir", desc: "Kodu düzenleyin, hataları düzeltin ve değişiklikleri Live Preview ile test edin." },
+      researchBusiness: { title: "İşinizi araştırın", desc: "Pazarı ve rakipleri analiz edin, teklifler hazırlayın ve büyümeyi planlayın." },
+      automateWork: { title: "Üret ve otomatikleştir", desc: "İçerik yazın, e-postalarla çalışın ve yinelenen görevler planlayın." },
     }
   }
 } satisfies Pick<TranslationSchema, "executionTrace" | "projectSection" | "common" | "nav" | "sidebar" | "dialogs" | "chat" | "userMenu" | "settings" | "home">;

@@ -172,6 +172,24 @@
   font-size: 11px;
 }
 
+.chat-user-role-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chat-user-support {
+  margin: 11px 0 8px;
+  color: #64748b;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.chat-user-support:hover {
+  text-decoration: underline;
+}
+
 .chat-user-role {
   margin: 11px 0 8px;
   padding: 4px 8px;

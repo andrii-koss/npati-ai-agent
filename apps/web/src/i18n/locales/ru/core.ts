@@ -268,30 +268,12 @@ export const core = {
     "footerPrefix": "NPATI Agent с открытым кодом · Разработчик",
     "footerLink": "NPATI",
     "actions": {
-      "sellSomething": {
-        "title": "Продать что-нибудь",
-        "desc": "Превратите продукт или услугу в понятное предложение"
-      },
-      "startBusiness": {
-        "title": "Начать бизнес",
-        "desc": "Превратите идею в первый практический эксперимент"
-      },
-      "growBusiness": {
-        "title": "Развивать мой бизнес",
-        "desc": "Найдите следующую реальную возможность роста"
-      },
-      "improveBusiness": {
-        "title": "Улучшить мой бизнес",
-        "desc": "Оцените, что работает, что нет и что улучшить дальше"
-      },
-      "createContent": {
-        "title": "Создать контент",
-        "desc": "Спланируйте полезный контент для своей аудитории"
-      },
-      "askAgent": {
-        "title": "Спросить NPATI Agent",
-        "desc": "Начните со своего вопроса"
-      }
+      buildWebsite: { title: "Создать сайт", desc: "Создавайте сайты и лендинги с кодом и просмотром в Live Preview." },
+      buildApplication: { title: "Создать приложение", desc: "Разрабатывайте веб-приложения, CRM и инструменты для бизнеса по описанию." },
+      connectDatabase: { title: "Подключить базу данных", desc: "Добавляйте базу данных к проекту и управляйте её таблицами и данными." },
+      improveProject: { title: "Улучшить проект", desc: "Изменяйте код, исправляйте ошибки и проверяйте изменения в Live Preview." },
+      researchBusiness: { title: "Исследовать бизнес", desc: "Анализируйте рынок и конкурентов, формируйте предложения и планируйте развитие." },
+      automateWork: { title: "Создавать и автоматизировать", desc: "Пишите контент, работайте с почтой и планируйте регулярные задачи." },
     }
   }
 } satisfies Pick<TranslationSchema, "executionTrace" | "projectSection" | "common" | "nav" | "sidebar" | "dialogs" | "chat" | "userMenu" | "settings" | "home">;

@@ -268,30 +268,12 @@ export const core = {
     "footerPrefix": "ओपन सोर्स NPATI Agent · निर्माता",
     "footerLink": "NPATI",
     "actions": {
-      "sellSomething": {
-        "title": "कुछ बेचें",
-        "desc": "उत्पाद या सेवा को स्पष्ट प्रस्ताव में बदलें"
-      },
-      "startBusiness": {
-        "title": "व्यवसाय शुरू करें",
-        "desc": "विचार को पहले व्यावहारिक परीक्षण में बदलें"
-      },
-      "growBusiness": {
-        "title": "अपना व्यवसाय बढ़ाएँ",
-        "desc": "अगला व्यावहारिक विकास अवसर खोजें"
-      },
-      "improveBusiness": {
-        "title": "अपना व्यवसाय सुधारें",
-        "desc": "देखें कि क्या सफल है, क्या नहीं और आगे क्या सुधारना है"
-      },
-      "createContent": {
-        "title": "कंटेंट बनाएँ",
-        "desc": "अपने दर्शकों के लिए उपयोगी कंटेंट की योजना बनाएँ"
-      },
-      "askAgent": {
-        "title": "NPATI Agent से पूछें",
-        "desc": "अपने सवाल से शुरुआत करें"
-      }
+      buildWebsite: { title: "वेबसाइट बनाएँ", desc: "कोड और Live Preview के साथ वेबसाइट और लैंडिंग पेज बनाएँ।" },
+      buildApplication: { title: "ऐप विकसित करें", desc: "अपने विवरण से वेब ऐप, CRM और व्यावसायिक टूल विकसित करें।" },
+      connectDatabase: { title: "डेटाबेस जोड़ें", desc: "प्रोजेक्ट में डेटाबेस जोड़ें और उसकी टेबल व डेटा प्रबंधित करें।" },
+      improveProject: { title: "प्रोजेक्ट सुधारें", desc: "कोड बदलें, त्रुटियाँ ठीक करें और Live Preview में बदलाव जाँचें।" },
+      researchBusiness: { title: "व्यवसाय का शोध करें", desc: "बाज़ार और प्रतिस्पर्धियों का विश्लेषण करें, प्रस्ताव बनाएँ और विकास की योजना बनाएँ।" },
+      automateWork: { title: "बनाएँ और स्वचालित करें", desc: "सामग्री लिखें, ईमेल पर काम करें और नियमित कार्य निर्धारित करें।" },
     }
   }
 } satisfies Pick<TranslationSchema, "executionTrace" | "projectSection" | "common" | "nav" | "sidebar" | "dialogs" | "chat" | "userMenu" | "settings" | "home">;

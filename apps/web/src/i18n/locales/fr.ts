@@ -268,30 +268,12 @@ export const fr: TranslationSchema = {
     footerPrefix: "NPATI Agent open source · Créé par",
     footerLink: "NPATI",
     actions: {
-      sellSomething: {
-        title: "Vendre un produit",
-        desc: "Transformez un produit ou un service en une offre claire",
-      },
-      startBusiness: {
-        title: "Créer une entreprise",
-        desc: "Concrétisez une idée en un premier test pratique",
-      },
-      growBusiness: {
-        title: "Développer l'activité",
-        desc: "Identifiez la prochaine opportunité pratique de croissance",
-      },
-      improveBusiness: {
-        title: "Optimiser l'activité",
-        desc: "Passez en revue ce qui fonctionne, ce qui ne fonctionne pas et ce qu'il faut améliorer",
-      },
-      createContent: {
-        title: "Créer du contenu",
-        desc: "Planifiez des publications utiles pour votre public",
-      },
-      askAgent: {
-        title: "Consulter l'agent",
-        desc: "Démarrez directement avec votre propre question",
-      },
+      buildWebsite: { title: "Créer un site web", desc: "Créez des sites et des pages de présentation avec leur code et Live Preview." },
+      buildApplication: { title: "Développer une application", desc: "Créez des applications web, des CRM et des outils métier à partir d’une description." },
+      connectDatabase: { title: "Connecter une base de données", desc: "Ajoutez une base de données au projet et gérez ses tables et ses données." },
+      improveProject: { title: "Améliorer un projet", desc: "Modifiez le code, corrigez les erreurs et testez les changements dans Live Preview." },
+      researchBusiness: { title: "Étudier votre activité", desc: "Analysez le marché et la concurrence, préparez vos offres et planifiez la croissance." },
+      automateWork: { title: "Créer et automatiser", desc: "Rédigez du contenu, traitez vos e-mails et programmez des tâches récurrentes." },
     },
   },
   aiMarketplace: {

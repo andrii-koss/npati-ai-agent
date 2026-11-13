@@ -268,30 +268,12 @@ export const core = {
     "footerPrefix": "오픈 소스 NPATI Agent · 제작:",
     "footerLink": "NPATI",
     "actions": {
-      "sellSomething": {
-        "title": "상품이나 서비스 판매",
-        "desc": "제품이나 서비스를 명확한 제안으로 정리하세요"
-      },
-      "startBusiness": {
-        "title": "사업 시작하기",
-        "desc": "아이디어를 실질적인 첫 검증으로 구체화하세요"
-      },
-      "growBusiness": {
-        "title": "사업 성장시키기",
-        "desc": "다음 실질적인 성장 기회를 찾으세요"
-      },
-      "improveBusiness": {
-        "title": "사업 개선하기",
-        "desc": "잘되는 점과 그렇지 않은 점을 검토하고 다음 개선점을 찾으세요"
-      },
-      "createContent": {
-        "title": "콘텐츠 만들기",
-        "desc": "고객층에 유용한 콘텐츠를 계획하세요"
-      },
-      "askAgent": {
-        "title": "NPATI Agent에 질문하기",
-        "desc": "나만의 질문으로 시작하세요"
-      }
+      buildWebsite: { title: "웹사이트 만들기", desc: "코드와 Live Preview를 갖춘 웹사이트와 랜딩 페이지를 만드세요." },
+      buildApplication: { title: "앱 개발하기", desc: "설명을 바탕으로 웹 앱, CRM 및 비즈니스 도구를 개발하세요." },
+      connectDatabase: { title: "데이터베이스 연결", desc: "프로젝트에 데이터베이스를 추가하고 테이블과 데이터를 관리하세요." },
+      improveProject: { title: "프로젝트 개선", desc: "코드를 수정하고 오류를 해결한 뒤 Live Preview에서 변경 사항을 확인하세요." },
+      researchBusiness: { title: "비즈니스 조사", desc: "시장과 경쟁사를 분석하고 제안 및 성장 계획을 수립하세요." },
+      automateWork: { title: "콘텐츠와 자동화", desc: "콘텐츠를 작성하고 이메일을 처리하며 반복 작업을 예약하세요." },
     }
   }
 } satisfies Pick<TranslationSchema, "executionTrace" | "projectSection" | "common" | "nav" | "sidebar" | "dialogs" | "chat" | "userMenu" | "settings" | "home">;

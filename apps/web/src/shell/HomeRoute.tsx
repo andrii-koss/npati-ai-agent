@@ -17,12 +17,12 @@ export function Home({ userMenu, logo }: { userMenu?: ReactNode; logo?: ReactNod
   const handleAuthSuccess = useCallback(() => navigate("/chat"), [navigate]);
 
   const actionCards = [
-    { title: t("home.actions.sellSomething.title"), description: t("home.actions.sellSomething.desc") },
-    { title: t("home.actions.startBusiness.title"), description: t("home.actions.startBusiness.desc") },
-    { title: t("home.actions.growBusiness.title"), description: t("home.actions.growBusiness.desc") },
-    { title: t("home.actions.improveBusiness.title"), description: t("home.actions.improveBusiness.desc") },
-    { title: t("home.actions.createContent.title"), description: t("home.actions.createContent.desc") },
-    { title: t("home.actions.askAgent.title"), description: t("home.actions.askAgent.desc") },
+    { title: t("home.actions.buildWebsite.title"), description: t("home.actions.buildWebsite.desc") },
+    { title: t("home.actions.buildApplication.title"), description: t("home.actions.buildApplication.desc") },
+    { title: t("home.actions.connectDatabase.title"), description: t("home.actions.connectDatabase.desc") },
+    { title: t("home.actions.improveProject.title"), description: t("home.actions.improveProject.desc") },
+    { title: t("home.actions.researchBusiness.title"), description: t("home.actions.researchBusiness.desc") },
+    { title: t("home.actions.automateWork.title"), description: t("home.actions.automateWork.desc") },
   ];
 
   async function startChat(prompt: string) {

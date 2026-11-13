@@ -268,30 +268,12 @@ export const core = {
     "footerPrefix": "Opensource NPATI Agent · Gemaakt door",
     "footerLink": "NPATI",
     "actions": {
-      "sellSomething": {
-        "title": "Iets verkopen",
-        "desc": "Maak van een product of dienst een duidelijk aanbod"
-      },
-      "startBusiness": {
-        "title": "Een onderneming starten",
-        "desc": "Werk een idee uit tot een eerste praktische test"
-      },
-      "growBusiness": {
-        "title": "Mijn onderneming laten groeien",
-        "desc": "Vind de volgende praktische groeikans"
-      },
-      "improveBusiness": {
-        "title": "Mijn onderneming verbeteren",
-        "desc": "Bekijk wat werkt, wat niet werkt en wat u hierna kunt verbeteren"
-      },
-      "createContent": {
-        "title": "Inhoud maken",
-        "desc": "Plan nuttige inhoud voor uw doelgroep"
-      },
-      "askAgent": {
-        "title": "NPATI Agent iets vragen",
-        "desc": "Begin met uw eigen vraag"
-      }
+      buildWebsite: { title: "Een website maken", desc: "Maak websites en landingspagina’s met code en Live Preview." },
+      buildApplication: { title: "Een applicatie bouwen", desc: "Maak webapps, CRM-systemen en zakelijke tools op basis van een beschrijving." },
+      connectDatabase: { title: "Een database koppelen", desc: "Voeg een database toe aan uw project en beheer de tabellen en gegevens." },
+      improveProject: { title: "Een project verbeteren", desc: "Bewerk code, los fouten op en test wijzigingen in Live Preview." },
+      researchBusiness: { title: "Uw bedrijf onderzoeken", desc: "Onderzoek markten en concurrenten, werk aanbiedingen uit en plan groei." },
+      automateWork: { title: "Maken en automatiseren", desc: "Schrijf content, werk met e-mail en plan terugkerende taken." },
     }
   }
 } satisfies Pick<TranslationSchema, "executionTrace" | "projectSection" | "common" | "nav" | "sidebar" | "dialogs" | "chat" | "userMenu" | "settings" | "home">;

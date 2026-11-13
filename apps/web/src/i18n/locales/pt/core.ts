@@ -268,30 +268,12 @@ export const core = {
     "footerPrefix": "NPATI Agent de código aberto · Criado por",
     "footerLink": "NPATI",
     "actions": {
-      "sellSomething": {
-        "title": "Vender algo",
-        "desc": "Transforme um produto ou serviço em uma oferta clara"
-      },
-      "startBusiness": {
-        "title": "Iniciar um negócio",
-        "desc": "Transforme uma ideia em um primeiro teste prático"
-      },
-      "growBusiness": {
-        "title": "Expandir meu negócio",
-        "desc": "Encontre a próxima oportunidade prática de crescimento"
-      },
-      "improveBusiness": {
-        "title": "Melhorar meu negócio",
-        "desc": "Revise o que funciona, o que não funciona e o que melhorar em seguida"
-      },
-      "createContent": {
-        "title": "Criar conteúdo",
-        "desc": "Planeje conteúdo útil para seu público"
-      },
-      "askAgent": {
-        "title": "Perguntar ao NPATI Agent",
-        "desc": "Comece com sua própria pergunta"
-      }
+      buildWebsite: { title: "Criar um site", desc: "Crie sites e páginas de destino com código e Live Preview." },
+      buildApplication: { title: "Desenvolver uma aplicação", desc: "Crie aplicações web, CRMs e ferramentas de negócio a partir de uma descrição." },
+      connectDatabase: { title: "Conectar um banco de dados", desc: "Adicione um banco de dados ao projeto e gerencie suas tabelas e dados." },
+      improveProject: { title: "Melhorar um projeto", desc: "Edite o código, corrija erros e teste as alterações no Live Preview." },
+      researchBusiness: { title: "Pesquisar seu negócio", desc: "Analise mercados e concorrentes, defina ofertas e planeje o crescimento." },
+      automateWork: { title: "Criar e automatizar", desc: "Escreva conteúdo, trabalhe com e-mails e agende tarefas recorrentes." },
     }
   }
 } satisfies Pick<TranslationSchema, "executionTrace" | "projectSection" | "common" | "nav" | "sidebar" | "dialogs" | "chat" | "userMenu" | "settings" | "home">;

@@ -268,30 +268,12 @@ export const core = {
     "footerPrefix": "开源 NPATI Agent · 开发者",
     "footerLink": "NPATI",
     "actions": {
-      "sellSomething": {
-        "title": "销售商品或服务",
-        "desc": "将产品或服务转化为清晰的销售方案"
-      },
-      "startBusiness": {
-        "title": "创办业务",
-        "desc": "将创意转化为首次实际测试"
-      },
-      "growBusiness": {
-        "title": "拓展我的业务",
-        "desc": "寻找下一个切实可行的增长机会"
-      },
-      "improveBusiness": {
-        "title": "改善我的业务",
-        "desc": "检查哪些有效、哪些无效以及接下来要改进什么"
-      },
-      "createContent": {
-        "title": "创建内容",
-        "desc": "为受众规划有用的内容"
-      },
-      "askAgent": {
-        "title": "询问 NPATI Agent",
-        "desc": "从您自己的问题开始"
-      }
+      buildWebsite: { title: "创建网站", desc: "创建网站和落地页，生成代码并通过 Live Preview 预览。" },
+      buildApplication: { title: "开发应用", desc: "根据描述开发 Web 应用、CRM 和业务工具。" },
+      connectDatabase: { title: "连接数据库", desc: "为项目添加数据库，管理数据表和数据。" },
+      improveProject: { title: "改进项目", desc: "修改代码、修复错误，并在 Live Preview 中测试更改。" },
+      researchBusiness: { title: "研究业务", desc: "分析市场和竞争对手，制定产品方案与增长计划。" },
+      automateWork: { title: "内容与自动化", desc: "撰写内容、处理电子邮件并安排定期任务。" },
     }
   }
 } satisfies Pick<TranslationSchema, "executionTrace" | "projectSection" | "common" | "nav" | "sidebar" | "dialogs" | "chat" | "userMenu" | "settings" | "home">;

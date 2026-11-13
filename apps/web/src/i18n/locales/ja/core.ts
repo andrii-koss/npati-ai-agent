@@ -268,30 +268,12 @@ export const core = {
     "footerPrefix": "オープンソースのNPATI Agent · 開発：",
     "footerLink": "NPATI",
     "actions": {
-      "sellSomething": {
-        "title": "商品やサービスを販売",
-        "desc": "商品やサービスを明確な提案にまとめる"
-      },
-      "startBusiness": {
-        "title": "ビジネスを始める",
-        "desc": "アイデアを最初の実践的な検証に落とし込む"
-      },
-      "growBusiness": {
-        "title": "ビジネスを成長させる",
-        "desc": "実践的な次の成長機会を見つける"
-      },
-      "improveBusiness": {
-        "title": "ビジネスを改善する",
-        "desc": "うまくいっている点と課題を確認し、次の改善点を見つける"
-      },
-      "createContent": {
-        "title": "コンテンツを作成",
-        "desc": "顧客層に役立つコンテンツを計画する"
-      },
-      "askAgent": {
-        "title": "NPATI Agentに質問",
-        "desc": "自分の質問から始める"
-      }
+      buildWebsite: { title: "ウェブサイトを作成", desc: "コードを生成し、Live Preview で確認できるサイトやランディングページを作成します。" },
+      buildApplication: { title: "アプリを開発", desc: "説明をもとにウェブアプリ、CRM、業務ツールを開発します。" },
+      connectDatabase: { title: "データベースを接続", desc: "プロジェクトにデータベースを追加し、テーブルやデータを管理します。" },
+      improveProject: { title: "プロジェクトを改善", desc: "コードの編集や不具合の修正を行い、Live Preview で変更を確認します。" },
+      researchBusiness: { title: "ビジネスを調査", desc: "市場や競合を分析し、提案内容や成長計画をまとめます。" },
+      automateWork: { title: "コンテンツと自動化", desc: "コンテンツの作成、メールの処理、定期タスクの設定を行います。" },
     }
   }
 } satisfies Pick<TranslationSchema, "executionTrace" | "projectSection" | "common" | "nav" | "sidebar" | "dialogs" | "chat" | "userMenu" | "settings" | "home">;

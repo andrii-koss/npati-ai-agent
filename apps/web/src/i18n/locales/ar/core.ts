@@ -268,30 +268,12 @@ export const core = {
     "footerPrefix": "NPATI Agent مفتوح المصدر · من تطوير",
     "footerLink": "NPATI",
     "actions": {
-      "sellSomething": {
-        "title": "بيع شيء ما",
-        "desc": "حوّل منتجًا أو خدمة إلى عرض واضح"
-      },
-      "startBusiness": {
-        "title": "بدء نشاط تجاري",
-        "desc": "حوّل فكرة إلى اختبار أول عملي"
-      },
-      "growBusiness": {
-        "title": "تنمية نشاطي التجاري",
-        "desc": "اعثر على فرصة النمو العملية التالية"
-      },
-      "improveBusiness": {
-        "title": "تحسين نشاطي التجاري",
-        "desc": "راجع ما ينجح وما لا ينجح وما ينبغي تحسينه لاحقًا"
-      },
-      "createContent": {
-        "title": "إنشاء محتوى",
-        "desc": "خطّط لمحتوى مفيد لجمهورك"
-      },
-      "askAgent": {
-        "title": "اسأل NPATI Agent",
-        "desc": "ابدأ بسؤالك الخاص"
-      }
+      buildWebsite: { title: "إنشاء موقع ويب", desc: "أنشئ مواقع وصفحات هبوط مع الشفرة البرمجية والمعاينة عبر Live Preview." },
+      buildApplication: { title: "تطوير تطبيق", desc: "طوّر تطبيقات ويب وأنظمة CRM وأدوات أعمال انطلاقًا من وصفك." },
+      connectDatabase: { title: "ربط قاعدة بيانات", desc: "أضف قاعدة بيانات إلى مشروعك وأدر جداولها وبياناتها." },
+      improveProject: { title: "تحسين مشروع", desc: "عدّل الشفرة وأصلح الأخطاء واختبر التغييرات في Live Preview." },
+      researchBusiness: { title: "دراسة أعمالك", desc: "حلّل السوق والمنافسين وصغ العروض وخطط للنمو." },
+      automateWork: { title: "الإنشاء والأتمتة", desc: "اكتب المحتوى وتعامل مع البريد الإلكتروني وجدول المهام المتكررة." },
     }
   }
 } satisfies Pick<TranslationSchema, "executionTrace" | "projectSection" | "common" | "nav" | "sidebar" | "dialogs" | "chat" | "userMenu" | "settings" | "home">;

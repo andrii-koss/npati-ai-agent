@@ -170,11 +170,11 @@ export interface HomeSchema {
     footerPrefix: string;
     footerLink: string;
     actions: {
-      sellSomething: { title: string; desc: string };
-      startBusiness: { title: string; desc: string };
-      growBusiness: { title: string; desc: string };
-      improveBusiness: { title: string; desc: string };
-      createContent: { title: string; desc: string };
-      askAgent: { title: string; desc: string };
+      buildWebsite: { title: string; desc: string };
+      buildApplication: { title: string; desc: string };
+      connectDatabase: { title: string; desc: string };
+      improveProject: { title: string; desc: string };
+      researchBusiness: { title: string; desc: string };
+      automateWork: { title: string; desc: string };
     };
 };

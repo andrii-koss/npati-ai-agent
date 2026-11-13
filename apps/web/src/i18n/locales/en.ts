@@ -232,12 +232,12 @@ export const en: TranslationSchema = {
     footerPrefix: "Open-source NPATI Agent · Built by",
     footerLink: "NPATI",
     actions: {
-      sellSomething: { title: "Sell something", desc: "Turn a product or service into a clear offer" },
-      startBusiness: { title: "Start a business", desc: "Shape an idea into a practical first test" },
-      growBusiness: { title: "Grow my business", desc: "Find the next practical growth opportunity" },
-      improveBusiness: { title: "Improve my business", desc: "Review what’s working, what isn’t, and what to improve next" },
-      createContent: { title: "Create content", desc: "Plan useful content for your audience" },
-      askAgent: { title: "Ask NPATI Agent", desc: "Start with your own question" },
+      buildWebsite: { title: "Create a website", desc: "Build websites and landing pages with code and Live Preview." },
+      buildApplication: { title: "Build an application", desc: "Create web apps, CRMs, and business tools from a description." },
+      connectDatabase: { title: "Connect a database", desc: "Add a project database and manage its tables and data." },
+      improveProject: { title: "Improve a project", desc: "Edit code, fix bugs, and test changes in Live Preview." },
+      researchBusiness: { title: "Research your business", desc: "Research markets and competitors, shape offers, and plan growth." },
+      automateWork: { title: "Create and automate", desc: "Write content, work with email, and schedule recurring tasks." },
     },
   },
   aiMarketplace: {
