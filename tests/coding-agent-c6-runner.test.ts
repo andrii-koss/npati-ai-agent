@@ -436,6 +436,26 @@ describe("security-gate: C6 runner — tool execution and the model contract", (
     expect(harness.activity.some((event) => event.kind === "reminder" && event.reason === "repeated_call")).toBe(true);
   });
 
+  // V6 step 10: six different successful shell commands (create a venv, install, list…) were all "code.shell.exec", so
+  // the cycle detector stopped a run that was making progress. Different commands are different steps.
+  it("does not call a series of different shell commands a cycle", async () => {
+    const commands = ["python -m venv /tmp/venv", "/tmp/venv/bin/python -m pip install -r requirements.txt", "ls /tmp/venv/bin",
+      "python -m venv .venv", ".venv/bin/python -m pip install -r requirements.txt", ".venv/bin/python -m pytest -q", ".venv/bin/python -c 'import main'"];
+    const harness = createHarness({
+      script: [...commands.map((command, i) => ({ content: "", toolCalls: [nativeCall("code.shell.exec", { command }, `shell-${i}`)] })), { content: "done" }],
+    });
+    const result = await harness.run();
+    expect(result.reason).not.toBe("loop_detected");
+    expect(harness.invocations).toHaveLength(commands.length);
+  });
+
+  it("still stops the same shell command repeated as a cycle", async () => {
+    const same = (i: number) => ({ content: "", toolCalls: [nativeCall("code.shell.exec", { command: "ls" }, `ls-${i}`)] });
+    const harness = createHarness({ limits: { maxStepsPerRun: 0 }, script: Array.from({ length: 25 }, (_, i) => same(i)) });
+    const result = await harness.run();
+    expect(result.reason).toBe("loop_detected");
+  });
+
   it("reminds the model about a repeated error and stops on the next one", async () => {
     const failing = (index: number) => ({
       content: "",

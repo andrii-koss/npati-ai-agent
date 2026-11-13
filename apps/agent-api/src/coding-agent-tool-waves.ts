@@ -269,7 +269,12 @@ export class CodingAgentToolWaves {
       // Data tools carry no path: creating categories, products and orders is three different steps, not a cycle.
       const op = args?.operation as Record<string, unknown> | undefined;
       const target = [args?.collection, op?.kind, op?.collection, (op?.field as Record<string, unknown> | undefined)?.name].filter((v) => typeof v === "string").join(":");
-      return target ? `${c.name}:${target}` : c.name;
+      if (target) return `${c.name}:${target}`;
+      // Shell commands and other path-less tools are told apart by their arguments: "python -m venv .venv", "pip install"
+      // and "ls" were all just "code.shell.exec", so six different steps of real progress stopped the run as a "cycle"
+      // (V6 step 10). The same call repeated still has the same signature.
+      const command = typeof args?.command === "string" ? args.command : JSON.stringify(args ?? {});
+      return `${c.name}:${command.slice(0, 300)}`;
     }).join(";");
     this.turnPatterns.push(turnSig);
     while (this.turnPatterns.length > 12) this.turnPatterns.shift();

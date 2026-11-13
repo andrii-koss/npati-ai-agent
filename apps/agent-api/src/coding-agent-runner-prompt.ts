@@ -180,6 +180,7 @@ export const CODE_RUN_DISCIPLINE_RULES: readonly string[] = [
   "- After a change, check it once in the cheapest sufficient way, then finish with a short summary (code.finish when available).",
   "- A JavaScript write or edit result already reports `syntax`; when it is ok, do not run node --check on that file again.",
   "- Do not repeat a failed action without changing the approach.",
+  "- Each shell command gets a fresh /tmp: keep files in the project folder. System Python is externally managed: use the project venv (`python3 -m venv .venv`, then `.venv/bin/python -m pip install -r requirements.txt`).",
   "- Protected files (.env, keys, credentials) are hidden from your tools. Asked about one, say it is protected and you cannot show it; never say it does not exist.",
 ];
 
