@@ -263,3 +263,14 @@ it("hides completed model-wait-only history without hiding provider failures", (
  const failed=renderToStaticMarkup(<AgentExecutionTrace items={[{...event,status:"failed",error:"Provider unavailable"}]} />);
  expect(failed).toContain('data-status="failed"');
 });
+
+// V6 step 10: a status line written during the run ("Created database: …") is the first reply to the request. The card
+// still shows on the agent's final reply at the bottom, not at the top of the run.
+it("shows the request card on the last reply to the request, below the agent's work", () => {
+ const ready={...card,status:"completed",previewUrl:"/preview/project",lastBuildStatus:"ready"};
+ const running={...process,status:"completed" as const,conversationId:"child"};
+ const messages=[{role:"user" as const,content:"create a FastAPI service",projectCard:ready},{role:"assistant" as const,content:"Created database: Notes."},{role:"assistant" as const,content:"Verified the project database."},{role:"user" as const,content:"thanks"},{role:"assistant" as const,content:"You are welcome."}];
+ expect(developmentCard(messages,1,[running],"child")).toBeNull();
+ expect(developmentCard(messages,2,[running],"child")).toMatchObject({id:card.id});
+ expect(developmentCard(messages,4,[running],"child")).toBeNull();
+});
