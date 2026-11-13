@@ -46,8 +46,12 @@ export async function detectProjectStack(
   // 3. Framework & Dev command detection
   if (pathSet.has("pubspec.yaml") && /\bflutter\s*:/m.test(await readFile("pubspec.yaml").catch(() => ""))) {
     // An interrupted build leaves index.html without the compiled app, so the compiled file decides.
+    // A Flutter project the model wrote without the web platform (only lib/ and test/) cannot build for the web: add the
+    // platform folder first, named after pubspec.yaml (the folder is a UUID, not a valid Dart package name). The file, not
+    // the folder, decides: the Sandbox copy is re-synced before a start and an emptied web/ folder stays behind.
+    const webPlatform = `[ -f web/index.html ] || flutter create . --platforms web --project-name "$(grep -m1 '^name:' pubspec.yaml | cut -d: -f2 | tr -d ' \\r"')" >/dev/null`;
     const stale = 'if [ ! -f build/web/main.dart.js ] || [ -n "$(find lib web pubspec.yaml -newer build/web/main.dart.js 2>/dev/null | head -1)" ]; then flutter build web; fi';
-    return { packageManager, framework: "flutter", command: `${stale} && npx -y serve -s build/web -l 3000`, port: 3000 };
+    return { packageManager, framework: "flutter", command: `${webPlatform} && ${stale} && npx -y serve -s build/web -l 3000`, port: 3000 };
   }
   if (pkg) {
     const deps = { ...pkg.dependencies, ...pkg.devDependencies };

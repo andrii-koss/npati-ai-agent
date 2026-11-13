@@ -344,7 +344,9 @@ export class ProjectPreviewService {
     if (!processId) throw new PreviewError("process_failed", "Failed to start preview dev server process", 500);
     // Starting a process does not mean its HTTP server (or first compilation) is ready.
     if (this.sandbox.supportsPreviewProxy()) {
-      const deadline = Date.now() + 90_000;
+      // A Flutter web Preview compiles the app inside its start command (131 s for a three-screen app on this host), so 90 s
+      // failed every first start with "did not become HTTP-ready". The loop still ends at once when the process exits.
+      const deadline = Date.now() + (detected.framework === "flutter" ? 600_000 : 90_000);
       let ready = false;
       try {
         while (Date.now() < deadline) {
