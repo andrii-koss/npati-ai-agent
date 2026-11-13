@@ -11,6 +11,7 @@ import { CodeAsyncWorkspaceService, registerCodeAsyncWorkspaceRoutes } from "./c
 import { finishCodeChatWebsite, isCodeChatWebsite, isPlainProjectFramework, isPreviewableChange } from "./code-chat-website";
 import { detectProjectStack } from "./project-preview-stack";
 import { verifyWebsiteRuntime } from "./website-runtime-acceptance";
+import { captureNativeThumbnail, needsNativeThumbnail } from "./native-project-thumbnail";
 import { gamePlayActions } from "./game-play-check";
 import { behaviourMessage, captureBehaviour, compareBehaviour, requestsBehaviourKeeping, type BehaviourBaseline } from "./website-behaviour-check";
 import { resolveCodingConversationLanguage } from "./company-chat-i18n";
@@ -429,6 +430,16 @@ export function registerCodeLifecycleRoutes(app: FastifyInstance, input: Registe
       });
       if (input.websiteEdit && !input.noMemory) await rememberWebsiteEdit(workspaceStore, projectWorkspace, input.ctx, input.session, finished)
         .catch(error => log.warn({ err: error }, "website_edit_context_save_failed"));
+      const nativeProject = await projectService.get(input.ctx, input.session.companyId, input.session.projectId).catch(() => null);
+      if (nativeProject && inputDeps.projectBrowserQaService && needsNativeThumbnail(nativeProject, finished)) {
+        void captureNativeThumbnail({
+          project: nativeProject,
+          startPreview: () => projectPreviewService.startPreview(input.ctx, input.session.companyId, input.session.projectId, {}),
+          screenshot: () => inputDeps.projectBrowserQaService!.inspect(input.ctx, input.session.companyId, {
+            projectId: input.session.projectId, runId: input.runId, checks: ["screenshot"], screenshotMode: "visual", maxScreenshotBytes: 2_000_000, agentId: "system" }),
+          warn: error => log.warn({ err: error, projectId: input.session.projectId }, "native_thumbnail_failed"),
+        });
+      }
       return finished;
     },
     resolveModel: async (ctx, input) => {

@@ -225,7 +225,8 @@ try {
       // Explicit reference-review mode captures the real render; default QA remains layout-only.
       // Mask user-entered values and regions explicitly marked private without replacing the design.
       const bytes = await page.screenshot({ type: "webp", quality: 80, fullPage: false, animations: "disabled", caret: "hide",
-        mask: [page.locator('input,textarea,[contenteditable],[data-private],[data-sensitive],iframe')],
+        // Neutral grey instead of Playwright's default magenta: the screenshot is also the Projects thumbnail.
+        mask: [page.locator('input,textarea,[contenteditable],[data-private],[data-sensitive],iframe')], maskColor: "#e2e8f0",
         timeout: Math.min(5000, timeoutMs) });
       if (bytes.length <= maxScreenshotBytes) {
         const base64Data = bytes.toString("base64");
