@@ -1,6 +1,7 @@
 import { OmniRouteEngine } from "@npati/omniroute-adapter";
 import {
   Crawl4AIProvider,
+  pageMarkdown,
   DefaultWebResearchProvider,
   MemoryResearchCache,
   OmniRouteFetchProvider,
@@ -417,5 +418,40 @@ describe("explicit multi-site research", () => {
   it("preserves the configured target bound before provider calls", async () => {
     const p=provider();const service=new WebResearchService(p,validator,{...limits,maxCompetitors:1});
     await expect(service.run("Compare https://www.apple.com and https://www.samsung.com",{})).rejects.toThrow("site limit");expect(p.crawl).not.toHaveBeenCalled();
+  });
+});
+
+// V6 step 11: "what is the current Node.js LTS, give sources". A release page was crawled with its links (ten GitHub
+// topics and profiles stored as sources), filtered by a business query (the version table cut), and a robots.txt refusal
+// reached the model as an empty page.
+describe("reading a named page", () => {
+  const page = (url: string, extra: Record<string, unknown> = {}) => ({ url, title: "Releases", markdown: "| v24 | Active LTS |", ...extra });
+  const service = (crawl: ReturnType<typeof vi.fn>) => new WebResearchService({ search: vi.fn(), fetch: vi.fn(), crawl } as never, { validate: async (url: string) => new URL(url) } as SafeUrlValidator, limits);
+
+  it("reads only that page, filtered by the user's request", async () => {
+    const crawl = vi.fn().mockResolvedValue({ rootUrl: "", startedAt: "", completedAt: "", pages: [page("https://nodejs.org/en/about/previous-releases")] });
+    const outcome = await service(crawl).run("https://nodejs.org/en/about/previous-releases current LTS version", { name: "V6TEST_Flowers", industry: "flowers" });
+    expect(crawl).toHaveBeenCalledWith(expect.objectContaining({ deep: false, maxPages: 1, maxDepth: 0, query: "current LTS version" }));
+    expect(outcome?.sources.map(s => s.url)).toEqual(["https://nodejs.org/en/about/previous-releases"]);
+  });
+
+  it("names a refused page with its reason instead of presenting it as empty", async () => {
+    const crawl = vi.fn().mockResolvedValue({ rootUrl: "", startedAt: "", completedAt: "", pages: [page("https://nodejs.org/dist/index.json", { markdown: "", error: "Access denied by robots.txt" })] });
+    const outcome = await service(crawl).run("https://nodejs.org/dist/index.json latest LTS", {});
+    expect(outcome?.sources).toEqual([]);
+    expect(outcome?.context).toContain("NOT RETRIEVED https://nodejs.org/dist/index.json: Access denied by robots.txt");
+  });
+
+  it("keeps the whole page when the query filter left only a small part of it", () => {
+    expect(pageMarkdown("x".repeat(783), "y".repeat(6789))).toBe("y".repeat(6789));
+    expect(pageMarkdown("", "y".repeat(50))).toBe("y".repeat(50));
+    expect(pageMarkdown("x".repeat(4000), "y".repeat(6789))).toBe("x".repeat(4000));
+    expect(pageMarkdown("# Public", undefined)).toBe("# Public");
+  });
+
+  it("passes the crawler's refusal through as the page error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ pages: [{ url: "https://93.184.216.34/dist/index.json", success: false, error: "Access denied by robots.txt", fit_markdown: "", raw_markdown: "" }] }), { status: 200 })));
+    const result = await new Crawl4AIProvider("http://crawler:11235", new SafeUrlValidator(), limits).crawl({ url: "https://93.184.216.34/dist/index.json", maxPages: 1 });
+    expect(result.pages[0]?.error).toBe("Access denied by robots.txt");
   });
 });

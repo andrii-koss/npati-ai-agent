@@ -76,6 +76,8 @@ export interface CrawledPage {
   extracted?: unknown;
   depth?: number;
   score?: number;
+  /** The crawler's refusal or failure for this page (robots.txt, HTTP error), shown instead of an empty page. */
+  error?: string;
 }
 
 export interface CrawlResult {

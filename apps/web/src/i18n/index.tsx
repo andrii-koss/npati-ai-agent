@@ -89,7 +89,9 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
       if (params) {
         for (const [key, val] of Object.entries(params)) {
-          template = template.replace(new RegExp(`{{${key}}}`, "g"), String(val));
+          // Half of the locales write placeholders as {name}; Goals, Content and Memory showed them raw (V6 step 11).
+          // Double braces first, so {{name}} never becomes {value}.
+          template = template.replace(new RegExp(`{{${key}}}`, "g"), () => String(val)).replace(new RegExp(`{${key}}`, "g"), () => String(val));
         }
       }
 

@@ -213,6 +213,7 @@ function contentType(value: ContentType): ContentLibraryType {
   return "article";
 }
 
+export const CONTENT_DELIVERABLE_RULE = "Your answer is saved verbatim as the finished content document. Return only the content itself, in the language of the brief: no greeting, no confirmation such as \"done\" or \"saved\", no card or code-fence wrapper, no list of edits or checks, and no follow-up question.";
 function contentTask(task: string): { title?: string; type: ContentLibraryType } {
   const match = task.match(/^\[NPATI_CONTENT:(article|seo_blueprint|social_post|brief|strategy|other):([A-Za-z0-9_-]+)\]/);
   if (!match) return { type: "article" };
@@ -479,7 +480,7 @@ Use activity.run when the user asks the company agents to perform work and wants
             throw new Error(`This request names the memory "${named[0]!.title}" (ID ${named[0]!.id}), not "${current.title}". Use that memoryId.`);
           if (directive.action === "memory.delete") {
             await deps.store.deleteMemory(auth, business.id, current.id);
-            const card = `\`\`\`card:${clean(current.title, 300)}\n**${labels.business}:** ${clean(business.name, 300)}\n\n[${labels.openMemory}](/settings/memory)\n\`\`\``;
+            const card = `\`\`\`card:${clean(current.title, 300)}\n**${labels.business}:** ${clean(business.name, 300)}\n\n[${labels.openMemory}](/settings/memory?business=${encodeURIComponent(business.id)})\n\`\`\``;
             return { cleanText: finish(directive, card), workspaceAction: { action: directive.action, resourceId: current.id, businessId: business.id } };
           }
           if (!item) throw new Error("Memory changes are required");
@@ -490,7 +491,7 @@ Use activity.run when the user asks the company agents to perform work and wants
           if (item.confidence !== undefined) { if (!Number.isFinite(item.confidence) || item.confidence < 0 || item.confidence > 1) throw new Error("Invalid confidence"); patch.confidence = item.confidence; }
           if (!Object.keys(patch).length) throw new Error("Memory changes are required");
           const updated = await deps.store.updateMemory(auth, business.id, current.id, patch);
-          const card = `\`\`\`card:${clean(updated.title, 300)}\n**${labels.type}:** ${updated.type}\n**${labels.business}:** ${clean(business.name, 300)}\n**${labels.confidence}:** ${Math.round((updated.confidence ?? 1) * 100)}%\n\n${clean(updated.content)}\n\n[${labels.openMemory}](/settings/memory)\n\`\`\``;
+          const card = `\`\`\`card:${clean(updated.title, 300)}\n**${labels.type}:** ${updated.type}\n**${labels.business}:** ${clean(business.name, 300)}\n**${labels.confidence}:** ${Math.round((updated.confidence ?? 1) * 100)}%\n\n${clean(updated.content)}\n\n[${labels.openMemory}](/settings/memory?business=${encodeURIComponent(business.id)})\n\`\`\``;
           return { cleanText: finish(directive, card), workspaceAction: { action: directive.action, resourceId: updated.id, businessId: business.id } };
         }
         if (!item || !memoryTypes.has(item.type as MemoryInput["type"]) || !clean(item.title, 300) || !clean(item.content)) throw new Error("Invalid memory");
@@ -498,7 +499,7 @@ Use activity.run when the user asks the company agents to perform work and wants
         const source = `chat:${key}`;
         const created = (await deps.store.listMemory(auth, business.id)).find((entry) => entry.source === source)
           ?? await deps.store.createMemory(auth, business.id, { type: item.type!, title: clean(item.title, 300), content: clean(item.content), confidence: item.confidence ?? 1, source });
-        const card = `\`\`\`card:${clean(created.title, 300)}\n**${labels.type}:** ${created.type}\n**${labels.business}:** ${clean(business.name, 300)}\n**${labels.confidence}:** ${Math.round((created.confidence ?? 1) * 100)}%\n\n${clean(created.content)}\n\n[${labels.openMemory}](/settings/memory)\n\`\`\``;
+        const card = `\`\`\`card:${clean(created.title, 300)}\n**${labels.type}:** ${created.type}\n**${labels.business}:** ${clean(business.name, 300)}\n**${labels.confidence}:** ${Math.round((created.confidence ?? 1) * 100)}%\n\n${clean(created.content)}\n\n[${labels.openMemory}](/settings/memory?business=${encodeURIComponent(business.id)})\n\`\`\``;
         return { cleanText: finish(directive, card), workspaceAction: { action: directive.action, resourceId: created.id, businessId: business.id } };
       }
 
@@ -744,7 +745,9 @@ Use activity.run when the user asks the company agents to perform work and wants
         return { cleanText: finish(directive, card), workspaceAction: { action: directive.action, resourceId: run.id, companyId: company.id } };
       }
       if (!item || !clean(item.title, 300) || !contentTypes.has(item.type as ContentType) || !clean(item.task) || (item.mode && !runModes.has(item.mode))) throw new Error("Invalid content request");
-      const task = `[NPATI_CONTENT:${item.type}:${Buffer.from(clean(item.title, 300), "utf8").toString("base64url")}] ${clean(item.task)}`;
+      // The run's answer is stored as the Content Hub document itself (V6 step 11: it arrived as a chat reply with "Done,
+      // saved", a nested card and an edit log, all stored and shown as raw ''' in the chat).
+      const task = `[NPATI_CONTENT:${item.type}:${Buffer.from(clean(item.title, 300), "utf8").toString("base64url")}] ${clean(item.task)}\n\n${CONTENT_DELIVERABLE_RULE}`;
       const business = directive.businessId || directive.businessName ? await resolveBusiness(deps.store, auth, directive, options.selectedBusinessId) : undefined;
       const details = await deps.runCompany(auth, company.id, { task, mode: item.mode ?? "single", conversationId }, `chat-content:${key}`);
       const run = details.run;

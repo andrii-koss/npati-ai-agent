@@ -150,3 +150,27 @@ describe("language selection", () => {
     expect(document.documentElement.lang).toBe("en");
   });
 });
+
+// V6 step 11: half of the locales write placeholders as {count}; the Goals page showed "Showing {count} of {total} goals"
+// and Goals/Content/Memory notices showed {title} and {message} raw.
+describe("placeholders", () => {
+  it("fills single- and double-brace placeholders in every language", async () => {
+    const seen: string[] = [];
+    function Probe() {
+      const { t } = useTranslation();
+      seen.push(t("goalsPage.showingGoals", { count: 3, total: 7 }), t("goalsPage.notices.createdSuccess", { title: "V6TEST $& goal" }),
+        t("contentPage.cards.minRead", { count: 2 }), t("memoryPage.card.confidenceTooltip", { score: "0.9" }));
+      return null;
+    }
+    for (const language of SUPPORTED_LANGUAGES) {
+      localStorage.setItem("npati_language", language.code);
+      const host = document.createElement("div"); const root = createRoot(host);
+      await act(async () => root.render(<I18nProvider><Probe /></I18nProvider>));
+      await act(async () => root.unmount());
+    }
+    expect(seen.length).toBeGreaterThanOrEqual(64);
+    for (const text of seen) expect(text).not.toMatch(/\{\{?(count|total|title|score)\}?\}/);
+    expect(seen.filter(text => text.includes("V6TEST $& goal")).length).toBeGreaterThanOrEqual(16);
+    localStorage.clear();
+  });
+});

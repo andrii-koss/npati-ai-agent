@@ -3,7 +3,7 @@ import { InMemoryWorkspaceStore, type AuthContext, type CompanyAgentRunDetails }
 import type { AIEngine, OmniRouteMarketplace } from "@npati/omniroute-adapter";
 import { CompanyAutomationsRepository } from "../apps/agent-api/src/automations-repository";
 import { ContentLibraryStore } from "../apps/agent-api/src/content-library-store";
-import { WorkspaceChatActions, type WorkspaceChatActionDependencies } from "../apps/agent-api/src/workspace-chat-actions";
+import { CONTENT_DELIVERABLE_RULE, WorkspaceChatActions, type WorkspaceChatActionDependencies } from "../apps/agent-api/src/workspace-chat-actions";
 import { stripInternalChatActions } from "../apps/web/src/ChatMessageContent";
 import { buildApp } from "../apps/agent-api/src/app";
 
@@ -237,6 +237,8 @@ describe("workspace resources from chat", () => {
     expect(content.cleanText).toContain("/settings/content");
     expect(calls[0]).toBe("Analyze the market");
     expect(calls[1]).toMatch(/^\[NPATI_CONTENT:article:/);
+    // V6 step 11: the run answer is stored as the document, so the agents are told to return only the content.
+    expect(calls[1]).toContain("Write an AI guide\n\n" + CONTENT_DELIVERABLE_RULE);
   });
 
   it("updates and deletes owned automations, memory and content", async () => {

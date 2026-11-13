@@ -182,7 +182,9 @@ def _make_config(request: NpatiCrawlRequest, url: str):
         extraction_strategy=_extraction_strategy(request.extraction),
         excluded_tags=["nav", "footer", "header", "aside", "script", "style", "noscript"],
         remove_forms=True,
-        remove_overlay_elements=True,
+        # V6 step 11: overlay removal took the main content of sites with a fixed layout (nodejs.org releases: 10 318
+        # characters of markdown became 35 with the tag exclusions). Consent popups are still removed below.
+        remove_overlay_elements=False,
         remove_consent_popups=True,
         check_robots_txt=True,
         user_agent="NPATI-Agent-WebResearch/0.2 (+https://www.npati.com/)",

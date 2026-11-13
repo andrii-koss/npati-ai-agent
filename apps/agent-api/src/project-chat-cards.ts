@@ -13,6 +13,13 @@ export interface ChatEntityContext {
   lastConfirmedAction: { entityType: string; entityId: string | null; companyId: string | null; projectId: string | null; action: string };
 }
 const contextKey = (conversationId: string) => `chat-active-context:${conversationId}`;
+const NOTHING_STORED: Partial<Record<import("./company-chat-i18n").CompanyChatLanguage, string>> = {
+  en: "No stored value is available for this field.", uk: "Для цього поля нічого не збережено.", ru: "Для этого поля ничего не сохранено.",
+  de: "Für dieses Feld ist nichts gespeichert.", fr: "Aucune valeur n'est enregistrée pour ce champ.", es: "No hay ningún valor guardado para este campo.",
+  it: "Non è salvato alcun valore per questo campo.", pl: "Dla tego pola nic nie zapisano.", pt: "Não há nenhum valor guardado para este campo.",
+  nl: "Voor dit veld is niets opgeslagen.", tr: "Bu alan için kayıtlı bir değer yok.", zh: "此字段没有保存任何值。", ja: "この項目には保存された値がありません。",
+  ko: "이 항목에 저장된 값이 없습니다.", ar: "لا توجد قيمة محفوظة لهذا الحقل.", hi: "इस फ़ील्ड के लिए कोई मान सहेजा नहीं गया है।",
+};
 export type ChatEntityRead = { field: "name" | "description" | "instructions" | "projects" | "role" | "agents" | "memory" | "profile"; entityType: "focused" | "company" | "business" | "project" | "agent" };
 export function focusedChatEntity(context: Partial<ActiveContext>, confirmed?: ChatEntityContext | null) {
   const selected = { entityType: context.contextType ?? "none", entityId: context.projectId ?? context.companyId ?? context.businessId ?? null,
@@ -70,7 +77,11 @@ export async function executeChatEntityRead(store: WorkspaceStore, auth: AuthCon
   else if (request.field === "memory" && type === "company") {
     const company = record as import("@npati/workspace").Company;
     const facts = Object.keys(company.memory ?? {}).length ? JSON.stringify(company.memory, null, 2) : undefined;
-    value = [company.companyInstructions?.trim(), facts].filter(Boolean).join("\n\n") || undefined;
+    // The Memory a user saves for a company lives in its linked Business ("запам'ятай для V6TEST_Bakery2: …"). Without it
+    // "нагадай код рецепту" answered that nothing was stored (V6 step 11).
+    const saved = company.businessId ? (await store.listMemory(auth, company.businessId).catch(() => []))
+      .map((item) => `${item.title}: ${item.content}`).join("\n") : "";
+    value = [company.companyInstructions?.trim(), facts, saved].filter(Boolean).join("\n\n") || undefined;
   }
   else if (request.field === "instructions" && type === "company") value = (record as import("@npati/workspace").Company).companyInstructions ?? undefined;
   else if (request.field === "instructions" && type === "agent") value = (record as import("@npati/workspace").CompanyAgent).systemInstruction ?? undefined;
@@ -86,7 +97,8 @@ export async function executeChatEntityRead(store: WorkspaceStore, auth: AuthCon
   // A Business Profile spreads its facts across several fields: one empty field is not evidence that the profile lacks the data.
   if (type === "business" && request.field !== "profile" && !value?.trim()) return null;
   if (type === "business") companyId = null;
-  const answer = value?.trim() || "No stored value is available for this field.";
+  // An authoritative "nothing stored" (the model must not guess a value), in the language of the question (V6 step 11).
+  const answer = value?.trim() || NOTHING_STORED[detectCompanyChatLanguage(message)] || NOTHING_STORED.en!;
   let conversation;
   if (!noMemory) {
     conversation = conversationId ? (await ownedConversation(store, auth, conversationId, confirmed?.context.businessId ?? resolved.context.businessId)).conversation

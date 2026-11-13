@@ -41,6 +41,16 @@ function contentString(value: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * The query-filtered markdown, unless the filter left a small part of the page (V6 step 11: nodejs.org's release page
+ * kept 783 of 6 789 characters, without the version table) or nothing; then the whole page.
+ */
+export function pageMarkdown(fit: string | undefined, raw: string | undefined): string | undefined {
+  if (!fit?.trim()) return raw?.trim() ? raw : fit ?? raw;
+  if (!raw?.trim() || fit.length * 2 >= Math.min(raw.length, 6_000)) return fit;
+  return raw;
+}
+
 function crawlLinks(value: unknown): string[] {
   if (Array.isArray(value)) return value.flatMap((item) =>
     typeof item === "string" ? [item]
@@ -243,10 +253,8 @@ export class Crawl4AIProvider {
         await this.validator.validate(finalUrl);
         const links = row.links && typeof row.links === "object" ? row.links as Json : {};
         const structured = row.structured && typeof row.structured === "object" ? row.structured as Json : {};
-        const rawMd = typeof row.fit_markdown === "string" ? row.fit_markdown
-          : typeof row.raw_markdown === "string" ? row.raw_markdown
-          : typeof row.markdown === "string" ? row.markdown
-          : undefined;
+        const rawMd = pageMarkdown(typeof row.fit_markdown === "string" ? row.fit_markdown : undefined,
+          typeof row.raw_markdown === "string" ? row.raw_markdown : typeof row.markdown === "string" ? row.markdown : undefined);
         const rawTxt = typeof row.text === "string" ? row.text
           : typeof row.description === "string" ? row.description
           : rawMd;
@@ -255,6 +263,7 @@ export class Crawl4AIProvider {
           title: typeof row.title === "string" ? row.title : undefined,
           text: rawTxt ? rawTxt.slice(0, this.limits.maxContentCharacters) : undefined,
           markdown: rawMd ? rawMd.slice(0, this.limits.maxContentCharacters) : undefined,
+          error: row.success === false ? String(row.error || "The page could not be retrieved.") : undefined,
           links: [...new Set(crawlLinks(links))],
           internalLinks: [...new Set(crawlLinks(links.internal))],
           externalLinks: [...new Set(crawlLinks(links.external))],

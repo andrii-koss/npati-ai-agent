@@ -43,6 +43,24 @@ describe("Final V5 stage 12: email reads in Chat", () => {
   });
 });
 
+describe("V6 step 11: an email read is evidence, not the answer", () => {
+  it("keeps the model's answer when a misrouted inbox search found nothing", async () => {
+    const store = new InMemoryWorkspaceStore();
+    const company = await store.createCompany(auth, { name: "V6TEST_Bakery2" }, "bakery");
+    const requests: ChatRequest[] = [];
+    const ai = engine({ intent: "CHAT", coreCapability: "npati_email_action", coreMutation: false }, async request => request.messages.some(message => message.role === "tool")
+      ? { content: "Слово-пароль з цього чату: ЛЕВАДА. Прогрес цілі: 120 з 500." }
+      : { content: "", toolCalls: [toolCall("search", "npati_email_action", { action: "inbox.list", companyId: company.id, fields: { search: "пароль" } })] }, requests);
+    const app = buildApp({ workspaceStore: store, authProvider: { authenticate: async () => auth }, aiEngine: ai, marketplace });
+    try {
+      const response = await app.inject({ method: "POST", url: "/chat", payload: { message: "яке слово-пароль з цього чату і який прогрес цілі?", contextType: "company", companyId: company.id } });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().message).toContain("ЛЕВАДА");
+      expect(response.json().message).not.toContain("No matching email threads");
+    } finally { await app.close(); }
+  });
+});
+
 describe("Final V5 stage 12: inbound webhooks", () => {
   const webhook: CompanyWebhook = { id: "hook-1", workspaceId: "w", companyId: "c", userId: "u", name: "Orders", secret: "whsec_test", agentId: null,
     promptTemplate: "Summarize {{payload}}", isActive: true, createdAt: "", updatedAt: "" };

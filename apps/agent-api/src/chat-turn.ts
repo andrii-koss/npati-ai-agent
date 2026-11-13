@@ -13,7 +13,7 @@ import { CompanyChatActions } from "./company-chat-actions";
 import { CompanyChatLanguage, chatLanguageInstruction, companyChatCopy, detectCompanyChatLanguage, resolveConversationLanguage } from "./company-chat-i18n";
 import { ContextCompactor } from "./context-compactor";
 import { extractDocumentText } from "./document-extractor";
-import { EmailChatActions } from "./email-chat-actions";
+import { EMAIL_READ_ACTIONS, EmailChatActions } from "./email-chat-actions";
 import { NoMemoryEvaluationResult, PerRequestNoMemoryGate } from "./ephemeral-no-memory-and-rtk";
 import { memoryDocumentPrompt } from "./memory-documents";
 import { pendingCompanyDelete } from "./pending-company-delete";
@@ -32,6 +32,7 @@ import type { ChatOrchestrationDeps } from "./chat-orchestration";
 import type { CoreChatRoute } from "./chat-project-intent";
 import { coreRouteOwns } from "./chat-core-routing";
 import { linkTurnCompanyAndBusiness } from "./chat-business-company-link";
+import { scopeBusinessPageLinks } from "./business-page-links"; import { businessMemoryNote, currentBusinessRecordsNote } from "./business-memory-context";
 import { defaultSkillRegistry } from "@npati/skills";
 
 export interface ChatTurnDeps {
@@ -466,7 +467,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
       skills: defaultSkillRegistry.list().map(({ id, name, capabilities }) => ({ id, name, capabilities })),
     }) + ". Answer questions about the configured models only from these settings.").catch(() => "") : "";
     const businessActionInstruction = (projectCapabilityScope ? "Use only the offered canonical project data tools for this authorized project. Read rows before changing them, preserve unspecified fields, and verify the persisted result. Do not use shell, SQL, migrations or static fallback data for a row task." :
-      (sendsRecords.business ? BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + goalScopeNote(hiddenGoals) : unloadedRecordsNote(userBusinesses))
+      (sendsRecords.business ? BusinessActionHandler.buildSystemPrompt(userBusinesses, goalsByBusiness) + goalScopeNote(hiddenGoals) + (routeSays("npati_workspace_action") || !memoryPolicy.readAllowed ? "" : await businessMemoryNote(workspaceStore, auth, goalBusinesses)) : linkedGoalBusinessId && memoryPolicy.readAllowed ? await currentBusinessRecordsNote(workspaceStore, auth, goalBusinesses) : unloadedRecordsNote(userBusinesses))
       + (sendsRecords.company ? await CompanyChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, /агент|agent|модел|model/iu.test(safeUserRequest) ? (await aiPreferences.get(auth)).addedModels : []) : "")
       + (sendsRecords.workspace ? await WorkspaceChatActions.buildSystemPrompt(auth, workspaceStore, safeUserRequest, effectiveManagementCompany?.id, undefined, { automations: automationsRepo, content: contentLibrary, browserTargets: browserCredentials, email: emailInboxRepo, webhooks: integrationsRepo, memoryReadAllowed: memoryPolicy.readAllowed, routed: routeSays("npati_workspace_action") }) : "")
       + (sendsRecords.email ? await EmailChatActions.buildSystemPrompt(auth, workspaceStore, emailInboxRepo, safeUserRequest, effectiveManagementCompany?.id, apiKeysRepo, {}, routeSays("npati_email_action")) : "")) + npatiSettings + chatLanguageInstruction(safeUserRequest, existing.messages, activeConversationLanguage) + (nativeToolCalling ? CHAT_TOOL_SELECTION_INSTRUCTION : "") + entityContext;
@@ -734,7 +735,8 @@ export function createChatTurn(deps: ChatTurnDeps) {
       logoAttachments: media.decoded.filter((item) => item.kind === "image").map((item) => ({ name: item.name, mimeType: item.mimeType, data: item.data, kind: item.kind })),
       persistBusinessLogo,
     });
-    const emailAction = nativeEmailResult ?? (workspaceSettingsRequest || !plannerAllowed("npati_email_action") ? { cleanText: executedAction.cleanText, emailAction: undefined, emailActions: undefined } : await executeEmailChatAction(auth, executedAction.cleanText, safeUserRequest, {
+    // As for workspace reads below, an email read receipt ("No matching email threads were found.") is evidence, not the answer: it replaced a Ukrainian answer about a goal and Memory (V6 step 11).
+    const emailAction = (nativeEmailResult?.emailAction && EMAIL_READ_ACTIONS.has(nativeEmailResult.emailAction.action) && executedAction.cleanText.trim() ? { ...nativeEmailResult, cleanText: executedAction.cleanText } : nativeEmailResult) ?? (workspaceSettingsRequest || !plannerAllowed("npati_email_action") ? { cleanText: executedAction.cleanText, emailAction: undefined, emailActions: undefined } : await executeEmailChatAction(auth, executedAction.cleanText, safeUserRequest, {
       model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id,
       addressReferences: emailReferences.addresses,
       attachments: media.decoded.map((item) => ({ filename: item.name, contentType: item.mimeType, sizeBytes: item.data.length, contentBase64: item.data.toString("base64") })),
@@ -763,7 +765,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
       ? { cleanText: companyAction.cleanText, workspaceAction: undefined, companyRunId: undefined }
       : await executeWorkspaceChatAction(auth, companyAction.cleanText, conversation?.id, safeUserRequest, { model: ai.model, fallbackModel: ai.fallbackModel, signal, selectedCompanyId: effectiveManagementCompany?.id, selectedBusinessId: createdBusiness?.id, selectedProjectId: projectContext?.id }));
     const workspaceAction = await completeCreatedBusinessMemory(auth, safeUserRequest, conversation?.id, createdBusiness, goalCompletion.reply, initialWorkspaceAction);
-    content = workspaceAction.cleanText;
+    content = scopeBusinessPageLinks(workspaceAction.cleanText, (goalCompletion.goalAction ?? executedAction.goalAction ?? nativeGoalAction)?.goal?.businessId, ["goals"]);
     // Persist server-issued references so approval cards survive chat reloads.
     for (const approval of pendingApprovals) content += `
 

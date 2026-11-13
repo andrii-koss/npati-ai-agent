@@ -65,3 +65,23 @@ describe("D101: validated reads survive record guards", () => {
   expect(result.entityRead).toBeUndefined(); expect(result.coreRoute?.mutation).toBe(true);
  });
 });
+
+// V6 step 11: "запамʼятай для V6TEST_Bakery2: код KRUASAN-77" is saved in the Company's linked Business; "нагадай код
+// рецепту круасанів" read only company.memory and answered in English that nothing was stored.
+describe("V6 step 11: company memory read", () => {
+ it("includes the Memory of the Company's linked Business, not of another one", async () => {
+  const store = new InMemoryWorkspaceStore();
+  const own = await store.createBusiness(auth, { name: "V6TEST_Bakery2" }), other = await store.createBusiness(auth, { name: "V6TEST_Flowers" });
+  await store.createMemory(auth, own.id, { type: "business_fact", title: "Код рецепту круасанів", content: "KRUASAN-77", confidence: 1, source: "user" });
+  await store.createMemory(auth, other.id, { type: "business_fact", title: "Код", content: "FOREIGN_BUSINESS", confidence: 1, source: "user" });
+  const company = await store.createCompany(auth, { name: "V6TEST_Bakery2", businessId: own.id }, "bakery");
+  const resolved = await new ActiveContextResolver(store).resolve(auth, { contextType: "company", companyId: company.id, businessId: null });
+  const result = await executeChatEntityRead(store, auth, resolved, { field: "memory", entityType: "company" }, "нагадай код рецепту круасанів");
+  expect(result?.message).toContain("KRUASAN-77"); expect(result?.message).not.toContain("FOREIGN_");
+ });
+ it("says that nothing is stored in the language of the question", async () => {
+  const f = await fixture(true);
+  const result = await executeChatEntityRead(f.store, auth, f.resolved, { field: "memory", entityType: "company" }, "нагадай код рецепту круасанів, будь ласка");
+  expect(result?.message).toBe("Для цього поля нічого не збережено.");
+ });
+});

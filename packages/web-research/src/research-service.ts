@@ -210,7 +210,12 @@ function report(listener: ResearchProgressListener | undefined, event: Parameter
   listener?.(event);
 }
 
+function isSiteRoot(url: URL) {
+  return url.pathname === "/" || url.pathname === "";
+}
+
 function pageFailure(page: CrawledPage) {
+  if (page.error) return page.error;
   const title = page.title?.trim() ?? "";
   if (/^(?:4\d\d|5\d\d)\b/i.test(title) || /\b(?:too many requests|access denied|forbidden|service unavailable)\b/i.test(title)) {
     return title || "The server returned an error page.";
@@ -334,7 +339,8 @@ export class WebResearchService {
     if (options.mode === "search" && !directUrl) return this.analyzeSearch(message, business, refresh, progress, true);
     if (directUrl) {
       const explicitlyLight = LIGHT_FETCH_PATTERN.test(message) && !RESEARCH_PATTERN.test(message);
-      return this.analyzeUrl(directUrl, business, refresh, !explicitlyLight, progress);
+      // The rest of the request ("current LTS version") steers which part of the page is kept (V6 step 11).
+      return this.analyzeUrl(directUrl, business, refresh, !explicitlyLight, progress, message.replace(directUrl, " ").replace(/\s+/g, " ").trim());
     }
     const siteEntity = extractSiteEntity(message);
     if (siteEntity) {
@@ -403,7 +409,7 @@ export class WebResearchService {
     return this.analyzeSearch(targetName, business, refresh, progress);
   }
 
-  private async analyzeUrl(url: string, business: BusinessResearchContext, refresh: boolean, deep: boolean, progress?: ResearchProgressListener): Promise<ResearchOutcome> {
+  private async analyzeUrl(url: string, business: BusinessResearchContext, refresh: boolean, deep: boolean, progress?: ResearchProgressListener, focus?: string): Promise<ResearchOutcome> {
     const safe = await this.validator.validate(url);
     report(progress, { type: "source_discovered", url: safe.toString(), title: safe.hostname });
     report(progress, { type: "page_fetch_started", url: safe.toString(), domain: safe.hostname });
@@ -414,13 +420,16 @@ export class WebResearchService {
       pages = [{ url: page.finalUrl ?? page.url, title: page.title, text: page.text, markdown: page.markdown, links: page.links }];
     } else {
       try {
+        // A site is crawled; a named page is read as that page. Following a release page's links stored GitHub topics,
+        // profiles and "report content" as ten sources of a Node.js answer (V6 step 11).
+        const site = isSiteRoot(safe);
         const crawl = await this.provider.crawl({
           url: safe.toString(),
-          query: researchQuery(business, safe.hostname),
-          maxPages: this.limits.maxPagesPerSite,
-          maxDepth: this.limits.maxCrawlDepth,
+          query: focus || researchQuery(business, safe.hostname),
+          maxPages: site ? this.limits.maxPagesPerSite : 1,
+          maxDepth: site ? this.limits.maxCrawlDepth : 0,
           refresh,
-          deep: true,
+          deep: site,
           contentFilter: "auto",
           extraction: { strategy: "auto" },
           dynamic: { scanFullPage: true, flattenShadowDom: true, maxScrollSteps: 8 },
@@ -436,6 +445,8 @@ export class WebResearchService {
         degraded = "Deep crawling was unavailable, so this analysis uses a single fetched page.";
       }
     }
+    // A refused page (robots.txt, HTTP error) is named with its reason; the model said "it opened without text".
+    const notRetrieved = pages.flatMap((page) => { const error = pageFailure(page); return error ? [`NOT RETRIEVED ${page.url}: ${error}`] : []; });
     pages = reportCrawledPages(pages, progress);
     const sources = pages.map((page) => source(page.url, page.title));
     const contextBudget = Math.min(this.limits.maxContentCharacters, 36_000);
@@ -445,6 +456,7 @@ export class WebResearchService {
       "Current business for comparison: " + JSON.stringify(business),
       "Crawl coverage: " + pages.length + " public pages.",
       ...pages.map((page) => pageEvidence(page, perPage)),
+      ...notRetrieved,
     ].join("\n\n");
     report(progress, { type: "research_completed", sourceCount: sources.length, pageCount: pages.length });
     return { kind: "url_analysis", context, sources, degraded, pageCount: pages.length };

@@ -3,6 +3,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import { useWorkspace } from "./BusinessWorkspace";
+import { useLinkedBusiness } from "./linked-business";
 import { confirmModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
 
@@ -100,7 +101,7 @@ function getInitialBusinessName(): string {
 export function MemoryPage() {
   const { t } = useTranslation();
   const { overview, loading: workspaceLoading, refresh, switchBusiness } = useWorkspace();
-  const business = overview?.currentBusiness || overview?.businesses?.[0];
+  const business = useLinkedBusiness(overview, switchBusiness);
   const businessId = business?.id ?? (overview ? "" : getInitialBusinessId());
   const businessName = business?.name ?? (overview ? "" : getInitialBusinessName());
 
