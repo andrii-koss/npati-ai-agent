@@ -296,12 +296,13 @@ describe("security-gate: C12 one shared budget for a parent run and its children
   it("really stops a run with budget_exhausted and never lets a child spend past the shared budget", async () => {
     const manager = new A2AQuotaManager();
     const quota = new CodeRunSharedQuota(manager, {
-      limits: { maxTokens: 10_000, maxCostUsd: 1 },
+      limits: { maxTokens: 12_000, maxCostUsd: 1 },
       resolveBudgetKey: (sessionId) => (sessionId === "session-child-run" ? "session-budget" : sessionId),
     });
 
-    // Include the request's context in pre-flight pressure: two 3,000-token turns fit, then the
-    // 6,000-token usage plus the next response estimate and context exceeds the 10,000 allowance.
+    // Pre-flight counts the request's context (system prompt, tool schemas, history, about 3 000 tokens) plus a
+    // 4 000-token response estimate. Two 3,000-token turns fit (3 000 + ~7 000 <= 12 000); the third does not
+    // (6 000 + ~7 000 > 12 000). V6 step 14: the limit was 10 000 when the coding prompt was smaller.
     const parent = budgetHarness({
       quota,
       script: [
@@ -317,7 +318,7 @@ describe("security-gate: C12 one shared budget for a parent run and its children
     expect(parent.releases).toContain("budget_exhausted");
     expect(manager.getBudget("session-budget")!.usedTokens).toBe(6_000);
 
-    // The child run, in its own session, mapped onto the same budget: 6 000 + 4 000 > 9 000, so its very first
+    // The child run, in its own session, mapped onto the same budget: 6 000 + ~7 000 > 12 000, so its very first
     // pre-flight is refused and it never calls the provider. The shared budget is what stops it — there is no
     // separate allowance a child could exhaust on its own.
     const child = budgetHarness({ quota, script: [{ content: "child", tokens: 100 }] });

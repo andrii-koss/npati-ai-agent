@@ -10,7 +10,8 @@ describe("10,000 Concurrent Session Capacity and Dispatch Latency Benchmark (NPA
     lastPingAt: number;
   }
 
-  it("handles 10,000 active concurrent session contexts with bounded dispatch latency and memory", async () => {
+  // Heavy test: the default 10 s timeout was exceeded only while the whole suite ran in parallel (V6 step 14).
+  it("handles 10,000 active concurrent session contexts with bounded dispatch latency and memory", { timeout: 60_000 }, async () => {
     const NUM_SESSIONS = 10000;
     const initialMemory = process.memoryUsage().heapUsed;
 

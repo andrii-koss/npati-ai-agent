@@ -112,7 +112,9 @@ function queryPostgres(sql: string): Promise<string> {
   });
 }
 
-describe("Coding Agent E2E Smoke Suite (Stage 2 Extended)", () => {
+// A live suite against a running stand: it runs only when NPATI_E2E_ISOLATED=true is set explicitly, and then still refuses an
+// incomplete fixture configuration. In the ordinary unit run it is skipped instead of failing in beforeAll (V6 step 14).
+describe.skipIf(process.env.NPATI_E2E_ISOLATED !== "true")("Coding Agent E2E Smoke Suite (Stage 2 Extended)", () => {
   let validToken = process.env.NPATI_E2E_ACCESS_TOKEN ?? "";
   const sessionCookieFile = process.env.NPATI_E2E_SESSION_COOKIE_FILE;
   async function renewTestSession() {

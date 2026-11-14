@@ -160,7 +160,9 @@ describe("NPATI Backend Authentication & Single Source of Truth Integration", ()
     expect(modalSource).toContain('new URL(`${marketPrefix}/sign-in`, connectUrl.origin)');
     expect(modalSource).toContain('signInUrl.searchParams.set("redirectUrl"');
     expect(appSource).toContain("resolveNpatiAvatarUrl(user?.avatar)");
-    expect(appSource).toContain("<img src={avatarUrl}");
+    // The avatar is drawn by ChatAvatarImage, which keeps a fixed surface until the image is painted.
+    expect(appSource).toContain("<ChatAvatarImage key={user?.id} url={avatarUrl}");
+    expect(readFileSync(new URL("../apps/web/src/ChatAvatarImage.tsx", import.meta.url), "utf8")).toMatch(/<img[^>]*src={url}/);
   });
 
   it("shows the central account profile and signs out without redirecting", () => {

@@ -144,7 +144,8 @@ describe("Production-Like Scale Certification", () => {
   describe("3. 10,000 Concurrent Sessions & Routing Dispatch", () => {
     const NUM_SESSIONS = 10_000;
 
-    it("evaluates 10,000 concurrent sessions with bounded memory delta (< 50MB) and sub-50ms total latency", () => {
+  // Heavy test: the default 10 s timeout was exceeded only while the whole suite ran in parallel (V6 step 14).
+    it("evaluates 10,000 concurrent sessions with bounded memory delta (< 50MB) and sub-50ms total latency", { timeout: 60_000 }, () => {
       const memBefore = process.memoryUsage().heapUsed;
       const t0 = performance.now();
 

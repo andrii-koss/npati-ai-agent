@@ -30,10 +30,13 @@ const labels: Record<SupportedLanguage, string> = {
   ar: "فتح الدليل (علامة تبويب جديدة)", hi: "निर्देश खोलें (नया टैब)",
 };
 
+/** Full guide addresses, built once from the constant slugs above, so no link is assembled while rendering. */
+const GUIDE_URLS = Object.fromEntries(Object.entries(PAGE_GUIDES).map(([key, slug]) => [key, "https://en.npati.com/" + slug + "/"])) as Record<keyof typeof PAGE_GUIDES, string>;
+
 export function PageGuideLink({ guide }: { guide: keyof typeof PAGE_GUIDES }) {
   const language = useContext(I18nContextRef)?.language ?? "en";
   const label = labels[language] ?? labels.en;
-  return <a className="page-guide-link" href={`https://en.npati.com/${PAGE_GUIDES[guide]}/`}
+  return <a className="page-guide-link" href={GUIDE_URLS[guide]}
     target="_blank" rel="noopener noreferrer" aria-label={label} title={label}>
     <CircleHelp size={20} strokeWidth={1.8} aria-hidden="true" />
   </a>;

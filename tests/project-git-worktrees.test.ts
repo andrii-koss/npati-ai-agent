@@ -287,7 +287,8 @@ describe("Step 9: Agent Worktrees", () => {
     ).rejects.toThrow();
   });
 
-  it("executes multi-agent workflow in worktree mode with review, merge, and events", async () => {
+  // Heavy test: the default 10 s timeout was exceeded only while the whole suite ran in parallel (V6 step 14).
+  it("executes multi-agent workflow in worktree mode with review, merge, and events", { timeout: 60_000 }, async () => {
     const { store, company, project, gitService, workspace } = await createFixture();
 
     // Create specialist agents
