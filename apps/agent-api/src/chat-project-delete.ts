@@ -8,8 +8,9 @@ import { detectCompanyChatLanguage, type CompanyChatLanguage } from "./company-c
  */
 const deleteVerb = /^\s*(?:(?:please|будь\s+ласка|por\s+favor|bitte)[,\s]+)?(?:видали(?:ти)?|видаліть|прибери|удали(?:ть)?|delete|remove|exclua|apague|elimina|borra|lösche|entferne|supprime)(?![\p{L}])/iu;
 const projectNoun = /(?:сайт\p{L}*|проєкт\p{L}*|проект\p{L}*|\bwebsite\b|\bsite\b|\bproject\b|\bprojeto\b|\bproyecto\b|\bsitio\b|\bprojekt\b|\bwebseite\b)/iu;
-/** Parts of a site ("delete the /about page", "remove the hero section") are code edits, not project deletion. */
-const sitePart = /(?:сторінк\p{L}*|розділ\p{L}*|секці\p{L}*|блок\p{L}*|файл\p{L}*|кнопк\p{L}*|форм\p{L}*|компонент\p{L}*|меню|\bpages?\b|\bsection\b|\bblock\b|\bfiles?\b|\bbutton\b|\bform\b|\bcomponent\b|\bmenu\b|(?:^|\s)\/[a-z0-9-]+)/iu;
+/** Parts of a site ("delete the /about page", "remove the hero section") are code edits, not project deletion. Parts of its
+ * database ("remove only field test_note from the dev products") are schema or row changes (V6 step 14, legacy A065). */
+const sitePart = /(?:пол[еяю](?![\p{L}])|стовп\p{L}*|колонк\p{L}*|рядок|рядк\p{L}*|таблиц\p{L}*|запис\p{L}*|схем\p{L}*|\bfields?\b|\bcolumns?\b|\brows?\b|\btables?\b|\brecords?\b|\bschema\b|\bfeld\b|\bspalte\p{L}*|\bzeile\p{L}*|\btabelle\p{L}*|\bcampos?\b|\bcolumnas?\b|\bcolunas?\b|\bfilas?\b|\blinhas?\b|\btablas?\b|\btabelas?\b|\bchamps?\b|\bcolonnes?\b|\blignes?\b|сторінк\p{L}*|розділ\p{L}*|секці\p{L}*|блок\p{L}*|файл\p{L}*|кнопк\p{L}*|форм\p{L}*|компонент\p{L}*|меню|\bpages?\b|\bsection\b|\bblock\b|\bfiles?\b|\bbutton\b|\bform\b|\bcomponent\b|\bmenu\b|(?:^|\s)\/[a-z0-9-]+)/iu;
 
 export function requestsDeletion(message: string): boolean { return deleteVerb.test(message); }
 
