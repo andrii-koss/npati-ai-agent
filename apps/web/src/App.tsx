@@ -351,6 +351,7 @@ function CanonicalChatRoute() {
         initialPrompt={(location.state as { prompt?: string } | null)?.prompt ?? ""}
         initialConversationId={conversationId}
         neutralChat={neutralChat}
+        businessRoute={!neutralChat}
       />
     </Workspace>
   );

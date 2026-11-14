@@ -20,7 +20,7 @@ const NOTHING_STORED: Partial<Record<import("./company-chat-i18n").CompanyChatLa
   nl: "Voor dit veld is niets opgeslagen.", tr: "Bu alan için kayıtlı bir değer yok.", zh: "此字段没有保存任何值。", ja: "この項目には保存された値がありません。",
   ko: "이 항목에 저장된 값이 없습니다.", ar: "لا توجد قيمة محفوظة لهذا الحقل.", hi: "इस फ़ील्ड के लिए कोई मान सहेजा नहीं गया है।",
 };
-export type ChatEntityRead = { field: "name" | "description" | "instructions" | "projects" | "role" | "agents" | "memory" | "profile"; entityType: "focused" | "company" | "business" | "project" | "agent" };
+export type ChatEntityRead = { field: "name" | "description" | "instructions" | "projects" | "role" | "agents" | "memory" | "profile" | "business_context"; entityType: "focused" | "company" | "business" | "project" | "agent" };
 export function focusedChatEntity(context: Partial<ActiveContext>, confirmed?: ChatEntityContext | null) {
   const selected = { entityType: context.contextType ?? "none", entityId: context.projectId ?? context.companyId ?? context.businessId ?? null,
     companyId: context.companyId ?? null, projectId: context.projectId ?? null, action: "select" };
@@ -34,7 +34,7 @@ export function focusedChatEntity(context: Partial<ActiveContext>, confirmed?: C
 export async function executeChatEntityRead(store: WorkspaceStore, auth: AuthContext, resolved: ResolvedActiveContext, request: ChatEntityRead,
   message: string, conversationId?: string, confirmed?: ChatEntityContext | null, noMemory = false) {
   if (confirmed && conversationId && confirmed.conversationId !== conversationId) throw new Error("Entity references belong to another conversation");
-  if (noMemory && (request.field === "instructions" || request.field === "memory")) return null;
+  if (noMemory && (request.field === "instructions" || request.field === "memory" || request.field === "business_context")) return null;
   const focus = focusedChatEntity(resolved.context, confirmed);
   let type = request.entityType === "focused" ? focus.entityType : request.entityType;
   let id = focus.entityType === type ? focus.entityId : null;
@@ -66,13 +66,18 @@ export async function executeChatEntityRead(store: WorkspaceStore, auth: AuthCon
   if (!record) return null;
   let value: string | undefined;
   if (request.field === "name" || request.field === "description") value = record[request.field] ?? undefined;
-  else if (request.field === "profile" && type === "business") {
+  else if ((request.field === "profile" || request.field === "business_context") && type === "business") {
     // Every filled profile field, labelled like the Business Profile card in the language of the question: "яка ніша?"
     // must find the niche, and a Ukrainian chat must not get English labels.
     const business = record as unknown as Record<string, unknown>;
     const labels = businessProfileCardLabels(detectCompanyChatLanguage(message));
     value = profileFields.filter((field) => typeof business[field] === "string" && String(business[field]).trim())
       .map((field) => labels.fields[field] + ": " + String(business[field]).trim()).join("\n") || undefined;
+    if (request.field === "business_context") {
+      const saved = (await store.listMemory(auth, id)).map(item => `${item.title}: ${item.content}`).join("\n");
+      const goals = (await store.listGoals(auth, id)).map(goal => `${goal.title}: ${goal.currentValue ?? 0} / ${goal.targetValue ?? ""} ${goal.targetUnit ?? ""} (P${goal.priority}; ${goal.status}; ${goal.targetDate ?? ""})${goal.description ? "\n" + goal.description : ""}`).join("\n");
+      value = [value, saved || NOTHING_STORED[detectCompanyChatLanguage(message)], goals].filter(Boolean).join("\n\n");
+    }
   }
   else if (request.field === "memory" && type === "company") {
     const company = record as import("@npati/workspace").Company;

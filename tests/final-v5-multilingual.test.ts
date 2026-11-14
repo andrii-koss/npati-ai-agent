@@ -39,7 +39,7 @@ describe("Final V5 stage 13: automation cards", () => {
     const store = new InMemoryWorkspaceStore();
     const company = await store.createCompany(auth, { name: "Clock Shop" }, "clock");
     const deps = { store, automations: new CompanyAutomationsRepository(), content: new ContentLibraryStore(store) } as never;
-    const text = "```workspace-action\n" + JSON.stringify({ action: "automation.create", companyId: company.id, intro: "Створено.", automation: { name: "Weekly", prompt: "Звіт", cronExpression: "0 9 * * 1", timezone: "Europe/Kyiv", status: "paused" } }) + "\n```";
+    const text = "```workspace-action\n" + JSON.stringify({ action: "automation.create", companyId: company.id, intro: "Створено.", automation: { name: "Weekly", prompt: "Звіт", cronExpression: "0 9 * * 1", timezone: "Europe/Kyiv", status: "active" } }) + "\n```";
     const created = await WorkspaceChatActions.extractAndExecute(auth, text, deps, "d73", { requestMessage: "Створи автоматизацію на паузі щопонеділка о 9:00" });
     expect(created.cleanText).toMatch(/\d{4}-\d{2}-\d{2} 09:00 Europe\/Kyiv/);
     expect(created.cleanText).not.toMatch(/GMT\+0000|Coordinated Universal Time/);

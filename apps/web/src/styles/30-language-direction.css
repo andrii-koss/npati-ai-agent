@@ -7,3 +7,10 @@ html[dir="rtl"] input[type="url"] {
   text-align: left;
   unicode-bidi: isolate;
 }
+
+/* Match the grid's RTL start edge; the mobile drawer leaves toward that edge. */
+@media (max-width: 760px) {
+  html[dir="rtl"] .sidebar:not(.mobile-open) {
+    transform: translateX(100%);
+  }
+}

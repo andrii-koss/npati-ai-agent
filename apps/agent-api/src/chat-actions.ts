@@ -1,4 +1,5 @@
 import { GOAL_ACTION_TOOL } from "./goal-action-native";
+import { selectBusinessCompactionFacts } from "./business-compaction-memory";
 import { assertNamedBusinessTarget } from "./named-business-target";
 import { WORKSPACE_ACTION_TOOL, EMAIL_ACTION_TOOL } from "./chat-productivity-tools";
 
@@ -138,14 +139,18 @@ export function createChatActions(deps: ChatActionDeps) {
   async function persistBusinessCompactionFlush(auth:AuthContext,businessId:string,memories:string[],writeAllowed:boolean){
     if(!writeAllowed||!memories.length)return {status:"skipped" as const,persistedCount:0};
     const existing=await workspaceStore.listMemory(auth,businessId,"",100);
-    const normalized=existing.map(item=>item.content.trim().toLocaleLowerCase());
+    let selected:string[];
+    try {
+      const aiContext=await getAIContext(auth);
+      selected=await selectBusinessCompactionFacts(memories,existing,request=>aiEngine.chat({...request,model:aiContext.model,fallbackModel:aiContext.fallbackModel,admission:admissionFor(auth)}));
+    } catch(error) {
+      log.warn({event:"business_memory_flush_selection_failed"},"Business memory selection failed; conversation summary is preserved");
+      return {status:"failed" as const,persistedCount:0};
+    }
     let persistedCount=0;
-    for(const content of [...new Set(memories.map(value=>value.trim()).filter(Boolean))].slice(0,25)){
-      const candidate=content.toLocaleLowerCase();
-      if(normalized.some(value=>value===candidate||value.includes(candidate)||candidate.includes(value)))continue;
+    for(const content of selected.slice(0,25)){
       try{
         await workspaceStore.createMemory(auth,businessId,{type:"business_fact",title:"Conversation fact",content,source:"automatic_flush",confidence:1});
-        normalized.push(candidate);
         persistedCount++;
       }catch(error){
         if(!String((error as {code?:string}).code??"").includes("23505"))throw error;

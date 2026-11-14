@@ -92,7 +92,7 @@
   .sidebar {
     position: fixed;
     top: 0;
-    left: 0;
+    inset-inline-start: 0;
     bottom: 0;
     width: 290px;
     max-width: 85vw;
@@ -100,7 +100,7 @@
     height: 100dvh;
     z-index: 100;
     background: white;
-    border-right: 1px solid #e5e5e5;
+    border-inline-end: 1px solid #e5e5e5;
     padding: 0 16px 20px;
     display: flex;
     flex-direction: column;

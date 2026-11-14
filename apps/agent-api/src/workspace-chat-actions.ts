@@ -291,7 +291,7 @@ export class WorkspaceChatActions {
   }
 
   static noSavedMemoryMessage(message: string): string {
-    const messages: Record<string, string> = {
+    const messages: Record<ReturnType<typeof detectCompanyChatLanguage>, string> = {
       en: "I found no saved Business Memory records. Refresh Settings → Memory if an old card is still visible.",
       uk: "Я не знайшов збережених записів пам’яті бізнесу. Якщо стара картка ще відображається, оновіть сторінку Налаштування → Пам’ять.",
       de: "Ich habe keine gespeicherten Einträge im Business Memory gefunden. Aktualisieren Sie Einstellungen → Memory, falls noch eine alte Karte angezeigt wird.",
@@ -299,13 +299,22 @@ export class WorkspaceChatActions {
       es: "No encontré registros guardados en la memoria del negocio. Actualiza Configuración → Memoria si aún aparece una tarjeta antigua.",
       it: "Non ho trovato voci salvate nella memoria aziendale. Aggiorna Impostazioni → Memoria se vedi ancora una vecchia scheda.",
       pl: "Nie znalazłem zapisanych wpisów pamięci biznesowej. Odśwież Ustawienia → Pamięć, jeśli nadal widać starą kartę.",
+      pt: "Não encontrei registos guardados na memória do negócio. Atualiza Definições → Memória se ainda aparecer um cartão antigo.",
+      nl: "Ik heb geen opgeslagen bedrijfsherinneringen gevonden. Vernieuw Instellingen → Geheugen als er nog een oude kaart staat.",
+      tr: "Kayıtlı işletme belleği bulunamadı. Eski bir kart görünüyorsa Ayarlar → Bellek sayfasını yenileyin.",
+      ru: "Сохранённых записей памяти бизнеса не найдено. Если видна старая карточка, обновите Настройки → Память.",
+      zh: "未找到已保存的业务记忆。如果仍显示旧卡片，请刷新设置 → 记忆。",
+      ja: "保存されたビジネスメモリが見つかりません。古いカードが表示される場合は、設定 → メモリを更新してください。",
+      ko: "저장된 사업 메모리를 찾지 못했습니다. 이전 카드가 보이면 설정 → 메모리를 새로 고침해 주세요.",
+      ar: "لم أعثر على سجلات محفوظة لذاكرة النشاط التجاري. حدّث الإعدادات → الذاكرة إذا بقيت بطاقة قديمة ظاهرة.",
+      hi: "व्यवसाय की मेमोरी में कोई सहेजे गए रिकॉर्ड नहीं मिले। पुराना कार्ड दिख रहा हो तो सेटिंग्स → मेमोरी को रीफ़्रेश करें।",
     };
     return messages[detectCompanyChatLanguage(message)] ?? messages.en!;
   }
 
   static noActionMessage(message: string): string {
     const language = detectCompanyChatLanguage(message);
-    const messages: Partial<Record<typeof language, string>> = {
+    const messages: Record<typeof language, string> = {
       uk: "Не вдалося безпечно виконати цю дію. Уточніть компанію або бізнес і потрібні параметри.",
       fr: "Je n’ai pas pu exécuter cette action en toute sécurité. Précisez l’entreprise et les paramètres nécessaires.",
       de: "Diese Aktion konnte nicht sicher ausgeführt werden. Bitte geben Sie das Unternehmen und die erforderlichen Angaben an.",
@@ -315,6 +324,13 @@ export class WorkspaceChatActions {
       ko: "이 작업을 안전하게 실행할 수 없습니다. 회사 또는 비즈니스와 필요한 설정을 지정해 주세요.",
       ar: "تعذر تنفيذ هذا الإجراء بأمان. حدد الشركة أو النشاط التجاري والإعدادات المطلوبة.",
       hi: "यह कार्रवाई सुरक्षित रूप से पूरी नहीं हो सकी। कंपनी या व्यवसाय और आवश्यक विवरण बताएं।",
+      en: "I could not complete this action safely. Specify the company or business and the required settings.",
+      ru: "Не удалось безопасно выполнить это действие. Уточните компанию или бизнес и необходимые параметры.",
+      it: "Non è stato possibile completare questa azione in sicurezza. Specifica l’azienda o l’attività e le impostazioni necessarie.",
+      pl: "Nie udało się bezpiecznie wykonać tej czynności. Wskaż firmę lub biznes i wymagane ustawienia.",
+      pt: "Não foi possível concluir esta ação com segurança. Indica a empresa ou o negócio e as definições necessárias.",
+      nl: "Deze actie kon niet veilig worden uitgevoerd. Geef het bedrijf of de onderneming en de vereiste instellingen op.",
+      tr: "Bu işlem güvenli şekilde tamamlanamadı. Şirketi veya işletmeyi ve gerekli ayarları belirtin.",
     };
     return messages[language] ?? "I could not complete this action safely. Specify the company or business and the required settings.";
   }

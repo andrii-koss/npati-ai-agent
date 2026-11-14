@@ -11,6 +11,7 @@ import { conversationTitle, isShortAffirmativeReply, requestsCompositeCompanyDel
 import { publicChatError, publicCompanyRunMessage } from "./chat-public-errors";
 import { browserScreenshotAttachments } from "./chat-browser-screenshots";
 import { runCancellationSignal } from "./workspace-chat-signals";
+import { localizedProjectClarification } from "./project-clarification-i18n";
 import { explicitlyRequestsWebResearch, isChatSpreadsheetTurn, isSpreadsheetEditRequest } from "./chat-text-directives";
 import { CodeBackgroundRunRegistry } from "./code-background-run-registry";
 import { canUseStylePreview, hasCodeChatPreview, isCodeChatWebsite, nativeMobileConversationContext, projectConversationContext, websiteConversationContext, websiteReferenceInstructions, isWebsiteReferenceRedesign, storeWebsiteReferenceAssets, refreshChatPreviewSession } from "./code-chat-website";
@@ -109,10 +110,10 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         return created;
       };
       const preflightStore = chatPreflightReads(workspaceStore);
-      const conversationCard = request.body.conversationId && !memoryPolicy.noMemoryActive
-        ? await getLatestChatProjectCard(preflightStore, auth, request.body.conversationId, requestedContext.businessId ?? undefined) : null;
       const confirmedContext = request.body.conversationId && !memoryPolicy.noMemoryActive
         ? await readChatActiveContext(preflightStore, auth, request.body.conversationId, requestedContext.businessId) : null;
+      const conversationCard = request.body.conversationId && !memoryPolicy.noMemoryActive
+        ? await getLatestChatProjectCard(preflightStore, auth, request.body.conversationId, requestedContext.businessId ?? confirmedContext?.context.businessId ?? undefined) : null;
       if (!request.body.projectId && !request.body.companyId && !request.body.businessId && confirmedContext) Object.assign(requestedContext, confirmedContext.context);
       if (!confirmedContext && !requestedContext.projectId && !requestedContext.companyId && !requestedContext.businessId && conversationCard?.companyId) {
         requestedContext.projectId = conversationCard.projectId ?? conversationCard.id;
@@ -614,7 +615,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
           let projectResponse;
           if (projectIntent.unsupportedIntentMessage || projectIntent.needsClarification) {
             projectResponse = {
-              message: projectIntent.unsupportedIntentMessage ?? projectIntent.clarificationPrompt ?? "Select an active Project.",
+              message: projectIntent.unsupportedIntentMessage ?? localizedProjectClarification(projectIntent.intent, message, projectIntent.clarificationPrompt),
               suggestedActions: [],
               activeContext: resolved.context,
             };
@@ -754,6 +755,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
             request.body.attachments,
             memoryPolicy,
             streamController.signal,
+            semantic?.coreRoute,
           );
           for(const delta of boundedResponseChunks(result.message))send("delta",{delta});
           await send("result", { ...result, activeContext: resolved.context });

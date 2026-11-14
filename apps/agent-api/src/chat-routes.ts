@@ -1,4 +1,5 @@
 import {rowTaskCapabilities,takesRowCapabilityPath} from "./chat-project-data-capabilities";
+import { localizedProjectClarification } from "./project-clarification-i18n";
 import { isOllamaChatPayload } from "./runtime-compat-routes";
 
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
@@ -41,7 +42,7 @@ export interface ChatRouteDeps {
   marketplace: ReturnType<typeof createCoreServices>["marketplace"];
   persistAutomaticCompanyMemory: (auth: AuthContext, companyId: string, runId: string, prompt: string, runStatus: string, noMemory: boolean) => Promise<unknown>;
   projectOrchestrator: ProjectOrchestrator;
-  runBusinessMessage: (auth: AuthContext, businessId: string, message: string, conversationId: string | undefined, log: { warn(value: unknown, message?: string): void }, progress?: ResearchProgressListener, attachments?: ChatAttachmentInput[], memoryPolicy?: NoMemoryEvaluationResult, signal?: AbortSignal) => Promise<Parameters<typeof applyChatTelemetryHeaders>[1] & { message: string; companyAction?: { companyId: string; action: string } }>;
+  runBusinessMessage: (auth: AuthContext, businessId: string, message: string, conversationId: string | undefined, log: { warn(value: unknown, message?: string): void }, progress?: ResearchProgressListener, attachments?: ChatAttachmentInput[], memoryPolicy?: NoMemoryEvaluationResult, signal?: AbortSignal, coreRoute?: import("./chat-project-intent").CoreChatRoute) => Promise<Parameters<typeof applyChatTelemetryHeaders>[1] & { message: string; companyAction?: { companyId: string; action: string } }>;
   runNeutralMessage: (auth: AuthContext, message: string, conversationId: string | undefined, attachments?: ChatAttachmentInput[], progress?: ResearchProgressListener, memoryPolicy?: NoMemoryEvaluationResult, onDelta?: (chunk: string) => void, signal?: AbortSignal, managementCompany?: { id: string; name: string }, projectContext?: Pick<import("@npati/workspace").Project, "id" | "name" | "description" | "framework"> & { capabilityIds?: string[] }, coreRoute?: import("./chat-project-intent").CoreChatRoute) => Promise<Parameters<typeof applyChatTelemetryHeaders>[1] & { message: string; companyAction?: { companyId: string; action: string } }>;
   workspaceStore: ReturnType<typeof createCoreServices>["workspaceStore"];
   boundedResponseChunks: (value: string, maxCharacters?: number) => Iterable<string>;
@@ -229,7 +230,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
 
       if (intentDecision.needsClarification && intentDecision.clarificationPrompt) {
         return {
-          message: intentDecision.clarificationPrompt,
+          message: localizedProjectClarification(intentDecision.intent, prompt ?? "", intentDecision.clarificationPrompt),
           suggestedActions: [],
           activeContext: resolved.context,
         };
@@ -486,6 +487,8 @@ export function registerChatRoutes(app: FastifyInstance, deps: ChatRouteDeps): v
         undefined,
         request.body.attachments,
         memoryPolicy,
+        undefined,
+        semantic?.coreRoute,
       );
       applyChatTelemetryHeaders(reply, businessResult);
       return { ...businessResult, activeContext: resolved.context };

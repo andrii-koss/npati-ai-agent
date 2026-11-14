@@ -2,6 +2,7 @@ import type { FormEvent } from "react";
 import { useTranslation } from "../i18n";
 import type { Company, CompanyDraft } from "./types";
 import { CompanyDataAutoAllow } from "./CompanyDataAutoAllow";
+import { requiredFieldMessage } from "../required-field-i18n";
 
 export interface CompanyDrawerProps {
   isOpen: boolean;
@@ -26,7 +27,7 @@ export function CompanyDrawer({
   saving,
   businesses,
 }: CompanyDrawerProps) {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
 
   if (!isOpen) return null;
 
@@ -48,7 +49,9 @@ export function CompanyDrawer({
         <form onSubmit={saveCompany}>
           <section>
             <h3>{t("companySettings.companyDrawer.companyContext")}</h3>
-            <label><span>{t("companySettings.companyDrawer.companyName")}</span><input required value={companyForm.name} onChange={(event) => setCompanyForm({ ...companyForm, name: event.target.value })} /></label>
+            <label><span>{t("companySettings.companyDrawer.companyName")}</span><input required value={companyForm.name}
+              onInvalid={(event) => event.currentTarget.setCustomValidity(requiredFieldMessage[language])}
+              onChange={(event) => { event.currentTarget.setCustomValidity(""); setCompanyForm({ ...companyForm, name: event.target.value }); }} /></label>
             <label><span>{t("companySettings.companyDrawer.linkedBusiness")}</span><select value={companyForm.businessId} onChange={(event) => setCompanyForm({ ...companyForm, businessId: event.target.value })}>
               <option value="">{t("companySettings.companyDrawer.independent")}</option>{businesses?.map((business) => <option value={business.id} key={business.id}>{business.name}</option>)}
             </select></label>

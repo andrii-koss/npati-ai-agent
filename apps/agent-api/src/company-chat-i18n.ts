@@ -102,21 +102,30 @@ function profileSimilarity(left: Map<string, number>, right: Map<string, number>
 
 /** Ukrainian and Russian words without the letters that tell the languages apart ("Який код ми зберегли для X?"). */
 const cyrillicFunctionWords: Record<"uk" | "ru", Set<string>> = {
-  uk: new Set(["який", "яка", "яке", "якого", "якому", "що", "щоб", "та", "або", "чи", "ще", "коли", "зараз", "хто", "вона", "вони", "воно", "треба", "щодо", "зберегли", "нагадай", "покажи", "перелічи", "створи", "додай", "видали", "зміни", "поміняй", "зроби", "знайди", "постав", "перейди", "збережи", "будь", "його", "її", "мені", "потрібно", "бізнесу", "цей", "ця", "шо"]),
-  ru: new Set(["какой", "какая", "какое", "какого", "что", "чтобы", "или", "где", "сейчас", "кто", "она", "они", "оно", "нужно", "когда", "сохранили", "напомни", "покажи", "перечисли", "создай", "добавь", "удали", "измени", "поменяй", "сделай", "найди", "поставь", "переключись", "сохрани", "пожалуйста", "его", "мне", "надо", "бизнеса", "этот", "эта", "чё", "поищи", "запомни", "какие", "новая"]),
+  uk: new Set(["який", "яка", "яке", "якого", "якому", "що", "щоб", "та", "або", "чи", "ще", "коли", "зараз", "хто", "вона", "вони", "воно", "треба", "щодо", "зберегли", "нагадай", "покажи", "перелічи", "створи", "додай", "видали", "зміни", "поміняй", "зроби", "знайди", "постав", "перейди", "збережи", "будь", "його", "її", "мені", "потрібно", "бізнесу", "цей", "ця", "шо", "як", "справи", "хай", "нехай", "дякую", "добре"]),
+  ru: new Set(["какой", "какая", "какое", "какого", "что", "чтобы", "или", "где", "сейчас", "кто", "она", "они", "оно", "нужно", "когда", "сохранили", "напомни", "покажи", "перечисли", "создай", "добавь", "удали", "измени", "поменяй", "сделай", "найди", "поставь", "переключись", "сохрани", "пожалуйста", "его", "мне", "надо", "бизнеса", "этот", "эта", "чё", "поищи", "запомни", "какие", "новая", "привет", "как", "дела", "сегодня", "давай", "пусть", "спасибо", "хорошо"]),
 };
 const latinOnlyLetters: Partial<Record<CompanyChatLanguage, RegExp>> = { pl: /[ąćęłńśźż]/u, tr: /[ğış]/u, pt: /[ãõ]/u, es: /[ñ]/u, de: /[ßä]/u, fr: /[œîïû]/u };
 
 const functionWords: Record<"en" | "fr" | "de" | "es" | "it" | "pl" | "pt" | "nl" | "tr", Set<string>> = {
-  en: new Set(["the", "and", "for", "from", "with", "every", "our", "my", "your", "have", "has", "is", "are", "this", "that", "please", "show", "what", "which", "how", "me", "it", "of", "to", "by", "at", "on", "an", "its", "did", "we", "do", "does", "now", "you", "new", "be", "can", "there", "whats", "pls", "wkly"]),
+  en: new Set(["the", "and", "for", "from", "with", "every", "our", "my", "your", "have", "has", "is", "are", "this", "that", "please", "show", "what", "which", "how", "me", "it", "of", "to", "by", "at", "on", "an", "its", "did", "we", "do", "does", "now", "you", "new", "be", "can", "there", "whats", "pls", "wkly", "where", "build", "make", "create", "set", "add", "write", "switch", "hi", "hello", "doing", "today", "game", "catches", "falling"]),
   fr: new Set(["le", "les", "et", "pour", "avec", "une", "est", "dans", "des", "du", "nous", "vous", "sur", "pas", "qui", "au", "aux", "chaque", "quel", "quelle", "notre", "nos", "mets", "ajoute", "crée", "nouvelle", "hebdo", "son", "sa"]),
-  de: new Set(["der", "die", "das", "und", "mit", "für", "ist", "nicht", "ein", "eine", "auf", "bitte", "wir", "ich", "zu", "den", "dem", "welche", "welchen", "welcher", "dieser", "haben", "hat", "jetzt", "unser", "unsere"]),
-  es: new Set(["el", "los", "las", "y", "para", "con", "una", "es", "está", "por", "qué", "cómo", "del", "al", "tiene", "cada", "antes", "cuál", "hay", "ahora", "guardamos", "sus", "pon", "añade", "anade", "su", "nueva", "semanal", "informe", "cuántas", "cuántos"]),
-  it: new Set(["il", "gli", "per", "una", "è", "che", "non", "sono", "della", "alla", "nel", "degli", "di", "dell", "nella", "alle", "ogni", "sul", "quale", "abbiamo", "delle", "dei", "c", "tramite", "suo", "sua", "nuova", "ore", "metti", "aggiungi", "progetto", "questa", "questo", "quante", "quanti", "sue", "suoi"]),
+  de: new Set(["der", "die", "das", "und", "mit", "für", "ist", "nicht", "ein", "eine", "auf", "bitte", "wir", "ich", "zu", "den", "dem", "welche", "welchen", "welcher", "dieser", "haben", "hat", "jetzt", "unser", "unsere", "zur", "zum", "firma", "wechsle", "hallo", "geht", "dir", "heute", "mir", "erstelle", "ändere", "schreib", "lass"]),
+  es: new Set(["el", "los", "las", "y", "para", "con", "una", "es", "está", "por", "qué", "cómo", "del", "al", "tiene", "cada", "antes", "cuál", "hay", "ahora", "guardamos", "sus", "pon", "añade", "anade", "su", "nueva", "semanal", "informe", "cuántas", "cuántos", "hola", "estás", "hoy", "haz", "nuestro", "nuestra", "negocio", "jóvenes", "público", "investiga", "fuentes", "escribe", "cambia"]),
+  it: new Set(["il", "gli", "per", "una", "è", "che", "non", "sono", "della", "alla", "nel", "degli", "di", "dell", "nella", "alle", "ogni", "sul", "quale", "abbiamo", "delle", "dei", "c", "tramite", "suo", "sua", "nuova", "ore", "metti", "aggiungi", "progetto", "questa", "questo", "quante", "quanti", "sue", "suoi", "ciao", "stai", "oggi", "imposta", "obiettivo", "entro", "vendere", "dammi", "fonti", "ricerca", "prezzi", "tabella", "prodotti", "prezzo", "scorte", "fammi", "scrivi", "nostro", "profilo", "aziendale", "pubblico", "famiglie", "giovani"]),
   pl: new Set(["w", "z", "na", "się", "jest", "nie", "dla", "oraz", "że", "jak", "do", "to", "jaki", "jaka", "każdy", "naszego", "przez", "co", "tam", "masz", "jej", "ten", "zmień", "dodaj", "utwórz", "jakie", "ma", "ją", "codziennie"]),
-  pt: new Set(["o", "os", "as", "para", "com", "uma", "é", "está", "não", "você", "do", "da", "em", "no", "na", "dos", "das", "ao", "nosso", "nossa", "toda", "até", "qual", "agora", "tem", "adicione", "crie", "dados", "dele", "dela"]),
+  pt: new Set(["o", "os", "as", "para", "com", "uma", "é", "está", "não", "você", "do", "da", "em", "no", "na", "dos", "das", "ao", "nosso", "nossa", "toda", "até", "qual", "agora", "tem", "adicione", "crie", "dados", "dele", "dela", "olá", "hoje", "faz", "muda", "pão", "sextas", "escreve", "pesquisa", "indica", "lembra"]),
   nl: new Set(["het", "een", "van", "met", "voor", "niet", "wij", "ik", "naar", "ook", "op", "om", "elke", "welke", "je", "er", "nu", "toe", "zet", "wat", "staat", "zoek", "noem", "zijn", "wijzig"]),
   tr: new Set(["ve", "bir", "bu", "için", "ile", "çok", "gibi", "her", "olarak", "hangi", "şu", "ne", "var", "yap", "ekle", "değiştir", "oluştur", "içinde", "deki"]),
+};
+
+/**
+ * Ukrainian and Russian typed in Latin letters ("na sajti zmini zagolovok", "sdelai lending sait") were answered in
+ * Italian or Dutch (V6 step 13). Two words from one list decide; the reply is then in that language.
+ */
+const transliteratedWords: Record<"uk" | "ru", Set<string>> = {
+  uk: new Set(["zmini", "zminy", "zroby", "zrobi", "shcho", "sho", "sajti", "sajt", "sayt", "sayti", "dlya", "budlaska", "pryvit", "yak", "spravy", "dyakuyu", "svizhyj", "svizhyi", "hlib", "shchoranku", "zapamyataj", "stvory", "dodaj", "pokazhy", "potribno", "zaraz", "meni"]),
+  ru: new Set(["sdelai", "sdelaj", "sdelay", "pozhaluista", "pozhaluysta", "pojaluista", "dlia", "sait", "privet", "kak", "dela", "spasibo", "svezhii", "svezhiy", "hleb", "khleb", "zapomni", "sozdai", "sozdaj", "dobav", "pokazhi", "nuzhno", "seichas", "mne", "pekarni", "lending"]),
 };
 
 function detectedLanguage(message: string): { language: CompanyChatLanguage; confidence: number; letters: number } {
@@ -140,6 +149,10 @@ function detectedLanguage(message: string): { language: CompanyChatLanguage; con
     if (uk !== ru) return { language: uk > ru ? "uk" : "ru", confidence: 1, letters };
   }
   if (candidates[0] === "en") {
+    const latinWords = normalized.split(" ");
+    const translit = (["uk", "ru"] as const).map((language) => ({ language, count: latinWords.filter((word) => transliteratedWords[language].has(word)).length }))
+      .sort((left, right) => right.count - left.count);
+    if (translit[0]!.count >= 2 && translit[0]!.count > translit[1]!.count) return { language: translit[0]!.language, confidence: 1, letters };
     // Letters that only one supported Latin-script language uses decide what the small trigram samples misread (V5-D75).
     const lettered = Object.entries(latinOnlyLetters).filter(([, pattern]) => pattern.test(normalized)).map(([language]) => language as CompanyChatLanguage);
     if (lettered.length === 1) return { language: lettered[0]!, confidence: 1, letters };

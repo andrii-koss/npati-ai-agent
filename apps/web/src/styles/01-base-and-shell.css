@@ -400,7 +400,7 @@ a {
 .sidebar {
   position: fixed;
   top: 0;
-  left: 0;
+  inset-inline-start: 0;
   width: 230px;
   z-index: 50;
   height: 100vh;
@@ -410,7 +410,7 @@ a {
   flex-direction: column;
   color: var(--npati-black);
   background: white;
-  border-right: 1px solid #e5e5e5;
+  border-inline-end: 1px solid #e5e5e5;
   box-sizing: border-box;
   overflow-y: auto;
   overflow-x: hidden;
