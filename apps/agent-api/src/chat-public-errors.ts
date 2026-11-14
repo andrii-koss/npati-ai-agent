@@ -55,6 +55,8 @@ function providerFailureText(error: unknown, raw: string, route: string | undefi
   const fallbackLabel = fallback?.modelId && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,100}$/.test(fallback.modelId) ? text.fallback(fallback.modelId, fallback.httpStatus) : "";
   // A provider outage (5xx, timeout) is temporary: the advice is to try again, not to change the AI mode.
   const reason: ProviderFailureReason = /no active credentials for provider/i.test(raw) ? "noCredential"
+    // An exhausted balance says so, without the provider's or the router's own text (V6 step 13).
+    : status === 402 || /credits? exhausted|insufficient (?:balance|credits?|funds)|out of credits/i.test(raw) ? "noCredits"
     : status === 401 || status === 403 ? "denied"
     : status === 404 ? "notFound"
     : status === 429 ? "rateLimit"
