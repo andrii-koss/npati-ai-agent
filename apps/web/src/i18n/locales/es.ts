@@ -158,7 +158,7 @@ export const es: TranslationSchema = {
   chat: {
     emptyTitle: "¿En qué desea trabajar hoy?",
     emptySubtitle: "Pregunte cualquier cosa a NPATI Agent o explore nuevas ideas.",
-    placeholder: "Pregunta lo que quieras a NPATI Agent…",
+    placeholder: "Pregunta a Npati…",
     businessEmptySubtitle: "Usaré el contexto de {{name}} y no inventaré datos faltantes.",
     businessPlaceholder: "Pregunte sobre su negocio, metas, audiencia o siguiente paso…",
     workModeLabel: "Modo de trabajo",

@@ -236,6 +236,13 @@ function requestedAgentCount(message: string, raw: Record<string, unknown>): num
   return undefined;
 }
 
+/** Whether the request gives the new agent a name, in any of the 16 chat languages or in quotes. */
+export function namesRequestedAgent(message: string): boolean {
+  return /[«»“”„"]|'[^']+'/u.test(message)
+    || /(?<!\p{L})(?:name[ds]?|call(?:ed)?|nenn\p{L}*|namens|hei(?:ß|ss)t|appel\p{L}*|nomm\p{L}*|nom|ll[aá]m\p{L}*|nombre|chiam\p{L}*|nome|nazwij|imi\p{L}*|chama\p{L}*|noem\p{L}*|naam|heet|ad[ıi]|isim|ismi)(?!\p{L})/iu.test(message)
+    || /(?:назв|назов|ім['’ʼ]?я|имя|имен|叫|名字|命名|名前|名づけ|と呼|이름|라고|سمّ|سم|اسم|नाम)/u.test(message);
+}
+
 function defaultAgentProfiles(message: string): Array<{ name: string; role: string; description: string; systemInstruction: string }> {
   return defaultLocalizedAgentProfiles(message);
 }
@@ -588,7 +595,9 @@ export class CompanyChatActions {
 
     const addAgents = /(?:add|дод|добав|füge|ajoute|añade|aggiungi|dodaj|adicione|voeg|ekle|添加|追加|추가|أضف|जोड़ें)/iu.test(message)
       && /(?:agents?|агент|agenten|agenti|agentów|ajan|智能体|エージェント|에이전트|وكلاء|وكيل|एजेंट)/iu.test(message);
-    if (selectedCompanyId && addAgents && !createCompany) {
+    // Template agents fit only a bare "add N agents" request. A request that names the agent goes to the planner:
+    // the template ignored it and a Korean "add an SNS helper named 꿀벌53" created "마케팅 관리자" (V6 step 13).
+    if (selectedCompanyId && addAgents && !createCompany && !namesRequestedAgent(message)) {
       const company = await store.getCompany(auth, selectedCompanyId);
       if (requestNamesOtherCompany(message, company)) return undefined;
       const existingAgents = await store.listCompanyAgents(auth, company.id);

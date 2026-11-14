@@ -1,5 +1,7 @@
 import { settleCodingTurn } from "./coding-agent-turn-settlement";
 import { codingCancellationMessage } from "./coding-cancel-i18n";
+import { codingProviderFailureMessage } from "./chat-public-errors";
+import { filesChangedBeforeFailure } from "./company-run-notice-i18n";
 import { createHash, randomUUID } from "node:crypto";
 import { CODE_AGENT_MASTER_FLAG } from "./feature-flags";
 import { emitCodingActivity } from "./coding-agent-runner-contracts";
@@ -618,10 +620,9 @@ export class CodingAgentRunner {
           await this.ports.runEvents?.append({ eventKey: `code-run-cancelled:${turnId}`, eventType: "cancelled", runStatus: "cancelled", message: "Coding Agent run cancelled during model request" });
           return stop("cancelled", "cancelled", codingCancellationMessage(input.responseLanguage));
         }
-        const failure = error as { code?: string; message?: string };
         await release("provider_error");
         await this.ports.runEvents?.append({ eventKey: `code-run-failed:${turnId}`, eventType: "failed", runStatus: "failed", message: "Coding Agent run failed" });
-        return stop("failed", "provider_error", failure.message ?? `The model provider failed (${failure.code ?? "provider_error"}).`);
+        return stop("failed", "provider_error", codingProviderFailureMessage(error, input.model, input.responseLanguage) + filesChangedBeforeFailure(input.responseLanguage, summary.filesChanged));
       }
 
       steps += 1;

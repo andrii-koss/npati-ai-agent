@@ -1,7 +1,8 @@
 /* Client-safe chat and company-run messages.
  * Extracted verbatim from app.ts (step 2a of docs/refactoring/PLAN.md).
  */
-import { detectCompanyChatLanguage, resolveConversationLanguage } from "./company-chat-i18n";
+import { detectCompanyChatLanguage, resolveConversationLanguage, type CompanyChatLanguage } from "./company-chat-i18n";
+import { companyRunNotices } from "./company-run-notice-i18n";
 import { providerErrorCopy, type ProviderFailureReason } from "./chat-provider-error-i18n";
 import { InferenceRouteFailure } from "./production-resilient-ai-engine";
 import { SelfHealingExhaustedError } from "./resilience-admission-queue";
@@ -32,32 +33,47 @@ export function publicChatError(error: unknown, route?: string, requestMessage =
   if (/audio transcription|transcribe|transcription/i.test(raw)) {
     return "The voice message could not be transcribed. Check the audio file and try again.";
   }
-  if (error instanceof InferenceRouteFailure || error instanceof SelfHealingExhaustedError) {
-    const attempts = error instanceof InferenceRouteFailure
-      ? error.attempts
-      : error instanceof SelfHealingExhaustedError
-        ? error.attempts.filter((attempt) => !attempt.success).map((attempt) => ({
-            modelId: attempt.modelId,
-            httpStatus: Number(/\bHTTP\s+(\d{3})\b/i.exec(attempt.error ?? "")?.[1]) || undefined,
-          }))
-        : [];
-    const selected = attempts[0]?.modelId ?? route;
-    const routeName = selected && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,100}$/.test(selected) ? selected : "NPATI";
-    const status = Number(/\bAPI\s*\[(\d{3})\]/i.exec(raw)?.[1]) || attempts[0]?.httpStatus || (Number(/\bHTTP\s+(\d{3})\b/i.exec(raw)?.[1]) || undefined);
-    const fallback = attempts.length > 1 ? attempts.at(-1) : undefined;
-    const text = providerErrorCopy(noticeLanguage(requestMessage));
-    const fallbackLabel = fallback?.modelId && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,100}$/.test(fallback.modelId) ? text.fallback(fallback.modelId, fallback.httpStatus) : "";
-    // A provider outage (5xx, timeout) is temporary: the advice is to try again, not to change the AI mode.
-    const reason: ProviderFailureReason = /no active credentials for provider/i.test(raw) ? "noCredential"
-      : status === 401 || status === 403 ? "denied"
-      : status === 404 ? "notFound"
-      : status === 429 ? "rateLimit"
-      : status === 400 ? "rejected"
-      : (status !== undefined && status >= 500) || /timed? ?out|ECONNRESET|ECONNREFUSED|unavailable|overload/i.test(raw) ? "unavailable"
-      : selected?.startsWith("auto") ? "switchMode" : "tryAgain";
-    return `${text.failed(routeName, status)}${fallbackLabel} ${text.reasons[reason]}`;
-  }
+  if (error instanceof InferenceRouteFailure || error instanceof SelfHealingExhaustedError) return providerFailureText(error, raw, route, noticeLanguage(requestMessage));
   return providerErrorCopy(noticeLanguage(requestMessage)).generic;
+}
+
+/** The localized provider failure: which route failed, its HTTP status and what to do, without the provider's raw text. */
+function providerFailureText(error: unknown, raw: string, route: string | undefined, language: CompanyChatLanguage) {
+  const attempts = error instanceof InferenceRouteFailure
+    ? error.attempts
+    : error instanceof SelfHealingExhaustedError
+      ? error.attempts.filter((attempt) => !attempt.success).map((attempt) => ({
+          modelId: attempt.modelId,
+          httpStatus: Number(/\bHTTP\s+(\d{3})\b/i.exec(attempt.error ?? "")?.[1]) || undefined,
+        }))
+      : [];
+  const selected = attempts[0]?.modelId ?? route;
+  const routeName = selected && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,100}$/.test(selected) ? selected : "NPATI";
+  const status = Number(/\bAPI\s*\[(\d{3})\]/i.exec(raw)?.[1]) || attempts[0]?.httpStatus || (Number(/\bHTTP\s+(\d{3})\b/i.exec(raw)?.[1]) || undefined);
+  const fallback = attempts.length > 1 ? attempts.at(-1) : undefined;
+  const text = providerErrorCopy(language);
+  const fallbackLabel = fallback?.modelId && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,100}$/.test(fallback.modelId) ? text.fallback(fallback.modelId, fallback.httpStatus) : "";
+  // A provider outage (5xx, timeout) is temporary: the advice is to try again, not to change the AI mode.
+  const reason: ProviderFailureReason = /no active credentials for provider/i.test(raw) ? "noCredential"
+    : status === 401 || status === 403 ? "denied"
+    : status === 404 ? "notFound"
+    : status === 429 ? "rateLimit"
+    : status === 400 ? "rejected"
+    : (status !== undefined && status >= 500) || /timed? ?out|ECONNRESET|ECONNREFUSED|unavailable|overload/i.test(raw) ? "unavailable"
+    : selected?.startsWith("auto") ? "switchMode" : "tryAgain";
+  return `${text.failed(routeName, status)}${fallbackLabel} ${text.reasons[reason]}`;
+}
+
+/**
+ * A coding run whose model call failed. The run showed the adapter's raw English text ("OmniRoute chat failed with
+ * HTTP 402: [deepseek] … credits exhausted") to a Russian or Chinese user (V6 step 13).
+ */
+export function codingProviderFailureMessage(error: unknown, route: string | undefined, language: CompanyChatLanguage = "en") {
+  const raw = error instanceof InferenceRouteFailure && error.cause instanceof Error ? error.cause.message : error instanceof Error ? error.message : String(error);
+  const plainStatus = /\bHTTP\s+\d{3}\b/i.test(raw) || /\bAPI\s*\[\d{3}\]/i.test(raw);
+  if (error instanceof InferenceRouteFailure || error instanceof SelfHealingExhaustedError || plainStatus) return providerFailureText(error, raw, route, language);
+  // Other failures (a policy guard such as provider_data_classification_exceeded) keep their own reason.
+  return raw || providerErrorCopy(language).generic;
 }
 
 /** Run failures caused by the company's own configuration or policy, not by the AI model. */
@@ -69,17 +85,10 @@ const COMPANY_RUN_POLICY_ERRORS = new Set(["TOOL_FORBIDDEN", "NO_MEMORY_TOOL_FOR
 
 export function publicCompanyRunMessage(result: string | null | undefined, errorMessage: string | null | undefined, requestMessage: string, errorCode?: string | null) {
   if (result?.trim()) return result;
-  if (!errorMessage?.trim()) return "Company run completed.";
-  const language = detectCompanyChatLanguage(requestMessage);
-  if (errorCode && COMPANY_RUN_POLICY_ERRORS.has(errorCode)) {
-    const reason = errorMessage.trim().slice(0, 300);
-    if (language === "uk") return `Завдання компанії не виконано: ${reason}`;
-    if (language === "ru") return `Задача компании не выполнена: ${reason}`;
-    return `The company task was not completed: ${reason}`;
-  }
-  if (language === "uk") return "Не вдалося виконати завдання компанії через тимчасову недоступність вибраної AI-моделі. Перевірте підключення вибраної моделі в AI Marketplace і спробуйте ще раз.";
-  if (language === "ru") return "Не удалось выполнить задачу компании из-за временной недоступности выбранной AI-модели. Проверьте подключение выбранной модели в AI Marketplace и попробуйте снова.";
-  return "The company task could not be completed because the selected AI model is temporarily unavailable. Check the selected model connection in AI Marketplace, then try again.";
+  const text = companyRunNotices(detectCompanyChatLanguage(requestMessage));
+  if (!errorMessage?.trim()) return text.completed;
+  if (errorCode && COMPANY_RUN_POLICY_ERRORS.has(errorCode)) return text.notCompleted + errorMessage.trim().slice(0, 300);
+  return text.unavailable;
 }
 
 // The sources label follows the conversation language: an English answer ended with "Джерела:" (V6 step 11).
@@ -103,17 +112,11 @@ export function attachResearchSources(content: string, research?: { sources: Arr
  */
 export function unreachablePageMessage(target: string, error: string | undefined, requestMessage: string) {
   const reason = (error ?? "").replace(/\s+/g, " ").trim().slice(0, 300);
-  const language = detectCompanyChatLanguage(requestMessage);
-  if (language === "uk") return `Не вдалося відкрити сторінку ${target}${reason ? ": " + reason : "."}\n\nБез її вмісту я не аналізую сайт, щоб не вигадувати висновки. Перевірте адресу та доступність сайту або надішліть скріншот чи HTML сторінки.`;
-  if (language === "ru") return `Не удалось открыть страницу ${target}${reason ? ": " + reason : "."}\n\nБез её содержимого я не анализирую сайт, чтобы не выдумывать выводы. Проверьте адрес и доступность сайта или пришлите скриншот или HTML страницы.`;
-  return `The page ${target} could not be opened${reason ? ": " + reason : "."}\n\nWithout its content I will not analyse the site, so as not to invent findings. Check the address and that the site is reachable, or send a screenshot or the page HTML.`;
+  return companyRunNotices(detectCompanyChatLanguage(requestMessage)).unreachable(target, reason ? ": " + reason : ".");
 }
 
 /** The answer when a web search the user asked for returned nothing usable; see `unreachablePageMessage`. */
 export function webResearchFailedMessage(error: string | undefined, requestMessage: string) {
   const reason = (error ?? "").replace(/\s+/g, " ").trim().slice(0, 300);
-  const language = detectCompanyChatLanguage(requestMessage);
-  if (language === "uk") return `Вебпошук не дав результатів, на які можна спертися${reason ? ": " + reason : "."}\n\nБез знайдених сторінок я не роблю висновків, щоб не вигадувати. Спробуйте уточнити запит або назвіть конкретні сайти.`;
-  if (language === "ru") return `Веб-поиск не дал результатов, на которые можно опереться${reason ? ": " + reason : "."}\n\nБез найденных страниц я не делаю выводов, чтобы не выдумывать. Уточните запрос или назовите конкретные сайты.`;
-  return `The web search returned nothing usable${reason ? ": " + reason : "."}\n\nWithout retrieved pages I will not draw conclusions, so as not to invent findings. Refine the request or name specific sites.`;
+  return companyRunNotices(detectCompanyChatLanguage(requestMessage)).researchFailed(reason ? ": " + reason : ".");
 }

@@ -135,7 +135,7 @@ export function BusinessChatComposer({
         }}
         onKeyDown={sendOnEnter}
         disabled={inputDisabled}
-        placeholder={business ? t("chat.businessPlaceholder") : t("chat.placeholder")}
+        placeholder={t("chat.placeholder")}
       />
       <div>
         {((sending || developmentActive) && !(codeInbox.active && input.trim())) ? (

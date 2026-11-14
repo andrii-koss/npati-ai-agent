@@ -1,0 +1,150 @@
+{
+  "description": "V6 step 13 dirty-language live test. Per locale: filler words (read agents, create agent), typos (read goals, create goal), mixing/surzhyk/slang (read business memory, remember fact, project edit). Placeholders: {A} agent number, {G} goal target, {M} remembered number, {P} project heading marker.",
+  "turns": ["filler_read", "filler_write", "typo_read", "typo_write", "mix_read", "mix_write", "mix_project"],
+  "messages": {
+    "en": [
+      "um so like, who are the agents we've got in this company? just list em, don't change anything ok",
+      "ok so basically, you know, add like a new agent to this company, kinda a social media helper, name it Buzzy {A}, yeah",
+      "wat goals do we hav for this busines rigth now? jsut show them, dont chnage anythign",
+      "pls ad a new goal: sell {G} croisants by the end of decmber, trak it as a numbr goal",
+      "yo wats the deal w/ our biz, like who r our customers n what do u remember abt us? no changes pls lol",
+      "ngl pls remember 4 later: we got {M} delivery bikes now, thx fam",
+      "hey can u pls make the landing page in this project, like an index.html w/ a big heading 'Bakery V6X{P}' n one line abt fresh bread, nothing fancy lol"
+    ],
+    "uk": [
+      "ну короче, типу, які в нас агенти є в цій компанії? просто перелічи, нічого не міняй",
+      "ну значить так, типу, додай у компанію нового агента, короче такого помічника для соцмереж, назви його Бджілка {A}, ну",
+      "які в нас зараз цілі для цьго бізнесу? просто покажи, нічго не змінюй",
+      "додай нову ціль: продатии {G} круасанів до кінця грудян, як числову ціль",
+      "слухай, шо там по нашому бізнесу, хто в нас клієнти і шо ти про нас запомнив? нічо не мєняй, лади",
+      "запомни, пожалуйста, шо в нас тепер {M} велосипедів для доставки, ну шоб потім знав",
+      "зроби, пліз, в цьому проєкті лендінг: index.html з великим заголовком 'Bakery V6X{P}' і одним рядочком про свіжий хліб, нічо сложного"
+    ],
+    "de": [
+      "äh, also, welche Agenten haben wir halt in dieser Firma? einfach auflisten, irgendwie nichts ändern, ne",
+      "also sozusagen, füg halt mal einen neuen Agenten zur Firma hinzu, äh, so einen Social-Media-Helfer, nenn ihn Summi {A}",
+      "welche ziele habn wir grad für dieses unternehmn? nur zeign, nix ändern",
+      "füge ein neus ziel hinzu: {G} croisants bis ende dezmber verkaufen, als zahlenziel",
+      "kannst du mal checken, wer unsere Kunden sind und was du dir über unser Business gemerkt hast? bitte nix updaten",
+      "merk dir bitte for later: wir haben jetzt {M} Delivery-Bikes, ist voll wichtig fürs Business",
+      "kannst du bitte in diesem Projekt eine Landingpage bauen, also eine index.html mit einer großen Headline 'Bakery V6X{P}' und einer Zeile über frisches Brot, nichts Fancy"
+    ],
+    "fr": [
+      "euh, genre, c'est quoi les agents qu'on a dans cette entreprise ? juste la liste, du coup tu changes rien",
+      "bah en fait, du coup, ajoute un nouvel agent à l'entreprise, genre un assistant réseaux sociaux, appelle-le Abeille {A}",
+      "c koi nos objectif pour ce busness en ce moment ? montre juste, change rien stp",
+      "ajoute un nouvel objetcif : vendre {G} croisants d'ici la fin de decembre, comme objectif chifré",
+      "tu peux checker qui sont nos clients et ce que t'as gardé en mémoire sur notre business ? pas d'update stp",
+      "remember ça pour plus tard stp : on a maintenant {M} vélos de delivery, c'est hyper important pour le business",
+      "tu peux me faire une landing page dans ce projet, genre un index.html avec un gros heading 'Bakery V6X{P}' et une ligne sur le pain frais, rien de fancy"
+    ],
+    "es": [
+      "eh, o sea, ¿qué agentes tenemos en esta empresa? pues solo dímelos, no cambies nada, ¿vale?",
+      "bueno, este, tipo, añade un agente nuevo a la empresa, o sea, un ayudante de redes sociales, llámalo Abejita {A}",
+      "q metas tenemos aora para este negosio? solo muestralas, no canbies nada",
+      "agrega una meta nueva: bender {G} cruasanes asta fin de diciembre, como meta numerica",
+      "oye, ¿puedes chequear quiénes son nuestros customers y qué recuerdas del business? no hagas update porfa",
+      "acuérdate porfa para later: ahora tenemos {M} bicis para el delivery, es súper importante",
+      "hazme porfa una landing page en este proyecto, un index.html con un heading grande 'Bakery V6X{P}' y una línea sobre pan fresco, nada fancy"
+    ],
+    "it": [
+      "ehm, cioè, quali agenti abbiamo in questa azienda? tipo elencali e basta, non cambiare niente",
+      "allora, praticamente, aggiungi un nuovo agente all'azienda, insomma un aiutante per i social, chiamalo Ape {A}",
+      "ke obbiettivi abbiamo ora per questa atività? fammeli vedere e basta, non canbiare nulla",
+      "agiungi un nuovo obbiettivo: vendere {G} cornetti entro fine dicenbre, come obbiettivo numerico",
+      "puoi checkare chi sono i nostri clienti e cosa ti sei salvato sul nostro business? niente update per favore",
+      "ricordati per dopo: adesso abbiamo {M} bici per il delivery, è super importante per il business",
+      "mi fai una landing page in questo progetto, un index.html con un heading grande 'Bakery V6X{P}' e una riga sul pane fresco, niente di fancy"
+    ],
+    "pl": [
+      "no, jakby, jakich mamy agentów w tej firmie? w sumie tylko wymień, nic nie zmieniaj",
+      "no to znaczy, dodaj typu nowego agenta do firmy, kurde, takiego pomocnika od social mediów, nazwij go Pszczółka {A}",
+      "jakie mamy teraz cele dla tego biznsu? tylko pokaz, nic nie zmieniaj",
+      "dodaj nowy cel: sprzedac {G} rogalikow do konca grudnia, jako cel liczbowy",
+      "możesz checknąć kim są nasi klienci i co zapamiętałeś o naszym biznesie? bez updatów pls",
+      "zapamiętaj na later: mamy teraz {M} rowerów do delivery, to mega ważne dla biznesu",
+      "zrób mi pls landing page w tym projekcie, index.html z dużym headingiem 'Bakery V6X{P}' i jedną linijką o świeżym chlebie, nic fancy"
+    ],
+    "pt": [
+      "tipo, então, que agentes temos nesta empresa, né? só lista, não mudes nada, sei lá",
+      "então pá, tipo, adiciona um agente novo à empresa, um ajudante de redes sociais, né, chama-lhe Abelha {A}",
+      "q metas temos agora pra este negocio? so mostra, nao muda nada",
+      "adiciona uma meta nova: vender {G} croassants ate ao fim de dezenbro, como meta numerica",
+      "podes dar um check em quem são os nossos clientes e no que guardaste sobre o nosso business? sem update por favor",
+      "lembra-te para later: agora temos {M} bikes de delivery, é super importante para o business",
+      "faz-me uma landing page neste projeto, um index.html com um heading grande 'Bakery V6X{P}' e uma linha sobre pão fresco, nada fancy"
+    ],
+    "nl": [
+      "eh, nou, welke agenten hebben we eigenlijk in dit bedrijf? gewoon opnoemen zeg maar, niks veranderen",
+      "dus eh, voeg gewoon een nieuwe agent toe aan het bedrijf, zeg maar een social-media-hulpje, noem hem Bijtje {A}",
+      "welke doelen hebbe we nu voor dit bedrjif? alleen laten zien, niks verandern",
+      "voeg een nieuw doel toe: {G} croisants verkopen voor eind decmber, als getal doel",
+      "kun je even checken wie onze customers zijn en wat je over ons business hebt onthouden? geen updates please",
+      "onthoud even voor later: we hebben nu {M} delivery bikes, super belangrijk voor de business",
+      "kun je in dit project een landing page maken, een index.html met een grote heading 'Bakery V6X{P}' en één regel over vers brood, niks fancy"
+    ],
+    "tr": [
+      "şey, yani, bu şirkette hangi ajanlarımız var işte? sadece listele, hani bir şey değiştirme",
+      "yani şöyle, şirkete yeni bir ajan ekle falan, işte sosyal medya yardımcısı gibi, adı Arıcık {A} olsun",
+      "su an bu isletme icin hangi hedeflerimz var? sadce goster, hicbirsey degistrme",
+      "yeni bir hedef ekle: aralik sonuna kadar {G} kruvasan satmak, sayisal hedf olarak",
+      "müşterilerimiz kim ve business hakkında ne hatırlıyorsun, bir check eder misin? update yapma lütfen",
+      "later için hatırla: artık {M} tane delivery bisikletimiz var, business için çok önemli",
+      "bu projede bir landing page yapar mısın, büyük bir 'Bakery V6X{P}' heading'i ve taze ekmek hakkında bir satır olan bir index.html, fancy olmasın"
+    ],
+    "ru": [
+      "ну короче, типа, какие у нас агенты в этой компании? в общем просто перечисли, ничего не меняй",
+      "ну как бы, блин, добавь в компанию нового агента, короче помощника для соцсетей, назови его Пчёлка {A}",
+      "какие у нас сейчас цели для этго бизнса? просто покажи, ничо не меняй",
+      "добавь новую цель: продать {G} круасанов до конца декабрья, как числовую цель",
+      "чекни плиз, кто наши клиенты и что ты запомнил про наш бизнес? без апдейтов",
+      "запомни на потом: у нас теперь {M} байков для деливери, это супер важно для бизнеса",
+      "сделай плиз в этом проекте лендос: index.html с большим хедингом 'Bakery V6X{P}' и одной строчкой про свежий хлеб, ничего фэнси"
+    ],
+    "zh": [
+      "嗯，那个，就是，这家公司现在都有哪些代理啊？反正列一下就行，别改东西",
+      "那个，然后，给公司加一个新代理吧，就是那种社交媒体小助手，嗯，叫它小蜜蜂{A}",
+      "这个生意现在有那些木标？只看一下，不要改任合东西",
+      "加一个新木标：到十二月底卖出{G}个牛交包，作为数字目标",
+      "帮我 check 一下我们的 customer 是谁，还有你记住了我们 business 的什么？不要 update",
+      "帮我 remember 一下：我们现在有 {M} 辆 delivery 自行车，对 business 很 important",
+      "帮我在这个 project 里做一个 landing page，一个 index.html，大 heading 写 'Bakery V6X{P}'，再加一行关于新鲜面包的，不要太 fancy"
+    ],
+    "ja": [
+      "えっと、あの、この会社って今どんなエージェントがいるんだっけ？なんか一覧だけでいいよ、変更はしないで",
+      "まあ、ちょっと、会社に新しいエージェントを追加して、あの、SNS のお手伝い的な感じで、名前はミツバチ{A}で",
+      "このびじねすのいまのもくひようってなにがある？みせるだけで、なにもへんこうしないで",
+      "あたらしいもくひようをついかして：12がつまつまでにクロワッサンを{G}こうる、すうちもくひようとして",
+      "うちの customer って誰で、business についてなにを覚えてる？ちょっと check して、update はしないで",
+      "あとのために remember して：今 delivery 用の自転車が {M} 台ある、business にめっちゃ important",
+      "この project に landing page 作って、index.html に大きい heading 'Bakery V6X{P}' と新鮮なパンについての一行、fancy じゃなくていい"
+    ],
+    "ko": [
+      "음, 그, 이 회사에 지금 어떤 에이전트들 있어? 뭐 그냥 목록만 보여줘, 아무것도 바꾸지 말고",
+      "그니까 막, 회사에 새 에이전트 하나 추가해 줘, 약간 SNS 도우미 같은 거, 이름은 꿀벌{A}로",
+      "이 비즈니스 지금 목퓨가 뭐 있어? 보여주기만 하고 아무거또 바꾸지마",
+      "새 목표 추가해 줘: 12월 말까지 크로아상 {G}개 판매, 숫자 목퓨로",
+      "우리 customer가 누군지, business에 대해 뭐 기억하고 있는지 check 좀 해 줘, update는 하지 마",
+      "나중을 위해 remember 해 줘: 이제 delivery 자전거가 {M}대 있어, business에 완전 important 해",
+      "이 project에 landing page 만들어 줘, 큰 heading 'Bakery V6X{P}' 하고 신선한 빵에 대한 한 줄 있는 index.html, fancy 안 해도 돼"
+    ],
+    "ar": [
+      "يعني، طيب، مين الوكلاء اللي عندنا في هالشركة؟ بصراحة بس اعرضهم، خلاص لا تغيّر شي",
+      "اممم، يعني، ضيف وكيل جديد للشركة، طيب، مساعد للسوشال ميديا، سمّيه نحلة {A}",
+      "ما هي الاهداف الحاليه لهذا البيزنس؟ فقط اعرضها ولا تغير اي شي",
+      "اضف هدف جديد: بيع {G} كرواسون قبل نهايه ديسمبر، كهدف رقمي",
+      "momken t3mel check meen el customers bto3na w shu btetzakkar 3an el business? bala update",
+      "تذكر for later: صار عندنا {M} bikes للـ delivery، مهم جداً للـ business",
+      "اعمل لي landing page بهذا المشروع، index.html فيه heading كبير 'Bakery V6X{P}' وسطر واحد عن الخبز الطازج، بدون fancy"
+    ],
+    "hi": [
+      "मतलब, यार, वो इस कंपनी में अभी कौन-कौन से एजेंट हैं ना? बस लिस्ट कर दो, कुछ बदलना मत",
+      "अच्छा, मतलब, कंपनी में एक नया एजेंट जोड़ दो ना, वो सोशल मीडिया हेल्पर टाइप, बस नाम मधुमक्खी {A} रखना",
+      "इस बिजनस के अभी कोन से लक्श्य है? बस दिखाओ, कुछ मत बदलो",
+      "नया लक्श्य जोडो: दिसंबर के अंत तक {G} क्रोसां बेचना, संख्या वाला लक्श्य",
+      "yaar zara check karo hamare customers kaun hain aur business ke baare mein tumhe kya yaad hai? koi update mat karna",
+      "later ke liye remember karo: ab hamare paas {M} delivery bikes hain, business ke liye bahut important hai",
+      "is project mein ek landing page bana do, index.html jisme bada heading 'Bakery V6X{P}' ho aur fresh bread ke baare mein ek line, kuch fancy nahi"
+    ]
+  }
+}
