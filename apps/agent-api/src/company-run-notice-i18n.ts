@@ -144,26 +144,29 @@ export function filesChangedBeforeFailure(language: CompanyChatLanguage | undefi
   return "\n\n" + (FILES_CHANGED_BEFORE_FAILURE[language ?? "en"] ?? FILES_CHANGED_BEFORE_FAILURE.en) + files.slice(0, 20).map((file) => "`" + file + "`").join(", ") + (files.length > 20 ? ", …" : "");
 }
 
-/** "Select a company first" for a website request with no company chosen; it was English for every language (V6 step 13). */
-const SELECT_COMPANY: Record<CompanyChatLanguage, [string, string, string]> = {
-  en: ["Select an active Company before creating a website.", "Select an active Company before creating or editing a website. Available companies: ", "."],
-  uk: ["Оберіть активну компанію, перш ніж створювати сайт.", "Оберіть активну компанію, перш ніж створювати або змінювати сайт. Доступні компанії: ", "."],
-  ru: ["Выберите активную компанию, прежде чем создавать сайт.", "Выберите активную компанию, прежде чем создавать или изменять сайт. Доступные компании: ", "."],
-  de: ["Wählen Sie eine aktive Firma aus, bevor Sie eine Website erstellen.", "Wählen Sie eine aktive Firma aus, bevor Sie eine Website erstellen oder bearbeiten. Verfügbare Firmen: ", "."],
-  fr: ["Sélectionnez une entreprise active avant de créer un site web.", "Sélectionnez une entreprise active avant de créer ou de modifier un site web. Entreprises disponibles : ", "."],
-  es: ["Selecciona una empresa activa antes de crear un sitio web.", "Selecciona una empresa activa antes de crear o editar un sitio web. Empresas disponibles: ", "."],
-  it: ["Seleziona un'azienda attiva prima di creare un sito web.", "Seleziona un'azienda attiva prima di creare o modificare un sito web. Aziende disponibili: ", "."],
-  pl: ["Wybierz aktywną firmę przed utworzeniem strony internetowej.", "Wybierz aktywną firmę przed utworzeniem lub edycją strony internetowej. Dostępne firmy: ", "."],
-  pt: ["Seleciona uma empresa ativa antes de criar um site.", "Seleciona uma empresa ativa antes de criar ou editar um site. Empresas disponíveis: ", "."],
-  nl: ["Selecteer een actief bedrijf voordat u een website maakt.", "Selecteer een actief bedrijf voordat u een website maakt of bewerkt. Beschikbare bedrijven: ", "."],
-  tr: ["Web sitesi oluşturmadan önce etkin bir şirket seçin.", "Web sitesi oluşturmadan veya düzenlemeden önce etkin bir şirket seçin. Kullanılabilir şirketler: ", "."],
-  zh: ["创建网站前，请先选择一个活动公司。", "创建或编辑网站前，请先选择一个活动公司。可用公司：", "。"],
-  ja: ["ウェブサイトを作成する前に、有効な会社を選択してください。", "ウェブサイトを作成または編集する前に、有効な会社を選択してください。利用可能な会社: ", "。"],
-  ko: ["웹사이트를 만들기 전에 활성 회사를 선택하세요.", "웹사이트를 만들거나 수정하기 전에 활성 회사를 선택하세요. 사용 가능한 회사: ", "."],
-  ar: ["اختر شركة نشطة قبل إنشاء موقع ويب.", "اختر شركة نشطة قبل إنشاء موقع ويب أو تعديله. الشركات المتاحة: ", "."],
-  hi: ["वेबसाइट बनाने से पहले एक सक्रिय कंपनी चुनें।", "वेबसाइट बनाने या संपादित करने से पहले एक सक्रिय कंपनी चुनें। उपलब्ध कंपनियाँ: ", "।"],
+/**
+ * "Select a company first" for a website request with no company chosen. It was English for every language, then
+ * listed a first page of company names (V6 step 13); it now says where to choose the company.
+ */
+const SELECT_COMPANY: Record<CompanyChatLanguage, [string, string]> = {
+  en: ["Select an active Company before creating a website.", "Choose a company in the selector at the bottom of the chat input, then send the request again."],
+  uk: ["Оберіть активну компанію, перш ніж створювати сайт.", "Оберіть компанію в перемикачі внизу поля вводу, а потім надішліть запит ще раз."],
+  ru: ["Выберите активную компанию, прежде чем создавать сайт.", "Выберите компанию в переключателе внизу поля ввода, затем отправьте запрос ещё раз."],
+  de: ["Wählen Sie eine aktive Firma aus, bevor Sie eine Website erstellen.", "Wählen Sie unten im Eingabefeld eine Firma aus und senden Sie die Anfrage dann erneut."],
+  fr: ["Sélectionnez une entreprise active avant de créer un site web.", "Choisissez une entreprise dans le sélecteur en bas du champ de saisie, puis renvoyez la demande."],
+  es: ["Selecciona una empresa activa antes de crear un sitio web.", "Elige una empresa en el selector de la parte inferior del campo de entrada y vuelve a enviar la solicitud."],
+  it: ["Seleziona un'azienda attiva prima di creare un sito web.", "Scegli un'azienda nel selettore in fondo al campo di inserimento, poi invia di nuovo la richiesta."],
+  pl: ["Wybierz aktywną firmę przed utworzeniem strony internetowej.", "Wybierz firmę w przełączniku na dole pola wpisywania, a potem wyślij prośbę ponownie."],
+  pt: ["Seleciona uma empresa ativa antes de criar um site.", "Escolhe uma empresa no seletor na parte inferior do campo de mensagem e envia o pedido novamente."],
+  nl: ["Selecteer een actief bedrijf voordat u een website maakt.", "Kies een bedrijf in de keuzelijst onder in het invoerveld en stuur het verzoek daarna opnieuw."],
+  tr: ["Web sitesi oluşturmadan önce etkin bir şirket seçin.", "Giriş alanının altındaki seçiciden bir şirket seçin ve isteği yeniden gönderin."],
+  zh: ["创建网站前，请先选择一个活动公司。", "请在输入框底部的选择器中选择一个公司，然后重新发送请求。"],
+  ja: ["ウェブサイトを作成する前に、有効な会社を選択してください。", "入力欄の下にある切り替えで会社を選択してから、もう一度送信してください。"],
+  ko: ["웹사이트를 만들기 전에 활성 회사를 선택하세요.", "입력창 아래의 선택기에서 회사를 선택한 다음 요청을 다시 보내세요."],
+  ar: ["اختر شركة نشطة قبل إنشاء موقع ويب.", "اختر شركة من المحدد أسفل حقل الإدخال، ثم أرسل الطلب مرة أخرى."],
+  hi: ["वेबसाइट बनाने से पहले एक सक्रिय कंपनी चुनें।", "इनपुट बॉक्स के नीचे वाले चयनकर्ता में एक कंपनी चुनें, फिर अनुरोध दोबारा भेजें।"],
 };
 export function selectCompanyForWebsite(language: CompanyChatLanguage, companyNames: string[]): string {
-  const [none, prefix, end] = SELECT_COMPANY[language] ?? SELECT_COMPANY.en;
-  return companyNames.length ? prefix + companyNames.join(", ") + end : none;
+  const [none, choose] = SELECT_COMPANY[language] ?? SELECT_COMPANY.en;
+  return companyNames.length ? choose : none;
 }
