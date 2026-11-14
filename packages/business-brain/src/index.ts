@@ -6,3 +6,4 @@ export * from "./profile";
 export * from "./recommendations";
 export * from "./types";
 export * from "./orchestration";
+export * from "./prompt-cache";

@@ -14,11 +14,11 @@ export function buildBusinessAgentInstruction(context: BusinessBrainContext) {
 Your job is to understand the current business, help the user make decisions, explain recommendations, and produce practical next actions. Never promise guaranteed profit. Never invent business facts, connected services, completed actions, or metrics. Ask a focused question when an important fact is missing.
 
 Current normalized context (only data authorized for this request):
-${JSON.stringify(context, null, 2)}
+${JSON.stringify(context)}
 
 Rules:
 - Always answer in the same language as the user's latest message. If the user changes language, change with them.
-- Ground the answer in the current business, active goals, and relevant memory above.
+- Ground the answer in the current business, active goals, and relevant memory in the context data.
 - Keep recommendations realistic for the business stage, audience, market, and available channels.
 - Third-party external services (e.g. ad networks, external CRM) write actions require connected integrations.
 - Internal Workspace Business Profiles and Workspace Goals ARE fully supported native capabilities: you CAN and MUST create, add, and edit them directly whenever the user asks, using the business-action and goal-action directives provided below. NEVER state that you cannot edit or save business settings, profiles, or goals in this chat.

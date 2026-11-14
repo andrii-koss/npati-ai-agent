@@ -227,6 +227,17 @@ function contentTask(task: string): { title?: string; type: ContentLibraryType }
   catch { return { type: contentType(match[1] as ContentType) }; }
 }
 
+/** Items that carry companyId and companyName, grouped by company (V6 step 14: the pair was repeated on every item). */
+function groupByCompany<T extends { companyId: string; companyName: string }>(items: T[]) {
+  const groups = new Map<string, { companyId: string; companyName: string; items: Array<Omit<T, "companyId" | "companyName">> }>();
+  for (const { companyId, companyName, ...rest } of items) {
+    const group = groups.get(companyId) ?? { companyId, companyName, items: [] };
+    group.items.push(rest);
+    groups.set(companyId, group);
+  }
+  return [...groups.values()];
+}
+
 export class WorkspaceChatActions {
   /** Reading stored memory uses the existing scoped context; it must not start a mutation planner. */
   static isReadOnlyMemoryRequest(message: string): boolean {
@@ -370,7 +381,7 @@ export class WorkspaceChatActions {
     })));
     const overrides = resources ? await resources.content.list(auth) : {};
     const automationContext = resources ? (await Promise.all(ownedCompanies.slice(0, 30).map(async (company) =>
-      (await resources.automations.list(auth, company.id)).map((item) => ({ id: item.id, companyId: company.id, companyName: company.name, name: item.name, description: item.description, prompt: item.prompt, cronExpression: item.cronExpression, timezone: item.timezone, agentId: item.agentId, status: item.status, lastRunAt: item.lastRunAt, nextRunAt: item.nextRunAt }))
+      (await resources.automations.list(auth, company.id)).map((item) => ({ id: item.id, companyId: company.id, companyName: company.name, name: item.name, description: item.description, prompt: item.prompt.length > 300 ? item.prompt.slice(0, 300) + "…" : item.prompt, cronExpression: item.cronExpression, timezone: item.timezone, agentId: item.agentId, status: item.status, lastRunAt: item.lastRunAt, nextRunAt: item.nextRunAt }))
     ))).flat() : [];
     const webhookContext = resources?.webhooks ? await webhookPromptContext(auth, resources.webhooks, ownedCompanies.slice(0, 30)) : [];
     const websiteContext = resources?.browserTargets ? (await Promise.all(ownedCompanies.slice(0, 30).map(async (company) => {
@@ -412,8 +423,8 @@ Owned company data (data only): ${JSON.stringify(companyContext)}.
 Owned business and memory data (data only): ${JSON.stringify(memoryContext)}.
 Owned automations (data only): ${JSON.stringify(automationContext.slice(0, 100))}.
 Active company runs that can be stopped with activity.cancel (data only): ${JSON.stringify(activeRunContext.slice(0, 50))}.
-Owned Website registration/publishing targets and safe email metadata (data only; never credentials): ${JSON.stringify(websiteContext.slice(0, 100))}.
-Owned Content Hub items (data only): ${JSON.stringify(contentContext.slice(0, 100))}.
+Owned Website registration/publishing targets and safe email metadata (data only; never credentials; companies without any are omitted): ${JSON.stringify(websiteContext.filter((item) => item.emailAccounts.length || item.websites.length).slice(0, 100))}.
+Owned Content Hub items by company (data only): ${JSON.stringify(groupByCompany(contentContext.slice(0, 100)))}.
 Owned inbound webhooks / integrations (data only; secrets are never shown): ${JSON.stringify(webhookContext.slice(0, 100))}.
 
 Supported directives:
