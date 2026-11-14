@@ -792,3 +792,13 @@
   animation: company-chart-flow-vertical 10s ease-in-out infinite;
   animation-delay: calc(var(--chart-level-delay) + 1.8s);
 }
+
+/* Inbound webhooks on the Integrations page (V6 step 12). */
+.inbound-webhooks-section .section-heading { align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+.inbound-webhooks-company { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.inbound-webhooks-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; margin-top: 12px; }
+.inbound-webhooks-list .provider-card-footer { flex-wrap: wrap; gap: 8px; justify-content: flex-start; }
+.inbound-webhook-url { display: block; overflow-wrap: anywhere; font-size: 12px; padding: 8px 10px; border-radius: 8px; background: var(--surface-muted, #f4f4f5); margin: 8px 0; }
+.inbound-webhooks-form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.inbound-webhooks-form input { flex: 1 1 220px; min-width: 0; }
+.automation-action-btn.stop-btn { color: #b42318; border-color: #f2b8b5; }

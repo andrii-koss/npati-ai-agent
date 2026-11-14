@@ -1265,6 +1265,8 @@ export const it: TranslationSchema = {
       runNow: "▶ Esegui ora",
       running: "In esecuzione...",
       runNowTitle: "Esegui questa automazione immediatamente",
+      stop: "Interrompi",
+      stopTitle: "Interrompi l’esecuzione in corso",
       history: "Cronologia",
       historyTitle: "Visualizza cronologia esecuzioni",
       edit: "Modifica",
@@ -1317,6 +1319,7 @@ export const it: TranslationSchema = {
     },
     notifications: {
       runInitiated: "Esecuzione avviata per \"{{name}}\".",
+      stopped: "Esecuzione di «{{name}}» interrotta.",
       resultReceived: "Risultato ricevuto!",
       runError: "Errore durante l'esecuzione: {{error}}",
     },

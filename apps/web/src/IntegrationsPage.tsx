@@ -20,6 +20,7 @@ import {
   getScopeLabel,
 } from "./integrations/types";
 import { Badge, ChannelIcon } from "./integrations/ui";
+import { InboundWebhooksSection } from "./integrations/InboundWebhooksSection";
 
 export function IntegrationsPage() {
   const { t } = useTranslation();
@@ -263,6 +264,7 @@ export function IntegrationsPage() {
           </>
         )}
       </section>
+      <InboundWebhooksSection companies={companies} />
       {selected && (
         <IntegrationDrawer
           key={`${selected.id}:${selectedConnectionId || "catalog"}`}

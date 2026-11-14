@@ -259,6 +259,8 @@ export const activity = {
       "runNow": "▶ 今すぐ実行",
       "running": "実行中...",
       "runNowTitle": "この自動化を今すぐ実行",
+      stop: "停止",
+      stopTitle: "実行中の処理を停止",
       "history": "履歴",
       "historyTitle": "実行履歴を表示",
       "edit": "編集",
@@ -311,6 +313,7 @@ export const activity = {
     },
     "notifications": {
       "runInitiated": "「{{name}}」の実行を開始しました。",
+      stopped: "「{{name}}」の実行を停止しました。",
       "resultReceived": "結果を受信しました！",
       "runError": "実行エラー：{{error}}"
     }

@@ -49,6 +49,8 @@ export interface AutomationsSchema {
       runNow: string;
       running: string;
       runNowTitle: string;
+      stop: string;
+      stopTitle: string;
       history: string;
       historyTitle: string;
       edit: string;
@@ -101,6 +103,7 @@ export interface AutomationsSchema {
     };
     notifications: {
       runInitiated: string;
+      stopped: string;
       resultReceived: string;
       runError: string;
     };

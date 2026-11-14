@@ -34,6 +34,12 @@ function err(reply: any, e: unknown) {
   });
 }
 
+/** A webhook as listed: the secret is replaced by a short hint. */
+function maskWebhook<T extends { secret: string }>(webhook: T): Omit<T, "secret"> & { secretHint: string } {
+  const { secret, ...rest } = webhook;
+  return { ...rest, secretHint: secret.slice(0, 6) + "…" + secret.slice(-4) };
+}
+
 export function registerIntegrationsRoutes(
   app: FastifyInstance,
   deps: {
@@ -52,7 +58,7 @@ export function registerIntegrationsRoutes(
       const c = await ctx(auth, r, "workspace:read");
       await store.getCompany(c, r.params.companyId);
       const webhooks = await repo.listWebhooks(c, r.params.companyId);
-      return { webhooks };
+      return { webhooks: webhooks.map(maskWebhook) };
     } catch (e) {
       return err(reply, e);
     }
@@ -68,7 +74,24 @@ export function registerIntegrationsRoutes(
         if (!webhook) {
           return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Webhook not found." } });
         }
-        return reply.code(200).send({ webhook });
+        return reply.code(200).send({ webhook: maskWebhook(webhook) });
+      } catch (e) {
+        return err(reply, e);
+      }
+    }
+  );
+
+  // The delivery URL carries the secret: it is shown only on an explicit request by a user who may manage the company
+  // (Settings > Integrations, "Show URL"), never in lists or in chat (V6 step 12, owner decision).
+  app.post<{ Params: { companyId: string; webhookId: string } }>(
+    "/companies/:companyId/webhooks/:webhookId/reveal",
+    async (r, reply) => {
+      try {
+        const c = await ctx(auth, r, "business:manage");
+        await store.getCompany(c, r.params.companyId);
+        const webhook = await repo.getWebhook(c, r.params.companyId, r.params.webhookId);
+        if (!webhook) return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Webhook not found." } });
+        return reply.code(200).send({ secret: webhook.secret, path: "/api/v1/webhooks/" + webhook.secret });
       } catch (e) {
         return err(reply, e);
       }
@@ -122,7 +145,7 @@ export function registerIntegrationsRoutes(
         }
         const webhook = await repo.setWebhookActive(c, r.params.companyId, r.params.webhookId, r.body.isActive);
         if (!webhook) return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Webhook not found." } });
-        return reply.code(200).send({ webhook });
+        return reply.code(200).send({ webhook: maskWebhook(webhook) });
       } catch (e) {
         return err(reply, e);
       }

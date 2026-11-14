@@ -259,6 +259,8 @@ export const activity = {
       "runNow": "▶ 지금 실행",
       "running": "실행 중...",
       "runNowTitle": "이 자동화를 즉시 실행",
+      stop: "중지",
+      stopTitle: "진행 중인 실행 중지",
       "history": "기록",
       "historyTitle": "실행 기록 보기",
       "edit": "수정",
@@ -311,6 +313,7 @@ export const activity = {
     },
     "notifications": {
       "runInitiated": "\"{{name}}\" 실행을 시작했습니다.",
+      stopped: "“{{name}}” 실행을 중지했습니다.",
       "resultReceived": "결과를 받았습니다!",
       "runError": "실행 오류: {{error}}"
     }

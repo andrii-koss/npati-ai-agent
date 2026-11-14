@@ -320,6 +320,20 @@ export class CompanyAutomationsRepository {
     return claimed;
   }
 
+  /** Automations of a company with a run in progress (the page offers Stop for them). */
+  async runningAutomationIds(ctx: AuthContext, companyId: string): Promise<string[]> {
+    if (this.pool) {
+      const result = await this.pool.query<{ automation_id: string }>(
+        `SELECT DISTINCT automation_id::text FROM company_automation_runs WHERE workspace_id = $1 AND company_id = $2 AND status = 'running'`,
+        [ctx.workspaceId, companyId],
+      );
+      return result.rows.map((row) => row.automation_id);
+    }
+    const ids: string[] = [];
+    for (const [automationId, runs] of this.memoryRuns) if (runs.some((run) => run.status === "running" && run.companyId === companyId)) ids.push(automationId);
+    return ids;
+  }
+
   /** Keeps a long run's lease: without renewal another claim could run the same slot again (V6 step 12). */
   async renewLease(autoId: string, workerId: string, leaseMs: number): Promise<void> {
     if (this.pool) {

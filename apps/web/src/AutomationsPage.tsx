@@ -1,5 +1,5 @@
 import { PageGuideLink } from "./PageGuideLink";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   chooseAvailableCompanyId,
@@ -63,6 +63,8 @@ export function AutomationsPage() {
   const [runs, setRuns] = useState<CompanyAutomationRun[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [runningNowId, setRunningNowId] = useState<string | null>(null);
+  // Automations stopped with Stop: their pending Run Now request ends with 409 and must not overwrite the Stop notice.
+  const stoppedIds = useRef(new Set<string>());
 
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState("");
@@ -336,9 +338,33 @@ export function AutomationsPage() {
         }`
       );
     } catch (err: any) {
-      setNotice(t("automations.notifications.runError", { error: err.message }));
+      // A run stopped with Stop ends as cancelled; the Stop notice stays.
+      if (!stoppedIds.current.delete(auto.id)) setNotice(t("automations.notifications.runError", { error: err.message }));
     } finally {
       setRunningNowId(null);
+    }
+  };
+
+  // A scheduled run can start while the page is open: the list is refreshed so its Stop button appears (V6 step 12).
+  useEffect(() => {
+    if (!selectedCompanyId) return;
+    const timer = setInterval(() => {
+      void api<{ automations: CompanyAutomation[] }>(`/companies/${selectedCompanyId}/automations`)
+        .then((res) => setAutomations(res.automations))
+        .catch(() => undefined);
+    }, 15000);
+    return () => clearInterval(timer);
+  }, [selectedCompanyId]);
+
+  // Stop the run in progress (V6 step 12, owner decision): the run ends as cancelled and the Run Now request returns.
+  const stopRun = async (auto: CompanyAutomation) => {
+    try {
+      stoppedIds.current.add(auto.id);
+      await api<{ stopped: number }>(`/companies/${selectedCompanyId}/automations/${auto.id}/stop`, { method: "POST" });
+      setNotice(t("automations.notifications.stopped", { name: auto.name }));
+      setAutomations((prev) => prev.map((item) => (item.id === auto.id ? { ...item, isRunning: false } : item)));
+    } catch (err: any) {
+      setNotice(t("automations.notifications.runError", { error: err.message }));
     }
   };
 
@@ -607,6 +633,7 @@ export function AutomationsPage() {
         setStatusFilter={setStatusFilter}
         toggleStatus={toggleStatus}
         triggerRunNow={triggerRunNow}
+        stopRun={stopRun}
         openHistory={openHistory}
         openEditDrawer={openEditDrawer}
         deleteAutomation={deleteAutomation}

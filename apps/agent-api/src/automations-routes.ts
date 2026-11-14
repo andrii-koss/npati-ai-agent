@@ -99,6 +99,7 @@ export function registerCompanyAutomationsRoutes(
     repo: CompanyAutomationsRepository;
     scheduler?: AutomationScheduler;
     triggerRun?: (automation: CompanyAutomation) => Promise<{ result: string }>;
+    stopRuns?: (ctx: import("@npati/workspace").AuthContext, companyId: string, automationId: string) => Promise<number>;
   }
 ) {
   const { auth, store, repo, triggerRun } = deps;
@@ -115,7 +116,9 @@ export function registerCompanyAutomationsRoutes(
         const c = await ctx(auth, r, "workspace:read");
         await store.getCompany(c, r.params.companyId);
         const automations = await repo.list(c, r.params.companyId);
-        return { automations };
+        // The page shows Stop while a run of the automation is in progress (V6 step 12).
+        const running = new Set(await repo.runningAutomationIds(c, r.params.companyId));
+        return { automations: automations.map((automation) => ({ ...automation, isRunning: running.has(automation.id) })) };
       } catch (e) {
         return err(reply, e);
       }
@@ -287,6 +290,22 @@ export function registerCompanyAutomationsRoutes(
         const nextRunAt = computeNextCronDate(auto.cronExpression, new Date(), auto.timezone).toISOString();
         await repo.recordRunFail(runRecord.id, auto.id, nextRunAt, "Automation execution is not configured on this server", durationMs);
         return reply.code(503).send({ status: "failed", runId: runRecord.id, automationId: auto.id, error: "Automation execution is not configured on this server" });
+      } catch (e) {
+        return err(reply, e);
+      }
+    }
+  );
+
+  // Stop the run in progress (V6 step 12, owner decision: Stop on the Automations page, not only in chat).
+  app.post<{ Params: { companyId: string; automationId: string } }>(
+    "/companies/:companyId/automations/:automationId/stop",
+    async (r, reply) => {
+      try {
+        const c = await ctx(auth, r, "business:manage");
+        await repo.get(c, r.params.companyId, r.params.automationId);
+        if (!deps.stopRuns) return reply.code(503).send({ error: { code: "STOP_UNAVAILABLE", message: "Stopping runs is not available on this server" } });
+        const stopped = await deps.stopRuns(c, r.params.companyId, r.params.automationId);
+        return reply.code(200).send({ stopped });
       } catch (e) {
         return err(reply, e);
       }

@@ -259,6 +259,8 @@ export const activity = {
       "runNow": "▶ Nu uitvoeren",
       "running": "Uitvoeren...",
       "runNowTitle": "Deze automatisering direct uitvoeren",
+      stop: "Stoppen",
+      stopTitle: "Lopende uitvoering stoppen",
       "history": "Geschiedenis",
       "historyTitle": "Uitvoeringsgeschiedenis bekijken",
       "edit": "Bewerken",
@@ -311,6 +313,7 @@ export const activity = {
     },
     "notifications": {
       "runInitiated": "Uitvoering gestart voor \"{{name}}\".",
+      stopped: "Uitvoering van ‘{{name}}’ gestopt.",
       "resultReceived": "Resultaat ontvangen!",
       "runError": "Uitvoeringsfout: {{error}}"
     }

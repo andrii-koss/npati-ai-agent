@@ -259,6 +259,8 @@ export const activity = {
       "runNow": "▶ Запустить сейчас",
       "running": "Выполнение...",
       "runNowTitle": "Запустить эту автоматизацию немедленно",
+      stop: "Остановить",
+      stopTitle: "Остановить выполняющийся запуск",
       "history": "История",
       "historyTitle": "Просмотреть историю запусков",
       "edit": "Изменить",
@@ -311,6 +313,7 @@ export const activity = {
     },
     "notifications": {
       "runInitiated": "Запуск «{{name}}» начат.",
+      stopped: "Запуск «{{name}}» остановлен.",
       "resultReceived": "Результат получен!",
       "runError": "Ошибка запуска: {{error}}"
     }

@@ -336,6 +336,17 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: PlatformRoute
     repo: automationsRepo,
     scheduler: automationScheduler,
     triggerRun: (automation) => runAutomation(automation, `automation:manual:${automation.id}:${Date.now()}`),
+    // Stop on the Automations page (V6 step 12, owner decision): every company run started for this automation is
+    // keyed "automation:…<automationId>…"; each active one is cancelled like a chat "stop" (runtime, then the queue).
+    stopRuns: async (context, companyId, automationId) => {
+      const active = (await workspaceStore.listCompanyAgentRuns(context, companyId, 100))
+        .filter((run) => !["completed", "failed", "cancelled"].includes(run.status) && run.idempotencyKey.startsWith("automation:") && run.idempotencyKey.includes(automationId));
+      for (const run of active) {
+        await companyRuntime.cancel(context, companyId, run.id);
+        if (companyRunQueue) await companyRunQueue.cancel({ context, companyId, runId: run.id });
+      }
+      return active.length;
+    },
   });
   app.post<{ Params: { businessId: string }; Body: { filename: string; mimeType: string; data: string } }>(
     "/businesses/:businessId/logo",

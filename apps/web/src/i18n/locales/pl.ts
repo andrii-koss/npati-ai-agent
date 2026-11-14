@@ -1116,6 +1116,8 @@ export const pl: TranslationSchema = {
       runNow: "▶ Uruchom teraz",
       running: "Uruchamianie...",
       runNowTitle: "Uruchom tę automatyzację natychmiast",
+      stop: "Zatrzymaj",
+      stopTitle: "Zatrzymaj trwające uruchomienie",
       history: "Historia",
       historyTitle: "Wyświetl historię uruchomień",
       edit: "Edytuj",
@@ -1168,6 +1170,7 @@ export const pl: TranslationSchema = {
     },
     notifications: {
       runInitiated: "Rozpoczęto uruchomienie dla \"{{name}}\".",
+      stopped: "Zatrzymano uruchomienie „{{name}}”.",
       resultReceived: "Otrzymano wynik!",
       runError: "Błąd uruchomienia: {{error}}",
     },

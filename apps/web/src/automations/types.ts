@@ -25,6 +25,8 @@ export interface CompanyAutomation {
   nextRunAt: string;
   createdAt: string;
   updatedAt: string;
+  /** A run of this automation is in progress (scheduled or started from here); the page offers Stop. */
+  isRunning?: boolean;
 }
 
 export interface CompanyAutomationRun {

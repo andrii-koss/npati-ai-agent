@@ -259,6 +259,8 @@ export const activity = {
       "runNow": "▶ Executar agora",
       "running": "Executando...",
       "runNowTitle": "Executar esta automação imediatamente",
+      stop: "Parar",
+      stopTitle: "Parar a execução em andamento",
       "history": "Histórico",
       "historyTitle": "Ver histórico de execuções",
       "edit": "Editar",
@@ -311,6 +313,7 @@ export const activity = {
     },
     "notifications": {
       "runInitiated": "Execução iniciada para \"{{name}}\".",
+      stopped: "A execução de «{{name}}» foi parada.",
       "resultReceived": "Resultado recebido!",
       "runError": "Erro de execução: {{error}}"
     }

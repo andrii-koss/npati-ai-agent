@@ -1126,6 +1126,8 @@ export const en: TranslationSchema = {
       runNow: "▶ Run Now",
       running: "Running...",
       runNowTitle: "Run this automation immediately",
+      stop: "Stop",
+      stopTitle: "Stop the run in progress",
       history: "History",
       historyTitle: "View run execution history",
       edit: "Edit",
@@ -1178,6 +1180,7 @@ export const en: TranslationSchema = {
     },
     notifications: {
       runInitiated: "Run initiated for \"{{name}}\".",
+      stopped: "Stopped the run of \"{{name}}\".",
       resultReceived: "Result received!",
       runError: "Run error: {{error}}",
     },

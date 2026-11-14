@@ -1273,6 +1273,8 @@ export const fr: TranslationSchema = {
       runNow: "▶ Exécuter",
       running: "Exécution...",
       runNowTitle: "Exécuter cette automatisation immédiatement",
+      stop: "Arrêter",
+      stopTitle: "Arrêter l’exécution en cours",
       history: "Historique",
       historyTitle: "Voir l'historique des exécutions",
       edit: "Modifier",
@@ -1325,6 +1327,7 @@ export const fr: TranslationSchema = {
     },
     notifications: {
       runInitiated: "Exécution lancée pour « {{name}} ».",
+      stopped: "Exécution de « {{name}} » arrêtée.",
       resultReceived: "Résultat reçu !",
       runError: "Erreur d'exécution : {{error}}",
     },

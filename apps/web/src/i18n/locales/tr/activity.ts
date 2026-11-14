@@ -259,6 +259,8 @@ export const activity = {
       "runNow": "▶ Şimdi çalıştır",
       "running": "Çalışıyor...",
       "runNowTitle": "Bu otomasyonu hemen çalıştır",
+      stop: "Durdur",
+      stopTitle: "Devam eden çalıştırmayı durdur",
       "history": "Geçmiş",
       "historyTitle": "Çalıştırma geçmişini görüntüle",
       "edit": "Düzenle",
@@ -311,6 +313,7 @@ export const activity = {
     },
     "notifications": {
       "runInitiated": "“{{name}}” için çalıştırma başlatıldı.",
+      stopped: "“{{name}}” çalıştırması durduruldu.",
       "resultReceived": "Sonuç alındı!",
       "runError": "Çalıştırma hatası: {{error}}"
     }

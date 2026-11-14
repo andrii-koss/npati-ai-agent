@@ -1126,6 +1126,8 @@ export const uk: TranslationSchema = {
       runNow: "▶ Запустити зараз",
       running: "Виконується...",
       runNowTitle: "Запустити цю автоматизацію негайно",
+      stop: "Зупинити",
+      stopTitle: "Зупинити запуск, що виконується",
       history: "Історія",
       historyTitle: "Переглянути історію запусків",
       edit: "Редагувати",
@@ -1178,6 +1180,7 @@ export const uk: TranslationSchema = {
     },
     notifications: {
       runInitiated: "Запуск розпочато для «{{name}}».",
+      stopped: "Запуск «{{name}}» зупинено.",
       resultReceived: "Результат отримано!",
       runError: "Помилка запуску: {{error}}",
     },

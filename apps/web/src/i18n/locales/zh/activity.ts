@@ -259,6 +259,8 @@ export const activity = {
       "runNow": "▶ 立即运行",
       "running": "正在运行…",
       "runNowTitle": "立即运行此自动化",
+      stop: "停止",
+      stopTitle: "停止正在进行的运行",
       "history": "历史",
       "historyTitle": "查看运行执行历史",
       "edit": "编辑",
@@ -311,6 +313,7 @@ export const activity = {
     },
     "notifications": {
       "runInitiated": "已启动“{{name}}”运行。",
+      stopped: "已停止“{{name}}”的运行。",
       "resultReceived": "已收到结果！",
       "runError": "运行错误：{{error}}"
     }

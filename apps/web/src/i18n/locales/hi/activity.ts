@@ -259,6 +259,8 @@ export const activity = {
       "runNow": "▶ अभी चलाएँ",
       "running": "चल रहा है...",
       "runNowTitle": "यह ऑटोमेशन तुरंत चलाएँ",
+      stop: "रोकें",
+      stopTitle: "चल रहा रन रोकें",
       "history": "इतिहास",
       "historyTitle": "रन इतिहास देखें",
       "edit": "संपादित करें",
@@ -311,6 +313,7 @@ export const activity = {
     },
     "notifications": {
       "runInitiated": "\"{{name}}\" का रन शुरू हुआ।",
+      stopped: "“{{name}}” का रन रोका गया।",
       "resultReceived": "परिणाम मिला!",
       "runError": "रन त्रुटि: {{error}}"
     }

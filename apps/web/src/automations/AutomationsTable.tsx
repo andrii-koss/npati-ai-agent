@@ -14,6 +14,7 @@ export interface AutomationsTableProps {
   setStatusFilter: (val: "all" | "active" | "paused") => void;
   toggleStatus: (auto: CompanyAutomation) => void | Promise<void>;
   triggerRunNow: (auto: CompanyAutomation) => void | Promise<void>;
+  stopRun?: (auto: CompanyAutomation) => void | Promise<void>;
   openHistory: (auto: CompanyAutomation) => void | Promise<void>;
   openEditDrawer: (auto: CompanyAutomation) => void;
   deleteAutomation: (id: string) => void | Promise<void>;
@@ -32,6 +33,7 @@ export function AutomationsTable({
   setStatusFilter,
   toggleStatus,
   triggerRunNow,
+  stopRun,
   openHistory,
   openEditDrawer,
   deleteAutomation,
@@ -186,6 +188,17 @@ export function AutomationsTable({
                     >
                       {isRunningNow ? t("automations.table.running") : t("automations.table.runNow")}
                     </button>
+                    {stopRun && (isRunningNow || auto.isRunning) && (
+                      <button
+                        type="button"
+                        className="automation-action-btn stop-btn"
+                        data-testid="automation-stop"
+                        onClick={() => stopRun(auto)}
+                        title={t("automations.table.stopTitle")}
+                      >
+                        {t("automations.table.stop")}
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="automation-action-btn"

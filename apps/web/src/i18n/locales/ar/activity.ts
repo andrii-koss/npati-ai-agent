@@ -259,6 +259,8 @@ export const activity = {
       "runNow": "▶ تشغيل الآن",
       "running": "جارٍ التشغيل...",
       "runNowTitle": "تشغيل هذه الأتمتة فورًا",
+      stop: "إيقاف",
+      stopTitle: "إيقاف التشغيل الجاري",
       "history": "السجل",
       "historyTitle": "عرض سجل التنفيذ",
       "edit": "تعديل",
@@ -311,6 +313,7 @@ export const activity = {
     },
     "notifications": {
       "runInitiated": "بدأ التشغيل لـ \"{{name}}\".",
+      stopped: "تم إيقاف تشغيل «{{name}}».",
       "resultReceived": "تم استلام النتيجة!",
       "runError": "خطأ في التشغيل: {{error}}"
     }
