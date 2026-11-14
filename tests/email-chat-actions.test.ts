@@ -181,7 +181,7 @@ describe("EmailChatActions", () => {
     const company = await store.createCompany(auth, { name: "Secure Mail" }, "email-chat-secure");
     const account = await repo.createAccount(auth, company.id, { emailAddress: "secure@example.com" });
     const secret = await EmailChatActions.extractAndExecute(auth, directive({ action: "account.update", companyId: company.id, accountId: account.id, fields: { imapConfig: { host: "imap.example.com", password: "do-not-store-this" } } }), store, repo);
-    expect(secret.cleanText).toContain("Не надсилайте пароль");
+    expect(secret.cleanText).toContain("Please do not send a password");
     expect((await repo.getAccount(auth, company.id, account.id))?.imapConfig.host).toBeUndefined();
     expect(EmailChatActions.containsCredentialSubmission("SMTP password: do-not-store-this")).toBe(true);
 

@@ -127,7 +127,8 @@ export function AutomationsTable({
           {filteredAutomations.map((auto) => {
             const assignedAgent = agents.find((a) => a.id === auto.agentId);
             const isRunningNow = runningNowId === auto.id;
-            const nextDate = auto.nextRunAt ? new Date(auto.nextRunAt) : null;
+            // A paused automation keeps its stored slot for resuming but has no next run (V6 step 12).
+            const nextDate = auto.status === "active" && auto.nextRunAt ? new Date(auto.nextRunAt) : null;
 
             return (
               <tr key={auto.id}>

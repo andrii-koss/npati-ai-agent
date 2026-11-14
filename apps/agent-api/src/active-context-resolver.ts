@@ -30,6 +30,7 @@ export interface ResolvedActiveContext {
 /** A clause that keeps a project unchanged ("не змінюй", "preserve", "keep", "no cambies") names it as context, not as the target. */
 const preservingClause = /(?:не\s+(?:змінюй|чіпай|редагуй|меняй|трогай)|збережи|залиш|сохрани|оставь|don'?t\s+(?:change|touch|edit|modify)|do\s+not\s+(?:change|touch|edit|modify)|\bkeep\b|\bpreserve\b|\bleave\b|nicht\s+ändern|no\s+(?:cambies|toques)|não\s+(?:altere|mude|toque)|mantén|mantenha|conserva|preserva)/iu;
 const nameWords = (value: string) => value.toLocaleLowerCase().match(/[\p{L}]+/gu) ?? [];
+const GENERIC_NAME_WORDS = new Set(["company", "companies", "business", "businesses", "group", "компанія", "компанії", "компанію", "компанией", "компания", "компании", "бізнес", "бизнес", "unternehmen", "firma", "empresa", "société", "societe", "azienda"]);
 /** A proper name as written (case-sensitive) and as whole words: "add" or "new" in ordinary text never names "Add" or "New". */
 /** "this empty test project": the words describe the open project, even when another project is called Test. */
 const refersToCurrentProject = (lowerMessage: string, lowerName: string) => {
@@ -60,7 +61,8 @@ export const quotesName = (message: string, name: string) => ["«»", '""', "“
 
 export function companyNamedInMessage<T extends { id: string; name: string }>(companies: T[], message: string, activeCompanyId?: string | null): T | undefined {
   const words = nameWords(message);
-  const score = (company: T) => nameWords(company.name).filter((word) => word.length >= 5)
+  // Generic words in a company name are not its name: "the company inbox" picked "V6TEST_Company_…" (V6 step 12).
+  const score = (company: T) => nameWords(company.name).filter((word) => word.length >= 5 && !GENERIC_NAME_WORDS.has(word))
     .filter((word) => { const stem = word.slice(0, Math.max(4, word.length - 2)); return words.some((candidate) => candidate.startsWith(stem)); }).length;
   const scored = companies.map((company) => ({ company, score: score(company) })).filter((entry) => entry.score > 0).sort((a, b) => b.score - a.score);
   const best = scored[0];

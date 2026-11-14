@@ -185,8 +185,12 @@ export class EmailChatActions {
     if (directive.accountEmail !== undefined) directive.accountEmail = restore(directive.accountEmail) as string;
     if (directive.contactEmail !== undefined) directive.contactEmail = restore(directive.contactEmail) as string;
     if (!directive.fields) return;
-    for (const key of ["emailAddress", "email"]) if (directive.fields[key] !== undefined) directive.fields[key] = restore(directive.fields[key]);
-    for (const key of ["toAddresses", "ccAddresses", "bccAddresses"]) if (Array.isArray(directive.fields[key])) directive.fields[key] = directive.fields[key].map(restore);
+    // Every field, at any depth: "login agent@npati.test" became imapConfig.username = "EMAIL_REF_…_1" and the stored
+    // mailbox could never log in (V6 step 12).
+    const deep = (value: unknown): unknown => Array.isArray(value) ? value.map(deep)
+      : value && typeof value === "object" ? Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, deep(item)]))
+      : restore(value);
+    directive.fields = deep(directive.fields) as typeof directive.fields;
   }
 
   static isManagementRequest(message: string): boolean {
@@ -199,8 +203,12 @@ export class EmailChatActions {
     return /(?:(?:password|app[ -]?password|парол\w*|client[ _-]?secret|access[ _-]?token|refresh[ _-]?token)\s*(?:is|це|=|:)\s*["']?[^\r\n]{6,}|(?:my\s+(?:app[ -]?)?password|мій\s+парол\w*)\s+(?:is\s+|це\s+)?["']?[^\r\n]{6,})/iu.test(message);
   }
 
-  static credentialSafetyMessage(): string {
-    return "Не надсилайте пароль, app password, OAuth token або client secret у чат. Відкрийте [Email Settings](/settings/email), виберіть скриньку та самостійно вставте секретні дані у захищені поля IMAP/SMTP або OAuth. Після збереження можете попросити мене перевірити з’єднання.";
+  /** In the language of the message that carried the secret (V6 step 12: an English request got Ukrainian). */
+  static credentialSafetyMessage(message = ""): string {
+    const language = detectCompanyChatLanguage(message);
+    if (language === "uk") return "Не надсилайте пароль, app password, OAuth token або client secret у чат. Відкрийте [Email Settings](/settings/email), виберіть скриньку та самостійно вставте секретні дані у захищені поля IMAP/SMTP або OAuth. Після збереження можете попросити мене перевірити з’єднання.";
+    if (language === "ru") return "Не отправляйте пароль, app password, OAuth token или client secret в чат. Откройте [Email Settings](/settings/email), выберите ящик и сами вставьте секретные данные в защищённые поля IMAP/SMTP или OAuth. После сохранения можете попросить меня проверить соединение.";
+    return "Please do not send a password, app password, OAuth token or client secret in the chat. Open [Email Settings](/settings/email), choose the mailbox and enter the secret yourself in the protected IMAP/SMTP or OAuth fields. After saving, you can ask me to test the connection.";
   }
 
   static noActionMessage(message = ""): string {
@@ -265,6 +273,7 @@ Permission keys: ${JSON.stringify(permissions.map((item) => ({ id: item.id, name
 Allowed actions: account.list/create/update/delete/test/dns_check; rule.list/create/update/delete; template.list/create/update/delete; contact.list/upsert; permission.list/revoke; inbox.list/read/compose/reply; draft.update/approve; thread.update/delete.
 Use companyId ${requestedScope === "personal" ? "personal" : scopeId}. Account fields: ${[...accountFields].join(", ")}. Rule fields: ${[...ruleFields].join(", ")}. Template fields: ${[...templateFields].join(", ")} (category: ${[...templateCategories].join("|")}). Contact fields: ${[...contactFields].join(", ")}. Thread fields: ${[...threadFields].join(", ")}. Compose fields: ${[...composeFields].join(", ")}.
 Preserve EMAIL_REF_* placeholders exactly in email address fields (emailAddress, email, accountEmail, toAddresses, ccAddresses, bccAddresses). They are complete user-provided address references, not missing credentials; the server resolves them locally after authorization. Never invent or expand a reference.
+To prepare, draft or write a reply without sending it, use inbox.reply with threadId and fields.isDraft true, so the draft is saved in the AI Inbox; a reply written only in chat prose is not a draft. To send, use draft.approve for a thread that has a saved draft, otherwise inbox.reply without isDraft. The recipient is the thread's customerEmail. Every address in these records is real data of this user, including reserved or test-looking domains such as .test or example.com; never refuse or ask to confirm an address because its domain looks like a test domain.
 For compose/reply, attachmentNames may contain exact filenames attached to the latest user message. For permission/API-key creation, OAuth authorization, and initial secret entry, direct the user to Email Settings. These create new credentials and must not be returned in persistent chat.
 Example:
 ${fence}email-action
@@ -369,7 +378,14 @@ Return ONLY one complete email-action block for the latest request. Omit every u
         } else if (directive.action === "inbox.list") {
           const fields = directive.fields || {};
           const items = await repo.listThreads(auth, companyId, { folder: typeof fields.folder === "string" ? fields.folder as EmailFolder : undefined, status: typeof fields.status === "string" ? fields.status as EmailThreadStatus : undefined, priority: typeof fields.priority === "string" ? fields.priority as EmailPriority : undefined, search: typeof fields.search === "string" ? fields.search : undefined, accountId: typeof fields.accountId === "string" ? fields.accountId : undefined, isVip: typeof fields.isVip === "boolean" ? fields.isVip : undefined, limit: typeof fields.limit === "number" ? Math.min(100, Math.max(1, fields.limit)) : 20 });
-          notice = items.length ? items.map((item) => `- **${safeMarkdown(item.subject)}** — ${safeMarkdown(item.customerEmail)} — ${item.folder}/${item.status}${item.unreadCount ? ` — ${item.unreadCount} unread` : ""}`).join("\n") : "No matching email threads were found.";
+          const line = (item: { subject: string; customerEmail: string; folder: string; status: string; unreadCount?: number }) => `- **${safeMarkdown(item.subject)}** — ${safeMarkdown(item.customerEmail)} — ${item.folder}/${item.status}${item.unreadCount ? ` — ${item.unreadCount} unread` : ""}`;
+          // A filter the threads do not use ("new emails" → status "new" while the thread waits for a human) is not an
+          // empty inbox: the chat answered "no emails" with one unread customer email in it (V6 step 12).
+          const filtered = ["folder", "status", "priority", "search", "accountId", "isVip"].some((key) => fields[key] !== undefined);
+          const all = !items.length && filtered ? await repo.listThreads(auth, companyId, { limit: 20 }) : [];
+          notice = items.length ? items.map(line).join("\n")
+            : all.length ? `No threads match the requested filter; the inbox has ${all.length} thread(s):\n${all.map(line).join("\n")}`
+            : "No matching email threads were found.";
         } else if (directive.action === "inbox.read") {
           const item = await thread(); const messages = await repo.listMessages(auth, companyId, item.id); resourceId = item.id;
           notice = `### ${safeMarkdown(item.subject)}\n\n${messages.slice(-20).map((entry) => `**${entry.direction === "inbound" ? "From" : "To"}:** ${safeMarkdown(entry.direction === "inbound" ? entry.fromAddress : entry.toAddresses.join(", "))}\n${safeMarkdown(entry.bodyText)}`).join("\n\n---\n\n") || "This thread has no messages."}`;
@@ -422,7 +438,7 @@ Return ONLY one complete email-action block for the latest request. Omit every u
       };
     } catch (error) {
       options.onError?.(error);
-      if (error instanceof SecureEmailCredentialError) return { cleanText: this.credentialSafetyMessage() };
+      if (error instanceof SecureEmailCredentialError) return { cleanText: this.credentialSafetyMessage(options.requestMessage) };
       return { cleanText: `${this.noActionMessage()} ${error instanceof Error ? safeMarkdown(error.message, 400) : ""}`.trim() };
     }
   }

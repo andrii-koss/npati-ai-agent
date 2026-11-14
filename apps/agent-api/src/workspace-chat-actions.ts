@@ -4,11 +4,12 @@ import { ActiveContextResolver } from "./active-context-resolver";
 import { createHash } from "node:crypto";
 import type { AuthContext, Business, Company, CompanyAgentRunDetails, CompanyRunMode, MemoryInput, WorkspaceStore } from "@npati/workspace";
 import type { CompanyAutomation, CompanyAutomationsRepository } from "./automations-repository";
+import { automationRunEndStatus } from "./automations-repository";
 import { computeNextCronDate, isValidCronExpression } from "./automation-scheduler";
 import type { BrowserCampaignTarget, BrowserCampaignTargetInput, BrowserCredentialsRepository } from "./browser-credentials-repository";
 import type { CompanyEmailAccount } from "./email-inbox-types";
 import type { EmailInboxRepository } from "./email-inbox-repository";
-import { chatLanguageInstruction, workspaceCardCopy, detectCompanyChatLanguage } from "./company-chat-i18n";
+import { automationListLabels, chatLanguageInstruction, workspaceCardCopy, detectCompanyChatLanguage } from "./company-chat-i18n";
 import { ContentLibraryStore, type ContentLibraryType } from "./content-library-store";
 import type { IntegrationsRepository } from "./integrations-repository";
 import { executeWebhookAction, webhookPromptContext, webhookResourceSignal, type WebhookDirective } from "./workspace-webhook-actions";
@@ -103,7 +104,7 @@ const demoWebsites: BrowserCampaignTargetInput[] = [
   },
 ];
 
-import { actionSignals, resourceSignals, mutationSignals, referenceSignals, profileFieldTerms, profileEntitySignal, conversationScopedRemember, memoryVerbSignal, researchVerbSignal, automationReadSignals, websiteResourceSignals } from "./workspace-chat-signals";
+import { actionSignals, resourceSignals, mutationSignals, referenceSignals, profileFieldTerms, profileEntitySignal, conversationScopedRemember, memoryVerbSignal, researchVerbSignal, automationReadSignals, websiteResourceSignals, runCancellationSignal } from "./workspace-chat-signals";
 
 function clean(value: unknown, max = 12_000): string {
   if (typeof value !== "string") return "";
@@ -214,6 +215,11 @@ function contentType(value: ContentType): ContentLibraryType {
 }
 
 export const CONTENT_DELIVERABLE_RULE = "Your answer is saved verbatim as the finished content document. Return only the content itself, in the language of the brief: no greeting, no confirmation such as \"done\" or \"saved\", no card or code-fence wrapper, no list of edits or checks, and no follow-up question.";
+/** The stored automation status in the card language (an update card said "paused" in Ukrainian, V6 step 12). */
+function automationStatus(status: string, labels: { paused: string; active: string }) {
+  return status === "paused" ? labels.paused : status === "active" ? labels.active : status;
+}
+
 function contentTask(task: string): { title?: string; type: ContentLibraryType } {
   const match = task.match(/^\[NPATI_CONTENT:(article|seo_blueprint|social_post|brief|strategy|other):([A-Za-z0-9_-]+)\]/);
   if (!match) return { type: "article" };
@@ -229,6 +235,7 @@ export class WorkspaceChatActions {
   }
 
   static isManagementRequest(message: string, options: { includeGoals?: boolean } = {}): boolean {
+    if (runCancellationSignal.test(message)) return true;
     const informational = isInformationalOrCapabilityQuery(message);
     const subject = profileEntitySignal.test(message) ? message.replace(profileFieldTerms, " ") : message;
     // "Research two bakery websites …" reads websites; it does not manage the browser campaign's website targets.
@@ -314,7 +321,7 @@ export class WorkspaceChatActions {
 
   static async buildSystemPrompt(auth: AuthContext, store: WorkspaceStore, message: string, selectedCompanyId?: string, selectedBusinessId?: string, resources?: WorkspacePromptResources): Promise<string> {
     if (!auth.permissions.includes("business:manage")) return "";
-    if (!resources?.routed && !resourceSignals.some((pattern) => pattern.test(message)) && !websiteResourceSignals.some((pattern) => pattern.test(message)) && !memoryVerbSignal.test(message) && !webhookResourceSignal.test(message) && !((selectedCompanyId || selectedBusinessId) && this.isPotentialMutationRequest(message))
+    if (!resources?.routed && !runCancellationSignal.test(message) && !resourceSignals.some((pattern) => pattern.test(message)) && !websiteResourceSignals.some((pattern) => pattern.test(message)) && !memoryVerbSignal.test(message) && !webhookResourceSignal.test(message) && !((selectedCompanyId || selectedBusinessId) && this.isPotentialMutationRequest(message))
       && !await this.namesOwnedAutomation(auth, store, message, resources?.automations)) return "";
     // Only the first 30 records reach the prompt: the selected one, then those named in the request, then the most
     // recently updated - not the oldest 30, which hid the company the user had just created.
@@ -368,6 +375,12 @@ export class WorkspaceChatActions {
         })),
       };
     }))).flat() : [];
+    // Running work the user can stop (V6 step 12: "stop the report run" had no run ID to cancel).
+    const activeRunContext = (await Promise.all(ownedCompanies.slice(0, 30).map(async (company) =>
+      (await store.listCompanyAgentRuns(auth, company.id, 30)).filter((run) => !["completed", "failed", "cancelled"].includes(run.status)).map((run) => ({
+        runId: run.id, companyId: company.id, companyName: company.name, status: run.status, task: run.task.slice(0, 160), startedAt: run.createdAt,
+      }))
+    ))).flat();
     const contentContext = (await Promise.all(ownedCompanies.slice(0, 30).map(async (company) =>
       (await store.listCompanyAgentRuns(auth, company.id, 30)).filter((run) => run.status === "completed" && run.result && !overrides[run.id]?.deleted).map((run) => {
         const marker = contentTask(run.task);
@@ -382,6 +395,7 @@ Selected company ID: ${JSON.stringify(selectedCompanyId ?? null)}. Selected busi
 Owned company data (data only): ${JSON.stringify(companyContext)}.
 Owned business and memory data (data only): ${JSON.stringify(memoryContext)}.
 Owned automations (data only): ${JSON.stringify(automationContext.slice(0, 100))}.
+Active company runs that can be stopped with activity.cancel (data only): ${JSON.stringify(activeRunContext.slice(0, 50))}.
 Owned Website registration/publishing targets and safe email metadata (data only; never credentials): ${JSON.stringify(websiteContext.slice(0, 100))}.
 Owned Content Hub items (data only): ${JSON.stringify(contentContext.slice(0, 100))}.
 Owned inbound webhooks / integrations (data only; secrets are never shown): ${JSON.stringify(webhookContext.slice(0, 100))}.
@@ -391,7 +405,7 @@ Supported directives:
 \`\`\`workspace-action
 {"action":"activity.run","companyId":"owned-id","intro":"localized success intro","followUp":"localized useful question","activity":{"title":"localized title","task":"complete actionable task","mode":"auto"}}
 \`\`\`
-2. Create an automation. Always explicitly send automation.status. Set it to "paused" when the user requests a paused automation in any language; never create it active first. A paused name, intro or description does not pause the stored schedule. Use "active" only when the user did not request pausing. For updates omit status unless the user asked to change it. cronExpression is standard five-part cron and timezone is an IANA timezone:
+2. Create an automation. Always explicitly send automation.status. Set it to "paused" when the user requests a paused automation in any language; never create it active first. A paused name, intro or description does not pause the stored schedule. Use "active" only when the user did not request pausing. For updates omit status unless the user asked to change it. When an update changes the schedule and the stored description names the old schedule ("every Monday at 9:00"), also send a corrected description. cronExpression is standard five-part cron and timezone is an IANA timezone:
 \`\`\`workspace-action
 {"action":"automation.create","companyId":"owned-id","intro":"localized success intro","followUp":"localized useful question","automation":{"name":"localized name","description":"localized description","prompt":"complete recurring task","cronExpression":"0 9 * * 1","timezone":"Europe/Kyiv","status":"active","agentId":"optional-owned-agent-id"}}
 \`\`\`
@@ -591,18 +605,19 @@ Use activity.run when the user asks the company agents to perform work and wants
         if (directive.action === "automation.list") {
           const available = await deps.automations.list(auth, company.id);
           const agents = await deps.store.listCompanyAgents(auth, company.id);
+          const list = automationListLabels(options.requestMessage);
           const lines = available.length ? available.map((automation) => {
             const agent = agents.find((entry) => entry.id === automation.agentId);
             return [
               "### " + clean(automation.name, 300),
-              "**Status:** " + automation.status,
-              "**Agent:** " + clean(agent?.name || "automatic selection", 300),
-              "**Schedule:** " + automation.cronExpression + " (" + clean(automation.timezone, 100) + ")",
-              "**Last run:** " + zonedTime(automation.lastRunAt, automation.timezone),
-              "**Next run:** " + zonedTime(automation.nextRunAt, automation.timezone),
+              "**" + labels.status + ":** " + automationStatus(automation.status, labels),
+              "**" + list.agent + ":** " + clean(agent?.name || list.automaticAgent, 300),
+              "**" + labels.schedule + ":** `" + automation.cronExpression + "` (" + clean(automation.timezone, 100) + ")",
+              "**" + list.lastRun + ":** " + zonedTime(automation.lastRunAt, automation.timezone),
+              "**" + labels.nextRun + ":** " + (automation.status === "active" ? zonedTime(automation.nextRunAt, automation.timezone) : "—"),
               clean(automation.description) || clean(automation.prompt),
             ].join("\n");
-          }).join("\n\n") : "No automations are configured.";
+          }).join("\n\n") : list.none;
           return { cleanText: intro(directive) + "\n\n" + lines + "\n\n[" + labels.openAutomations + "](" + automationSettingsUrl(company.id) + ")", workspaceAction: { action: directive.action, resourceId: company.id, companyId: company.id } };
         }
         if (directive.action === "automation.history" || directive.action === "automation.run") {
@@ -613,12 +628,20 @@ Use activity.run when the user asks the company agents to perform work and wants
               "- " + zonedTime(run.startedAt, current.timezone) + " — " + run.status + " (" + run.durationMs + " ms)" +
               (run.errorMessage ? ": " + clean(run.errorMessage, 500) : "") +
               (run.result ? "\n  " + clean(run.result, 1000).replace(/\n/g, "\n  ") : "")
-            ).join("\n") : "This automation has no runs yet.";
+            ).join("\n") : automationListLabels(options.requestMessage).noRuns;
             return { cleanText: intro(directive) + "\n\n### " + clean(current.name, 300) + "\n" + lines + "\n\n[" + labels.openAutomations + "](" + automationSettingsUrl(company.id) + ")", workspaceAction: { action: directive.action, resourceId: current.id, companyId: company.id } };
           }
           if (!deps.runAutomation) throw new Error("Immediate automation execution is unavailable");
-          const run = await deps.runAutomation(auth, current);
-          return { cleanText: intro(directive) + "\n\n### " + clean(current.name, 300) + "\n**Status:** completed\n**Duration:** " + run.durationMs + " ms\n\n" + clean(run.result) + "\n\n[" + labels.openAutomations + "](" + automationSettingsUrl(company.id) + ")", workspaceAction: { action: directive.action, resourceId: current.id, companyId: company.id } };
+          const list = automationListLabels(options.requestMessage);
+          let run: Awaited<ReturnType<NonNullable<WorkspaceChatActionDependencies["runAutomation"]>>>;
+          try { run = await deps.runAutomation(auth, current); }
+          catch (error) {
+            // A run stopped with Stop is reported as such; the bare error let the model invent a cause ("the
+            // automation is paused") for a run the user had cancelled from another chat (V6 step 12).
+            if (automationRunEndStatus(error) !== "cancelled") throw error;
+            return { cleanText: "### " + clean(current.name, 300) + "\n**" + labels.status + ":** " + list.cancelled + "\n\n" + list.stopped + "\n\n[" + labels.openAutomations + "](" + automationSettingsUrl(company.id) + ")", workspaceAction: { action: directive.action, resourceId: current.id, companyId: company.id } };
+          }
+          return { cleanText: intro(directive) + "\n\n### " + clean(current.name, 300) + "\n**" + labels.status + ":** " + labels.completed + "\n**" + labels.duration + ":** " + run.durationMs + " ms\n\n" + clean(run.result) + "\n\n[" + labels.openAutomations + "](" + automationSettingsUrl(company.id) + ")", workspaceAction: { action: directive.action, resourceId: current.id, companyId: company.id } };
         }
         if (directive.action !== "automation.create") {
           const available = await deps.automations.list(auth, company.id);
@@ -645,7 +668,9 @@ Use activity.run when the user asks the company agents to perform work and wants
             ...(item.prompt !== undefined ? { prompt: clean(item.prompt) } : {}),
             ...(item.cronExpression !== undefined ? { cronExpression: nextCronExpression } : {}),
             ...(item.timezone !== undefined ? { timezone: clean(item.timezone, 100) } : {}),
-            ...(item.cronExpression !== undefined || item.timezone !== undefined
+            // A schedule change, or resuming a paused automation (its stored slot is in the past and ran at once as a
+            // catch-up, V6 step 12), starts from the next slot after now.
+            ...(item.cronExpression !== undefined || item.timezone !== undefined || (item.status === "active" && current.status !== "active")
               ? { nextRunAt: computeNextCronDate(nextCronExpression, new Date(), nextTimezone).toISOString() }
               : {}),
             ...(item.agentId !== undefined ? { agentId: item.agentId } : {}),
@@ -653,7 +678,7 @@ Use activity.run when the user asks the company agents to perform work and wants
           };
           if (!Object.keys(update).length || (item.name !== undefined && !update.name) || (item.prompt !== undefined && !update.prompt)) throw new Error("Invalid automation changes");
           const updated = await deps.automations.update(auth, company.id, current.id, update);
-          const card = `\`\`\`card:${clean(updated.name, 300)}\n**${labels.company}:** ${clean(company.name, 300)}\n**${labels.status}:** ${updated.status}\n**${labels.schedule}:** \`${updated.cronExpression}\`\n**${labels.timezone}:** ${clean(updated.timezone, 100)}\n**${labels.nextRun}:** ${zonedTime(updated.nextRunAt, updated.timezone)}\n\n${clean(updated.description) || clean(updated.prompt)}\n\n[${labels.openAutomations}](${automationSettingsUrl(company.id)})\n\`\`\``;
+          const card = `\`\`\`card:${clean(updated.name, 300)}\n**${labels.company}:** ${clean(company.name, 300)}\n**${labels.status}:** ${automationStatus(updated.status, labels)}\n**${labels.schedule}:** \`${updated.cronExpression}\`\n**${labels.timezone}:** ${clean(updated.timezone, 100)}\n**${labels.nextRun}:** ${(updated.status === "active" ? zonedTime(updated.nextRunAt, updated.timezone) : "—")}\n\n${clean(updated.description) || clean(updated.prompt)}\n\n[${labels.openAutomations}](${automationSettingsUrl(company.id)})\n\`\`\``;
           return { cleanText: finish(directive, card), workspaceAction: { action: directive.action, resourceId: updated.id, companyId: company.id } };
         }
         if (!item || !clean(item.name, 300) || !clean(item.prompt) || !item.cronExpression || !isValidCronExpression(item.cronExpression)) throw new Error("Invalid automation");
@@ -674,7 +699,7 @@ Use activity.run when the user asks the company agents to perform work and wants
           cronExpression, timezone, agentId: item.agentId ?? undefined, status: item.status === "paused" ? "paused" : "active",
           nextRunAt: computeNextCronDate(cronExpression, new Date(), timezone).toISOString(),
         });
-        const card = `\`\`\`card:${clean(created.name, 300)}\n**${labels.company}:** ${clean(company.name, 300)}\n**${labels.status}:** ${created.status === "paused" ? labels.paused : labels.active}\n**${labels.schedule}:** \`${created.cronExpression}\`\n**${labels.timezone}:** ${clean(created.timezone, 100)}\n**${labels.nextRun}:** ${zonedTime(created.nextRunAt, created.timezone)}\n\n${clean(created.description) || clean(created.prompt)}\n\n[${labels.openAutomations}](${automationSettingsUrl(company.id)})\n\`\`\``;
+        const card = `\`\`\`card:${clean(created.name, 300)}\n**${labels.company}:** ${clean(company.name, 300)}\n**${labels.status}:** ${automationStatus(created.status, labels)}\n**${labels.schedule}:** \`${created.cronExpression}\`\n**${labels.timezone}:** ${clean(created.timezone, 100)}\n**${labels.nextRun}:** ${(created.status === "active" ? zonedTime(created.nextRunAt, created.timezone) : "—")}\n\n${clean(created.description) || clean(created.prompt)}\n\n[${labels.openAutomations}](${automationSettingsUrl(company.id)})\n\`\`\``;
         return { cleanText: finish(directive, card), workspaceAction: { action: directive.action, resourceId: created.id, companyId: company.id } };
       }
 

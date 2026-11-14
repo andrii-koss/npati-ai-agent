@@ -96,7 +96,7 @@ export function createAutomationExecutor(deps: CreateAutomationExecutorDeps) {
       executionKey,
     );
     if (details.run.status !== "completed") {
-      throw new Error(details.run.errorMessage || `Company automation run ended with status ${details.run.status}`);
+      throw Object.assign(new Error(details.run.errorMessage || `Company automation run ended with status ${details.run.status}`), { cancelled: details.run.status === "cancelled" });
     }
     return { result: details.run.result || `Company run ${details.run.id} completed.` };
   };

@@ -364,6 +364,22 @@ const cardCopies: Record<string, CardCopy> = {
   hi: { type: "प्रकार", business: "व्यवसाय", confidence: "विश्वसनीयता", company: "कंपनी", status: "स्थिति", active: "सक्रिय", completed: "पूर्ण", schedule: "समय-सारणी", timezone: "समय क्षेत्र", nextRun: "अगला रन", mode: "मोड", steps: "चरण", toolCalls: "टूल कॉल", duration: "अवधि", openMemory: "व्यवसाय मेमोरी खोलें", openAutomations: "ऑटोमेशन खोलें", openActivity: "गतिविधि और रन ट्रेस खोलें", openContent: "कंटेंट हब खोलें" },
 };
 
+/** Automation list labels (V6 step 12: the list was English in every language). */
+const automationListCopy: Partial<Record<CompanyChatLanguage, { agent: string; lastRun: string; automaticAgent: string; none: string; cancelled: string; stopped: string; noRuns: string }>> = {
+  en: { agent: "Agent", lastRun: "Last run", automaticAgent: "automatic selection", none: "No automations are configured.", cancelled: "Cancelled", stopped: "Stopped on request before it finished; nothing was produced.", noRuns: "This automation has no runs yet." },
+  uk: { agent: "Агент", lastRun: "Останній запуск", automaticAgent: "автоматичний вибір", none: "Автоматизацій ще немає.", cancelled: "Скасовано", stopped: "Зупинено на запит до завершення; результату немає.", noRuns: "Ця автоматизація ще не запускалась." },
+  ru: { agent: "Агент", lastRun: "Последний запуск", automaticAgent: "автоматический выбор", none: "Автоматизаций пока нет.", cancelled: "Отменено", stopped: "Остановлено по запросу до завершения; результата нет.", noRuns: "Эта автоматизация ещё не запускалась." },
+  de: { agent: "Agent", lastRun: "Letzter Lauf", automaticAgent: "automatische Auswahl", none: "Es sind keine Automatisierungen eingerichtet.", cancelled: "Abgebrochen", stopped: "Auf Anfrage vor dem Ende gestoppt; es gibt kein Ergebnis.", noRuns: "Diese Automatisierung ist noch nicht gelaufen." },
+  es: { agent: "Agente", lastRun: "Última ejecución", automaticAgent: "selección automática", none: "No hay automatizaciones configuradas.", cancelled: "Cancelada", stopped: "Detenida a petición antes de terminar; no hay resultado.", noRuns: "Esta automatización aún no se ha ejecutado." },
+  fr: { agent: "Agent", lastRun: "Dernière exécution", automaticAgent: "sélection automatique", none: "Aucune automatisation n'est configurée.", cancelled: "Annulée", stopped: "Arrêtée sur demande avant la fin ; aucun résultat.", noRuns: "Cette automatisation n’a pas encore été exécutée." },
+  it: { agent: "Agente", lastRun: "Ultima esecuzione", automaticAgent: "selezione automatica", none: "Nessuna automazione configurata.", cancelled: "Annullata", stopped: "Interrotta su richiesta prima della fine; nessun risultato.", noRuns: "Questa automazione non è ancora stata eseguita." },
+  pl: { agent: "Agent", lastRun: "Ostatnie uruchomienie", automaticAgent: "wybór automatyczny", none: "Brak skonfigurowanych automatyzacji.", cancelled: "Anulowano", stopped: "Zatrzymano na żądanie przed zakończeniem; brak wyniku.", noRuns: "Ta automatyzacja jeszcze się nie uruchomiła." },
+  pt: { agent: "Agente", lastRun: "Última execução", automaticAgent: "seleção automática", none: "Nenhuma automação configurada.", cancelled: "Cancelada", stopped: "Interrompida a pedido antes de terminar; não há resultado.", noRuns: "Esta automação ainda não foi executada." },
+};
+export function automationListLabels(message = "") {
+  return automationListCopy[detectCompanyChatLanguage(message)] ?? automationListCopy.en!;
+}
+
 export function workspaceCardCopy(message = ""): CardCopy & { paused: string } {
   const language = detectCompanyChatLanguage(message);
   const paused: Partial<Record<CompanyChatLanguage, string>> = { en: "Paused", uk: "Призупинено", ru: "Приостановлено", de: "Pausiert", es: "Pausada", pt: "Pausada", fr: "En pause", it: "In pausa", pl: "Wstrzymano" };

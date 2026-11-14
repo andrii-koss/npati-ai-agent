@@ -178,7 +178,7 @@ export function renderInlineMarkdown(
   let match: RegExpExecArray | null;
   inlineMarkdown.lastIndex = 0;
   while ((match = inlineMarkdown.exec(content))) {
-    if (match.index > cursor) nodes.push(content.slice(cursor, match.index));
+    if (match.index > cursor) nodes.push(unescapeMarkdown(content.slice(cursor, match.index)));
     const key = match.index + "-" + match[0];
     if (match[2] && match[3]) {
       const label = cleanLabel(match[2]);
@@ -218,7 +218,7 @@ export function renderInlineMarkdown(
         );
       }
     } else if (match[4]) {
-      nodes.push(<strong key={key}>{match[4]}</strong>);
+      nodes.push(<strong key={key}>{unescapeMarkdown(match[4])}</strong>);
     } else if (match[5]) {
       const trailing = match[5].match(/[.,;:!?]+$/)?.[0] ?? "";
       const rawUrl = trailing ? match[5].slice(0, -trailing.length) : match[5];
@@ -240,6 +240,11 @@ export function renderInlineMarkdown(
     }
     cursor = inlineMarkdown.lastIndex;
   }
-  if (cursor < content.length) nodes.push(content.slice(cursor));
+  if (cursor < content.length) nodes.push(unescapeMarkdown(content.slice(cursor)));
   return nodes;
+}
+
+/** Markdown backslash escapes are syntax, not text: an email card showed "agent@npati\.test" (V6 step 12). */
+export function unescapeMarkdown(text: string): string {
+  return text.replace(/\\([\\`*_{}[\]()#+.!|<>~-])/g, "$1");
 }

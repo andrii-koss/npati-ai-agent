@@ -99,7 +99,7 @@ export function createChatTurn(deps: ChatTurnDeps) {
       ? `Yes, delete company ${confirmedDeletion.name}`
       : resolveContextualCompanyFollowUp(message, previousAssistant);
     if (EmailChatActions.containsCredentialSubmission(effectiveMessage)) {
-      const safetyMessage = EmailChatActions.credentialSafetyMessage();
+      const safetyMessage = EmailChatActions.credentialSafetyMessage(effectiveMessage);
       onDelta?.(safetyMessage);
       return {
         message: safetyMessage,

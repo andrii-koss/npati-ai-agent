@@ -160,7 +160,8 @@ describe("Automations and Cron Scheduler (Automations System)", () => {
         "auto-2",
         expect.any(String),
         "API quota exceeded",
-        expect.any(Number)
+        expect.any(Number),
+        "failed"
       );
       expect(recordRunComplete).not.toHaveBeenCalled();
     });

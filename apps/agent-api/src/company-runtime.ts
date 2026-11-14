@@ -37,6 +37,17 @@ import { executeChatCapability, authorizedChatProjectTools, chatCapabilityExecut
 import { executeAgentStages } from "./company-runtime-stages";
 import { executeCompanyRunTools } from "./company-runtime-tool-executor";
 export * from "./company-runtime-types";
+/**
+ * A whole company run has no deadline: only Stop (cancel) ends it. The former 120 s run cap ended a multi-agent
+ * report with RUN_TIMEOUT while every model call was still answering (V6 step 12, owner rule: no limits that end a
+ * user's work). Each model call keeps its own timeout as a guard against a hung provider. An operator can still set
+ * NPATI_COMPANY_RUN_DEADLINE_MS.
+ */
+function runDeadline(): AbortSignal {
+  const ms = Number(process.env.NPATI_COMPANY_RUN_DEADLINE_MS ?? 0);
+  return Number.isFinite(ms) && ms > 0 ? AbortSignal.timeout(ms) : new AbortController().signal;
+}
+
 export class CompanyDelegationRuntime {
   private readonly controllers = new Map<string, AbortController>();
   private readonly toolRuntime: CompanyToolExecutor;
@@ -82,7 +93,7 @@ export class CompanyDelegationRuntime {
   }
   private async runChatCapability(ctx: AuthContext, company: Company, runId: string, plan: Plan, parentSignal?: AbortSignal, noMemory = false, approvalId?: string) {
     const controller = new AbortController(); this.controllers.set(runId, controller);
-    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(this.timeoutMs), ...(parentSignal ? [parentSignal] : [])]);
+    const signal = AbortSignal.any([controller.signal, runDeadline(), ...(parentSignal ? [parentSignal] : [])]);
     try {
       return await executeChatCapability({ ctx, company, runId, plan, signal, noMemory, approvalId,
         store: this.store, toolRuntime: this.toolRuntime, capabilityResolver: this.capabilityResolver,
@@ -120,7 +131,7 @@ export class CompanyDelegationRuntime {
     }
     const created = { run: existing.run };
     const input = { task: existing.run.task, mode: existing.run.requestedMode };
-    const controller = new AbortController(), timeout = AbortSignal.timeout(this.timeoutMs);
+    const controller = new AbortController(), timeout = runDeadline();
     const signal = AbortSignal.any([controller.signal, timeout, ...(options.signal ? [options.signal] : [])]);
     const runStartedAt = Date.now();
     let totalCost = 0;
@@ -582,6 +593,9 @@ export class CompanyDelegationRuntime {
   async cancel(ctx: AuthContext, companyId: string, runId: string) {
     const current = await this.store.getCompanyAgentRun(ctx, companyId, runId);
     if (["completed", "failed", "cancelled"].includes(current.run.status)) return current;
+    // A second cancel (the queue's broadcast reaching the worker) after the owning process already requested it: the
+    // owner may have finished the run as cancelled meanwhile, and rewriting "cancelling" left it there forever (V6 step 12).
+    if (current.run.status === "cancelling" && !this.controllers.has(runId)) return current;
     if (current.run.status === "queued" || current.run.status === "awaiting_approval") {
       await this.store.setCompanyRunPendingPlan(ctx, companyId, runId, null);
       await this.store.updateCompanyAgentRun(ctx, companyId, runId, { status: "cancelled", cancelRequested: true, errorCode: "RUN_CANCELLED", errorMessage: "Company run was cancelled" });

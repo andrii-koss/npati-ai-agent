@@ -1,4 +1,5 @@
 import type { CompanyAutomationsRepository, CompanyAutomation } from "./automations-repository";
+import { automationRunEndStatus } from "./automations-repository";
 
 export interface CronSchedulePreset {
   id: string;
@@ -210,6 +211,9 @@ export class AutomationScheduler {
 
   start(): void {
     if (this.timer) return;
+    // Runs a previous process left "running" are closed before the first tick (V6 step 12).
+    const startedAt = new Date();
+    void this.repo.failInterruptedRuns?.(startedAt).catch(() => 0);
     this.timer = setInterval(() => void this.tick(), this.tickIntervalMs);
     this.timer.unref();
     void this.tick();
@@ -232,8 +236,13 @@ export class AutomationScheduler {
       for (const auto of dueTasks) {
         processed++;
         const startTime = Date.now();
-        const run = await this.repo.recordRunStart(auto);
         const nextDate = computeNextCronDate(auto.cronExpression, new Date(), auto.timezone);
+        // The slot is consumed when claimed and the lease is kept while the run lasts: a long run outlived its lease
+        // and the same slot could be claimed again (V6 step 12).
+        await this.repo.advanceNextRun?.(auto.id, nextDate.toISOString());
+        const run = await this.repo.recordRunStart(auto);
+        const renew = setInterval(() => void this.repo.renewLease?.(auto.id, this.workerId, 180000).catch(() => undefined), 60000);
+        renew.unref?.();
 
         try {
           const { result } = await this.executor(auto);
@@ -242,7 +251,9 @@ export class AutomationScheduler {
         } catch (err) {
           const duration = Date.now() - startTime;
           const msg = err instanceof Error ? err.message : String(err);
-          await this.repo.recordRunFail(run.id, auto.id, nextDate.toISOString(), msg, duration);
+          await this.repo.recordRunFail(run.id, auto.id, nextDate.toISOString(), msg, duration, automationRunEndStatus(err));
+        } finally {
+          clearInterval(renew);
         }
       }
     } catch {

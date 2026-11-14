@@ -86,18 +86,21 @@ function markdownToCardHtml(md: string): string {
     // escaped again — previously a `"` inside the URL could close the href attribute and install an
     // event handler (`[x](https://a.com/"onmouseover="location=name)`).
     let s = escapeInlineText(str);
+    // Code spans are set aside first: emphasis inside them turned the cron `30 18 * * *` into "30 18 *" (V6 step 12).
+    const codeSpans: string[] = [];
+    s = s.replace(/`([^`]+)`/g, (_match: string, code: string) => `\u0000${codeSpans.push(code) - 1}\u0000`);
     // Bold: **text** or __text__
     s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
     s = s.replace(/__([^_]+)__/g, "<strong>$1</strong>");
     // Italic: *text* (when not bold) or _text_
     s = s.replace(/(^|[^*])\*([^*]+)\*([^*]|$)/g, "$1<em>$2</em>$3");
-    // Code inline: `code`
-    s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
     // Links: [label](url) — the URL is validated and re-escaped by cardLinkHtml.
     s = s.replace(
       /\[([^\]]+)\]\((https?:\/\/[^\s)]+|\/[^\s)]*)\)/g,
       (_match: string, label: string, url: string) => cardLinkHtml(label, url)
     );
+    // Code inline: `code`, restored verbatim.
+    s = s.replace(/\u0000(\d+)\u0000/g, (_match: string, index: string) => `<code>${codeSpans[Number(index)] ?? ""}</code>`);
     return s;
   };
 

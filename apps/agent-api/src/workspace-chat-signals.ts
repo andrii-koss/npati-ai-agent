@@ -97,3 +97,10 @@ export const websiteResourceSignals = [
   /(?:реєстрац\p{L}*.*сайт|публікац\p{L}*.*сайт|сайт\p{L}*.*(?:реєстрац|публікац)|сайти|сайтів|вебсайти|вебсайтів)/iu,
   /(?:автоматизац\p{L}*|запланован\p{L}*.*завдан|агент\p{L}*.*завдан)/iu,
 ];
+
+/**
+ * "Stop the report run that is running now", "зупини автоматизацію, що зараз виконується": cancelling an active
+ * company run is a workspace action (activity.cancel). It was delegated to the Main Agent as a new run, which could not
+ * stop anything (V6 step 12). A verb and a run-like object are both required.
+ */
+export const runCancellationSignal = /(?:\b(?:stop|cancel|abort|halt|kill|terminate)\b|зупин\p{L}*|скасу\p{L}*|перерв\p{L}*|припин\p{L}*|останов\p{L}*|отмен\p{L}*|прерв\p{L}*)[^.!?\n]{0,80}(?:\b(?:run|runs|running|automation|job|task|activity|report|execution)\b|запуск\p{L}*|автоматизац\p{L}*|виконанн\p{L}*|задач\p{L}*|завданн\p{L}*|звіт\p{L}*|отчет\p{L}*|отчёт\p{L}*|активніст\p{L}*)/iu;

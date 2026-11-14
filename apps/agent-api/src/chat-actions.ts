@@ -7,7 +7,7 @@ import type { AppConfig } from "./app";
 import { createAuditServices } from "./audit-services";
 import { AutomaticMemoryExtractor } from "./automatic-memory-extractor";
 import { computeNextCronDate } from "./automation-scheduler";
-import { CompanyAutomationsRepository } from "./automations-repository";
+import { automationRunEndStatus, CompanyAutomationsRepository } from "./automations-repository";
 import { BrowserCredentialsRepository } from "./browser-credentials-repository";
 import { BusinessActionHandler } from "./business-action-handler";
 import { requestCreatesCompany } from "./chat-business-company-link";
@@ -635,7 +635,7 @@ ${localized.next}`;
         } catch (error) {
           const durationMs = Date.now() - startedAt;
           const nextRunAt = computeNextCronDate(current.cronExpression, new Date(), current.timezone).toISOString();
-          await automationsRepo.recordRunFail(runRecord.id, current.id, nextRunAt, error instanceof Error ? error.message : String(error), durationMs);
+          await automationsRepo.recordRunFail(runRecord.id, current.id, nextRunAt, error instanceof Error ? error.message : String(error), durationMs, automationRunEndStatus(error));
           throw error;
         }
       },

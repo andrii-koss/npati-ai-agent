@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { WorkspaceAccessError, type WorkspaceStore, type AuthContext } from "@npati/workspace";
 import type { AuthProvider } from "./auth";
 import type { CompanyAutomation, CompanyAutomationsRepository } from "./automations-repository";
+import { automationRunEndStatus } from "./automations-repository";
 import { computeNextCronDate, isValidCronExpression, type AutomationScheduler } from "./automation-scheduler";
 import {
   TaskFlowEngine,
@@ -222,6 +223,12 @@ export function registerCompanyAutomationsRoutes(
           ).toISOString();
         }
 
+        // Resuming starts from the next slot after now: the stored slot of a paused automation lies in the past and
+        // ran at once as a "catch-up" (V6 step 12).
+        if (!nextRunAt && r.body.status === "active") {
+          const current = await repo.get(c, r.params.companyId, r.params.automationId);
+          if (current.status !== "active") nextRunAt = computeNextCronDate(current.cronExpression, new Date(), current.timezone).toISOString();
+        }
         const updated = await repo.update(c, r.params.companyId, r.params.automationId, {
           ...r.body,
           nextRunAt,
@@ -269,23 +276,17 @@ export function registerCompanyAutomationsRoutes(
           } catch (runErr: any) {
             const durationMs = Date.now() - startTime;
             const nextRunAt = computeNextCronDate(auto.cronExpression, new Date(), auto.timezone).toISOString();
-            await repo.recordRunFail(runRecord.id, auto.id, nextRunAt, runErr.message || String(runErr), durationMs);
-            return reply.code(500).send({ status: "failed", runId: runRecord.id, error: runErr.message });
+            const status = automationRunEndStatus(runErr);
+            await repo.recordRunFail(runRecord.id, auto.id, nextRunAt, runErr.message || String(runErr), durationMs, status);
+            return reply.code(status === "cancelled" ? 409 : 500).send({ status, runId: runRecord.id, error: runErr.message });
           }
         }
 
+        // Without an executor nothing ran: recording "executed successfully" was a fabricated result (V6 step 12).
         const durationMs = Date.now() - startTime;
         const nextRunAt = computeNextCronDate(auto.cronExpression, new Date(), auto.timezone).toISOString();
-        const simulatedResult = `Automation '${auto.name}' executed successfully.`;
-        await repo.recordRunComplete(runRecord.id, auto.id, nextRunAt, simulatedResult, durationMs);
-
-        return reply.code(200).send({
-          status: "completed",
-          runId: runRecord.id,
-          automationId: auto.id,
-          result: simulatedResult,
-          durationMs,
-        });
+        await repo.recordRunFail(runRecord.id, auto.id, nextRunAt, "Automation execution is not configured on this server", durationMs);
+        return reply.code(503).send({ status: "failed", runId: runRecord.id, automationId: auto.id, error: "Automation execution is not configured on this server" });
       } catch (e) {
         return err(reply, e);
       }

@@ -5,6 +5,11 @@ import type { AuthContext } from "@npati/workspace";
 export type AutomationStatus = "active" | "paused" | "deleted";
 export type AutomationRunStatus = "running" | "completed" | "failed" | "cancelled";
 
+/** A run stopped by the user ends as cancelled, not failed (V6 step 12). The executor marks such errors. */
+export function automationRunEndStatus(error: unknown): "failed" | "cancelled" {
+  return (error as { cancelled?: unknown } | null)?.cancelled === true ? "cancelled" : "failed";
+}
+
 export interface CompanyAutomation {
   id: string;
   workspaceId: string;
@@ -315,6 +320,49 @@ export class CompanyAutomationsRepository {
     return claimed;
   }
 
+  /** Keeps a long run's lease: without renewal another claim could run the same slot again (V6 step 12). */
+  async renewLease(autoId: string, workerId: string, leaseMs: number): Promise<void> {
+    if (this.pool) {
+      await this.pool.query(`UPDATE company_automations SET lease_expires_at = now() + ($3 || ' milliseconds')::interval WHERE id = $1 AND worker_id = $2`, [autoId, workerId, leaseMs]);
+      return;
+    }
+    const item = this.memoryAutomations.get(autoId);
+    if (item?.workerId === workerId) item.leaseExpiresAt = new Date(Date.now() + leaseMs).toISOString();
+  }
+
+  /** Moves the schedule to the next slot as soon as a slot is claimed, so a crash cannot run it twice. */
+  async advanceNextRun(autoId: string, nextRunAt: string): Promise<void> {
+    if (this.pool) {
+      await this.pool.query(`UPDATE company_automations SET next_run_at = $2, updated_at = now() WHERE id = $1`, [autoId, nextRunAt]);
+      return;
+    }
+    const item = this.memoryAutomations.get(autoId);
+    if (item) item.nextRunAt = nextRunAt;
+  }
+
+  /**
+   * Runs left "running" by a stopped process. Automation runs execute only inside the API process that owns the
+   * scheduler, so at its start none of them can still be executing; one stayed "running" for ever after a restart
+   * (V6 step 12).
+   */
+  async failInterruptedRuns(startedBefore: Date): Promise<number> {
+    const message = "Interrupted: the server restarted during this run";
+    if (this.pool) {
+      const result = await this.pool.query(
+        `UPDATE company_automation_runs SET status = 'failed', error_message = $2, completed_at = now(),
+           duration_ms = GREATEST(0, (EXTRACT(EPOCH FROM (now() - started_at)) * 1000)::int)
+         WHERE status = 'running' AND started_at < $1`,
+        [startedBefore.toISOString(), message],
+      );
+      return result.rowCount ?? 0;
+    }
+    let count = 0;
+    for (const runs of this.memoryRuns.values()) for (const run of runs) {
+      if (run.status === "running" && new Date(run.startedAt).getTime() < startedBefore.getTime()) { run.status = "failed"; run.errorMessage = message; run.completedAt = new Date().toISOString(); count++; }
+    }
+    return count;
+  }
+
   async recordRunStart(auto: CompanyAutomation): Promise<CompanyAutomationRun> {
     const id = randomUUID();
     const now = new Date().toISOString();
@@ -412,7 +460,8 @@ export class CompanyAutomationsRepository {
     autoId: string,
     nextRunAt: string,
     errorMessage: string,
-    durationMs: number
+    durationMs: number,
+    status: "failed" | "cancelled" = "failed",
   ): Promise<void> {
     const now = new Date().toISOString();
 
@@ -422,12 +471,12 @@ export class CompanyAutomationsRepository {
         await client.query("BEGIN");
         await client.query(
           `UPDATE company_automation_runs SET
-             status = 'failed',
+             status = $4,
              error_message = $2,
              duration_ms = $3,
              completed_at = now()
            WHERE id = $1`,
-          [runId, errorMessage.slice(0, 2000), durationMs]
+          [runId, errorMessage.slice(0, 2000), durationMs, status]
         );
         await client.query(
           `UPDATE company_automations SET
@@ -453,7 +502,7 @@ export class CompanyAutomationsRepository {
     if (runs) {
       const run = runs.find((r) => r.id === runId);
       if (run) {
-        run.status = "failed";
+        run.status = status;
         run.errorMessage = errorMessage;
         run.durationMs = durationMs;
         run.completedAt = now;

@@ -416,10 +416,26 @@ describe("Company delegation runtime", () => {
     const timeoutSetup = await setup(engine({ a2aSend: timeoutA2A as AIEngine["a2aSend"] }), active, 25);
     const timeoutManager = await addAgent(timeoutSetup.app, timeoutSetup.companyId, "timeout-manager-001", { name: "Manager", role: "Coordinator" });
     await timeoutSetup.app.inject({ method: "PUT", url: `/companies/${timeoutSetup.companyId}/main-agent`, payload: { agentId: timeoutManager.id, expectedRevision: 1 } });
+    // V6 step 12: a run has no deadline unless the operator sets one; then it still ends with RUN_TIMEOUT.
+    process.env.NPATI_COMPANY_RUN_DEADLINE_MS = "25";
     const timedOut = await timeoutSetup.app.inject({ method: "POST", url: `/companies/${timeoutSetup.companyId}/runs`,
-      headers: { "idempotency-key": "timeout-run-0001" }, payload: { task: "Timeout task" } });
+      headers: { "idempotency-key": "timeout-run-0001" }, payload: { task: "Timeout task" } }).finally(() => { delete process.env.NPATI_COMPANY_RUN_DEADLINE_MS; });
     expect(timedOut.statusCode).toBe(504);
     expect(timedOut.json().run).toMatchObject({ status: "failed", errorCode: "RUN_TIMEOUT" });
+  });
+
+  // V6 step 12: a 3000-word report ended with RUN_TIMEOUT after 120 s while its model calls were still answering.
+  it("lets a run take longer than one model call's timeout when no deadline is set", async () => {
+    const active = { value: { workspaceId: "workspace-a", userId: "user-a", permissions: ["workspace:read", "business:manage"] } };
+    const slow = (delayMs: number) => async ({ signal }: { signal?: AbortSignal }) => {
+      await new Promise((resolve, reject) => { const t = setTimeout(resolve, delayMs); signal?.addEventListener("abort", () => { clearTimeout(t); reject(new DOMException("Aborted", "AbortError")); }, { once: true }); });
+      return { taskId: "slow", content: "Long report done", metadata: {} };
+    };
+    const longSetup = await setup(engine({ a2aSend: slow(80) as AIEngine["a2aSend"] }), active, 25);
+    const lead = await addAgent(longSetup.app, longSetup.companyId, "long-manager-001", { name: "Manager", role: "Coordinator" });
+    await longSetup.app.inject({ method: "PUT", url: `/companies/${longSetup.companyId}/main-agent`, payload: { agentId: lead.id, expectedRevision: 1 } });
+    const done = await longSetup.app.inject({ method: "POST", url: `/companies/${longSetup.companyId}/runs`, headers: { "idempotency-key": "long-run-0001" }, payload: { task: "Long report" } });
+    expect(done.json().run.errorCode).not.toBe("RUN_TIMEOUT");
   });
 
 });
