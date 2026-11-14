@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import { DEFAULT_AGENT_READ_TOOLS } from "./default-agent-tools";
 import { readOwnedNeutralConversation } from "./postgres-chat-pages";
 import { assertCompany, ensureIdentity, getBusiness } from "./postgres-store-support";
 import { randomUUID } from "node:crypto";
@@ -280,7 +281,7 @@ export async function createCompanyAgent(pool: Pool, context: AuthContext, compa
     if (!name || !role) throw new Error("Agent name and role are required");
     const values = [randomUUID(), context.workspaceId, companyId, name, role, input.description ?? null,
       input.systemInstruction ?? null, input.promptGuidelines ?? null, JSON.stringify(input.recommendedPrompts ?? []),
-      input.modelId ?? null, input.fallbackModelId ?? null, JSON.stringify(input.tools ?? []), input.isActive ?? true,
+      input.modelId ?? null, input.fallbackModelId ?? null, JSON.stringify(input.tools ?? DEFAULT_AGENT_READ_TOOLS), input.isActive ?? true,
       input.positionX ?? null, input.positionY ?? null, input.sortOrder ?? 0, idempotencyKey];
     const result = await pool.query<CompanyAgent>(`INSERT INTO company_agents(
       id,workspace_id,company_id,name,role,description,system_instruction,prompt_guidelines,recommended_prompts,

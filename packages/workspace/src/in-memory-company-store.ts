@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { DEFAULT_AGENT_READ_TOOLS } from "./default-agent-tools";
 import type { AuthContext, Business, BusinessInput, BusinessToCompanyInput, Company, CompanyAgent, CompanyAgentInput, CompanyAgentRun, CompanyAgentRunStep, CompanyAgentToolAudit, CompanyAgentRunEvent, CompanyInput, CompanyMember, CompanyInvite, CompanyInviteInput, UpdateCompanyMemberRoleInput, ProviderHostedConsentRecord } from "./types";
 import { WorkspaceAccessError, WorkspaceNotFoundError, ProviderDataPolicyStoreError } from "./types";
 import { companyPageLimit, decodeBusinessCursor, encodeBusinessCursor } from "./pagination";
@@ -166,7 +167,7 @@ export async function createCompanyAgent(host: InMemoryCompanyState, context: Au
       id: randomUUID(), workspaceId: context.workspaceId, companyId, name: input.name.trim(), role: input.role.trim(),
       description: input.description, systemInstruction: input.systemInstruction, promptGuidelines: input.promptGuidelines,
       recommendedPrompts: input.recommendedPrompts ?? [], modelId: input.modelId, fallbackModelId: input.fallbackModelId,
-      tools: input.tools ?? [], isActive: input.isActive ?? true, positionX: input.positionX, positionY: input.positionY,
+      tools: input.tools ?? [...DEFAULT_AGENT_READ_TOOLS], isActive: input.isActive ?? true, positionX: input.positionX, positionY: input.positionY,
       sortOrder: input.sortOrder ?? 0, revision: 1, createdAt: timestamp, updatedAt: timestamp,
     };
     host.companyAgents.set(agent.id, agent);

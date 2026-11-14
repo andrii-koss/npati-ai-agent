@@ -48,6 +48,24 @@ function runDeadline(): AbortSignal {
   return Number.isFinite(ms) && ms > 0 ? AbortSignal.timeout(ms) : new AbortController().signal;
 }
 
+/**
+ * Company agents whose exact names appear in the task as whole words. Longer names are matched first and blanked, so
+ * "Reviewer" is not found inside "Accessibility Reviewer".
+ */
+export function agentsNamedInTask<T extends { name: string }>(task: string, agents: T[]): T[] {
+  let text = task.toLocaleLowerCase();
+  const found: T[] = [];
+  for (const agent of [...agents].sort((a, b) => b.name.trim().length - a.name.trim().length)) {
+    const name = agent.name.trim().toLocaleLowerCase();
+    if (name.length < 3) continue;
+    const pattern = new RegExp("(?<![\\p{L}\\p{N}])" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![\\p{L}\\p{N}])", "gu");
+    if (!pattern.test(text)) continue;
+    found.push(agent);
+    text = text.replace(pattern, " ");
+  }
+  return agents.filter((agent) => found.includes(agent));
+}
+
 export class CompanyDelegationRuntime {
   private readonly controllers = new Map<string, AbortController>();
   private readonly toolRuntime: CompanyToolExecutor;
@@ -389,6 +407,15 @@ export class CompanyDelegationRuntime {
       plan.agentIds = plan.agentIds.map((id) => resolveAgentId(id)!);
       plan.reviewerAgentId = resolveAgentId(plan.reviewerAgentId);
       plan.toolRequests = plan.toolRequests.map((request) => ({ ...request, agentId: resolveAgentId(request.agentId)! }));
+      // Two or more company agents named in the request are its participants: "ask Designer and Reviewer" ran Designer
+      // and Accessibility Reviewer, whose name only contains "Reviewer" (V6 step 14, A041).
+      const named = agentsNamedInTask(input.task, candidates);
+      if (!options.preferredAgentId && named.length >= 2) {
+        plan.agentIds = named.map((agent) => agent.id);
+        if (plan.mode === "single") plan.mode = "pipeline";
+        if (plan.reviewerAgentId && !plan.agentIds.includes(plan.reviewerAgentId)) plan.reviewerAgentId = undefined;
+        plan.toolRequests = plan.toolRequests.filter((request) => plan.agentIds.includes(request.agentId));
+      }
       if (plan.agentIds.some((id) => !byId.has(id)) && !options.preferredAgentId) {
         // One repair of the agent selection: the plan named agents this company does not have. The repaired plan is
         // validated exactly like the first one, so a second invalid selection still fails the run.

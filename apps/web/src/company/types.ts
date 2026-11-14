@@ -87,7 +87,8 @@ export function translatedTool(t: Translate, tool: CapabilityItem) {
 }
 
 export const emptyCompany: CompanyDraft = { name: "", businessId: "", website: "", industry: "", description: "", productsServices: "", languages: "", brandTone: "", companyInstructions: "", status: "active" };
-export const emptyAgent: AgentDraft = { name: "", role: "", description: "", systemInstruction: "", promptGuidelines: "", recommendedPrompts: "", modelId: "", fallbackModelId: "", tools: [], isActive: true, parentAgentId: "" };
+// A new agent starts with read-only project file access (owner decision, V6 step 14); the user can untick it.
+export const emptyAgent: AgentDraft = { name: "", role: "", description: "", systemInstruction: "", promptGuidelines: "", recommendedPrompts: "", modelId: "", fallbackModelId: "", tools: ["project.files.list", "project.files.search", "project.files.read"], isActive: true, parentAgentId: "" };
 
 export function companyDraft(company?: Company): CompanyDraft {
   return company ? {

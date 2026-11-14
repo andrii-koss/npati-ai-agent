@@ -451,7 +451,8 @@ it.each([true, false])("allows an explicit main-agent author before a distinct r
   const reviewer = await addAgent(app, companyId, "distinct-reviewer", { name: "Reviewer", role: "Reviewer" });
   await app.inject({ method: "PUT", url: "/companies/" + companyId + "/main-agent", payload: { agentId: author.id, expectedRevision: 1 } });
   plan = JSON.stringify({ mode: "pipeline", agentIds: includeAuthor ? [author.id, reviewer.id] : [reviewer.id], reviewerAgentId: reviewer.id, toolRequests: [] });
-  const response = await app.inject({ method: "POST", url: "/companies/" + companyId + "/runs", headers: { "idempotency-key": "explicit-author-" + includeAuthor }, payload: { task: "Designer and Reviewer collaborate on a review" } });
+  const response = await app.inject({ method: "POST", url: "/companies/" + companyId + "/runs", headers: { "idempotency-key": "explicit-author-" + includeAuthor }, payload: { task: includeAuthor ? "Designer and Reviewer collaborate on a review" : "Reviewer, review the draft" } });
+  // V6 step 14: agents named in the task are the participants, so the self-review case names only the Reviewer.
   if (!includeAuthor) {
     // The sole worker named as its own reviewer keeps the work; it is never recorded as reviewer of it.
     expect(response.json().run.status).toBe("completed");
