@@ -186,6 +186,13 @@ export function useChatDevelopment(options: {
       }
     }
     if (sending.current) return true;
+    // Without exactly one company the chat stream answers: it offers to create the first company or points to the selector.
+    let companyId = callbacks.current.companyId;
+    if (!restore && !companyId) {
+      const data = await api<{ companies: { id: string }[] }>("/companies").catch(() => ({ companies: [] as { id: string }[] }));
+      if (data.companies.length !== 1) return false;
+      companyId = data.companies[0]!.id;
+    }
     sending.current = true; setSubmitting(true);
     callbacks.current.onAccepted(message);
     try {
@@ -195,12 +202,6 @@ export function useChatDevelopment(options: {
         setProcesses(data.processes);
         if (data.conversationId) { callbacks.current.onConversation(data.conversationId, true); navigate("/c/" + data.conversationId); }
         return true;
-      }
-      let companyId = callbacks.current.companyId;
-      if (!companyId) {
-        const data = await api<{ companies: { id: string }[] }>("/companies");
-        if (data.companies.length !== 1) throw new Error(language === "uk" ? "Оберіть компанію перед створенням проєкту." : "Choose a company before creating a project.");
-        companyId = data.companies[0]!.id;
       }
       const originalConversationId = callbacks.current.conversationId;
       const creationConversationId = originalConversationId ?? currentProcess?.parentConversationId;

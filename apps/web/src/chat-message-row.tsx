@@ -1,4 +1,5 @@
 import { memo, useMemo, useRef, type MutableRefObject, type RefObject } from "react";
+import { chatCardLabels } from "./chat-card-i18n";
 import type { ProjectCardData } from "@npati/shared";
 import { ChatMessageContent, projectChatText } from "./ChatMessageContent";
 import { UserPromptMessage } from "./UserPromptMessage";
@@ -59,8 +60,8 @@ export const ChatMessageRow = memo(function ChatMessageRow({ message, card, show
           <ChatMessageContent content={assistantText} />
         </>
       )}
-      {card && <ChatProjectPreviewCard card={card} showPreviewTrigger={!previewBusy} onActivate={actions.activateCard} />}
-      {showToolbar && Boolean(assistantText.trim()) && <div className="assistant-toolbar-row"><AssistantMessageToolbar content={message.content} onRegenerate={() => actions.regenerate(message.id)} />{totalTime && <span className="chat-run-total">{responseLanguage === "uk" ? "Усього" : "Total"} {totalTime}</span>}</div>}
+      {card && <ChatProjectPreviewCard card={card} showPreviewTrigger={!previewBusy} onActivate={actions.activateCard} language={responseLanguage} />}
+      {showToolbar && Boolean(assistantText.trim()) && <div className="assistant-toolbar-row"><AssistantMessageToolbar content={message.content} onRegenerate={() => actions.regenerate(message.id)} />{totalTime && <span className="chat-run-total">{chatCardLabels(responseLanguage).total} {totalTime}</span>}</div>}
     </article>
   );
 }, (previous, next) => previous.message.id === next.message.id && previous.message.content === next.message.content

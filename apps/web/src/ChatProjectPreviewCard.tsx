@@ -1,4 +1,5 @@
 import { isolatedPreviewUrl } from "./preview-origin";
+import { chatCardLabels, type ChatCardLabels } from "./chat-card-i18n";
 import React, { useState, useEffect, useRef, useContext, type SyntheticEvent } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, Link } from "react-router-dom";
@@ -42,6 +43,8 @@ export interface ChatProjectPreviewCardProps {
   className?: string;
   showDropdown?: boolean;
   showPreviewTrigger?: boolean;
+  /** The language the person wrote in; the interface language when absent. */
+  language?: string;
 }
 
 export function resolveChatProjectType(card: ProjectCardData): ProjectVariantType {
@@ -199,8 +202,9 @@ function OtherSvgThumbnail() {
  * A desktop game (Pygame): its Live Preview is the game window, streamed from the Sandbox's virtual display with keyboard
  * and mouse. The card says it is a desktop window, and Open starts that Preview like any other.
  */
-export function desktopCardView(framework: string | undefined, isUk: boolean): { mode: string; open: string } | null {
+export function desktopCardView(framework: string | undefined, isUk: boolean | ChatCardLabels): { mode: string; open: string } | null {
   if (!isDesktopProjectFramework(framework)) return null;
+  if (typeof isUk === "object") return { mode: isUk.desktopMode, open: isUk.desktopOpen };
   return isUk ? { mode: "Десктоп-вікно", open: "Відкрити вікно гри" } : { mode: "Desktop window", open: "Open the game window" };
 }
 
@@ -210,10 +214,12 @@ export function ChatProjectPreviewCard({
   className = "",
   showDropdown = true,
   showPreviewTrigger = true,
+  language,
 }: ChatProjectPreviewCardProps) {
   const navigate = useNavigate();
   const i18n = useContext(I18nContextRef);
   const isUk = i18n?.language === "uk";
+  const L = chatCardLabels(language ?? i18n?.language);
 
   const openPreviews = useContext(ChatPreviewOpenContext);
   const previewKey = card.projectId ?? card.id;
@@ -271,22 +277,22 @@ export function ChatProjectPreviewCard({
 
   // Subtitle: Type · Live Preview
   const typeLabel = projectType === "website"
-    ? (isUk ? "Вебсайт" : "Website")
+    ? L.website
     : projectType === "mobile_app"
-      ? (isUk ? "Мобільний застосунок" : "Mobile app")
+      ? L.mobileApp
       : projectType === "game"
-        ? (isUk ? "Гра" : "Game")
-        : (isUk ? "Проєкт" : "Project");
-  const desktop = desktopCardView(card.framework, isUk);
+        ? L.game
+        : L.project;
+  const desktop = desktopCardView(card.framework, L);
   const subtitle = `${typeLabel} · ${desktop ? desktop.mode + " · " : ""}Live Preview`;
 
   // Status text and color
   const statusLabels: Record<PreviewRuntimeStatus, string> = {
-    running: isUk ? "Працює" : "Running",
-    starting: isUk ? "Запуск..." : "Starting",
-    stopped: isUk ? "Зупинено" : "Stopped",
-    failed: isUk ? "Помилка" : "Failed",
-    unavailable: isUk ? "Прев'ю недоступне" : "Preview unavailable",
+    running: L.running,
+    starting: L.starting,
+    stopped: L.stopped,
+    failed: L.failed,
+    unavailable: L.unavailable,
   };
 
   const isStatic = card.framework === "HTML/CSS" && !isCodeProject;
@@ -650,10 +656,10 @@ export function ChatProjectPreviewCard({
               className="chat-preview-open-btn coding-preview-trigger"
               onClick={() => void openPreview()}
               disabled={runtimeStatus === "unavailable"}
-              aria-label={desktop ? desktop.open : isUk ? "Відкрити Live Preview" : "Open Live Preview"}
+              aria-label={desktop ? desktop.open : L.openLivePreview}
             >
               <ExternalLink size={15} aria-hidden="true" strokeWidth={2.3} />
-              <span>{isUk ? "Open" : "Open"}</span>
+              <span>{L.open}</span>
               {card.framework && <span className="coding-preview-framework" style={{ display: "none" }}>{card.framework}</span>}
             </button>
 
@@ -662,7 +668,7 @@ export function ChatProjectPreviewCard({
                 type="button"
                 className="chat-preview-dropdown-btn"
                 onClick={() => setDropdownOpen((open) => !open)}
-                aria-label={isUk ? "Додаткові дії" : "Additional actions"}
+                aria-label={L.more}
                 aria-haspopup="true"
                 aria-expanded={dropdownOpen}
               >
@@ -680,7 +686,7 @@ export function ChatProjectPreviewCard({
                   onClick={handleOpenInNewTab}
                 >
                   <ExtIcon size={14} aria-hidden="true" />
-                  <span>{isUk ? "Відкрити в новій вкладці" : "Open in new tab"}</span>
+                  <span>{L.openNewTab}</span>
                 </button>
 
                 {/* Edit in chat */}
@@ -695,7 +701,7 @@ export function ChatProjectPreviewCard({
                     }}
                   >
                     <MessageSquare size={14} aria-hidden="true" />
-                    <span>{isUk ? "Редагувати в чаті" : "Edit in chat"}</span>
+                    <span>{L.editInChat}</span>
                   </button>
                 )}
 
@@ -712,7 +718,7 @@ export function ChatProjectPreviewCard({
                   >
                     <GitCommit size={14} aria-hidden="true" />
                     <span>
-                      {isUk ? "Зміни" : "Changes"}
+                      {L.changes}
                       {typeof card.changesCount === "number" ? ` (${card.changesCount})` : ""}
                     </span>
                   </button>
@@ -730,7 +736,7 @@ export function ChatProjectPreviewCard({
                     }}
                   >
                     <Terminal size={14} aria-hidden="true" />
-                    <span>{isUk ? "Робоча область коду" : "Code Workspace"}</span>
+                    <span>{L.codeWorkspace}</span>
                   </button>
                 )}
 
@@ -742,7 +748,7 @@ export function ChatProjectPreviewCard({
                   onClick={() => void restartPreview()}
                 >
                   <RefreshCw size={14} aria-hidden="true" />
-                  <span>{isUk ? "Перезапустити preview" : "Restart preview"}</span>
+                  <span>{L.restartPreview}</span>
                 </button>
 
                 {/* View Run */}
@@ -754,7 +760,7 @@ export function ChatProjectPreviewCard({
                     onClick={() => setDropdownOpen(false)}
                   >
                     <Eye size={14} aria-hidden="true" />
-                    <span>{isUk ? "Переглянути запуск" : "View Run"}</span>
+                    <span>{L.viewRun}</span>
                   </Link>
                 )}
               </div>

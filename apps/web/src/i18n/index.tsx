@@ -126,6 +126,11 @@ export function useTranslation() {
 export { SUPPORTED_LANGUAGES };
 export type { SupportedLanguage };
 
+/** A dictionary text in a given language (the language a person wrote in), English when that language lacks it. */
+export function textIn(language: string, path: string): string {
+  return getNestedValue(dictionaries[language as SupportedLanguage], path) ?? getNestedValue(dictionaries.en, path) ?? path;
+}
+
 /** Reuse the same dictionaries for request-language activity without changing UI preferences. */
 export function executionTraceText(language: string, key: string) {
   const requestText = language === "pt" ? ptExecutionTrace[key] : additionalExecutionTrace[language]?.[key];

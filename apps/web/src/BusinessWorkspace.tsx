@@ -1,4 +1,5 @@
 import { getStoredAuthToken } from "./AuthContext";
+import { textIn } from "./i18n";
 import { useTranslation } from "./i18n";
 import { developmentIsActive, type AgentReply, type ProjectCardData } from "@npati/shared";
 import { defaultHybridRouter } from "@npati/shared/hybrid-router";
@@ -290,7 +291,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const streamControllerRef=useRef<{controller:AbortController;streamId:string;stopRequested?:boolean}|null>(null);
   const thinking = useChatThinking({
     busy: sending || development.submitting || development.isActive || codeInbox.active,
-    streaming: streamingResponse, text: t("chat.thinking"), items: development.project?.progress, events: progressEvents,
+    streaming: streamingResponse, text: textIn(messageLanguage([...messages].reverse().find((message) => message.role === "user")?.content, development.project?.responseLanguage ?? language), "chat.thinking"), items: development.project?.progress, events: progressEvents,
     runIds: [...Object.keys(development.project?.runStatuses ?? {}), development.project?.runId, development.project?.initialRunId].filter((id): id is string => Boolean(id)),
   });
   const suggestions = useMemo(
@@ -836,7 +837,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
                   />
                 )}
                 <ChatMessageRow message={message} card={messageCard} showToolbar={message.role === "assistant" && !sending} previewBusy={agentWorking}
-                  responseLanguage={development.project?.responseLanguage ?? language} totalTime={isLatestAssistant ? runTotal : undefined} actions={rowActions} />
+                  responseLanguage={messageLanguage(displayMessages.slice(0, index + 1).reverse().find((item) => item.role === "user")?.content, development.project?.responseLanguage ?? language)} totalTime={isLatestAssistant ? runTotal : undefined} actions={rowActions} />
               </Fragment>
             );
           })}

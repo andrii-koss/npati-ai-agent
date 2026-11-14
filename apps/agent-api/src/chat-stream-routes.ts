@@ -3,6 +3,7 @@ import { runChatProjectBatch } from "./chat-project-batch";
 import { conversationProjectIds, projectBatchIntent, resolveConversationProjectTarget } from "./chat-conversation-project-target";
 import { isChatProjectCreationBatch, runChatProjectCreation, chatProjectCreationReply } from "./chat-project-creation";
 import { selectCompanyForWebsite } from "./company-run-notice-i18n";
+import { companyOnboardingCopy, continueCompanyOnboarding } from "./chat-company-onboarding";
 import { resolveCodingConversationLanguage, codingChatResponseInstruction, chatLanguageInstruction, detectCompanyChatLanguage } from "./company-chat-i18n";
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { AppConfig } from "./app";
@@ -88,7 +89,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
       if (!hasConnectedProviders) {
         return reply.code(409).send({ error: { code: "AI_PROVIDER_REQUIRED", message: "Connect an AI provider to start using NPATI Agent." } });
       }
-      const message = request.body.message?.trim() ?? "";
+      let message = request.body.message?.trim() ?? "";
       if (!message && !request.body.attachments?.length) return reply.code(400).send({ error: { code: "MESSAGE_REQUIRED", message: "Enter a message or attach a photo or voice message." } });
       reply.raw.once("close", abortPreflight);
       releaseStream = await reserveChatStream({ owner: auth, streamId, controller: streamController, activeStreams: activeChatStreams, registry: activeSessionRegistry });
@@ -131,6 +132,15 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
       }
       const history = !memoryPolicy.noMemoryActive
         ? await readIntentHistory(preflightStore, auth, request.body.conversationId, requestedContext.businessId) : [];
+      // "Yes" to the offer to create a company: create it, select it and run the original website request in this turn.
+      const onboarding = !memoryPolicy.noMemoryActive && !request.body.companyId && !request.body.projectId && history.length
+        ? await continueCompanyOnboarding({ store: workspaceStore, auth, message, language: resolveCodingConversationLanguage(message, history), history,
+          idempotencyKey: `chat-onboarding:${request.body.conversationId ?? streamId}` }) : undefined;
+      if (onboarding) {
+        message = onboarding.request;
+        Object.assign(requestedContext, { contextType: "company", companyId: onboarding.companyId, projectId: null, businessId: null });
+        request.body.companyId = onboarding.companyId;
+      }
       // In Code mode the selected project's operation comes from the deterministic router, and anything it reads as
       // conversation is an edit of that project; record modules stay out of the prompt (no record route).
       const codeMode = request.body.mode === "code" && Boolean(requestedContext.projectId);
@@ -258,6 +268,12 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         if(codeBackgroundRunId) request.log.info({ runId: codeBackgroundRunId }, "code_background_run_detached");
       });
       const send = async (event: "progress" | "delta" | "result" | "error" | "code_session" | "code_inbox", data: unknown) => {
+        // The company created in this turn is announced and selected in the chat (the client selects a created company).
+        if (event === "result" && onboarding && data && typeof data === "object") {
+          const result = data as { message?: unknown; companyAction?: unknown };
+          data = { ...result, ...(typeof result.message === "string" ? { message: onboarding.announcement + "\n\n" + result.message } : {}),
+            companyAction: result.companyAction ?? { companyId: onboarding.companyId, action: "create" } };
+        }
         if (event === "result" && !memoryPolicy.noMemoryActive) data = await persistChatResultContext(workspaceStore, auth, data, { replaceSelection: isReadOnlyCompanySwitch(message) });
         if (reply.raw.destroyed) return;
         sequence += 1;
@@ -626,11 +642,15 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
               const companies = (await workspaceStore.listCompanies(auth)).items;
               if (companies.length === 1) targetCompanyId = companies[0]!.id;
               else if (companies.length === 0) {
-                projectResponse = {
-                  message: selectCompanyForWebsite(resolveCodingConversationLanguage(message, history), []),
-                  suggestedActions: ["Create a Company"],
-                  activeContext: resolved.context,
-                };
+                // No company yet: offer to create one now and continue with this request (see chat-company-onboarding).
+                // The request and the offer are saved, so the next "yes" in this conversation finds both.
+                const copy = companyOnboardingCopy(resolveCodingConversationLanguage(message, history));
+                const conversation = await chatConversation();
+                if (conversation) {
+                  await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", message);
+                  await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", copy.offer);
+                }
+                projectResponse = { message: copy.offer, suggestedActions: [copy.yes], activeContext: resolved.context, ...(conversation ? { conversationId: conversation.id } : {}) };
               } else {
                 projectResponse = {
                   message: selectCompanyForWebsite(resolveCodingConversationLanguage(message, history), companies.map((company) => company.name)),
