@@ -406,6 +406,20 @@ class NamedCompanyNotFoundError extends Error {
 
 /** Whether the request names a different company than `company` (case-insensitive prefix match either way). */
 /** The user asks to replace the instructions, not to add to them ("replace the instructions with", "зміни інструкції на"). */
+/**
+ * Company memory after a model wrote the whole field. When the new text keeps most of the stored lines, the model edited
+ * the field ("update: the contract is now MK-3108") and the new text is the memory; appending it wrote every fact twice
+ * and kept the old value (V6 step 14). Otherwise the text is a new fact: it is added, without lines already stored.
+ */
+export function mergeCompanyInstructions(previous: string, next: string): string {
+  const lines = (text: string) => text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const before = lines(previous), after = lines(next);
+  const kept = before.filter((line) => after.includes(line)).length;
+  if (before.length >= 2 && kept >= Math.ceil(before.length / 2)) return after.join("\n");
+  const added = after.filter((line) => !before.includes(line));
+  return added.length ? [...before, ...added].join("\n") : previous;
+}
+
 export function replacesInstructions(message: string): boolean {
   return /(?:\breplace\b|\brewrite\b|\boverwrite\b|\binstead\b|\bclear\b|\bchange\b[^.!?]{0,60}\bto\b|\bset\b[^.!?]{0,60}\bto\b|замін|перепиш|замість|очист|змін\p{L}*[^.!?]{0,60}\bна\b|встанов\p{L}*[^.!?]{0,60}\bна\b|замен|вместо|измени\p{L}*[^.!?]{0,60}\bна\b|ersetz|überschreib|\bstatt\b|remplac|réécri|au lieu|reemplaz|reescrib|en lugar|sostitui|riscriv|invece|zastąp|przepisz|zamiast|substitu|reescrev|em vez|vervang|herschrijf|in plaats|yerine|üzerine yaz|替换|改为|置き換|대체|استبدل|बदलकर)/iu.test(message);
 }
@@ -781,9 +795,9 @@ For update, include only fields that should change. To change only agents, use a
         const previousInstructions = company.companyInstructions?.trim();
         const nextInstructions = typeof companyPatch.companyInstructions === "string" ? companyPatch.companyInstructions.trim() : undefined;
         if (previousInstructions && nextInstructions && !nextInstructions.includes(previousInstructions) && !replacesInstructions(options.requestMessage ?? "")) {
-          // The same fact remembered again is already there: nothing is added twice.
-          if (previousInstructions.includes(nextInstructions)) delete companyPatch.companyInstructions;
-          else companyPatch.companyInstructions = `${previousInstructions}\n${nextInstructions}`;
+          const merged = mergeCompanyInstructions(previousInstructions, nextInstructions);
+          if (merged === previousInstructions) delete companyPatch.companyInstructions;
+          else companyPatch.companyInstructions = merged;
         }
         if (Object.keys(companyPatch).length) {
           company = await store.updateCompany(auth, company.id, companyPatch, company.revision);
