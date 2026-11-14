@@ -360,6 +360,7 @@ export function ConversationalChat(props: ChatProps) {
   return <ContextChat key={chatKey} {...props} userId={user?.id} />;
 }
 function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...props }: ChatProps & { userId?: string }) {
+  const { t } = useTranslation();
   const { overview } = useWorkspace();
   const key = "npati_chat_context:" + (userId ?? "anonymous");
   const readStoredSelection = () => {
@@ -504,7 +505,7 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
     <div className="composer-context-switcher" title={activeCompanyName || "Active context"} onPointerEnter={() => void ensureCompanyList()} onFocusCapture={() => void ensureCompanyList()}>
       <div className="composer-context-trigger" aria-hidden="true">
         <span className="composer-context-text">
-          {activeCompanyName || (selectValue !== "none" ? <span aria-hidden="true" style={{ display: "inline-block", width: 96, height: 12, borderRadius: 4, background: "var(--surface-muted, #f1f5f9)" }} /> : "No company")}
+          {activeCompanyName || (selectValue !== "none" ? <span aria-hidden="true" style={{ display: "inline-block", width: 96, height: 12, borderRadius: 4, background: "var(--surface-muted, #f1f5f9)" }} /> : t("chat.noCompany"))}
         </span>
         <svg className="composer-context-icon" viewBox="0 0 10 6" width="10" height="6" fill="none">
           <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -518,7 +519,7 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
         onChange={(e) => void choose(e.target.value)}
         className="composer-context-select"
       >
-        <option value="none">No company</option>
+        <option value="none">{t("chat.noCompany")}</option>
         {selectValue !== "none" && !activeCompanyName && <option value={selectValue}>Loading company…</option>}
         {companies.map((c) => (
             <option key={c.id} value={"company:" + c.id} title={c.name}>

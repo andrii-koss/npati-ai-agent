@@ -49,7 +49,7 @@ it("keeps the company selected while an uncached name loads instead of showing N
   await render();
   expect(select().value).toBe("company:bakery");
   expect(select().getAttribute("aria-busy")).toBe("true");
-  expect(trigger().textContent).not.toContain("No company");
+  expect(trigger().textContent).not.toContain("chat.noCompany");
   await act(async () => finish({ company: { id: "bakery", name: "Bakery" } }));
   expect(trigger().textContent).toBe("Bakery");
   expect(JSON.parse(localStorage.getItem(`${key}:company`)!)).toEqual({ id: "bakery", name: "Bakery" });
@@ -59,7 +59,7 @@ it("does not restore a pending company after the user chooses No company", async
   await act(async () => { select().value = "none"; select().dispatchEvent(new Event("change", { bubbles: true })); });
   await act(async () => finish({ company: { id: "bakery", name: "Bakery" } }));
   expect(select().value).toBe("none");
-  expect(trigger().textContent).toBe("No company");
+  expect(trigger().textContent).toBe("chat.noCompany"); // the label is translated; this test renders without a language provider
   expect(localStorage.getItem(`${key}:company`)).toBeNull();
 });
 it("keeps the saved selection on a temporary open failure", async () => {

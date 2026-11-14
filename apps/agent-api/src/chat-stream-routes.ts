@@ -2,6 +2,7 @@ import {rowTaskCapabilities,takesRowCapabilityPath} from "./chat-project-data-ca
 import { runChatProjectBatch } from "./chat-project-batch";
 import { conversationProjectIds, projectBatchIntent, resolveConversationProjectTarget } from "./chat-conversation-project-target";
 import { isChatProjectCreationBatch, runChatProjectCreation, chatProjectCreationReply } from "./chat-project-creation";
+import { selectCompanyForWebsite } from "./company-run-notice-i18n";
 import { resolveCodingConversationLanguage, codingChatResponseInstruction, chatLanguageInstruction, detectCompanyChatLanguage } from "./company-chat-i18n";
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { AppConfig } from "./app";
@@ -626,13 +627,13 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
               if (companies.length === 1) targetCompanyId = companies[0]!.id;
               else if (companies.length === 0) {
                 projectResponse = {
-                  message: "Select an active Company before creating a website.",
+                  message: selectCompanyForWebsite(resolveCodingConversationLanguage(message, history), []),
                   suggestedActions: ["Create a Company"],
                   activeContext: resolved.context,
                 };
               } else {
                 projectResponse = {
-                  message: `Select an active Company before creating or editing a website. Available companies: ${companies.map((company) => company.name).join(", ")}.`,
+                  message: selectCompanyForWebsite(resolveCodingConversationLanguage(message, history), companies.map((company) => company.name)),
                   suggestedActions: companies.slice(0, 3).map((company) => `Company: ${company.name}`),
                   activeContext: resolved.context,
                 };

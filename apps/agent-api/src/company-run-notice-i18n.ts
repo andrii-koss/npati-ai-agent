@@ -143,3 +143,27 @@ export function filesChangedBeforeFailure(language: CompanyChatLanguage | undefi
   if (!files.length) return "";
   return "\n\n" + (FILES_CHANGED_BEFORE_FAILURE[language ?? "en"] ?? FILES_CHANGED_BEFORE_FAILURE.en) + files.slice(0, 20).map((file) => "`" + file + "`").join(", ") + (files.length > 20 ? ", …" : "");
 }
+
+/** "Select a company first" for a website request with no company chosen; it was English for every language (V6 step 13). */
+const SELECT_COMPANY: Record<CompanyChatLanguage, [string, string, string]> = {
+  en: ["Select an active Company before creating a website.", "Select an active Company before creating or editing a website. Available companies: ", "."],
+  uk: ["Оберіть активну компанію, перш ніж створювати сайт.", "Оберіть активну компанію, перш ніж створювати або змінювати сайт. Доступні компанії: ", "."],
+  ru: ["Выберите активную компанию, прежде чем создавать сайт.", "Выберите активную компанию, прежде чем создавать или изменять сайт. Доступные компании: ", "."],
+  de: ["Wählen Sie eine aktive Firma aus, bevor Sie eine Website erstellen.", "Wählen Sie eine aktive Firma aus, bevor Sie eine Website erstellen oder bearbeiten. Verfügbare Firmen: ", "."],
+  fr: ["Sélectionnez une entreprise active avant de créer un site web.", "Sélectionnez une entreprise active avant de créer ou de modifier un site web. Entreprises disponibles : ", "."],
+  es: ["Selecciona una empresa activa antes de crear un sitio web.", "Selecciona una empresa activa antes de crear o editar un sitio web. Empresas disponibles: ", "."],
+  it: ["Seleziona un'azienda attiva prima di creare un sito web.", "Seleziona un'azienda attiva prima di creare o modificare un sito web. Aziende disponibili: ", "."],
+  pl: ["Wybierz aktywną firmę przed utworzeniem strony internetowej.", "Wybierz aktywną firmę przed utworzeniem lub edycją strony internetowej. Dostępne firmy: ", "."],
+  pt: ["Seleciona uma empresa ativa antes de criar um site.", "Seleciona uma empresa ativa antes de criar ou editar um site. Empresas disponíveis: ", "."],
+  nl: ["Selecteer een actief bedrijf voordat u een website maakt.", "Selecteer een actief bedrijf voordat u een website maakt of bewerkt. Beschikbare bedrijven: ", "."],
+  tr: ["Web sitesi oluşturmadan önce etkin bir şirket seçin.", "Web sitesi oluşturmadan veya düzenlemeden önce etkin bir şirket seçin. Kullanılabilir şirketler: ", "."],
+  zh: ["创建网站前，请先选择一个活动公司。", "创建或编辑网站前，请先选择一个活动公司。可用公司：", "。"],
+  ja: ["ウェブサイトを作成する前に、有効な会社を選択してください。", "ウェブサイトを作成または編集する前に、有効な会社を選択してください。利用可能な会社: ", "。"],
+  ko: ["웹사이트를 만들기 전에 활성 회사를 선택하세요.", "웹사이트를 만들거나 수정하기 전에 활성 회사를 선택하세요. 사용 가능한 회사: ", "."],
+  ar: ["اختر شركة نشطة قبل إنشاء موقع ويب.", "اختر شركة نشطة قبل إنشاء موقع ويب أو تعديله. الشركات المتاحة: ", "."],
+  hi: ["वेबसाइट बनाने से पहले एक सक्रिय कंपनी चुनें।", "वेबसाइट बनाने या संपादित करने से पहले एक सक्रिय कंपनी चुनें। उपलब्ध कंपनियाँ: ", "।"],
+};
+export function selectCompanyForWebsite(language: CompanyChatLanguage, companyNames: string[]): string {
+  const [none, prefix, end] = SELECT_COMPANY[language] ?? SELECT_COMPANY.en;
+  return companyNames.length ? prefix + companyNames.join(", ") + end : none;
+}
