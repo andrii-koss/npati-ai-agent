@@ -133,6 +133,8 @@ export function textIn(language: string, path: string): string {
 
 /** Reuse the same dictionaries for request-language activity without changing UI preferences. */
 export function executionTraceText(language: string, key: string) {
+  // The trace asks which language it is in for steps whose text is built outside the dictionaries.
+  if (key === "__language") return language;
   const requestText = language === "pt" ? ptExecutionTrace[key] : additionalExecutionTrace[language]?.[key];
   return requestText ?? dictionaries[language as SupportedLanguage]?.executionTrace[key] ?? dictionaries.en.executionTrace[key] ?? key;
 }

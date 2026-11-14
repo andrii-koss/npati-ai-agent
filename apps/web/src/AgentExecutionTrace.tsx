@@ -1,4 +1,5 @@
 import React, { useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { technologySelectionTitle } from "./technology-selection-i18n";
 import { Terminal, Blocks, FilePenLine, FileText, Package, Box, Monitor, Search, FlaskConical, Globe, Brain, ChevronDown, ChevronRight, Copy, Check, X, AlertCircle } from "lucide-react";
 import type { DevelopmentProcess, DevelopmentProcessProgressItem } from "@npati/shared";
 import { sanitizeExecutionTrace } from "@npati/shared";
@@ -141,7 +142,7 @@ function title(item: DevelopmentProcessProgressItem, t: Labels, active: boolean)
   if (item.status === "failed" && item.file && !item.command) return t("fileNotChanged") + ": " + sanitizeExecutionTrace(item.file) + (readableFailure(item) ? " — " + readableFailure(item) : "");
   if (item.command && ["waiting_for_approval", "awaiting_approval"].includes(item.status ?? "")) return t("awaiting_approval") + ": " + sanitizeExecutionTrace(item.command).slice(0, 100);
   if (/code\.finish/.test(item.tool ?? "")) return t("agentFinished");
-  if (item.stage === "technology_selection") return sanitizeExecutionTrace(item.title);
+  if (item.stage === "technology_selection") { const language = t("__language"); return language === "__language" ? sanitizeExecutionTrace(item.title) : technologySelectionTitle(language, item); }
   if (operation(item)[0] === "working") return t(item.status === "waiting_for_approval" ? "awaiting_approval" : item.status ?? "running");
   if (!item.status) return sanitizeExecutionTrace(item.command ? item.tool + ": " + item.command : item.title);
   if (item.command) { const command = sanitizeExecutionTrace(item.command).slice(0,100); if (active) return t("runningCommand").replace("{{command}}",command); const outcome = commandOutcome(item); return t("executed") + ": " + command + (outcome ? " — " + outcome : ""); }

@@ -91,7 +91,8 @@ describe("execution row interaction", () => {
     expect(host.querySelector(".lucide-folder-plus")).toBeNull();
     expect(host.textContent).not.toContain("Виконано операцій");
     await act(async () => host.querySelector<HTMLButtonElement>(".coding-run-header")!.click());
-    expect(host.textContent).toContain("HTML/CSS: Explicit user technology: HTML/CSS");
+    // The technology step is shown in the request language, not as the English reason the server recorded (V6 step 13).
+    expect(host.textContent).toContain("HTML/CSS: технологія, яку ви вказали");
     await act(async () => host.querySelector<HTMLButtonElement>(".coding-operation-history .codex-trace-row-header")!.click());
     expect(host.querySelector('a[href*="/activity?runId="]')).toBeNull();
     expect(host.textContent).not.toContain("Переглянути Run");

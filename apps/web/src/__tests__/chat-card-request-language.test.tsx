@@ -31,3 +31,11 @@ it("has every card label and the thinking text in all 16 languages", () => {
     expect(textIn(language, "chat.thinking"), language).not.toBe("Thinking");
   }
 });
+
+it("shows the technology selection step in the request language, also for steps recorded in English", async () => {
+  const { technologySelectionTitle } = await import("../technology-selection-i18n");
+  expect(technologySelectionTitle("ja", { title: "HTML/CSS: Explicit user technology: HTML/CSS" })).toBe("HTML/CSS：指定された技術");
+  expect(technologySelectionTitle("de", { title: "HTML/CSS: AI planning unavailable; conservative static fallback" })).toBe("HTML/CSS: Standardtechnologie (KI-Planung nicht verfügbar)");
+  expect(technologySelectionTitle("uk", { title: "React + Vite: a modern SPA fits the request", agentId: "AI Planner", result: JSON.stringify({ source: "ai_planner" }) })).toBe("React + Vite: обрано AI-планувальником для цього запиту");
+  expect(technologySelectionTitle("ar", { title: "Phaser: Named game engine: the local Vite starter" })).toContain("محرك الألعاب");
+});
