@@ -1,3 +1,4 @@
+import { detectedLanguage } from "@npati/shared";
 /**
  * Texts of the confirmation cards in chat, in the 16 chat languages. A card speaks the language the person writes in
  * (the run's response language, else the language of their last message), not only the interface language, so
@@ -223,48 +224,16 @@ export function approvalToolLabel(toolName: string, copy: ApprovalCopy): string 
   return copy.tool.other;
 }
 
-const latinLetters: Array<[ApprovalLanguage, RegExp]> = [
-  ["tr", /[ğışĞİŞ]/u], ["pl", /[ąćęłńśźżĄĆĘŁŃŚŹŻ]/u], ["de", /[äöüßÄÖÜ]/u], ["es", /[ñ¿¡Ñ]/u], ["pt", /[ãõÃÕ]/u],
-  // "ç" is Portuguese too ("preço"): a Portuguese request got French card labels (V6 step 14), so the words decide.
-  ["fr", /[œèêëîïûùÿŒ]/u], ["it", /[òìÒÌ]/u],
-];
-const latinWords: Array<[ApprovalLanguage, Set<string>]> = [
-  ["en", new Set(["the", "and", "please", "delete", "create", "change", "add", "make", "with", "my", "file", "what", "is"])],
-  ["de", new Set(["und", "der", "die", "das", "bitte", "lösche", "erstelle", "mit", "ist", "nicht", "eine", "ein"])],
-  ["fr", new Set(["le", "la", "les", "et", "est", "pour", "avec", "supprime", "crée", "une", "un", "des"])],
-  ["es", new Set(["el", "la", "los", "las", "y", "es", "para", "con", "elimina", "crea", "una", "por"])],
-  ["it", new Set(["il", "lo", "gli", "e", "è", "per", "con", "elimina", "crea", "una", "di", "che"])],
-  ["pl", new Set(["i", "jest", "dla", "z", "usuń", "utwórz", "na", "nie", "się", "to"])],
-  ["pt", new Set(["o", "os", "as", "e", "é", "para", "com", "exclua", "crie", "uma", "não", "do"])],
-  ["nl", new Set(["de", "het", "een", "en", "is", "voor", "met", "verwijder", "maak", "niet", "van"])],
-  ["tr", new Set(["ve", "bir", "bu", "için", "ile", "sil", "oluştur", "değil", "mi"])],
-];
-
-/** The language a person writes in, from the text of their message; the fallback when the text does not say. */
+/**
+ * The language a person writes in, from the text of their message; the fallback when the text has no words.
+ * The server's detector is used, so a card and the reply it sits under always agree. The web had its own word lists:
+ * "en" in «… EN Site» made an English request Dutch and then Hindi, and Italian questions read as French (V6 step 14).
+ */
 export function messageLanguage(text: string | null | undefined, fallback: string): ApprovalLanguage {
-  const value = String(text ?? "");
-  if (/[ぁ-ゟ゠-ヿ]/u.test(value)) return "ja";
-  if (/[가-힣]/u.test(value)) return "ko";
-  if (/\p{Script=Han}/u.test(value)) return "zh";
-  if (/\p{Script=Arabic}/u.test(value)) return "ar";
-  if (/\p{Script=Devanagari}/u.test(value)) return "hi";
-  if (/\p{Script=Cyrillic}/u.test(value)) {
-    const uk = /[іїєґІЇЄҐ]/u.test(value), ru = /[ыэёъЫЭЁЪ]/u.test(value);
-    if (uk !== ru) return uk ? "uk" : "ru";
-    // Without a letter only one of them uses, the small words decide ("и", "что" against "й", "що").
-    const words = value.toLowerCase().split(/[^\p{L}']+/u);
-    const ukWords = words.filter(word => ["й", "що", "це", "та", "як", "для", "видали", "зміни", "створи", "додай", "будь", "ласка"].includes(word)).length;
-    const ruWords = words.filter(word => ["и", "что", "это", "как", "удали", "измени", "создай", "добавь", "пожалуйста", "или", "его"].includes(word)).length;
-    if (ukWords !== ruWords) return ukWords > ruWords ? "uk" : "ru";
-    return fallback === "ru" ? "ru" : "uk";
-  }
-  if (!/\p{Script=Latin}/u.test(value)) return approvalCopyLanguage(fallback);
-  const lettered = latinLetters.filter(([, pattern]) => pattern.test(value)).map(([language]) => language);
-  if (lettered.length === 1) return lettered[0]!;
-  const words = value.toLowerCase().split(/[^\p{L}]+/u);
-  const scored = latinWords.map(([language, set]) => ({ language, hits: words.filter(word => set.has(word)).length })).sort((a, b) => b.hits - a.hits);
-  if (scored[0]!.hits > 0 && scored[0]!.hits > scored[1]!.hits) return scored[0]!.language;
-  return approvalCopyLanguage(fallback);
+  const detected = detectedLanguage(String(text ?? ""));
+  // "ok", "так", a number: too short to say, so the conversation keeps its language.
+  if (detected.letters < 4) return approvalCopyLanguage(fallback);
+  return approvalCopyLanguage(detected.language);
 }
 
 function approvalCopyLanguage(language: string): ApprovalLanguage {

@@ -25,7 +25,7 @@ function placeholders(value: string) {
 
 describe("interface language catalogues", () => {
   it("offers exactly the same sixteen languages as the chat", () => {
-    const chatSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../../agent-api/src/company-chat-i18n.ts"), "utf8");
+    const chatSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../../../packages/shared/src/chat-language.ts"), "utf8");
     const chatLanguageType = chatSource.match(/export type CompanyChatLanguage = ([^;]+);/)![1]!;
     const chatLanguages = Array.from(chatLanguageType.matchAll(/"([a-z]+)"/g), match => match[1]);
     expect(SUPPORTED_LANGUAGES.map(item => item.code).sort()).toEqual(chatLanguages.sort());

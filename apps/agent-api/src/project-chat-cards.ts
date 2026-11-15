@@ -1,4 +1,4 @@
-import type { ProjectCardData } from "@npati/shared";
+import type { DatabaseCardData, ProjectCardData } from "@npati/shared";
 import type { AuthContext, ConversationMessage, WorkspaceStore } from "@npati/workspace";
 import { ActiveContextResolver, type ResolvedActiveContext } from "./active-context-resolver";
 import type { ActiveContext } from "@npati/shared";
@@ -297,16 +297,31 @@ export async function saveChatProjectCard(
   throw new Error("Could not save the website card with the chat message");
 }
 
+/** The database block of a chat message (owner, V6 step 14), kept beside the project cards of the same chat. */
+const databaseCardKey = (conversationId: string) => "chat-database-cards:" + conversationId;
+export async function saveChatDatabaseCard(store: WorkspaceStore, context: AuthContext, conversationId: string, messageId: string, card: DatabaseCardData): Promise<void> {
+  const key = databaseCardKey(conversationId);
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const existing = await store.getUserSetting(context, key);
+    const value = existing?.value && typeof existing.value === "object" && !Array.isArray(existing.value) ? existing.value as Record<string, DatabaseCardData> : {};
+    if (await store.setUserSetting(context, key, { ...value, [messageId]: card }, existing?.revision ?? 0)) return;
+  }
+  throw new Error("Could not save the database card with the chat message");
+}
+
 export async function getChatMessagesWithProjectCards(
   store: WorkspaceStore,
   context: AuthContext,
   conversationId: string,
   messages: ConversationMessage[],
-): Promise<Array<ConversationMessage & { projectCard?: ProjectCardData }>> {
-  const cards = readCards((await store.getUserSetting(context, settingKey(conversationId)))?.value);
+): Promise<Array<ConversationMessage & { projectCard?: ProjectCardData; databaseCard?: DatabaseCardData }>> {
+  const [cardSetting, databaseSetting] = await Promise.all([store.getUserSetting(context, settingKey(conversationId)), store.getUserSetting(context, databaseCardKey(conversationId)).catch(() => null)]);
+  const cards = readCards(cardSetting?.value);
+  const databases = databaseSetting?.value && typeof databaseSetting.value === "object" && !Array.isArray(databaseSetting.value) ? databaseSetting.value as Record<string, DatabaseCardData> : {};
   return Promise.all(messages.map(async message => {
     const card = cards[message.id];
-    return card ? { ...message, projectCard: card, content: await publicCodeChatReply(store, context, card, message.content) } : message;
+    const withDatabase = databases[message.id] ? { ...message, databaseCard: databases[message.id] } : message;
+    return card ? { ...withDatabase, projectCard: card, content: await publicCodeChatReply(store, context, card, message.content) } : withDatabase;
   }));
 }
 

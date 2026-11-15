@@ -25,3 +25,6 @@ it("still reads French with ç", () => expect(messageLanguage("Ça marche, crée
 // "site" is French, Portuguese and English alike: a French question tied with English and took the project's language.
 it("reads a French question without accents", () => expect(messageLanguage("Quel est le titre actuel du site «V6TEST14 Poly AR Site» ?", "hi")).toBe("fr"));
 it("still reads an English question about a site", () => expect(messageLanguage("What heading is on the website «S» now?", "hi")).toBe("en"));
+// Names and identifiers do not vote: "EN" in «… EN Site» and POLY_EN_V1 is not the Dutch "en".
+it("reads an English request that names an EN site", () => expect(messageLanguage("Create a simple website «V6TEST14 Poly EN Site» for our bakery: heading POLY_EN_V1 and one line about fresh bread. Simple HTML/CSS.", "hi")).toBe("en"));
+it("reads a German sentence that names a Cyrillic company", () => expect(messageLanguage("Merke dir für das Unternehmen «V6TEST14 Poly Пекарня»: Unser Lieferpartner ist «Express Alfa».", "uk")).toBe("de"));

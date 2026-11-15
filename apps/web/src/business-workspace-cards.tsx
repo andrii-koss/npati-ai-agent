@@ -3,7 +3,7 @@ import { Monitor } from "lucide-react";
 import { ChatProjectPreviewCard } from "./ChatProjectPreviewCard";
 import { getStoredAuthToken } from "./AuthContext";
 import { useTranslation } from "./i18n";
-import type { ProjectCardData } from "@npati/shared";
+import type { DatabaseCardData, ProjectCardData } from "@npati/shared";
 import { FormEvent, ReactNode, SyntheticEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { createPortal } from "react-dom";
@@ -617,4 +617,4 @@ export function FloatingNotice({
     </div>
   );
 }
-export type Message = { id: string; role: "user" | "assistant" | "system"; content: string; createdAt: string; attachments?: ChatAttachmentInput[]; projectCard?: ProjectCardData };
+export type Message = { id: string; role: "user" | "assistant" | "system"; content: string; createdAt: string; attachments?: ChatAttachmentInput[]; projectCard?: ProjectCardData; databaseCard?: DatabaseCardData };

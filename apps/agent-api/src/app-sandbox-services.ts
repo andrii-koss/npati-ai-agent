@@ -1,4 +1,5 @@
 import { databaseCreatedMessage } from "./database-created-i18n";
+import { saveChatDatabaseCard } from "./project-chat-cards";
 import type { Pool } from "pg";
 import type { FastifyBaseLogger } from "fastify";
 import type { WorkspaceStore } from "@npati/workspace";
@@ -106,7 +107,12 @@ export function createAppSandboxServices(deps: AppSandboxServicesDeps) {
               if (process?.conversationId) {
                 const latestUser = (await workspaceStore.getNeutralConversation(ctx, process.conversationId).catch(() => ({ messages: [] as { role: string; content: string }[] })))
                   .messages.filter(message => message.role === "user").at(-1)?.content;
-                await workspaceStore.appendNeutralMessage(ctx, process.conversationId, "assistant", databaseCreatedMessage(result.backend.name, latestUser, process.responseLanguage));
+                const announced = await workspaceStore.appendNeutralMessage(ctx, process.conversationId, "assistant", databaseCreatedMessage(result.backend.name, latestUser, process.responseLanguage));
+                // The chat shows the new database as its own block under this message (owner, V6 step 14).
+                await saveChatDatabaseCard(workspaceStore, ctx, process.conversationId, announced.id, {
+                  id: result.backend.id, name: result.backend.name, companyId, projectId,
+                  engine: "PostgreSQL", status: "ready",
+                }).catch(() => undefined);
               }
             }
             return { ...result, environment };

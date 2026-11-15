@@ -118,6 +118,21 @@ export type ProjectProgressEvent = {
   projectId?: string;
 };
 
+/**
+ * A project database the agent created in a chat, shown as its own block under the reply that created it (owner, V6
+ * step 14): the database name, "PostgreSQL · Data Studio", its status and Open into Data Studio.
+ */
+export interface DatabaseCardData {
+  /** The data backend id. */
+  id: string;
+  name: string;
+  companyId: string;
+  projectId?: string;
+  /** Engine label, e.g. PostgreSQL. */
+  engine: string;
+  status: "ready" | "provisioning" | "failed";
+}
+
 export interface ProjectCardData {
   id: string;
   projectId?: string;
@@ -247,3 +262,4 @@ export * from "./chat-development";
 
 export { sanitizeExecutionTrace } from "./execution-trace";
 export { monitorCodeRun, normalizeCodeRunStatus } from "./code-run-monitor";
+export * from "./chat-language";

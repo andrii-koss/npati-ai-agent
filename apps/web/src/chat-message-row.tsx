@@ -5,6 +5,7 @@ import { ChatMessageContent, projectChatText } from "./ChatMessageContent";
 import { UserPromptMessage } from "./UserPromptMessage";
 import { PendingMessageAttachments } from "./ChatAttachments";
 import { AssistantMessageToolbar, ProjectChatCard, ChatProjectPreviewCard, type Message } from "./business-workspace-cards";
+import { ChatDatabaseCard } from "./ChatDatabaseCard";
 
 export function messageHasImage(message: Message) {
   return message.attachments?.some((attachment) => attachment.kind === "image")
@@ -39,9 +40,10 @@ const sameCard = (left: ProjectCardData | null | undefined, right: ProjectCardDa
  * change: typing in the composer or the streamed reply of another message leaves it as it is.
  */
 export const ChatMessageRow = memo(function ChatMessageRow({ message, card, showToolbar, previewBusy = false, responseLanguage, totalTime, actions }: ChatMessageRowProps) {
-  const assistantText = message.role === "user" ? "" : projectChatText(message.content, message.projectCard, responseLanguage);
+  // A message that announces a new database is shown as the database block itself (owner, V6 step 14).
+  const assistantText = message.role === "user" || message.databaseCard ? "" : projectChatText(message.content, message.projectCard, responseLanguage);
   // The opening note of a project chat only names the project. With nothing to show there is nothing to copy or rate.
-  if (message.role !== "user" && !assistantText.trim() && !card && !message.attachments?.length) return null;
+  if (message.role !== "user" && !assistantText.trim() && !card && !message.databaseCard && !message.attachments?.length) return null;
   return (
     <article
       ref={(element) => actions.registerArticle(message.id, element)}
@@ -60,12 +62,13 @@ export const ChatMessageRow = memo(function ChatMessageRow({ message, card, show
           <ChatMessageContent content={assistantText} />
         </>
       )}
+      {message.databaseCard && <ChatDatabaseCard card={message.databaseCard} language={responseLanguage} />}
       {card && <ChatProjectPreviewCard card={card} showPreviewTrigger={!previewBusy} onActivate={actions.activateCard} language={responseLanguage} />}
       {showToolbar && Boolean(assistantText.trim()) && <div className="assistant-toolbar-row"><AssistantMessageToolbar content={message.content} onRegenerate={() => actions.regenerate(message.id)} />{totalTime && <span className="chat-run-total">{chatCardLabels(responseLanguage).total} {totalTime}</span>}</div>}
     </article>
   );
 }, (previous, next) => previous.message.id === next.message.id && previous.message.content === next.message.content
-  && previous.message.attachments === next.message.attachments && previous.message.projectCard === next.message.projectCard
+  && previous.message.attachments === next.message.attachments && previous.message.projectCard === next.message.projectCard && previous.message.databaseCard === next.message.databaseCard
   && sameCard(previous.card, next.card) && previous.showToolbar === next.showToolbar && previous.previewBusy === next.previewBusy
   && previous.responseLanguage === next.responseLanguage && previous.totalTime === next.totalTime && previous.actions === next.actions);
 
