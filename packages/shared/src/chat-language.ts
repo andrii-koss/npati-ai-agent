@@ -119,7 +119,10 @@ export function detectedLanguage(message: string): { language: CompanyChatLangua
     // Function words decide short Latin-script messages, which the small trigram samples misread
     // ("Remember for Nordic Fit: classes start every hour from 7am to 9pm." scored as French).
     const words = normalized.split(" ");
-    const hits = Object.entries(functionWords).map(([language, set]) => ({ language: language as CompanyChatLanguage, count: words.filter((word) => set.has(word)).length }))
+    // "è" standing alone is the Italian "is" (French writes "est", Portuguese "é"): it counts twice, so an Italian question
+    // such as "Qual è ora l'intestazione principale del sito …?" is not read as French (V6 step 14).
+    const italianIs = words.filter((word) => word === "è").length;
+    const hits = Object.entries(functionWords).map(([language, set]) => ({ language: language as CompanyChatLanguage, count: words.filter((word) => set.has(word)).length + (language === "it" ? italianIs : 0) }))
       .sort((left, right) => right.count - left.count);
     // Very short utterances may have only one distinguishing function word. Longer abbreviations still use profiles.
     if ((hits[0]!.count >= 2 || (letters < 18 && hits[0]!.count === 1)) && hits[0]!.count > hits[1]!.count) {
