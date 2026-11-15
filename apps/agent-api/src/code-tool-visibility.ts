@@ -141,7 +141,9 @@ const GROUP_PATTERNS: Record<Exclude<CodeToolIntentGroup, "mcp">, RegExp> = {
   subagents: /(?:субагент|sub-?agent|делегуй|delegate|паралельно кількома агентами|in parallel agents)/iu,
   processes: /(?:dev[- ]?server|сервер розробки|запусти сервер|start the server|\bwatch\b|watcher|фонов\w* процес|background process|\blogs?\b|(?<!\p{L})логи?(?!\p{L})|зупини процес|stop the process)/iu,
   async: /(?:довгий процес|long[- ]running|in the background|у фоні|фоново)/iu,
-  data: /(?:баз[аиуі] даних|(?<!\p{L})бд(?!\p{L})|database|\bdb\b|таблиц|\btable|схем[аиуі] (?:бази|даних)|schema|колонк|\bcolumn|\bfield|поле в|\brls\b|row level|політик[аиу] доступу|access polic|\bseed|наповни|тестов\w* дан|міграц|migration|\bsql\b|збереж\w* дан|зберігат\w* дан|store data|persist|data studio|supabase|postgres)/iu,
+  // A database request in any of the 16 chat languages; only Ukrainian and English were recognised, so a Hindi request
+  // got no data tools and the agent wrote a SQLite file instead of the project database (V6 step 14).
+  data: /(?:баз[аиуі] даних|баз[аыуе] данных|(?<!\p{L})бд(?!\p{L})|database|datenbank|\btabelle|base\s+de\s+(?:données|donnees|datos|dados)|banco\s+de\s+dados|\btabla|\btabela|baz[aęy]\s+danych|veritaban|\btablo|数据库|数据表|データベース|テーブル|데이터베이스|테이블|قاعدة\s*(?:ال)?بيانات|جدول|डेटाबेस|तालिका|\bdb\b|таблиц|\btable|схем[аиуі] (?:бази|даних)|schema|колонк|\bcolumn|\bfield|поле в|\brls\b|row level|політик[аиу] доступу|access polic|\bseed|наповни|тестов\w* дан|міграц|migration|\bsql\b|збереж\w* дан|зберігат\w* дан|store data|persist|data studio|supabase|postgres)/iu,
   planning: /(?:(?<!\p{L})план(?!\p{L})|сплануй|сплануват|\bplan\b|\btodo\b|список задач|покроков|step[- ]by[- ]step)/iu,
   workspace: /(?:перейменуй|перемісти|rename|\bmove\b|видали файл|видали теку|delete (?:the )?file|remove (?:the )?file|undo|відкоти|скасуй останн|revert|outline|символи файлу|\bsymbols?\b)/iu,
 };

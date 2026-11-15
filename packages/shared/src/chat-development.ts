@@ -57,7 +57,7 @@ export function requestsDevelopmentRestore(message: string): boolean {
 const WEB_APP = /(?<!(?:^|[\s(])(?:в|у|до|із|з|in|on|to|into|from|the|my|this|your)\s)(?:\bweb\s*app\b|\bapp\b|\bapplication\b|застосун\p{L}*|додат(?:ок|ку|ком)|приложени\p{L}*|\bscene\b|сцен\p{L}*|(?<![\p{L}\d])3d(?![\p{L}])|three\.?js|webgl|\bcanvas\b|\btodo\b|to-?do|дашборд|dashboard|калькулятор|calculator|портфоліо|портфолио|portfolio)/iu;
 
 /** "Створи базу даних для сайту": the thing to create is the database, so the site it names already exists. */
-function createsDatabaseFirst(message: string): boolean {
+export function createsDatabaseFirst(message: string): boolean {
   const found = /(?:database|\bdb\b|баз[уаи]\s+дан|datenbank|base\s+de\s+(?:données|donnees|datos|dados)|banco\s+de\s+dados|baz[ęa]\s+danych|veritaban|데이터베이스|データベース|数据库|डेटाबेस|قاعدة\s*بيانات)/iu.exec(message);
   if (!found) return false;
   const before = message.slice(0, found.index);

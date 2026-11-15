@@ -5,6 +5,7 @@ import {
   validateActiveContext,
   ContextValidationError,
   defaultHybridRouter,
+  createsDatabaseFirst,
 } from "@npati/shared";
 import {
   type AuthContext,
@@ -130,7 +131,9 @@ export class ActiveContextResolver {
     const creating = decision?.intent === "CREATE_WEBSITE" || decision?.intent === "CREATE_PROJECT";
     // "Create X" names X as the thing to create, not as the place to work ("create NovaScale" when it exists is a
     // duplicate request for the company actions); only a new project for a named company switches.
-    if (!creating && /^\s*(?:please\s+)?(?:create|створи|створіть|создай|crie|cria|crea|erstelle|crée|maak)(?![\p{L}])/iu.test(message)) return undefined;
+    // "Create a database for the website «X»" creates the database; X is the existing site it belongs to (V6 step 14:
+    // the request got "Select an active project first" although it named the site).
+    if (!creating && !createsDatabaseFirst(message) && /^\s*(?:please\s+)?(?:create|створи|створіть|создай|crie|cria|crea|erstelle|crée|maak)(?![\p{L}])/iu.test(message)) return undefined;
     // Deleting a company names its target, not a place to continue working (the chat would be left inside it).
     // Removing data inside a named project ("Remove only field test_note from Next Shop") still targets that project.
     const removesProjectData = /(?<![\p{L}])(?:field|column|table|row|record|поле|колонк\p{L}*|таблиц\p{L}*|рядок|запис\p{L}*|campo|columna|coluna|tabla|tabela|fila|linha|feld|spalte|tabelle|zeile)(?![\p{L}])/iu.test(message);
