@@ -13,6 +13,12 @@ export interface ChatEntityContext {
   lastConfirmedAction: { entityType: string; entityId: string | null; companyId: string | null; projectId: string | null; action: string };
 }
 const contextKey = (conversationId: string) => `chat-active-context:${conversationId}`;
+const PROJECT_COUNT: Record<import("./company-chat-i18n").CompanyChatLanguage, (n: number) => string> = {
+  en: (n) => `projects: ${n}`, uk: (n) => `проєктів: ${n}`, ru: (n) => `проектов: ${n}`, de: (n) => `Projekte: ${n}`,
+  fr: (n) => `projets : ${n}`, es: (n) => `proyectos: ${n}`, it: (n) => `progetti: ${n}`, pl: (n) => `projekty: ${n}`,
+  pt: (n) => `projetos: ${n}`, nl: (n) => `projecten: ${n}`, tr: (n) => `proje sayısı: ${n}`, zh: (n) => `项目数：${n}`,
+  ja: (n) => `プロジェクト数：${n}`, ko: (n) => `프로젝트 수: ${n}`, ar: (n) => `عدد المشاريع: ${n}`, hi: (n) => `प्रोजेक्ट: ${n}`,
+};
 const NOTHING_STORED: Partial<Record<import("./company-chat-i18n").CompanyChatLanguage, string>> = {
   en: "No stored value is available for this field.", uk: "Для цього поля нічого не збережено.", ru: "Для этого поля ничего не сохранено.",
   de: "Für dieses Feld ist nichts gespeichert.", fr: "Aucune valeur n'est enregistrée pour ce champ.", es: "No hay ningún valor guardado para este campo.",
@@ -117,7 +123,8 @@ export async function executeChatEntityRead(store: WorkspaceStore, auth: AuthCon
     // "How many websites does our company have now?" got four bare names and no number (V6 step 14): the count comes
     // first, from storage, as for the company's agents.
     const projects = (await store.listProjects(auth, id)).filter(project => !["archived", "soft_deleted", "purging", "deleted"].includes(project.status));
-    value = projects.length ? record.name + " — " + projects.length + "\n" + projects.slice(0, 30).map(project => "- " + project.name).join("\n") : "";
+    // The count line is in the language of the question; a Japanese question got only a number and names (V6 step 14).
+    value = projects.length ? record.name + " — " + PROJECT_COUNT[detectCompanyChatLanguage(message)](projects.length) + ":\n" + projects.slice(0, 30).map(project => "- " + project.name).join("\n") : "";
   }
   else return null;
   // A Business Profile spreads its facts across several fields: one empty field is not evidence that the profile lacks the data.

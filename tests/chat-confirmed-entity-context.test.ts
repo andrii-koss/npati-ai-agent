@@ -42,7 +42,7 @@ describe("confirmed conversation entity context", () => {
     await persistChatResultContext(store, auth, agentRead);
     const agentFocus = await readChatActiveContext(store, auth, chat.id);
     expect((await executeChatEntityRead(store, auth, companyContext, { field: "role", entityType: "focused" }, "Its role?", chat.id, agentFocus))?.message).toBe(lead.role);
-    expect((await executeChatEntityRead(store, auth, companyContext, { field: "projects", entityType: "company" }, "List its projects.", chat.id, confirmed))?.message).toBe(a.name + " — 1\n- " + project.name);
+    expect((await executeChatEntityRead(store, auth, companyContext, { field: "projects", entityType: "company" }, "List its projects.", chat.id, confirmed))?.message).toBe(a.name + " — projects: 1:\n- " + project.name);
     const business = await store.createBusiness(auth, { name: a.name, businessStage: "operating", description: "BUSINESS_DESCRIPTION" });
     const businessRead = await executeChatEntityRead(store, auth, companyContext, { field: "description", entityType: "business" }, `Show the description of Business Profile "${a.name}".`, chat.id, confirmed);
     expect(businessRead).toMatchObject({ message: "BUSINESS_DESCRIPTION", entityRead: { entityType: "business", entityId: business.id, companyId: null } });
