@@ -176,11 +176,25 @@ export interface CodeSessionRunExecutorOptions {
 
 /** The subset of `CodingAgentRunResult` this module reads. Everything else is passed through untouched. */
 /** A reply that already says no file changed ("Нічого не змінював", "Файли не змінювалися", "No files were changed"). */
-const ACKNOWLEDGES_NO_CHANGE = /(?:нічого\s+не\s+змін|не\s+змінюв|не\s+змінювал|не\s+змінено|не\s+змінювались|без\s+змін|ничего\s+не\s+измен|не\s+изменял|не\s+изменен|no\s+(?:files?|changes?)\s+(?:were\s+|was\s+)?(?:changed|made|modified)|nothing\s+(?:was\s+)?changed|unchanged|did\s+not\s+change|didn['’]t\s+change|left\s+(?:the\s+)?files?\s+as)/iu;
+const ACKNOWLEDGES_NO_CHANGE = /(?:нічого\s+не\s+змін|не\s+змінюв|не\s+змінювал|не\s+змінено|не\s+змінювались|без\s+змін|ничего\s+не\s+измен|не\s+изменял|не\s+изменен|no\s+(?:files?|changes?)\s+(?:were\s+|was\s+)?(?:changed|made|modified)|nothing\s+(?:was\s+)?changed|unchanged|did\s+not\s+change|didn['’]t\s+change|left\s+(?:the\s+)?files?\s+as|keine\s+datei\w*\s+(?:wurde\s+)?(?:geändert|verändert)|nichts\s+geändert|nicht\s+geändert|aucun\s+fichier|rien\s+(?:n['’]a\s+été\s+)?modifié|pas\s+modifié|ningún\s+archivo|no\s+(?:se\s+)?(?:modifiqué|cambié|modificó|cambió)|nessun\s+file|non\s+ho\s+modificat|żadn\w+\s+plik|nie\s+zmienia\w*|nie\s+zmieni\w*|nenhum\s+ficheiro|nenhum\s+arquivo|não\s+alterei|não\s+(?:foi|foram)\s+alterad|geen\s+bestand|niets\s+gewijzigd|niet\s+gewijzigd|hiçbir\s+dosya|değiştirilmedi|没有修改|未修改|未更改|変更していません|変更はありません|변경하지\s*않|변경되지\s*않|لم\s+(?:يتم\s+)?(?:أغير|تغيير|يُغيَّر)|कोई\s+फ़ाइल\s+नहीं|नहीं\s+बदल)/iu;
+/** Written in the language of the request; it was English under a Portuguese reply (V6 step 14). */
 const NO_CHANGE_NOTE: Record<string, string> = {
   uk: "Примітка системи: під час цього запуску жоден файл проєкту не змінено.",
   ru: "Примечание системы: во время этого запуска ни один файл проекта не изменён.",
   en: "System note: no project file was changed during this run.",
+  de: "Systemhinweis: In diesem Lauf wurde keine Projektdatei geändert.",
+  fr: "Note du système : aucun fichier du projet n’a été modifié pendant cette exécution.",
+  es: "Nota del sistema: no se modificó ningún archivo del proyecto en esta ejecución.",
+  it: "Nota di sistema: nessun file del progetto è stato modificato in questa esecuzione.",
+  pl: "Uwaga systemu: podczas tego uruchomienia nie zmieniono żadnego pliku projektu.",
+  pt: "Nota do sistema: nenhum ficheiro do projeto foi alterado nesta execução.",
+  nl: "Systeemmelding: tijdens deze uitvoering is geen projectbestand gewijzigd.",
+  tr: "Sistem notu: bu çalıştırmada hiçbir proje dosyası değiştirilmedi.",
+  zh: "系统提示：本次运行没有修改任何项目文件。",
+  ja: "システムメモ：今回の実行ではプロジェクトのファイルは変更されていません。",
+  ko: "시스템 안내: 이번 실행에서는 프로젝트 파일이 변경되지 않았습니다.",
+  ar: "ملاحظة النظام: لم يتم تغيير أي ملف في المشروع خلال هذا التشغيل.",
+  hi: "सिस्टम नोट: इस रन में प्रोजेक्ट की कोई फ़ाइल नहीं बदली गई।",
 };
 
 /**
@@ -192,6 +206,19 @@ const REPAIR_HEADING: Record<string, string> = {
   uk: "Автоматична перевірка знайшла помилку і виправила її:",
   ru: "Автоматическая проверка нашла ошибку и исправила её:",
   en: "The automatic check found an error and fixed it:",
+  de: "Die automatische Prüfung hat einen Fehler gefunden und behoben:",
+  fr: "La vérification automatique a trouvé une erreur et l’a corrigée :",
+  es: "La comprobación automática encontró un error y lo corrigió:",
+  it: "Il controllo automatico ha trovato un errore e lo ha corretto:",
+  pl: "Automatyczna kontrola znalazła błąd i go naprawiła:",
+  pt: "A verificação automática encontrou um erro e corrigiu-o:",
+  nl: "De automatische controle vond een fout en heeft die verholpen:",
+  tr: "Otomatik denetim bir hata buldu ve düzeltti:",
+  zh: "自动检查发现了一个错误并已修复：",
+  ja: "自動チェックでエラーが見つかり、修正しました：",
+  ko: "자동 검사에서 오류를 찾아 수정했습니다:",
+  ar: "وجد الفحص التلقائي خطأً وأصلحه:",
+  hi: "स्वचालित जाँच में एक त्रुटि मिली और उसे ठीक किया गया:",
 };
 
 /**

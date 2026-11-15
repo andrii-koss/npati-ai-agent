@@ -124,7 +124,7 @@ export async function executeChatEntityRead(store: WorkspaceStore, auth: AuthCon
     // first, from storage, as for the company's agents.
     const projects = (await store.listProjects(auth, id)).filter(project => !["archived", "soft_deleted", "purging", "deleted"].includes(project.status));
     // The count line is in the language of the question; a Japanese question got only a number and names (V6 step 14).
-    value = projects.length ? record.name + " — " + PROJECT_COUNT[detectCompanyChatLanguage(message)](projects.length) + ":\n" + projects.slice(0, 30).map(project => "- " + project.name).join("\n") : "";
+    value = projects.length ? record.name + " — " + PROJECT_COUNT[detectCompanyChatLanguage(message)](projects.length) + "\n" + projects.slice(0, 30).map(project => "- " + project.name).join("\n") : "";
   }
   else return null;
   // A Business Profile spreads its facts across several fields: one empty field is not evidence that the profile lacks the data.

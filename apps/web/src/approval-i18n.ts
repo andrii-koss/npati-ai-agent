@@ -224,10 +224,12 @@ export function approvalToolLabel(toolName: string, copy: ApprovalCopy): string 
 }
 
 const latinLetters: Array<[ApprovalLanguage, RegExp]> = [
-  ["tr", /[ğışĞİŞ]/u], ["pl", /[ąćęłńśźżĄĆĘŁŃŚŹŻ]/u], ["de", /[äöüßÄÖÜ]/u], ["es", /[ñ¿¡Ñ]/u], ["pt", /[ãõÃÕ]/u], ["fr", /[œçèêëîïûùÿŒÇ]/u], ["it", /[òìÒÌ]/u],
+  ["tr", /[ğışĞİŞ]/u], ["pl", /[ąćęłńśźżĄĆĘŁŃŚŹŻ]/u], ["de", /[äöüßÄÖÜ]/u], ["es", /[ñ¿¡Ñ]/u], ["pt", /[ãõÃÕ]/u],
+  // "ç" is Portuguese too ("preço"): a Portuguese request got French card labels (V6 step 14), so the words decide.
+  ["fr", /[œèêëîïûùÿŒ]/u], ["it", /[òìÒÌ]/u],
 ];
 const latinWords: Array<[ApprovalLanguage, Set<string>]> = [
-  ["en", new Set(["the", "and", "please", "delete", "create", "change", "add", "make", "with", "my", "site", "file", "what", "is"])],
+  ["en", new Set(["the", "and", "please", "delete", "create", "change", "add", "make", "with", "my", "file", "what", "is"])],
   ["de", new Set(["und", "der", "die", "das", "bitte", "lösche", "erstelle", "mit", "ist", "nicht", "eine", "ein"])],
   ["fr", new Set(["le", "la", "les", "et", "est", "pour", "avec", "supprime", "crée", "une", "un", "des"])],
   ["es", new Set(["el", "la", "los", "las", "y", "es", "para", "con", "elimina", "crea", "una", "por"])],
