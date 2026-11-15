@@ -2,10 +2,20 @@ import type { FastifyInstance } from "fastify";
 import type { AuthContext, WorkspaceStore } from "@npati/workspace";
 import type { AuthProvider } from "./auth";
 import type { DevelopmentProcess } from "@npati/shared";
-import { getChatMessagesWithProjectCards } from "./project-chat-cards";
+import { getChatMessagesWithProjectCards, readChatActiveContext } from "./project-chat-cards";
 import { errorReply } from "./workspace-routes";
 
 const MESSAGE_PAGE = 10;
+
+/**
+ * The company a conversation last worked in, so opening it selects that company. V6 step 14: a chat held in a company's
+ * context showed "No company" in the selector while its messages still went to that company.
+ */
+async function savedConversationCompany(store: WorkspaceStore, context: AuthContext, conversationId: string) {
+  const saved = await readChatActiveContext(store, context, conversationId).catch(() => null);
+  const companyId = saved?.context.companyId;
+  return companyId ? store.getCompany(context, companyId).then((item) => ({ id: item.id, name: item.name })).catch(() => null) : null;
+}
 const CHAT_PAGE = 20;
 const ACTIVE_STATUSES = new Set(["queued", "preparing", "running", "stopping"]);
 
@@ -71,9 +81,10 @@ export function registerChatOpenRoutes(app: FastifyInstance, deps: { auth: AuthP
         deferProcesses ? [] as DevelopmentProcess[] : deps.listProcesses(context, conversationId),
       ]);
       const { messages: _all, ...conversation } = opened?.conversation ?? { messages: [] };
+      const conversationCompany = opened && conversationId ? await savedConversationCompany(deps.store, context, conversationId) : null;
       return {
         overview,
-        conversation: opened ? { ...conversation, messages: opened.messages, earlier: opened.start, cursor: opened.cursor, hasMore: opened.hasMore } : null,
+        conversation: opened ? { ...conversation, messages: opened.messages, earlier: opened.start, cursor: opened.cursor, hasMore: opened.hasMore, company: conversationCompany } : null,
         company,
         chats,
         processes: processes.filter((process) => chatProcess(process, conversationId)),
@@ -87,7 +98,9 @@ export function registerChatOpenRoutes(app: FastifyInstance, deps: { auth: AuthP
       reply.header("cache-control", "private, no-store");
       const context = await deps.auth.authenticate(request);
       const page = await messagePage(deps.store, context, request.params.conversationId, request.query.before, pageSize(request.query.limit, MESSAGE_PAGE));
-      return { messages: page.messages, earlier: page.start, cursor: page.cursor, hasMore: page.hasMore };
+      // The first page also names the conversation's company, so switching chats selects it.
+      const company = request.query.before ? undefined : await savedConversationCompany(deps.store, context, request.params.conversationId);
+      return { messages: page.messages, earlier: page.start, cursor: page.cursor, hasMore: page.hasMore, ...(company !== undefined ? { company } : {}) };
     } catch (error) { return errorReply(reply, error); }
   });
 

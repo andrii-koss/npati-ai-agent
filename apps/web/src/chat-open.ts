@@ -7,7 +7,7 @@ export type ChatOpenMessage = { id: string; role: "user" | "assistant"; content:
 export type ChatOpenChat = { id: string; title: string; updatedAt: string; businessId: string | null; businessName: string };
 export interface ChatOpenData {
   overview: WorkspaceOverview | null;
-  conversation: { id: string; title: string; messages: ChatOpenMessage[]; earlier: number; cursor?: string | null; hasMore?: boolean } | null;
+  conversation: { id: string; title: string; messages: ChatOpenMessage[]; earlier: number; cursor?: string | null; hasMore?: boolean; company?: { id: string; name: string } | null } | null;
   company: { id: string; name: string } | null;
   chats: { items: ChatOpenChat[]; more: boolean };
   processes: DevelopmentProcess[];

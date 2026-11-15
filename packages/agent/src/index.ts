@@ -1,5 +1,5 @@
-import { buildBusinessAgentInstruction, cacheFriendlyPrompt, detectMemoryCandidate } from "@npati/business-brain";
-export { cacheFriendlyPrompt } from "@npati/business-brain";
+import { buildBusinessAgentInstruction, cacheFriendlyPrompt, detectMemoryCandidate, stripDecorativeEmoji } from "@npati/business-brain";
+export { cacheFriendlyPrompt, stripDecorativeEmoji } from "@npati/business-brain";
 import type { HubClient } from "@npati/hub-connector";
 import type { MemoryProvider } from "@npati/memory";
 import type { AIEngine, ChatRequest, ChatResult } from "@npati/omniroute-adapter";
@@ -200,7 +200,7 @@ export class NpatiAgent {
     const chat = input.chat ?? ((request: ChatRequest) => this.dependencies.aiEngine.chat(request));
     const result = await chat({ ...aiRoute(input.context.ai), signal:input.signal, messages: [{ role: "system", content: cacheFriendlyPrompt(system + summaryInstruction + mediaInstruction + documentInstruction + tableExportInstruction + businessActionInstruction) + (researchInstruction ? "\n\n" + researchInstruction : "") }, ...history, { role: "user", content: userContent }] });
     return {
-      message: attachResearchSources(normalizeChatStyle(result.content, "I couldn’t generate a useful response. Please try again."), input.research),
+      message: attachResearchSources(stripDecorativeEmoji(normalizeChatStyle(result.content, "I couldn’t generate a useful response. Please try again."), message), input.research),
       suggestedActions: skillResult?.suggestedActions ?? [],
       model: result.model ?? input.context.ai.model,
       telemetry: result.telemetry ? { ...result.telemetry, usage: result.usage } : undefined,

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { cacheFriendlyPrompt } from "@npati/agent";
+import { cacheFriendlyPrompt, stripDecorativeEmoji } from "@npati/agent";
 
 import { BusinessActionHandler, goalContextBusinesses, goalScopeNote, unloadedRecordsNote } from "./business-action-handler";
 import { summarizeBusinessProfileChat } from "./business-profile-response";
@@ -776,6 +776,8 @@ export function createChatTurn(deps: ChatTurnDeps) {
       content = attachResearchSources(content, research);
     }
 
+    // Decorative emoji the person did not use or ask for are removed before the reply is stored or shown (V6 step 14).
+    content = stripDecorativeEmoji(content, safeUserRequest);
     if (memoryPolicy.writeAllowed && conversation) await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", content);
     if (memoryPolicy.writeAllowed && conversation) for (const record of researchRecords)
       await workspaceStore.appendConversationResearch?.(auth, conversation.id, researchEvidenceInput(record.tool, record.query, record.outcome, effectiveManagementCompany?.id ?? null));

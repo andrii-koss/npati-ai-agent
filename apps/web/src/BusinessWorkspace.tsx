@@ -356,6 +356,12 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           const page = opened ? (await opened).conversation : await api<{ messages: Message[]; earlier: number; cursor?: string | null }>(`/conversations/${next}/messages`);
           loaded = (page?.messages ?? []) as Message[];
           setEarlierMessages(page?.earlier ?? 0);
+          // The chat selects the company it worked in, as the user expects on opening it (owner decision, V6 step 14).
+          const chatCompany = (page as { company?: { id: string } | null } | null | undefined)?.company;
+          if (chatCompany?.id && chatCompany.id !== readActiveCompanyId()) {
+            writeActiveCompanyId(chatCompany.id);
+            window.dispatchEvent(new CustomEvent("npati:company-changed", { detail: { action: "select", companyId: chatCompany.id } }));
+          }
           // A refresh after a turn keeps the earlier pages already shown and their cursor.
           if (!preserveActiveTurn || earlierCursorRef.current === null) earlierCursorRef.current = page?.cursor ?? (loaded[0]?.id ?? null);
         }

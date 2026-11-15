@@ -438,7 +438,7 @@ function ContextChat({ userId, neutralChat, businessSetup, businessRoute, ...pro
     };
     const handleCompanyChanged = (event: Event) => {
       const detail = (event as CustomEvent<{ action?: string; companyId?: string }>).detail;
-      if (detail?.action === "create" && detail.companyId) {
+      if ((detail?.action === "create" || detail?.action === "select") && detail.companyId) {
         selectionRevision.current++;
         void loadSelected(detail.companyId).catch((e) => { if (active) setError(e instanceof Error ? e.message : "Could not refresh companies"); });
         return;
