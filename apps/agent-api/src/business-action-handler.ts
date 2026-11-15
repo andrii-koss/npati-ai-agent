@@ -193,7 +193,7 @@ When the user asks to create or edit a business idea:
    - businessStage: "idea" | "starting" | "operating" | "growing" | "scaling"
    - industry: e.g. E-commerce, Консалтинг, HoReCa, IT / SaaS, тощо.
    - niche: Precise market niche
-   - country: Primary country (e.g. Україна)
+   - country: Primary country, in the language of the user's message (Ukraine, Україна, Ukrayna)
    - market: "Local", "National", "Global", тощо.
    - teamType: "solo" | "team"
    - presenceType: "online" | "local" | "both"
