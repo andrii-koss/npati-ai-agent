@@ -10,6 +10,7 @@ it.each(['Expo','Flutter'])('routes a new %s Mobile App into existing Code prepa
  const legacy=vi.spyOn(ProjectOrchestrator.prototype,'executeWebsiteTask').mockRejectedValue(Error('legacy-company-runtime'));
  const app=buildApp({workspaceStore:store,authProvider:{authenticate:async()=>ctx},aiEngine:engine,marketplace:{marketplace:async()=>({overview:{connectedProviders:1}})},deploymentType:'self_hosted'} as never);
  try{const response=await app.inject({method:'POST',url:'/chat/stream',payload:{streamId:crypto.randomUUID(),message:`Create ${framework} mobile app named Native Todo`,contextType:'company',companyId:company.id}});
- expect(response.statusCode,response.body).toBe(500);expect(prepare).toHaveBeenCalledOnce();expect(prepare.mock.calls[0]?.[1]).toMatchObject({type:'mobile_app',kind:'mobile_app',name:'Native Todo'});expect(prepare.mock.calls[0]?.[3]).toBe(framework);expect(legacy).not.toHaveBeenCalled();
+ // Since V6 step 14 every creation runs as a development process: a failed preparation ends with a failed project card, not a bare 500.
+ expect(response.statusCode,response.body).toBe(200);expect(response.body).toContain(`"status":"failed"`);expect(prepare).toHaveBeenCalledOnce();expect(prepare.mock.calls[0]?.[1]).toMatchObject({type:'mobile_app',kind:'mobile_app',name:'Native Todo'});expect(prepare.mock.calls[0]?.[3]).toBe(framework);expect(legacy).not.toHaveBeenCalled();
  }finally{prepare.mockRestore();legacy.mockRestore();await app.close();}
 },15000);
