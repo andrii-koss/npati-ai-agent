@@ -63,8 +63,8 @@ export const cyrillicFunctionWords: Record<"uk" | "ru", Set<string>> = {
 };
 const latinOnlyLetters: Partial<Record<CompanyChatLanguage, RegExp>> = { pl: /[ąćęłńśźż]/u, tr: /[ğış]/u, pt: /[ãõ]/u, es: /[ñ]/u, de: /[ßä]/u, fr: /[œîïû]/u };
 
-const functionWords: Record<"en" | "fr" | "de" | "es" | "it" | "pl" | "pt" | "nl" | "tr", Set<string>> = {
-  en: new Set(["the", "and", "for", "from", "with", "every", "our", "my", "your", "have", "has", "is", "are", "this", "that", "please", "show", "what", "which", "how", "me", "it", "of", "to", "by", "at", "on", "an", "its", "did", "we", "do", "does", "now", "you", "new", "be", "can", "there", "whats", "pls", "wkly", "where", "build", "make", "create", "set", "add", "write", "switch", "hi", "hello", "doing", "today", "game", "catches", "falling"]),
+export const functionWords: Record<"en" | "fr" | "de" | "es" | "it" | "pl" | "pt" | "nl" | "tr", Set<string>> = {
+  en: new Set(["create", "add", "set", "write", "make", "the", "and", "for", "from", "with", "every", "our", "my", "your", "have", "has", "is", "are", "this", "that", "please", "show", "what", "which", "how", "me", "it", "of", "to", "by", "at", "on", "an", "its", "did", "we", "do", "does", "now", "you", "new", "be", "can", "there", "whats", "pls", "wkly", "where", "build", "make", "create", "set", "add", "write", "switch", "hi", "hello", "doing", "today", "game", "catches", "falling"]),
   fr: new Set(["le", "les", "et", "pour", "avec", "une", "est", "dans", "des", "du", "nous", "vous", "sur", "pas", "qui", "au", "aux", "chaque", "quel", "quelle", "notre", "nos", "mets", "ajoute", "crée", "nouvelle", "hebdo", "son", "sa"]),
   de: new Set(["der", "die", "das", "und", "mit", "für", "ist", "nicht", "ein", "eine", "auf", "bitte", "wir", "ich", "zu", "den", "dem", "welche", "welchen", "welcher", "dieser", "haben", "hat", "jetzt", "unser", "unsere", "zur", "zum", "firma", "wechsle", "hallo", "geht", "dir", "heute", "mir", "erstelle", "ändere", "schreib", "lass"]),
   es: new Set(["el", "los", "las", "y", "para", "con", "una", "es", "está", "por", "qué", "cómo", "del", "al", "tiene", "cada", "antes", "cuál", "hay", "ahora", "guardamos", "sus", "pon", "añade", "anade", "su", "nueva", "semanal", "informe", "cuántas", "cuántos", "hola", "estás", "hoy", "haz", "nuestro", "nuestra", "negocio", "jóvenes", "público", "investiga", "fuentes", "escribe", "cambia", "tenemos", "tienes", "pues", "vale", "solo", "muestra", "muestralas", "muéstralas", "cambies", "canbies", "dime", "dímelos", "porfa", "oye", "puedes", "quiénes", "nuestros", "nuestras", "recuerdas", "hagas", "hazme", "agrega", "hasta", "asta", "aora", "negosio", "llámalo", "acuérdate", "bicis", "línea", "nuevo"]),
@@ -79,7 +79,7 @@ const functionWords: Record<"en" | "fr" | "de" | "es" | "it" | "pl" | "pt" | "nl
  * Ukrainian and Russian typed in Latin letters ("na sajti zmini zagolovok", "sdelai lending sait") were answered in
  * Italian or Dutch (V6 step 13). Two words from one list decide; the reply is then in that language.
  */
-const transliteratedWords: Record<"uk" | "ru" | "hi", Set<string>> = {
+export const transliteratedWords: Record<"uk" | "ru" | "hi", Set<string>> = {
   uk: new Set(["zmini", "zminy", "zroby", "zrobi", "shcho", "sho", "sajti", "sajt", "sayt", "sayti", "dlya", "budlaska", "pryvit", "yak", "spravy", "dyakuyu", "svizhyj", "svizhyi", "hlib", "shchoranku", "zapamyataj", "stvory", "dodaj", "pokazhy", "potribno", "zaraz", "meni"]),
   ru: new Set(["sdelai", "sdelaj", "sdelay", "pozhaluista", "pozhaluysta", "pojaluista", "dlia", "sait", "privet", "kak", "dela", "spasibo", "svezhii", "svezhiy", "hleb", "khleb", "zapomni", "sozdai", "sozdaj", "dobav", "pokazhi", "nuzhno", "seichas", "mne", "pekarni", "lending"]),
   // Hindi written in Latin letters (Hinglish) was answered in Italian and French (V6 step 13).
@@ -136,4 +136,12 @@ export function detectedLanguage(message: string): { language: CompanyChatLangua
 
 export function detectCompanyChatLanguage(message = ""): CompanyChatLanguage {
   return detectedLanguage(message).language;
+}
+
+/** Words of the language itself in a Latin-script message, and words of a transliterated uk/ru/hi text (V6 step 14). */
+export function latinLanguageEvidence(message: string, language: CompanyChatLanguage): { own: number; transliterated: number } {
+  const words = normalizedLanguageText(message).split(" ");
+  const own = language in functionWords ? words.filter((word) => functionWords[language as keyof typeof functionWords].has(word)).length : 0;
+  const transliterated = (["uk", "ru", "hi"] as const).reduce((sum, key) => sum + words.filter((word) => transliteratedWords[key].has(word)).length, 0);
+  return { own, transliterated };
 }

@@ -719,7 +719,11 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
             : false;
           // Editing a spreadsheet sent to this chat is chat file work: delegated to the Main Agent it never saw the file and
           // failed (V6 step 11: "give me the updated Excel file" with a CSV). A named agent asked to do it still gets it.
-          const spreadsheetTurn = !delegatesWork && isChatSpreadsheetTurn(message, (request.body.attachments ?? []).map((item) => String((item as { name?: string }).name ?? "")),
+          // A file, photo or voice message sent now is read by the chat, which receives the attachments; the Main Agent
+          // is given only the text and answered "I do not see any table" to a Polish question about an attached CSV
+          // (V6 step 14). Work explicitly handed to a named agent still goes to the company run.
+          const attachedNow = !delegatesWork && (request.body.attachments?.length ?? 0) > 0;
+          const spreadsheetTurn = attachedNow || !delegatesWork && isChatSpreadsheetTurn(message, (request.body.attachments ?? []).map((item) => String((item as { name?: string }).name ?? "")),
             Boolean(request.body.conversationId && isSpreadsheetEditRequest(message) && deps.chatFiles && await deps.chatFiles.latestChatSpreadsheet(auth, request.body.conversationId).catch(() => null)));
           if ((semantic?.coreRoute ? !semantic.coreRoute.delegate : semantic?.coreCapability || managementRequest || isReadOnlyCompanySwitch(message) || explicitCoreWebRequest) || !runnableMainAgent || spreadsheetTurn || (!delegatesWork && runCancellationSignal.test(message))) {
             const result = await runNeutralMessage(auth, message, request.body.conversationId, request.body.attachments, progress, memoryPolicy, (delta) => send("delta", { delta }), streamController.signal, { id: resolved.company!.id, name: resolved.company!.name }, undefined, semantic?.coreRoute);

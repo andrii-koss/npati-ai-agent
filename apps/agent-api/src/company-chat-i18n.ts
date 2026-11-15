@@ -1,4 +1,4 @@
-import { detectCompanyChatLanguage, cyrillicFunctionWords, detectedLanguage, normalizedLanguageText, type CompanyChatLanguage } from "@npati/shared";
+import { detectCompanyChatLanguage, cyrillicFunctionWords, detectedLanguage, latinLanguageEvidence, normalizedLanguageText, type CompanyChatLanguage } from "@npati/shared";
 export { detectCompanyChatLanguage, type CompanyChatLanguage } from "@npati/shared";
 
 export type CompanyChatCopy = {
@@ -129,7 +129,11 @@ export function resolveConversationLanguage(
     // A message in another script cannot continue the active language, however short ("Cambia su rol a X" after Arabic) (V5-D77).
     if (candidate.letters >= 3 && languageScript(candidate.language) !== languageScript(active)) {
       // A script change alone is not a language switch: transliteration and technical terms may be weak Latin matches.
-      if (candidate.confidence >= 0.04) active = candidate.language;
+      // A full Latin sentence after Cyrillic switches when it carries words of its own language and none of a
+      // transliterated one: "Create a business profile «…»: craft sourdough bakery in Kyiv" (confidence 0.02) kept the
+      // chat Ukrainian and the profile card came in Ukrainian (V6 step 14). "dodai tsil …" still keeps Ukrainian.
+      const evidence = languageScript(candidate.language) === "latin" ? latinLanguageEvidence(text, candidate.language) : { own: 0, transliterated: 1 };
+      if (candidate.confidence >= 0.04 || (candidate.letters >= 24 && evidence.own >= 1 && evidence.transliterated === 0)) active = candidate.language;
       continue;
     }
     const clearSwitch = candidate.letters >= 18 && candidate.confidence >= 0.025
