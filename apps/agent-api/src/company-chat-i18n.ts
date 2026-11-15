@@ -132,8 +132,11 @@ export function resolveConversationLanguage(
       // A full Latin sentence after Cyrillic switches when it carries words of its own language and none of a
       // transliterated one: "Create a business profile «…»: craft sourdough bakery in Kyiv" (confidence 0.02) kept the
       // chat Ukrainian and the profile card came in Ukrainian (V6 step 14). "dodai tsil …" still keeps Ukrainian.
-      const evidence = languageScript(candidate.language) === "latin" ? latinLanguageEvidence(text, candidate.language) : { own: 0, transliterated: 1 };
-      if (candidate.confidence >= 0.04 || (candidate.letters >= 24 && evidence.own >= 1 && evidence.transliterated === 0)) active = candidate.language;
+      // A sentence written in a non-Latin script cannot be a transliteration: after Latin, a full Cyrillic sentence is
+      // Ukrainian or Russian whatever the confidence between those two ("Напиши короткий пост…" stayed English).
+      const latin = languageScript(candidate.language) === "latin";
+      const evidence = latin ? latinLanguageEvidence(text, candidate.language) : { own: 0, transliterated: 0 };
+      if (candidate.confidence >= 0.04 || (candidate.letters >= 24 && (!latin || (evidence.own >= 1 && evidence.transliterated === 0)))) active = candidate.language;
       continue;
     }
     const clearSwitch = candidate.letters >= 18 && candidate.confidence >= 0.025
