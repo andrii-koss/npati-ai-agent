@@ -130,6 +130,11 @@ function normalizeAgentFields(value: unknown): unknown {
     if (key === "tools" && typeof item === "string") {
       item = item.split(/\r?\n|,/).map((part) => part.trim()).filter(Boolean);
     }
+    // Guidelines or an instruction given as a list of lines is the same text: rejecting it left a Dutch "add agent"
+    // request without the agent ("Invalid promptGuidelines", V6 step 14).
+    if (["promptGuidelines", "systemInstruction", "description", "role"].includes(key) && Array.isArray(item) && item.every((part) => typeof part === "string")) {
+      item = item.map((part) => (part as string).trim()).filter(Boolean).join("\n");
+    }
     // Unknown tools are kept so validation refuses them: dropping them silently saved [] and reported success.
     if (key === "tools" && Array.isArray(item)) item = item
       .map((part) => typeof part === "string" ? normalizeTool(part) : part)
