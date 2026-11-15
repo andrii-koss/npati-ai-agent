@@ -136,7 +136,7 @@ export function resolveConversationLanguage(
       // Ukrainian or Russian whatever the confidence between those two ("Напиши короткий пост…" stayed English).
       const latin = languageScript(candidate.language) === "latin";
       const evidence = latin ? latinLanguageEvidence(text, candidate.language) : { own: 0, transliterated: 0 };
-      if (candidate.confidence >= 0.04 || (candidate.letters >= 24 && (!latin || (evidence.own >= 1 && evidence.transliterated === 0)))) active = candidate.language;
+      if (candidate.confidence >= 0.04 || (candidate.letters >= (latin ? 16 : 24) && (!latin || (evidence.own >= 1 && evidence.transliterated === 0)))) active = candidate.language;
       continue;
     }
     const clearSwitch = candidate.letters >= 18 && candidate.confidence >= 0.025
