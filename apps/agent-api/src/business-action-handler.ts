@@ -238,7 +238,7 @@ For an update, include only fields the user explicitly supplied or asked to chan
 \`\`\`
 (For editing an existing business: use "action": "update", "businessId": "<ID-from-list-above>", and provide updated fields).
 
-3. Wrap the summary in an interactive card:
+3. Wrap the summary in an interactive card, every label and value in the language of the user's message (the Ukrainian labels below only show the layout):
 \`\`\`card:Бізнес-профіль: <Назва>
 **Назва бізнесу:** <Назва>
 **Стадія:** <Стадія>
@@ -325,7 +325,7 @@ Identify the target business and target goal by ID or title. If the user refers 
 \`\`\`
 Confirm clearly in your message that the goal has been deleted. Do not include an interactive card when deleting.
 
-5. Wrap active/created goal summary in an interactive card:
+5. Wrap active/created goal summary in an interactive card. Write every label, value and the link text of the card in the language of the user's message; the Ukrainian labels below only show the layout:
 \`\`\`card:Ціль: <Назва цілі>
 **Ціль:** <Назва цілі>
 **Бізнес:** <Назва бізнесу>
