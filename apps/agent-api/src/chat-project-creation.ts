@@ -4,7 +4,8 @@ import type { ChatProjectIntentResolver } from "./chat-project-intent";
 import type { DevelopmentProcess } from "@npati/shared";
 import { getChatMessagesWithProjectCards } from "./project-chat-cards";
 
-/** Also recover single-target progress when the client's keyword planner missed the request. */
+/** A creation that reaches the server was not started by the client, so it always runs as a development process: its
+ * steps, files and Preview card stay in the chat (V6 step 14: an API-sent creation went straight to the Coding Agent). */
 export function isChatProjectCreationBatch(intent: Awaited<ReturnType<ChatProjectIntentResolver>> | undefined): boolean {
   return intent?.source === "semantic" && intent.targets.length > 0
     && (intent.targets.length > 1 || intent.requiresDevelopmentProgress === true)
