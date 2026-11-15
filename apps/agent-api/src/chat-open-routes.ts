@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { AuthContext, WorkspaceStore } from "@npati/workspace";
 import type { AuthProvider } from "./auth";
 import type { DevelopmentProcess } from "@npati/shared";
-import { getChatMessagesWithProjectCards, readChatActiveContext } from "./project-chat-cards";
+import { getChatMessagesWithProjectCards, readSavedChatCompanyId } from "./project-chat-cards";
 import { errorReply } from "./workspace-routes";
 
 const MESSAGE_PAGE = 10;
@@ -12,8 +12,8 @@ const MESSAGE_PAGE = 10;
  * context showed "No company" in the selector while its messages still went to that company.
  */
 async function savedConversationCompany(store: WorkspaceStore, context: AuthContext, conversationId: string) {
-  const saved = await readChatActiveContext(store, context, conversationId).catch(() => null);
-  const companyId = saved?.context.companyId;
+  // Only the stored context is read: the conversation itself was already read as a page, so it is owned.
+  const companyId = await readSavedChatCompanyId(store, context, conversationId).catch(() => null);
   return companyId ? store.getCompany(context, companyId).then((item) => ({ id: item.id, name: item.name })).catch(() => null) : null;
 }
 const CHAT_PAGE = 20;

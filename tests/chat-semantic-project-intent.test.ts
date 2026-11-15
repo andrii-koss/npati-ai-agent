@@ -201,7 +201,9 @@ describe("semantic project routing", () => {
     expect(payload).toMatchObject({ mentionedCompanies: ["R3 Логістика"], mentionedBusinesses: [] });
     expect(String(request.messages[0]!.content)).toContain("mentionedCompanies are owned AI Company names");
     expect(result).toMatchObject({ coreRoute: { capability: "npati_company_action", mutation: true, research: false } });
-    expect(String(request.messages[0]!.content)).toContain("Remembering a fact for an AI Company (not for a Business Profile) is also npati_company_action");
+    expect(String(request.messages[0]!.content)).toContain("Remembering a fact for an AI Company (not a Business Profile) is npati_company_action");
+    // V6 step 14: a plain lasting fact about the selected Company is remembered without a "remember" cue.
+    expect(String(request.messages[0]!.content)).toContain("a plain lasting fact about it");
     expect(String(request.messages[0]!.content)).toContain('returns npati_business_profile with additionalCoreCapabilities ["npati_company_action"]');
     expect(String(request.messages[0]!.content)).toContain("Deleting a Business Profile on its own is npati_business_profile with coreMutation true");
   });

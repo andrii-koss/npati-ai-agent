@@ -163,6 +163,12 @@ async function ownedConversation(store: WorkspaceStore, auth: AuthContext, id: s
 }
 
 /** Same owned conversation/settings store as cards. A stale descriptive card cannot replace a confirmed selection. */
+/** The company a chat last worked in, from its stored context only (no full conversation read; the caller owns the chat). */
+export async function readSavedChatCompanyId(store: WorkspaceStore, auth: AuthContext, conversationId: string): Promise<string | null> {
+  const value = (await store.getUserSetting(auth, contextKey(conversationId)))?.value as ChatEntityContext | undefined;
+  return value?.schemaVersion === 1 && value.conversationId === conversationId ? value.context?.companyId ?? null : null;
+}
+
 export async function readChatActiveContext(store: WorkspaceStore, auth: AuthContext, conversationId: string, businessId?: string | null): Promise<ChatEntityContext | null> {
   const value = (await store.getUserSetting(auth, contextKey(conversationId)))?.value as ChatEntityContext | undefined;
   await ownedConversation(store, auth, conversationId, businessId ?? value?.context?.businessId);
