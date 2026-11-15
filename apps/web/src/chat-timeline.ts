@@ -147,6 +147,29 @@ export function codingActivityStages(value: unknown, process?: DevelopmentProces
  * `others`: the chat's other projects. A chat that built a site, a game and an app showed the steps of only the
  * current project; the app's 62 steps were missing beside its request (V6 step 14). Each run keeps its own process.
  */
+/**
+ * Ids of agent messages that close a run: the last message before the run's code.finish, when an assistant reply was
+ * saved in the chat after it and before the next request. That reply is the same answer, so the message is not shown.
+ */
+export function closingRunTexts(items: DevelopmentProcessProgressItem[], messages: Message[]): Set<string> {
+  const ids = new Set<string>();
+  const byRun = new Map<string, DevelopmentProcessProgressItem[]>();
+  for (const item of items) if (item.runId) byRun.set(item.runId, [...(byRun.get(item.runId) ?? []), item]);
+  for (const runItems of byRun.values()) {
+    const sorted = [...runItems].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+    sorted.forEach((item, index) => {
+      if (item.kind !== "assistant_message") return;
+      const next = sorted.slice(index + 1).find(other => other.tool || other.kind === "assistant_message");
+      if (next?.tool !== "code.finish") return;
+      const at = Date.parse(item.at);
+      const after = messages.filter(message => Date.parse(message.createdAt) >= at);
+      const reply = after.findIndex(message => message.role === "assistant"), request = after.findIndex(message => message.role === "user");
+      if (reply >= 0 && (request < 0 || reply < request)) ids.add(item.id);
+    });
+  }
+  return ids;
+}
+
 export function chatTimeline(messages: Message[], value: unknown, conversationId?: string | null, process?: DevelopmentProcess, hasEarlier = false, others: DevelopmentProcess[] = []) {
   const sources = [{ value, process }, ...others.filter(other => other.id !== process?.id).map(other => ({ value: other.progress, process: other }))];
   const normalized: DevelopmentProcessProgressItem[] = [];
@@ -157,7 +180,10 @@ export function chatTimeline(messages: Message[], value: unknown, conversationId
     groups.push(...codingActivityStages(items,source.process,messages).map(group => ({ ...group, process: source.process })));
   }
   const anchors = groups.map(group=>({id:group.id,stage:"run",title:"",at:group.at,sequence:group.sequence}));
-  const slots = activitySlots(messages,[...normalized.filter(item=>item.kind==="assistant_message" && !messages.some(message=>message.role==="assistant" && message.content.trim()===item.title.trim())),...anchors],conversationId,hasEarlier);
+  // The run's closing text (the agent's message right before code.finish) is the reply the chat saved after the run,
+  // reworded by the finish step; both were shown, so one question had two answers (V6 step 14).
+  const closing = closingRunTexts(normalized, messages);
+  const slots = activitySlots(messages,[...normalized.filter(item=>item.kind==="assistant_message" && !closing.has(item.id) && !messages.some(message=>message.role==="assistant" && message.content.trim()===item.title.trim())),...anchors],conversationId,hasEarlier);
   const entries: ({ kind: "message"; message: Message; index: number } | { kind: "activity"; item: DevelopmentProcessProgressItem; run?: CodingActivityRun; process?: DevelopmentProcess })[] = [];
   for (let index=0; index<=messages.length; index++) {
     for (const item of slots.get(index) ?? []) { const run = groups.find(group=>group.id===item.id); entries.push({kind:"activity",item,run,process:run?.process ?? process}); }

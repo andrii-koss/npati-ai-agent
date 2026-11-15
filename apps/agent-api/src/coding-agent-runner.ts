@@ -1,5 +1,5 @@
 import { settleCodingTurn } from "./coding-agent-turn-settlement";
-import { codingCancellationMessage } from "./coding-cancel-i18n";
+import { codingCancellationMessage, codingInboxAdmissionMessage } from "./coding-cancel-i18n";
 import { codingProviderFailureMessage } from "./chat-public-errors";
 import { filesChangedBeforeFailure } from "./company-run-notice-i18n";
 import { createHash, randomUUID } from "node:crypto";
@@ -461,12 +461,22 @@ export class CodingAgentRunner {
       for (const content of this.ports.engine.recordedCompletionInputs?.(steps + 1) ?? []) messages.push({ role: "user", content });
 
       if (inboxManager.isOpened) {
-        try {
-          await inboxManager.reopenIfSealed();
-          await inboxManager.admitInbox(steps);
-        } catch {
-          return stop("interrupted", "interrupted", "Stopped: durable inbox admission failed. Pending input remains recoverable.");
+        // A database run in a 16-language chat stopped here with an English technical line and no trace of the cause
+        // (V6 step 14). The cause is logged, one retry covers a momentary conflict, and the person reads their language.
+        let admissionError: unknown;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            await inboxManager.reopenIfSealed();
+            await inboxManager.admitInbox(steps);
+            admissionError = undefined;
+            break;
+          } catch (error) {
+            admissionError = error;
+            this.ports.logger?.warn("code_run_inbox_admission_failed", { companyId, runId: stateRunId, attempt, error: error instanceof Error ? error.message : String(error) });
+            if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 1_000));
+          }
         }
+        if (admissionError) return stop("interrupted", "interrupted", codingInboxAdmissionMessage(input.responseLanguage));
       }
 
       if (runTurnLimit > 0 && steps >= runTurnLimit) {

@@ -29,3 +29,21 @@ it("leaves steps older than the loaded window out while earlier messages are not
   expect([...activitySlots(messages, old, "conv", true).values()].flat()).toHaveLength(0);
   expect([...activitySlots(messages, old, "conv", false).values()].flat()).toHaveLength(1);
 });
+
+// V6 step 14 (16-language chat): a read-only question showed two answers, the agent's closing message before
+// code.finish and the reply saved after the run.
+it("does not repeat a run's closing message beside the reply the chat saved for it", () => {
+  const q = [
+    { id: "u", role: "user", content: "Qual è ora il titolo?", createdAt: at(10) },
+    { id: "a", role: "assistant", content: "Il titolo del documento è POLY_EN_V1.", createdAt: at(12) },
+  ] as never[];
+  const p = { ...process("site", "run-q", 10, "index.html"), progress: [
+    { id: "r", stage: "tool", title: "read", at: at(10), runId: "run-q", tool: "code.fs.read", status: "completed", conversationId: "conv" },
+    { id: "m", kind: "assistant_message", stage: "planning", title: "Il titolo del sito è POLY_EN_V1.", at: at(11), runId: "run-q", status: "completed", conversationId: "conv" },
+    { id: "f", stage: "tool", title: "finish", at: at(11) + "", runId: "run-q", tool: "code.finish", status: "completed", conversationId: "conv" },
+  ] } as DevelopmentProcess;
+  const texts = chatTimeline(q, p.progress, "conv", p).filter((entry) => entry.kind === "activity" && entry.item.kind === "assistant_message");
+  expect(texts).toHaveLength(0);
+  // While the reply is not saved yet, the closing message is what the person sees.
+  expect(chatTimeline(q.slice(0, 1), p.progress, "conv", p).some((entry) => entry.kind === "activity" && entry.item.kind === "assistant_message")).toBe(true);
+});

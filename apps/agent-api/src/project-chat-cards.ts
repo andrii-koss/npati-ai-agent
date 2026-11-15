@@ -113,8 +113,12 @@ export async function executeChatEntityRead(store: WorkspaceStore, auth: AuthCon
     const agents = await store.listCompanyAgents(auth, id), mainAgentId = (record as import("@npati/workspace").Company).mainAgentId;
     value = record.name + " — " + agents.length + "\n" + agents.map(agent => (agent.id === mainAgentId ? "★ " : "") + agent.name + ": " + agent.role).join("\n");
   }
-  else if (request.field === "projects" && type === "company") value = (await store.listProjects(auth, id))
-    .filter(project => !["archived", "soft_deleted", "purging", "deleted"].includes(project.status)).slice(0, 30).map(project => project.name).join("\n");
+  else if (request.field === "projects" && type === "company") {
+    // "How many websites does our company have now?" got four bare names and no number (V6 step 14): the count comes
+    // first, from storage, as for the company's agents.
+    const projects = (await store.listProjects(auth, id)).filter(project => !["archived", "soft_deleted", "purging", "deleted"].includes(project.status));
+    value = projects.length ? record.name + " — " + projects.length + "\n" + projects.slice(0, 30).map(project => "- " + project.name).join("\n") : "";
+  }
   else return null;
   // A Business Profile spreads its facts across several fields: one empty field is not evidence that the profile lacks the data.
   if (type === "business" && request.field !== "profile" && !value?.trim()) return null;

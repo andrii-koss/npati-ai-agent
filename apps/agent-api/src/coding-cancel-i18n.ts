@@ -22,3 +22,27 @@ const cancelledCopy: Record<CompanyChatLanguage, string> = {
 export function codingCancellationMessage(language: CompanyChatLanguage = "en"): string {
   return cancelledCopy[language];
 }
+
+/** The run could not take in the person's new messages and stopped; nothing they sent is lost (V6 step 14). */
+const inboxAdmissionCopy: Record<CompanyChatLanguage, string> = {
+  en: "The run stopped: it could not take in your new messages. Nothing you sent was lost; repeat the request to continue.",
+  uk: "Запуск зупинено: не вдалося прийняти ваші нові повідомлення. Нічого з надісланого не втрачено; повторіть запит, щоб продовжити.",
+  fr: "L’exécution s’est arrêtée : elle n’a pas pu recevoir vos nouveaux messages. Rien de ce que vous avez envoyé n’est perdu ; renouvelez la demande pour continuer.",
+  de: "Der Lauf wurde gestoppt: Ihre neuen Nachrichten konnten nicht übernommen werden. Nichts Gesendetes ging verloren; wiederholen Sie die Anfrage, um fortzufahren.",
+  es: "La ejecución se detuvo: no pudo recibir sus mensajes nuevos. No se perdió nada de lo enviado; repita la solicitud para continuar.",
+  it: "L’esecuzione si è fermata: non è riuscita a ricevere i tuoi nuovi messaggi. Nulla di quanto inviato è andato perso; ripeti la richiesta per continuare.",
+  pl: "Uruchomienie zatrzymano: nie udało się przyjąć nowych wiadomości. Nic z wysłanych nie zginęło; powtórz prośbę, aby kontynuować.",
+  pt: "A execução parou: não conseguiu receber as suas novas mensagens. Nada do que enviou se perdeu; repita o pedido para continuar.",
+  nl: "De uitvoering is gestopt: je nieuwe berichten konden niet worden opgenomen. Er is niets verloren gegaan; herhaal het verzoek om door te gaan.",
+  tr: "Çalıştırma durdu: yeni mesajlarınız alınamadı. Gönderdiklerinizden hiçbiri kaybolmadı; devam etmek için isteği yineleyin.",
+  ru: "Запуск остановлен: не удалось принять ваши новые сообщения. Ничего из отправленного не потеряно; повторите запрос, чтобы продолжить.",
+  zh: "运行已停止：无法接收您的新消息。您发送的内容没有丢失；请重新发送请求以继续。",
+  ja: "実行が停止しました：新しいメッセージを受け取れませんでした。送信内容は失われていません。続けるにはもう一度依頼してください。",
+  ko: "실행이 중지되었습니다: 새 메시지를 받을 수 없었습니다. 보낸 내용은 사라지지 않았습니다. 계속하려면 요청을 다시 보내 주세요.",
+  ar: "توقف التشغيل: تعذّر استلام رسائلك الجديدة. لم يُفقد شيء مما أرسلته؛ أعد الطلب للمتابعة.",
+  hi: "रन रुक गया: आपके नए संदेश नहीं लिए जा सके। आपका भेजा कुछ भी नहीं खोया; जारी रखने के लिए अनुरोध दोहराएँ।",
+};
+
+export function codingInboxAdmissionMessage(language: CompanyChatLanguage = "en"): string {
+  return inboxAdmissionCopy[language] ?? inboxAdmissionCopy.en;
+}

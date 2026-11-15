@@ -367,6 +367,19 @@ export class CompanyApprovalsRepository {
   }
 
   /**
+   * A run stopped waiting for this request without an answer. The request is expired and journalled first, like
+   * every other expiry, so its card does not stay open beside the run's next request for the same change: a chat
+   * showed two identical database confirmations, one of them for a wait that had already ended (V6 step 14).
+   */
+  async expireUnanswered(ctx: AuthContext, companyId: string, id: string): Promise<boolean> {
+    const current = await this.get(ctx, companyId, id).catch(() => null);
+    if (!current || current.status !== "pending") return false;
+    await this.journalExpiry(current, new Date());
+    const updated = await this.pool.query<{ id: string }>("UPDATE company_approvals SET status='expired' WHERE id=$1 AND status='pending' RETURNING id", [id]);
+    return Boolean(updated.rows[0]);
+  }
+
+  /**
    * Same sweep, but returns the affected ids as well.
    *
    * Why two methods instead of one: the code-run reaper already declares its port as
@@ -382,6 +395,7 @@ export class CompanyApprovalsRepository {
    * to. Returning them from the sweep that already read them is what keeps that a single query rather than a
    * second one that could disagree with it.
    */
+
   async expireStaleApprovalsDetailed(params: { now?: number | Date; limit?: number } = {}): Promise<{ expired: number; ids: string[]; rows: CompanyApproval[] }> {
     const now = params.now instanceof Date ? params.now : new Date(params.now ?? Date.now());
     const limit = Math.max(1, Math.min(params.limit ?? 500, 5_000));

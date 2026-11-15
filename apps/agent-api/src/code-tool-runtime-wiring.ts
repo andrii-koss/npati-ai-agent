@@ -219,15 +219,26 @@ export function createCodeToolRuntimeWiring(deps: CodeToolRuntimeWiringDeps) {
 
     approvalDecision: approvalsRepo ? {
       timeoutMs: resolveApprovalTimeoutMs(process.env),
-      wait: async ({ ctx, companyId, approvalId, signal }) => {
-        const report = await waitForApprovalDecision(() => approvalsRepo!.get(ctx, companyId, approvalId).catch(() => null), resolveApprovalTimeoutMs(process.env), { signal });
+      wait: async ({ ctx, companyId, approvalId, action, signal }) => {
+        // A database request already waiting is released when the owner switches the company to "agents change
+        // databases without asking": the owner turned it on and the chat still showed the confirmation (V6 step 14).
+        // The decision is journalled like any other, with the setting named as its reason.
+        const read = async () => {
+          const report = await approvalsRepo!.get(ctx, companyId, approvalId).catch(() => null);
+          if (report?.status !== "pending" || !action.startsWith("code.data.")) return report;
+          if (await featureFlagService.dataAutoAllow?.isOn(ctx, companyId).catch(() => false) !== true) return report;
+          return await approvalsRepo!.decide(ctx, companyId, approvalId, "approved", "Allowed by the company setting: agents change this company's databases without asking.").catch(() => report);
+        };
+        const report = await waitForApprovalDecision(read, resolveApprovalTimeoutMs(process.env), { signal });
         if (!report) return null;
         if (report.status === "approved") return { status: "approved" as const };
         if (report.status === "rejected") return { status: "rejected" as const, comment: report.decisionNotes ?? null };
         return { status: "pending" as const };
       },
-      onTimeout: async ({ approvalId, waitedMs, action }) => {
+      onTimeout: async ({ approvalId, waitedMs, action, ctx, companyId }) => {
         await codeApprovalScope.recordTimeout(approvalId, waitedMs);
+        // The run stopped waiting: its unanswered card leaves the chat instead of staying beside the next request.
+        if (ctx && companyId) await approvalsRepo!.expireUnanswered(ctx, companyId, approvalId).catch((err: unknown) => log.warn({ err, approvalId }, "code_approval_expire_failed"));
         log.warn({ approvalId, waitedMs, action, kind: "approval_timeout" }, "code_approval_timeout");
       },
     } : undefined,

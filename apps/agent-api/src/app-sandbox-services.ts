@@ -1,3 +1,4 @@
+import { databaseCreatedMessage } from "./database-created-i18n";
 import type { Pool } from "pg";
 import type { FastifyBaseLogger } from "fastify";
 import type { WorkspaceStore } from "@npati/workspace";
@@ -102,8 +103,11 @@ export function createAppSandboxServices(deps: AppSandboxServicesDeps) {
               const setting = await workspaceStore.getUserSetting(ctx, "chat-development-processes:v1");
               const processes = Array.isArray(setting?.value) ? setting.value as import("@npati/shared").DevelopmentProcess[] : [];
               const process = processes.find(item => item.projectId === projectId && item.companyId === companyId);
-              if (process?.conversationId) await workspaceStore.appendNeutralMessage(ctx, process.conversationId, "assistant",
-                process.responseLanguage === "uk" ? "\u0421\u0442\u0432\u043e\u0440\u0435\u043d\u043e \u0431\u0430\u0437\u0443 \u0434\u0430\u043d\u0438\u0445 \u00ab" + result.backend.name + "\u00bb \u0434\u043b\u044f \u0446\u044c\u043e\u0433\u043e \u043f\u0440\u043e\u0454\u043a\u0442\u0443." : "Created database: " + result.backend.name + ".");
+              if (process?.conversationId) {
+                const latestUser = (await workspaceStore.getNeutralConversation(ctx, process.conversationId).catch(() => ({ messages: [] as { role: string; content: string }[] })))
+                  .messages.filter(message => message.role === "user").at(-1)?.content;
+                await workspaceStore.appendNeutralMessage(ctx, process.conversationId, "assistant", databaseCreatedMessage(result.backend.name, latestUser, process.responseLanguage));
+              }
             }
             return { ...result, environment };
           } : undefined,

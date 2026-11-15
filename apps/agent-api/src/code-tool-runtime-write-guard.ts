@@ -248,7 +248,7 @@ export class CodeToolWriteGuard {
     input.signal?.throwIfAborted();
     if (!outcome || outcome.status === "pending") {
       const waitedMs = channel.timeoutMs;
-      await channel.onTimeout?.({ approvalId, waitedMs, action: tool.name });
+      await channel.onTimeout?.({ approvalId, waitedMs, action: tool.name, ctx: authCtx, companyId: input.companyId });
       throw new CodeToolError("approval_timeout",
         `No approval decision for ${tool.name} within ${channel.timeoutMs} ms; the change was not applied`,
         504, "approval", false, tool.name,

@@ -776,6 +776,12 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const timeline = chatTimeline(displayMessages, development.project?.progress, selected, development.project, earlierMessages > 0, development.conversationProcesses);
   // While the agent works in this chat, an open Preview stays but none is offered for the state it is changing.
   const agentWorking = sending || codeInbox.active || Boolean(development.project && developmentIsActive(development.project));
+  // Only the project the agent is changing loses its Open block meanwhile. Every project's block vanished while one
+  // site's database run waited 15 minutes for a confirmation (V6 step 14). When the changed project is not known yet
+  // (a request just sent), all blocks wait as before.
+  const workingProjectId = agentWorking ? (development.activeProject && developmentIsActive(development.activeProject) ? development.activeProject.projectId
+    : development.project && developmentIsActive(development.project) ? development.project.projectId : undefined) : undefined;
+  const previewBusyFor = (card: { projectId?: string | null; id: string } | null | undefined) => agentWorking && (!workingProjectId || !card || (card.projectId ?? card.id) === workingProjectId);
   // Resolve the card once, then anchor it to the closing reply below.
   // A project deleted later has nothing to open: its replies say it was deleted instead of offering its old block.
   const deletedProcessOf = (card: { projectId?: string | null; id: string } | null | undefined) => card
@@ -858,7 +864,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
                     failed={!sending && progressFailed}
                   />
                 )}
-                <ChatMessageRow message={message} card={messageCard} showToolbar={message.role === "assistant" && !sending} previewBusy={agentWorking}
+                <ChatMessageRow message={message} card={messageCard} showToolbar={message.role === "assistant" && !sending} previewBusy={previewBusyFor(messageCard)}
                   responseLanguage={messageLanguage(displayMessages.slice(0, index + 1).reverse().find((item) => item.role === "user")?.content, development.project?.responseLanguage ?? language)} totalTime={isLatestAssistant ? runTotal : undefined} actions={rowActions} />
                 {deletedProcess && <div className="chat-project-deleted-note" role="note">{deletedProcess.name} · {chatCardLabels(messageLanguage(displayMessages.slice(0, index + 1).reverse().find((item) => item.role === "user")?.content, deletedProcess.responseLanguage ?? language)).deleted}</div>}
               </Fragment>
