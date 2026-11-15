@@ -239,7 +239,7 @@ export class ChatDevelopmentService {
     this.starts.set(owner, work);
     try { return await work; } finally { if (this.starts.get(owner) === work) this.starts.delete(owner); }
   }
-  async start(ctx: AuthContext, input: { companyId: string; message: string; targets?: DevelopmentTarget[]; conversationId?: string; businessId?: string; requestId: string }) {
+  async start(ctx: AuthContext, input: { companyId: string; message: string; targets?: DevelopmentTarget[]; serverTargets?: DevelopmentTarget[]; conversationId?: string; businessId?: string; requestId: string }) {
     return this.serialize(ctx, () => this.startOwned(ctx, input));
   }
   async plan(ctx: AuthContext, input: { message: string; projectId?: string; companyId?: string; conversationId?: string; businessId?: string }) {
@@ -262,7 +262,7 @@ export class ChatDevelopmentService {
     if (semantic.targets.length) return semantic.targets;
     return [];
   }
-  private async startOwned(ctx: AuthContext, input: { companyId: string; message: string; targets?: DevelopmentTarget[]; conversationId?: string; businessId?: string; requestId: string }) {
+  private async startOwned(ctx: AuthContext, input: { companyId: string; message: string; targets?: DevelopmentTarget[]; serverTargets?: DevelopmentTarget[]; conversationId?: string; businessId?: string; requestId: string }) {
     if (!ctx.permissions.some(p => ["*", "owner", "admin:all", "business:manage", "workspace:write"].includes(p))) throw new DevelopmentError("Coding Agent write permission denied", 403);
     await this.d.store.getCompany(ctx, input.companyId);
     await this.d.flags.assertEnabled(ctx, "coding_agent.enabled", { companyId: input.companyId });
@@ -272,8 +272,10 @@ export class ChatDevelopmentService {
     const existing = await this.entries(ctx);
     const duplicate = existing.filter(p => p.requestId === input.requestId);
     if (duplicate.length) return { conversationId: duplicate[0]!.parentConversationId, processes: duplicate };
-    // Client targets cannot override authoritative server technology planning.
-    const targets = await this.plan(ctx, input);
+    // Client targets cannot override authoritative server technology planning. Targets the server's own resolver planned
+    // for this turn are that planning: a second classification of the same Korean request found none and the site was
+    // refused ("Describe a website … to create", V6 step 14).
+    const targets = input.serverTargets?.length ? input.serverTargets : await this.plan(ctx, input);
     // The server's own reading found no project to build ("створи компанію … квітковий магазин" is a company): the
     // client sends the message through the ordinary chat instead, so it is answered rather than dropped.
     if (!targets.length) throw new DevelopmentError("Describe a website, blog, shop, mobile app or CRM to create.", 400, "not_development_request");

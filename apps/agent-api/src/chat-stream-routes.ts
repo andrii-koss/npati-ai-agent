@@ -289,6 +289,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
           const conversation = await chatConversation();
           const run = await runChatProjectCreation({ service: deps.chatDevelopment, ctx: auth, companyId: activeCompanyId, message,
             conversationId: conversation?.id, requestId: `chat-multi:${auth.userId}:${streamId ?? crypto.randomUUID()}`, signal: streamController.signal,
+            serverTargets: semantic!.targets,
             progress: processes => send("progress", { routed: "chat_development", processes }) });
           await send("result", await chatProjectCreationReply(workspaceStore, auth, run, activeCompanyId));
           clearInterval(heartbeat); if (!reply.raw.writableEnded) reply.raw.end(); return;

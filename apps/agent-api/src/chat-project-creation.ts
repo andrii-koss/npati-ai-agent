@@ -17,6 +17,8 @@ export async function runChatProjectCreation(input: {
   service: Pick<ChatDevelopmentService, "start" | "list" | "stop"> & Partial<Pick<ChatDevelopmentService, "listForChat" | "waitForCompletion">>;
   ctx: AuthContext; companyId: string; message: string; conversationId?: string; requestId: string;
   signal: AbortSignal; progress(processes: unknown[]): Promise<void>;
+  /** The targets this server's own intent resolver planned for the turn; they are not planned a second time. */
+  serverTargets?: import("@npati/shared").DevelopmentTarget[];
 }) {
   const { service, ctx, signal } = input;
   signal.throwIfAborted();
