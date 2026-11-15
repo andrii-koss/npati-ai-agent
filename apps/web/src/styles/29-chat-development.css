@@ -1321,3 +1321,14 @@ body:has(.project-chat-preview-layer) .message-stream {
 .codex-trace-row .research-progress-globe.lucide-flask-conical { transform: scale(0.875); stroke-width: 1.83; }
 .codex-trace-row .research-progress-globe.lucide-globe { transform: scale(0.700); stroke-width: 2.29; }
 .codex-trace-row .research-progress-globe.lucide-brain { transform: scale(0.700); stroke-width: 2.29; }
+
+/* A project deleted later: its steps stay in the chat and this line replaces the block that opened it. */
+.chat-project-deleted-note {
+  margin-top: 10px;
+  padding: 10px 16px;
+  border: 1px dashed #d4d4d8;
+  border-radius: 18px;
+  background-color: #f8f9fb;
+  color: #6b7280;
+  font-size: 14px;
+}

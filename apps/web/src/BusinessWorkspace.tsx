@@ -18,6 +18,7 @@ import { cancelChatStream, streamChat } from "./chat-stream";
 import { InboxSubmission } from "./code-inbox-client";
 import { useCodeInbox } from "./use-code-inbox";
 import { projectConversationUrl, developmentPreviewAnchor } from "./chat-development-view";
+import { chatCardLabels } from "./chat-card-i18n";
 import { useChatResearchProgress } from "./use-chat-research-progress";
 import { useChatOpeningPosition } from "./use-chat-opening-position";
 import { chatTimeline, mergeConversationMessages, nearChatBottom, normalizeActivity } from "./chat-timeline";
@@ -776,10 +777,13 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   // While the agent works in this chat, an open Preview stays but none is offered for the state it is changing.
   const agentWorking = sending || codeInbox.active || Boolean(development.project && developmentIsActive(development.project));
   // Resolve the card once, then anchor it to the closing reply below.
+  // A project deleted later has nothing to open: its replies say it was deleted instead of offering its old block.
+  const deletedProcessOf = (card: { projectId?: string | null; id: string } | null | undefined) => card
+    ? development.conversationProcesses.find(process => process.projectDeleted && process.projectId === (card.projectId ?? card.id)) : undefined;
   const timelineCards = timeline.flatMap((entry, timelineIndex) => {
     if (entry.kind !== "message") return [];
     const card = development.card(displayMessages, entry.index);
-    return card ? [{ card, timelineIndex }] : [];
+    return card && !deletedProcessOf(card) ? [{ card, timelineIndex }] : [];
   });
   const timelineCard = timelineCards.at(-1)?.card;
   const lastCardEntry = timelineCards.at(-1)?.timelineIndex ?? -1;
@@ -799,7 +803,11 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   const latestReplyAt = Date.parse(displayMessages.at(-1)?.createdAt ?? "") || 0;
   const runTotal = runEndedAt && Math.abs(latestReplyAt - runEndedAt) < 120_000 ? processDuration(runActivity) : undefined;
   const bottomCard = timelineCard ?? fallbackCard;
-  const previewAnchor = developmentPreviewAnchor(timeline, development.project);
+  // A run older than the loaded part of a long chat has its reply further up: its block waits there, not under the
+  // first loaded reply (V6 step 14).
+  const firstLoadedAt = Date.parse(displayMessages[0]?.createdAt ?? "") || 0;
+  const runStartedAt = Date.parse((development.project?.runId && development.project.runStartedAts?.[development.project.runId]) || development.project?.createdAt || "") || 0;
+  const previewAnchor = earlierMessages > 0 && runStartedAt && runStartedAt < firstLoadedAt ? -1 : developmentPreviewAnchor(timeline, development.project);
   const projectPreview = bottomCard && !agentWorking ? (
       <ChatProjectPreviewCard card={bottomCard} showPreviewTrigger onActivate={(card) => setSelectedProject({ companyId: card.companyId, projectId: card.projectId ?? card.id, conversationId: selected })} />
   ) : null;
@@ -826,13 +834,17 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
             </div>
           )}
           {timeline.map((entry, timelineIndex) => {
-            if (entry.kind === "activity") return <ChatDevelopmentProgress key={"activity:" + entry.item.id} process={entry.process ?? development.project} items={entry.run?.items ?? [entry.item]} run={entry.run} animatePending={!thinking.visible} preview={timelineIndex === previewAnchor ? projectPreview : undefined} />;
+            if (entry.kind === "activity") {
+              // A project deleted later keeps its steps; under its last run the chat says it was deleted, with nothing to open.
+              return <ChatDevelopmentProgress key={"activity:" + entry.item.id} process={entry.process ?? development.project} items={entry.run?.items ?? [entry.item]} run={entry.run} animatePending={!thinking.visible} preview={timelineIndex === previewAnchor && !entry.process?.projectDeleted ? projectPreview : undefined} />;
+            }
             const { message, index } = entry;
             if (development.hideMessage(displayMessages, index)) return timelineIndex === previewAnchor && projectPreview ? <article className="assistant" key={message.id}>{projectPreview}</article> : null;
             const resolvedCard = development.card(displayMessages, index);
+            const deletedProcess = deletedProcessOf(resolvedCard);
             // Every finished request keeps its Preview under its own reply; only the reply whose card already shows at the
             // run's closing anchor is skipped, so the card never appears twice.
-            const messageCard = timelineIndex === previewAnchor && !agentWorking ? bottomCard : resolvedCard && !(projectPreview && previewAnchor >= 0 && timelineIndex === lastCardEntry) ? resolvedCard : null;
+            const messageCard = deletedProcess ? null : timelineIndex === previewAnchor && !agentWorking ? bottomCard : resolvedCard && !(projectPreview && previewAnchor >= 0 && timelineIndex === lastCardEntry) ? resolvedCard : null;
             const isLatestAssistant = message.role === "assistant" && index === displayMessages.length - 1;
             const hasResearch = !development.project && progressEvents.some((event) => !event.type.startsWith("final_generation"));
             return (
@@ -848,6 +860,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
                 )}
                 <ChatMessageRow message={message} card={messageCard} showToolbar={message.role === "assistant" && !sending} previewBusy={agentWorking}
                   responseLanguage={messageLanguage(displayMessages.slice(0, index + 1).reverse().find((item) => item.role === "user")?.content, development.project?.responseLanguage ?? language)} totalTime={isLatestAssistant ? runTotal : undefined} actions={rowActions} />
+                {deletedProcess && <div className="chat-project-deleted-note" role="note">{deletedProcess.name} · {chatCardLabels(messageLanguage(displayMessages.slice(0, index + 1).reverse().find((item) => item.role === "user")?.content, deletedProcess.responseLanguage ?? language)).deleted}</div>}
               </Fragment>
             );
           })}
@@ -863,7 +876,9 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
           {/* A run started from the chat waits for its confirmation too, not only a development process run. */}
           {agentWorking && (development.project?.companyId ?? companyId) && <ChatRunApprovals language={messageLanguage([...messages].reverse().find(message => message.role === "user")?.content, development.project?.responseLanguage ?? language)} companyId={(development.project?.companyId ?? companyId)!} runId={development.project && developmentIsActive(development.project) ? development.project.runId ?? null : null} projectIds={[development.project?.projectId, development.activeProject?.projectId, selectedProject?.projectId, codeInbox.session?.projectId].filter((id): id is string => Boolean(id))} />}
           {thinking.visible && <ChatThinking key="turn-thinking" text={thinking.text} />}
-          {previewAnchor < 0 && projectPreview && <article className="assistant">{projectPreview}</article>}
+          {/* Only a chat opened from a project with nothing asked yet shows its block on its own. It was appended under
+              the last message of a long chat whatever that message asked (owner, V6 step 14). */}
+          {previewAnchor < 0 && projectPreview && earlierMessages === 0 && !displayMessages.some(message => message.role === "user") && <article className="assistant">{projectPreview}</article>}
           {!bottomCard && development.preview}
           {messages.length > 0 && <div className="chat-scroll-spacer" aria-hidden="true" />}
           <div ref={streamEndRef} aria-hidden="true" />

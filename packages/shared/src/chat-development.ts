@@ -46,6 +46,8 @@ export type DevelopmentProcess = {
   initialRunId?: string; responseLanguage?: string; runStatuses?: Record<string, string>; runStartedAts?: Record<string,string>; runLanguages?: Record<string,string>;
   progress?: DevelopmentProcessProgressItem[];
   inboxEnabled?: boolean; hidden: boolean; createdAt: string; updatedAt: string; detail?: string; previewUrl?: string;
+  /** The project was deleted later: its steps stay in the chat, nothing can be opened. */
+  projectDeleted?: boolean;
 };
 export const developmentIsActive = (p: DevelopmentProcess) => ["queued", "preparing", "running", "stopping"].includes(p.status);
 export function requestsDevelopmentRestore(message: string): boolean {

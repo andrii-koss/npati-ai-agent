@@ -215,7 +215,7 @@ describe("deleting a site of another named company", () => {
     await store.createProject(context, studio.id, { name: "Stress Vite", type: "website" } as never, "other-delete-vite");
     const payload = { contextType: "project", companyId: shop.id, projectId: next.id };
     const asked = await app.inject({ method: "POST", url: "/chat/stream", payload: { ...payload, message: 'Delete only the test React/Vite project "Stress Vite" in company "Stress Studio" through the normal confirmation flow.' } });
-    expect(asked.body).toContain("Yes, delete website Stress Vite");
+    expect(asked.body).toContain("Yes, delete project Stress Vite");
     const conversationId = /"conversationId":"([^"]+)"/.exec(asked.body)?.[1];
     const confirmed = await app.inject({ method: "POST", url: "/chat/stream", payload: { ...payload, conversationId, message: "Yes, delete website Stress Vite" } });
     expect(confirmed.body).toContain("was deleted");

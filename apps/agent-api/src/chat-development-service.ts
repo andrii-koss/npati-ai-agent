@@ -161,7 +161,13 @@ export class ChatDevelopmentService {
       // An inbox can start a new run while its persisted binding is still idle. Discover it from the already
       // loaded lease summaries, without hydrating every unrelated project's replay, inbox and conversation.
       if (currentOrActiveOnly && !detailed && !developmentIsActive(stored) && latestRun?.status !== "running") return null;
-      const project = stored.projectId ? await this.d.projects.get(ctx, stored.companyId, stored.projectId) : null;
+      const project = stored.projectId ? await this.d.projects.get(ctx, stored.companyId, stored.projectId).catch((error: unknown) => {
+        if (error instanceof WorkspaceNotFoundError) return undefined;
+        throw error;
+      }) : null;
+      // A project deleted later keeps the steps and files of its work in the chat that built it: they were dropped with
+      // the project, so its creation looked like a reply with nothing done (V6 step 14). Nothing can be opened any more.
+      if (project === undefined) return currentOrActiveOnly && detailed ? { ...stored, status: developmentIsActive(stored) ? "cancelled" as const : stored.status, previewUrl: undefined, projectDeleted: true, progress: stored.progress ?? [] } : null;
       const traceProcess = latestRun ? { ...stored, runId: latestRun.runId, sessionId: stored.sessionId ?? latestRun.sessionId, detail: latestRun.runId === stored.runId ? stored.detail : undefined } : stored;
       const progress = detailed ? await developmentTrace(this.d.store, ctx, traceProcess, this.d.terminalEvents) : stored.progress ?? [];
       const history = detailed ? await Promise.all([...traceRuns.roots, ...traceRuns.children].filter(run => run.runId !== traceProcess.runId).map(run =>
