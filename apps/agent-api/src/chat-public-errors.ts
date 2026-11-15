@@ -19,20 +19,39 @@ function noticeLanguage(message: string) {
   return letters >= 24 || /[äöüßñ¿¡ãõçœèêëîïûùąćęłńśźżğış]/iu.test(message) ? language : "en";
 }
 
+const FORMATS = "M4A, MP3, WAV, WEBM, OGG, AAC, FLAC";
+const AUDIO_COPY: Record<CompanyChatLanguage, { transcribe: string; format: string; container: string }> = {
+  en: { transcribe: "The voice message could not be transcribed. Check the audio file and try again.", format: `This audio format is not supported. Upload ${FORMATS}.`, container: `The audio container does not match the file extension. Export the file as ${FORMATS} and try again.` },
+  uk: { transcribe: "Не вдалося розпізнати голосове повідомлення. Перевірте аудіофайл і спробуйте ще раз.", format: `Цей аудіоформат не підтримується. Завантажте ${FORMATS}.`, container: `Вміст аудіофайлу не відповідає його розширенню. Збережіть файл як ${FORMATS} і спробуйте ще раз.` },
+  ru: { transcribe: "Не удалось распознать голосовое сообщение. Проверьте аудиофайл и попробуйте ещё раз.", format: `Этот аудиоформат не поддерживается. Загрузите ${FORMATS}.`, container: `Содержимое аудиофайла не соответствует расширению. Сохраните файл как ${FORMATS} и попробуйте ещё раз.` },
+  de: { transcribe: "Die Sprachnachricht konnte nicht erkannt werden. Prüfen Sie die Audiodatei und versuchen Sie es erneut.", format: `Dieses Audioformat wird nicht unterstützt. Laden Sie ${FORMATS} hoch.`, container: `Der Inhalt der Audiodatei passt nicht zur Dateiendung. Exportieren Sie sie als ${FORMATS} und versuchen Sie es erneut.` },
+  fr: { transcribe: "Le message vocal n’a pas pu être transcrit. Vérifiez le fichier audio et réessayez.", format: `Ce format audio n’est pas pris en charge. Envoyez ${FORMATS}.`, container: `Le contenu du fichier audio ne correspond pas à son extension. Exportez-le en ${FORMATS} et réessayez.` },
+  es: { transcribe: "No se pudo transcribir el mensaje de voz. Revisa el archivo de audio e inténtalo de nuevo.", format: `Este formato de audio no es compatible. Sube ${FORMATS}.`, container: `El contenido del audio no coincide con su extensión. Expórtalo como ${FORMATS} e inténtalo de nuevo.` },
+  it: { transcribe: "Non è stato possibile trascrivere il messaggio vocale. Controlla il file audio e riprova.", format: `Questo formato audio non è supportato. Carica ${FORMATS}.`, container: `Il contenuto del file audio non corrisponde all’estensione. Esportalo come ${FORMATS} e riprova.` },
+  pl: { transcribe: "Nie udało się rozpoznać wiadomości głosowej. Sprawdź plik audio i spróbuj ponownie.", format: `Ten format audio nie jest obsługiwany. Prześlij ${FORMATS}.`, container: `Zawartość pliku audio nie pasuje do rozszerzenia. Wyeksportuj go jako ${FORMATS} i spróbuj ponownie.` },
+  pt: { transcribe: "Não foi possível transcrever a mensagem de voz. Verifique o ficheiro de áudio e tente novamente.", format: `Este formato de áudio não é suportado. Envie ${FORMATS}.`, container: `O conteúdo do áudio não corresponde à extensão. Exporte-o como ${FORMATS} e tente novamente.` },
+  nl: { transcribe: "Het spraakbericht kon niet worden omgezet. Controleer het audiobestand en probeer het opnieuw.", format: `Dit audioformaat wordt niet ondersteund. Upload ${FORMATS}.`, container: `De inhoud van het audiobestand past niet bij de extensie. Exporteer het als ${FORMATS} en probeer het opnieuw.` },
+  tr: { transcribe: "Sesli mesaj metne dönüştürülemedi. Ses dosyasını kontrol edip tekrar deneyin.", format: `Bu ses biçimi desteklenmiyor. ${FORMATS} yükleyin.`, container: `Ses dosyasının içeriği uzantısıyla uyuşmuyor. Dosyayı ${FORMATS} olarak dışa aktarıp tekrar deneyin.` },
+  zh: { transcribe: "无法识别这条语音消息。请检查音频文件后重试。", format: `不支持此音频格式。请上传 ${FORMATS}。`, container: `音频文件内容与扩展名不符。请导出为 ${FORMATS} 后重试。` },
+  ja: { transcribe: "音声メッセージを文字起こしできませんでした。音声ファイルを確認して、もう一度お試しください。", format: `この音声形式には対応していません。${FORMATS} をアップロードしてください。`, container: `音声ファイルの内容が拡張子と一致しません。${FORMATS} で書き出して、もう一度お試しください。` },
+  ko: { transcribe: "음성 메시지를 텍스트로 변환하지 못했습니다. 오디오 파일을 확인하고 다시 시도해 주세요.", format: `지원하지 않는 오디오 형식입니다. ${FORMATS} 파일을 올려 주세요.`, container: `오디오 파일 내용이 확장자와 맞지 않습니다. ${FORMATS}(으)로 내보낸 뒤 다시 시도해 주세요.` },
+  ar: { transcribe: "تعذّر تحويل الرسالة الصوتية إلى نص. تحقق من الملف الصوتي وحاول مرة أخرى.", format: `صيغة الصوت هذه غير مدعومة. ارفع ${FORMATS}.`, container: `محتوى الملف الصوتي لا يطابق امتداده. صدّره بصيغة ${FORMATS} وحاول مرة أخرى.` },
+  hi: { transcribe: "वॉइस संदेश को पाठ में नहीं बदला जा सका। ऑडियो फ़ाइल जाँचें और फिर से कोशिश करें।", format: `यह ऑडियो फ़ॉर्मेट समर्थित नहीं है। ${FORMATS} अपलोड करें।`, container: `ऑडियो फ़ाइल की सामग्री उसके एक्सटेंशन से मेल नहीं खाती। उसे ${FORMATS} में निर्यात करके फिर से कोशिश करें।` },
+};
+/** A voice message's caption or the person's earlier messages decide; with neither, English. */
+function voiceLanguage(text: string): CompanyChatLanguage {
+  return text.trim() ? noticeLanguage(text) : "en";
+}
+
 /** `requestMessage` decides the language of the provider failure text, so it matches the language the person writes in. */
 export function publicChatError(error: unknown, route?: string, requestMessage = "") {
   const raw = error instanceof InferenceRouteFailure && error.cause instanceof Error
     ? error.cause.message
     : error instanceof Error ? error.message : String(error);
-  if (/Invalid file format/i.test(raw)) {
-    return "The audio container does not match the file extension. Convert or export the file as M4A/AAC, MP3, WAV, WEBM, OGG, or FLAC and try again.";
-  }
-  if (/Unsupported audio format/i.test(raw)) {
-    return "This audio format is not supported. Upload M4A, MP3, WAV, WEBM, OGG, AAC, or FLAC.";
-  }
-  if (/audio transcription|transcribe|transcription/i.test(raw)) {
-    return "The voice message could not be transcribed. Check the audio file and try again.";
-  }
+  // The voice message notices were English in every chat language (V6 step 14).
+  if (/Invalid file format/i.test(raw)) return AUDIO_COPY[voiceLanguage(requestMessage)].container;
+  if (/Unsupported audio format/i.test(raw)) return AUDIO_COPY[voiceLanguage(requestMessage)].format;
+  if (/audio transcription|transcribe|transcription/i.test(raw)) return AUDIO_COPY[voiceLanguage(requestMessage)].transcribe;
   if (error instanceof InferenceRouteFailure || error instanceof SelfHealingExhaustedError) return providerFailureText(error, raw, route, noticeLanguage(requestMessage));
   return providerErrorCopy(noticeLanguage(requestMessage)).generic;
 }

@@ -785,7 +785,12 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
         request.log.error(error);
         const expected = error instanceof WorkspaceAccessError || error instanceof StorageRateLimitError || error instanceof ContextValidationError || error instanceof SecurityPolicyViolation || error instanceof AdmissionError || error instanceof ProjectOrchestrationError;
         const route = expected ? undefined : await getAIContext(auth).then((ai) => ai.model).catch(() => undefined);
-        const detail = expected ? error.message : publicChatError(error, route, request.body.message ?? "");
+        // A voice message usually comes without text: the person's language is then read from their earlier messages,
+        // so the failure is not in English for a Ukrainian chat (V6 step 14).
+        const languageSource = request.body.message?.trim() ? request.body.message : request.body.conversationId
+          ? await workspaceStore.getNeutralConversation(auth, request.body.conversationId).then((c) => c.messages.filter((m) => m.role === "user" && m.content.trim() && !/^(?:🎤|📷|📄)/u.test(m.content)).slice(-3).map((m) => m.content).join("\n")).catch(() => "")
+          : "";
+        const detail = expected ? error.message : publicChatError(error, route, languageSource ?? "");
         progress({ type: "final_generation_failed", error: detail });
         send("error", { error: { code: expected ? (error as any).code ?? "ERROR" : "AGENT_UNAVAILABLE", message: detail } });
       } finally {
