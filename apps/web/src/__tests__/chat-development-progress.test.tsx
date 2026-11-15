@@ -274,3 +274,16 @@ it("shows the request card on the last reply to the request, below the agent's w
  expect(developmentCard(messages,2,[running],"child")).toMatchObject({id:card.id});
  expect(developmentCard(messages,4,[running],"child")).toBeNull();
 });
+
+// V6 step 14 (owner): the site's creation lost its Preview once a later request edited the site. Every request keeps it.
+it("keeps the Preview under each request's reply when a later request changes the same project", () => {
+ const ready={...card,status:"completed",previewUrl:"/preview/project",lastBuildStatus:"ready"};
+ const done={...process,status:"completed" as const,conversationId:"child"};
+ const messages=[{role:"user" as const,content:"create the site"},{role:"assistant" as const,content:"Site created",projectCard:ready},{role:"user" as const,content:"add the address"},{role:"assistant" as const,content:"Address added",projectCard:ready}];
+ expect(developmentCard(messages,1,[done],"child")).toMatchObject({id:card.id});
+ expect(developmentCard(messages,3,[done],"child")).toMatchObject({id:card.id});
+ // Within one request only the last reply shows it.
+ const same=[{role:"user" as const,content:"create the site"},{role:"assistant" as const,content:"Working",projectCard:ready},{role:"assistant" as const,content:"Done",projectCard:ready}];
+ expect(developmentCard(same,1,[done],"child")).toBeNull();
+ expect(developmentCard(same,2,[done],"child")).toMatchObject({id:card.id});
+});

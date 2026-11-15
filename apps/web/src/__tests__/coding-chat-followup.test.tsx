@@ -98,10 +98,10 @@ it.each(["/c/child?company=company&project=project&developmentRoot=parent", "/c/
   await act(async () => {host.querySelector("form")!.dispatchEvent(new Event("submit",{bubbles:true,cancelable:true}));});
   expect(requests).toHaveLength(2);expect(requests[1]).toMatchObject({projectId:"project",companyId:"company",conversationId:"child",message:"Create a contact form on this website"});
   expect(host.textContent).toContain("Added the contact form.");expect(host.querySelectorAll(".project-chat-card")).toHaveLength(0);
-  const preview = host.querySelector<HTMLButtonElement>(".coding-preview-trigger")!;
+  // Every finished request keeps its own Preview (owner, V6 step 14); the latest reply has the latest one.
+  const preview = [...host.querySelectorAll<HTMLButtonElement>(".coding-preview-trigger")].at(-1)!;
   const reply = [...host.querySelectorAll("article.assistant")].find(node=>node.textContent?.includes("Added the contact form."))!;
-  // The one Preview is in the latest reply, not above it.
-  expect(host.querySelectorAll(".coding-preview-trigger")).toHaveLength(1);expect(reply.contains(preview)).toBe(true);
+  expect(host.querySelectorAll(".coding-preview-trigger")).toHaveLength(2);expect(reply.contains(preview)).toBe(true);
   await act(async () => preview.click());
   expect(document.querySelector('[aria-label="Preview of Company website"] iframe')).not.toBeNull();
   expect(host.textContent).not.toContain("Editing Company website");

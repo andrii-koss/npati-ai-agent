@@ -33,7 +33,12 @@ export function developmentCard(messages: CardMessage[], index: number, processe
   const card = message?.projectCard ?? (requestCard && processes.some(p => p.projectId === (requestCard.projectId ?? requestCard.id) && p.conversationId === conversationId) ? requestCard : undefined);
   if (!card || card.kind === "code_project" && card.status === "waiting_for_user") return null;
   const projectId = card.projectId ?? card.id;
-  if (messages.slice(index + 1).some(m => (!m.role || m.role === "assistant") && (m.projectCard?.projectId ?? m.projectCard?.id) === projectId)) return null;
+  // One card per request: a later reply to the SAME request takes it. A later request about the project keeps its own
+  // card; the site's creation lost its Preview once the chat edited the site afterwards (V6 step 14, owner complaint).
+  // A card that answers no request (the project the chat was opened with) is superseded by any later card of the project.
+  if (messages.slice(index + 1, nextUser === -1 || request?.role !== "user" ? undefined : nextUser).some(m => (!m.role || m.role === "assistant") && (m.projectCard?.projectId ?? m.projectCard?.id) === projectId)) return null;
+  // The request's own card goes to its last reply, so an earlier status reply of that request does not repeat it.
+  if (!lastReply && request?.role === "user" && (request.projectCard?.projectId ?? request.projectCard?.id) === projectId) return null;
   const process = processes.find(p => p.projectId === projectId);
   if (process && process.parentConversationId === conversationId && process.conversationId !== conversationId) return null;
   // The empty project the chat was opened with ("Open in chat") is superseded once this chat built a newer project:

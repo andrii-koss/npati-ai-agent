@@ -776,11 +776,13 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   // While the agent works in this chat, an open Preview stays but none is offered for the state it is changing.
   const agentWorking = sending || codeInbox.active || Boolean(development.project && developmentIsActive(development.project));
   // Resolve the card once, then anchor it to the closing reply below.
-  const timelineCard = timeline.flatMap(entry => {
+  const timelineCards = timeline.flatMap((entry, timelineIndex) => {
     if (entry.kind !== "message") return [];
     const card = development.card(displayMessages, entry.index);
-    return card ? [card] : [];
-  }).at(-1);
+    return card ? [{ card, timelineIndex }] : [];
+  });
+  const timelineCard = timelineCards.at(-1)?.card;
+  const lastCardEntry = timelineCards.at(-1)?.timelineIndex ?? -1;
   const fallbackCard = entryProjectCard || (development.project?.projectId && development.project.companyId ? {
     id: development.project.projectId,
     projectId: development.project.projectId,
@@ -828,7 +830,9 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
             const { message, index } = entry;
             if (development.hideMessage(displayMessages, index)) return timelineIndex === previewAnchor && projectPreview ? <article className="assistant" key={message.id}>{projectPreview}</article> : null;
             const resolvedCard = development.card(displayMessages, index);
-            const messageCard = timelineIndex === previewAnchor && !agentWorking ? bottomCard : resolvedCard && (resolvedCard.projectId ?? resolvedCard.id) !== (bottomCard?.projectId ?? bottomCard?.id) ? resolvedCard : null;
+            // Every finished request keeps its Preview under its own reply; only the reply whose card already shows at the
+            // run's closing anchor is skipped, so the card never appears twice.
+            const messageCard = timelineIndex === previewAnchor && !agentWorking ? bottomCard : resolvedCard && !(projectPreview && previewAnchor >= 0 && timelineIndex === lastCardEntry) ? resolvedCard : null;
             const isLatestAssistant = message.role === "assistant" && index === displayMessages.length - 1;
             const hasResearch = !development.project && progressEvents.some((event) => !event.type.startsWith("final_generation"));
             return (
