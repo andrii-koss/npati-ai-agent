@@ -241,6 +241,8 @@ export function useChatDevelopment(options: {
     activeProject: activeProcess,
     openingProjectChat,
     project: currentProcess,
+    /** Every project this chat built or is building, so its steps show beside their own requests. */
+    conversationProcesses: processes.filter(p => Boolean(options.conversationId) && (p.conversationId === options.conversationId || p.parentConversationId === options.conversationId)),
     card: (messages: Parameters<typeof developmentCard>[0], index: number) => developmentCard(messages, index, processes, options.conversationId),
     hideMessage: (messages: Parameters<typeof hideDevelopmentMessage>[0], index: number) => hideDevelopmentMessage(messages, index, processes),
     preview: <ChatDevelopmentPreview process={currentProcess} busy={options.busy || submitting} />,

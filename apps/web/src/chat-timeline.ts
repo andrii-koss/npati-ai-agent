@@ -32,7 +32,12 @@ export function normalizeActivity(value: unknown): DevelopmentProcessProgressIte
   return [...valid.values()];
 }
 /** Message order is the server's append order, never role grouping. Insert activity at its start time. */
-export function activitySlots(messages: Message[], value: unknown, conversationId?: string | null) {
+/**
+ * `hasEarlier`: older messages of this chat are not loaded yet. Activity older than the first loaded message then
+ * belongs to those messages and is left out until they load; it was stacked after the first loaded reply, so a long
+ * chat showed every step of a site built 150 messages earlier between two unrelated questions (V6 step 14).
+ */
+export function activitySlots(messages: Message[], value: unknown, conversationId?: string | null, hasEarlier = false) {
   const slots = new Map<number, DevelopmentProcessProgressItem[]>();
   for (const item of normalizeActivity(value)) {
     if (item.conversationId && item.conversationId !== conversationId) continue;
@@ -42,6 +47,7 @@ export function activitySlots(messages: Message[], value: unknown, conversationI
       index = messages.findIndex(message => Number.isFinite(Date.parse(message.createdAt)) && Date.parse(message.createdAt) > time);
       if (index < 0) index = messages.length;
     } else if (messages.at(-1)?.role === "assistant") index--;
+    if (index === 0 && hasEarlier) continue;
     if (index === 0 && messages.length > 0) {
       const assistantIdx = messages.findIndex(m => m.role === "assistant");
       index = assistantIdx !== -1 ? assistantIdx + 1 : 1;
@@ -137,14 +143,24 @@ export function codingActivityStages(value: unknown, process?: DevelopmentProces
   return result;
 }
 
-export function chatTimeline(messages: Message[], value: unknown, conversationId?: string | null, process?: DevelopmentProcess) {
-  const normalized = normalizeActivity(value).filter(item => !item.conversationId || item.conversationId === conversationId);
-  const groups = codingActivityStages(normalized,process,messages);
+/**
+ * `others`: the chat's other projects. A chat that built a site, a game and an app showed the steps of only the
+ * current project; the app's 62 steps were missing beside its request (V6 step 14). Each run keeps its own process.
+ */
+export function chatTimeline(messages: Message[], value: unknown, conversationId?: string | null, process?: DevelopmentProcess, hasEarlier = false, others: DevelopmentProcess[] = []) {
+  const sources = [{ value, process }, ...others.filter(other => other.id !== process?.id).map(other => ({ value: other.progress, process: other }))];
+  const normalized: DevelopmentProcessProgressItem[] = [];
+  const groups: (CodingActivityRun & { process?: DevelopmentProcess })[] = [];
+  for (const source of sources) {
+    const items = normalizeActivity(source.value).filter(item => !item.conversationId || item.conversationId === conversationId);
+    normalized.push(...items);
+    groups.push(...codingActivityStages(items,source.process,messages).map(group => ({ ...group, process: source.process })));
+  }
   const anchors = groups.map(group=>({id:group.id,stage:"run",title:"",at:group.at,sequence:group.sequence}));
-  const slots = activitySlots(messages,[...normalized.filter(item=>item.kind==="assistant_message" && !messages.some(message=>message.role==="assistant" && message.content.trim()===item.title.trim())),...anchors],conversationId);
-  const entries: ({ kind: "message"; message: Message; index: number } | { kind: "activity"; item: DevelopmentProcessProgressItem; run?: CodingActivityRun })[] = [];
+  const slots = activitySlots(messages,[...normalized.filter(item=>item.kind==="assistant_message" && !messages.some(message=>message.role==="assistant" && message.content.trim()===item.title.trim())),...anchors],conversationId,hasEarlier);
+  const entries: ({ kind: "message"; message: Message; index: number } | { kind: "activity"; item: DevelopmentProcessProgressItem; run?: CodingActivityRun; process?: DevelopmentProcess })[] = [];
   for (let index=0; index<=messages.length; index++) {
-    for (const item of slots.get(index) ?? []) entries.push({kind:"activity",item,run:groups.find(group=>group.id===item.id)});
+    for (const item of slots.get(index) ?? []) { const run = groups.find(group=>group.id===item.id); entries.push({kind:"activity",item,run,process:run?.process ?? process}); }
     if (index<messages.length) entries.push({kind:"message",message:messages[index]!,index});
   }
   return entries;

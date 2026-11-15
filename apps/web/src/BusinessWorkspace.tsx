@@ -772,7 +772,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
   }
   const displayMessages = mergeConversationMessages(messages,development.project?.conversationMessages);
   rowStateRef.current = { displayMessages, activeTurn };
-  const timeline = chatTimeline(displayMessages, development.project?.progress, selected, development.project);
+  const timeline = chatTimeline(displayMessages, development.project?.progress, selected, development.project, earlierMessages > 0, development.conversationProcesses);
   // While the agent works in this chat, an open Preview stays but none is offered for the state it is changing.
   const agentWorking = sending || codeInbox.active || Boolean(development.project && developmentIsActive(development.project));
   // Resolve the card once, then anchor it to the closing reply below.
@@ -824,7 +824,7 @@ export function BusinessChatPage({ initialPrompt = "", initialConversationId, ne
             </div>
           )}
           {timeline.map((entry, timelineIndex) => {
-            if (entry.kind === "activity") return <ChatDevelopmentProgress key={"activity:" + entry.item.id} process={development.project} items={entry.run?.items ?? [entry.item]} run={entry.run} animatePending={!thinking.visible} preview={timelineIndex === previewAnchor ? projectPreview : undefined} />;
+            if (entry.kind === "activity") return <ChatDevelopmentProgress key={"activity:" + entry.item.id} process={entry.process ?? development.project} items={entry.run?.items ?? [entry.item]} run={entry.run} animatePending={!thinking.visible} preview={timelineIndex === previewAnchor ? projectPreview : undefined} />;
             const { message, index } = entry;
             if (development.hideMessage(displayMessages, index)) return timelineIndex === previewAnchor && projectPreview ? <article className="assistant" key={message.id}>{projectPreview}</article> : null;
             const resolvedCard = development.card(displayMessages, index);
