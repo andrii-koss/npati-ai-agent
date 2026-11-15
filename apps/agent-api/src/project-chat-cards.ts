@@ -31,6 +31,16 @@ export function focusedChatEntity(context: Partial<ActiveContext>, confirmed?: C
 }
 
 /** A bounded record read on the existing resolver/store. The classifier chooses a field, never IDs or factual values. */
+/** The person asks about the company's AI agents or its team, not about a person or role it remembered. */
+export function asksAboutAgents(message: string): boolean {
+  return /(?:агент|agent|ajan|에이전트|エージェント|智能体|代理|وكيل|وكلاء|एजेंट|команд|\bteam\b|équipe|equipe|equipo|squadra|zespół|zespol|equipa|takım|팀|チーム|团队|فريق|टीम|\bAI\b|\bШІ\b|\bИИ\b)/iu.test(message);
+}
+
+/** The person asks about the memory itself ("what do you remember", "show the saved facts"), not about one fact in it. */
+export function asksAboutStoredMemory(message: string): boolean {
+  return /(?:пам['’ʼ]?ят|памят|memory|remember|запам['’ʼ]?ят|збереж|сохран|saved|stored|instructions|інструкц|инструкц|gespeichert|erinner|gedächtnis|mémoire|souvien|memoria|ricord|lembr|pamię|zapamięt|bellek|hatırl|記憶|覚え|メモリ|기억|메모리|ذاكرة|تذكر|याद|स्मृति)/iu.test(message);
+}
+
 export async function executeChatEntityRead(store: WorkspaceStore, auth: AuthContext, resolved: ResolvedActiveContext, request: ChatEntityRead,
   message: string, conversationId?: string, confirmed?: ChatEntityContext | null, noMemory = false) {
   if (confirmed && conversationId && confirmed.conversationId !== conversationId) throw new Error("Entity references belong to another conversation");
@@ -87,11 +97,18 @@ export async function executeChatEntityRead(store: WorkspaceStore, auth: AuthCon
     const saved = company.businessId ? (await store.listMemory(auth, company.businessId).catch(() => []))
       .map((item) => `${item.title}: ${item.content}`).join("\n") : "";
     value = [company.companyInstructions?.trim(), facts, saved].filter(Boolean).join("\n\n") || undefined;
+    // "What is our generator's power?" got all twenty stored lines back (V6 step 14). A long memory is returned as is only
+    // when the person asks about the memory itself; any other question is answered by the model from that same memory.
+    // An empty memory still gets the honest "nothing is stored" answer, and a short one is the answer.
+    // "Long" is counted in lines and in characters: one model stored all twenty facts on a single line.
+    if (value && !asksAboutStoredMemory(message) && (value.split("\n").filter((line) => line.trim()).length > 3 || value.length > 300)) return null;
   }
   else if (request.field === "instructions" && type === "company") value = (record as import("@npati/workspace").Company).companyInstructions ?? undefined;
   else if (request.field === "instructions" && type === "agent") value = (record as import("@npati/workspace").CompanyAgent).systemInstruction ?? undefined;
   else if (request.field === "role" && type === "agent") value = (record as import("@npati/workspace").CompanyAgent).role;
   else if (request.field === "agents" && type === "company") {
+    // "Who is our shift manager?" listed the AI agents (V6 step 14): a person the company told us about is not an agent.
+    if (!asksAboutAgents(message)) return null;
     // The count and the actual Main Agent come from storage, not from role text that may merely say "lead".
     const agents = await store.listCompanyAgents(auth, id), mainAgentId = (record as import("@npati/workspace").Company).mainAgentId;
     value = record.name + " — " + agents.length + "\n" + agents.map(agent => (agent.id === mainAgentId ? "★ " : "") + agent.name + ": " + agent.role).join("\n");

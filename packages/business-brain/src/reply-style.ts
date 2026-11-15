@@ -11,7 +11,8 @@ export function stripDecorativeEmoji(reply: string, userMessage = ""): string {
   if (!present.test(reply) || present.test(userMessage) || WANTS_EMOJI.test(userMessage)) return reply;
   const emojiWithSpace = new RegExp(EMOJI + "[ \\t]?", "gu");
   // Code blocks keep their bytes; prose loses the pictographs and the space each one left behind.
-  return reply.split(/(```[\s\S]*?```)/u).map((part, index) => index % 2 ? part : part
+  // A ```card block is prose shown as a card (an Instagram post got 🍞 there), so only real code blocks are kept as is.
+  return reply.split(/(```(?!card)[\s\S]*?```)/u).map((part, index) => index % 2 ? part : part
     .replace(emojiWithSpace, "")
     .replace(/[ \t]+([.,!?:;])/g, "$1")
     .replace(/[ \t]+$/gm, "")).join("").trim();

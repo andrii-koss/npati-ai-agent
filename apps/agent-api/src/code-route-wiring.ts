@@ -472,16 +472,26 @@ export function registerCodeRouteWiring(app: FastifyInstance, deps: CodeRouteDep
       : {}),
     contextBlocks: {
       load: async ({ ctx, companyId, projectId, query, websiteEdit, sessionId }) => {
+        // The company's remembered facts live in its instructions and in its linked Business Memory. The block read Business
+        // Memory by company id, which is never a Business, so it was always empty and a site got an invented address
+        // ("вул. Хлібна, 12" instead of the remembered "вул. Ранкова, 17", V6 step 14).
         let companyMemory: string | null = null;
         try {
-          const memories = await workspaceStore.listMemory(ctx, companyId, query, 25);
-          companyMemory = buildCompanyMemoryBlock(
-            memories.map((memory) => ({
+          const company = await workspaceStore.getCompany(ctx, companyId);
+          const memories = company.businessId ? await workspaceStore.listMemory(ctx, company.businessId, query, 25).catch(() => []) : [];
+          // One entry per stored line: a single entry is cut at 400 characters and lost the later facts.
+          const facts = (company.companyInstructions ?? "").split("\n").map((line) => line.trim()).filter(Boolean)
+            // A model sometimes stores every fact on one line: such a line is split into its sentences.
+            .flatMap((line) => line.length > 400 ? line.split(/(?<=[.!?])\s+/u) : [line])
+            .map((content) => ({ content, type: "company_fact" }));
+          companyMemory = buildCompanyMemoryBlock([
+            ...facts,
+            ...memories.map((memory) => ({
               ...(memory.title ? { title: memory.title } : {}),
               content: memory.content,
               ...(memory.type ? { type: memory.type } : {}),
             })),
-          )?.body ?? null;
+          ])?.body ?? null;
         } catch {
           companyMemory = null;
         }
