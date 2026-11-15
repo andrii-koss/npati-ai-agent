@@ -20,7 +20,7 @@ export const CORE_CHAT_TOOLS: ChatToolDefinition[] = [
     type: "function",
     function: {
       name: "npati_company_action",
-      description: "Create, update, or delete AI Companies and their agents stored inside NPATI. When the primary request creates a company with named AI agents, use this tool for the entire company and every agent in one operation. Preserve each supplied agent name, role, responsibility, hierarchy, shared behavior rule, and main-agent selection. A long structured prompt with agent sections is one company-creation request; do not replace it with a memory or Business Profile action. Business Profiles with stage, audience, registration, goals, and memory use npati_business_profile. Do not use for explanations, capability questions, or public research.",
+      description: "Create, update, or delete AI Companies and their agents stored inside NPATI. When the primary request creates a company with named AI agents, use this tool for the entire company and every agent in one operation. Preserve each supplied agent name, role, responsibility, hierarchy, shared behavior rule, and main-agent selection. Write new readable values (role, description) in the language of the user's message, not the company's. A long structured prompt with agent sections is one company-creation request; do not replace it with a memory or Business Profile action. Business Profiles with stage, audience, registration, goals, and memory use npati_business_profile. Do not use for explanations, capability questions, or public research.",
       parameters: {
         type: "object",
         additionalProperties: false,
