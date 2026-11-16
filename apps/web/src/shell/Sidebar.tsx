@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { LanguageSwitcher } from "../LanguageSwitcher";
 import { NpatiAgentLogo } from "./brand";
@@ -13,8 +13,24 @@ import { conversationActivity, stopConversationActivity, useChatActivity } from 
 
 const navigation = ["Settings"];
 
+/** The width below which the sidebar is a menu that slides in (09-chat-and-company-config.css). */
+const NARROW = "(max-width: 760px)";
+function useNarrowScreen() {
+  const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia(NARROW).matches);
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const query = window.matchMedia(NARROW);
+    const update = () => setNarrow(query.matches);
+    update();
+    query.addEventListener?.("change", update);
+    return () => query.removeEventListener?.("change", update);
+  }, []);
+  return narrow;
+}
+
 export function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose?: () => void } = {}) {
   const activity = useChatActivity();
+  const narrow = useNarrowScreen();
   const {
     location,
     t,
@@ -92,7 +108,9 @@ export function Sidebar({ isOpen = false, onClose }: { isOpen?: boolean; onClose
   }
 
   return (
-    <aside className={`sidebar ${isOpen ? "mobile-open" : ""}`}>
+    // On a phone the closed menu is off screen: it must also leave the Tab order. A keyboard user went through the
+    // whole chat history, unseen, and 90 Tabs did not reach the message box (V6 step 15).
+    <aside className={`sidebar ${isOpen ? "mobile-open" : ""}`} inert={narrow && !isOpen ? true : undefined} aria-hidden={narrow && !isOpen ? true : undefined}>
       <div className="sidebar-mobile-head">
         <Link className="brand" to="/chat" onClick={onClose}>
           <NpatiAgentLogo />
