@@ -15,6 +15,7 @@ import {
   type WorkspaceStore,
   WorkspaceAccessError,
 } from "@npati/workspace";
+import { ProjectNameAmbiguityError, sameNameProjectQuestion } from "./same-name-project-i18n";
 
 export interface ResolvedActiveContext {
   context: ActiveContext;
@@ -75,13 +76,7 @@ export function companyNamedInMessage<T extends { id: string; name: string }>(co
 
 /** The question for a name several projects share: which one, with the company and last change that tell them apart. */
 function sameNameQuestion(message: string, projects: Project[], companies: Company[]): string {
-  const uk = /[Ѐ-ӿ]/u.test(message);
-  // The dates come as Date objects: String(date).slice(0, 10) gave "Fri Nov 13" for both projects, so the person could not
-  // tell them apart (V6 D08-04). Minutes, the stack and a short id do.
-  const when = (value: unknown) => { const date = value instanceof Date ? value : new Date(String(value ?? "")); return Number.isNaN(date.getTime()) ? "?" : date.toISOString().slice(0, 16).replace("T", " ") + " UTC"; };
-  const list = projects.slice(0, 6).map(p => `«${p.name}» — ${companies.find(c => c.id === p.companyId)?.name ?? p.companyId}, ${p.framework ? p.framework + ", " : ""}${uk ? "створено" : "created"} ${when(p.createdAt)}, ${uk ? "змінено" : "changed"} ${when(p.updatedAt)}, id ${p.id.slice(0, 8)}`).join("; ");
-  return uk ? `Знайдено кілька проєктів із назвою «${projects[0]!.name}»: ${list}. Відкрийте чат потрібного проєкту або назвіть його однозначно.`
-    : `More than one owned project is named “${projects[0]!.name}”: ${list}. Open the chat of the project you mean or name it unambiguously.`;
+  return sameNameProjectQuestion(message, projects, (id) => companies.find(c => c.id === id)?.name ?? id);
 }
 
 export class ActiveContextResolver {
@@ -186,7 +181,7 @@ export class ActiveContextResolver {
           && new Set(candidates.map(p => p.name.trim().toLocaleLowerCase())).size === candidates.length) {
           return { ...await this.resolve(auth, { contextType: "company", companyId: candidates[0]!.companyId }), projects: candidates };
         }
-        if (sameName) throw new ContextValidationError(sameNameQuestion(message, candidates, owned));
+        if (sameName) throw new ProjectNameAmbiguityError(sameNameQuestion(message, candidates, owned));
         throw new ContextValidationError("More than one owned project is named; specify a single project for this action");
       }
       const project = candidates[0];

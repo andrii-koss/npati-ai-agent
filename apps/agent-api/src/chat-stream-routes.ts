@@ -5,6 +5,7 @@ import { isChatProjectCreationBatch, runChatProjectCreation, chatProjectCreation
 import { selectCompanyForWebsite } from "./company-run-notice-i18n";
 import { companyOnboardingCopy, continueCompanyOnboarding } from "./chat-company-onboarding";
 import { resolveCodingConversationLanguage, codingChatResponseInstruction, chatLanguageInstruction, detectCompanyChatLanguage } from "./company-chat-i18n";
+import { ProjectNameAmbiguityError } from "./same-name-project-i18n";
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { AppConfig } from "./app";
 import { AuthenticationError } from "./auth";
@@ -72,6 +73,9 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
     let streamId: string | undefined;
     let releaseStream: (() => Promise<void>) | undefined;
     const abortPreflight = () => { if (!reply.raw.writableEnded) streamController.abort(new Error("Client disconnected")); };
+    // Answers a question the context check asks before any work (several projects share the name the request uses):
+    // a reply saved in the conversation, not an error that vanishes with its toast (V6 step 15, V6-102).
+    let clarify: ((question: string) => Promise<void>) | undefined;
     try {
       const auth = await authProvider.authenticate(request);
       streamId=request.body.streamId?.trim();
@@ -92,6 +96,29 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
       let message = request.body.message?.trim() ?? "";
       if (!message && !request.body.attachments?.length) return reply.code(400).send({ error: { code: "MESSAGE_REQUIRED", message: "Enter a message or attach a photo or voice message." } });
       reply.raw.once("close", abortPreflight);
+      clarify = async (question) => {
+        reply.hijack();
+        reply.raw.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache, no-transform", "connection": "keep-alive", "x-accel-buffering": "no" });
+        let sequence = 0;
+        const write = (event: "progress" | "delta" | "result", data: unknown) => {
+          if (reply.raw.destroyed) return;
+          sequence += 1;
+          reply.raw.write(`id: ${sequence}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        };
+        let conversationId: string | undefined;
+        if (memoryPolicy.writeAllowed) {
+          const conversation = request.body.conversationId
+            ? (await workspaceStore.getNeutralConversation(auth, request.body.conversationId)).conversation
+            : await workspaceStore.createNeutralConversation(auth, conversationTitle(message));
+          if (!request.body.conversationId) write("progress", { type: "conversation_started", conversationId: conversation.id });
+          await workspaceStore.appendNeutralMessage(auth, conversation.id, "user", message);
+          await workspaceStore.appendNeutralMessage(auth, conversation.id, "assistant", question);
+          conversationId = conversation.id;
+        }
+        write("delta", { delta: question });
+        write("result", { message: question, suggestedActions: [], conversationId });
+        reply.raw.end();
+      };
       releaseStream = await reserveChatStream({ owner: auth, streamId, controller: streamController, activeStreams: activeChatStreams, registry: activeSessionRegistry });
       streamController.signal.throwIfAborted();
       const overview = await workspaceStore.overview(auth);
@@ -837,6 +864,7 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
           .code(429)
           .send({ error: { code: error.code === "queue_cancelled" ? "CODE_RUN_QUEUE_CANCELLED" : "CODE_RUN_QUEUE_FULL", message: error.message, retryable: true } });
       }
+      if (error instanceof ProjectNameAmbiguityError && clarify && !reply.sent) return clarify(error.question);
       if (error instanceof ContextValidationError) {
         return reply.code(400).send({ error: { code: "INVALID_CONTEXT", message: error.message } });
       }
