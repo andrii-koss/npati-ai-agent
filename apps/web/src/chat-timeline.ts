@@ -135,7 +135,10 @@ export function codingActivityStages(value: unknown, process?: DevelopmentProces
       const stage=ordered[index]!;
       if(!stage.items.length && !activeStates.includes(run.status))continue;
       if(index===ordered.length-1 && activeStates.includes(run.status))stage.status=run.status;
-      else stage.status=stage.items.some(item=>["running","active"].includes(item.status??"")) && activeStates.includes(run.status) ? "running" : stage.items.some(item=>["awaiting_approval","waiting_for_approval"].includes(item.status??"")) && activeStates.includes(run.status) ? "waiting_for_approval" : stage.items.some(item=>item.status==="failed") ? "failed" : run.status==="cancelled" && stage.items.some(item=>item.status==="cancelled") ? "cancelled" : "completed";
+      else stage.status=stage.items.some(item=>["running","active"].includes(item.status??"")) && activeStates.includes(run.status) ? "running" : stage.items.some(item=>["awaiting_approval","waiting_for_approval"].includes(item.status??"")) && activeStates.includes(run.status) ? "waiting_for_approval" // A run the person stopped breaks off its last step: that step is recorded as failed, but the run reads "Stopped",
+        // not "Error" (V6 step 15).
+        : run.status==="cancelled" && stage.items.some(item=>item.status==="failed" || item.status==="cancelled") ? "cancelled"
+        : stage.items.some(item=>item.status==="failed") ? "failed" : "completed";
       stage.usage=[...new Map([...stage.items.map(item=>item.modelUsage),...run.items.filter(item=>item.stage==="model_usage" && item.modelUsage && (stage.items.some(action=>action.modelUsage?.id===item.modelUsage?.id) || index===ordered.length-1 && !item.modelUsage.toolCallIds.length)).map(item=>item.modelUsage)].filter((usage): usage is NonNullable<DevelopmentProcessProgressItem["modelUsage"]>=>Boolean(usage)).map(usage=>[usage.id,usage])).values()];
       result.push(stage);
     }
