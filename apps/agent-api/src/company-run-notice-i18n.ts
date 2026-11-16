@@ -139,6 +139,22 @@ const FILES_CHANGED_BEFORE_FAILURE: Record<CompanyChatLanguage, string> = {
   nl: "Bestanden die vóór de fout zijn gewijzigd: ", tr: "Hatadan önce değişen dosyalar: ", zh: "失败前已更改的文件：",
   ja: "失敗前に変更されたファイル: ", ko: "실패 전에 변경된 파일: ", ar: "الملفات التي تغيّرت قبل الفشل: ", hi: "विफलता से पहले बदली गई फ़ाइलें: ",
 };
+const FILES_CHANGED_BEFORE_STOP: Record<CompanyChatLanguage, string> = {
+  en: "These files had already been changed before the stop and stay as they are: ", uk: "Ці файли було змінено ще до зупинки, і вони лишаються такими: ",
+  ru: "Эти файлы были изменены ещё до остановки и остаются такими: ", de: "Diese Dateien wurden schon vor dem Stopp geändert und bleiben so: ",
+  fr: "Ces fichiers avaient déjà été modifiés avant l'arrêt et restent ainsi : ", es: "Estos archivos ya se habían modificado antes de la detención y se quedan así: ",
+  it: "Questi file erano già stati modificati prima dell'arresto e restano così: ", pl: "Te pliki zmieniono jeszcze przed zatrzymaniem i pozostają bez zmian: ",
+  pt: "Estes ficheiros já tinham sido alterados antes da paragem e ficam assim: ", nl: "Deze bestanden waren al gewijzigd vóór het stoppen en blijven zo: ",
+  tr: "Bu dosyalar durdurmadan önce değiştirilmişti ve öyle kalıyor: ", zh: "这些文件在停止之前已被修改，并保持原样：", ja: "これらのファイルは停止前に変更済みで、そのまま残ります：",
+  ko: "이 파일들은 중지 전에 이미 변경되었으며 그대로 유지됩니다: ", ar: "عُدّلت هذه الملفات قبل الإيقاف وتبقى كما هي: ", hi: "ये फ़ाइलें रोकने से पहले बदली जा चुकी थीं और वैसी ही रहेंगी: ",
+};
+
+/** A stopped run names what it had already changed, so the person does not think nothing happened (V6 step 18). */
+export function filesChangedBeforeStop(language: CompanyChatLanguage | undefined, files: string[]): string {
+  if (!files.length) return "";
+  return "\n\n" + (FILES_CHANGED_BEFORE_STOP[language ?? "en"] ?? FILES_CHANGED_BEFORE_STOP.en) + files.slice(0, 20).map((file) => "`" + file + "`").join(", ") + (files.length > 20 ? ", …" : "");
+}
+
 export function filesChangedBeforeFailure(language: CompanyChatLanguage | undefined, files: string[]): string {
   if (!files.length) return "";
   return "\n\n" + (FILES_CHANGED_BEFORE_FAILURE[language ?? "en"] ?? FILES_CHANGED_BEFORE_FAILURE.en) + files.slice(0, 20).map((file) => "`" + file + "`").join(", ") + (files.length > 20 ? ", …" : "");

@@ -11,7 +11,7 @@ vi.mock("../code-workspace/CodeMetricsPanel", () => ({ CodeMetricsPanel: () => n
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.innerHTML = ""; });
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 
-async function view(check: (state: { host: HTMLDivElement; fetcher: ReturnType<typeof vi.fn>; releaseA: () => void }) => Promise<void>) {
+async function view(check: (state: { host: HTMLDivElement; fetcher: ReturnType<typeof vi.fn>; releaseA: () => void }) => Promise<void>, entry = "/code/co/pr?session=s&run=r") {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   let approvals = [{ id: "approval-a", toolName: "code.fs.edit", command: "same command", diff: "first patch" }, { id: "approval-b", toolName: "code.fs.edit", command: "same command", diff: "second patch" }];
   let releaseA!: () => void;
@@ -34,7 +34,7 @@ async function view(check: (state: { host: HTMLDivElement; fetcher: ReturnType<t
   vi.stubGlobal("fetch", fetcher);
   const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
   try {
-    await act(async () => { root.render(<MemoryRouter initialEntries={["/code/co/pr?session=s&run=r"]}><Routes><Route path="/code/:companyId/:projectId" element={<CodeWorkspacePage />} /></Routes></MemoryRouter>); });
+    await act(async () => { root.render(<MemoryRouter initialEntries={[entry]}><Routes><Route path="/code/:companyId/:projectId" element={<CodeWorkspacePage />} /></Routes></MemoryRouter>); });
     await check({ host, fetcher, releaseA: () => releaseA() });
   } finally { await act(async () => root.unmount()); }
 }
@@ -93,4 +93,13 @@ it("ignores a stale file response and saves the selected file with its own revis
     expect(host.textContent).not.toContain("revision_conflict");
     expect(host.querySelector<HTMLTextAreaElement>(".project-file-browser-textarea")?.value).toBe("CURRENT_B_CONTENT");
   });
+});
+
+// V6 step 18: a reload closed the open file; the file named in the address opens again.
+it("opens the file named in the address after a reload", async () => {
+  await view(async ({ host, fetcher }) => {
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(fetcher.mock.calls.some(([url]) => String(url).includes("/files/read") && String(url).includes("b.ts"))).toBe(true);
+    expect(host.querySelector<HTMLTextAreaElement>(".project-file-browser-textarea")?.value ?? host.textContent).toContain("CURRENT_B_CONTENT");
+  }, "/code/co/pr?session=s&run=r&file=b.ts");
 });

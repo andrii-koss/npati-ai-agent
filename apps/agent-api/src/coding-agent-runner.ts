@@ -1,7 +1,7 @@
 import { settleCodingTurn } from "./coding-agent-turn-settlement";
 import { codingCancellationMessage, codingInboxAdmissionMessage } from "./coding-cancel-i18n";
 import { codingProviderFailureMessage } from "./chat-public-errors";
-import { filesChangedBeforeFailure } from "./company-run-notice-i18n";
+import { filesChangedBeforeFailure, filesChangedBeforeStop } from "./company-run-notice-i18n";
 import { createHash, randomUUID } from "node:crypto";
 import { CODE_AGENT_MASTER_FLAG } from "./feature-flags";
 import { emitCodingActivity } from "./coding-agent-runner-contracts";
@@ -454,7 +454,7 @@ export class CodingAgentRunner {
         }
         await release("cancelled");
         await this.ports.runEvents?.append({ eventKey: `code-run-cancelled:${turnId}`, eventType: "cancelled", runStatus: "cancelled", message: "Coding Agent run cancelled by the user" });
-        return stop("cancelled", "cancelled", codingCancellationMessage(input.responseLanguage));
+        return stop("cancelled", "cancelled", codingCancellationMessage(input.responseLanguage) + filesChangedBeforeStop(input.responseLanguage, summary.filesChanged));
       }
       const flagStop = await stopIfFlagDisabled();
       if (flagStop) return flagStop;
@@ -628,7 +628,7 @@ export class CodingAgentRunner {
           if ((input.signal?.reason as { code?: string } | undefined)?.code === "feature_disabled") return suspendByFlag();
           await release("cancelled");
           await this.ports.runEvents?.append({ eventKey: `code-run-cancelled:${turnId}`, eventType: "cancelled", runStatus: "cancelled", message: "Coding Agent run cancelled during model request" });
-          return stop("cancelled", "cancelled", codingCancellationMessage(input.responseLanguage));
+          return stop("cancelled", "cancelled", codingCancellationMessage(input.responseLanguage) + filesChangedBeforeStop(input.responseLanguage, summary.filesChanged));
         }
         await release("provider_error");
         await this.ports.runEvents?.append({ eventKey: `code-run-failed:${turnId}`, eventType: "failed", runStatus: "failed", message: "Coding Agent run failed" });
@@ -675,7 +675,7 @@ export class CodingAgentRunner {
         if (input.detachedChildInbox && (input.signal?.reason as { code?: string } | undefined)?.code === "subagent_interrupt") return stop("interrupted", "interrupted", "The child was interrupted after its model request and can be continued.");
         await release("cancelled");
         await this.ports.runEvents?.append({ eventKey: `code-run-cancelled:${turnId}`, eventType: "cancelled", runStatus: "cancelled", message: "Coding Agent run cancelled after model request" });
-        return stop("cancelled", "cancelled", codingCancellationMessage(input.responseLanguage));
+        return stop("cancelled", "cancelled", codingCancellationMessage(input.responseLanguage) + filesChangedBeforeStop(input.responseLanguage, summary.filesChanged));
       }
 
 

@@ -452,6 +452,8 @@ function CodeWorkspaceContent() {
     async (path: string) => {
       const requestId = ++fileRequest.current;
       setSelectedPath(path);
+      // The open file is part of the address, so a reload shows it again (V6 step 18: the reload closed it).
+      setSearchParams((current) => { const next = new URLSearchParams(current); next.set("file", path); return next; }, { replace: true });
       setFileRevision(undefined);
       setSaveSuccess(false);
       setFileContent(null);
@@ -466,8 +468,15 @@ function CodeWorkspaceContent() {
         if (requestId === fileRequest.current) setFileError(cause instanceof Error ? cause.message : String(cause));
       }
     },
-    [companyId, projectId],
+    [companyId, projectId, setSearchParams],
   );
+  // A file named in the address (after a reload or a shared link) opens once the page starts.
+  const initialFile = useRef(searchParams.get("file"));
+  useEffect(() => {
+    const path = initialFile.current;
+    initialFile.current = null;
+    if (path) void openFile(path);
+  }, [openFile]);
 
   const saveFile = async () => {
     if (!companyId || !projectId || !selectedPath || fileContent === null || savingFile) return;

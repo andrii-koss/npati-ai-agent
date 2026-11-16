@@ -37,6 +37,14 @@ export function extractCleanProjectName(prompt: string, explicitName?: string): 
   for (const pattern of commandPatterns) {
     cleaned = cleaned.replace(pattern, "").trim();
   }
+  // A name the person put in quotes right after the command is the name, exactly. Without the model (a provider
+  // outage) the fallback kept the closing quote and the description: "V6TEST18 Retry Site» — проста сторінка…",
+  // and the repeated request then created a second project (V6 step 18).
+  const quoted = cleaned.match(/^[«“"„]([^»”"“\n]{2,80})[»”"“]/u);
+  if (quoted?.[1]?.trim()) {
+    const name = quoted[1].trim();
+    return name.charAt(0).toUpperCase() + name.slice(1);
+  }
   // Framework and execution instructions belong in the description, not the display name.
   cleaned = cleaned.replace(/\s+(?:на|on|using|with)\s+(?:next\.?js|react|vite|expo|html(?:\/css)?)(?:\b|(?=\s|[,.;]))[\s\S]*$/iu, "").trim();
   cleaned = cleaned.replace(/[,;]\s*(?:запусти|збери|покажи|run|build|start|launch)(?:\s|$)[\s\S]*$/iu, "").trim();

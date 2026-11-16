@@ -15,7 +15,7 @@ import {
   type WorkspaceStore,
   WorkspaceAccessError,
 } from "@npati/workspace";
-import { ProjectNameAmbiguityError, sameNameProjectQuestion } from "./same-name-project-i18n";
+import { ProjectNameAmbiguityError, namedProjectMissingQuestion, sameNameProjectQuestion } from "./same-name-project-i18n";
 
 export interface ResolvedActiveContext {
   context: ActiveContext;
@@ -138,16 +138,21 @@ export class ActiveContextResolver {
     // A question or record task can name the project too ("delete row X in Next Shop"), so CHAT does not skip it.
     if (!creating) {
       const ownedProjects = (await Promise.all(companies.map(company => this.store.listProjects(auth, company.id)))).flat();
+      const live = (project: Project) => !["archived", "soft_deleted", "purging", "deleted"].includes(project.status);
       // An explicit location is authoritative even if the named project has been deleted. Never fall back to
       // the active sibling. Quoted replacement text (e.g. change heading to "Welcome") is not a location.
       if (["EDIT_WEBSITE", "EDIT_PROJECT", "ADD_FEATURE", "FIX_BUG", "ADD_DATA_MODEL", "EDIT_DATA_MODEL", "PREVIEW_PROJECT", "REVIEW_PROJECT", "TEST_PROJECT"].includes(decision?.intent ?? "")) {
         const references = [...message.matchAll(/(?:^\s*in\s+|\b(?:project|website|site)\s+|(?:проєкт[іу]?|сайт[іу]?)\s+)[«"“]([^»"”\n]+)[»"”]/giu)].map(match => match[1]!.trim());
         for (const name of references) {
           if (owned.some(company => company.name.toLocaleLowerCase() === name.toLocaleLowerCase())) continue;
-          if (!ownedProjects.some(project => project.name.toLocaleLowerCase() === name.toLocaleLowerCase()
-            && !["archived", "soft_deleted", "purging", "deleted"].includes(project.status))) {
-            throw new ContextValidationError("Explicitly named project not found or unavailable: " + name + ". Select an existing project before continuing.");
-          }
+          if (ownedProjects.some(project => project.name.toLocaleLowerCase() === name.toLocaleLowerCase() && live(project))) continue;
+          // An exact quoted project name is precise: it is looked up in every owned company, not only the selected
+          // or named ones (V6 step 18: a new chat with no company refused an existing site with an English 400).
+          const elsewhere = (await Promise.all(owned.filter(company => !companies.some(c => c.id === company.id))
+            .map(company => this.store.listProjects(auth, company.id).catch(() => [] as Project[])))).flat()
+            .filter(project => project.name.toLocaleLowerCase() === name.toLocaleLowerCase() && live(project));
+          if (elsewhere.length) { ownedProjects.push(...elsewhere); continue; }
+          throw new ProjectNameAmbiguityError(namedProjectMissingQuestion(message, name));
         }
       }
       let candidates = ownedProjects

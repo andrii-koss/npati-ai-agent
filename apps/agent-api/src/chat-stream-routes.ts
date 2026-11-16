@@ -5,7 +5,7 @@ import { isChatProjectCreationBatch, runChatProjectCreation, chatProjectCreation
 import { selectCompanyForWebsite } from "./company-run-notice-i18n";
 import { companyOnboardingCopy, continueCompanyOnboarding } from "./chat-company-onboarding";
 import { resolveCodingConversationLanguage, codingChatResponseInstruction, chatLanguageInstruction, detectCompanyChatLanguage } from "./company-chat-i18n";
-import { ProjectNameAmbiguityError } from "./same-name-project-i18n";
+import { ProjectNameAmbiguityError, projectAlreadyCreatedInChat } from "./same-name-project-i18n";
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import type { AppConfig } from "./app";
 import { AuthenticationError, assertChatKeyScope } from "./auth";
@@ -219,6 +219,15 @@ export function registerChatStreamRoutes(app: FastifyInstance, deps: ChatStreamR
       if (creatingChatWebsite && !activeCompanyId) {
         const companies = (await workspaceStore.listCompanies(auth)).items;
         if (companies.length === 1) activeCompanyId = companies[0]!.id;
+      }
+      // The same create request repeated in a chat that already made a project with that name (a retry after a slow
+      // or failed answer) is answered, not executed again: it made a second identical site (V6 step 18).
+      if (creatingChatWebsite && activeCompanyId && request.body.conversationId && !memoryPolicy.noMemoryActive) {
+        const wanted = extractCleanProjectName(message, projectIntent.targetDetails?.entityName).trim().toLocaleLowerCase();
+        const ids = new Set(await conversationProjectIds(workspaceStore, auth, request.body.conversationId, history)());
+        const existing = ids.size ? (await workspaceStore.listProjects(auth, activeCompanyId).catch(() => []))
+          .find((project) => ids.has(project.id) && project.name.trim().toLocaleLowerCase() === wanted && !["archived", "soft_deleted", "purging", "deleted"].includes(project.status)) : undefined;
+        if (existing && clarify) return clarify(projectAlreadyCreatedInChat(message, existing.name));
       }
       let preparedChatSession: CodeSession | null = null;
       const chatCodingEnabled = activeCompanyId

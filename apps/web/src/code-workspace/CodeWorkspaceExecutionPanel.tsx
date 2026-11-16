@@ -1,7 +1,7 @@
 import { modeLabel } from "./actions";
 import type { Dispatch, SetStateAction, FormEventHandler } from "react";
 import { Link } from "react-router-dom";
-import { SESSION_MODES, eventTitle, eventFacts, type SessionMode, type UsageResponse, type RunEvent, type PendingApproval, type ApprovalScope } from "../code-workspace-page-types";
+import { SESSION_MODES, eventTitle, eventFacts, eventFailure, type SessionMode, type UsageResponse, type RunEvent, type PendingApproval, type ApprovalScope } from "../code-workspace-page-types";
 interface Props {
   isUk: boolean;
   asyncInboxEnabled: boolean | null;
@@ -190,6 +190,7 @@ export function CodeWorkspaceExecutionPanel({ isUk, asyncInboxEnabled, startTask
                           onClick={() => setExpanded((current) => ({ ...current, [key]: !isOpen }))}
                         >
                           <span className="code-stream-kind">{eventTitle(event, isUk)}</span>
+                          {eventFailure(event) && <span className="code-stream-failed" style={{ color: "#b91c1c", fontWeight: 600, fontSize: "12px" }}>{(isUk ? "помилка" : "failed") + (eventFailure(event) !== "failed" ? ` · ${eventFailure(event)}` : "")}</span>}
                           {event.snapshotId && <span className="data-studio-badge info">snapshot</span>}
                         </button>
                         {isOpen && (

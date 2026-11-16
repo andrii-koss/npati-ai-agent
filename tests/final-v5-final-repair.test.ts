@@ -35,7 +35,8 @@ it("refuses an explicitly named missing Project before writing to the active sib
   const resolver = new ActiveContextResolver(store);
   const current = await resolver.resolve(auth, { contextType: "project", companyId: company.id, projectId: project.id });
   await expect(resolver.resolveNamedCompany(auth, current, 'In "Deleted Vite" add keyboard navigation.', { intent: "EDIT_WEBSITE" } as never))
-    .rejects.toThrow(/named project.*not found/i);
+    // V6 step 18: the refusal is now a question in the request language, asked in the chat.
+    .rejects.toThrow(/could not find an active project named “Deleted Vite”/i);
   expect((await store.listProjects(auth, company.id)).map(p => p.id)).toEqual([project.id]);
   expect(await resolver.resolveNamedCompany(auth, current, 'Change the heading to "Welcome".', { intent: "EDIT_WEBSITE" } as never)).toBeUndefined();
   expect(await resolver.resolveNamedCompany(auth, current, 'In "Active Shop" add keyboard navigation.', { intent: "EDIT_WEBSITE" } as never)).toMatchObject({ project: { id: project.id } });

@@ -148,6 +148,18 @@ export function eventTitle(event: RunEvent, isUk: boolean): string {
   return kind || (isUk ? "подія" : "event");
 }
 
+/**
+ * The failure of a stream event, for its collapsed row: a failed tool call looked exactly like a successful one
+ * until the row was opened (V6 step 18). Returns the error code (or "failed") or undefined.
+ */
+export function eventFailure(event: RunEvent): string | undefined {
+  const payload = event.payload ?? {};
+  const code = typeof payload.errorCode === "string" && payload.errorCode ? payload.errorCode : undefined;
+  if (payload.ok === false || code) return code ?? "failed";
+  if (payload.decision === "deny" || payload.decision === "denied") return typeof payload.code === "string" ? payload.code : "denied";
+  return undefined;
+}
+
 /** Metadata-only summary: string/number/boolean leaves only, no nested content, bounded. */
 export function eventFacts(event: RunEvent): Array<[string, string]> {
   const payload = event.payload ?? {};
