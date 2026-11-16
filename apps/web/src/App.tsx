@@ -378,28 +378,6 @@ function SettingsPage() {
       description: t("settings.cards.aiProviders.desc"),
     },
     {
-      to: "/settings/integrations",
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M8 12h8M12 8v8" /><circle cx="5" cy="12" r="3" /><circle cx="19" cy="12" r="3" />
-        </svg>
-      ),
-      title: "Integrations",
-      description: "Connect Telegram or WhatsApp to the shared NPATI Messaging Gateway.",
-    },
-    {
-      to: "/settings/business",
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
-          <rect width="20" height="14" x="2" y="6" rx="2" />
-          <path d="M2 13h20" />
-        </svg>
-      ),
-      title: t("settings.cards.business.title"),
-      description: t("settings.cards.business.desc"),
-    },
-    {
       to: "/settings/company",
       icon: (
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -411,6 +389,16 @@ function SettingsPage() {
       ),
       title: t("settings.cards.company.title"),
       description: t("settings.cards.company.desc"),
+    },
+    {
+      to: "/settings/integrations",
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M8 12h8M12 8v8" /><circle cx="5" cy="12" r="3" /><circle cx="19" cy="12" r="3" />
+        </svg>
+      ),
+      title: "Integrations",
+      description: "Connect Telegram or WhatsApp to the shared NPATI Messaging Gateway.",
     },
     {
       to: "/settings/projects",
@@ -450,46 +438,16 @@ function SettingsPage() {
       description: language === "uk" ? "Таблиці, схеми та дані ваших проєктів" : "Tables, schemas and data for your projects",
     },
     {
-      to: "/settings/capabilities",
+      to: "/settings/business",
       icon: (
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
-          <path d="m9 12 2 2 4-4" />
+          <path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+          <rect width="20" height="14" x="2" y="6" rx="2" />
+          <path d="M2 13h20" />
         </svg>
       ),
-      title: t("settings.cards.capabilities.title"),
-      description: t("settings.cards.capabilities.desc"),
-    },
-    {
-      to: "/settings/activity",
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-        </svg>
-      ),
-      title: t("settings.cards.activity.title"),
-      description: t("settings.cards.activity.desc"),
-    },
-    {
-      to: "/settings/automations",
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
-        </svg>
-      ),
-      title: t("settings.cards.automations.title"),
-      description: t("settings.cards.automations.desc"),
-    },
-    {
-      to: "/settings/email",
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <rect width="20" height="16" x="2" y="4" rx="2" />
-          <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
-        </svg>
-      ),
-      title: t("settings.cards.email.title"),
-      description: t("settings.cards.email.desc"),
+      title: t("settings.cards.business.title"),
+      description: t("settings.cards.business.desc"),
     },
     {
       to: "/settings/goals",
@@ -502,30 +460,6 @@ function SettingsPage() {
       ),
       title: t("settings.cards.goals.title"),
       description: t("settings.cards.goals.desc"),
-    },
-    {
-      to: "/settings/content",
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-          <polyline points="14 2 14 8 20 8" />
-          <line x1="16" x2="8" y1="13" y2="13" />
-          <line x1="16" x2="8" y1="17" y2="17" />
-          <line x1="10" x2="8" y1="9" y2="9" />
-        </svg>
-      ),
-      title: t("settings.cards.content.title"),
-      description: t("settings.cards.content.desc"),
-    },
-    {
-      to: "/settings/connections",
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M12 22v-5M9 8V2M15 8V2M18 8v5a6 6 0 0 1-12 0V8z" />
-        </svg>
-      ),
-      title: t("settings.cards.connections.title"),
-      description: t("settings.cards.connections.desc"),
     },
     {
       to: "/settings/memory",
@@ -547,6 +481,72 @@ function SettingsPage() {
       ),
       title: t("settings.cards.skills.title"),
       description: t("settings.cards.skills.desc"),
+    },
+    {
+      to: "/settings/automations",
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
+        </svg>
+      ),
+      title: t("settings.cards.automations.title"),
+      description: t("settings.cards.automations.desc"),
+    },
+    {
+      to: "/settings/content",
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="16" x2="8" y1="13" y2="13" />
+          <line x1="16" x2="8" y1="17" y2="17" />
+          <line x1="10" x2="8" y1="9" y2="9" />
+        </svg>
+      ),
+      title: t("settings.cards.content.title"),
+      description: t("settings.cards.content.desc"),
+    },
+    {
+      to: "/settings/email",
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect width="20" height="16" x="2" y="4" rx="2" />
+          <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+        </svg>
+      ),
+      title: t("settings.cards.email.title"),
+      description: t("settings.cards.email.desc"),
+    },
+    {
+      to: "/settings/connections",
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M12 22v-5M9 8V2M15 8V2M18 8v5a6 6 0 0 1-12 0V8z" />
+        </svg>
+      ),
+      title: t("settings.cards.connections.title"),
+      description: t("settings.cards.connections.desc"),
+    },
+    {
+      to: "/settings/activity",
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+        </svg>
+      ),
+      title: t("settings.cards.activity.title"),
+      description: t("settings.cards.activity.desc"),
+    },
+    {
+      to: "/settings/capabilities",
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
+          <path d="m9 12 2 2 4-4" />
+        </svg>
+      ),
+      title: t("settings.cards.capabilities.title"),
+      description: t("settings.cards.capabilities.desc"),
     },
   ];
 
