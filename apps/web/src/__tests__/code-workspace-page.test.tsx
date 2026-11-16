@@ -88,7 +88,9 @@ it("ignores a stale file response and saves the selected file with its own revis
     const writes = fetcher.mock.calls.filter(([url]) => String(url).endsWith("/files/write"));
     expect(writes).toHaveLength(1);
     expect(JSON.parse(String(writes[0]?.[1]?.body))).toEqual({ path: "b.ts", content: "CURRENT_B_CONTENT", expectedRevision: "b-revision" });
-    expect(host.textContent).toContain("File changed by agent");
+    // V6 step 16: the conflict is said plainly, not as the server's revision_conflict text.
+    expect(host.textContent).toContain("The file changed after you opened it");
+    expect(host.textContent).not.toContain("revision_conflict");
     expect(host.querySelector<HTMLTextAreaElement>(".project-file-browser-textarea")?.value).toBe("CURRENT_B_CONTENT");
   });
 });
