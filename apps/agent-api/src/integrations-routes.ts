@@ -4,6 +4,7 @@ import { WorkspaceAccessError, type WorkspaceStore } from "@npati/workspace";
 import type { AuthProvider } from "./auth";
 import type { CompanyWebhook, IntegrationsRepository } from "./integrations-repository";
 import { PromptInjectionGuard, CredentialMasker } from "./security-guardrails";
+import { parseDestination, resolveAndValidate, SsrfPolicyError, type ResolverPort } from "./ssrf-policy";
 
 function hasPermission(scope: any, permission: string): boolean {
   if (!scope || !Array.isArray(scope.permissions)) return false;
@@ -22,6 +23,28 @@ async function ctx(auth: AuthProvider, r: FastifyRequest, permission: "workspace
   const c = await auth.authenticate(r);
   if (!hasPermission(c, permission)) throw new WorkspaceAccessError("Missing permission: " + permission);
   return c;
+}
+
+/**
+ * An MCP endpoint is checked with the SSRF policy when it is saved, not only when it is dialled: loopback, metadata,
+ * private and internal-service addresses (in any encoding, or by a name that resolves to them) were saved without a
+ * word and could only fail later (V6 step 17). Any port is allowed for a public host; an unresolvable public name is
+ * kept, because it is checked again before every connection.
+ */
+export async function assertPublicMcpEndpoint(endpoint: string, resolve?: ResolverPort) {
+  try {
+    const port = (() => { try { const url = new URL(endpoint); return url.port ? Number(url.port) : url.protocol === "https:" ? 443 : 80; } catch { return 443; } })();
+    const destination = parseDestination(endpoint, { allowlist: ["*"], allowedPorts: [port] });
+    // Names under internal-only zones are never public, even when they do not resolve here (metadata.google.internal).
+    if (!destination.isIpLiteral && /(?:^|\.)(?:internal|local|localhost|localdomain|lan|intranet|corp|home\.arpa)$/i.test(destination.host.replace(/\.$/, ""))) {
+      throw new SsrfPolicyError("host_not_allowed", "Internal-only host names are not allowed");
+    }
+    await resolveAndValidate(destination, resolve ?? (async (host) => (await (await import("node:dns/promises")).lookup(host, { all: true, verbatim: true })).map((entry) => entry.address)));
+  } catch (error) {
+    if (error instanceof SsrfPolicyError && error.code === "dns_resolution_failed") return;
+    if (error instanceof SsrfPolicyError) throw Object.assign(new Error("The MCP endpoint must be a public http(s) address: " + error.message), { status: 400, code: "MCP_ENDPOINT_NOT_PUBLIC" });
+    throw error;
+  }
 }
 
 function err(reply: any, e: unknown) {
@@ -230,6 +253,7 @@ export function registerIntegrationsRoutes(
     try {
       const c = await ctx(auth, r, "business:manage");
       await store.getCompany(c, r.params.companyId);
+      if (r.body?.transport !== "stdio") await assertPublicMcpEndpoint(String(r.body?.endpoint ?? ""));
       const created = await repo.createMcpServer(c, r.params.companyId, r.body);
       return reply.code(201).send(created);
     } catch (e) {
