@@ -22,7 +22,7 @@ export interface CodeInboxMessage {
 }
 export interface CodeInboxEvent {
   seq: number;
-  type: "input.accepted" | "input.claimed" | "input.admitted" | "input.discarded" | "input.updated" | "task.opened" | "task.sealed" | "task.closed" | "task.paused" | "task.dispatch_failed";
+  type: "input.accepted" | "input.claimed" | "input.admitted" | "input.discarded" | "input.updated" | "task.opened" | "task.sealed" | "task.closed" | "task.paused" | "task.interrupted" | "task.dispatch_failed";
   messageId: string | null;
   runId: string | null;
 }
@@ -67,6 +67,7 @@ export type CodeInboxCommand =
   | { kind: "discard"; id: string; expectedRevision: number }
   | { kind: "take-task"; authorId?: string }
   | { kind: "release-task"; runId: string }
+  | { kind: "recover-interrupted-task"; runId: string }
   /**
    * N1: the run is not driving the session any more, although it has not reached a terminal state. Written by
    * the pause path (the loop stopped on a human decision) and by a resume (which takes the lease and hands the
@@ -95,6 +96,7 @@ export interface CodeInboxLease {
   owner: string | null;
   live: boolean;
   terminal: boolean;
+  interrupted?: boolean;
 }
 export class CodeInboxError extends Error {
   constructor(readonly code: string, readonly httpStatus = 409) { super(code); }
@@ -208,6 +210,16 @@ export function applyCodeInbox(
       state.phase = "idle";
       state.yielded = null;
       event("task.closed");
+    }
+  } else if (command.kind === "recover-interrupted-task") {
+    // A crash leaves no transport to close the inbox. The transaction rechecks the durable run under the
+    // same lock as admission: a resumed/live run must never be released by a stale recovery read.
+    const lease = leases.find(entry => entry.runId === command.runId);
+    if (state.runId === command.runId && state.phase !== "idle" && lease?.interrupted && !lease.live) {
+      state.phase = "idle";
+      state.yielded = null;
+      // Retain runId and every input: the same interrupted run can still resume its admitted messages.
+      event("task.interrupted");
     }
   } else if (command.kind === "pause") {
     /**

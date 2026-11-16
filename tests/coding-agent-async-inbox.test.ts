@@ -312,3 +312,45 @@ describe("a closed epoch of a run that is no longer live", () => {
       [{ runId: "run-a", owner: "w", live: true, terminal: false }, { runId: "run-b", owner: "w", live: true, terminal: false }], now)).toThrow("session_run_held");
   });
 });
+
+describe("step 15: a browser reconnects after the API stopped mid-run", () => {
+  it.each([
+    { live: true, interrupted: false },
+    { live: false, interrupted: false }, // waiting for a person or still being reconciled
+    { live: true, interrupted: true }, // even inconsistent/stale input must preserve a live lease
+  ])("never releases a resumed or paused driver: %j", async lease => {
+    const { applyCodeInbox, emptyCodeInbox } = await import("@npati/workspace");
+    const state = { ...emptyCodeInbox(), phase: "running" as const, runId: "r" };
+    const result = applyCodeInbox(state, { kind: "recover-interrupted-task", runId: "r" }, [{ runId: "r", owner: "w", terminal: false, ...lease }], new Date());
+    expect(result.state).toEqual(state);
+  });
+
+  it("refuses caller-supplied recovery commands", async () => {
+    const h = setup();
+    await expect(h.inbox.execute(ctx, "c", "s", { kind: "recover-interrupted-task", runId: "r" })).rejects.toMatchObject({ code: "invalid_arguments" });
+  });
+
+  it("releases the interrupted driver's busy state without losing admitted or pending input", async () => {
+    const h = setup(); await h.start(); await h.open();
+    await h.submit("admitted-before-crash");
+    await h.op({ kind: "drain", runId: "r", owner: "worker", turnIndex: 2 });
+    await h.submit("queued-before-crash", "queue");
+    await h.log.markInterrupted({ companyId: "c", runId: "r", reason: "API restart", owner: "worker" });
+    await h.inbox.recoverTerminalTask(session);
+    const recovered = await h.op({ kind: "read" });
+    expect(recovered.state).toMatchObject({ phase: "idle", runId: "r" });
+    expect(recovered.state.messages.map(m => [m.text, m.status])).toEqual([
+      ["admitted-before-crash", "admitted"], ["queued-before-crash", "pending"],
+    ]);
+    expect((await h.op({ kind: "take-task", authorId: "u" })).messages[0]?.text).toBe("queued-before-crash");
+  });
+
+  it("preserves inputs for resuming the same interrupted run", async () => {
+    const h = setup(); await h.start(); await h.open(); await h.submit("keep-this-input");
+    await h.op({ kind: "drain", runId: "r", owner: "worker", turnIndex: 2 });
+    await h.log.markInterrupted({ companyId: "c", runId: "r", reason: "API restart", owner: "worker" });
+    await h.inbox.recoverTerminalTask(session);
+    await h.log.resumeRun({ companyId: "c", runId: "r", owner: "resumed-worker" });
+    expect((await h.open("r", "resumed-worker")).messages.map(m => m.text)).toEqual(["keep-this-input"]);
+  });
+});

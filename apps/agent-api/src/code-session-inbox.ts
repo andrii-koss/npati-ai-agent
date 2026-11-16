@@ -104,6 +104,7 @@ export class CodeSessionInboxService {
     if (!snapshot.state.runId || snapshot.state.phase === "idle" || !this.options.loadRunState) return;
     const run = await this.options.loadRunState(session.companyId, snapshot.state.runId);
     if (run && ["completed", "failed", "cancelled"].includes(run.status)) await this.transact(session, { kind: "release-task", runId: snapshot.state.runId });
+    else if (run?.status === "interrupted") await this.transact(session, { kind: "recover-interrupted-task", runId: snapshot.state.runId });
   }
   scope(session: CodeSession): CodeInboxScope {
     return { companyId: session.companyId, projectId: session.projectId, sessionId: session.id,

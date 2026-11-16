@@ -69,7 +69,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     .filter((run) => run.companyId === scope.companyId && run.sessionId === scope.sessionId)
     .map((run) => ({ runId: run.runId, owner: run.leaseOwner,
       live: run.status === "running" && !!run.leaseExpiresAt && run.leaseExpiresAt.getTime() > Date.now(),
-      terminal: ["completed", "failed", "cancelled"].includes(run.status) })));
+      terminal: ["completed", "failed", "cancelled"].includes(run.status), interrupted: run.status === "interrupted" })));
   private readonly identities = new Map<string, { displayName: string; workspaceName: string; role: string }>();
   private readonly businesses = new Map<string, Business>();
   private readonly companies = new Map<string, Company>();

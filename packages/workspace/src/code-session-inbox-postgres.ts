@@ -16,10 +16,10 @@ export class PostgresCodeInboxStore implements CodeInboxStore {
       // Run rows are locked too: heartbeat/takeover cannot change authority during admission.
       const runs = await client.query(`SELECT run_id,lease_owner,
         (status='running' AND lease_expires_at > clock_timestamp()) AS live,
-        (status IN ('completed','failed','cancelled')) AS terminal FROM code_run_states
+        (status IN ('completed','failed','cancelled')) AS terminal, (status='interrupted') AS interrupted FROM code_run_states
         WHERE company_id=$1 AND session_id=$2 FOR UPDATE`, [scope.companyId, scope.sessionId]);
       const result = applyCodeInbox(row.rows[0].state, command,
-        runs.rows.map((r) => ({ runId: r.run_id as string, owner: r.lease_owner as string | null, live: r.live === true, terminal: r.terminal === true })), new Date());
+        runs.rows.map((r) => ({ runId: r.run_id as string, owner: r.lease_owner as string | null, live: r.live === true, terminal: r.terminal === true, interrupted: r.interrupted === true })), new Date());
       if (command.kind !== "read") await client.query(`UPDATE code_session_inboxes SET state=$4,updated_at=clock_timestamp(),
         data_classification=(ARRAY['public','internal','confidential','restricted'])[GREATEST(
           array_position(ARRAY['public','internal','confidential','restricted'],data_classification),
