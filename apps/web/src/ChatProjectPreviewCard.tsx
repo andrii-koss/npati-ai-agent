@@ -622,8 +622,38 @@ export function ChatProjectPreviewCard({
     }
   }
 
+  /**
+   * Restart rebuilds the project from its current files. It only opened the old Preview, so a source broken by hand
+   * still showed the previous build as "Running" and the failure never reached the person (V6 step 15). A failed
+   * build now marks the block as failed and says why; the previous version stays available.
+   */
   async function restartPreview() {
     setDropdownOpen(false);
+    if (!card.companyId) return;
+    const token = getStoredAuthToken();
+    setRuntimeStatus("starting");
+    setRefreshNotice("");
+    try {
+      const response = await fetch(`/api/companies/${encodeURIComponent(card.companyId)}/projects/${encodeURIComponent(card.projectId ?? card.id)}/preview/apply-file-changes`, { method: "POST", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: "{}" });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+        // In the language of the block, with the build's own first error line rather than the whole log.
+        const log = body?.error?.message ?? `HTTP ${response.status}`;
+        const lines = log.split(/\n|(?<=\S)\s{2,}/).map((line) => line.trim()).filter((line) => line && !/^>/.test(line));
+        // The compiler's own message ("ERROR: Expected identifier …") says more than "Build command failed".
+        const firstError = lines.find((line) => /:\d+:\d+:?\s*ERROR|\bexpected\b|unexpected|cannot find|not found|SyntaxError/i.test(line))
+          ?? lines.find((line) => /error|failed/i.test(line)) ?? log;
+        setRefreshNotice(`${chatCardLabels(language ?? i18n?.language).buildFailed}: ${firstError.replace(/^\/projects\/[0-9a-f-]+\//, "").slice(0, 220)}`);
+        setRuntimeStatus("failed");
+        return;
+      }
+      setRuntimeStatus("running");
+      setIframeKey((key) => key + 1);
+    } catch (error) {
+      setRefreshNotice(previewUpdateFailure(error instanceof Error ? error.message : "", isUk));
+      setRuntimeStatus("failed");
+      return;
+    }
     await openPreview();
   }
 
@@ -667,6 +697,7 @@ export function ChatProjectPreviewCard({
             <div className="chat-preview-card-info">
               <h4 className="chat-preview-card-title" title={title}>{title}</h4>
               <span className="chat-preview-card-subtitle">{subtitle}</span>
+              {refreshNotice && !previewOpen && <div className="chat-preview-card-notice" role="alert">{refreshNotice}</div>}
               <div className={`chat-preview-card-status status-${runtimeStatus}`}>
                 <span className="chat-preview-status-dot" aria-hidden="true" />
                 <span>{statusLabels[runtimeStatus]}</span>

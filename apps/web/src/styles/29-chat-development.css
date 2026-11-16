@@ -1355,3 +1355,11 @@ body:has(.project-chat-preview-layer) .message-stream {
   z-index: 1000;
 }
 
+
+/* Why a restart of the Preview failed, under the block (V6 step 15). */
+.chat-preview-card-notice {
+  margin: 4px 0;
+  color: #b42318;
+  font-size: 13px;
+  line-height: 1.35;
+}
