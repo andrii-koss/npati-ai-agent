@@ -43,7 +43,8 @@ describe("coding response presentation", () => {
 
   it("separates the warning from readable findings without losing evidence", () => {
     const notice = selfReviewUnresolvedNotice(verdict([finding, { ...finding, id: "R-2", file: "account.js", reason: "Second concrete issue." }]), "Виправ сайт");
-    expect(notice).toMatch(/^\*\*⚠️.*\*\*\n\n- \*\*script\.js\*\*:/);
+    // V6 step 15 (D15-05): the heading carries no warning emoji.
+    expect(notice).toMatch(/^\*\*[^\n⚠]+\*\*\n\n- \*\*script\.js\*\*:/);
     expect(notice).toContain(finding.reason);
     expect(notice).toContain("\n\n- **account.js**: Second concrete issue.");
     expect(notice).not.toContain("correctness (");
@@ -60,7 +61,7 @@ describe("coding response presentation", () => {
     const languages: CompanyChatLanguage[] = ["en", "uk", "ru", "de", "fr", "es", "it", "pl", "pt", "nl", "tr", "zh", "ja", "ko", "ar", "hi"];
     for (const language of languages) {
       const notice = selfReviewFindingsNotice(language, "- **script.js**: Evidence preserved.");
-      expect(notice).toMatch(/^\*\*⚠️[^\n]+\*\*\n\n- \*\*script\.js\*\*: Evidence preserved\.$/);
+      expect(notice).toMatch(/^\*\*[^\n⚠]+\*\*\n\n- \*\*script\.js\*\*: Evidence preserved\.$/);
       expect(notice).not.toContain("undefined");
     }
   });

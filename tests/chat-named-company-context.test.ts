@@ -104,7 +104,8 @@ describe("an exact project target overrides the previous project context", () =>
     const sameCompany = await resolver.resolve(auth, { contextType: "company", companyId: studio.id });
     expect((await resolver.resolveNamedCompany(auth, sameCompany, message, decision, history))?.context.projectId).toBe(vite.id);
     await store.createProject(auth, bakery.id, { name: "Stress Vite", type: "website" } as never, "duplicate-target-vite");
-    await expect(resolver.resolveNamedCompany(auth, current, message, decision, history)).rejects.toThrow("More than one owned project");
+    // The request is German, so the question is too (V6 step 15).
+    await expect(resolver.resolveNamedCompany(auth, current, message, decision, history)).rejects.toThrow("Mehrere Ihrer Projekte heißen „Stress Vite“");
   });
   it("does not search a different company from a loose project reference outside this conversation", async () => {
     const store = new InMemoryWorkspaceStore();
