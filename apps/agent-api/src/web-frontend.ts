@@ -88,8 +88,12 @@ export function registerWebFrontend(app: FastifyInstance, directory: string): vo
       && (staticRoute || frontendPage.test(pathname) || dataStudioPage.test(pathname)))) {
       // Complete navigation in this hook; asynchronous sendFile can race the
       // wildcard/not-found handler and send a JSON error with an HTML MIME type.
+      // Another site must not frame the app: a hidden frame could steer a click onto "Allow" of an approval
+      // (V6 step 17). The app's own Preview frames are same-origin and stay allowed.
       return reply.type("text/html; charset=utf-8").header("Cache-Control", "no-cache")
-        .header("X-Content-Type-Options", "nosniff").header("Content-Length", indexHtml.length)
+        .header("X-Content-Type-Options", "nosniff").header("X-Frame-Options", "SAMEORIGIN")
+        .header("Content-Security-Policy", "frame-ancestors 'self'").header("Referrer-Policy", "strict-origin-when-cross-origin")
+        .header("Content-Length", indexHtml.length)
         .send(request.method === "HEAD" ? undefined : indexHtml);
     }
   });

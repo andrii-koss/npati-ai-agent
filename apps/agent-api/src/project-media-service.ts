@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import type { AuthContext } from "@npati/workspace";
 import { NPATI_BUCKETS, objectKey, objectKeySegment, type ObjectStorage, type StoredObjectInfo } from "./object-storage";
-import type { ProjectWorkspace } from "./project-workspace";
+import { ProjectFileError, safeProjectPath, type ProjectWorkspace } from "./project-workspace";
 import { sanitizeSvg } from "./svg-sanitizer";
 
 export class ProjectMediaError extends Error {
@@ -166,6 +166,13 @@ export class ProjectMediaService {
     }
 
     const cleanFilename = input.name.replace(/[^\p{L}\p{N}._-]/gu, "_").slice(0, 255);
+    // The same path rules as every project file, before anything is stored: an upload named .env, id_rsa or *.key
+    // was stored and reported as saved, while the project copy was silently refused (V6 step 17).
+    try { safeProjectPath(`public/${(input.targetDir ? input.targetDir.replace(/^\/+/, "").replace(/\/+$/, "") : "assets")}/${cleanFilename}`); }
+    catch (error) {
+      if (error instanceof ProjectFileError) throw new ProjectMediaError(error.code, error.code === "secret_path" ? "This file name is reserved for secrets and cannot be uploaded" : "Invalid media path", error.status);
+      throw error;
+    }
     const mimeType = this.resolveMimeType(cleanFilename, input.mimeType);
 
     let uploadData = input.data;

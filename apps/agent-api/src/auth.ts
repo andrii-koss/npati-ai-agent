@@ -461,8 +461,14 @@ export function createMockNpatiJwt(
  */
 const SECRET_QUERY = /([?&](?:token|authToken|access_token|api_key|apiKey|key)=)[^&#]*/giu;
 
+/**
+ * Inbound webhook and channel URLs carry their secret as a path segment; every delivery wrote it to the request log in
+ * plain text (V6 step 17).
+ */
+const SECRET_PATH = /(\/v1\/(?:webhooks|integrations\/telegram|integrations\/slack\/http|integrations\/whatsapp\/cloud)\/)[^/?#]+/giu;
+
 export function redactUrlSecrets(url: string | undefined): string | undefined {
-  return url?.replace(SECRET_QUERY, "$1[REDACTED]");
+  return url?.replace(SECRET_QUERY, "$1[REDACTED]").replace(SECRET_PATH, "$1[REDACTED]");
 }
 
 /** Fastify's default request serializer with the URL's credentials redacted. */

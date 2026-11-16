@@ -221,7 +221,9 @@ export class EmailInboxWorker {
             from: message.from, to: message.to, subject: message.subject, body: message.body,
             bodyHtml: message.bodyHtml, messageId: message.messageId || `imap:${account.id}:${message.uid}`,
             inReplyTo: message.inReplyTo, references: message.references, attachments: message.attachments,
-            headers: message.headers, authenticationResults: message.authenticationResults,
+            // A mailbox message is never owner input: without parsed headers it would have been trusted as authorized
+            // and authenticated (V6 step 17), so it always goes through the sender checks.
+            headers: message.headers ?? {}, authenticationResults: message.authenticationResults,
           });
           lastUid = Math.max(lastUid, message.uid);
         }

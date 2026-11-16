@@ -257,7 +257,7 @@ describe("Stage 4: MinIO Integration for Website Media Files", () => {
 
       // Upload to Project A
       await service.uploadMedia(context, companyId, projectA, {
-        name: "secret-diagram.png",
+        name: "private-diagram.png",
         data: Buffer.from("PROJECT-A-DATA"),
         mimeType: "image/png",
       });
@@ -265,7 +265,7 @@ describe("Stage 4: MinIO Integration for Website Media Files", () => {
       // Project A lists 1 item
       const listA = await service.listMedia(companyId, projectA);
       expect(listA.items.length).toBe(1);
-      expect(listA.items[0].name).toBe("secret-diagram.png");
+      expect(listA.items[0].name).toBe("private-diagram.png");
 
       // Project B lists 0 items
       const listB = await service.listMedia(companyId, projectB);
@@ -273,11 +273,11 @@ describe("Stage 4: MinIO Integration for Website Media Files", () => {
 
       // Project B querying Project A's media returns not found (404)
       await expect(
-        service.getMedia(companyId, projectB, "assets/secret-diagram.png"),
+        service.getMedia(companyId, projectB, "assets/private-diagram.png"),
       ).rejects.toThrow();
 
       // Deleting non-existent file in Project B does not affect Project A
-      await service.deleteMedia(context, companyId, projectB, "assets/secret-diagram.png");
+      await service.deleteMedia(context, companyId, projectB, "assets/private-diagram.png");
 
       const listAAfter = await service.listMedia(companyId, projectA);
       expect(listAAfter.items.length).toBe(1);

@@ -10,6 +10,7 @@ import type {
 import { APPROVAL_DEFERRED_REASON } from "./code-policy-tools";
 import { detectGitWriteAttempts } from "./code-shell-classifier";
 import { approvalActionFor, redactDenyComment } from "./code-approval-scope";
+import { CredentialMasker } from "./security-guardrails";
 import {
   MCP_APPROVAL_TTL_MS,
   mcpApprovalPayloadFor,
@@ -189,8 +190,12 @@ export async function evaluatePolicyApproval(
   // A `PolicyRequest` structurally satisfies `McpApprovalSubject`, which is what lets the run path and this
   // phase build the material from the same values with the same function.
   const mcpPayload = mcpApprovalPayloadFor(request);
+  // The person deciding sees the command and folder it approves (V6 step 17: the card said only "run a terminal
+  // command"); secrets in the command are masked, and the environment stays in the hash only.
+  const shellCommand = request.tool === "code.shell.exec" ? approvalVisibleCommand(request.command) : null;
   const shellPayload = request.tool === "code.shell.exec" ? {
     tool: request.tool, projectId: request.projectId ?? null, sessionId: request.sessionId ?? null,
+    command: shellCommand, cwd: request.shellExecution?.cwd ?? null,
     executionHash: createHash("sha256").update(canonicalJson({ command: request.command ?? null,
       cwd: request.shellExecution?.cwd ?? null, env: request.shellExecution?.env ?? {} })).digest("hex"),
   } : null;
@@ -200,6 +205,7 @@ export async function evaluatePolicyApproval(
     ? {
         toolName: request.tool,
         actionSummary: mcpPayload ? `Runtime MCP tool ${request.tool} requires an approval for this exact call`
+          : shellCommand ? `Run in the project terminal: ${shellCommand.slice(0, 300)}`
           : `${request.tool} requires an approval for this exact call`,
         inputPayload: boundPayload,
         runId: request.runId ?? "",
@@ -285,6 +291,16 @@ export async function evaluatePolicyApproval(
 }
 
 /** A shell command that writes to git (push, commit, reset...): the company setting does not cover it, like a git tool. */
+/** A shell command as the approver sees it: known secret shapes and secret-named values masked, length bounded. */
+export function approvalVisibleCommand(command: string | null | undefined): string | null {
+  if (typeof command !== "string") return null;
+  return CredentialMasker.mask(command)
+    .replace(/\b(Bearer|Basic|Token)\s+[A-Za-z0-9._~+/=-]{8,}/gi, "$1 [REDACTED]")
+    .replace(/((?:--?|\b)[A-Za-z0-9_]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|authorization|auth)[A-Za-z0-9_]*\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s"']+)/gi, "$1[REDACTED]")
+    .replace(/(:\/\/[^\s:/@]+:)[^\s@/]+@/g, "$1[REDACTED]@")
+    .slice(0, 2000);
+}
+
 export function writesGitFromShell(command: string | null | undefined): boolean {
   if (typeof command !== "string" || !command) return false;
   return detectGitWriteAttempts(command).length > 0

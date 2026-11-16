@@ -26,6 +26,16 @@ async function ctx(auth: AuthProvider, r: FastifyRequest, permission: "workspace
 }
 
 /**
+ * An MCP server as the API returns it: the stored auth token never leaves the server. Listing used to return it in
+ * plain text, so even a read-only company key could read every MCP token (V6 step 17). The runtime reads the token
+ * from the repository directly.
+ */
+export function publicMcpServer<T extends { authToken?: string | null }>(server: T): Omit<T, "authToken"> & { hasAuthToken: boolean } {
+  const { authToken, ...rest } = server;
+  return { ...rest, hasAuthToken: Boolean(authToken) };
+}
+
+/**
  * An MCP endpoint is checked with the SSRF policy when it is saved, not only when it is dialled: loopback, metadata,
  * private and internal-service addresses (in any encoding, or by a name that resolves to them) were saved without a
  * word and could only fail later (V6 step 17). Any port is allowed for a public host; an unresolvable public name is
@@ -240,7 +250,7 @@ export function registerIntegrationsRoutes(
       const c = await ctx(auth, r, "workspace:read");
       await store.getCompany(c, r.params.companyId);
       const servers = await repo.listMcpServers(c, r.params.companyId);
-      return { servers };
+      return { servers: servers.map(publicMcpServer) };
     } catch (e) {
       return err(reply, e);
     }
@@ -255,7 +265,7 @@ export function registerIntegrationsRoutes(
       await store.getCompany(c, r.params.companyId);
       if (r.body?.transport !== "stdio") await assertPublicMcpEndpoint(String(r.body?.endpoint ?? ""));
       const created = await repo.createMcpServer(c, r.params.companyId, r.body);
-      return reply.code(201).send(created);
+      return reply.code(201).send(publicMcpServer(created));
     } catch (e) {
       return err(reply, e);
     }

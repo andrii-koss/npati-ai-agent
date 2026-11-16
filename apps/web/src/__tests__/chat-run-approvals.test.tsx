@@ -41,6 +41,13 @@ describe("approvals while the agent waits", () => {
     expect(host.textContent).not.toContain("Delete a file");
   });
 
+  // V6 step 17: the terminal card said only "run a command"; the person now sees the command it would approve.
+  it("shows the terminal command that would run", async () => {
+    const shell = { id: "s2", toolName: "code.shell.exec", runId: "run-1", inputPayload: { command: "touch v6t17-shell.txt", cwd: null } };
+    const host = await mount(server(url => url.includes("/approvals?") ? reply({ approvals: [shell] }) : undefined));
+    expect(host.textContent).toContain("Run a command in the terminal: touch v6t17-shell.txt");
+  });
+
   it("describes a row change as the change itself, not a tool name", async () => {
     const update = { id: "u1", toolName: "code.data.rows.update", runId: "run-1", inputPayload: { args: { collection: "products", values: { price: 95 }, filters: [{ field: "title", operator: "eq", value: "Круасан" }] } } };
     const host = await mount(server(url => url.includes("/approvals?") ? reply({ approvals: [update] }) : undefined));

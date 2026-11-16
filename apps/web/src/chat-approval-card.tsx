@@ -81,7 +81,7 @@ export function ChatApprovalCard({ companyId, runId, approvalId, toolName, langu
     <div className="chat-approval-card" data-status={status} role="group" aria-label={t.confirmTitle}>
       <div className="chat-approval-card-title">{t.confirmTitle}</div>
       <div className="chat-approval-card-action" title={approval?.toolName ?? toolName}>{approvalToolLabel(approval?.toolName ?? toolName, t)}</div>
-      {approval?.inputPayload ? <pre className="chat-approval-resource">{JSON.stringify(Object.fromEntries(Object.entries(approval.inputPayload).filter(([key]) => ["projectId", "resourceId", "collection", "id", "ids", "path", "paths", "operation"].includes(key))), null, 2)}</pre> : null}
+      {approval?.inputPayload ? <pre className="chat-approval-resource">{JSON.stringify(Object.fromEntries(Object.entries(approval.inputPayload).filter(([key]) => ["projectId", "resourceId", "collection", "id", "ids", "path", "paths", "operation", "command", "cwd"].includes(key))), null, 2)}</pre> : null}
       <div className="chat-approval-card-status">{busy ? t.working : approval?.consumedAt && status === "approved" ? t.used : statusText[status] ?? status}</div>
       {decidable ? (
         <div className="chat-approval-card-actions">

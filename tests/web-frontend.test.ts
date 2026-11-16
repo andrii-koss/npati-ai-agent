@@ -28,6 +28,15 @@ beforeEach(async () => {
 });
 afterEach(async () => { await app.close(); await rm(root, { recursive: true, force: true }); });
 
+// V6 step 17: the app page had no framing protection, so another site could frame it and steer a click onto "Allow".
+it("forbids framing the app page by another site and keeps the project preview frameable", async () => {
+  const page = await app.inject({ url: "/c/active-chat", headers: { accept: "text/html" } });
+  expect(page.headers["x-frame-options"]).toBe("SAMEORIGIN");
+  expect(page.headers["content-security-policy"]).toBe("frame-ancestors 'self'");
+  const preview = await app.inject({ url: "/companies/c/projects/p/preview/proxy/index.html" });
+  expect(preview.headers["x-frame-options"]).toBeUndefined();
+});
+
 describe("frontend and API in one HTTP server", () => {
   it.each(["/", "/activity?runId=running-agent", "/c/active-chat", "/settings/code/company/project", "/projects/company/project", "/companies/company/projects/project/data", "/unknown-page"])("serves browser navigation at %s", async (url) => {
     const response = await app.inject({ url, headers: { accept: "text/html" } });

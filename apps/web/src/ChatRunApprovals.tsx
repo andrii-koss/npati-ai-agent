@@ -95,6 +95,9 @@ export function ChatRunApprovals({ companyId, runId, projectIds = [], language: 
           (item.inputPayload.args.filters ?? []).map(filter => `${filter.field} ${filter.operator} ${JSON.stringify(filter.value)}`).join(", "))
       : item.toolName === "code.data.users.roles.set" && item.inputPayload?.args?.email
         ? t.roles(item.inputPayload.args.email, (item.inputPayload.args.roles ?? []).join(", "))
+      // The terminal command itself, as the server stored it with secrets masked (V6 step 17: only "run a command").
+      : item.toolName === "code.shell.exec" && typeof (item.inputPayload as { command?: unknown } | undefined)?.command === "string"
+        ? `${approvalToolLabel(item.toolName, t)}: ${(item.inputPayload as { command: string }).command}`
         : "";
     return (
       <article className="assistant" key={item.id}>
