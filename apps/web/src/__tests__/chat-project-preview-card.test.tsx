@@ -220,7 +220,8 @@ describe("ChatProjectPreviewCard", () => {
       dropdownBtn.click();
     });
 
-    const menu = host.querySelector(".chat-preview-dropdown-menu")!;
+    // The menu floats in document.body (V6 step 15: inside the chat it was cut off and covered).
+    const menu = document.querySelector(".chat-preview-dropdown-menu")!;
     expect(menu).not.toBeNull();
     expect(menu.textContent).toContain("Open in new tab");
     expect(menu.textContent).toContain("Edit in chat");

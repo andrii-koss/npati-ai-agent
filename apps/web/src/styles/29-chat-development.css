@@ -1349,3 +1349,9 @@ body:has(.project-chat-preview-layer) .message-stream {
   text-overflow: ellipsis;
   max-width: 100%;
 }
+
+/* The block menu floats above the page at its button (V6 step 15): it is never cut off or covered by messages. */
+.chat-preview-dropdown-menu.chat-preview-dropdown-floating {
+  z-index: 1000;
+}
+

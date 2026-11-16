@@ -1,6 +1,6 @@
 import { isolatedPreviewUrl } from "./preview-origin";
 import { chatCardLabels, type ChatCardLabels } from "./chat-card-i18n";
-import React, { useState, useEffect, useRef, useContext, type SyntheticEvent } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useContext, type SyntheticEvent } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, Link } from "react-router-dom";
 import { ExternalLink, ChevronDown, RefreshCw, MessageSquare, GitCommit, Terminal, Eye, ExternalLink as ExtIcon } from "lucide-react";
@@ -257,6 +257,31 @@ export function ChatProjectPreviewCard({
   }, [warm, previewOpen, hovering]);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [menuPosition, setMenuPosition] = useState<{ top?: number; bottom?: number; right: number } | null>(null);
+  /**
+   * The menu floats above the page at its button. Inside the chat it opened under the composer, where only "Open in new
+   * tab" could be seen, and later messages covered it, so "Edit in chat" could not be clicked (V6 step 15). It opens
+   * upwards when it would pass the composer, and closes when the chat scrolls away from it.
+   */
+  useLayoutEffect(() => {
+    if (!dropdownOpen) { setMenuPosition(null); return; }
+    const button = dropdownRef.current?.querySelector(".chat-preview-dropdown-btn")?.getBoundingClientRect();
+    if (!button) return;
+    const right = Math.max(8, window.innerWidth - button.right);
+    const composer = document.querySelector("form textarea")?.closest("form")?.getBoundingClientRect().top;
+    const limit = Math.min(window.innerHeight, composer && composer > button.bottom ? composer : window.innerHeight);
+    const height = menuRef.current?.getBoundingClientRect().height ?? 320;
+    setMenuPosition(button.bottom + 6 + height > limit - 8 ? { bottom: window.innerHeight - button.top + 6, right } : { top: button.bottom + 6, right });
+  }, [dropdownOpen, menuRef.current]);
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const close = () => setDropdownOpen(false);
+    const stream = document.querySelector(".message-stream");
+    stream?.addEventListener("scroll", close, { passive: true });
+    window.addEventListener("resize", close);
+    return () => { stream?.removeEventListener("scroll", close); window.removeEventListener("resize", close); };
+  }, [dropdownOpen]);
   const isCodeProject = card.kind === "code_project";
   const projectType = resolveChatProjectType(card);
 
@@ -455,7 +480,7 @@ export function ChatProjectPreviewCard({
   useEffect(() => {
     if (!dropdownOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node) && !menuRef.current?.contains(e.target as Node)) {
         setDropdownOpen(false);
       }
     };
@@ -676,8 +701,9 @@ export function ChatProjectPreviewCard({
               </button>
             )}
 
-            {showDropdown && dropdownOpen && (
-              <div className="chat-preview-dropdown-menu" role="menu">
+            {showDropdown && dropdownOpen && createPortal(
+              <div ref={menuRef} className="chat-preview-dropdown-menu chat-preview-dropdown-floating" role="menu"
+                style={{ position: "fixed", top: menuPosition?.top ?? "auto", bottom: menuPosition?.bottom ?? "auto", right: menuPosition?.right ?? 8, visibility: menuPosition ? "visible" : "hidden" }}>
                 {/* Open in new tab */}
                 <button
                   type="button"
@@ -763,7 +789,8 @@ export function ChatProjectPreviewCard({
                     <span>{L.viewRun}</span>
                   </Link>
                 )}
-              </div>
+              </div>,
+              document.body,
             )}
           </div>
         </div>

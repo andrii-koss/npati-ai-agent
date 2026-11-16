@@ -63,7 +63,7 @@ it("keeps different runs independent and restores their histories from JSON",asy
   const cardHost=document.createElement("div");document.body.append(cardHost);const cardRoot=createRoot(cardHost);
   await act(async()=>cardRoot.render(<MemoryRouter><ChatProjectPreviewCard card={{id:"p1",projectId:"p1",companyId:"c",name:"Site",framework:"Next.js",kind:"website_project",status:"ready",runId:"first"}}/></MemoryRouter>));
   await act(async()=>cardHost.querySelector<HTMLButtonElement>(".chat-preview-dropdown-btn")!.click());
-  expect(cardHost.querySelector('a[href="/activity?runId=first"]')).not.toBeNull();
+  expect(document.querySelector('a[href="/activity?runId=first"]')).not.toBeNull();
   await act(async()=>cardRoot.unmount());
 });
 
