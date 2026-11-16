@@ -1,3 +1,4 @@
+import { CompanyScopeSelect } from "../CompanyScopeSelect";
 import { PageGuideLink } from "../PageGuideLink";
 import { Link } from "react-router-dom";
 import type { Company, EmailAccount, EmailNotification } from "../email-inbox-shared";
@@ -102,15 +103,15 @@ export function InboxHeaderToolbar({
             </span>
 
             <div className="email-scope-select-wrap">
-              <select
+              <CompanyScopeSelect
                 aria-label={t("emailInbox.scope.selectOwnerAria")}
                 value={selectedCompanyId}
-                onChange={(e) => onSelectCompanyId(e.target.value)}
+                onValueChange={(value) => onSelectCompanyId(value)}
                 className="email-scope-select"
                 title={selectedCompanyId === "personal" ? t("emailInbox.scope.personalOption") : (companies.find((c) => c.id === selectedCompanyId)?.name || selectedCompanyId)}
               >
                 <option value="personal">{t("emailInbox.scope.personalOption")}</option>
-                {selectedCompanyId && selectedCompanyId !== "personal" && !companies.some((c) => c.id === selectedCompanyId) && (
+                {selectedCompanyId && selectedCompanyId !== "all" && selectedCompanyId !== "personal" && !companies.some((c) => c.id === selectedCompanyId) && (
                   <option key={selectedCompanyId} value={selectedCompanyId} title={selectedCompanyId}>
                     {selectedCompanyId}
                   </option>
@@ -120,14 +121,14 @@ export function InboxHeaderToolbar({
                     {c.name}
                   </option>
                 ))}
-              </select>
+              </CompanyScopeSelect>
               <svg className="email-scope-select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <path d="M6 9l6 6 6-6" />
               </svg>
             </div>
           </div>
           <span className="email-scope-context-hint">
-            {selectedCompanyId === "personal"
+            {selectedCompanyId === "all" ? "All companies" : selectedCompanyId === "personal"
               ? t("emailInbox.scope.personalHint")
               : `${t("emailInbox.scope.companyHintPrefix")}${companies.find((c) => c.id === selectedCompanyId)?.name || t("emailInbox.scope.selectedOrgFallback")}`}
           </span>

@@ -1,3 +1,6 @@
+import { ALL_COMPANIES, loadCompanyScopes } from "./company-scope";
+import { listProjectCompanies } from "./website-builder-cache";
+import { CompanyScopeSelect } from "./CompanyScopeSelect";
 import { PageGuideLink } from "./PageGuideLink";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -38,7 +41,7 @@ export function AutomationsPage() {
   const cachedCompanies = useMemo(() => readCachedCompanies<Company>(), []);
   const [companies, setCompanies] = useState<Company[]>(cachedCompanies);
   const initialCompanyId = useMemo(() => {
-    return chooseAvailableCompanyId(cachedCompanies, { requested: requestedCompanyId });
+    return requestedCompanyId || ALL_COMPANIES;
   }, [cachedCompanies, requestedCompanyId]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>(initialCompanyId);
   const initialAutomations = useMemo(() => getCachedAutomations(initialCompanyId), [initialCompanyId]);
@@ -80,7 +83,7 @@ export function AutomationsPage() {
 
   const handleCompanyChange = (companyId: string) => {
     setSelectedCompanyId(companyId);
-    writeActiveCompanyId(companyId);
+    if (companyId !== ALL_COMPANIES) writeActiveCompanyId(companyId);
     const cachedAuto = getCachedAutomations(companyId);
     const cachedAg = getCachedAgents(companyId);
     setAutomations(cachedAuto);
@@ -93,16 +96,16 @@ export function AutomationsPage() {
   // Load companies
   useEffect(() => {
     let active = true;
-    api<{ companies: Company[] }>("/companies")
-      .then((res) => {
+    listProjectCompanies()
+      .then((list) => {
         if (!active) return;
-        setCompanies(res.companies);
-        writeCachedCompanies(res.companies);
+        setCompanies(list);
+        writeCachedCompanies(list);
         const requested = searchParams.get("company");
-        const selected = chooseAvailableCompanyId(res.companies, { requested });
+        const selected = requested ? chooseAvailableCompanyId(list, { requested }) : ALL_COMPANIES;
         if (selected && selected !== selectedCompanyId) {
           setSelectedCompanyId(selected);
-          writeActiveCompanyId(selected);
+          if (selected !== ALL_COMPANIES) writeActiveCompanyId(selected);
         }
         if (requested) {
           const next = new URLSearchParams(searchParams);
@@ -123,6 +126,23 @@ export function AutomationsPage() {
   useEffect(() => {
     if (!selectedCompanyId) return;
     let active = true;
+    if (selectedCompanyId === ALL_COMPANIES) {
+      setLoading(true);
+      setBrowserTargets([]); setBrowserEmails([]);
+      void loadCompanyScopes(companies.map(company => company.id), async id => {
+        const [auto, agent] = await Promise.all([
+          api<{ automations: CompanyAutomation[] }>(`/companies/${id}/automations`),
+          api<{ agents: Agent[] }>(`/companies/${id}/agents`),
+        ]);
+        return { automations: auto.automations.map(item => ({ ...item, companyId: id })), agents: agent.agents };
+      }).then(pages => {
+        if (!active) return;
+        setAutomations(pages.flatMap(page => page.automations));
+        setAgents(pages.flatMap(page => page.agents));
+      }).catch(error => { if (active) setNotice(error.message); })
+        .finally(() => { if (active) setLoading(false); });
+      return () => { active = false; };
+    }
     const cachedAuto = getCachedAutomations(selectedCompanyId);
     if (cachedAuto.length === 0 && automations.length === 0) {
       setLoading(true);
@@ -157,7 +177,7 @@ export function AutomationsPage() {
     return () => {
       active = false;
     };
-  }, [selectedCompanyId]);
+  }, [selectedCompanyId, companies]);
 
   const selectedCompany = useMemo(
     () => companies.find((c) => c.id === selectedCompanyId),
@@ -209,6 +229,7 @@ export function AutomationsPage() {
   };
 
   const openCreateDrawer = () => {
+    if (selectedCompanyId === ALL_COMPANIES) return;
     setEditingId(null);
     setFormName("");
     setFormDescription("");
@@ -219,6 +240,7 @@ export function AutomationsPage() {
   };
 
   const openEditDrawer = (auto: CompanyAutomation) => {
+    if (auto.companyId !== selectedCompanyId) handleCompanyChange(auto.companyId);
     setEditingId(auto.id);
     setFormName(auto.name);
     setFormDescription(auto.description || "");
@@ -251,7 +273,7 @@ export function AutomationsPage() {
         );
         setAutomations((prev) => {
           const next = prev.map((a) => (a.id === updated.id ? updated : a));
-          updateCachedAutomations(selectedCompanyId, next);
+          if (selectedCompanyId !== ALL_COMPANIES) updateCachedAutomations(selectedCompanyId, next);
           return next;
         });
       } else {
@@ -270,7 +292,7 @@ export function AutomationsPage() {
         );
         setAutomations((prev) => {
           const next = [created, ...prev];
-          updateCachedAutomations(selectedCompanyId, next);
+          if (selectedCompanyId !== ALL_COMPANIES) updateCachedAutomations(selectedCompanyId, next);
           return next;
         });
       }
@@ -286,7 +308,7 @@ export function AutomationsPage() {
     const nextStatus = auto.status === "active" ? "paused" : "active";
     try {
       const updated = await api<CompanyAutomation>(
-        `/companies/${selectedCompanyId}/automations/${auto.id}`,
+        `/companies/${auto.companyId || selectedCompanyId}/automations/${auto.id}`,
         {
           method: "PATCH",
           body: JSON.stringify({ status: nextStatus }),
@@ -294,7 +316,7 @@ export function AutomationsPage() {
       );
       setAutomations((prev) => {
         const next = prev.map((a) => (a.id === updated.id ? updated : a));
-        updateCachedAutomations(selectedCompanyId, next);
+        if (selectedCompanyId !== ALL_COMPANIES) updateCachedAutomations(selectedCompanyId, next);
         return next;
       });
     } catch (err: any) {
@@ -303,6 +325,7 @@ export function AutomationsPage() {
   };
 
   const deleteAutomation = async (id: string) => {
+    const ownerId = automations.find(item => item.id === id)?.companyId || selectedCompanyId;
     const confirmed = await confirmModal({
       title: t("automations.dialogs.deleteTitle"),
       message: t("automations.dialogs.deleteMessage"),
@@ -312,10 +335,10 @@ export function AutomationsPage() {
     });
     if (!confirmed) return;
     try {
-      await api(`/companies/${selectedCompanyId}/automations/${id}`, { method: "DELETE" });
+      await api(`/companies/${ownerId}/automations/${id}`, { method: "DELETE" });
       setAutomations((prev) => {
         const next = prev.filter((a) => a.id !== id);
-        updateCachedAutomations(selectedCompanyId, next);
+        if (selectedCompanyId !== ALL_COMPANIES) updateCachedAutomations(selectedCompanyId, next);
         return next;
       });
       if (editingId === id) setDrawerOpen(false);
@@ -329,7 +352,7 @@ export function AutomationsPage() {
     setNotice(null);
     try {
       const res = await api<{ message?: string; result?: string }>(
-        `/companies/${selectedCompanyId}/automations/${auto.id}/run`,
+        `/companies/${auto.companyId || selectedCompanyId}/automations/${auto.id}/run`,
         { method: "POST" }
       );
       setNotice(
@@ -347,7 +370,7 @@ export function AutomationsPage() {
 
   // A scheduled run can start while the page is open: the list is refreshed so its Stop button appears (V6 step 12).
   useEffect(() => {
-    if (!selectedCompanyId) return;
+    if (!selectedCompanyId || selectedCompanyId === ALL_COMPANIES) return;
     const timer = setInterval(() => {
       void api<{ automations: CompanyAutomation[] }>(`/companies/${selectedCompanyId}/automations`)
         .then((res) => setAutomations(res.automations))
@@ -360,7 +383,7 @@ export function AutomationsPage() {
   const stopRun = async (auto: CompanyAutomation) => {
     try {
       stoppedIds.current.add(auto.id);
-      await api<{ stopped: number }>(`/companies/${selectedCompanyId}/automations/${auto.id}/stop`, { method: "POST" });
+      await api<{ stopped: number }>(`/companies/${auto.companyId || selectedCompanyId}/automations/${auto.id}/stop`, { method: "POST" });
       setNotice(t("automations.notifications.stopped", { name: auto.name }));
       setAutomations((prev) => prev.map((item) => (item.id === auto.id ? { ...item, isRunning: false } : item)));
     } catch (err: any) {
@@ -374,7 +397,7 @@ export function AutomationsPage() {
     setHistoryLoading(true);
     try {
       const res = await api<{ runs: CompanyAutomationRun[] }>(
-        `/companies/${selectedCompanyId}/automations/${auto.id}/runs`
+        `/companies/${auto.companyId || selectedCompanyId}/automations/${auto.id}/runs`
       );
       setRuns(res.runs);
     } catch (err: any) {
@@ -499,11 +522,11 @@ export function AutomationsPage() {
             </p>
           </div>
           <div className="automations-header-actions">
-            {companies.length > 1 && (
-              <select
+            {(
+              <CompanyScopeSelect
                 aria-label={t("automations.selectCompanyAria")}
                 value={selectedCompanyId}
-                onChange={(e) => handleCompanyChange(e.target.value)}
+                onValueChange={(value) => handleCompanyChange(value)}
                 className="page-size-select"
               >
                 {companies.map((c) => (
@@ -511,9 +534,9 @@ export function AutomationsPage() {
                     {c.name}
                   </option>
                 ))}
-              </select>
+              </CompanyScopeSelect>
             )}
-            <button type="button" className="button-primary automations-action-primary" onClick={openCreateDrawer}>
+            <button type="button" className="button-primary automations-action-primary" onClick={openCreateDrawer} disabled={selectedCompanyId === ALL_COMPANIES} title={selectedCompanyId === ALL_COMPANIES ? (language === "uk" ? "Виберіть компанію" : "Select a company") : undefined}>
               {t("automations.newAutomationBtn")}
             </button>
           </div>
@@ -639,7 +662,7 @@ export function AutomationsPage() {
         deleteAutomation={deleteAutomation}
       />
 
-      <BrowserCampaignPanel
+      {selectedCompanyId !== ALL_COMPANIES && <BrowserCampaignPanel
         automations={automations}
         browserTargets={browserTargets}
         browserEmails={browserEmails}
@@ -653,7 +676,7 @@ export function AutomationsPage() {
         revealBrowserCredential={revealBrowserCredential}
         toggleBrowserTarget={toggleBrowserTarget}
         deleteBrowserTarget={deleteBrowserTarget}
-      />
+      />}
 
       <AutomationEditorDrawer
         isOpen={drawerOpen}

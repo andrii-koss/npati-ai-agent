@@ -7,6 +7,7 @@ import { CodeSettingsPage } from "../CodeSettingsPage";
 import { CodeAgentsPage } from "../CodeAgentsPage";
 
 vi.mock("../i18n", () => ({ useTranslation: () => ({ language: "en" }) }));
+vi.mock("../website-builder-cache", () => ({ listProjectCompanies: async () => (await (await fetch("/api/companies?limit=50")).json()).companies }));
 vi.mock("../CodeFlagsPanel", () => ({ CodeFlagsPanel: () => <section className="code-flags"><h2>Feature flags (experimental)</h2></section> }));
 vi.mock("../CodeSandboxImagesPanel", () => ({ CodeSandboxImagesPanel: () => null }));
 vi.mock("../CodeDataPolicyPanel", () => ({ CodeDataPolicyPanel: () => null }));
@@ -38,6 +39,8 @@ it("shows the Npati settings arrow at Feature flags and scrolls to the top with 
   const scroll = async (position: number) => act(async () => { vi.stubGlobal("scrollY", position); window.dispatchEvent(new Event("scroll")); });
   try {
     await act(async () => root.render(<MemoryRouter initialEntries={["/settings/code?agent=npati"]}><CodeAgentsPage /></MemoryRouter>));
+    await act(async () => host.querySelector<HTMLButtonElement>('.company-scope-trigger')!.click());
+    await act(async () => [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(option => option.textContent === "Flags Company")!.click());
     expect(host.querySelector(".code-flags")).not.toBeNull();
     expect(arrow()).toBeNull();
     await scroll(500);

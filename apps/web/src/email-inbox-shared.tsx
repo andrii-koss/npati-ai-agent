@@ -7,6 +7,7 @@ export interface Company {
   name: string;
 }
 export interface EmailAccount {
+  companyId?: string;
   id: string;
   emailAddress: string;
   displayName?: string | null;
@@ -16,6 +17,7 @@ export interface EmailAccount {
   testMode: boolean;
 }
 export interface EmailThread {
+  companyId?: string;
   id: string;
   subject: string;
   customerEmail: string;
@@ -143,6 +145,7 @@ export interface CustomerContext {
   tasks: Array<{ id: string; task: string; status: string; createdAt: string }>;
 }
 export interface EmailNotification {
+  companyId?: string;
   id: string;
   threadId?: string | null;
   notificationType: string;

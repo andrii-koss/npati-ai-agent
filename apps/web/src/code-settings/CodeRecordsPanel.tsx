@@ -11,7 +11,7 @@ export function RecordIconButton({ label, icon: Icon, danger, ...props }: {
     title={label} aria-label={label} {...props}><Icon size={16} strokeWidth={1.7} aria-hidden="true" /></button>;
 }
 
-type RecordItem = { id: string; revision?: number; status?: string };
+type RecordItem = { id: string; companyId?: string; revision?: number; status?: string };
 type TableState<T> = {
   rows: T[]; selected: Set<string>; busy: boolean;
   toggle(id: string): void; remove(item: T): void;
@@ -122,7 +122,7 @@ export function CodeRecordsPanel<T extends RecordItem>({ items, kind, companyId,
       let firstError = "";
       for (const item of targets) {
         if (!alive.current) return;
-        const base = `/companies/${encodeURIComponent(companyId)}`;
+        const base = `/companies/${encodeURIComponent(item.companyId || companyId)}`;
         const path = action === "archive"
           ? kind === "projects" ? `${base}/projects/${encodeURIComponent(item.id)}/archive` : `${base}/code/sessions/${encodeURIComponent(item.id)}/archive`
           : `${base}/code/${kind}/${encodeURIComponent(item.id)}${kind === "sessions" ? "/data" : ""}`;

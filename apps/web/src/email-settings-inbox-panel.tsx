@@ -116,7 +116,7 @@ export function EmailSettingsInboxPanel({ t, filteredAccounts, accounts, loading
                         <td>
                           <div className="automation-actions-cell">
                             <Link
-                              to={`/settings/email/inbox?compose=1&account=${encodeURIComponent(acc.id)}${selectedCompanyId && selectedCompanyId !== "personal" ? `&company=${encodeURIComponent(selectedCompanyId)}` : ""}`}
+                              to={`/settings/email/inbox?compose=1&account=${encodeURIComponent(acc.id)}${(acc.companyId || selectedCompanyId) ? `&company=${encodeURIComponent(acc.companyId || selectedCompanyId)}` : ""}`}
                               className="automation-action-btn"
                               title={t("emailSettings.accountsTab.actionComposeTitle").replace("{{email}}", acc.emailAddress)}
                             >

@@ -96,7 +96,7 @@ export function useEmailTemplatesContacts(
     });
     if (!ok) return;
     try {
-      await api(`/companies/${selectedCompanyId}/email-inbox/templates/${id}`, { method: "DELETE" });
+      await api(`/companies/${templates.find(template => template.id === id)?.companyId || selectedCompanyId}/email-inbox/templates/${id}`, { method: "DELETE" });
       setTemplates((prev) => prev.filter((item) => item.id !== id));
     } catch (err: any) {
       setNotice(err.message);

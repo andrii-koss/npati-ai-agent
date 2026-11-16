@@ -1,3 +1,5 @@
+import { ALL_COMPANIES, loadCompanyScopes } from "./company-scope";
+import { CompanyScopeSelect } from "./CompanyScopeSelect";
 import { PageGuideLink } from "./PageGuideLink";
 import { listProjectCompanies } from "./website-builder-cache";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -37,7 +39,7 @@ export function ActivityPage() {
   const { t, language } = useTranslation();
   const initialCompanies = useMemo(() => readCachedCompanies<CompanyItem>(), []);
   const initialCompanyId = useMemo(
-    () => chooseAvailableCompanyId(initialCompanies),
+    () => new URLSearchParams(window.location.search).get("company") || (new URLSearchParams(window.location.search).get("runId") ? chooseAvailableCompanyId(initialCompanies) : ALL_COMPANIES),
     [initialCompanies]
   );
   const initialRuns = useMemo(() => getCachedRuns(initialCompanyId), [initialCompanyId]);
@@ -48,6 +50,7 @@ export function ActivityPage() {
   const selectedCompanyRef=useRef(selectedCompanyId);
   selectedCompanyRef.current=selectedCompanyId;
   const [codingCursor,setCodingCursor]=useState<string|null>(null);
+  const allCodingCursors = useRef(new Map<string, string | null>());
   const historyCursor=useRef<{companyId:string;cursor:string|null}|null>(null);
   const runsRef=useRef(runs);runsRef.current=runs;
   const queryRunId = new URLSearchParams(window.location.search).get("runId");
@@ -85,7 +88,8 @@ export function ActivityPage() {
 
   const handleCompanyChange = (companyId: string) => {
     setSelectedCompanyId(companyId);
-    writeActiveCompanyId(companyId);
+    if (companyId !== ALL_COMPANIES) writeActiveCompanyId(companyId);
+    allCodingCursors.current.clear();
     const cachedForNewCompany = getCachedRuns(companyId);
     setRuns([]);setSelectedRunId("");setActiveRunDetails(null);setCodingCursor(null);
     if (cachedForNewCompany.length > 0) {
@@ -101,9 +105,9 @@ export function ActivityPage() {
         setCompanies(list);
         writeCachedCompanies(list);
         if (list.length > 0) {
-          const nextSelectedId = chooseAvailableCompanyId(list, { requested: selectedCompanyId });
+          const nextSelectedId = selectedCompanyId === ALL_COMPANIES ? ALL_COMPANIES : chooseAvailableCompanyId(list, { requested: selectedCompanyId });
           setSelectedCompanyId(nextSelectedId);
-          writeActiveCompanyId(nextSelectedId);
+          if (nextSelectedId !== ALL_COMPANIES) writeActiveCompanyId(nextSelectedId);
         } else {
           setLoading(false);
         }
@@ -123,21 +127,30 @@ export function ActivityPage() {
     if (token) headers["authorization"] = `Bearer ${token}`;
 
     try {
-      const [res, coding] = await Promise.all([fetch(`/api/companies/${companyId}/runs?limit=50`, { headers }),fetch(`/api/companies/${companyId}/code/monitor/runs`, { headers })]);
-      if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to load runs`);
-      const data = (await res.json()) as { runs?: CompanyRun[] };
-      if(!coding.ok) throw new Error(`HTTP ${coding.status}: Failed to load Coding Runs`);
-      const codeData=await coding.json() as {runs:CompanyRun[];nextCursor:string|null};
-      const items = [...codeData.runs,...(data.runs ?? [])].sort((a,b)=>Date.parse(b.createdAt)-Date.parse(a.createdAt));
-      if(queryRunId && !items.some(r=>r.id===queryRunId)) {
-        const linked=await fetch(`/api/companies/${companyId}/code/monitor/runs/${encodeURIComponent(queryRunId)}?limit=1`,{headers});
-        if(linked.ok) items.unshift((await linked.json()).run);
+      const scopeIds = companyId === ALL_COMPANIES ? companies.map(company => company.id) : [companyId];
+      const pages = await loadCompanyScopes(scopeIds, async id => {
+        const [res, coding] = await Promise.all([fetch(`/api/companies/${id}/runs?limit=50`, { headers }), fetch(`/api/companies/${id}/code/monitor/runs`, { headers })]);
+        if (!res.ok || !coding.ok) throw new Error(`HTTP ${!res.ok ? res.status : coding.status}: Failed to load runs`);
+        const data = await res.json() as { runs?: CompanyRun[] };
+        const codeData = await coding.json() as { runs: CompanyRun[]; nextCursor: string | null };
+        const items = [...codeData.runs, ...(data.runs ?? [])].map(item => ({ ...item, companyId: id }));
+        if (queryRunId && companyId !== ALL_COMPANIES && !items.some(run => run.id === queryRunId)) {
+          const linked = await fetch(`/api/companies/${id}/code/monitor/runs/${encodeURIComponent(queryRunId)}?limit=1`, { headers });
+          if (linked.ok) items.unshift({ ...(await linked.json()).run, companyId: id });
+        }
+        return { id, items, cursor: codeData.nextCursor };
+      });
+      if (selectedCompanyRef.current !== companyId) return;
+      const items = pages.flatMap(page => page.items).sort((a,b) => Date.parse(b.createdAt)-Date.parse(a.createdAt));
+      pages.forEach(page => updateCachedRuns(page.id, page.items));
+      if (companyId === ALL_COMPANIES) {
+        pages.forEach(page => { if (!allCodingCursors.current.has(page.id)) allCodingCursors.current.set(page.id, page.cursor); });
+        setCodingCursor([...allCodingCursors.current.values()].some(Boolean) ? ALL_COMPANIES : null);
+      } else {
+        if(historyCursor.current?.companyId!==companyId) historyCursor.current={companyId,cursor:pages[0]?.cursor ?? null};
+        setCodingCursor(historyCursor.current.cursor);
       }
-      if(selectedCompanyRef.current!==companyId) return;
-      if(historyCursor.current?.companyId!==companyId) historyCursor.current={companyId,cursor:codeData.nextCursor};
-      setCodingCursor(historyCursor.current.cursor);
-      setRuns(previous=>[...items,...previous.filter(r=>r.companyId===companyId && r.requestedMode.startsWith("coding") && !items.some(item=>item.id===r.id))]);
-      updateCachedRuns(companyId, items);
+      setRuns(previous => [...items, ...previous.filter(run => (companyId === ALL_COMPANIES ? scopeIds.includes(run.companyId) : run.companyId === companyId) && run.requestedMode.startsWith("coding") && !items.some(item => item.id === run.id))]);
 
       if (items.length > 0) {
         // If current selection is still in list keep it, otherwise pick first
@@ -161,11 +174,13 @@ export function ActivityPage() {
     if (selectedCompanyId) {
       loadRuns(selectedCompanyId);
     }
-  }, [selectedCompanyId]);
+  }, [selectedCompanyId, companies]);
+
+  const selectedRunCompanyId = runs.find(run => run.id === selectedRunId)?.companyId || (selectedCompanyId === ALL_COMPANIES ? "" : selectedCompanyId);
 
   // Fetch run details when selectedRunId changes
   useEffect(() => {
-    if (!selectedCompanyId || !selectedRunId) return;
+    if (!selectedRunCompanyId || !selectedRunId) return;
     if(runs.find(r=>r.id===selectedRunId)?.requestedMode.startsWith("coding")) {setActiveRunDetails(null);return;}
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -173,7 +188,7 @@ export function ActivityPage() {
     const token = getStoredAuthToken();
     if (token) headers["authorization"] = `Bearer ${token}`;
 
-    const loadDetails = () => fetch(`/api/companies/${selectedCompanyId}/runs/${selectedRunId}`, { headers })
+    const loadDetails = () => fetch(`/api/companies/${selectedRunCompanyId}/runs/${selectedRunId}`, { headers })
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to load run details`);
         return (await res.json()) as {
@@ -193,16 +208,32 @@ export function ActivityPage() {
       .catch((err) => {if(!stopped) {setError(String(err));timer=setTimeout(loadDetails,3000);}});
     void loadDetails();
     return () => { stopped = true; if (timer) clearTimeout(timer); };
-  }, [selectedCompanyId, selectedRunId, runs.find(r=>r.id===selectedRunId)?.requestedMode]);
+  }, [selectedRunCompanyId, selectedRunId, runs.find(r=>r.id===selectedRunId)?.requestedMode]);
 
   useEffect(()=>{
     if(!selectedCompanyId) return;
     const timer=setInterval(()=>{if(!document.hidden) void loadRuns(selectedCompanyId);},10000);
     return()=>clearInterval(timer);
-  },[selectedCompanyId]);
+  },[selectedCompanyId, companies]);
 
   const loadOlderCodingRuns=async()=>{
     if(!codingCursor) return;
+    if (selectedCompanyId === ALL_COMPANIES) {
+      const headers: Record<string, string> = getStoredAuthToken() ? { authorization: `Bearer ${getStoredAuthToken()}` } : {};
+      const entries = [...allCodingCursors.current].filter(([, cursor]) => cursor);
+      try {
+        const pages = await loadCompanyScopes(entries.map(([id]) => id), async id => {
+          const response = await fetch(`/api/companies/${id}/code/monitor/runs?cursor=${encodeURIComponent(allCodingCursors.current.get(id)!)}`, { headers });
+          if (!response.ok) throw new Error(`Monitoring HTTP ${response.status}`);
+          return { id, data: await response.json() as { runs: CompanyRun[]; nextCursor: string | null } };
+        });
+        if (selectedCompanyRef.current !== ALL_COMPANIES) return;
+        pages.forEach(page => allCodingCursors.current.set(page.id, page.data.nextCursor));
+        setRuns(previous => [...previous, ...pages.flatMap(page => page.data.runs.map(run => ({ ...run, companyId: page.id }))).filter(run => !previous.some(old => old.id === run.id))]);
+        setCodingCursor([...allCodingCursors.current.values()].some(Boolean) ? ALL_COMPANIES : null);
+      } catch (error) { setError(String(error)); }
+      return;
+    }
     try {
       const token=getStoredAuthToken();
       const response=await fetch(`/api/companies/${selectedCompanyId}/code/monitor/runs?cursor=${encodeURIComponent(codingCursor)}`,{headers:token?{authorization:`Bearer ${token}`}:{}});
@@ -216,7 +247,7 @@ export function ActivityPage() {
   // Handle task dispatch
   const handleDispatch = async (overridePrompt?: string) => {
     const promptToRun = (overridePrompt ?? taskPrompt).trim();
-    if (!promptToRun || !selectedCompanyId || dispatching) return;
+    if (!promptToRun || !selectedCompanyId || selectedCompanyId === ALL_COMPANIES || dispatching) return;
 
     setDispatching(true);
     setDispatchNotice(null);
@@ -346,7 +377,7 @@ export function ActivityPage() {
       {/* Controls Bar: Company Switcher, Status Filters, Search, Refresh */}
       <div className="activity-controls">
         <div className="activity-controls-row">
-          {companies.length > 0 && (
+          {(
             <div className="activity-company-selector">
               <label htmlFor="activity-company-select">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -354,10 +385,10 @@ export function ActivityPage() {
                 </svg>
                 {t("activity.controls.companyLabel")}
               </label>
-              <select
+              <CompanyScopeSelect
                 id="activity-company-select"
                 value={selectedCompanyId}
-                onChange={(e) => handleCompanyChange(e.target.value)}
+                onValueChange={(value) => handleCompanyChange(value)}
                 className="select-input activity-select"
               >
                 {companies.map((c) => (
@@ -365,7 +396,7 @@ export function ActivityPage() {
                     {c.name}
                   </option>
                 ))}
-              </select>
+              </CompanyScopeSelect>
             </div>
           )}
 
@@ -498,7 +529,7 @@ export function ActivityPage() {
             type="button"
             className="activity-dispatch-submit-btn"
             onClick={() => handleDispatch()}
-            disabled={dispatching || !taskPrompt.trim() || !selectedCompanyId}
+            disabled={dispatching || !taskPrompt.trim() || !selectedCompanyId || selectedCompanyId === ALL_COMPANIES}
           >
             {dispatching ? (
               <>
@@ -665,7 +696,7 @@ export function ActivityPage() {
 
             {/* Main: Execution Trace & Policy Inspection */}
             <section className="activity-trace-detail">
-            {runs.find(r=>r.id===selectedRunId)?.requestedMode.startsWith("coding") ? <CodeRunMonitor key={selectedRunId} companyId={selectedCompanyId} runId={selectedRunId} isUk={language==="uk"}/> : <>
+            {runs.find(r=>r.id===selectedRunId)?.requestedMode.startsWith("coding") ? <CodeRunMonitor key={selectedRunId} companyId={selectedRunCompanyId} runId={selectedRunId} isUk={language==="uk"}/> : <>
             <ActivityTraceDetail
               activeRunDetails={activeRunDetails}
               projectTasks={projectTasks}
@@ -679,7 +710,7 @@ export function ActivityPage() {
             {/* C6b: the minimum Run Trace needs to explain a run's environment and policies. A run with no
                 snapshot says legacy_no_snapshot rather than rendering an error. */}
             {selectedRunId ? (
-              <CodeSnapshotPanel companyId={selectedCompanyId} runId={selectedRunId} isUk={language === "uk"} />
+              <CodeSnapshotPanel companyId={selectedRunCompanyId} runId={selectedRunId} isUk={language === "uk"} />
             ) : null}
           </section>
         </div>

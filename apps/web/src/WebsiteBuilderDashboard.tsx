@@ -1,3 +1,4 @@
+import { CompanyScopeSelect } from "./CompanyScopeSelect";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
@@ -562,11 +563,11 @@ export function WebsiteBuilderDashboard() {
 
           <div className="automations-header-actions" style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
             {companies.length > 0 && (
-              <select
+              <CompanyScopeSelect
                 aria-label={language === "uk" ? "Компанія" : "Company"}
                 value={companyId}
-                onChange={(e) => {
-                  const nextCompanyId = e.target.value;
+                onValueChange={(value) => {
+                  const nextCompanyId = value;
                   setCompanyId(nextCompanyId);
                   if (nextCompanyId) {
                     writeActiveCompanyId(nextCompanyId);
@@ -575,24 +576,12 @@ export function WebsiteBuilderDashboard() {
                 }}
                 className="company-select"
                 title={companyId ? companies.find(c => c.id === companyId)?.name : language === "uk" ? "Усі" : "All"}
-                style={{
-                  width: "130px", minWidth: "130px", maxWidth: "130px", flex: "0 0 130px",
-                  boxSizing: "border-box", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                  padding: "9px 14px",
-                  borderRadius: "10px",
-                  border: "1px solid var(--npati-gray-200, #e2e8f0)",
-                  background: "#ffffff",
-                  color: "#111111",
-                  fontSize: "13.5px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
               >
-                <option value="">{language === "uk" ? "Усі" : "All"}</option>
+                <option value="">{language === "uk" ? "Усі компанії" : "All companies"}</option>
                 {companies.map((c) => (
-                  <option key={c.id} value={c.id} title={c.name}>{Array.from(c.name).length > 16 ? Array.from(c.name).slice(0, 15).join("") + "…" : c.name}</option>
+                  <option key={c.id} value={c.id} title={c.name}>{c.name}</option>
                 ))}
-              </select>
+              </CompanyScopeSelect>
             )}
 
             <button

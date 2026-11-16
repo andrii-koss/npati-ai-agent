@@ -25,6 +25,8 @@ export interface Toolchain {
 }
 
 export interface CodeProject {
+  companyId?: string;
+  companyName?: string;
   id: string;
   name: string;
   type?: string;
@@ -40,6 +42,8 @@ export interface CodeProject {
 }
 
 export interface CodeSession {
+  companyId?: string;
+  companyName?: string;
   id: string;
   projectId: string;
   projectName?: string;

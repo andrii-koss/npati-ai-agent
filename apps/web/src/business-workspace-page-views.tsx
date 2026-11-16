@@ -1,3 +1,5 @@
+import { CompanyScopeSelect } from "./CompanyScopeSelect";
+import { ALL_COMPANIES } from "./company-scope";
 import { PageGuideLink } from "./PageGuideLink";
 import { useTranslation } from "./i18n";
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
@@ -89,6 +91,7 @@ export function BusinessPage() {
   const { t } = useTranslation();
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [companyScope, setCompanyScope] = useState(ALL_COMPANIES);
   const [filterTab, setFilterTab] = useState<"all" | "active" | "drafts">("all");
   const [sortBy, setSortBy] = useState<"newest" | "oldest" | "name_asc" | "name_desc">("newest");
   const [sortOpen, setSortOpen] = useState(false);
@@ -175,7 +178,7 @@ export function BusinessPage() {
   const totalCount = allItems.length;
 
   const visibleItems = useMemo(() => {
-    let result = allItems;
+    let result = companyScope === ALL_COMPANIES ? allItems : allItems.filter(item => item.id === companyScope);
 
     if (filterTab === "active") {
       result = result.filter((it) => it.kind === "business");
@@ -213,7 +216,7 @@ export function BusinessPage() {
       }
       return 0;
     });
-  }, [allItems, filterTab, searchQuery, sortBy]);
+  }, [allItems, filterTab, searchQuery, sortBy, companyScope]);
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -341,7 +344,9 @@ export function BusinessPage() {
     <main className="automations-container business-settings-page">
       <BusinessSettingsHeader
         copy={t("businessSettings.description")}
-        action={<button className="button-primary automations-action-primary" onClick={() => setCreatingManually(true)}>{t("businessSettings.addBusiness")}</button>}
+        action={<><CompanyScopeSelect aria-label="Company" value={companyScope} onValueChange={value => { setCompanyScope(value); setSelectedIds(new Set()); }}>
+          {allItems.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+        </CompanyScopeSelect><button className="button-primary automations-action-primary" onClick={() => setCreatingManually(true)}>{t("businessSettings.addBusiness")}</button></>}
       />
 
       <section className="overview-grid inspector-stats-grid business-stats-grid">

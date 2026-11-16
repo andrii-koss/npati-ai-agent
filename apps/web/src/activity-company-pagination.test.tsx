@@ -22,9 +22,10 @@ it("keeps a company beyond page one selectable and dispatches only to that compa
   }));
   host=document.createElement("div");document.body.append(host);root=createRoot(host);
   await act(async()=>{root!.render(<MemoryRouter><ActivityPage /></MemoryRouter>);});
-  const select=host.querySelector<HTMLSelectElement>("#activity-company-select")!;
-  expect([...select.options].map(o=>o.value)).toContain("V6TEST16-late");
-  await act(async()=>{select.value="V6TEST16-late";select.dispatchEvent(new Event("change",{bubbles:true}));});
+  await act(async()=>host!.querySelector<HTMLButtonElement>("#activity-company-select")!.click());
+  const lateCompany = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(option => option.textContent === "V6TEST16 late company");
+  expect(lateCompany).toBeDefined();
+  await act(async()=>lateCompany!.click());
   const input=host.querySelector<HTMLInputElement>("input.activity-task-input")!;
   await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")!.set!.call(input,"V6TEST16 dispatch to late company");input.dispatchEvent(new Event("input",{bubbles:true}));});
   await act(async()=>host!.querySelector<HTMLButtonElement>(".activity-dispatch-submit-btn")!.click());

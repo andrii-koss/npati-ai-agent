@@ -124,8 +124,8 @@ describe("Projects catalog company scope and freshness", () => {
       return new Promise<Response>(resolve => { resolveOld = resolve; });
     }));
     await render();
-    const selector = host.querySelector<HTMLSelectElement>(".company-select")!;
-    await act(async () => { selector.value = "race-b"; selector.dispatchEvent(new Event("change", { bubbles: true })); });
+    await act(async () => host.querySelector<HTMLButtonElement>(".company-select")!.click());
+    await act(async () => [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(option => option.textContent === "B")!.click());
     expect(oldSignal?.aborted).toBe(true);
     await act(async () => { resolveOld(new Response(JSON.stringify({ projects: [project("obsolete-scope", "race-a")], pagination: { nextCursor: null } }))); });
     expect(host.querySelectorAll("[data-project]")).toHaveLength(1);
@@ -149,7 +149,8 @@ describe("Projects catalog company scope and freshness", () => {
       : url.includes("cursor=") ? { companies: [{ id: "page-b", name: "Second page company" }], pagination: { nextCursor: null } }
         : { companies: [{ id: "page-a", name: "First page company" }], pagination: { nextCursor: "next-page" } }), { headers: { "content-type": "application/json" } })));
     await render();
-    expect(host.querySelector('option[value="page-b"]')?.getAttribute("title")).toBe("Second page company");
+    await act(async () => host.querySelector<HTMLButtonElement>(".company-select")!.click());
+    expect([...document.querySelectorAll('[role="option"]')].some(option => option.getAttribute("title") === "Second page company")).toBe(true);
   });
   it("refreshes new projects on focus instead of keeping the old list for five minutes", async () => {
     let now = Date.now();
@@ -173,15 +174,15 @@ describe("Projects catalog company scope and freshness", () => {
       ? { projects: url.includes("companyId=company-b") ? [project("project-b", "company-b")] : [project("project-a", "company-a"), project("project-b", "company-b")] }
       : { companies: [{ id: "company-a", name: longName }, { id: "company-b", name: "Company B" }], pagination: { nextCursor: null } }), { headers: { "content-type": "application/json" } })));
     await render();
-    const selector = host.querySelector<HTMLSelectElement>(".company-select")!;
-    expect(selector.value).toBe("");
-    expect(selector.options[0]?.textContent).toBe("All");
-    expect(selector.style.width).toBe("130px");
-    expect(host.querySelector('option[value="company-a"]')?.textContent).toMatch(/…$/);
-    expect(host.querySelector('option[value="company-a"]')?.getAttribute("title")).toBe(longName);
+    const selector = host.querySelector<HTMLButtonElement>(".company-select")!;
+    expect(selector.textContent).toBe("All companies");
+    expect(selector.classList.contains("company-scope-trigger")).toBe(true);
+    await act(async () => selector.click());
+    const longOption = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(option => option.textContent === longName);
+    expect(longOption?.getAttribute("title")).toBe(longName);
     expect([...host.querySelectorAll("[data-project]")].map(node => node.getAttribute("data-company"))).toEqual(["company-a", "company-b"]);
     expect([...host.querySelectorAll("button")].some(button => button.textContent?.trim() === "Refresh")).toBe(false);
-    await act(async () => { selector.value = "company-b"; selector.dispatchEvent(new Event("change", { bubbles: true })); });
+    await act(async () => [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(option => option.textContent === "Company B")!.click());
     expect(host.querySelectorAll("[data-project]")).toHaveLength(1);
     expect(host.querySelector("[data-project]")?.textContent).toBe("project-b");
   });

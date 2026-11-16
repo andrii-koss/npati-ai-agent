@@ -86,11 +86,11 @@ export function EmailSettingsTestBlock({ t, openCreateContactDrawer, contacts, o
                           type="button"
                           className="automation-action-btn"
                           onClick={async () => {
-                            const updated = await api<{ contact: ContactItem }>(`/companies/${selectedCompanyId}/email-inbox/contacts/${encodeURIComponent(contact.email)}`, {
+                            const updated = await api<{ contact: ContactItem }>(`/companies/${contact.companyId || selectedCompanyId}/email-inbox/contacts/${encodeURIComponent(contact.email)}`, {
                               method: "PATCH",
                               body: JSON.stringify({ isVip: !contact.isVip }),
                             });
-                            setContacts((prev) => prev.map((c) => (c.id === contact.id ? updated.contact : c)));
+                            setContacts((prev) => prev.map((c) => (c.id === contact.id ? { ...updated.contact, companyId: contact.companyId || selectedCompanyId } : c)));
                           }}
                         >
                           {contact.isVip ? t("emailSettings.contactsTab.actionUnVip") : t("emailSettings.contactsTab.actionMakeVip")}

@@ -143,8 +143,8 @@ it("searches all databases rather than only the first page and sends server comp
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 280)); });
   expect(rows()).toHaveLength(1); expect(rows()[0]?.textContent).toContain("Database 24");
   expect(urls().at(-1)).toContain("search=Database+24");
-  const company = host.querySelector<HTMLSelectElement>('select[aria-label="Company"]')!;
-  await act(async () => { company.value = "c0"; company.dispatchEvent(new Event("change", { bubbles: true })); });
+  await click(host.querySelector<HTMLButtonElement>('button[aria-label="Company"]')!);
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(option => option.textContent === "Company 0")!.click());
   expect(urls().at(-1)).toContain("companyId=c0");
   await click([...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(button => button.textContent?.includes("Needs attention"))!);
   expect(urls().at(-1)).toContain("status=attention"); expect(rows()).toHaveLength(1);
@@ -166,7 +166,7 @@ it("keeps company summary cards unchanged through pending, rapid, and cached sta
   await click(tab("Ready"));
   expect(pending).toHaveLength(1);
   expect(host.querySelector(".ds-catalog-stats")!.getAttribute("aria-busy")).toBe("false");
-  expect(host.querySelector('select[aria-label="Company"]')).not.toBeNull();
+  expect(host.querySelector('button[aria-label="Company"]')).not.toBeNull();
   await click(tab("Needs attention"));
   expect(pending).toHaveLength(2);
   await act(async () => pending[0]!());

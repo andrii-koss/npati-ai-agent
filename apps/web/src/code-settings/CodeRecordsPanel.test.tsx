@@ -29,6 +29,13 @@ const rows = () => host.querySelectorAll("tbody tr");
 async function click(element: HTMLElement) { expect(element).toBeTruthy(); await act(async () => element.click()); }
 
 describe("Code project and session table controls", () => {
+  it("routes mixed-company bulk actions to each record's owner", async () => {
+    await render(projects.slice(0, 2).map((item, index) => ({ ...item, companyId: index === 0 ? "owner-a" : "owner-b" })));
+    await click(masterCheckbox());
+    vi.mocked(promptModal).mockResolvedValueOnce("delete");
+    await click(button("Delete selected"));
+    expect(api.mock.calls.map(call => call[0])).toEqual(["/companies/owner-a/code/projects/project-0", "/companies/owner-b/code/projects/project-1"]);
+  });
   it("paginates by five, preserves selection across pages and selects all twelve records", async () => {
     await render();
     expect(rows()).toHaveLength(5);

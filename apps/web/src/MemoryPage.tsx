@@ -1,6 +1,8 @@
+import { ALL_COMPANIES, loadCompanyScopes } from "./company-scope";
+import { CompanyScopeSelect } from "./CompanyScopeSelect";
 import { PageGuideLink } from "./PageGuideLink";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import { useWorkspace } from "./BusinessWorkspace";
 import { useLinkedBusiness } from "./linked-business";
@@ -99,11 +101,15 @@ function getInitialBusinessName(): string {
 }
 
 export function MemoryPage() {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const { overview, loading: workspaceLoading, refresh, switchBusiness } = useWorkspace();
   const business = useLinkedBusiness(overview, switchBusiness);
+  const [scopeParams] = useSearchParams();
+  const [companyScope, setCompanyScope] = useState(() => scopeParams.get("business") || ALL_COMPANIES);
+  const scopeIds = companyScope === ALL_COMPANIES ? (overview?.businesses.map(item => item.id) ?? []) : [companyScope];
+  const scopeKey = scopeIds.join("\0");
   const businessId = business?.id ?? (overview ? "" : getInitialBusinessId());
-  const businessName = business?.name ?? (overview ? "" : getInitialBusinessName());
+  const businessName = companyScope === ALL_COMPANIES ? (language === "uk" ? "Усі компанії" : "All companies") : business?.name ?? (overview ? "" : getInitialBusinessName());
 
   const [items, setItems] = useState<MemoryItem[]>(() => getCachedMemory(businessId));
   const [loading, setLoading] = useState(() => getCachedMemory(businessId).length === 0);
@@ -127,17 +133,21 @@ export function MemoryPage() {
 
   const loadMemory = async () => {
     const version = ++loadVersion.current;
-    if (!businessId) {
+    if (!scopeIds.length) {
       setItems([]);
       setLoading(false);
       return;
     }
-    setItems(getCachedMemory(businessId));
+    setItems(scopeIds.flatMap(id => getCachedMemory(id)));
     try {
-      const data = await api<MemoryItem[]>(`/businesses/${businessId}/memory`);
+      const pages = await loadCompanyScopes(scopeIds, async id => {
+        const records = await api<MemoryItem[]>(`/businesses/${id}/memory`);
+        return { id, records: records.map(item => ({ ...item, businessId: id })) };
+      });
+      const data = pages.flatMap(page => page.records);
       if (version !== loadVersion.current) return;
       setItems(data);
-      updateCachedMemory(businessId, data);
+      pages.forEach(page => updateCachedMemory(page.id, page.records));
     } catch (error) {
       if (version !== loadVersion.current) return;
       if ([403, 404].includes((error as Error & { status?: number }).status ?? 0)) {
@@ -152,7 +162,7 @@ export function MemoryPage() {
 
   useEffect(() => {
     void loadMemory();
-  }, [businessId, workspaceLoading]);
+  }, [scopeKey, workspaceLoading]);
 
   // Tab definitions
   const tabs = useMemo(() => {
@@ -227,6 +237,7 @@ export function MemoryPage() {
   }, [items, selectedTab, search, t]);
 
   const openCreateDrawer = () => {
+    if (companyScope === ALL_COMPANIES && businessId) setCompanyScope(businessId);
     setEditingItem(null);
     setForm(initialForm);
     setFormError("");
@@ -264,11 +275,11 @@ export function MemoryPage() {
     if (!confirmed) return;
 
     try {
-      await api(`/businesses/${businessId}/memory/${item.id}`, { method: "DELETE" });
+      await api(`/businesses/${item.businessId}/memory/${item.id}`, { method: "DELETE" });
       showToast(t("memoryPage.toasts.deleted", { title: item.title }));
       setItems((prev) => {
         const next = prev.filter((i) => i.id !== item.id);
-        if (businessId) updateCachedMemory(businessId, next);
+        updateCachedMemory(item.businessId, next.filter(record => record.businessId === item.businessId));
         return next;
       });
       await loadMemory();
@@ -293,7 +304,7 @@ export function MemoryPage() {
     setFormError("");
 
     try {
-      let targetBusinessId = businessId;
+      let targetBusinessId = editingItem?.businessId || businessId;
 
       // If user has no business created yet, automatically initialize one
       if (!targetBusinessId) {
@@ -386,19 +397,19 @@ export function MemoryPage() {
             </p>
           </div>
           <div className="automations-header-actions">
-            {(overview?.businesses.length ?? 0) > 1 && (
-              <select
+            {(
+              <CompanyScopeSelect
                 className="business-scope-select"
                 aria-label={t("nav.business")}
-                value={businessId}
-                onChange={(event) => void switchBusiness(event.target.value)}
+                value={companyScope}
+                onValueChange={(value) => { setCompanyScope(value); if (value !== ALL_COMPANIES) void switchBusiness(value); }}
               >
                 {overview?.businesses.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.name}{overview?.businesses.some((other) => other.id !== item.id && other.name === item.name) ? ` ? ${item.id.slice(0, 8)}` : ""}
                   </option>
                 ))}
-              </select>
+              </CompanyScopeSelect>
             )}
             <button
               type="button"

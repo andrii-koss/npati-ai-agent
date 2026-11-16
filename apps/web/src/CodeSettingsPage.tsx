@@ -1,9 +1,12 @@
+import { CompanyScopeSelect } from "./CompanyScopeSelect";
+import { ALL_COMPANIES, loadCompanyScopes } from "./company-scope";
+import { listProjectCompanies } from "./website-builder-cache";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
 import { confirmModal } from "./ConfirmDialog";
 import { useTranslation } from "./i18n";
-import { chooseAvailableCompanyId, readCachedCompanies, writeActiveCompanyId } from "./active-company";
+import { readCachedCompanies, writeActiveCompanyId } from "./active-company";
 import { CodeFlagsPanel } from "./CodeFlagsPanel";
 import { CodeSandboxImagesPanel } from "./CodeSandboxImagesPanel";
 import { CodeDataPolicyPanel } from "./CodeDataPolicyPanel";
@@ -87,18 +90,19 @@ function CodeSettingsPageContent() {
 
   const reload = useCallback(() => setReloadToken((token) => token + 1), []);
 
-  const openSession = useCallback(async (session: Pick<CodeSession, "id" | "projectId" | "status">, chat = false) => {
+  const openSession = useCallback(async (session: Pick<CodeSession, "id" | "projectId" | "status" | "companyId">, chat = false) => {
+    const targetCompanyId = session.companyId || companyId;
     setBusyId(session.id);
     try {
       if (session.status !== "archived") {
-        const result = await apiFetch<{ persisted: boolean }>(`/companies/${encodeURIComponent(companyId)}/code/active-context`, {
+        const result = await apiFetch<{ persisted: boolean }>(`/companies/${encodeURIComponent(targetCompanyId)}/code/active-context`, {
           method: "PUT", body: JSON.stringify({ contextType: "project", projectId: session.projectId, sessionId: session.id }),
         });
         if (!result.persisted) throw new Error(isUk ? "Не вдалося зберегти активну сесію." : "Could not save the active session.");
       }
-      writeActiveCompanyId(companyId);
-      navigate(chat ? `/chat?company=${encodeURIComponent(companyId)}&project=${encodeURIComponent(session.projectId)}`
-        : `/settings/code/${encodeURIComponent(companyId)}/${encodeURIComponent(session.projectId)}?session=${encodeURIComponent(session.id)}`);
+      writeActiveCompanyId(targetCompanyId);
+      navigate(chat ? `/chat?company=${encodeURIComponent(targetCompanyId)}&project=${encodeURIComponent(session.projectId)}`
+        : `/settings/code/${encodeURIComponent(targetCompanyId)}/${encodeURIComponent(session.projectId)}?session=${encodeURIComponent(session.id)}`);
     } catch (cause) {
       setFeedback({ type: "error", message: codeErrorMessage(cause, isUk) });
     } finally { setBusyId(null); }
@@ -113,22 +117,22 @@ function CodeSettingsPageContent() {
   // Companies: cache first, then the API.
   useEffect(() => {
     let cancelled = false;
-    void apiFetch<{ companies: CompanySummary[] }>("/companies?limit=50")
-      .then((body) => {
+    void listProjectCompanies()
+      .then((list) => {
         if (cancelled) return;
-        const list = body.companies ?? [];
         setCompanies(list);
-        setCompanyId((current) => current || chooseAvailableCompanyId(list));
+
       })
       .catch(() => {
-        if (!cancelled) setCompanyId((current) => current || chooseAvailableCompanyId([], { fallback: "" }));
+        if (!cancelled) setCompanies(readCachedCompanies<CompanySummary>());
       });
     return () => { cancelled = true; };
   }, []);
 
   // Projects, sessions and limits for the selected company.
   useEffect(() => {
-    if (!companyId) {
+    const scopeIds = companyId ? [companyId] : companies.map(company => company.id);
+    if (!scopeIds.length) {
       setProjects([]);
       setSessions([]);
       setLimits(null);
@@ -136,18 +140,23 @@ function CodeSettingsPageContent() {
     }
     let cancelled = false;
     setLoading(true);
-    const base = "/companies/" + encodeURIComponent(companyId);
-    void Promise.all([
-      apiFetch<{ projects: CodeProject[] }>(`${base}/code/projects?includeArchived=true`).then((body) => body.projects ?? []),
-      apiFetch<{ sessions: CodeSession[] }>(`${base}/code/sessions`).then((body) => body.sessions ?? []).catch(() => [] as CodeSession[]),
-      apiFetch<{ limits: CodeLimits }>(`${base}/code/limits`).then((body) => body.limits ?? null).catch(() => null),
-    ])
-      .then(([projectList, sessionList, limitsList]) => {
+    void loadCompanyScopes(scopeIds, async id => {
+      const base = "/companies/" + encodeURIComponent(id);
+      const [projectList, sessionList, limitsList] = await Promise.all([
+        apiFetch<{ projects: CodeProject[] }>(`${base}/code/projects?includeArchived=true`).then(body => body.projects ?? []),
+        apiFetch<{ sessions: CodeSession[] }>(`${base}/code/sessions`).then(body => body.sessions ?? []),
+        companyId ? apiFetch<{ limits: CodeLimits }>(`${base}/code/limits`).then(body => body.limits ?? null).catch(() => null) : Promise.resolve(null),
+      ]);
+      const companyName = companies.find(company => company.id === id)?.name;
+      return { projects: projectList.map(item => ({ ...item, companyId: id, companyName })), sessions: sessionList.map(item => ({ ...item, companyId: id, companyName })), limits: limitsList };
+    })
+      .then(pages => {
         if (cancelled) return;
-        setProjects(projectList);
-        setSessions(sessionList);
+        setProjects(pages.flatMap(page => page.projects));
+        setSessions(pages.flatMap(page => page.sessions));
+        const limitsList = companyId ? pages[0]?.limits ?? null : null;
         setLimits(limitsList);
-        setLimitsError(limitsList ? null : isUk ? "Ліміти недоступні." : "Limits are unavailable.");
+        setLimitsError(!companyId || limitsList ? null : isUk ? "Ліміти недоступні." : "Limits are unavailable.");
         setError(null);
       })
       .catch((cause) => {
@@ -156,7 +165,7 @@ function CodeSettingsPageContent() {
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [companyId, reloadToken, isUk]);
+  }, [companyId, companies, reloadToken, isUk]);
 
   const companyList = Array.isArray(companies) ? companies : [];
   const projectList = Array.isArray(projects) ? projects : [];
@@ -214,11 +223,12 @@ function CodeSettingsPageContent() {
   }, [companyId, isUk, reload]);
 
   const detectToolchain = useCallback(async (project: CodeProject) => {
-    if (!companyId) return;
+    const targetCompanyId = project.companyId || companyId;
+    if (!targetCompanyId) return;
     setBusyId(project.id);
     try {
       const updated = await apiFetch<CodeProject>(
-        `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(project.id)}/code/detect-toolchain`,
+        `/companies/${encodeURIComponent(targetCompanyId)}/projects/${encodeURIComponent(project.id)}/code/detect-toolchain`,
         { method: "POST" },
       );
       const languages = updated.toolchain?.languages ?? [];
@@ -237,7 +247,8 @@ function CodeSettingsPageContent() {
   }, [companyId, isUk, reload]);
 
   const archiveProject = useCallback(async (project: CodeProject) => {
-    if (!companyId) return;
+    const targetCompanyId = project.companyId || companyId;
+    if (!targetCompanyId) return;
     const agreed = await confirmModal({
       title: isUk ? "Архівувати код-проєкт" : "Archive code project",
       message: isUk
@@ -250,7 +261,7 @@ function CodeSettingsPageContent() {
     setBusyId(project.id);
     try {
       await apiFetch(
-        `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(project.id)}/archive`,
+        `/companies/${encodeURIComponent(targetCompanyId)}/projects/${encodeURIComponent(project.id)}/archive`,
         { method: "POST", body: JSON.stringify({ expectedRevision: project.revision }) },
       );
       setFeedback({ type: "success", message: isUk ? "Код-проєкт заархівовано." : "Code project archived." });
@@ -269,14 +280,15 @@ function CodeSettingsPageContent() {
     dataClassification: DataClassification;
     retentionClass: RetentionClass;
   }) => {
-    if (!companyId) return;
+    const targetCompanyId = project.companyId || companyId;
+    if (!targetCompanyId) return;
     const cleaned: VerifyCommands = {};
     for (const [key, value] of Object.entries(input.verifyCommands)) {
       const text = (value ?? "").trim();
       if (text) (cleaned as Record<string, string>)[key] = text;
     }
     const updated = await apiFetch<CodeProject>(
-      `/companies/${encodeURIComponent(companyId)}/projects/${encodeURIComponent(project.id)}/code`,
+      `/companies/${encodeURIComponent(targetCompanyId)}/projects/${encodeURIComponent(project.id)}/code`,
       {
         method: "PATCH",
         body: JSON.stringify({
@@ -309,7 +321,8 @@ function CodeSettingsPageContent() {
   }, [companyId, isUk, reload, openSession]);
 
   const archiveSession = useCallback(async (session: CodeSession) => {
-    if (!companyId) return;
+    const targetCompanyId = session.companyId || companyId;
+    if (!targetCompanyId) return;
     const agreed = await confirmModal({
       title: isUk ? "Архівувати сесію" : "Archive session",
       message: isUk
@@ -321,7 +334,7 @@ function CodeSettingsPageContent() {
     if (!agreed) return;
     setBusyId(session.id);
     try {
-      await apiFetch(`/companies/${encodeURIComponent(companyId)}/code/sessions/${encodeURIComponent(session.id)}/archive`, { method: "POST" });
+      await apiFetch(`/companies/${encodeURIComponent(targetCompanyId)}/code/sessions/${encodeURIComponent(session.id)}/archive`, { method: "POST" });
       setFeedback({ type: "success", message: isUk ? "Сесію заархівовано." : "Session archived." });
       reload();
     } catch (cause) {
@@ -354,15 +367,15 @@ function CodeSettingsPageContent() {
             </p>
           </div>
           <div className="automations-header-actions">
-            {companies.length > 1 && (
-              <select
+            {(
+              <CompanyScopeSelect
                 aria-label={isUk ? "Компанія" : "Company"}
                 className="page-size-select"
-                value={companyId}
-                onChange={(event) => { setCompanyId(event.target.value); setDetailId(null); }}
+                value={companyId || ALL_COMPANIES}
+                onValueChange={(value) => { setCompanyId(value === ALL_COMPANIES ? "" : value); setDetailId(null); }}
               >
                 {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
-              </select>
+              </CompanyScopeSelect>
             )}
             <button
               type="button"
@@ -436,9 +449,9 @@ function CodeSettingsPageContent() {
           ) : (
             <CodeProjectsTable key={`projects-${companyId}-${searchQuery}-${showArchived}`}
               companyId={companyId} items={visibleProjects} isUk={isUk} readOnly={readOnly} busyId={busyId}
-              api={apiFetch} onChanged={reload} onDetails={project => setDetailId(project.id)}
+              api={apiFetch} onChanged={reload} onDetails={project => { setCompanyId(project.companyId || companyId); setDetailId(project.id); }}
               onDetect={project => void detectToolchain(project)} onArchive={project => void archiveProject(project)}
-              onSessions={project => { setSessionProjectId(project.id); setSessionOpen(true); }} />
+              onSessions={project => { setCompanyId(project.companyId || companyId); setSessionProjectId(project.id); setSessionOpen(true); }} />
           )}
 
           <section className="ds-section-title">
@@ -453,10 +466,12 @@ function CodeSettingsPageContent() {
             <button
               type="button"
               className="button-primary automations-action-primary"
-              disabled={!companyId || projects.length === 0 || readOnly}
+              disabled={projects.length === 0 || readOnly}
               title={readOnly ? readOnlyTitle : undefined}
               onClick={() => {
-                setSessionProjectId((current) => current || detailId || visibleProjects[0]?.id || projects[0]?.id || "");
+                const project = visibleProjects[0] || projects[0];
+                if (!companyId && project?.companyId) setCompanyId(project.companyId);
+                setSessionProjectId((current) => current || detailId || project?.id || "");
                 setSessionOpen(true);
               }}
             >

@@ -1,3 +1,5 @@
+import { ALL_COMPANIES } from "./company-scope";
+import { CompanyScopeSelect } from "./CompanyScopeSelect";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { Link } from "react-router-dom";
 import { writeActiveCompanyId } from "./active-company";
@@ -42,17 +44,18 @@ export function EmailSettingsOverviewBlock({ selectedCompanyId, t, setSelectedCo
             </span>
 
             <div className="email-scope-select-wrap">
-              <select
+              <CompanyScopeSelect
                 aria-label={t("emailSettings.scope.selectOwnerAria")}
                 value={selectedCompanyId}
-                onChange={(e) => {
-                  const companyId = e.target.value;
+                onValueChange={(value) => {
+                  const companyId = value;
                   setSelectedCompanyId(companyId);
                   setAgentId("");
                   setRuleAgentId("");
                   setRuleWorkflowId("");
                   setRuleCreateTask(false);
-                  writeActiveCompanyId(companyId === "personal" ? "" : companyId);
+                  if (companyId !== ALL_COMPANIES) writeActiveCompanyId(companyId === "personal" ? "" : companyId);
+                  setAccounts([]); setAnalytics(null);
                   const cachedAcc = readCachedAccounts(companyId);
                   if (cachedAcc.length > 0) setAccounts(cachedAcc);
                   const cachedAnal = readCachedAnalytics(companyId);
@@ -62,7 +65,7 @@ export function EmailSettingsOverviewBlock({ selectedCompanyId, t, setSelectedCo
                 title={selectedCompanyId === "personal" ? t("emailSettings.scope.personalScope") : (companies.find((c) => c.id === selectedCompanyId)?.name || selectedCompanyId)}
               >
                 <option value="personal">{t("emailSettings.scope.personalScope")}</option>
-                {selectedCompanyId && selectedCompanyId !== "personal" && !companies.some((c) => c.id === selectedCompanyId) && (
+                {selectedCompanyId && selectedCompanyId !== ALL_COMPANIES && selectedCompanyId !== "personal" && !companies.some((c) => c.id === selectedCompanyId) && (
                   <option key={selectedCompanyId} value={selectedCompanyId} title={selectedCompanyId}>
                     {selectedCompanyId}
                   </option>
@@ -72,14 +75,14 @@ export function EmailSettingsOverviewBlock({ selectedCompanyId, t, setSelectedCo
                     {c.name}
                   </option>
                 ))}
-              </select>
+              </CompanyScopeSelect>
               <svg className="email-scope-select-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <path d="M6 9l6 6 6-6" />
               </svg>
             </div>
           </div>
           <span className="email-scope-context-hint">
-            {selectedCompanyId === "personal"
+            {selectedCompanyId === ALL_COMPANIES ? "All companies" : selectedCompanyId === "personal"
               ? t("emailSettings.scope.personalContextHint")
               : t("emailSettings.scope.companyContextHint").replace("{{company}}", companies.find((c) => c.id === selectedCompanyId)?.name || "selected organization")}
           </span>

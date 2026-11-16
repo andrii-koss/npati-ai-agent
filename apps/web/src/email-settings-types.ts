@@ -18,6 +18,7 @@ export interface CompanyAutomation {
 }
 
 export interface EmailAccount {
+  companyId?: string;
   id: string;
   emailAddress: string;
   provider: "gmail" | "microsoft" | "imap_smtp";
@@ -62,6 +63,7 @@ export interface DnsCheckResult {
 }
 
 export interface EmailRule {
+  companyId?: string;
   id: string;
   name: string;
   priorityOrder: number;
@@ -71,6 +73,7 @@ export interface EmailRule {
 }
 
 export interface EmailTemplate {
+  companyId?: string;
   id: string;
   title: string;
   category: string;
@@ -79,6 +82,7 @@ export interface EmailTemplate {
 }
 
 export interface ContactItem {
+  companyId?: string;
   id: string;
   email: string;
   name?: string | null;
@@ -110,6 +114,7 @@ export interface EmailAnalytics {
 }
 
 export interface EmailPermissionKey {
+  companyId?: string;
   id: string;
   name: string;
   keyPrefix: string;

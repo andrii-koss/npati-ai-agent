@@ -1,3 +1,6 @@
+import { ALL_COMPANIES, loadCompanyScopes } from "./company-scope";
+import { readEmailCollection, mergeEmailAnalytics } from "./email-company-scope";
+import { listProjectCompanies } from "./website-builder-cache";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { chooseAvailableCompanyId, getInitialCompanyScope, readCachedCompanies, writeActiveCompanyId, writeCachedCompanies } from "./active-company";
@@ -46,12 +49,12 @@ export function EmailSettingsPage() {
   const [companies, setCompanies] = useState<Company[]>(readCachedCompanies);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>(() => {
     const currentUrl = new URL(window.location.href);
-    return getInitialCompanyScope(currentUrl.searchParams.get("company"));
+    return currentUrl.searchParams.get("company") || ALL_COMPANIES;
   });
   const [agents, setAgents] = useState<Agent[]>([]);
   const [accounts, setAccounts] = useState<EmailAccount[]>(() => {
     const currentUrl = new URL(window.location.href);
-    const scope = getInitialCompanyScope(currentUrl.searchParams.get("company"));
+    const scope = currentUrl.searchParams.get("company") || ALL_COMPANIES;
     return readCachedAccounts(scope);
   });
   const [activeTab, setActiveTab] = useState<"accounts" | "rules" | "templates" | "contacts" | "permissions">("accounts");
@@ -229,18 +232,18 @@ export function EmailSettingsPage() {
 
   // Load companies
   useEffect(() => {
-    api<{ companies: Company[] }>("/companies")
-      .then((res) => {
-        setCompanies(res.companies);
-        writeCachedCompanies(res.companies);
+    listProjectCompanies()
+      .then((list) => {
+        setCompanies(list);
+        writeCachedCompanies(list);
         const currentUrl = new URL(window.location.href);
         const requested = currentUrl.searchParams.get("company");
         const selected = requested === "personal"
           ? "personal"
-          : chooseAvailableCompanyId(res.companies, { requested, fallback: "personal" });
+          : requested && requested !== ALL_COMPANIES ? chooseAvailableCompanyId(list, { requested, fallback: "personal" }) : ALL_COMPANIES;
         if (selected !== selectedCompanyId) {
           setSelectedCompanyId(selected);
-          writeActiveCompanyId(selected === "personal" ? "" : selected);
+          if (selected !== ALL_COMPANIES) writeActiveCompanyId(selected === "personal" ? "" : selected);
         }
         if (requested) {
           currentUrl.searchParams.delete("company");
@@ -254,6 +257,21 @@ export function EmailSettingsPage() {
   // Load accounts, agents and analytics when company changes
   useEffect(() => {
     if (!selectedCompanyId) return;
+    let active = true;
+    if (selectedCompanyId === ALL_COMPANIES) {
+      const ids = companies.map(company => company.id);
+      setAccounts([]); setAgents([]); setAnalytics(null); setLoading(true);
+      void Promise.all([
+        readEmailCollection<EmailAccount>(ids, "email-accounts", "accounts"),
+        readEmailCollection<Agent>(ids, "agents", "agents"),
+        loadCompanyScopes(ids, id => api<{ analytics: EmailAnalytics }>(`/companies/${id}/email-inbox/analytics`).then(result => result.analytics)),
+      ]).then(([accounts, agents, analytics]) => {
+        if (!active) return;
+        setAccounts(accounts); setAgents(agents); setAnalytics(mergeEmailAnalytics(analytics.filter(Boolean)));
+      }).catch(error => { if (active) setNotice(error.message); })
+        .finally(() => { if (active) setLoading(false); });
+      return () => { active = false; };
+    }
     const personalScope = selectedCompanyId === "personal";
     Promise.all([
       api<{ accounts: EmailAccount[] }>(`/companies/${selectedCompanyId}/email-accounts`),
@@ -261,7 +279,8 @@ export function EmailSettingsPage() {
       api<{ analytics: EmailAnalytics }>(`/companies/${selectedCompanyId}/email-inbox/analytics`).catch(() => ({ analytics: null })),
     ])
       .then(([accRes, agentRes, analRes]) => {
-        setAccounts(accRes.accounts);
+        if (!active) return;
+        setAccounts(accRes.accounts.map(account => ({ ...account, companyId: selectedCompanyId })));
         writeCachedAccounts(selectedCompanyId, accRes.accounts);
         setAgents(agentRes.agents);
         if (analRes.analytics) {
@@ -270,12 +289,35 @@ export function EmailSettingsPage() {
         }
       })
       .catch((e) => setNotice(e.message))
-      .finally(() => setLoading(false));
-  }, [selectedCompanyId]);
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [selectedCompanyId, companies]);
 
   // Load rules/templates/contacts on tab switch
   useEffect(() => {
     if (!selectedCompanyId) return;
+    if (selectedCompanyId === ALL_COMPANIES) {
+      let active = true;
+      const ids = companies.map(company => company.id);
+      setRules([]); setTemplates([]); setContacts([]); setPermissionKeys([]); setWorkflows([]);
+      const load = async () => {
+        if (activeTab === "rules") {
+          const [rules, templates] = await Promise.all([readEmailCollection<EmailRule>(ids, "email-inbox/rules", "rules"), readEmailCollection<EmailTemplate>(ids, "email-inbox/templates", "templates")]);
+          if (active) { setRules(rules); setTemplates(templates); }
+        } else if (activeTab === "templates") {
+          const templates = await readEmailCollection<EmailTemplate>(ids, "email-inbox/templates", "templates");
+          if (active) setTemplates(templates);
+        } else if (activeTab === "contacts") {
+          const contacts = await readEmailCollection<ContactItem>(ids, "email-inbox/contacts", "contacts");
+          if (active) setContacts(contacts);
+        } else if (activeTab === "permissions") {
+          const keys = await readEmailCollection<EmailPermissionKey>(ids, "api-keys", "keys");
+          if (active) setPermissionKeys(keys.filter(key => key.scopes.some(scope => scope.startsWith("email:"))));
+        }
+      };
+      void load().catch(error => { if (active) setNotice(error.message); });
+      return () => { active = false; };
+    }
     if (activeTab === "rules") {
       Promise.all([
         api<{ rules: EmailRule[] }>(`/companies/${selectedCompanyId}/email-inbox/rules`),
@@ -307,10 +349,11 @@ export function EmailSettingsPage() {
         .then((r) => setPermissionKeys(r.keys.filter((key) => key.scopes.some((scope: string) => scope.startsWith("email:")))))
         .catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
     }
-  }, [selectedCompanyId, activeTab]);
+  }, [selectedCompanyId, activeTab, companies]);
 
   async function createPermissionKey(event: FormEvent) {
     event.preventDefault();
+    if (selectedCompanyId === ALL_COMPANIES) { setNotice(language === "uk" ? "Виберіть компанію" : "Select a company"); return; }
     if (selectedCompanyId === "personal") {
       setNotice(t("emailSettings.messages.personalKeysNotice"));
       return;
@@ -335,11 +378,12 @@ export function EmailSettingsPage() {
 
   async function revokePermissionKey(keyId: string) {
     if (!selectedCompanyId || !await confirmModal({ title: t("emailSettings.dialogs.revokeKeyTitle"), message: t("emailSettings.dialogs.revokeKeyMsg"), confirmText: t("emailSettings.dialogs.revokeKeyConfirm"), isDanger: true })) return;
-    await api(`/companies/${selectedCompanyId}/api-keys/${keyId}`, { method: "DELETE" });
+    await api(`/companies/${permissionKeys.find(key => key.id === keyId)?.companyId || selectedCompanyId}/api-keys/${keyId}`, { method: "DELETE" });
     setPermissionKeys((current) => current.filter((key) => key.id !== keyId));
   }
 
   function openCreateDrawer() {
+    if (selectedCompanyId === ALL_COMPANIES) setSelectedCompanyId("personal");
     setEditingId(null);
     setEmailAddress("");
     setDisplayName("");
@@ -386,6 +430,7 @@ export function EmailSettingsPage() {
   }
 
   function openEditDrawer(account: EmailAccount) {
+    if (account.companyId) setSelectedCompanyId(account.companyId);
     setEditingId(account.id);
     setEmailAddress(account.emailAddress);
     setDisplayName(account.displayName || "");
@@ -543,7 +588,7 @@ export function EmailSettingsPage() {
     if (!ok) return;
 
     try {
-      await api(`/companies/${selectedCompanyId}/email-accounts/${id}`, { method: "DELETE" });
+      await api(`/companies/${accounts.find(account => account.id === id)?.companyId || selectedCompanyId}/email-accounts/${id}`, { method: "DELETE" });
       setAccounts((prev) => prev.filter((a) => a.id !== id));
     } catch (err: any) {
       setNotice(err.message);
@@ -582,7 +627,7 @@ export function EmailSettingsPage() {
     setTestResult(null);
     try {
       const res = await api<{ result: { success: boolean; error?: string; imapStatus?: any; smtpStatus?: any } }>(
-        `/companies/${selectedCompanyId}/email-accounts/${account.id}/test-connection`,
+        `/companies/${account.companyId || selectedCompanyId}/email-accounts/${account.id}/test-connection`,
         { method: "POST" }
       );
       setTestResult({
@@ -592,8 +637,9 @@ export function EmailSettingsPage() {
           ? t("emailSettings.messages.verifiedConnection")
           : res.result.error || t("emailSettings.messages.failedConnection"),
       });
-      const updated = await api<{ accounts: EmailAccount[] }>(`/companies/${selectedCompanyId}/email-accounts`);
-      setAccounts(updated.accounts);
+      const ownerId = account.companyId || selectedCompanyId;
+      const updated = await api<{ accounts: EmailAccount[] }>(`/companies/${ownerId}/email-accounts`);
+      setAccounts(previous => [...previous.filter(item => (item.companyId || selectedCompanyId) !== ownerId), ...updated.accounts.map(item => ({ ...item, companyId: ownerId }))]);
     } catch (err: any) {
       setTestResult({ id: account.id, success: false, message: err.message });
     } finally {
@@ -608,7 +654,7 @@ export function EmailSettingsPage() {
     setDnsChecking(true);
     try {
       const res = await api<{ result: DnsCheckResult }>(
-        `/companies/${selectedCompanyId}/email-accounts/${account.id}/dns-check`,
+        `/companies/${account.companyId || selectedCompanyId}/email-accounts/${account.id}/dns-check`,
         { method: "POST" }
       );
       setDnsResult(res.result);
@@ -683,17 +729,17 @@ export function EmailSettingsPage() {
 
       {/* RULES TAB */}
       {activeTab === "rules" && (
-        <EmailSettingsInboxBlock t={t} openCreateRuleDrawer={openCreateRuleDrawer} rules={rules} mode={mode} agents={agents} openEditRuleDrawer={openEditRuleDrawer} handleDeleteRule={handleDeleteRule} />
+        <EmailSettingsInboxBlock t={t} openCreateRuleDrawer={() => { if (selectedCompanyId === ALL_COMPANIES) setSelectedCompanyId("personal"); openCreateRuleDrawer(); }} rules={rules} mode={mode} agents={agents} openEditRuleDrawer={(rule: EmailRule) => { if (rule.companyId) setSelectedCompanyId(rule.companyId); openEditRuleDrawer(rule); }} handleDeleteRule={handleDeleteRule} />
       )}
 
       {/* TEMPLATES TAB */}
       {activeTab === "templates" && (
-        <EmailSettingsSidebarBlock t={t} openCreateTemplateDrawer={openCreateTemplateDrawer} templates={templates} openEditTemplateDrawer={openEditTemplateDrawer} handleDeleteTemplate={handleDeleteTemplate} />
+        <EmailSettingsSidebarBlock t={t} openCreateTemplateDrawer={() => { if (selectedCompanyId === ALL_COMPANIES) setSelectedCompanyId("personal"); openCreateTemplateDrawer(); }} templates={templates} openEditTemplateDrawer={(template: EmailTemplate) => { if (template.companyId) setSelectedCompanyId(template.companyId); openEditTemplateDrawer(template); }} handleDeleteTemplate={handleDeleteTemplate} />
       )}
 
       {/* CONTACTS & VIP TAB */}
       {activeTab === "contacts" && (
-        <EmailSettingsTestBlock t={t} openCreateContactDrawer={openCreateContactDrawer} contacts={contacts} openEditContactDrawer={openEditContactDrawer} companies={companies} selectedCompanyId={selectedCompanyId} setContacts={setContacts} />
+        <EmailSettingsTestBlock t={t} openCreateContactDrawer={() => { if (selectedCompanyId === ALL_COMPANIES) setSelectedCompanyId("personal"); openCreateContactDrawer(); }} contacts={contacts} openEditContactDrawer={(contact: ContactItem) => { if (contact.companyId) setSelectedCompanyId(contact.companyId); openEditContactDrawer(contact); }} companies={companies} selectedCompanyId={selectedCompanyId} setContacts={setContacts} />
       )}
 
       {/* GRANULAR EMAIL PERMISSIONS */}

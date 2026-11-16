@@ -1,3 +1,4 @@
+import { CompanyScopeSelect } from "./CompanyScopeSelect";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useMatch, useNavigate } from "react-router-dom";
 import { confirmModal, promptModal } from "./ConfirmDialog";
@@ -568,13 +569,13 @@ export function DataStudioSettingsPage() {
   );
 
   // The company selector filters the merged list instead of switching a single company.
-  const companySelect = companies.length > 0 && (
-    <select
+  const companySelect = (
+    <CompanyScopeSelect
       aria-label={isUk ? "Компанія" : "Company"}
       className="page-size-select"
       value={companyFilter}
-      onChange={(event) => {
-        const next = event.target.value;
+      onValueChange={(value) => {
+        const next = value;
         setCompanyFilter(next);
         setDetailId(null);
         if (next !== ALL_COMPANIES) setCompanyId(next);
@@ -582,7 +583,7 @@ export function DataStudioSettingsPage() {
     >
       <option value={ALL_COMPANIES}>{isUk ? "Усі компанії" : "All companies"}</option>
       {companies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
-    </select>
+    </CompanyScopeSelect>
   );
 
   const unavailableNotice = backendsError?.code === "DATA_STUDIO_UNAVAILABLE" && (

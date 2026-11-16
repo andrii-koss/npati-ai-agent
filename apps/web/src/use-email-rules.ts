@@ -141,7 +141,7 @@ export function useEmailRules(
     });
     if (!ok) return;
     try {
-      await api(`/companies/${selectedCompanyId}/email-inbox/rules/${id}`, { method: "DELETE" });
+      await api(`/companies/${rules.find(rule => rule.id === id)?.companyId || selectedCompanyId}/email-inbox/rules/${id}`, { method: "DELETE" });
       setRules((prev) => prev.filter((r) => r.id !== id));
     } catch (err: any) {
       setNotice(err.message);

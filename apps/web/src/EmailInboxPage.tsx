@@ -1,3 +1,6 @@
+import { ALL_COMPANIES, loadCompanyScopes } from "./company-scope";
+import { readEmailCollection } from "./email-company-scope";
+import { listProjectCompanies } from "./website-builder-cache";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { getStoredAuthToken } from "./AuthContext";
@@ -31,7 +34,7 @@ export function EmailInboxPage() {
   const [companies, setCompanies] = useState<Company[]>(readCachedCompanies);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>(() => {
     const requested = searchParams.get("company");
-    return getInitialCompanyScope(requested);
+    return requested || ALL_COMPANIES;
   });
   const [accounts, setAccounts] = useState<EmailAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>("all");
@@ -42,6 +45,7 @@ export function EmailInboxPage() {
   });
   const [threads, setThreads] = useState<EmailThread[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
+  const threadCompanyId = threads.find(thread => thread.id === selectedThreadId)?.companyId || (selectedCompanyId === ALL_COMPANIES ? "" : selectedCompanyId);
   const [activeThread, setActiveThread] = useState<EmailThread | null>(null);
   const [messages, setMessages] = useState<EmailMessage[]>([]);
   const [contact, setContact] = useState<ContactDetails | null>(null);
@@ -139,7 +143,7 @@ export function EmailInboxPage() {
     try {
       const attachments = await Promise.all(composeFiles.map(fileToEmailAttachment));
       const result = await api<{ thread: EmailThread; status: "draft" | "queued" | "simulated_send" }>(
-        `/companies/${selectedCompanyId}/email-inbox/compose`,
+        `/companies/${accounts.find(account => account.id === composeAccountId)?.companyId || selectedCompanyId}/email-inbox/compose`,
         {
           method: "POST",
           body: JSON.stringify({
@@ -163,7 +167,7 @@ export function EmailInboxPage() {
 
   async function openInspectedLink(url: string, senderEmail?: string) {
     const inspected = await api<{ check: { requiresHumanApproval: boolean; warnings: string[] } }>(
-      `/companies/${selectedCompanyId}/email-inbox/inspect-link`,
+      `/companies/${threadCompanyId || selectedCompanyId}/email-inbox/inspect-link`,
       { method: "POST", body: JSON.stringify({ url, senderEmail }) }
     );
     if (inspected.check.requiresHumanApproval) {
@@ -210,17 +214,17 @@ export function EmailInboxPage() {
 
   // Load companies
   useEffect(() => {
-    api<{ companies: Company[] }>("/companies")
-      .then((res) => {
-        setCompanies(res.companies);
-        writeCachedCompanies(res.companies);
+    listProjectCompanies()
+      .then((list) => {
+        setCompanies(list);
+        writeCachedCompanies(list);
         const requested = searchParams.get("company");
         const sel = requested === "personal"
           ? "personal"
-          : chooseAvailableCompanyId(res.companies, { requested, fallback: "personal" });
+          : requested && requested !== ALL_COMPANIES ? chooseAvailableCompanyId(list, { requested, fallback: "personal" }) : ALL_COMPANIES;
         if (sel !== selectedCompanyId) {
           setSelectedCompanyId(sel);
-          writeActiveCompanyId(sel === "personal" ? "" : sel);
+          if (sel !== ALL_COMPANIES) writeActiveCompanyId(sel === "personal" ? "" : sel);
         }
         if (requested) {
           const next = new URLSearchParams(searchParams);
@@ -234,12 +238,22 @@ export function EmailInboxPage() {
   // Load accounts when company changes
   useEffect(() => {
     if (!selectedCompanyId) return;
+    let active = true;
+    if (selectedCompanyId === ALL_COMPANIES) {
+      const ids = companies.map(company => company.id);
+      setAccounts([]); setNotifications([]);
+      void Promise.all([readEmailCollection<EmailAccount>(ids, "email-accounts", "accounts"), readEmailCollection<EmailNotification>(ids, "email-inbox/notifications", "notifications")])
+        .then(([accounts, notifications]) => { if (active) { setAccounts(accounts); setNotifications(notifications); } })
+        .catch(error => { if (active) setNotice(error.message); });
+      return () => { active = false; };
+    }
     Promise.all([
       api<{ accounts: EmailAccount[] }>(`/companies/${selectedCompanyId}/email-accounts`),
       api<{ notifications: EmailNotification[] }>(`/companies/${selectedCompanyId}/email-inbox/notifications`),
     ])
       .then(([accountResult, notificationResult]) => {
-        setAccounts(accountResult.accounts);
+        if (!active) return;
+        setAccounts(accountResult.accounts.map(account => ({ ...account, companyId: selectedCompanyId })));
         setNotifications(notificationResult.notifications);
         const requestedAccount = searchParams.get("account");
         const initialAccount = requestedAccount && accountResult.accounts.some((account) => account.id === requestedAccount)
@@ -252,12 +266,16 @@ export function EmailInboxPage() {
         }
       })
       .catch(() => undefined);
-  }, [selectedCompanyId]);
+    return () => { active = false; };
+  }, [selectedCompanyId, companies]);
 
   async function openNotification(notification: EmailNotification) {
-    if (notification.threadId) setSelectedThreadId(notification.threadId);
+    if (notification.threadId) {
+      if (!threads.some(thread => thread.id === notification.threadId) && notification.companyId) setSelectedCompanyId(notification.companyId);
+      setSelectedThreadId(notification.threadId);
+    }
     if (!notification.isRead) {
-      await api(`/companies/${selectedCompanyId}/email-inbox/notifications/${notification.id}/read`, { method: "PATCH" });
+      await api(`/companies/${notification.companyId || selectedCompanyId}/email-inbox/notifications/${notification.id}/read`, { method: "PATCH" });
       setNotifications((items) => items.map((item) => item.id === notification.id ? { ...item, isRead: true } : item));
     }
   }
@@ -271,7 +289,7 @@ export function EmailInboxPage() {
     setThreads((current) => current.map((item) => item.id === thread.id ? { ...item, unreadCount: 0 } : item));
     setFolderCounts((current) => ({ ...current, inbox: Math.max(0, current.inbox - unreadCount) }));
     void api<{ thread: EmailThread }>(
-      `/companies/${selectedCompanyId}/email-inbox/threads/${thread.id}`,
+      `/companies/${thread.companyId || selectedCompanyId}/email-inbox/threads/${thread.id}`,
       { method: "PATCH", body: JSON.stringify({ unreadCount: 0 }) }
     ).then(({ thread: updated }) => {
       setActiveThread((current) => current?.id === updated.id ? { ...current, unreadCount: 0 } : current);
@@ -308,14 +326,19 @@ export function EmailInboxPage() {
       if (searchQuery.trim()) q.set("search", searchQuery.trim());
 
       const countQuery = selectedAccountId !== "all" ? `?accountId=${encodeURIComponent(selectedAccountId)}` : "";
-      const [res, countResult] = await Promise.all([
-        api<{ threads: EmailThread[] }>(
-          `/companies/${selectedCompanyId}/email-inbox/threads?${q.toString()}`
-        ),
-        api<{ counts: Record<"inbox" | "sent" | "drafts" | "archived" | "spam", number> }>(
-          `/companies/${selectedCompanyId}/email-inbox/folder-counts${countQuery}`
-        ),
-      ]);
+      const ids = selectedCompanyId === ALL_COMPANIES ? companies.map(company => company.id) : [selectedCompanyId];
+      const scopeIds = selectedAccountId === "all" ? ids : ids.filter(id => accounts.some(account => account.id === selectedAccountId && (account.companyId || selectedCompanyId) === id));
+      const pages = await loadCompanyScopes(scopeIds, async id => {
+        const [res, counts] = await Promise.all([
+          api<{ threads: EmailThread[] }>(`/companies/${id}/email-inbox/threads?${q.toString()}`),
+          api<{ counts: Record<"inbox" | "sent" | "drafts" | "archived" | "spam", number> }>(`/companies/${id}/email-inbox/folder-counts${countQuery}`),
+        ]);
+        return { threads: res.threads.map(thread => ({ ...thread, companyId: id })), counts: counts.counts };
+      });
+      const res = { threads: pages.flatMap(page => page.threads).sort((a,b) => Date.parse(b.lastMessageAt) - Date.parse(a.lastMessageAt)) };
+      const counts = { inbox: 0, sent: 0, drafts: 0, archived: 0, spam: 0 };
+      for (const page of pages) for (const key of Object.keys(counts) as Array<keyof typeof counts>) counts[key] += page.counts[key] || 0;
+      const countResult = { counts };
       if (requestId !== threadRequestIdRef.current) return;
       const visibleThreads = res.threads.filter((thread) => !deletedThreadIdsRef.current.has(thread.id));
       setFolderCounts(countResult.counts);
@@ -346,11 +369,11 @@ export function EmailInboxPage() {
       if (!document.hidden) void loadThreads();
     }, 15_000);
     return () => window.clearInterval(timer);
-  }, [selectedCompanyId, folder, selectedAccountId, statusFilter, priorityFilter, searchQuery]);
+  }, [selectedCompanyId, companies, folder, selectedAccountId, statusFilter, priorityFilter, searchQuery]);
 
   // Load thread detail
   useEffect(() => {
-    if (!selectedCompanyId || !selectedThreadId) {
+    if (!threadCompanyId || !selectedThreadId) {
       setActiveThread(null);
       setMessages([]);
       setContact(null);
@@ -359,16 +382,18 @@ export function EmailInboxPage() {
       return;
     }
 
+    let active = true;
     Promise.all([
       api<{ thread: EmailThread; messages: EmailMessage[]; contact: ContactDetails | null; customerContext: CustomerContext }>(
-        `/companies/${selectedCompanyId}/email-inbox/threads/${selectedThreadId}`
+        `/companies/${threadCompanyId}/email-inbox/threads/${selectedThreadId}`
       ),
       api<{ logs: EmailAuditEntry[] }>(
-        `/companies/${selectedCompanyId}/email-inbox/threads/${selectedThreadId}/audit`
+        `/companies/${threadCompanyId}/email-inbox/threads/${selectedThreadId}/audit`
       ).catch(() => ({ logs: [] })),
     ])
       .then(([res, audit]) => {
-        setActiveThread(res.thread);
+        if (!active) return;
+        setActiveThread({ ...res.thread, companyId: threadCompanyId });
         setMessages(res.messages);
         setContact(res.contact);
         setCustomerContext(res.customerContext || { previousThreads: [], tasks: [] });
@@ -386,6 +411,7 @@ export function EmailInboxPage() {
         }
       })
       .catch((e) => {
+        if (!active) return;
         setActiveThread(null);
         setMessages([]);
         setContact(null);
@@ -395,12 +421,13 @@ export function EmailInboxPage() {
         setDraftText("");
         setNotice(e.message);
       });
-  }, [selectedCompanyId, selectedThreadId, mailboxRefreshVersion]);
+    return () => { active = false; };
+  }, [threadCompanyId, selectedThreadId, mailboxRefreshVersion]);
 
   // Handle Acquire Lock when typing reply
   async function onReplyFocus() {
     if (!selectedCompanyId || !selectedThreadId) return;
-    await api(`/companies/${selectedCompanyId}/email-inbox/threads/${selectedThreadId}/lock`, {
+    await api(`/companies/${threadCompanyId}/email-inbox/threads/${selectedThreadId}/lock`, {
       method: "POST",
       body: JSON.stringify({ action: "acquire" }),
     }).catch(() => undefined);
@@ -410,7 +437,7 @@ export function EmailInboxPage() {
     if (!selectedCompanyId || !selectedThreadId) return;
     try {
       const response = await api<{ thread: EmailThread }>(
-        `/companies/${selectedCompanyId}/email-inbox/threads/${selectedThreadId}`,
+        `/companies/${threadCompanyId}/email-inbox/threads/${selectedThreadId}`,
         { method: "PATCH", body: JSON.stringify(patch) }
       );
       if (patch.folder && patch.folder !== folder) {
@@ -443,7 +470,7 @@ export function EmailInboxPage() {
     setThreads((current) => current.filter((thread) => thread.id !== deletedId));
     setSelectedThreadId(null); setActiveThread(null); setMessages([]);
     try {
-      await api(`/companies/${selectedCompanyId}/email-inbox/threads/${deletedId}`, { method: "DELETE" });
+      await api(`/companies/${threadCompanyId}/email-inbox/threads/${deletedId}`, { method: "DELETE" });
       await loadThreads();
     } catch (error) {
       deletedThreadIdsRef.current.delete(deletedId);
@@ -471,7 +498,7 @@ export function EmailInboxPage() {
         : undefined;
       if (composerMode === "forward" && !toAddresses?.length) throw new Error(t("emailInbox.notices.enterForwardRecipient"));
       const attachments = await Promise.all(replyFiles.map(fileToEmailAttachment));
-      await api(`/companies/${selectedCompanyId}/email-inbox/threads/${selectedThreadId}/messages`, {
+      await api(`/companies/${threadCompanyId}/email-inbox/threads/${selectedThreadId}/messages`, {
         method: "POST",
         body: JSON.stringify({
           bodyText: replyText,
@@ -487,12 +514,12 @@ export function EmailInboxPage() {
       setReplyFiles([]);
       setForwardTo("");
       setComposerMode("reply");
-      await api(`/companies/${selectedCompanyId}/email-inbox/threads/${selectedThreadId}/lock`, {
+      await api(`/companies/${threadCompanyId}/email-inbox/threads/${selectedThreadId}/lock`, {
         method: "POST",
         body: JSON.stringify({ action: "release" }),
       });
       const res = await api<{ thread: EmailThread; messages: EmailMessage[] }>(
-        `/companies/${selectedCompanyId}/email-inbox/threads/${selectedThreadId}`
+        `/companies/${threadCompanyId}/email-inbox/threads/${selectedThreadId}`
       );
       setActiveThread(res.thread);
       setMessages(res.messages);
@@ -511,12 +538,12 @@ export function EmailInboxPage() {
     try {
       if (draftEditing) {
         await api(
-          `/companies/${selectedCompanyId}/email-inbox/threads/${selectedThreadId}/messages/${draftMessageId}`,
+          `/companies/${threadCompanyId}/email-inbox/threads/${selectedThreadId}/messages/${draftMessageId}`,
           { method: "PATCH", body: JSON.stringify({ bodyText: draftText }) }
         );
       }
 
-      await api(`/companies/${selectedCompanyId}/email-inbox/threads/${selectedThreadId}/messages`, {
+      await api(`/companies/${threadCompanyId}/email-inbox/threads/${selectedThreadId}/messages`, {
         method: "POST",
         body: JSON.stringify({ approvedDraftMessageId: draftMessageId, bodyText: draftText }),
       });
@@ -524,7 +551,7 @@ export function EmailInboxPage() {
       setDraftMessageId(null);
       setDraftEditing(false);
       const res = await api<{ thread: EmailThread; messages: EmailMessage[] }>(
-        `/companies/${selectedCompanyId}/email-inbox/threads/${selectedThreadId}`
+        `/companies/${threadCompanyId}/email-inbox/threads/${selectedThreadId}`
       );
       setActiveThread(res.thread);
       setMessages(res.messages);
@@ -542,7 +569,7 @@ export function EmailInboxPage() {
     const next = !activeThread.isHumanTakeover;
     try {
       const res = await api<{ thread: EmailThread }>(
-        `/companies/${selectedCompanyId}/email-inbox/threads/${activeThread.id}/takeover`,
+        `/companies/${threadCompanyId}/email-inbox/threads/${activeThread.id}/takeover`,
         { method: "POST", body: JSON.stringify({ takeover: next }) }
       );
       setActiveThread(res.thread);
@@ -557,7 +584,7 @@ export function EmailInboxPage() {
     if (!selectedCompanyId || !activeThread) return;
     const nextVip = !activeThread.isVip;
     try {
-      await api(`/companies/${selectedCompanyId}/email-inbox/contacts/${encodeURIComponent(activeThread.customerEmail)}`, {
+      await api(`/companies/${threadCompanyId}/email-inbox/contacts/${encodeURIComponent(activeThread.customerEmail)}`, {
         method: "PATCH",
         body: JSON.stringify({ isVip: nextVip }),
       });
@@ -570,7 +597,7 @@ export function EmailInboxPage() {
 
   // Simulate Inbound Email
   async function handleSimulateEmail() {
-    if (!selectedCompanyId) return;
+    if (!selectedCompanyId || selectedCompanyId === ALL_COMPANIES) return;
     try {
       const res = await api<{ thread: EmailThread }>(
         `/companies/${selectedCompanyId}/email-inbox/simulate`,
@@ -590,7 +617,8 @@ export function EmailInboxPage() {
         selectedCompanyId={selectedCompanyId}
         onSelectCompanyId={(companyId) => {
           setSelectedCompanyId(companyId);
-          writeActiveCompanyId(companyId === "personal" ? "" : companyId);
+          if (companyId !== ALL_COMPANIES) writeActiveCompanyId(companyId === "personal" ? "" : companyId);
+          setSelectedAccountId("all");
         }}
         companies={companies}
         accounts={accounts}

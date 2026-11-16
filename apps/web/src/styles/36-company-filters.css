@@ -3,6 +3,130 @@
   --company-filter-height: 38px;
 }
 
+/* Company menus render in a portal so header overflow cannot clip them. */
+.company-scope-trigger.company-scope-trigger {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 0 0 var(--company-filter-width) !important;
+  width: var(--company-filter-width) !important;
+  min-width: var(--company-filter-width) !important;
+  max-width: var(--company-filter-width) !important;
+  height: var(--company-filter-height);
+  padding: 0 12px !important;
+  border: 1px solid #dedee1;
+  border-radius: 9px;
+  background: #fff;
+  color: #171717;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 1px 2px #00000006;
+}
+
+.company-scope-trigger > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.company-scope-trigger > svg { flex-shrink: 0; }
+.company-scope-trigger:disabled { opacity: .5; cursor: default; }
+.company-scope-trigger:focus-visible { outline: 2px solid #ed292e; outline-offset: 3px; }
+.email-scope-select-wrap:has(.company-scope-trigger) > .email-scope-select-arrow { display: none; }
+
+.company-scope-popover {
+  position: fixed;
+  z-index: 1500;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: min(440px, calc(100vw - 24px));
+  padding: 10px 9px 12px;
+  border: 1px solid #ececee;
+  border-radius: 18px;
+  background: #fff;
+  color: #171717;
+  font-family: Inter, sans-serif;
+  text-align: left;
+  box-shadow: 0 14px 30px #0000001a, 0 4px 8px #0000000d;
+}
+
+.company-scope-heading {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 17px;
+  flex-shrink: 0;
+  min-height: 48px;
+  padding: 0 16px 5px;
+}
+.company-scope-heading > svg { flex-shrink: 0; color: #ed2429; stroke-width: 2; }
+.company-scope-heading > strong { font-size: 17px; font-weight: 650; }
+.company-scope-heading > span { margin-left: auto; color: #777; font-size: 14px; white-space: nowrap; }
+
+.company-scope-search {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  flex-shrink: 0;
+  height: 42px;
+  margin: 5px 11px 15px;
+  padding: 0 15px;
+  border: 1px solid #dedee1;
+  border-radius: 11px;
+  background: #fafafa;
+}
+.company-scope-search > svg { flex-shrink: 0; color: #ed2429; stroke-width: 1.8; }
+.company-scope-search:focus-within { border-color: #eeb0b3; box-shadow: 0 0 0 2px #ed242908; }
+.company-scope-search > input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  background: transparent;
+  color: #171717;
+  font: inherit;
+  font-size: 15px;
+  box-shadow: none;
+}
+.company-scope-search > input::placeholder { color: #909094; opacity: 1; }
+.company-scope-options { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #bdbdbd #fafafa; }
+.company-scope-options::-webkit-scrollbar { width: 9px; }
+.company-scope-options::-webkit-scrollbar-track { background: #fafafa; }
+.company-scope-options::-webkit-scrollbar-thumb { background: #bdbdbd; border: 1px solid #fafafa; border-radius: 8px; }
+.company-scope-option {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  box-sizing: border-box;
+  min-height: 39px;
+  margin-right: 5px;
+  padding: 9px 17px;
+  border-radius: 11px;
+  font-size: 15px;
+  line-height: 21px;
+  cursor: pointer;
+}
+.company-scope-option > svg { flex-shrink: 0; color: #656565; stroke-width: 1.9; }
+.company-scope-option > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.company-scope-option:hover, .company-scope-option.is-active { background: #f2f2f2; }
+.company-scope-option[aria-selected="true"] { background: #fae9ea; color: #e92328; font-weight: 600; }
+.company-scope-option[aria-selected="true"] > svg { color: #ed2429; }
+.company-scope-option > .company-scope-check { margin-left: auto; }
+.company-scope-option[aria-disabled="true"] { opacity: .45; cursor: default; }
+.company-scope-empty { padding: 18px; margin: 0; color: #777; font-size: 14px; }
+
+@media (max-width: 480px) {
+  .company-scope-heading { gap: 10px; padding-inline: 12px; }
+  .company-scope-heading > strong { font-size: 15px; }
+  .company-scope-heading > span { font-size: 12px; }
+}
+
 /* Header scope filters only; form fields and pagination selects keep their sizes.
  * Important dimensions also override the website catalog's legacy inline sizing. */
 .automations-header-actions > select:is(.page-size-select, .company-select, .business-scope-select),
